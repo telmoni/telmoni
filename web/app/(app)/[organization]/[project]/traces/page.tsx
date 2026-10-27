@@ -6,15 +6,15 @@ import { LinkPending } from "@/components/link-pending";
 import { PageHeader } from "@/components/page-header";
 import { ServiceUnavailable } from "@/components/service-unavailable";
 import { TraceCharts, TraceHistogramStrip } from "@/components/traces/charts";
-import { TraceFacetsPanel } from "@/components/traces/facets";
-import { TraceFilterBar } from "@/components/traces/filter-bar";
+import { FacetsPanel } from "@/components/traces/facets";
+import { FilterBar } from "@/components/traces/filter-bar";
+import { ListNotice } from "@/components/traces/list-notice";
 import { NewTraces } from "@/components/traces/new-traces";
-import { TracePagination } from "@/components/traces/pagination";
+import { ListPagination } from "@/components/traces/pagination";
 import { TracePeek } from "@/components/traces/peek";
 import { TraceTable } from "@/components/traces/table";
-import { TraceHeaderControls, TraceToolbar } from "@/components/traces/toolbar";
+import { ListHeaderControls, TraceToolbar } from "@/components/traces/toolbar";
 import { UtcOffsetCookie } from "@/components/traces/utc-offset";
-import { Card } from "@/components/ui/card";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ownerContact } from "@/lib/identity";
 import { LIST_DIMS_WHILE_PENDING } from "@/lib/list-pending";
@@ -97,7 +97,7 @@ export default async function TracesPage({
   // holds no trace the filters admit.
   const none =
     list.total > 0 ? null : filtered ? (
-      <Notice
+      <ListNotice
         title="No traces match these filters."
         body={
           <>
@@ -113,7 +113,7 @@ export default async function TracesPage({
         }
       />
     ) : (
-      <Notice
+      <ListNotice
         title="Nothing to show yet."
         body={
           <>
@@ -142,85 +142,90 @@ export default async function TracesPage({
       <div className="group/list contents">
         <PageHeader
           title="Traces"
-          count={list.total}
           info="Every run of this project's agents, newest first, with its steps, model and tool calls. Click a value to narrow the list to it, a heading to sort by it."
-          action={<TraceHeaderControls days={days} />}
+          action={<ListHeaderControls days={days} />}
         />
-        <div className="grid gap-3">
-          <TraceToolbar
-            organization={organization}
-            slug={slug}
-            projectId={project.id}
-            query={query}
-            ui={ui}
-            total={list.total}
-            views={views.kind === "ok" ? views.views : null}
-            canSave={canSave}
-          />
-          <div className="flex flex-col gap-4 md:flex-row md:items-start">
-            <TraceFacetsPanel
+        <div className="grid gap-6">
+          <section className="grid gap-3">
+            <TraceToolbar
               organization={organization}
               slug={slug}
+              projectId={project.id}
               query={query}
               ui={ui}
-              facets={facets.kind === "ok" ? facets.facets : null}
+              total={list.total}
+              views={views.kind === "ok" ? views.views : null}
+              canSave={canSave}
             />
-            <div className={cn("grid min-w-0 flex-1 gap-3", LIST_DIMS_WHILE_PENDING)}>
-              <TraceFilterBar organization={organization} slug={slug} query={query} ui={ui} />
-              {/* What landed since this render, counted rather than drawn in:
-                  the rows stay under the reader's hand until they ask. */}
-              <NewTraces
-                key={project.id}
-                projectId={project.id}
-                drawn={drawn}
-                empty={list.total === 0}
+            <div className="flex flex-col gap-4 md:flex-row md:items-start">
+              <FacetsPanel
+                list="traces"
+                organization={organization}
+                slug={slug}
+                query={query}
+                ui={ui}
+                facets={facets.kind === "ok" ? facets.facets : null}
               />
-              {none ??
-                (ui.display === "chart" ? (
-                  histogram.kind === "ok" ? (
-                    <TraceCharts histogram={histogram.histogram} />
+              <div className={cn("grid min-w-0 flex-1 gap-3", LIST_DIMS_WHILE_PENDING)}>
+                <FilterBar list="traces" organization={organization} slug={slug} query={query} ui={ui} />
+                {/* What landed since this render, counted rather than drawn in:
+                    the rows stay under the reader's hand until they ask. */}
+                <NewTraces
+                  key={project.id}
+                  projectId={project.id}
+                  drawn={drawn}
+                  empty={list.total === 0}
+                />
+                {none ??
+                  (ui.display === "chart" ? (
+                    histogram.kind === "ok" ? (
+                      <TraceCharts histogram={histogram.histogram} />
+                    ) : (
+                      <ListNotice title="The charts could not be read." body="Try again in a moment." />
+                    )
                   ) : (
-                    <Notice title="The charts could not be read." body="Try again in a moment." />
-                  )
-                ) : (
-                  <>
-                    {histogram.kind === "ok" && <TraceHistogramStrip histogram={histogram.histogram} />}
-                    {list.traces.length > 0 ? (
-                      <TraceTable
-                        key={drawn}
+                    <>
+                      {histogram.kind === "ok" && (
+                        <TraceHistogramStrip histogram={histogram.histogram} />
+                      )}
+                      {list.traces.length > 0 ? (
+                        <TraceTable
+                          key={drawn}
+                          organization={organization}
+                          slug={slug}
+                          query={query}
+                          ui={ui}
+                          traces={list.traces}
+                        />
+                      ) : (
+                        <ListNotice
+                          title="This page is past the last one."
+                          body={
+                            <Link
+                              href={tracesHref(organization, slug, query, { page: lastPage }, ui)}
+                              className="underline underline-offset-4"
+                            >
+                              Go to the last page
+                              <LinkPending />
+                            </Link>
+                          }
+                        />
+                      )}
+                      <ListPagination
+                        list="traces"
                         organization={organization}
                         slug={slug}
                         query={query}
                         ui={ui}
-                        traces={list.traces}
+                        total={list.total}
+                        page={list.page}
+                        limit={list.limit}
                       />
-                    ) : (
-                      <Notice
-                        title="This page is past the last one."
-                        body={
-                          <Link
-                            href={tracesHref(organization, slug, query, { page: lastPage }, ui)}
-                            className="underline underline-offset-4"
-                          >
-                            Go to the last page
-                            <LinkPending />
-                          </Link>
-                        }
-                      />
-                    )}
-                    <TracePagination
-                      organization={organization}
-                      slug={slug}
-                      query={query}
-                      ui={ui}
-                      total={list.total}
-                      page={list.page}
-                      limit={list.limit}
-                    />
-                  </>
-                ))}
+                    </>
+                  ))}
+              </div>
             </div>
-          </div>
+          </section>
         </div>
       </div>
       {/* The trace a row opened, over the list rather than in its place: its
@@ -233,17 +238,5 @@ export default async function TracesPage({
         runs={list.traces.map((t) => t.run_id)}
       />
     </TooltipProvider>
-  );
-}
-
-/** What the page says in the table's place. */
-function Notice({ title, body }: { title: string; body: React.ReactNode }) {
-  return (
-    <Card className="gap-0 overflow-hidden p-0">
-      <div className="grid gap-1 p-4">
-        <p className="text-sm font-medium">{title}</p>
-        <p className="text-sm text-muted-foreground">{body}</p>
-      </div>
-    </Card>
   );
 }

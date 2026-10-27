@@ -11,7 +11,7 @@ vi.mock("@/components/traces/navigate", () => ({
   useListNavigation: () => ({ go: vi.fn(), pending: false }),
 }));
 
-import { TraceFacetsPanel } from "@/components/traces/facets";
+import { FacetsPanel } from "@/components/traces/facets";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { FILTERS_WIDTH_DEFAULT, FILTERS_WIDTH_MAX, FILTERS_WIDTH_MIN, FILTERS_WIDTH_STEP } from "@/lib/panel-width";
 import { TRACE_PREFS_KEY, readPrefs } from "@/lib/trace-prefs";
@@ -33,7 +33,7 @@ class FakePointerEvent extends MouseEvent {
 function panel() {
   return render(
     <TooltipProvider>
-      <TraceFacetsPanel organization="acme" slug="web" query={{}} ui={{}} facets={null} />
+      <FacetsPanel list="traces" organization="acme" slug="web" query={{}} facets={null} />
     </TooltipProvider>,
   );
 }

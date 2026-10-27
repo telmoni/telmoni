@@ -103,11 +103,13 @@ export {
 export type {
   DownloadFormat,
   Facet,
+  Facets,
   LayoutQuery,
+  ListFilters,
+  ListQuery,
   Trace,
   TraceAccess,
   TraceDetail,
-  TraceFacets,
   TraceHistogram,
   TraceLayout,
   TraceList,
@@ -121,10 +123,15 @@ export type {
 export { fetchSessionLayout } from "./entities/session-layout";
 export type { SessionLayoutSetting } from "./entities/session-layout";
 
-export { fetchUsers } from "./entities/users";
+export { fetchUserFacets, fetchUsers, userDownload } from "./entities/users";
 export type { UserList, UserQuery, UserRow, UsersAccess } from "./entities/users";
 
-export { fetchSession, fetchSessions } from "./entities/sessions";
+export {
+  fetchSession,
+  fetchSessionFacets,
+  fetchSessions,
+  sessionDownload,
+} from "./entities/sessions";
 export type {
   PinnedSpan,
   SessionAccess,

@@ -165,7 +165,20 @@ pub fn router(state: Arc<AppState>) -> Router {
             get(handler::traces::get_trace),
         )
         .route("/telemetry/users", get(handler::users::list_users))
+        .route(
+            "/telemetry/users/facets",
+            get(handler::users::get_user_facets),
+        )
+        .route("/telemetry/users/export", get(handler::users::export_users))
         .route("/telemetry/sessions", get(handler::sessions::list_sessions))
+        .route(
+            "/telemetry/session-facets",
+            get(handler::sessions::get_session_facets),
+        )
+        .route(
+            "/telemetry/session-export",
+            get(handler::sessions::export_sessions),
+        )
         .route(
             "/telemetry/sessions/{session_id}",
             get(handler::sessions::get_session),

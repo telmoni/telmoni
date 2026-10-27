@@ -3,18 +3,9 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/components/page-header", () => ({
-  PageHeader: ({
-    title,
-    count,
-    action,
-  }: {
-    title: string;
-    count?: number;
-    action?: React.ReactNode;
-  }) => (
+  PageHeader: ({ title, action }: { title: string; action?: React.ReactNode }) => (
     <div data-testid="page-header">
       {title}
-      {count !== undefined && <span data-testid="count">{count}</span>}
       {action}
     </div>
   ),
@@ -172,23 +163,23 @@ beforeEach(() => {
       days: 7,
       agent: {
         values: [
-          { value: "nightly-report", runs: 1 },
-          { value: "support-bot", runs: 1 },
+          { value: "nightly-report", count: 1 },
+          { value: "support-bot", count: 1 },
         ],
         more: false,
       },
-      user: { values: [{ value: USER, runs: 1 }], more: false },
+      user: { values: [{ value: USER, count: 1 }], more: false },
       session: NONE,
       status: {
         values: [
-          { value: "ok", runs: 1 },
-          { value: "error", runs: 1 },
+          { value: "ok", count: 1 },
+          { value: "error", count: 1 },
         ],
         more: false,
       },
       model: NONE,
       tool: NONE,
-      environment: { values: [{ value: "production", runs: 1 }], more: false },
+      environment: { values: [{ value: "production", count: 1 }], more: false },
       release: NONE,
       tag: NONE,
       prompt: NONE,
@@ -217,7 +208,7 @@ describe("TracesPage", () => {
   it("lists a page of runs in the default columns, each value a filter, and counts them all", async () => {
     render(await TracesPage({ params: PARAMS }));
     expect(screen.getByTestId("page-header")).toHaveTextContent("Traces");
-    expect(screen.getByTestId("count")).toHaveTextContent("2");
+    expect(screen.getByText("Total 2")).toBeInTheDocument();
     expect(fetchProjectBySlug).toHaveBeenCalledWith("web");
     // A page holds fifty rows unless the URL names another count.
     expect(fetchTraces).toHaveBeenCalledWith(PROJECT, { limit: 50 });
@@ -329,7 +320,6 @@ describe("TracesPage", () => {
     render(
       await TracesPage({ params: PARAMS, searchParams: Promise.resolve({ page: "2", agent: "zeta" }) }),
     );
-    expect(screen.getByTestId("count")).toHaveTextContent("120");
     expect(screen.getByText("Total 120")).toBeInTheDocument();
     expect(screen.getByText("Page 2 of 3")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Next page" })).toHaveAttribute(

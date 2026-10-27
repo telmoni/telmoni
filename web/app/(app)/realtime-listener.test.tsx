@@ -519,11 +519,20 @@ describe("RealtimeListener - spans:ingested", () => {
     }
   });
 
-  it("leaves the download's route alone", () => {
-    mockPathname = "/acme/web/traces/export";
-    render(<RealtimeListener />);
-    nudge("project_1", ["run_1"], true);
-    expect(mockRefresh).not.toHaveBeenCalled();
+  it("leaves a download's route alone, but not a session whose id is export", () => {
+    for (const [path, drawn] of [
+      ["/acme/web/traces/export", 0],
+      ["/acme/web/users/export", 0],
+      ["/acme/web/sessions/export", 1],
+    ] as const) {
+      MockEventSource.instances = [];
+      mockRefresh.mockClear();
+      mockPathname = path;
+      const { unmount } = render(<RealtimeListener />);
+      nudge("project_1", ["run_1"], true);
+      expect(mockRefresh, path).toHaveBeenCalledTimes(drawn);
+      unmount();
+    }
   });
 
   // jsdom pretends to be visual, so a hidden tab has to be said outright.

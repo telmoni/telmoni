@@ -1,36 +1,37 @@
 import Link from "next/link";
 
 import { AccessDenied } from "@/components/access-denied";
-import { DataTable, THead, Td } from "@/components/data-table";
 import { LinkPending } from "@/components/link-pending";
-import { LocalTime } from "@/components/local-time";
 import { PageHeader } from "@/components/page-header";
 import { ServiceUnavailable } from "@/components/service-unavailable";
-import { SortHeading } from "@/components/sort-heading";
-import { Card } from "@/components/ui/card";
-import { WindowPicker } from "@/components/window-picker";
+import { FacetsPanel } from "@/components/traces/facets";
+import { FilterBar } from "@/components/traces/filter-bar";
+import { ListNotice } from "@/components/traces/list-notice";
+import { ListPagination } from "@/components/traces/pagination";
+import { ListHeaderControls, ListToolbar } from "@/components/traces/toolbar";
+import { UserTable } from "@/components/traces/user-table";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { ownerContact } from "@/lib/identity";
 import { LIST_DIMS_WHILE_PENDING } from "@/lib/list-pending";
-import { MAX_LIMIT, type SearchParams } from "@/lib/list-query";
+import type { SearchParams } from "@/lib/list-query";
 import {
   activeOrganization,
   fetchProjectBySlug,
+  fetchUserFacets,
   fetchUsers,
   getServerContext,
-  type UserQuery,
-  type UserRow,
 } from "@/lib/server/data";
 import { projectPath } from "@/lib/slug";
-import { formatCount, tracesHref } from "@/lib/traces";
-import { USER_COLUMNS, currentUserSort, nextUserSort, parseUserQuery, usersHref } from "@/lib/users";
+import { DEFAULT_ROWS, activeFilters, pageCount, unfiltered } from "@/lib/traces";
+import { parseUserQuery, usersHref } from "@/lib/users";
+import { cn } from "@/lib/utils";
 
 export const metadata = { title: "Users" };
 
-// The users list: a row per end user this project's agents served in a
-// window of days, by the id the application tagged its runs with, as stored
-// — hashed unless the project keeps ids plain, so the page names nobody the
-// project did not choose to name — with what their runs added up to. Every
-// column is a sort, carried in the URL, and a user opens their traces.
+// The users list, laid out as the trace list is, all of it in the URL: a row
+// per end user in a window of days, by the id as stored — hashed unless the
+// project keeps ids plain — admitted by any of their runs the filters admit.
+// A user opens their traces.
 export default async function UsersPage({
   params,
   searchParams,
@@ -43,7 +44,10 @@ export default async function UsersPage({
   const [gate, project] = await Promise.all([getServerContext(), fetchProjectBySlug(slug)]);
   if (!gate || !project) return <ServiceUnavailable />;
 
-  const access = await fetchUsers(project.id, query);
+  const [access, facets] = await Promise.all([
+    fetchUsers(project.id, { ...query, limit: query.limit ?? DEFAULT_ROWS }),
+    fetchUserFacets(project.id, query),
+  ]);
   if (access.kind === "unavailable") return <ServiceUnavailable />;
   if (access.kind === "forbidden") {
     return (
@@ -56,122 +60,116 @@ export default async function UsersPage({
   }
 
   const { list } = access;
-  const { sort, dir } = currentUserSort(query);
-  const href = (patch: Partial<UserQuery>) => usersHref(organization, slug, query, patch);
   const days = query.days ?? list.days;
+  const filtered = activeFilters(query).length > 0;
+  const last = pageCount(list.total, list.limit);
+  const lastPage = last > 1 ? last : undefined;
 
+  // What the page says in place of its rows when the window holds no user
+  // the filters admit.
+  const none =
+    list.total > 0 ? null : filtered ? (
+      <ListNotice
+        title="No users match these filters."
+        body={
+          <>
+            Widen the window, or{" "}
+            <Link
+              href={usersHref(organization, slug, unfiltered(query))}
+              className="underline underline-offset-4"
+            >
+              clear the filters
+            </Link>
+            .
+          </>
+        }
+      />
+    ) : (
+      <ListNotice
+        title="Nothing to show yet."
+        body={
+          <>
+            No run from the last {days} {days === 1 ? "day" : "days"} named the user it served.
+            Name one when you open a run — <code>user_id</code> in the{" "}
+            <Link href="/docs/api/sdks" className="underline underline-offset-4">
+              SDKs
+            </Link>
+            , <code>user.id</code> on the span — and every user lists here, hashed under the
+            project&rsquo;s own key unless the project keeps ids plain.
+          </>
+        }
+      />
+    );
+
+  // `group/list`: the header's window and every control and link below it mark
+  // themselves pending while the list they asked for is on its way, and the
+  // list dims under them; `contents`, so the group lays nothing out itself.
   return (
-    <>
-      <PageHeader title="Users" count={list.more ? undefined : list.users.length} />
-      <div className="grid gap-6">
-        {/* The window, the headings and the link to more mark themselves
-            pending while the list they asked for is on its way, and the
-            list dims under them. */}
-        <section className="group/list grid gap-3">
-          <p className="text-sm text-muted-foreground">
-            Everyone this project&rsquo;s agents served, by the id you tag runs with, with their
-            traces, errors, steps and tokens. Click a user to see their traces together; click a
-            heading to sort by it.
-          </p>
-
-          <div>
-            <WindowPicker days={days} />
-          </div>
-
-          {list.users.length === 0 ? (
-            <Card className="overflow-hidden p-0 gap-0">
-              <div className="grid gap-1 p-4">
-                <p className="text-sm font-medium">Nothing to show yet.</p>
-                <p className="text-sm text-muted-foreground">
-                  No run from the last {days} {days === 1 ? "day" : "days"} named the user it
-                  served. Name one when you open a run — <code>user_id</code> in the{" "}
-                  <Link href="/docs/api/sdks" className="underline underline-offset-4">
-                    SDKs
-                  </Link>
-                  , <code>user.id</code> on the span — and every user lists here, hashed under
-                  the project&rsquo;s own key unless the project keeps ids plain.
-                </p>
+    <TooltipProvider>
+      <div className="group/list contents">
+        <PageHeader
+          title="Users"
+          info="Everyone this project's agents served, by the id you tag runs with, with their traces, errors, steps and tokens. Click a user to see their traces together, a value in the filters to narrow the list to it, a heading to sort by it."
+          action={<ListHeaderControls days={days} />}
+        />
+        <div className="grid gap-6">
+          <section className="grid gap-3">
+            <ListToolbar
+              list="users"
+              organization={organization}
+              slug={slug}
+              query={query}
+              total={list.total}
+            />
+            <div className="flex flex-col gap-4 md:flex-row md:items-start">
+              <FacetsPanel
+                list="users"
+                organization={organization}
+                slug={slug}
+                query={query}
+                facets={facets.kind === "ok" ? facets.facets : null}
+              />
+              <div className={cn("grid min-w-0 flex-1 gap-3", LIST_DIMS_WHILE_PENDING)}>
+                <FilterBar list="users" organization={organization} slug={slug} query={query} />
+                {none ?? (
+                  <>
+                    {list.users.length > 0 ? (
+                      <UserTable
+                        organization={organization}
+                        slug={slug}
+                        query={query}
+                        users={list.users}
+                      />
+                    ) : (
+                      <ListNotice
+                        title="This page is past the last one."
+                        body={
+                          <Link
+                            href={usersHref(organization, slug, query, { page: lastPage })}
+                            className="underline underline-offset-4"
+                          >
+                            Go to the last page
+                            <LinkPending />
+                          </Link>
+                        }
+                      />
+                    )}
+                    <ListPagination
+                      list="users"
+                      organization={organization}
+                      slug={slug}
+                      query={query}
+                      total={list.total}
+                      page={list.page}
+                      limit={list.limit}
+                    />
+                  </>
+                )}
               </div>
-            </Card>
-          ) : (
-            <DataTable className={LIST_DIMS_WHILE_PENDING}>
-              <THead>
-                {USER_COLUMNS.map((column) => (
-                  <SortHeading
-                    key={column.sort}
-                    label={column.label}
-                    column={column.sort}
-                    sort={sort}
-                    dir={dir}
-                    href={href(nextUserSort(query, column.sort))}
-                  />
-                ))}
-              </THead>
-              <tbody>
-                {list.users.map((u) => (
-                  <UserTableRow
-                    key={u.user_id}
-                    user={u}
-                    traces={tracesHref(organization, slug, { user: [u.user_id], days: query.days })}
-                  />
-                ))}
-              </tbody>
-            </DataTable>
-          )}
-
-          {list.more && (
-            <p className="text-sm text-muted-foreground">
-              The first {formatCount(list.limit)} of more in this window.{" "}
-              {list.limit < MAX_LIMIT ? (
-                <>
-                  <Link
-                    href={href({ limit: MAX_LIMIT })}
-                    scroll={false}
-                    className="underline underline-offset-4"
-                  >
-                    Show up to {formatCount(MAX_LIMIT)}
-                    <LinkPending />
-                  </Link>
-                  , or narrow the window.
-                </>
-              ) : (
-                "Narrow the window to see the rest."
-              )}
-            </p>
-          )}
-        </section>
+            </div>
+          </section>
+        </div>
       </div>
-    </>
-  );
-}
-
-function UserTableRow({ user, traces }: { user: UserRow; traces: string }) {
-  return (
-    <tr>
-      <Td className="max-w-64 truncate text-xs" title={user.user_id}>
-        <Link href={traces} className="underline-offset-4 hover:underline">
-          {user.user_id}
-        </Link>
-      </Td>
-      <Td className="whitespace-nowrap text-right tabular-nums">{formatCount(user.traces)}</Td>
-      <Td
-        className={`whitespace-nowrap text-right tabular-nums ${user.errors > 0 ? "text-destructive" : "text-muted-foreground"}`}
-      >
-        {formatCount(user.errors)}
-      </Td>
-      <Td className="whitespace-nowrap text-right tabular-nums">{formatCount(user.steps)}</Td>
-      <Td
-        className="whitespace-nowrap text-right tabular-nums"
-        title={`${formatCount(user.input_tokens)} in, ${formatCount(user.output_tokens)} out`}
-      >
-        {formatCount(user.input_tokens + user.output_tokens)}
-      </Td>
-      <Td className="whitespace-nowrap text-xs text-muted-foreground">
-        <LocalTime iso={user.first_seen} />
-      </Td>
-      <Td className="whitespace-nowrap text-xs text-muted-foreground">
-        <LocalTime iso={user.last_seen} />
-      </Td>
-    </tr>
+    </TooltipProvider>
   );
 }

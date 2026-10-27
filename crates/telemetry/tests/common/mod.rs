@@ -987,6 +987,111 @@ pub(crate) async fn rows_of(store: &Store, project: &ProjectId) -> (u64, u64) {
     (spans, hours)
 }
 
+/// Five runs of `project` that each of the trace list's filters tells apart
+/// — by status, model, tool, environment, release, tag, prompt, agent, user
+/// and session — the last naming no session.
+pub(crate) fn varied_runs(project: &ProjectId) -> Vec<SpanRow> {
+    let started = |minutes| Utc::now() - chrono::Duration::minutes(minutes);
+    let mut a = run_of(
+        project,
+        Uuid::new_v4(),
+        "user-a",
+        "conv-1",
+        started(50),
+        (100, 10),
+        false,
+        0x100,
+    );
+    for span in &mut a {
+        span.environment = "production".into();
+    }
+    a[1].tags = vec![("team".into(), "search".into())];
+    a[0].attributes = vec![("gen_ai.prompt.name".into(), "greeting".into())];
+    let mut b = run_of(
+        project,
+        Uuid::new_v4(),
+        "user-a",
+        "conv-1",
+        started(40),
+        (200, 20),
+        true,
+        0x200,
+    );
+    for span in &mut b {
+        span.release = "v2".into();
+    }
+    let mut c = run_of(
+        project,
+        Uuid::new_v4(),
+        "user-b",
+        "conv-2",
+        started(30),
+        (300, 30),
+        false,
+        0x300,
+    );
+    for span in &mut c {
+        span.agent = "billing-bot".into();
+    }
+    let tool = SpanRow {
+        kind: SpanKind::ToolCall,
+        name: "search_docs".into(),
+        model: String::new(),
+        input_tokens: 0,
+        output_tokens: 0,
+        span_id: format!("{:016x}", 0x303),
+        ..c[2].clone()
+    };
+    let mut d = run_of(
+        project,
+        Uuid::new_v4(),
+        "user-c",
+        "conv-3",
+        started(20),
+        (400, 40),
+        false,
+        0x400,
+    );
+    d[2].model = "gpt-5".into();
+    for span in &mut d {
+        span.environment = "staging".into();
+    }
+    let e = run_of(
+        project,
+        Uuid::new_v4(),
+        "user-d",
+        "",
+        started(10),
+        (500, 50),
+        false,
+        0x500,
+    );
+    let mut rows: Vec<SpanRow> = [a, b, c, d, e].into_iter().flatten().collect();
+    rows.push(tool);
+    rows
+}
+
+/// Queries the varied runs answer differently, a filter alone or several,
+/// one admitting none.
+pub(crate) const FILTER_QUERIES: [&str; 16] = [
+    "",
+    "?status=error",
+    "?model=claude-sonnet-5-5",
+    "?model=gpt-5",
+    "?tool=search_docs",
+    "?environment=production",
+    "?environment=staging",
+    "?release=v2",
+    "?tag=team%3Asearch",
+    "?prompt=greeting",
+    "?agent=billing-bot",
+    "?user=user-a",
+    "?session=conv-2",
+    "?status=ok&model=claude-sonnet-5-5",
+    "?environment=production&environment=staging&release=v2",
+    "?tag=team%3Asearch&agent=billing-bot",
+];
+
 /// One run of `support-bot` as the users and sessions pages sum it: its run
 /// span, one step and one model call with `tokens`, every span carrying
 /// `user` and `session`, started at `started` and received now, the run

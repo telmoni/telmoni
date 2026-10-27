@@ -209,11 +209,12 @@ function MetricChart({
 
 // The strip above the table:
 // the window's runs by when they started, or their tokens or durations,
-// picked beside it.
+// picked beside it. A region rather than a `<section>`, which the console
+// keeps for a page's own blocks.
 export function TraceHistogramStrip({ histogram }: { histogram: TraceHistogram }) {
   const [metric, setMetric] = useState<Metric>("runs");
   return (
-    <section className="grid gap-1" aria-label="Over the window">
+    <div role="region" className="grid gap-1" aria-label="Over the window">
       <div className="flex items-center gap-2">
         <Select value={metric} onValueChange={(next) => setMetric(next as Metric)}>
           {/* The console's control height, so its row centers on the Filters heading beside it. */}
@@ -233,7 +234,7 @@ export function TraceHistogramStrip({ histogram }: { histogram: TraceHistogram }
         </span>
       </div>
       <MetricChart histogram={histogram} metric={metric} className="h-28" />
-    </section>
+    </div>
   );
 }
 
@@ -244,8 +245,9 @@ export function TraceCharts({ histogram }: { histogram: TraceHistogram }) {
   return (
     <div className="grid gap-4 lg:grid-cols-2">
       {(["runs", "tokens", "duration"] as const).map((metric) => (
-        <section
+        <div
           key={metric}
+          role="region"
           className={cn("grid gap-2 rounded-xl border border-border p-4", metric === "runs" && "lg:col-span-2")}
           aria-label={METRIC_LABEL[metric]}
         >
@@ -256,7 +258,7 @@ export function TraceCharts({ histogram }: { histogram: TraceHistogram }) {
             </span>
           </h2>
           <MetricChart histogram={histogram} metric={metric} className="h-56" legend={metric !== "tokens"} />
-        </section>
+        </div>
       ))}
     </div>
   );

@@ -97,6 +97,8 @@
       "traces",
       "errors",
       "steps",
+      "input_tokens",
+      "output_tokens",
       "tokens",
       "first_seen",
       "last_seen"
@@ -169,6 +171,8 @@
       "traces",
       "errors",
       "steps",
+      "input_tokens",
+      "output_tokens",
       "tokens",
       "first_seen",
       "last_seen"

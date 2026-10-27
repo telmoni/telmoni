@@ -26,8 +26,8 @@ const ROSTER_PAGES = /^\/[^/]+(?:\/[^/]+)?\/(members|audit-log)$/;
 
 // A page reading a project's spans: its traces, sessions or users, the list
 // or one of them. A trace's page names its run, which a nudge is compared
-// with; `traces/export` is the download's route, not a page.
-const SPAN_PAGES = /^\/[^/]+\/[^/]+\/(traces|sessions|users)(?:\/(?!export$)([^/]+))?$/;
+// with.
+const SPAN_PAGES = /^\/[^/]+\/[^/]+\/(traces|sessions|users)(?:\/([^/]+))?$/;
 
 function payload<K extends keyof typeof RealtimeEventDataSchema>(
   e: MessageEvent,
@@ -234,6 +234,8 @@ export function RealtimeListener({
         const page = SPAN_PAGES.exec(pathnameRef.current);
         if (!page) return;
         const [, section, one] = page;
+        // A download's route, not a page; a session's id may be `export`.
+        if (one === "export" && section !== "sessions") return;
         const peeked = one ? null : new URLSearchParams(window.location.search).get(PEEK_PARAM);
         // A trace's peek for its own run; a session's for any, since a nudge
         // names runs and never their sessions.

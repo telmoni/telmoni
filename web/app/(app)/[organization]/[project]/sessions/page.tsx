@@ -1,50 +1,42 @@
 import Link from "next/link";
 
 import { AccessDenied } from "@/components/access-denied";
-import { DataTable, THead, Td } from "@/components/data-table";
 import { LinkPending } from "@/components/link-pending";
-import { LocalTime } from "@/components/local-time";
 import { PageHeader } from "@/components/page-header";
 import { ServiceUnavailable } from "@/components/service-unavailable";
-import { SortHeading } from "@/components/sort-heading";
-import { SessionLink } from "@/components/traces/session-link";
+import { FacetsPanel } from "@/components/traces/facets";
+import { FilterBar } from "@/components/traces/filter-bar";
+import { ListNotice } from "@/components/traces/list-notice";
+import { ListPagination } from "@/components/traces/pagination";
 import { SessionPeek } from "@/components/traces/session-peek";
-import { Card } from "@/components/ui/card";
-import { WindowPicker } from "@/components/window-picker";
+import { SessionTable } from "@/components/traces/session-table";
+import { ListHeaderControls, ListToolbar } from "@/components/traces/toolbar";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { ownerContact } from "@/lib/identity";
 import { LIST_DIMS_WHILE_PENDING } from "@/lib/list-pending";
-import { MAX_LIMIT, type SearchParams } from "@/lib/list-query";
+import type { SearchParams } from "@/lib/list-query";
 import { administersProject } from "@/lib/project-role";
 import {
   activeOrganization,
   fetchProjectBySlug,
+  fetchSessionFacets,
   fetchSessionLayout,
   fetchSessions,
   fetchTraceLayouts,
   getServerContext,
-  type SessionQuery,
-  type SessionRow,
 } from "@/lib/server/data";
-import {
-  SESSION_COLUMNS,
-  currentSessionSort,
-  nextSessionSort,
-  parseSessionQuery,
-  sessionHref,
-  sessionsHref,
-} from "@/lib/sessions";
+import { parseSessionQuery, sessionsHref } from "@/lib/sessions";
 import { projectPath } from "@/lib/slug";
-import { formatCount, tracesHref } from "@/lib/traces";
+import { DEFAULT_ROWS, activeFilters, pageCount, unfiltered } from "@/lib/traces";
+import { cn } from "@/lib/utils";
 
 export const metadata = { title: "Sessions" };
 
-// The sessions list: a row per session this project's agents took part in
-// within a window of days, by the id the application gave it, with the user
-// it was with and what its runs added up to. Every column is a sort, carried
-// in the URL; a session opens beside the list, in the console's side panel
-// (`components/traces/session-peek.tsx`), a replay of its runs in metadata,
-// and has a page of its own. Nothing here is a message: the server sums
-// spans.
+// The sessions list, laid out as the trace list is, all of it in the URL: a
+// row per session in a window of days, admitted by any of its runs the
+// filters admit. A session opens beside the list
+// (`components/traces/session-peek.tsx`) and has a page of its own. Nothing
+// here is a message: the server sums spans.
 export default async function SessionsPage({
   params,
   searchParams,
@@ -58,8 +50,9 @@ export default async function SessionsPage({
   if (!gate || !project) return <ServiceUnavailable />;
 
   // The layouts and the project's default, for the session the panel opens.
-  const [access, setting, layouts] = await Promise.all([
-    fetchSessions(project.id, query),
+  const [access, facets, setting, layouts] = await Promise.all([
+    fetchSessions(project.id, { ...query, limit: query.limit ?? DEFAULT_ROWS }),
+    fetchSessionFacets(project.id, query),
     fetchSessionLayout(project.id),
     fetchTraceLayouts(project.id),
   ]);
@@ -75,152 +68,128 @@ export default async function SessionsPage({
   }
 
   const { list } = access;
-  const { sort, dir } = currentSessionSort(query);
-  const href = (patch: Partial<SessionQuery>) => sessionsHref(organization, slug, query, patch);
   const days = query.days ?? list.days;
+  const filtered = activeFilters(query).length > 0;
+  const last = pageCount(list.total, list.limit);
+  const lastPage = last > 1 ? last : undefined;
 
+  // What the page says in place of its rows when the window holds no session
+  // the filters admit.
+  const none =
+    list.total > 0 ? null : filtered ? (
+      <ListNotice
+        title="No sessions match these filters."
+        body={
+          <>
+            Widen the window, or{" "}
+            <Link
+              href={sessionsHref(organization, slug, unfiltered(query))}
+              className="underline underline-offset-4"
+            >
+              clear the filters
+            </Link>
+            .
+          </>
+        }
+      />
+    ) : (
+      <ListNotice
+        title="Nothing to show yet."
+        body={
+          <>
+            No run from the last {days} {days === 1 ? "day" : "days"} named the session it
+            belonged to. Name one when you open a run — <code>session_id</code> in the{" "}
+            <Link href="/docs/api/sdks" className="underline underline-offset-4">
+              SDKs
+            </Link>
+            , <code>gen_ai.conversation.id</code> on the span — and the runs that share it group
+            here as a session.
+          </>
+        }
+      />
+    );
+
+  // `group/list`: the header's window and every control and link below it mark
+  // themselves pending while the list they asked for is on its way, and the
+  // list dims under them; `contents`, so the group lays nothing out itself.
   return (
-    <>
-      <PageHeader title="Sessions" count={list.more ? undefined : list.sessions.length} />
-      <div className="grid gap-6">
-        {/* The window, the headings and the link to more mark themselves
-            pending while the list they asked for is on its way, and the
-            list dims under them. */}
-        <section className="group/list grid gap-3">
-          <p className="text-sm text-muted-foreground">
-            Every session this project&rsquo;s agents took part in, last heard from first, with the
-            user it was with and its traces, errors, steps and tokens. Click a session to replay
-            its runs beside the list; click a heading to sort by it.
-          </p>
-
-          <div>
-            <WindowPicker days={days} />
-          </div>
-
-          {list.sessions.length === 0 ? (
-            <Card className="overflow-hidden p-0 gap-0">
-              <div className="grid gap-1 p-4">
-                <p className="text-sm font-medium">Nothing to show yet.</p>
-                <p className="text-sm text-muted-foreground">
-                  No run from the last {days} {days === 1 ? "day" : "days"} named the session it
-                  belonged to. Name one when you open a run — <code>session_id</code> in the{" "}
-                  <Link href="/docs/api/sdks" className="underline underline-offset-4">
-                    SDKs
-                  </Link>
-                  , <code>gen_ai.conversation.id</code> on the span — and the runs that share it
-                  group here as a session.
-                </p>
+    <TooltipProvider>
+      <div className="group/list contents">
+        <PageHeader
+          title="Sessions"
+          info="Every session this project's agents took part in, last heard from first, with the user it was with and its traces, errors, steps and tokens. Click a session to replay its runs beside the list, a value in the filters to narrow the list to it, a heading to sort by it."
+          action={<ListHeaderControls days={days} />}
+        />
+        <div className="grid gap-6">
+          <section className="grid gap-3">
+            <ListToolbar
+              list="sessions"
+              organization={organization}
+              slug={slug}
+              query={query}
+              total={list.total}
+            />
+            <div className="flex flex-col gap-4 md:flex-row md:items-start">
+              <FacetsPanel
+                list="sessions"
+                organization={organization}
+                slug={slug}
+                query={query}
+                facets={facets.kind === "ok" ? facets.facets : null}
+              />
+              <div className={cn("grid min-w-0 flex-1 gap-3", LIST_DIMS_WHILE_PENDING)}>
+                <FilterBar list="sessions" organization={organization} slug={slug} query={query} />
+                {none ?? (
+                  <>
+                    {list.sessions.length > 0 ? (
+                      <SessionTable
+                        organization={organization}
+                        slug={slug}
+                        query={query}
+                        sessions={list.sessions}
+                      />
+                    ) : (
+                      <ListNotice
+                        title="This page is past the last one."
+                        body={
+                          <Link
+                            href={sessionsHref(organization, slug, query, { page: lastPage })}
+                            className="underline underline-offset-4"
+                          >
+                            Go to the last page
+                            <LinkPending />
+                          </Link>
+                        }
+                      />
+                    )}
+                    <ListPagination
+                      list="sessions"
+                      organization={organization}
+                      slug={slug}
+                      query={query}
+                      total={list.total}
+                      page={list.page}
+                      limit={list.limit}
+                    />
+                  </>
+                )}
               </div>
-            </Card>
-          ) : (
-            <DataTable className={LIST_DIMS_WHILE_PENDING}>
-              <THead>
-                {SESSION_COLUMNS.map((column) => (
-                  <SortHeading
-                    key={column.sort}
-                    label={column.label}
-                    column={column.sort}
-                    sort={sort}
-                    dir={dir}
-                    href={href(nextSessionSort(query, column.sort))}
-                  />
-                ))}
-              </THead>
-              <tbody>
-                {list.sessions.map((s) => (
-                  <SessionTableRow
-                    key={s.session_id}
-                    session={s}
-                    open={sessionHref(organization, slug, s.session_id, {
-                      days: query.days,
-                    })}
-                    user={tracesHref(organization, slug, { user: [s.user_id], days: query.days })}
-                  />
-                ))}
-              </tbody>
-            </DataTable>
-          )}
-
-          {list.more && (
-            <p className="text-sm text-muted-foreground">
-              The first {formatCount(list.limit)} of more in this window.{" "}
-              {list.limit < MAX_LIMIT ? (
-                <>
-                  <Link
-                    href={href({ limit: MAX_LIMIT })}
-                    scroll={false}
-                    className="underline underline-offset-4"
-                  >
-                    Show up to {formatCount(MAX_LIMIT)}
-                    <LinkPending />
-                  </Link>
-                  , or narrow the window.
-                </>
-              ) : (
-                "Narrow the window to see the rest."
-              )}
-            </p>
-          )}
-        </section>
+            </div>
+          </section>
+        </div>
       </div>
+      {/* The session a row opened, over the list rather than in its place:
+          its ↑ and ↓ buttons step through this page's rows. */}
       <SessionPeek
         organization={organization}
         slug={slug}
         projectId={project.id}
         sessions={list.sessions.map((s) => s.session_id)}
-        window={{ days: query.days, limit: query.limit }}
+        window={{ days: query.days }}
         layouts={layouts.kind === "ok" ? layouts.layouts : null}
         project={setting}
         canSave={administersProject(project.role)}
       />
-    </>
-  );
-}
-
-function SessionTableRow({
-  session,
-  open,
-  user,
-}: {
-  session: SessionRow;
-  open: string;
-  user: string;
-}) {
-  return (
-    <tr>
-      <Td className="max-w-64 truncate text-xs" title={session.session_id}>
-        <SessionLink sessionId={session.session_id} href={open}>
-          {session.session_id}
-        </SessionLink>
-      </Td>
-      <Td className="max-w-48 truncate text-xs" title={session.user_id || undefined}>
-        {session.user_id ? (
-          <Link href={user} className="underline-offset-4 hover:underline">
-            {session.user_id}
-          </Link>
-        ) : (
-          <span className="text-muted-foreground">—</span>
-        )}
-      </Td>
-      <Td className="whitespace-nowrap text-right tabular-nums">{formatCount(session.traces)}</Td>
-      <Td
-        className={`whitespace-nowrap text-right tabular-nums ${session.errors > 0 ? "text-destructive" : "text-muted-foreground"}`}
-      >
-        {formatCount(session.errors)}
-      </Td>
-      <Td className="whitespace-nowrap text-right tabular-nums">{formatCount(session.steps)}</Td>
-      <Td
-        className="whitespace-nowrap text-right tabular-nums"
-        title={`${formatCount(session.input_tokens)} in, ${formatCount(session.output_tokens)} out`}
-      >
-        {formatCount(session.input_tokens + session.output_tokens)}
-      </Td>
-      <Td className="whitespace-nowrap text-xs text-muted-foreground">
-        <LocalTime iso={session.first_seen} />
-      </Td>
-      <Td className="whitespace-nowrap text-xs text-muted-foreground">
-        <LocalTime iso={session.last_seen} />
-      </Td>
-    </tr>
+    </TooltipProvider>
   );
 }

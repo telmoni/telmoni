@@ -14,6 +14,8 @@ describe("what a browser kept of the trace list's look", () => {
       readPrefs(
         JSON.stringify({
           columns: ["duration", "started", "models"],
+          sessionColumns: ["last_seen", "user"],
+          userColumns: [],
           density: "compact",
           refresh: 60,
           filters: false,
@@ -25,6 +27,8 @@ describe("what a browser kept of the trace list's look", () => {
       ),
     ).toEqual({
       columns: ["started", "duration", "models"],
+      sessionColumns: ["user", "last_seen"],
+      userColumns: [],
       density: "compact",
       refresh: 60,
       filters: false,
@@ -43,6 +47,8 @@ describe("what a browser kept of the trace list's look", () => {
       readPrefs(
         JSON.stringify({
           columns: ["spend", 7, "agent"],
+          sessionColumns: "user",
+          userColumns: ["user", "tokens"],
           density: "airy",
           refresh: 45,
           filters: "yes",
@@ -52,7 +58,7 @@ describe("what a browser kept of the trace list's look", () => {
           layout: { view: null, options: {} },
         }),
       ),
-    ).toEqual({ ...DEFAULT_PREFS, columns: ["agent"] });
+    ).toEqual({ ...DEFAULT_PREFS, columns: ["agent"], userColumns: ["tokens"] });
     // A width no panel stands at, stored by hand or by an older build.
     expect(readPrefs(JSON.stringify({ peekWidth: 40 })).peekWidth).toBeNull();
     expect(readPrefs(JSON.stringify({ peekWidth: "720" })).peekWidth).toBeNull();

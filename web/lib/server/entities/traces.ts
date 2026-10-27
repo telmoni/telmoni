@@ -67,15 +67,15 @@ const TraceListSchema = z.object({
 });
 export type TraceList = z.infer<typeof TraceListSchema>;
 
-// One filter's values among the window's runs, each counted under every
-// other filter: the ticked ones first, then the most runs.
+// One filter's values among the window's runs, each with how many of the
+// list's rows carry it under every other filter: the ticked first.
 const FacetSchema = z.object({
-  values: z.array(z.object({ value: z.string(), runs: z.number() })),
+  values: z.array(z.object({ value: z.string(), count: z.number() })),
   more: z.boolean(),
 });
 export type Facet = z.infer<typeof FacetSchema>;
 
-const TraceFacetsSchema = z.object({
+export const FacetsSchema = z.object({
   days: z.number(),
   agent: FacetSchema,
   user: FacetSchema,
@@ -89,7 +89,7 @@ const TraceFacetsSchema = z.object({
   tag: FacetSchema,
   prompt: FacetSchema,
 });
-export type TraceFacets = z.infer<typeof TraceFacetsSchema>;
+export type Facets = z.infer<typeof FacetsSchema>;
 
 // The window in bars of equal width, each starting on the reader's clock:
 // the runs that started in it by how they ended, their tokens, and the
@@ -227,11 +227,10 @@ const TraceDetailSchema = z.object({
 });
 export type TraceDetail = z.infer<typeof TraceDetailSchema>;
 
-/** What narrows and orders the list, as the URL carries it: a filter is the
- *  values any of which admits a run, and a key left out narrows nothing.
- *  The server checks every value; the page drops what it cannot read before
- *  asking (`lib/traces.ts`). */
-export type TraceQuery = {
+/** What narrows a list as the URL carries it: a filter is the values any of
+ *  which admits a run, a key left out narrowing nothing; a session or a user
+ *  is admitted by a run of theirs. */
+export type ListFilters = {
   agent?: string[];
   user?: string[];
   session?: string[];
@@ -243,16 +242,24 @@ export type TraceQuery = {
   /** Each `key:value`. */
   tag?: string[];
   prompt?: string[];
-  sort?: TraceSort;
+};
+
+/** What narrows and orders a list, and which page of it shows, as the URL
+ *  carries it, `S` its columns' sorts. The server checks every value; the
+ *  page drops what it cannot read before asking (`lib/traces.ts`). */
+export type ListQuery<S extends string> = ListFilters & {
+  sort?: S;
   dir?: SortDirection;
   days?: number;
   limit?: number;
   page?: number;
 };
 
+export type TraceQuery = ListQuery<TraceSort>;
+
 /** The filters and the window alone: what the facets and the histogram take,
  *  each lane refusing a parameter it has no use for. */
-function filtersOf(query: TraceQuery) {
+export function filtersOf(query: ListFilters & { days?: number }) {
   return {
     agent: query.agent,
     user: query.user,
@@ -277,7 +284,7 @@ export type TracesAccess =
   | { kind: "unavailable" };
 
 export type FacetsAccess =
-  | { kind: "ok"; facets: TraceFacets }
+  | { kind: "ok"; facets: Facets }
   | { kind: "forbidden" }
   | { kind: "unavailable" };
 
@@ -369,7 +376,7 @@ export const fetchTraceFacets = cache(
       "fetchTraceFacets",
       projectId,
       `/traces/facets${queryString(filtersOf(query))}`,
-      TraceFacetsSchema,
+      FacetsSchema,
     );
     return read.kind === "ok" ? { kind: "ok", facets: read.value } : read;
   },
@@ -411,35 +418,27 @@ export const fetchTraceLayouts = cache(async (projectId: string): Promise<Layout
   return read.kind === "ok" ? { kind: "ok", layouts: read.value.views } : read;
 });
 
-/** The list as a file: every trace the filters admit, sorted as the page is,
- *  up to the server's cap — or the runs `runs` names alone. A 400 is a query
- *  the server refused, which the route says so about. */
-export async function traceDownload(
+/** A list as a file from one of telemetry's download lanes, `path` with its
+ *  query: a 400 is a query the server refused, which the route says so
+ *  about. */
+export async function readDownload(
+  fetcher: string,
   projectId: string,
-  query: TraceQuery,
-  format: DownloadFormat,
-  runs: string[],
+  path: string,
 ): Promise<DownloadAccess> {
   if (!projectId) return { kind: "unavailable" };
   const ctx = await identityContext();
   if (!ctx) return { kind: "unavailable" };
-  const lane = queryString({
-    ...filtersOf(query),
-    sort: query.sort,
-    dir: query.dir,
-    format,
-    run: runs,
-  });
   try {
     const res = await fetchWithTimeout(
-      `${env.SERVER_URL}/internal/v1/telemetry/traces/export${lane}`,
+      `${env.SERVER_URL}/internal/v1/telemetry${path}`,
       { headers: projectHeaders(ctx, projectId), cache: "no-store" },
       DOWNLOAD_TIMEOUT_MS,
     );
     if (res.status === 403) return { kind: "forbidden" };
     if (res.status === 400) return { kind: "refused" };
     if (!res.ok) {
-      logger.warn({ fetcher: "traceDownload", status: res.status }, "entities: upstream refused");
+      logger.warn({ fetcher, status: res.status }, "entities: upstream refused");
       return { kind: "unavailable" };
     }
     return {
@@ -448,9 +447,27 @@ export async function traceDownload(
       contentType: res.headers.get("content-type") ?? "application/octet-stream",
     };
   } catch (err) {
-    fetchFailed("traceDownload", err);
+    fetchFailed(fetcher, err);
     return { kind: "unavailable" };
   }
+}
+
+/** The list as a file: every trace the filters admit, sorted as the page is,
+ *  up to the server's cap — or the runs `runs` names alone. */
+export async function traceDownload(
+  projectId: string,
+  query: TraceQuery,
+  format: DownloadFormat,
+  runs: string[],
+): Promise<DownloadAccess> {
+  const lane = queryString({
+    ...filtersOf(query),
+    sort: query.sort,
+    dir: query.dir,
+    format,
+    run: runs,
+  });
+  return readDownload("traceDownload", projectId, `/traces/export${lane}`);
 }
 
 /** One trace's spans, by the run's id. A run id the path cannot be — not a

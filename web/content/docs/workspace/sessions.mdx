@@ -1,6 +1,6 @@
 ---
 title: "Sessions"
-description: "A project's Sessions page: every session its agents took part in within the window, with its user, traces, errors, steps and tokens, and each session opened beside the list or on a page of its own — its runs replayed in metadata, never a message, in a layout you customize and keep."
+description: "A project's Sessions page: every session its agents took part in within the window, with its user, traces, errors, steps and tokens — narrowed by the trace list's filters, a page at a time, downloaded as CSV or JSON — and each session opened beside the list or on a page of its own, its runs replayed in metadata, never a message, in a layout you customize and keep."
 ---
 
 A **session** is the runs that share the session id the application gave
@@ -24,9 +24,12 @@ project whose runs name none sees the page say so, with the attribute to set.
 
 ## The list
 
+Every session seen in the window, the one last heard from first, fifty to a
+page, laid out as the [trace list](/docs/workspace/traces#the-list) is:
+
 | Column | What it is |
 |---|---|
-| Session | The session id, as the application set it; opens the session beside the list |
+| Session | The session id, as the application set it; opens the session beside the list, as a click anywhere else on the row does |
 | User | The end user it was with, as stored: hashed under the project's own key; opens their traces |
 | Traces | How many runs the session had in the window |
 | Errors | How many of those had a span that failed |
@@ -35,27 +38,62 @@ project whose runs name none sees the page say so, with the attribute to set.
 | First seen | When the session's first run in the window started, in your time zone |
 | Last seen | When its last run in the window ended |
 
-**Sort** by any column by clicking its heading; the session last heard from
-comes first. A second click turns the sort round. Ids and first seen sort the
-alphabet's and the calendar's way; the most and the latest come first on the
-others.
+**Columns** shows or hides each of these, and the input and output tokens
+apart, the counts and the tokens each a group under its own heading; the
+session's id always shows. Your columns, and how tightly the rows sit
+(**Row density**, the same on every list), are kept in your browser rather
+than in the page's link.
 
-**The window** is the last day, week, 30 or 90 days, by the day each span
-arrived. The page reads the spans within it — never the whole table — so a
-session whose runs have all passed their retention is no longer listed. Up
-to 100 sessions are shown, and the page says when the window holds more: show
-up to 500, or narrow the window.
+### Filters
+
+The **Filters** panel beside the list is the
+[trace list's](/docs/workspace/traces#filters): each agent, status, model,
+tool, user, session, environment, release, tag and prompt among the window's
+runs, with how many sessions hold a run carrying it — counted under every
+other filter. A session is listed when one of its runs passes the filters,
+and its row still sums every run of it in the window: **Error** under Status
+lists the sessions with a run that failed, each with all its runs. A
+session's id, or a user's, can be typed in as well (**Text**), to find one.
+The filters in force stand above the rows: clear one with its ×, or all of
+them at once.
+
+### Sort, pages and the window
+
+**Sort** by any column by clicking its heading; a second click turns it
+round. Ids and first seen sort the alphabet's and the calendar's way; the
+most and the latest come first on the others.
+
+**Rows per page** is 25, 50 or 100; beside it, the total the filters admit,
+and the way to the first, previous, next and last page.
+
+**The window**, beside the page's title, is the last day, week, 30 or 90
+days, by the day each span arrived. The page reads the spans within it —
+never the whole table — so a session whose runs have all passed their
+retention is no longer listed. A window of more runs than the store sums at
+once, about a million, shows the page as unavailable, and one of more than
+about a hundred thousand lists its sessions without the filters' values; a
+shorter one reads. **Refresh** beside it reads the list now; and
+beside that, have the page read itself again every 30 seconds, minute, 5 or
+15 minutes as well.
 
 The list draws itself again as the project's runs land, while it is in view:
 at once for the first, and once more for whatever arrives in the next 30
 seconds. A session's own page, or one opened beside the list, is drawn again
 the same way, as the project's runs land.
 
-The sort and the window are in the page's URL, so a link holds the view.
+Every filter, the sort, the window and the page are in the page's URL, so a
+link holds the view.
+
+### Downloading the list
+
+**Download** writes the list as a file, CSV for a spreadsheet or JSON: every
+session its filters admit, sorted as it is, up to the first 10,000, each with
+its user's id as stored. A file holds what the list holds — metadata — and
+never a message.
 
 ## A session
 
-Click a session's id and it opens beside the list, in the console's side
+Click a session and it opens beside the list, in the console's side
 panel — as a trace opens over the trace list, and as New project opens — the
 list still in reach behind it; **Open the session's page** in the panel's
 header, or a click that asks for a new tab, gives it a page of its own, with

@@ -20,6 +20,10 @@ pub enum UserSort {
     Errors,
     /// How many steps their runs took, summed.
     Steps,
+    /// Their runs' input tokens, summed.
+    InputTokens,
+    /// Their runs' output tokens, summed.
+    OutputTokens,
     /// Their runs' input and output tokens, summed: the default.
     Tokens,
     /// When their first run in the window started.
@@ -31,12 +35,14 @@ pub enum UserSort {
 impl UserSort {
     /// Every column, in wire order.
     #[must_use]
-    pub const fn all() -> [Self; 7] {
+    pub const fn all() -> [Self; 9] {
         [
             Self::User,
             Self::Traces,
             Self::Errors,
             Self::Steps,
+            Self::InputTokens,
+            Self::OutputTokens,
             Self::Tokens,
             Self::FirstSeen,
             Self::LastSeen,
@@ -51,6 +57,8 @@ impl fmt::Display for UserSort {
             Self::Traces => write!(f, "traces"),
             Self::Errors => write!(f, "errors"),
             Self::Steps => write!(f, "steps"),
+            Self::InputTokens => write!(f, "input_tokens"),
+            Self::OutputTokens => write!(f, "output_tokens"),
             Self::Tokens => write!(f, "tokens"),
             Self::FirstSeen => write!(f, "first_seen"),
             Self::LastSeen => write!(f, "last_seen"),
@@ -66,12 +74,15 @@ impl FromStr for UserSort {
             "traces" => Ok(Self::Traces),
             "errors" => Ok(Self::Errors),
             "steps" => Ok(Self::Steps),
+            "input_tokens" => Ok(Self::InputTokens),
+            "output_tokens" => Ok(Self::OutputTokens),
             "tokens" => Ok(Self::Tokens),
             "first_seen" => Ok(Self::FirstSeen),
             "last_seen" => Ok(Self::LastSeen),
             _ => Err(ParseEnumError::new(
                 s,
-                "user, traces, errors, steps, tokens, first_seen, last_seen",
+                "user, traces, errors, steps, input_tokens, output_tokens, tokens, first_seen, \
+                 last_seen",
             )),
         }
     }
@@ -81,7 +92,7 @@ impl FromStr for UserSort {
 mod tests {
     use super::*;
 
-    const ALL: [UserSort; 7] = UserSort::all();
+    const ALL: [UserSort; 9] = UserSort::all();
 
     /// `all()` is a hand-written array, so nothing but a `match` forces it to
     /// stay complete: a new variant fails to compile here until it is listed.
@@ -93,6 +104,8 @@ mod tests {
                 | UserSort::Traces
                 | UserSort::Errors
                 | UserSort::Steps
+                | UserSort::InputTokens
+                | UserSort::OutputTokens
                 | UserSort::Tokens
                 | UserSort::FirstSeen
                 | UserSort::LastSeen => {}

@@ -14,8 +14,12 @@ import {
   formatCost,
   formatDuration,
   isTagPair,
+  listDownloadHref,
+  listPageHref,
   nextSort,
   pageCount,
+  parseFilters,
+  parseListQuery,
   parseTraceQuery,
   parseTraceUi,
   presetActive,
@@ -305,6 +309,43 @@ describe("the URL as the list's state", () => {
     expect(downloadHref("acme", "web", {}, "json", ["r1", "r2"])).toBe(
       "/acme/web/traces/export?format=json&run=r1&run=r2",
     );
+  });
+});
+
+describe("the sessions and users lists, which take the trace list's filters and pages", () => {
+  it("reads a list's query with its own sorts, dropping the trace list's", () => {
+    const sorts = { Session: "session", LastSeen: "last_seen" } as const;
+    expect(
+      parseListQuery({ sort: "last_seen", status: "error", limit: "25", page: "2" }, sorts),
+    ).toEqual({ status: ["error"], sort: "last_seen", limit: 25, page: 2 });
+    expect(parseListQuery({ sort: "started" }, sorts)).toEqual({});
+    expect(parseFilters({ agent: "zeta", sort: "user", days: "30" })).toEqual({ agent: ["zeta"] });
+  });
+
+  it("writes a list's page and its download, the sessions' beside their page rather than under it", () => {
+    expect(listPageHref("sessions", "acme", "web", { user: ["u"], page: 2 })).toBe(
+      "/acme/web/sessions?user=u&page=2",
+    );
+    expect(listPageHref("traces", "acme", "web", { status: ["error"] }, { display: "chart" })).toBe(
+      "/acme/web/traces?status=error&display=chart",
+    );
+    expect(
+      listDownloadHref("sessions", "acme", "web", { status: ["error"], sort: "tokens", page: 3 }, "csv"),
+    ).toBe("/acme/web/session-export?status=error&sort=tokens&format=csv");
+    expect(listDownloadHref("users", "acme", "web", { days: 30 }, "json")).toBe(
+      "/acme/web/users/export?days=30&format=json",
+    );
+  });
+
+  it("keeps a filter's every other query key as it ticks and clears values, from the first page", () => {
+    const query = { status: ["error" as const], sort: "user", page: 3, limit: 25 };
+    expect(toggled(query, "agent", "zeta")).toEqual({
+      status: ["error"],
+      agent: ["zeta"],
+      sort: "user",
+      limit: 25,
+    });
+    expect(unfiltered(query)).toEqual({ sort: "user", limit: 25 });
   });
 });
 

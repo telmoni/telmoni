@@ -1,8 +1,9 @@
 //! The session lanes against a real ClickHouse: the page sums each session's
-//! runs into one row, latest first, sorted as asked, a run with no session
-//! id belonging to none and another project's never listed; a session's own
-//! page is its traces in the order they ran, and a session the project's runs
-//! in the window did not belong to is a 404.
+//! runs into one row, latest first, sorted, paged and filtered as asked, a
+//! run with no session id belonging to none and another project's never
+//! listed, its facets count sessions and its download holds them all; a
+//! session's own page is its traces in the order they ran, and a session the
+//! project's runs in the window did not belong to is a 404.
 #![expect(clippy::expect_used, reason = "test scaffolding")]
 
 mod common;
@@ -17,7 +18,9 @@ use sqlx::PgPool;
 use tower::ServiceExt;
 use uuid::Uuid;
 
-use common::{AuthStub, SECRET, clickhouse_or_skip, run_of, state_with_stores};
+use common::{
+    AuthStub, FILTER_QUERIES, SECRET, clickhouse_or_skip, run_of, state_with_stores, varied_runs,
+};
 use telmoni_shared::middleware::service_auth::SERVICE_SECRET_HEADER;
 use telmoni_shared::{OrganizationId, OrganizationRole, ProjectId, Role};
 use telmoni_telemetry::router;
@@ -108,6 +111,44 @@ impl Projects {
     async fn detail(&self, path: &str) -> (StatusCode, Value) {
         self.send(self.request(MEMBER, &self.ours, &format!("{LANE}/{path}")))
             .await
+    }
+
+    /// The page's facets as the member reads them, with `query`.
+    async fn facets(&self, query: &str) -> Value {
+        let path = format!("/internal/v1/telemetry/session-facets{query}");
+        let (status, body) = self.send(self.request(MEMBER, &self.ours, &path)).await;
+        assert_eq!(status, StatusCode::OK, "{query}: {body}");
+        body
+    }
+
+    /// The page's download as the member makes it, with `query`: its status,
+    /// its content type and its body.
+    async fn export(&self, query: &str) -> (StatusCode, String, String) {
+        let path = format!("/internal/v1/telemetry/session-export{query}");
+        let response = self
+            .app
+            .clone()
+            .oneshot(self.request(MEMBER, &self.ours, &path))
+            .await
+            .expect("the router answers");
+        let status = response.status();
+        let kind = response
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default()
+            .to_owned();
+        let bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("a body")
+            .to_bytes();
+        (
+            status,
+            kind,
+            String::from_utf8(bytes.to_vec()).expect("text"),
+        )
     }
 }
 
@@ -247,6 +288,8 @@ async fn the_page_sums_each_sessions_runs_latest_first(pool: PgPool) {
     assert_eq!(list["dir"], "desc");
     assert_eq!(list["days"], 7);
     assert_eq!(list["limit"], 100);
+    assert_eq!(list["page"], 1);
+    assert_eq!(list["total"], 3, "the run that names no session is none's");
     assert_eq!(list["more"], false);
 
     let one = session(&list, "conv-1");
@@ -271,7 +314,7 @@ async fn the_page_sums_each_sessions_runs_latest_first(pool: PgPool) {
 }
 
 #[sqlx::test]
-async fn the_page_sorts_by_any_column_and_holds_to_its_limit(pool: PgPool) {
+async fn the_page_sorts_by_any_column_and_pages(pool: PgPool) {
     let Some(ch) = clickhouse_or_skip(module_path!()).await else {
         return;
     };
@@ -297,6 +340,14 @@ async fn the_page_sorts_by_any_column_and_holds_to_its_limit(pool: PgPool) {
         ["conv-2", "conv-1", "chat/42 b"]
     );
     assert_eq!(
+        ids(&p.list("?sort=input_tokens&dir=asc").await),
+        ["chat/42 b", "conv-1", "conv-2"]
+    );
+    assert_eq!(
+        ids(&p.list("?sort=output_tokens").await),
+        ["conv-2", "conv-1", "chat/42 b"]
+    );
+    assert_eq!(
         ids(&p.list("?sort=first_seen").await),
         ["conv-1", "conv-2", "chat/42 b"],
         "earliest first"
@@ -308,7 +359,18 @@ async fn the_page_sorts_by_any_column_and_holds_to_its_limit(pool: PgPool) {
 
     let one = p.list("?limit=1").await;
     assert_eq!(ids(&one), ["chat/42 b"]);
+    assert_eq!(one["total"], 3);
     assert_eq!(one["more"], true);
+    let second = p.list("?limit=2&page=2").await;
+    assert_eq!(ids(&second), ["conv-1"]);
+    assert_eq!(second["page"], 2);
+    assert_eq!(second["more"], false);
+    let past = p.list("?limit=2&page=3").await;
+    assert!(ids(&past).is_empty());
+    assert_eq!(
+        past["total"], 3,
+        "a page past the last still counts the rest"
+    );
 
     // The word the page no longer answers to is refused by name, unechoed.
     let (status, body) = p
@@ -408,4 +470,184 @@ async fn a_session_is_its_traces_in_the_order_they_ran(pool: PgPool) {
         .send(p.request(STRANGER, &p.ours, &format!("{LANE}/conv-1")))
         .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+/// A facet's values and their counts, in the answer's order.
+fn values(facets: &Value, facet: &str) -> Vec<(String, u64)> {
+    facets
+        .get(facet)
+        .and_then(|f| f.get("values"))
+        .and_then(Value::as_array)
+        .expect("values")
+        .iter()
+        .map(|v| {
+            (
+                v["value"].as_str().expect("a value").to_owned(),
+                v["count"].as_u64().expect("a count"),
+            )
+        })
+        .collect()
+}
+
+/// The trace list's filters admit a session that holds a run they admit, and
+/// the row still sums every run of it in the window.
+#[sqlx::test]
+async fn a_filter_admits_a_session_by_one_run_and_sums_it_whole(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let p = projects(&pool);
+    seed(&ch, &p).await;
+
+    let failed = p.list("?status=error").await;
+    assert_eq!(ids(&failed), ["conv-1"]);
+    assert_eq!(failed["total"], 1);
+    let one = session(&failed, "conv-1");
+    assert_eq!(one["traces"], 2, "its run that ended well is summed too");
+    assert_eq!(one["input_tokens"], 300);
+    assert_eq!(ids(&p.list("?user=user-b").await), ["conv-2"]);
+    assert_eq!(
+        ids(&p.list("?session=conv-1&session=chat%2F42%20b").await),
+        ["chat/42 b", "conv-1"]
+    );
+    let none = p.list("?agent=billing-bot").await;
+    assert!(ids(&none).is_empty());
+    assert_eq!(none["total"], 0);
+
+    // Another agent's run in conv-2 lets the session in, summed with the
+    // support bot's run beside it.
+    let mut billed = run_of(
+        &p.ours,
+        Uuid::new_v4(),
+        "user-b",
+        "conv-2",
+        Utc::now().trunc_subsecs(6) - Duration::minutes(2),
+        (5, 5),
+        false,
+        0x70,
+    );
+    for span in &mut billed {
+        span.agent = "billing-bot".into();
+    }
+    ch.store
+        .insert_spans(&billed)
+        .await
+        .expect("the spans land");
+    let billing = p.list("?agent=billing-bot").await;
+    assert_eq!(ids(&billing), ["conv-2"]);
+    assert_eq!(session(&billing, "conv-2")["traces"], 2);
+    assert_eq!(session(&billing, "conv-2")["input_tokens"], 1_005);
+}
+
+/// Every filter lists the sessions of the runs the trace list admits: the
+/// one reads a run's matches as counts, the other off the arrays it shows.
+#[sqlx::test]
+async fn the_filters_list_the_sessions_of_the_runs_the_trace_list_admits(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let p = projects(&pool);
+    ch.store
+        .insert_spans(&varied_runs(&p.ours))
+        .await
+        .expect("the spans land");
+    for query in FILTER_QUERIES {
+        let path = format!("/internal/v1/telemetry/traces{query}");
+        let (status, traces) = p.send(p.request(MEMBER, &p.ours, &path)).await;
+        assert_eq!(status, StatusCode::OK, "{query}: {traces}");
+        let mut expected: Vec<&str> = traces["traces"]
+            .as_array()
+            .expect("traces")
+            .iter()
+            .filter_map(|t| t["session_id"].as_str().filter(|s| !s.is_empty()))
+            .collect();
+        expected.sort_unstable();
+        expected.dedup();
+        let list = p.list(query).await;
+        let mut listed = ids(&list);
+        listed.sort_unstable();
+        assert_eq!(listed, expected, "{query}");
+        assert_eq!(list["total"], listed.len(), "{query}");
+    }
+    assert_eq!(
+        ids(&p.list("").await).len(),
+        3,
+        "the run with no session is none's"
+    );
+    assert_eq!(ids(&p.list("?tool=search_docs").await), ["conv-2"]);
+}
+
+/// Each facet counts the sessions that hold a run carrying a value, under
+/// every filter but its own.
+#[sqlx::test]
+async fn the_facets_count_sessions_under_every_other_filter(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let p = projects(&pool);
+    seed(&ch, &p).await;
+
+    let all = p.facets("").await;
+    assert_eq!(
+        values(&all, "status"),
+        [("ok".to_owned(), 3), ("error".to_owned(), 1)],
+        "three sessions hold a run that ended well; one, a run that failed"
+    );
+    assert_eq!(values(&all, "agent"), [("support-bot".to_owned(), 3)]);
+    assert_eq!(all["days"], 7);
+    let failed = p.facets("?status=error").await;
+    assert_eq!(
+        values(&failed, "status"),
+        [("error".to_owned(), 1), ("ok".to_owned(), 3)],
+        "a facet's own filter does not narrow it, the ticked value first"
+    );
+    assert_eq!(values(&failed, "user"), [("user-a".to_owned(), 1)]);
+
+    let (status, _) = p
+        .send(p.request(
+            MEMBER,
+            &p.ours,
+            "/internal/v1/telemetry/session-facets?sort=traces",
+        ))
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+/// The download is every session the filters admit, sorted as asked, as CSV
+/// or JSON, and takes no chosen runs.
+#[sqlx::test]
+async fn the_download_holds_every_session_the_filters_admit(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let p = projects(&pool);
+    seed(&ch, &p).await;
+
+    let (status, kind, csv) = p.export("?sort=session").await;
+    assert_eq!(status, StatusCode::OK, "{csv}");
+    assert_eq!(kind, "text/csv; charset=utf-8");
+    let lines: Vec<&str> = csv.trim_start_matches('\u{feff}').lines().collect();
+    assert_eq!(
+        lines[0],
+        "session_id,user_id,traces,errors,steps,input_tokens,output_tokens,first_seen,last_seen"
+    );
+    assert_eq!(lines.len(), 4, "a header and three sessions: {csv}");
+    assert!(lines[1].starts_with("chat/42 b,user-c,1,0,1,7,7,"), "{csv}");
+
+    let (status, kind, json) = p.export("?status=error&format=json").await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(kind, "application/json");
+    let rows: Value = serde_json::from_str(&json).expect("JSON");
+    assert_eq!(rows.as_array().map(Vec::len), Some(1));
+    assert_eq!(rows[0]["session_id"], "conv-1");
+    assert_eq!(rows[0]["traces"], 2);
+
+    for refused in [
+        "?run=6f2b8e3c-5d1a-4b7e-9c0f-1a2b3c4d5e6f",
+        "?page=2",
+        "?format=xlsx",
+    ] {
+        let (status, _, body) = p.export(refused).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{refused}: {body}");
+    }
 }

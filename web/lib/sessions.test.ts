@@ -3,8 +3,11 @@ import { describe, expect, it } from "vitest";
 import type { SessionTrace } from "@/lib/server/entities/sessions";
 
 import {
+  DEFAULT_SESSION_COLUMNS,
+  SESSION_COLUMN_MENU,
   currentSessionSort,
   nextSessionSort,
+  orderedSessionColumns,
   parseSessionQuery,
   sessionHref,
   sessionSums,
@@ -50,13 +53,29 @@ describe("a session's sums", () => {
 });
 
 describe("the sessions list's URL", () => {
-  it("reads the sort and the window, and drops what the server would refuse", () => {
-    expect(parseSessionQuery({ sort: "session", dir: "asc", days: "90", limit: "200" })).toEqual({
+  it("reads the filters, the sort, the window and the page, and drops what the server would refuse", () => {
+    expect(
+      parseSessionQuery({
+        sort: "session",
+        dir: "asc",
+        days: "90",
+        limit: "100",
+        page: "3",
+        status: ["error", "gone"],
+        user: "user-a",
+      }),
+    ).toEqual({
+      user: ["user-a"],
+      status: ["error"],
       sort: "session",
       dir: "asc",
       days: 90,
-      limit: 200,
+      limit: 100,
+      page: 3,
     });
+    expect(parseSessionQuery({ sort: "input_tokens" })).toEqual({ sort: "input_tokens" });
+    // Rows a page does not offer, and the first page, which the URL leaves out.
+    expect(parseSessionQuery({ limit: "200", page: "1" })).toEqual({});
     expect(parseSessionQuery({ sort: "agent", dir: "up", days: "361", limit: "0" })).toEqual({});
     // The word the page no longer answers to is dropped like any other.
     expect(parseSessionQuery({ sort: "conversation" })).toEqual({});
@@ -81,11 +100,53 @@ describe("the sessions list's URL", () => {
       sort: "session",
       dir: "asc",
     });
-    expect(nextSessionSort({}, "last_seen")).toEqual({ sort: "last_seen", dir: "asc" });
-    expect(nextSessionSort({}, "user")).toEqual({ sort: "user", dir: "asc" });
-    expect(nextSessionSort({ sort: "tokens" }, "tokens")).toEqual({
+    expect(nextSessionSort({}, "last_seen")).toEqual({
+      sort: "last_seen",
+      dir: "asc",
+      page: undefined,
+    });
+    expect(nextSessionSort({}, "user")).toEqual({ sort: "user", dir: "asc", page: undefined });
+    expect(nextSessionSort({ sort: "tokens", page: 4 }, "tokens")).toEqual({
       sort: "tokens",
       dir: "asc",
+      page: undefined,
     });
+    expect(nextSessionSort({}, "output_tokens")).toEqual({
+      sort: "output_tokens",
+      dir: "desc",
+      page: undefined,
+    });
+  });
+});
+
+describe("the sessions table's columns", () => {
+  it("keeps the columns picked in the table's order, once, and none it does not have", () => {
+    expect(orderedSessionColumns(["last_seen", "user", "user", "agent", "session"])).toEqual([
+      "user",
+      "last_seen",
+    ]);
+    expect(DEFAULT_SESSION_COLUMNS).toEqual([
+      "user",
+      "traces",
+      "errors",
+      "steps",
+      "tokens",
+      "first_seen",
+      "last_seen",
+    ]);
+  });
+
+  it("files the counts and the tokens each under its own heading in the menu", () => {
+    expect(
+      SESSION_COLUMN_MENU.map((block) =>
+        block.kind === "group" ? `${block.label}: ${block.columns.map((c) => c.key).join()}` : block.column.key,
+      ),
+    ).toEqual([
+      "user",
+      "Counts: traces,errors,steps",
+      "Tokens: input_tokens,output_tokens,tokens",
+      "first_seen",
+      "last_seen",
+    ]);
   });
 });

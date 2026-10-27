@@ -9,6 +9,7 @@
 //! every read, twice.
 
 use std::collections::BTreeMap;
+use std::str::FromStr;
 use std::sync::Arc;
 
 use axum::extract::{Path, State};
@@ -40,19 +41,21 @@ use crate::traces::{
 /// window, and its own parameters beside them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Reading {
-    /// The list: its sort, and its page.
+    /// A list: its sort, and its page.
     List,
     /// The facets: the filters alone.
     Facets,
     /// The histogram: the reader's clock.
     Histogram,
-    /// A download: its sort, its format, and the runs chosen for it.
+    /// A download: its sort and its format.
     Export,
+    /// The trace list's download, which also takes the runs chosen for it.
+    TraceExport,
 }
 
-/// A trace lane's query string, every value text until it is checked. A
-/// filter may be given again, each value one more the list admits, and an
-/// empty value — a form's untouched field — admits nothing; every other
+/// A list lane's query string — the traces', the sessions' or the users' —
+/// every value text until it is checked. A filter may be given again, each
+/// value one more the list admits, an empty one admitting nothing; any other
 /// parameter is given once at most, and one the lane does not take is a 400.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct TraceQuery {
@@ -103,7 +106,7 @@ impl TraceQuery {
     /// filter. A name the lane does not know is never echoed: a person typed
     /// it.
     pub fn read(pairs: Vec<(String, String)>, reading: Reading) -> Result<Self, TelmoniError> {
-        use Reading::{Export, Histogram, List};
+        use Reading::{Export, Histogram, List, TraceExport};
         let mut query = Self::default();
         for (name, value) in pairs {
             let once = match (name.as_str(), reading) {
@@ -147,17 +150,17 @@ impl TraceQuery {
                     query.prompt.push(value);
                     continue;
                 }
-                ("run", Export) => {
+                ("run", TraceExport) => {
                     query.run.push(value);
                     continue;
                 }
                 ("days", _) => &mut query.days,
-                ("sort", List | Export) => &mut query.sort,
-                ("dir", List | Export) => &mut query.dir,
+                ("sort", List | Export | TraceExport) => &mut query.sort,
+                ("dir", List | Export | TraceExport) => &mut query.dir,
                 ("limit", List) => &mut query.limit,
                 ("page", List) => &mut query.page,
                 ("utc_offset", Histogram) => &mut query.utc_offset,
-                ("format", Export) => &mut query.format,
+                ("format", Export | TraceExport) => &mut query.format,
                 _ => {
                     return Err(TelmoniError::BadRequest(
                         "the lane takes no parameter by that name".into(),
@@ -219,23 +222,74 @@ impl TraceQuery {
     ///
     /// A column or a direction there is none of, never echoed.
     pub fn sort(&self) -> Result<(TraceSort, SortDirection), TelmoniError> {
+        self.sort_among(
+            TraceSort::Started,
+            default_direction,
+            "sort is one of started, agent, user, session, status, steps, model_calls, \
+             tool_calls, errors, input_tokens, output_tokens, tokens, duration",
+        )
+    }
+
+    /// The sort the query asks for among a list's columns: `fallback` when
+    /// it names none, each column `first`'s way unless it says which.
+    /// `columns` is the refusal, naming them.
+    ///
+    /// # Errors
+    ///
+    /// A column or a direction there is none of, never echoed.
+    pub(crate) fn sort_among<S: FromStr + Copy>(
+        &self,
+        fallback: S,
+        first: fn(S) -> SortDirection,
+        columns: &str,
+    ) -> Result<(S, SortDirection), TelmoniError> {
         let sort = match self.sort.as_deref().unwrap_or_default().trim() {
-            "" => TraceSort::Started,
-            given => given.parse::<TraceSort>().map_err(|_| {
-                TelmoniError::BadRequest(
-                    "sort is one of started, agent, user, session, status, steps, model_calls, \
-                     tool_calls, errors, input_tokens, output_tokens, tokens, duration"
-                        .into(),
-                )
-            })?,
+            "" => fallback,
+            given => given
+                .parse::<S>()
+                .map_err(|_| TelmoniError::BadRequest(columns.to_owned()))?,
         };
         let direction = match self.dir.as_deref().unwrap_or_default().trim() {
-            "" => default_direction(sort),
+            "" => first(sort),
             given => given
                 .parse::<SortDirection>()
                 .map_err(|_| TelmoniError::BadRequest("dir is asc or desc".into()))?,
         };
         Ok((sort, direction))
+    }
+
+    /// The page the query asks for.
+    ///
+    /// # Errors
+    ///
+    /// A limit or a page out of range, never echoed.
+    pub(crate) fn paging(&self) -> Result<Paging, TelmoniError> {
+        let limit = parse_limit(self.limit.as_deref().unwrap_or_default())?;
+        let page = parse_page(self.page.as_deref().unwrap_or_default())?;
+        Ok(Paging {
+            limit,
+            page,
+            skipped: u64::from(page - 1) * u64::from(limit),
+        })
+    }
+}
+
+/// A list's page: how many rows it holds, which it is from 1, and how many
+/// rows come before it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Paging {
+    pub(crate) limit: u32,
+    pub(crate) page: u32,
+    pub(crate) skipped: u64,
+}
+
+impl Paging {
+    /// Whether a page after this one holds more of `total` rows, once this
+    /// one holds `shown`.
+    pub(crate) fn more(self, shown: usize, total: u64) -> bool {
+        self.skipped
+            .saturating_add(u64::try_from(shown).unwrap_or(u64::MAX))
+            < total
     }
 }
 
@@ -386,18 +440,46 @@ fn parse_utc_offset(text: &str) -> Result<i16, TelmoniError> {
 /// The two shapes a download comes in: CSV, for a spreadsheet, and JSON, the
 /// list's own rows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Format {
+pub(crate) enum Format {
     Csv,
     Json,
 }
 
 /// `format` as a URL carries it: `csv` when empty.
-fn parse_format(text: &str) -> Result<Format, TelmoniError> {
+pub(crate) fn parse_format(text: &str) -> Result<Format, TelmoniError> {
     match text.trim() {
         "" | "csv" => Ok(Format::Csv),
         "json" => Ok(Format::Json),
         _ => Err(TelmoniError::BadRequest("format is csv or json".into())),
     }
+}
+
+/// A list's rows as a file: JSON, the list's own rows, or CSV under
+/// `columns`, each row's cells as `cells` writes them. `what` names the
+/// list in the error a row that cannot be written gives.
+pub(crate) fn download<T: Serialize, const N: usize>(
+    format: Format,
+    rows: &[T],
+    columns: &[&str; N],
+    cells: impl Fn(&T) -> [String; N],
+    what: &str,
+) -> Result<Response, TelmoniError> {
+    Ok(match format {
+        Format::Json => {
+            let body = serde_json::to_vec(rows).map_err(|e| {
+                TelmoniError::Internal(format!("a {what} download could not be written: {e}"))
+            })?;
+            ([(header::CONTENT_TYPE, "application/json")], body).into_response()
+        }
+        Format::Csv => {
+            let mut body = csv::BOM.as_bytes().to_vec();
+            csv::row(&mut body, columns);
+            for row in rows {
+                csv::row(&mut body, &cells(row));
+            }
+            ([(header::CONTENT_TYPE, "text/csv; charset=utf-8")], body).into_response()
+        }
+    })
 }
 
 /// What the list answers.
@@ -546,10 +628,10 @@ impl Trace {
     }
 }
 
-/// What the facets answer: each filter's values among the window's runs,
-/// each counted under every other filter.
+/// What a list's facets answer: each filter's values among the window's
+/// runs, each counted in the list's own rows under every other filter.
 #[derive(Debug, Default, Serialize)]
-pub struct TraceFacets {
+pub struct Facets {
     /// How many days back they read.
     pub days: u16,
     pub agent: Facet,
@@ -565,7 +647,7 @@ pub struct TraceFacets {
     pub prompt: Facet,
 }
 
-/// One filter's values: the ticked ones first, then the most runs, up to
+/// One filter's values: the ticked ones first, then the most rows, up to
 /// [`FACET_VALUES_MAX`].
 #[derive(Debug, Default, Serialize)]
 pub struct Facet {
@@ -574,16 +656,16 @@ pub struct Facet {
     pub more: bool,
 }
 
-/// One value, and how many runs carry it.
+/// One value, and how many of the list's rows carry it.
 #[derive(Debug, Serialize)]
 pub struct FacetValue {
     pub value: String,
-    pub runs: u64,
+    pub count: u64,
 }
 
-impl TraceFacets {
+impl Facets {
     /// The read's rows, by facet, in the read's order.
-    fn of(days: u16, rows: Vec<FacetRow>) -> Self {
+    pub(crate) fn of(days: u16, rows: Vec<FacetRow>) -> Self {
         let mut facets = Self {
             days,
             ..Self::default()
@@ -608,7 +690,7 @@ impl TraceFacets {
             }
             facet.values.push(FacetValue {
                 value: row.value,
-                runs: row.runs,
+                count: row.listed,
             });
         }
         facets
@@ -732,8 +814,11 @@ impl From<SpanRow> for TraceSpan {
     }
 }
 
-/// The project a trace lane reads, once the caller may read its traces.
-async fn readable(state: &AppState, headers: &HeaderMap) -> Result<Projects, TelmoniError> {
+/// The project a list lane reads, once the caller may read its traces.
+pub(crate) async fn readable(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<Projects, TelmoniError> {
     let acting = state.auth.resolve(headers).await?;
     let project_id = acting
         .require_project(Verb::Read, Resource::Trace)?
@@ -755,22 +840,27 @@ pub async fn list_traces(
     let query = TraceQuery::read(pairs, Reading::List)?;
     let filter = query.filter()?;
     let (sort, dir) = query.sort()?;
-    let limit = parse_limit(query.limit.as_deref().unwrap_or_default())?;
-    let page = parse_page(query.page.as_deref().unwrap_or_default())?;
-    let skipped = u64::from(page - 1) * u64::from(limit);
+    let paging = query.paging()?;
     let (rows, total) = tokio::try_join!(
-        traces::list(&state.store, &projects, &filter, sort, dir, limit, skipped),
+        traces::list(
+            &state.store,
+            &projects,
+            &filter,
+            sort,
+            dir,
+            paging.limit,
+            paging.skipped
+        ),
         traces::count(&state.store, &projects, &filter),
     )
     .map_err(read_failed)?;
-    let more = skipped.saturating_add(u64::try_from(rows.len()).unwrap_or(u64::MAX)) < total;
     Ok(Json(TraceList {
+        more: paging.more(rows.len(), total),
         traces: rows.into_iter().map(Trace::from).collect(),
         days: filter.days,
-        limit,
-        page,
+        limit: paging.limit,
+        page: paging.page,
         total,
-        more,
         sort,
         dir,
     }))
@@ -783,13 +873,13 @@ pub async fn get_facets(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Query(pairs): Query<Vec<(String, String)>>,
-) -> Result<Json<TraceFacets>, TelmoniError> {
+) -> Result<Json<Facets>, TelmoniError> {
     let projects = readable(&state, &headers).await?;
     let filter = TraceQuery::read(pairs, Reading::Facets)?.filter()?;
     let rows = traces::facets(&state.store, &projects, &filter)
         .await
         .map_err(read_failed)?;
-    Ok(Json(TraceFacets::of(filter.days, rows)))
+    Ok(Json(Facets::of(filter.days, rows)))
 }
 
 /// `GET /internal/v1/telemetry/traces/histogram` — the project's traces the
@@ -832,7 +922,7 @@ pub async fn export_traces(
     Query(pairs): Query<Vec<(String, String)>>,
 ) -> Result<Response, TelmoniError> {
     let projects = readable(&state, &headers).await?;
-    let query = TraceQuery::read(pairs, Reading::Export)?;
+    let query = TraceQuery::read(pairs, Reading::TraceExport)?;
     let filter = query.filter()?;
     let (sort, dir) = query.sort()?;
     let format = parse_format(query.format.as_deref().unwrap_or_default())?;
@@ -840,22 +930,7 @@ pub async fn export_traces(
         .await
         .map_err(read_failed)?;
     let traces: Vec<Trace> = rows.into_iter().map(Trace::from).collect();
-    Ok(match format {
-        Format::Json => {
-            let body = serde_json::to_vec(&traces).map_err(|e| {
-                TelmoniError::Internal(format!("a trace download could not be written: {e}"))
-            })?;
-            ([(header::CONTENT_TYPE, "application/json")], body).into_response()
-        }
-        Format::Csv => {
-            let mut body = csv::BOM.as_bytes().to_vec();
-            csv::row(&mut body, &CSV_HEADER);
-            for trace in &traces {
-                csv::row(&mut body, &trace.cells());
-            }
-            ([(header::CONTENT_TYPE, "text/csv; charset=utf-8")], body).into_response()
-        }
-    })
+    download(format, &traces, &CSV_HEADER, Trace::cells, "trace")
 }
 
 /// `GET /internal/v1/telemetry/traces/{run_id}` — one trace's spans, the run's
@@ -1006,8 +1081,8 @@ mod tests {
     }
 
     /// Each lane takes the filters and its own parameters, and no other's:
-    /// a page is the list's, a clock the histogram's, a format and chosen
-    /// runs a download's.
+    /// a page is a list's, a clock the histogram's, a format a download's,
+    /// and chosen runs the trace list's download alone.
     #[test]
     fn each_lane_takes_its_own_parameters_and_no_others() {
         for (reading, name) in [
@@ -1020,6 +1095,9 @@ mod tests {
             (Reading::List, "run"),
             (Reading::Export, "page"),
             (Reading::Export, "utc_offset"),
+            (Reading::Export, "run"),
+            (Reading::TraceExport, "page"),
+            (Reading::TraceExport, "limit"),
         ] {
             let refused = read(reading, &[(name, "1")]).expect_err(name);
             assert_eq!(
@@ -1029,8 +1107,9 @@ mod tests {
             );
         }
         assert!(read(Reading::Histogram, &[("utc_offset", "-300")]).is_ok());
+        assert!(read(Reading::Export, &[("sort", "tokens"), ("format", "json")]).is_ok());
         let download = read(
-            Reading::Export,
+            Reading::TraceExport,
             &[
                 ("format", "json"),
                 ("run", "6f2b8e3c-5d1a-4b7e-9c0f-1a2b3c4d5e6f"),
@@ -1063,7 +1142,7 @@ mod tests {
             read(Reading::List, &[("days", "7.5")]).and_then(|q| q.filter().map(|_| ())),
             read(Reading::List, &[("sort", "agent"), ("sort", "user")]).map(|_| ()),
             read(Reading::List, &[("nonsense<script>", "1")]).map(|_| ()),
-            read(Reading::Export, &[("run", "not-a-run<script>")])
+            read(Reading::TraceExport, &[("run", "not-a-run<script>")])
                 .and_then(|q| q.filter().map(|_| ())),
             read(Reading::Export, &[("format", "xlsx<script>")])
                 .and_then(|q| parse_format(q.format.as_deref().unwrap_or_default()).map(|_| ())),
@@ -1138,9 +1217,9 @@ mod tests {
         let runs: Vec<(String, String)> = (0..=RUNS_MAX)
             .map(|_| ("run".to_owned(), Uuid::new_v4().to_string()))
             .collect();
-        let page = TraceQuery::read(runs[1..].to_vec(), Reading::Export).expect("read");
+        let page = TraceQuery::read(runs[1..].to_vec(), Reading::TraceExport).expect("read");
         assert_eq!(page.filter().expect("a page's runs").runs.len(), RUNS_MAX);
-        let query = TraceQuery::read(runs, Reading::Export).expect("read");
+        let query = TraceQuery::read(runs, Reading::TraceExport).expect("read");
         assert_eq!(
             query
                 .filter()
@@ -1157,21 +1236,22 @@ mod tests {
     fn the_facets_keep_the_reads_order_and_say_when_there_are_more() {
         let mut rows: Vec<FacetRow> = (0..=FACET_VALUES_MAX)
             .zip((0..100_u64).rev())
-            .map(|(i, runs)| FacetRow {
+            .map(|(i, listed)| FacetRow {
                 facet: "model".into(),
                 value: format!("model-{i}"),
-                runs,
+                listed,
             })
             .collect();
         rows.push(FacetRow {
             facet: "status".into(),
             value: "error".into(),
-            runs: 3,
+            listed: 3,
         });
-        let facets = TraceFacets::of(7, rows);
+        let facets = Facets::of(7, rows);
         assert_eq!(facets.model.values.len(), FACET_VALUES_MAX);
         assert!(facets.model.more);
         assert_eq!(facets.model.values[0].value, "model-0");
+        assert_eq!(facets.status.values[0].count, 3);
         assert_eq!(facets.status.values.len(), 1);
         assert!(!facets.status.more);
         assert!(facets.agent.values.is_empty());

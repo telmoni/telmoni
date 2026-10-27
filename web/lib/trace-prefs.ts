@@ -1,17 +1,18 @@
 import { readLayoutChoice, type LayoutChoice } from "@/lib/layout";
 import { keptFiltersWidth } from "@/lib/panel-width";
 import { PEEK_WIDTH_MIN } from "@/lib/peek";
-import { DEFAULT_COLUMNS, orderedColumns } from "@/lib/traces";
+import { DEFAULT_SESSION_COLUMNS, orderedSessionColumns, type SessionColumn } from "@/lib/sessions";
+import { DEFAULT_COLUMNS, orderedColumns, type ListName } from "@/lib/traces";
 import type { TraceColumn } from "@/lib/types/enums";
+import { DEFAULT_USER_COLUMNS, orderedUserColumns, type UserColumn } from "@/lib/users";
 
-// What a person chose of the trace list's look, kept in their own browser:
-// which columns show, how tightly the rows
-// sit, how often the page reads itself again, whether the filters stand
-// beside it and how wide, how wide a trace opened from it stands, full size or dragged,
-// and the layout they last chose for a session's page and a trace's. None
-// of it is the list's state — a link a colleague opens shows their own
-// columns — so none of it is in the URL; a saved view carries its columns
-// with it, and applying one sets them here.
+// What a person chose of the lists' look, kept in their own browser: the
+// columns each list shows, and for every list how tightly the rows sit, how
+// often it reads itself again, whether the filters stand beside it and how
+// wide; how wide a trace opened from it stands, and the layout they last
+// chose for a session's page and a trace's. None of it is a list's state — a
+// link a colleague opens shows their own columns — so none of it is in the
+// URL; a saved view carries its columns with it, and applying one sets them.
 
 /** How tightly the rows sit. */
 export const DENSITIES = ["comfortable", "compact"] as const;
@@ -23,6 +24,10 @@ export type RefreshSeconds = (typeof REFRESH_INTERVALS)[number];
 
 export type TracePrefs = {
   columns: readonly TraceColumn[];
+  /** The sessions table's columns. */
+  sessionColumns: readonly SessionColumn[];
+  /** The users table's. */
+  userColumns: readonly UserColumn[];
   density: Density;
   refresh: RefreshSeconds;
   /** Whether the filters' sidebar shows. */
@@ -44,6 +49,8 @@ export type TracePrefs = {
 
 export const DEFAULT_PREFS: TracePrefs = {
   columns: DEFAULT_COLUMNS,
+  sessionColumns: DEFAULT_SESSION_COLUMNS,
+  userColumns: DEFAULT_USER_COLUMNS,
   density: "comfortable",
   refresh: 0,
   filters: true,
@@ -81,11 +88,17 @@ export function readPrefs(stored: string | null): TracePrefs {
   }
   if (typeof raw !== "object" || raw === null) return DEFAULT_PREFS;
   const kept = raw as Record<string, unknown>;
-  const columns = Array.isArray(kept.columns)
-    ? orderedColumns(kept.columns.filter((c): c is string => typeof c === "string"))
-    : DEFAULT_PREFS.columns;
+  const strings = (value: unknown): string[] | null =>
+    Array.isArray(value) ? value.filter((c): c is string => typeof c === "string") : null;
+  const columns = strings(kept.columns);
+  const sessionColumns = strings(kept.sessionColumns);
+  const userColumns = strings(kept.userColumns);
   return {
-    columns,
+    columns: columns ? orderedColumns(columns) : DEFAULT_PREFS.columns,
+    sessionColumns: sessionColumns
+      ? orderedSessionColumns(sessionColumns)
+      : DEFAULT_PREFS.sessionColumns,
+    userColumns: userColumns ? orderedUserColumns(userColumns) : DEFAULT_PREFS.userColumns,
     density: DENSITIES.includes(kept.density as Density)
       ? (kept.density as Density)
       : DEFAULT_PREFS.density,
@@ -99,6 +112,13 @@ export function readPrefs(stored: string | null): TracePrefs {
     layout: readLayoutChoice(kept.layout),
   };
 }
+
+/** Where each list's columns are kept. */
+export const COLUMNS_PREF = {
+  traces: "columns",
+  sessions: "sessionColumns",
+  users: "userColumns",
+} as const satisfies Record<ListName, keyof TracePrefs>;
 
 /** How often the page reads itself again, in words. */
 export function refreshLabel(seconds: RefreshSeconds): string {

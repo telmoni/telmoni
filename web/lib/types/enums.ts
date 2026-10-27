@@ -121,26 +121,30 @@ export type TraceColumn = typeof TraceColumn[keyof typeof TraceColumn];
 
 /** Wire vocabulary of the Rust `UserSort`: a column of the users page, named in the URL. */
 export const UserSort = {
-  User:      "user",
-  Traces:    "traces",
-  Errors:    "errors",
-  Steps:     "steps",
-  Tokens:    "tokens",
-  FirstSeen: "first_seen",
-  LastSeen:  "last_seen",
+  User:         "user",
+  Traces:       "traces",
+  Errors:       "errors",
+  Steps:        "steps",
+  InputTokens:  "input_tokens",
+  OutputTokens: "output_tokens",
+  Tokens:       "tokens",
+  FirstSeen:    "first_seen",
+  LastSeen:     "last_seen",
 } as const;
 export type UserSort = typeof UserSort[keyof typeof UserSort];
 
 /** Wire vocabulary of the Rust `SessionSort`: a column of the sessions page, named in the URL. */
 export const SessionSort = {
-  Session:   "session",
-  User:      "user",
-  Traces:    "traces",
-  Errors:    "errors",
-  Steps:     "steps",
-  Tokens:    "tokens",
-  FirstSeen: "first_seen",
-  LastSeen:  "last_seen",
+  Session:      "session",
+  User:         "user",
+  Traces:       "traces",
+  Errors:       "errors",
+  Steps:        "steps",
+  InputTokens:  "input_tokens",
+  OutputTokens: "output_tokens",
+  Tokens:       "tokens",
+  FirstSeen:    "first_seen",
+  LastSeen:     "last_seen",
 } as const;
 export type SessionSort = typeof SessionSort[keyof typeof SessionSort];
 

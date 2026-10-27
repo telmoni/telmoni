@@ -21,21 +21,23 @@ import {
 import { Input } from "@/components/ui/input";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import type { Facet, TraceFacets, TraceQuery } from "@/lib/server/entities/traces";
+import type { Facet, Facets, ListQuery } from "@/lib/server/entities/traces";
 import {
   FILTERS,
   FILTER_LABEL,
+  ROW_NOUN,
   STATUS_LABEL,
   TYPED_FILTERS,
   activeFilters,
   fits,
   formatCount,
   isTagPair,
+  listPageHref,
   toggled,
-  tracesHref,
   unfiltered,
   without,
   type FilterKey,
+  type ListName,
   type TraceUi,
 } from "@/lib/traces";
 import type { SpanStatus } from "@/lib/types/enums";
@@ -46,7 +48,7 @@ import { cn } from "@/lib/utils";
  *  earns its place. */
 const SEARCHABLE_FROM = 8;
 
-/** How many values the server names of a facet, the most runs first. */
+/** How many values the server names of a facet, the most rows first. */
 const FACET_VALUES_MAX = 50;
 
 /** The value a facet's list starts on: no item's, cmdk trimming each, so none is chosen and
@@ -54,26 +56,29 @@ const FACET_VALUES_MAX = 50;
 const NONE_CHOSEN = " ";
 
 type Props = {
+  /** The list the panel narrows. */
+  list: ListName;
   organization: string;
   slug: string;
-  query: TraceQuery;
-  ui: TraceUi;
-  /** Each filter's values and their runs, or `null` where they could not
-   *  be read. */
-  facets: TraceFacets | null;
+  query: ListQuery<string>;
+  /** The trace list's own state, which its links carry. */
+  ui?: TraceUi;
+  /** Each filter's values and how many of the list's rows carry each, or
+   *  `null` where they could not be read. */
+  facets: Facets | null;
 };
 
-// The filters, beside the list: each a section of the values the window's
-// runs carry, with how
-// many runs carry each under every other filter, ticked to narrow the list
-// to them. Ids — users and sessions — can be typed in as well, since the
-// fifty a facet names are rarely the one a person is after.
-export function TraceFacetsPanel({ organization, slug, query, ui, facets }: Props) {
+// The filters beside a list: each the values the window's runs carry, with
+// how many of the list's rows carry each under every other filter, ticked to
+// narrow the list. Ids can be typed in as well, since the fifty a facet names
+// are rarely the one a person is after.
+export function FacetsPanel({ list, organization, slug, query, ui = {}, facets }: Props) {
   const { filters: shown } = useTracePrefs();
   const [search, setSearch] = useState("");
   const { go, pending } = useListNavigation();
   const panel = useRef<HTMLElement>(null);
   const { width, edge } = useFiltersWidth(panel);
+  const href = (next: ListQuery<string>) => listPageHref(list, organization, slug, next, ui);
   // Hidden, the panel leaves its button where its heading stood, so it opens
   // again from there.
   if (!shown) {
@@ -117,7 +122,7 @@ export function TraceFacetsPanel({ organization, slug, query, ui, facets }: Prop
             <TooltipTrigger asChild>
               <Button asChild variant="ghost" size="icon-xs" className="ml-auto">
                 <Link
-                  href={tracesHref(organization, slug, unfiltered(query), {}, ui)}
+                  href={href(unfiltered(query))}
                   scroll={false}
                   aria-label="Clear all filters"
                 >
@@ -153,9 +158,10 @@ export function TraceFacetsPanel({ organization, slug, query, ui, facets }: Prop
               key={filter}
               filter={filter}
               facet={facets[filter]}
+              rows={ROW_NOUN[list][1]}
               ticked={query[filter] ?? []}
-              clearHref={tracesHref(organization, slug, without(query, filter), {}, ui)}
-              onToggle={(value) => go(tracesHref(organization, slug, toggled(query, filter, value), {}, ui))}
+              clearHref={href(without(query, filter))}
+              onToggle={(value) => go(href(toggled(query, filter, value)))}
             />
           ))}
         </div>
@@ -192,12 +198,15 @@ function PanelButton({ shown }: { shown: boolean }) {
 function FacetSection({
   filter,
   facet,
+  rows,
   ticked,
   clearHref,
   onToggle,
 }: {
   filter: FilterKey;
   facet: Facet;
+  /** What the list's rows are, as the counts beside the values count them. */
+  rows: string;
   ticked: readonly string[];
   clearHref: string;
   onToggle: (value: string) => void;
@@ -219,7 +228,7 @@ function FacetSection({
     ...facet.values,
     ...ticked
       .filter((value) => !facet.values.some((v) => v.value === value))
-      .map((value) => ({ value, runs: 0 })),
+      .map((value) => ({ value, count: 0 })),
   ];
   const text = (value: string) => (filter === "status" ? STATUS_LABEL[value as SpanStatus] : value);
 
@@ -311,7 +320,7 @@ function FacetSection({
                       {text(v.value)}
                     </span>
                     {on && <span className="sr-only">(selected)</span>}
-                    <span className="text-xs tabular-nums text-muted-foreground">{formatCount(v.runs)}</span>
+                    <span className="text-xs tabular-nums text-muted-foreground">{formatCount(v.count)}</span>
                   </CommandItem>
                 );
               })}
@@ -320,7 +329,8 @@ function FacetSection({
         )}
         {facet.more && mode === "select" && (
           <p className="px-2 text-xs text-muted-foreground">
-            The {FACET_VALUES_MAX} with the most runs{typed ? "; type one in to find another" : ""}.
+            The {FACET_VALUES_MAX} with the most {rows}
+            {typed ? "; type one in to find another" : ""}.
           </p>
         )}
       </CollapsibleContent>

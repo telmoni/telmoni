@@ -8,7 +8,17 @@ import { logger } from "@/lib/logger";
 import { SessionSort, SortDirection, SpanKind, SpanStatus } from "@/lib/types/enums";
 
 import { identityContext, projectHeaders } from "./identity-context";
-import { TraceSchema } from "./traces";
+import {
+  FacetsSchema,
+  TraceSchema,
+  filtersOf,
+  readDownload,
+  readLane,
+  type DownloadAccess,
+  type DownloadFormat,
+  type FacetsAccess,
+  type ListQuery,
+} from "./traces";
 
 // Sessions: a project's runs grouped by the id the application gave each
 // session (`session_id`, sent as `gen_ai.conversation.id`). Sign-in sessions
@@ -28,10 +38,13 @@ const SessionRowSchema = z.object({
 });
 export type SessionRow = z.infer<typeof SessionRowSchema>;
 
+// A page of the list, and how many sessions the filters admit on every page.
 const SessionListSchema = z.object({
   sessions: z.array(SessionRowSchema),
   days: z.number(),
   limit: z.number(),
+  page: z.number(),
+  total: z.number(),
   more: z.boolean(),
   sort: z.enum(SessionSort),
   dir: z.enum(SortDirection),
@@ -73,15 +86,9 @@ export const SessionDetailSchema = z.object({
 });
 export type SessionDetail = z.infer<typeof SessionDetailSchema>;
 
-/** What orders and bounds the page, as the URL carries it: a key left out
- *  asks for the default. The server checks every value; the page drops what
- *  it cannot read before asking (`lib/sessions.ts`). */
-export type SessionQuery = {
-  sort?: SessionSort;
-  dir?: SortDirection;
-  days?: number;
-  limit?: number;
-};
+/** What narrows and orders the list, and which page of it shows, as the URL
+ *  carries it (`lib/sessions.ts`). */
+export type SessionQuery = ListQuery<SessionSort>;
 
 export type SessionsAccess =
   | { kind: "ok"; list: SessionList }
@@ -136,6 +143,31 @@ export const fetchSessions = cache(
     }
   },
 );
+
+/** Each filter's values among the project's runs, and how many sessions hold
+ *  a run carrying each under every other filter. */
+export const fetchSessionFacets = cache(
+  async (projectId: string, query: SessionQuery): Promise<FacetsAccess> => {
+    const read = await readLane(
+      "fetchSessionFacets",
+      projectId,
+      `/session-facets${queryString(filtersOf(query))}`,
+      FacetsSchema,
+    );
+    return read.kind === "ok" ? { kind: "ok", facets: read.value } : read;
+  },
+);
+
+/** The list as a file: every session the filters admit, sorted as the page
+ *  is, up to the server's cap. */
+export async function sessionDownload(
+  projectId: string,
+  query: SessionQuery,
+  format: DownloadFormat,
+): Promise<DownloadAccess> {
+  const lane = queryString({ ...filtersOf(query), sort: query.sort, dir: query.dir, format });
+  return readDownload("sessionDownload", projectId, `/session-export${lane}`);
+}
 
 /** One session's traces in the window, by its id, which the path carries
  *  URL-encoded since it is the application's own text, each with the spans

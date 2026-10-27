@@ -57,9 +57,8 @@ pub const PINNED_MAX: usize = 8;
 /// is read in the trace itself.
 pub const PINNED_PER_RUN: u32 = 32;
 
-/// A window of days and a cap on rows: what the users and sessions pages are
-/// read by, each one aggregation over the spans of those days and never the
-/// whole table.
+/// A window of days and a cap on rows: what a session's page is read by, one
+/// aggregation over the spans of those days and never the whole table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Window {
     /// How many days back, by the day each span arrived.
@@ -191,14 +190,14 @@ pub struct TraceRow {
     pub releases: Vec<String>,
 }
 
-/// How many runs the filter admits in the window.
+/// How many rows the filter admits in the window: runs, sessions or users.
 #[derive(Debug, Row, Deserialize)]
-struct CountRow {
-    total: u64,
+pub(crate) struct CountRow {
+    pub(crate) total: u64,
 }
 
-/// One value of one facet: how many of the runs the other filters admit
-/// carry it.
+/// One value of one facet: how many of a list's rows, among those the other
+/// filters admit, carry it.
 #[derive(Debug, Clone, PartialEq, Eq, Row, Deserialize)]
 pub struct FacetRow {
     /// `agent`, `user`, `session`, `status`, `model`, `tool`, `environment`,
@@ -206,8 +205,8 @@ pub struct FacetRow {
     pub facet: String,
     /// The value, as stored.
     pub value: String,
-    /// How many runs carry it.
-    pub runs: u64,
+    /// How many of the list's rows carry it: runs, sessions or users.
+    pub listed: u64,
 }
 
 /// One span a layout pinned by name, as a session's page shows it under a
@@ -363,6 +362,48 @@ macro_rules! runs {
     };
 }
 
+/// Every run in the window, a row each, with what the sessions and users
+/// lists sum of it and whether the filter admits it (`admitted`), its matches
+/// counted rather than kept as the arrays `runs!` shows: some seven times
+/// less memory a run, so a long window's runs fit a read.
+macro_rules! run_rows {
+    () => {
+        concat!(
+            "SELECT run_id, anyIf(user_id, user_id != '') AS run_user_id, ",
+            "anyIf(session_id, session_id != '') AS run_session_id, ",
+            "min(started_at) AS first_started_at, max(ended_at) AS last_ended_at, ",
+            "countIf(kind = 'step') AS steps, countIf(status = 'error') AS errors, ",
+            "sumIf(input_tokens, kind = 'model_call') AS input_total, ",
+            "sumIf(output_tokens, kind = 'model_call') AS output_total, ",
+            "toUInt8((empty({agents:Array(String)}) OR has({agents:Array(String)}, any(agent))) ",
+            "AND (empty({users:Array(String)}) OR has({users:Array(String)}, run_user_id)) ",
+            "AND (empty({sessions:Array(String)}) OR has({sessions:Array(String)}, run_session_id)) ",
+            "AND (empty({statuses:Array(String)}) OR has({statuses:Array(String)}, ",
+            "if(countIf(kind = 'run') > 0, anyIf(status, kind = 'run'), ",
+            "if(countIf(status = 'error') > 0, 'error', 'ok')))) ",
+            "AND (empty({models:Array(String)}) ",
+            "OR countIf(kind = 'model_call' AND has({models:Array(String)}, model)) > 0) ",
+            "AND (empty({tools:Array(String)}) ",
+            "OR countIf(kind = 'tool_call' AND has({tools:Array(String)}, name)) > 0) ",
+            "AND (empty({environments:Array(String)}) ",
+            "OR countIf(has({environments:Array(String)}, environment)) > 0) ",
+            "AND (empty({releases:Array(String)}) ",
+            "OR countIf(has({releases:Array(String)}, release)) > 0) ",
+            "AND (empty({tags:Array(String)}) OR countIf(hasAny(arrayMap((k, v) -> ",
+            "concat(k, ':', v), mapKeys(tags), mapValues(tags)), {tags:Array(String)})) > 0) ",
+            "AND (empty({prompts:Array(String)}) ",
+            "OR countIf(mapContains(attributes, 'gen_ai.prompt.name') ",
+            "AND has({prompts:Array(String)}, attributes['gen_ai.prompt.name'])) > 0)) AS admitted ",
+            $crate::traces::window!(),
+            "GROUP BY run_id"
+        )
+    };
+}
+
+pub(crate) use run_carries;
+pub(crate) use run_rows;
+pub(crate) use window;
+
 /// The list's SQL with one `ORDER BY`, so every (column, direction) is a
 /// literal: the query module takes nothing else. The outer SELECT gives the
 /// sums the row's names.
@@ -445,76 +486,97 @@ const HISTOGRAM_SQL: &str = concat!(
     ") GROUP BY at_ms ORDER BY at_ms"
 );
 
-/// The facets: each value of each facet, and how many runs carry it among
-/// those every OTHER filter admits — so a value beside a ticked one still
-/// counts what ticking it would add. Every run is summed once, its matches
-/// with each filter kept as flags, then spread to a row per value it
-/// carries. The ticked values come first in their facet, so one past the
-/// first fifty is never lost, then the most runs; one more than
-/// [`FACET_VALUES_MAX`] each, so the answer can say there were more.
-const FACETS_SQL: &str = concat!(
-    "SELECT tupleElement(facet_value, 1) AS facet, tupleElement(facet_value, 2) AS value, ",
-    "count() AS runs ",
-    "FROM (SELECT run_id, any(agent) AS run_agent, ",
-    "anyIf(user_id, user_id != '') AS run_user_id, ",
-    "anyIf(session_id, session_id != '') AS run_session_id, ",
-    "if(countIf(kind = 'run') > 0, anyIf(status, kind = 'run'), ",
-    "if(countIf(status = 'error') > 0, 'error', 'ok')) AS run_status, ",
-    "arraySort(groupUniqArrayIf(model, kind = 'model_call' AND model != '')) AS models, ",
-    "arraySort(groupUniqArrayIf(name, kind = 'tool_call')) AS tools, ",
-    run_carries!(),
-    ", toUInt8(empty({agents:Array(String)}) OR has({agents:Array(String)}, run_agent)) ",
-    "AS m_agent, ",
-    "toUInt8(empty({users:Array(String)}) OR has({users:Array(String)}, run_user_id)) AS m_user, ",
-    "toUInt8(empty({sessions:Array(String)}) OR has({sessions:Array(String)}, run_session_id)) ",
-    "AS m_session, ",
-    "toUInt8(empty({statuses:Array(String)}) OR has({statuses:Array(String)}, run_status)) ",
-    "AS m_status, ",
-    "toUInt8(empty({models:Array(String)}) OR hasAny(models, {models:Array(String)})) AS m_model, ",
-    "toUInt8(empty({tools:Array(String)}) OR hasAny(tools, {tools:Array(String)})) AS m_tool, ",
-    "toUInt8(empty({environments:Array(String)}) ",
-    "OR hasAny(environments, {environments:Array(String)})) AS m_environment, ",
-    "toUInt8(empty({releases:Array(String)}) OR hasAny(releases, {releases:Array(String)})) ",
-    "AS m_release, ",
-    "toUInt8(empty({tags:Array(String)}) OR hasAny(tag_pairs, {tags:Array(String)})) AS m_tag, ",
-    "toUInt8(empty({prompts:Array(String)}) OR hasAny(prompts, {prompts:Array(String)})) ",
-    "AS m_prompt ",
-    window!(),
-    "GROUP BY run_id) ",
-    "ARRAY JOIN arrayConcat(",
-    "[tuple('agent', CAST(run_agent AS String), toUInt8(m_user AND m_session AND m_status ",
-    "AND m_model AND m_tool AND m_environment AND m_release AND m_tag AND m_prompt))], ",
-    "[tuple('user', CAST(run_user_id AS String), toUInt8(m_agent AND m_session AND m_status ",
-    "AND m_model AND m_tool AND m_environment AND m_release AND m_tag AND m_prompt))], ",
-    "[tuple('session', CAST(run_session_id AS String), toUInt8(m_agent AND m_user AND m_status ",
-    "AND m_model AND m_tool AND m_environment AND m_release AND m_tag AND m_prompt))], ",
-    "[tuple('status', CAST(run_status AS String), toUInt8(m_agent AND m_user AND m_session ",
-    "AND m_model AND m_tool AND m_environment AND m_release AND m_tag AND m_prompt))], ",
-    "arrayMap(x -> tuple('model', CAST(x AS String), toUInt8(m_agent AND m_user AND m_session ",
-    "AND m_status AND m_tool AND m_environment AND m_release AND m_tag AND m_prompt)), models), ",
-    "arrayMap(x -> tuple('tool', CAST(x AS String), toUInt8(m_agent AND m_user AND m_session ",
-    "AND m_status AND m_model AND m_environment AND m_release AND m_tag AND m_prompt)), tools), ",
-    "arrayMap(x -> tuple('environment', CAST(x AS String), toUInt8(m_agent AND m_user ",
-    "AND m_session AND m_status AND m_model AND m_tool AND m_release AND m_tag AND m_prompt)), ",
-    "environments), ",
-    "arrayMap(x -> tuple('release', CAST(x AS String), toUInt8(m_agent AND m_user AND m_session ",
-    "AND m_status AND m_model AND m_tool AND m_environment AND m_tag AND m_prompt)), releases), ",
-    "arrayMap(x -> tuple('tag', CAST(x AS String), toUInt8(m_agent AND m_user AND m_session ",
-    "AND m_status AND m_model AND m_tool AND m_environment AND m_release AND m_prompt)), ",
-    "tag_pairs), ",
-    "arrayMap(x -> tuple('prompt', CAST(x AS String), toUInt8(m_agent AND m_user AND m_session ",
-    "AND m_status AND m_model AND m_tool AND m_environment AND m_release AND m_tag)), prompts)",
-    ") AS facet_value ",
-    "WHERE tupleElement(facet_value, 3) = 1 AND tupleElement(facet_value, 2) != '' ",
-    "GROUP BY facet, value ",
-    "ORDER BY facet, has(multiIf(facet = 'agent', {agents:Array(String)}, ",
-    "facet = 'user', {users:Array(String)}, facet = 'session', {sessions:Array(String)}, ",
-    "facet = 'status', {statuses:Array(String)}, facet = 'model', {models:Array(String)}, ",
-    "facet = 'tool', {tools:Array(String)}, facet = 'environment', {environments:Array(String)}, ",
-    "facet = 'release', {releases:Array(String)}, facet = 'tag', {tags:Array(String)}, ",
-    "{prompts:Array(String)}), value) DESC, runs DESC, value ",
-    "LIMIT 51 BY facet"
-);
+/// A list's facets: each value of each facet, and how many of the list's
+/// rows (`$count`: runs, or the sessions or users `$holds` keeps) carry it
+/// among the runs every OTHER filter admits — so a value beside a ticked one
+/// still counts what ticking it would add. Every run is summed once, its
+/// matches kept as flags, then spread to a row per value it carries; the
+/// ticked values first, so none past the first fifty is lost, then the most
+/// rows, one more than [`FACET_VALUES_MAX`] each to say there were more.
+macro_rules! facets_sql {
+    ($count:literal, $holds:literal) => {
+        concat!(
+            "SELECT tupleElement(facet_value, 1) AS facet, tupleElement(facet_value, 2) AS value, ",
+            $count,
+            " AS listed ",
+            "FROM (SELECT run_id, any(agent) AS run_agent, ",
+            "anyIf(user_id, user_id != '') AS run_user_id, ",
+            "anyIf(session_id, session_id != '') AS run_session_id, ",
+            "if(countIf(kind = 'run') > 0, anyIf(status, kind = 'run'), ",
+            "if(countIf(status = 'error') > 0, 'error', 'ok')) AS run_status, ",
+            "arraySort(groupUniqArrayIf(model, kind = 'model_call' AND model != '')) AS models, ",
+            "arraySort(groupUniqArrayIf(name, kind = 'tool_call')) AS tools, ",
+            $crate::traces::run_carries!(),
+            ", toUInt8(empty({agents:Array(String)}) OR has({agents:Array(String)}, run_agent)) ",
+            "AS m_agent, ",
+            "toUInt8(empty({users:Array(String)}) OR has({users:Array(String)}, run_user_id)) ",
+            "AS m_user, ",
+            "toUInt8(empty({sessions:Array(String)}) ",
+            "OR has({sessions:Array(String)}, run_session_id)) AS m_session, ",
+            "toUInt8(empty({statuses:Array(String)}) OR has({statuses:Array(String)}, run_status)) ",
+            "AS m_status, ",
+            "toUInt8(empty({models:Array(String)}) OR hasAny(models, {models:Array(String)})) ",
+            "AS m_model, ",
+            "toUInt8(empty({tools:Array(String)}) OR hasAny(tools, {tools:Array(String)})) ",
+            "AS m_tool, ",
+            "toUInt8(empty({environments:Array(String)}) ",
+            "OR hasAny(environments, {environments:Array(String)})) AS m_environment, ",
+            "toUInt8(empty({releases:Array(String)}) ",
+            "OR hasAny(releases, {releases:Array(String)})) AS m_release, ",
+            "toUInt8(empty({tags:Array(String)}) OR hasAny(tag_pairs, {tags:Array(String)})) ",
+            "AS m_tag, ",
+            "toUInt8(empty({prompts:Array(String)}) OR hasAny(prompts, {prompts:Array(String)})) ",
+            "AS m_prompt ",
+            $crate::traces::window!(),
+            "GROUP BY run_id) ",
+            "ARRAY JOIN arrayConcat(",
+            "[tuple('agent', CAST(run_agent AS String), toUInt8(m_user AND m_session AND m_status ",
+            "AND m_model AND m_tool AND m_environment AND m_release AND m_tag AND m_prompt))], ",
+            "[tuple('user', CAST(run_user_id AS String), toUInt8(m_agent AND m_session AND m_status ",
+            "AND m_model AND m_tool AND m_environment AND m_release AND m_tag AND m_prompt))], ",
+            "[tuple('session', CAST(run_session_id AS String), toUInt8(m_agent AND m_user ",
+            "AND m_status AND m_model AND m_tool AND m_environment AND m_release AND m_tag ",
+            "AND m_prompt))], ",
+            "[tuple('status', CAST(run_status AS String), toUInt8(m_agent AND m_user AND m_session ",
+            "AND m_model AND m_tool AND m_environment AND m_release AND m_tag AND m_prompt))], ",
+            "arrayMap(x -> tuple('model', CAST(x AS String), toUInt8(m_agent AND m_user ",
+            "AND m_session AND m_status AND m_tool AND m_environment AND m_release AND m_tag ",
+            "AND m_prompt)), models), ",
+            "arrayMap(x -> tuple('tool', CAST(x AS String), toUInt8(m_agent AND m_user ",
+            "AND m_session AND m_status AND m_model AND m_environment AND m_release AND m_tag ",
+            "AND m_prompt)), tools), ",
+            "arrayMap(x -> tuple('environment', CAST(x AS String), toUInt8(m_agent AND m_user ",
+            "AND m_session AND m_status AND m_model AND m_tool AND m_release AND m_tag ",
+            "AND m_prompt)), environments), ",
+            "arrayMap(x -> tuple('release', CAST(x AS String), toUInt8(m_agent AND m_user ",
+            "AND m_session AND m_status AND m_model AND m_tool AND m_environment AND m_tag ",
+            "AND m_prompt)), releases), ",
+            "arrayMap(x -> tuple('tag', CAST(x AS String), toUInt8(m_agent AND m_user ",
+            "AND m_session AND m_status AND m_model AND m_tool AND m_environment AND m_release ",
+            "AND m_prompt)), tag_pairs), ",
+            "arrayMap(x -> tuple('prompt', CAST(x AS String), toUInt8(m_agent AND m_user ",
+            "AND m_session AND m_status AND m_model AND m_tool AND m_environment AND m_release ",
+            "AND m_tag)), prompts)",
+            ") AS facet_value ",
+            "WHERE tupleElement(facet_value, 3) = 1 AND tupleElement(facet_value, 2) != '' ",
+            $holds,
+            "GROUP BY facet, value ",
+            "ORDER BY facet, has(multiIf(facet = 'agent', {agents:Array(String)}, ",
+            "facet = 'user', {users:Array(String)}, facet = 'session', {sessions:Array(String)}, ",
+            "facet = 'status', {statuses:Array(String)}, facet = 'model', {models:Array(String)}, ",
+            "facet = 'tool', {tools:Array(String)}, ",
+            "facet = 'environment', {environments:Array(String)}, ",
+            "facet = 'release', {releases:Array(String)}, facet = 'tag', {tags:Array(String)}, ",
+            "{prompts:Array(String)}), value) DESC, listed DESC, value ",
+            "LIMIT 51 BY facet"
+        )
+    };
+}
+
+pub(crate) use facets_sql;
+
+/// The trace list's facets, each counting the runs that carry a value.
+const FACETS_SQL: &str = facets_sql!("count()", "");
 
 /// A trace's spans whole, in the order they started — of two that started
 /// together, the one that ended later, which holds the other — up to the one
@@ -550,7 +612,7 @@ const PINNED_SQL: &str = "SELECT run_id, span_id, parent_span_id, kind, name, st
 
 /// `read` with the filter's every value bound: each read binds them all,
 /// since each names them all.
-fn filtered(read: Read, filter: &TraceFilter) -> Read {
+pub(crate) fn filtered(read: Read, filter: &TraceFilter) -> Read {
     let statuses: Vec<String> = filter.statuses.iter().map(ToString::to_string).collect();
     read.param("days", filter.days)
         .param("agents", &filter.agents)

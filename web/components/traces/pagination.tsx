@@ -20,36 +20,40 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type { TraceQuery } from "@/lib/server/entities/traces";
+import type { ListQuery } from "@/lib/server/entities/traces";
 import {
   DEFAULT_ROWS,
   ROWS_PER_PAGE,
   formatCount,
+  listPageHref,
   pageCount,
-  tracesHref,
+  type ListName,
   type TraceUi,
 } from "@/lib/traces";
 
 type Props = {
+  list: ListName;
   organization: string;
   slug: string;
-  query: TraceQuery;
-  ui: TraceUi;
+  query: ListQuery<string>;
+  /** The trace list's own state, which its links carry. */
+  ui?: TraceUi;
   total: number;
   page: number;
   limit: number;
 };
 
-// The foot of the list: how many traces it holds, how many
-// a page shows, which page this is, and the way to the others — the first
-// and the last a click away too.
-export function TracePagination({ organization, slug, query, ui, total, page, limit }: Props) {
+// The foot of a list: how many rows it holds, how many a page shows, which
+// page this is, and the way to the others — the first and the last a click
+// away too.
+export function ListPagination({ list, organization, slug, query, ui = {}, total, page, limit }: Props) {
   const { go, pending } = useListNavigation();
   // The rows picked show at once, and give way to the server's when it lands.
   const [rowsShown, showRows] = useOptimistic(limit);
   const pages = pageCount(total, limit);
-  const to = (p: number) =>
-    tracesHref(organization, slug, query, { page: p > 1 ? p : undefined }, ui);
+  const href = (patch: Partial<ListQuery<string>>) =>
+    listPageHref(list, organization, slug, { ...query, ...patch }, ui);
+  const to = (p: number) => href({ page: p > 1 ? p : undefined });
   return (
     <nav
       className="flex flex-wrap items-center justify-end gap-x-6 gap-y-2 text-sm"
@@ -66,15 +70,8 @@ export function TracePagination({ organization, slug, query, ui, total, page, li
           value={String(rowsShown)}
           onValueChange={(value) => {
             const rows = Number(value);
-            go(
-              tracesHref(
-                organization,
-                slug,
-                query,
-                { limit: rows === DEFAULT_ROWS ? undefined : rows, page: undefined },
-                ui,
-              ),
-              () => showRows(rows),
+            go(href({ limit: rows === DEFAULT_ROWS ? undefined : rows, page: undefined }), () =>
+              showRows(rows),
             );
           }}
         >

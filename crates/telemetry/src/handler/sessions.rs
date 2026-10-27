@@ -1,89 +1,39 @@
 //! The console's session lanes, under `Resource::Trace`, which every role on
-//! a project holds: `GET /internal/v1/telemetry/sessions`, the page — every
-//! session the project's runs belonged to in a window of days, with the end
-//! user it was with and what its runs came to, sorted as the URL says — and
-//! `GET /internal/v1/telemetry/sessions/{session_id}`, one session's traces
-//! in the order they ran, each with the spans a layout pinned by name
-//! (`?pinned=`): a replay in metadata, never a message, since content is
-//! not metadata. Each reads the spans of the project `x-project-id` names
-//! and no other.
+//! a project holds: `GET /internal/v1/telemetry/sessions`, a page of the
+//! list as the trace list's filters narrow it, with its total;
+//! `/session-facets` and `/session-export`, beside it rather than under it,
+//! where a session's id would be read as one; and `/sessions/{session_id}`,
+//! one session's traces in the order they ran, each with the spans a layout
+//! pinned by name (`?pinned=`): a replay in metadata, never a message. Each
+//! reads the spans of the project `x-project-id` names and no other.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use axum::response::Response;
+use chrono::{DateTime, SecondsFormat, Utc};
+use serde::Serialize;
 use uuid::Uuid;
 
 use telmoni_shared::extract::{Json, Query};
-use telmoni_shared::rbac::{Resource, Verb};
 use telmoni_shared::{
     AuthError, SessionSort, SortDirection, SpanKind, SpanStatus, TelmoniError, TraceSort,
 };
 
 use crate::AppState;
 use crate::contract::{NAME_MAX, SESSION_ID_MAX};
-use crate::handler::traces::{Trace, parse_days, parse_limit, read_failed, values};
+use crate::handler::traces::{
+    Facets, Reading, Trace, TraceQuery, download, parse_days, parse_format, parse_limit,
+    read_failed, readable, values,
+};
 use crate::sessions::{self, SessionRow};
-use crate::store::Projects;
-use crate::traces::{self, PINNED_MAX, PinnedRow, TraceFilter, Window};
+use crate::traces::{self, EXPORT_MAX, PINNED_MAX, PinnedRow, TraceFilter, Window};
 
-/// The page's query string, every value text until it is checked, so an
-/// empty value asks for the default and a value that is not what its
-/// parameter takes is a 400 that echoes none of it.
-#[derive(Debug, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SessionsQuery {
-    /// The column to sort by ([`SessionSort`]).
-    #[serde(default)]
-    pub sort: String,
-    /// Which way ([`SortDirection`]); the column's own default when unset.
-    #[serde(default)]
-    pub dir: String,
-    /// How many days back.
-    #[serde(default)]
-    pub days: String,
-    /// The most sessions to answer.
-    #[serde(default)]
-    pub limit: String,
-}
-
-impl SessionsQuery {
-    /// The window and the sort the query asks for, each value checked.
-    ///
-    /// # Errors
-    ///
-    /// A value that is not what its parameter takes, named by the parameter
-    /// and never echoed.
-    pub fn into_parts(self) -> Result<(Window, SessionSort, SortDirection), TelmoniError> {
-        let sort = match self.sort.trim() {
-            "" => SessionSort::LastSeen,
-            given => given.parse::<SessionSort>().map_err(|_| {
-                TelmoniError::BadRequest(
-                    "sort is one of session, user, traces, errors, steps, tokens, first_seen, \
-                     last_seen"
-                        .into(),
-                )
-            })?,
-        };
-        let direction = match self.dir.trim() {
-            "" => default_direction(sort),
-            given => given
-                .parse::<SortDirection>()
-                .map_err(|_| TelmoniError::BadRequest("dir is asc or desc".into()))?,
-        };
-        Ok((
-            Window {
-                days: parse_days(&self.days)?,
-                limit: parse_limit(&self.limit)?,
-            },
-            sort,
-            direction,
-        ))
-    }
-}
+/// What a sort the page does not take is refused with.
+const SORTS: &str = "sort is one of session, user, traces, errors, steps, input_tokens, \
+                     output_tokens, tokens, first_seen, last_seen";
 
 /// The way a column sorts when the URL names none: the most and the latest
 /// first; ids in the alphabet's order, and the earliest seen first.
@@ -94,9 +44,21 @@ pub const fn default_direction(sort: SessionSort) -> SortDirection {
         SessionSort::Traces
         | SessionSort::Errors
         | SessionSort::Steps
+        | SessionSort::InputTokens
+        | SessionSort::OutputTokens
         | SessionSort::Tokens
         | SessionSort::LastSeen => SortDirection::Desc,
     }
+}
+
+/// The page's sort: the session last heard from first, unless the query
+/// names another.
+///
+/// # Errors
+///
+/// A column or a direction there is none of, never echoed.
+pub fn sort(query: &TraceQuery) -> Result<(SessionSort, SortDirection), TelmoniError> {
+    query.sort_among(SessionSort::LastSeen, default_direction, SORTS)
 }
 
 /// A session's own page's query string, every value text until it is
@@ -171,13 +133,17 @@ impl SessionQuery {
 /// What the page's lane answers.
 #[derive(Debug, Serialize)]
 pub struct SessionList {
-    /// The sessions, in the order asked.
+    /// The page's sessions, in the order asked.
     pub sessions: Vec<Session>,
     /// How many days back the page read.
     pub days: u16,
-    /// The most it would answer.
+    /// The most a page holds.
     pub limit: u32,
-    /// Whether the window held more sessions than the limit.
+    /// Which page this is, from 1.
+    pub page: u32,
+    /// How many sessions the filter admits in the window, on every page.
+    pub total: u64,
+    /// Whether a page after this one holds more.
     pub more: bool,
     /// The sort it is in.
     pub sort: SessionSort,
@@ -197,6 +163,38 @@ pub struct Session {
     pub output_tokens: u64,
     pub first_seen: DateTime<Utc>,
     pub last_seen: DateTime<Utc>,
+}
+
+/// A download's header row: the page's fields, in its order.
+const CSV_HEADER: [&str; 9] = [
+    "session_id",
+    "user_id",
+    "traces",
+    "errors",
+    "steps",
+    "input_tokens",
+    "output_tokens",
+    "first_seen",
+    "last_seen",
+];
+
+impl Session {
+    /// The row a download writes for it, under [`CSV_HEADER`], its times as
+    /// RFC 3339.
+    fn cells(&self) -> [String; 9] {
+        let time = |t: &DateTime<Utc>| t.to_rfc3339_opts(SecondsFormat::Micros, true);
+        [
+            self.session_id.clone(),
+            self.user_id.clone(),
+            self.traces.to_string(),
+            self.errors.to_string(),
+            self.steps.to_string(),
+            self.input_tokens.to_string(),
+            self.output_tokens.to_string(),
+            time(&self.first_seen),
+            time(&self.last_seen),
+        ]
+    }
 }
 
 impl From<SessionRow> for Session {
@@ -275,41 +273,77 @@ impl From<PinnedRow> for PinnedSpan {
     }
 }
 
-/// `GET /internal/v1/telemetry/sessions` — the project's sessions in the window,
-/// sorted as the query says, up to its limit, and whether the window held
-/// more.
+/// `GET /internal/v1/telemetry/sessions` — a page of the project's sessions
+/// in the window, filtered and sorted as the query says, and how many the
+/// filter admits: two reads at once, as the trace list's are.
 pub async fn list_sessions(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Query(query): Query<SessionsQuery>,
+    Query(pairs): Query<Vec<(String, String)>>,
 ) -> Result<Json<SessionList>, TelmoniError> {
-    let acting = state.auth.resolve(&headers).await?;
-    let project_id = acting
-        .require_project(Verb::Read, Resource::Trace)?
-        .project_id
-        .clone();
-    let (window, sort, dir) = query.into_parts()?;
-    // One past the limit, so the answer can say whether there were more.
-    let read = Window {
-        limit: window.limit + 1,
-        ..window
-    };
-    let rows = sessions::list(&state.store, &Projects::one(project_id), read, sort, dir)
-        .await
-        .map_err(read_failed)?;
-    let more = rows.len() > window.limit as usize;
+    let projects = readable(&state, &headers).await?;
+    let query = TraceQuery::read(pairs, Reading::List)?;
+    let filter = query.filter()?;
+    let (sort, dir) = sort(&query)?;
+    let paging = query.paging()?;
+    let (rows, total) = tokio::try_join!(
+        sessions::list(
+            &state.store,
+            &projects,
+            &filter,
+            sort,
+            dir,
+            paging.limit,
+            paging.skipped
+        ),
+        sessions::count(&state.store, &projects, &filter),
+    )
+    .map_err(read_failed)?;
     Ok(Json(SessionList {
-        sessions: rows
-            .into_iter()
-            .take(window.limit as usize)
-            .map(Session::from)
-            .collect(),
-        days: window.days,
-        limit: window.limit,
-        more,
+        more: paging.more(rows.len(), total),
+        sessions: rows.into_iter().map(Session::from).collect(),
+        days: filter.days,
+        limit: paging.limit,
+        page: paging.page,
+        total,
         sort,
         dir,
     }))
+}
+
+/// `GET /internal/v1/telemetry/session-facets` — each filter's values among
+/// the project's runs in the window, and how many sessions hold a run
+/// carrying each under every other filter.
+pub async fn get_session_facets(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(pairs): Query<Vec<(String, String)>>,
+) -> Result<Json<Facets>, TelmoniError> {
+    let projects = readable(&state, &headers).await?;
+    let filter = TraceQuery::read(pairs, Reading::Facets)?.filter()?;
+    let rows = sessions::facets(&state.store, &projects, &filter)
+        .await
+        .map_err(read_failed)?;
+    Ok(Json(Facets::of(filter.days, rows)))
+}
+
+/// `GET /internal/v1/telemetry/session-export` — the project's sessions the
+/// filter admits, sorted as asked, as a file: up to [`EXPORT_MAX`] of them.
+pub async fn export_sessions(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(pairs): Query<Vec<(String, String)>>,
+) -> Result<Response, TelmoniError> {
+    let projects = readable(&state, &headers).await?;
+    let query = TraceQuery::read(pairs, Reading::Export)?;
+    let filter = query.filter()?;
+    let (sort, dir) = sort(&query)?;
+    let format = parse_format(query.format.as_deref().unwrap_or_default())?;
+    let rows = sessions::list(&state.store, &projects, &filter, sort, dir, EXPORT_MAX, 0)
+        .await
+        .map_err(read_failed)?;
+    let sessions: Vec<Session> = rows.into_iter().map(Session::from).collect();
+    download(format, &sessions, &CSV_HEADER, Session::cells, "session")
 }
 
 /// `GET /internal/v1/telemetry/sessions/{session_id}` — one session's traces in
@@ -322,11 +356,7 @@ pub async fn get_session(
     Path(session_id): Path<String>,
     Query(pairs): Query<Vec<(String, String)>>,
 ) -> Result<Json<SessionDetail>, TelmoniError> {
-    let acting = state.auth.resolve(&headers).await?;
-    let project_id = acting
-        .require_project(Verb::Read, Resource::Trace)?
-        .project_id
-        .clone();
+    let projects = readable(&state, &headers).await?;
     let session_id = session_id.trim().to_owned();
     if session_id.is_empty() || session_id.chars().count() > SESSION_ID_MAX {
         return Err(TelmoniError::BadRequest(format!(
@@ -334,7 +364,6 @@ pub async fn get_session(
         )));
     }
     let (window, pinned) = SessionQuery::read(pairs)?.into_parts()?;
-    let projects = Projects::one(project_id);
     let filter = TraceFilter {
         session_ids: vec![session_id.clone()],
         days: window.days,
@@ -392,26 +421,33 @@ mod tests {
     use super::*;
     use crate::traces::{DEFAULT_DAYS, DEFAULT_LIMIT};
 
+    fn pairs(query: &[(&str, &str)]) -> Vec<(String, String)> {
+        query
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .collect()
+    }
+
     #[test]
     fn an_empty_query_is_the_latest_first_over_a_week() {
-        let (window, sort, dir) = SessionsQuery::default().into_parts().expect("the default");
-        assert_eq!(window.days, DEFAULT_DAYS);
-        assert_eq!(window.limit, DEFAULT_LIMIT);
-        assert_eq!(sort, SessionSort::LastSeen);
-        assert_eq!(dir, SortDirection::Desc);
+        let query = TraceQuery::read(Vec::new(), Reading::List).expect("read");
+        assert_eq!(query.filter().expect("the default").days, DEFAULT_DAYS);
+        assert_eq!(query.paging().expect("the default").limit, DEFAULT_LIMIT);
+        assert_eq!(
+            sort(&query).expect("the default"),
+            (SessionSort::LastSeen, SortDirection::Desc)
+        );
     }
 
     #[test]
     fn each_column_has_its_own_first_direction() {
-        for sort in SessionSort::all() {
-            let (_, parsed, dir) = SessionsQuery {
-                sort: sort.to_string(),
-                ..SessionsQuery::default()
-            }
-            .into_parts()
-            .expect("a column");
-            assert_eq!(parsed, sort);
-            assert_eq!(dir, default_direction(sort));
+        for column in SessionSort::all() {
+            let query = TraceQuery::read(pairs(&[("sort", &column.to_string())]), Reading::List)
+                .expect("read");
+            assert_eq!(
+                sort(&query).expect("a column"),
+                (column, default_direction(column))
+            );
         }
         assert_eq!(default_direction(SessionSort::Session), SortDirection::Asc);
         assert_eq!(
@@ -420,11 +456,42 @@ mod tests {
         );
     }
 
-    fn pairs(query: &[(&str, &str)]) -> Vec<(String, String)> {
-        query
-            .iter()
-            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
-            .collect()
+    /// A sort the page does not take, a trace list's among them, is refused
+    /// naming the parameter, never the value.
+    #[test]
+    fn a_sort_the_page_does_not_take_is_refused_without_an_echo() {
+        for given in ["started", "spend<script>"] {
+            let query = TraceQuery::read(pairs(&[("sort", given)]), Reading::List).expect("read");
+            let detail = sort(&query)
+                .expect_err(given)
+                .to_problem_details()
+                .detail
+                .unwrap_or_default();
+            assert!(detail.starts_with("sort is one of session"), "{detail}");
+            assert!(!detail.contains("script"), "{detail}");
+        }
+    }
+
+    /// A download's row is the page's fields under the header's names.
+    #[test]
+    fn a_downloads_row_is_the_pages_fields_under_the_headers_names() {
+        let at = DateTime::from_timestamp_millis(1_791_721_800_000).expect("a time");
+        let session = Session {
+            session_id: "thread, 42".into(),
+            user_id: "user-a".into(),
+            traces: 3,
+            errors: 1,
+            steps: 7,
+            input_tokens: 300,
+            output_tokens: 30,
+            first_seen: at,
+            last_seen: at,
+        };
+        let cells = session.cells();
+        assert_eq!(cells.len(), CSV_HEADER.len());
+        assert_eq!(cells[0], "thread, 42");
+        assert_eq!(cells[5], "300");
+        assert_eq!(cells[7], "2026-10-11T12:30:00.000000Z");
     }
 
     /// A session's page reads its window and the names pinned, each trimmed
@@ -472,22 +539,5 @@ mod tests {
             assert_eq!(refused.status, 400, "{query:?}");
             assert!(!refused.detail.unwrap_or_default().contains("script"));
         }
-    }
-
-    /// A value a parameter does not take is refused by the parameter's name,
-    /// and never echoed.
-    #[test]
-    fn a_bad_value_names_the_parameter_and_echoes_nothing() {
-        let refused = SessionsQuery {
-            sort: "spend<script>".into(),
-            ..SessionsQuery::default()
-        }
-        .into_parts()
-        .expect_err("refused")
-        .to_problem_details();
-        assert_eq!(refused.status, 400);
-        let detail = refused.detail.expect("a detail");
-        assert!(detail.starts_with("sort"), "{detail}");
-        assert!(!detail.contains("script"));
     }
 }

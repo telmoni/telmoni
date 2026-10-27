@@ -3,22 +3,32 @@ import { XIcon } from "lucide-react";
 
 import { LinkPending } from "@/components/link-pending";
 import { Badge } from "@/components/ui/badge";
-import type { TraceQuery } from "@/lib/server/entities/traces";
-import { activeFilters, tracesHref, unfiltered, without, type TraceUi } from "@/lib/traces";
+import type { ListQuery } from "@/lib/server/entities/traces";
+import {
+  activeFilters,
+  listPageHref,
+  unfiltered,
+  without,
+  type ListName,
+  type TraceUi,
+} from "@/lib/traces";
 
-// The filters in force above the list: a value at a time, each taken off by
-// its own ×, and all of them
-// at once. Plain links, so the bar is the server's to draw.
-export function TraceFilterBar({
+// The filters in force above a list: a value at a time, each taken off by
+// its own ×, and all of them at once. Plain links, so the bar is the
+// server's to draw.
+export function FilterBar({
+  list,
   organization,
   slug,
   query,
-  ui,
+  ui = {},
 }: {
+  list: ListName;
   organization: string;
   slug: string;
-  query: TraceQuery;
-  ui: TraceUi;
+  query: ListQuery<string>;
+  /** The trace list's own state, which its links carry. */
+  ui?: TraceUi;
 }) {
   const chips = activeFilters(query);
   if (chips.length === 0) return null;
@@ -34,7 +44,7 @@ export function TraceFilterBar({
             {chip.text}
           </span>
           <Link
-            href={tracesHref(organization, slug, without(query, chip.filter, chip.value), {}, ui)}
+            href={listPageHref(list, organization, slug, without(query, chip.filter, chip.value), ui)}
             scroll={false}
             aria-label={`Clear ${chip.label.toLowerCase()} ${chip.text}`}
             className="rounded-sm text-muted-foreground hover:text-foreground"
@@ -45,7 +55,7 @@ export function TraceFilterBar({
         </Badge>
       ))}
       <Link
-        href={tracesHref(organization, slug, unfiltered(query), {}, ui)}
+        href={listPageHref(list, organization, slug, unfiltered(query), ui)}
         scroll={false}
         className="ml-auto text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
       >

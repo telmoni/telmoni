@@ -1,12 +1,10 @@
-//! The sessions page's read, through the one query module
-//! ([`crate::store`]): every session the project's runs belonged to in a
+//! The sessions page's reads, through the one query module
+//! ([`crate::store`]): the sessions the project's runs belonged to in a
 //! window of days, by the id the application gave it (`session_id`, sent as
-//! `gen_ai.conversation.id`), with the end user it was with and what its runs
-//! came to. One aggregation over the spans within retention, bounded by the
-//! window and never the whole table; a run whose spans carry no session id
-//! belongs to none and is left out. A session's own page is its traces in the
-//! order they ran, which is the trace list read for it
-//! ([`crate::traces::list`]).
+//! `gen_ai.conversation.id`), each summed over all of its runs — admitted by
+//! any run the trace list's filters admit — with its page, total, facets and
+//! download. A run with no session id belongs to none. A session's own page
+//! is the trace list read for it ([`crate::traces::list`]).
 
 use chrono::{DateTime, Utc};
 use clickhouse::Row;
@@ -15,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use telmoni_shared::{SessionSort, SortDirection};
 
 use crate::store::{Projects, Store};
-use crate::traces::Window;
+use crate::traces::{CountRow, FacetRow, TraceFilter, facets_sql, filtered, run_rows};
 
 /// One session as the page reads it: its runs, summed.
 #[derive(Debug, Clone, PartialEq, Eq, Row, Serialize, Deserialize)]
@@ -44,35 +42,45 @@ pub struct SessionRow {
     pub last_seen: DateTime<Utc>,
 }
 
+/// The sessions that hold a run the filter admits, a row each, summed over
+/// every run of theirs in the window. The sums take names no column has, for
+/// the reason the trace list's do.
+macro_rules! sessions {
+    () => {
+        concat!(
+            "SELECT run_session_id AS session_id, ",
+            "anyIf(run_user_id, run_user_id != '') AS session_user, ",
+            "count() AS session_traces, countIf(errors > 0) AS session_errors, ",
+            "sum(steps) AS session_steps, sum(input_total) AS session_input, ",
+            "sum(output_total) AS session_output, ",
+            "session_input + session_output AS session_tokens, ",
+            "min(first_started_at) AS session_first, max(last_ended_at) AS session_last ",
+            "FROM (",
+            run_rows!(),
+            ") WHERE run_session_id != '' ",
+            "GROUP BY run_session_id ",
+            "HAVING max(admitted) = 1"
+        )
+    };
+}
+
 /// The page's SQL with one `ORDER BY`, so every (column, direction) is a
-/// literal: the query module takes nothing else. Two levels, as the trace
-/// list's: ClickHouse resolves a SELECT alias before a column of the same
-/// name anywhere in the query, so the sums take names no column has and the
-/// outer SELECT gives them the row's.
+/// literal: the query module takes nothing else. The outer SELECT gives the
+/// sums the row's names.
 macro_rules! list_sql {
     ($order:literal) => {
         concat!(
-            "SELECT session_id, run_user_id AS user_id, traces, errors, steps, ",
-            "input_total AS input_tokens, output_total AS output_tokens, tokens, ",
-            "first_seen, last_seen ",
-            "FROM (SELECT session_id, ",
-            "anyIf(user_id, user_id != '') AS run_user_id, ",
-            "uniqExact(run_id) AS traces, ",
-            "uniqExactIf(run_id, status = 'error') AS errors, ",
-            "countIf(kind = 'step') AS steps, ",
-            "sumIf(input_tokens, kind = 'model_call') AS input_total, ",
-            "sumIf(output_tokens, kind = 'model_call') AS output_total, ",
-            "input_total + output_total AS tokens, ",
-            "min(started_at) AS first_seen, max(ended_at) AS last_seen ",
-            "FROM telemetry.spans ",
-            "WHERE project_id IN {projects:Array(String)} ",
-            "AND received_at >= now64(6) - toIntervalDay({days:UInt16}) ",
-            "AND session_id != '' ",
-            "GROUP BY session_id) ",
-            "ORDER BY ",
+            "SELECT session_id, session_user AS user_id, session_traces AS traces, ",
+            "session_errors AS errors, session_steps AS steps, ",
+            "session_input AS input_tokens, session_output AS output_tokens, ",
+            "session_tokens AS tokens, session_first AS first_seen, ",
+            "session_last AS last_seen ",
+            "FROM (",
+            sessions!(),
+            ") ORDER BY ",
             $order,
             ", last_seen DESC, session_id ",
-            "LIMIT {limit:UInt32}"
+            "LIMIT {limit:UInt32} OFFSET {offset:UInt64}"
         )
     };
 }
@@ -91,6 +99,10 @@ const fn list_sql(sort: SessionSort, direction: SortDirection) -> &'static str {
         (SessionSort::Errors, Desc) => list_sql!("errors DESC"),
         (SessionSort::Steps, Asc) => list_sql!("steps ASC"),
         (SessionSort::Steps, Desc) => list_sql!("steps DESC"),
+        (SessionSort::InputTokens, Asc) => list_sql!("input_tokens ASC"),
+        (SessionSort::InputTokens, Desc) => list_sql!("input_tokens DESC"),
+        (SessionSort::OutputTokens, Asc) => list_sql!("output_tokens ASC"),
+        (SessionSort::OutputTokens, Desc) => list_sql!("output_tokens DESC"),
         (SessionSort::Tokens, Asc) => list_sql!("tokens ASC"),
         (SessionSort::Tokens, Desc) => list_sql!("tokens DESC"),
         (SessionSort::FirstSeen, Asc) => list_sql!("first_seen ASC"),
@@ -100,8 +112,16 @@ const fn list_sql(sort: SessionSort, direction: SortDirection) -> &'static str {
     }
 }
 
-/// The sessions of `projects` in `window`, sorted as asked: up to
-/// `window.limit` of them.
+/// How many sessions the filter admits: the page's total, a second read
+/// beside it, since a page past the last holds no row to carry it.
+const COUNT_SQL: &str = concat!("SELECT count() AS total FROM (", sessions!(), ")");
+
+/// The page's facets, each counting the sessions that hold a run carrying a
+/// value.
+const FACETS_SQL: &str = facets_sql!("uniqExact(run_session_id)", "AND run_session_id != '' ");
+
+/// The sessions of `projects` the filter admits, sorted as asked: up to
+/// `limit` of them, past the first `offset`.
 ///
 /// # Errors
 ///
@@ -109,14 +129,47 @@ const fn list_sql(sort: SessionSort, direction: SortDirection) -> &'static str {
 pub async fn list(
     store: &Store,
     projects: &Projects,
-    window: Window,
+    filter: &TraceFilter,
     sort: SessionSort,
     direction: SortDirection,
+    limit: u32,
+    offset: u64,
 ) -> clickhouse::error::Result<Vec<SessionRow>> {
-    store
-        .read(projects, list_sql(sort, direction))
-        .param("days", window.days)
-        .param("limit", window.limit)
+    filtered(store.read(projects, list_sql(sort, direction)), filter)
+        .param("limit", limit)
+        .param("offset", offset)
+        .fetch_all()
+        .await
+}
+
+/// How many sessions of `projects` the filter admits.
+///
+/// # Errors
+///
+/// ClickHouse did not answer, or refused the read.
+pub async fn count(
+    store: &Store,
+    projects: &Projects,
+    filter: &TraceFilter,
+) -> clickhouse::error::Result<u64> {
+    let row: CountRow = filtered(store.read(projects, COUNT_SQL), filter)
+        .fetch_one()
+        .await?;
+    Ok(row.total)
+}
+
+/// The values of each facet among the sessions of `projects`, each counted
+/// under every filter but its own, as the trace list's are.
+///
+/// # Errors
+///
+/// ClickHouse did not answer, or refused the read.
+pub async fn facets(
+    store: &Store,
+    projects: &Projects,
+    filter: &TraceFilter,
+) -> clickhouse::error::Result<Vec<FacetRow>> {
+    filtered(store.read(projects, FACETS_SQL), filter)
         .fetch_all()
         .await
 }
@@ -127,7 +180,8 @@ mod tests {
     use crate::store::PROJECTS_PARAM;
 
     /// Every sort is one literal that names its projects, carries no
-    /// settings, orders by its own column first, and binds the window.
+    /// settings, orders by its own column first, and binds the window, the
+    /// filters and the page.
     #[test]
     fn every_sort_is_a_literal_naming_its_projects_and_its_column() {
         for sort in SessionSort::all() {
@@ -141,6 +195,8 @@ mod tests {
                     SessionSort::Traces => "traces",
                     SessionSort::Errors => "errors",
                     SessionSort::Steps => "steps",
+                    SessionSort::InputTokens => "input_tokens",
+                    SessionSort::OutputTokens => "output_tokens",
                     SessionSort::Tokens => "tokens",
                     SessionSort::FirstSeen => "first_seen",
                     SessionSort::LastSeen => "last_seen",
@@ -153,14 +209,33 @@ mod tests {
                     }
                 );
                 assert!(sql.contains(&order), "{sort} {direction}: {sql}");
-                for param in ["{days:UInt16}", "{limit:UInt32}"] {
+                for param in [
+                    "{days:UInt16}",
+                    "{agents:Array(String)}",
+                    "{prompts:Array(String)}",
+                    "{limit:UInt32}",
+                    "{offset:UInt64}",
+                ] {
                     assert!(sql.contains(param), "{sort} {direction} lacks {param}");
                 }
                 assert!(
-                    sql.contains("session_id != ''"),
+                    sql.contains("run_session_id != ''"),
                     "a run with no session id belongs to none"
                 );
             }
         }
+    }
+
+    /// The total and the facets read the sessions the page lists, by the
+    /// same filters, a session counted once whatever its runs carry.
+    #[test]
+    fn the_total_and_the_facets_count_sessions() {
+        for sql in [COUNT_SQL, FACETS_SQL] {
+            assert!(sql.contains(PROJECTS_PARAM));
+            assert!(sql.contains("{tags:Array(String)}"), "{sql}");
+            assert!(sql.contains("run_session_id != ''"), "{sql}");
+        }
+        assert!(COUNT_SQL.contains("HAVING max(admitted) = 1"));
+        assert!(FACETS_SQL.contains("uniqExact(run_session_id) AS listed"));
     }
 }

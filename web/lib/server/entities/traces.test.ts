@@ -63,18 +63,18 @@ const LIST = {
   dir: "desc",
 };
 
-const FACET = { values: [{ value: "nightly-report", runs: 1 }], more: false };
+const FACET = { values: [{ value: "nightly-report", count: 1 }], more: false };
 const FACETS = {
   days: 7,
   agent: FACET,
   user: { values: [], more: false },
   session: { values: [], more: false },
-  status: { values: [{ value: "ok", runs: 1 }], more: false },
+  status: { values: [{ value: "ok", count: 1 }], more: false },
   model: { values: [], more: false },
   tool: { values: [], more: false },
-  environment: { values: [{ value: "production", runs: 1 }], more: false },
+  environment: { values: [{ value: "production", count: 1 }], more: false },
   release: { values: [], more: false },
-  tag: { values: [{ value: "team:search", runs: 1 }], more: false },
+  tag: { values: [{ value: "team:search", count: 1 }], more: false },
   prompt: { values: [], more: false },
 };
 

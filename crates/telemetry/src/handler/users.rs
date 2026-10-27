@@ -1,79 +1,30 @@
-//! `GET /internal/v1/telemetry/users` — the users page, under `Resource::Trace`,
-//! which every role on a project holds: every end user the project's
-//! runs were for in a window of days, as stored, with what those runs came
-//! to, sorted as the URL says. Reads the spans of the project `x-project-id`
-//! names and no other: the store names that project on every read, twice.
+//! The console's user lanes, under `Resource::Trace`, which every role on a
+//! project holds: `GET /internal/v1/telemetry/users`, a page of the end users
+//! as stored, as the trace list's filters narrow it, with its total; and
+//! `/users/facets` and `/users/export`. Each reads the spans of the project
+//! `x-project-id` names and no other.
 
 use std::sync::Arc;
 
 use axum::extract::State;
 use axum::http::HeaderMap;
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use axum::response::Response;
+use chrono::{DateTime, SecondsFormat, Utc};
+use serde::Serialize;
 
 use telmoni_shared::extract::{Json, Query};
-use telmoni_shared::rbac::{Resource, Verb};
 use telmoni_shared::{SortDirection, TelmoniError, UserSort};
 
 use crate::AppState;
-use crate::handler::traces::{parse_days, parse_limit, read_failed};
-use crate::store::Projects;
-use crate::traces::Window;
+use crate::handler::traces::{
+    Facets, Reading, TraceQuery, download, parse_format, read_failed, readable,
+};
+use crate::traces::EXPORT_MAX;
 use crate::users::{self, UserRow};
 
-/// The page's query string, every value text until it is checked, so an
-/// empty value asks for the default and a value that is not what its
-/// parameter takes is a 400 that echoes none of it.
-#[derive(Debug, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct UsersQuery {
-    /// The column to sort by ([`UserSort`]).
-    #[serde(default)]
-    pub sort: String,
-    /// Which way ([`SortDirection`]); the column's own default when unset.
-    #[serde(default)]
-    pub dir: String,
-    /// How many days back.
-    #[serde(default)]
-    pub days: String,
-    /// The most users to answer.
-    #[serde(default)]
-    pub limit: String,
-}
-
-impl UsersQuery {
-    /// The window and the sort the query asks for, each value checked.
-    ///
-    /// # Errors
-    ///
-    /// A value that is not what its parameter takes, named by the parameter
-    /// and never echoed.
-    pub fn into_parts(self) -> Result<(Window, UserSort, SortDirection), TelmoniError> {
-        let sort = match self.sort.trim() {
-            "" => UserSort::Tokens,
-            given => given.parse::<UserSort>().map_err(|_| {
-                TelmoniError::BadRequest(
-                    "sort is one of user, traces, errors, steps, tokens, first_seen, last_seen"
-                        .into(),
-                )
-            })?,
-        };
-        let direction = match self.dir.trim() {
-            "" => default_direction(sort),
-            given => given
-                .parse::<SortDirection>()
-                .map_err(|_| TelmoniError::BadRequest("dir is asc or desc".into()))?,
-        };
-        Ok((
-            Window {
-                days: parse_days(&self.days)?,
-                limit: parse_limit(&self.limit)?,
-            },
-            sort,
-            direction,
-        ))
-    }
-}
+/// What a sort the page does not take is refused with.
+const SORTS: &str = "sort is one of user, traces, errors, steps, input_tokens, output_tokens, \
+                     tokens, first_seen, last_seen";
 
 /// The way a column sorts when the URL names none: the most and the latest
 /// first; ids in the alphabet's order, and the earliest seen first.
@@ -84,21 +35,36 @@ pub const fn default_direction(sort: UserSort) -> SortDirection {
         UserSort::Traces
         | UserSort::Errors
         | UserSort::Steps
+        | UserSort::InputTokens
+        | UserSort::OutputTokens
         | UserSort::Tokens
         | UserSort::LastSeen => SortDirection::Desc,
     }
 }
 
+/// The page's sort: the most tokens first, unless the query names another.
+///
+/// # Errors
+///
+/// A column or a direction there is none of, never echoed.
+pub fn sort(query: &TraceQuery) -> Result<(UserSort, SortDirection), TelmoniError> {
+    query.sort_among(UserSort::Tokens, default_direction, SORTS)
+}
+
 /// What the page's lane answers.
 #[derive(Debug, Serialize)]
 pub struct UserList {
-    /// The users, in the order asked.
+    /// The page's users, in the order asked.
     pub users: Vec<User>,
     /// How many days back the page read.
     pub days: u16,
-    /// The most it would answer.
+    /// The most a page holds.
     pub limit: u32,
-    /// Whether the window held more users than the limit.
+    /// Which page this is, from 1.
+    pub page: u32,
+    /// How many users the filter admits in the window, on every page.
+    pub total: u64,
+    /// Whether a page after this one holds more.
     pub more: bool,
     /// The sort it is in.
     pub sort: UserSort,
@@ -134,41 +100,107 @@ impl From<UserRow> for User {
     }
 }
 
-/// `GET /internal/v1/telemetry/users` — the project's users in the window,
-/// sorted as the query says, up to its limit, and whether the window held
-/// more.
+/// A download's header row: the page's fields, in its order.
+const CSV_HEADER: [&str; 8] = [
+    "user_id",
+    "traces",
+    "errors",
+    "steps",
+    "input_tokens",
+    "output_tokens",
+    "first_seen",
+    "last_seen",
+];
+
+impl User {
+    /// The row a download writes for them, under [`CSV_HEADER`], the times as
+    /// RFC 3339.
+    fn cells(&self) -> [String; 8] {
+        let time = |t: &DateTime<Utc>| t.to_rfc3339_opts(SecondsFormat::Micros, true);
+        [
+            self.user_id.clone(),
+            self.traces.to_string(),
+            self.errors.to_string(),
+            self.steps.to_string(),
+            self.input_tokens.to_string(),
+            self.output_tokens.to_string(),
+            time(&self.first_seen),
+            time(&self.last_seen),
+        ]
+    }
+}
+
+/// `GET /internal/v1/telemetry/users` — a page of the project's users in the
+/// window, filtered and sorted as the query says, and how many the filter
+/// admits: two reads at once, as the trace list's are.
 pub async fn list_users(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Query(query): Query<UsersQuery>,
+    Query(pairs): Query<Vec<(String, String)>>,
 ) -> Result<Json<UserList>, TelmoniError> {
-    let acting = state.auth.resolve(&headers).await?;
-    let project_id = acting
-        .require_project(Verb::Read, Resource::Trace)?
-        .project_id
-        .clone();
-    let (window, sort, dir) = query.into_parts()?;
-    // One past the limit, so the answer can say whether there were more.
-    let read = Window {
-        limit: window.limit + 1,
-        ..window
-    };
-    let rows = users::list(&state.store, &Projects::one(project_id), read, sort, dir)
-        .await
-        .map_err(read_failed)?;
-    let more = rows.len() > window.limit as usize;
+    let projects = readable(&state, &headers).await?;
+    let query = TraceQuery::read(pairs, Reading::List)?;
+    let filter = query.filter()?;
+    let (sort, dir) = sort(&query)?;
+    let paging = query.paging()?;
+    let (rows, total) = tokio::try_join!(
+        users::list(
+            &state.store,
+            &projects,
+            &filter,
+            sort,
+            dir,
+            paging.limit,
+            paging.skipped
+        ),
+        users::count(&state.store, &projects, &filter),
+    )
+    .map_err(read_failed)?;
     Ok(Json(UserList {
-        users: rows
-            .into_iter()
-            .take(window.limit as usize)
-            .map(User::from)
-            .collect(),
-        days: window.days,
-        limit: window.limit,
-        more,
+        more: paging.more(rows.len(), total),
+        users: rows.into_iter().map(User::from).collect(),
+        days: filter.days,
+        limit: paging.limit,
+        page: paging.page,
+        total,
         sort,
         dir,
     }))
+}
+
+/// `GET /internal/v1/telemetry/users/facets` — each filter's values among the
+/// project's runs in the window, and how many users have a run carrying each
+/// under every other filter.
+pub async fn get_user_facets(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(pairs): Query<Vec<(String, String)>>,
+) -> Result<Json<Facets>, TelmoniError> {
+    let projects = readable(&state, &headers).await?;
+    let filter = TraceQuery::read(pairs, Reading::Facets)?.filter()?;
+    let rows = users::facets(&state.store, &projects, &filter)
+        .await
+        .map_err(read_failed)?;
+    Ok(Json(Facets::of(filter.days, rows)))
+}
+
+/// `GET /internal/v1/telemetry/users/export` — the project's users the filter
+/// admits, sorted as asked, as a file: up to [`EXPORT_MAX`] of them.
+pub async fn export_users(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(pairs): Query<Vec<(String, String)>>,
+) -> Result<Response, TelmoniError> {
+    let projects = readable(&state, &headers).await?;
+    let query = TraceQuery::read(pairs, Reading::Export)?;
+    let filter = query.filter()?;
+    let (sort, dir) = sort(&query)?;
+    let format = parse_format(query.format.as_deref().unwrap_or_default())?;
+    let rows = users::list(&state.store, &projects, &filter, sort, dir, EXPORT_MAX, 0)
+        .await
+        .map_err(read_failed)?;
+    let users: Vec<User> = rows.into_iter().map(User::from).collect();
+    download(format, &users, &CSV_HEADER, User::cells, "user")
 }
 
 #[cfg(test)]
@@ -176,26 +208,33 @@ mod tests {
     use super::*;
     use crate::traces::{DEFAULT_DAYS, DEFAULT_LIMIT};
 
+    fn pairs(query: &[(&str, &str)]) -> Vec<(String, String)> {
+        query
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .collect()
+    }
+
     #[test]
     fn an_empty_query_is_the_most_spent_on_first_over_a_week() {
-        let (window, sort, dir) = UsersQuery::default().into_parts().expect("the default");
-        assert_eq!(window.days, DEFAULT_DAYS);
-        assert_eq!(window.limit, DEFAULT_LIMIT);
-        assert_eq!(sort, UserSort::Tokens);
-        assert_eq!(dir, SortDirection::Desc);
+        let query = TraceQuery::read(Vec::new(), Reading::List).expect("read");
+        assert_eq!(query.filter().expect("the default").days, DEFAULT_DAYS);
+        assert_eq!(query.paging().expect("the default").limit, DEFAULT_LIMIT);
+        assert_eq!(
+            sort(&query).expect("the default"),
+            (UserSort::Tokens, SortDirection::Desc)
+        );
     }
 
     #[test]
     fn each_column_has_its_own_first_direction() {
-        for sort in UserSort::all() {
-            let (_, parsed, dir) = UsersQuery {
-                sort: sort.to_string(),
-                ..UsersQuery::default()
-            }
-            .into_parts()
-            .expect("a column");
-            assert_eq!(parsed, sort);
-            assert_eq!(dir, default_direction(sort));
+        for column in UserSort::all() {
+            let query = TraceQuery::read(pairs(&[("sort", &column.to_string())]), Reading::List)
+                .expect("read");
+            assert_eq!(
+                sort(&query).expect("a column"),
+                (column, default_direction(column))
+            );
         }
         assert_eq!(default_direction(UserSort::User), SortDirection::Asc);
         assert_eq!(default_direction(UserSort::FirstSeen), SortDirection::Asc);
@@ -206,44 +245,50 @@ mod tests {
     /// and never echoed.
     #[test]
     fn a_bad_value_names_the_parameter_and_echoes_nothing() {
-        for (query, parameter) in [
-            (
-                UsersQuery {
-                    sort: "spend<script>".into(),
-                    ..UsersQuery::default()
-                },
-                "sort",
-            ),
-            (
-                UsersQuery {
-                    dir: "sideways".into(),
-                    ..UsersQuery::default()
-                },
-                "dir",
-            ),
-            (
-                UsersQuery {
-                    days: "0".into(),
-                    ..UsersQuery::default()
-                },
-                "days",
-            ),
-            (
-                UsersQuery {
-                    limit: "501".into(),
-                    ..UsersQuery::default()
-                },
-                "limit",
-            ),
+        for (given, parameter) in [
+            (("sort", "spend<script>"), "sort"),
+            (("sort", "started"), "sort"),
+            (("dir", "sideways"), "dir"),
+            (("days", "0"), "days"),
+            (("limit", "501"), "limit"),
+            (("page", "1001"), "page"),
         ] {
-            let problem = query
-                .into_parts()
-                .expect_err("refused")
-                .to_problem_details();
+            let query = TraceQuery::read(pairs(&[given]), Reading::List).expect("read");
+            let refused = query
+                .filter()
+                .and_then(|_| sort(&query))
+                .and_then(|_| {
+                    query
+                        .paging()
+                        .map(|_| (UserSort::Tokens, SortDirection::Desc))
+                })
+                .expect_err("refused");
+            let problem = refused.to_problem_details();
             assert_eq!(problem.status, 400);
             let detail = problem.detail.expect("a detail");
             assert!(detail.starts_with(parameter), "{detail}");
             assert!(!detail.contains("script") && !detail.contains("sideways"));
         }
+    }
+
+    /// A download's row is the page's fields under the header's names.
+    #[test]
+    fn a_downloads_row_is_the_pages_fields_under_the_headers_names() {
+        let at = DateTime::from_timestamp_millis(1_791_721_800_000).expect("a time");
+        let user = User {
+            user_id: "user-a".into(),
+            traces: 2,
+            errors: 1,
+            steps: 2,
+            input_tokens: 300,
+            output_tokens: 30,
+            first_seen: at,
+            last_seen: at,
+        };
+        let cells = user.cells();
+        assert_eq!(cells.len(), CSV_HEADER.len());
+        assert_eq!(cells[0], "user-a");
+        assert_eq!(cells[4], "300");
+        assert_eq!(cells[7], "2026-10-11T12:30:00.000000Z");
     }
 }

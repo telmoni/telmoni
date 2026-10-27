@@ -23,6 +23,10 @@ pub enum SessionSort {
     Errors,
     /// How many steps its runs took, summed.
     Steps,
+    /// Its runs' input tokens, summed.
+    InputTokens,
+    /// Its runs' output tokens, summed.
+    OutputTokens,
     /// Its runs' input and output tokens, summed.
     Tokens,
     /// When its first run in the window started.
@@ -34,13 +38,15 @@ pub enum SessionSort {
 impl SessionSort {
     /// Every column, in wire order.
     #[must_use]
-    pub const fn all() -> [Self; 8] {
+    pub const fn all() -> [Self; 10] {
         [
             Self::Session,
             Self::User,
             Self::Traces,
             Self::Errors,
             Self::Steps,
+            Self::InputTokens,
+            Self::OutputTokens,
             Self::Tokens,
             Self::FirstSeen,
             Self::LastSeen,
@@ -56,6 +62,8 @@ impl fmt::Display for SessionSort {
             Self::Traces => write!(f, "traces"),
             Self::Errors => write!(f, "errors"),
             Self::Steps => write!(f, "steps"),
+            Self::InputTokens => write!(f, "input_tokens"),
+            Self::OutputTokens => write!(f, "output_tokens"),
             Self::Tokens => write!(f, "tokens"),
             Self::FirstSeen => write!(f, "first_seen"),
             Self::LastSeen => write!(f, "last_seen"),
@@ -72,12 +80,15 @@ impl FromStr for SessionSort {
             "traces" => Ok(Self::Traces),
             "errors" => Ok(Self::Errors),
             "steps" => Ok(Self::Steps),
+            "input_tokens" => Ok(Self::InputTokens),
+            "output_tokens" => Ok(Self::OutputTokens),
             "tokens" => Ok(Self::Tokens),
             "first_seen" => Ok(Self::FirstSeen),
             "last_seen" => Ok(Self::LastSeen),
             _ => Err(ParseEnumError::new(
                 s,
-                "session, user, traces, errors, steps, tokens, first_seen, last_seen",
+                "session, user, traces, errors, steps, input_tokens, output_tokens, tokens, \
+                 first_seen, last_seen",
             )),
         }
     }
@@ -87,7 +98,7 @@ impl FromStr for SessionSort {
 mod tests {
     use super::*;
 
-    const ALL: [SessionSort; 8] = SessionSort::all();
+    const ALL: [SessionSort; 10] = SessionSort::all();
 
     /// `all()` is a hand-written array, so nothing but a `match` forces it to
     /// stay complete: a new variant fails to compile here until it is listed.
@@ -100,6 +111,8 @@ mod tests {
                 | SessionSort::Traces
                 | SessionSort::Errors
                 | SessionSort::Steps
+                | SessionSort::InputTokens
+                | SessionSort::OutputTokens
                 | SessionSort::Tokens
                 | SessionSort::FirstSeen
                 | SessionSort::LastSeen => {}

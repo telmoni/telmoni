@@ -153,7 +153,7 @@ fn values(facets: &Value, facet: &str) -> Vec<(String, u64)> {
         .map(|v| {
             (
                 v["value"].as_str().expect("a value").to_owned(),
-                v["runs"].as_u64().expect("a count"),
+                v["count"].as_u64().expect("a count"),
             )
         })
         .collect()

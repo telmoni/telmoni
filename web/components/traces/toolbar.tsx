@@ -37,33 +37,38 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Toggle } from "@/components/ui/toggle";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { WindowPicker } from "@/components/window-picker";
-import type { TraceQuery, TraceView } from "@/lib/server/entities/traces";
+import type { ListQuery, TraceQuery, TraceView } from "@/lib/server/entities/traces";
+import { SESSION_COLUMN_MENU, SESSION_TABLE } from "@/lib/sessions";
 import {
+  COLUMNS_PREF,
   DENSITIES,
   REFRESH_INTERVALS,
   refreshLabel,
   type Density,
   type RefreshSeconds,
+  type TracePrefs,
 } from "@/lib/trace-prefs";
 import {
   COLUMN_MENU,
-  DEFAULT_COLUMNS,
   DOWNLOAD_MAX,
-  TRACE_COLUMNS,
-  TRACE_ID_COLUMN,
+  ROW_NOUN,
   TRACE_PRESETS,
-  downloadHref,
+  TRACE_TABLE,
   formatCount,
-  orderedColumns,
+  listDownloadHref,
+  ordered,
   presetActive,
   presetToggled,
   tracesHref,
+  type ColumnBlock,
   type ColumnGroup,
+  type ListName,
+  type ListTable,
   type Preset,
   type TraceUi,
 } from "@/lib/traces";
-import type { TraceColumn } from "@/lib/types/enums";
 import { setTracePrefs, useTracePrefs } from "@/lib/use-trace-prefs";
+import { USER_COLUMN_MENU, USER_TABLE } from "@/lib/users";
 import { cn } from "@/lib/utils";
 
 type Props = {
@@ -85,13 +90,19 @@ const PRESET_ICON: Record<Preset["id"], LucideIcon> = {
   tokens: CoinsIcon,
 };
 
-// The trace list's toolbar, on one row: the ready-made queries, the saved
-// views and the table or the charts on the left; the columns, the rows'
-// density and a download on the right. The window and the refresh stand on
-// the title's row (`TraceHeaderControls`), and the filters' panel opens and closes from
-// its own heading. Every control is a shadcn one; each that changes what the
-// list holds changes its URL, and each that changes only how it looks is kept
-// in the browser (`lib/trace-prefs.ts`).
+/** Each list's columns menu, and its rows. */
+const TABLES: Record<ListName, { table: ListTable; menu: readonly ColumnBlock[] }> = {
+  traces: { table: TRACE_TABLE, menu: COLUMN_MENU },
+  sessions: { table: SESSION_TABLE, menu: SESSION_COLUMN_MENU },
+  users: { table: USER_TABLE, menu: USER_COLUMN_MENU },
+};
+
+// The trace list's toolbar, on one row of shadcn controls: the ready-made
+// queries, the saved views and the table or the charts on the left; on the
+// right what every list has (`ListControls`). The window and the refresh
+// stand on the title's row (`ListHeaderControls`). A control that changes
+// what the list holds changes its URL, and one that changes only how it
+// looks is kept in the browser (`lib/trace-prefs.ts`).
 export function TraceToolbar(props: Props) {
   const { organization, slug, query, ui } = props;
   const { go, pending } = useListNavigation();
@@ -151,17 +162,43 @@ export function TraceToolbar(props: Props) {
         </TabsList>
       </Tabs>
 
-      <div className="ml-auto flex items-center gap-3.5">
-        <ColumnsMenu />
-        <DensityMenu />
-        <DownloadMenu organization={organization} slug={slug} query={query} total={props.total} />
-      </div>
+      <ListControls list="traces" organization={organization} slug={slug} query={query} total={props.total} />
     </div>
   );
 }
 
-// The window the list reads and its refresh, on the title's row.
-export function TraceHeaderControls({ days }: { days: number }) {
+/** The sessions' or the users' toolbar: what every list has, on the right,
+ *  as the trace list's toolbar has it. */
+export function ListToolbar(props: ListControlsProps) {
+  return (
+    <div className="flex flex-wrap items-center gap-3.5">
+      <ListControls {...props} />
+    </div>
+  );
+}
+
+type ListControlsProps = {
+  list: ListName;
+  organization: string;
+  slug: string;
+  query: ListQuery<string>;
+  /** How many rows the filters admit. */
+  total: number;
+};
+
+/** A list's columns, its rows' density and its download. */
+function ListControls({ list, organization, slug, query, total }: ListControlsProps) {
+  return (
+    <div className="ml-auto flex items-center gap-3.5">
+      <ColumnsMenu list={list} />
+      <DensityMenu />
+      <DownloadMenu list={list} organization={organization} slug={slug} query={query} total={total} />
+    </div>
+  );
+}
+
+// The window a list reads and its refresh, on the title's row.
+export function ListHeaderControls({ days }: { days: number }) {
   return (
     <div className="flex items-center gap-3.5">
       <WindowPicker days={days} />
@@ -229,19 +266,20 @@ function RefreshControl() {
   );
 }
 
-/** Which columns the table shows: the
- *  trace's id ticked for good, the counts and the tokens each a group that
- *  opens under its heading with how many of it show, what a column means
- *  behind its ⓘ, and the menu left open while columns are ticked one after
- *  another. */
-function ColumnsMenu() {
-  const { columns } = useTracePrefs();
+/** Which columns a list's table shows: the row's id ticked for good, the
+ *  counts and the tokens each a group under its heading, what a column means
+ *  behind its ⓘ, and the menu left open while columns are ticked. */
+function ColumnsMenu({ list }: { list: ListName }) {
+  const prefs = useTracePrefs();
+  const { table, menu } = TABLES[list];
+  const pref = COLUMNS_PREF[list];
+  const columns: readonly string[] = prefs[pref];
   const [opened, setOpened] = useState<ReadonlySet<ColumnGroup>>(() => new Set());
-  const shown = (key: TraceColumn) => columns.includes(key);
-  const flip = (key: TraceColumn) =>
-    setTracePrefs({
-      columns: orderedColumns(shown(key) ? columns.filter((c) => c !== key) : [...columns, key]),
-    });
+  const shown = (key: string) => columns.includes(key);
+  // Held to the list's own columns, in its order, so the cast names what they are.
+  const keep = (keys: readonly string[]) =>
+    setTracePrefs({ [pref]: ordered(table.columns, keys) } as Partial<TracePrefs>);
+  const flip = (key: string) => keep(shown(key) ? columns.filter((c) => c !== key) : [...columns, key]);
   const toggleGroup = (group: ColumnGroup) =>
     setOpened((was) => {
       const next = new Set(was);
@@ -257,13 +295,13 @@ function ColumnsMenu() {
           <Columns3Icon />
           Columns
           <Badge variant="secondary" className="px-1.5 tabular-nums">
-            {columns.length + 1}/{TRACE_COLUMNS.length + 1}
+            {columns.length + 1}/{table.columns.length + 1}
           </Badge>
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-64">
-        <ColumnItem label={TRACE_ID_COLUMN.label} hint={TRACE_ID_COLUMN.hint} checked disabled />
-        {COLUMN_MENU.map((block) => {
+        <ColumnItem label={table.id.label} hint={table.id.hint} checked disabled />
+        {menu.map((block) => {
           if (block.kind === "column") {
             const { column } = block;
             return (
@@ -311,7 +349,7 @@ function ColumnsMenu() {
           );
         })}
         <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={() => setTracePrefs({ columns: DEFAULT_COLUMNS })}>
+        <DropdownMenuItem onSelect={() => keep(table.defaults)}>
           Back to the defaults
         </DropdownMenuItem>
       </DropdownMenuContent>
@@ -422,19 +460,10 @@ function DensityMenu() {
   );
 }
 
-/** The list as a file: every trace its filters admit, sorted as it is, up
- *  to the server's cap, which the menu names when the list is past it. */
-function DownloadMenu({
-  organization,
-  slug,
-  query,
-  total,
-}: {
-  organization: string;
-  slug: string;
-  query: TraceQuery;
-  total: number;
-}) {
+/** The list as a file: every row its filters admit, sorted as it is, up to
+ *  the server's cap, which the menu names when the list is past it. */
+function DownloadMenu({ list, organization, slug, query, total }: ListControlsProps) {
+  const [one, many] = ROW_NOUN[list];
   return (
     <DropdownMenu>
       <Tooltip>
@@ -450,16 +479,16 @@ function DownloadMenu({
       <DropdownMenuContent align="end" className="w-64">
         <DropdownMenuLabel className="font-normal text-muted-foreground">
           {total > DOWNLOAD_MAX
-            ? `The first ${formatCount(DOWNLOAD_MAX)} of ${formatCount(total)} traces`
-            : `${formatCount(total)} ${total === 1 ? "trace" : "traces"}, as the list is sorted`}
+            ? `The first ${formatCount(DOWNLOAD_MAX)} of ${formatCount(total)} ${many}`
+            : `${formatCount(total)} ${total === 1 ? one : many}, as the list is sorted`}
         </DropdownMenuLabel>
         <DropdownMenuItem asChild>
-          <a href={downloadHref(organization, slug, query, "csv")} download>
+          <a href={listDownloadHref(list, organization, slug, query, "csv")} download>
             CSV, for a spreadsheet
           </a>
         </DropdownMenuItem>
         <DropdownMenuItem asChild>
-          <a href={downloadHref(organization, slug, query, "json")} download>
+          <a href={listDownloadHref(list, organization, slug, query, "json")} download>
             JSON
           </a>
         </DropdownMenuItem>

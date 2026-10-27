@@ -1,10 +1,10 @@
-//! The users page's read, through the one query module ([`crate::store`]):
-//! every end user the project's runs were for in a window of days, as
-//! stored — hashed under the project's key unless it keeps ids plain — with
-//! what those runs came to. One aggregation over the spans within retention,
-//! since the rollups name no user, bounded by the window and never the
-//! whole table; a run whose spans carry no user is nobody's and is left
-//! out.
+//! The users page's reads, through the one query module ([`crate::store`]):
+//! the end users the project's runs were for in a window of days, as stored
+//! — hashed under the project's key unless it keeps ids plain — each summed
+//! over all of their runs, admitted by any run the trace list's filters
+//! admit, with its page, total, facets and download. The spans within the
+//! window are read, since the rollups name no user; a run with no user is
+//! nobody's.
 
 use chrono::{DateTime, Utc};
 use clickhouse::Row;
@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use telmoni_shared::{SortDirection, UserSort};
 
 use crate::store::{Projects, Store};
-use crate::traces::Window;
+use crate::traces::{CountRow, FacetRow, TraceFilter, facets_sql, filtered, run_rows};
 
 /// One user as the page reads it: a user id's runs, summed.
 #[derive(Debug, Clone, PartialEq, Eq, Row, Serialize, Deserialize)]
@@ -40,32 +40,41 @@ pub struct UserRow {
     pub last_seen: DateTime<Utc>,
 }
 
+/// The users one of whose runs the filter admits, a row each, summed over
+/// every run of theirs in the window. The sums take names no column has, for
+/// the reason the trace list's do.
+macro_rules! users {
+    () => {
+        concat!(
+            "SELECT run_user_id AS user_id, ",
+            "count() AS user_traces, countIf(errors > 0) AS user_errors, ",
+            "sum(steps) AS user_steps, sum(input_total) AS user_input, ",
+            "sum(output_total) AS user_output, user_input + user_output AS user_tokens, ",
+            "min(first_started_at) AS user_first, max(last_ended_at) AS user_last ",
+            "FROM (",
+            run_rows!(),
+            ") WHERE run_user_id != '' ",
+            "GROUP BY run_user_id ",
+            "HAVING max(admitted) = 1"
+        )
+    };
+}
+
 /// The page's SQL with one `ORDER BY`, so every (column, direction) is a
-/// literal: the query module takes nothing else. Two levels, as the trace
-/// list's: ClickHouse resolves a SELECT alias before a column of the same
-/// name anywhere in the query, so the sums take names no column has and the
-/// outer SELECT gives them the row's.
+/// literal: the query module takes nothing else. The outer SELECT gives the
+/// sums the row's names.
 macro_rules! list_sql {
     ($order:literal) => {
         concat!(
-            "SELECT user_id, traces, errors, steps, input_total AS input_tokens, ",
-            "output_total AS output_tokens, tokens, first_seen, last_seen ",
-            "FROM (SELECT user_id, uniqExact(run_id) AS traces, ",
-            "uniqExactIf(run_id, status = 'error') AS errors, ",
-            "countIf(kind = 'step') AS steps, ",
-            "sumIf(input_tokens, kind = 'model_call') AS input_total, ",
-            "sumIf(output_tokens, kind = 'model_call') AS output_total, ",
-            "input_total + output_total AS tokens, ",
-            "min(started_at) AS first_seen, max(ended_at) AS last_seen ",
-            "FROM telemetry.spans ",
-            "WHERE project_id IN {projects:Array(String)} ",
-            "AND received_at >= now64(6) - toIntervalDay({days:UInt16}) ",
-            "AND user_id != '' ",
-            "GROUP BY user_id) ",
-            "ORDER BY ",
+            "SELECT user_id, user_traces AS traces, user_errors AS errors, ",
+            "user_steps AS steps, user_input AS input_tokens, user_output AS output_tokens, ",
+            "user_tokens AS tokens, user_first AS first_seen, user_last AS last_seen ",
+            "FROM (",
+            users!(),
+            ") ORDER BY ",
             $order,
             ", last_seen DESC, user_id ",
-            "LIMIT {limit:UInt32}"
+            "LIMIT {limit:UInt32} OFFSET {offset:UInt64}"
         )
     };
 }
@@ -82,6 +91,10 @@ const fn list_sql(sort: UserSort, direction: SortDirection) -> &'static str {
         (UserSort::Errors, Desc) => list_sql!("errors DESC"),
         (UserSort::Steps, Asc) => list_sql!("steps ASC"),
         (UserSort::Steps, Desc) => list_sql!("steps DESC"),
+        (UserSort::InputTokens, Asc) => list_sql!("input_tokens ASC"),
+        (UserSort::InputTokens, Desc) => list_sql!("input_tokens DESC"),
+        (UserSort::OutputTokens, Asc) => list_sql!("output_tokens ASC"),
+        (UserSort::OutputTokens, Desc) => list_sql!("output_tokens DESC"),
         (UserSort::Tokens, Asc) => list_sql!("tokens ASC"),
         (UserSort::Tokens, Desc) => list_sql!("tokens DESC"),
         (UserSort::FirstSeen, Asc) => list_sql!("first_seen ASC"),
@@ -91,8 +104,16 @@ const fn list_sql(sort: UserSort, direction: SortDirection) -> &'static str {
     }
 }
 
-/// The users of `projects` in `window`, sorted as asked: up to
-/// `window.limit` of them.
+/// How many users the filter admits: the page's total, a second read beside
+/// it, since a page past the last holds no row to carry it.
+const COUNT_SQL: &str = concat!("SELECT count() AS total FROM (", users!(), ")");
+
+/// The page's facets, each counting the users one of whose runs carries a
+/// value.
+const FACETS_SQL: &str = facets_sql!("uniqExact(run_user_id)", "AND run_user_id != '' ");
+
+/// The users of `projects` the filter admits, sorted as asked: up to `limit`
+/// of them, past the first `offset`.
 ///
 /// # Errors
 ///
@@ -100,14 +121,47 @@ const fn list_sql(sort: UserSort, direction: SortDirection) -> &'static str {
 pub async fn list(
     store: &Store,
     projects: &Projects,
-    window: Window,
+    filter: &TraceFilter,
     sort: UserSort,
     direction: SortDirection,
+    limit: u32,
+    offset: u64,
 ) -> clickhouse::error::Result<Vec<UserRow>> {
-    store
-        .read(projects, list_sql(sort, direction))
-        .param("days", window.days)
-        .param("limit", window.limit)
+    filtered(store.read(projects, list_sql(sort, direction)), filter)
+        .param("limit", limit)
+        .param("offset", offset)
+        .fetch_all()
+        .await
+}
+
+/// How many users of `projects` the filter admits.
+///
+/// # Errors
+///
+/// ClickHouse did not answer, or refused the read.
+pub async fn count(
+    store: &Store,
+    projects: &Projects,
+    filter: &TraceFilter,
+) -> clickhouse::error::Result<u64> {
+    let row: CountRow = filtered(store.read(projects, COUNT_SQL), filter)
+        .fetch_one()
+        .await?;
+    Ok(row.total)
+}
+
+/// The values of each facet among the users of `projects`, each counted
+/// under every filter but its own, as the trace list's are.
+///
+/// # Errors
+///
+/// ClickHouse did not answer, or refused the read.
+pub async fn facets(
+    store: &Store,
+    projects: &Projects,
+    filter: &TraceFilter,
+) -> clickhouse::error::Result<Vec<FacetRow>> {
+    filtered(store.read(projects, FACETS_SQL), filter)
         .fetch_all()
         .await
 }
@@ -118,7 +172,8 @@ mod tests {
     use crate::store::PROJECTS_PARAM;
 
     /// Every sort is one literal that names its projects, carries no
-    /// settings, orders by its own column first, and binds the window.
+    /// settings, orders by its own column first, and binds the window, the
+    /// filters and the page.
     #[test]
     fn every_sort_is_a_literal_naming_its_projects_and_its_column() {
         for sort in UserSort::all() {
@@ -131,6 +186,8 @@ mod tests {
                     UserSort::Traces => "traces",
                     UserSort::Errors => "errors",
                     UserSort::Steps => "steps",
+                    UserSort::InputTokens => "input_tokens",
+                    UserSort::OutputTokens => "output_tokens",
                     UserSort::Tokens => "tokens",
                     UserSort::FirstSeen => "first_seen",
                     UserSort::LastSeen => "last_seen",
@@ -143,14 +200,33 @@ mod tests {
                     }
                 );
                 assert!(sql.contains(&order), "{sort} {direction}: {sql}");
-                for param in ["{days:UInt16}", "{limit:UInt32}"] {
+                for param in [
+                    "{days:UInt16}",
+                    "{agents:Array(String)}",
+                    "{prompts:Array(String)}",
+                    "{limit:UInt32}",
+                    "{offset:UInt64}",
+                ] {
                     assert!(sql.contains(param), "{sort} {direction} lacks {param}");
                 }
                 assert!(
-                    sql.contains("user_id != ''"),
+                    sql.contains("run_user_id != ''"),
                     "a run with no user is nobody's"
                 );
             }
         }
+    }
+
+    /// The total and the facets read the users the page lists, by the same
+    /// filters, a user counted once whatever their runs carry.
+    #[test]
+    fn the_total_and_the_facets_count_users() {
+        for sql in [COUNT_SQL, FACETS_SQL] {
+            assert!(sql.contains(PROJECTS_PARAM));
+            assert!(sql.contains("{tags:Array(String)}"), "{sql}");
+            assert!(sql.contains("run_user_id != ''"), "{sql}");
+        }
+        assert!(COUNT_SQL.contains("HAVING max(admitted) = 1"));
+        assert!(FACETS_SQL.contains("uniqExact(run_user_id) AS listed"));
     }
 }

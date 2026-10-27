@@ -1,5 +1,7 @@
 import type {
   DownloadFormat,
+  ListFilters,
+  ListQuery,
   TraceQuery,
   TraceSpan,
   TraceView,
@@ -28,13 +30,16 @@ import {
   type SearchParams,
 } from "./list-query";
 
-// The trace list's URL is its state: every filter, the sort, the window and
-// the page are query parameters, so a link holds them and a page sent to a
-// colleague opens as it was left (`list-query.ts`). Two more are the page's
-// own and never reach the server: whether it shows the table or the charts,
-// and the saved view it was opened from. What this module does is read that
-// URL, write it with one thing changed, and put the server's numbers into
-// words.
+// A list's URL is its state — the trace list's, and the sessions' and the
+// users', which take its filters and pages: every filter, the sort, the
+// window and the page are query parameters, so a link holds them
+// (`list-query.ts`). Two more are the trace list's own and never reach the
+// server: the table or the charts, and the saved view it was opened from.
+// What this module does is read that URL, write it with one thing changed,
+// and put the server's numbers into words.
+
+/** The lists a project's spans are read as, each a page of the console. */
+export type ListName = "traces" | "sessions" | "users";
 
 /** The rows a page offers to hold. */
 export const ROWS_PER_PAGE = [25, 50, 100] as const;
@@ -43,7 +48,7 @@ export const DEFAULT_ROWS = 50;
 /** The furthest page the server turns to. */
 export const MAX_PAGE = 1_000;
 
-/** The filters the list takes, each a list of values any of which admits a
+/** The filters every list takes, each a list of values any of which admits a
  *  run, in the order the sidebar shows them. */
 export const FILTERS = [
   "agent",
@@ -117,14 +122,11 @@ function capped(filter: Exclude<FilterKey, "status">, searchParams: SearchParams
   return many(searchParams[filter]).filter((value) => fits(filter, value));
 }
 
-/** The query the URL carries, every value the server would refuse dropped
- *  — a status that is no status, a value past its length, rows a page does
- *  not offer — so a stale or hand-edited link opens the list, not a 400.
- *  The first page is the URL's when it names none. */
-export function parseTraceQuery(searchParams: SearchParams): TraceQuery {
+/** The filters the URL carries, every value the server would refuse dropped
+ *  — a status that is no status, a value past its length — so a stale or
+ *  hand-edited link opens the list, not a 400. */
+export function parseFilters(searchParams: SearchParams): ListFilters {
   const statuses = Object.values(SpanStatus) as string[];
-  const rows = whole(searchParams.limit, 100);
-  const page = whole(searchParams.page, MAX_PAGE);
   return compact({
     agent: some(capped("agent", searchParams)),
     user: some(capped("user", searchParams)),
@@ -138,12 +140,31 @@ export function parseTraceQuery(searchParams: SearchParams): TraceQuery {
     release: some(capped("release", searchParams)),
     tag: some(capped("tag", searchParams).filter(isTagPair)),
     prompt: some(capped("prompt", searchParams)),
-    sort: oneOf(searchParams.sort, TraceSort),
+  });
+}
+
+/** A list's query as the URL carries it, its sort among `sorts`: the
+ *  filters, the window, and rows a page offers; the first page is the URL's
+ *  when it names none. */
+export function parseListQuery<S extends string>(
+  searchParams: SearchParams,
+  sorts: Record<string, S>,
+): ListQuery<S> {
+  const rows = whole(searchParams.limit, 100);
+  const page = whole(searchParams.page, MAX_PAGE);
+  return compact({
+    ...parseFilters(searchParams),
+    sort: oneOf(searchParams.sort, sorts),
     dir: oneOf(searchParams.dir, SortDirection),
     days: whole(searchParams.days, MAX_DAYS),
     limit: rows !== undefined && (ROWS_PER_PAGE as readonly number[]).includes(rows) ? rows : undefined,
     page: page !== undefined && page > 1 ? page : undefined,
   });
+}
+
+/** The trace list's query the URL carries. */
+export function parseTraceQuery(searchParams: SearchParams): TraceQuery {
+  return parseListQuery(searchParams, TraceSort);
 }
 
 /** Whether `value` is a tag as the filter takes one, `key:value` with a key
@@ -175,6 +196,18 @@ export function tracesHref(
   return listHref(organization, project, "/traces", { ...query, ...patch, ...ui });
 }
 
+/** `list`'s path with `query` in its URL, as the parts every list shares —
+ *  its filters, its pages — write it; `ui` is the trace list's own. */
+export function listPageHref(
+  list: ListName,
+  organization: string,
+  project: string,
+  query: ListQuery<string>,
+  ui: TraceUi = {},
+): string {
+  return listHref(organization, project, `/${list}`, { ...query, ...ui });
+}
+
 /** A trace's own page. */
 export function traceHref(organization: string, project: string, runId: string): string {
   return projectPath(organization, project, `/traces/${encodeURIComponent(runId)}`);
@@ -190,31 +223,31 @@ export const PEEK_NUDGED = "telmoni:peek-nudged";
 
 /** The query with `value` ticked under `filter`, or unticked where it was,
  *  from the first page again: what clicking a value does. */
-export function toggled(query: TraceQuery, filter: FilterKey, value: string): TraceQuery {
+export function toggled<Q extends ListQuery<string>>(query: Q, filter: FilterKey, value: string): Q {
   const ticked: string[] = query[filter] ?? [];
   const values = ticked.includes(value)
     ? ticked.filter((v) => v !== value)
     : [...ticked, value];
-  return compact({ ...query, [filter]: some(values), page: undefined });
+  return compact({ ...query, [filter]: some(values), page: undefined } as Q);
 }
 
 /** The query without `value` under `filter`, or without the filter where no
  *  value is named, from the first page again. */
-export function without(query: TraceQuery, filter: FilterKey, value?: string): TraceQuery {
+export function without<Q extends ListQuery<string>>(query: Q, filter: FilterKey, value?: string): Q {
   const kept = value === undefined ? [] : (query[filter] ?? []).filter((v) => v !== value);
-  return compact({ ...query, [filter]: some(kept as string[]), page: undefined });
+  return compact({ ...query, [filter]: some(kept as string[]), page: undefined } as Q);
 }
 
 /** The query with no filter: its sort, window and rows kept. */
-export function unfiltered(query: TraceQuery): TraceQuery {
-  return compact({ sort: query.sort, dir: query.dir, days: query.days, limit: query.limit });
+export function unfiltered<Q extends ListQuery<string>>(query: Q): Q {
+  return compact({ sort: query.sort, dir: query.dir, days: query.days, limit: query.limit } as Q);
 }
 
 /** One value of one filter in force, as the page shows it. */
 export type ActiveFilter = { filter: FilterKey; label: string; value: string; text: string };
 
 /** The filters in force, a value at a time, in the sidebar's order. */
-export function activeFilters(query: TraceQuery): ActiveFilter[] {
+export function activeFilters(query: ListQuery<string>): ActiveFilter[] {
   return FILTERS.flatMap((filter) =>
     (query[filter] ?? []).map((value) => ({
       filter,
@@ -234,18 +267,27 @@ export const COLUMN_GROUP_LABEL: Record<ColumnGroup, string> = {
   tokens: "Tokens",
 };
 
-/** A column of the list a person may show or hide: its heading, its sort
+/** A column of a list a person may show or hide: its heading, its sort
  *  when it has one and the way it sorts when first clicked, whether it holds
  *  a number, which stands right, the group the columns menu files it under,
  *  and what it means, where its heading does not say, behind an ⓘ there. */
-export type ColumnSpec = {
-  key: TraceColumn;
+export type ColumnSpec<K extends string = TraceColumn, S extends string = TraceSort> = {
+  key: K;
   label: string;
-  sort?: TraceSort;
+  sort?: S;
   first?: SortDirection;
   numeric?: boolean;
   group?: ColumnGroup;
   hint?: string;
+};
+
+/** What a list's columns menu offers: the id every row shows, ticked and not
+ *  to be unticked, the columns a person shows or hides, and those it shows
+ *  until they pick others. */
+export type ListTable<K extends string = string, S extends string = string> = {
+  id: { label: string; hint: string };
+  columns: readonly ColumnSpec<K, S>[];
+  defaults: readonly K[];
 };
 
 /** The trace's id, which every row shows, since it opens the trace: in the
@@ -395,14 +437,16 @@ export const TRACE_COLUMNS: readonly ColumnSpec[] = [
 
 /** A row of the columns menu: a column, or a group of them under a heading
  *  that opens and closes, where the group's columns stand together. */
-export type ColumnBlock =
-  | { kind: "column"; column: ColumnSpec }
-  | { kind: "group"; group: ColumnGroup; label: string; columns: ColumnSpec[] };
+export type ColumnBlock<K extends string = string, S extends string = string> =
+  | { kind: "column"; column: ColumnSpec<K, S> }
+  | { kind: "group"; group: ColumnGroup; label: string; columns: ColumnSpec<K, S>[] };
 
-/** The columns menu, in the table's order, each group where its first column
- *  falls. */
-export const COLUMN_MENU: readonly ColumnBlock[] = TRACE_COLUMNS.reduce<ColumnBlock[]>(
-  (blocks, column) => {
+/** A list's columns menu, in the table's order, each group where its first
+ *  column falls. */
+export function columnMenu<K extends string, S extends string>(
+  columns: readonly ColumnSpec<K, S>[],
+): ColumnBlock<K, S>[] {
+  return columns.reduce<ColumnBlock<K, S>[]>((blocks, column) => {
     const last = blocks.at(-1);
     if (!column.group) {
       blocks.push({ kind: "column", column });
@@ -417,14 +461,28 @@ export const COLUMN_MENU: readonly ColumnBlock[] = TRACE_COLUMNS.reduce<ColumnBl
       });
     }
     return blocks;
-  },
-  [],
-);
+  }, []);
+}
 
-/** `columns` as the table shows them: each a column of the list, once, in
- *  the list's order, whatever order they were picked in. */
+/** `keys` as a list's table shows them: each one of `columns`, once, in the
+ *  list's order, whatever order they were picked in. */
+export function ordered<K extends string>(
+  columns: readonly ColumnSpec<K, string>[],
+  keys: readonly string[],
+): K[] {
+  return columns.filter((c) => keys.includes(c.key)).map((c) => c.key);
+}
+
+/** The sortable columns of a list, as the shared sort reads them. */
+export function sortsOf<S extends string>(columns: readonly ColumnSpec<string, S>[]): Column<S>[] {
+  return columns.flatMap((c) =>
+    c.sort && c.first ? [{ sort: c.sort, label: c.label, first: c.first }] : [],
+  );
+}
+
+/** `columns` as the trace table shows them. */
 export function orderedColumns(columns: readonly string[]): TraceColumn[] {
-  return TRACE_COLUMNS.filter((c) => columns.includes(c.key)).map((c) => c.key);
+  return ordered(TRACE_COLUMNS, columns);
 }
 
 /** The columns a list shows until a person picks others: what it showed
@@ -440,10 +498,18 @@ export const DEFAULT_COLUMNS: readonly TraceColumn[] = [
   TraceColumn.Duration,
 ];
 
+/** The trace list's columns menu. */
+export const TRACE_TABLE: ListTable<TraceColumn, TraceSort> = {
+  id: TRACE_ID_COLUMN,
+  columns: TRACE_COLUMNS,
+  defaults: DEFAULT_COLUMNS,
+};
+
+/** The trace list's columns menu, in its rows. */
+export const COLUMN_MENU: readonly ColumnBlock<TraceColumn, TraceSort>[] = columnMenu(TRACE_COLUMNS);
+
 /** The sortable columns, as the shared sort reads them. */
-const SORTS: readonly Column<TraceSort>[] = TRACE_COLUMNS.flatMap((c) =>
-  c.sort && c.first ? [{ sort: c.sort, label: c.label, first: c.first }] : [],
-);
+const SORTS = sortsOf(TRACE_COLUMNS);
 
 /** The sort in force: the URL's, else the server's default, newest first. */
 export function currentSort(query: TraceQuery): { sort: TraceSort; dir: SortDirection } {
@@ -511,8 +577,16 @@ export function pageCount(total: number, limit: number): number {
   return Math.max(1, Math.min(MAX_PAGE, Math.ceil(total / Math.max(1, limit))));
 }
 
-/** The list as a file, through the console's own route: its filters and
- *  sort, or the runs `runs` names alone. */
+/** Where each list's download is served: the sessions' beside their page
+ *  rather than under it, where a session's id would be read as one. */
+const DOWNLOAD_PATH: Record<ListName, string> = {
+  traces: "/traces/export",
+  sessions: "/session-export",
+  users: "/users/export",
+};
+
+/** The trace list as a file, through the console's own route: its filters
+ *  and sort, or the runs `runs` names alone. */
 export function downloadHref(
   organization: string,
   project: string,
@@ -520,7 +594,20 @@ export function downloadHref(
   format: DownloadFormat,
   runs: readonly string[] = [],
 ): string {
-  return listHref(organization, project, "/traces/export", {
+  return listDownloadHref("traces", organization, project, query, format, runs);
+}
+
+/** `list` as a file, through the console's own route: its filters and sort,
+ *  or — the trace list's alone — the runs `runs` names. */
+export function listDownloadHref(
+  list: ListName,
+  organization: string,
+  project: string,
+  query: ListQuery<string>,
+  format: DownloadFormat,
+  runs: readonly string[] = [],
+): string {
+  return listHref(organization, project, DOWNLOAD_PATH[list], {
     agent: query.agent,
     user: query.user,
     session: query.session,
@@ -648,8 +735,15 @@ export function formatDuration(ms: number): string {
   return rest ? `${hours} h ${rest} min` : `${hours} h`;
 }
 
-/** The most traces one download holds, as the server writes them. */
+/** The most rows one download holds, as the server writes them. */
 export const DOWNLOAD_MAX = 10_000;
+
+/** What each list's rows are, one and many, as the page counts them. */
+export const ROW_NOUN: Record<ListName, readonly [string, string]> = {
+  traces: ["trace", "traces"],
+  sessions: ["session", "sessions"],
+  users: ["user", "users"],
+};
 
 /** The word the console gives each status. */
 export const STATUS_LABEL: Record<SpanStatus, string> = {
