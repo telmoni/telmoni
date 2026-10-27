@@ -7,10 +7,10 @@ vi.mock("@/lib/api/rate-limit", () => ({
 }));
 vi.mock("@/lib/server/data", () => ({
   identityContext: vi.fn(),
-  fetchProject: vi.fn(),
-  projectHeaders: vi.fn((_ctx: unknown, projectId: string) => ({
+  fetchProjectAnywhere: vi.fn(),
+  projectHeaders: vi.fn((ctx: { organizationId: string }, projectId: string) => ({
     authorization: "Bearer at_1",
-    "x-organization-id": "org_1",
+    "x-organization-id": ctx.organizationId,
     "x-project-id": projectId,
   })),
 }));
@@ -24,7 +24,7 @@ import { NextRequest } from "next/server";
 
 import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
 import { rateLimit } from "@/lib/api/rate-limit";
-import { fetchProject, identityContext } from "@/lib/server/data";
+import { fetchProjectAnywhere, identityContext } from "@/lib/server/data";
 import { getServerSession } from "@/lib/server/session";
 
 import { GET } from "./route";
@@ -90,12 +90,15 @@ beforeEach(() => {
     role: "owner",
     accessToken: "at_1",
   });
-  vi.mocked(fetchProject).mockResolvedValue({
+  vi.mocked(fetchProjectAnywhere).mockResolvedValue({
     id: PROJECT,
     slug: "project",
     name: "Project",
     role: "owner",
-  });
+    organizationId: "org_1",
+    organizationSlug: "acme",
+    organizationName: "Acme",
+  } as never);
   fetchMock.mockResolvedValue(json(page));
 });
 
@@ -130,13 +133,37 @@ describe("GET /api/v1/connectors/[connection]/deliveries", () => {
   // A member reads the log too: the role is the service's to check, so the
   // handler asks the same way whatever the project role.
   it("reads for a member as for an owner", async () => {
-    vi.mocked(fetchProject).mockResolvedValue({
+    vi.mocked(fetchProjectAnywhere).mockResolvedValue({
       id: PROJECT,
       slug: "project",
       name: "Project",
       role: "member",
-    });
+      organizationId: "org_1",
+      organizationSlug: "acme",
+      organizationName: "Acme",
+    } as never);
     expect((await get()).status).toBe(200);
+  });
+
+  // The path names no organization and the cookie follows the last tab, so
+  // the read acts in the project's own organization, never the cookie's.
+  it("asks in the project's own organization, wherever the cookie stands", async () => {
+    vi.mocked(fetchProjectAnywhere).mockResolvedValue({
+      id: PROJECT,
+      slug: "project",
+      name: "Project",
+      role: "owner",
+      organizationId: "org_2",
+      organizationSlug: "globex",
+      organizationName: "Globex",
+    } as never);
+    expect((await get()).status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        headers: expect.objectContaining({ "x-organization-id": "org_2" }),
+      }),
+    );
   });
 
   it("refuses a malformed cursor before any request", async () => {
@@ -160,7 +187,7 @@ describe("GET /api/v1/connectors/[connection]/deliveries", () => {
     vi.mocked(rateLimit).mockResolvedValueOnce(30 as never);
     expect((await get()).status).toBe(429);
 
-    vi.mocked(fetchProject).mockResolvedValueOnce(null);
+    vi.mocked(fetchProjectAnywhere).mockResolvedValueOnce(null);
     const res = await get();
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({

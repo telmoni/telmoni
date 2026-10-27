@@ -12,7 +12,7 @@ vi.mock("@/lib/api/rate-limit", () => ({
 }));
 vi.mock("@/lib/server/data", () => ({
   identityContext: vi.fn(),
-  fetchProject: vi.fn(),
+  fetchProjectAnywhere: vi.fn(),
   projectHeaders: vi.fn((_ctx: unknown, projectId: string) => ({
     authorization: "Bearer at_1",
     "x-organization-id": "org_1",
@@ -34,7 +34,7 @@ import { NextResponse } from "next/server";
 
 import { tryFetchWithTimeout } from "@/lib/api/fetch";
 import { rateLimit } from "@/lib/api/rate-limit";
-import { fetchProject, identityContext, projectHeaders } from "@/lib/server/data";
+import { fetchProjectAnywhere, identityContext, projectHeaders } from "@/lib/server/data";
 import { getServerSession } from "@/lib/server/session";
 
 import {
@@ -88,12 +88,15 @@ beforeEach(() => {
     role: "owner",
     accessToken: "at_1",
   });
-  vi.mocked(fetchProject).mockResolvedValue({
+  vi.mocked(fetchProjectAnywhere).mockResolvedValue({
     id: PROJECT,
     slug: "project",
     name: "Project",
     role: "owner",
-  });
+    organizationId: "org_1",
+    organizationSlug: "acme",
+    organizationName: "Acme",
+  } as never);
   fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
 });
 
@@ -151,7 +154,7 @@ describe("disconnectConnectorAction", () => {
   });
 
   it("stops when the project cannot be resolved", async () => {
-    vi.mocked(fetchProject).mockResolvedValue(null);
+    vi.mocked(fetchProjectAnywhere).mockResolvedValue(null);
     const res = await disconnectConnectorAction(PROJECT, ID);
     expect(res.error).toMatch(/resolve this project/i);
     expect(fetchMock).not.toHaveBeenCalled();

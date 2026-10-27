@@ -4,7 +4,7 @@ import { z } from "zod";
 
 import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
 import { env } from "@/lib/env";
-import { fetchProject, identityContext, projectHeaders } from "@/lib/server/data";
+import { fetchProjectAnywhere, identityContext, projectHeaders } from "@/lib/server/data";
 import { getServerSession } from "@/lib/server/session";
 
 /** Why the connectors' lanes turn a call away, in the sentence the page shows,
@@ -45,9 +45,14 @@ export async function admitConnectorsCall(
   if (connectionId !== null && !z.guid().safeParse(connectionId).success) {
     return { error: "Invalid connection.", status: 404 };
   }
-  const [ctx, project] = await Promise.all([identityContext(), fetchProject(projectId)]);
+  // The project's own organization: the Route Handler's path names none, and
+  // the cookie follows whichever tab opened a page last.
+  const [ctx, project] = await Promise.all([identityContext(), fetchProjectAnywhere(projectId)]);
   if (!ctx || !project) {
     return { error: "Couldn't resolve this project. Reload and try again.", status: 404 };
   }
-  return { base: env.SERVER_URL, headers: projectHeaders(ctx, projectId) };
+  return {
+    base: env.SERVER_URL,
+    headers: projectHeaders({ ...ctx, organizationId: project.organizationId }, projectId),
+  };
 }

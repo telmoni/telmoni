@@ -6,23 +6,15 @@ vi.mock("@/lib/api/rate-limit", () => ({
   sessionKey: vi.fn(() => "k"),
 }));
 vi.mock("@/lib/server/data", () => ({
-  activeOrganization: vi.fn(),
   fetchMembers: vi.fn(),
-  fetchProject: vi.fn(),
+  fetchProjectAnywhere: vi.fn(),
   fetchTokens: vi.fn(),
-  getServerContext: vi.fn(),
 }));
 
 import { NextRequest } from "next/server";
 
 import { rateLimit } from "@/lib/api/rate-limit";
-import {
-  activeOrganization,
-  fetchMembers,
-  fetchProject,
-  fetchTokens,
-  getServerContext,
-} from "@/lib/server/data";
+import { fetchMembers, fetchProjectAnywhere, fetchTokens } from "@/lib/server/data";
 import { getServerSession } from "@/lib/server/session";
 
 import { GET } from "./route";
@@ -39,9 +31,12 @@ describe("GET /api/v1/search/index", () => {
     vi.clearAllMocks();
     vi.mocked(getServerSession).mockResolvedValue({ accessToken: "at_1" } as never);
     vi.mocked(rateLimit).mockResolvedValue(null as never);
-    vi.mocked(fetchProject).mockResolvedValue({ id: PROJECT, slug: "web" } as never);
-    vi.mocked(getServerContext).mockResolvedValue({} as never);
-    vi.mocked(activeOrganization).mockReturnValue({ slug: "acme" } as never);
+    vi.mocked(fetchProjectAnywhere).mockResolvedValue({
+      id: PROJECT,
+      slug: "web",
+      organizationId: "org_1",
+      organizationSlug: "acme",
+    } as never);
     vi.mocked(fetchTokens).mockResolvedValue({
       kind: "ok",
       tokens: [{ id: "tok_1", name: "Deploy" }],
@@ -92,16 +87,30 @@ describe("GET /api/v1/search/index", () => {
     vi.mocked(rateLimit).mockResolvedValue(30 as never);
     const res = await get();
     expect(res.status).toBe(429);
-    expect(fetchProject).not.toHaveBeenCalled();
+    expect(fetchProjectAnywhere).not.toHaveBeenCalled();
+  });
+
+  // The path names no organization and the cookie follows the last tab, so a
+  // project is placed in its own organization, never the cookie's.
+  it("leads to the project's pages in its own organization", async () => {
+    vi.mocked(fetchProjectAnywhere).mockResolvedValue({
+      id: PROJECT,
+      slug: "api",
+      organizationId: "org_2",
+      organizationSlug: "globex",
+    } as never);
+    const body = await (await get()).json();
+    expect(body.keys.items[0].href).toBe("/globex/api/api-keys");
+    expect(body.members.items[0].href).toBe("/globex/api/members");
   });
 
   it("refuses anything but a project id, and a project the session cannot place", async () => {
     for (const project of [null, "", "../members", "project_short"]) {
       expect((await get(project)).status).toBe(404);
     }
-    expect(fetchProject).not.toHaveBeenCalled();
+    expect(fetchProjectAnywhere).not.toHaveBeenCalled();
 
-    vi.mocked(fetchProject).mockResolvedValue(null as never);
+    vi.mocked(fetchProjectAnywhere).mockResolvedValue(null as never);
     const res = await get();
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ error: "Unknown project." });

@@ -2,13 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 
 import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
 import type { SearchIndex, SearchItem, SearchSection } from "@/lib/search";
-import {
-  activeOrganization,
-  fetchMembers,
-  fetchProject,
-  fetchTokens,
-  getServerContext,
-} from "@/lib/server/data";
+import { fetchMembers, fetchProjectAnywhere, fetchTokens } from "@/lib/server/data";
 import { getServerSession } from "@/lib/server/session";
 import { projectPath } from "@/lib/slug";
 
@@ -47,10 +41,11 @@ export async function GET(request: NextRequest) {
   const projectId = request.nextUrl.searchParams.get("project") ?? "";
   if (!PROJECT_ID_RE.test(projectId)) return refuse("Unknown project.", 404);
 
-  const [project, gate] = await Promise.all([fetchProject(projectId), getServerContext()]);
-  const organization = gate ? activeOrganization(gate) : null;
-  if (!project || !organization) return refuse("Unknown project.", 404);
-  const page = (path: string) => projectPath(organization.slug, project.slug, path);
+  // In the project's own organization: the path names none, and the cookie
+  // follows whichever tab opened a page last.
+  const project = await fetchProjectAnywhere(projectId);
+  if (!project) return refuse("Unknown project.", 404);
+  const page = (path: string) => projectPath(project.organizationSlug, project.slug, path);
 
   const [tokens, members] = await Promise.all([
     fetchTokens(projectId),
