@@ -1,4 +1,4 @@
-//! A project's maintenance windows, under [`Resource::Rule`] as its alerts
+//! A project's maintenance windows, under [`Resource::Alert`] as its alerts
 //! are: `GET` and `POST /internal/v1/telemetry/mutes`, and `POST
 //! /mutes/{id}/end`, each open to any member of the project. A window mutes
 //! one alert, or every alert of the project, from its start — now, unless
@@ -98,7 +98,7 @@ pub async fn list_mutes(
 ) -> Result<Json<MuteList>, TelmoniError> {
     let acting = state.auth.resolve(&headers).await?;
     let project_id = &acting
-        .require_project(Verb::Read, Resource::Rule)?
+        .require_project(Verb::Read, Resource::Alert)?
         .project_id;
     let mut tx = project_scope(&state.db, project_id).await?;
     let rows = mutes::mutes(&mut tx, project_id, MUTES_MAX).await?;
@@ -118,7 +118,7 @@ pub async fn create_mute(
 ) -> Result<(StatusCode, Json<Mute>), TelmoniError> {
     let acting = state.auth.resolve(&headers).await?;
     let project_id = &acting
-        .require_project(Verb::Create, Resource::Rule)?
+        .require_project(Verb::Create, Resource::Alert)?
         .project_id;
     let now = Utc::now();
     let starts_at = input.starts_at.unwrap_or(now);
@@ -159,10 +159,10 @@ async fn open(
     starts_at: DateTime<Utc>,
 ) -> Result<MuteRow, TelmoniError> {
     let project_id = &acting
-        .require_project(Verb::Create, Resource::Rule)?
+        .require_project(Verb::Create, Resource::Alert)?
         .project_id;
     let now = chain::hold(state.auth.as_ref(), acting, project_id, tx).await?;
-    now.require_project(Verb::Create, Resource::Rule)?;
+    now.require_project(Verb::Create, Resource::Alert)?;
     // The settings row, by which the organization's erasure finds the window.
     db::ensure_settings(tx, project_id, &acting.organization_id).await?;
     if mutes::unended(tx, project_id).await? >= MUTES_UNENDED_MAX {
@@ -211,7 +211,7 @@ pub async fn end_mute(
 ) -> Result<Json<Mute>, TelmoniError> {
     let acting = state.auth.resolve(&headers).await?;
     let project_id = &acting
-        .require_project(Verb::Update, Resource::Rule)?
+        .require_project(Verb::Update, Resource::Alert)?
         .project_id;
     let id: Uuid = id.parse().map_err(|_| not_found())?;
     let mut tx = chain::scoped(&state.db, &acting, project_id).await?;
@@ -236,10 +236,10 @@ async fn ended(
     id: Uuid,
 ) -> Result<MuteRow, TelmoniError> {
     let project_id = &acting
-        .require_project(Verb::Update, Resource::Rule)?
+        .require_project(Verb::Update, Resource::Alert)?
         .project_id;
     let now = chain::hold(state.auth.as_ref(), acting, project_id, tx).await?;
-    now.require_project(Verb::Update, Resource::Rule)?;
+    now.require_project(Verb::Update, Resource::Alert)?;
     let (row, ended) = mutes::end(tx, project_id, id, &acting.user_id).await?;
     let row = row.ok_or_else(not_found)?;
     if ended {

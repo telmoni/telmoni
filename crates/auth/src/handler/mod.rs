@@ -325,29 +325,9 @@ pub(crate) fn log_act_outside_every_organization(
     );
 }
 
-/// Gate an [`ActingProject`] transaction against the RBAC matrix, or fail with
-/// the role held and the least one that would suffice — read OUT OF the matrix,
-/// read directly from the matrix.
-pub(crate) fn authorize(
-    role: telmoni_shared::Role,
-    verb: telmoni_shared::rbac::Verb,
-    resource: telmoni_shared::rbac::Resource,
-) -> Result<(), telmoni_shared::TelmoniError> {
-    if telmoni_shared::rbac::can(role, verb, resource) {
-        return Ok(());
-    }
-    let Some(required) = telmoni_shared::rbac::minimum_role(verb, resource) else {
-        return Err(telmoni_shared::AuthzError::Forbidden(format!(
-            "no role may {verb} {resource}"
-        ))
-        .into());
-    };
-    Err(telmoni_shared::AuthzError::InsufficientRole {
-        required,
-        actual: role,
-    }
-    .into())
-}
+/// Gate an [`ActingProject`] transaction against the RBAC matrix, as every
+/// module's lanes are gated.
+pub(crate) use telmoni_shared::rbac::authorize;
 
 /// The project a request acts on, from `x-project-id` and nothing else.
 pub(crate) fn project_of(

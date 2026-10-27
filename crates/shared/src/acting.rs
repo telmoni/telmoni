@@ -7,7 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::rbac::{Resource, Verb, can};
+use crate::rbac::{Resource, Verb};
 use crate::types::{ApiKeyScope, OrganizationId, OrganizationRole, ProjectId, Role, UserId};
 use crate::{AuthError, AuthzError, TelmoniError};
 
@@ -93,13 +93,7 @@ impl Acting {
         resource: Resource,
     ) -> Result<&ActingProject, TelmoniError> {
         let project = self.project_or_bad_request()?;
-        if !can(project.role, verb, resource) {
-            return Err(AuthzError::Forbidden(format!(
-                "role {} may not {verb} {resource}",
-                project.role
-            ))
-            .into());
-        }
+        crate::rbac::authorize(project.role, verb, resource)?;
         Ok(project)
     }
 

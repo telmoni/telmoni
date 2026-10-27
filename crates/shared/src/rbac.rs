@@ -7,6 +7,7 @@
 
 use std::fmt;
 
+use crate::error::{AuthzError, TelmoniError};
 use crate::types::{OrganizationRole, Role};
 
 /// What the caller is trying to do.
@@ -76,7 +77,7 @@ pub enum Resource {
     /// member of the project makes, edits, pauses and deletes them, as
     /// Langfuse's members make alerts: an alert reads what every member may
     /// read already, and tells the connectors the project's admins set up.
-    Rule,
+    Alert,
     // The product built on this platform adds its resources here WITH their
     // handlers, never before, or the matrix grants a capability no endpoint
     // exposes.
@@ -94,7 +95,7 @@ impl Resource {
             Self::Audit,
             Self::Trace,
             Self::View,
-            Self::Rule,
+            Self::Alert,
         ]
     }
 
@@ -109,7 +110,7 @@ impl Resource {
             Self::Audit => "audit",
             Self::Trace => "trace",
             Self::View => "view",
-            Self::Rule => "rule",
+            Self::Alert => "alert",
         }
     }
 }
@@ -148,7 +149,7 @@ pub fn can(role: Role, verb: Verb, resource: Resource) -> bool {
         // Reads the work, mutates nothing but the project's alerts. The chain
         // is the exception: what everyone did is the owner's record of the
         // collaboration, not the work a member was invited to see.
-        Role::Member => resource == R::Rule || (resource != R::Audit && verb == V::Read),
+        Role::Member => resource == R::Alert || (resource != R::Audit && verb == V::Read),
     }
 }
 
@@ -166,6 +167,22 @@ pub fn minimum_role(verb: Verb, resource: Resource) -> Option<Role> {
         .into_iter()
         .rev()
         .find(|&role| can(role, verb, resource))
+}
+
+/// [`can`]'s verdict as the refusal every lane answers: the least role that
+/// would do, or that no role may.
+pub fn authorize(role: Role, verb: Verb, resource: Resource) -> Result<(), TelmoniError> {
+    if can(role, verb, resource) {
+        return Ok(());
+    }
+    Err(match minimum_role(verb, resource) {
+        Some(required) => AuthzError::InsufficientRole {
+            required,
+            actual: role,
+        },
+        None => AuthzError::Forbidden(format!("no role may {verb} {resource}")),
+    }
+    .into())
 }
 
 /// A person's role on one project, from their organization role and their
@@ -209,7 +226,7 @@ mod tests {
                 | Resource::Audit
                 | Resource::Trace
                 | Resource::View
-                | Resource::Rule => {}
+                | Resource::Alert => {}
             }
         }
         let mut words: Vec<&str> = VERBS.iter().map(|v| v.as_str()).collect();
@@ -248,13 +265,13 @@ mod tests {
             for verb in [Verb::Create, Verb::Update, Verb::Delete] {
                 assert_eq!(
                     can(Role::Member, verb, resource),
-                    resource == Resource::Rule,
+                    resource == Resource::Alert,
                     "Member {verb:?} {resource:?}"
                 );
             }
         }
         assert_eq!(
-            minimum_role(Verb::Delete, Resource::Rule),
+            minimum_role(Verb::Delete, Resource::Alert),
             Some(Role::Member)
         );
     }

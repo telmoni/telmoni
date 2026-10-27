@@ -1,4 +1,4 @@
-//! A project's incidents, under [`Resource::Rule`] as their alerts are: `GET
+//! A project's incidents, under [`Resource::Alert`] as their alerts are: `GET
 //! /internal/v1/telemetry/incidents`, those not resolved first, then the
 //! newest, or with `?run=` those whose notices showed that run, and
 //! `/incidents/{id}`; `POST /incidents/{id}/acknowledge` and `/resolve`,
@@ -112,7 +112,7 @@ pub async fn list_incidents(
 ) -> Result<Json<IncidentList>, TelmoniError> {
     let acting = state.auth.resolve(&headers).await?;
     let project_id = &acting
-        .require_project(Verb::Read, Resource::Rule)?
+        .require_project(Verb::Read, Resource::Alert)?
         .project_id;
     let run = match query.run.as_deref() {
         None => None,
@@ -143,7 +143,7 @@ pub async fn acknowledge_incident(
 ) -> Result<Json<Incident>, TelmoniError> {
     let acting = state.auth.resolve(&headers).await?;
     let project_id = &acting
-        .require_project(Verb::Update, Resource::Rule)?
+        .require_project(Verb::Update, Resource::Alert)?
         .project_id;
     let id = incident_id(&id)?;
     let mut tx = chain::scoped(&state.db, &acting, project_id).await?;
@@ -180,10 +180,10 @@ async fn moved(
     to: IncidentStatus,
 ) -> Result<(IncidentRow, bool), TelmoniError> {
     let project_id = &acting
-        .require_project(Verb::Update, Resource::Rule)?
+        .require_project(Verb::Update, Resource::Alert)?
         .project_id;
     let now = chain::hold(state.auth.as_ref(), acting, project_id, tx).await?;
-    now.require_project(Verb::Update, Resource::Rule)?;
+    now.require_project(Verb::Update, Resource::Alert)?;
     let (row, moved) = if to == IncidentStatus::Resolved {
         incidents::resolve(tx, project_id, id, &acting.user_id).await?
     } else {
@@ -212,7 +212,7 @@ pub async fn resolve_incident(
 ) -> Result<Json<Incident>, TelmoniError> {
     let acting = state.auth.resolve(&headers).await?;
     let project_id = &acting
-        .require_project(Verb::Update, Resource::Rule)?
+        .require_project(Verb::Update, Resource::Alert)?
         .project_id;
     let id = incident_id(&id)?;
     let mut tx = chain::scoped(&state.db, &acting, project_id).await?;
@@ -249,7 +249,7 @@ pub async fn get_incident(
 ) -> Result<Json<Incident>, TelmoniError> {
     let acting = state.auth.resolve(&headers).await?;
     let project_id = &acting
-        .require_project(Verb::Read, Resource::Rule)?
+        .require_project(Verb::Read, Resource::Alert)?
         .project_id;
     let id = incident_id(&id)?;
     let mut tx = project_scope(&state.db, project_id).await?;

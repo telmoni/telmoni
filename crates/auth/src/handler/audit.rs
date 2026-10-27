@@ -21,7 +21,7 @@ use telmoni_shared::db::tenant_session::{PersonAndOrganization, Scoped, organiza
 use telmoni_shared::error::TelmoniError;
 use telmoni_shared::extract::{Json, Query};
 use telmoni_shared::person_token::Principal;
-use telmoni_shared::rbac::{Resource, Verb, can};
+use telmoni_shared::rbac::{Resource, Verb};
 use telmoni_shared::types::CONNECTION_BYTES;
 use telmoni_shared::{AuditAction, AuthError, AuthzError, OrganizationId, TelmoniResourceKind};
 
@@ -65,13 +65,9 @@ pub async fn list_project_audit(
     let acting = super::acting_project(&state, &project_id, &user_id).await?;
     let organization = acting.organization.clone();
     let tx = acting.tx;
-    if !can(acting.role, Verb::Read, Resource::Audit) {
+    if let Err(refused) = super::authorize(acting.role, Verb::Read, Resource::Audit) {
         tx.commit().await?;
-        return Err(AuthzError::Forbidden(format!(
-            "role {} may not read the audit log",
-            acting.role
-        ))
-        .into());
+        return Err(refused);
     }
 
     let mut tx = tx.bind_organization(&organization).await?;

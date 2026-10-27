@@ -1,4 +1,4 @@
-//! A project's alerts, under [`Resource::Rule`]: `GET` and `POST
+//! A project's alerts, under [`Resource::Alert`]: `GET` and `POST
 //! /internal/v1/telemetry/rules`, and `GET`, `PUT` and `DELETE
 //! /rules/{id}`, every one open to any member of the project, as Langfuse
 //! lets members make alerts. An alert is its definition, checked whole
@@ -161,7 +161,7 @@ pub async fn list_rules(
 ) -> Result<Json<AlertList>, TelmoniError> {
     let acting = state.auth.resolve(&headers).await?;
     let project_id = &acting
-        .require_project(Verb::Read, Resource::Rule)?
+        .require_project(Verb::Read, Resource::Alert)?
         .project_id;
     let mut tx = project_scope(&state.db, project_id).await?;
     let rows = rules::rules(&mut tx, project_id).await?;
@@ -190,7 +190,7 @@ pub async fn get_rule(
 ) -> Result<Json<Alert>, TelmoniError> {
     let acting = state.auth.resolve(&headers).await?;
     let project_id = &acting
-        .require_project(Verb::Read, Resource::Rule)?
+        .require_project(Verb::Read, Resource::Alert)?
         .project_id;
     let id = rule_id(&id)?;
     let mut tx = project_scope(&state.db, project_id).await?;
@@ -219,7 +219,7 @@ pub async fn create_rule(
 ) -> Result<(StatusCode, Json<Alert>), TelmoniError> {
     let acting = state.auth.resolve(&headers).await?;
     let project_id = acting
-        .require_project(Verb::Create, Resource::Rule)?
+        .require_project(Verb::Create, Resource::Alert)?
         .project_id
         .clone();
     let rule = input.checked()?;
@@ -287,11 +287,11 @@ async fn held(
     verb: Verb,
 ) -> Result<ProjectId, TelmoniError> {
     let project_id = acting
-        .require_project(verb, Resource::Rule)?
+        .require_project(verb, Resource::Alert)?
         .project_id
         .clone();
     let now = chain::hold(state.auth.as_ref(), acting, &project_id, tx).await?;
-    now.require_project(verb, Resource::Rule)?;
+    now.require_project(verb, Resource::Alert)?;
     Ok(project_id)
 }
 
@@ -328,7 +328,7 @@ pub async fn update_rule(
 ) -> Result<Json<Alert>, TelmoniError> {
     let acting = state.auth.resolve(&headers).await?;
     let project_id = &acting
-        .require_project(Verb::Update, Resource::Rule)?
+        .require_project(Verb::Update, Resource::Alert)?
         .project_id;
     let id = rule_id(&id)?;
     let rule = input.checked()?;
@@ -405,7 +405,7 @@ pub async fn delete_rule(
 ) -> Result<StatusCode, TelmoniError> {
     let acting = state.auth.resolve(&headers).await?;
     let project_id = &acting
-        .require_project(Verb::Delete, Resource::Rule)?
+        .require_project(Verb::Delete, Resource::Alert)?
         .project_id;
     let id = rule_id(&id)?;
     let (open, links): (Option<IncidentRow>, Vec<Link>) =
@@ -472,7 +472,7 @@ pub async fn unmute_link(
 ) -> Result<Json<Alert>, TelmoniError> {
     let acting = state.auth.resolve(&headers).await?;
     let project_id = &acting
-        .require_project(Verb::Update, Resource::Rule)?
+        .require_project(Verb::Update, Resource::Alert)?
         .project_id;
     let id = rule_id(&id)?;
     let connection_id: Uuid = connection_id.parse().map_err(|_| not_linked())?;
@@ -525,7 +525,7 @@ pub async fn pause_rule(
 ) -> Result<Json<Alert>, TelmoniError> {
     let acting = state.auth.resolve(&headers).await?;
     let project_id = &acting
-        .require_project(Verb::Update, Resource::Rule)?
+        .require_project(Verb::Update, Resource::Alert)?
         .project_id;
     let id = rule_id(&id)?;
     let (row, links) = under_chain(&state, &acting, project_id, async |tx| {
@@ -571,7 +571,7 @@ pub async fn resume_rule(
 ) -> Result<Json<Alert>, TelmoniError> {
     let acting = state.auth.resolve(&headers).await?;
     let project_id = &acting
-        .require_project(Verb::Update, Resource::Rule)?
+        .require_project(Verb::Update, Resource::Alert)?
         .project_id;
     let id = rule_id(&id)?;
     let ceilings = seam::alert_ceilings(state.entitlements.as_ref(), &acting.organization_id).await;

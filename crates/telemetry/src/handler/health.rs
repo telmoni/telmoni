@@ -58,7 +58,7 @@ pub async fn organization_health(
         .readable_projects(&acting)
         .await?
         .into_iter()
-        .filter(|project| can(project.role, Verb::Read, Resource::Rule))
+        .filter(|project| can(project.role, Verb::Read, Resource::Alert))
         .map(|project| (project.project_id.clone(), project))
         .collect();
     if projects.is_empty() {

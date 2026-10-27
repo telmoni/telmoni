@@ -1983,7 +1983,8 @@ async fn a_member_cannot_disconnect(pool: PgPool) {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
     let body = json_body(resp).await;
-    assert_eq!(body["detail"], "role member may not delete connector");
+    assert_eq!(body["type"], "/errors/authz/insufficient-role");
+    assert_eq!(body["detail"], "required admin, have member");
 
     assert_eq!(connection_status(&pool, connection).await.0, "active");
     let rows: i64 = sqlx::query_scalar("SELECT count(*) FROM notifications.connections")

@@ -14,14 +14,14 @@ use uuid::Uuid;
 
 use telmoni_shared::acting::{Acting, ActingKey, ActingProject};
 use telmoni_shared::db::tenant_session::{maintenance_scope, organization_scope};
-use telmoni_shared::rbac::{Resource, Verb, can};
+use telmoni_shared::rbac::{Resource, Verb};
 use telmoni_shared::seam::{
     Audience, AuditEventsQuery, Auth, DocumentCursor, FoundedOrganization, OrganizationFounding,
     OwnedOrganization, ProjectHome, ReadableProject, SourceDocument,
 };
 use telmoni_shared::{
-    AuthError, AuthzError, Flag, FlagSet, OrganizationId, OrganizationRole, OrganizationStatus,
-    ProjectId, TelmoniError, TenantError, UserId,
+    AuthError, Flag, FlagSet, OrganizationId, OrganizationRole, OrganizationStatus, ProjectId,
+    TelmoniError, TenantError, UserId,
 };
 
 use crate::AppState;
@@ -269,13 +269,9 @@ impl Auth for AppState {
         let whole_chain = current
             .organization_role
             .is_some_and(|role| role.can_view_rolled_up_audit());
-        if !whole_chain && !can(current.role, Verb::Read, Resource::Audit) {
+        if !whole_chain && let Err(refused) = authorize(current.role, Verb::Read, Resource::Audit) {
             current.tx.commit().await?;
-            return Err(AuthzError::Forbidden(format!(
-                "role {} may not read the audit log",
-                current.role
-            ))
-            .into());
+            return Err(refused);
         }
         let organization = current.organization.clone();
         let mut tx = current.tx.bind_organization(&organization).await?;
