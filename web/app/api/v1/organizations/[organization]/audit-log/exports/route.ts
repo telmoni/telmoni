@@ -4,6 +4,7 @@ import { z } from "zod";
 import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
 import { listAuditExports, startAuditExport } from "@/lib/server/data";
 import { getServerSession } from "@/lib/server/session";
+import { ExportFormat } from "@/lib/types/enums";
 
 const NO_STORE = { "Cache-Control": "no-store, private" };
 
@@ -13,7 +14,7 @@ const STARTS_AN_HOUR = { limit: 20, windowMs: 60 * 60_000 };
 
 const StartSchema = z
   .object({
-    format: z.enum(["json", "csv"]),
+    format: z.enum(ExportFormat),
     from: z.iso.datetime({ offset: true }).nullable().optional(),
     to: z.iso.datetime({ offset: true }).nullable().optional(),
   })

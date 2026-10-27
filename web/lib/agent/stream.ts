@@ -5,8 +5,8 @@ import {
   type AgentCitation,
   type AgentConversation,
   type AgentMessage,
-  type AgentTool,
 } from "@/lib/types/agent";
+import type { AgentTool } from "@/lib/types/enums";
 
 export type AgentEvent =
   | { type: "conversation"; conversationId: string }

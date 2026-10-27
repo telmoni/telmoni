@@ -4,17 +4,31 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import {
+  AgentTool,
   ApiKeyScope,
   asRole,
+  AttemptOutcome,
+  AttemptTrigger,
+  ConnectionStatus,
+  ConnectorProvider,
   ContentMode,
+  DeliveryStatus,
+  ExportFailure,
+  ExportFormat,
+  ExportStatus,
   Flag,
   FlagOffDetail,
   IncidentStatus,
+  InviteScope,
   LayoutDepth,
   LayoutOpen,
+  Live,
   MissingData,
   NotificationKind,
+  OrganizationRole,
   OrganizationStatus,
+  PausedBy,
+  ResourceKind,
   Role,
   RuleAggregation,
   RuleLevel,
@@ -42,20 +56,34 @@ const contract = JSON.parse(
   enums: Record<string, string[]>;
   flags: { off_detail: Record<string, string> };
   slugs: { max_length: number; reserved: { organization: string[]; project: string[] } };
+  live: { organization_channel: string; spans_ingested: string };
 };
 
 // Every enum the server publishes, and the console's copy of it. A new one
 // in the contract fails the first test until it is added here.
 const CONSOLE: Record<string, Record<string, string>> = {
+  AgentTool,
   ApiKeyScope,
+  AttemptOutcome,
+  AttemptTrigger,
+  ConnectionStatus,
+  ConnectorProvider,
   ContentMode,
+  DeliveryStatus,
+  ExportFailure,
+  ExportFormat,
+  ExportStatus,
   Flag,
   IncidentStatus,
+  InviteScope,
   LayoutDepth,
   LayoutOpen,
   MissingData,
   NotificationKind,
+  OrganizationRole,
   OrganizationStatus,
+  PausedBy,
+  ResourceKind,
   Role,
   RuleAggregation,
   RuleLevel,
@@ -87,6 +115,13 @@ describe("wire contract", () => {
 
   it("each switched-off feature says what the server says", () => {
     expect(FlagOffDetail).toEqual(contract.flags.off_detail);
+  });
+
+  // The live lists redraw on this event alone, so a drift would stop them
+  // without an error.
+  it("listens where the server publishes, for the event it names", () => {
+    expect(Live.organizationChannel).toBe(contract.live.organization_channel);
+    expect(Live.spansIngested).toBe(contract.live.spans_ingested);
   });
 
   // The proxy reads a path's first segment as an organization unless it is

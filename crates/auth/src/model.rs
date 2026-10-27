@@ -19,22 +19,11 @@ pub enum InviteScope {
     Organization,
 }
 
-impl InviteScope {
-    /// The wire spelling — what the SQL selects and the console reads.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Project => "project",
-            Self::Organization => "organization",
-        }
-    }
-}
-
-impl std::fmt::Display for InviteScope {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
+// The wire spelling: what the SQL selects and the console reads.
+telmoni_shared::wire_enum!(InviteScope {
+    Project => "project",
+    Organization => "organization",
+});
 
 /// Who asked for an organization's deletion, as its audit chain records it.
 /// Mirrors `auth.organizations.deletion_kind`.
@@ -396,6 +385,11 @@ pub struct ValidateTokenResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_invite_scope_words_are_the_wire_words() {
+        telmoni_shared::test_util::assert_wire_words::<InviteScope>();
+    }
 
     /// The redaction is mechanical: no raw token survives a Debug render, and a
     /// refactor that re-derives Debug fails here.

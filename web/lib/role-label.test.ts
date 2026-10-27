@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { roleLabel } from "./role-label";
-import { OrganizationRole } from "./types/organization-role";
-import { Role } from "./types/enums";
+import { OrganizationRole, Role } from "./types/enums";
 
 describe("roleLabel", () => {
   // ⚠ **Both ladders, on purpose.** This was six private copies, one of them

@@ -4,7 +4,8 @@ import { z } from "zod";
 import { fetchWithTimeout } from "@/lib/api/fetch";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
-import { type OrganizationRole, asOrganizationRole } from "@/lib/types/organization-role";
+import type { OrganizationRole } from "@/lib/types/enums";
+import { asOrganizationRole } from "@/lib/types/organization-role";
 
 import { organizationHeaders, identityContext } from "./identity-context";
 

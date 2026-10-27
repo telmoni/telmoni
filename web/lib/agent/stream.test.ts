@@ -12,7 +12,7 @@ import {
   type AgentEvent,
   type AgentState,
 } from "./stream";
-import { AGENT_TOOLS } from "@/lib/types/agent";
+import { AgentTool } from "@/lib/types/enums";
 
 function streamOf(chunks: (string | Uint8Array)[]): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
@@ -317,7 +317,9 @@ describe("describeRefusal", () => {
   });
 
   it("words every tool, and one it does not know", () => {
-    for (const tool of AGENT_TOOLS) expect(toolStatus(tool)).not.toBe("Looking something up…");
+    for (const tool of Object.values(AgentTool)) {
+      expect(toolStatus(tool)).not.toBe("Looking something up…");
+    }
     expect(toolStatus("connector_deliveries")).toBe("Checking connector deliveries…");
     expect(toolStatus("new_tool")).toBe("Looking something up…");
     expect(toolStatus("constructor")).toBe("Looking something up…");

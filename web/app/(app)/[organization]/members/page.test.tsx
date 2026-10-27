@@ -3,7 +3,7 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { IdentityContext } from "@/lib/server/entities/identity-context";
-import { OrganizationRole } from "@/lib/types/organization-role";
+import { OrganizationRole } from "@/lib/types/enums";
 
 // The actions, not their effects: which organization the page hands its
 // controls is the assertion, and each action refuses any other.

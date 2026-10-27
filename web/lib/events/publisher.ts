@@ -4,6 +4,7 @@ import { env } from "@/lib/env";
 import { getRedis } from "@/lib/redis";
 import type { RealtimeEvent } from "./types";
 import { logger } from "@/lib/logger";
+import { Live } from "@/lib/types/enums";
 
 // Domain separation, so a value keyed for a channel name can never collide
 // with anything else this secret is ever asked to key. Versioned because
@@ -42,7 +43,7 @@ export function userChannel(email: string): string {
 // and hiding it would cost the one thing a readable channel name is worth:
 // being able to see which tenant a stuck subscriber belongs to.
 export function organizationChannel(organizationId: string): string {
-  return `bfev:organization:${organizationId.trim()}`;
+  return `${Live.organizationChannel}${organizationId.trim()}`;
 }
 
 export async function publishEvent(

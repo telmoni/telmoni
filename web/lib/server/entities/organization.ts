@@ -12,7 +12,7 @@ import {
   IncomingInviteSchema,
   type IncomingInvite,
 } from "@/lib/types/incoming-invite";
-import { type Role, asRole } from "@/lib/types/enums";
+import { OrganizationRole, type Role, asRole } from "@/lib/types/enums";
 import { type GivenSeat, GivenSeatSchema } from "@/lib/types/given-seat";
 
 import { getServerSession } from "../session";
@@ -43,7 +43,7 @@ const OrganizationEntrySchema = z.object({
   name:                    z.string(),
   ownerEmail:              z.string().nullable().optional(),
   ownerDisplayName:        z.string().nullable().optional(),
-  role:                    z.enum(["owner", "admin", "member"]),
+  role:                    z.enum(OrganizationRole),
   /// When the owner's offer of this organization to the person lapses; absent
   /// when there is no live offer to them.
   ownershipOfferExpiresAt: z.string().nullable().optional(),

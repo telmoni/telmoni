@@ -16,17 +16,6 @@ export interface AgentCitation {
 export const AGENT_ROLES = ["user", "assistant"] as const;
 export type AgentRole = (typeof AGENT_ROLES)[number];
 
-// The server's `Tool` enum (`crates/agent/src/tools.rs`), by the names the
-// model calls them by.
-export const AGENT_TOOLS = [
-  "search",
-  "list_members",
-  "list_connectors",
-  "connector_deliveries",
-  "audit_events",
-] as const;
-export type AgentTool = (typeof AGENT_TOOLS)[number];
-
 // The agent's own problem types, which the panel words itself.
 export const AGENT_PROBLEM = {
   disabled: "/errors/agent/disabled",

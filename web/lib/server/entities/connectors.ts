@@ -4,7 +4,14 @@ import { z } from "zod";
 import { fetchWithTimeout } from "@/lib/api/fetch";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
-import { NotificationKind } from "@/lib/types/enums";
+import {
+  AttemptOutcome,
+  AttemptTrigger,
+  ConnectionStatus,
+  ConnectorProvider,
+  DeliveryStatus,
+  NotificationKind,
+} from "@/lib/types/enums";
 
 import { identityContext, projectHeaders } from "./identity-context";
 import { fetchProject } from "./projects";
@@ -17,12 +24,12 @@ const NotificationKindSchema = z.enum(NotificationKind);
 // never a webhook's signing secret, which is answered once at creation.
 export const ConnectionSchema = z.object({
   id: z.string(),
-  provider: z.enum(["slack", "webhook"]),
+  provider: z.enum(ConnectorProvider),
   external_workspace_id: z.string(),
   external_workspace_name: z.string().nullable(),
   channel_id: z.string(),
   channel_name: z.string(),
-  status: z.enum(["active", "errored", "revoked"]),
+  status: z.enum(ConnectionStatus),
   last_error: z.string().nullable(),
   last_delivery_at: z.string().nullable(),
   created_at: z.string(),
@@ -36,8 +43,8 @@ export type Connection = z.infer<typeof ConnectionSchema>;
 
 const DeliveryAttemptSchema = z.object({
   id: z.string(),
-  trigger: z.enum(["scheduled", "manual"]),
-  outcome: z.enum(["delivered", "failed"]),
+  trigger: z.enum(AttemptTrigger),
+  outcome: z.enum(AttemptOutcome),
   status_code: z.number().int().nullable(),
   duration_ms: z.number(),
   error: z.string().nullable(),
@@ -52,7 +59,7 @@ const DeliveryLogEntrySchema = z.object({
   kind: NotificationKindSchema,
   subject: z.string(),
   body: z.string(),
-  status: z.enum(["pending", "delivered", "failed"]),
+  status: z.enum(DeliveryStatus),
   next_attempt_at: z.string(),
   last_error: z.string().nullable(),
   created_at: z.string(),

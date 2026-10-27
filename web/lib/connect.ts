@@ -8,12 +8,13 @@
 
 import type { Connection } from "@/lib/server/data";
 import { projectPath } from "@/lib/slug";
+import { ConnectorProvider } from "@/lib/types/enums";
 
-export const OAUTH_PROVIDERS = ["slack"] as const;
+export const OAUTH_PROVIDERS = [ConnectorProvider.Slack] as const;
 export type OAuthProvider = (typeof OAUTH_PROVIDERS)[number];
 
-export const PROVIDERS = [...OAUTH_PROVIDERS, "webhook"] as const;
-export type Provider = (typeof PROVIDERS)[number];
+export const PROVIDERS = Object.values(ConnectorProvider);
+export type Provider = ConnectorProvider;
 
 export function isProvider(value: string): value is Provider {
   return (PROVIDERS as readonly string[]).includes(value);

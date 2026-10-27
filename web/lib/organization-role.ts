@@ -1,4 +1,4 @@
-export type OrganizationRole = "owner" | "admin" | "member";
+import type { OrganizationRole } from "@/lib/types/enums";
 
 /// The person's role in the organization `ident` names, from `/me`'s list.
 ///

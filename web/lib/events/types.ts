@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { isSlug } from "@/lib/slug";
+import { Live } from "@/lib/types/enums";
 import { IncomingInviteSchema } from "@/lib/types/incoming-invite";
 
 const InviteRefSchema = z.object({ inviteId: z.string() });
@@ -99,7 +100,7 @@ export const RealtimeEventSchema = z.discriminatedUnion("type", [
     data: InviteRefSchema,
   }),
   z.object({
-    type: z.literal("spans:ingested"),
+    type: z.literal(Live.spansIngested),
     data: SpansIngestedSchema,
   }),
 ]);
@@ -115,5 +116,5 @@ export const RealtimeEventDataSchema = {
   "invite:sent": InviteRefSchema,
   "invite:revoked": InviteRefSchema,
   "invite:resolved": InviteRefSchema,
-  "spans:ingested": SpansIngestedSchema,
+  [Live.spansIngested]: SpansIngestedSchema,
 } as const;

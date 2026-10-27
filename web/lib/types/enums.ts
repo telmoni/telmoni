@@ -1,6 +1,6 @@
 // The wire vocabularies the console shares with the server. Written by hand;
 // `contract.test.ts` fails if any differs from contract/wire-contract.json,
-// which `make contract` writes from the Rust enums in crates/shared/src/types.
+// which `make contract` writes from every module's Rust vocabularies.
 
 /** Wire vocabulary of the Rust `ApiKeyScope`: what an API key opens. */
 export const ApiKeyScope = {
@@ -260,6 +260,118 @@ export const SortDirection = {
   Desc: "desc",
 } as const;
 export type SortDirection = typeof SortDirection[keyof typeof SortDirection];
+
+/** Wire vocabulary of the Rust `OrganizationRole`: a person's place in an organization. */
+export const OrganizationRole = {
+  Owner:  "owner",
+  Admin:  "admin",
+  Member: "member",
+} as const;
+export type OrganizationRole = typeof OrganizationRole[keyof typeof OrganizationRole];
+
+/** Wire vocabulary of the Rust `TelmoniResourceKind`: what an audit row names. */
+export const ResourceKind = {
+  Organization:      "organization",
+  Project:           "project",
+  Member:            "member",
+  Token:             "token",
+  Session:           "session",
+  Connector:         "connector",
+  Alert:             "alert",
+  MaintenanceWindow: "maintenance_window",
+  Incident:          "incident",
+} as const;
+export type ResourceKind = typeof ResourceKind[keyof typeof ResourceKind];
+
+/** Wire vocabulary of the Rust `PausedBy`: a member, by hand, or the plan. */
+export const PausedBy = {
+  Person: "person",
+  Plan:   "plan",
+} as const;
+export type PausedBy = typeof PausedBy[keyof typeof PausedBy];
+
+/** Wire vocabulary of the Rust connector `Provider`. */
+export const ConnectorProvider = {
+  Slack:   "slack",
+  Webhook: "webhook",
+} as const;
+export type ConnectorProvider = typeof ConnectorProvider[keyof typeof ConnectorProvider];
+
+/** Wire vocabulary of the Rust `ConnectionStatus`: whether a connection hears notices. */
+export const ConnectionStatus = {
+  Active:  "active",
+  Errored: "errored",
+  Revoked: "revoked",
+} as const;
+export type ConnectionStatus = typeof ConnectionStatus[keyof typeof ConnectionStatus];
+
+/** Wire vocabulary of the Rust `DeliveryStatus`: where one queued notice stands. */
+export const DeliveryStatus = {
+  Pending:   "pending",
+  Delivered: "delivered",
+  Failed:    "failed",
+} as const;
+export type DeliveryStatus = typeof DeliveryStatus[keyof typeof DeliveryStatus];
+
+/** Wire vocabulary of the Rust `AttemptTrigger`: what made one delivery attempt. */
+export const AttemptTrigger = {
+  Scheduled: "scheduled",
+  Manual:    "manual",
+} as const;
+export type AttemptTrigger = typeof AttemptTrigger[keyof typeof AttemptTrigger];
+
+/** Wire vocabulary of the Rust `AttemptOutcome`: how one delivery attempt went. */
+export const AttemptOutcome = {
+  Delivered: "delivered",
+  Failed:    "failed",
+} as const;
+export type AttemptOutcome = typeof AttemptOutcome[keyof typeof AttemptOutcome];
+
+/** Wire vocabulary of the Rust `ExportFormat`: an audit export's file. */
+export const ExportFormat = {
+  Json: "json",
+  Csv:  "csv",
+} as const;
+export type ExportFormat = typeof ExportFormat[keyof typeof ExportFormat];
+
+/** Wire vocabulary of the Rust `ExportStatus`: where an audit export stands. */
+export const ExportStatus = {
+  Queued:  "queued",
+  Running: "running",
+  Ready:   "ready",
+  Failed:  "failed",
+} as const;
+export type ExportStatus = typeof ExportStatus[keyof typeof ExportStatus];
+
+/** Wire vocabulary of the Rust `ExportFailure`: why an audit export failed. */
+export const ExportFailure = {
+  TooLarge: "too_large",
+  Error:    "error",
+} as const;
+export type ExportFailure = typeof ExportFailure[keyof typeof ExportFailure];
+
+/** Wire vocabulary of the Rust `InviteScope`: which roster an invitation seats on. */
+export const InviteScope = {
+  Project:      "project",
+  Organization: "organization",
+} as const;
+export type InviteScope = typeof InviteScope[keyof typeof InviteScope];
+
+/** The agent's tools, by the names the model calls them by (the Rust `Tool`). */
+export const AgentTool = {
+  Search:              "search",
+  ListMembers:         "list_members",
+  ListConnectors:      "list_connectors",
+  ConnectorDeliveries: "connector_deliveries",
+  AuditEvents:         "audit_events",
+} as const;
+export type AgentTool = typeof AgentTool[keyof typeof AgentTool];
+
+/** The live channel's spellings, as the server publishes on them (`live.rs`). */
+export const Live = {
+  organizationChannel: "bfev:organization:",
+  spansIngested:       "spans:ingested",
+} as const;
 
 /** The sentence a switched-off feature answers with, by flag — the Rust `Flag::off_detail`. */
 export const FlagOffDetail = {

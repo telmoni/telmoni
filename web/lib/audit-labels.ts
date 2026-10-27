@@ -1,8 +1,9 @@
-const RESOURCE_LABELS: Record<string, string> = {
+import type { ResourceKind } from "@/lib/types/enums";
+
+const RESOURCE_LABELS: Partial<Record<ResourceKind, string>> = {
   token: "API key",
-  ledger_entry: "Ledger entry",
 };
 
-export function resourceLabel(kind: string): string {
+export function resourceLabel(kind: ResourceKind): string {
   return RESOURCE_LABELS[kind] ?? kind.replace(/_/g, " ");
 }

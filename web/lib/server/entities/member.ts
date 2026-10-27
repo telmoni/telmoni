@@ -4,7 +4,7 @@ import { z } from "zod";
 import { fetchWithTimeout } from "@/lib/api/fetch";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
-import { Role, asRole } from "@/lib/types/enums";
+import { InviteScope, Role, asRole } from "@/lib/types/enums";
 
 import { identityContext, projectHeaders } from "./identity-context";
 import { type RosterCeiling, RosterCeilingSchema } from "./organization-member";
@@ -136,7 +136,7 @@ export const fetchInvites = cache(async (projectId: string): Promise<InviteAcces
 const InviteLookSchema = z.object({
   /// Which roster the link seats somebody on. The two ladders spell their
   /// roles the same, so the role alone cannot say.
-  scope: z.enum(["project", "organization"]),
+  scope: z.enum(InviteScope),
   inviter: z.string(),
   /// What the organization is called: its name, which it has before it can
   /// invite.

@@ -1,14 +1,57 @@
 {
-  "$generated": "by `make contract` from crates/shared/src/types and slug.rs — do not edit by hand",
+  "$generated": "by `make contract` from the modules' vocabularies and slug.rs — do not edit by hand",
   "enums": {
+    "AgentTool": [
+      "search",
+      "list_members",
+      "list_connectors",
+      "connector_deliveries",
+      "audit_events"
+    ],
     "ApiKeyScope": [
       "read",
       "ingest"
+    ],
+    "AttemptOutcome": [
+      "delivered",
+      "failed"
+    ],
+    "AttemptTrigger": [
+      "scheduled",
+      "manual"
+    ],
+    "ConnectionStatus": [
+      "active",
+      "errored",
+      "revoked"
+    ],
+    "ConnectorProvider": [
+      "slack",
+      "webhook"
     ],
     "ContentMode": [
       "off",
       "on",
       "sealed"
+    ],
+    "DeliveryStatus": [
+      "pending",
+      "delivered",
+      "failed"
+    ],
+    "ExportFailure": [
+      "too_large",
+      "error"
+    ],
+    "ExportFormat": [
+      "json",
+      "csv"
+    ],
+    "ExportStatus": [
+      "queued",
+      "running",
+      "ready",
+      "failed"
     ],
     "Flag": [
       "connectors",
@@ -21,6 +64,10 @@
       "open",
       "acknowledged",
       "resolved"
+    ],
+    "InviteScope": [
+      "project",
+      "organization"
     ],
     "LayoutDepth": [
       "trace",
@@ -47,10 +94,30 @@
       "incident_opened",
       "incident_resolved"
     ],
+    "OrganizationRole": [
+      "owner",
+      "admin",
+      "member"
+    ],
     "OrganizationStatus": [
       "active",
       "pending_deletion",
       "deleted"
+    ],
+    "PausedBy": [
+      "person",
+      "plan"
+    ],
+    "ResourceKind": [
+      "organization",
+      "project",
+      "member",
+      "token",
+      "session",
+      "connector",
+      "alert",
+      "maintenance_window",
+      "incident"
     ],
     "Role": [
       "owner",
@@ -193,6 +260,10 @@
       "public_api": "The API is switched off right now.",
       "signup": "Sign-ups are closed right now."
     }
+  },
+  "live": {
+    "organization_channel": "bfev:organization:",
+    "spans_ingested": "spans:ingested"
   },
   "slugs": {
     "max_length": 48,

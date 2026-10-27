@@ -1,10 +1,4 @@
-export const OrganizationRole = {
-  Owner: "owner",
-  Admin: "admin",
-  Member: "member",
-} as const;
-
-export type OrganizationRole = (typeof OrganizationRole)[keyof typeof OrganizationRole];
+import { OrganizationRole } from "./enums";
 
 export function asOrganizationRole(value: unknown): OrganizationRole | null {
   if (typeof value !== "string") return null;

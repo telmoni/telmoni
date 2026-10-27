@@ -1,6 +1,6 @@
 import type { SessionData } from "@/lib/auth/session";
 import { env } from "@/lib/env";
-import type { OrganizationRole } from "@/lib/organization-role";
+import type { OrganizationRole } from "@/lib/types/enums";
 
 import { activeOrganization, getServerContext } from "./organization";
 import { getServerSession } from "../session";

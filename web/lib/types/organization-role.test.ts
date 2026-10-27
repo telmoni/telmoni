@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { OrganizationRole, asOrganizationRole } from "./organization-role";
+import { OrganizationRole } from "./enums";
+import { asOrganizationRole } from "./organization-role";
 
 describe("OrganizationRole", () => {
   it("parses valid roles and rejects unknown", () => {

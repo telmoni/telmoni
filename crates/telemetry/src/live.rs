@@ -12,11 +12,13 @@ use uuid::Uuid;
 
 use crate::AppState;
 
-/// The organization's channel, spelled as the console's publisher spells it
-/// (`organizationChannel`, `web/lib/events/publisher.ts`): unkeyed, since an
-/// organization id is a minted value that names nobody.
+/// What an organization's channel begins with, its id after: unkeyed, since
+/// an id is a minted value that names nobody. The console's publisher spells
+/// it from the wire contract.
+pub const ORGANIZATION_CHANNEL: &str = "bfev:organization:";
+
 fn channel(organization_id: &str) -> String {
-    format!("bfev:organization:{organization_id}")
+    format!("{ORGANIZATION_CHANNEL}{organization_id}")
 }
 
 /// How many run ids a nudge carries. A trace's page needs its own among
@@ -24,8 +26,9 @@ fn channel(organization_id: &str) -> String {
 /// met; past it `more` tells the page its run may be among the rest.
 const RUNS_MAX: usize = 32;
 
-/// The event's name, as the console's `RealtimeEventSchema` knows it.
-const SPANS_INGESTED: &str = "spans:ingested";
+/// The event's name, as the console's `RealtimeEventSchema` knows it from the
+/// wire contract.
+pub const SPANS_INGESTED: &str = "spans:ingested";
 
 #[derive(Debug, Serialize)]
 struct Event<D> {

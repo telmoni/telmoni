@@ -7,6 +7,7 @@ import { logger } from "@/lib/logger";
 import {
   IncidentStatus,
   MissingData,
+  PausedBy,
   RuleAggregation,
   RuleLevel,
   RuleMeasure,
@@ -67,7 +68,7 @@ const AlertSchema = z.object({
   missing_data: z.enum(MissingData),
   renotify_minutes: z.number().int().nullable(),
   /** A member, by hand, or its plan, past the organization's number. */
-  paused: z.enum(["person", "plan"]).nullable(),
+  paused: z.enum(PausedBy).nullable(),
   paused_at: z.string().nullable(),
   /** None before its first evaluation, or where its window held no span. */
   value: z.number().nullable(),

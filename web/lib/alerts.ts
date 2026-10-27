@@ -16,6 +16,7 @@ import type {
 import { projectPath } from "@/lib/slug";
 import { formatCost } from "@/lib/traces";
 import {
+  type ConnectionStatus,
   IncidentStatus,
   MissingData,
   NotificationKind,
@@ -415,7 +416,7 @@ const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
 export type ConnectionChoice = {
   id: string;
   name: string;
-  status: "active" | "errored" | "revoked";
+  status: ConnectionStatus;
   eventKinds: Connection["event_kinds"];
 };
 

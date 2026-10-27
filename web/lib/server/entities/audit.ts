@@ -11,6 +11,7 @@ import {
   type AuditExportFormat,
   type AuditExportLimits,
 } from "@/lib/types/audit-export";
+import { ResourceKind } from "@/lib/types/enums";
 
 import { identityContext, organizationHeaders, projectHeaders } from "./identity-context";
 
@@ -18,7 +19,7 @@ const AuditEventSchema = z.object({
   id: z.string(),
   actor_id: z.string(),
   action: z.string(),
-  resource_kind: z.string(),
+  resource_kind: z.enum(ResourceKind),
   resource_id: z.string().nullable(),
   created_at: z.string(),
   request_id: z.string().nullish(),
