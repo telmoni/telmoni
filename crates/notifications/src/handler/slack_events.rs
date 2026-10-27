@@ -24,24 +24,16 @@ enum Revocation {
     TokensRevoked,
 }
 
+telmoni_shared::wire_enum!(Revocation {
+    AppUninstalled => "app_uninstalled",
+    TokensRevoked => "tokens_revoked",
+});
+
 impl Revocation {
-    const fn all() -> [Self; 2] {
-        [Self::AppUninstalled, Self::TokensRevoked]
-    }
-
-    const fn as_str(self) -> &'static str {
-        match self {
-            Self::AppUninstalled => "app_uninstalled",
-            Self::TokensRevoked => "tokens_revoked",
-        }
-    }
-
     /// The revocation an event's `type` names; `None` for every other event,
     /// which is acknowledged and otherwise ignored.
     fn parse(event_type: &str) -> Option<Self> {
-        Self::all()
-            .into_iter()
-            .find(|revocation| revocation.as_str() == event_type)
+        event_type.parse().ok()
     }
 }
 
@@ -181,16 +173,6 @@ async fn revoke_workspace(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// A new variant fails to compile here until `all()` lists it.
-    #[test]
-    fn all_lists_every_revocation() {
-        for revocation in Revocation::all() {
-            match revocation {
-                Revocation::AppUninstalled | Revocation::TokensRevoked => {}
-            }
-        }
-    }
 
     /// Slack's own spelling, which `slack: app_uninstalled` on the row and
     /// the audit row's `event` repeat.

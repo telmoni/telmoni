@@ -10,7 +10,7 @@
 //! Every query runs with the organization and the requester bound: the
 //! table's policy admits an export to nobody else.
 
-use std::{fmt, str::FromStr, sync::Arc};
+use std::sync::Arc;
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -23,9 +23,7 @@ use telmoni_shared::csv;
 use telmoni_shared::db::tenant_session::{
     PersonAndOrganization, Scoped, maintenance_scope, organization_scope,
 };
-use telmoni_shared::{
-    AuditAction, OrganizationId, ParseEnumError, TelmoniError, TelmoniResourceKind, UserId,
-};
+use telmoni_shared::{AuditAction, OrganizationId, TelmoniError, TelmoniResourceKind, UserId};
 
 use crate::AppState;
 use crate::db::AuthLane;
@@ -92,43 +90,17 @@ pub enum ExportFormat {
     Csv,
 }
 
+telmoni_shared::wire_enum!(ExportFormat {
+    Json => "json",
+    Csv => "csv",
+});
+
 impl ExportFormat {
-    /// Every format, in wire order.
-    #[must_use]
-    pub const fn all() -> [Self; 2] {
-        [Self::Json, Self::Csv]
-    }
-
-    /// The column's spelling.
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Json => "json",
-            Self::Csv => "csv",
-        }
-    }
-
     /// What a download says the file is.
     pub const fn content_type(self) -> &'static str {
         match self {
             Self::Json => "application/json; charset=utf-8",
             Self::Csv => "text/csv; charset=utf-8",
-        }
-    }
-}
-
-impl fmt::Display for ExportFormat {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl FromStr for ExportFormat {
-    type Err = ParseEnumError;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "json" => Ok(Self::Json),
-            "csv" => Ok(Self::Csv),
-            _ => Err(ParseEnumError::new(s, "json, csv")),
         }
     }
 }
@@ -150,37 +122,12 @@ pub enum ExportStatus {
     Failed,
 }
 
-impl ExportStatus {
-    /// Every status, in wire order.
-    #[must_use]
-    pub const fn all() -> [Self; 4] {
-        [Self::Queued, Self::Running, Self::Ready, Self::Failed]
-    }
-}
-
-impl fmt::Display for ExportStatus {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Queued => write!(f, "queued"),
-            Self::Running => write!(f, "running"),
-            Self::Ready => write!(f, "ready"),
-            Self::Failed => write!(f, "failed"),
-        }
-    }
-}
-
-impl FromStr for ExportStatus {
-    type Err = ParseEnumError;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "queued" => Ok(Self::Queued),
-            "running" => Ok(Self::Running),
-            "ready" => Ok(Self::Ready),
-            "failed" => Ok(Self::Failed),
-            _ => Err(ParseEnumError::new(s, "queued, running, ready, failed")),
-        }
-    }
-}
+telmoni_shared::wire_enum!(ExportStatus {
+    Queued => "queued",
+    Running => "running",
+    Ready => "ready",
+    Failed => "failed",
+});
 
 /// Why an export failed for good, which tells its requester whether asking
 /// again can help.
@@ -194,33 +141,10 @@ pub enum ExportFailure {
     Error,
 }
 
-impl ExportFailure {
-    /// Every failure, in wire order.
-    #[must_use]
-    pub const fn all() -> [Self; 2] {
-        [Self::TooLarge, Self::Error]
-    }
-}
-
-impl fmt::Display for ExportFailure {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::TooLarge => write!(f, "too_large"),
-            Self::Error => write!(f, "error"),
-        }
-    }
-}
-
-impl FromStr for ExportFailure {
-    type Err = ParseEnumError;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "too_large" => Ok(Self::TooLarge),
-            "error" => Ok(Self::Error),
-            _ => Err(ParseEnumError::new(s, "too_large, error")),
-        }
-    }
-}
+telmoni_shared::wire_enum!(ExportFailure {
+    TooLarge => "too_large",
+    Error => "error",
+});
 
 /// What one build came to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -737,27 +661,11 @@ mod tests {
         assert_eq!(lines.next(), Some(""));
     }
 
-    /// A new variant fails to compile here until its `all()` lists it.
     #[test]
-    fn all_lists_every_variant() {
-        for format in ExportFormat::all() {
-            match format {
-                ExportFormat::Json | ExportFormat::Csv => {}
-            }
-        }
-        for status in ExportStatus::all() {
-            match status {
-                ExportStatus::Queued
-                | ExportStatus::Running
-                | ExportStatus::Ready
-                | ExportStatus::Failed => {}
-            }
-        }
-        for failure in ExportFailure::all() {
-            match failure {
-                ExportFailure::TooLarge | ExportFailure::Error => {}
-            }
-        }
+    fn the_words_are_the_wire_words() {
+        telmoni_shared::test_util::assert_wire_words::<ExportFormat>();
+        telmoni_shared::test_util::assert_wire_words::<ExportStatus>();
+        telmoni_shared::test_util::assert_wire_words::<ExportFailure>();
     }
 
     /// ⚠ The words the table's CHECKs admit and the console's schema reads,
@@ -782,19 +690,6 @@ mod tests {
     }
 
     #[test]
-    fn from_str_round_trips_every_variant() {
-        for v in ExportFormat::all() {
-            assert_eq!(v.to_string().parse::<ExportFormat>().unwrap(), v);
-        }
-        for v in ExportStatus::all() {
-            assert_eq!(v.to_string().parse::<ExportStatus>().unwrap(), v);
-        }
-        for v in ExportFailure::all() {
-            assert_eq!(v.to_string().parse::<ExportFailure>().unwrap(), v);
-        }
-    }
-
-    #[test]
     fn from_str_rejects_unknown() {
         for word in ["JSON", "xml", ""] {
             assert!(word.parse::<ExportFormat>().is_err(), "parsed: {word:?}");
@@ -804,19 +699,6 @@ mod tests {
         }
         for word in ["too-large", "TooLarge", "timeout", ""] {
             assert!(word.parse::<ExportFailure>().is_err(), "parsed: {word:?}");
-        }
-    }
-
-    #[test]
-    fn serde_matches_display() {
-        for v in ExportFormat::all() {
-            assert_eq!(serde_json::to_string(&v).unwrap(), format!("\"{v}\""));
-        }
-        for v in ExportStatus::all() {
-            assert_eq!(serde_json::to_string(&v).unwrap(), format!("\"{v}\""));
-        }
-        for v in ExportFailure::all() {
-            assert_eq!(serde_json::to_string(&v).unwrap(), format!("\"{v}\""));
         }
     }
 }

@@ -4,14 +4,11 @@
 //! minted. From here both are a target to seal, a body to render and an
 //! error vocabulary to classify.
 
-use std::str::FromStr;
-
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use telmoni_shared::net_guard::{Egress, HostRejection};
 use telmoni_shared::{
-    ParseEnumError, Redacted, TelmoniError, text::truncate_on_char_boundary,
-    types::NotificationKind,
+    Redacted, TelmoniError, text::truncate_on_char_boundary, types::NotificationKind,
 };
 use uuid::Uuid;
 
@@ -30,21 +27,13 @@ pub enum Provider {
     Webhook,
 }
 
+// In the order the page lists them.
+telmoni_shared::wire_enum!(Provider {
+    Slack => "slack",
+    Webhook => "webhook",
+});
+
 impl Provider {
-    /// Every provider, in the order the page lists them.
-    #[must_use]
-    pub const fn all() -> [Self; 2] {
-        [Self::Slack, Self::Webhook]
-    }
-
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Slack => "slack",
-            Self::Webhook => "webhook",
-        }
-    }
-
     /// The name a customer reads.
     #[must_use]
     pub const fn label(self) -> &'static str {
@@ -62,22 +51,6 @@ impl Provider {
             Self::Slack => true,
             Self::Webhook => false,
         }
-    }
-}
-
-impl std::fmt::Display for Provider {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl FromStr for Provider {
-    type Err = ParseEnumError;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::all()
-            .into_iter()
-            .find(|p| p.as_str() == s)
-            .ok_or_else(|| ParseEnumError::new(s, "slack, webhook"))
     }
 }
 
@@ -135,37 +108,11 @@ pub enum ConnectionStatus {
     Revoked,
 }
 
-impl ConnectionStatus {
-    /// Every status, in wire order.
-    #[must_use]
-    pub const fn all() -> [Self; 3] {
-        [Self::Active, Self::Errored, Self::Revoked]
-    }
-
-    const fn as_str(self) -> &'static str {
-        match self {
-            Self::Active => "active",
-            Self::Errored => "errored",
-            Self::Revoked => "revoked",
-        }
-    }
-}
-
-impl std::fmt::Display for ConnectionStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl FromStr for ConnectionStatus {
-    type Err = ParseEnumError;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::all()
-            .into_iter()
-            .find(|status| status.as_str() == s)
-            .ok_or_else(|| ParseEnumError::new(s, "active, errored, revoked"))
-    }
-}
+telmoni_shared::wire_enum!(ConnectionStatus {
+    Active => "active",
+    Errored => "errored",
+    Revoked => "revoked",
+});
 
 /// Why a terminal failure is terminal, and so what to do to the connection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -470,65 +417,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn provider_round_trips_its_wire_spelling() {
-        for p in Provider::all() {
-            assert_eq!(p.as_str().parse::<Provider>().unwrap(), p);
-            assert_eq!(p.to_string(), p.as_str());
-            assert_eq!(serde_json::to_string(&p).unwrap(), format!("\"{p}\""));
-        }
+    fn the_words_are_the_wire_words() {
+        telmoni_shared::test_util::assert_wire_words::<Provider>();
+        telmoni_shared::test_util::assert_wire_words::<ConnectionStatus>();
+    }
+
+    #[test]
+    fn a_provider_parses_its_own_word_alone() {
         assert!("projects".parse::<Provider>().is_err());
         assert!("Slack".parse::<Provider>().is_err());
     }
 
-    /// A new variant fails to compile here until `all()` lists it.
     #[test]
-    fn all_lists_every_provider() {
-        for provider in Provider::all() {
-            match provider {
-                Provider::Slack | Provider::Webhook => {}
-            }
-        }
-        let mut seen: Vec<String> = Provider::all().iter().map(ToString::to_string).collect();
-        seen.sort();
-        seen.dedup();
-        assert_eq!(seen.len(), Provider::all().len(), "all() repeats a variant");
-    }
-
-    /// A new variant fails to compile here until `all()` lists it.
-    #[test]
-    fn all_lists_every_connection_status() {
-        for status in ConnectionStatus::all() {
-            match status {
-                ConnectionStatus::Active
-                | ConnectionStatus::Errored
-                | ConnectionStatus::Revoked => {}
-            }
-        }
-        let mut seen: Vec<String> = ConnectionStatus::all()
-            .iter()
-            .map(ToString::to_string)
-            .collect();
-        seen.sort();
-        seen.dedup();
-        assert_eq!(
-            seen.len(),
-            ConnectionStatus::all().len(),
-            "all() repeats a variant"
-        );
-    }
-
-    #[test]
-    fn a_connection_status_round_trips_its_wire_spelling() {
-        for status in ConnectionStatus::all() {
-            assert_eq!(
-                status.to_string().parse::<ConnectionStatus>().unwrap(),
-                status
-            );
-            assert_eq!(
-                serde_json::to_string(&status).unwrap(),
-                format!("\"{status}\"")
-            );
-        }
+    fn a_connection_status_parses_its_own_word_alone() {
         for unknown in ["Active", "pending", "disabled", ""] {
             assert!(
                 unknown.parse::<ConnectionStatus>().is_err(),

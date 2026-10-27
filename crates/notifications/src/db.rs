@@ -14,7 +14,7 @@ use telmoni_shared::db::tenant_session::{
     ProjectAndOrganization, Scoped,
 };
 use telmoni_shared::envelope::Sealed;
-use telmoni_shared::{NotificationKind, OrganizationId, ParseEnumError, ProjectId, UserId};
+use telmoni_shared::{NotificationKind, OrganizationId, ProjectId, UserId};
 use uuid::Uuid;
 
 use crate::connector::{ConnectionStatus, Provider};
@@ -1733,36 +1733,10 @@ pub enum AttemptTrigger {
     Manual,
 }
 
-impl AttemptTrigger {
-    /// Every trigger, in wire order.
-    #[must_use]
-    pub const fn all() -> [Self; 2] {
-        [Self::Scheduled, Self::Manual]
-    }
-
-    const fn as_str(self) -> &'static str {
-        match self {
-            Self::Scheduled => "scheduled",
-            Self::Manual => "manual",
-        }
-    }
-}
-
-impl std::fmt::Display for AttemptTrigger {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl std::str::FromStr for AttemptTrigger {
-    type Err = ParseEnumError;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::all()
-            .into_iter()
-            .find(|trigger| trigger.as_str() == s)
-            .ok_or_else(|| ParseEnumError::new(s, "scheduled, manual"))
-    }
-}
+telmoni_shared::wire_enum!(AttemptTrigger {
+    Scheduled => "scheduled",
+    Manual => "manual",
+});
 
 /// How one send ended, as the log keeps it: `delivered` exactly when it
 /// carries no error. Never pending, as its delivery may be: an attempt is a
@@ -1775,36 +1749,10 @@ pub enum AttemptOutcome {
     Failed,
 }
 
-impl AttemptOutcome {
-    /// Every outcome, in wire order.
-    #[must_use]
-    pub const fn all() -> [Self; 2] {
-        [Self::Delivered, Self::Failed]
-    }
-
-    const fn as_str(self) -> &'static str {
-        match self {
-            Self::Delivered => "delivered",
-            Self::Failed => "failed",
-        }
-    }
-}
-
-impl std::fmt::Display for AttemptOutcome {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl std::str::FromStr for AttemptOutcome {
-    type Err = ParseEnumError;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::all()
-            .into_iter()
-            .find(|outcome| outcome.as_str() == s)
-            .ok_or_else(|| ParseEnumError::new(s, "delivered, failed"))
-    }
-}
+telmoni_shared::wire_enum!(AttemptOutcome {
+    Delivered => "delivered",
+    Failed => "failed",
+});
 
 /// One send, as the delivery log keeps it. `error` is `None` exactly when it
 /// was delivered.
@@ -1917,37 +1865,11 @@ pub enum DeliveryStatus {
     Failed,
 }
 
-impl DeliveryStatus {
-    /// Every status, in wire order.
-    #[must_use]
-    pub const fn all() -> [Self; 3] {
-        [Self::Pending, Self::Delivered, Self::Failed]
-    }
-
-    const fn as_str(self) -> &'static str {
-        match self {
-            Self::Pending => "pending",
-            Self::Delivered => "delivered",
-            Self::Failed => "failed",
-        }
-    }
-}
-
-impl std::fmt::Display for DeliveryStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl std::str::FromStr for DeliveryStatus {
-    type Err = ParseEnumError;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::all()
-            .into_iter()
-            .find(|status| status.as_str() == s)
-            .ok_or_else(|| ParseEnumError::new(s, "pending, delivered, failed"))
-    }
-}
+telmoni_shared::wire_enum!(DeliveryStatus {
+    Pending => "pending",
+    Delivered => "delivered",
+    Failed => "failed",
+});
 
 /// One delivery as the log lists it, with its sends oldest first.
 #[derive(Debug, Serialize, FromRow)]
@@ -2396,60 +2318,11 @@ pub async fn queue_stats(
 mod tests {
     use super::*;
 
-    use std::fmt::{Debug, Display};
-    use std::str::FromStr;
-
-    fn spelled_once<T: Display>(all: &[T]) {
-        let mut seen: Vec<String> = all.iter().map(ToString::to_string).collect();
-        seen.sort();
-        seen.dedup();
-        assert_eq!(seen.len(), all.len(), "all() repeats a variant");
-    }
-
-    fn round_trips<T>(all: &[T])
-    where
-        T: Display + FromStr + PartialEq + Debug,
-        T::Err: Debug,
-    {
-        for v in all {
-            assert_eq!(&v.to_string().parse::<T>().unwrap(), v);
-        }
-    }
-
-    fn serde_matches<T: Display + Serialize>(all: &[T]) {
-        for v in all {
-            assert_eq!(serde_json::to_string(v).unwrap(), format!("\"{v}\""));
-        }
-    }
-
-    /// A new variant fails to compile here until its `all()` lists it.
     #[test]
-    fn all_lists_every_variant() {
-        for trigger in AttemptTrigger::all() {
-            match trigger {
-                AttemptTrigger::Scheduled | AttemptTrigger::Manual => {}
-            }
-        }
-        for outcome in AttemptOutcome::all() {
-            match outcome {
-                AttemptOutcome::Delivered | AttemptOutcome::Failed => {}
-            }
-        }
-        for status in DeliveryStatus::all() {
-            match status {
-                DeliveryStatus::Pending | DeliveryStatus::Delivered | DeliveryStatus::Failed => {}
-            }
-        }
-        spelled_once(&AttemptTrigger::all());
-        spelled_once(&AttemptOutcome::all());
-        spelled_once(&DeliveryStatus::all());
-    }
-
-    #[test]
-    fn from_str_round_trips_every_variant() {
-        round_trips(&AttemptTrigger::all());
-        round_trips(&AttemptOutcome::all());
-        round_trips(&DeliveryStatus::all());
+    fn the_words_are_the_wire_words() {
+        telmoni_shared::test_util::assert_wire_words::<AttemptTrigger>();
+        telmoni_shared::test_util::assert_wire_words::<AttemptOutcome>();
+        telmoni_shared::test_util::assert_wire_words::<DeliveryStatus>();
     }
 
     /// `pending` is a delivery's word and never an attempt's: an attempt is a
@@ -2474,12 +2347,5 @@ mod tests {
                 "parsed: {unknown:?}"
             );
         }
-    }
-
-    #[test]
-    fn serde_matches_display() {
-        serde_matches(&AttemptTrigger::all());
-        serde_matches(&AttemptOutcome::all());
-        serde_matches(&DeliveryStatus::all());
     }
 }
