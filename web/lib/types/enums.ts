@@ -367,6 +367,24 @@ export const AgentTool = {
 } as const;
 export type AgentTool = typeof AgentTool[keyof typeof AgentTool];
 
+/** Wire vocabulary of the Rust agent `MessageRole`: who wrote a message. */
+export const AgentMessageRole = {
+  User:      "user",
+  Assistant: "assistant",
+} as const;
+export type AgentMessageRole = typeof AgentMessageRole[keyof typeof AgentMessageRole];
+
+/** Wire vocabulary of the Rust `TurnEventKind`: a turn's stream event names. */
+export const AgentTurnEvent = {
+  Conversation: "conversation",
+  Text:         "text",
+  Tool:         "tool",
+  Citation:     "citation",
+  Done:         "done",
+  Error:        "error",
+} as const;
+export type AgentTurnEvent = typeof AgentTurnEvent[keyof typeof AgentTurnEvent];
+
 /** The live channel's spellings, as the server publishes on them (`live.rs`). */
 export const Live = {
   organizationChannel: "bfev:organization:",

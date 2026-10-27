@@ -188,6 +188,26 @@ pub async fn post_turn(
         .into_response())
 }
 
+/// A turn event's name on the stream, its SSE `event:` line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TurnEventKind {
+    Conversation,
+    Text,
+    Tool,
+    Citation,
+    Done,
+    Error,
+}
+
+telmoni_shared::wire_enum!(TurnEventKind {
+    Conversation => "conversation",
+    Text => "text",
+    Tool => "tool",
+    Citation => "citation",
+    Done => "done",
+    Error => "error",
+});
+
 /// One event of a turn's stream, as `web/lib/agent/stream.ts` parses it.
 enum TurnEvent<'a> {
     Conversation {
@@ -210,26 +230,26 @@ enum TurnEvent<'a> {
 
 impl TurnEvent<'_> {
     fn into_sse(self) -> Event {
-        let (name, data) = match self {
+        let (kind, data) = match self {
             Self::Conversation { conversation_id } => (
-                "conversation",
+                TurnEventKind::Conversation,
                 json!({ "conversation_id": conversation_id }),
             ),
-            Self::Text(delta) => ("text", json!({ "delta": delta })),
-            Self::Tool(name) => ("tool", json!({ "name": name })),
-            Self::Citation(citation) => ("citation", json!(citation)),
+            Self::Text(delta) => (TurnEventKind::Text, json!({ "delta": delta })),
+            Self::Tool(name) => (TurnEventKind::Tool, json!({ "name": name })),
+            Self::Citation(citation) => (TurnEventKind::Citation, json!(citation)),
             Self::Done {
                 conversation_id,
                 message_id,
             } => (
-                "done",
+                TurnEventKind::Done,
                 json!({ "conversation_id": conversation_id, "message_id": message_id }),
             ),
             Self::Error {
                 conversation_id,
                 problem,
             } => (
-                "error",
+                TurnEventKind::Error,
                 json!({
                     "conversation_id": conversation_id,
                     "type": problem.type_uri,
@@ -238,7 +258,7 @@ impl TurnEvent<'_> {
                 }),
             ),
         };
-        Event::default().event(name).data(data.to_string())
+        Event::default().event(kind.as_str()).data(data.to_string())
     }
 }
 

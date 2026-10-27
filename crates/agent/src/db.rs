@@ -82,8 +82,8 @@ impl From<Audience> for Visibility {
     }
 }
 
-/// Who wrote a message: `agent.messages.role`. The console reads it as
-/// `AGENT_ROLES` (`web/lib/types/agent.ts`).
+/// Who wrote a message: `agent.messages.role`, read by the console from the
+/// wire contract.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, sqlx::Type, Serialize, Deserialize)]
 #[sqlx(type_name = "text", rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]

@@ -2,6 +2,8 @@
 // server's wire shape at the entity (`lib/server/entities/agent.ts`) and at
 // the stream parser (`lib/agent/stream.ts`), so the panel reads one spelling.
 
+import type { AgentMessageRole } from "./enums";
+
 // The server's own ceiling, after trim. The console refuses past it too, so a
 // message it forwards is never one the server would turn away for length.
 export const AGENT_MESSAGE_MAX = 4000;
@@ -13,9 +15,6 @@ export interface AgentCitation {
   url: string | null;
 }
 
-export const AGENT_ROLES = ["user", "assistant"] as const;
-export type AgentRole = (typeof AGENT_ROLES)[number];
-
 // The agent's own problem types, which the panel words itself.
 export const AGENT_PROBLEM = {
   disabled: "/errors/agent/disabled",
@@ -25,7 +24,7 @@ export const AGENT_PROBLEM = {
 
 export interface AgentMessage {
   id: string;
-  role: AgentRole;
+  role: AgentMessageRole;
   content: string;
   citations: AgentCitation[];
 }

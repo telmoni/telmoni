@@ -6,7 +6,7 @@ import {
   type AgentConversation,
   type AgentMessage,
 } from "@/lib/types/agent";
-import type { AgentTool } from "@/lib/types/enums";
+import { type AgentTool, AgentTurnEvent } from "@/lib/types/enums";
 
 export type AgentEvent =
   | { type: "conversation"; conversationId: string }
@@ -50,23 +50,23 @@ export function parseAgentEvent(name: string, data: string): AgentEvent | null {
     return null;
   }
   switch (name) {
-    case "conversation": {
+    case AgentTurnEvent.Conversation: {
       const p = ConversationData.safeParse(body);
       return p.success ? { type: "conversation", conversationId: p.data.conversation_id } : null;
     }
-    case "text": {
+    case AgentTurnEvent.Text: {
       const p = TextData.safeParse(body);
       return p.success ? { type: "text", delta: p.data.delta } : null;
     }
-    case "tool": {
+    case AgentTurnEvent.Tool: {
       const p = ToolData.safeParse(body);
       return p.success ? { type: "tool", name: p.data.name } : null;
     }
-    case "citation": {
+    case AgentTurnEvent.Citation: {
       const p = CitationData.safeParse(body);
       return p.success ? { type: "citation", citation: p.data } : null;
     }
-    case "done": {
+    case AgentTurnEvent.Done: {
       const p = DoneData.safeParse(body);
       return p.success
         ? {
@@ -76,7 +76,7 @@ export function parseAgentEvent(name: string, data: string): AgentEvent | null {
           }
         : null;
     }
-    case "error": {
+    case AgentTurnEvent.Error: {
       const p = ErrorData.safeParse(body);
       return p.success
         ? {

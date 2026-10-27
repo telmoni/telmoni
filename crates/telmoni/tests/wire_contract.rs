@@ -5,6 +5,8 @@
 use std::path::PathBuf;
 
 use serde_json::{Value, json};
+use telmoni_agent::db::MessageRole;
+use telmoni_agent::handler::TurnEventKind;
 use telmoni_agent::tools::Tool;
 use telmoni_auth::audit_export::{ExportFailure, ExportFormat, ExportStatus};
 use telmoni_auth::model::InviteScope;
@@ -68,6 +70,8 @@ fn generated_contract() -> Value {
             "ExportFailure": wire::<ExportFailure>(),
             "InviteScope": wire::<InviteScope>(),
             "AgentTool": Tool::ALL.map(Tool::name),
+            "AgentMessageRole": wire::<MessageRole>(),
+            "AgentTurnEvent": wire::<TurnEventKind>(),
         },
         "flags": {
             "global_only": Flag::all().iter().filter(|f| f.is_global_only())

@@ -5,11 +5,11 @@ import { fetchWithTimeout } from "@/lib/api/fetch";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import {
-  AGENT_ROLES,
   type AgentConversation,
   type AgentConversationSummary,
   type AgentStatus,
 } from "@/lib/types/agent";
+import { AgentMessageRole } from "@/lib/types/enums";
 
 import { identityContext, projectHeaders } from "./identity-context";
 import { fetchProjectAnywhere } from "./projects";
@@ -44,7 +44,7 @@ const ConversationSchema = z.object({
   messages: z.array(
     z.object({
       id: z.string(),
-      role: z.enum(AGENT_ROLES),
+      role: z.enum(AgentMessageRole),
       content: z.string(),
       citations: z.array(CitationData),
       created_at: z.string(),

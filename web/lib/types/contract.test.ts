@@ -4,7 +4,9 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import {
+  AgentMessageRole,
   AgentTool,
+  AgentTurnEvent,
   ApiKeyScope,
   asRole,
   AttemptOutcome,
@@ -62,7 +64,9 @@ const contract = JSON.parse(
 // Every enum the server publishes, and the console's copy of it. A new one
 // in the contract fails the first test until it is added here.
 const CONSOLE: Record<string, Record<string, string>> = {
+  AgentMessageRole,
   AgentTool,
+  AgentTurnEvent,
   ApiKeyScope,
   AttemptOutcome,
   AttemptTrigger,
