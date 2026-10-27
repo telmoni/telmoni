@@ -17,6 +17,7 @@ import {
 import type { WindowQuery } from "@/lib/list-query";
 import type { PinnedSpan, SessionDetail, SessionTrace, TraceDetail } from "@/lib/server/data";
 import {
+  STATUS_LABEL,
   TRACE_COLUMNS,
   formatDuration,
   shortId,
@@ -288,7 +289,7 @@ function PinnedStrip({ spans }: { spans: readonly PinnedSpan[] }) {
           <span className="truncate">{spanTitle(span)}</span>
           <span className="tabular-nums text-muted-foreground">{formatDuration(spanMillis(span))}</span>
           {span.status === SpanStatus.Error && (
-            <span className="text-destructive">{span.error_type || "Error"}</span>
+            <span className="text-destructive">{span.error_type || STATUS_LABEL[span.status]}</span>
           )}
         </li>
       ))}

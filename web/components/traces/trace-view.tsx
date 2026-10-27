@@ -27,6 +27,7 @@ import {
 import Link from "next/link";
 
 import { LocalTime } from "@/components/local-time";
+import { StatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -119,19 +120,7 @@ export function KindIcon({
 
 /** How a span ended, the error's class beside it where it failed. */
 function SpanStatusBadge({ span }: { span: Pick<TraceSpan, "status" | "error_type"> }) {
-  if (span.status === SpanStatus.Error) {
-    return (
-      <Badge variant="destructive" className="font-normal">
-        {STATUS_LABEL[span.status]}
-        {span.error_type ? `: ${span.error_type}` : ""}
-      </Badge>
-    );
-  }
-  return (
-    <Badge variant={span.status === SpanStatus.Cancelled ? "secondary" : "outline"} className="font-normal">
-      {STATUS_LABEL[span.status]}
-    </Badge>
-  );
+  return <StatusBadge status={span.status} detail={span.error_type} />;
 }
 
 /** A value with a page of its own, linked there, with the arrow that says
@@ -202,13 +191,7 @@ export const TraceMeta = memo(function TraceMeta({
   const tokens = summary.inputTokens + summary.outputTokens;
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-muted-foreground">
-      {run ? (
-        <SpanStatusBadge span={run} />
-      ) : (
-        <Badge variant="secondary" className="font-normal">
-          Running
-        </Badge>
-      )}
+      <StatusBadge status={run?.status ?? null} detail={run?.error_type} />
       <LocalTime iso={summary.startedAt} />
       <span className="tabular-nums">{formatDuration(summary.durationMs)}</span>
       <span

@@ -1,6 +1,6 @@
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/status-badge";
 import type { Trace } from "@/lib/server/entities/traces";
-import { formatCount, STATUS_LABEL } from "@/lib/traces";
+import { formatCount } from "@/lib/traces";
 import { SpanStatus } from "@/lib/types/enums";
 
 // A trace's status as a list shows it: the run's own, and beside any but
@@ -12,19 +12,7 @@ export function TraceStatusBadge({
 }: {
   trace: Pick<Trace, "ended" | "status" | "errors">;
 }) {
-  const badge = !trace.ended ? (
-    <Badge variant="secondary" className="font-normal">
-      Running
-    </Badge>
-  ) : trace.status === SpanStatus.Error ? (
-    <Badge variant="destructive" className="font-normal">
-      {STATUS_LABEL[trace.status]}
-    </Badge>
-  ) : (
-    <Badge variant="outline" className="font-normal">
-      {STATUS_LABEL[trace.status]}
-    </Badge>
-  );
+  const badge = <StatusBadge status={trace.ended ? trace.status : null} />;
   if (trace.errors === 0 || (trace.ended && trace.status === SpanStatus.Error)) return badge;
   return (
     <span className="inline-flex items-center gap-1.5">
