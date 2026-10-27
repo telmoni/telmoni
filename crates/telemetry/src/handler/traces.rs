@@ -38,6 +38,33 @@ use crate::traces::{
     MAX_LIMIT, MAX_PAGE, RUNS_MAX, SPANS_MAX, TRACE_UNITS_MAX, TraceFilter, TraceRow,
 };
 
+/// The longest value each filter takes, in characters, by its name in a URL:
+/// a tag's is its key, colon and value.
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct FilterValueMax {
+    pub agent: usize,
+    pub user: usize,
+    pub session: usize,
+    pub model: usize,
+    pub tool: usize,
+    pub environment: usize,
+    pub release: usize,
+    pub tag: usize,
+    pub prompt: usize,
+}
+
+pub const FILTER_VALUE_MAX: FilterValueMax = FilterValueMax {
+    agent: AGENT_MAX,
+    user: USER_ID_MAX,
+    session: SESSION_ID_MAX,
+    model: MODEL_MAX,
+    tool: NAME_MAX,
+    environment: ENVIRONMENT_MAX,
+    release: RELEASE_MAX,
+    tag: TAG_KEY_MAX + 1 + TAG_VALUE_MAX,
+    prompt: ATTRIBUTE_VALUE_MAX,
+};
+
 /// Which lane a query string is read for. Each takes the filters and the
 /// window, and its own parameters beside them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -201,16 +228,20 @@ impl TraceQuery {
             })
             .collect::<Result<Vec<_>, _>>()?;
         Ok(TraceFilter {
-            agents: values("agent", &self.agent, AGENT_MAX)?,
-            user_ids: values("user", &self.user, USER_ID_MAX)?,
-            session_ids: values("session", &self.session, SESSION_ID_MAX)?,
+            agents: values("agent", &self.agent, FILTER_VALUE_MAX.agent)?,
+            user_ids: values("user", &self.user, FILTER_VALUE_MAX.user)?,
+            session_ids: values("session", &self.session, FILTER_VALUE_MAX.session)?,
             statuses,
-            models: values("model", &self.model, MODEL_MAX)?,
-            tools: values("tool", &self.tool, NAME_MAX)?,
-            environments: values("environment", &self.environment, ENVIRONMENT_MAX)?,
-            releases: values("release", &self.release, RELEASE_MAX)?,
+            models: values("model", &self.model, FILTER_VALUE_MAX.model)?,
+            tools: values("tool", &self.tool, FILTER_VALUE_MAX.tool)?,
+            environments: values(
+                "environment",
+                &self.environment,
+                FILTER_VALUE_MAX.environment,
+            )?,
+            releases: values("release", &self.release, FILTER_VALUE_MAX.release)?,
             tags: tag_values(&self.tag)?,
-            prompts: values("prompt", &self.prompt, ATTRIBUTE_VALUE_MAX)?,
+            prompts: values("prompt", &self.prompt, FILTER_VALUE_MAX.prompt)?,
             runs,
             days: parse_days(self.days.as_deref().unwrap_or_default())?,
         })
@@ -336,7 +367,7 @@ fn values_up_to(
 /// A tag filter's values, each `key:value` as ingest keeps a tag: the key 1
 /// to [`TAG_KEY_MAX`] characters, the value up to [`TAG_VALUE_MAX`].
 fn tag_values(given: &[String]) -> Result<Vec<String>, TelmoniError> {
-    let pairs = values("tag", given, TAG_KEY_MAX + 1 + TAG_VALUE_MAX)?;
+    let pairs = values("tag", given, FILTER_VALUE_MAX.tag)?;
     for pair in &pairs {
         let well_formed = pair.split_once(':').is_some_and(|(key, value)| {
             (1..=TAG_KEY_MAX).contains(&key.chars().count())
@@ -419,7 +450,7 @@ fn parse_page(text: &str) -> Result<u32, TelmoniError> {
 
 /// The furthest west and east a clock is set from UTC, in minutes: UTC−12
 /// and UTC+14.
-const UTC_OFFSET_RANGE: std::ops::RangeInclusive<i16> = -720..=840;
+pub const UTC_OFFSET_RANGE: std::ops::RangeInclusive<i16> = -720..=840;
 
 /// `utc_offset` as a URL carries it: the reader's clock in whole minutes
 /// east of UTC, and UTC itself when empty.

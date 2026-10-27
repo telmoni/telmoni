@@ -18,15 +18,23 @@ use crate::model::{
 /// it wrote so far with a note, rather than a bill for a hundred calls.
 pub const MAX_TOOL_ROUNDS: usize = 8;
 
-/// How long one turn may run, every model call and tool included.
-///
-/// ⚠ **Under the console's `AGENT_STREAM_TIMEOUT_MS` (120 s, in
-/// `web/lib/server/entities/agent.ts`)**, which cuts the stream wherever it
-/// is. Nine model calls of `AGENT_MODEL_TIMEOUT_SECS` each can take far
-/// longer, and a turn the console cut off reached the person as "couldn't
-/// reach the agent" halfway through a reply, with nothing saved. Ending it
-/// here first leaves room to save what was written, cite it and say `done`.
+/// How long one turn may run, every model call and tool included: nine model
+/// calls can take far longer, and a turn the console cut off mid-reply saved
+/// nothing. Ending it first leaves room to save, cite and say `done`.
 pub const TURN_BUDGET: Duration = Duration::from_secs(100);
+
+/// The longest a turn's stream runs: the budget, the last check for an asker
+/// gone, the save on its lock and the rest of the save and `done`. The wire
+/// contract holds the console's cut-off above it.
+pub const STREAM_MAX: Duration = Duration::from_secs(
+    TURN_BUDGET.as_secs()
+        + crate::handler::FINAL_RECHECK.as_secs()
+        + crate::db::SAVE_STATEMENT.as_secs()
+        + REST_OF_THE_SAVE.as_secs(),
+);
+
+/// The save's work past its statement on the lock, and the `done` event.
+const REST_OF_THE_SAVE: Duration = Duration::from_secs(5);
 
 /// How often a model call is checked, while it streams, for an asker who
 /// has gone.
@@ -741,17 +749,5 @@ mod tests {
     #[test]
     fn the_cap_note_names_the_cap() {
         assert!(CAPPED_NOTE.contains(&format!("{MAX_TOOL_ROUNDS} times")));
-    }
-
-    /// The console's own cut-off (`AGENT_STREAM_TIMEOUT_MS`), which the
-    /// budget has to leave room under: the last check for an asker gone,
-    /// the save's wait on the erasure lock, and the rest of the save and the
-    /// `done` event.
-    #[test]
-    fn the_budget_ends_a_turn_before_the_console_gives_up_on_it() {
-        const CONSOLE_STREAM_TIMEOUT: Duration = Duration::from_secs(120);
-        const REST_OF_THE_SAVE: Duration = Duration::from_secs(5);
-        let after = crate::handler::FINAL_RECHECK + crate::db::SAVE_STATEMENT + REST_OF_THE_SAVE;
-        assert!(TURN_BUDGET + after <= CONSOLE_STREAM_TIMEOUT);
     }
 }

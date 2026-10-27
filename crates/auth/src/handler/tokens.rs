@@ -36,8 +36,8 @@ const DEFAULT_TTL_DAYS: i64 = 90;
 
 /// A key's name and description, in characters, as every caller of the
 /// lane is held to them.
-const MAX_KEY_NAME: usize = 100;
-const MAX_KEY_DESCRIPTION: usize = 500;
+pub const MAX_KEY_NAME: usize = 100;
+pub const MAX_KEY_DESCRIPTION: usize = 500;
 
 /// Default grace window for a rotation: 24 hours for a deploy to ship the new
 /// token. An emergency rotation sends `grace_seconds: 0`.

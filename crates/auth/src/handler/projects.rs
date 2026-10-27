@@ -19,7 +19,7 @@ use crate::handler::emit_audit;
 
 /// The longest a project name may be. The column is unconstrained, so this is
 /// the only thing enforcing it.
-pub(crate) const MAX_PROJECT_NAME: usize = 100;
+pub const MAX_PROJECT_NAME: usize = 100;
 
 /// A submitted project name as a project carries it: shared by create and
 /// rename so the two cannot drift. It is printed in mail subjects, so it is

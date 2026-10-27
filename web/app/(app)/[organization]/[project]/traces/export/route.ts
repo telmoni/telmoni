@@ -4,11 +4,7 @@ import { z } from "zod";
 import { listDownload } from "@/lib/api/list-download";
 import { many } from "@/lib/list-query";
 import { traceDownload } from "@/lib/server/data";
-import { parseTraceQuery } from "@/lib/traces";
-
-/** The most runs a download names: a page's chosen rows, as the server
- *  takes them. */
-const RUNS_MAX = 100;
+import { RUNS_MAX, parseTraceQuery } from "@/lib/traces";
 
 // The trace list as a file: the filters and the sort its URL carries, or the
 // runs chosen on its page, as CSV for a spreadsheet or the list's own JSON.

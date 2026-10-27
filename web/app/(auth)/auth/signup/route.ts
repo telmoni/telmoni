@@ -5,6 +5,7 @@ import { PKCE_COOKIE, cookieOpts, getSession, sealPkce } from "@/lib/auth/sessio
 import { safeReturnTo } from "@/lib/api/fetch";
 import { clientKey, rateLimitRetryAfter } from "@/lib/api/rate-limit";
 import { logger } from "@/lib/logger";
+import { MAX_EMAIL } from "@/lib/names";
 
 const AUTH_START_CEILING = { limit: 60, windowMs: 60_000 };
 
@@ -77,6 +78,6 @@ export async function GET(request: NextRequest) {
 
 function loginHint(raw: string | null): string | undefined {
   const value = raw?.trim() ?? "";
-  if (value.length === 0 || value.length > 254) return undefined;
+  if (value.length === 0 || [...value].length > MAX_EMAIL) return undefined;
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value) ? value : undefined;
 }

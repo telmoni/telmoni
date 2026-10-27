@@ -6,9 +6,14 @@ use std::path::PathBuf;
 
 use serde_json::{Value, json};
 use telmoni_agent::db::MessageRole;
-use telmoni_agent::handler::TurnEventKind;
+use telmoni_agent::handler::{MESSAGE_MAX_CHARS, TurnEventKind};
 use telmoni_agent::tools::Tool;
-use telmoni_auth::audit_export::{ExportFailure, ExportFormat, ExportStatus};
+use telmoni_agent::turn::STREAM_MAX;
+use telmoni_auth::audit_export::{ExportFailure, ExportFormat, ExportStatus, KEEP_FOR_SECS};
+use telmoni_auth::db::organizations::MAX_ORGANIZATION_NAME;
+use telmoni_auth::handler::projects::MAX_PROJECT_NAME;
+use telmoni_auth::handler::tokens::{MAX_KEY_DESCRIPTION, MAX_KEY_NAME};
+use telmoni_auth::identity::MAX_EMAIL_LEN;
 use telmoni_auth::model::InviteScope;
 use telmoni_notifications::connector::{ConnectionStatus, Provider};
 use telmoni_notifications::db::{AttemptOutcome, AttemptTrigger, DeliveryStatus};
@@ -19,13 +24,36 @@ use telmoni_shared::{
     RuleMeasure, RuleOperator, RuleWindow, SessionSort, Severity, SortDirection, SpanKind,
     SpanStatus, TelmoniResourceKind, TraceColumn, TraceSort, UserSort, ViewKind, slug,
 };
+use telmoni_telemetry::handler::incidents::INCIDENTS_MAX;
+use telmoni_telemetry::handler::traces::{FILTER_VALUE_MAX, UTC_OFFSET_RANGE};
 use telmoni_telemetry::live;
 use telmoni_telemetry::rules::db::PausedBy;
+use telmoni_telemetry::rules::mutes::MUTE_DAYS_MAX;
+use telmoni_telemetry::rules::{LINKS_MAX, RENOTIFY_MAX_MINUTES, RULE_NAME_MAX, folds};
+use telmoni_telemetry::traces::{
+    DEFAULT_DAYS, EXPORT_MAX, FILTER_VALUES_MAX, MAX_DAYS, MAX_LIMIT, MAX_PAGE, PINNED_MAX,
+    PINNED_PER_RUN, RUNS_MAX,
+};
 
 /// A vocabulary's words in its table's order, each the one serde writes
 /// (`telmoni_shared::test_util::assert_wire_words` holds the two together).
 fn wire<T: WireEnum>() -> Vec<&'static str> {
     T::variants().iter().map(|variant| variant.word()).collect()
+}
+
+/// Each measure's aggregations, as the alert lane folds them.
+fn rule_folds() -> serde_json::Map<String, Value> {
+    RuleMeasure::all()
+        .iter()
+        .map(|&measure| {
+            let aggregations: Vec<&str> = RuleAggregation::all()
+                .iter()
+                .filter(|&&aggregation| folds(measure, aggregation))
+                .map(|aggregation| aggregation.as_str())
+                .collect();
+            (measure.as_str().to_owned(), json!(aggregations))
+        })
+        .collect()
 }
 
 /// The contract as the live vocabularies define it.
@@ -91,6 +119,34 @@ fn generated_contract() -> Value {
             "organization_channel": live::ORGANIZATION_CHANNEL,
             "spans_ingested": live::SPANS_INGESTED,
         },
+        "limits": {
+            "list_default_days": DEFAULT_DAYS,
+            "list_max_days": MAX_DAYS,
+            "list_max_limit": MAX_LIMIT,
+            "list_max_page": MAX_PAGE,
+            "list_export_max": EXPORT_MAX,
+            "list_runs_max": RUNS_MAX,
+            "filter_values_max": FILTER_VALUES_MAX,
+            "filter_value_max": FILTER_VALUE_MAX,
+            "pinned_max": PINNED_MAX,
+            "pinned_per_run": PINNED_PER_RUN,
+            "utc_offset_west": *UTC_OFFSET_RANGE.start(),
+            "utc_offset_east": *UTC_OFFSET_RANGE.end(),
+            "alert_name_max": RULE_NAME_MAX,
+            "alert_renotify_max_minutes": RENOTIFY_MAX_MINUTES,
+            "alert_links_max": LINKS_MAX,
+            "mute_days_max": MUTE_DAYS_MAX,
+            "incidents_max": INCIDENTS_MAX,
+            "organization_name_max": MAX_ORGANIZATION_NAME,
+            "project_name_max": MAX_PROJECT_NAME,
+            "api_key_name_max": MAX_KEY_NAME,
+            "api_key_description_max": MAX_KEY_DESCRIPTION,
+            "email_max": MAX_EMAIL_LEN,
+            "agent_message_max": MESSAGE_MAX_CHARS,
+            "agent_stream_max_secs": STREAM_MAX.as_secs(),
+            "audit_export_kept_days": KEEP_FOR_SECS / 86_400,
+        },
+        "rules": { "folds": rule_folds() },
     })
 }
 

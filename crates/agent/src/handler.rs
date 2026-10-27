@@ -35,9 +35,9 @@ use crate::prompt;
 use crate::tools::{self, Citation, Citations};
 use crate::turn::{self, Ending, Runner};
 
-/// The longest question, in characters. The console refuses past it too
-/// (`AGENT_MESSAGE_MAX` in `web/lib/types/agent.ts`).
-const MESSAGE_MAX_CHARS: usize = 4_000;
+/// The longest question, in characters. The console refuses past it too,
+/// held to it by the wire contract.
+pub const MESSAGE_MAX_CHARS: usize = 4_000;
 
 /// How much of the first question titles a new conversation.
 const TITLE_CHARS: usize = 80;

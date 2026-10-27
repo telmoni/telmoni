@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { API_KEY_SCOPES } from "@/lib/api-key-scopes";
+import { MAX_API_KEY_DESCRIPTION, MAX_API_KEY_NAME, typedBound } from "@/lib/names";
 import { PRODUCT_NAME } from "@/lib/site";
 import type { ApiKeyScope } from "@/lib/types/enums";
 
@@ -180,7 +181,7 @@ function MintKeyPanel({
                 setName(e.target.value);
                 setError(null);
               }}
-              maxLength={100}
+              maxLength={typedBound(MAX_API_KEY_NAME)}
               placeholder="e.g. ci-deploy"
               autoComplete="off"
               required
@@ -195,7 +196,7 @@ function MintKeyPanel({
               id="key-description"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              maxLength={500}
+              maxLength={typedBound(MAX_API_KEY_DESCRIPTION)}
               placeholder="What is this key for?"
               autoComplete="off"
               disabled={pending}

@@ -47,7 +47,28 @@ import {
   UserSort,
   ViewKind,
 } from "./enums";
+import { AGENT_MESSAGE_MAX, AGENT_STREAM_TIMEOUT_MS } from "./agent";
+import { AUDIT_EXPORT_KEPT_DAYS } from "./audit-export";
+import {
+  ALERT_NAME_MAX,
+  INCIDENTS_MAX,
+  LINKS_MAX,
+  MUTE_MINUTES_MAX,
+  RENOTIFY_MAX_MINUTES,
+  aggregationsFor,
+} from "../alerts";
+import { PINNED_MAX, PINNED_PER_TRACE } from "../layout";
+import { FILTER_VALUES_MAX, MAX_DAYS, MAX_LIMIT, OPENING_DAYS } from "../list-query";
+import {
+  MAX_API_KEY_DESCRIPTION,
+  MAX_API_KEY_NAME,
+  MAX_EMAIL,
+  MAX_ORGANIZATION_NAME,
+  MAX_PROJECT_NAME,
+} from "../names";
 import { RESERVED_ORGANIZATION_SLUGS, RESERVED_PROJECT_SLUGS, SLUG_MAX_LENGTH } from "../slug";
+import { DOWNLOAD_MAX, FILTER_VALUE_MAX, MAX_PAGE, RUNS_MAX } from "../traces";
+import { UTC_OFFSET_EAST, UTC_OFFSET_WEST } from "../utc-offset";
 
 const contract = JSON.parse(
   readFileSync(
@@ -59,7 +80,12 @@ const contract = JSON.parse(
   flags: { off_detail: Record<string, string> };
   slugs: { max_length: number; reserved: { organization: string[]; project: string[] } };
   live: { organization_channel: string; spans_ingested: string };
+  limits: { agent_stream_max_secs: number; [limit: string]: unknown };
+  rules: { folds: Record<string, string[]> };
 };
+
+// The one limit the console exceeds rather than copies.
+const { agent_stream_max_secs: STREAM_MAX_SECS, ...LIMITS } = contract.limits;
 
 // Every enum the server publishes, and the console's copy of it. A new one
 // in the contract fails the first test until it is added here.
@@ -126,6 +152,50 @@ describe("wire contract", () => {
   it("listens where the server publishes, for the event it names", () => {
     expect(Live.organizationChannel).toBe(contract.live.organization_channel);
     expect(Live.spansIngested).toBe(contract.live.spans_ingested);
+  });
+
+  // The console checks these before it asks, so a copy below the server's
+  // refuses what the server takes, and one above sends what it refuses.
+  it("the console's limits are the server's", () => {
+    expect({
+      list_default_days: OPENING_DAYS,
+      list_max_days: MAX_DAYS,
+      list_max_limit: MAX_LIMIT,
+      list_max_page: MAX_PAGE,
+      list_export_max: DOWNLOAD_MAX,
+      list_runs_max: RUNS_MAX,
+      filter_values_max: FILTER_VALUES_MAX,
+      filter_value_max: FILTER_VALUE_MAX,
+      pinned_max: PINNED_MAX,
+      pinned_per_run: PINNED_PER_TRACE,
+      utc_offset_west: UTC_OFFSET_WEST,
+      utc_offset_east: UTC_OFFSET_EAST,
+      alert_name_max: ALERT_NAME_MAX,
+      alert_renotify_max_minutes: RENOTIFY_MAX_MINUTES,
+      alert_links_max: LINKS_MAX,
+      mute_days_max: MUTE_MINUTES_MAX / 1_440,
+      incidents_max: INCIDENTS_MAX,
+      organization_name_max: MAX_ORGANIZATION_NAME,
+      project_name_max: MAX_PROJECT_NAME,
+      api_key_name_max: MAX_API_KEY_NAME,
+      api_key_description_max: MAX_API_KEY_DESCRIPTION,
+      email_max: MAX_EMAIL,
+      agent_message_max: AGENT_MESSAGE_MAX,
+      audit_export_kept_days: AUDIT_EXPORT_KEPT_DAYS,
+    }).toEqual(LIMITS);
+  });
+
+  // The server ends a turn and saves it first; a console that cut the
+  // stream sooner would lose the reply mid-sentence.
+  it("the console waits on a turn longer than the server lets one run", () => {
+    expect(AGENT_STREAM_TIMEOUT_MS).toBeGreaterThan(STREAM_MAX_SECS * 1_000);
+  });
+
+  // The form offers what the server folds, and nothing it refuses.
+  it("the alert form folds each measure as the server does", () => {
+    for (const measure of Object.values(RuleMeasure)) {
+      expect([...aggregationsFor(measure)].sort()).toEqual([...contract.rules.folds[measure]!].sort());
+    }
   });
 
   // The proxy reads a path's first segment as an organization unless it is

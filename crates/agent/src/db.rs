@@ -798,7 +798,7 @@ const OPEN_FENCE_MINUTES: i32 = 15;
 /// How long saving an answer may wait on its organization's erasure lock: a
 /// fence holds it only as long as its own two-second waits for the other
 /// keys allow. The turn's budget, this and the rest of the save stay under
-/// the console's cut-off (`turn::TURN_BUDGET`).
+/// the console's cut-off (`turn::STREAM_MAX`).
 pub(crate) const SAVE_LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// The save's statement on the lock as a whole, the wait in it.

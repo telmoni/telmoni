@@ -10,8 +10,8 @@ import { isSessionBlacklisted } from "@/lib/auth/session-blacklist";
 import { isProjectId } from "@/lib/connect";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
-import { AGENT_STREAM_TIMEOUT_MS, agentHeaders } from "@/lib/server/entities/agent";
-import { AGENT_MESSAGE_MAX } from "@/lib/types/agent";
+import { agentHeaders } from "@/lib/server/entities/agent";
+import { AGENT_MESSAGE_MAX, AGENT_STREAM_TIMEOUT_MS } from "@/lib/types/agent";
 
 // Six bytes a character at the message ceiling — what JSON makes of a control
 // character (`\u0001`) — and room for the ids around them. Anything past it
@@ -26,7 +26,12 @@ const TURNS = { limit: 20, windowMs: 60_000 };
 const TurnBody = z.object({
   projectId: z.string().refine(isProjectId),
   conversationId: z.uuid().nullable().optional(),
-  message: z.string().trim().min(1).max(AGENT_MESSAGE_MAX),
+  // In characters, as the server counts: Zod's `max` counts UTF-16 units.
+  message: z
+    .string()
+    .trim()
+    .min(1)
+    .refine((message) => [...message].length <= AGENT_MESSAGE_MAX),
 });
 
 const PROBLEM_JSON = "application/problem+json";

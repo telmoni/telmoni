@@ -273,9 +273,74 @@
       "signup": "Sign-ups are closed right now."
     }
   },
+  "limits": {
+    "agent_message_max": 4000,
+    "agent_stream_max_secs": 115,
+    "alert_links_max": 20,
+    "alert_name_max": 60,
+    "alert_renotify_max_minutes": 10080,
+    "api_key_description_max": 500,
+    "api_key_name_max": 100,
+    "audit_export_kept_days": 7,
+    "email_max": 254,
+    "filter_value_max": {
+      "agent": 128,
+      "environment": 128,
+      "model": 128,
+      "prompt": 1024,
+      "release": 128,
+      "session": 200,
+      "tag": 321,
+      "tool": 145,
+      "user": 128
+    },
+    "filter_values_max": 50,
+    "incidents_max": 200,
+    "list_default_days": 7,
+    "list_export_max": 10000,
+    "list_max_days": 360,
+    "list_max_limit": 500,
+    "list_max_page": 1000,
+    "list_runs_max": 100,
+    "mute_days_max": 30,
+    "organization_name_max": 80,
+    "pinned_max": 8,
+    "pinned_per_run": 32,
+    "project_name_max": 100,
+    "utc_offset_east": 840,
+    "utc_offset_west": -720
+  },
   "live": {
     "organization_channel": "bfev:organization:",
     "spans_ingested": "spans:ingested"
+  },
+  "rules": {
+    "folds": {
+      "cost": [
+        "avg",
+        "sum",
+        "max"
+      ],
+      "count": [
+        "count"
+      ],
+      "duration": [
+        "avg",
+        "sum",
+        "p50",
+        "p90",
+        "p95",
+        "p99"
+      ],
+      "failures": [
+        "count",
+        "avg"
+      ],
+      "tokens": [
+        "avg",
+        "sum"
+      ]
+    }
   },
   "slugs": {
     "max_length": 48,

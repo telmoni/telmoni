@@ -7,7 +7,7 @@ const MAX_DISPLAY_NAME_LEN: usize = 120;
 
 /// The address cap: RFC 5321 caps a path at 256 octets, so this is longer than
 /// any real mailbox and shorter than a payload worth storing.
-const MAX_EMAIL_LEN: usize = 254;
+pub const MAX_EMAIL_LEN: usize = 254;
 
 /// True for a character that carries no glyph but changes how the rest reads:
 /// bidi overrides, zero-width characters, the BOM. Two names identical on

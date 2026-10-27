@@ -134,9 +134,7 @@ export type IncidentAccess =
   | { kind: "forbidden" }
   | { kind: "unavailable" };
 
-/** The most incidents the list answers, the server's `INCIDENTS_MAX`: a full
- *  list may leave out the oldest resolved ones. */
-export const INCIDENTS_MAX = 200;
+export { INCIDENTS_MAX } from "@/lib/alerts";
 
 /** What the alerts page reads: the alerts by name, the incidents — those not
  *  resolved first, then the newest — and the maintenance windows; read

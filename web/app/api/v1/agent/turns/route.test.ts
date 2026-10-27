@@ -37,7 +37,7 @@ vi.mock("@/lib/server/entities/projects", () => ({ fetchProjectAnywhere }));
 
 import { NextRequest } from "next/server";
 
-import { AGENT_STREAM_TIMEOUT_MS } from "@/lib/server/entities/agent";
+import { AGENT_STREAM_TIMEOUT_MS } from "@/lib/types/agent";
 
 import { POST } from "./route";
 
@@ -120,6 +120,11 @@ describe("POST /api/v1/agent/turns", () => {
     const res = await turn(body);
     expect(res.status).toBe(400);
     expect(fetchWithTimeout).not.toHaveBeenCalled();
+  });
+
+  it("counts the ceiling in characters, as the server does", async () => {
+    await turn({ projectId: PROJECT, message: "😀".repeat(4000) });
+    expect(fetchWithTimeout).toHaveBeenCalledOnce();
   });
 
   it("refuses a project the person does not have", async () => {

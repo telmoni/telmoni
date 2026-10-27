@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
   ALERT_KINDS,
   NEW_ALERT,
-  aggregationsFor,
   amount,
   connectionChoices,
   draftOf,
@@ -72,39 +71,11 @@ const ALERT: Alert = {
   updated_at: "2026-10-25T03:00:00Z",
 };
 
-/** The server's `folds`, copied as it reads: what the hourly totals answer. */
-function serverFolds(measure: RuleMeasure, aggregation: RuleAggregation): boolean {
-  const A = RuleAggregation;
-  switch (measure) {
-    case RuleMeasure.Count:
-      return aggregation === A.Count;
-    case RuleMeasure.Failures:
-      return aggregation === A.Count || aggregation === A.Avg;
-    case RuleMeasure.Duration:
-      return aggregation !== A.Count && aggregation !== A.Max;
-    case RuleMeasure.Tokens:
-      return aggregation === A.Avg || aggregation === A.Sum;
-    case RuleMeasure.Cost:
-      return aggregation === A.Avg || aggregation === A.Sum || aggregation === A.Max;
-  }
-}
-
 function draft(over: Partial<AlertDraft> = {}): AlertDraft {
   return { ...draftOf(ALERT), ...over };
 }
 
 describe("what an alert measures", () => {
-  // ⚠ The form offers what the server folds, and nothing it refuses.
-  it("folds each measure as the server does", () => {
-    for (const measure of Object.values(RuleMeasure)) {
-      for (const aggregation of Object.values(RuleAggregation)) {
-        expect(aggregationsFor(measure).includes(aggregation), `${measure} ${aggregation}`).toBe(
-          serverFolds(measure, aggregation),
-        );
-      }
-    }
-  });
-
   it("measures tokens on model calls alone and cost on runs alone", () => {
     for (const kind of ALERT_KINDS) {
       expect(measuresFor(kind).includes(RuleMeasure.Tokens)).toBe(kind === SpanKind.ModelCall);

@@ -15,6 +15,7 @@ import type {
 } from "@/lib/server/data";
 import { projectPath } from "@/lib/slug";
 import { formatCost } from "@/lib/traces";
+import { UTC_OFFSET_EAST, UTC_OFFSET_WEST } from "@/lib/utc-offset";
 import {
   type ConnectionStatus,
   IncidentStatus,
@@ -53,6 +54,10 @@ export const RENOTIFY_MAX_MINUTES = 10_080;
 
 /** The most connectors one alert links. */
 export const LINKS_MAX = 20;
+
+/** The most incidents the list answers: a full list may leave out the oldest
+ *  resolved ones. */
+export const INCIDENTS_MAX = 200;
 
 /** What an alert of `kind` measures: tokens on model calls alone, and cost on
  *  runs alone, from their calls. */
@@ -382,7 +387,10 @@ export function offsetWords(minutes: number): string {
 }
 
 /** Every offset the lane admits, a quarter-hour apart: -12:00 to +14:00. */
-export const OFFSETS: number[] = Array.from({ length: (840 + 720) / 15 + 1 }, (_, i) => -720 + i * 15);
+export const OFFSETS: number[] = Array.from(
+  { length: (UTC_OFFSET_EAST - UTC_OFFSET_WEST) / 15 + 1 },
+  (_, i) => UTC_OFFSET_WEST + i * 15,
+);
 
 /** The browser's own offset from UTC now, in minutes east. */
 export function browserOffset(): number {

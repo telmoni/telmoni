@@ -10,15 +10,15 @@ export const UTC_OFFSET_COOKIE = "telmoni-utc-offset";
 
 /** The furthest west and east a clock is set from UTC, in minutes: UTC−12
  *  and UTC+14, the bounds the server takes. */
-const WEST = -720;
-const EAST = 840;
+export const UTC_OFFSET_WEST = -720;
+export const UTC_OFFSET_EAST = 840;
 
 /** The cookie's offset in whole minutes east of UTC, or UTC itself where
  *  there is none or it is not one. */
 export function parseUtcOffset(value: string | undefined): number {
   if (value === undefined || !/^-?\d{1,3}$/.test(value)) return 0;
   const minutes = Number(value);
-  return minutes >= WEST && minutes <= EAST ? minutes : 0;
+  return minutes >= UTC_OFFSET_WEST && minutes <= UTC_OFFSET_EAST ? minutes : 0;
 }
 
 /** This browser's offset now, in whole minutes east of UTC. */

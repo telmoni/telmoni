@@ -14,14 +14,6 @@ import { AgentMessageRole } from "@/lib/types/enums";
 import { identityContext, projectHeaders } from "./identity-context";
 import { fetchProjectAnywhere } from "./projects";
 
-// How long one turn may stream. `fetchWithTimeout` bounds the whole exchange,
-// body included, so this is the ceiling on a reply, not on its first byte: a
-// turn that runs several tools before it writes is still inside it. The server
-// ends a turn itself at `TURN_BUDGET` (100 s, `crates/agent/src/turn.rs`) and
-// saves what it wrote, so this cut-off is only ever the backstop; keep it the
-// longer of the two.
-export const AGENT_STREAM_TIMEOUT_MS = 120_000;
-
 const StatusSchema = z.object({ enabled: z.boolean() });
 
 const ConversationListSchema = z.object({

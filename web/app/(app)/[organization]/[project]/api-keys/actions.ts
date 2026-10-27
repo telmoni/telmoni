@@ -9,6 +9,7 @@ import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
 import { env } from "@/lib/env";
 import { Flag } from "@/lib/flags";
 import { featureOff } from "@/lib/server/flags";
+import { checkApiKeyDescription, checkApiKeyName } from "@/lib/names";
 import { activeProjectForMutation } from "@/lib/server/identity";
 import { sessionHeaders } from "@/lib/server/entities/identity-context";
 import { getServerSession } from "@/lib/server/session";
@@ -63,11 +64,11 @@ export async function mintTokenAction(projectId: string, input: unknown): Promis
 
   const asked = MintInputSchema.safeParse(input);
   if (!asked.success) return { status: "error", error: "That key could not be read." };
-  const name = asked.data.name.trim();
-  if (!name || name.length > 100) {
-    return { status: "error", error: "Name is required (≤100 chars)." };
-  }
-  const description = asked.data.description.trim() || null;
+  const name = checkApiKeyName(asked.data.name);
+  if (!name.ok) return { status: "error", error: name.error };
+  const described = checkApiKeyDescription(asked.data.description);
+  if (!described.ok) return { status: "error", error: described.error };
+  const description = described.value || null;
   const ttl = asked.data.ttl;
   if (!isTtl(ttl)) return { status: "error", error: "Invalid TTL selection." };
   const scopes = asked.data.scopes;
@@ -86,7 +87,7 @@ export async function mintTokenAction(projectId: string, input: unknown): Promis
       "content-type": "application/json",
     },
     body: JSON.stringify({
-      name,
+      name:               name.value,
       description,
       created_by:         session.userId,
       scopes,

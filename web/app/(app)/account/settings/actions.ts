@@ -8,6 +8,7 @@ import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
 import { blacklistSession, isSessionBlacklisted } from "@/lib/auth/session-blacklist";
 import { sessionEndKey } from "@/lib/auth/session-end-key";
 import { env } from "@/lib/env";
+import { MAX_EMAIL } from "@/lib/names";
 import { accountHeaders, personHeaders } from "@/lib/server/entities/identity-context";
 import { getServerSession } from "@/lib/server/session";
 import { canChangeEmail } from "@/lib/sign-in-method";
@@ -15,7 +16,7 @@ import { canChangeEmail } from "@/lib/sign-in-method";
 // Shape only, and loose on purpose. A regex that refuses a legal address is a
 // bug the person cannot work around; one that admits an illegal address costs a
 // round trip. Auth validates properly and the column has its own CHECK.
-const emailShape = z.object({ email: z.email().max(254) });
+const emailShape = z.object({ email: z.email().max(MAX_EMAIL) });
 
 // ⚠ The sign-in method never reaches auth — it describes the sign-in that
 // sealed the cookie, and no row stores it — so the console is the ONLY place

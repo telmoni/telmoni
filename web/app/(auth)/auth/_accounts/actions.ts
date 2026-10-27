@@ -8,6 +8,7 @@ import { challengeOf } from "@/lib/auth/pkce";
 import { PKCE_COOKIE, unsealPkce } from "@/lib/auth/session";
 import { clientKeyFromHeaders, rateLimit, sessionKey } from "@/lib/api/rate-limit";
 import { env } from "@/lib/env";
+import { MAX_EMAIL } from "@/lib/names";
 import { personHeaders } from "@/lib/server/entities/identity-context";
 import { getServerSession } from "@/lib/server/session";
 
@@ -23,7 +24,7 @@ type Result = { error: string | null };
 const UNAVAILABLE = "Sign-in is unavailable right now. Try again in a minute.";
 
 // Shape only; auth validates properly.
-const email = z.email().max(254);
+const email = z.email().max(MAX_EMAIL);
 // Auth holds the same floor (`hashing::MIN_PASSWORD_CHARS`); this saves a
 // round trip for a password that could never be accepted.
 const newPassword = z.string().min(8, "Use at least 8 characters.").max(256);

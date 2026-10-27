@@ -4,9 +4,14 @@
 
 import type { AgentMessageRole } from "./enums";
 
-// The server's own ceiling, after trim. The console refuses past it too, so a
-// message it forwards is never one the server would turn away for length.
+// The server's own ceiling, in characters after trim. The console refuses past
+// it too, so a message it forwards is never one the server would turn away.
 export const AGENT_MESSAGE_MAX = 4000;
+
+// How long one turn may stream, the reply's body included. The server ends a
+// turn and saves it first (`STREAM_MAX` in the wire contract), so this cut-off
+// is only the backstop, and the contract test holds it the longer.
+export const AGENT_STREAM_TIMEOUT_MS = 120_000;
 
 export interface AgentCitation {
   index: number;

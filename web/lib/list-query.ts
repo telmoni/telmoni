@@ -27,7 +27,7 @@ export function windowsOffered(days: number): number[] {
     : [...WINDOWS, days].sort((a, b) => a - b);
 }
 /** The week a list opens on when its URL names no window, as the server's. */
-const OPENING_DAYS = 7;
+export const OPENING_DAYS = 7;
 
 /** The narrowest window a page offers that reaches back to `iso`, or none
  *  where the week a list opens on already does: a link from a run to its

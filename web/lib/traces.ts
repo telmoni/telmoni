@@ -84,7 +84,7 @@ export const TYPED_FILTERS: readonly FilterKey[] = ["user", "session", "tag"];
 
 /** The longest value each filter takes, in characters, as the server caps it
  *  (`crates/telemetry/src/contract.rs`); a tag's is its key, colon and value. */
-const VALUE_MAX: Record<Exclude<FilterKey, "status">, number> = {
+export const FILTER_VALUE_MAX: Record<Exclude<FilterKey, "status">, number> = {
   agent: 128,
   model: 128,
   tool: 145,
@@ -114,7 +114,7 @@ function some<T>(values: T[]): T[] | undefined {
 /** Whether `value` is within `filter`'s length, counted in characters as the
  *  server counts them, not in UTF-16's units. */
 export function fits(filter: Exclude<FilterKey, "status">, value: string): boolean {
-  return [...value].length <= VALUE_MAX[filter];
+  return [...value].length <= FILTER_VALUE_MAX[filter];
 }
 
 /** A filter's values from the URL, but those past its length. */
@@ -737,6 +737,10 @@ export function formatDuration(ms: number): string {
 
 /** The most rows one download holds, as the server writes them. */
 export const DOWNLOAD_MAX = 10_000;
+
+/** The most runs a download names: a page's chosen rows, as the server
+ *  takes them. */
+export const RUNS_MAX = 100;
 
 /** What each list's rows are, one and many, as the page counts them. */
 export const ROW_NOUN: Record<ListName, readonly [string, string]> = {
