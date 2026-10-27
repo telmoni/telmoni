@@ -74,9 +74,10 @@ test.describe("Console chrome row", () => {
     await injectSession(page, testUser(testInfo.project.name));
     await gotoOrganizationMembers(page);
 
-    const name = page.getByRole("banner").getByText("Telmoni", { exact: true });
-    await expect(name).toBeVisible();
-    const brand = page.getByRole("banner").getByRole("link", { name: "Telmoni" });
+    // The name is drawn with the mark, one image filling the link, so the
+    // link stands for it.
+    const brand = page.getByRole("banner").getByRole("link", { name: "Telmoni", exact: true });
+    await expect(brand).toBeVisible();
     const rail = page.locator("#console-sidebar");
     const row = rail.getByRole("link", { name: "Overview" });
 
@@ -100,8 +101,8 @@ test.describe("Console chrome row", () => {
     // ⚠ **The name goes; the mark stays and becomes the control.** Closed,
     // the rail is one icon wide with the inset on both sides, and the mark,
     // now the button that opens the rail, lands on the centre every icon
-    // shares; the name is the one piece of chrome wider than the column.
-    await expect(name).toBeHidden();
+    // shares; the lockup is the one piece of chrome wider than the column.
+    await expect(brand).toBeHidden();
     const railShut = (await rail.boundingBox())!;
     const centre = railShut.x + railShut.width / 2;
     for (const piece of [open, row]) {
@@ -110,7 +111,7 @@ test.describe("Console chrome row", () => {
     }
 
     await open.click();
-    await expect(name).toBeVisible();
+    await expect(brand).toBeVisible();
     await page.waitForTimeout(400);
     expect(Math.abs((await brand.boundingBox())!.x - brandOpen.x)).toBeLessThanOrEqual(1);
   });

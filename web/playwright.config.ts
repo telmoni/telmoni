@@ -9,6 +9,11 @@ const TELEMETRY_DB = "postgresql://telemetry:telemetry_dev@localhost:5432/telmon
 // The dev ClickHouse, as the module's own user. No page the suite opens reads
 // a span, and the server dials ClickHouse at its first query, never at boot.
 const TELEMETRY_CLICKHOUSE = "http://telemetry:telemetry_dev@localhost:8123";
+// A laptop's key, whatever .env holds: it seals a project's hashing key at the
+// project's first export, and no spec exports a span.
+const TELEMETRY_KEK = `local:${"0".repeat(64)}`;
+// The dev Redis, the console's too.
+const REDIS_URL = "redis://localhost:6379";
 
 export default defineConfig({
   testDir: "./e2e",
@@ -43,6 +48,8 @@ export default defineConfig({
         NOTIFICATIONS_DATABASE_URL: NOTIFICATIONS_DB,
         TELEMETRY_DATABASE_URL: TELEMETRY_DB,
         TELEMETRY_CLICKHOUSE_URL: TELEMETRY_CLICKHOUSE,
+        TELEMETRY_KEK,
+        REDIS_URL,
         PORT: "8082",
         SERVICE_SECRET,
         // Dex, the compose file's `oidc` profile, which `make e2e` starts:
@@ -75,7 +82,7 @@ export default defineConfig({
         AUTH_URL: "http://localhost:3000",
         SERVICE_SECRET,
         SERVER_URL: "http://localhost:8082",
-        REDIS_URL: "redis://localhost:6379",
+        REDIS_URL,
         // A deployment that published no legal documents, whatever
         // web/.env.local names: `/legal/*` then answers the console's own Page
         // not found, as on a checkout with no env file, rather than a redirect

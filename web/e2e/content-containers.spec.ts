@@ -130,7 +130,11 @@ function snapshot(page: Page): Promise<Snapshot> {
     if (!main) throw new Error("no #console-main on the page");
     const pane = main.closest('[data-slot="scroll-area-viewport"]');
     if (!pane) throw new Error("<main> is not inside the scrollport");
-    const kids = Array.from(main.children);
+    // A `display: contents` group (a list's pending group, `group/list`) lays
+    // nothing out: its children stand in <main> as its own do.
+    const kids = Array.from(main.children).flatMap((el) =>
+      getComputedStyle(el).display === "contents" ? Array.from(el.children) : [el],
+    );
     const wrappers = kids.filter(
       (el) =>
         el.tagName === "DIV" &&
@@ -175,9 +179,11 @@ function snapshot(page: Page): Promise<Snapshot> {
           cardScrollWidth: card ? (card as HTMLElement).scrollWidth : 0,
         };
       }),
-      emptyStates: Array.from(main.querySelectorAll("div.grid.gap-1.p-4")).map((d) =>
-        cls(d.closest('[data-slot="card"]')),
-      ),
+      // A card of its own with the same classes, as Privacy's notes are, is
+      // no empty state.
+      emptyStates: Array.from(
+        main.querySelectorAll('div.grid.gap-1.p-4:not([data-slot="card"])'),
+      ).map((d) => cls(d.closest('[data-slot="card"]'))),
       main: { width: main.getBoundingClientRect().width },
       pane: { clientWidth: pane.clientWidth, scrollWidth: pane.scrollWidth },
     };

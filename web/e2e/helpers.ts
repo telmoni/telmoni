@@ -9,6 +9,11 @@ export async function landOnProject(page: Page): Promise<string> {
   await page.waitForURL((url) => /^\/[a-z0-9-]+$/.test(url.pathname));
   const overview = new URL(page.url()).pathname;
   const listing = `${overview}/projects`;
+  // The Projects page's own path has a project's shape, so it is ruled out.
+  const onProject = (url: URL) =>
+    url.pathname !== listing &&
+    url.pathname.startsWith(`${overview}/`) &&
+    /^\/[a-z0-9-]+\/[a-z0-9-]+$/.test(url.pathname);
   await page.goto(listing);
   const projects = page.getByRole("region", { name: "Projects" });
   await expect(projects).toBeVisible();
@@ -19,14 +24,19 @@ export async function landOnProject(page: Page): Promise<string> {
     await page.getByRole("button", { name: "New project" }).click();
     await page.getByLabel("Project name").fill("Web");
     await page.getByRole("button", { name: "Create project" }).click();
+    // A test signed in as the same person may have made it a moment earlier:
+    // the name is then taken, and theirs is the project to open.
+    const taken = page.getByRole("alert").filter({ hasText: "already exists" });
+    const refused = await Promise.race([
+      taken.waitFor().then(() => true, () => false),
+      page.waitForURL(onProject).then(() => false, () => false),
+    ]);
+    if (refused) {
+      await page.goto(listing);
+      await first.click();
+    }
   }
-  // The Projects page's own path has a project's shape, so it is ruled out.
-  await page.waitForURL(
-    (url) =>
-      url.pathname !== listing &&
-      url.pathname.startsWith(`${overview}/`) &&
-      /^\/[a-z0-9-]+\/[a-z0-9-]+$/.test(url.pathname),
-  );
+  await page.waitForURL(onProject);
   const landing = new URL(page.url()).pathname;
   expect(landing).not.toBe("/console");
   return landing;
