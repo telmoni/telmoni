@@ -211,6 +211,8 @@ CREATE TABLE telemetry.rules (
     CONSTRAINT rules_severity_check
         CHECK (severity IN ('unknown', 'ok', 'warning', 'alert', 'no_data', 'paused')),
     CONSTRAINT rules_paused_at_check CHECK ((paused IS NULL) = (paused_at IS NULL)),
+    -- A pause is said once: paused, and only paused, reads `paused`.
+    CONSTRAINT rules_paused_severity_check CHECK ((paused IS NULL) = (severity <> 'paused')),
     CONSTRAINT rules_lease_check CHECK ((lease_id IS NULL) = (leased_until IS NULL))
 );
 

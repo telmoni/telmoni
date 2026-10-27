@@ -55,8 +55,8 @@ pub struct Alert {
     pub warning_threshold: Option<f64>,
     pub missing_data: MissingData,
     pub renotify_minutes: Option<i32>,
-    /// Who paused it, `person` or `plan`; none while it runs.
-    pub paused: Option<String>,
+    /// Who paused it; none while it runs.
+    pub paused: Option<crate::rules::db::PausedBy>,
     pub paused_at: Option<DateTime<Utc>>,
     /// Its value at its last evaluation: none before the first, or where
     /// the window held no span its filters admit.

@@ -3,6 +3,7 @@
 //! to the plan's number in the module's lane, which spans tenants.
 
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use telmoni_shared::db::tenant_session::{HasProject, Maintenance, ProjectAndOrganization, Scoped};
@@ -32,8 +33,8 @@ pub struct RuleRow {
     pub warning_threshold: Option<f64>,
     pub missing_data: MissingData,
     pub renotify_minutes: Option<i32>,
-    /// Who paused it — `person` or `plan` — and when; none while it runs.
-    pub paused: Option<String>,
+    /// Who paused it, and when; none while it runs.
+    pub paused: Option<PausedBy>,
     pub paused_at: Option<DateTime<Utc>>,
     /// Its value at its last evaluation, none where the window held no span.
     pub value: Option<f64>,
@@ -54,8 +55,18 @@ const RULE_COLUMNS: &str = "id, project_id, organization_id, name, kind, measure
 
 /// Who paused an alert: a member, by hand, or its plan, on a fall past its
 /// number, which lifts its own once there is room again.
-pub const PAUSED_BY_PERSON: &str = "person";
-pub const PAUSED_BY_PLAN: &str = "plan";
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
+#[sqlx(type_name = "text", rename_all = "lowercase")]
+#[serde(rename_all = "lowercase")]
+pub enum PausedBy {
+    Person,
+    Plan,
+}
+
+telmoni_shared::wire_enum!(PausedBy {
+    Person => "person",
+    Plan => "plan",
+});
 
 /// The project's alerts, by name.
 pub async fn rules<B: HasProject>(
@@ -278,9 +289,10 @@ pub async fn held_by_plan(
     tx: &mut Scoped<'_, Maintenance<TelemetryLane>>,
 ) -> sqlx::Result<Vec<OrganizationId>> {
     sqlx::query_scalar(
-        "SELECT DISTINCT organization_id FROM telemetry.rules WHERE paused = 'plan'
+        "SELECT DISTINCT organization_id FROM telemetry.rules WHERE paused = $1
           ORDER BY organization_id",
     )
+    .bind(PausedBy::Plan)
     .fetch_all(tx.conn())
     .await
 }
@@ -299,7 +311,7 @@ pub async fn hold_to(
               SELECT id, row_number() OVER (ORDER BY created_at, id) AS place
                 FROM telemetry.rules WHERE organization_id = $1)
          UPDATE telemetry.rules AS rule
-            SET paused = CASE WHEN $2::bigint IS NOT NULL AND ranked.place > $2 THEN 'plan' END,
+            SET paused = CASE WHEN $2::bigint IS NOT NULL AND ranked.place > $2 THEN $3::text END,
                 paused_at = CASE WHEN $2::bigint IS NOT NULL AND ranked.place > $2 THEN now() END,
                 severity = CASE WHEN $2::bigint IS NOT NULL AND ranked.place > $2
                                 THEN 'paused' ELSE 'unknown' END,
@@ -314,10 +326,11 @@ pub async fn hold_to(
            FROM ranked
           WHERE rule.id = ranked.id
             AND ((rule.paused IS NULL AND $2::bigint IS NOT NULL AND ranked.place > $2)
-              OR (rule.paused = 'plan' AND ($2::bigint IS NULL OR ranked.place <= $2)))",
+              OR (rule.paused = $3 AND ($2::bigint IS NULL OR ranked.place <= $2)))",
     )
     .bind(organization_id)
     .bind(limit)
+    .bind(PausedBy::Plan)
     .execute(tx.conn())
     .await?
     .rows_affected())
@@ -420,12 +433,13 @@ pub async fn pause<B: HasProject>(
 ) -> sqlx::Result<Option<RuleRow>> {
     sqlx::query(
         "UPDATE telemetry.rules
-            SET paused = 'person', paused_at = now(), severity = 'paused', severity_since = now(),
+            SET paused = $3, paused_at = now(), severity = 'paused', severity_since = now(),
                 lease_id = NULL, leased_until = NULL
-          WHERE project_id = $1 AND id = $2 AND paused IS DISTINCT FROM 'person'",
+          WHERE project_id = $1 AND id = $2 AND paused IS DISTINCT FROM $3",
     )
     .bind(project_id)
     .bind(id)
+    .bind(PausedBy::Person)
     .execute(tx.conn())
     .await?;
     rule(tx, project_id, id).await
