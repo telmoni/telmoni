@@ -95,17 +95,17 @@ fn kek_for(state: &AppState) -> Result<&Kek, TelmoniError> {
 /// nothing inserted, rather than a grant stored under a key we could never open.
 fn kek_refused(e: &KekError) -> TelmoniError {
     tracing::error!(error = %e, "the connector grant could not be sealed; nothing is stored");
-    TelmoniError::Upstream(Box::new(telmoni_shared::error_schema::ProblemDetails {
-        type_uri: "/errors/connectors/key-unavailable".into(),
-        title: "the grant could not be sealed".into(),
-        status: 502,
-        detail: Some(
+    TelmoniError::Upstream(Box::new(
+        telmoni_shared::error_schema::ProblemDetails::new(
+            "/errors/connectors/key-unavailable",
+            "the grant could not be sealed",
+            502,
+        )
+        .detail(
             "The key service that seals connector grants did not answer, so nothing was \
-             stored. Try connecting again in a moment."
-                .into(),
+             stored. Try connecting again in a moment.",
         ),
-        ..Default::default()
-    }))
+    ))
 }
 
 /// `TelmoniError::FeatureOff` when the `connectors` flag is off. An

@@ -8,7 +8,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 
-use crate::error::{TelmoniError, TenantError};
+use crate::error::TelmoniError;
 use crate::error_schema::ProblemDetails;
 
 /// A path no lane serves, on a door that answers problem documents for
@@ -33,35 +33,15 @@ pub fn method_not_allowed(allow: &'static str) -> Response {
 /// [`not_found`]'s problem, for a lane that answers in a shape of its own.
 #[must_use]
 pub fn not_found_details(detail: &str) -> ProblemDetails {
-    details(
-        StatusCode::NOT_FOUND,
-        "/errors/not-found",
-        "not found",
-        detail,
-    )
+    ProblemDetails::new("/errors/not-found", "not found", 404).detail(detail)
 }
 
 /// [`method_not_allowed`]'s problem, for a lane that answers in a shape of
 /// its own; `Allow` is the lane's to send.
 #[must_use]
 pub fn method_not_allowed_details(allow: &str) -> ProblemDetails {
-    details(
-        StatusCode::METHOD_NOT_ALLOWED,
-        "/errors/method-not-allowed",
-        "method not allowed",
-        &format!("this lane takes {allow}"),
-    )
-}
-
-fn details(status: StatusCode, type_uri: &str, title: &str, detail: &str) -> ProblemDetails {
-    ProblemDetails {
-        type_uri: type_uri.into(),
-        title: title.into(),
-        status: status.as_u16(),
-        detail: Some(detail.into()),
-        instance: None,
-        extensions: serde_json::Map::new(),
-    }
+    ProblemDetails::new("/errors/method-not-allowed", "method not allowed", 405)
+        .detail(format!("this lane takes {allow}"))
 }
 
 fn problem(body: ProblemDetails, headers: &[(header::HeaderName, HeaderValue)]) -> Response {
@@ -98,20 +78,7 @@ impl IntoResponse for TelmoniError {
         let pd = self.to_problem_details();
         let status = StatusCode::from_u16(pd.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
 
-        let retry_after = if matches!(
-            &self,
-            Self::Tenant(
-                TenantError::RateLimited { .. }
-                    | TenantError::PastCeiling { .. }
-                    | TenantError::FeatureOff { .. }
-            ) | Self::AgentRateLimited { .. }
-        ) {
-            pd.extensions
-                .get("retry_after_secs")
-                .and_then(serde_json::Value::as_u64)
-        } else {
-            None
-        };
+        let retry_after = pd.retry_after();
 
         let mut resp = Json(pd).into_response();
         *resp.status_mut() = status;
@@ -217,6 +184,23 @@ mod tests {
                 .get(header::RETRY_AFTER)
                 .and_then(|v| v.to_str().ok()),
             Some("3600")
+        );
+    }
+
+    /// Every problem that asks for a wait says it in the header, whichever
+    /// error wrote it: the read lanes' store outage as much as a rate limit.
+    #[tokio::test]
+    async fn a_store_outage_lifts_its_retry_after_header() {
+        let resp = TelmoniError::from(crate::error::TelemetryError::StoreUnavailable(
+            "down".into(),
+        ))
+        .into_response();
+        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            resp.headers()
+                .get(header::RETRY_AFTER)
+                .and_then(|v| v.to_str().ok()),
+            Some("1")
         );
     }
 

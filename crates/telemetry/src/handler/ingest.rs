@@ -417,10 +417,7 @@ fn refusal(problem: &ProblemDetails, headers: &HeaderMap) -> Response {
         header::CONTENT_TYPE,
         HeaderValue::from_static(encoding.content_type()),
     );
-    if let Some(secs) = problem
-        .extensions
-        .get("retry_after_secs")
-        .and_then(serde_json::Value::as_u64)
+    if let Some(secs) = problem.retry_after()
         && let Ok(value) = HeaderValue::from_str(&secs.to_string())
     {
         response.headers_mut().insert(header::RETRY_AFTER, value);

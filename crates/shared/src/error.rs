@@ -1,6 +1,6 @@
 //! Platform error taxonomy + RFC 9457 problem-details mapping.
 
-use crate::error_schema::ProblemDetails;
+use crate::error_schema::{ProblemDetails, RETRY_AFTER_SECS};
 
 /// Platform error enum.
 #[derive(Debug, thiserror::Error)]
@@ -195,99 +195,58 @@ impl TelmoniError {
                 AuthError::Conflict("That already exists. Refresh and try again.".into())
                     .to_problem_details()
             }
-            Self::Database(_) => ProblemDetails {
-                type_uri: "/errors/internal/database".into(),
-                title: "internal server error".into(),
-                status: 500,
-                detail: None,
-                ..Default::default()
-            },
-            Self::Internal(_) | Self::InternalSource { .. } => ProblemDetails {
-                type_uri: "/errors/internal/unknown".into(),
-                title: "internal server error".into(),
-                status: 500,
-                detail: None,
-                ..Default::default()
-            },
-            Self::Upstream(pd) => (**pd).clone(),
-            Self::BadRequest(detail) => ProblemDetails {
-                type_uri: "/errors/bad-request".into(),
-                title: "bad request".into(),
-                status: 400,
-                detail: Some(detail.clone()),
-                ..Default::default()
-            },
-            Self::IncompatibleClient { client, minimum } => ProblemDetails {
-                type_uri: "/errors/incompatible-client".into(),
-                title: "incompatible client".into(),
-                status: 426,
-                detail: Some(format!(
-                    "Telmoni CLI {client} is older than the minimum supported {minimum}; upgrade to continue"
-                )),
-                ..Default::default()
-            },
-            Self::PayloadTooLarge { max_bytes } => {
-                let mut pd = ProblemDetails {
-                    type_uri: "/errors/payload-too-large".into(),
-                    title: "payload too large".into(),
-                    status: 413,
-                    detail: Some(format!(
-                        "The upload is larger than this lane accepts ({max_bytes} bytes)."
-                    )),
-                    ..Default::default()
-                };
-                pd.extensions.insert(
-                    "max_bytes".into(),
-                    serde_json::Value::Number((*max_bytes).into()),
-                );
-                pd
+            Self::Database(_) => {
+                ProblemDetails::new("/errors/internal/database", "internal server error", 500)
             }
-            Self::AgentDisabled => ProblemDetails {
-                type_uri: "/errors/agent/disabled".into(),
-                title: "agent not configured".into(),
-                status: 503,
-                detail: Some("the operator of this deployment has not configured the agent".into()),
-                ..Default::default()
-            },
-            Self::AgentModelUnavailable { .. } => ProblemDetails {
-                type_uri: "/errors/agent/model-unavailable".into(),
-                title: "agent model unavailable".into(),
-                status: 502,
-                detail: Some(
-                    "the model behind the agent did not answer; nothing was changed, try again \
-                     shortly"
-                        .into(),
-                ),
-                ..Default::default()
-            },
+            Self::Internal(_) | Self::InternalSource { .. } => {
+                ProblemDetails::new("/errors/internal/unknown", "internal server error", 500)
+            }
+            Self::Upstream(pd) => (**pd).clone(),
+            Self::BadRequest(detail) => {
+                ProblemDetails::new("/errors/bad-request", "bad request", 400).detail(detail.clone())
+            }
+            Self::IncompatibleClient { client, minimum } => {
+                ProblemDetails::new("/errors/incompatible-client", "incompatible client", 426).detail(
+                    format!(
+                        "Telmoni CLI {client} is older than the minimum supported {minimum}; upgrade to continue"
+                    ),
+                )
+            }
+            Self::PayloadTooLarge { max_bytes } => {
+                ProblemDetails::new("/errors/payload-too-large", "payload too large", 413)
+                    .detail(format!(
+                        "The upload is larger than this lane accepts ({max_bytes} bytes)."
+                    ))
+                    .extension("max_bytes", *max_bytes)
+            }
+            Self::AgentDisabled => {
+                ProblemDetails::new("/errors/agent/disabled", "agent not configured", 503)
+                    .detail("the operator of this deployment has not configured the agent")
+            }
+            Self::AgentModelUnavailable { .. } => ProblemDetails::new(
+                "/errors/agent/model-unavailable",
+                "agent model unavailable",
+                502,
+            )
+            .detail(
+                "the model behind the agent did not answer; nothing was changed, try again \
+                 shortly",
+            ),
             Self::AgentRateLimited { retry_after_secs } => {
-                let mut pd = ProblemDetails {
-                    type_uri: "/errors/agent/rate-limited".into(),
-                    title: "agent rate limited".into(),
-                    status: 429,
-                    detail: Some(format!(
+                ProblemDetails::new("/errors/agent/rate-limited", "agent rate limited", 429)
+                    .detail(format!(
                         "you have asked the agent as many questions as this hour allows; \
                          retry after {retry_after_secs}s"
-                    )),
-                    ..Default::default()
-                };
-                pd.extensions.insert(
-                    "retry_after_secs".into(),
-                    serde_json::Value::Number((*retry_after_secs).into()),
-                );
-                pd
+                    ))
+                    .extension(RETRY_AFTER_SECS, *retry_after_secs)
             }
-            Self::MailDelivery { .. } => ProblemDetails {
-                type_uri: "/errors/mail/delivery-failed".into(),
-                title: "email delivery failed".into(),
-                status: 502,
-                detail: Some(
-                    "the email could not be sent — delivery is misconfigured or the provider \
-                     is unavailable on our side; nothing was lost, try again shortly"
-                        .into(),
-                ),
-                ..Default::default()
-            },
+            Self::MailDelivery { .. } => {
+                ProblemDetails::new("/errors/mail/delivery-failed", "email delivery failed", 502)
+                    .detail(
+                        "the email could not be sent — delivery is misconfigured or the provider \
+                         is unavailable on our side; nothing was lost, try again shortly",
+                    )
+            }
         }
     }
 }
@@ -389,11 +348,8 @@ impl AuthError {
             _ => None,
         };
         ProblemDetails {
-            type_uri: format!("/errors/auth/{slug}"),
-            title: title.into(),
-            status,
             detail,
-            ..Default::default()
+            ..ProblemDetails::new(format!("/errors/auth/{slug}"), title, status)
         }
     }
 }
@@ -429,11 +385,8 @@ impl AuthzError {
             ),
         };
         ProblemDetails {
-            type_uri: format!("/errors/authz/{slug}"),
-            title: title.into(),
-            status: 403,
             detail,
-            ..Default::default()
+            ..ProblemDetails::new(format!("/errors/authz/{slug}"), title, 403)
         }
     }
 }
@@ -470,39 +423,24 @@ impl TelemetryError {
     #[must_use]
     pub fn to_problem_details(&self) -> ProblemDetails {
         match self {
-            Self::InvalidBatch(detail) => ProblemDetails {
-                type_uri: "/errors/telemetry/invalid-batch".into(),
-                title: "invalid batch".into(),
-                status: 400,
-                detail: Some(detail.clone()),
-                ..Default::default()
-            },
+            Self::InvalidBatch(detail) => {
+                ProblemDetails::new("/errors/telemetry/invalid-batch", "invalid batch", 400)
+                    .detail(detail.clone())
+            }
             Self::BatchTooLarge { max_bytes } => {
-                let mut pd = ProblemDetails {
-                    type_uri: "/errors/telemetry/batch-too-large".into(),
-                    title: "batch too large".into(),
-                    status: 413,
-                    detail: Some(format!(
+                ProblemDetails::new("/errors/telemetry/batch-too-large", "batch too large", 413)
+                    .detail(format!(
                         "the body is larger than {max_bytes} bytes once decompressed"
-                    )),
-                    ..Default::default()
-                };
-                pd.extensions
-                    .insert("max_bytes".into(), serde_json::Value::from(*max_bytes));
-                pd
+                    ))
+                    .extension("max_bytes", *max_bytes)
             }
-            Self::StoreUnavailable(detail) => {
-                let mut pd = ProblemDetails {
-                    type_uri: "/errors/telemetry/store-unavailable".into(),
-                    title: "store unavailable".into(),
-                    status: 503,
-                    detail: Some(detail.clone()),
-                    ..Default::default()
-                };
-                pd.extensions
-                    .insert("retry_after_secs".into(), serde_json::Value::from(1_u64));
-                pd
-            }
+            Self::StoreUnavailable(detail) => ProblemDetails::new(
+                "/errors/telemetry/store-unavailable",
+                "store unavailable",
+                503,
+            )
+            .detail(detail.clone())
+            .extension(RETRY_AFTER_SECS, 1_u64),
         }
     }
 }
@@ -534,20 +472,9 @@ impl PlanError {
             Self::LimitReached {
                 entitlement,
                 detail,
-            } => {
-                let mut pd = ProblemDetails {
-                    type_uri: "/errors/plan/limit-reached".into(),
-                    title: "plan limit reached".into(),
-                    status: 402,
-                    detail: Some(detail.clone()),
-                    ..Default::default()
-                };
-                pd.extensions.insert(
-                    "entitlement".into(),
-                    serde_json::Value::String(entitlement.clone()),
-                );
-                pd
-            }
+            } => ProblemDetails::new("/errors/plan/limit-reached", "plan limit reached", 402)
+                .detail(detail.clone())
+                .extension("entitlement", entitlement.clone()),
         }
     }
 }
@@ -593,60 +520,26 @@ impl TenantError {
     pub fn to_problem_details(&self) -> ProblemDetails {
         match self {
             Self::RateLimited { retry_after_secs } => {
-                let mut pd = ProblemDetails {
-                    type_uri: "/errors/tenant/rate-limited".into(),
-                    title: "rate limited".into(),
-                    status: 429,
-                    detail: Some(format!("retry after {retry_after_secs}s")),
-                    ..Default::default()
-                };
-                pd.extensions.insert(
-                    "retry_after_secs".into(),
-                    serde_json::Value::Number((*retry_after_secs).into()),
-                );
-                pd
+                ProblemDetails::new("/errors/tenant/rate-limited", "rate limited", 429)
+                    .detail(format!("retry after {retry_after_secs}s"))
+                    .extension(RETRY_AFTER_SECS, *retry_after_secs)
             }
             Self::PastCeiling {
                 detail,
                 retry_after_secs,
-            } => {
-                let mut pd = ProblemDetails {
-                    type_uri: "/errors/tenant/rate-limited".into(),
-                    title: "rate limited".into(),
-                    status: 429,
-                    detail: Some(detail.clone()),
-                    ..Default::default()
-                };
-                pd.extensions.insert(
-                    "retry_after_secs".into(),
-                    serde_json::Value::Number((*retry_after_secs).into()),
-                );
-                pd
-            }
-            Self::CrossTenantDenied => ProblemDetails {
-                type_uri: "/errors/tenant/cross-tenant-denied".into(),
-                title: "cross-tenant access denied".into(),
-                status: 403,
-                detail: None,
-                ..Default::default()
-            },
+            } => ProblemDetails::new("/errors/tenant/rate-limited", "rate limited", 429)
+                .detail(detail.clone())
+                .extension(RETRY_AFTER_SECS, *retry_after_secs),
+            Self::CrossTenantDenied => ProblemDetails::new(
+                "/errors/tenant/cross-tenant-denied",
+                "cross-tenant access denied",
+                403,
+            ),
             Self::FeatureOff { flag } => {
-                let mut pd = ProblemDetails {
-                    type_uri: "/errors/tenant/feature-off".into(),
-                    title: "feature switched off".into(),
-                    status: 503,
-                    detail: Some(flag.off_detail().into()),
-                    ..Default::default()
-                };
-                pd.extensions.insert(
-                    "flag".into(),
-                    serde_json::Value::String(flag.as_str().into()),
-                );
-                pd.extensions.insert(
-                    "retry_after_secs".into(),
-                    serde_json::Value::Number(FEATURE_OFF_RETRY_SECS.into()),
-                );
-                pd
+                ProblemDetails::new("/errors/tenant/feature-off", "feature switched off", 503)
+                    .detail(flag.off_detail())
+                    .extension("flag", flag.as_str())
+                    .extension(RETRY_AFTER_SECS, FEATURE_OFF_RETRY_SECS)
             }
         }
     }
