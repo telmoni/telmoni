@@ -53,6 +53,10 @@ pub const PROJECTS_PARAM: &str = "{projects:Array(String)}";
 const INSERT_SEND_TIMEOUT: Duration = Duration::from_secs(10);
 const INSERT_END_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// How long ClickHouse itself waits for an insert's flush, past the client's
+/// wait: rows the client gave up on may still be written until it ends.
+const ASYNC_INSERT_WAIT: Duration = Duration::from_secs(120);
+
 /// The longest a read may run on the server, in seconds: one node answers
 /// every project, so a read that runs away is every reader's outage. The
 /// console waits ten seconds for any answer, so the server stops a read
@@ -335,6 +339,9 @@ pub(crate) mod text {
 #[derive(Clone)]
 pub struct Store {
     client: clickhouse::Client,
+    /// How long an insert waits for ClickHouse's answer once its rows are
+    /// sent, thirty seconds; a field so a suite can wait less.
+    pub insert_wait: Duration,
 }
 
 impl Store {
@@ -342,15 +349,23 @@ impl Store {
     pub fn connect(url: &str) -> anyhow::Result<Self> {
         Ok(Self {
             client: client(url)?.with_database(DATABASE),
+            insert_wait: INSERT_END_TIMEOUT,
         })
     }
 
-    /// Write finished spans: one asynchronous insert, waited for, so `Ok`
-    /// means ClickHouse holds them, the hourly rollup's rows with them.
+    /// Write finished spans under `token`: one asynchronous insert, waited
+    /// for, so `Ok` means ClickHouse holds them, the hourly rollup's rows with
+    /// them. A copy written again under the token, while the tables keep it
+    /// among their last ten thousand inserts, writes nothing, whatever
+    /// became of the first: answered, refused or never heard back from.
     ///
     /// ⚠ An error's text can carry ClickHouse's own message: log its kind,
     /// never the text, beside a span's fields.
-    pub async fn insert_spans(&self, spans: &[SpanRow]) -> clickhouse::error::Result<()> {
+    pub async fn insert_spans_once(
+        &self,
+        spans: &[SpanRow],
+        token: &str,
+    ) -> clickhouse::error::Result<()> {
         if spans.is_empty() {
             return Ok(());
         }
@@ -361,11 +376,24 @@ impl Store {
         let mut insert = insert
             .with_setting("async_insert", "1")
             .with_setting("wait_for_async_insert", "1")
-            .with_timeouts(Some(INSERT_SEND_TIMEOUT), Some(INSERT_END_TIMEOUT));
+            .with_setting(
+                "wait_for_async_insert_timeout",
+                ASYNC_INSERT_WAIT.as_secs().to_string(),
+            )
+            .with_setting("async_insert_deduplicate", "1")
+            .with_setting("insert_deduplication_token", token)
+            .with_timeouts(Some(INSERT_SEND_TIMEOUT), Some(self.insert_wait));
         for span in spans {
             insert.write(span).await?;
         }
         insert.end().await
+    }
+
+    /// Write finished spans as [`Self::insert_spans_once`] does, under a
+    /// token of their own, so no other insert is taken for their copy.
+    pub async fn insert_spans(&self, spans: &[SpanRow]) -> clickhouse::error::Result<()> {
+        self.insert_spans_once(spans, &Uuid::new_v4().to_string())
+            .await
     }
 
     /// Every row of `project`'s, in the spans and their hourly totals, marked

@@ -161,11 +161,12 @@ then a count of the rest:
 }
 ```
 
-An exporter retries with the same bytes when an answer was lost. Where the
-server reaches its Redis, an export sent again within an hour, byte for byte,
-gets its first answer again and is not written twice, and a copy that arrives
-while the first is still being written is answered `503` with
-`Retry-After: 1`; without Redis, every copy is written.
+An exporter retries with the same bytes when an answer was lost. An export
+sent again, byte for byte, is not written twice, whatever became of the first
+copy's answer, for as long as the span store still holds the first among its
+last ten thousand writes. Where the server reaches its Redis, the copy gets its
+first answer again within an hour, and one that arrives while the first is
+still being written is answered `503` with `Retry-After: 1`.
 
 ## Refusals
 

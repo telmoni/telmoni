@@ -1,8 +1,10 @@
 //! The claim on an export's body: its SHA-256, under the project, set in
 //! Redis if absent before the rows are written, so a retry with the same
-//! bytes is answered as the first was, not written again. Pending for a
-//! minute, then for an hour the answer's mode alone, some 200 bytes whatever
-//! it said, the retry's own bytes giving the rest. Without Redis, no claim.
+//! bytes is answered as the first was. Pending for a minute while they are
+//! written, and let go where the write fails, since the insert's token, the
+//! same digest, keeps ClickHouse from writing a copy twice; then for an hour
+//! the answer's mode alone, some 200 bytes whatever it said, the retry's own
+//! bytes giving the rest. Without Redis, no claim.
 
 use telmoni_shared::digest::sha256_hex;
 use telmoni_shared::{ContentMode, ProjectId};
@@ -28,8 +30,8 @@ fn answered(content_mode: ContentMode) -> String {
 /// What the claim found.
 #[derive(Debug)]
 pub enum Claim {
-    /// This body is new, or Redis does not answer: write it. The guard
-    /// holds the answer's mode, or releases the claim if the write fails.
+    /// This body is new, or Redis does not answer: write it. The guard holds
+    /// the answer's mode, or the claim while the rows may yet land, or lets it go.
     Fresh(Guard),
     /// A copy of this body is being written now: answer `503`, retry in a
     /// second.

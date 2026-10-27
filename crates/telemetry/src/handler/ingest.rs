@@ -120,15 +120,18 @@ async fn handle(
     // Its own task, so an exporter that hangs up cannot cancel the write
     // between its insert and its settling.
     let sender = sender_clock(headers, arrived);
+    let token = format!("{}:{digest}", key.project_id.as_str());
     let written = tokio::spawn({
         let state = Arc::clone(state);
         let key = key.clone();
         async move {
-            match write(&state, &key, encoding, &bytes, sender).await {
+            match write(&state, &key, encoding, &bytes, sender, &token).await {
                 Ok((content_mode, body)) => {
                     guard.answer(&state.redis, content_mode).await;
                     Ok((content_mode, body))
                 }
+                // Whatever became of its rows, ClickHouse writes them once
+                // under the token, so the body may be sent again at once.
                 Err(error) => {
                     release(guard, &state).await;
                     Err(error)
@@ -181,14 +184,15 @@ async fn admit(
 }
 
 /// The claimed body, written: the spans read by the contract, the rows put
-/// in ClickHouse and settled ([`settle_written`]), and the console told of
-/// them; the answer's mode and body on success.
+/// in ClickHouse under `token` and settled ([`settle_written`]), and the
+/// console told of them; the answer's mode and body on success.
 async fn write(
     state: &Arc<AppState>,
     key: &ActingKey,
     encoding: Encoding,
     bytes: &[u8],
     sender: Option<SenderClock>,
+    token: &str,
 ) -> Result<(ContentMode, Vec<u8>), TelmoniError> {
     let request = decode::request(bytes, encoding).map_err(decode_error)?;
     // Made and sealed on the project's first export, which also files its
@@ -214,7 +218,7 @@ async fn write(
 
     state
         .store
-        .insert_spans(&batch.rows)
+        .insert_spans_once(&batch.rows, token)
         .await
         .map_err(store_failed)?;
 
@@ -541,8 +545,9 @@ fn batch_error(error: BatchError) -> TelmoniError {
     .into()
 }
 
-/// ClickHouse did not take the rows: an outage the exporter retries, or a
-/// shape of ours it refused, which retrying will not mend.
+/// ClickHouse did not take the rows, or was not heard to: an outage the
+/// exporter retries, a shape of ours it refused, which retrying will not
+/// mend, or no answer in time, after which a retry is written once.
 fn store_failed(error: clickhouse::error::Error) -> TelmoniError {
     // ⚠ The error's text can carry ClickHouse's own message, which may quote
     // a row: its kind is logged, never the text.

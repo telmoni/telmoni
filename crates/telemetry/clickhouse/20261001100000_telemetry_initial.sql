@@ -31,10 +31,14 @@ ORDER BY applied_at;
 --
 -- Partitioned by the day it ARRIVED, by the server's clock, so the nightly
 -- purge counts its retention from then and no client's clock decides when it
--- goes; ordered by project and start, the order every read narrows by. A
--- trace is read by its run's id, which no key holds and no window bounds, so
--- a bloom filter a granule lets that read skip every granule but the run's
--- instead of its project's whole history.
+-- goes; ordered by project and start. A window is read by arrival, which
+-- tracks start, so a minmax a granule skips the rest of its day's part; a
+-- trace by its run's id, which no key holds and no window bounds, so a bloom
+-- filter a granule skips every granule but the run's.
+--
+-- Each insert carries a token, its project and its export's digest, which the
+-- table keeps for its last ten thousand inserts: an export written again
+-- under it, however its first copy's answer was lost, writes nothing.
 CREATE TABLE IF NOT EXISTS telemetry.spans
 (
     -- The server's own: the key's project, its clock at receipt, and what
@@ -76,11 +80,13 @@ CREATE TABLE IF NOT EXISTS telemetry.spans
     -- The attributes the field inventory names, and any other whose value is
     -- a number or a boolean; an array is kept as its JSON.
     attributes               Map(LowCardinality(String), String),
-    INDEX run_id_idx run_id TYPE bloom_filter GRANULARITY 1
+    INDEX run_id_idx run_id TYPE bloom_filter GRANULARITY 1,
+    INDEX received_at_idx received_at TYPE minmax GRANULARITY 1
 )
 ENGINE = MergeTree
 PARTITION BY toDate(received_at)
-ORDER BY (project_id, started_at);
+ORDER BY (project_id, started_at)
+SETTINGS non_replicated_deduplication_window = 10000;
 
 -- Each hour's totals, by project, agent, kind, model, provider, a tool call's
 -- name, status, the deployment's environment and release, and whether the
@@ -116,7 +122,10 @@ CREATE TABLE IF NOT EXISTS telemetry.spans_hourly
 ENGINE = AggregatingMergeTree
 PARTITION BY toYYYYMM(hour)
 ORDER BY (project_id, hour, agent, kind, model, provider, tool, status, environment, release,
-          cost_reported);
+          cost_reported)
+-- As long as `spans` keeps its tokens: the totals of a copy it drops are
+-- dropped with it, where without them they would count it again.
+SETTINGS non_replicated_deduplication_window = 10000;
 
 -- ⚠ The one second table an insert into `spans` writes, in the same flush:
 -- a view that failed would fail the insert after its spans were written, so

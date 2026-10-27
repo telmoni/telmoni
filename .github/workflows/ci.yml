@@ -119,9 +119,10 @@ jobs:
       # ClickHouse as `make docker-up` runs it — the compose file's own
       # service, image, settings and two users, so the row policy holds the
       # module's user here as on a tier — started after the checkout its
-      # files come from, which a job's `services` start before.
-      - name: Start ClickHouse (the compose file's service)
-        run: docker compose up -d --wait clickhouse
+      # files come from, which a job's `services` start before; and Redis,
+      # without which the suites of ingest's claims skip.
+      - name: Start ClickHouse and Redis (the compose file's services)
+        run: docker compose up -d --wait clickhouse redis
       # EVERY set, in one run of the same command `make db-migrate` and a
       # tier's Job run. `tenancy_boundary` enumerates every tenant-keyed table
       # across every app schema and asserts each is FORCE'd + isolated —

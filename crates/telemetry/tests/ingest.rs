@@ -12,6 +12,7 @@ mod common;
 
 use std::io::Write as _;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use axum::Router;
@@ -34,7 +35,7 @@ use telmoni_shared::test_util::captured_logs;
 use telmoni_shared::{ApiKeyScope, OrganizationId, ProjectId};
 use telmoni_telemetry::contract;
 use telmoni_telemetry::seam::TelemetrySeam;
-use telmoni_telemetry::store::Projects;
+use telmoni_telemetry::store::{Projects, Store};
 use telmoni_telemetry::{otlp_router, router};
 
 const LANE: &str = "/otlp/v1/traces";
@@ -655,6 +656,133 @@ async fn an_export_sent_again_is_answered_as_it_was_and_written_once(pool: PgPoo
         .await
         .expect("a count");
     assert_eq!(count, 1, "written once");
+}
+
+/// A way to the ClickHouse at `url` that passes every request on, and none
+/// of its answers while `withheld` is set: `url`, through it.
+async fn withholding(url: &str, withheld: Arc<AtomicBool>) -> String {
+    let mut through = reqwest::Url::parse(url).expect("a ClickHouse URL");
+    let server = format!(
+        "{}:{}",
+        through.host_str().expect("its host"),
+        through.port_or_known_default().expect("its port")
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("a port");
+    let port = listener.local_addr().expect("its address").port();
+    tokio::spawn(async move {
+        while let Ok((client, _)) = listener.accept().await {
+            let (server, withheld) = (server.clone(), withheld.clone());
+            tokio::spawn(async move {
+                let Ok(upstream) = tokio::net::TcpStream::connect(&server).await else {
+                    return;
+                };
+                let (mut from_client, mut to_client) = client.into_split();
+                let (mut from_server, mut to_server) = upstream.into_split();
+                let answers = async {
+                    let mut buffer = [0_u8; 8192];
+                    while let Ok(read @ 1..) = from_server.read(&mut buffer).await {
+                        let Some(answer) = buffer.get(..read) else {
+                            return;
+                        };
+                        if !withheld.load(Ordering::SeqCst)
+                            && to_client.write_all(answer).await.is_err()
+                        {
+                            return;
+                        }
+                    }
+                };
+                tokio::select! {
+                    _ = tokio::io::copy(&mut from_client, &mut to_server) => {}
+                    () = answers => {}
+                }
+            });
+        }
+    });
+    through.set_port(Some(port)).expect("a port");
+    through.set_host(Some("127.0.0.1")).expect("a host");
+    through.into()
+}
+
+/// ⚠ A retry of an export whose insert outlasted its wait, which ClickHouse
+/// still wrote, is answered, and neither its spans nor their totals count twice.
+#[sqlx::test]
+async fn a_retry_of_an_insert_that_outlasted_its_wait_is_written_once(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let lane = lane(&pool, true);
+    if lane.state.redis.connection().await.is_none() {
+        eprintln!(
+            "skipping {}: Redis is not reachable (REDIS_URL, or the compose file's)",
+            module_path!()
+        );
+        return;
+    }
+    let withheld = Arc::new(AtomicBool::new(false));
+    let url = std::env::var("TELEMETRY_CLICKHOUSE_URL").expect("checked by clickhouse_or_skip");
+    let mut store = Store::connect(&withholding(&url, withheld.clone()).await)
+        .expect("ClickHouse through the way");
+    store.insert_wait = Duration::from_secs(1);
+    let state = common::state_with_stores_under(&pool, lane.auth.clone(), Arc::new(NoLimits));
+    let mut state = Arc::try_unwrap(state).ok().expect("a state of its own");
+    state.store = store;
+    let state = Arc::new(state);
+    let lane = Lane {
+        app: lanes(state.clone()),
+        state,
+        ..lane
+    };
+    // Answered, so the client holds the table's columns before the answers stop.
+    lane.export("chat before").await;
+
+    withheld.store(true, Ordering::SeqCst);
+    let body = export_json(&["chat unanswered"]).to_string().into_bytes();
+    let (status, _, _) = lane
+        .send(Some(INGEST_KEY), "application/json", None, body.clone())
+        .await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "told to retry");
+    withheld.store(false, Ordering::SeqCst);
+    common::eventually("ClickHouse writes the unanswered copy", || async {
+        common::rows_of(&ch.store, &lane.project).await.0 == 2
+    })
+    .await;
+
+    let (again, _, answer) = lane
+        .send(Some(INGEST_KEY), "application/json", None, body)
+        .await;
+    assert_eq!(
+        again,
+        StatusCode::OK,
+        "the retry is answered: {}",
+        String::from_utf8_lossy(&answer)
+    );
+    let only = Projects::one(lane.project.clone());
+    let spans: u64 = ch
+        .store
+        .read(
+            &only,
+            "SELECT count() FROM telemetry.spans WHERE project_id IN {projects:Array(String)}",
+        )
+        .fetch_one()
+        .await
+        .expect("the spans counted");
+    let totalled: u64 = ch
+        .store
+        .read(
+            &only,
+            "SELECT sum(spans) FROM telemetry.spans_hourly \
+             WHERE project_id IN {projects:Array(String)}",
+        )
+        .fetch_one()
+        .await
+        .expect("their totals summed");
+    assert_eq!(
+        (spans, totalled),
+        (2, 2),
+        "the first copy written, the retry's not"
+    );
 }
 
 /// An export of spans of one run, the `n`th named `<name> <n>` and carrying
