@@ -28,6 +28,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
+  ALERTS_HEADING,
   ALERT_KINDS,
   DAYS,
   FILTER_LABEL,
@@ -48,6 +49,7 @@ import {
   browserOffset,
   filterFieldsFor,
   filtersStatus,
+  incidentKindsLabel,
   inputOf,
   measuresFor,
   offsetWords,
@@ -71,6 +73,7 @@ import {
   SpanStatus,
 } from "@/lib/types/enums";
 
+import { useLanding } from "./_act";
 import { saveAlertAction } from "./actions";
 
 // An alert is made and edited in the console's side panel, full over the
@@ -164,6 +167,8 @@ function AlertPanel({
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const said = useRef<HTMLParagraphElement>(null);
+  // An alert's panel goes with its card.
+  const { gone } = useLanding(ALERTS_HEADING);
 
   // The form runs past the panel's height: what is wrong is brought into
   // view, below the field the person may have scrolled away from.
@@ -188,6 +193,7 @@ function AlertPanel({
     start(async () => {
       try {
         const r = await saveAlertAction(projectId, ruleId, checked.input);
+        if (gone(r)) return;
         if (r.error) {
           setError(r.error);
           return;
@@ -565,7 +571,7 @@ function Links({
     ...connections,
     ...links
       .filter((link) => !known.has(link.connectionId))
-      .map((link) => ({ id: link.connectionId, name: "A removed connector", status: "revoked" as const })),
+      .map((link) => ({ id: link.connectionId, name: "A removed connector", status: "revoked" as const, eventKinds: null })),
   ];
   if (rows.length === 0) {
     return (
@@ -584,39 +590,61 @@ function Links({
           : [...links, next],
     );
   const full = links.length >= LINKS_MAX;
+  const levelHint = `${id}-level-hint`;
   return (
-    <ul className="grid max-w-xl gap-3" aria-label="Connectors">
-      {rows.map((connection) => {
-        const link = links.find((l) => l.connectionId === connection.id) ?? null;
-        const switchId = `${id}-link-${connection.id}`;
-        const status = CONNECTION_STATUS_LABEL[connection.status];
-        return (
-          <li key={connection.id} className="grid gap-3 rounded-menu border border-border p-3">
-            <div className="flex items-center justify-between gap-3">
-              <span className="flex min-w-0 items-center gap-2">
-                <Label id={`${switchId}-name`} htmlFor={switchId} className="min-w-0 truncate font-normal">
-                  {connection.name}
-                </Label>
-                {status && (
-                  <Badge variant="secondary" className="shrink-0 font-normal">
-                    {status}
-                  </Badge>
-                )}
-              </span>
-              <Switch
-                id={switchId}
-                checked={link !== null}
-                onCheckedChange={(on) =>
-                  set(connection.id, on ? { connectionId: connection.id, level: RuleLevel.Warning, hours: null } : null)
-                }
-                disabled={disabled || (link === null && full)}
-              />
-            </div>
-            {link && <LinkFields id={switchId} link={link} onChange={(next) => set(connection.id, next)} disabled={disabled} />}
-          </li>
-        );
-      })}
-    </ul>
+    <>
+      <ul className="grid max-w-xl gap-3" aria-label="Connectors">
+        {rows.map((connection) => {
+          const link = links.find((l) => l.connectionId === connection.id) ?? null;
+          const switchId = `${id}-link-${connection.id}`;
+          const status = CONNECTION_STATUS_LABEL[connection.status];
+          const taken = incidentKindsLabel(connection.eventKinds);
+          return (
+            <li key={connection.id} className="grid gap-3 rounded-menu border border-border p-3">
+              <div className="flex items-center justify-between gap-3">
+                <span className="flex min-w-0 items-center gap-2">
+                  <Label id={`${switchId}-name`} htmlFor={switchId} className="min-w-0 truncate font-normal">
+                    {connection.name}
+                  </Label>
+                  {status && (
+                    <Badge variant="secondary" className="shrink-0 font-normal">
+                      {status}
+                    </Badge>
+                  )}
+                  {taken && (
+                    <Badge variant="secondary" className="shrink-0 font-normal">
+                      {taken}
+                    </Badge>
+                  )}
+                </span>
+                <Switch
+                  id={switchId}
+                  checked={link !== null}
+                  onCheckedChange={(on) =>
+                    set(connection.id, on ? { connectionId: connection.id, level: RuleLevel.Warning, hours: null } : null)
+                  }
+                  disabled={disabled || (link === null && full)}
+                />
+              </div>
+              {link && (
+                <LinkFields
+                  id={switchId}
+                  link={link}
+                  levelHint={levelHint}
+                  onChange={(next) => set(connection.id, next)}
+                  disabled={disabled}
+                />
+              )}
+            </li>
+          );
+        })}
+      </ul>
+      {links.length > 0 && (
+        <p id={levelHint} className="text-muted-foreground">
+          A no-data incident reaches only the connectors that hear warnings and alerts.
+        </p>
+      )}
+    </>
   );
 }
 
@@ -624,11 +652,14 @@ function Links({
 function LinkFields({
   id,
   link,
+  levelHint,
   onChange,
   disabled,
 }: {
   id: string;
   link: LinkDraft;
+  /** The id of the line under the connectors on what each level hears. */
+  levelHint: string;
   onChange: (link: LinkDraft) => void;
   disabled: boolean;
 }) {
@@ -646,7 +677,7 @@ function LinkFields({
             onValueChange={(level) => onChange({ ...link, level: level as RuleLevel })}
             disabled={disabled}
           >
-            <SelectTrigger id={`${id}-level`} className="w-full">
+            <SelectTrigger id={`${id}-level`} aria-describedby={levelHint} className="w-full">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>

@@ -32,7 +32,7 @@ export function IncidentActions({
   name: string;
   openedAt: string;
 }) {
-  const { pending, error, act, movedRef } = useAct();
+  const { pending, error, act, movedRef } = useAct(alertHeading(ruleId));
   const resolve = useRef<HTMLButtonElement>(null);
   // A move takes away the button it was made with: the focus goes on to the
   // row's next control, or to its alert's heading once none stays.

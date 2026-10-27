@@ -13,7 +13,8 @@ import { deleteAlertAction, hearAgainAction, pauseAlertAction } from "./actions"
 const ROW_BUTTON = "h-9 gap-1.5 text-xs text-muted-foreground hover:text-foreground";
 
 /** An alert's own controls: edit it, pause or resume it, mute it for a
- *  while, or delete it with its incidents. */
+ *  while, or delete it with its incidents. One its plan paused may be kept
+ *  paused as a member's own, so room returning does not run it again. */
 export function AlertActions({
   projectId,
   alert,
@@ -54,6 +55,18 @@ export function AlertActions({
       >
         {paused ? "Resume" : "Pause"}
       </Button>
+      {alert.paused === "plan" && (
+        <Button
+          variant="outline"
+          size="sm"
+          className={ROW_BUTTON}
+          disabled={pending}
+          onClick={() => act(() => pauseAlertAction(projectId, alert.id, true))}
+          aria-label={`Keep ${alert.name} paused`}
+        >
+          Keep paused
+        </Button>
+      )}
       <MuteButton projectId={projectId} ruleId={alert.id} name={alert.name} disabled={pending} />
       <ConfirmDialog
         trigger={
@@ -68,7 +81,7 @@ export function AlertActions({
           </Button>
         }
         title={`Delete "${alert.name}"?`}
-        description="The alert stops at once, and its incidents and maintenance windows go with it."
+        description="The alert stops at once, and its incidents and maintenance windows go with it; one still open is told resolved to the connectors that heard it."
         confirmLabel="Delete"
         destructive
         onConfirm={() => act(() => deleteAlertAction(projectId, alert.id), true)}

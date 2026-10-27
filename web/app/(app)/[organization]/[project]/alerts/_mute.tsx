@@ -22,9 +22,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { MUTE_LENGTHS } from "@/lib/alerts";
+import { ALERTS_HEADING, MUTE_LENGTHS } from "@/lib/alerts";
 
-import { useAct } from "./_act";
+import { useAct, useLanding } from "./_act";
 import { endMuteAction, muteAction } from "./actions";
 
 // A maintenance window mutes one alert, or every alert of the project, from
@@ -96,6 +96,8 @@ function MuteDialog({
   const [minutes, setMinutes] = useState<number>(60);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
+  // An alert's dialog goes with its card.
+  const { gone } = useLanding(ALERTS_HEADING);
 
   function submit() {
     // The browser's own clock reads the time typed, a local one.
@@ -112,6 +114,7 @@ function MuteDialog({
           starts_at: startsAt?.toISOString() ?? null,
           minutes,
         });
+        if (gone(r)) return;
         if (r.error) {
           setError(r.error);
           return;

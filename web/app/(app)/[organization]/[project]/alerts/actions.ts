@@ -29,7 +29,7 @@ import {
 // before it becomes part of a lane's path, and an alert's shape before it is
 // sent; the lane checks the rest and says what it refused.
 
-type Result = { error: string | null };
+type Result = { error: string | null; gone?: true };
 
 const Id = z.guid();
 const Values = z.array(z.string()).optional();
@@ -104,9 +104,11 @@ async function send(
   if (!res) return { error: UNAVAILABLE };
   if (!res.ok && !(init.goneIsDone && res.status === 404)) {
     const { message } = await extractProblem(res);
-    // What the page drew is gone, another member having deleted it: it is
-    // drawn again as it stands, beside what was refused.
-    if (res.status === 404) refresh();
+    // Gone, as another member deleted it: the page is drawn again without it.
+    if (res.status === 404) {
+      refresh();
+      return { error: message, gone: true };
+    }
     return { error: message };
   }
   refresh();

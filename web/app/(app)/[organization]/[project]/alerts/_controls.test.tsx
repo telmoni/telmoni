@@ -10,8 +10,11 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/components/console-shell", () => ({
   useConsoleShell: () => ({ element: null, cover: () => () => {} }),
 }));
+vi.mock("sonner", () => ({
+  toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }),
+}));
 
-type Answer = Promise<{ error: string | null }>;
+type Answer = Promise<{ error: string | null; gone?: boolean }>;
 const saveAlertAction = vi.fn<(p: string, r: string | null, i: unknown) => Answer>(async () => ({ error: null }));
 const pauseAlertAction = vi.fn<(p: string, r: string, paused: boolean) => Answer>(async () => ({ error: null }));
 const deleteAlertAction = vi.fn<(p: string, r: string) => Answer>(async () => ({ error: null }));
@@ -29,6 +32,8 @@ vi.mock("./actions", () => ({
   endMuteAction: (p: string, m: string) => endMuteAction(p, m),
 }));
 
+import { toast } from "sonner";
+
 import { ALERTS_HEADING, alertHeading, type ConnectionChoice } from "@/lib/alerts";
 import type { Alert } from "@/lib/server/data";
 
@@ -42,8 +47,8 @@ const RULE = "7a1c0e52-0000-4000-8000-000000000002";
 const SLACK = "3c4e2a74-0000-4000-8000-000000000004";
 const HOOK = "4d5f3b85-0000-4000-8000-000000000007";
 const CONNECTIONS: ConnectionChoice[] = [
-  { id: SLACK, name: "#alerts in Acme", status: "active" },
-  { id: HOOK, name: "hooks.example.com", status: "errored" },
+  { id: SLACK, name: "#alerts in Acme", status: "active", eventKinds: null },
+  { id: HOOK, name: "hooks.example.com", status: "errored", eventKinds: null },
 ];
 
 /** A choice made in one of the console's selects, through the native select
@@ -171,6 +176,9 @@ describe("the alert's form", { timeout: 15_000 }, () => {
     expect(within(panel).getByText("Needs attention")).toBeInTheDocument();
     fireEvent.click(within(panel).getByRole("switch", { name: "hooks.example.com" }));
     expect(within(panel).getByRole("combobox", { name: "Hears" })).toHaveTextContent("Warnings and alerts");
+    expect(within(panel).getByRole("combobox", { name: "Hears" })).toHaveAccessibleDescription(
+      "A no-data incident reaches only the connectors that hear warnings and alerts.",
+    );
     const when = within(panel).getByRole("combobox", { name: "When" });
     expect(when).toHaveTextContent("At any hour");
 
@@ -221,6 +229,37 @@ describe("the alert's form", { timeout: 15_000 }, () => {
       expect(panel.querySelector(`label[for="${select.id}"]`), select.textContent ?? "").not.toBeNull();
     }
     expect(within(panel).getByRole("combobox", { name: "Compared as" })).toHaveTextContent("Above (>)");
+  });
+
+  // ⚠ Notifications sends a webhook only the kinds it takes, an alert's incidents among them.
+  it("marks a webhook that takes neither of an incident's kinds, or one alone", () => {
+    const webhook = (id: string, eventKinds: ConnectionChoice["eventKinds"]): ConnectionChoice => ({
+      id,
+      name: `${id}.example.com`,
+      status: "active",
+      eventKinds,
+    });
+    render(
+      <NewAlert
+        projectId={PROJECT}
+        connections={[
+          ...CONNECTIONS,
+          webhook("none", ["member_added"]),
+          webhook("opened", ["incident_opened"]),
+          webhook("resolved", ["member_left", "incident_resolved"]),
+          webhook("both", ["incident_resolved", "incident_opened"]),
+        ]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /New alert/ }));
+    const panel = screen.getByRole("dialog");
+    const row = (name: string) => within(panel).getByRole("switch", { name }).closest("li")!;
+    expect(row("none.example.com")).toHaveTextContent("Takes no incidents");
+    expect(row("opened.example.com")).toHaveTextContent("Takes openings only");
+    expect(row("resolved.example.com")).toHaveTextContent("Takes resolutions only");
+    for (const name of ["both.example.com", "#alerts in Acme"]) {
+      expect(row(name)).not.toHaveTextContent(/Takes/);
+    }
   });
 
   it("says the alert's incidents reach the feed alone where the project connects nothing", () => {
@@ -275,6 +314,21 @@ describe("an alert's controls", { timeout: 15_000 }, () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Resume Slow calls" }));
     await waitFor(() => expect(pauseAlertAction).toHaveBeenCalledWith(PROJECT, RULE, false));
+  });
+
+  // ⚠ Room returning would run it again, so a member may keep it off first.
+  it("offers to keep an alert the plan paused paused, as the member's own pause", async () => {
+    render(<AlertActions projectId={PROJECT} alert={{ ...ALERT, paused: "plan" }} connections={CONNECTIONS} />);
+    expect(screen.getByRole("button", { name: "Resume Slow calls" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Keep Slow calls paused" }));
+    await waitFor(() => expect(pauseAlertAction).toHaveBeenCalledWith(PROJECT, RULE, true));
+  });
+
+  it("offers no second pause on an alert a member paused", () => {
+    render(
+      <AlertActions projectId={PROJECT} alert={{ ...ALERT, paused: "person" }} connections={CONNECTIONS} />,
+    );
+    expect(screen.queryByRole("button", { name: "Keep Slow calls paused" })).toBeNull();
   });
 
   it("says what the lane refused beside the alert", async () => {
@@ -459,5 +513,104 @@ describe("an incident's controls", { timeout: 15_000 }, () => {
     render(<IncidentActions {...props} status="resolved" />);
     expect(screen.queryByRole("button")).toBeNull();
     expect(screen.queryByRole("link")).toBeNull();
+  });
+});
+
+// ⚠ Another member deleted the alert: the refresh takes its card away, with
+// what a control on it would say and the focus it held.
+describe("a refusal for what is gone", { timeout: 15_000 }, () => {
+  const GONE = { error: "Not Found: no alert with that id in this project", gone: true };
+  const section = (
+    <h2 id={ALERTS_HEADING} tabIndex={-1}>
+      Alerts
+    </h2>
+  );
+  const page = () => screen.getByRole("heading", { name: "Alerts" });
+
+  it("is said in a toast, and the focus goes to the page's heading as the card goes", async () => {
+    pauseAlertAction.mockResolvedValueOnce(GONE);
+    const { rerender } = render(
+      <>
+        {section}
+        <AlertActions projectId={PROJECT} alert={ALERT} connections={CONNECTIONS} />
+      </>,
+    );
+    const pause = screen.getByRole("button", { name: "Pause Slow calls" });
+    pause.focus();
+    fireEvent.click(pause);
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(GONE.error));
+    await waitFor(() => expect(pause).toBeEnabled());
+    rerender(section);
+    expect(document.activeElement).toBe(page());
+
+    // Edits saved over it, the panel going with the card.
+    saveAlertAction.mockResolvedValueOnce(GONE);
+    rerender(
+      <>
+        {section}
+        <AlertActions projectId={PROJECT} alert={ALERT} connections={CONNECTIONS} />
+      </>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Edit Slow calls" }));
+    const save = within(screen.getByRole("dialog")).getByRole("button", { name: "Save alert" });
+    fireEvent.click(save);
+    await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(save).toBeEnabled());
+    rerender(section);
+    expect(document.activeElement).toBe(page());
+
+    incidentAction.mockResolvedValueOnce(GONE);
+    rerender(
+      <>
+        {section}
+        <IncidentActions
+          projectId={PROJECT}
+          ruleId={RULE}
+          incidentId="i-1"
+          status="open"
+          name="Slow calls"
+          openedAt="2026-10-26T11:00:00Z"
+        />
+      </>,
+    );
+    const acknowledge = screen.getByRole("button", { name: /^Acknowledge the incident of Slow calls/ });
+    acknowledge.focus();
+    fireEvent.click(acknowledge);
+    await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(acknowledge).toBeEnabled());
+    rerender(section);
+    expect(document.activeElement).toBe(page());
+
+    // Its own window's End, whose landing, the alert's heading, went too.
+    endMuteAction.mockResolvedValueOnce(GONE);
+    rerender(
+      <>
+        {section}
+        <EndMute projectId={PROJECT} muteId="m-1" label="End the window muting Slow calls" landing={alertHeading(RULE)} />
+      </>,
+    );
+    const end = screen.getByRole("button", { name: "End the window muting Slow calls" });
+    end.focus();
+    fireEvent.click(end);
+    await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(4));
+    await waitFor(() => expect(end).toBeEnabled());
+    rerender(section);
+    expect(document.activeElement).toBe(page());
+
+    muteAction.mockResolvedValueOnce(GONE);
+    rerender(
+      <>
+        {section}
+        <MuteButton projectId={PROJECT} ruleId={RULE} name="Slow calls" />
+      </>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Mute Slow calls" }));
+    const dialog = screen.getByRole("dialog", { name: 'Mute "Slow calls"' });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Mute" }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(5));
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Mute" })).toBeEnabled());
+    rerender(section);
+    await waitFor(() => expect(document.activeElement).toBe(page()));
+    expect(toast.error).toHaveBeenCalledTimes(5);
   });
 });

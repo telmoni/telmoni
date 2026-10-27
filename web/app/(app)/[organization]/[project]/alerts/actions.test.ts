@@ -131,18 +131,18 @@ describe("saveAlertAction", () => {
 
   it("says what the lane refused, or that it could not be reached, and draws nothing again", async () => {
     fetchMock.mockResolvedValueOnce(new Response(null, { status: 409 }));
-    expect((await saveAlertAction(PROJECT, null, INPUT)).error).toBe(
-      "this project has an alert by that name already",
-    );
+    expect(await saveAlertAction(PROJECT, null, INPUT)).toEqual({
+      error: "this project has an alert by that name already",
+    });
     fetchMock.mockResolvedValueOnce(null);
     expect((await saveAlertAction(PROJECT, null, INPUT)).error).toMatch(/Alerts are unavailable/);
     expect(refresh).not.toHaveBeenCalled();
   });
 
   // Another member deleted it: the page is drawn again without it.
-  it("draws the page again where what it acted on is gone", async () => {
+  it("draws the page again where what it acted on is gone, and answers that it is", async () => {
     fetchMock.mockResolvedValueOnce(new Response(null, { status: 404 }));
-    expect((await saveAlertAction(PROJECT, RULE, INPUT)).error).toBeTruthy();
+    expect(await saveAlertAction(PROJECT, RULE, INPUT)).toEqual({ error: expect.any(String), gone: true });
     expect(refresh).toHaveBeenCalledOnce();
   });
 

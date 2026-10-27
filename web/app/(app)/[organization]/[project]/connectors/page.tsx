@@ -92,8 +92,10 @@ export default async function ConnectorsPage({
         <section className="grid gap-3">
           <p className="text-sm text-muted-foreground">
             Connect this project to the places it already talks. A Slack channel
-            gets every notice this project raises; a webhook gets the events you
-            choose for it.
+            gets every notice this project and its organization raise; a webhook,
+            those among the events you choose for it. An alert&rsquo;s incidents,
+            though, go only to the connectors each alert links, a webhook among
+            them only if it takes their kind.
           </p>
 
           {notice && (

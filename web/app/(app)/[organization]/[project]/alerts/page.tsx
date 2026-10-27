@@ -22,6 +22,7 @@ import {
   connectionChoices,
   filterWords,
   hoursWords,
+  incidentKindsLabel,
   inForce,
   memberNames,
   metricWords,
@@ -265,18 +266,20 @@ function AlertCard({
   now: number;
 }) {
   const thresholds = thresholdWords(alert);
-  const statuses = new Map((connections ?? []).map((connection) => [connection.id, connection.status]));
+  const choices = new Map((connections ?? []).map((connection) => [connection.id, connection]));
   const filters = filterWords(alert.filters);
+  const read = readSince(alert);
   return (
     <Card id={`alert-${alert.id}`} className="scroll-mt-4 gap-3">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="grid min-w-0 gap-1">
           <div className="flex min-w-0 items-center gap-2">
-            <h3 id={alertHeading(alert.id)} tabIndex={-1} className="min-w-0 truncate text-sm font-medium">
+            <h2 id={alertHeading(alert.id)} tabIndex={-1} className="min-w-0 truncate text-sm font-medium">
               {alert.name}
-            </h3>
+            </h2>
             <Badge variant={severityVariant(alert.severity)} className="shrink-0 font-normal">
-              {SEVERITY_LABEL[alert.severity]}
+              {/* Read, an alert keeping its last severity can still have none to keep. */}
+              {alert.severity === Severity.Unknown && read ? "No severity" : SEVERITY_LABEL[alert.severity]}
             </Badge>
           </div>
           <p className="text-sm text-muted-foreground">{metricWords(alert)}</p>
@@ -287,7 +290,7 @@ function AlertCard({
           button makes it taller. */}
       <dl className="grid items-baseline gap-x-3 gap-y-2 border-t border-border pt-3 text-sm sm:grid-cols-[9rem_minmax(0,1fr)]">
         <Detail label="Now">
-          <Standing alert={alert} />
+          <Standing alert={alert} read={read} />
         </Detail>
         <Detail label="Thresholds">
           Alert {thresholds.alert}
@@ -304,8 +307,9 @@ function AlertCard({
               {alert.connectors.map((link) => {
                 const name =
                   connectionNames.get(link.connection_id) ?? unknownConnector.replace(/^a/, "A");
-                const status = statuses.get(link.connection_id);
-                const stopped = status ? CONNECTION_STATUS_LABEL[status] : null;
+                const connection = choices.get(link.connection_id);
+                const stopped = connection ? CONNECTION_STATUS_LABEL[connection.status] : null;
+                const taken = connection ? incidentKindsLabel(connection.eventKinds) : null;
                 return (
                   <li key={link.connection_id} className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
                     {/* A webhook's host is one word, which a phone's width must break. */}
@@ -321,6 +325,12 @@ function AlertCard({
                     {stopped && (
                       <Badge variant="secondary" className="font-normal">
                         {stopped}
+                      </Badge>
+                    )}
+                    {/* A webhook hears only the kinds of notice its events name. */}
+                    {taken && (
+                      <Badge variant="secondary" className="font-normal">
+                        {taken}
                       </Badge>
                     )}
                     {link.muted && (
@@ -418,7 +428,11 @@ function IncidentItem({
   return (
     <li
       id={`incident-${incident.id}`}
-      className={cn("grid scroll-mt-4 gap-1 rounded-sm", followed && "bg-muted/60 ring-4 ring-muted/60")}
+      className={cn(
+        "grid scroll-mt-4 gap-1 rounded-sm",
+        // A bar past 3:1 on either theme's page, and a border: the focus the link hands it clears a ring.
+        followed && "-my-1 -mr-1 -ml-2 border-l-2 border-muted-foreground bg-muted/60 py-1 pr-1 pl-1.5",
+      )}
       aria-current={followed ? "true" : undefined}
       tabIndex={followed ? -1 : undefined}
     >
@@ -490,9 +504,16 @@ function IncidentState({ incident, who }: { incident: Incident; who: (id: string
   return <span>{STATUS_LABEL[incident.status]}</span>;
 }
 
-/** Where an alert stands: paused, and by whom; not yet evaluated; or its
- *  last value, and since when it has stood where it does. */
-function Standing({ alert }: { alert: Alert }) {
+/** When the alert was last read, if after its severity was last set: one the
+ *  plan runs again keeps the reading from before its pause. */
+function readSince(alert: Alert): string | null {
+  const at = alert.evaluated_at;
+  return at !== null && Date.parse(at) >= Date.parse(alert.severity_since) ? at : null;
+}
+
+/** Where an alert stands: paused, and by whom; not yet read; read with no
+ *  severity to keep; or its last value, and since when it has stood there. */
+function Standing({ alert, read }: { alert: Alert; read: string | null }) {
   if (alert.paused === "plan") {
     return (
       <>
@@ -508,15 +529,22 @@ function Standing({ alert }: { alert: Alert }) {
       </>
     );
   }
-  if (alert.severity === Severity.Unknown) {
-    return <>Not evaluated yet: it is, within a minute.</>;
-  }
-  // Saved over since its last reading, which answered another question.
-  if (alert.evaluated_at === null) {
+  if (read === null) {
+    if (alert.severity === Severity.Unknown) return <>Not evaluated yet: it is, within a minute.</>;
+    // Saved over since its last reading, which answered another question.
     return (
       <>
         Changed since its last reading, taken again within a minute;{" "}
         {SEVERITY_LABEL[alert.severity]} until then.
+      </>
+    );
+  }
+  // Only an alert that keeps its last severity is read and still has none.
+  if (alert.severity === Severity.Unknown) {
+    return (
+      <>
+        Its window has held no span yet, so it has no severity to keep; read{" "}
+        <LocalTime iso={read} />.
       </>
     );
   }
@@ -525,7 +553,7 @@ function Standing({ alert }: { alert: Alert }) {
       {alert.value === null
         ? "No span in its window"
         : amount(alert.measure, alert.aggregation, alert.value)}
-      , read <LocalTime iso={alert.evaluated_at} />; {SEVERITY_LABEL[alert.severity]} since{" "}
+      , read <LocalTime iso={read} />; {SEVERITY_LABEL[alert.severity]} since{" "}
       <LocalTime iso={alert.severity_since} />.
     </>
   );

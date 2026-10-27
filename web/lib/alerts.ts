@@ -18,6 +18,7 @@ import { formatCost } from "@/lib/traces";
 import {
   IncidentStatus,
   MissingData,
+  NotificationKind,
   RuleAggregation,
   RuleLevel,
   RuleMeasure,
@@ -409,8 +410,14 @@ const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 // ── The form ─────────────────────────────────────────────────────────────────
 
-/** One of the project's connections, as the form offers it. */
-export type ConnectionChoice = { id: string; name: string; status: "active" | "errored" | "revoked" };
+/** One of the project's connections, as the form offers it, with the kinds
+ *  of notice it takes: none for every kind, as a webhook's events narrow them. */
+export type ConnectionChoice = {
+  id: string;
+  name: string;
+  status: "active" | "errored" | "revoked";
+  eventKinds: Connection["event_kinds"];
+};
 
 /** A connection's state where it hears nothing, as the Connectors page says
  *  it: a delivery goes to an active one alone. */
@@ -419,6 +426,18 @@ export const CONNECTION_STATUS_LABEL: Record<ConnectionChoice["status"], string 
   errored: "Needs attention",
   revoked: "Disconnected",
 };
+
+/** What a connection takes of an alert's incidents, where not both kinds:
+ *  notifications sends a webhook only the kinds its events name. */
+export function incidentKindsLabel(eventKinds: ConnectionChoice["eventKinds"]): string | null {
+  if (eventKinds === null) return null;
+  const opened = eventKinds.includes(NotificationKind.IncidentOpened);
+  const resolved = eventKinds.includes(NotificationKind.IncidentResolved);
+  if (opened && resolved) return null;
+  if (opened) return "Takes openings only";
+  if (resolved) return "Takes resolutions only";
+  return "Takes no incidents";
+}
 
 /** The project's connections, each by a name that tells it from the rest: a
  *  webhook on a host another shares, with the start of its fingerprint, as
@@ -432,6 +451,7 @@ export function connectionChoices(connections: readonly Connection[]): Connectio
         ? `${names[i]} (${connection.channel_id.slice(0, 8)})`
         : names[i],
     status: connection.status,
+    eventKinds: connection.event_kinds,
   }));
 }
 
@@ -596,8 +616,8 @@ export function inputOf(
   }
   let renotify: number | null = null;
   if (draft.renotifyMinutes.trim()) {
-    renotify = Number(draft.renotifyMinutes.trim());
-    if (!Number.isInteger(renotify) || renotify < 1 || renotify > RENOTIFY_MAX_MINUTES) {
+    renotify = parsed(draft.renotifyMinutes, "number");
+    if (renotify === null || !Number.isInteger(renotify) || renotify < 1 || renotify > RENOTIFY_MAX_MINUTES) {
       return fail(`Notify again every 1 to ${RENOTIFY_MAX_MINUTES.toLocaleString("en-US")} minutes, or leave it empty.`);
     }
   }

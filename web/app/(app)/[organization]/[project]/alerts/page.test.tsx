@@ -1,4 +1,7 @@
 // @vitest-environment jsdom
+import { readFileSync } from "node:fs";
+import path from "node:path";
+
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -280,6 +283,44 @@ function detail(ruleId: string, label: string) {
   return within(card).getByText(label, { selector: "dt" }).nextElementSibling as HTMLElement;
 }
 
+const CSS = readFileSync(path.join(__dirname, "../../../../globals.css"), "utf8");
+
+/** A colour token of a console palette, as `globals.css` sets it in oklch. */
+function oklch(theme: string, name: string): [number, number, number] | null {
+  const at = CSS.indexOf(`\n${theme} {`);
+  const block = CSS.slice(at, CSS.indexOf("\n}", at));
+  const value = new RegExp(`--${name}:\\s*oklch\\(\\s*([\\d.]+)\\s+([\\d.]+)\\s+([\\d.]+)\\s*\\)`).exec(block);
+  return value ? [Number(value[1]), Number(value[2]), Number(value[3])] : null;
+}
+
+/** An oklch colour in gamma-encoded sRGB, where a browser lays one over another. */
+function srgb([l, c, h]: [number, number, number]): number[] {
+  const [a, b] = [c * Math.cos((h * Math.PI) / 180), c * Math.sin((h * Math.PI) / 180)];
+  const [long, medium, short] = [
+    l + 0.3963377774 * a + 0.2158037573 * b,
+    l - 0.1055613458 * a - 0.0638541728 * b,
+    l - 0.0894841775 * a - 1.291485548 * b,
+  ].map((v) => v ** 3);
+  return [
+    4.0767416621 * long - 3.3077115913 * medium + 0.2309699292 * short,
+    -1.2684380046 * long + 2.6097574011 * medium - 0.3413193965 * short,
+    -0.0041960863 * long - 0.7034186147 * medium + 1.707614701 * short,
+  ].map((v) => {
+    const x = Math.min(Math.max(v, 0), 1);
+    return x <= 0.0031308 ? 12.92 * x : 1.055 * x ** (1 / 2.4) - 0.055;
+  });
+}
+
+/** WCAG's contrast between two sRGB colours. */
+function contrast(one: number[], other: number[]): number {
+  const luminance = (rgb: number[]) => {
+    const [r, g, b] = rgb.map((x) => (x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4));
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const [high, low] = [luminance(one), luminance(other)].sort((x, y) => y - x);
+  return (high + 0.05) / (low + 0.05);
+}
+
 describe("AlertsPage", () => {
   it("offers a new alert and a mute over all", async () => {
     render(await AlertsPage({ params: PARAMS }));
@@ -290,8 +331,8 @@ describe("AlertsPage", () => {
     expect(header.dataset.info).toMatch(/^Each reads a measure of the project's spans/);
     expect(within(header).getByTestId("new-alert").dataset.connections).toBe(
       JSON.stringify([
-        { id: SLACK, name: "#alerts in Acme", status: "active" },
-        { id: HOOK, name: "hooks.example.com", status: "errored" },
+        { id: SLACK, name: "#alerts in Acme", status: "active", eventKinds: null },
+        { id: HOOK, name: "hooks.example.com", status: "errored", eventKinds: null },
       ]),
     );
     expect(within(header).getByTestId("mute").dataset.rule).toBe("null");
@@ -325,6 +366,83 @@ describe("AlertsPage", () => {
     expect(within(cap).getByText("None: its incidents reach the project's feed alone")).toBeInTheDocument();
     expect(within(cap).getByText("Alert > $5.00")).toBeInTheDocument();
     expect(detail(OTHER_RULE, "Incidents")).toHaveTextContent(/^None$/);
+  });
+
+  // ⚠ Notifications sends a webhook only the kinds it takes: linked, one that
+  // takes neither of an incident's, or one alone, hears less than the card says.
+  it("marks a linked webhook that takes neither of an incident's kinds, or one alone", async () => {
+    const taking = async (kinds: string[] | null) => {
+      cleanup();
+      const listing = mockConnectors as { connections: { id: string }[] };
+      mockConnectors = {
+        ...listing,
+        connections: listing.connections.map((c) => (c.id === HOOK ? { ...c, event_kinds: kinds } : c)),
+      };
+      render(await AlertsPage({ params: PARAMS }));
+      return within(detail(RULE, "Connectors")).getByText(/hooks\.example\.com/).closest("li")!;
+    };
+    expect(await taking(["member_added"])).toHaveTextContent("Takes no incidents");
+    expect(await taking(["incident_opened", "member_left"])).toHaveTextContent("Takes openings only");
+    expect(await taking(["incident_resolved"])).toHaveTextContent("Takes resolutions only");
+    for (const kinds of [null, ["incident_resolved", "incident_opened"]]) {
+      expect(await taking(kinds)).not.toHaveTextContent(/Takes/);
+    }
+    // Slack takes every kind.
+    expect(within(detail(RULE, "Connectors")).getByText(/#alerts in Acme/).closest("li")).not.toHaveTextContent(
+      /Takes/,
+    );
+  });
+
+  // ⚠ One level under the page's h1 (`PageHeader`), so the outline skips none;
+  // its id and tabIndex take the focus a control on its card hands it as it goes.
+  it("heads each alert one level under the page's title", async () => {
+    render(await AlertsPage({ params: PARAMS }));
+    const slow = document.getElementById(`alert-${RULE}`)!;
+    const heading = within(slow).getByRole("heading", { level: 2, name: "Slow calls" });
+    expect(heading).toHaveAttribute("id", `alert-${RULE}-name`);
+    expect(heading).toHaveAttribute("tabindex", "-1");
+    expect(heading).toHaveClass("min-w-0", "truncate", "text-sm", "font-medium");
+  });
+
+  // ⚠ Kept with no span yet, an alert has no severity to keep, and says so once read.
+  it("says where an alert stands before its first reading, after it, and after an empty one it keeps", async () => {
+    const standing = async (over: Record<string, unknown>) => {
+      cleanup();
+      mockAlerts = { ...(mockAlerts as object), alerts: [{ ...SLOW, ...over }] };
+      render(await AlertsPage({ params: PARAMS }));
+      const card = document.getElementById(`alert-${RULE}`)!;
+      return { badge: card.querySelector('[data-slot="badge"]'), now: detail(RULE, "Now") };
+    };
+    const kept = {
+      missing_data: "keep",
+      severity: "unknown",
+      value: null,
+      evaluated_at: "2026-10-26T11:59:00Z",
+      severity_since: "2026-10-26T11:00:00Z",
+    };
+    let shown = await standing(kept);
+    expect(shown.now).toHaveTextContent(
+      /^Its window has held no span yet, so it has no severity to keep; read \S.*\.$/,
+    );
+    expect(shown.now.querySelector("time")).toHaveAttribute("datetime", "2026-10-26T11:59:00Z");
+    expect(shown.badge).toHaveTextContent(/^No severity$/);
+
+    // Made or resumed, and not read since.
+    shown = await standing({ ...kept, evaluated_at: null });
+    expect(shown.badge).toHaveTextContent(/^Not evaluated$/);
+    expect(shown.now).toHaveTextContent(/^Not evaluated yet: it is, within a minute\.$/);
+    // Run again by the plan, which keeps the reading from before its pause.
+    shown = await standing({ ...kept, value: 6200, evaluated_at: "2026-10-26T09:00:00Z", severity_since: "2026-10-26T11:58:00Z" });
+    expect(shown.badge).toHaveTextContent(/^Not evaluated$/);
+    expect(shown.now).toHaveTextContent(/^Not evaluated yet: it is, within a minute\.$/);
+
+    shown = await standing({ value: null, evaluated_at: null });
+    expect(shown.now).toHaveTextContent(
+      /^Changed since its last reading, taken again within a minute; Alert until then\.$/,
+    );
+    shown = await standing({});
+    expect(shown.badge).toHaveTextContent(/^Alert$/);
+    expect(shown.now).toHaveTextContent(/^6,200 ms, read \S.*; Alert since \S.*\.$/);
   });
 
   // ⚠ Under the alert that opened them, open ones first, each with where its notices went.
@@ -367,6 +485,27 @@ describe("AlertsPage", () => {
     expect(items).toHaveLength(4);
     expect(items[3]).toHaveAttribute("id", `incident-${past}`);
     expect(items[3]).toHaveAttribute("aria-current", "true");
+  });
+
+  // ⚠ Marked past WCAG's 3:1 for a state, on the page of either theme, by a
+  // fill or a border: the focus the link hands it clears a ring (globals.css).
+  it("marks a followed incident past 3:1 against the page, light and dark", async () => {
+    const held = "6e5a6d79-0000-4000-8000-00000000000a";
+    const alerts = mockAlerts as { incidents: ReturnType<typeof incident>[] };
+    alerts.incidents = [incident(held), ...alerts.incidents.slice(1)];
+    render(await AlertsPage({ params: PARAMS, searchParams: Promise.resolve({ incident: held }) }));
+    const followed = incidentItems(RULE)[0]!;
+    for (const theme of [".theme-console", ".dark .theme-console"]) {
+      const page = srgb(oklch(theme, "background")!);
+      const marks = [...followed.classList].flatMap((name) => {
+        const drawn = /^(?:bg|border(?:-[trblxy])?)-([a-z-]+?)(?:\/(\d+))?$/.exec(name);
+        const color = drawn && oklch(theme, drawn[1]);
+        if (!drawn || !color) return [];
+        const alpha = drawn[2] ? Number(drawn[2]) / 100 : 1;
+        return [contrast(srgb(color).map((v, i) => alpha * v + (1 - alpha) * page[i]), page)];
+      });
+      expect(Math.max(0, ...marks), theme).toBeGreaterThanOrEqual(3);
+    }
   });
 
   it("marks a followed incident the list holds without reading it again, and ignores one that is no id", async () => {

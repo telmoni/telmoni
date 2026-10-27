@@ -10,6 +10,7 @@ import {
   filterFieldsFor,
   hoursWords,
   incidentHref,
+  incidentKindsLabel,
   inForce,
   inputOf,
   joinValues,
@@ -29,6 +30,7 @@ import {
 import type { Alert, Mute } from "./server/data";
 import {
   MissingData,
+  NotificationKind,
   RuleAggregation,
   RuleLevel,
   RuleMeasure,
@@ -280,6 +282,19 @@ describe("the form", () => {
     expect(grouped.ok && grouped.input).toMatchObject({ alert_threshold: 12500.5, warning_threshold: 1000 });
   });
 
+  // "1,440" is a day, its comma read as a threshold's is.
+  it("takes grouping commas in Notify again, still a whole number of minutes", () => {
+    const day = inputOf(draft({ renotifyMinutes: "1,440" }));
+    expect(day.ok && day.input.renotify_minutes).toBe(1440);
+    const week = inputOf(draft({ renotifyMinutes: " 10,080 " }));
+    expect(week.ok && week.input.renotify_minutes).toBe(10_080);
+    for (const typed of ["1,5", "1,440.5", "10,081"]) {
+      const checked = inputOf(draft({ renotifyMinutes: typed }));
+      expect(checked.ok, typed).toBe(false);
+      if (!checked.ok) expect(checked.error).toMatch(/every 1 to 10,080 minutes/);
+    }
+  });
+
   // A decimal comma is no grouping: "0,5" is not five.
   it("refuses a comma that does not group thousands", () => {
     for (const typed of ["0,5", "1,5", "12,50", "1,00,000"]) {
@@ -371,6 +386,34 @@ describe("words", () => {
       "other.example.com",
       "#alerts in Acme",
     ]);
+  });
+
+  // ⚠ Notifications sends a webhook only the kinds it takes, an alert's incidents among them.
+  it("says what a webhook takes of an alert's incidents, where not both kinds", () => {
+    const { IncidentOpened, IncidentResolved, MemberAdded, MemberLeft } = NotificationKind;
+    const [choice] = connectionChoices([
+      {
+        id: "abcd1234",
+        provider: "webhook",
+        external_workspace_id: "w",
+        external_workspace_name: null,
+        channel_id: "abcd1234-fingerprint",
+        channel_name: "hooks.example.com",
+        status: "active",
+        last_error: null,
+        last_delivery_at: null,
+        created_at: "2026-10-01T00:00:00Z",
+        event_kinds: [IncidentOpened, MemberAdded],
+        previous_secret_expires_at: null,
+      },
+    ]);
+    expect(choice?.eventKinds).toEqual([IncidentOpened, MemberAdded]);
+    expect(incidentKindsLabel(null)).toBeNull();
+    expect(incidentKindsLabel([MemberAdded, IncidentResolved, IncidentOpened])).toBeNull();
+    expect(incidentKindsLabel([])).toBe("Takes no incidents");
+    expect(incidentKindsLabel([MemberAdded, MemberLeft])).toBe("Takes no incidents");
+    expect(incidentKindsLabel([IncidentOpened, MemberAdded])).toBe("Takes openings only");
+    expect(incidentKindsLabel([IncidentResolved])).toBe("Takes resolutions only");
   });
 
   it("links an incident on the alerts page, drawn and scrolled to", () => {
