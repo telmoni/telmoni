@@ -49,7 +49,9 @@ use chrono::{DateTime, Utc};
 use serde_json::json;
 
 use telmoni_shared::audit::{Actor, AuditEvent};
-use telmoni_shared::db::tenant_session::{maintenance_scope, organization_scope, person_scope};
+use telmoni_shared::db::tenant_session::{
+    HasOrganization, Scoped, maintenance_scope, organization_scope, person_scope,
+};
 use telmoni_shared::extract::Json;
 use telmoni_shared::{
     AuditAction, AuthError, OrganizationId, OrganizationRole, OrganizationStatus, ProjectId, Role,
@@ -63,7 +65,7 @@ use crate::{
         organizations::{self, FinalizeStanding},
     },
     handler::emit_audit,
-    model::AuditKind,
+    model::{AuditKind, DeletionKind},
 };
 
 /// How long an organization stays `pending_deletion` before its row may go,
@@ -77,6 +79,52 @@ use crate::{
 /// (`the_wait_is_fifteen_minutes_for_an_owners_deletion_and_a_termination`,
 /// `the_finalize_grace_is_fifteen_minutes`).
 pub const FINALIZE_GRACE_SECONDS: u32 = 900;
+
+/// Mark an active `organization` for deletion under its lock and end any
+/// ownership offer on it: what every deletion does, its owner's, an
+/// operator's and its owner's account's alike, each filing its own audit row
+/// ([`deletion_metadata`]). `None` when it was not active, for the caller to
+/// say why.
+pub(crate) async fn request_deletion<B: HasOrganization>(
+    tx: &mut Scoped<'_, B>,
+    organization: &OrganizationId,
+    by: DeletionKind,
+) -> Result<Option<DateTime<Utc>>, TelmoniError> {
+    let Some(erase_after) =
+        organizations::mark_pending_deletion(tx, organization, by, FINALIZE_GRACE_SECONDS).await?
+    else {
+        return Ok(None);
+    };
+    organization_members::clear_offers(tx, organization).await?;
+    Ok(Some(erase_after))
+}
+
+/// A deletion's audit metadata: its `step` (`requested`, or `taken` by an
+/// account deletion from a request already on the chain), who asked, and
+/// the keys an account's deletion revoked outright.
+pub(crate) fn deletion_metadata(
+    step: &str,
+    by: DeletionKind,
+    erase_after: DateTime<Utc>,
+    tokens_revoked: Option<u64>,
+) -> serde_json::Value {
+    match tokens_revoked {
+        Some(revoked) => json!({
+            "kind": AuditKind::OrganizationDeletion,
+            "deletion": step,
+            "by": by,
+            "with": "account_deletion",
+            "erase_after": erase_after,
+            "tokens_revoked": revoked,
+        }),
+        None => json!({
+            "kind": AuditKind::OrganizationDeletion,
+            "deletion": step,
+            "by": by,
+            "erase_after": erase_after,
+        }),
+    }
+}
 
 /// Outcome of one inline tail attempt.
 pub enum TailOutcome {

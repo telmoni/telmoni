@@ -40,8 +40,10 @@ use crate::{
         identities, locks, organization_members, organizations, sessions, tokens,
     },
     handler::{
-        acting_person_in, deletion::FINALIZE_GRACE_SECONDS, emit_audit,
-        log_act_outside_every_organization, parse_organization_id, recording_organization_of,
+        acting_person_in,
+        deletion::{FINALIZE_GRACE_SECONDS, deletion_metadata, request_deletion},
+        emit_audit, log_act_outside_every_organization, parse_organization_id,
+        recording_organization_of,
     },
     model::{AuditKind, DeletionKind},
 };
@@ -615,20 +617,13 @@ pub async fn delete_account(
         // with the account too: its kind becomes `account`, so its chain says
         // what took it, and its wait is never lengthened. Audited as `taken`
         // rather than `requested`: its chain already holds the request.
-        let marked = match organizations::mark_pending_deletion(
-            &mut otx,
-            organization,
-            DeletionKind::Account,
-            FINALIZE_GRACE_SECONDS,
-        )
-        .await?
-        {
+        let marked = match request_deletion(&mut otx, organization, DeletionKind::Account).await? {
             Some(erase_after) => Some((erase_after, "requested")),
             None => organizations::take_for_account(&mut otx, organization, FINALIZE_GRACE_SECONDS)
                 .await?
                 .map(|erase_after| (erase_after, "taken")),
         };
-        if let Some((erase_after, deletion)) = marked {
+        if let Some((erase_after, step)) = marked {
             emit_audit(
                 &mut otx,
                 AuditEvent {
@@ -641,14 +636,12 @@ pub async fn delete_account(
                     request_id: None,
                     ip_address: None,
                     user_agent: None,
-                    metadata: Some(json!({
-                        "kind": AuditKind::OrganizationDeletion,
-                        "deletion": deletion,
-                        "by": DeletionKind::Account,
-                        "with": "account_deletion",
-                        "erase_after": erase_after,
-                        "tokens_revoked": revoked,
-                    })),
+                    metadata: Some(deletion_metadata(
+                        step,
+                        DeletionKind::Account,
+                        erase_after,
+                        Some(revoked),
+                    )),
                 },
             )
             .await?;

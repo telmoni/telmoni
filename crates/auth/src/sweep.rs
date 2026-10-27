@@ -44,12 +44,10 @@ use telmoni_shared::{
 use crate::AppState;
 use crate::db::{
     AuthLane, access_tokens, audit, authorization_codes, device_codes, invites, locks,
-    organization_members, organizations, refresh_tokens, sessions, tokens,
+    organizations, refresh_tokens, sessions, tokens,
 };
-use crate::handler::deletion::{
-    self, ErasureOutcome, FINALIZE_GRACE_SECONDS, FinalizeOutcome, PurgeOutcome, TailOutcome,
-};
-use crate::model::{AuditKind, DeletionKind};
+use crate::handler::deletion::{self, ErasureOutcome, FinalizeOutcome, PurgeOutcome, TailOutcome};
+use crate::model::DeletionKind;
 
 /// Advisory-lock id for the deletion sweep: ASCII `"work_del"` as i64.
 const LOCK_ID_DELETION_SWEEP: i64 = 0x776F_726B_5F64_656C;
@@ -425,20 +423,13 @@ pub async fn terminate(
             );
         }
     }
-    let Some(erase_after) = organizations::mark_pending_deletion(
-        &mut tx,
-        organization,
-        DeletionKind::Operator,
-        FINALIZE_GRACE_SECONDS,
-    )
-    .await?
+    let Some(erase_after) =
+        deletion::request_deletion(&mut tx, organization, DeletionKind::Operator).await?
     else {
         return Err(TelmoniError::Internal(format!(
             "{organization} changed status under its lock"
         )));
     };
-    organization_members::clear_offers(&mut tx, organization).await?;
-
     emit_audit(
         &mut tx,
         AuditEvent {
@@ -451,12 +442,12 @@ pub async fn terminate(
             request_id: None,
             ip_address: None,
             user_agent: None,
-            metadata: Some(json!({
-                "kind": AuditKind::OrganizationDeletion,
-                "deletion": "requested",
-                "by": DeletionKind::Operator,
-                "erase_after": erase_after,
-            })),
+            metadata: Some(deletion::deletion_metadata(
+                "requested",
+                DeletionKind::Operator,
+                erase_after,
+                None,
+            )),
         },
     )
     .await?;

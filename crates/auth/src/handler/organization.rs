@@ -32,9 +32,12 @@ use crate::{
         flags, identities, locks, organization_members, organizations,
     },
     handler::{
-        ActingOrganization, account::DeletionRequest, account::wrong_code, acting_organization,
-        deletion::FINALIZE_GRACE_SECONDS, emit_audit, organization_of,
-        organization_role_or_forbidden,
+        ActingOrganization,
+        account::DeletionRequest,
+        account::wrong_code,
+        acting_organization,
+        deletion::{deletion_metadata, request_deletion},
+        emit_audit, organization_of, organization_role_or_forbidden,
     },
     model::{AuditKind, DeletionKind},
 };
@@ -168,13 +171,7 @@ pub async fn delete_organization(
     };
     confirmation_codes::consume(&mut tx, code_id).await?;
 
-    let Some(erase_after) = organizations::mark_pending_deletion(
-        &mut tx,
-        &organization,
-        DeletionKind::Owner,
-        FINALIZE_GRACE_SECONDS,
-    )
-    .await?
+    let Some(erase_after) = request_deletion(&mut tx, &organization, DeletionKind::Owner).await?
     else {
         // The role check above refused anything but an active organization,
         // under the same lock this still holds.
@@ -182,8 +179,6 @@ pub async fn delete_organization(
             "{organization} changed status under its lock"
         )));
     };
-    organization_members::clear_offers(&mut tx, &organization).await?;
-
     emit_audit(
         &mut tx,
         AuditEvent {
@@ -196,12 +191,12 @@ pub async fn delete_organization(
             request_id: None,
             ip_address: None,
             user_agent: None,
-            metadata: Some(json!({
-                "kind": AuditKind::OrganizationDeletion,
-                "deletion": "requested",
-                "by": DeletionKind::Owner,
-                "erase_after": erase_after,
-            })),
+            metadata: Some(deletion_metadata(
+                "requested",
+                DeletionKind::Owner,
+                erase_after,
+                None,
+            )),
         },
     )
     .await?;
