@@ -90,7 +90,6 @@ export default async function OrganizationMembersPage() {
     <>
       <PageHeader
         title="Members"
-        count={listing.members.length}
         action={
           canManage && !full ? (
             <AddOrganizationMember organizationId={organizationId} />

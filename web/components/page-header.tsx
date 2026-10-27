@@ -5,7 +5,6 @@ import { ArrowLeft, InfoIcon } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 import { recordVisit } from "@/lib/search-recent";
@@ -13,16 +12,16 @@ import { useUser } from "@/lib/store";
 
 export function PageHeader({
   title,
-  count,
+  headingId,
   info,
   action,
   backHref,
   backLabel,
 }: {
   title?: string;
-  /** How many the page lists, beside its title, as the Projects page counts
-   *  its projects; none while that count cannot be read. */
-  count?: number;
+  /** Names the title's heading, which then takes the focus a control on the
+   *  page hands it as it goes. */
+  headingId?: string;
   /** What the page is, behind an ⓘ beside its title: for a page whose toolbar
    *  leaves no room for a sentence. */
   info?: string;
@@ -60,16 +59,12 @@ export function PageHeader({
         <div className="flex min-w-0 items-center gap-2">
           <h1
             ref={heading}
+            id={headingId}
             tabIndex={-1}
             className="min-w-0 truncate text-base font-medium outline-none"
           >
             {title}
           </h1>
-          {count !== undefined && (
-            <Badge variant="secondary" className="shrink-0 text-xs">
-              {count}
-            </Badge>
-          )}
           {info && (
             <TooltipProvider>
               <Tooltip>
@@ -79,7 +74,7 @@ export function PageHeader({
                     className="shrink-0 cursor-help rounded-sm text-muted-foreground hover:text-foreground"
                     aria-label={`About ${title}`}
                   >
-                    <InfoIcon className="size-4" />
+                    <InfoIcon className="size-3.5" />
                   </button>
                 </TooltipTrigger>
                 <TooltipContent className="max-w-xs">{info}</TooltipContent>

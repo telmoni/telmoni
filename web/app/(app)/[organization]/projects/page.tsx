@@ -55,11 +55,7 @@ export default async function OrganizationProjectsPage() {
 
   return (
     <>
-      <PageHeader
-        title="Projects"
-        count={projects?.length}
-        action={<CreateProjectAction />}
-      />
+      <PageHeader title="Projects" action={<CreateProjectAction />} />
 
       <div className="grid gap-6">
         {/* The tiles, with Leave beside a project the person holds a seat

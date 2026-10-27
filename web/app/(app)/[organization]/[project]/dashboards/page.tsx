@@ -23,12 +23,18 @@ export default async function DashboardsPage({
 
   return (
     <>
-      <PageHeader title="Dashboards" />
+      <PageHeader
+        title="Dashboards"
+        info="Charts over this project's telemetry, still to come: spend, tokens, latency and volume by model, agent, user, session and tag over any window, in dashboards you compose and keep."
+      />
       <div className="grid gap-6">
         <Card className="overflow-hidden p-0 gap-0">
           <div className="grid gap-1 p-4">
             <p className="text-sm font-medium">Nothing to show yet.</p>
-            <p className="text-sm text-muted-foreground">Charts over this project&rsquo;s telemetry will live here: spend, tokens, latency and volume by model, agent, user, session and tag over any window, with dashboards you compose and keep.</p>
+            <p className="text-sm text-muted-foreground">
+              Dashboards are still to come. Until then, Chart on the Traces page charts a
+              window&rsquo;s runs, tokens and durations.
+            </p>
           </div>
         </Card>
       </div>
