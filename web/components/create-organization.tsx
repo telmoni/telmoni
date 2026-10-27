@@ -123,7 +123,7 @@ export function CreateOrganizationPanel({
             An organization holds projects and the people who work on them.
           </p>
         </SidePanelHeader>
-        <div className="min-h-0 flex-1 overflow-y-auto px-3.5 py-2">
+        <div className="min-h-0 flex-1 overflow-y-auto px-3.5">
           {notice}
           <SidePanelRow label="Name" htmlFor="organization-name">
             <Input

@@ -255,7 +255,10 @@ export function SidePanelFooter({ children }: { children: ReactNode }) {
 
 /** One line of what the panel holds, a name beside its value as a span's
  *  details read (`trace-view.tsx`); stacked on a phone. With `htmlFor`, the
- *  name labels the field it stands beside. */
+ *  name labels the field it stands beside. Its 14px above and below are the
+ *  body's only vertical inset, so every name stands as far below its rule;
+ *  the rule is drawn above it, so a row a slot wraps alone is still ruled
+ *  off from the next. */
 export function SidePanelRow({
   label,
   htmlFor,
@@ -266,7 +269,7 @@ export function SidePanelRow({
   children: ReactNode;
 }) {
   return (
-    <div className="grid gap-1.5 border-b border-border py-2 last:border-b-0 sm:grid-cols-[minmax(0,9rem)_minmax(0,1fr)] sm:gap-3">
+    <div className="grid gap-1.5 border-t border-border py-3.5 first:border-t-0 sm:grid-cols-[minmax(0,9rem)_minmax(0,1fr)] sm:gap-3">
       {htmlFor ? (
         <Label htmlFor={htmlFor} className="font-normal text-muted-foreground sm:h-9">
           {label}
