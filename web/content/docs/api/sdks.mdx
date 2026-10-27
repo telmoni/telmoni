@@ -1,0 +1,931 @@
+---
+title: "Client SDKs"
+description: "The Telmoni SDKs for Python, TypeScript / JavaScript, Go and Rust: an agent's runs, steps, model calls and tool calls as OpenTelemetry spans, sent to Telmoni and nowhere else."
+---
+
+The SDKs record an agent's **runs**, and the **steps**, **model calls** and
+**tool calls** inside each, as OpenTelemetry spans, and send them to
+[ingest](/docs/api/ingest). Each one runs a tracer provider of its own beside
+whatever OpenTelemetry your application already has, sends nothing outside a
+run, and takes prompts, completions and tool payloads off every span before it
+leaves the process unless you ask and the project's content mode allows.
+
+| Language | Package | Requires | Source |
+|---|---|---|---|
+| **Python** | `telmoni` | Python 3.10 or later | [`sdk/python`](https://github.com/telmoni/telmoni/tree/main/sdk/python) |
+| **TypeScript / JavaScript** | `telmoni` | Node.js 18 from 18.19, or 20.6 or later | [`sdk/typescript`](https://github.com/telmoni/telmoni/tree/main/sdk/typescript) |
+| **Go** | `github.com/telmoni/telmoni/sdk/go` | Go 1.26.10 or later | [`sdk/go`](https://github.com/telmoni/telmoni/tree/main/sdk/go) |
+| **Rust** | `telmoni` | Rust 1.99.1 or later | [`sdk/rust`](https://github.com/telmoni/telmoni/tree/main/sdk/rust) |
+
+Their source is the platform's repository,
+[`telmoni/telmoni`](https://github.com/telmoni/telmoni), which holds them
+beside the ingest they send to, and each installs with its language's own
+tool, below. Each is built on its language's OpenTelemetry SDK and sends with
+the language's own HTTP client, Rust with reqwest. Python, TypeScript and Go
+carry nothing else; Rust also carries serde, serde_json, tracing and uuid.
+
+---
+
+## Installation
+
+<Tabs items={['Python', 'TypeScript', 'Go', 'Rust']}>
+  <Tab value="Python">
+    ```console
+    $ pip install telmoni
+    ```
+  </Tab>
+  <Tab value="TypeScript">
+    ```console
+    $ npm install telmoni
+    ```
+  </Tab>
+  <Tab value="Go">
+    ```console
+    $ go get github.com/telmoni/telmoni/sdk/go
+    ```
+  </Tab>
+  <Tab value="Rust">
+    ```console
+    $ cargo add telmoni
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## A run
+
+A run is one execution of an agent. Open one around the agent's work, and
+inside it open a step for each unit of work, a model call around each call to
+a model, and a tool call around each tool. The SDK sends each span when it
+ends. Set `TELMONI_API_KEY` to a [project API key](/docs/api/api-keys)
+holding the **ingest** scope.
+
+<Tabs items={['Python', 'TypeScript', 'Go', 'Rust']}>
+  <Tab value="Python">
+    ```python
+    from telmoni import Telmoni, Usage
+
+    telmoni = Telmoni.from_env()
+
+
+    @telmoni.run("support-bot")
+    def answer(question: str) -> str:
+        with telmoni.step("plan"):
+            with telmoni.model_call("gpt-4o-mini", provider="openai") as call:
+                reply = ask_the_model(question)  # your provider's call
+                call.answered(
+                    response_model=reply.model,
+                    usage=Usage(input_tokens=reply.usage.input, output_tokens=reply.usage.output),
+                )
+        with telmoni.tool_call("search"):
+            results = search(reply.query)  # an exception marks the call failed
+        return reply.text
+
+
+    with telmoni.run(
+        "support-bot",
+        user_id="user_42",
+        session_id="conv_7",
+        tags={"env": "prod"},
+    ) as run:
+        ...
+    ```
+
+    Each of `run`, `step`, `model_call` and `tool_call` is a context manager,
+    an `async with`, and a decorator. An exception that escapes one marks the
+    span failed with the exception's class, never its message, and is raised
+    again; a `KeyboardInterrupt` or `asyncio.CancelledError` marks it
+    cancelled. `fail("TimeoutError")` and `cancel()` do the same by hand.
+    `run` raises `ValueError` for a blank agent name, a sample rate outside
+    its range or a cap that is no cap ([the guard](#the-guard)). A token
+    count is read from a number or its text, its fraction cut, and `Usage`'s
+    `cost` is what the call cost in US dollars, where your provider reports
+    it; of what Telmoni would refuse, these are left off with one warning: a
+    token count below 0 or past 64 bits, a cost below 0, not finite, or text,
+    a tag whose key is not 1 to 64 characters or whose value is past 256, and
+    the tags past the first 32 kept; an empty user, session, provider or
+    response model is left off as unset. A name, model, provider, user, session, response model or error
+    type that is no string goes as its text with one warning, as does a tag
+    that is no string, finite number or bool; an exception or an
+    exception's class handed to `fail()` goes as the class's name, never its
+    message. Past Telmoni's caps, counted in characters, a name, the agent, a
+    model, a provider, a response model or an error type is cut to its cap — a
+    step's or a tool's name, and a model call's `<operation> <model>`, to 145,
+    the rest to 128 — and a user past 128 or a session past 200 is left off,
+    since cut it would name another; a step named nothing goes as `step`, and a
+    model call with no model is named by its operation alone; each with one
+    warning.
+  </Tab>
+  <Tab value="TypeScript">
+    ```ts
+    import { Telmoni, type Run } from 'telmoni';
+
+    const telmoni = Telmoni.fromEnv();
+
+    const text = await telmoni.run(
+      'support-bot',
+      { userId: 'user_42', sessionId: 'conv_7', tags: { env: 'prod' } },
+      async (run) => {
+        const reply = await run.step('plan', (step) =>
+          step.modelCall('gpt-4o-mini', { provider: 'openai' }, async (call) => {
+            const reply = await askTheModel(question); // your provider's call
+            call.answered({
+              responseModel: reply.model,
+              usage: { inputTokens: reply.usage.input, outputTokens: reply.usage.output },
+            });
+            return reply;
+          }),
+        );
+        await run.toolCall('search', {}, () => search(reply.query)); // a rejection marks it failed
+        return reply.text;
+      },
+    );
+
+    const answer = telmoni.wrap('support-bot', {}, async (question: string, run: Run) => '...');
+    ```
+
+    Each callback receives its handle and may be sync or async; the span ends
+    when the callback settles. An error thrown inside marks the span failed
+    with the error's class name and is thrown again; one named `AbortError`
+    marks it cancelled. `fail('TimeoutError')` and `cancel()` do the same by
+    hand, and `wrap` turns a function into one that opens a run per call.
+    `run` throws a `TypeError` for a blank agent name and a `RangeError` for
+    a sample rate that is no number or outside its range, or a cap that is
+    no cap ([the guard](#the-guard)). A token count is read from a number, a
+    bigint or a decimal numeral's text, its fraction cut, and the usage's
+    `cost` is what the call cost in US dollars, where your provider reports
+    it; of what Telmoni would refuse, these are left off with one warning: a
+    token count below 0 or past 64 bits, a cost below 0, not finite, or no
+    number, a tag whose key is not 1 to 64 characters or whose value is past
+    256, and the tags past the first 32 kept; an empty user, session,
+    provider or response model is left off as unset. A name, model, provider, user, session, response model
+    or error type that is no string goes as its text with one warning, as does
+    a tag that is no string, finite number or boolean; an error, or a class,
+    handed to `fail()` goes as its class's name, never its message. Past
+    Telmoni's caps, counted in characters, a name, the agent, a model, a
+    provider, a response model or an error type is cut to its cap — a step's
+    or a tool's name, and a model call's `<operation> <model>`, to 145, the
+    rest to 128 — and a user past 128 or a session past 200 is left off, since
+    cut it would name another; a step named nothing goes as `step`, and a model
+    call with no model is named by its operation alone; each with one warning.
+  </Tab>
+  <Tab value="Go">
+    ```go
+    client, err := telmoni.NewFromEnv()
+    if err != nil {
+    	log.Fatal(err)
+    }
+    defer client.Shutdown(context.Background())
+
+    ctx, run := client.Run(ctx, "support-bot", telmoni.RunOptions{
+    	UserID:    "user_42",
+    	SessionID: "conv_7",
+    	Tags:      map[string]string{"env": "prod"},
+    })
+    defer run.End()
+
+    stepCtx, step := run.Step(ctx, "plan")
+    _, call := run.ModelCall(stepCtx, "gpt-4o-mini", telmoni.ModelCallOptions{Provider: "openai"})
+    reply, err := askTheModel(stepCtx, question) // your provider's call
+    if err != nil {
+    	call.Fail(err)
+    } else {
+    	call.Answered(telmoni.Answer{
+    		ResponseModel: reply.Model,
+    		Usage:         &telmoni.Usage{InputTokens: reply.Usage.Input, OutputTokens: reply.Usage.Output},
+    	})
+    }
+    call.End()
+    step.End()
+
+    _, tool := run.ToolCall(ctx, "search", telmoni.ToolCallOptions{})
+    if _, err := search(reply.Query); err != nil {
+    	tool.Fail(err)
+    }
+    tool.End()
+    ```
+
+    Each opener returns a context carrying its span, so your own OpenTelemetry
+    spans started with it nest under the run, and the handle to end with
+    `defer`; `telmoni.RunFromContext(ctx)` finds the run deep in a call stack.
+    `Fail(err)` marks the span failed with the error's Go type, never its
+    message, and marks it cancelled for `context.Canceled`;
+    `FailWith("TimeoutError")` and `Cancel()` do the same by hand. The SDK
+    never panics: a `Client` not from `New`, the nil a failed `New` returns
+    among them, sends nothing; a blank agent name opens a run that does
+    nothing, and of what Telmoni would refuse, these are left off with one
+    warning — a token count below 0, a `Usage`'s `Cost` below 0 or not finite
+    (a `*float64`, nil where your provider reports none), a tag whose key is
+    not 1 to 64 characters or whose value is past 256, and the tags past the
+    first 32 kept, by key.
+    Past Telmoni's caps, counted in characters, a name, the agent, a model, a
+    provider, a response model or an error type is cut to its cap — a step's
+    or a tool's name, and a model call's `<operation> <model>`, to 145, the
+    rest to 128 — and a user past 128 or a session past 200 is left off,
+    since cut it would name another; a step named nothing goes as `step`, and
+    a model call with no model is named by its operation alone; each with one
+    warning.
+  </Tab>
+  <Tab value="Rust">
+    ```rust
+    use telmoni::{Config, ModelCallOptions, Reply, RunOptions, Telmoni, ToolCallOptions, Usage};
+
+    let telmoni = Telmoni::new(Config::from_env());
+
+    let run = telmoni.run(
+        "support-bot",
+        RunOptions {
+            user_id: Some("user_42".into()),
+            session_id: Some("conv_7".into()),
+            tags: [("env".to_owned(), "prod".to_owned())].into(),
+            ..RunOptions::default()
+        },
+    )?;
+    let reply = {
+        let step = run.step("plan")?;
+        let call = step.model_call("gpt-4o-mini", ModelCallOptions { provider: Some("openai".into()), ..ModelCallOptions::default() })?;
+        let reply = ask_the_model(question)?; // your provider's call
+        call.answered(Reply {
+            response_model: Some(reply.model.clone()),
+            usage: Some(Usage { input_tokens: Some(reply.usage.input), output_tokens: Some(reply.usage.output), ..Usage::default() }),
+            ..Reply::default()
+        });
+        reply
+    };
+    let tool = run.tool_call("search", ToolCallOptions::default())?;
+    if search(&reply.query).is_err() {
+        tool.fail("TimeoutError");
+    }
+    drop(tool);
+    run.end();
+    telmoni.shutdown();
+    ```
+
+    Each handle is a guard that ends its span when dropped or on `end()`.
+    `run` returns an error for a blank agent name, a sample rate outside its
+    range or a cap that is no cap; `step`, `model_call` and `tool_call` once
+    the run reached a cap it was opened with ([the guard](#the-guard)); and
+    `record_run` for the cases [below](#a-run-recorded-after-it-ended).
+    Nothing else in the SDK fails: of what Telmoni would refuse, these are
+    left off with one warning — a token count below 0, a cost below 0 or not
+    finite, a tag whose key is not 1 to 64 characters or whose value is past
+    256, and the tags past the first 32 kept, by key — and an export
+    that fails is warned about, never returned. Past Telmoni's caps, counted
+    in characters, a name, the agent, a model, a provider, a response model or
+    an error type is cut to its cap — a step's or a tool's name, and a model
+    call's `<operation> <model>`, to 145, the rest to 128 — and a user past
+    128 or a session past 200 is left off, since cut it would name another; a
+    step named nothing goes as `step`, and a model call with no model is named
+    by its operation alone; each with one warning. The closure forms `run_with`, `step_with`, `model_call_with` and
+    `tool_call_with` end the span when the closure returns and return its
+    value, `step_with` and the calls' wrapped in a `Result` for the cap; their
+    `try_` forms mark an `Err` on the span with the error's type name before
+    returning it unchanged, and return a cap's refusal as that error type,
+    which takes one (`From<telmoni::Error>`). `fail("TimeoutError")` and
+    `cancel()` do the same by hand, and `context()` or `attach()` make the run
+    current for your own spans.
+  </Tab>
+</Tabs>
+
+Flush before a short-lived process exits (`flush()` / `flush()` / `Flush(ctx)`
+/ `flush()`), or shut the client down, which flushes first; a long-lived one
+needs neither.
+
+---
+
+## A run recorded after it ended
+
+A job that keeps its own log, or a hook that runs once the work it reports is
+over, hands the finished run over whole, as data: its id, a UUID you give and
+keep with the log; its agent, user, session and tags; its start and end and
+how it ended; and its steps and calls, each with its own times. A step holds
+the calls made inside it. A record the export queue has no room for is refused
+whole, before anything is queued: flush, or wait, and record it again. Its
+times are read as the clock of the process that sends it: where that clock is
+a time zone or a date out, [ingest moves the record](/docs/api/ingest#what-is-kept)
+by as much, so time a record by the clock that sends it.
+
+<Tabs items={['Python', 'TypeScript', 'Go', 'Rust']}>
+  <Tab value="Python">
+    ```python
+    from datetime import datetime, timezone
+
+    from telmoni import ModelCallRecord, RunRecord, ToolCallRecord, Usage
+
+    at = lambda s: datetime(2026, 10, 12, 9, 0, s, tzinfo=timezone.utc)
+
+    telmoni.record_run(
+        RunRecord(
+            run_id="3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d",
+            agent="nightly-triage",
+            session_id="conv_7",
+            start=at(0),
+            end=at(9),
+            inside=[
+                ModelCallRecord(
+                    model="gpt-4o-mini", provider="openai", start=at(0), end=at(2),
+                    usage=Usage(input_tokens=1200, output_tokens=85),
+                ),
+                ToolCallRecord(name="search", start=at(2), end=at(3), error_type="TimeoutError"),
+            ],
+        )
+    )
+    telmoni.flush()
+    ```
+
+    Times carry their timezone. A blank agent, a run id that is neither a
+    hyphenated UUID nor 32 hex digits, or is the nil UUID, a time without its
+    timezone or outside what Telmoni reads (after the Unix epoch, and less than
+    2^64 nanoseconds after it, in July 2554), an empty step's name or model,
+    text longer than Telmoni keeps (a step's or a tool's name past 145
+    characters, the agent, a model, a provider, a user or an error type past
+    128, a session past 200, or a model call's operation and model past 144
+    together), or a span that ends before it starts raises `ValueError`. A field of the wrong type raises
+    `TypeError` — a time that is no `datetime`, an item of another class,
+    `inside` or `calls` that is no sequence (a list or a tuple) — save a token
+    count, read as a whole number where it can be and else left off with one
+    warning, and an `operation` of `None`, a chat. Either way, nothing is sent.
+  </Tab>
+  <Tab value="TypeScript">
+    ```ts
+    telmoni.recordRun({
+      runId: '3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d',
+      agent: 'nightly-triage',
+      sessionId: 'conv_7',
+      start: new Date('2026-10-12T09:00:00Z'),
+      end: new Date('2026-10-12T09:00:09Z'),
+      inside: [
+        {
+          type: 'model_call',
+          model: 'gpt-4o-mini',
+          provider: 'openai',
+          start: new Date('2026-10-12T09:00:00Z'),
+          end: new Date('2026-10-12T09:00:02Z'),
+          usage: { inputTokens: 1200, outputTokens: 85 },
+        },
+        {
+          type: 'tool_call',
+          name: 'search',
+          start: new Date('2026-10-12T09:00:02Z'),
+          end: new Date('2026-10-12T09:00:03Z'),
+          errorType: 'TimeoutError',
+        },
+      ],
+    });
+    await telmoni.flush();
+    ```
+
+    A time is a `Date` or milliseconds since the Unix epoch; a step is
+    `{ type: 'step', name, start, end, calls }`. A blank agent, a run id that
+    is neither a hyphenated UUID nor 32 hex digits, or is the nil UUID, or an
+    empty step's name or model throws a `TypeError`, as does a field of the
+    wrong type — a time that is not one, an item of no known `type`, `inside`
+    or `calls` that is no array, tags or a usage that is no object — save a
+    token count, read as a whole number where it can be and else left off with
+    one warning. A time outside what Telmoni reads (after the Unix epoch, and
+    less than 2^64 nanoseconds after it, in July 2554), text longer than
+    Telmoni keeps (a step's or a tool's name past 145 characters, the agent, a
+    model, a provider, a user or an error type past 128, a session past 200,
+    or a model call's operation and model past 144 together, counted in
+    characters), or a span that ends before it starts throws a `RangeError`. Either way, nothing is sent.
+  </Tab>
+  <Tab value="Go">
+    ```go
+    start := time.Date(2026, 10, 12, 9, 0, 0, 0, time.UTC)
+    err := client.RecordRun(ctx, telmoni.RunRecord{
+        RunID:     "3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d",
+        Agent:     "nightly-triage",
+        SessionID: "conv_7",
+        Start:     start,
+        End:       start.Add(9 * time.Second),
+        Inside: []telmoni.RecordItem{
+            telmoni.ModelCallRecord{
+                Model: "gpt-4o-mini", Provider: "openai",
+                Start: start, End: start.Add(2 * time.Second),
+                Usage: &telmoni.Usage{InputTokens: 1200, OutputTokens: 85},
+            },
+            telmoni.ToolCallRecord{
+                Name: "search", ErrorType: "TimeoutError",
+                Start: start.Add(2 * time.Second), End: start.Add(3 * time.Second),
+            },
+        },
+    })
+    client.Flush(ctx)
+    ```
+
+    A step is a `telmoni.StepRecord` with its `Calls`. A blank agent, a run
+    id that is not a UUID or is the nil UUID, a time that is zero or outside
+    what Telmoni reads (after the Unix epoch, and less than 2^64 nanoseconds
+    after it, in July 2554), an empty step's name or model, text longer than
+    Telmoni keeps (a step's or a tool's name past 145 characters, the agent, a
+    model, a provider, a user or an error type past 128, a session past 200,
+    or a model call's operation and model past 144 together), a nil item or a
+    span that ends before it starts returns an error, and nothing is sent.
+  </Tab>
+  <Tab value="Rust">
+    ```rust
+    use std::time::{Duration, SystemTime};
+
+    use telmoni::{ModelCallRecord, RunRecord, ToolCallRecord, Usage};
+
+    // 2026-10-12T09:00:00Z, and what came after it.
+    let start = SystemTime::UNIX_EPOCH + Duration::from_secs(1_791_795_600);
+    let at = |millis| start + Duration::from_millis(millis);
+
+    telmoni.record_run(RunRecord {
+        session_id: Some("conv_7".into()),
+        inside: vec![
+            ModelCallRecord {
+                provider: Some("openai".into()),
+                usage: Some(Usage { input_tokens: Some(1200), output_tokens: Some(85), ..Usage::default() }),
+                ..ModelCallRecord::new("gpt-4o-mini", start, at(2_000))
+            }
+            .into(),
+            ToolCallRecord {
+                error_type: Some("TimeoutError".into()),
+                ..ToolCallRecord::new("search", at(2_000), at(3_000))
+            }
+            .into(),
+        ],
+        ..RunRecord::new("3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d", "nightly-triage", start, at(9_000))
+    })?;
+    telmoni.flush();
+    ```
+
+    A step is a `StepRecord` with its `calls`. A blank agent
+    (`Error::EmptyAgent`), a run id that is not a UUID or is the nil UUID
+    (`Error::RunId`), an empty step's name or model (`Error::EmptyName`), a
+    time outside what Telmoni reads, after the Unix epoch and less than 2^64
+    nanoseconds after it, in July 2554 (`Error::RecordedTime`), text longer
+    than Telmoni keeps — a step's or a tool's name past 145 characters, the
+    agent, a model, a provider, a user or an error type past 128, a session
+    past 200, or a model call's operation and model past 144 together
+    (`Error::TooLong`) — a span that
+    ends before it starts (`Error::EndBeforeStart`) or a configured sample
+    rate outside its range (`Error::SampleRate`) is returned as an error, and
+    nothing is sent.
+  </Tab>
+</Tabs>
+
+The run is sent as the live calls would have sent it, through the same
+exporter, content rules and sample rate, in a trace of its own named by the
+run's id, whatever trace is current. Each span's id is derived from the run's
+id and the span's place in the record, and a record travels in bodies of its
+own, so the same record sent again is the same bytes, whatever else the client
+is sending, which Telmoni, where it reaches its Redis, answers within the hour
+as it answered the first, storing nothing twice: give a run the same id each
+time you send it. A record
+holds no content.
+The [coding-agent plugins](/docs/api/coding-agents) are built on it.
+
+---
+
+## A run across services
+
+An agent whose work spans more than one service — an orchestrator handing a
+task to a worker, a tool served over HTTP — is still one run. Before the
+request leaves, `inject` writes into its headers the W3C `traceparent` of the
+span current inside the run and the run's id and agent as the W3C `baggage`
+members `telmoni.run_id` and `telmoni.agent`, beside whatever members the
+headers hold already. In the service that answers, `extract` reads them back
+as the run continued there: the steps and calls it opens carry the caller's
+run and take the caller's span as their parent, so the trace shows the work
+where it was asked for, and the trace list shows one run, not one a service.
+
+<Tabs items={['Python', 'TypeScript', 'Go', 'Rust']}>
+  <Tab value="Python">
+    ```python
+    # The orchestrator, inside a run.
+    with telmoni.step("delegate"):
+        headers = {"Content-Type": "application/json"}
+        telmoni.inject(headers)
+        requests.post("https://worker.internal/work", json=task, headers=headers)
+
+    # The worker.
+    @app.post("/work")
+    def work(request):
+        run = telmoni.extract(request.headers)
+        with telmoni.step("work", run=run):
+            ...
+    ```
+  </Tab>
+  <Tab value="TypeScript">
+    ```ts
+    // The orchestrator, inside a run.
+    await run.step('delegate', async (step) => {
+      const headers = new Headers({ 'content-type': 'application/json' });
+      telmoni.inject(headers, step);
+      await fetch('https://worker.internal/work', { method: 'POST', headers, body });
+    });
+
+    // The worker.
+    app.post('/work', async (req, res) => {
+      const run = telmoni.extract(req.headers);
+      await run?.step('work', async (step) => { /* ... */ });
+    });
+    ```
+  </Tab>
+  <Tab value="Go">
+    ```go
+    // The orchestrator, inside a run.
+    stepCtx, step := run.Step(ctx, "delegate")
+    req, _ := http.NewRequestWithContext(stepCtx, http.MethodPost, "https://worker.internal/work", body)
+    client.Inject(stepCtx, req.Header)
+    resp, err := httpClient.Do(req)
+    step.End()
+
+    // The worker.
+    func work(w http.ResponseWriter, r *http.Request) {
+    	ctx := client.Extract(r.Context(), r.Header)
+    	run := telmoni.RunFromContext(ctx)
+    	workCtx, step := run.Step(ctx, "work")
+    	defer step.End()
+    	// ...
+    }
+    ```
+  </Tab>
+  <Tab value="Rust">
+    ```rust
+    // The orchestrator, inside a run.
+    let step = run.step("delegate")?;
+    let mut headers: HashMap<String, String> = HashMap::new();
+    telmoni.inject_from(&step.context(), &mut headers);
+    // or, with the step attached or a future run with its context: telmoni.inject(&mut headers)
+    post("https://worker.internal/work", &headers, &task)?;
+    step.end();
+
+    // The worker.
+    let headers: HashMap<String, String> = request.headers_as_map();
+    if let Some(run) = telmoni.extract(&headers) {
+        let step = run.step("work")?;
+        // ...
+    }
+    ```
+
+    `inject` and `extract` take any `Carrier`: a type that is both an
+    OpenTelemetry `Injector` and `Extractor`, as `HashMap<String, String>`
+    is; wrap a request's own headers in one.
+  </Tab>
+</Tabs>
+
+In TypeScript, `inject` takes the handle to write from, or writes from the
+active context where your application runs OpenTelemetry's context manager;
+in Rust, `inject` reads the current context, which a handle's `attach()` or
+`FutureExt::with_context` sets, and `inject_from` takes a handle's `context()`.
+The worker never ends a run it continued: the orchestrator's own span does,
+and until it arrives the run is open with what the worker sent. Headers that
+name no run — no `traceparent`, no `telmoni.run_id`, a malformed one —
+continue nothing, and a step opened then is outside a run and sends nothing.
+A run sampled out hands nothing on, so no half of it reaches Telmoni. The
+headers carry the run's id and agent and nothing else; a service sending
+under another project's key records the spans as that project's own run, so a
+forged header reaches no other tenant. Telmoni's own helpers write and read
+the headers; no propagator is set globally, since your application's
+propagators are its own.
+
+---
+
+## The guard
+
+A run opened with a cap is held to it in the agent's own process, with no
+call to Telmoni: `max_steps` caps its steps, and `max_spend`, in US dollars,
+what its model calls cost. Once the run reaches a cap, what it opens next is
+refused before it opens: a step past its step cap, and, once what it spent is
+its spend cap or more, any step, model call or tool call. A call's cost is
+known only once it answers, so a run can spend past its cap by the calls
+already open as it crossed: one, where it makes them one at a time.
+
+Each call is counted as Telmoni counts it: its cost as reported in the usage
+handed to `answered`; else its tokens at its price in the table each SDK
+release carries — LiteLLM's, the one Telmoni
+[prices a call by](/docs/api/ingest#what-a-call-cost), by its provider and the
+model it answered as, whole; else nothing. Prices of your own, handed to the
+client as `prices`, come before the table's, for a model it lacks or prices
+otherwise than you pay; the SDK alone holds them, so Telmoni's own reads, an
+alert on what each run spent among them, still price that call by the table.
+A call answered more than once, as a stream's counts arrive, counts as its
+span then holds it: each count and the cost as last given, Go's `Usage` giving
+its four counts each time. A call with neither a cost nor a price is never
+stopped on cost, and under a spend cap the SDK warns once of each such model.
+`spent` reads what a run's calls have cost so far, as the guard counts them.
+
+<Tabs items={['Python', 'TypeScript', 'Go', 'Rust']}>
+  <Tab value="Python">
+    ```python
+    from telmoni import CapExceededError, Config, Price, Telmoni
+
+    telmoni = Telmoni(
+        Config(prices=[Price(provider="vllm", model="llama-3.1-70b", input=2e-7, output=6e-7)])
+    )
+
+    try:
+        with telmoni.run("support-bot", max_steps=20, max_spend=0.50) as run:
+            ...
+    except CapExceededError as stopped:
+        print(stopped.cap, stopped.limit, stopped.used)  # spend 0.5 0.5213
+    ```
+
+    `CapExceededError`, a `RuntimeError`, is raised where the step, model
+    call or tool call would open, naming the `cap` (`steps` or `spend`), its
+    `limit` and what the run had `used`; escaping the run, it marks the run
+    failed with its class. A cap that is not above 0 raises `ValueError`, as a
+    price that names no provider or model, or is no number from 0, does; a
+    cache price not given is the input price.
+  </Tab>
+  <Tab value="TypeScript">
+    ```ts
+    import { CapExceededError, Telmoni } from 'telmoni';
+
+    const telmoni = new Telmoni({
+      prices: [{ provider: 'vllm', model: 'llama-3.1-70b', input: 2e-7, output: 6e-7 }],
+    });
+
+    await telmoni.run('support-bot', { maxSteps: 20, maxSpend: 0.5 }, async (run) => {
+      // ...
+    }); // rejects with a CapExceededError once the run reached a cap
+    ```
+
+    `step`, `modelCall` and `toolCall` throw `CapExceededError` before their
+    callback runs, naming the `cap` (`steps` or `spend`), its `limit` and what
+    the run had `used`; escaping the run, it marks the run failed with its
+    class. A cap that is not above 0 throws a `RangeError`; a price that names
+    no provider or model throws a `TypeError`, and one that is no number from
+    0 a `RangeError`; a cache price not given is the input price.
+  </Tab>
+  <Tab value="Go">
+    ```go
+    client, err := telmoni.New(telmoni.Config{
+    	Prices: []telmoni.Price{{Provider: "vllm", Model: "llama-3.1-70b", Input: 2e-7, Output: 6e-7}},
+    })
+
+    ctx, run := client.Run(ctx, "support-bot", telmoni.RunOptions{MaxSteps: 20, MaxSpend: 0.50})
+    defer run.End()
+
+    callCtx, call := run.ModelCall(ctx, "llama-3.1-70b", telmoni.ModelCallOptions{Provider: "vllm"})
+    reply, err := askTheModel(callCtx, question) // fails at once past a cap
+    if err != nil {
+    	call.Fail(err)
+    } else {
+    	call.Answered(telmoni.Answer{
+    		Usage: &telmoni.Usage{InputTokens: reply.Usage.Input, OutputTokens: reply.Usage.Output},
+    	})
+    }
+    call.End()
+    var capped *telmoni.CapExceededError
+    if errors.As(context.Cause(callCtx), &capped) {
+    	run.Fail(capped)
+    }
+    ```
+
+    Go's openers return no error: past a cap, `Step`, `ModelCall` and
+    `ToolCall` open nothing and return a context already cancelled, its
+    `context.Cause` a `*CapExceededError` naming the `Cap`, its `Limit` and
+    what the run had `Used`, so a request made with it fails at once, as one
+    past its deadline does; `run.Err()` gives the last refusal too. A cap of
+    0 is none, and one below 0, or a spend that is no finite number, is none
+    with one warning. `New` returns an error for a price that names no
+    provider or model, or is no number from 0; a nil `CacheRead` or
+    `CacheWrite` is the input price.
+  </Tab>
+  <Tab value="Rust">
+    ```rust
+    use telmoni::{Config, Error, Price, RunOptions, Telmoni};
+
+    let telmoni = Telmoni::new(Config {
+        prices: vec![Price { provider: "vllm".into(), model: "llama-3.1-70b".into(), input: 2e-7, output: 6e-7, ..Price::default() }],
+        ..Config::from_env()
+    });
+
+    let run = telmoni.run("support-bot", RunOptions { max_steps: Some(20), max_spend: Some(0.50), ..RunOptions::default() })?;
+    match run.step("plan") {
+        Ok(step) => { /* ... */ }
+        Err(Error::CapExceeded { .. }) => { /* the run reached a cap: stop */ }
+        Err(other) => return Err(other.into()),
+    }
+    ```
+
+    `step`, `model_call` and `tool_call` return `Error::CapExceeded`, naming
+    the `cap` (`Cap::Steps` or `Cap::Spend`), its `limit` and what the run had
+    `used`, and open nothing; `run` returns `Error::MaxSteps` for a step cap of
+    0 and `Error::MaxSpend` for a spend cap that is no finite number above 0.
+    A price that names no provider or model, or is no number from 0, is left
+    out with one warning, since a client cannot fail; a cache price of `None`
+    is the input price.
+  </Tab>
+</Tabs>
+
+A run [continued in another service](#a-run-across-services) carries no cap
+there, and counts there only what its calls in that process cost; a
+[recorded run](#a-run-recorded-after-it-ended) has ended, and no cap holds it.
+
+---
+
+## What a run sends
+
+A run is a span of its own, named `invoke_agent <agent>`, inside your current
+trace when one is current and a trace of its own otherwise. It carries the
+run's id (`telmoni.run_id`, a UUID), its agent (`telmoni.agent`), the user
+and conversation you named (`user.id`, `gen_ai.conversation.id`), the first 32
+of its tags Telmoni would keep, the most it keeps, as `telmoni.tag.<key>`, and
+the sample rate. Every span inside the run
+carries the run's id, agent, user and session, so Telmoni knows each
+span's run without waiting
+for the trace's tree. The resource every span of an export shares names the
+SDK (`telemetry.distro.name` `telmoni`, its version, and the OpenTelemetry
+SDK's name, language and version) and, where you set them, the deployment:
+`deployment.environment.name` from the `environment` option or
+`TELMONI_ENVIRONMENT` (`production`, `staging`), and `service.version` from
+`release` or `TELMONI_RELEASE` (a version or a commit), which Telmoni keeps as
+the `environment` and `release` of every span and the trace list
+[filters](/docs/workspace/traces#filters) by. A step is a span named as you named it; a model call is
+`chat <model>` (or the operation you gave) with the model asked for, the
+model that answered, the provider and the token counts under the GenAI
+conventions' names, each a whole number from 0, another left off the call
+with one warning, and the cost you report as Langfuse's `gen_ai.usage.cost`,
+a number of US dollars from 0; a tool call is `execute_tool <name>`. The exception's class
+alone marks a failure, as `error.type`; no message, stack trace or event is
+ever sent. The [ingest page](/docs/api/ingest) lists every attribute and what
+the server keeps of each.
+
+### Content
+
+Prompts, completions, tool arguments and results — `input_messages`,
+`output_messages`, `system_instructions`, `arguments`, `returned(...)` — are
+recorded on the span and taken off by the exporter before anything leaves
+the process. They are sent only when the client is built with
+`capture_content` on **and** the project's content mode, which the SDK learns
+from the server's first answer, is `on`. No project can be switched to `on`
+today, so content never leaves the process. The server's own drop at the door
+is the second lock, not the first.
+
+### Sampling
+
+`sample_rate`, on the client or on one run, is the share of runs sent, a
+number above 0 and up to 1. A run sampled out is dropped whole in the SDK,
+never through the trace's sampled flag, so your
+application's own sampling is untouched and the volume Telmoni sees is a
+dial you hold. A step or call still open when its run ends is dropped too,
+however late it ends.
+
+### Beside your own OpenTelemetry
+
+The SDK builds every part of its tracer provider itself — resource, sampler,
+limits, batching — so none of your `OTEL_*` variables reaches it, and it
+neither replaces your provider nor sends your spans to Telmoni. A run joins
+the trace that is current where it begins, and your spans opened inside it
+nest under the run. The run's sampled flag follows the trace it joins; a run
+that starts a trace of its own takes the decision your own sampler gives it —
+given as the `sampler` option in every SDK, Python falling back to your
+provider's sampler when you give none — so your application keeps its own sampling rate inside runs as
+outside them. A run inside a trace your application does not sample is still
+sent.
+
+### Answers and warnings
+
+The SDK batches spans and sends them in the background, on a bounded queue,
+so a slow Telmoni never slows an agent. Each request times out after 10
+seconds. It retries a `429` or a `503` after its `Retry-After`, waiting at most
+60 seconds, and a request that failed or timed out before its answer's head was
+whole after 1 second, then 2; after three attempts in all it drops the batch
+with one warning. Any other refusal is logged once and never retried, and an
+answer whose body breaks after its head, or runs past the 10 seconds, is
+decided by its status, read as far as it came. A batch whose body would pass the
+1 MiB [ingest](/docs/api/ingest#refusals) takes, or that holds more than its
+1,000 spans, is sent in halves, each within both, and a span that alone passes
+the 1 MiB is sent without the attributes ingest drops for their length — a key
+past 128 characters, a value past 1,024 — with one warning. Once a part fails
+as the rest would, Telmoni out of reach or busy past the retries, or the key
+refused, the parts after it are dropped with it; past a part refused for what it
+holds, they are sent. A number attribute JSON cannot carry, `NaN` or an
+infinity, is sent as no value, and so dropped, and a whole number past 64 bits
+as its text or a double, never costing its batch. Each attempt carries
+`Telmoni-Sent-At`, the agent's clock as it leaves, so
+[ingest](/docs/api/ingest#what-is-kept) can move
+a run from a clock a time zone or a date out as one. A flush waits up to 30 seconds. An attribute the
+server drops is logged once: content with the project's content mode, which
+decides the drop, and a link to [what is dropped at the
+door](/docs/api/ingest#what-is-dropped-at-the-door); text the field inventory
+does not name with the `telmoni.tag.<key>` that would keep it; and a tag past
+its project's cardinality cap with how tags keep, a few keys of a few values
+each.
+
+### The key on the wire
+
+The key travels as a bearer over HTTPS. Plain HTTP is accepted only to this
+machine, for a server you run beside the agent: `localhost`, a name under it,
+an address in `127.0.0.0/8`, or `::1`, an IPv4-mapped address such as
+`[::ffff:127.0.0.1]` counting as its IPv4. Python, TypeScript and Go refuse any
+other `http://` endpoint when the client is built, and Rust when the first
+export would go, with one warning. An endpoint given without a scheme gets
+`https://`, or `http://` for this machine, as the CLI reads one; any scheme
+but those two is refused the same way, as is an endpoint the four SDKs could
+read two ways: one that is not printable ASCII once the whitespace around it
+is trimmed, or holds credentials, a percent-escape, a query, a fragment, a `.`
+or `..` segment or a character a URL parser would escape, such as a space or
+`|`, or a port of 0 or past 65535, or whose host is neither a name of letters,
+digits, dots, hyphens and underscores, in labels of 1 to 63 characters with no
+hyphen at either end and the last no number, nor an IPv4 address in four
+decimal parts, nor an IPv6 address in brackets. Write an
+address in full, `127.0.0.1` rather than `127.1`, and a name in another script
+in its `xn--` form. No SDK follows a redirect, which could carry the key to
+another host, nor sends to this machine through a proxy, whatever the proxy
+variables name, since the proxy would read it; and the key never appears in a
+log, a warning or an error.
+
+---
+
+## Configuration
+
+<Tabs items={['Python', 'TypeScript', 'Go', 'Rust']}>
+  <Tab value="Python">
+    ```python
+    from telmoni import Config, Telmoni
+
+    telmoni = Telmoni(
+        Config(
+            endpoint="https://api.telmoni.com",
+            api_key="tm_...",
+            organization_id="org_019a0b8c3f2e7d41",
+            capture_content=False,
+            sample_rate=1.0,
+            environment="production",
+            release="2026.10.18",
+        )
+    )
+    ```
+  </Tab>
+  <Tab value="TypeScript">
+    ```ts
+    import { Telmoni } from 'telmoni';
+
+    const telmoni = new Telmoni({
+      endpoint: 'https://api.telmoni.com',
+      apiKey: process.env.TELMONI_API_KEY,
+      organizationId: 'org_019a0b8c3f2e7d41',
+      captureContent: false,
+      sampleRate: 1.0,
+      environment: 'production',
+      release: '2026.10.18',
+    });
+    ```
+  </Tab>
+  <Tab value="Go">
+    ```go
+    client, err := telmoni.New(telmoni.Config{
+    	Endpoint:       "https://api.telmoni.com",
+    	APIKey:         os.Getenv("TELMONI_API_KEY"),
+    	OrganizationID: "org_019a0b8c3f2e7d41",
+    	CaptureContent: false,
+    	SampleRate:     1.0,
+    	Environment:    "production",
+    	Release:        "2026.10.18",
+    })
+    ```
+  </Tab>
+  <Tab value="Rust">
+    ```rust
+    use telmoni::{Config, Telmoni};
+
+    let telmoni = Telmoni::new(Config {
+        endpoint: "https://api.telmoni.com".into(),
+        api_key: std::env::var("TELMONI_API_KEY").ok(),
+        organization_id: Some("org_019a0b8c3f2e7d41".into()),
+        environment: Some("production".into()),
+        release: Some("2026.10.18".into()),
+        ..Default::default()
+    });
+    ```
+  </Tab>
+</Tabs>
+
+`environment` and `release` name the deployment every span is sent from, as
+the resource's `deployment.environment.name` and `service.version`; a blank
+one is unset, and nothing is sent for one unset. `prices` hands
+[the guard](#the-guard) prices of your own, and nothing of them is sent.
+
+Each SDK keeps the API key out of the configuration's printed form: Rust's
+`Debug` shows `<redacted>` in its place and serialization skips it; Python
+holds it as a `Secret` that `repr`, `str` and `dataclasses.asdict` show
+redacted; Go's `String` and `GoString` redact it and JSON skips it;
+TypeScript holds `apiKey` as a non-enumerable property, which `console.log`
+and `JSON.stringify` pass over.
+
+---
+
+## Environment variables
+
+`from_env` / `fromEnv` / `NewFromEnv` / `Config::from_env` read:
+
+| Variable | Description | Default |
+|---|---|---|
+| `TELMONI_ENDPOINT` | The origin ingest is served on: Telmoni's machine host, or your own deployment's | `https://api.telmoni.com` when unset or blank |
+| `TELMONI_API_KEY` | An [API key](/docs/api/api-keys) holding the **ingest** scope, created on a project's API keys page | None |
+| `TELMONI_ORG` | The organization's ID (`org_...`), held and not sent: the key names the project | None |
+| `TELMONI_ENVIRONMENT` | The deployment this process runs in — `production`, `staging` — sent as `deployment.environment.name` | None: nothing is sent |
+| `TELMONI_RELEASE` | The release this process runs — a version or a commit — sent as `service.version` | None: nothing is sent |
+
+Every SDK reads these five and no others. OpenTelemetry's own `OTEL_*`
+variables are your application's, for its own exporters, and change nothing
+of the SDK's: `OTEL_RESOURCE_ATTRIBUTES` in particular reaches nothing the
+SDK sends.

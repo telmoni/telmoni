@@ -1,0 +1,186 @@
+---
+title: "Traces"
+description: "A project's Traces page: every run of its agents as a row, newest first, narrowed by any of its values, sorted, paged, drawn over the window, saved as views and downloaded, and each run opened beside the list or on a page of its own, its spans as a tree beside the one you choose — all of it metadata."
+---
+
+A **trace** is one run's record: the run's own span and every span recorded
+inside it, found by the run's id. A project's **Traces** page lists them; each
+opens beside the list, and has a page of its own. Everything on both is
+metadata — timings, statuses, counts, model and tool names — and nothing on
+either is a prompt, a completion or a tool payload, in any
+[content mode](/docs/api/ingest#what-is-dropped-at-the-door).
+
+## The list
+
+Every run of the project's agents from the last seven days, newest first, one
+row each, fifty to a page:
+
+| Column | What it is |
+|---|---|
+| Trace | The first eight characters of the run's id; opens the trace beside the list, as a click anywhere else on the row does |
+| Started | When the run's first span started, in your time zone |
+| Agent | The run's agent (`telmoni.agent`) |
+| User | The end user the run was for (`user.id`), as stored: hashed under the project's own key |
+| Session | The session the run belongs to (`gen_ai.conversation.id`), as the application set it |
+| Status | **OK**, **Error** or **Cancelled** once the run's own span has arrived; **Running** until it has. Beside any but **Error**, how many of the run's spans failed: a run can recover from a failed call |
+| Steps | How many steps the run took; hover for its model and tool calls |
+| Tokens | Its model calls' input and output tokens, summed; hover for the split |
+| Duration | From its first span's start to its last span's end |
+
+**Columns** shows or hides each of these, and more beside them: when the
+run's last span ended, the deployment its spans were sent from
+(**Environment**: `production`, `staging`) and its release (**Release**: a
+version or a commit), each once where a run crossed services deployed apart,
+the class of the error it ended on (**Error**: `TimeoutError`,
+`RateLimitError` — never its message), its model calls, tool calls, errors
+and spans, its input, output and cached tokens, and the models and tools its
+calls used.
+The counts and the tokens are each a group that opens under its heading,
+which says how many of it show; a column whose name does not say what it
+holds says so behind its ⓘ; and the trace's id always shows. Your columns,
+and how tightly the rows sit (**Row density**), are kept in your browser
+rather than in the page's link.
+
+### Filters
+
+The **Filters** panel beside the list names each agent, status, model, tool,
+user, session, environment, release, tag and prompt among the window's runs,
+with how many runs carry it — counted under every other filter, so a value
+beside a ticked one says what ticking it would add. Tick values to narrow the
+list: the values of one filter add to each other, and filters narrow
+together. The panel names fifty values of each at most, the most runs first;
+a session's id can be typed in as well (**Text**), so can a user's as it is
+stored, the hashed id the User column shows, and so can a tag, as
+`key:value`. A run carries an environment, a release, a tag or a prompt
+where any of its spans does: the deployment is the resource's
+`deployment.environment.name` and `service.version`, a tag each
+`telmoni.tag.<key>` with its value, and a prompt a span's
+`gen_ai.prompt.name`. Click an agent, a user, a session, a model, a tool, an
+environment or a release in a row to narrow the list to it alone. The filters
+in force stand above the rows: clear one with its ×, or all of them at once.
+The button beside the panel's heading hides it, and opens it again. Drag the
+edge between the panel and the list to give the filters more room, or less,
+so a long value reads whole; a double click puts them back at their own
+width. The edge takes the keyboard too: the arrow keys move it, Home and End
+take it to its narrowest and widest, and Enter puts it back.
+
+**Errors**, **Slow** and **Tokens** beside it are ready-made: the runs that
+ended in error, the longest runs first, or the runs that used the most tokens
+first. Click one again to take it off.
+
+### Sort, pages and the window
+
+**Sort** by clicking a column's heading; every column sorts but Trace, Ended,
+Spans, Cache read, Cache write, Models and Tools. A second click turns it
+round. Names sort in the alphabet's order, and the newest, the longest and the
+most come first on the others.
+
+**Rows per page** is 25, 50 or 100; beside it, the total the filters admit,
+and the way to the first, previous, next and last page. A list past a
+thousand pages is reached by narrowing the window or the filters.
+
+**The window**, beside the page's title, is the last day, week, 30 or 90
+days, by the day each span arrived. A window of more runs than the store
+reads at once, about a hundred thousand, shows the page as unavailable; a
+shorter one reads. Above the rows, its runs stand as bars by when they started — how
+they ended, or their tokens, or the median and 95th percentile of their
+durations, as the menu above the bars picks — each bar an hour, a few hours,
+a day or a week, starting on your own clock. **Chart** shows the three as
+charts in the table's place.
+
+As the project's runs land, a bar above the list counts the new traces rather
+than moving the rows under your hand; **Show** reads the list again, with them
+on it where the filters admit them. An empty list shows its first trace at
+once. A trace's own page draws itself again as its run's spans land, while it
+is in view: at once for the first, and once more for whatever arrives in the
+next 30 seconds.
+
+**Refresh**, beside the window, reads the list now; beside it, have the page
+read itself again every 30 seconds, minute, 5 or 15 minutes as well, for a
+console whose live events are paused.
+
+Every filter, the sort, the window and the page are in the page's URL, so a
+link holds the view you were looking at.
+
+### Saved views
+
+**Views** keeps a list as the project's own: its filters, sort, window, rows
+per page and columns, under a name. **Save as a new view**, then pick it from
+the menu to open the list as it was saved, with its columns. A view the list
+has moved off since — a filter or a column changed — is starred, and **Save
+changes** writes it over. Every member of the project applies its views; its
+Owners and Admins save, rename and delete them
+([Roles](/docs/workspace/roles#project-roles)). A project keeps up to 100,
+and up to 100 [layouts](/docs/workspace/sessions#keeping-a-layout) of a
+session's page and a trace's beside them.
+
+### Downloading the list
+
+**Download** writes the list as a file, CSV for a spreadsheet or JSON: every
+run its filters admit, sorted as it is, up to the first 10,000. Tick rows by
+their boxes to download those alone. A file holds what the list holds —
+metadata, with each user's id as stored — and never a message.
+
+## A trace
+
+A click on a row of the list, anywhere but on one of its links, opens the
+run's trace in a panel over the list's right side, under the page's header and
+beside the sidebar, without leaving the list. The row stays marked while its
+trace is open. The panel's ↑ and ↓ open the previous and the next row's
+trace, as `k` and `j` do. Drag the panel's left edge to make it wider or
+narrower, and double-click the edge to put it back; **Full size** fills the
+page's area with the panel and **Exit full size** puts it back. Your browser
+keeps both for the next trace you open. The arrow beside them opens the
+trace's own page. **Close**,
+`Esc` from inside the panel, or your browser's **Back** shuts it, and the
+page's link holds the open trace, so a link you share opens the list with it.
+A `⌘`-click or `Ctrl`-click on the run's id opens the trace's page in a new
+tab instead. The trace's own page shows the same, with the page's room.
+
+Its first line sums the run: its status, when it started, how long it ran, its
+model calls' tokens — hover for the split — its session, a link to
+[its page](/docs/workspace/sessions#a-session), its user, a link to the runs
+that share it, and its tags; and on the trace's own page, each incident whose
+notices showed the run, among the last twenty each keeps, a link to it on the
+project's [Alerts](/docs/workspace/alerts#from-a-trace) page.
+
+Below it, the run's spans stand as the tree they ran in, each under the span
+it names as its parent: its kind, its name, how long it ran, a model call's
+tokens, and, for a span that failed, the error's type in red. **Search spans**
+finds spans by name, kind, model, provider or error type, each with the spans
+above it.
+**Timeline** draws each span as a bar on one line of time, from the run's
+first start to its last end. The arrow keys walk the tree: up and down a span,
+right to open a span's branch or step into it, left to shut it or step out of
+it. A run of more than 400 spans opens with its branches shut but the run's
+own.
+
+Beside the tree stands the span you choose, the run's own first: its kind, its
+status and the error's type, its model and provider, the environment and
+release it was sent from, the tool it called — the model, the environment,
+the release and the tool each a link to the list narrowed to them — its
+tokens, input, output and cached, the cost it reported, in US dollars, where
+it reported one, when it started and ended to the
+millisecond, how long it ran, when it was received, and its ids. The run's own span adds the
+run's steps, calls and tokens, its user, session and tags, and its sample
+rate. **Attributes** lists what else was kept with the
+span under its own name, and **Raw** shows either as it was stored. The
+trace holds a run's first 5,000 spans, fewer where their names, tags and
+attributes pass about 8 MiB; a run with more says so under them.
+
+A run whose own span has not arrived yet is shown as running, and its trace
+is read again as more of its spans land. A trace that is not in the project —
+a run that has passed its retention, or one of another project's — says so.
+
+### Layouts
+
+The trace's own page opens in the same layout as
+[a session's](/docs/workspace/sessions#customize), changed by **Customize**
+beside its title: to begin with the tree holds the run's own row alone, its
+details beside it, until Customize opens its steps or calls, the branches
+with a failure inside, and the timeline. The depth and the
+calls shown narrow what the tree lists, what starts open opens its branches,
+and the pinned spans stand above the tree, each a press away from being
+chosen, wherever the depth leaves them. **Layouts** keeps a cut under a name
+for everyone on the project and sets what the project opens in, as the
+session's page does. The trace opened over the list keeps the tree whole.

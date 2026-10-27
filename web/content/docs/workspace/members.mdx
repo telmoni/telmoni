@@ -1,0 +1,158 @@
+---
+title: "Members and invitations"
+description: "Inviting people to an organization or project, adding a member of the organization to a project, accepting and declining, changing roles, removing members, and leaving."
+---
+
+Collaborators join an organization or project by invitation, or, on a project,
+by a seat given to somebody already in its organization. Either grants a
+[role](/docs/workspace/roles) of **Admin** or **Member**.
+
+## Scope of an invitation
+
+Telmoni supports two invitation scopes:
+
+1. **Organization invitations**: Invited from the organization's **Members** page
+   (`/{organization}/members`). Grants an organization role (`Admin` or
+   `Member`). An invited Organization Admin gains administrative access across
+   all projects in the organization.
+2. **Project invitations**: Invited from a project's **Members** page
+   (`/{organization}/{project}/members`). Grants access directly to that
+   project as an `Admin` or `Member` without granting organization-wide
+   permissions.
+
+## Inviting someone
+
+An Owner or Admin can send invitations:
+
+1. Navigate to the **Members** page of the organization or project.
+2. Select **Invite member** (on a project's page, **Add member**, and **By
+   email** where the organization's members are offered beside it), enter the
+   recipient's email address, and choose a role (**Admin** or **Member**).
+3. Telmoni emails an invitation link (on a self-hosted deployment, when the
+   operator has configured mail), and the console displays the link once so
+   you can share it directly.
+
+**An invitation is created for any email address that is not already on the
+roster, whether or not it currently holds a Telmoni account.** Inviting checks
+the address against the roster (for a project, its seats) and against your own
+address, never against existing accounts, and the answer is the same either
+way. An address already
+on that roster is refused, your own included. A project invitation checks the
+project's seats, so the organization Owner's address, which holds none, is
+refused only when the invitation is accepted. A new invitation to an address
+that already holds a live one from the same project or organization replaces
+it, and the earlier link stops working.
+
+Where the `members` feature flag is off, for the deployment or for the
+organization, inviting is refused with "Adding a member is switched off right
+now."
+
+Invitations expire automatically after **7 days**.
+
+On the hosted service, an organization on the Hobby plan holds one member,
+its owner: an invitation from it, or from one of its projects, is refused,
+naming Pro. Its **Members** page says so in place of the invite button, and a
+project's under **By email**, closed, while **From the organization** stays
+open to whoever in the organization holds no seat there yet
+([Billing](https://telmoni.com/docs/workspace/billing#one-member-on-hobby)).
+A self-hosted installation holds no organization to a number.
+
+## Adding a member from the organization
+
+An organization Owner or Admin can seat somebody already in the organization
+on one of its projects without an invitation. On the project's **Members**
+page, **Add member** offers **From the organization**: the organization's
+Members who hold no seat on that project yet (its Owner and Admins are on every
+project already), with a role (**Admin** or **Member**). The person is added at
+once — there is nothing to accept, since they agreed to the organization when
+they joined it — and told by email (on a self-hosted deployment, when the
+operator has configured mail) and in their notifications: the bell and the
+**Notifications** page list the project until they open it, from there or any
+other way, or dismiss it, or the project moves to another organization, or
+they are made an Admin of the organization, which puts them on every project.
+An invitation of theirs to that project is withdrawn by the seat. The seat is
+recorded in the audit log, and the project's **Overview** notes who joined.
+
+A project Admin who is only a Member of the organization sees no roster and
+invites by email. Where the `members` feature flag is off, or the organization
+is paused on the hosted service, adding is refused as inviting is, and nobody
+whose account is being deleted is added.
+
+## Accepting or declining
+
+Invitations can be answered in two places:
+
+- **The console bell & notifications**: Pending invitations appear in the bell icon
+  in the console header and on your account's **Notifications** page
+  (`/account/notifications`). You can accept or decline directly without
+  leaving your current view — when your email address is verified. An address
+  nobody has verified (a password sign-up on a deployment with `VERIFY_EMAIL`
+  off, or an identity provider that did not vouch for it) sees no invitations
+  here and uses the email link, which is itself the proof that the inbox is
+  yours.
+- **The email link**: Opens a page naming who invited you, the organization (for
+  a project invitation, that it is for a project in that organization), and the
+  role granted, with **Accept invitation**. You must sign in or register with
+  the exact email address the invitation was sent to.
+
+A signed-in recipient with a verified address also sees the invitation arrive
+as a toast, "Invitation to join" and the organization's or project's name,
+with **Review**, which opens the Notifications page; the console's live stream
+carries no invitation to an unverified address. The bell accepts and declines
+in one press; the Notifications page asks you to confirm a decline.
+
+Accepting an invitation records an audit event. Accepting a project invitation
+also posts a `member_added` notice on the project's **Overview** and to its
+connectors, and lists you on the organization's roster as a **Member**: no
+organization powers come with that, and it is what lets the organization show
+your address on its rosters. Declining an invitation ends it immediately.
+
+## Withdrawing a pending invitation
+
+An Owner or Admin can withdraw a pending invitation at any time from the
+**Members** page by selecting **Withdraw** on its row. Withdrawn links are
+invalidated immediately.
+
+## Changing roles and removing members
+
+An Owner or Admin can change a member's role or remove them from the
+**Members** page:
+
+- **Role changes**: Changing between Admin and Member takes effect immediately
+  and is recorded in the audit log.
+- **Removing members**: Removing a member revokes their access immediately. A
+  console page they have open in that project or organization leaves it at
+  once, for the console's entry page.
+- **The Owner cannot be removed or demoted**: The Owner's row is marked **Owner**
+  and carries no removal controls. To change the Owner, the current Owner must
+  initiate an [ownership transfer](/docs/workspace/organizations-and-projects#transferring-organization-ownership).
+
+## Leaving an organization or project
+
+- Anyone but the Owner can leave an organization from its **Overview** page
+  (`/{organization}`), which also removes them from every project in it.
+- A project seat is given up with **Leave** on your own row of the project's
+  **Members** page, whether the seat was accepted from an invitation or given
+  from the organization's roster, and whatever its role; you stay on the
+  organization's roster, and an Owner or Admin can add you back. An
+  organization Admin who still holds a seat on a project, from before they
+  were made an Admin, also finds **Leave** beside it on the organization's
+  **Projects** page (`/{organization}/projects`), which opens for the Owner
+  and Admins alone; they keep their access to the project through their
+  organization role. The Owner, who holds every project outright, is offered
+  no Leave anywhere.
+- The Owner cannot leave until ownership is transferred to an Admin or the
+  organization is deleted.
+
+## Invitation limits
+
+A project can send up to **20 invitations in any 24 hours**,
+withdrawn ones included, and its organization's Owner and Admins can add up to
+**20** of the organization's members to it in any 24 hours, removed ones
+included. Organization invitations have no such count. There is
+no limit on the number of members in an organization or project, apart from
+Hobby's one on the hosted service
+([One member on Hobby](https://telmoni.com/docs/workspace/billing#one-member-on-hobby)).
+On the hosted service, a paused organization sends no invitation until it
+moves to a paid plan
+([One Hobby organization](https://telmoni.com/docs/workspace/billing#one-hobby-organization)).
