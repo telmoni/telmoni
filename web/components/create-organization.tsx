@@ -17,7 +17,7 @@ import {
   type CreateOrganizationField,
   createOrganizationAction,
 } from "@/app/(app)/actions";
-import { MAX_ORGANIZATION_NAME } from "@/lib/organization-name";
+import { MAX_ORGANIZATION_NAME, typedBound } from "@/lib/names";
 import { SLUG_MAX_LENGTH } from "@/lib/slug";
 
 interface Refusal {
@@ -132,7 +132,7 @@ export function CreateOrganizationPanel({
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Acme"
-              maxLength={MAX_ORGANIZATION_NAME}
+              maxLength={typedBound(MAX_ORGANIZATION_NAME)}
               autoComplete="off"
               required
               aria-invalid={nameError ? true : undefined}

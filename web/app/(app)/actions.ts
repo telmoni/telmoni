@@ -11,7 +11,7 @@ import { createOrganizationElsewhere } from "@/lib/extension/create-organization
 import { createdOrganizationHref } from "@/lib/extension/created-organization";
 import { FlagOffDetail } from "@/lib/flags";
 import { logger } from "@/lib/logger";
-import { MAX_ORGANIZATION_NAME } from "@/lib/organization-name";
+import { checkOrganizationName, checkOrganizationUrl, checkProjectName } from "@/lib/names";
 import {
   identityContext,
   organizationHeaders,
@@ -22,10 +22,8 @@ import type { Project } from "@/lib/server/entities/projects";
 import { FeatureOffProblemSchema } from "@/lib/server/flags";
 import { unplacedOrganization } from "@/lib/server/identity";
 import { getServerSession } from "@/lib/server/session";
-import { SLUG_MAX_LENGTH, isOrganizationSlug, isSlug, organizationPath } from "@/lib/slug";
+import { isSlug, organizationPath } from "@/lib/slug";
 import { asRole } from "@/lib/types/enums";
-
-const MAX_PROJECT_NAME = 100;
 
 const CreatedProjectSchema = z.object({
   id: z.string(),
@@ -51,11 +49,9 @@ export async function createProjectAction(
   });
   if (limited) return { error: "Too many requests — slow down a moment." };
 
-  const trimmed = name.trim();
-  if (!trimmed) return { error: "Project name cannot be empty." };
-  if (trimmed.length > MAX_PROJECT_NAME) {
-    return { error: `Project name must be ${MAX_PROJECT_NAME} characters or fewer.` };
-  }
+  const checked = checkProjectName(name);
+  if (!checked.ok) return { error: checked.error };
+  const trimmed = checked.value;
 
   const ctx = await identityContext();
   if (!ctx) return { error: await unplacedOrganization() };
@@ -162,20 +158,14 @@ export async function createOrganizationAction(
   });
   if (limited) return { error: "Too many requests — slow down a moment." };
 
-  const trimmed = name.trim();
-  if (!trimmed) return { error: "Give your organization a name.", field: "name" };
-  if ([...trimmed].length > MAX_ORGANIZATION_NAME) {
-    return { error: `Keep it to ${MAX_ORGANIZATION_NAME} characters or fewer.`, field: "name" };
-  }
+  const checkedName = checkOrganizationName(name);
+  if (!checkedName.ok) return { error: checkedName.error, field: "name" };
+  const trimmed = checkedName.value;
+  // No URL asked for is auth's to make from the name.
   const url = slug.trim();
-  if (url && !isSlug(url)) {
-    return {
-      error: `A URL is lowercase letters and digits, in words joined by single hyphens, at most ${SLUG_MAX_LENGTH} characters.`,
-      field: "slug",
-    };
-  }
-  if (url && !isOrganizationSlug(url)) {
-    return { error: `${url} is a word the console's own pages use — choose another.`, field: "slug" };
+  if (url) {
+    const checkedUrl = checkOrganizationUrl(url);
+    if (!checkedUrl.ok) return { error: checkedUrl.error, field: "slug" };
   }
 
   // A console built on this one may take the founding elsewhere first — one

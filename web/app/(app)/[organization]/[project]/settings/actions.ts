@@ -9,6 +9,7 @@ import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
 import { isProjectId } from "@/lib/connect";
 import { env } from "@/lib/env";
 import { organizationChannel, publishEvent } from "@/lib/events/publisher";
+import { checkProjectName } from "@/lib/names";
 import {
   identityContext,
   projectHeaders,
@@ -45,13 +46,9 @@ export async function updateProjectNameAction(
   });
   if (limited) return { error: "Too many requests — slow down a moment." };
 
-  const trimmed = name.trim();
-  if (!trimmed) {
-    return { error: "Project name cannot be empty." };
-  }
-  if (trimmed.length > 100) {
-    return { error: "Project name must be 100 characters or fewer." };
-  }
+  const checked = checkProjectName(name);
+  if (!checked.ok) return { error: checked.error };
+  const trimmed = checked.value;
 
   // A Server Action is a public endpoint, and the id becomes a path segment
   // of the upstream URL: anything but a project id is refused before it can

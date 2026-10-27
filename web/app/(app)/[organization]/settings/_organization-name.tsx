@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
-import { MAX_ORGANIZATION_NAME } from "@/lib/organization-name";
+import { MAX_ORGANIZATION_NAME, typedBound } from "@/lib/names";
 
 import { renameOrganizationAction } from "./settings-actions";
 
@@ -70,7 +70,7 @@ export function OrganizationNameForm({
           onChange={(e) => setName(e.target.value)}
           disabled={!canEdit || pending}
           placeholder="Organization name"
-          maxLength={MAX_ORGANIZATION_NAME}
+          maxLength={typedBound(MAX_ORGANIZATION_NAME)}
           className="max-w-md"
           aria-label="Organization name"
         />

@@ -6,6 +6,7 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { MAX_PROJECT_NAME, typedBound } from "@/lib/names";
 import { useRenameProject } from "@/lib/store";
 
 import { updateProjectNameAction } from "./actions";
@@ -75,7 +76,7 @@ export function RenameProjectForm({
           onChange={(e) => setName(e.target.value)}
           disabled={!canEdit || pending}
           placeholder="Project name"
-          maxLength={100}
+          maxLength={typedBound(MAX_PROJECT_NAME)}
           className="max-w-md"
           aria-label="Project name"
         />

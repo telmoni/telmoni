@@ -19,9 +19,8 @@ import { createProjectAction } from "@/app/(app)/actions";
 import { organizationLabel } from "@/lib/identity";
 import { projectPath } from "@/lib/slug";
 import { useActiveOrganization, useAddProject, useRoles } from "@/lib/store";
+import { MAX_PROJECT_NAME, typedBound } from "@/lib/names";
 import { administersOrganization } from "@/lib/organization-role";
-
-const MAX_PROJECT_NAME = 100;
 
 /// Whether the caller may create a project in the organization they are STANDING
 /// IN: every entry point's question, since the panel creates there and asks
@@ -112,7 +111,7 @@ export function CreateProjectPanel({
               onChange={(e) => setName(e.target.value)}
               // An example of what a project is here: the agent it watches.
               placeholder="Support agent"
-              maxLength={MAX_PROJECT_NAME}
+              maxLength={typedBound(MAX_PROJECT_NAME)}
               autoComplete="off"
               required
               aria-invalid={error ? true : undefined}

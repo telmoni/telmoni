@@ -8,13 +8,12 @@ import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
 import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
 import { env } from "@/lib/env";
 import { organizationChannel, publishEvent } from "@/lib/events/publisher";
-import { MAX_ORGANIZATION_NAME } from "@/lib/organization-name";
+import { checkOrganizationName, checkOrganizationUrl } from "@/lib/names";
 import { identityContext, organizationHeaders } from "@/lib/server/entities/identity-context";
 import { activeOrganization, getServerContext } from "@/lib/server/entities/organization";
 import { SWITCHED_ORGANIZATION, unplacedOrganization } from "@/lib/server/identity";
 import { canonicalPath } from "@/lib/server/path";
 import { getServerSession } from "@/lib/server/session";
-import { SLUG_MAX_LENGTH, isOrganizationSlug, isSlug } from "@/lib/slug";
 
 const Updated = z.object({ slug: z.string() });
 
@@ -82,14 +81,9 @@ export async function renameOrganizationAction(
   organizationId: string,
   name: string,
 ): Promise<Answer> {
-  const trimmed = name.trim();
-  if (!trimmed) return { error: "Give your organization a name." };
-  if ([...trimmed].length > MAX_ORGANIZATION_NAME) {
-    return {
-      error: `Keep it to ${MAX_ORGANIZATION_NAME} characters or fewer.`,
-    };
-  }
-  return patchOrganization(organizationId, "organization:rename", { name: trimmed });
+  const checked = checkOrganizationName(name);
+  if (!checked.ok) return { error: checked.error };
+  return patchOrganization(organizationId, "organization:rename", { name: checked.value });
 }
 
 /// Change the slug the organization's paths begin with. Checked for shape
@@ -99,14 +93,7 @@ export async function changeOrganizationUrlAction(
   organizationId: string,
   slug: string,
 ): Promise<Answer> {
-  const trimmed = slug.trim();
-  if (!isSlug(trimmed)) {
-    return {
-      error: `A URL is lowercase letters and digits, in words joined by single hyphens, at most ${SLUG_MAX_LENGTH} characters.`,
-    };
-  }
-  if (!isOrganizationSlug(trimmed)) {
-    return { error: `${trimmed} is a word the console's own pages use — choose another.` };
-  }
-  return patchOrganization(organizationId, "organization:url", { slug: trimmed });
+  const checked = checkOrganizationUrl(slug);
+  if (!checked.ok) return { error: checked.error };
+  return patchOrganization(organizationId, "organization:url", { slug: checked.value });
 }

@@ -1,1 +1,0 @@
-export const MAX_ORGANIZATION_NAME = 80;
