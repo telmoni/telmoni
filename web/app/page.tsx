@@ -32,7 +32,7 @@ const KICKER = "Privacy-first telemetry and monitoring for AI agents";
 const STAGE = "Beta";
 const CLAIM = "Know when your agents stall, loop or overspend, without sending us a single prompt.";
 const PITCH =
-  "Every run and the steps inside it, every model and tool call with its tokens, latency and cost, and the alert when something goes wrong. Prompts and completions stay out unless an organization owner turns them on for a project.";
+  "Every run and the steps inside it, every model and tool call with its tokens, latency and cost, and the alert when something goes wrong. Prompts and completions stay out: they come off a span before it leaves your process.";
 
 // One way in per tab, each line the book's.
 const INSTALL: readonly InstallTab[] = [
@@ -73,7 +73,7 @@ const WHAT = {
     },
     {
       title: "Alerts",
-      body: "Failures, latency, tokens or what a run spends, over an hour, a day or a week against an alert threshold and an optional warning one; each incident told to the feed, Slack and webhooks, and acknowledged or resolved in the console.",
+      body: "Failures, latency, tokens or what a run spends, over an hour, a day or a week against an alert threshold and an optional warning one; each incident told to the feed, Slack and webhooks, acknowledged or resolved in the console, and listed on the organization's Overview while it is open.",
     },
     {
       title: "Cost and caps",
@@ -96,7 +96,7 @@ const WHAT = {
       body: "One Rust binary and one console, Apache-2.0, on Docker Compose or Kubernetes; you bring the identity provider, the mail transport and the model.",
     },
   ],
-  next: "Next, built in the open: each organization's open incidents on its Overview, and content an owner chooses to keep.",
+  next: "Next, built in the open: content an owner chooses to keep.",
   link: { label: "Read the docs", href: DOCS_URL },
 } as const;
 
@@ -147,7 +147,7 @@ const FAQ = [
   {
     question: "What runs today?",
     answer:
-      "The foundation — organizations and roles, API keys, the audit log, notifications, the console agent and the CLI — and the first of the telemetry: the SDKs record an agent's runs and the cost each call reports, and stop a run at the caps you set, ingest keeps them as metadata, and the console reads them as traces, sessions and users and alerts on them, to Slack and webhooks. Next: an organization's open incidents on its Overview, and content an owner chooses to keep.",
+      "The foundation — organizations and roles, API keys, the audit log, notifications, the console agent and the CLI — and the first of the telemetry: the SDKs record an agent's runs and the cost each call reports, and stop a run at the caps you set, ingest keeps them as metadata, and the console reads them as traces, sessions and users and alerts on them, to Slack and webhooks, with each organization's open incidents on its Overview. Next: content an owner chooses to keep.",
   },
   {
     question: "What does it store?",
