@@ -33,13 +33,13 @@ export async function landOnProject(page: Page): Promise<string> {
 }
 
 // A project's overview is titled by the project, so landing on one is the
-// page's title naming the project the header's switcher stands in — read once
-// the switcher has caught up with a client-side navigation, when its prompt
-// for a project has given way to one's name.
+// page's title naming the project the header's switcher stands in, once the
+// switcher has caught up with a client-side navigation.
 export async function expectProjectOverview(page: Page): Promise<void> {
-  const project = page.getByRole("button", { name: "Select a project" });
-  await expect(project.getByTestId("project-prompt")).toHaveCount(0);
-  const name = (await project.innerText()).trim();
-  expect(name, "the switcher names the project").not.toBe("");
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText(name);
+  const name = (await page.getByRole("heading", { level: 1 }).innerText()).trim();
+  expect(name, "the page has a title").not.toBe("");
+  await expect(
+    page.getByRole("button", { name: `Project: ${name}`, exact: true }),
+    "the switcher names the project",
+  ).toBeVisible();
 }

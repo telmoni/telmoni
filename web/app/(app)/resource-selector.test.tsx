@@ -81,7 +81,7 @@ describe("the switcher", () => {
   // muted, so it never reads as a project called that.
   it("asks for a project after the organization at the organization level", () => {
     const { container } = renderSelector();
-    expect(screen.getByRole("button", { name: "Select an organization" })).toHaveTextContent("acme");
+    expect(screen.getByRole("button", { name: "Organization: acme" })).toBeInTheDocument();
     const prompt = screen.getByRole("button", { name: "Select a project" });
     expect(within(prompt).getByTestId("project-prompt")).toHaveTextContent("Select a project");
     expect(within(prompt).getByTestId("project-prompt")).toHaveClass("text-muted-foreground");
@@ -107,13 +107,13 @@ describe("the switcher", () => {
   it("names the project after a slash inside one", () => {
     pathname = "/acme/atlas";
     const { container } = renderSelector();
-    expect(screen.getByRole("button", { name: "Select a project" })).toHaveTextContent("Atlas");
+    expect(screen.getByRole("button", { name: "Project: Atlas" })).toBeInTheDocument();
     expect(container).toHaveTextContent("/");
   });
 
   it("draws the badge it is handed beside the organization's name", () => {
     renderSelector(<span data-testid="plan">Hobby</span>);
-    const trigger = screen.getByRole("button", { name: "Select an organization" });
+    const trigger = screen.getByRole("button", { name: /^Organization: acme/ });
     expect(within(trigger).getByTestId("plan")).toHaveTextContent("Hobby");
   });
 
@@ -121,7 +121,7 @@ describe("the switcher", () => {
   // hands the focus back to the menu's trigger.
   it("opens New organization in its panel, handing it the menu's trigger", () => {
     renderSelector();
-    const trigger = screen.getByRole("button", { name: "Select an organization" });
+    const trigger = screen.getByRole("button", { name: "Organization: acme" });
     fireEvent.click(within(open(trigger)).getByRole("menuitem", { name: "New organization" }));
     expect(openCreate).toHaveBeenCalledWith("organization", trigger);
   });
@@ -135,7 +135,7 @@ describe("the switcher", () => {
 
   it("lists every organization the person can stand in, the active one first, with its settings", () => {
     renderSelector();
-    const menu = open(screen.getByRole("button", { name: "Select an organization" }));
+    const menu = open(screen.getByRole("button", { name: "Organization: acme" }));
     const names = within(menu)
       .getAllByRole("menuitem")
       .map((item) => item.textContent?.trim())
@@ -154,7 +154,7 @@ describe("the switcher", () => {
   it("lists the active organization's projects with their settings and a way to a new one", () => {
     pathname = "/acme/atlas";
     renderSelector();
-    const menu = open(screen.getByRole("button", { name: "Select a project" }));
+    const menu = open(screen.getByRole("button", { name: "Project: Atlas" }));
     expect(within(menu).getByRole("menuitem", { name: "Atlas" })).toHaveAttribute("aria-current", "true");
     expect(within(menu).getByRole("menuitem", { name: "Beacon" })).toHaveAttribute("href", "/acme/beacon");
     expect(within(menu).getByRole("menuitem", { name: "Beacon settings" })).toHaveAttribute(
@@ -168,7 +168,7 @@ describe("the switcher", () => {
     pathname = "/acme/atlas";
     canCreate = false;
     renderSelector();
-    const menu = open(screen.getByRole("button", { name: "Select a project" }));
+    const menu = open(screen.getByRole("button", { name: "Project: Atlas" }));
     expect(within(menu).queryByRole("menuitem", { name: "New project" })).toBeNull();
   });
 });

@@ -242,8 +242,10 @@ export function ResourceSelector({
             // `px-2`, with the header cell's `pl-1.5`: the name starts where
             // the page's title does.
             className={cn(TRIGGER, "px-2 has-[>svg]:px-2")}
-            aria-label="Select an organization"
           >
+            {/* Named by what it shows, so a voice command can say it; the
+                kind before it is a screen reader's alone. */}
+            <span className="sr-only">Organization:</span>{" "}
             <span className="truncate font-medium">{activeOrganizationName}</span>
             {organizationBadge}
             <ChevronDown className={CHEVRON} />
@@ -301,19 +303,21 @@ export function ResourceSelector({
                   // never squeezed by the organization's name beside it.
                   !activeProject && "max-md:shrink-0",
                 )}
-                aria-label="Select a project"
               >
                 {activeProject ? (
-                  <span className="truncate font-medium">{activeProject.name}</span>
+                  <>
+                    <span className="sr-only">Project:</span>{" "}
+                    <span className="truncate font-medium">{activeProject.name}</span>
+                  </>
                 ) : (
                   // A prompt, not a name: muted and at the body's weight, as a
                   // field's placeholder is, so a project that happens to be
                   // called this never reads as the one you stand in. Below
-                  // `md` the words go and the chevron stays: on a phone's bar
-                  // they and the organization's name cut each other to a
-                  // letter apiece.
+                  // `md` the words are a screen reader's alone and the chevron
+                  // stays: on a phone's bar they and the organization's name
+                  // cut each other to a letter apiece.
                   <span
-                    className="hidden truncate text-muted-foreground md:block"
+                    className="truncate text-muted-foreground max-md:sr-only"
                     data-testid="project-prompt"
                   >
                     Select a project
