@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 
 import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
+import { problem } from "@/lib/api/respond";
 import { listAuditExports, startAuditExport } from "@/lib/server/data";
 import { getServerSession } from "@/lib/server/session";
 import { ExportFormat } from "@/lib/types/enums";
@@ -33,14 +34,14 @@ function crossSite(request: NextRequest): boolean {
 // path's, resolved once inside the call.
 export async function GET(request: NextRequest) {
   if (crossSite(request)) {
-    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    return problem(403, "forbidden");
   }
   const result = await listAuditExports();
   if (result.kind === "forbidden") {
-    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    return problem(403, "forbidden");
   }
   if (result.kind === "unavailable") {
-    return NextResponse.json({ error: "unavailable" }, { status: 503 });
+    return problem(503, "unavailable");
   }
   return NextResponse.json({ exports: result.exports, ...result.limits }, { headers: NO_STORE });
 }
@@ -49,18 +50,18 @@ export async function GET(request: NextRequest) {
 // the export as the list shows it, still queued.
 export async function POST(request: NextRequest) {
   if (crossSite(request)) {
-    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    return problem(403, "forbidden");
   }
   const session = await getServerSession();
   if (!session) {
-    return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+    return problem(401, "unauthenticated");
   }
   const limited = await rateLimit(sessionKey(session, "audit-export:start"), STARTS_AN_HOUR);
   if (limited) return limited;
 
   const parsed = StartSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
-    return NextResponse.json({ error: "invalid" }, { status: 400 });
+    return problem(400, "invalid");
   }
   const result = await startAuditExport({
     format: parsed.data.format,
@@ -71,12 +72,12 @@ export async function POST(request: NextRequest) {
     case "ok":
       return NextResponse.json({ export: result.export }, { status: 202, headers: NO_STORE });
     case "forbidden":
-      return NextResponse.json({ error: "forbidden" }, { status: 403 });
+      return problem(403, "forbidden");
     case "busy":
-      return NextResponse.json({ error: "busy" }, { status: 409 });
+      return problem(409, "busy");
     case "invalid":
-      return NextResponse.json({ error: "invalid" }, { status: 400 });
+      return problem(400, "invalid");
     case "unavailable":
-      return NextResponse.json({ error: "unavailable" }, { status: 503 });
+      return problem(503, "unavailable");
   }
 }

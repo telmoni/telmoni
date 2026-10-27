@@ -99,7 +99,8 @@ describe("POST /api/v1/agent/turns", () => {
     getSession.mockResolvedValue(null);
     const res = await turn({ projectId: PROJECT, message: "hi" });
     expect(res.status).toBe(401);
-    expect(await res.json()).toEqual({ error: "unauthenticated" });
+    expect(res.headers.get("content-type")).toBe("application/problem+json");
+    expect(await res.json()).toEqual({ type: "about:blank", title: "unauthenticated", status: 401 });
     expect(fetchWithTimeout).not.toHaveBeenCalled();
   });
 
@@ -197,7 +198,7 @@ describe("POST /api/v1/agent/turns", () => {
     );
     const res = await turn({ projectId: PROJECT, message: "hi" });
     expect(res.status).toBe(502);
-    expect(await res.json()).toEqual({ title: "upstream error", status: 502 });
+    expect(await res.json()).toEqual({ type: "about:blank", title: "upstream error", status: 502 });
   });
 
   it("answers 503 when the server cannot be reached", async () => {

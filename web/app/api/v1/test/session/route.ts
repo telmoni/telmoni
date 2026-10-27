@@ -7,6 +7,7 @@ import {
   type SessionData,
 } from "@/lib/auth/session";
 import { fetchWithTimeout } from "@/lib/api/fetch";
+import { problem } from "@/lib/api/respond";
 import { env } from "@/lib/env";
 
 const ALLOWED =
@@ -34,12 +35,11 @@ const MintedSchema = z.object({
 });
 
 export async function POST(request: NextRequest) {
-  if (!ALLOWED)
-    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  if (!ALLOWED) return problem(403, "forbidden");
 
   const parsed = BodySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
-    return NextResponse.json({ error: "invalid JSON" }, { status: 400 });
+    return problem(400, "invalid JSON");
   }
   const body = parsed.data;
   const userId = body.userId ?? "test-user";
@@ -67,14 +67,10 @@ export async function POST(request: NextRequest) {
     ? MintedSchema.safeParse(await minted.json().catch(() => null))
     : null;
   if (!tokens?.success) {
-    return NextResponse.json(
-      {
-        error: "session_not_minted",
-        message:
-          "auth did not mint a test session — is the server started with ALLOW_TEST_SESSION=true?",
-      },
-      { status: 502 },
-    );
+    return problem(502, "session_not_minted", {
+      detail:
+        "auth did not mint a test session — is the server started with ALLOW_TEST_SESSION=true?",
+    });
   }
 
   const sessionData: SessionData = {
@@ -102,8 +98,7 @@ export async function POST(request: NextRequest) {
 }
 
 export async function DELETE() {
-  if (!ALLOWED)
-    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  if (!ALLOWED) return problem(403, "forbidden");
   const response = NextResponse.json({ ok: true });
   response.cookies.delete(SESSION_COOKIE);
   return response;

@@ -27,6 +27,8 @@ import { NextRequest } from "next/server";
 
 import { POST } from "./route";
 
+const refusal = (title: string, status: number) => ({ type: "about:blank", title, status });
+
 /** The console's own heartbeat: a fetch from the page that set the cookie. */
 function beat(headers: Record<string, string> = { "sec-fetch-site": "same-origin" }) {
   return POST(
@@ -65,7 +67,7 @@ describe("POST /api/v1/auth/heartbeat", () => {
 
     const res = await beat();
     expect(res.status).toBe(401);
-    expect(await res.json()).toEqual({ ok: false, error: "unauthenticated" });
+    expect(await res.json()).toEqual(refusal("unauthenticated", 401));
     expect(res.cookies.get("telmoni_session")?.value).toBe("");
   });
 
@@ -80,7 +82,7 @@ describe("POST /api/v1/auth/heartbeat", () => {
 
     const res = await beat();
     expect(res.status).toBe(401);
-    expect(await res.json()).toEqual({ ok: false, error: "session_ended" });
+    expect(await res.json()).toEqual(refusal("session_ended", 401));
     expect(res.cookies.get("telmoni_session")?.value).toBe("");
   });
 
@@ -93,7 +95,7 @@ describe("POST /api/v1/auth/heartbeat", () => {
 
     const res = await beat();
     expect(res.status).toBe(401);
-    expect(await res.json()).toEqual({ ok: false, error: "session_ended" });
+    expect(await res.json()).toEqual(refusal("session_ended", 401));
     expect(res.cookies.get("telmoni_session")?.value).toBe("");
   });
 
@@ -156,7 +158,7 @@ describe("POST /api/v1/auth/heartbeat", () => {
 
     const res = await beat();
     expect(res.status).toBe(401);
-    expect(await res.json()).toEqual({ ok: false, error: "refresh_failed" });
+    expect(await res.json()).toEqual(refusal("refresh_failed", 401));
     expect(res.cookies.get("telmoni_session")?.value).toBe("");
   });
 
@@ -175,7 +177,7 @@ describe("POST /api/v1/auth/heartbeat", () => {
     const res = await beat();
     expect(res.status).toBe(503);
     expect(res.headers.get("retry-after")).toBe("5");
-    expect(await res.json()).toEqual({ ok: false, error: "unavailable" });
+    expect(await res.json()).toEqual(refusal("unavailable", 503));
     expect(res.cookies.get("telmoni_session")).toBeUndefined();
   });
 });

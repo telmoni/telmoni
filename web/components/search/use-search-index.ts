@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { problemWords } from "@/lib/api/problem";
 import type { SearchIndex } from "@/lib/search";
 
 const UNREAD = "We couldn't read this project's resources just now.";
@@ -32,18 +33,16 @@ export function useSearchIndex(open: boolean, projectId?: string) {
       signal: abort.signal,
     })
       .then(async (res) => {
-        const answer = (await res.json().catch(() => null)) as
-          | (SearchIndex & { error?: string })
-          | null;
-        if (!res.ok || !answer || answer.error !== undefined) {
+        const answer: unknown = await res.json().catch(() => null);
+        if (!res.ok || !answer || typeof answer !== "object") {
           // A lapsed session is turned away by the console's proxy before
           // the handler runs, in a word meant for code; say it as the
           // handler would have.
-          setIndexError(res.status === 401 ? EXPIRED : answer?.error || UNREAD);
+          setIndexError(res.status === 401 ? EXPIRED : problemWords(answer) || UNREAD);
           indexedProject.current = null;
           return;
         }
-        setIndex(answer);
+        setIndex(answer as SearchIndex);
       })
       .catch(() => {
         if (abort.signal.aborted) return;

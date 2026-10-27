@@ -1,9 +1,10 @@
-import { type NextRequest, NextResponse } from "next/server";
+import { type NextRequest } from "next/server";
 import { z } from "zod";
 
 import { readBodyCapped } from "@/lib/api/body";
 import { fetchWithTimeout } from "@/lib/api/fetch";
 import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
+import { problem } from "@/lib/api/respond";
 import { getSession } from "@/lib/auth/session";
 import { sessionEndKey } from "@/lib/auth/session-end-key";
 import { isSessionBlacklisted } from "@/lib/auth/session-blacklist";
@@ -44,12 +45,12 @@ const PROBLEM_JSON = "application/problem+json";
 export async function POST(request: NextRequest) {
   const secFetchSite = request.headers.get("sec-fetch-site");
   if (secFetchSite && secFetchSite !== "same-origin" && secFetchSite !== "none") {
-    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    return problem(403, "forbidden");
   }
 
   const session = await getSession();
   if (!session || (await isSessionBlacklisted(sessionEndKey(session)))) {
-    return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+    return problem(401, "unauthenticated");
   }
 
   const limited = await rateLimit(sessionKey(session, "agent:turn"), TURNS);
@@ -57,23 +58,23 @@ export async function POST(request: NextRequest) {
 
   const raw = await readBodyCapped(request, BODY_CAP_BYTES);
   if (raw === null) {
-    return NextResponse.json({ error: "payload too large" }, { status: 413 });
+    return problem(413, "payload too large");
   }
   let json: unknown;
   try {
     json = JSON.parse(new TextDecoder().decode(raw));
   } catch {
-    return NextResponse.json({ error: "body is not JSON" }, { status: 400 });
+    return problem(400, "body is not JSON");
   }
   const body = TurnBody.safeParse(json);
   if (!body.success) {
-    return NextResponse.json({ error: "invalid turn" }, { status: 400 });
+    return problem(400, "invalid turn");
   }
   const { projectId, conversationId, message } = body.data;
 
   const headers = await agentHeaders(projectId);
   if (!headers) {
-    return NextResponse.json({ error: "unknown project" }, { status: 404 });
+    return problem(404, "unknown project");
   }
 
   let res: Response;
@@ -99,7 +100,7 @@ export async function POST(request: NextRequest) {
       { route: "agent:turns", error: err instanceof Error ? err.name : "unknown" },
       "agent: upstream unreachable",
     );
-    return NextResponse.json({ error: "unavailable" }, { status: 503 });
+    return problem(503, "unavailable");
   }
 
   if (!res.ok) {
@@ -107,7 +108,7 @@ export async function POST(request: NextRequest) {
   }
   if (!res.body) {
     logger.warn({ route: "agent:turns", status: res.status }, "agent: upstream sent no stream");
-    return NextResponse.json({ error: "unavailable" }, { status: 502 });
+    return problem(502, "unavailable");
   }
 
   return new Response(res.body, {
@@ -129,18 +130,18 @@ async function refusal(res: Response): Promise<Response> {
   if (retryAfter) headers["retry-after"] = retryAfter;
 
   const text = await res.text().catch(() => "");
-  let problem: unknown = null;
+  let answered: unknown = null;
   if ((res.headers.get("content-type") ?? "").includes("json")) {
     try {
-      problem = JSON.parse(text);
+      answered = JSON.parse(text);
     } catch {
-      problem = null;
+      answered = null;
     }
   }
-  if (problem === null || typeof problem !== "object") {
-    problem = { title: "upstream error", status: res.status };
+  if (answered === null || typeof answered !== "object") {
+    return problem(res.status, "upstream error", { headers });
   }
-  return new Response(JSON.stringify(problem), {
+  return new Response(JSON.stringify(answered), {
     status: res.status,
     headers: { ...headers, "content-type": PROBLEM_JSON },
   });

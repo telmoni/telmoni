@@ -1,7 +1,8 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { type NextRequest } from "next/server";
 import { z } from "zod";
 
 import { listDownload } from "@/lib/api/list-download";
+import { problem } from "@/lib/api/respond";
 import { many } from "@/lib/list-query";
 import { traceDownload } from "@/lib/server/data";
 import { RUNS_MAX, parseTraceQuery } from "@/lib/traces";
@@ -16,10 +17,10 @@ export async function GET(
     // A UUID of any version, as ingest takes one; dropped, a chosen run would widen the file.
     const runs = many(searchParams.run, RUNS_MAX + 1);
     if (runs.some((run) => !z.guid().safeParse(run).success)) {
-      return NextResponse.json({ error: "bad request" }, { status: 400 });
+      return problem(400, "bad request");
     }
     if (runs.length > RUNS_MAX) {
-      return NextResponse.json({ error: "too many runs" }, { status: 400 });
+      return problem(400, "too many runs");
     }
     // The page and its rows are the table's; a download is every row.
     return traceDownload(projectId, parseTraceQuery(searchParams), format, runs);

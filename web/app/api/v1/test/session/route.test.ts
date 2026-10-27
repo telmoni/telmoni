@@ -120,8 +120,10 @@ describe("the test-session endpoint", () => {
     const res = await postWith({ NODE_ENV: "test", ALLOW_TEST_SESSION: "true" });
     expect(res.status).toBe(502);
     expect(await res.json()).toEqual({
-      error: "session_not_minted",
-      message: expect.stringContaining("ALLOW_TEST_SESSION"),
+      type: "about:blank",
+      title: "session_not_minted",
+      status: 502,
+      detail: expect.stringContaining("ALLOW_TEST_SESSION"),
     });
     expect(res.cookies.get("telmoni_session")).toBeUndefined();
   });

@@ -3,6 +3,7 @@ import "server-only";
 import { NextResponse } from "next/server";
 
 import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
+import { problem } from "@/lib/api/respond";
 import { isProjectId } from "@/lib/connect";
 import { getServerSession } from "@/lib/server/session";
 
@@ -32,7 +33,14 @@ export async function admitAgentCall(
   return null;
 }
 
+const PRIVATE = { "cache-control": "private, no-store" };
+
 /** A read's answer: the session's own, so nothing in between keeps a copy. */
-export function agentReply(body: unknown, status = 200): NextResponse {
-  return NextResponse.json(body, { status, headers: { "cache-control": "private, no-store" } });
+export function agentReply(body: unknown): NextResponse {
+  return NextResponse.json(body, { headers: PRIVATE });
+}
+
+/** A read turned away, in the sentence the panel shows. */
+export function agentRefusal(sentence: string, status: number): NextResponse {
+  return problem(status, sentence, { headers: PRIVATE });
 }

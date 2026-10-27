@@ -40,8 +40,11 @@ describe("GET /api/v1/agent/conversations", () => {
     vi.mocked(listAgentConversations).mockResolvedValue(null as never);
     const res = await get();
     expect(res.status).toBe(503);
+    expect(res.headers.get("cache-control")).toBe("private, no-store");
     expect(await res.json()).toEqual({
-      error: "The agent is unavailable right now — try again shortly.",
+      type: "about:blank",
+      title: "The agent is unavailable right now — try again shortly.",
+      status: 503,
     });
   });
 

@@ -40,6 +40,8 @@ const json = (body: unknown, status = 200) =>
     headers: { "content-type": "application/json" },
   });
 
+const refusal = (title: string, status: number) => ({ type: "about:blank", title, status });
+
 function get(connection = ID, before?: string) {
   const query = new URLSearchParams({ project: PROJECT });
   if (before !== undefined) query.set("before", before);
@@ -169,14 +171,14 @@ describe("GET /api/v1/connectors/[connection]/deliveries", () => {
   it("refuses a malformed cursor before any request", async () => {
     const res = await get(ID, "not-a-uuid");
     expect(res.status).toBe(400);
-    expect(await res.json()).toEqual({ error: "Invalid delivery." });
+    expect(await res.json()).toEqual(refusal("Invalid delivery.", 400));
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("refuses a malformed connection id before any request", async () => {
     const res = await get("not-a-uuid");
     expect(res.status).toBe(404);
-    expect(await res.json()).toEqual({ error: "Invalid connection." });
+    expect(await res.json()).toEqual(refusal("Invalid connection.", 404));
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -190,9 +192,9 @@ describe("GET /api/v1/connectors/[connection]/deliveries", () => {
     vi.mocked(fetchProjectAnywhere).mockResolvedValueOnce(null);
     const res = await get();
     expect(res.status).toBe(404);
-    expect(await res.json()).toEqual({
-      error: "Couldn't resolve this project. Reload and try again.",
-    });
+    expect(await res.json()).toEqual(
+      refusal("Couldn't resolve this project. Reload and try again.", 404),
+    );
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -200,7 +202,7 @@ describe("GET /api/v1/connectors/[connection]/deliveries", () => {
     fetchMock.mockResolvedValue(new Response("{}", { status: 404 }));
     const res = await get();
     expect(res.status).toBe(404);
-    expect(await res.json()).toEqual({ error: "connection not found" });
+    expect(await res.json()).toEqual(refusal("connection not found", 404));
   });
 
   it("answers the service's own failure as a bad gateway", async () => {
@@ -211,20 +213,20 @@ describe("GET /api/v1/connectors/[connection]/deliveries", () => {
     });
     const res = await get();
     expect(res.status).toBe(502);
-    expect(await res.json()).toEqual({ error: "Internal Server Error" });
+    expect(await res.json()).toEqual(refusal("Internal Server Error", 502));
   });
 
   it("reports a shape it cannot read", async () => {
     fetchMock.mockResolvedValue(json({ deliveries: [{ id: DELIVERY }], next_before: null }));
     const res = await get();
     expect(res.status).toBe(502);
-    expect((await res.json()).error).toMatch(/unexpected response/i);
+    expect((await res.json()).title).toMatch(/unexpected response/i);
   });
 
   it("reports an unreachable service", async () => {
     fetchMock.mockResolvedValue(null);
     const res = await get();
     expect(res.status).toBe(503);
-    expect((await res.json()).error).toMatch(/unavailable/i);
+    expect((await res.json()).title).toMatch(/unavailable/i);
   });
 });

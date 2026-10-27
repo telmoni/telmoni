@@ -16,7 +16,10 @@ const fetchMock = vi.fn((_url: string, init?: RequestInit) => {
 
 const renewed = () =>
   Promise.resolve(Response.json({ ok: true, expiresAt: NOW + 15 * 60_000 }));
-const unanswered = () => Promise.resolve(Response.json({ ok: false, error: "unavailable" }, { status: 503 }));
+const unanswered = () =>
+  Promise.resolve(
+    Response.json({ type: "about:blank", title: "unavailable", status: 503 }, { status: 503 }),
+  );
 
 // A renewal nobody answered may have been made all the same, and auth takes
 // the spent token back for thirty seconds alone: the heartbeat asks again

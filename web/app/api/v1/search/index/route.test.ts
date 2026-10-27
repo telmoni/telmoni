@@ -79,7 +79,12 @@ describe("GET /api/v1/search/index", () => {
     vi.mocked(getServerSession).mockResolvedValue(null as never);
     const res = await get();
     expect(res.status).toBe(401);
-    expect(await res.json()).toEqual({ error: "Your session expired — sign in again." });
+    expect(res.headers.get("cache-control")).toBe("private, no-store");
+    expect(await res.json()).toEqual({
+      type: "about:blank",
+      title: "Your session expired — sign in again.",
+      status: 401,
+    });
     expect(fetchTokens).not.toHaveBeenCalled();
   });
 
@@ -113,7 +118,7 @@ describe("GET /api/v1/search/index", () => {
     vi.mocked(fetchProjectAnywhere).mockResolvedValue(null as never);
     const res = await get();
     expect(res.status).toBe(404);
-    expect(await res.json()).toEqual({ error: "Unknown project." });
+    expect(await res.json()).toEqual({ type: "about:blank", title: "Unknown project.", status: 404 });
     expect(fetchTokens).not.toHaveBeenCalled();
   });
 });

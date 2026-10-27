@@ -6,6 +6,8 @@ import { env } from "@/lib/env";
 import { getRedis } from "@/lib/redis";
 import { logger } from "@/lib/logger";
 
+import { problem } from "./respond";
+
 declare module "ioredis" {
   interface RedisCommander<Context> {
     slidingWindow(
@@ -130,13 +132,9 @@ function noteFallback(status: string) {
 }
 
 function rateLimitedResponse(retryAfterSecs: number): NextResponse {
-  return NextResponse.json(
-    { error: "rate limit exceeded" },
-    {
-      status:  429,
-      headers: { "retry-after": String(retryAfterSecs), "cache-control": "no-store" },
-    },
-  );
+  return problem(429, "rate limit exceeded", {
+    headers: { "retry-after": String(retryAfterSecs), "cache-control": "no-store" },
+  });
 }
 
 export function sessionKey(

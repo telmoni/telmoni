@@ -165,11 +165,11 @@ describe("extractProblem", () => {
     expect(message).toBe("request failed (400)");
   });
 
-  it("still reads the legacy {error} shape", async () => {
+  it("reads a problem alone, never a bare {error}", async () => {
     const { message, problem } = await extractProblem(
       json({ error: "slug already taken" }, 409),
     );
-    expect(message).toBe("slug already taken");
+    expect(message).toBe("request failed (409)");
     expect(problem).toBeNull();
   });
 

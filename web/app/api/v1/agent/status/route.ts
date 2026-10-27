@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 
-import { admitAgentCall, agentReply } from "@/lib/server/agent-admit";
+import { admitAgentCall, agentRefusal, agentReply } from "@/lib/server/agent-admit";
 import { agentStatus } from "@/lib/server/entities/agent";
 
 // Whether the agent can answer on a project, asked each time its window opens.
@@ -10,6 +10,6 @@ import { agentStatus } from "@/lib/server/entities/agent";
 export async function GET(request: NextRequest) {
   const projectId = request.nextUrl.searchParams.get("project") ?? "";
   const refused = await admitAgentCall("agent:status", 30, projectId);
-  if (refused) return agentReply({ error: refused.error }, refused.status);
+  if (refused) return agentRefusal(refused.error, refused.status);
   return agentReply({ status: await agentStatus(projectId) });
 }

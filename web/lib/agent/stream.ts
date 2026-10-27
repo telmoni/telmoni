@@ -414,7 +414,9 @@ export function describeRefusal(
       detail: "It may have been deleted. Start a new conversation to keep asking.",
     };
   }
-  if (problem.title) {
+  // The console's own refusals are terse words for code ("invalid turn"); the
+  // panel's sentence says them better.
+  if (problem.title && problem.type !== "about:blank") {
     return { title: problem.title, detail: problem.detail ?? null };
   }
   return {

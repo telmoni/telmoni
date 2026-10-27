@@ -105,11 +105,5 @@ export async function extractProblem(
         : problem.title;
     return { message, problem };
   }
-  if (body && typeof body === "object") {
-    const b = body as Record<string, unknown>;
-    if (typeof b.error === "string") {
-      return { message: b.error, problem: null };
-    }
-  }
   return { message: `request failed (${res.status})`, problem: null };
 }

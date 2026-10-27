@@ -1,5 +1,6 @@
 import { type NextProxy, NextResponse } from 'next/server';
 
+import { problem } from '@/lib/api/respond';
 import { SESSION_COOKIE, SESSION_TTL_SECONDS, cookieOpts } from '@/lib/auth/session';
 import { ORGANIZATION_HEADER, PATH_HEADER, namedOrganization } from '@/lib/proxy/organization';
 import { isPublic } from '@/lib/proxy/public-paths';
@@ -125,7 +126,7 @@ export const proxy: NextProxy = async (request) => {
 
   if (isProtected && !loggedIn) {
     if (pathname.startsWith('/api/')) {
-      return carry(settled, NextResponse.json({ error: 'unauthenticated' }, { status: 401 }));
+      return carry(settled, problem(401, 'unauthenticated'));
     }
     const entry = '/auth/login';
     const url = new URL(entry, request.url);

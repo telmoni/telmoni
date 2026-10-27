@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import { toast } from "sonner";
 
+import { ProblemType, problemType } from "@/lib/api/problem";
 import { exportHref, exportSummary, exportsHref, failureText } from "@/lib/audit-exports";
 import { administersOrganization } from "@/lib/organization-role";
 import {
@@ -91,7 +92,7 @@ export async function downloadExport(
       // The organization's day of data out, as against this person's hour.
       const spent =
         res.status === 429 &&
-        ((await res.json().catch(() => null)) as { error?: string } | null)?.error === "spent";
+        problemType(await res.json().catch(() => null)) === ProblemType.TenantRateLimited;
       toast.error(
         res.status === 404
           ? "That export is no longer kept. Start a new one."

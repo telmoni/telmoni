@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 
+import { problem } from "@/lib/api/respond";
 import { SESSION_ENDED } from "@/lib/auth/heartbeat";
 import {
   SESSION_COOKIE,
@@ -24,7 +25,7 @@ import { sessionEndKey } from "@/lib/auth/session-end-key";
 export async function POST(request: NextRequest) {
   const secFetchSite = request.headers.get("sec-fetch-site");
   if (secFetchSite && secFetchSite !== "same-origin" && secFetchSite !== "none") {
-    return NextResponse.json({ ok: false, error: "forbidden" }, { status: 403 });
+    return problem(403, "forbidden");
   }
 
   // A session the console ended is told apart from one that ran out, so the
@@ -33,19 +34,13 @@ export async function POST(request: NextRequest) {
   const ended = await sessionEndedAlready();
   const session = await getSession();
   if (!session) {
-    const response = NextResponse.json(
-      { ok: false, error: ended ? SESSION_ENDED : "unauthenticated" },
-      { status: 401 },
-    );
+    const response = problem(401, ended ? SESSION_ENDED : "unauthenticated");
     response.cookies.delete(SESSION_COOKIE);
     return response;
   }
 
   if (await isSessionBlacklisted(sessionEndKey(session))) {
-    const response = NextResponse.json(
-      { ok: false, error: SESSION_ENDED },
-      { status: 401 },
-    );
+    const response = problem(401, SESSION_ENDED);
     response.cookies.delete(SESSION_COOKIE);
     return response;
   }
@@ -62,10 +57,7 @@ export async function POST(request: NextRequest) {
     // surfaces here as a refused grant rather than through a call of its own.
     const renewal = await refreshSessionTokens(currentSession);
     if (renewal.kind === "refused") {
-      const response = NextResponse.json(
-        { ok: false, error: "refresh_failed" },
-        { status: 401 },
-      );
+      const response = problem(401, "refresh_failed");
       response.cookies.delete(SESSION_COOKIE);
       return response;
     }
@@ -74,10 +66,7 @@ export async function POST(request: NextRequest) {
     // have spent the token before its answer was lost — rather than sending
     // anyone to sign in while auth is down.
     if (renewal.kind === "unreachable") {
-      return NextResponse.json(
-        { ok: false, error: "unavailable" },
-        { status: 503, headers: { "Retry-After": "5" } },
-      );
+      return problem(503, "unavailable", { headers: { "Retry-After": "5" } });
     }
     currentSession = renewal.session;
   }

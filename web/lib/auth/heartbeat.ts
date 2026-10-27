@@ -1,3 +1,5 @@
+import { Problem } from "@/lib/api/problem";
+
 /// The heartbeat's refusal for a session the console has already ended — an
 /// account deletion, a confirmed email change, or this device revoked from
 /// the sessions list — as opposed to no session, or one that ran out.
@@ -12,6 +14,6 @@ export const SESSION_ENDED = "session_ended";
 /// on its own schedule, and one that landed inside the farewell's few seconds
 /// sent the person to sign in, not to the home page the farewell promises.
 export function afterRefusedHeartbeat(body: unknown): "/auth/logout" | "/auth/login" {
-  const error = (body as { error?: unknown } | null)?.error;
-  return error === SESSION_ENDED ? "/auth/logout" : "/auth/login";
+  const refusal = Problem.safeParse(body);
+  return refusal.success && refusal.data.title === SESSION_ENDED ? "/auth/logout" : "/auth/login";
 }

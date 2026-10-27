@@ -48,7 +48,7 @@ describe("GET /api/v1/agent/status", () => {
 
     const res = await get("../members");
     expect(res.status).toBe(404);
-    expect(await res.json()).toEqual({ error: "Unknown project." });
+    expect(await res.json()).toEqual({ type: "about:blank", title: "Unknown project.", status: 404 });
     expect(agentStatus).not.toHaveBeenCalled();
   });
 });

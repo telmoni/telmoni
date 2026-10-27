@@ -1,3 +1,4 @@
+import { problemWords } from "@/lib/api/problem";
 import type {
   AgentConversation,
   AgentConversationSummary,
@@ -16,10 +17,10 @@ const UNREACHABLE = "The agent is unavailable right now — try again shortly.";
 async function read<T extends object>(path: string): Promise<T | { error: string }> {
   try {
     const res = await fetch(path);
-    const body = (await res.json().catch(() => null)) as (T & { error?: string }) | null;
-    if (res.ok && body && !("error" in body)) return body;
+    const body: unknown = await res.json().catch(() => null);
+    if (res.ok && body && typeof body === "object") return body as T;
     if (res.status === 401) return { error: EXPIRED };
-    return { error: body?.error || UNREACHABLE };
+    return { error: problemWords(body) || UNREACHABLE };
   } catch {
     return { error: UNREACHABLE };
   }

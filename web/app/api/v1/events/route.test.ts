@@ -107,8 +107,7 @@ describe("GET /api/v1/events (SSE)", () => {
 
     const res = await GET(req);
     expect(res.status).toBe(403);
-    const body = await res.json();
-    expect(body.error).toBe("forbidden");
+    expect(await res.json()).toEqual({ type: "about:blank", title: "forbidden", status: 403 });
   });
 
   it("returns 401 if unauthenticated", async () => {
@@ -525,7 +524,10 @@ describe("GET /api/v1/events (SSE)", () => {
     mockGetSession.mockResolvedValue(LIVE_SESSION);
     const { NextResponse } = await import("next/server");
     mockRateLimit.mockResolvedValueOnce(
-      NextResponse.json({ error: "rate limit exceeded" }, { status: 429, headers: { "retry-after": "17" } }),
+      NextResponse.json(
+        { type: "about:blank", title: "rate limit exceeded", status: 429 },
+        { status: 429, headers: { "retry-after": "17" } },
+      ),
     );
 
     const res = await GET(new NextRequest("http://localhost:3000/api/v1/events"));

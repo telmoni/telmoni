@@ -189,6 +189,13 @@ describe("rateLimit (Redis backend)", () => {
     expect(res).not.toBeNull();
     expect(res!.status).toBe(429);
     expect(res!.headers.get("retry-after")).toBe("5");
+    expect(res!.headers.get("cache-control")).toBe("no-store");
+    expect(res!.headers.get("content-type")).toBe("application/problem+json");
+    expect(await res!.json()).toEqual({
+      type: "about:blank",
+      title: "rate limit exceeded",
+      status: 429,
+    });
   });
 
   it("falls back to in-memory when Redis errors", async () => {

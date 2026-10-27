@@ -1,3 +1,4 @@
+import { problemWords } from "@/lib/api/problem";
 import type { DeliveryLogPage } from "@/lib/server/data";
 
 // A page of a connection's delivery log, from its Route Handler
@@ -17,14 +18,12 @@ export async function readDeliveries(
   const res = await fetch(
     `/api/v1/connectors/${encodeURIComponent(connectionId)}/deliveries?${query}`,
   );
-  const body = (await res.json().catch(() => null)) as
-    | (DeliveryLogPage & { error?: string })
-    | null;
-  if (res.ok && body && body.error === undefined) return { page: body };
+  const body: unknown = await res.json().catch(() => null);
+  if (res.ok && body && typeof body === "object") return { page: body as DeliveryLogPage };
   if (res.status === 401) return { error: "Your session expired — sign in again." };
   return {
     error:
-      body?.error ||
+      problemWords(body) ||
       (before === null ? "Couldn't load the deliveries." : "Couldn't load older deliveries."),
   };
 }

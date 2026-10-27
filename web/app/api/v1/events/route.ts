@@ -1,6 +1,7 @@
-import { type NextRequest, NextResponse } from "next/server";
+import { type NextRequest } from "next/server";
 
 import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
+import { problem } from "@/lib/api/respond";
 import { getSession } from "@/lib/auth/session";
 import { sessionEndKey } from "@/lib/auth/session-end-key";
 import {
@@ -19,16 +20,16 @@ const STREAM_OPENS = { limit: 60, windowMs: 60_000 };
 export async function GET(request: NextRequest) {
   const secFetchSite = request.headers.get("sec-fetch-site");
   if (secFetchSite && secFetchSite !== "same-origin" && secFetchSite !== "none") {
-    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    return problem(403, "forbidden");
   }
 
   const session = await getSession();
   if (!session) {
-    return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+    return problem(401, "unauthenticated");
   }
 
   if (await isSessionBlacklisted(sessionEndKey(session))) {
-    return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+    return problem(401, "unauthenticated");
   }
 
   // The one authenticated door that allocates something long-lived per hit:
@@ -41,10 +42,7 @@ export async function GET(request: NextRequest) {
 
   const ctx = await getServerContext();
   if (!ctx) {
-    return NextResponse.json(
-      { error: "unavailable" },
-      { status: 503, headers: { "Retry-After": "30" } },
-    );
+    return problem(503, "unavailable", { headers: { "Retry-After": "30" } });
   }
   // The person's own channel, and one per organization they are in — their
   // own included, which is an entry like any other since organizations

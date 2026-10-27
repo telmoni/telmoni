@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
+import { problem } from "@/lib/api/respond";
 import { many, one, type SearchParams } from "@/lib/list-query";
 import { fetchProjectBySlug, getServerContext } from "@/lib/server/data";
 import type { DownloadAccess, DownloadFormat } from "@/lib/server/entities/traces";
@@ -27,12 +28,12 @@ export async function listDownload(
 ): Promise<NextResponse> {
   const site = request.headers.get("sec-fetch-site");
   if (site && site !== "same-origin" && site !== "none") {
-    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    return problem(403, "forbidden");
   }
 
   const session = await getServerSession();
   if (!session) {
-    return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+    return problem(401, "unauthenticated");
   }
   const limited = await rateLimit(sessionKey(session, `${list}:download`), DOWNLOADS_AN_HOUR);
   if (limited) return limited;
@@ -40,7 +41,7 @@ export async function listDownload(
   const { project: slug } = await params;
   const [gate, project] = await Promise.all([getServerContext(), fetchProjectBySlug(slug)]);
   if (!gate || !project) {
-    return NextResponse.json({ error: "unavailable" }, { status: 503 });
+    return problem(503, "unavailable");
   }
 
   const searchParams: SearchParams = {};
@@ -50,18 +51,18 @@ export async function listDownload(
   const format = one(searchParams.format) === "json" ? "json" : "csv";
   const filters = parseFilters(searchParams);
   if (FILTERS.some((filter) => many(searchParams[filter]).length !== (filters[filter]?.length ?? 0))) {
-    return NextResponse.json({ error: "bad request" }, { status: 400 });
+    return problem(400, "bad request");
   }
   const result = await read(project.id, searchParams, format);
   if (result instanceof NextResponse) return result;
   if (result.kind === "forbidden") {
-    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    return problem(403, "forbidden");
   }
   if (result.kind === "refused") {
-    return NextResponse.json({ error: "bad request" }, { status: 400 });
+    return problem(400, "bad request");
   }
   if (result.kind === "unavailable") {
-    return NextResponse.json({ error: "unavailable" }, { status: 503 });
+    return problem(503, "unavailable");
   }
 
   const day = new Date().toISOString().slice(0, 10);

@@ -2,6 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
 import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
+import { problem } from "@/lib/api/respond";
 import {
   CONNECTORS_UNAVAILABLE,
   CONNECTORS_UNEXPECTED,
@@ -18,9 +19,16 @@ import { DeliveryLogPageSchema } from "@/lib/server/entities/connectors";
 
 const PAGE_SIZE = 25;
 
+const PRIVATE = { "cache-control": "private, no-store" };
+
 /** The session's own answer, so nothing in between keeps a copy. */
-function reply(body: unknown, status = 200) {
-  return NextResponse.json(body, { status, headers: { "cache-control": "private, no-store" } });
+function reply(body: unknown) {
+  return NextResponse.json(body, { headers: PRIVATE });
+}
+
+/** A read turned away, in the sentence the dialog shows. */
+function refuse(sentence: string, status: number) {
+  return problem(status, sentence, { headers: PRIVATE });
 }
 
 export async function GET(
@@ -35,10 +43,10 @@ export async function GET(
     search.get("project") ?? "",
     connection,
   );
-  if (gate.error !== undefined) return reply({ error: gate.error }, gate.status);
+  if (gate.error !== undefined) return refuse(gate.error, gate.status);
   const before = search.get("before");
   if (before !== null && !z.guid().safeParse(before).success) {
-    return reply({ error: "Invalid delivery." }, 400);
+    return refuse("Invalid delivery.", 400);
   }
   const query = new URLSearchParams({ limit: String(PAGE_SIZE) });
   if (before !== null) query.set("before", before);
@@ -46,14 +54,14 @@ export async function GET(
     `${gate.base}/internal/v1/connectors/${encodeURIComponent(connection)}/deliveries?${query}`,
     { method: "GET", headers: gate.headers },
   );
-  if (!res) return reply({ error: CONNECTORS_UNAVAILABLE }, 503);
+  if (!res) return refuse(CONNECTORS_UNAVAILABLE, 503);
   // The service's refusal keeps its status, so a bearer it no longer takes
   // reads as the ended session it is; its own failure is a bad gateway here.
   if (!res.ok) {
     const { message } = await extractProblem(res);
-    return reply({ error: message }, res.status >= 500 ? 502 : res.status);
+    return refuse(message, res.status >= 500 ? 502 : res.status);
   }
   const parsed = DeliveryLogPageSchema.safeParse(await res.json().catch(() => null));
-  if (!parsed.success) return reply({ error: CONNECTORS_UNEXPECTED }, 502);
+  if (!parsed.success) return refuse(CONNECTORS_UNEXPECTED, 502);
   return reply(parsed.data);
 }

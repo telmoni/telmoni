@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 
 import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
+import { problem } from "@/lib/api/respond";
 import type { SearchIndex, SearchItem, SearchSection } from "@/lib/search";
 import { fetchMembers, fetchProjectAnywhere, fetchTokens } from "@/lib/server/data";
 import { getServerSession } from "@/lib/server/session";
@@ -24,8 +25,8 @@ const ok = (items: SearchItem[]): SearchSection => ({
 
 const PROJECT_ID_RE = /^project_[0-9A-Za-z]{16}$/;
 
-function refuse(error: string, status: number) {
-  return NextResponse.json({ error }, { status, headers: NO_STORE });
+function refuse(sentence: string, status: number) {
+  return problem(status, sentence, { headers: NO_STORE });
 }
 
 export async function GET(request: NextRequest) {

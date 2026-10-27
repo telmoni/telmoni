@@ -311,8 +311,13 @@ describe("describeRefusal", () => {
     });
     expect(gone.title).toMatch(/no longer there/);
     expect(gone.detail).toMatch(/new conversation/);
-    const relayed = describeRefusal(404, { error: "unknown project" });
+    const relayed = describeRefusal(404, {
+      type: "about:blank",
+      title: "unknown project",
+      status: 404,
+    });
     expect(relayed.title).not.toBe(gone.title);
+    expect(relayed.title).not.toBe("unknown project");
     expect(relayed.detail).toMatch(/404/);
   });
 
