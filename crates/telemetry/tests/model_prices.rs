@@ -7,7 +7,7 @@
     reason = "a panicking helper is a failing test"
 )]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -45,8 +45,14 @@ const CONVENTIONS: [&str; 16] = [
     "x_ai",
 ];
 
-/// The modes whose calls are priced by the token.
-const MODES: [&str; 4] = ["chat", "completion", "responses", "embedding"];
+/// The modes priced by the token, each with the most a token may cost in it,
+/// well above the dearest real rate: past it, LiteLLM's figure is a slip.
+const MODES: [(&str, f64); 4] = [
+    ("chat", 1e-3),
+    ("completion", 1e-3),
+    ("responses", 1e-3),
+    ("embedding", 1e-5),
+];
 
 /// The conventions' name for a provider LiteLLM names, the routing prefix
 /// LiteLLM's keys for it may carry, and whether a name it answers with holds
@@ -88,20 +94,21 @@ struct Given {
 }
 
 /// LiteLLM's entries as the price file's rows, sorted, by the rules
-/// `ARCHITECTURE.md` gives (*Model prices*); and the names left unpriced
-/// because two of its entries price them differently.
-fn convert(litellm: &Value) -> (Vec<ModelPrice>, Vec<String>) {
+/// `ARCHITECTURE.md` gives (*Model prices*); and the names left unpriced:
+/// those two entries price differently, and those one prices past its ceiling.
+fn convert(litellm: &Value) -> (Vec<ModelPrice>, Vec<String>, Vec<String>) {
     let entries = litellm.as_object().expect("LiteLLM's file is an object");
     let mut names: BTreeMap<(String, String), Vec<Given>> = BTreeMap::new();
+    let mut dear: BTreeSet<(String, String)> = BTreeSet::new();
     for (key, entry) in entries {
         let Some((to, prefix, slashes)) = entry["litellm_provider"].as_str().and_then(provider)
         else {
             continue;
         };
         let mode = entry["mode"].as_str().unwrap_or_default();
-        if !MODES.contains(&mode) {
+        let Some(&(_, ceiling)) = MODES.iter().find(|(name, _)| *name == mode) else {
             continue;
-        }
+        };
         let model = key.strip_prefix(prefix).unwrap_or(key);
         // A fine-tune's base, a region's or a data zone's price: no span names one.
         if model.starts_with("ft:") || (!slashes && model.contains('/')) {
@@ -132,16 +139,23 @@ fn convert(litellm: &Value) -> (Vec<ModelPrice>, Vec<String>) {
         if input == 0.0 && output == 0.0 {
             continue;
         }
-        names
-            .entry((to.to_owned(), model.to_owned()))
-            .or_default()
-            .push(Given {
-                input,
-                output,
-                cache_read,
-                cache_write,
-            });
+        let name = (to.to_owned(), model.to_owned());
+        if [Some(input), Some(output), cache_read, cache_write]
+            .into_iter()
+            .flatten()
+            .any(|price| price > ceiling)
+        {
+            dear.insert(name);
+            continue;
+        }
+        names.entry(name).or_default().push(Given {
+            input,
+            output,
+            cache_read,
+            cache_write,
+        });
     }
+    names.retain(|name, _| !dear.contains(name));
 
     let mut rows = Vec::new();
     let mut unpriced = Vec::new();
@@ -160,7 +174,11 @@ fn convert(litellm: &Value) -> (Vec<ModelPrice>, Vec<String>) {
             cache_write: price.cache_write.unwrap_or(price.input),
         });
     }
-    (rows, unpriced)
+    let dear = dear
+        .into_iter()
+        .map(|(provider, model)| format!("{provider} {model}"))
+        .collect();
+    (rows, unpriced, dear)
 }
 
 /// The price `given` agrees on, each cache price taken from any entry that
@@ -300,9 +318,12 @@ async fn the_price_file_is_litellms_at_its_pin() {
     ))
     .expect("LiteLLM's licence no longer reads as MIT's: read it before moving the pin");
     let litellm: Value = serde_json::from_slice(&bytes).expect("LiteLLM's file is JSON");
-    let (prices, unpriced) = convert(&litellm);
+    let (prices, unpriced, dear) = convert(&litellm);
     for name in &unpriced {
         eprintln!("unpriced: LiteLLM prices {name} twice, differently");
+    }
+    for name in &dear {
+        eprintln!("unpriced: LiteLLM prices {name} past its mode's ceiling");
     }
     let file = PriceFile {
         source: Source {
@@ -342,8 +363,18 @@ fn the_price_file_is_as_make_prices_writes_it() {
     }
     assert_eq!(file.source.repository, REPOSITORY);
     assert_eq!(file.source.path, PATH);
+    let dearest = MODES
+        .iter()
+        .map(|&(_, ceiling)| ceiling)
+        .fold(0.0, f64::max);
     for row in &file.prices {
         assert!(CONVENTIONS.contains(&row.provider.as_str()), "{row:?}");
+        assert!(
+            [row.input, row.output, row.cache_read, row.cache_write]
+                .iter()
+                .all(|price| *price <= dearest),
+            "a price past every mode's ceiling: {row:?}"
+        );
         assert!(
             row.effective_from.is_none(),
             "LiteLLM dates no price, nor does the SDKs' guard read a date: {row:?}"
@@ -526,6 +557,18 @@ fn litellm() -> Value {
             "litellm_provider": "cohere", "mode": "embedding",
             "input_cost_per_token": 1.2e-7, "output_cost_per_token": "n/a"
         },
+        "azure_ai/jais-30b-chat": {
+            "litellm_provider": "azure_ai", "mode": "chat",
+            "input_cost_per_token": 0.0032, "output_cost_per_token": 0.00971
+        },
+        "watsonx/core42/jais-13b-chat": {
+            "litellm_provider": "watsonx", "mode": "chat",
+            "input_cost_per_token": 5e-4, "output_cost_per_token": 2e-3
+        },
+        "embed-multilingual-light-v3.0": {
+            "litellm_provider": "cohere", "mode": "embedding",
+            "input_cost_per_token": 1e-4, "output_cost_per_token": 0.0
+        },
         "accounts/fireworks/models/llama-v3p1-8b-instruct": {
             "litellm_provider": "fireworks_ai", "mode": "chat",
             "input_cost_per_token": 2e-7, "output_cost_per_token": 2e-7
@@ -536,7 +579,7 @@ fn litellm() -> Value {
 /// ⚠ Each case the conversion decides, decided by its rules.
 #[test]
 fn litellms_entries_convert_by_the_rules() {
-    let (rows, unpriced) = convert(&litellm());
+    let (rows, unpriced, dear) = convert(&litellm());
     let got: Vec<(&str, &str, [f64; 4])> = rows
         .iter()
         .map(|r| {
@@ -597,6 +640,14 @@ fn litellms_entries_convert_by_the_rules() {
         ]
     );
     assert_eq!(unpriced, ["mistral_ai codestral-latest"]);
+    assert_eq!(
+        dear,
+        [
+            "azure.ai.inference jais-30b-chat",
+            "cohere embed-multilingual-light-v3.0",
+            "ibm.watsonx.ai core42/jais-13b-chat",
+        ]
+    );
 }
 
 /// The licence's MIT notice is kept, its preamble aside; one not MIT's stops the conversion.
