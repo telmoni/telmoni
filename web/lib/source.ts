@@ -1,12 +1,10 @@
 import { llms, loader } from "fumadocs-core/source";
 import { defineDocs } from "fumadocs-mdx/macro";
 
-// The documentation, as pages of this console: MDX under `content/docs`, laid
-// there from telmoni/docs by `make book` (scripts/book.sh), read at build,
-// served at `/docs`. A console built on this one lays its own pages into the
-// same tree — the hosted service's legal documents, its billing page — and
-// each folder's `meta.json` ends in `...`, so they take their place in the
-// book without replacing anything of the core's.
+// The documentation, as pages of this console: MDX under `content/docs`, read
+// at build, served at `/docs`. A console built on this one lays its own pages
+// into the same tree, and each folder's `meta.json` ends in `...`, so they
+// take their place in the book without replacing anything of the core's.
 const docs = defineDocs({
   dir: "content/docs",
   docs: {

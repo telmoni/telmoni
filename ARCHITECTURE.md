@@ -40,8 +40,8 @@ It is **one Rust binary**, `telmoni-server`, and **a Next.js console** beside it
 
 | For | Read |
 |---|---|
-| What the product does for a customer | The book, [`telmoni/docs`](https://github.com/telmoni/docs), which the console builds in from `web/content/docs` and serves at `/docs` |
-| Running it yourself | The book's self-host pages, `content/self-host` in `telmoni/docs` |
+| What the product does for a customer | The book, `web/content/docs`, which the console builds in and serves at `/docs` |
+| Running it yourself | The book's self-host pages, `web/content/docs/self-host` |
 | Developing it | `README.md` and `AGENTS.md` |
 
 ## Goals and constraints
@@ -153,7 +153,7 @@ flowchart TB
 | `telemetry` | Ingest at `/otlp/v1/traces` (`contract.rs`, `ingest/`, `handler/ingest.rs`); each project's hashing key (`hashing.rs`), content mode (`handler/content_mode.rs`) and saved views and layouts (`handler/views.rs`, `handler/session_layout.rs`); the console's reads of traces (`traces.rs`, `handler/traces.rs`), sessions (`sessions.rs`, `handler/sessions.rs`), users (`users.rs`, `handler/users.rs`) and the field inventory (`handler/field_inventory.rs`), every ClickHouse read and write going through `store.rs`; live nudges (`live.rs`), lane ceilings (`ceilings.rs`), project move and purge (`seam.rs`, `sweep.rs`), ClickHouse's schema and retention (`schema.rs`, `retention.rs`), and the model prices (`prices.rs`, `model_prices.json`) | The `telemetry` schema, and ClickHouse's `telemetry` database |
 | `shared` | Errors and problems, RBAC, `Acting`, scoped transactions, the project move lock (`db/project_move.rs`), the seams (`seam.rs`), the audit writer and verifier, envelope encryption, the egress guard, logging, configuration, `Redacted`, slugs | — |
 | `migrator` | The migration runner, `rotate`, the `audit` schema, role hardening and grants, and the model prices written from telemetry's price file; ClickHouse's file, its purge and the rewrite of deleted projects' rows, run as its user there | The `audit` schema |
-| `web/` | The console: pages, the session, the edge's rate limits, the Route Handlers — the reads a page makes after it loads, and the relays of agent turns and live events — and the book, laid into `content/docs` from `telmoni/docs` before the console builds (`scripts/book.sh`); no database access and no business logic. A 404 answered from a layout's `notFound()` renders Next's error shell from scratch so the status is a real 404 rather than a 200 with `noindex` inside Suspense, and `components/settings-boot.tsx` applies the saved settings there | Nothing but what Redis holds |
+| `web/` | The console: pages, the session, the edge's rate limits, the Route Handlers — the reads a page makes after it loads, and the relays of agent turns and live events — and the book, `content/docs`; no database access and no business logic. A 404 answered from a layout's `notFound()` renders Next's error shell from scratch so the status is a real 404 rather than a 200 with `noindex` inside Suspense, and `components/settings-boot.tsx` applies the saved settings there | Nothing but what Redis holds |
 | `sdk/` | The four SDKs, in an agent's own process: a tracer provider of each one's own, a batch processor, and an exporter that takes content off and sends OTLP JSON to ingest (*The SDKs*); `fixtures/`, the golden exports, the answers, the headers and the endpoints every suite replays | A bounded queue, in memory, until it is sent |
 | Postgres | One database: a schema per module, each written by its own role alone | Everything durable but the spans and their totals |
 | ClickHouse | One node: telemetry's spans and their hourly totals, metadata alone, read under a row policy | The spans, until the retention line, and their hourly totals for 13 months |
@@ -436,12 +436,12 @@ flowchart LR
   Rotate --> PG & CH
 ```
 
-- **Two images**, `server` (a static musl binary on distroless) and `web` (Node on distroless, with the book as `telmoni/docs`'s `main` held it at the build), published to GHCR once CI passes on `main`.
+- **Two images**, `server` (a static musl binary on distroless) and `web` (Node on distroless, with the book built in), published to GHCR once CI passes on `main`.
 - **The chart** runs the console, the server, the migrate hook and the rotate CronJob, reads one ConfigMap and three Secrets the operator makes, denies all traffic by default, runs every pod non-root with every capability dropped, and offers high availability and a Gateway as switches. Postgres, ClickHouse, Redis and the key are the operator's, outside it.
 - **Two doors.** The console's, for people; and the machine lanes' — ingest at `/otlp/v1/traces`, the read API under `/v1`, the CLI's session lanes under `/cli/v1` and Slack's events at `/webhooks/v1/slack` — on a Service of their own, `server-api`, routed on a host of their own (`ingress.apiHost`) or by path on the console's host, whose slugs are reserved for them, and only the lanes' paths either way: every other lane of the server is the console's to call, behind the service secret, and each machine lane has a gate of its own, a project API key, the CLI's device code or bearer, or Slack's signature. The server reads `TRUSTED_PROXY_HOPS` from the same ConfigMap value the console does (`web.trustedProxyHops`), since both sit behind the same Gateway.
 - **Order:** the ConfigMap and the migrator's account as hooks, then the migration, then the rollout; a failed migration fails the upgrade before anything rolls.
 - **Compose** runs the whole of it on one machine, every module as one superuser, ClickHouse as one user, and `rotate` by hand; it publishes the console, and the server's port on loopback alone, for the reverse proxy on the host to forward the machine lanes to.
-- **CI** checks, tests against Postgres and ClickHouse, and lints and renders the chart and parses the compose file, as `make deploy-check` does; the jobs that build the console or read its pages check `telmoni/docs` out beside this repository first, and so does `publish.yml` for the `web` image, which it pushes, with `server`, once CI passes on `main`; nothing deploys.
+- **CI** checks, tests against Postgres and ClickHouse, and lints and renders the chart and parses the compose file, as `make deploy-check` does; `publish.yml` pushes the `web` and `server` images once CI passes on `main`; nothing deploys.
 
 ## Extending the core
 

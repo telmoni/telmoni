@@ -130,10 +130,9 @@ A deployment that needs more builds on these crates instead of forking them: `te
 
 ## Developing
 
-You need Rust (the version `rust-toolchain.toml` pins, which `rustup` installs for you), Node with npm (`web/.nvmrc`), Docker, `rsync`, and the docs checked out beside this repository, since the console builds them in.
+You need Rust (the version `rust-toolchain.toml` pins, which `rustup` installs for you), Node with npm (`web/.nvmrc`) and Docker.
 
 ```console
-git clone https://github.com/telmoni/docs.git ../docs   # once: the docs, which `make book` lays into the console
 make first-run   # once: env files, dependencies, Postgres and ClickHouse, migrations
 make up          # Postgres, ClickHouse, Redis, Mailpit, the server on :8082, the console on :3000
 ```
@@ -154,11 +153,11 @@ crates/
                   prices, converted from LiteLLM's by `make prices`
   migrator/       the migration runner, grants, role hardening, the audit schema
   shared/         errors, RBAC, tenancy, the seams between modules
-web/              the console, a thin proxy in front of the server, and the docs it serves, laid in from ../docs
+web/              the console, a thin proxy in front of the server, and the docs it serves (content/docs)
 sdk/              the SDKs: python/, typescript/, go/, rust/, and the fixtures every suite replays
 contract/         the generated wire contract and OpenAPI document
 deploy/           the Helm chart and the self-host compose file
-scripts/          `up.sh` behind `make up`, `book.sh` behind `make book`, and the webhook tunnel and receiver
+scripts/          `up.sh` behind `make up`, and the webhook tunnel and receiver
 .github/          CI, the image publishing workflow, and the logo and diagram this README shows
 ARCHITECTURE.md   how it is built, and why, on one page
 ```

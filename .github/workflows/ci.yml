@@ -115,14 +115,6 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      # The book, telmoni/docs, whose pages error_catalog.rs and
-      # field_inventory.rs hold to the code, laid in as `make book` lays it.
-      - uses: actions/checkout@v7
-        with:
-          repository: telmoni/docs
-          path: telmoni-docs
-          persist-credentials: false
-      - run: scripts/book.sh telmoni-docs
       - uses: Swatinem/rust-cache@v2
       # ClickHouse as `make docker-up` runs it — the compose file's own
       # service, image, settings and two users, so the row policy holds the
@@ -192,14 +184,6 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      # The book, telmoni/docs, which the build compiles in, laid in as `make
-      # book` lays it.
-      - uses: actions/checkout@v7
-        with:
-          repository: telmoni/docs
-          path: telmoni-docs
-          persist-credentials: false
-      - run: scripts/book.sh telmoni-docs
       - uses: actions/setup-node@v7
         with:
           node-version: 24.22.1

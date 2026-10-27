@@ -41,8 +41,6 @@ node_modules/
 .next/
 # Fumadocs MDX writes the book's index here at build (`web/lib/source.ts`).
 web/.source/
-# The book itself, telmoni/docs, laid in by `make book` (scripts/book.sh).
-web/content/docs/
 *.tsbuildinfo
 next-env.d.ts
 .eslintcache

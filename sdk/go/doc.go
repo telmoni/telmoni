@@ -27,5 +27,5 @@
 // once its turn is over, is sent whole from its record with RecordRun.
 //
 // The guide to it, beside the other three SDKs, is the SDKs page of Telmoni's
-// book: https://github.com/telmoni/docs/blob/main/content/api/sdks.mdx
+// book: https://github.com/telmoni/telmoni/blob/main/web/content/docs/api/sdks.mdx
 package telmoni

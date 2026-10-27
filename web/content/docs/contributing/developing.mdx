@@ -1,21 +1,17 @@
 ---
 title: "Developing"
-description: "Running and checking each Telmoni repository on your machine: the platform with the SDKs in it, these docs, the CLI, and the agent skills."
+description: "Running and checking each Telmoni repository on your machine: the platform with the SDKs and these docs in it, the CLI, and the agent skills."
 ---
 
-One page for the four repositories. The gates named here are what each repository's CI runs.
+One page for the three repositories. The gates named here are what each repository's CI runs.
 
 ## The platform
 
-[`telmoni/telmoni`](https://github.com/telmoni/telmoni): the server, the console, the four SDKs under `sdk/`, the Helm chart and the compose file.
+[`telmoni/telmoni`](https://github.com/telmoni/telmoni): the server, the console, the four SDKs under `sdk/`, these docs, the Helm chart and the compose file.
 
-You need Rust at the version `rust-toolchain.toml` pins (`rustup` installs it on the first `cargo` run), Node at the version in `web/.nvmrc` with npm, Docker for Postgres with `pgvector`, ClickHouse, Redis, Mailpit and, on request, Ollama, and `rsync`. The console builds these docs in ([The docs](/docs/contributing/developing#the-docs)), so check them out beside the platform:
+You need Rust at the version `rust-toolchain.toml` pins (`rustup` installs it on the first `cargo` run), Node at the version in `web/.nvmrc` with npm, and Docker for Postgres with `pgvector`, ClickHouse, Redis, Mailpit and, on request, Ollama.
 
-```console
-$ git clone https://github.com/telmoni/docs.git ../docs
-```
-
-For `make ci` you also need `cargo install cargo-deny typos-cli`. `make doctor` checks that Rust, Node and npm, Docker with Compose and a running daemon, `rsync` and `gh` are installed and that both env files and the docs beside the platform exist; it checks no versions, and not `cargo-deny` or `typos`. The SDK suites want Node 22.18, 24.11, or 26 or later, which the TypeScript suite's tsup requires though the SDK itself runs on Node 18 from 18.19, or 20.6 or later, and npm (TypeScript, after `npm ci --prefix sdk/typescript`), Go 1.26.10 or later, and for Python (3.10 or later) a venv: `python3 -m venv sdk/python/.venv && sdk/python/.venv/bin/pip install -e "sdk/python[dev]"`.
+For `make ci` you also need `cargo install cargo-deny typos-cli`. `make doctor` checks that Rust, Node and npm, Docker with Compose and a running daemon, and `gh` are installed and that both env files exist; it checks no versions, and not `cargo-deny` or `typos`. The SDK suites want Node 22.18, 24.11, or 26 or later, which the TypeScript suite's tsup requires though the SDK itself runs on Node 18 from 18.19, or 20.6 or later, and npm (TypeScript, after `npm ci --prefix sdk/typescript`), Go 1.26.10 or later, and for Python (3.10 or later) a venv: `python3 -m venv sdk/python/.venv && sdk/python/.venv/bin/pip install -e "sdk/python[dev]"`.
 
 ```console
 $ make first-run
@@ -93,17 +89,17 @@ $ claude --plugin-dir .
 
 ## The docs
 
-[`telmoni/docs`](https://github.com/telmoni/docs): these pages, MDX under `content/` that the platform's console serves at `/docs` with [Fumadocs](https://fumadocs.dev). The console builds them in: `make book` in the platform lays `content/` into the console's `web/content/docs`, every build does it first, and `make up` and `make web-dev` keep it in step as you edit, at http://localhost:3000/docs with live reload. An image carries the pages as they stood when it was built. What a page may say is the code's business: verify every claim against the platform or the CLI before writing it.
+[`web/content/docs`](https://github.com/telmoni/telmoni/tree/main/web/content/docs) in the platform: these pages, MDX that its console builds in and serves at `/docs` with [Fumadocs](https://fumadocs.dev). `make up` and `make web-dev` serve them at http://localhost:3000/docs, with live reload as you edit. An image carries the pages as they stood when it was built. What a page may say is the code's business: verify every claim against the platform or the CLI before writing it.
 
-- A page is an `.mdx` file under `content/`, with `title` and `description` in its frontmatter; the title is also its name in the sidebar.
-- Each folder's `meta.json` is the reading order, and the only place that holds it: a new page goes into its folder's `pages`, and the `...` at the end takes in the pages a console built on the platform lays over the tree. The hosted service's own pages, its legal documents and its billing page, are `hosted/`, which only its console lays over the book.
+- A page is an `.mdx` file under `web/content/docs`, with `title` and `description` in its frontmatter; the title is also its name in the sidebar.
+- Each folder's `meta.json` is the reading order, and the only place that holds it: a new page goes into its folder's `pages`, and the `...` at the end takes in the pages a console built on the platform lays over the tree, as the hosted service's lays its legal documents and its billing page.
 - Links use the served path (`/docs/integrations/webhooks`), never a file path. A link from one of these pages to the hosted service's own uses its address on telmoni.com (`https://telmoni.com/docs/legal/subprocessors`), since a self-hosted console does not serve them.
 - Shell blocks use the `console` fence with a `$ ` prompt, and show only output a host really produced.
 - Outside a code fence, a bare `<flag>` or `{param}` breaks the build, and HTML comments are invalid.
 - `errors.mdx` and `api/field-inventory.mdx` stay where they are: the platform's `error_catalog.rs` and `field_inventory.rs` tests read them from there.
 
 ```console
-$ make check
+$ make book-check
 ```
 
-`make check` and `typos` are the gate CI runs. With the platform checked out beside these docs, `make check` builds the console with them, which compiles every page and fails on invalid MDX, and runs those two tests (`make book-check` in the platform). The same pages are served as Markdown for a model, `/llms.txt` (the index) and `/llms-full.txt` (every page), which is the corpus the console agent indexes.
+`make book-check` builds the console, which compiles every page and fails on invalid MDX, and runs those two tests; `make ci` covers the same, and runs `typos` over every page. The same pages are served as Markdown for a model, `/llms.txt` (the index) and `/llms-full.txt` (every page), which is the corpus the console agent indexes.

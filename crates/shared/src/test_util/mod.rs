@@ -198,15 +198,12 @@ pub fn project_root() -> std::path::PathBuf {
         .to_path_buf()
 }
 
-/// A page of the customer documentation, by its path in the book
-/// (`"errors.mdx"`, `"api/field-inventory.mdx"`): `telmoni/docs`, laid into
-/// the console's `web/content/docs` by `make book`, and by CI from its own
-/// checkout.
+/// A page of the customer documentation, by its path in the book,
+/// `web/content/docs` (`"errors.mdx"`, `"api/field-inventory.mdx"`).
 ///
 /// ⚠ **A page the book lacks panics.** That is a page that moved, and passing
 /// over it once let a test check nothing for as long as its page lived
-/// somewhere else. A book that was never laid in panics too, with the command
-/// that lays it, rather than as a page that moved.
+/// somewhere else.
 #[must_use]
 #[expect(
     clippy::panic,
@@ -214,12 +211,6 @@ pub fn project_root() -> std::path::PathBuf {
 )]
 pub fn customer_docs_page(page: &str) -> String {
     let book = project_root().join("web/content/docs");
-    if !book.is_dir() {
-        panic!(
-            "no book at {}: `make book` lays it in from telmoni/docs, checked out as ../docs",
-            book.display()
-        );
-    }
     let path = book.join(page);
     if !path.is_file() {
         panic!(

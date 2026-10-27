@@ -56,16 +56,6 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
           persist-credentials: false
-      # The web image builds the book in: telmoni/docs as main holds it now,
-      # laid into web/content/docs, which the path context sends to the build.
-      - if: matrix.image == 'web'
-        uses: actions/checkout@v7
-        with:
-          repository: telmoni/docs
-          path: telmoni-docs
-          persist-credentials: false
-      - if: matrix.image == 'web'
-        run: scripts/book.sh telmoni-docs
       - uses: docker/setup-buildx-action@v4
       - uses: docker/login-action@v4
         with:
