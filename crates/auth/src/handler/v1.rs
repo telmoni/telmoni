@@ -254,15 +254,9 @@ async fn meter_data_out(
 /// The `tm_` key a request's `authorization` presents as its bearer,
 /// or `None` for no bearer, an empty one, or one that is not an API key.
 pub(crate) fn presented_key(headers: &HeaderMap) -> Option<&str> {
-    headers
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| {
-            let (scheme, token) = v.split_at_checked(7)?;
-            scheme.eq_ignore_ascii_case("bearer ").then_some(token)
-        })
-        .map(str::trim)
-        .filter(|t| !t.is_empty() && t.starts_with(API_TOKEN_PREFIX))
+    telmoni_shared::extract::header(headers, header::AUTHORIZATION.as_str())
+        .and_then(telmoni_shared::extract::bearer)
+        .filter(|token| token.starts_with(API_TOKEN_PREFIX))
 }
 
 /// A read could not reach the database: a `503` problem document, the same

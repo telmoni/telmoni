@@ -165,14 +165,8 @@ async fn admit(
 /// one per request. Anything that is no bearer is no credential here: the
 /// gate refuses it, and the source's limit has already counted it.
 fn bearer_token(request: &Request) -> Option<&str> {
-    let value = request
-        .headers()
-        .get(header::AUTHORIZATION)?
-        .to_str()
-        .ok()?;
-    let (scheme, token) = value.split_at_checked(7)?;
-    let token = token.trim();
-    (scheme.eq_ignore_ascii_case("bearer ") && !token.is_empty()).then_some(token)
+    telmoni_shared::extract::header(request.headers(), header::AUTHORIZATION.as_str())
+        .and_then(telmoni_shared::extract::bearer)
 }
 
 /// ⚠ **`X-Forwarded-For`, counted back from the end, and nothing a caller

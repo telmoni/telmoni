@@ -14,6 +14,7 @@ use uuid::Uuid;
 
 use telmoni_shared::acting::{Acting, ActingKey, ActingProject};
 use telmoni_shared::db::tenant_session::{maintenance_scope, organization_scope};
+use telmoni_shared::extract::header;
 use telmoni_shared::rbac::{Resource, Verb};
 use telmoni_shared::seam::{
     Audience, AuditEventsQuery, Auth, DocumentCursor, FoundedOrganization, OrganizationFounding,
@@ -33,14 +34,6 @@ use crate::handler::{
     acting_organization, acting_project, authorize, parse_organization_id, parse_project_id,
 };
 use crate::model::InviteScope;
-
-fn header<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
-    headers
-        .get(name)
-        .and_then(|v| v.to_str().ok())
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-}
 
 #[async_trait]
 impl Auth for AppState {

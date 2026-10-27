@@ -113,11 +113,40 @@ pub fn correlation_id(headers: &HeaderMap) -> Option<&str> {
         .filter(|value| is_request_id(value))
 }
 
+/// A header's value, trimmed; `None` when absent, not text, or blank.
+#[must_use]
+pub fn header<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
+    headers
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+/// The token of an `Authorization` value: the scheme in any case, as RFC
+/// 7235 has it, and the token trimmed. Every lane and the door read it so.
+#[must_use]
+pub fn bearer(value: &str) -> Option<&str> {
+    let (scheme, token) = value.split_at_checked(7)?;
+    let token = token.trim();
+    (scheme.eq_ignore_ascii_case("bearer ") && !token.is_empty()).then_some(token)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use axum::body::Body;
     use axum::http::Request as HttpRequest;
+
+    #[test]
+    fn a_bearer_is_its_token_however_the_scheme_is_spelled() {
+        for value in ["Bearer tok", "bearer tok", "BEARER tok", "bEaReR   tok\t"] {
+            assert_eq!(bearer(value), Some("tok"), "{value:?}");
+        }
+        for value in ["Basic tok", "Bearer", "Bearer ", "Bearertok", ""] {
+            assert_eq!(bearer(value), None, "{value:?}");
+        }
+    }
 
     #[derive(serde::Deserialize)]
     #[serde(deny_unknown_fields)]

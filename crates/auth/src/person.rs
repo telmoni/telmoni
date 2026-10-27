@@ -40,12 +40,7 @@ fn bearer_of(authorization: Option<&str>) -> Result<&str, TelmoniError> {
     let Some(raw) = authorization else {
         return Err(refuse("no bearer", AuthError::Unauthenticated));
     };
-    let Some(token) = raw
-        .strip_prefix("Bearer ")
-        .or_else(|| raw.strip_prefix("bearer "))
-        .map(str::trim)
-        .filter(|t| !t.is_empty())
-    else {
+    let Some(token) = telmoni_shared::extract::bearer(raw) else {
         return Err(refuse(
             "authorization is not a bearer",
             AuthError::Unauthenticated,
@@ -124,6 +119,8 @@ mod tests {
     fn the_header_takes_a_bearer_and_nothing_else() {
         assert_eq!(bearer_of(Some("Bearer abc")).unwrap(), "abc");
         assert_eq!(bearer_of(Some("bearer  abc ")).unwrap(), "abc");
+        // RFC 7235: the scheme in any case, as the key lane and the door take it.
+        assert_eq!(bearer_of(Some("BEARER abc")).unwrap(), "abc");
         assert_eq!(status(bearer_of(Some("Basic abc"))), 401);
         assert_eq!(status(bearer_of(Some("Bearer "))), 401);
         assert_eq!(status(bearer_of(None)), 401);

@@ -23,7 +23,7 @@ use serde_json::json;
 
 use telmoni_notifications::{AppState, Config, handler};
 use telmoni_shared::acting::{Acting, ActingProject};
-use telmoni_shared::extract::Json;
+use telmoni_shared::extract::{Json, header};
 use telmoni_shared::seam::{Auth, Notice, ProjectHome};
 use telmoni_shared::{
     AuthError, AuthzError, FlagSet, NotificationKind, OrganizationId, OrganizationRole,
@@ -160,14 +160,6 @@ impl AuthStub {
     pub(crate) fn asked_again(&self) -> usize {
         self.asked_again.load(Ordering::SeqCst)
     }
-}
-
-fn header<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
-    headers
-        .get(name)
-        .and_then(|v| v.to_str().ok())
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
 }
 
 #[async_trait]

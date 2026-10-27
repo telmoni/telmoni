@@ -18,6 +18,7 @@ use tokio::sync::OnceCell;
 use uuid::Uuid;
 
 use telmoni_shared::acting::{Acting, ActingKey, ActingProject};
+use telmoni_shared::extract::header;
 use telmoni_shared::middleware::service_auth::ServiceSecrets;
 use telmoni_shared::rbac::project_role;
 use telmoni_shared::seam::{
@@ -292,14 +293,6 @@ impl AuthStub {
             expires_at: Utc::now().timestamp() + 3600,
         })
     }
-}
-
-fn header<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
-    headers
-        .get(name)
-        .and_then(|v| v.to_str().ok())
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
 }
 
 #[async_trait]
