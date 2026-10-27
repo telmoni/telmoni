@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { z } from "zod";
 
+import { ProblemType } from "@/lib/api/problem";
 import { Flag, FlagOffDetail, allOff, flagOn } from "@/lib/flags";
 
 import { getServerContext } from "./entities/organization";
@@ -20,6 +21,6 @@ export async function featureOff(flag: Flag): Promise<string | null> {
 }
 
 export const FeatureOffProblemSchema = z.object({
-  type: z.literal("/errors/tenant/feature-off"),
-  flag: z.string(),
+  type: z.literal(ProblemType.FeatureOff),
+  flag: z.enum(Flag),
 });

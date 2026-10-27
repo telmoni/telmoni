@@ -4,6 +4,7 @@ import { cookies, headers } from "next/headers";
 import { z } from "zod";
 
 import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
+import { ProblemType } from "@/lib/api/problem";
 import { challengeOf } from "@/lib/auth/pkce";
 import { PKCE_COOKIE, unsealPkce } from "@/lib/auth/session";
 import { clientKeyFromHeaders, rateLimit, sessionKey } from "@/lib/api/rate-limit";
@@ -52,9 +53,6 @@ async function refusal(res: Response, fallback?: string): Promise<string> {
   const { message, problem } = await extractProblem(res);
   return problem?.detail || fallback || message;
 }
-
-// The domain's addresses sign in through the identity provider alone.
-const SSO_REQUIRED = "/errors/auth/sso-required";
 
 const EXPIRED = "This sign-in has expired. Start again.";
 
@@ -112,7 +110,7 @@ export async function signInAction(input: {
   if (!res.ok) {
     // The form gives way to the provider's button for a domain held to it.
     const { message, problem } = await extractProblem(res);
-    if (problem?.type === SSO_REQUIRED) {
+    if (problem?.type === ProblemType.SsoRequired) {
       return { error: "Your organization signs you in through its identity provider.", sso: true };
     }
     return { error: problem?.detail || message };

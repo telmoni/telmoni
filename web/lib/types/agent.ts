@@ -20,13 +20,6 @@ export interface AgentCitation {
   url: string | null;
 }
 
-// The agent's own problem types, which the panel words itself.
-export const AGENT_PROBLEM = {
-  disabled: "/errors/agent/disabled",
-  rateLimited: "/errors/agent/rate-limited",
-  modelUnavailable: "/errors/agent/model-unavailable",
-} as const;
-
 export interface AgentMessage {
   id: string;
   role: AgentMessageRole;

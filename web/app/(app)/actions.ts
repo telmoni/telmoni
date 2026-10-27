@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
+import { ProblemType } from "@/lib/api/problem";
 import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
 import { env } from "@/lib/env";
 import { publishEvent, userChannel } from "@/lib/events/publisher";
@@ -189,10 +190,7 @@ export async function createOrganizationAction(
     if (res.status === 401) return { error: "Your session expired — sign in again." };
     const { message, problem } = await extractProblem(res);
     const off = FeatureOffProblemSchema.safeParse(problem);
-    if (off.success) {
-      const sentence: string | undefined = (FlagOffDetail as Record<string, string>)[off.data.flag];
-      return { error: sentence ?? message };
-    }
+    if (off.success) return { error: FlagOffDetail[off.data.flag] };
     // The one conflict a creation meets is the URL asked for; one with no URL
     // asked for belongs under neither field.
     if (res.status === 409) return url ? { error: message, field: "slug" } : { error: message };
@@ -203,7 +201,7 @@ export async function createOrganizationAction(
     if (res.status === 400) {
       return {
         error: message,
-        field: problem?.type === "/errors/auth/bad-url" ? "slug" : "name",
+        field: problem?.type === ProblemType.BadUrl ? "slug" : "name",
       };
     }
     return { error: message };

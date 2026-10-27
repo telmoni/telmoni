@@ -1,7 +1,7 @@
 import { z } from "zod";
 
+import { ProblemType } from "@/lib/api/problem";
 import {
-  AGENT_PROBLEM,
   type AgentCitation,
   type AgentConversation,
   type AgentMessage,
@@ -351,10 +351,6 @@ export function toolStatus(name: string): string {
     : "Looking something up…";
 }
 
-// Auth's not-found, which the agent answers for a conversation that is not the
-// person's on this project, or not there at all (`crates/agent/src/handler.rs`).
-const NOT_FOUND = "/errors/auth/not-found";
-
 const RefusalBody = z.object({
   type: z.string().optional(),
   title: z.string().optional(),
@@ -366,7 +362,7 @@ const RefusalBody = z.object({
 // as its status rather than as one turn's error.
 export function isAgentDisabled(body: unknown): boolean {
   const parsed = RefusalBody.safeParse(body);
-  return parsed.success && parsed.data.type === AGENT_PROBLEM.disabled;
+  return parsed.success && parsed.data.type === ProblemType.AgentDisabled;
 }
 
 // What the panel says when a turn is refused before it streams. The agent's
@@ -380,12 +376,12 @@ export function describeRefusal(
   const parsed = RefusalBody.safeParse(body);
   const problem = parsed.success ? parsed.data : {};
   switch (problem.type) {
-    case AGENT_PROBLEM.disabled:
+    case ProblemType.AgentDisabled:
       return {
         title: "The agent isn't set up on this deployment.",
         detail: "Ask whoever runs Telmoni here to configure it.",
       };
-    case AGENT_PROBLEM.rateLimited: {
+    case ProblemType.AgentRateLimited: {
       const secs = problem.retry_after_secs ?? Number(retryAfterHeader ?? NaN);
       return {
         title: "You've sent a lot of messages in a short time.",
@@ -394,7 +390,7 @@ export function describeRefusal(
           : "Try again in a moment.",
       };
     }
-    case AGENT_PROBLEM.modelUnavailable:
+    case ProblemType.AgentModelUnavailable:
       return {
         title: "The model isn't answering right now.",
         detail: "Try again shortly.",
@@ -412,7 +408,7 @@ export function describeRefusal(
   // ⚠ **Not the relay's bare 404**, which an auth that did not answer gives
   // too (`agentHeaders` in `lib/server/entities/agent.ts`): worded as gone, a
   // passing outage sent people away from conversations that were still there.
-  if (problem.type === NOT_FOUND) {
+  if (problem.type === ProblemType.NotFound) {
     return {
       title: "This conversation or its project is no longer there.",
       detail: "It may have been deleted. Start a new conversation to keep asking.",

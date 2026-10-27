@@ -6,6 +6,7 @@
 import "server-only";
 
 export { extractProblem, fetchWithTimeout, tryFetchWithTimeout } from "@/lib/api/fetch";
+export { ProblemType } from "@/lib/api/problem";
 export { rateLimit, sessionKey } from "@/lib/api/rate-limit";
 export type { SessionData } from "@/lib/auth/session";
 export { env } from "@/lib/env";

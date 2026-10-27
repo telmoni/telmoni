@@ -48,11 +48,11 @@ fn production_sources(root: &Path) -> Vec<String> {
         .collect()
 }
 
-#[test]
-fn the_error_page_and_the_error_code_name_the_same_types() {
-    let root = project_root();
+/// Every type a service answers: the URIs its code spells, and auth's
+/// `/errors/auth/{slug}` from `TelmoniError`'s table.
+fn answered_types(root: &Path) -> BTreeSet<String> {
     let mut in_code = BTreeSet::new();
-    for source in production_sources(&root) {
+    for source in production_sources(root) {
         in_code.extend(uris_in(&source, '"'));
     }
     let code = std::fs::read_to_string(root.join("crates/shared/src/error.rs")).unwrap();
@@ -67,6 +67,13 @@ fn the_error_page_and_the_error_code_name_the_same_types() {
         };
         in_code.insert(format!("/errors/{prefix}/{slug}"));
     }
+    in_code
+}
+
+#[test]
+fn the_error_page_and_the_error_code_name_the_same_types() {
+    let root = project_root();
+    let in_code = answered_types(&root);
 
     let page = customer_docs_page("errors.mdx");
     let in_page = uris_in(&page, '`');
@@ -80,5 +87,21 @@ fn the_error_page_and_the_error_code_name_the_same_types() {
     assert!(
         phantom.is_empty(),
         "errors.mdx documents types no code produces: {phantom:?}"
+    );
+}
+
+/// A type the console words itself is one a service answers: a renamed one
+/// would fall through to the console's catch-all without an error.
+#[test]
+fn every_type_the_console_names_is_one_a_service_answers() {
+    let root = project_root();
+    let console = std::fs::read_to_string(root.join("web/lib/api/problem.ts")).unwrap();
+    let named = uris_in(&console, '"');
+    assert!(!named.is_empty(), "web/lib/api/problem.ts names no types");
+    let answered = answered_types(&root);
+    let unknown: Vec<_> = named.difference(&answered).collect();
+    assert!(
+        unknown.is_empty(),
+        "the console names types no service answers: {unknown:?}"
     );
 }

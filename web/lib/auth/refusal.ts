@@ -1,10 +1,10 @@
+import { ProblemType } from "@/lib/api/problem";
+
 // Why a sign-in ended without a session, as `/auth/refused` words it: the
 // callback names one of these, and the page reads nothing else, so no
 // address can put words of its own on it.
 export const REFUSALS = ["closed", "taken", "unverified", "provider", "expired", "failed"] as const;
 export type Refusal = (typeof REFUSALS)[number];
-
-const CLOSED = "/errors/auth/sign-up-closed";
 
 /** A code exchange auth refused: its status, and its problem's type. */
 export class ExchangeRefused extends Error {
@@ -20,7 +20,7 @@ export class ExchangeRefused extends Error {
 /** The reason an exchange that threw is told as. */
 export function refusalOf(err: unknown): Refusal {
   if (err instanceof ExchangeRefused) {
-    if (err.type === CLOSED) return "closed";
+    if (err.type === ProblemType.SignUpClosed) return "closed";
     if (err.status === 409) return "taken";
   }
   return "failed";
