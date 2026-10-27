@@ -1,9 +1,5 @@
 //! [`TelmoniResourceKind`] — the closed vocabulary of platform-side resource types.
 
-use std::{fmt, str::FromStr};
-
-use crate::types::ParseEnumError;
-
 use serde::{Deserialize, Serialize};
 
 /// The closed set of platform-side resource kinds the audit log writes.
@@ -36,99 +32,25 @@ pub enum TelmoniResourceKind {
     Incident,
 }
 
-impl TelmoniResourceKind {
-    /// Every kind, in declaration order.
-    #[must_use]
-    pub const fn all() -> [Self; 9] {
-        [
-            Self::Organization,
-            Self::Project,
-            Self::Member,
-            Self::Token,
-            Self::Session,
-            Self::Connector,
-            Self::Alert,
-            Self::MaintenanceWindow,
-            Self::Incident,
-        ]
-    }
-}
-
-impl fmt::Display for TelmoniResourceKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Organization => write!(f, "organization"),
-            Self::Project => write!(f, "project"),
-            Self::Token => write!(f, "token"),
-            Self::Session => write!(f, "session"),
-            Self::Member => write!(f, "member"),
-            Self::Connector => write!(f, "connector"),
-            Self::Alert => write!(f, "alert"),
-            Self::MaintenanceWindow => write!(f, "maintenance_window"),
-            Self::Incident => write!(f, "incident"),
-        }
-    }
-}
-
-impl FromStr for TelmoniResourceKind {
-    type Err = ParseEnumError;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "organization" => Ok(Self::Organization),
-            "project" => Ok(Self::Project),
-            "member" => Ok(Self::Member),
-            "token" => Ok(Self::Token),
-            "session" => Ok(Self::Session),
-            "connector" => Ok(Self::Connector),
-            "alert" => Ok(Self::Alert),
-            "maintenance_window" => Ok(Self::MaintenanceWindow),
-            "incident" => Ok(Self::Incident),
-            _ => Err(ParseEnumError::new(
-                s,
-                "organization, project, member, token, session, connector, alert, \
-                 maintenance_window, incident",
-            )),
-        }
-    }
-}
+crate::wire_enum!(TelmoniResourceKind {
+    Organization => "organization",
+    Project => "project",
+    Member => "member",
+    Token => "token",
+    Session => "session",
+    Connector => "connector",
+    Alert => "alert",
+    MaintenanceWindow => "maintenance_window",
+    Incident => "incident",
+});
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Every variant, for the round-trip below.
-    const ALL: &[TelmoniResourceKind] = &TelmoniResourceKind::all();
-
-    /// `ALL` covers the enum, and says so by count.
     #[test]
-    fn all_lists_every_variant() {
-        fn named(kind: TelmoniResourceKind) -> &'static str {
-            match kind {
-                TelmoniResourceKind::Organization => "organization",
-                TelmoniResourceKind::Project => "project",
-                TelmoniResourceKind::Member => "member",
-                TelmoniResourceKind::Token => "token",
-                TelmoniResourceKind::Session => "session",
-                TelmoniResourceKind::Connector => "connector",
-                TelmoniResourceKind::Alert => "alert",
-                TelmoniResourceKind::MaintenanceWindow => "maintenance_window",
-                TelmoniResourceKind::Incident => "incident",
-            }
-        }
-        assert_eq!(
-            ALL.len(),
-            9,
-            "a variant reached the enum without reaching ALL"
-        );
-        for kind in ALL {
-            assert_eq!(named(*kind), kind.to_string());
-        }
-    }
-
-    #[test]
-    fn display_matches_snake_case() {
-        assert_eq!(TelmoniResourceKind::Project.to_string(), "project");
-        assert_eq!(TelmoniResourceKind::Session.to_string(), "session");
+    fn the_words_are_the_wire_words() {
+        crate::test_util::assert_wire_words::<TelmoniResourceKind>();
     }
 
     /// The organization and project kinds are distinct spellings, and an audit
@@ -153,13 +75,6 @@ mod tests {
     }
 
     #[test]
-    fn from_str_round_trips_every_variant() {
-        for v in ALL {
-            assert_eq!(v.to_string().parse::<TelmoniResourceKind>().unwrap(), *v);
-        }
-    }
-
-    #[test]
     fn from_str_rejects_unknown() {
         assert!("PROJECT".parse::<TelmoniResourceKind>().is_err());
         assert!("projects".parse::<TelmoniResourceKind>().is_err());
@@ -176,15 +91,5 @@ mod tests {
         assert!("ping_key".parse::<TelmoniResourceKind>().is_err());
         assert!("account".parse::<TelmoniResourceKind>().is_err());
         assert!("not_a_resource".parse::<TelmoniResourceKind>().is_err());
-    }
-
-    #[test]
-    fn serde_uses_snake_case_wire() {
-        assert_eq!(
-            serde_json::to_string(&TelmoniResourceKind::Session).unwrap(),
-            "\"session\""
-        );
-        let back: TelmoniResourceKind = serde_json::from_str("\"session\"").unwrap();
-        assert_eq!(back, TelmoniResourceKind::Session);
     }
 }

@@ -5,11 +5,8 @@
 //! never the recovery — a key stays revocable and a member stays removable.
 
 use std::collections::BTreeMap;
-use std::{fmt, str::FromStr};
 
 use serde::{Deserialize, Serialize};
-
-use crate::types::ParseEnumError;
 
 /// One switchable feature. The variant list IS the catalog. Exhaustive on
 /// purpose: the contract pin stops compiling when a variant is added and not
@@ -38,38 +35,21 @@ pub enum Flag {
     Signup,
 }
 
-impl Flag {
-    /// Every flag, in catalog order — for the resolver, the listing and the
-    /// exhaustive tests.
-    #[must_use]
-    pub const fn all() -> [Self; 5] {
-        [
-            Self::Connectors,
-            Self::PublicApi,
-            Self::ApiTokens,
-            Self::Members,
-            Self::Signup,
-        ]
-    }
+// The wire spelling is also the `key` column in both flag tables.
+crate::wire_enum!(Flag {
+    Connectors => "connectors",
+    PublicApi => "public_api",
+    ApiTokens => "api_tokens",
+    Members => "members",
+    Signup => "signup",
+});
 
+impl Flag {
     /// A flag only the GLOBAL table can carry. A per-organization row for one
     /// would be read by nothing, so `make flag` refuses `ORG=` for it.
     #[must_use]
     pub fn is_global_only(self) -> bool {
         matches!(self, Self::Signup)
-    }
-
-    /// The wire spelling, without allocating. This is also the `key` column
-    /// in both flag tables.
-    #[must_use]
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Connectors => "connectors",
-            Self::PublicApi => "public_api",
-            Self::ApiTokens => "api_tokens",
-            Self::Members => "members",
-            Self::Signup => "signup",
-        }
     }
 
     /// The one sentence a refusal carries when this flag is off.
@@ -82,22 +62,6 @@ impl Flag {
             Self::Members => "Adding a member is switched off right now.",
             Self::Signup => "Sign-ups are closed right now.",
         }
-    }
-}
-
-impl fmt::Display for Flag {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl FromStr for Flag {
-    type Err = ParseEnumError;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::all()
-            .into_iter()
-            .find(|f| f.as_str() == s)
-            .ok_or_else(|| ParseEnumError::new(s, "a feature flag key"))
     }
 }
 
@@ -153,36 +117,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn wire_spelling_is_snake_case_and_is_the_key_column() {
-        for f in Flag::all() {
-            assert_eq!(
-                serde_json::to_string(&f).unwrap(),
-                format!("\"{}\"", f.as_str())
-            );
-        }
+    fn the_words_are_the_wire_words() {
+        crate::test_util::assert_wire_words::<Flag>();
     }
 
     #[test]
-    fn from_str_round_trips_and_rejects_near_misses() {
-        for f in Flag::all() {
-            assert_eq!(f.to_string().parse::<Flag>().unwrap(), f);
-        }
+    fn from_str_rejects_near_misses() {
         assert!("Logs".parse::<Flag>().is_err());
         assert!("api-tokens".parse::<Flag>().is_err());
         assert!("".parse::<Flag>().is_err());
-    }
-
-    #[test]
-    fn all_lists_every_variant_exactly_once() {
-        let all = Flag::all();
-        let mut keys: Vec<&str> = all.iter().map(|f| f.as_str()).collect();
-        keys.sort_unstable();
-        keys.dedup();
-        assert_eq!(
-            keys.len(),
-            all.len(),
-            "a duplicated key would shadow a flag"
-        );
     }
 
     #[test]

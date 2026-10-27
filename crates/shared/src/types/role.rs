@@ -1,9 +1,5 @@
 //! [`Role`] — telmoni-side RBAC role for a user within a project.
 
-use std::{fmt, str::FromStr};
-
-use crate::types::ParseEnumError;
-
 use serde::{Deserialize, Serialize};
 
 /// A user's role within a project. The same three names as
@@ -27,53 +23,20 @@ pub enum Role {
     Member,
 }
 
-impl fmt::Display for Role {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Owner => write!(f, "owner"),
-            Self::Admin => write!(f, "admin"),
-            Self::Member => write!(f, "member"),
-        }
-    }
-}
-
-impl FromStr for Role {
-    type Err = ParseEnumError;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "owner" => Ok(Self::Owner),
-            "admin" => Ok(Self::Admin),
-            "member" => Ok(Self::Member),
-            _ => Err(ParseEnumError::new(s, "owner, admin, member")),
-        }
-    }
-}
-
-impl Role {
-    /// Every variant, most privileged first, so a caller that must enumerate
-    /// roles never hand-writes a list that can fall behind.
-    #[must_use]
-    pub const fn all() -> [Self; 3] {
-        [Self::Owner, Self::Admin, Self::Member]
-    }
-}
+// Most privileged first, which `rbac::minimum_role` searches from the end of.
+crate::wire_enum!(Role {
+    Owner => "owner",
+    Admin => "admin",
+    Member => "member",
+});
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn display_matches_snake_case() {
-        assert_eq!(Role::Owner.to_string(), "owner");
-        assert_eq!(Role::Admin.to_string(), "admin");
-        assert_eq!(Role::Member.to_string(), "member");
-    }
-
-    #[test]
-    fn from_str_round_trips_every_variant() {
-        for v in Role::all() {
-            assert_eq!(v.to_string().parse::<Role>().unwrap(), v);
-        }
+    fn the_words_are_the_wire_words() {
+        crate::test_util::assert_wire_words::<Role>();
     }
 
     #[test]
@@ -98,24 +61,6 @@ mod tests {
                 retired.parse::<Role>().is_err(),
                 "`{retired}` is not a role and must not parse as one"
             );
-        }
-    }
-
-    #[test]
-    fn serde_uses_snake_case_wire() {
-        assert_eq!(serde_json::to_string(&Role::Member).unwrap(), "\"member\"");
-        assert_eq!(serde_json::to_string(&Role::Admin).unwrap(), "\"admin\"");
-        let back: Role = serde_json::from_str("\"admin\"").unwrap();
-        assert_eq!(back, Role::Admin);
-    }
-
-    /// `serde` and `Display` must agree, or a role written by one path and read
-    /// by the other silently changes meaning.
-    #[test]
-    fn serde_and_display_agree_on_every_variant() {
-        for v in Role::all() {
-            let json = serde_json::to_string(&v).unwrap();
-            assert_eq!(json, format!("\"{v}\""), "serde/Display disagree on {v:?}");
         }
     }
 }

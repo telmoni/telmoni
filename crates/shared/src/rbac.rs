@@ -5,8 +5,6 @@
 //! that scope. `crates/auth/tests/rbac_matrix.rs` pins every cell, so a flipped
 //! verdict here fails a named test there.
 
-use std::fmt;
-
 use crate::error::{AuthzError, TelmoniError};
 use crate::types::{OrganizationRole, Role};
 
@@ -23,30 +21,13 @@ pub enum Verb {
     Delete,
 }
 
-impl Verb {
-    /// Every verb, in the matrix's order.
-    #[must_use]
-    pub const fn all() -> [Self; 4] {
-        [Self::Read, Self::Create, Self::Update, Self::Delete]
-    }
-
-    /// The word a refusal names it by.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Read => "read",
-            Self::Create => "create",
-            Self::Update => "update",
-            Self::Delete => "delete",
-        }
-    }
-}
-
-impl fmt::Display for Verb {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
+// The words a refusal names them by, in the matrix's order.
+crate::wire_enum!(Verb {
+    Read => "read",
+    Create => "create",
+    Update => "update",
+    Delete => "delete",
+});
 
 /// What the caller is trying to do it to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -83,43 +64,17 @@ pub enum Resource {
     // exposes.
 }
 
-impl Resource {
-    /// Every resource, in the matrix's order.
-    #[must_use]
-    pub const fn all() -> [Self; 8] {
-        [
-            Self::Project,
-            Self::Member,
-            Self::Token,
-            Self::Connector,
-            Self::Audit,
-            Self::Trace,
-            Self::View,
-            Self::Alert,
-        ]
-    }
-
-    /// The word a refusal names it by.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Project => "project",
-            Self::Member => "member",
-            Self::Token => "token",
-            Self::Connector => "connector",
-            Self::Audit => "audit",
-            Self::Trace => "trace",
-            Self::View => "view",
-            Self::Alert => "alert",
-        }
-    }
-}
-
-impl fmt::Display for Resource {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
+// The words a refusal names them by, in the matrix's order.
+crate::wire_enum!(Resource {
+    Project => "project",
+    Member => "member",
+    Token => "token",
+    Connector => "connector",
+    Audit => "audit",
+    Trace => "trace",
+    View => "view",
+    Alert => "alert",
+});
 
 /// The verdict: may `role` perform `verb` on `resource`?
 #[must_use]
@@ -207,37 +162,6 @@ mod tests {
 
     const VERBS: [Verb; 4] = Verb::all();
     const RESOURCES: [Resource; 8] = Resource::all();
-
-    /// A new variant fails to compile here until `all()` lists it, and two
-    /// variants never share a word.
-    #[test]
-    fn all_lists_every_variant_under_its_own_word() {
-        for verb in VERBS {
-            match verb {
-                Verb::Read | Verb::Create | Verb::Update | Verb::Delete => {}
-            }
-        }
-        for resource in RESOURCES {
-            match resource {
-                Resource::Project
-                | Resource::Member
-                | Resource::Token
-                | Resource::Connector
-                | Resource::Audit
-                | Resource::Trace
-                | Resource::View
-                | Resource::Alert => {}
-            }
-        }
-        let mut words: Vec<&str> = VERBS.iter().map(|v| v.as_str()).collect();
-        words.sort_unstable();
-        words.dedup();
-        assert_eq!(words.len(), VERBS.len(), "all() repeats a verb");
-        let mut words: Vec<&str> = RESOURCES.iter().map(|r| r.as_str()).collect();
-        words.sort_unstable();
-        words.dedup();
-        assert_eq!(words.len(), RESOURCES.len(), "all() repeats a resource");
-    }
 
     /// A refusal reads as a sentence: lower case, as `Display` gives it.
     #[test]

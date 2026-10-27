@@ -1,9 +1,5 @@
 //! [`TraceSort`] — closed vocabulary of the columns the trace list sorts by.
 
-use std::{fmt, str::FromStr};
-
-use crate::types::ParseEnumError;
-
 use serde::{Deserialize, Serialize};
 
 /// A column of the console's trace list, named in the URL so a link holds
@@ -40,120 +36,35 @@ pub enum TraceSort {
     Duration,
 }
 
-impl TraceSort {
-    /// Every column, in wire order: the list's own, left to right.
-    #[must_use]
-    pub const fn all() -> [Self; 13] {
-        [
-            Self::Started,
-            Self::Agent,
-            Self::User,
-            Self::Session,
-            Self::Status,
-            Self::Steps,
-            Self::ModelCalls,
-            Self::ToolCalls,
-            Self::Errors,
-            Self::InputTokens,
-            Self::OutputTokens,
-            Self::Tokens,
-            Self::Duration,
-        ]
-    }
-}
-
-impl fmt::Display for TraceSort {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Started => write!(f, "started"),
-            Self::Agent => write!(f, "agent"),
-            Self::User => write!(f, "user"),
-            Self::Session => write!(f, "session"),
-            Self::Status => write!(f, "status"),
-            Self::Steps => write!(f, "steps"),
-            Self::ModelCalls => write!(f, "model_calls"),
-            Self::ToolCalls => write!(f, "tool_calls"),
-            Self::Errors => write!(f, "errors"),
-            Self::InputTokens => write!(f, "input_tokens"),
-            Self::OutputTokens => write!(f, "output_tokens"),
-            Self::Tokens => write!(f, "tokens"),
-            Self::Duration => write!(f, "duration"),
-        }
-    }
-}
-
-impl FromStr for TraceSort {
-    type Err = ParseEnumError;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "started" => Ok(Self::Started),
-            "agent" => Ok(Self::Agent),
-            "user" => Ok(Self::User),
-            "session" => Ok(Self::Session),
-            "status" => Ok(Self::Status),
-            "steps" => Ok(Self::Steps),
-            "model_calls" => Ok(Self::ModelCalls),
-            "tool_calls" => Ok(Self::ToolCalls),
-            "errors" => Ok(Self::Errors),
-            "input_tokens" => Ok(Self::InputTokens),
-            "output_tokens" => Ok(Self::OutputTokens),
-            "tokens" => Ok(Self::Tokens),
-            "duration" => Ok(Self::Duration),
-            _ => Err(ParseEnumError::new(
-                s,
-                "started, agent, user, session, status, steps, model_calls, tool_calls, errors, \
-                 input_tokens, output_tokens, tokens, duration",
-            )),
-        }
-    }
-}
+// The list's own columns, left to right.
+crate::wire_enum!(TraceSort {
+    Started => "started",
+    Agent => "agent",
+    User => "user",
+    Session => "session",
+    Status => "status",
+    Steps => "steps",
+    ModelCalls => "model_calls",
+    ToolCalls => "tool_calls",
+    Errors => "errors",
+    InputTokens => "input_tokens",
+    OutputTokens => "output_tokens",
+    Tokens => "tokens",
+    Duration => "duration",
+});
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    const ALL: [TraceSort; 13] = TraceSort::all();
-
-    /// `all()` is a hand-written array, so nothing but a `match` forces it to
-    /// stay complete: a new variant fails to compile here until it is listed.
     #[test]
-    fn all_lists_every_variant() {
-        for sort in ALL {
-            match sort {
-                TraceSort::Started
-                | TraceSort::Agent
-                | TraceSort::User
-                | TraceSort::Session
-                | TraceSort::Status
-                | TraceSort::Steps
-                | TraceSort::ModelCalls
-                | TraceSort::ToolCalls
-                | TraceSort::Errors
-                | TraceSort::InputTokens
-                | TraceSort::OutputTokens
-                | TraceSort::Tokens
-                | TraceSort::Duration => {}
-            }
-        }
-        let mut seen: Vec<String> = ALL.iter().map(ToString::to_string).collect();
-        seen.sort();
-        seen.dedup();
-        assert_eq!(seen.len(), ALL.len(), "all() repeats a variant");
+    fn the_words_are_the_wire_words() {
+        crate::test_util::assert_wire_words::<TraceSort>();
     }
 
     #[test]
-    fn from_str_round_trips_every_variant() {
-        for v in &ALL {
-            assert_eq!(v.to_string().parse::<TraceSort>().unwrap(), *v);
-        }
+    fn from_str_rejects_the_rest() {
         assert!("Started".parse::<TraceSort>().is_err());
         assert!("".parse::<TraceSort>().is_err());
-    }
-
-    #[test]
-    fn serde_matches_display() {
-        for v in ALL {
-            assert_eq!(serde_json::to_string(&v).unwrap(), format!("\"{v}\""));
-        }
     }
 }

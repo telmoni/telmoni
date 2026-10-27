@@ -1,10 +1,6 @@
 //! [`TraceColumn`] — closed vocabulary of the trace list's columns a person
 //! shows or hides.
 
-use std::{fmt, str::FromStr};
-
-use crate::types::ParseEnumError;
-
 use serde::{Deserialize, Serialize};
 
 /// A column of the console's trace list that a person may hide, named in a
@@ -59,137 +55,44 @@ pub enum TraceColumn {
     Tools,
 }
 
-impl TraceColumn {
-    /// Every column, in wire order: the list's own, left to right.
-    #[must_use]
-    pub const fn all() -> [Self; 22] {
-        [
-            Self::Started,
-            Self::Ended,
-            Self::Agent,
-            Self::User,
-            Self::Session,
-            Self::Environment,
-            Self::Release,
-            Self::Status,
-            Self::ErrorType,
-            Self::Steps,
-            Self::ModelCalls,
-            Self::ToolCalls,
-            Self::Errors,
-            Self::Spans,
-            Self::InputTokens,
-            Self::OutputTokens,
-            Self::CacheReadTokens,
-            Self::CacheWriteTokens,
-            Self::Tokens,
-            Self::Duration,
-            Self::Models,
-            Self::Tools,
-        ]
-    }
-
-    /// The wire word.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Started => "started",
-            Self::Ended => "ended",
-            Self::Agent => "agent",
-            Self::User => "user",
-            Self::Session => "session",
-            Self::Environment => "environment",
-            Self::Release => "release",
-            Self::Status => "status",
-            Self::ErrorType => "error_type",
-            Self::Steps => "steps",
-            Self::ModelCalls => "model_calls",
-            Self::ToolCalls => "tool_calls",
-            Self::Errors => "errors",
-            Self::Spans => "spans",
-            Self::InputTokens => "input_tokens",
-            Self::OutputTokens => "output_tokens",
-            Self::CacheReadTokens => "cache_read_tokens",
-            Self::CacheWriteTokens => "cache_write_tokens",
-            Self::Tokens => "tokens",
-            Self::Duration => "duration",
-            Self::Models => "models",
-            Self::Tools => "tools",
-        }
-    }
-}
-
-impl fmt::Display for TraceColumn {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl FromStr for TraceColumn {
-    type Err = ParseEnumError;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::all()
-            .into_iter()
-            .find(|column| column.as_str() == s)
-            .ok_or_else(|| ParseEnumError::new(s, "a column of the trace list"))
-    }
-}
+// The list's own columns, left to right.
+crate::wire_enum!(TraceColumn {
+    Started => "started",
+    Ended => "ended",
+    Agent => "agent",
+    User => "user",
+    Session => "session",
+    Environment => "environment",
+    Release => "release",
+    Status => "status",
+    ErrorType => "error_type",
+    Steps => "steps",
+    ModelCalls => "model_calls",
+    ToolCalls => "tool_calls",
+    Errors => "errors",
+    Spans => "spans",
+    InputTokens => "input_tokens",
+    OutputTokens => "output_tokens",
+    CacheReadTokens => "cache_read_tokens",
+    CacheWriteTokens => "cache_write_tokens",
+    Tokens => "tokens",
+    Duration => "duration",
+    Models => "models",
+    Tools => "tools",
+});
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    const ALL: [TraceColumn; 22] = TraceColumn::all();
-
-    /// `all()` is a hand-written array, so nothing but a `match` forces it to
-    /// stay complete: a new variant fails to compile here until it is listed.
     #[test]
-    fn all_lists_every_variant() {
-        for column in ALL {
-            match column {
-                TraceColumn::Started
-                | TraceColumn::Ended
-                | TraceColumn::Agent
-                | TraceColumn::User
-                | TraceColumn::Session
-                | TraceColumn::Environment
-                | TraceColumn::Release
-                | TraceColumn::Status
-                | TraceColumn::ErrorType
-                | TraceColumn::Steps
-                | TraceColumn::ModelCalls
-                | TraceColumn::ToolCalls
-                | TraceColumn::Errors
-                | TraceColumn::Spans
-                | TraceColumn::InputTokens
-                | TraceColumn::OutputTokens
-                | TraceColumn::CacheReadTokens
-                | TraceColumn::CacheWriteTokens
-                | TraceColumn::Tokens
-                | TraceColumn::Duration
-                | TraceColumn::Models
-                | TraceColumn::Tools => {}
-            }
-        }
-        let mut seen: Vec<&str> = ALL.iter().map(|c| c.as_str()).collect();
-        seen.sort_unstable();
-        seen.dedup();
-        assert_eq!(seen.len(), ALL.len(), "all() repeats a variant");
+    fn the_words_are_the_wire_words() {
+        crate::test_util::assert_wire_words::<TraceColumn>();
     }
 
     #[test]
-    fn from_str_round_trips_every_variant() {
-        for v in ALL {
-            assert_eq!(v.as_str().parse::<TraceColumn>().unwrap(), v);
-        }
+    fn from_str_rejects_the_rest() {
         assert!("Started".parse::<TraceColumn>().is_err());
         assert!("run_id".parse::<TraceColumn>().is_err());
-    }
-
-    #[test]
-    fn serde_matches_display() {
-        for v in ALL {
-            assert_eq!(serde_json::to_string(&v).unwrap(), format!("\"{v}\""));
-        }
     }
 }

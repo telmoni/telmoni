@@ -1,9 +1,5 @@
 //! [`ContentMode`] — what a project keeps of the content its spans carry.
 
-use std::{fmt, str::FromStr};
-
-use crate::types::ParseEnumError;
-
 use serde::{Deserialize, Serialize};
 
 /// What a project keeps of prompts, completions and tool payloads: nothing
@@ -24,54 +20,19 @@ pub enum ContentMode {
     Sealed,
 }
 
-impl ContentMode {
-    /// Every mode, in wire order.
-    #[must_use]
-    pub const fn all() -> [Self; 3] {
-        [Self::Off, Self::On, Self::Sealed]
-    }
-}
-
-impl fmt::Display for ContentMode {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Off => write!(f, "off"),
-            Self::On => write!(f, "on"),
-            Self::Sealed => write!(f, "sealed"),
-        }
-    }
-}
-
-impl FromStr for ContentMode {
-    type Err = ParseEnumError;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "off" => Ok(Self::Off),
-            "on" => Ok(Self::On),
-            "sealed" => Ok(Self::Sealed),
-            _ => Err(ParseEnumError::new(s, "off, on, sealed")),
-        }
-    }
-}
+crate::wire_enum!(ContentMode {
+    Off => "off",
+    On => "on",
+    Sealed => "sealed",
+});
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    const ALL: [ContentMode; 3] = ContentMode::all();
-
-    /// A new variant fails to compile here until `all()` lists it.
     #[test]
-    fn all_lists_every_variant() {
-        for mode in ALL {
-            match mode {
-                ContentMode::Off | ContentMode::On | ContentMode::Sealed => {}
-            }
-        }
-        let mut seen: Vec<String> = ALL.iter().map(ToString::to_string).collect();
-        seen.sort();
-        seen.dedup();
-        assert_eq!(seen.len(), ALL.len(), "all() repeats a variant");
+    fn the_words_are_the_wire_words() {
+        crate::test_util::assert_wire_words::<ContentMode>();
     }
 
     /// ⚠ Off until an owner changes it: the default is what a project with
@@ -82,23 +43,9 @@ mod tests {
     }
 
     #[test]
-    fn from_str_round_trips_every_variant() {
-        for v in &ALL {
-            assert_eq!(v.to_string().parse::<ContentMode>().unwrap(), *v);
-        }
-    }
-
-    #[test]
     fn from_str_rejects_unknown() {
         for mode in ["Off", "plain", "encrypted", "true", ""] {
             assert!(mode.parse::<ContentMode>().is_err(), "parsed: {mode:?}");
-        }
-    }
-
-    #[test]
-    fn serde_matches_display() {
-        for v in ALL {
-            assert_eq!(serde_json::to_string(&v).unwrap(), format!("\"{v}\""));
         }
     }
 }

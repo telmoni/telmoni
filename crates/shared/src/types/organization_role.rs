@@ -1,9 +1,5 @@
 //! [`OrganizationRole`] — telmoni-side role of a user within an organization.
 
-use std::{fmt, str::FromStr};
-
-use crate::types::ParseEnumError;
-
 use serde::{Deserialize, Serialize};
 
 /// Role a user holds across an entire organization.
@@ -34,35 +30,14 @@ pub enum OrganizationRole {
     Member,
 }
 
-impl fmt::Display for OrganizationRole {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Owner => write!(f, "owner"),
-            Self::Admin => write!(f, "admin"),
-            Self::Member => write!(f, "member"),
-        }
-    }
-}
-
-impl FromStr for OrganizationRole {
-    type Err = ParseEnumError;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "owner" => Ok(Self::Owner),
-            "admin" => Ok(Self::Admin),
-            "member" => Ok(Self::Member),
-            _ => Err(ParseEnumError::new(s, "owner, admin, member")),
-        }
-    }
-}
+// Most privileged first.
+crate::wire_enum!(OrganizationRole {
+    Owner => "owner",
+    Admin => "admin",
+    Member => "member",
+});
 
 impl OrganizationRole {
-    /// Every variant, most privileged first.
-    #[must_use]
-    pub const fn all() -> [Self; 3] {
-        [Self::Owner, Self::Admin, Self::Member]
-    }
-
     /// User-facing label, Title Cased.
     #[must_use]
     pub const fn label(&self) -> &'static str {
@@ -138,17 +113,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn display_matches_snake_case() {
-        assert_eq!(OrganizationRole::Owner.to_string(), "owner");
-        assert_eq!(OrganizationRole::Admin.to_string(), "admin");
-        assert_eq!(OrganizationRole::Member.to_string(), "member");
-    }
-
-    #[test]
-    fn from_str_round_trips_every_variant() {
-        for v in OrganizationRole::all() {
-            assert_eq!(v.to_string().parse::<OrganizationRole>().unwrap(), v);
-        }
+    fn the_words_are_the_wire_words() {
+        crate::test_util::assert_wire_words::<OrganizationRole>();
     }
 
     #[test]

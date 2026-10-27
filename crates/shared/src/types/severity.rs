@@ -1,9 +1,5 @@
 //! [`Severity`] — where an alert stands at its last evaluation.
 
-use std::{fmt, str::FromStr};
-
-use crate::types::ParseEnumError;
-
 use serde::{Deserialize, Serialize};
 
 /// Where an alert stands: `unknown` until its first evaluation, then `ok`,
@@ -29,33 +25,16 @@ pub enum Severity {
     Paused,
 }
 
+crate::wire_enum!(Severity {
+    Unknown => "unknown",
+    Ok => "ok",
+    Warning => "warning",
+    Alert => "alert",
+    NoData => "no_data",
+    Paused => "paused",
+});
+
 impl Severity {
-    /// Every one, in wire order.
-    #[must_use]
-    pub const fn all() -> [Self; 6] {
-        [
-            Self::Unknown,
-            Self::Ok,
-            Self::Warning,
-            Self::Alert,
-            Self::NoData,
-            Self::Paused,
-        ]
-    }
-
-    /// The wire word.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Unknown => "unknown",
-            Self::Ok => "ok",
-            Self::Warning => "warning",
-            Self::Alert => "alert",
-            Self::NoData => "no_data",
-            Self::Paused => "paused",
-        }
-    }
-
     /// Whether the alert stands past a threshold: what an incident opens on.
     #[must_use]
     pub const fn is_breach(self) -> bool {
@@ -63,57 +42,17 @@ impl Severity {
     }
 }
 
-impl fmt::Display for Severity {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl FromStr for Severity {
-    type Err = ParseEnumError;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "unknown" => Ok(Self::Unknown),
-            "ok" => Ok(Self::Ok),
-            "warning" => Ok(Self::Warning),
-            "alert" => Ok(Self::Alert),
-            "no_data" => Ok(Self::NoData),
-            "paused" => Ok(Self::Paused),
-            _ => Err(ParseEnumError::new(
-                s,
-                "unknown, ok, warning, alert, no_data, paused",
-            )),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    const ALL: [Severity; 6] = Severity::all();
-
-    /// A new variant fails to compile here until `all()` lists it.
     #[test]
-    fn all_lists_every_variant() {
-        for v in ALL {
-            match v {
-                Severity::Unknown
-                | Severity::Ok
-                | Severity::Warning
-                | Severity::Alert
-                | Severity::NoData
-                | Severity::Paused => {}
-            }
-        }
+    fn the_words_are_the_wire_words() {
+        crate::test_util::assert_wire_words::<Severity>();
     }
 
     #[test]
-    fn from_str_round_trips_every_variant_and_rejects_the_rest() {
-        for v in ALL {
-            assert_eq!(v.as_str().parse::<Severity>().unwrap(), v);
-            assert_eq!(serde_json::to_string(&v).unwrap(), format!("\"{v}\""));
-        }
+    fn from_str_rejects_the_rest() {
         for given in ["OK", "breached", ""] {
             assert!(given.parse::<Severity>().is_err(), "parsed: {given:?}");
         }

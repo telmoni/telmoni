@@ -1,9 +1,5 @@
 //! [`RuleAggregation`] — how an alert folds its measure over its window.
 
-use std::{fmt, str::FromStr};
-
-use crate::types::ParseEnumError;
-
 use serde::{Deserialize, Serialize};
 
 /// How an alert folds its measure over the window: how many spans, their
@@ -30,37 +26,18 @@ pub enum RuleAggregation {
     P99,
 }
 
+crate::wire_enum!(RuleAggregation {
+    Count => "count",
+    Avg => "avg",
+    Sum => "sum",
+    Max => "max",
+    P50 => "p50",
+    P90 => "p90",
+    P95 => "p95",
+    P99 => "p99",
+});
+
 impl RuleAggregation {
-    /// Every one, in wire order.
-    #[must_use]
-    pub const fn all() -> [Self; 8] {
-        [
-            Self::Count,
-            Self::Avg,
-            Self::Sum,
-            Self::Max,
-            Self::P50,
-            Self::P90,
-            Self::P95,
-            Self::P99,
-        ]
-    }
-
-    /// The wire word.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Count => "count",
-            Self::Avg => "avg",
-            Self::Sum => "sum",
-            Self::Max => "max",
-            Self::P50 => "p50",
-            Self::P90 => "p90",
-            Self::P95 => "p95",
-            Self::P99 => "p99",
-        }
-    }
-
     /// The level a percentile is read at, `None` for the rest.
     #[must_use]
     pub const fn level(self) -> Option<f64> {
@@ -74,61 +51,17 @@ impl RuleAggregation {
     }
 }
 
-impl fmt::Display for RuleAggregation {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl FromStr for RuleAggregation {
-    type Err = ParseEnumError;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "count" => Ok(Self::Count),
-            "avg" => Ok(Self::Avg),
-            "sum" => Ok(Self::Sum),
-            "max" => Ok(Self::Max),
-            "p50" => Ok(Self::P50),
-            "p90" => Ok(Self::P90),
-            "p95" => Ok(Self::P95),
-            "p99" => Ok(Self::P99),
-            _ => Err(ParseEnumError::new(
-                s,
-                "count, avg, sum, max, p50, p90, p95, p99",
-            )),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    const ALL: [RuleAggregation; 8] = RuleAggregation::all();
-
-    /// A new variant fails to compile here until `all()` lists it.
     #[test]
-    fn all_lists_every_variant() {
-        for v in ALL {
-            match v {
-                RuleAggregation::Count
-                | RuleAggregation::Avg
-                | RuleAggregation::Sum
-                | RuleAggregation::Max
-                | RuleAggregation::P50
-                | RuleAggregation::P90
-                | RuleAggregation::P95
-                | RuleAggregation::P99 => {}
-            }
-        }
+    fn the_words_are_the_wire_words() {
+        crate::test_util::assert_wire_words::<RuleAggregation>();
     }
 
     #[test]
-    fn from_str_round_trips_every_variant_and_rejects_the_rest() {
-        for v in ALL {
-            assert_eq!(v.as_str().parse::<RuleAggregation>().unwrap(), v);
-            assert_eq!(serde_json::to_string(&v).unwrap(), format!("\"{v}\""));
-        }
+    fn from_str_rejects_the_rest() {
         for given in ["average", "P95", ""] {
             assert!(
                 given.parse::<RuleAggregation>().is_err(),

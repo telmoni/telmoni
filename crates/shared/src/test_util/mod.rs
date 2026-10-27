@@ -242,3 +242,34 @@ pub fn visit_rust_files(dir: &std::path::Path, visit: &mut dyn FnMut(&std::path:
         }
     }
 }
+
+/// Every word of `T`'s table is the one serde writes and reads, and parses
+/// and prints back to its variant: the derives held to [`crate::wire_enum!`].
+pub fn assert_wire_words<T>()
+where
+    T: crate::types::WireEnum
+        + serde::Serialize
+        + serde::de::DeserializeOwned
+        + std::str::FromStr
+        + std::fmt::Display
+        + std::fmt::Debug
+        + PartialEq,
+    <T as std::str::FromStr>::Err: std::fmt::Debug,
+{
+    for &variant in T::variants() {
+        let word = variant.word();
+        let quoted = format!("\"{word}\"");
+        assert_eq!(
+            serde_json::to_string(&variant).unwrap(),
+            quoted,
+            "{variant:?}"
+        );
+        assert_eq!(
+            serde_json::from_str::<T>(&quoted).unwrap(),
+            variant,
+            "{word}"
+        );
+        assert_eq!(word.parse::<T>().unwrap(), variant, "{word}");
+        assert_eq!(variant.to_string(), word, "{variant:?}");
+    }
+}

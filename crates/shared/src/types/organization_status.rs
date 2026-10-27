@@ -1,9 +1,5 @@
 //! [`OrganizationStatus`] — an organization's lifecycle state.
 
-use std::{fmt, str::FromStr};
-
-use crate::types::ParseEnumError;
-
 use serde::{Deserialize, Serialize};
 
 /// An organization's lifecycle state.
@@ -20,56 +16,23 @@ pub enum OrganizationStatus {
     Deleted,
 }
 
-impl fmt::Display for OrganizationStatus {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Active => write!(f, "active"),
-            Self::PendingDeletion => write!(f, "pending_deletion"),
-            Self::Deleted => write!(f, "deleted"),
-        }
-    }
-}
-
-impl FromStr for OrganizationStatus {
-    type Err = ParseEnumError;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "active" => Ok(Self::Active),
-            "pending_deletion" => Ok(Self::PendingDeletion),
-            "deleted" => Ok(Self::Deleted),
-            _ => Err(ParseEnumError::new(s, "active, pending_deletion, deleted")),
-        }
-    }
-}
+crate::wire_enum!(OrganizationStatus {
+    Active => "active",
+    PendingDeletion => "pending_deletion",
+    Deleted => "deleted",
+});
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn wire_spelling_is_snake_case() {
-        assert_eq!(OrganizationStatus::Active.to_string(), "active");
-        assert_eq!(
-            OrganizationStatus::PendingDeletion.to_string(),
-            "pending_deletion"
-        );
-        assert_eq!(
-            serde_json::to_string(&OrganizationStatus::PendingDeletion).unwrap(),
-            "\"pending_deletion\""
-        );
-        let back: OrganizationStatus = serde_json::from_str("\"active\"").unwrap();
-        assert_eq!(back, OrganizationStatus::Active);
+    fn the_words_are_the_wire_words() {
+        crate::test_util::assert_wire_words::<OrganizationStatus>();
     }
 
     #[test]
-    fn from_str_round_trips_and_rejects_unknown() {
-        for v in [
-            OrganizationStatus::Active,
-            OrganizationStatus::PendingDeletion,
-            OrganizationStatus::Deleted,
-        ] {
-            assert_eq!(v.to_string().parse::<OrganizationStatus>().unwrap(), v);
-        }
+    fn from_str_rejects_unknown() {
         assert!("pending".parse::<OrganizationStatus>().is_err());
     }
 }

@@ -31,6 +31,7 @@ pub mod trace_column;
 pub mod trace_sort;
 pub mod user_sort;
 pub mod view_kind;
+pub mod wire_enum;
 
 pub use api_key_scope::ApiKeyScope;
 pub use audit_action::AuditAction;
@@ -66,3 +67,4 @@ pub use trace_column::TraceColumn;
 pub use trace_sort::TraceSort;
 pub use user_sort::UserSort;
 pub use view_kind::ViewKind;
+pub use wire_enum::WireEnum;

@@ -1,9 +1,5 @@
 //! [`NotificationKind`] — closed vocabulary of notification kinds.
 
-use std::{fmt, str::FromStr};
-
-use crate::types::ParseEnumError;
-
 use serde::{Deserialize, Serialize};
 
 /// Closed set of notification kinds, the stable string a feed row carries.
@@ -35,98 +31,23 @@ pub enum NotificationKind {
     IncidentResolved,
 }
 
-impl NotificationKind {
-    /// Every kind, in wire order.
-    #[must_use]
-    pub const fn all() -> [Self; 7] {
-        [
-            Self::OrganizationAlert,
-            Self::MemberAdded,
-            Self::MemberLeft,
-            Self::ConnectorConnected,
-            Self::ConnectorDisconnected,
-            Self::IncidentOpened,
-            Self::IncidentResolved,
-        ]
-    }
-}
-
-impl fmt::Display for NotificationKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::OrganizationAlert => write!(f, "organization_alert"),
-            Self::MemberAdded => write!(f, "member_added"),
-            Self::MemberLeft => write!(f, "member_left"),
-            Self::ConnectorConnected => write!(f, "connector_connected"),
-            Self::ConnectorDisconnected => write!(f, "connector_disconnected"),
-            Self::IncidentOpened => write!(f, "incident_opened"),
-            Self::IncidentResolved => write!(f, "incident_resolved"),
-        }
-    }
-}
-
-impl FromStr for NotificationKind {
-    type Err = ParseEnumError;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "organization_alert" => Ok(Self::OrganizationAlert),
-            "member_added" => Ok(Self::MemberAdded),
-            "member_left" => Ok(Self::MemberLeft),
-            "connector_connected" => Ok(Self::ConnectorConnected),
-            "connector_disconnected" => Ok(Self::ConnectorDisconnected),
-            "incident_opened" => Ok(Self::IncidentOpened),
-            "incident_resolved" => Ok(Self::IncidentResolved),
-            _ => Err(ParseEnumError::new(
-                s,
-                "organization_alert, member_added, member_left, connector_connected, \
-                 connector_disconnected, incident_opened, incident_resolved",
-            )),
-        }
-    }
-}
+crate::wire_enum!(NotificationKind {
+    OrganizationAlert => "organization_alert",
+    MemberAdded => "member_added",
+    MemberLeft => "member_left",
+    ConnectorConnected => "connector_connected",
+    ConnectorDisconnected => "connector_disconnected",
+    IncidentOpened => "incident_opened",
+    IncidentResolved => "incident_resolved",
+});
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// The vocabulary, read from the enum rather than restated here.
-    const ALL: [NotificationKind; 7] = NotificationKind::all();
-
-    /// `all()` is a hand-written array, so nothing but a `match` forces it to
-    /// stay complete: a new variant fails to compile here until it is listed.
     #[test]
-    fn all_lists_every_variant() {
-        for kind in ALL {
-            match kind {
-                NotificationKind::OrganizationAlert
-                | NotificationKind::MemberAdded
-                | NotificationKind::MemberLeft
-                | NotificationKind::ConnectorConnected
-                | NotificationKind::ConnectorDisconnected
-                | NotificationKind::IncidentOpened
-                | NotificationKind::IncidentResolved => {}
-            }
-        }
-        let mut seen: Vec<String> = ALL.iter().map(ToString::to_string).collect();
-        seen.sort();
-        seen.dedup();
-        assert_eq!(seen.len(), ALL.len(), "all() repeats a variant");
-    }
-
-    #[test]
-    fn display_matches_snake_case() {
-        assert_eq!(NotificationKind::MemberAdded.to_string(), "member_added");
-        assert_eq!(
-            NotificationKind::OrganizationAlert.to_string(),
-            "organization_alert"
-        );
-    }
-
-    #[test]
-    fn from_str_round_trips_every_variant() {
-        for v in &ALL {
-            assert_eq!(v.to_string().parse::<NotificationKind>().unwrap(), *v);
-        }
+    fn the_words_are_the_wire_words() {
+        crate::test_util::assert_wire_words::<NotificationKind>();
     }
 
     #[test]
@@ -158,15 +79,5 @@ mod tests {
         assert!("WelcomeEmail".parse::<NotificationKind>().is_err());
         assert!("welcome".parse::<NotificationKind>().is_err());
         assert!("".parse::<NotificationKind>().is_err());
-    }
-
-    #[test]
-    fn serde_uses_snake_case_wire() {
-        assert_eq!(
-            serde_json::to_string(&NotificationKind::MemberAdded).unwrap(),
-            "\"member_added\""
-        );
-        let back: NotificationKind = serde_json::from_str("\"organization_alert\"").unwrap();
-        assert_eq!(back, NotificationKind::OrganizationAlert);
     }
 }
