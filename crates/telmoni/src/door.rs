@@ -328,6 +328,33 @@ mod tests {
         assert_eq!(client_address(&mapped, 2), "203.0.113.9");
     }
 
+    /// The callers the console keys together, the door keys together.
+    #[test]
+    fn the_door_buckets_callers_as_the_console_does() {
+        let cases: serde_json::Value =
+            serde_json::from_str(include_str!("../../../contract/client-address.json"))
+                .expect("the shared cases");
+        let hops = cases["hops"]
+            .as_u64()
+            .and_then(|hops| u8::try_from(hops).ok())
+            .expect("hops");
+        let buckets = |group: &serde_json::Value| {
+            let entries = group.as_array().expect("a group");
+            let buckets: std::collections::HashSet<String> = entries
+                .iter()
+                .map(|xff| client_address(&request(&[xff.as_str().expect("an entry")], None), hops))
+                .collect();
+            (entries.len(), buckets.len())
+        };
+        for group in cases["same"].as_array().expect("same") {
+            assert_eq!(buckets(group).1, 1, "{group}");
+        }
+        for group in cases["apart"].as_array().expect("apart") {
+            let (entries, buckets) = buckets(group);
+            assert_eq!(buckets, entries, "{group}");
+        }
+    }
+
     fn with_authorization(value: &str) -> Request {
         Request::builder()
             .uri("/v1/organization")

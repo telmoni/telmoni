@@ -154,7 +154,62 @@ export function clientKey(request: NextRequest, scope: string): string {
 // pre-session account actions (sign-in, sign-up, the reset) meter the caller
 // by address, since there is no session to meter them by.
 export function clientKeyFromHeaders(headers: Headers, scope: string): string {
-  return `bfrl:${scope}:${trustedClientIp(headers)}`;
+  return `bfrl:${scope}:${bucketOf(trustedClientIp(headers))}`;
+}
+
+// The bucket an address counts against, as the server's door keys it: IPv6
+// by its /64, which one host holds whole, and a mapped IPv4 as the IPv4.
+// Both sides are held to `contract/client-address.json`.
+export function bucketOf(address: string): string {
+  const groups = ipv6Groups(address);
+  if (!groups) return address;
+  const [a, b, c, d, e, f, g, h] = groups;
+  if (a === 0 && b === 0 && c === 0 && d === 0 && e === 0 && f === 0xffff) {
+    return [g >> 8, g & 0xff, h >> 8, h & 0xff].join(".");
+  }
+  const prefix = [a, b, c, d];
+  while (prefix.at(-1) === 0) prefix.pop();
+  return `${prefix.map((group) => group.toString(16)).join(":")}::/64`;
+}
+
+type Groups = [number, number, number, number, number, number, number, number];
+
+const IPV4_OCTET = "(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)";
+const IPV4 = new RegExp(`^${IPV4_OCTET}(?:\\.${IPV4_OCTET}){3}$`);
+
+// An IPv6 address's eight groups, or null for anything that is not one.
+function ipv6Groups(text: string): Groups | null {
+  const halves = text.split("::");
+  if (halves.length > 2 || !text.includes(":")) return null;
+  const head = hexGroups(halves[0] ?? "");
+  const tail = halves.length === 2 ? hexGroups(halves[1] ?? "") : [];
+  if (!head || !tail) return null;
+  const missing = 8 - head.length - tail.length;
+  if (halves.length === 1 ? missing !== 0 : missing < 1) return null;
+  const groups = [...head, ...new Array<number>(missing).fill(0), ...tail];
+  return isGroups(groups) ? groups : null;
+}
+
+function isGroups(groups: number[]): groups is Groups {
+  return groups.length === 8;
+}
+
+// One side of a `::`, whose last group may be a dotted IPv4.
+function hexGroups(part: string): number[] | null {
+  if (part === "") return [];
+  const pieces = part.split(":");
+  const groups: number[] = [];
+  for (const [index, piece] of pieces.entries()) {
+    if (/^[0-9a-f]{1,4}$/i.test(piece)) {
+      groups.push(parseInt(piece, 16));
+    } else if (index === pieces.length - 1 && IPV4.test(piece)) {
+      const [w = 0, x = 0, y = 0, z = 0] = piece.split(".").map(Number);
+      groups.push((w << 8) | x, (y << 8) | z);
+    } else {
+      return null;
+    }
+  }
+  return groups;
 }
 
 // ⚠ **`X-Forwarded-For`, counted back from the end, and nothing a caller can

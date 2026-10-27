@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const evalMock = vi.fn();
@@ -15,7 +18,14 @@ vi.mock("@/lib/redis", () => ({
 
 import { logger } from "@/lib/logger";
 
-import { clientKey, rateLimit, sessionKey } from "./rate-limit";
+import { bucketOf, clientKey, rateLimit, sessionKey } from "./rate-limit";
+
+const addresses = JSON.parse(
+  readFileSync(
+    fileURLToPath(new URL("../../../contract/client-address.json", import.meta.url)),
+    "utf8",
+  ),
+) as { hops: number; same: string[][]; apart: string[][] };
 
 describe("sessionKey", () => {
   it("keys on the user — every session individually throttled", () => {
@@ -94,6 +104,33 @@ describe("clientKey", () => {
     const naked = new Request("http://example.com");
     expect(clientKey(naked as never, "unsubscribe"))
       .toBe("bfrl:unsubscribe:unknown");
+  });
+
+  // A host rotating through its own /64 is one caller, as the door counts it.
+  it("keys the callers the door keys together as one", () => {
+    process.env.TRUSTED_PROXY_HOPS = String(addresses.hops);
+    const key = (xff: string) =>
+      clientKey(
+        new Request("http://example.com", { headers: { "x-forwarded-for": xff } }) as never,
+        "signin",
+      );
+    for (const group of addresses.same) {
+      expect(new Set(group.map(key)).size, group.join(" | ")).toBe(1);
+    }
+    for (const group of addresses.apart) {
+      expect(new Set(group.map(key)).size, group.join(" | ")).toBe(group.length);
+    }
+  });
+
+  it("spells a bucket as the door does", () => {
+    expect(bucketOf("2001:db8:1:2:aaaa::1")).toBe("2001:db8:1:2::/64");
+    expect(bucketOf("2001:db8::1")).toBe("2001:db8::/64");
+    expect(bucketOf("2001:0:0:1:2::")).toBe("2001:0:0:1::/64");
+    expect(bucketOf("::1")).toBe("::/64");
+    expect(bucketOf("::ffff:203.0.113.9")).toBe("203.0.113.9");
+    expect(bucketOf("203.0.113.9")).toBe("203.0.113.9");
+    expect(bucketOf("fe80::1%eth0")).toBe("fe80::1%eth0");
+    expect(bucketOf("unknown")).toBe("unknown");
   });
 });
 
