@@ -17,7 +17,7 @@ use telmoni_shared::db::tenant_session::{maintenance_scope, organization_scope};
 use telmoni_shared::rbac::{Resource, Verb, can};
 use telmoni_shared::seam::{
     Audience, AuditEventsQuery, Auth, DocumentCursor, FoundedOrganization, OrganizationFounding,
-    OwnedOrganization, ProjectHome, SourceDocument,
+    OwnedOrganization, ProjectHome, ReadableProject, SourceDocument,
 };
 use telmoni_shared::{
     AuthError, AuthzError, Flag, FlagSet, OrganizationId, OrganizationRole, OrganizationStatus,
@@ -140,6 +140,26 @@ impl Auth for AppState {
         let slugs = organizations::slugs(&mut tx, organizations).await?;
         tx.commit().await?;
         Ok(slugs)
+    }
+
+    async fn readable_projects(
+        &self,
+        acting: &Acting,
+    ) -> Result<Vec<ReadableProject>, TelmoniError> {
+        let mut tx = maintenance_scope(&self.db, AuthLane).await?;
+        let listed =
+            projects::list_for_organization_user(&mut tx, &acting.organization_id, &acting.user_id)
+                .await?;
+        tx.commit().await?;
+        Ok(listed
+            .into_iter()
+            .map(|project| ReadableProject {
+                project_id: project.id,
+                slug: project.slug,
+                name: project.name,
+                role: project.role,
+            })
+            .collect())
     }
 
     async fn global_flags(&self) -> Result<FlagSet, TelmoniError> {

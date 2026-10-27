@@ -59,9 +59,9 @@ export function LeaveOrganization({
               size="sm"
               className="h-9 text-xs"
               disabled={pending}
-              aria-label={`Leave ${name}`}
             >
-              Leave organization
+              {/* Named by what it shows, which a voice command says. */}
+              Leave organization<span className="sr-only">: {name}</span>
             </Button>
           }
           title={`Leave ${name}?`}

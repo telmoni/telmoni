@@ -2,7 +2,7 @@
 
 Telmoni's core on one page: what it is for, what it is made of, how a request moves through it, how tenants are kept apart, how data lives and is erased, how it runs, how it fails, and why it is built this way. It is the repository's one document on how the core is built: the detail behind each line is in the code it names, the code's comments and its tests.
 
-**Where it stands:** Telmoni has not launched. What runs is the foundation — organizations and projects, members and roles, API keys, notifications, a hash-chained audit log and a read-only console agent — and the first of the telemetry on it: the `telemetry` module and its two stores, ingest at `/otlp/v1/traces`, the four SDKs under `sdk/`, and the console's traces, sessions, users and alerts. An organization's open incidents on its Overview are next ([Where it goes next](#where-it-goes-next)).
+**Where it stands:** Telmoni has not launched. What runs is the foundation — organizations and projects, members and roles, API keys, notifications, a hash-chained audit log and a read-only console agent — and the first of the telemetry on it: the `telemetry` module and its two stores, ingest at `/otlp/v1/traces`, the four SDKs under `sdk/`, and the console's traces, sessions, users and alerts, with an organization's open incidents on its Overview. Content an owner chooses to keep is next ([Where it goes next](#where-it-goes-next)).
 
 ## Contents
 
@@ -516,6 +516,7 @@ Telmoni is for telemetry from AI agents, and that is built on this foundation in
   - **Users and sessions:** runs summed by user and by session, laid out as the trace list is — its filters, pages, columns, density and download, from the same components (`web/components/traces/`) — with a session opening its runs in order in the side panel or on its own page, sharing its customizable layout and pinned spans (`web/lib/layout.ts`) with the trace page.
   - **Alerts:** every alert with its metric, filters, window, thresholds, severity, connectors and maintenance windows, made, edited, paused, muted and deleted there, the form checking what the lane checks (`web/lib/alerts.ts`); and under each the incidents it opened, those not resolved first, each with its severity, when and where its notices went, acknowledged or resolved by any member. A trace's page links each incident whose notices showed it, to the alerts page at that incident, which `?incident=` draws even past the list.
   - **Privacy and field inventory:** the project's content mode switch (owner-only, audited, offering `off` today) beside the field inventory table served from `contract.rs` and pinned against the docs page by a test.
+- **An organization's health:** the incidents still open on the projects a person can open, the newest first, on its Overview, each linking to it under its alert; nothing when all is well.
 - **The console agent's own runs:** reported through the Rust SDK to a project of the operator's own (*The console agent*).
 - **One door for machines (`crates/telmoni/src/door.rs`):** `/v1`, `/cli/v1`, `/otlp/v1/traces` and `/webhooks/v1/slack` served directly by the server on the machine host (`server-api`), metered in Redis.
 - **The model prices (`crates/telemetry/src/prices.rs`):** LiteLLM's at a pinned commit, written over `telemetry.model_prices` by every `migrate`, and the price in force for a call's provider and model.
@@ -523,7 +524,6 @@ Telmoni is for telemetry from AI agents, and that is built on this foundation in
 - **The SDKs' guard:** opt-in caps on a run's steps and spend, counted in the agent's own process with no call to the server, each call costed as the server costs it but by a price handed to the client first (*The SDKs*).
 
 **What is settled, and not built:**
-- **An organization's health:** its open incidents across the projects a person can see, on its Overview.
 - **Content modes** beyond `off` once content has a store.
 
 ## Decisions

@@ -297,15 +297,24 @@ CREATE UNIQUE INDEX incidents_one_open_idx ON telemetry.incidents (rule_id)
 -- The project's incidents, newest first, and an alert's last resolved one.
 CREATE INDEX incidents_project_idx ON telemetry.incidents (project_id, opened_at DESC);
 CREATE INDEX incidents_rule_idx ON telemetry.incidents (rule_id, resolved_at DESC);
--- The organization's purge and a transfer find them by it.
+-- The organization's purge, a transfer and its Overview find them by it.
 CREATE INDEX incidents_organization_idx ON telemetry.incidents (organization_id);
 
 ALTER TABLE telemetry.incidents ENABLE ROW LEVEL SECURITY;
 ALTER TABLE telemetry.incidents FORCE ROW LEVEL SECURITY;
 
+-- A write names the organization too, which `organization_read` trusts, as
+-- an alert's does.
 CREATE POLICY tenant_isolation ON telemetry.incidents
     USING      (project_id = current_setting('app.project_id', true))
-    WITH CHECK (project_id = current_setting('app.project_id', true));
+    WITH CHECK (project_id = current_setting('app.project_id', true)
+                AND organization_id = current_setting('app.organization_id', true));
+
+-- An organization reads its projects' incidents, for its Overview, and
+-- writes none.
+CREATE POLICY organization_read ON telemetry.incidents
+    FOR SELECT
+    USING (organization_id = current_setting('app.organization_id', true));
 
 CREATE POLICY maintenance_access ON telemetry.incidents
     TO telemetry_maintenance

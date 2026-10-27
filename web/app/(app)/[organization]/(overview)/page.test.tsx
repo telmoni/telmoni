@@ -1,8 +1,13 @@
 // @vitest-environment jsdom
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { incidentHref } from "@/lib/alerts";
 import type { OrganizationEntry } from "@/lib/server/entities/organization";
+import type {
+  HealthIncident,
+  OrganizationHealth,
+} from "@/lib/server/entities/organization-health";
 
 // The action, not its effects: which organization the page hands it is the
 // assertion, and the action refuses any other.
@@ -47,6 +52,9 @@ let mockContext: {
 const fetchNotifications = vi.hoisted(() =>
   vi.fn<() => Promise<{ items: FeedItem[]; unread: number } | null>>(async () => null),
 );
+const fetchOrganizationHealth = vi.hoisted(() =>
+  vi.fn<() => Promise<OrganizationHealth>>(async () => ({ kind: "ok", incidents: [] })),
+);
 
 
 type FeedItem = {
@@ -66,9 +74,33 @@ vi.mock("@/lib/server/data", async () => {
   return {
     activeOrganization,
     fetchNotifications,
+    fetchOrganizationHealth,
     getServerContext: async () => mockContext,
   };
 });
+
+/** An open incident on Web, as the server sends it, with the `fields` a test
+ *  sets. */
+function incident(fields: Partial<HealthIncident>): HealthIncident {
+  return {
+    id: "incident_1",
+    rule_id: "rule_1",
+    rule_name: "Slow calls",
+    status: "open",
+    severity: "alert",
+    value: 6200,
+    opened_at: "2026-10-27T03:00:00Z",
+    acknowledged_at: null,
+    acknowledged_by: null,
+    resolved_at: null,
+    resolved_by: null,
+    reopened: 0,
+    told_to: [],
+    runs: [],
+    project: { id: "project_1", slug: "web", name: "Web" },
+    ...fields,
+  };
+}
 
 import OrganizationOverviewPage from "./page";
 
@@ -88,6 +120,7 @@ const OWNED: OrganizationEntry = {
 beforeEach(() => {
   vi.clearAllMocks();
   fetchNotifications.mockResolvedValue(null);
+  fetchOrganizationHealth.mockResolvedValue({ kind: "ok", incidents: [] });
   mockContext = { organizations: [OWNED], activeOrganizationId: "org_1" };
 });
 
@@ -173,7 +206,7 @@ describe("OrganizationOverviewPage", () => {
       };
       await renderPage();
       expect(
-        screen.getByRole("button", { name: "Leave Difference Engine" }),
+        screen.getByRole("button", { name: "Leave organization: Difference Engine" }),
       ).toBeInTheDocument();
     },
   );
@@ -230,6 +263,75 @@ describe("OrganizationOverviewPage", () => {
     },
   );
 
+  // ⚠ In the server's order, newest first, each linking to it under its alert.
+  it("lists the open incidents, each linking to it under its alert", async () => {
+    fetchOrganizationHealth.mockResolvedValue({
+      kind: "ok",
+      incidents: [
+        incident({
+          id: "incident_2",
+          rule_name: "Spend",
+          status: "acknowledged",
+          severity: "warning",
+          acknowledged_at: "2026-10-27T04:00:00Z",
+          acknowledged_by: "user_1",
+          project: { id: "project_2", slug: "payments", name: "Payments" },
+        }),
+        incident({}),
+      ],
+    });
+    await renderPage();
+
+    const section = screen.getByRole("region", { name: "Open incidents" });
+    expect(
+      within(section)
+        .getAllByRole("link")
+        .map((link) => [link.textContent, link.getAttribute("href")]),
+    ).toEqual([
+      ["Spend in Payments", incidentHref("ada-works", "payments", "incident_2")],
+      ["Slow calls in Web", incidentHref("ada-works", "web", "incident_1")],
+    ]);
+    const [spend, slow] = within(section)
+      .getAllByRole("link")
+      .map((link) => link.closest("div.flex"));
+    expect(spend).toHaveTextContent(/Payments · opened .* · acknowledged/);
+    expect(spend).toHaveTextContent("Warning");
+    expect(slow).toHaveTextContent(/Web · opened /);
+    expect(slow).not.toHaveTextContent("acknowledged");
+    expect(slow).toHaveTextContent("Alert");
+  });
+
+  it.each<[string, OrganizationHealth]>([
+    ["all is well", { kind: "ok", incidents: [] }],
+    ["the server refuses the person", { kind: "forbidden" }],
+  ])("says nothing about incidents when %s", async (_, health) => {
+    fetchOrganizationHealth.mockResolvedValue(health);
+    await renderPage();
+    expect(screen.queryByRole("region", { name: "Open incidents" })).toBeNull();
+    expect(screen.queryByText(/incident/i)).toBeNull();
+  });
+
+  // Saying nothing would read as all being well.
+  it("says the open incidents could not be read, rather than nothing", async () => {
+    fetchOrganizationHealth.mockResolvedValue({ kind: "unavailable" });
+    await renderPage();
+    expect(screen.getByRole("region", { name: "Open incidents" })).toHaveTextContent(
+      "The open incidents could not be read.",
+    );
+  });
+
+  it.each(["owner", "admin", "member"] as const)(
+    "asks an organization %s's open incidents of the server, which narrows them",
+    async (role) => {
+      mockContext = {
+        organizations: [{ ...OWNED, role }],
+        activeOrganizationId: "org_1",
+      };
+      await renderPage();
+      expect(fetchOrganizationHealth).toHaveBeenCalled();
+    },
+  );
+
   // ⚠ The button names the organization this page rendered, so the leave has
   // to be aimed at that one — the action refuses any other, including the
   // one its request resolves once this page has gone stale.
@@ -243,7 +345,7 @@ describe("OrganizationOverviewPage", () => {
     };
     await renderPage();
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Leave Difference Engine" }));
+      fireEvent.click(screen.getByRole("button", { name: "Leave organization: Difference Engine" }));
     });
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Leave" }));

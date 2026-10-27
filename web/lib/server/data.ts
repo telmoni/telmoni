@@ -89,6 +89,9 @@ export type {
   RuleFilters,
 } from "./entities/alerts";
 
+export { fetchOrganizationHealth } from "./entities/organization-health";
+export type { HealthIncident, OrganizationHealth } from "./entities/organization-health";
+
 export {
   fetchTrace,
   fetchTraceFacets,

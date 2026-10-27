@@ -37,7 +37,7 @@ use telmoni_shared::heartbeat::Heartbeats;
 use telmoni_shared::middleware::service_auth::{ServiceSecrets, require_service_secret};
 use telmoni_shared::seam::{
     AuditEventsQuery, Auth, DocumentCursor, Entitlements, NoLimits, OwnedOrganization,
-    OwnershipHook, ProjectHome, PurgeHook, SourceDocument,
+    OwnershipHook, ProjectHome, PurgeHook, ReadableProject, SourceDocument,
 };
 use telmoni_shared::{
     AuthError, FlagSet, OrganizationId, OrganizationStatus, ProjectId, TelmoniError, UserId,
@@ -176,6 +176,13 @@ impl Auth for LateAuth {
         organizations: &[OrganizationId],
     ) -> Result<Vec<(OrganizationId, String)>, TelmoniError> {
         self.get()?.organization_slugs(organizations).await
+    }
+
+    async fn readable_projects(
+        &self,
+        acting: &Acting,
+    ) -> Result<Vec<ReadableProject>, TelmoniError> {
+        self.get()?.readable_projects(acting).await
     }
 
     async fn global_flags(&self) -> Result<FlagSet, TelmoniError> {

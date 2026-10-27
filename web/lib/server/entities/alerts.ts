@@ -83,7 +83,7 @@ export type Alert = z.infer<typeof AlertSchema>;
 // One incident: its alert, where it stands, who took or resolved it, where
 // its notices went — the connections, the feed apart — and the runs they
 // showed, oldest first.
-const IncidentSchema = z.object({
+export const IncidentSchema = z.object({
   id: z.string(),
   rule_id: z.string(),
   rule_name: z.string(),

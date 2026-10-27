@@ -3,11 +3,17 @@ import { notFound } from "next/navigation";
 
 import { ServiceUnavailable } from "@/components/service-unavailable";
 import { organizationLabel } from "@/lib/identity";
-import { activeOrganization, fetchNotifications, getServerContext } from "@/lib/server/data";
+import {
+  activeOrganization,
+  fetchNotifications,
+  fetchOrganizationHealth,
+  getServerContext,
+} from "@/lib/server/data";
 
 import { Notices } from "../../_notices";
 import { Overview } from "../../_overview";
 import { LeaveOrganization } from "../_leave-organization";
+import { OpenIncidents } from "../_open-incidents";
 import { MarkOrganizationRead } from "../_organization-notices";
 
 // In a route group of its own so that whatever stands in for a page while it
@@ -23,12 +29,8 @@ export async function generateMetadata(): Promise<Metadata> {
   return { title: organization ? organizationLabel(organization) : "Overview" };
 }
 
-// The organization's name and nothing else, for now: the owner cleared its
-// sections (projects, members, recent activity, the hosted plan) on
-// 2026-10-08 while the page is rethought. Two things stay because they have
-// no other home: the organization's own notices, a failed payment among them,
-// for its owner and admins when there are any; and the way out, for anybody
-// but the owner. Projects are reached from the switcher and the rail.
+// Under the organization's name, only what needs somebody: its open
+// incidents, its own notices and the way out. Projects are in the switcher.
 export default async function OrganizationOverviewPage() {
   const gate = await getServerContext();
   // The path names the organization: not found unless auth answered with it.
@@ -45,7 +47,10 @@ export default async function OrganizationOverviewPage() {
   // The organization's own feed — the notices that name no project, such as
   // an `organization_alert` a service beside this one raises — answers its
   // owner and admins, so nobody else is sent to ask for it.
-  const notices = isAdmin ? await fetchNotifications() : null;
+  const [health, notices] = await Promise.all([
+    fetchOrganizationHealth(),
+    isAdmin ? fetchNotifications() : null,
+  ]);
 
   // Anybody but the owner may leave. The owner hands the organization to an
   // admin first — the organization cannot be left with nobody holding it.
@@ -68,6 +73,7 @@ export default async function OrganizationOverviewPage() {
       action={markRead ?? undefined}
       sections={
         <>
+          <OpenIncidents organization={organization.slug} health={health} />
           {notices && notices.items.length > 0 && (
             <Notices label="Organization notices" feed={notices} />
           )}

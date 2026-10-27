@@ -239,6 +239,10 @@ pub fn router(state: Arc<AppState>) -> Router {
             "/telemetry/incidents/{id}/resolve",
             post(handler::incidents::resolve_incident),
         )
+        .route(
+            "/telemetry/organizations/{id}/health",
+            get(handler::health::organization_health),
+        )
         .layer(middleware::from_fn_with_state(
             state.service_secrets.clone(),
             require_service_secret,

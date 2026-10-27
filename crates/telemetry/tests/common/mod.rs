@@ -21,7 +21,8 @@ use telmoni_shared::acting::{Acting, ActingKey, ActingProject};
 use telmoni_shared::middleware::service_auth::ServiceSecrets;
 use telmoni_shared::rbac::project_role;
 use telmoni_shared::seam::{
-    Auth, Emitted, Entitlements, NoLimits, Notice, Notifications, ProjectHome, Route, Routed,
+    Auth, Emitted, Entitlements, NoLimits, Notice, Notifications, ProjectHome, ReadableProject,
+    Route, Routed,
 };
 use telmoni_shared::test_util::{ServiceRole, chain_lock_held, service_pool};
 use telmoni_shared::{
@@ -450,6 +451,40 @@ impl Auth for AuthStub {
                         organization_slug: organization.to_string(),
                         organization_id: organization,
                     })
+            })
+            .collect())
+    }
+
+    /// The acting organization's projects the person can open, from the
+    /// roster, each slugged by its id and named "Project <id>".
+    async fn readable_projects(
+        &self,
+        acting: &Acting,
+    ) -> Result<Vec<ReadableProject>, TelmoniError> {
+        let seats = self
+            .seats
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut projects: Vec<&String> = seats
+            .iter()
+            .filter(|(_, (organization, _, _))| *organization == acting.organization_id)
+            .map(|((_, project), _)| project)
+            .collect();
+        projects.sort();
+        projects.dedup();
+        Ok(projects
+            .into_iter()
+            .filter_map(|project| {
+                let seat = seats
+                    .get(&(acting.user_id.to_string(), project.clone()))
+                    .and_then(|(_, _, seat)| *seat);
+                let role = project_role(acting.organization_role, seat)?;
+                Some(ReadableProject {
+                    project_id: ProjectId::try_new(project.as_str()).ok()?,
+                    slug: project.clone(),
+                    name: format!("Project {project}"),
+                    role,
+                })
             })
             .collect())
     }

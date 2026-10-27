@@ -102,9 +102,15 @@ async fn sign_in(app: &Router, pool: &PgPool, user: &str, sid: Option<&str>) -> 
     (organization, me)
 }
 
-/// A project in `organization`, made by `owner` as the console would: sign-in
-/// makes none.
-async fn create_project(app: &Router, pool: &PgPool, owner: &str, organization: &str) -> String {
+/// A project called `name` in `organization`, made by `owner` as the console
+/// would: sign-in makes none.
+async fn create_project(
+    app: &Router,
+    pool: &PgPool,
+    owner: &str,
+    organization: &str,
+    name: &str,
+) -> String {
     let resp = app
         .clone()
         .oneshot(
@@ -117,7 +123,7 @@ async fn create_project(app: &Router, pool: &PgPool, owner: &str, organization: 
                 owner,
             )
             .await
-            .body(Body::from(json!({ "name": "Platform" }).to_string()))
+            .body(Body::from(json!({ "name": name }).to_string()))
             .unwrap(),
         )
         .await
@@ -219,7 +225,7 @@ async fn the_seam_answers_owner_seat_and_non_member_from_auths_own_tables(pool: 
     let (organization, _) = sign_in(&app, &pool, "user_owner", None).await;
     sign_in(&app, &pool, "user_member", None).await;
     sign_in(&app, &pool, "user_stranger", None).await;
-    let project = create_project(&app, &pool, "user_owner", &organization).await;
+    let project = create_project(&app, &pool, "user_owner", &organization, "Platform").await;
     seat(
         &app,
         &pool,
@@ -276,6 +282,107 @@ async fn the_seam_answers_owner_seat_and_non_member_from_auths_own_tables(pool: 
         .await
         .unwrap_err();
     assert_eq!(refused.to_problem_details().status, 403);
+}
+
+/// `user`'s projects in `organization` as the console lists them: each one's
+/// id, slug, name and the role on it.
+async fn listed(
+    app: &Router,
+    pool: &PgPool,
+    user: &str,
+    organization: &str,
+) -> Vec<(String, String, String, String)> {
+    let resp = app
+        .clone()
+        .oneshot(
+            as_person(
+                Request::get("/internal/v1/projects")
+                    .header("x-service-secret", SERVICE_SECRET)
+                    .header("x-organization-id", organization),
+                pool,
+                user,
+            )
+            .await
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    json_body(resp).await["projects"]
+        .as_array()
+        .expect("the list")
+        .iter()
+        .map(|p| {
+            let field = |name: &str| p[name].as_str().expect("a string").to_owned();
+            (field("id"), field("slug"), field("name"), field("role"))
+        })
+        .collect()
+}
+
+/// ⚠ The projects a person can open, from auth's own tables, as the console lists them.
+#[sqlx::test]
+async fn the_seam_answers_the_projects_a_person_can_open(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let (app, state, _provider) = app(pool.clone());
+    let (organization, _) = sign_in(&app, &pool, "user_owner", None).await;
+    sign_in(&app, &pool, "user_member", None).await;
+    let platform = create_project(&app, &pool, "user_owner", &organization, "Platform").await;
+    let billing = create_project(&app, &pool, "user_owner", &organization, "Billing").await;
+    seat(
+        &app,
+        &pool,
+        "user_owner",
+        &organization,
+        &platform,
+        "user_member",
+        "member",
+    )
+    .await;
+
+    for (user, opens) in [
+        ("user_owner", vec![billing.as_str(), platform.as_str()]),
+        ("user_member", vec![platform.as_str()]),
+    ] {
+        let acting = resolve(&state, user, &organization, None).await.unwrap();
+        let answered: Vec<(String, String, String, String)> = state
+            .readable_projects(&acting)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|p| (p.project_id.to_string(), p.slug, p.name, p.role.to_string()))
+            .collect();
+        assert_eq!(
+            answered.iter().map(|p| p.0.as_str()).collect::<Vec<_>>(),
+            opens,
+            "{user}'s projects, by name"
+        );
+        assert_eq!(answered, listed(&app, &pool, user, &organization).await);
+    }
+    assert_eq!(
+        state
+            .readable_projects(
+                &resolve(&state, "user_member", &organization, None)
+                    .await
+                    .unwrap()
+            )
+            .await
+            .unwrap()[0]
+            .role,
+        Role::Member,
+        "the seat's role"
+    );
+
+    // The tables decide, not the caller: a person never seated here opens nothing.
+    let stranger = telmoni_shared::acting::Acting {
+        user_id: telmoni_shared::UserId::try_new("user_stranger").unwrap(),
+        organization_id: telmoni_shared::OrganizationId::try_new(organization.as_str()).unwrap(),
+        organization_role: None,
+        project: None,
+        session_id: None,
+        expires_at: chrono::Utc::now().timestamp() + 60,
+    };
+    assert!(state.readable_projects(&stranger).await.unwrap().is_empty());
 }
 
 /// ⚠ The seam resolves the bearer itself: no bearer, or one auth never

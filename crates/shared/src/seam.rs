@@ -17,7 +17,7 @@ use uuid::Uuid;
 use crate::acting::{Acting, ActingKey};
 use crate::{
     AlertCeilings, AuditAction, FlagSet, Grants, LaneCeilings, MemberCeiling, NotificationKind,
-    OrganizationId, OrganizationStatus, ProjectId, TelmoniError, UserId,
+    OrganizationId, OrganizationStatus, ProjectId, Role, TelmoniError, UserId,
 };
 
 /// Who may read a document the agent indexes, beyond the tenant its keys
@@ -118,6 +118,20 @@ pub struct ProjectHome {
     pub organization_slug: String,
 }
 
+/// A project a person can open, as auth answers a module that shows each
+/// person their part of an organization.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReadableProject {
+    /// The project.
+    pub project_id: ProjectId,
+    /// Its segment in console paths, under its organization's.
+    pub slug: String,
+    /// Its name, as the console shows it.
+    pub name: String,
+    /// The person's role on it, as [`crate::rbac::project_role`] decides it.
+    pub role: Role,
+}
+
 /// One active organization a person owns, as auth answers a module that
 /// decides something for each owner rather than each organization.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -212,6 +226,16 @@ pub trait Auth: Send + Sync {
     ) -> Result<Vec<(OrganizationId, String)>, TelmoniError> {
         let _ = organizations;
         Err(not_linked("organization slugs"))
+    }
+
+    /// The projects of the organization `acting` stands in that the person
+    /// can open, with their role on each, as the console lists them.
+    async fn readable_projects(
+        &self,
+        acting: &Acting,
+    ) -> Result<Vec<ReadableProject>, TelmoniError> {
+        let _ = acting;
+        Err(not_linked("the projects a person can open"))
     }
 
     /// The global feature-flag set. **An unreadable set is an error, never
