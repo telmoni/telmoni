@@ -4,8 +4,6 @@
 //! and width-checked by [`crate::embed::literal`], so no driver type for
 //! them is needed.
 
-use std::{fmt, str::FromStr};
-
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -15,7 +13,7 @@ use telmoni_shared::db::tenant_session::{
     PersonOrganizationProject, Scoped, maintenance_scope,
 };
 use telmoni_shared::seam::Audience;
-use telmoni_shared::{OrganizationId, ParseEnumError, ProjectId, UserId};
+use telmoni_shared::{OrganizationId, ProjectId, UserId};
 use uuid::Uuid;
 
 /// This module's cross-tenant lane. See `tenant_session::Lane`.
@@ -42,46 +40,14 @@ pub enum Source {
     Conversation,
 }
 
-impl Source {
-    /// Every source, in the migration's order.
-    #[must_use]
-    pub const fn all() -> [Self; 5] {
-        [
-            Self::Docs,
-            Self::Audit,
-            Self::Feed,
-            Self::Delivery,
-            Self::Conversation,
-        ]
-    }
-
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Docs => "docs",
-            Self::Audit => "audit",
-            Self::Feed => "feed",
-            Self::Delivery => "delivery",
-            Self::Conversation => "conversation",
-        }
-    }
-}
-
-impl fmt::Display for Source {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl FromStr for Source {
-    type Err = ParseEnumError;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::all()
-            .into_iter()
-            .find(|source| source.as_str() == s)
-            .ok_or_else(|| ParseEnumError::new(s, "docs, audit, feed, delivery, conversation"))
-    }
-}
+// In the migration's order.
+telmoni_shared::wire_enum!(Source {
+    Docs => "docs",
+    Audit => "audit",
+    Feed => "feed",
+    Delivery => "delivery",
+    Conversation => "conversation",
+});
 
 /// Who reads a passage, beyond what RLS admits: `agent.chunks.visibility`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, sqlx::Type, Serialize, Deserialize)]
@@ -98,44 +64,13 @@ pub enum Visibility {
     Author,
 }
 
-impl Visibility {
-    /// Every visibility, in the migration's order.
-    #[must_use]
-    pub const fn all() -> [Self; 4] {
-        [
-            Self::Everyone,
-            Self::Audit,
-            Self::OrganizationAdmin,
-            Self::Author,
-        ]
-    }
-
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Everyone => "everyone",
-            Self::Audit => "audit",
-            Self::OrganizationAdmin => "organization_admin",
-            Self::Author => "author",
-        }
-    }
-}
-
-impl fmt::Display for Visibility {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl FromStr for Visibility {
-    type Err = ParseEnumError;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::all()
-            .into_iter()
-            .find(|visibility| visibility.as_str() == s)
-            .ok_or_else(|| ParseEnumError::new(s, "everyone, audit, organization_admin, author"))
-    }
-}
+// In the migration's order.
+telmoni_shared::wire_enum!(Visibility {
+    Everyone => "everyone",
+    Audit => "audit",
+    OrganizationAdmin => "organization_admin",
+    Author => "author",
+});
 
 impl From<Audience> for Visibility {
     fn from(audience: Audience) -> Self {
@@ -157,33 +92,11 @@ pub enum MessageRole {
     Assistant,
 }
 
-impl MessageRole {
-    /// Every role, in the migration's order.
-    #[must_use]
-    pub const fn all() -> [Self; 2] {
-        [Self::User, Self::Assistant]
-    }
-}
-
-impl fmt::Display for MessageRole {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::User => write!(f, "user"),
-            Self::Assistant => write!(f, "assistant"),
-        }
-    }
-}
-
-impl FromStr for MessageRole {
-    type Err = ParseEnumError;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "user" => Ok(Self::User),
-            "assistant" => Ok(Self::Assistant),
-            _ => Err(ParseEnumError::new(s, "user, assistant")),
-        }
-    }
-}
+// In the migration's order.
+telmoni_shared::wire_enum!(MessageRole {
+    User => "user",
+    Assistant => "assistant",
+});
 
 // ── The index ────────────────────────────────────────────────────────────────
 
@@ -1705,58 +1618,11 @@ pub async fn forget_fences(
 mod tests {
     use super::*;
 
-    /// A new variant fails to compile here until `all()` lists it.
     #[test]
-    fn all_lists_every_variant() {
-        for source in Source::all() {
-            match source {
-                Source::Docs
-                | Source::Audit
-                | Source::Feed
-                | Source::Delivery
-                | Source::Conversation => {}
-            }
-        }
-        for visibility in Visibility::all() {
-            match visibility {
-                Visibility::Everyone
-                | Visibility::Audit
-                | Visibility::OrganizationAdmin
-                | Visibility::Author => {}
-            }
-        }
-        for role in MessageRole::all() {
-            match role {
-                MessageRole::User | MessageRole::Assistant => {}
-            }
-        }
-        listed_once(&Source::all());
-        listed_once(&Visibility::all());
-        listed_once(&MessageRole::all());
-    }
-
-    fn listed_once<T: fmt::Display>(all: &[T]) {
-        let mut seen: Vec<String> = all.iter().map(ToString::to_string).collect();
-        seen.sort();
-        seen.dedup();
-        assert_eq!(seen.len(), all.len(), "all() repeats a variant");
-    }
-
-    #[test]
-    fn from_str_round_trips_and_serde_matches_display() {
-        round_trips(&Source::all());
-        round_trips(&Visibility::all());
-        round_trips(&MessageRole::all());
-    }
-
-    fn round_trips<T>(all: &[T])
-    where
-        T: Copy + PartialEq + fmt::Debug + fmt::Display + FromStr<Err = ParseEnumError> + Serialize,
-    {
-        for v in all {
-            assert_eq!(v.to_string().parse::<T>(), Ok(*v));
-            assert_eq!(serde_json::to_string(v).unwrap(), format!("\"{v}\""));
-        }
+    fn the_words_are_the_wire_words() {
+        telmoni_shared::test_util::assert_wire_words::<Source>();
+        telmoni_shared::test_util::assert_wire_words::<Visibility>();
+        telmoni_shared::test_util::assert_wire_words::<MessageRole>();
     }
 
     #[test]
