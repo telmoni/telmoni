@@ -22,10 +22,19 @@ export type AuditExport = z.infer<typeof AuditExportSchema>;
 
 export type AuditExportFormat = AuditExport["format"];
 
-/// The most rows one file holds, as auth's `MAX_ROWS` caps it: past it, or past
-/// the 24 MiB auth's `MAX_BYTES` allows, an export fails as `too_large`, and a
-/// shorter range is the answer.
-export const AUDIT_EXPORT_MAX_ROWS = 25_000;
+/// What one file may hold, as auth answers it with the list: the rows, and the
+/// bytes, which the organization's plan may hold lower. Past either, an export
+/// fails as `too_large`, and a shorter range is the answer.
+export const AuditExportLimitsSchema = z.object({
+  max_rows:  z.number().int().positive(),
+  max_bytes: z.number().int().positive(),
+});
+export type AuditExportLimits = z.infer<typeof AuditExportLimitsSchema>;
+
+/// The caller's exports, newest first, with what one file may hold.
+export const AuditExportListSchema = AuditExportLimitsSchema.extend({
+  exports: z.array(AuditExportSchema),
+});
 
 /// How long a finished file is kept for the person who asked, as auth's
 /// `KEEP_FOR_SECS` keeps it.

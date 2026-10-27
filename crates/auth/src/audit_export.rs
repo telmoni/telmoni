@@ -429,13 +429,19 @@ async fn hand_back(
 /// The most bytes one of the organization's files may hold: [`MAX_BYTES`],
 /// or its plan's data out a day where that is less, so a file is never too
 /// large to download, and a long log comes a day's worth at a time.
-async fn cap_for(state: &AppState, organization_id: &OrganizationId) -> usize {
-    let Some(entitlements) = state.siblings.entitlements.as_deref() else {
-        return MAX_BYTES;
+pub(crate) async fn cap_for(state: &AppState, organization_id: &OrganizationId) -> usize {
+    let day = match state.siblings.entitlements.as_deref() {
+        Some(entitlements) => telmoni_shared::seam::lane_ceilings(entitlements, organization_id)
+            .await
+            .map(|ceilings| ceilings.data_out_per_day),
+        None => None,
     };
-    telmoni_shared::seam::lane_ceilings(entitlements, organization_id)
-        .await
-        .and_then(|ceilings| usize::try_from(ceilings.data_out_per_day).ok())
+    cap_of(day)
+}
+
+fn cap_of(data_out_per_day: Option<u64>) -> usize {
+    data_out_per_day
+        .and_then(|day| usize::try_from(day).ok())
         .map_or(MAX_BYTES, |day| day.min(MAX_BYTES))
 }
 
@@ -659,6 +665,13 @@ fn unwritable(e: serde_json::Error) -> TelmoniError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_file_holds_the_plans_day_where_that_is_less() {
+        assert_eq!(cap_of(None), MAX_BYTES);
+        assert_eq!(cap_of(Some(5_000_000)), 5_000_000);
+        assert_eq!(cap_of(Some(u64::MAX)), MAX_BYTES);
+    }
 
     fn row(seq: i64, metadata: Option<serde_json::Value>) -> ExportRow {
         ExportRow {

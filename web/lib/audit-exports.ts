@@ -1,4 +1,4 @@
-import { AUDIT_EXPORT_MAX_ROWS, type AuditExport } from "@/lib/types/audit-export";
+import type { AuditExport, AuditExportLimits } from "@/lib/types/audit-export";
 
 /// The ranges the export dialog offers: the last week, month or quarter up to
 /// now, the whole chain, or two days the person picks.
@@ -86,14 +86,27 @@ export function exportSummary(entry: AuditExport, now: Date): string {
 }
 
 /// Why one failed, and what to do instead. `too_large` is either cap — the
-/// events or the bytes their details come to — and a shorter range is the
-/// answer to both.
-export function failureText(entry: Pick<AuditExport, "failure">): string {
+/// events or the bytes their details come to, as auth sets them for the
+/// organization — and a shorter range is the answer to both.
+export function failureText(
+  entry: Pick<AuditExport, "failure">,
+  limits: AuditExportLimits,
+): string {
   return entry.failure === "too_large"
     ? `That range is too much for one file, which holds up to ${COUNT.format(
-        AUDIT_EXPORT_MAX_ROWS,
-      )} events and 24 MiB. Export a shorter one.`
+        limits.max_rows,
+      )} events and ${sizeLabel(limits.max_bytes)}. Export a shorter one.`
     : "The audit log export failed. Try again.";
+}
+
+const SIZE = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 });
+const MIB = 1024 * 1024;
+
+/// A cap as it was set: in MiB where it is whole ones, else in MB.
+export function sizeLabel(bytes: number): string {
+  return bytes % MIB === 0
+    ? `${SIZE.format(bytes / MIB)} MiB`
+    : `${SIZE.format(bytes / 1_000_000)} MB`;
 }
 
 /// Where the export dialog starts one and the bell reads the list: under the

@@ -41,7 +41,7 @@ export async function GET(request: NextRequest) {
   if (result.kind === "unavailable") {
     return NextResponse.json({ error: "unavailable" }, { status: 503 });
   }
-  return NextResponse.json({ exports: result.exports }, { headers: NO_STORE });
+  return NextResponse.json({ exports: result.exports, ...result.limits }, { headers: NO_STORE });
 }
 
 // Start one: auth queues it and builds it in the background, and the answer is

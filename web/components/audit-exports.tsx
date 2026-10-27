@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useRef } from "react";
 import { toast } from "sonner";
-import { z } from "zod";
 
 import { exportHref, exportSummary, exportsHref, failureText } from "@/lib/audit-exports";
 import { administersOrganization } from "@/lib/organization-role";
@@ -14,7 +13,12 @@ import {
   useMarkAuditExportDownloaded,
   useReplaceAuditExports,
 } from "@/lib/store";
-import { AuditExportSchema, isBuilding, type AuditExport } from "@/lib/types/audit-export";
+import {
+  AuditExportListSchema,
+  isBuilding,
+  type AuditExport,
+  type AuditExportLimits,
+} from "@/lib/types/audit-export";
 
 /// How often an export still building is asked after: most finish inside a
 /// second or two, so the wait for the toast is about one of these.
@@ -46,8 +50,6 @@ const SLOW_DOWNLOAD_MS = 1_000;
 /// The downloads under way, by export: a second press waits for the first
 /// rather than fetching the file again and saving it twice.
 const downloading = new Set<string>();
-
-const ListSchema = z.object({ exports: z.array(AuditExportSchema) });
 
 /// Whether a response says the session has ended: the proxy's 401, or a
 /// redirect to sign in, never followed, since followed it is the sign-in page.
@@ -178,6 +180,7 @@ export function useAuditExportsWatcher(): void {
     const ticket = ++issued.current;
     const startedBefore = startedRef.current;
     let fresh: AuditExport[];
+    let limits: AuditExportLimits;
     reading.current += 1;
     try {
       const res = await fetch(exportsHref(slug), {
@@ -195,9 +198,10 @@ export function useAuditExportsWatcher(): void {
         return;
       }
       if (!res.ok) throw new Error(`exports answered ${res.status}`);
-      const parsed = ListSchema.safeParse(await res.json());
+      const parsed = AuditExportListSchema.safeParse(await res.json());
       if (!parsed.success) throw new Error("exports answered another shape");
       fresh = parsed.data.exports;
+      limits = parsed.data;
     } catch {
       // The list stays as it was; enough of these in a row stop the polling.
       failures.current += 1;
@@ -229,7 +233,7 @@ export function useAuditExportsWatcher(): void {
           },
         });
       } else {
-        toast.error(failureText(entry));
+        toast.error(failureText(entry, limits));
       }
     }
   }, [slug, organizationId, replaceAuditExports, markDownloaded, forget]);

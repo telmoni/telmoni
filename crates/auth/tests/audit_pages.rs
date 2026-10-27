@@ -815,6 +815,27 @@ async fn a_member_may_not_export_list_or_download_the_organizations_audit_log(po
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
+/// The list says how much one file may hold, by which the console words a
+/// refused export; with no plan to hold it lower, the deployment's caps.
+#[sqlx::test]
+async fn the_export_list_says_how_much_one_file_holds(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let organization = sign_in(&pool, OWNER).await;
+    let (status, body) = call(
+        &pool,
+        "GET",
+        &format!("/internal/v1/audit/organizations/{organization}/exports"),
+        OWNER,
+        &organization,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["max_rows"], json!(25_000));
+    assert_eq!(body["max_bytes"], json!(24 * 1024 * 1024));
+}
+
 /// Another admin reads the same log, and still not somebody else's file: an
 /// export is its requester's to download, and nobody else's to see.
 #[sqlx::test]

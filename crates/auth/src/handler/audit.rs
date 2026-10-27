@@ -288,7 +288,14 @@ pub async fn list_audit_exports(
     )
     .await?;
     tx.commit().await?;
-    Ok(Json(json!({ "exports": exports })))
+    // What one file may hold, for the console's word on a `too_large`: the
+    // bytes are the plan's, so only the server can say.
+    let max_bytes = audit_export::cap_for(&state, &organization_id).await;
+    Ok(Json(json!({
+        "exports": exports,
+        "max_rows": audit_export::MAX_ROWS,
+        "max_bytes": max_bytes,
+    })))
 }
 
 /// `GET /internal/v1/audit/organizations/{organization_id}/exports/{export_id}`

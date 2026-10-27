@@ -5,9 +5,11 @@ import { fetchWithTimeout } from "@/lib/api/fetch";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import {
+  AuditExportListSchema,
   AuditExportSchema,
   type AuditExport,
   type AuditExportFormat,
+  type AuditExportLimits,
 } from "@/lib/types/audit-export";
 
 import { identityContext, organizationHeaders, projectHeaders } from "./identity-context";
@@ -62,10 +64,8 @@ export const fetchOrganizationAudit = cache(
   },
 );
 
-const ExportListSchema = z.object({ exports: z.array(AuditExportSchema) });
-
 export type AuditExportsAccess =
-  | { kind: "ok"; exports: AuditExport[] }
+  | { kind: "ok"; exports: AuditExport[]; limits: AuditExportLimits }
   | { kind: "forbidden" }
   | { kind: "unavailable" };
 
@@ -116,7 +116,7 @@ export async function listAuditExports(): Promise<AuditExportsAccess> {
     });
     if (res.status === 403) return { kind: "forbidden" };
     if (!res.ok) return { kind: "unavailable" };
-    const parsed = ExportListSchema.safeParse(await res.json());
+    const parsed = AuditExportListSchema.safeParse(await res.json());
     if (!parsed.success) {
       logger.warn(
         { fetcher: "listAuditExports", issues: parsed.error.issues },
@@ -124,7 +124,8 @@ export async function listAuditExports(): Promise<AuditExportsAccess> {
       );
       return { kind: "unavailable" };
     }
-    return { kind: "ok", exports: parsed.data.exports };
+    const { exports, max_rows, max_bytes } = parsed.data;
+    return { kind: "ok", exports, limits: { max_rows, max_bytes } };
   } catch (err) {
     fetchFailed("listAuditExports", err);
     return { kind: "unavailable" };

@@ -8,6 +8,7 @@ import {
   exportsHref,
   failureText,
   rangeLabel,
+  sizeLabel,
 } from "./audit-exports";
 
 // Local construction throughout, as the dialog's own days are: a custom
@@ -78,8 +79,19 @@ describe("an export's labels", () => {
   });
 
   it("says a range too large is the range's fault", () => {
-    expect(failureText({ failure: "too_large" })).toMatch(/shorter/);
-    expect(failureText({ failure: "error" })).toMatch(/Try again/);
+    const limits = { max_rows: 25_000, max_bytes: 24 * 1024 * 1024 };
+    expect(failureText({ failure: "too_large" }, limits)).toBe(
+      "That range is too much for one file, which holds up to 25,000 events and 24 MiB. Export a shorter one.",
+    );
+    expect(failureText({ failure: "error" }, limits)).toMatch(/Try again/);
+  });
+
+  // A plan that hands over less a day holds a file to that day.
+  it("names the cap the organization's plan sets", () => {
+    expect(failureText({ failure: "too_large" }, { max_rows: 25_000, max_bytes: 5_000_000 })).toMatch(
+      /25,000 events and 5 MB\./,
+    );
+    expect(sizeLabel(2_500_000)).toBe("2.5 MB");
   });
 });
 
