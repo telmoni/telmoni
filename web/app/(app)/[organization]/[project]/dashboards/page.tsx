@@ -1,7 +1,7 @@
 import { PageHeader } from "@/components/page-header";
 import { ServiceUnavailable } from "@/components/service-unavailable";
 import { Card } from "@/components/ui/card";
-import { fetchProjectBySlug, getServerContext } from "@/lib/server/data";
+import { projectPage } from "@/lib/server/project-page";
 
 export const metadata = { title: "Dashboards" };
 
@@ -15,11 +15,7 @@ export default async function DashboardsPage({
   params: Promise<{ organization: string; project: string }>;
 }) {
   const { project: slug } = await params;
-  const gate = await getServerContext();
-  if (!gate) return <ServiceUnavailable />;
-
-  const project = await fetchProjectBySlug(slug);
-  if (!project) return <ServiceUnavailable />;
+  if ((await projectPage(slug)).kind === "unavailable") return <ServiceUnavailable />;
 
   return (
     <>

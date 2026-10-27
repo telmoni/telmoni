@@ -42,12 +42,11 @@ import {
   fetchIncident,
   fetchMembers,
   fetchOrganizationMembers,
-  fetchProjectBySlug,
-  getServerContext,
   type Alert,
   type Incident,
   type Mute,
 } from "@/lib/server/data";
+import { projectPage } from "@/lib/server/project-page";
 import { projectPath } from "@/lib/slug";
 import { shortId, traceHref } from "@/lib/traces";
 import { IncidentStatus, Severity } from "@/lib/types/enums";
@@ -75,8 +74,9 @@ export default async function AlertsPage({
 }) {
   const { organization, project: slug } = await params;
   const { incident: asked } = (await searchParams) ?? {};
-  const [gate, project] = await Promise.all([getServerContext(), fetchProjectBySlug(slug)]);
-  if (!gate || !project) return <ServiceUnavailable />;
+  const resolved = await projectPage(slug);
+  if (resolved.kind === "unavailable") return <ServiceUnavailable />;
+  const { gate, project } = resolved;
 
   // The organization's roster names its admins, who act on every project
   // with no seat on it; only its owner and admins may read it.

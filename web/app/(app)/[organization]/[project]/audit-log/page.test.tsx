@@ -115,4 +115,14 @@ describe("AuditPage (project)", () => {
     render(await AuditPage({ params: PARAMS }));
     expect(screen.getByTestId("outage")).toBeInTheDocument();
   });
+
+  // The project listing unread is an outage: an admin is never told they
+  // have no access because auth could not answer.
+  it("renders outage, never a refusal, when the project cannot be read", async () => {
+    mockProject = null;
+    render(await AuditPage({ params: PARAMS }));
+    expect(screen.getByTestId("outage")).toBeInTheDocument();
+    expect(screen.queryByTestId("access-denied")).toBeNull();
+    expect(auditFetches).toBe(0);
+  });
 });

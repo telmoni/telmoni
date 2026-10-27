@@ -16,12 +16,11 @@ import { MAX_LIMIT, parseWindow, type SearchParams } from "@/lib/list-query";
 import { administersProject } from "@/lib/project-role";
 import {
   activeOrganization,
-  fetchProjectBySlug,
   fetchSession,
   fetchSessionLayout,
   fetchTraceLayouts,
-  getServerContext,
 } from "@/lib/server/data";
+import { projectPage } from "@/lib/server/project-page";
 import { sessionHref, sessionSums, sessionsHref } from "@/lib/sessions";
 import { projectPath } from "@/lib/slug";
 import { formatCount, tracesHref } from "@/lib/traces";
@@ -48,8 +47,9 @@ export default async function SessionPage({
   const given = (await searchParams) ?? {};
   const query = parseWindow(given);
   const ui = parseLayoutUi(given);
-  const [gate, project] = await Promise.all([getServerContext(), fetchProjectBySlug(slug)]);
-  if (!gate || !project) return <ServiceUnavailable />;
+  const resolved = await projectPage(slug);
+  if (resolved.kind === "unavailable") return <ServiceUnavailable />;
+  const { gate, project } = resolved;
 
   // The layout the server can know — a link's, or the project's — names the
   // spans to read with the session; the browser's own last choice is read

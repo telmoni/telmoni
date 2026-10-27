@@ -16,11 +16,10 @@ import { LIST_DIMS_WHILE_PENDING } from "@/lib/list-pending";
 import type { SearchParams } from "@/lib/list-query";
 import {
   activeOrganization,
-  fetchProjectBySlug,
   fetchUserFacets,
   fetchUsers,
-  getServerContext,
 } from "@/lib/server/data";
+import { projectPage } from "@/lib/server/project-page";
 import { projectPath } from "@/lib/slug";
 import { DEFAULT_ROWS, activeFilters, pageCount, unfiltered } from "@/lib/traces";
 import { parseUserQuery, usersHref } from "@/lib/users";
@@ -41,8 +40,9 @@ export default async function UsersPage({
 }) {
   const { organization, project: slug } = await params;
   const query = parseUserQuery((await searchParams) ?? {});
-  const [gate, project] = await Promise.all([getServerContext(), fetchProjectBySlug(slug)]);
-  if (!gate || !project) return <ServiceUnavailable />;
+  const resolved = await projectPage(slug);
+  if (resolved.kind === "unavailable") return <ServiceUnavailable />;
+  const { gate, project } = resolved;
 
   const [access, facets] = await Promise.all([
     fetchUsers(project.id, { ...query, limit: query.limit ?? DEFAULT_ROWS }),

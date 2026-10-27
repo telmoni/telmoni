@@ -21,13 +21,12 @@ import { LIST_DIMS_WHILE_PENDING } from "@/lib/list-pending";
 import type { SearchParams } from "@/lib/list-query";
 import {
   activeOrganization,
-  fetchProjectBySlug,
   fetchTraceFacets,
   fetchTraceHistogram,
   fetchTraces,
   fetchTraceViews,
-  getServerContext,
 } from "@/lib/server/data";
+import { projectPage } from "@/lib/server/project-page";
 import { projectPath } from "@/lib/slug";
 import {
   DEFAULT_ROWS,
@@ -62,8 +61,9 @@ export default async function TracesPage({
   const query = parseTraceQuery(given);
   const ui = parseTraceUi(given);
   const utcOffset = parseUtcOffset((await cookies()).get(UTC_OFFSET_COOKIE)?.value);
-  const [gate, project] = await Promise.all([getServerContext(), fetchProjectBySlug(slug)]);
-  if (!gate || !project) return <ServiceUnavailable />;
+  const resolved = await projectPage(slug);
+  if (resolved.kind === "unavailable") return <ServiceUnavailable />;
+  const { gate, project } = resolved;
 
   const [access, facets, histogram, views] = await Promise.all([
     fetchTraces(project.id, { ...query, limit: query.limit ?? DEFAULT_ROWS }),

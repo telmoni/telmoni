@@ -8,12 +8,8 @@ import { AccessDenied } from "@/components/access-denied";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { ownerContact } from "@/lib/identity";
-import {
-  activeOrganization,
-  fetchProjectBySlug,
-  fetchTokens,
-  getServerContext,
-} from "@/lib/server/data";
+import { activeOrganization, fetchTokens } from "@/lib/server/data";
+import { projectPage } from "@/lib/server/project-page";
 import { SCOPE_LABEL } from "@/lib/api-key-scopes";
 import { projectPath } from "@/lib/slug";
 import { administersProject } from "@/lib/project-role";
@@ -28,11 +24,9 @@ export default async function ApiKeysPage({
   params: Promise<{ organization: string; project: string }>;
 }) {
   const { organization, project: slug } = await params;
-  const gate = await getServerContext();
-  if (!gate) return <ServiceUnavailable />;
-
-  const project = await fetchProjectBySlug(slug);
-  if (!project) return <ServiceUnavailable />;
+  const resolved = await projectPage(slug);
+  if (resolved.kind === "unavailable") return <ServiceUnavailable />;
+  const { gate, project } = resolved;
 
   const listing = await fetchTokens(project.id);
   if (listing.kind === "unavailable") return <ServiceUnavailable />;

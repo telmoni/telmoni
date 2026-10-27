@@ -21,10 +21,9 @@ import { Flag, FlagOffDetail } from "@/lib/flags";
 import { eventKindLabel } from "@/lib/notification-kinds";
 import {
   fetchConnectors,
-  fetchProjectBySlug,
-  getServerContext,
   type Connection,
 } from "@/lib/server/data";
+import { projectPage } from "@/lib/server/project-page";
 import { administersProject } from "@/lib/project-role";
 
 import { DeliveriesButton } from "./_deliveries";
@@ -72,8 +71,9 @@ export default async function ConnectorsPage({
   const { project: slug } = await params;
   const { connected, error } = (await searchParams) ?? {};
 
-  const [gate, project] = await Promise.all([getServerContext(), fetchProjectBySlug(slug)]);
-  if (!gate || !project) return <ServiceUnavailable />;
+  const resolved = await projectPage(slug);
+  if (resolved.kind === "unavailable") return <ServiceUnavailable />;
+  const { project } = resolved;
   const projectId = project.id;
   const listing = await fetchConnectors(projectId);
 

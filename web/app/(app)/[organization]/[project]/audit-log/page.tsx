@@ -1,12 +1,8 @@
 import { AccessDenied } from "@/components/access-denied";
 import { ServiceUnavailable } from "@/components/service-unavailable";
 import { ownerContact } from "@/lib/identity";
-import {
-  activeOrganization,
-  fetchAuditEvents,
-  fetchProjectBySlug,
-  getServerContext,
-} from "@/lib/server/data";
+import { activeOrganization, fetchAuditEvents } from "@/lib/server/data";
+import { projectPage } from "@/lib/server/project-page";
 import { projectPath } from "@/lib/slug";
 import { administersProject } from "@/lib/project-role";
 
@@ -20,14 +16,12 @@ export default async function AuditPage({
   params: Promise<{ organization: string; project: string }>;
 }) {
   const { organization, project: slug } = await params;
-  const [gate, project] = await Promise.all([
-    getServerContext(),
-    fetchProjectBySlug(slug),
-  ]);
-  if (!gate) return <ServiceUnavailable />;
+  const resolved = await projectPage(slug);
+  if (resolved.kind === "unavailable") return <ServiceUnavailable />;
+  const { gate, project } = resolved;
   const overview = projectPath(organization, slug);
 
-  if (!project || !administersProject(project.role)) {
+  if (!administersProject(project.role)) {
     return (
       <AccessDenied
         what="this project's audit log"

@@ -12,13 +12,12 @@ import { ownerContact } from "@/lib/identity";
 import { administersProject } from "@/lib/project-role";
 import {
   activeOrganization,
-  fetchProjectBySlug,
   fetchRunIncidents,
   fetchSessionLayout,
   fetchTrace,
   fetchTraceLayouts,
-  getServerContext,
 } from "@/lib/server/data";
+import { projectPage } from "@/lib/server/project-page";
 import { projectPath } from "@/lib/slug";
 import { summarizeTrace } from "@/lib/trace-tree";
 import { tracesHref } from "@/lib/traces";
@@ -37,8 +36,9 @@ export default async function TracePage({
   params: Promise<{ organization: string; project: string; trace: string }>;
 }) {
   const { organization, project: slug, trace: runId } = await params;
-  const [gate, project] = await Promise.all([getServerContext(), fetchProjectBySlug(slug)]);
-  if (!gate || !project) return <ServiceUnavailable />;
+  const resolved = await projectPage(slug);
+  if (resolved.kind === "unavailable") return <ServiceUnavailable />;
+  const { gate, project } = resolved;
 
   const list = tracesHref(organization, slug, {});
   const [access, setting, layouts, incidents] = await Promise.all([

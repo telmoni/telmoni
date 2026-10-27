@@ -6,12 +6,8 @@ import { Section } from "@/components/section";
 import { ServiceUnavailable } from "@/components/service-unavailable";
 import { Card } from "@/components/ui/card";
 import { CONTENT_MODE_LABEL, CONTENT_MODE_MEANS } from "@/lib/content-mode";
-import {
-  fetchContentMode,
-  fetchFieldInventory,
-  fetchProjectBySlug,
-  getServerContext,
-} from "@/lib/server/data";
+import { fetchContentMode, fetchFieldInventory } from "@/lib/server/data";
+import { projectPage } from "@/lib/server/project-page";
 import { projectPath } from "@/lib/slug";
 
 export const metadata = { title: "Privacy" };
@@ -26,8 +22,9 @@ export default async function PrivacyPage({
   params: Promise<{ organization: string; project: string }>;
 }) {
   const { organization, project: slug } = await params;
-  const [gate, project] = await Promise.all([getServerContext(), fetchProjectBySlug(slug)]);
-  if (!gate || !project) return <ServiceUnavailable />;
+  const resolved = await projectPage(slug);
+  if (resolved.kind === "unavailable") return <ServiceUnavailable />;
+  const { project } = resolved;
   const [contentMode, inventory] = await Promise.all([
     fetchContentMode(project.id),
     fetchFieldInventory(project.id),

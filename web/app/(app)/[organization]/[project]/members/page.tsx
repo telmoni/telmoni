@@ -14,9 +14,8 @@ import {
   fetchInvites,
   fetchMembers,
   fetchOrganizationMembers,
-  fetchProjectBySlug,
-  getServerContext,
 } from "@/lib/server/data";
+import { projectPage } from "@/lib/server/project-page";
 import { projectPath } from "@/lib/slug";
 
 import { AddMember, type Candidate, InviteRow, MemberRow } from "./_manage";
@@ -30,8 +29,9 @@ export default async function MembersPage({
 }) {
   const { organization, project: slug } = await params;
 
-  const [gate, project] = await Promise.all([getServerContext(), fetchProjectBySlug(slug)]);
-  if (!gate || !project) return <ServiceUnavailable />;
+  const resolved = await projectPage(slug);
+  if (resolved.kind === "unavailable") return <ServiceUnavailable />;
+  const { gate, project } = resolved;
 
   // The organization's roster is its owner's and admins' to seat from, so
   // they alone are handed it; a project admin invites by email.

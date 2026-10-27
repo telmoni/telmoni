@@ -18,13 +18,12 @@ import type { SearchParams } from "@/lib/list-query";
 import { administersProject } from "@/lib/project-role";
 import {
   activeOrganization,
-  fetchProjectBySlug,
   fetchSessionFacets,
   fetchSessionLayout,
   fetchSessions,
   fetchTraceLayouts,
-  getServerContext,
 } from "@/lib/server/data";
+import { projectPage } from "@/lib/server/project-page";
 import { parseSessionQuery, sessionsHref } from "@/lib/sessions";
 import { projectPath } from "@/lib/slug";
 import { DEFAULT_ROWS, activeFilters, pageCount, unfiltered } from "@/lib/traces";
@@ -46,8 +45,9 @@ export default async function SessionsPage({
 }) {
   const { organization, project: slug } = await params;
   const query = parseSessionQuery((await searchParams) ?? {});
-  const [gate, project] = await Promise.all([getServerContext(), fetchProjectBySlug(slug)]);
-  if (!gate || !project) return <ServiceUnavailable />;
+  const resolved = await projectPage(slug);
+  if (resolved.kind === "unavailable") return <ServiceUnavailable />;
+  const { gate, project } = resolved;
 
   // The layouts and the project's default, for the session the panel opens.
   const [access, facets, setting, layouts] = await Promise.all([
