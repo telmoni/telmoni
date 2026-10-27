@@ -117,6 +117,70 @@ const MUTATIONS: &[Mutation] = &[
         resource_kind: "Project",
         actor_id: ActorPattern::Variable,
     },
+    // A member's changes to alerts, windows and incidents, filed by `chain::file`.
+    Mutation {
+        file: "crates/telemetry/src/handler/rules.rs",
+        fn_name: "save",
+        action: "Created",
+        resource_kind: "Alert",
+        actor_id: ActorPattern::Variable,
+    },
+    Mutation {
+        file: "crates/telemetry/src/handler/rules.rs",
+        fn_name: "update_rule",
+        action: "Updated",
+        resource_kind: "Alert",
+        actor_id: ActorPattern::Variable,
+    },
+    Mutation {
+        file: "crates/telemetry/src/handler/rules.rs",
+        fn_name: "delete_rule",
+        action: "Deleted",
+        resource_kind: "Alert",
+        actor_id: ActorPattern::Variable,
+    },
+    Mutation {
+        file: "crates/telemetry/src/handler/rules.rs",
+        fn_name: "pause_rule",
+        action: "Updated",
+        resource_kind: "Alert",
+        actor_id: ActorPattern::Variable,
+    },
+    Mutation {
+        file: "crates/telemetry/src/handler/rules.rs",
+        fn_name: "resume_rule",
+        action: "Updated",
+        resource_kind: "Alert",
+        actor_id: ActorPattern::Variable,
+    },
+    Mutation {
+        file: "crates/telemetry/src/handler/rules.rs",
+        fn_name: "unmute_link",
+        action: "Updated",
+        resource_kind: "Alert",
+        actor_id: ActorPattern::Variable,
+    },
+    Mutation {
+        file: "crates/telemetry/src/handler/mutes.rs",
+        fn_name: "open",
+        action: "Created",
+        resource_kind: "MaintenanceWindow",
+        actor_id: ActorPattern::Variable,
+    },
+    Mutation {
+        file: "crates/telemetry/src/handler/mutes.rs",
+        fn_name: "ended",
+        action: "Updated",
+        resource_kind: "MaintenanceWindow",
+        actor_id: ActorPattern::Variable,
+    },
+    Mutation {
+        file: "crates/telemetry/src/handler/incidents.rs",
+        fn_name: "moved",
+        action: "Updated",
+        resource_kind: "Incident",
+        actor_id: ActorPattern::Variable,
+    },
     Mutation {
         file: "crates/auth/src/handler/organization.rs",
         fn_name: "delete_organization",
@@ -430,10 +494,11 @@ fn every_listed_mutation_emits_expected_tuple() {
             continue;
         };
 
-        let emits = parse_emit_audit_calls(&body);
+        let mut emits = parse_emit_audit_calls(&body);
+        emits.extend(parse_change_emits(&root, &body));
         if emits.is_empty() {
             violations.push(format!(
-                "{}::{} → no `emit_audit(...)` calls in fn body",
+                "{}::{} → no `emit_audit(...)` or change-emitter call in fn body",
                 m.file, m.fn_name,
             ));
             continue;
@@ -485,6 +550,14 @@ const SCANNED_SERVICES: &[&str] = &["auth", "notifications", "telemetry"];
 /// Functions that wrap the shared `emit_audit` under its own name and hand its
 /// error back changed: their callers are the emitters, held to `?` as any is.
 const EMIT_WRAPPERS: &[(&str, &str)] = &[("crates/auth/src/handler/mod.rs", "emit_audit")];
+
+/// Emitters handed their tuple as a `Change { action, kind, .. }` literal, as
+/// (file, fn, call): a call is an emit, its actor the one the emitter files as.
+const CHANGE_EMITTERS: &[(&str, &str, &str)] = &[(
+    "crates/telemetry/src/handler/chain.rs",
+    "file",
+    "chain::file(",
+)];
 
 /// Every crate that HAS a `src/handler` tree must be in [`SCANNED_SERVICES`].
 #[test]
@@ -576,11 +649,18 @@ fn handler_emit_set_matches_manifest() {
             .replace('\\', "/");
 
         for fn_name in handler_fn_names(contents) {
-            if EMIT_WRAPPERS.contains(&(rel.as_str(), fn_name.as_str())) {
+            if EMIT_WRAPPERS.contains(&(rel.as_str(), fn_name.as_str()))
+                || CHANGE_EMITTERS
+                    .iter()
+                    .any(|(file, name, _)| *file == rel && *name == fn_name)
+            {
                 continue;
             }
             if let Some(body) = slurp_fn_body(contents, &fn_name)
-                && body.contains("emit_audit(")
+                && (body.contains("emit_audit(")
+                    || CHANGE_EMITTERS
+                        .iter()
+                        .any(|(_, _, call)| body.contains(call)))
             {
                 found.insert((rel.clone(), fn_name));
             }
@@ -726,6 +806,36 @@ fn parse_emit_audit_calls(body: &str) -> Vec<EmitCall> {
     out
 }
 
+/// The emits a body makes through [`CHANGE_EMITTERS`]: one per `Change {`
+/// literal, each filed as the actor the emitter's own `emit_audit` names.
+fn parse_change_emits(root: &Path, body: &str) -> Vec<EmitCall> {
+    let mut out = Vec::new();
+    for (file, fn_name, call) in CHANGE_EMITTERS {
+        if !body.contains(call) {
+            continue;
+        }
+        let emitter = fs::read_to_string(root.join(file)).expect("read a change emitter");
+        let actor_id = slurp_fn_body(&emitter, fn_name)
+            .and_then(|own| parse_emit_audit_calls(&own).into_iter().next())
+            .map(|e| e.actor_id)
+            .unwrap_or_default();
+        for (idx, _) in body.match_indices("Change {") {
+            if body[..idx].ends_with(|c: char| c.is_alphanumeric() || c == '_') {
+                continue;
+            }
+            // `action` and `kind` come before the literal's first brace closes.
+            let window = &body[idx..];
+            let window = &window[..window.find('}').map_or(window.len(), |n| n + 1)];
+            out.push(EmitCall {
+                action: extract_field(window, "action").unwrap_or_default(),
+                resource_kind: extract_field(window, "kind").unwrap_or_default(),
+                actor_id: actor_id.clone(),
+            });
+        }
+    }
+    out
+}
+
 /// Read the value of a struct field in an `AuditEvent { ... }` literal.
 fn extract_field(window: &str, field: &str) -> Option<String> {
     let needle = format!("{field}:");
@@ -853,7 +963,10 @@ fn every_emit_propagates_its_error() {
                 .filter(|(file, _)| *file == rel)
                 .filter_map(|(_, fn_name)| body_span(contents, fn_name))
                 .collect();
-            for (idx, _) in contents.match_indices("emit_audit(") {
+            let calls = std::iter::once("emit_audit(")
+                .chain(CHANGE_EMITTERS.iter().map(|(_, _, call)| *call));
+            for (idx, call) in calls.flat_map(|call| contents.match_indices(call)) {
+                let name = call.trim_end_matches('(');
                 let before = &contents[..idx];
                 if before.ends_with("fn ") || before.ends_with("async fn ") {
                     continue;
@@ -865,7 +978,7 @@ fn every_emit_propagates_its_error() {
 
                 let tail = &contents[idx..];
                 let Some(aw) = tail.find(".await") else {
-                    violations.push(format!("{rel}:{line} — `emit_audit` call with no `.await`"));
+                    violations.push(format!("{rel}:{line} — `{name}` call with no `.await`"));
                     continue;
                 };
                 let after: String = tail[aw + ".await".len()..]
@@ -874,7 +987,7 @@ fn every_emit_propagates_its_error() {
                     .collect();
                 if !after.trim_start().starts_with('?') {
                     violations.push(format!(
-                        "{rel}:{line} — `emit_audit(...).await` is not followed by `?`. \
+                        "{rel}:{line} — `{name}(...).await` is not followed by `?`. \
                          A swallowed audit error leaves `app.organization_id` bound on the \
                          caller's transaction; see this test's doc comment.",
                     ));
