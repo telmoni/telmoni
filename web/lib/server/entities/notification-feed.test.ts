@@ -21,6 +21,8 @@ vi.mock("./projects", () => ({ fetchProject }));
 import { fetchNotifications, fetchProjectNotifications } from "./notification-feed";
 
 const PROJECT = "project_7bQx2mNv9BcK4dLp";
+const INCIDENT = "5d4f5c68-0000-4000-8000-000000000001";
+const RULE = "7a1c0e52-0000-4000-8000-000000000002";
 const FEED = {
   items: [
     {
@@ -28,12 +30,15 @@ const FEED = {
       kind: "connector_connected",
       title: "Slack connected",
       body: "This project's notices will now be posted to #agents in Acme.",
+      metadata: { provider: "slack", channel: "agents" },
       read_at: null,
       created_at: "2026-10-14T03:00:00Z",
     },
   ],
   unread: 1,
 };
+// Only an incident's notice keeps its metadata.
+const READ = { ...FEED, items: FEED.items.map((item) => ({ ...item, metadata: null })) };
 
 function answer(status: number, body: unknown) {
   fetchWithTimeout.mockResolvedValue({ ok: status < 400, status, json: async () => body });
@@ -50,7 +55,7 @@ beforeEach(() => {
 // whether the request names a project: each reader asks for its own.
 describe("fetchProjectNotifications", () => {
   it("reads the project's own feed, naming the project", async () => {
-    expect(await fetchProjectNotifications(PROJECT)).toEqual(FEED);
+    expect(await fetchProjectNotifications(PROJECT)).toEqual(READ);
     const [url, init] = fetchWithTimeout.mock.calls[0];
     expect(url).toBe("http://server/internal/v1/notifications/feed");
     expect(init.headers).toMatchObject({ "x-project-id": PROJECT });
@@ -75,11 +80,36 @@ describe("fetchProjectNotifications", () => {
     fetchWithTimeout.mockRejectedValue(new Error("timed out"));
     expect(await fetchProjectNotifications(PROJECT)).toBeNull();
   });
+
+  // ⚠ An incident's notice names the incident its row links to; one whose
+  // metadata names none stays on the feed, linking nowhere.
+  it("keeps an incident's notice's metadata, checked, and no other notice's", async () => {
+    const [notice] = FEED.items;
+    answer(200, {
+      items: [
+        {
+          ...notice,
+          id: "n3",
+          kind: "incident_opened",
+          metadata: { incident_id: INCIDENT, rule_id: RULE, severity: "alert", reminder: false },
+        },
+        { ...notice, id: "n2", kind: "incident_resolved", metadata: { incident_id: "i-1", rule_id: RULE } },
+        notice,
+      ],
+      unread: 3,
+    });
+    const read = await fetchProjectNotifications(PROJECT);
+    expect(read?.items.map((item) => [item.id, item.metadata])).toEqual([
+      ["n3", { incident_id: INCIDENT, rule_id: RULE }],
+      ["n2", null],
+      ["n1", null],
+    ]);
+  });
 });
 
 describe("fetchNotifications", () => {
   it("reads the organization's own feed, naming no project", async () => {
-    expect(await fetchNotifications()).toEqual(FEED);
+    expect(await fetchNotifications()).toEqual(READ);
     const [url, init] = fetchWithTimeout.mock.calls[0];
     expect(url).toBe("http://server/internal/v1/notifications/feed");
     expect(init.headers).not.toHaveProperty("x-project-id");

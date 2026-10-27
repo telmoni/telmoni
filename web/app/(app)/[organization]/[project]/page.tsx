@@ -19,15 +19,15 @@ export async function generateMetadata({
 }
 
 // The project's name, and under it its notices when there are any — a
-// member joining or leaving, a channel connected or lost — which nothing
-// else in the console reads. Anybody on the project reads them, as the
-// service answers a project's feed at any role.
+// member joining or leaving, a channel connected or lost, an incident told,
+// linking to it — which nothing else in the console reads. Anybody on the
+// project reads them, as the service answers a project's feed at any role.
 export default async function OverviewPage({
   params,
 }: {
   params: Promise<{ organization: string; project: string }>;
 }) {
-  const { project: slug } = await params;
+  const { organization, project: slug } = await params;
   const project = await fetchProjectBySlug(slug);
   if (!project) return <ServiceUnavailable />;
   const notices = await fetchProjectNotifications(project.id);
@@ -42,6 +42,7 @@ export default async function OverviewPage({
           <Notices
             label="Project notices"
             feed={notices}
+            project={{ organization, slug }}
             action={
               newest && notices.unread > 0 ? (
                 <MarkProjectRead

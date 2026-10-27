@@ -4,18 +4,36 @@ import { z } from "zod";
 import { fetchWithTimeout } from "@/lib/api/fetch";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
+import { NotificationKind } from "@/lib/types/enums";
 
 import { identityContext, organizationHeaders, projectHeaders } from "./identity-context";
 import { fetchProject } from "./projects";
 
-const FeedItemSchema = z.object({
-  id: z.string(),
-  kind: z.string(),
-  title: z.string(),
-  body: z.string(),
-  read_at: z.string().nullable(),
-  created_at: z.string(),
-});
+// What an incident's notice carries besides its words: its incident and its
+// alert (`crates/telemetry/src/notify.rs`), the incident its row links to.
+const IncidentMetadataSchema = z.object({ incident_id: z.guid(), rule_id: z.guid() });
+
+const INCIDENT_KINDS: ReadonlySet<string> = new Set([
+  NotificationKind.IncidentOpened,
+  NotificationKind.IncidentResolved,
+]);
+
+// Only an incident's notice keeps its metadata, checked: one that names no
+// incident stays on the feed, linking nowhere, rather than failing the feed.
+const FeedItemSchema = z
+  .object({
+    id: z.string(),
+    kind: z.string(),
+    title: z.string(),
+    body: z.string(),
+    metadata: z.unknown(),
+    read_at: z.string().nullable(),
+    created_at: z.string(),
+  })
+  .transform(({ metadata, ...item }) => {
+    const incident = INCIDENT_KINDS.has(item.kind) ? IncidentMetadataSchema.safeParse(metadata) : null;
+    return { ...item, metadata: incident?.success ? incident.data : null };
+  });
 export type FeedItem = z.infer<typeof FeedItemSchema>;
 
 const FeedSchema = z.object({

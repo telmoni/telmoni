@@ -27,6 +27,7 @@ type FeedItem = {
   kind: string;
   title: string;
   body: string;
+  metadata: { incident_id: string; rule_id: string } | null;
   read_at: string | null;
   created_at: string;
 };
@@ -56,6 +57,7 @@ const CONNECTED: FeedItem = {
   kind: "connector_connected",
   title: "Slack connected",
   body: "This project's notices will now be posted to #agents in Acme.",
+  metadata: null,
   read_at: null,
   created_at: "2026-10-14T03:00:00Z",
 };
@@ -64,8 +66,23 @@ const JOINED: FeedItem = {
   kind: "member_added",
   title: "Grace joined the project",
   body: "Grace accepted an invitation as a Member.",
+  metadata: null,
   read_at: "2026-10-13T09:00:00Z",
   created_at: "2026-10-13T08:00:00Z",
+};
+const INCIDENT = "5d4f5c68-0000-4000-8000-000000000001";
+const OPENED: FeedItem = {
+  id: "n3",
+  kind: "incident_opened",
+  title: "Slow calls: alert",
+  body: [
+    "The p95 duration of model calls over the last hour is 6,200 ms, past the alert threshold of 5,000 ms.",
+    "The run of the slowest model call: 4 steps, 1200 tokens and $0.012. https://console.example.com/org_1/project_7bQx2mNv9BcK4dLp/traces/9b2d1f63-0000-4000-8000-000000000003",
+    "Traces: https://console.example.com/org_1/project_7bQx2mNv9BcK4dLp/traces?kind=model_call",
+  ].join("\n"),
+  metadata: { incident_id: INCIDENT, rule_id: "7a1c0e52-0000-4000-8000-000000000002" },
+  read_at: null,
+  created_at: "2026-10-14T04:00:00Z",
 };
 
 async function renderAt(project: string) {
@@ -109,6 +126,22 @@ describe("OverviewPage", () => {
     expect(screen.getByRole("heading", { level: 2, name: "Project notices" })).toBeInTheDocument();
     expect(within(notices).getByRole("button", { name: "Mark read (1)" })).toBeInTheDocument();
     expect(within(screen.getByTestId("page-header")).queryAllByRole("button")).toHaveLength(0);
+  });
+
+  // ⚠ An incident's notice is lines, and the incident itself one link away.
+  it("links an incident's notice to the incident, its lines kept", async () => {
+    mockFeed = { items: [OPENED, CONNECTED, JOINED], unread: 2 };
+    await renderAt(SLUG);
+    const notices = screen.getByRole("region", { name: "Project notices" });
+    expect(within(notices).getByRole("link", { name: "Slow calls: alert" })).toHaveAttribute(
+      "href",
+      `/acme/platform/alerts?incident=${INCIDENT}#incident-${INCIDENT}`,
+    );
+    // The only link: a notice of any other kind names no incident.
+    expect(within(notices).getAllByRole("link")).toHaveLength(1);
+    const body = within(notices).getByText(/^The p95 duration of model calls/);
+    expect(body.textContent).toBe(OPENED.body);
+    expect(body).toHaveClass("whitespace-pre-line");
   });
 
   it("hands Mark read the project's id, not its slug", async () => {
