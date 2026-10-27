@@ -45,7 +45,7 @@ import {
 import { incidentHref } from "@/lib/alerts";
 import { windowReaching } from "@/lib/list-query";
 import type { Incident } from "@/lib/server/entities/alerts";
-import type { TraceDetail, TraceSpan } from "@/lib/server/entities/traces";
+import type { RunSpend, TraceDetail, TraceSpan } from "@/lib/server/entities/traces";
 import { sessionHref } from "@/lib/sessions";
 import {
   branchesFrom,
@@ -161,11 +161,30 @@ function useWindowReaching(iso: string): number | undefined {
   return useSyncExternalStore(subscribeNever, () => windowReaching(iso), () => undefined);
 }
 
+/** What the run spent, each call priced as an alert on its cost prices it,
+ *  and how many of the models it called no price covers, named on hover. */
+function RunSpent({ spend }: { spend: RunSpend }) {
+  const unpriced = spend.unpriced.length;
+  return (
+    <span
+      className="tabular-nums"
+      title={
+        unpriced > 0
+          ? `No price for ${spend.unpriced.map((name) => `${name.provider} ${name.model}`).join(", ")}`
+          : "Each call's cost as reported, else its tokens at Telmoni's price"
+      }
+    >
+      {formatCost(spend.spent)}
+      {unpriced > 0 && `, ${formatCount(unpriced)} ${unpriced === 1 ? "model" : "models"} unpriced`}
+    </span>
+  );
+}
+
 /** The trace summed on one line under its name: how it ended, when it began,
- *  how long it ran, its tokens, the session, the user and the tags it
- *  carried, and on its page the incidents whose notices showed it. Drawn
- *  again only for another trace (`memo`): the peek's edge, dragged, draws the
- *  panel around it at every move. */
+ *  how long it ran, its tokens, what it spent as its cost alert reads it, the
+ *  session, the user and the tags it carried, and on its page the incidents
+ *  whose notices showed it. Drawn again only for another trace (`memo`): the
+ *  peek's edge, dragged, draws the panel around it at every move. */
 export const TraceMeta = memo(function TraceMeta({
   trace,
   organization,
@@ -198,6 +217,9 @@ export const TraceMeta = memo(function TraceMeta({
       >
         {formatCount(tokens)} {tokens === 1 ? "token" : "tokens"}
       </span>
+      {trace.spend && (trace.spend.spent > 0 || trace.spend.unpriced.length > 0) && (
+        <RunSpent spend={trace.spend} />
+      )}
       {root.session_id && (
         <MetaLink
           href={sessionHref(organization, slug, root.session_id, { days: reaching })}

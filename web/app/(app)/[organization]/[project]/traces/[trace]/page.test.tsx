@@ -194,7 +194,15 @@ beforeEach(() => {
     flags: {},
   };
   mockProject = { id: "project_7bQx2mNv9BcK4dLp", slug: "web", name: "Web", role: Role.Member };
-  mockTrace = { kind: "ok", trace: { run_id: RUN, spans: SPANS, truncated: false } };
+  mockTrace = {
+    kind: "ok",
+    trace: {
+      run_id: RUN,
+      spans: SPANS,
+      truncated: false,
+      spend: { spent: 0.84, unpriced: [{ provider: "openai", model: "ft:gpt-4o:acme" }] },
+    },
+  };
   mockIncidents = [];
 });
 
@@ -233,6 +241,12 @@ describe("TracePage", () => {
     expect(screen.getAllByText("2 s").length).toBeGreaterThan(0);
     expect(
       screen.getAllByText("1,500 tokens").some((el) => el.getAttribute("title") === "1,200 in, 300 out"),
+    ).toBe(true);
+    // ⚠ What the run spent, as its cost alert's notice gives it, and the models left out.
+    expect(
+      screen
+        .getAllByText("$0.84, 1 model unpriced")
+        .some((el) => el.getAttribute("title") === "No price for openai ft:gpt-4o:acme"),
     ).toBe(true);
     expect(screen.getByRole("link", { name: "session" })).toHaveAttribute(
       "href",
@@ -387,7 +401,10 @@ describe("TracePage", () => {
   });
 
   it("calls a run whose own span has not arrived running", async () => {
-    mockTrace = { kind: "ok", trace: { run_id: RUN, spans: SPANS.slice(2, 3), truncated: true } };
+    mockTrace = {
+      kind: "ok",
+      trace: { run_id: RUN, spans: SPANS.slice(2, 3), truncated: true, spend: null },
+    };
     render(await TracePage({ params: PARAMS }));
     expect(screen.getByText("Running")).toBeInTheDocument();
     expect(within(screen.getByRole("tree")).getByText("chat claude-sonnet-5-5")).toBeInTheDocument();

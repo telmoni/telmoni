@@ -901,6 +901,64 @@ async fn a_trace_is_its_runs_spans_in_order_and_another_projects_run_is_not_here
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
+/// ⚠ A trace carries what its run spent as an alert on its cost reads it: a
+/// call's cost as reported, else its tokens at the table's price, and the
+/// models priced by neither.
+#[sqlx::test]
+async fn a_trace_carries_what_its_run_spent_and_the_models_no_price_covers(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let p = projects(&pool);
+    sqlx::query(
+        "INSERT INTO telemetry.model_prices
+             (provider, model, effective_from, input, output, cache_read, cache_write)
+         VALUES ('openai', 'gpt-4o', NULL, 2e-6, 8e-6, 2e-7, 2.5e-6)",
+    )
+    .execute(&pool)
+    .await
+    .expect("a price");
+    let run = Uuid::new_v4();
+    let at = Utc::now() - Duration::seconds(30);
+    let call = |model: &str, input: u64, output: u64, cost: Option<f64>| SpanRow {
+        run_id: run,
+        provider: "openai".into(),
+        model: model.into(),
+        input_tokens: input,
+        output_tokens: output,
+        cost,
+        ..common::received(
+            &p.ours,
+            SpanKind::ModelCall,
+            &format!("chat {model}"),
+            500,
+            at,
+        )
+    };
+    ch.store
+        .insert_spans(&[
+            call("gpt-4o", 1_000, 100, None),
+            call("gpt-4o", 10, 10, Some(0.5)),
+            call("ft:gpt-4o:acme", 90, 9, None),
+        ])
+        .await
+        .expect("the calls are kept");
+
+    let (status, body) = p
+        .send(p.request(MEMBER, &p.ours, &format!("{LANE}/{run}")))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let spent = body["spend"]["spent"].as_f64().expect("what it spent");
+    assert!(
+        (spent - (1_000.0 * 2e-6 + 100.0 * 8e-6 + 0.5)).abs() < 1e-12,
+        "{spent}"
+    );
+    assert_eq!(
+        body["spend"]["unpriced"],
+        serde_json::json!([{ "provider": "openai", "model": "ft:gpt-4o:acme" }])
+    );
+}
+
 /// A run whose spans hold more units than a page shows is cut where they pass, and says so.
 #[sqlx::test]
 async fn a_trace_of_wide_spans_is_cut_where_their_units_pass_the_cap(pool: PgPool) {

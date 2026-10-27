@@ -160,7 +160,12 @@ const SPAN = {
   units: 1,
   received_at: "2026-10-11T03:00:02Z",
 };
-const DETAIL = { run_id: RUN, spans: [SPAN], truncated: false };
+const DETAIL = {
+  run_id: RUN,
+  spans: [SPAN],
+  truncated: false,
+  spend: { spent: 0.0028, unpriced: [] },
+};
 
 function answer(status: number, body: unknown) {
   fetchWithTimeout.mockResolvedValue({ ok: status < 400, status, json: async () => body });

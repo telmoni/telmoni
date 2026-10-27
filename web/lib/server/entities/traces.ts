@@ -220,10 +220,21 @@ const TraceSpanSchema = z.object({
 });
 export type TraceSpan = z.infer<typeof TraceSpanSchema>;
 
+/** What a run has spent, as an alert on its cost reads it: each call's cost
+ *  as reported, else its tokens at Telmoni's price, and the models priced by
+ *  neither, which it leaves out. */
+const RunSpendSchema = z.object({
+  spent: z.number(),
+  unpriced: z.array(z.object({ provider: z.string(), model: z.string() })),
+});
+export type RunSpend = z.infer<typeof RunSpendSchema>;
+
 const TraceDetailSchema = z.object({
   run_id: z.string(),
   spans: z.array(TraceSpanSchema),
   truncated: z.boolean(),
+  /** None where the server could not read it. */
+  spend: RunSpendSchema.nullable(),
 });
 export type TraceDetail = z.infer<typeof TraceDetailSchema>;
 

@@ -139,7 +139,10 @@ A `⌘`-click or `Ctrl`-click on the run's id opens the trace's page in a new
 tab instead. The trace's own page shows the same, with the page's room.
 
 Its first line sums the run: its status, when it started, how long it ran, its
-model calls' tokens — hover for the split — its session, a link to
+model calls' tokens — hover for the split — what it spent so far, as an
+alert on a run's cost reads it ([what a call cost](/docs/api/ingest#what-a-call-cost)),
+with how many of the models it called no price covers, named on hover, its
+session, a link to
 [its page](/docs/workspace/sessions#a-session), its user, a link to the runs
 that share it, and its tags; and on the trace's own page, each incident whose
 notices showed the run, among the last twenty each keeps, a link to it on the

@@ -31,6 +31,7 @@ use crate::contract::{
     AGENT_MAX, ATTRIBUTE_VALUE_MAX, ENVIRONMENT_MAX, MODEL_MAX, NAME_MAX, RELEASE_MAX,
     SESSION_ID_MAX, TAG_KEY_MAX, TAG_VALUE_MAX, USER_ID_MAX,
 };
+use crate::spend::{self, Unread};
 use crate::store::{self, Projects, SpanRow};
 use crate::traces::{
     self, Bar, DEFAULT_LIMIT, EXPORT_MAX, FACET_VALUES_MAX, FILTER_VALUES_MAX, FacetRow, MAX_DAYS,
@@ -746,6 +747,27 @@ pub struct TraceDetail {
     pub spans: Vec<TraceSpan>,
     /// Whether the run holds more spans than the page shows.
     pub truncated: bool,
+    /// What the run has spent, as an alert on its cost reads it; none where
+    /// that could not be read.
+    pub spend: Option<RunSpend>,
+}
+
+/// What a run's model calls cost so far: each call's cost as reported, else
+/// its tokens at Telmoni's price ([`spend::run`]).
+#[derive(Debug, Serialize)]
+pub struct RunSpend {
+    /// In US dollars.
+    pub spent: f64,
+    /// The models its calls named that neither reported a cost nor have a
+    /// price, which `spent` leaves out.
+    pub unpriced: Vec<UnpricedModel>,
+}
+
+/// A model no price covers, by its provider.
+#[derive(Debug, Serialize)]
+pub struct UnpricedModel {
+    pub provider: String,
+    pub model: String,
 }
 
 /// One span as the trace page reads it: the row, its maps as maps and its
@@ -963,7 +985,39 @@ pub async fn get_trace(
         run_id,
         spans: rows.into_iter().take(shown).map(TraceSpan::from).collect(),
         truncated,
+        spend: spend_of(&state, &projects, run_id).await,
     }))
+}
+
+/// What the run has spent; none, logged by the error's kind, where a store
+/// does not answer, and the trace shows without it.
+async fn spend_of(state: &AppState, projects: &Projects, run_id: Uuid) -> Option<RunSpend> {
+    match spend::run(state, projects, run_id).await {
+        Ok(run) => Some(RunSpend {
+            spent: run.spent,
+            unpriced: run
+                .unpriced
+                .into_iter()
+                .map(|(provider, model)| UnpricedModel { provider, model })
+                .collect(),
+        }),
+        Err(Unread::Store(error)) => {
+            tracing::warn!(
+                run_id = %run_id,
+                kind = store::error_kind(&error),
+                "traces: what a run spent could not be read; its trace goes without"
+            );
+            None
+        }
+        Err(Unread::Db(error)) => {
+            tracing::warn!(
+                run_id = %run_id,
+                error = %error,
+                "traces: the prices of what a run spent could not be read; its trace goes without"
+            );
+            None
+        }
+    }
 }
 
 /// ClickHouse did not answer a read: an outage the console says so about, or
