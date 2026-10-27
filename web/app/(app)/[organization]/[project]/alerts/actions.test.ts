@@ -197,7 +197,7 @@ describe("the alert's own changes", () => {
       await pauseAlertAction(PROJECT, RULE, "yes" as unknown as boolean),
       await deleteAlertAction(PROJECT, `${RULE}/pause`),
       await hearAgainAction(PROJECT, RULE, "../../rules"),
-      await incidentAction(PROJECT, INCIDENT, "vote" as "resolve"),
+      await incidentAction(PROJECT, INCIDENT, "../../rules" as "resolve"),
       await incidentAction(PROJECT, "x", "resolve"),
       await endMuteAction(PROJECT, `${MUTE}/end`),
     ]) {

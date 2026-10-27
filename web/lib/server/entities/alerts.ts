@@ -15,7 +15,6 @@ import {
   Severity,
   SpanKind,
   SpanStatus,
-  Verdict,
 } from "@/lib/types/enums";
 
 import { identityContext, projectHeaders } from "./identity-context";
@@ -115,41 +114,12 @@ const MuteSchema = z.object({
 });
 export type Mute = z.infer<typeof MuteSchema>;
 
-// The share of the votes on the incidents of the last `days` calling them
-// useful, the project's and each alert's; `ratio` is none without a vote.
-const PrecisionSchema = z.object({
-  days: z.number().int(),
-  useful: z.number().int(),
-  noise: z.number().int(),
-  ratio: z.number().nullable(),
-  rules: z.array(
-    z.object({
-      rule_id: z.string(),
-      rule_name: z.string(),
-      useful: z.number().int(),
-      noise: z.number().int(),
-      ratio: z.number().nullable(),
-    }),
-  ),
-});
-export type Precision = z.infer<typeof PrecisionSchema>;
-
-// One of the project's incidents with the votes on it and the person's own,
-// as the page every notice of it links to reads it.
-const IncidentVotesSchema = IncidentSchema.extend({
-  useful: z.number().int(),
-  noise: z.number().int(),
-  yours: z.enum(Verdict).nullable(),
-});
-export type IncidentVotes = z.infer<typeof IncidentVotesSchema>;
-
 export type AlertsAccess =
   | {
       kind: "ok";
       alerts: Alert[];
       incidents: Incident[];
       mutes: Mute[];
-      precision: Precision;
       /** When it was read, in epoch milliseconds: the page's now. */
       at: number;
     }
@@ -157,7 +127,7 @@ export type AlertsAccess =
   | { kind: "unavailable" };
 
 export type IncidentAccess =
-  | { kind: "ok"; incident: IncidentVotes }
+  | { kind: "ok"; incident: Incident }
   /** No incident with that id in this project. */
   | { kind: "missing" }
   | { kind: "forbidden" }
@@ -167,25 +137,19 @@ export type IncidentAccess =
  *  list may leave out the oldest resolved ones. */
 export const INCIDENTS_MAX = 200;
 
-/** The project's alerts page whole: its alerts by name, its incidents —
- *  those not resolved first, then the newest — its maintenance windows, and
- *  the week's precision; read together, so the page is one moment's. */
+/** What the alerts page reads: the alerts by name, the incidents — those not
+ *  resolved first, then the newest — and the maintenance windows; read
+ *  together, so the page is one moment's. */
 export const fetchAlerts = cache(async (projectId: string): Promise<AlertsAccess> => {
   const at = Date.now();
-  const [alerts, incidents, mutes, precision] = await Promise.all([
+  const [alerts, incidents, mutes] = await Promise.all([
     readLane("fetchAlerts", projectId, "/rules", z.object({ rules: z.array(AlertSchema) })),
     readLane("fetchAlerts", projectId, "/incidents", z.object({ incidents: z.array(IncidentSchema) })),
     readLane("fetchAlerts", projectId, "/mutes", z.object({ mutes: z.array(MuteSchema) })),
-    readLane("fetchAlerts", projectId, "/precision", PrecisionSchema),
   ]);
-  const reads = [alerts, incidents, mutes, precision];
+  const reads = [alerts, incidents, mutes];
   if (reads.some((read) => read.kind === "forbidden")) return { kind: "forbidden" };
-  if (
-    alerts.kind !== "ok" ||
-    incidents.kind !== "ok" ||
-    mutes.kind !== "ok" ||
-    precision.kind !== "ok"
-  ) {
+  if (alerts.kind !== "ok" || incidents.kind !== "ok" || mutes.kind !== "ok") {
     return { kind: "unavailable" };
   }
   return {
@@ -193,7 +157,6 @@ export const fetchAlerts = cache(async (projectId: string): Promise<AlertsAccess
     alerts: alerts.value.rules,
     incidents: incidents.value.incidents,
     mutes: mutes.value.mutes,
-    precision: precision.value,
     at,
   };
 });
@@ -232,7 +195,7 @@ export const fetchIncident = cache(
         logger.warn({ fetcher: "fetchIncident", status: res.status }, "entities: upstream refused");
         return { kind: "unavailable" };
       }
-      const parsed = IncidentVotesSchema.safeParse(await res.json());
+      const parsed = IncidentSchema.safeParse(await res.json());
       if (!parsed.success) {
         logger.warn(
           { fetcher: "fetchIncident", issues: parsed.error.issues },

@@ -4,8 +4,8 @@
 //! keyed by the incident and the kind, so an incident has one feed row of
 //! each; what it says again goes to the connectors alone. A notice names the
 //! alert, where it stands and the numbers that crossed it, the run that shows
-//! it and the traces it read, and links its vote: names and numbers alone,
-//! never a span's content, since every connector is a third party.
+//! it and the traces it read: names and numbers alone, never a span's
+//! content, since every connector is a third party.
 
 use serde_json::json;
 use uuid::Uuid;
@@ -65,20 +65,11 @@ pub async fn tell_incidents(state: &AppState, rule: &RuleRow, value: Option<f64>
         };
         let (title, body) = words(rule, value, one);
         let shown = run.as_ref().filter(|_| shows_run(one));
-        let vote_url = vote_link(
-            state,
-            &rule.organization_id,
-            &rule.project_id,
-            one.incident_id,
-        );
         let body = carrying(
             body,
             [
                 shown.map(|run| run_line(state, rule, run)),
                 traces_url.as_ref().map(|url| format!("Traces: {url}")),
-                vote_url
-                    .as_ref()
-                    .map(|url| format!("Useful, or noise? {url}")),
             ],
         );
         let metadata = json!({
@@ -91,7 +82,6 @@ pub async fn tell_incidents(state: &AppState, rule: &RuleRow, value: Option<f64>
             "reminder": one.reminder,
             "run": shown.map(|run| run_json(state, rule, run)),
             "traces_url": traces_url,
-            "vote_url": vote_url,
         });
         let key = format!(
             "telemetry:incident:{}:{}",
@@ -233,22 +223,6 @@ async fn muted_now(state: &AppState, project_id: &ProjectId, rule_id: Uuid) -> b
             false
         }
     }
-}
-
-/// The console page an incident is voted on from, behind sign-in, spelled
-/// with ids, which the console sends on to the slugs and follows a moved
-/// project by. The page asks before it casts, so a link a mail scanner or a
-/// chat's preview follows casts nothing.
-fn vote_link(
-    state: &AppState,
-    organization_id: &OrganizationId,
-    project_id: &ProjectId,
-    incident_id: Uuid,
-) -> Option<String> {
-    let origin = state.config.app_url.as_deref()?;
-    Some(format!(
-        "{origin}/{organization_id}/{project_id}/alerts/incidents/{incident_id}/vote"
-    ))
 }
 
 /// A notice's body, then a line for each of what else it carries.
@@ -594,25 +568,17 @@ pub async fn resolved_by_hand(state: &AppState, incident: &IncidentRow) {
     let (incident_id, rule_id, severity) = (incident.id, incident.rule_id, incident.severity);
     let title = format!("{}: resolved", incident.rule_name);
     let key = format!("telemetry:incident:{incident_id}:resolved");
-    let vote_url = vote_link(state, organization_id, project_id, incident_id);
-    let body = carrying(
-        "A member of the project resolved this incident.".to_owned(),
-        [vote_url
-            .as_ref()
-            .map(|url| format!("Useful, or noise? {url}"))],
-    );
     let metadata = json!({
         "incident_id": incident_id,
         "rule_id": rule_id,
         "severity": severity,
         "by_hand": true,
-        "vote_url": vote_url,
     });
     let notice = |dedup_key| Notice {
         kind: NotificationKind::IncidentResolved,
         subject_user_id: None,
         title: &title,
-        body: &body,
+        body: "A member of the project resolved this incident.",
         metadata: metadata.clone(),
         dedup_key,
     };

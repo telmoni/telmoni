@@ -73,7 +73,7 @@ const WHAT = {
     },
     {
       title: "Alerts",
-      body: "Failures, latency, tokens or what a run spends, over an hour, a day or a week against an alert threshold and an optional warning one; each incident told to the feed, Slack and webhooks, and acknowledged, resolved or voted on in the console.",
+      body: "Failures, latency, tokens or what a run spends, over an hour, a day or a week against an alert threshold and an optional warning one; each incident told to the feed, Slack and webhooks, and acknowledged or resolved in the console.",
     },
     {
       title: "Cost and caps",

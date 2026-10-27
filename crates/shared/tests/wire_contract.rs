@@ -12,7 +12,7 @@ use telmoni_shared::{
     ApiKeyScope, ContentMode, Flag, IncidentStatus, LayoutDepth, LayoutOpen, MissingData,
     NotificationKind, OrganizationStatus, Role, RuleAggregation, RuleLevel, RuleMeasure,
     RuleOperator, RuleWindow, SessionSort, Severity, SortDirection, SpanKind, SpanStatus,
-    TraceColumn, TraceSort, UserSort, Verdict, ViewKind, slug,
+    TraceColumn, TraceSort, UserSort, ViewKind, slug,
 };
 
 /// Serialize each variant to its wire string, per the enum's `#[serde(rename_all)]`.
@@ -71,7 +71,6 @@ fn generated_contract() -> Value {
             "Severity": wire(&Severity::all()),
             "IncidentStatus": wire(&IncidentStatus::all()),
             "RuleLevel": wire(&RuleLevel::all()),
-            "Verdict": wire(&Verdict::all()),
             "Flag": wire(&all_variants!(Flag; Connectors, PublicApi, ApiTokens,
                 Members, Signup)),
         },

@@ -70,14 +70,6 @@ const MUTE = {
   created_at: "2026-10-26T02:00:00Z",
   ended_by: null,
 };
-const PRECISION = {
-  days: 7,
-  useful: 3,
-  noise: 1,
-  ratio: 0.75,
-  rules: [{ rule_id: RULE, rule_name: "Slow calls", useful: 3, noise: 1, ratio: 0.75 }],
-};
-const VOTES = { ...INCIDENT_ROW, useful: 2, noise: 1, yours: "noise" };
 
 function answer(status: number, body: unknown) {
   fetchWithTimeout.mockResolvedValue({ ok: status < 400, status, json: async () => body });
@@ -96,7 +88,6 @@ const PAGE = {
   "/rules": { status: 200, body: { rules: [ALERT] } },
   "/incidents": { status: 200, body: { incidents: [INCIDENT_ROW] } },
   "/mutes": { status: 200, body: { mutes: [MUTE] } },
-  "/precision": { status: 200, body: PRECISION },
 };
 
 beforeEach(() => {
@@ -105,7 +96,7 @@ beforeEach(() => {
 });
 
 describe("fetchAlerts", () => {
-  it("reads the project's alerts, incidents, windows and precision together", async () => {
+  it("reads the project's alerts, incidents and windows together", async () => {
     lanes(PAGE);
     const access = await fetchAlerts(PROJECT);
     expect(access).toMatchObject({
@@ -113,13 +104,11 @@ describe("fetchAlerts", () => {
       alerts: [{ name: "Slow calls", connectors: [{ connection_id: CONNECTION }] }],
       incidents: [{ id: INCIDENT, told_to: [CONNECTION], runs: [RUN] }],
       mutes: [{ rule_id: null }],
-      precision: { ratio: 0.75 },
     });
     const asked = fetchWithTimeout.mock.calls.map(([url]) => url).sort();
     expect(asked).toEqual([
       "http://server/internal/v1/telemetry/incidents",
       "http://server/internal/v1/telemetry/mutes",
-      "http://server/internal/v1/telemetry/precision",
       "http://server/internal/v1/telemetry/rules",
     ]);
     for (const [, init] of fetchWithTimeout.mock.calls) {
@@ -130,7 +119,7 @@ describe("fetchAlerts", () => {
   it("reads a 403 on any lane as forbidden, and any other failure as an outage", async () => {
     lanes({ ...PAGE, "/mutes": { status: 403, body: {} } });
     expect(await fetchAlerts(PROJECT)).toEqual({ kind: "forbidden" });
-    lanes({ ...PAGE, "/precision": { status: 503, body: {} } });
+    lanes({ ...PAGE, "/incidents": { status: 503, body: {} } });
     expect(await fetchAlerts(PROJECT)).toEqual({ kind: "unavailable" });
     lanes({ ...PAGE, "/rules": { status: 200, body: { rules: [{ ...ALERT, severity: "red" }] } } });
     expect(await fetchAlerts(PROJECT)).toEqual({ kind: "unavailable" });
@@ -165,13 +154,13 @@ describe("fetchRunIncidents", () => {
 });
 
 describe("fetchIncident", () => {
-  beforeEach(() => answer(200, VOTES));
+  beforeEach(() => answer(200, INCIDENT_ROW));
 
-  it("reads one of the project's incidents, with its votes and the person's own", async () => {
+  it("reads one of the project's incidents", async () => {
     const access = await fetchIncident(PROJECT, INCIDENT);
     expect(access).toMatchObject({
       kind: "ok",
-      incident: { rule_name: "Slow calls", useful: 2, noise: 1, yours: "noise" },
+      incident: { id: INCIDENT, rule_name: "Slow calls", runs: [RUN] },
     });
     const [url, init] = fetchWithTimeout.mock.calls[0];
     expect(url).toBe(`http://server/internal/v1/telemetry/incidents/${INCIDENT}`);
@@ -192,9 +181,9 @@ describe("fetchIncident", () => {
   });
 
   it("answers an outage for an answer it cannot read, or a server it cannot reach", async () => {
-    answer(200, { ...VOTES, yours: "maybe" });
+    answer(200, { ...INCIDENT_ROW, status: "maybe" });
     expect(await fetchIncident(PROJECT, INCIDENT)).toEqual({ kind: "unavailable" });
-    answer(503, VOTES);
+    answer(503, INCIDENT_ROW);
     expect(await fetchIncident(PROJECT, INCIDENT)).toEqual({ kind: "unavailable" });
     fetchWithTimeout.mockRejectedValue(new Error("timed out"));
     expect(await fetchIncident(PROJECT, INCIDENT)).toEqual({ kind: "unavailable" });

@@ -1,6 +1,6 @@
 ---
 title: "Alerts"
-description: "A project's Alerts page: the week's precision, its incidents, open ones first, acknowledged or resolved by any member, and every alert — a measure of the project's runs, steps or calls over a window against its thresholds — with where its notices go and its maintenance windows, made, edited, paused, muted and deleted there."
+description: "A project's Alerts page: every alert — a measure of the project's runs, steps or calls over a window against its thresholds — with where its notices go, its maintenance windows and the incidents it opened, made, edited, paused, muted and deleted there, its incidents acknowledged or resolved by any member."
 ---
 
 An **alert** watches a measure of a project's spans over the last hour, day
@@ -10,49 +10,15 @@ the tokens they used, the most a run spent. It is evaluated every minute.
 When its value crosses a threshold it opens an **incident**, told in the
 project's feed and to the connectors the alert links; when the value comes
 back inside its thresholds the incident resolves, and that is told too. A
-project's **Alerts** page (`/{organization}/{project}/alerts`) holds both.
-Everything on it is metadata — names and numbers, never a prompt, a
-completion or a tool payload — and so is every notice.
+project's **Alerts** page (`/{organization}/{project}/alerts`) holds both,
+each alert's incidents under it. Everything on it is metadata — names and
+numbers, never a prompt, a completion or a tool payload — and so is every
+notice.
 
 Any member of the project, whatever their role, makes, edits, pauses, mutes
-and deletes its alerts, and acknowledges, resolves and votes on its
-incidents.
+and deletes its alerts, and acknowledges and resolves its incidents.
 
-## Precision
-
-The page opens on the share of the votes on the last seven days' incidents
-that call them useful, and how many votes that is. Each notice of an
-incident links a page where every member marks it **Useful** or **Noise**,
-one vote each, changed by picking the other word; opening the link casts
-nothing, since a mail scanner or a chat's preview follows it too. An alert
-whose incidents are mostly noise wants another threshold, a longer window, or
-deleting: each alert shows its own share beside the others.
-
-## Incidents
-
-The project's incidents, those not resolved first, then the newest, 200 at
-most:
-
-| Column | What it is |
-|---|---|
-| Alert | The alert that opened it, a link to the alert below; how often it reopened; and the run its last notice showed, a link to the run's trace |
-| Severity | **Alert**, **Warning**, or **No data** where the alert asks to be told of a window holding no span |
-| Status | **Open**; **Acknowledged**, by whom and when; **Resolved** by a member, or **Recovered** where its alert came back inside its thresholds, and when |
-| Opened | When it opened |
-| Told | Where its notices went: the feed, then each connector they were sent to; one the project has removed since says so |
-
-**Acknowledge** takes an open incident, and its reminders stop. **Resolve**
-ends it by hand, told to its alert's connectors as a recovery is; an alert
-still past its threshold opens no new incident until it recovers and breaches
-again. **Vote** opens the incident's page, where you mark it useful or noise.
-
-An alert holds one incident at a time. A breach within an hour of its
-recovery reopens it rather than opening another, so an alert that flaps
-opens one incident an hour at most, and a rise from warning to alert follows
-the incident it is in. What each notice says is on
-[Notifications](/docs/integrations/notifications#notice-types).
-
-## Alerts
+## The list
 
 Every alert of the project, by name, each with where it stands, its controls,
 and its metric in its notices' own words — "The p95 duration of model calls
@@ -67,14 +33,14 @@ over the last hour" — then:
 | Notified again | How often a breach held is told again |
 | Connectors | Each connector its notices go to, whether it hears warnings and alerts or alerts alone, and in which hours. One that hears nothing says so: one that **Needs attention** or is **Disconnected** on the Connectors page, and one whose last five deliveries of this alert failed, which hears no more of it until **Hear again** turns it back on |
 | Maintenance | The windows that mute it, its own and every alert's, in force or still to come, each with **End** |
-| Precision | The share of the votes on its own incidents of the last seven days that call them useful |
+| Incidents | The [incidents](#incidents) it opened |
 
 **Edit** opens the alert's form filled in. **Pause** stops its evaluation
 until a member **Resume**s it: a paused alert opens and tells nothing, and an
 incident it holds open stays open until a member resolves it, or the alert,
 resumed, recovers. **Mute** opens a
 [maintenance window](#maintenance-windows) for it. **Delete** removes it at
-once, with its incidents, the votes on them and its maintenance windows.
+once, with its incidents and its maintenance windows.
 
 On a deployment that sells plans, such as the hosted service, an
 organization holds as many alerts across its projects as its plan does,
@@ -86,6 +52,31 @@ is room, and resuming one is refused while there is none. Once the day's
 deliveries are made, its incidents reach the feed alone until midnight UTC,
 and the organization's Owner and Admins are told once that day. A
 self-hosted deployment holds no number.
+
+## Incidents
+
+Under each alert, the incidents it opened, those not resolved first, then the
+newest; the page reads the project's 200 at most, so an alert's oldest
+resolved ones may not show. Each says:
+
+| Line | What it says |
+|---|---|
+| Severity | **Alert**, **Warning**, or **No data** where the alert asks to be told of a window holding no span |
+| Status | **Open**; **Acknowledged**, by whom and when; **Resolved** by a member, or **Recovered** where its alert came back inside its thresholds, and when |
+| Opened | When it opened, and how often it reopened |
+| Told | Where its notices went: the feed, then each connector they were sent to; one the project has removed since says so |
+| Run | The run its last notice showed, a link to the run's trace |
+
+**Acknowledge** takes an open incident, and its reminders stop. **Resolve**
+ends it by hand, told to its alert's connectors as a recovery is; an alert
+still past its threshold opens no new incident until it recovers and breaches
+again.
+
+An alert holds one incident at a time. A breach within an hour of its
+recovery reopens it rather than opening another, so an alert that flaps
+opens one incident an hour at most, and a rise from warning to alert follows
+the incident it is in. What each notice says is on
+[Notifications](/docs/integrations/notifications#notice-types).
 
 ## Making an alert
 
@@ -114,8 +105,9 @@ question, and it is evaluated again within a minute.
 
 ## Maintenance windows
 
-**Mute** on an alert, or **Mute every alert** at the top of the page, opens a
-window over it: from now or a time you set, for 30 minutes up to 30 days.
+**Mute** on an alert, or **Mute every alert** at the top of the page once the
+project has one, opens a window over it: from now or a time you set, for 30
+minutes up to 30 days.
 While it holds, the alert is evaluated as ever and its incidents open and
 resolve in the feed, but no connector hears them. **End** ends one
 early, and one still to come before it starts. A window over every alert
@@ -128,6 +120,7 @@ A notice that opens, reopens or raises an incident names the run that best
 shows it — the latest that failed, the slowest call, the one with the most
 tokens or the one that spent the most, as the alert measures, and the latest
 for a count — and links its trace. That trace's page links back, beside its
-tags, to each incident whose notices showed it, at its row of the Alerts page,
-even an incident too old for the page's 200. An incident keeps the last twenty
-runs its notices showed, so a run shown before those links back no more.
+tags, to each incident whose notices showed it, under its alert on the Alerts
+page, even an incident too old for the page's 200. An incident keeps the last
+twenty runs its notices showed, so a run shown before those links back no
+more.

@@ -68,7 +68,7 @@ export function AlertActions({
           </Button>
         }
         title={`Delete "${alert.name}"?`}
-        description="The alert stops at once, and its incidents, their votes and its maintenance windows go with it."
+        description="The alert stops at once, and its incidents and maintenance windows go with it."
         confirmLabel="Delete"
         destructive
         onConfirm={() => act(() => deleteAlertAction(projectId, alert.id), true)}

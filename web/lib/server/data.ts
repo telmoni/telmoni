@@ -85,9 +85,7 @@ export type {
   Hours,
   Incident,
   IncidentAccess,
-  IncidentVotes,
   Mute,
-  Precision,
   RuleFilters,
 } from "./entities/alerts";
 

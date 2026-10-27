@@ -177,10 +177,6 @@
       "first_seen",
       "last_seen"
     ],
-    "Verdict": [
-      "useful",
-      "noise"
-    ],
     "ViewKind": [
       "list",
       "layout"

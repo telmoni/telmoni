@@ -3,8 +3,18 @@ import { cleanup, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/components/page-header", () => ({
-  PageHeader: ({ title, action }: { title: string; action?: React.ReactNode }) => (
-    <div data-testid="page-header">
+  PageHeader: ({
+    title,
+    headingId,
+    info,
+    action,
+  }: {
+    title: string;
+    headingId?: string;
+    info?: string;
+    action?: React.ReactNode;
+  }) => (
+    <div data-testid="page-header" data-heading={headingId} data-info={info}>
       <span>{title}</span>
       {action}
     </div>
@@ -35,11 +45,6 @@ vi.mock("./_alert-actions", () => ({
     </button>
   ),
 }));
-vi.mock("./_incident-actions", () => ({
-  IncidentActions: ({ incidentId, status, voteHref }: { incidentId: string; status: string; voteHref: string }) => (
-    <span data-testid="incident-actions" data-incident={incidentId} data-status={status} data-vote={voteHref} />
-  ),
-}));
 vi.mock("./_mute", () => ({
   MuteButton: ({ ruleId }: { ruleId: string | null }) => (
     <button data-testid="mute" data-rule={String(ruleId)}>
@@ -50,6 +55,11 @@ vi.mock("./_mute", () => ({
     <button data-testid="end-mute" data-mute={muteId}>
       End now
     </button>
+  ),
+}));
+vi.mock("./_incident-actions", () => ({
+  IncidentActions: ({ incidentId, ruleId, status }: { incidentId: string; ruleId: string; status: string }) => (
+    <span data-testid="incident-actions" data-incident={incidentId} data-rule={ruleId} data-status={status} />
   ),
 }));
 
@@ -152,9 +162,9 @@ vi.mock("@/lib/server/data", () => ({
   fetchProjectBySlug: async () => mockProject,
   fetchAlerts: (projectId: string) => fetchAlerts(projectId),
   fetchConnectors: async () => mockConnectors,
+  fetchIncident: (projectId: string, id: string) => fetchIncident(projectId, id),
   fetchMembers: async () => mockMembers,
   fetchOrganizationMembers: () => fetchOrganizationMembers(),
-  fetchIncident: (projectId: string, id: string) => fetchIncident(projectId, id),
 }));
 
 import AlertsPage from "./page";
@@ -210,13 +220,6 @@ beforeEach(() => {
         ended_by: "user_2",
       },
     ],
-    precision: {
-      days: 7,
-      useful: 9,
-      noise: 1,
-      ratio: 0.9,
-      rules: [{ rule_id: RULE, rule_name: "Slow calls", useful: 9, noise: 1, ratio: 0.9 }],
-    },
   };
   mockConnectors = {
     enabled: { slack: true, webhook: true },
@@ -265,21 +268,26 @@ beforeEach(() => {
   mockOrganizationMembers = { kind: "forbidden" };
 });
 
-/** The incidents table's rows, by their order on the page. */
-function incidentRows() {
-  const table = screen.getByRole("table");
-  return within(table).getAllByRole("row").slice(1);
+/** An alert's incidents, by their order in its card. */
+function incidentItems(ruleId: string) {
+  const card = document.getElementById(`alert-${ruleId}`)!;
+  return Array.from(card.querySelectorAll<HTMLElement>('li[id^="incident-"]'));
+}
+
+/** What an alert's card says beside `label`. */
+function detail(ruleId: string, label: string) {
+  const card = document.getElementById(`alert-${ruleId}`)!;
+  return within(card).getByText(label, { selector: "dt" }).nextElementSibling as HTMLElement;
 }
 
 describe("AlertsPage", () => {
-  it("heads the page with the week's precision, and offers a new alert and a mute over all", async () => {
+  it("offers a new alert and a mute over all", async () => {
     render(await AlertsPage({ params: PARAMS }));
     expect(fetchAlerts).toHaveBeenCalledWith("project_7bQx2mNv9BcK4dLp");
-    const top = screen.getByText(/votes on the last 7 days' incidents/).closest("div")!.parentElement!;
-    expect(top).toHaveTextContent("Precision");
-    expect(within(top).getByText("90% useful")).toBeInTheDocument();
-    expect(within(top).getByText("9 of 10 votes")).toBeInTheDocument();
     const header = screen.getByTestId("page-header");
+    // The title takes the focus a control hands it as its alert goes.
+    expect(header.dataset.heading).toBe("alerts-heading");
+    expect(header.dataset.info).toMatch(/^Each reads a measure of the project's spans/);
     expect(within(header).getByTestId("new-alert").dataset.connections).toBe(
       JSON.stringify([
         { id: SLACK, name: "#alerts in Acme", status: "active" },
@@ -287,33 +295,6 @@ describe("AlertsPage", () => {
       ]),
     );
     expect(within(header).getByTestId("mute").dataset.rule).toBe("null");
-  });
-
-  // ⚠ Open ones first, each with its alert, its severity, when, and where its notices went.
-  it("lists the incidents as the server ordered them, each with where its notices went", async () => {
-    render(await AlertsPage({ params: PARAMS }));
-    const [open, taken, done] = incidentRows();
-    expect(open).toHaveAttribute("id", "incident-i-open");
-    expect(within(open).getByRole("link", { name: "Slow calls" })).toHaveAttribute("href", `#alert-${RULE}`);
-    // Its value is the alert's to show, in the unit it measures now.
-    expect(within(open).queryByText(/6,200/)).toBeNull();
-    expect(within(open).getByText("Alert")).toBeInTheDocument();
-    expect(within(open).getByText("Open")).toBeInTheDocument();
-    expect(within(open).getByText("Feed, #alerts in Acme, a removed connector")).toBeInTheDocument();
-    expect(within(open).getByRole("link", { name: /run 9b2d1f63/ })).toHaveAttribute(
-      "href",
-      `/acme/web/traces/${RUN}`,
-    );
-    const actions = within(open).getByTestId("incident-actions");
-    expect(actions.dataset.status).toBe("open");
-    expect(actions.dataset.vote).toBe("/acme/web/alerts/incidents/i-open/vote");
-
-    expect(within(taken).getByText("Warning")).toBeInTheDocument();
-    expect(within(taken).getByText("Acknowledged by sam@example.test")).toBeInTheDocument();
-    expect(within(taken).getByText("Feed")).toBeInTheDocument();
-
-    expect(within(done).getByText("Recovered")).toBeInTheDocument();
-    expect(within(done).getByText("Reopened 2 times")).toBeInTheDocument();
   });
 
   it("draws every alert with its metric, filters, window, thresholds, severity, connectors and windows", async () => {
@@ -325,14 +306,14 @@ describe("AlertsPage", () => {
     expect(within(slow).getByText("model claude-sonnet-5-5")).toBeInTheDocument();
     expect(within(slow).getByText("Read as 0")).toBeInTheDocument();
     expect(within(slow).getByText("Every 30 minutes")).toBeInTheDocument();
-    expect(within(slow).getByText(/#alerts in Acme/)).toHaveTextContent(
+    const connectors = detail(RULE, "Connectors");
+    expect(within(connectors).getByText(/#alerts in Acme/)).toHaveTextContent(
       "#alerts in Acme · warnings and alerts",
     );
-    expect(within(slow).getByText(/hooks\.example\.com/)).toHaveTextContent(
+    expect(within(connectors).getByText(/hooks\.example\.com/)).toHaveTextContent(
       "hooks.example.com · alerts only, Mon–Fri 09:00–18:00 UTC+01:00",
     );
     expect(within(slow).getByTestId("hear-again").dataset.connection).toBe(HOOK);
-    expect(within(slow).getByText("90% useful, 9 of 10 votes")).toBeInTheDocument();
     // Its own window to come and the one over every alert, the one over not.
     expect(within(slow).getAllByTestId("end-mute").map((b) => b.dataset.mute)).toEqual(["m-all", "m-slow"]);
     expect(within(slow).getByTestId("alert-actions").dataset.alert).toBe(RULE);
@@ -343,29 +324,49 @@ describe("AlertsPage", () => {
     expect(within(cap).getByText(/Paused by the plan/)).toBeInTheDocument();
     expect(within(cap).getByText("None: its incidents reach the project's feed alone")).toBeInTheDocument();
     expect(within(cap).getByText("Alert > $5.00")).toBeInTheDocument();
+    expect(detail(OTHER_RULE, "Incidents")).toHaveTextContent(/^None$/);
   });
 
-  it("names the window over every alert at the section's head, with who set it", async () => {
+  // ⚠ Under the alert that opened them, open ones first, each with where its notices went.
+  it("lists each alert's incidents under it as the server ordered them", async () => {
     render(await AlertsPage({ params: PARAMS }));
-    const row = screen.getByText("Every alert is muted").closest("div")!.parentElement!;
-    expect(row).toHaveTextContent("set by Ada");
-    expect(within(row).getByTestId("end-mute").dataset.mute).toBe("m-all");
+    const [open, taken, done] = incidentItems(RULE);
+    expect(incidentItems(RULE).map((item) => item.id)).toEqual([
+      "incident-i-open",
+      "incident-i-taken",
+      "incident-i-done",
+    ]);
+    // Its value is the alert's to show, in the unit it measures now.
+    expect(open).not.toHaveTextContent("6,200");
+    expect(within(open).getByText("Alert")).toBeInTheDocument();
+    expect(within(open).getByText("Open")).toBeInTheDocument();
+    expect(open).toHaveTextContent("told the feed, #alerts in Acme, a removed connector");
+    expect(within(open).getByRole("link", { name: /run 9b2d1f63/ })).toHaveAttribute(
+      "href",
+      `/acme/web/traces/${RUN}`,
+    );
+    const actions = within(open).getByTestId("incident-actions");
+    expect(actions.dataset.status).toBe("open");
+    expect(actions.dataset.rule).toBe(RULE);
+
+    expect(within(taken).getByText("Warning")).toBeInTheDocument();
+    expect(within(taken).getByText("Acknowledged by sam@example.test")).toBeInTheDocument();
+    expect(taken).toHaveTextContent("told the feed");
+
+    expect(within(done).getByText("Recovered")).toBeInTheDocument();
+    expect(done).toHaveTextContent("reopened 2 times");
   });
 
   // ⚠ A trace links the incident it carries even past a full list.
-  it("reads a followed incident past a full list on its own, and marks it", async () => {
-    mockIncident = { kind: "ok", incident: { ...incident("5d4f5c68-0000-4000-8000-000000000001"), status: "resolved", resolved_at: "2026-10-01T00:00:00Z", useful: 0, noise: 0, yours: null } };
-    render(
-      await AlertsPage({
-        params: PARAMS,
-        searchParams: Promise.resolve({ incident: "5d4f5c68-0000-4000-8000-000000000001" }),
-      }),
-    );
-    expect(fetchIncident).toHaveBeenCalledWith("project_7bQx2mNv9BcK4dLp", "5d4f5c68-0000-4000-8000-000000000001");
-    const rows = incidentRows();
-    expect(rows).toHaveLength(4);
-    expect(rows[3]).toHaveAttribute("id", "incident-5d4f5c68-0000-4000-8000-000000000001");
-    expect(rows[3]).toHaveAttribute("aria-current", "true");
+  it("reads a followed incident past a full list on its own, and marks it under its alert", async () => {
+    const past = "5d4f5c68-0000-4000-8000-000000000001";
+    mockIncident = { kind: "ok", incident: incident(past, { status: "resolved", resolved_at: "2026-10-01T00:00:00Z" }) };
+    render(await AlertsPage({ params: PARAMS, searchParams: Promise.resolve({ incident: past }) }));
+    expect(fetchIncident).toHaveBeenCalledWith("project_7bQx2mNv9BcK4dLp", past);
+    const items = incidentItems(RULE);
+    expect(items).toHaveLength(4);
+    expect(items[3]).toHaveAttribute("id", `incident-${past}`);
+    expect(items[3]).toHaveAttribute("aria-current", "true");
   });
 
   it("marks a followed incident the list holds without reading it again, and ignores one that is no id", async () => {
@@ -374,47 +375,52 @@ describe("AlertsPage", () => {
     alerts.incidents = [incident(held), ...alerts.incidents.slice(1)];
     render(await AlertsPage({ params: PARAMS, searchParams: Promise.resolve({ incident: held.toUpperCase() }) }));
     expect(fetchIncident).not.toHaveBeenCalled();
-    const [first, ...rest] = incidentRows();
+    const [first, ...rest] = incidentItems(RULE);
     expect(first).toHaveAttribute("aria-current", "true");
     expect(first).toHaveAttribute("tabindex", "-1");
-    for (const row of rest) expect(row).not.toHaveAttribute("aria-current");
+    for (const item of rest) expect(item).not.toHaveAttribute("aria-current");
 
     for (const asked of ["i-open", [held]]) {
       cleanup();
       render(await AlertsPage({ params: PARAMS, searchParams: Promise.resolve({ incident: asked }) }));
       expect(fetchIncident).not.toHaveBeenCalled();
-      for (const row of incidentRows()) expect(row).not.toHaveAttribute("aria-current");
+      for (const item of incidentItems(RULE)) expect(item).not.toHaveAttribute("aria-current");
     }
   });
 
-  it("says when there are no incidents and no alerts yet", async () => {
-    mockAlerts = { ...(mockAlerts as object), alerts: [], incidents: [], mutes: [] };
+  it("names the window over every alert at the page's head, with who set it", async () => {
     render(await AlertsPage({ params: PARAMS }));
-    expect(screen.getByText("No incidents.")).toBeInTheDocument();
-    expect(screen.getByText("No alerts yet.")).toBeInTheDocument();
-    expect(screen.queryByRole("table")).toBeNull();
+    const row = screen.getByText("Every alert is muted").closest("div")!.parentElement!;
+    expect(row).toHaveTextContent("set by Ada");
+    expect(within(row).getByTestId("end-mute").dataset.mute).toBe("m-all");
   });
 
-  it("says no votes yet, and names nobody when the roster cannot be read", async () => {
-    mockAlerts = {
-      ...(mockAlerts as object),
-      precision: { days: 7, useful: 0, noise: 0, ratio: null, rules: [] },
-    };
+  it("says when there are no alerts yet", async () => {
+    mockAlerts = { ...(mockAlerts as object), alerts: [], mutes: [] };
+    render(await AlertsPage({ params: PARAMS }));
+    expect(screen.getByText("No alerts yet.")).toBeInTheDocument();
+    // Nothing to mute: only New alert stands at the page's head.
+    expect(screen.queryByTestId("mute")).toBeNull();
+    expect(screen.getByTestId("new-alert")).toBeInTheDocument();
+  });
+
+  it("names nobody when the roster cannot be read", async () => {
     mockMembers = { kind: "unavailable" };
     render(await AlertsPage({ params: PARAMS }));
-    expect(screen.getAllByText("No votes yet").length).toBeGreaterThan(0);
-    expect(within(incidentRows()[1]).getByText("Acknowledged by someone")).toBeInTheDocument();
+    const row = screen.getByText("Every alert is muted").closest("div")!.parentElement!;
+    expect(row).toHaveTextContent("set by someone");
+    expect(within(incidentItems(RULE)[1]).getByText("Acknowledged by someone")).toBeInTheDocument();
     expect(fetchOrganizationMembers).not.toHaveBeenCalled();
   });
 
   // ⚠ An organization's admin acts on every project with no seat on it.
   it("names an admin the project's roster lacks from the organization's, to an admin", async () => {
-    const taken = (by: string) =>
-      incident("i-taken", { status: "acknowledged", acknowledged_by: by, acknowledged_at: "2026-10-26T11:10:00Z" });
-    mockAlerts = { ...(mockAlerts as object), incidents: [taken("user_admin"), taken("user_gone")] };
+    const taken = (id: string, by: string) =>
+      incident(id, { status: "acknowledged", acknowledged_by: by, acknowledged_at: "2026-10-26T11:10:00Z" });
+    mockAlerts = { ...(mockAlerts as object), incidents: [taken("i-admin", "user_admin"), taken("i-gone", "user_gone")] };
     render(await AlertsPage({ params: PARAMS }));
     expect(fetchOrganizationMembers).not.toHaveBeenCalled();
-    expect(within(incidentRows()[0]).getByText("Acknowledged by an organization admin or a former member")).toBeInTheDocument();
+    expect(within(incidentItems(RULE)[0]).getByText("Acknowledged by an organization admin or a former member")).toBeInTheDocument();
 
     cleanup();
     mockOrganization = { organizationId: "org_1", slug: "acme", name: "Acme", role: "admin" };
@@ -424,7 +430,7 @@ describe("AlertsPage", () => {
       members: [{ id: "o1", member_id: "user_admin", email: "grace@example.test", display_name: "Grace", role: "admin", created_at: "" }],
     };
     render(await AlertsPage({ params: PARAMS }));
-    const [admin, gone] = incidentRows();
+    const [admin, gone] = incidentItems(RULE);
     expect(within(admin).getByText("Acknowledged by Grace")).toBeInTheDocument();
     expect(within(gone).getByText("Acknowledged by a former member")).toBeInTheDocument();
   });
@@ -432,30 +438,17 @@ describe("AlertsPage", () => {
   it("calls a connection by no wrong name when the connectors cannot be read", async () => {
     mockConnectors = null;
     render(await AlertsPage({ params: PARAMS }));
-    expect(within(incidentRows()[0]).getByText("Feed, a connector, a connector")).toBeInTheDocument();
     const slow = document.getElementById(`alert-${RULE}`)!;
     expect(within(slow).getAllByText(/^A connector/).length).toBe(2);
     expect(within(slow).queryByText(/removed/)).toBeNull();
-  });
-
-  it("finds a followed incident whatever the case of its id", async () => {
-    mockAlerts = {
-      ...(mockAlerts as object),
-      incidents: [incident("5d4f5c68-0000-4000-8000-00000000000a")],
-    };
-    render(
-      await AlertsPage({
-        params: PARAMS,
-        searchParams: Promise.resolve({ incident: "5D4F5C68-0000-4000-8000-00000000000A" }),
-      }),
-    );
-    expect(incidentRows()[0]).toHaveAttribute("aria-current", "true");
+    expect(incidentItems(RULE)[0]).toHaveTextContent("told the feed, a connector, a connector");
   });
 
   it("draws the outage and the refusal as every page does", async () => {
     mockAlerts = { kind: "unavailable" };
     render(await AlertsPage({ params: PARAMS }));
     expect(screen.getByTestId("outage")).toBeInTheDocument();
+    cleanup();
     mockAlerts = { kind: "forbidden" };
     render(await AlertsPage({ params: PARAMS }));
     expect(screen.getByTestId("denied")).toHaveTextContent("this project's alerts");

@@ -579,8 +579,6 @@ async fn the_maintenance_lanes_narrowed_grants_hold_in_every_tier() {
             "telemetry.rule_connectors",
             &["SELECT"],
         ),
-        // A member's vote is the project's alone; it goes with its incident.
-        ("telemetry_maintenance", "telemetry.incident_votes", &[]),
         // The prices are `migrate`'s to write and the module's to read.
         ("telemetry_maintenance", "telemetry.model_prices", &[]),
         // The delivery loop counts each route's failed deliveries and mutes

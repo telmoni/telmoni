@@ -45,7 +45,6 @@ const CONNECTIONS: ConnectionChoice[] = [
   { id: SLACK, name: "#alerts in Acme", status: "active" },
   { id: HOOK, name: "hooks.example.com", status: "errored" },
 ];
-const VOTE = "/acme/web/alerts/incidents/i-1/vote";
 
 /** A choice made in one of the console's selects, through the native select
  *  it keeps beside its trigger for the form. */
@@ -401,15 +400,27 @@ describe("maintenance windows", () => {
 describe("an incident's controls", { timeout: 15_000 }, () => {
   const props = {
     projectId: PROJECT,
+    ruleId: RULE,
     incidentId: "i-1",
     name: "Slow calls",
     openedAt: "2026-10-26T11:00:00Z",
-    voteHref: VOTE,
   };
+  // Its alert's heading, which the focus falls back to.
+  const heading = (
+    <h3 id={`alert-${RULE}-name`} tabIndex={-1}>
+      Slow calls
+    </h3>
+  );
 
-  // ⚠ Each move takes away its own button: the focus goes on to the row's next control.
+  // ⚠ Each move takes away its own button: the focus goes on to the row's
+  // next control, and to its alert's heading once there is none.
   it("acknowledges an open incident and resolves one once confirmed, the focus going on", async () => {
-    const { rerender } = render(<IncidentActions {...props} status="open" />);
+    const { rerender } = render(
+      <>
+        {heading}
+        <IncidentActions {...props} status="open" />
+      </>,
+    );
     const acknowledge = screen.getByRole("button", { name: /^Acknowledge the incident of Slow calls, opened \S/ });
     acknowledge.focus();
     fireEvent.click(acknowledge);
@@ -417,7 +428,12 @@ describe("an incident's controls", { timeout: 15_000 }, () => {
     const resolve = screen.getByRole("button", { name: /^Resolve the incident of Slow calls, opened \S/ });
     await waitFor(() => expect(resolve).toBeEnabled());
     // The refresh draws it taken.
-    rerender(<IncidentActions {...props} status="acknowledged" />);
+    rerender(
+      <>
+        {heading}
+        <IncidentActions {...props} status="acknowledged" />
+      </>,
+    );
     expect(document.activeElement).toBe(resolve);
 
     fireEvent.click(resolve);
@@ -426,17 +442,22 @@ describe("an incident's controls", { timeout: 15_000 }, () => {
     await waitFor(() => expect(incidentAction).toHaveBeenCalledWith(PROJECT, "i-1", "resolve"));
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
     await waitFor(() => expect(resolve).toBeEnabled());
-    rerender(<IncidentActions {...props} status="resolved" />);
-    expect(document.activeElement).toBe(screen.getByRole("link", { name: /^Vote on the incident of Slow calls, opened \S/ }));
+    rerender(
+      <>
+        {heading}
+        <IncidentActions {...props} status="resolved" />
+      </>,
+    );
+    expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Slow calls" }));
   });
 
-  it("offers no acknowledgement once taken, and its vote alone once resolved", () => {
+  it("offers no acknowledgement once taken, and nothing once resolved", () => {
     const { unmount } = render(<IncidentActions {...props} status="acknowledged" />);
     expect(screen.queryByRole("button", { name: /Acknowledge/ })).toBeNull();
     expect(screen.getByRole("button", { name: /Resolve/ })).toBeInTheDocument();
     unmount();
     render(<IncidentActions {...props} status="resolved" />);
     expect(screen.queryByRole("button")).toBeNull();
-    expect(screen.getByRole("link", { name: /^Vote on the incident of Slow calls, opened \S/ })).toHaveAttribute("href", VOTE);
+    expect(screen.queryByRole("link")).toBeNull();
   });
 });

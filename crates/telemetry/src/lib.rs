@@ -232,14 +232,6 @@ pub fn router(state: Arc<AppState>) -> Router {
             get(handler::incidents::get_incident),
         )
         .route(
-            "/telemetry/incidents/{id}/vote",
-            post(handler::incidents::vote_incident),
-        )
-        .route(
-            "/telemetry/precision",
-            get(handler::incidents::get_precision),
-        )
-        .route(
             "/telemetry/incidents/{id}/acknowledge",
             post(handler::incidents::acknowledge_incident),
         )

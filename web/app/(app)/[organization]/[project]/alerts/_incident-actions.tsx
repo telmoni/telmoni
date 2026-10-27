@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import Link from "next/link";
 
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { LocalTime } from "@/components/local-time";
 import { Button } from "@/components/ui/button";
+import { alertHeading } from "@/lib/alerts";
 import { IncidentStatus } from "@/lib/types/enums";
 
 import { useAct } from "./_act";
@@ -14,34 +14,36 @@ import { incidentAction } from "./actions";
 const ROW_BUTTON = "h-9 gap-1.5 text-xs text-muted-foreground hover:text-foreground";
 
 /** An incident taken by a member, which stops its reminders, or resolved by
- *  hand, which its channels are told as a recovery is; and its vote. */
+ *  hand, which its channels are told as a recovery is. */
 export function IncidentActions({
   projectId,
+  ruleId,
   incidentId,
   status,
   name,
   openedAt,
-  voteHref,
 }: {
   projectId: string;
+  /** Its alert's id, whose heading takes the focus once no control stays. */
+  ruleId: string;
   incidentId: string;
   status: IncidentStatus;
   /** Its alert's name. */
   name: string;
   openedAt: string;
-  voteHref: string;
 }) {
   const { pending, error, act, movedRef } = useAct();
   const resolve = useRef<HTMLButtonElement>(null);
-  const vote = useRef<HTMLAnchorElement>(null);
   // A move takes away the button it was made with: the focus goes on to the
-  // row's next control that stays.
+  // row's next control, or to its alert's heading once none stays.
   useEffect(() => {
     if (movedRef.current && document.activeElement === document.body) {
-      (resolve.current ?? vote.current)?.focus({ preventScroll: true });
+      (resolve.current ?? document.getElementById(alertHeading(ruleId)))?.focus({
+        preventScroll: true,
+      });
     }
     movedRef.current = false;
-  }, [status, movedRef]);
+  }, [status, movedRef, ruleId]);
   const settled = status === IncidentStatus.Resolved;
   // Told apart, to a screen reader, from the same alert's other incidents.
   const which = (
@@ -87,11 +89,6 @@ export function IncidentActions({
           onConfirm={() => act(() => incidentAction(projectId, incidentId, "resolve"), true)}
         />
       )}
-      <Button asChild variant="outline" size="sm" className={ROW_BUTTON}>
-        <Link ref={vote} href={voteHref}>
-          Vote <span className="sr-only">on {which}</span>
-        </Link>
-      </Button>
     </div>
   );
 }

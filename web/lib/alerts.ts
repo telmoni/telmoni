@@ -11,7 +11,6 @@ import type {
   Hours,
   Incident,
   Mute,
-  Precision,
   RuleFilters,
 } from "@/lib/server/data";
 import { projectPath } from "@/lib/slug";
@@ -688,9 +687,10 @@ export function inForce(mute: Mute, now: number): boolean {
   return Date.parse(mute.starts_at) <= now && Date.parse(mute.ends_at) > now;
 }
 
-// ── Incidents and precision ──────────────────────────────────────────────────
+// ── Incidents ────────────────────────────────────────────────────────────────
 
-/** The Alerts section's heading, where the focus lands once an alert goes. */
+/** The Alerts page's heading, where the focus lands once an alert, or the
+ *  window over every alert, goes. */
 export const ALERTS_HEADING = "alerts-heading";
 
 /** An alert's heading, where the focus lands once a control in its card goes. */
@@ -698,32 +698,44 @@ export function alertHeading(ruleId: string): string {
   return `alert-${ruleId}-name`;
 }
 
-/** The alerts page at one incident, which it draws even past its list, and
- *  scrolls to. */
+/** The alerts page at one incident, under its alert, which it draws even past
+ *  its list, and scrolls to. */
 export function incidentHref(organization: string, project: string, incidentId: string): string {
   const id = encodeURIComponent(incidentId);
   return projectPath(organization, project, `/alerts?incident=${id}#incident-${id}`);
 }
 
-/** Where an incident's notices went: the feed, always, then each connection
- *  by its name, one `names` lacks by `unknown`. */
+/** One entry of a roster, the organization's or the project's. */
+type Named = { member_id: string; display_name?: string | null; email: string };
+
+/** Who a member's id names, from the rosters that could be read: the
+ *  organization's, which its owner and admins alone read, then the project's.
+ *  Someone neither names has left, where the organization's was read; else
+ *  they may be an admin of it, seated on no project. */
+export function memberNames(
+  organization: readonly Named[] | null,
+  project: readonly Named[] | null,
+): (id: string) => string {
+  const people = new Map(
+    [...(organization ?? []), ...(project ?? [])].map((member) => [
+      member.member_id,
+      member.display_name || member.email,
+    ]),
+  );
+  const unknown = organization
+    ? "a former member"
+    : project
+      ? "an organization admin or a former member"
+      : "someone";
+  return (id) => people.get(id) ?? unknown;
+}
+
+/** Where an incident's notices went, as a sentence lists it: the feed,
+ *  always, then each connection by its name, one `names` lacks by `unknown`. */
 export function toldWords(
   incident: Pick<Incident, "told_to">,
   names: ReadonlyMap<string, string>,
   unknown: string,
 ): string[] {
-  return ["Feed", ...incident.told_to.map((id) => names.get(id) ?? unknown)];
-}
-
-/** The project's precision in words: the share useful, and of how many votes. */
-export function precisionWords(precision: Pick<Precision, "useful" | "noise" | "ratio">): {
-  share: string;
-  votes: string;
-} | null {
-  if (precision.ratio === null) return null;
-  const votes = precision.useful + precision.noise;
-  return {
-    share: `${Math.round(precision.ratio * 100)}% useful`,
-    votes: `${precision.useful} of ${votes} ${votes === 1 ? "vote" : "votes"}`,
-  };
+  return ["the feed", ...incident.told_to.map((id) => names.get(id) ?? unknown)];
 }

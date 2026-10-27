@@ -13,10 +13,10 @@ import {
   inForce,
   inputOf,
   joinValues,
+  memberNames,
   measuresFor,
   metricWords,
   offsetWords,
-  precisionWords,
   renotifyWords,
   splitValues,
   thresholdWords,
@@ -335,14 +335,14 @@ describe("words", () => {
   it("names where an incident's notices went, the feed first", () => {
     const names = new Map([["c1", "#alerts in Acme"]]);
     expect(toldWords({ told_to: ["c1", "c2"] }, names, "a removed connector")).toEqual([
-      "Feed",
+      "the feed",
       "#alerts in Acme",
       "a removed connector",
     ]);
-    expect(toldWords({ told_to: [] }, names, "a removed connector")).toEqual(["Feed"]);
+    expect(toldWords({ told_to: [] }, names, "a removed connector")).toEqual(["the feed"]);
   });
 
-  // The form's switches and the Told column name each one apart.
+  // The form's switches and where an incident's notices went name each one apart.
   it("tells two webhooks on one host apart by their fingerprints", () => {
     const connection = (id: string, provider: "slack" | "webhook", channel: string, workspace: string | null) => ({
       id,
@@ -373,19 +373,26 @@ describe("words", () => {
     ]);
   });
 
-  it("says the share of votes useful, and nothing without a vote", () => {
-    expect(precisionWords({ useful: 3, noise: 1, ratio: 0.75 })).toEqual({
-      share: "75% useful",
-      votes: "3 of 4 votes",
-    });
-    expect(precisionWords({ useful: 1, noise: 0, ratio: 1 })?.votes).toBe("1 of 1 vote");
-    expect(precisionWords({ useful: 0, noise: 0, ratio: null })).toBeNull();
-  });
-
   it("links an incident on the alerts page, drawn and scrolled to", () => {
     expect(incidentHref("acme", "web", "5d4f5c68-0000-4000-8000-000000000001")).toBe(
       "/acme/web/alerts?incident=5d4f5c68-0000-4000-8000-000000000001#incident-5d4f5c68-0000-4000-8000-000000000001",
     );
+  });
+
+  // ⚠ An organization's admin acts on every project with no seat on it.
+  it("names a member from the rosters read, and says what the rest may be", () => {
+    const ada = { member_id: "user_1", display_name: "Ada", email: "ada@example.test" };
+    const sam = { member_id: "user_2", display_name: null, email: "sam@example.test" };
+    const grace = { member_id: "user_3", display_name: "Grace", email: "grace@example.test" };
+    const both = memberNames([grace], [ada, sam]);
+    expect([both("user_1"), both("user_2"), both("user_3"), both("user_9")]).toEqual([
+      "Ada",
+      "sam@example.test",
+      "Grace",
+      "a former member",
+    ]);
+    expect(memberNames(null, [ada])("user_9")).toBe("an organization admin or a former member");
+    expect(memberNames(null, null)("user_1")).toBe("someone");
   });
 });
 

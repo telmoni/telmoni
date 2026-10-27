@@ -4,11 +4,9 @@ import Link from "next/link";
 import { z } from "zod";
 
 import { AccessDenied } from "@/components/access-denied";
-import { DataTable, THead, Th, Td } from "@/components/data-table";
 import { LocalTime } from "@/components/local-time";
 import { PageHeader } from "@/components/page-header";
 import { Row, Rows } from "@/components/rows";
-import { Section } from "@/components/section";
 import { ServiceUnavailable } from "@/components/service-unavailable";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -25,8 +23,8 @@ import {
   filterWords,
   hoursWords,
   inForce,
+  memberNames,
   metricWords,
-  precisionWords,
   renotifyWords,
   severityVariant,
   thresholdWords,
@@ -48,11 +46,11 @@ import {
   type Alert,
   type Incident,
   type Mute,
-  type Precision,
 } from "@/lib/server/data";
 import { projectPath } from "@/lib/slug";
 import { shortId, traceHref } from "@/lib/traces";
 import { IncidentStatus, Severity } from "@/lib/types/enums";
+import { cn } from "@/lib/utils";
 
 import { AlertActions, HearAgain } from "./_alert-actions";
 import { NewAlert } from "./_alert-panel";
@@ -61,13 +59,12 @@ import { EndMute, MuteButton } from "./_mute";
 
 export const metadata = { title: "Alerts" };
 
-// The project's alerts, built as Langfuse's are: the week's precision at the
-// top; then its incidents, those not resolved first, each with its alert,
-// its severity, when, and where its notices went, acknowledged or resolved
-// by any member; then every alert with its metric, filters, window,
-// thresholds, severity, connectors and maintenance windows, each made,
-// edited, paused, muted and deleted here. A trace a notice showed links
-// back with `?incident=`, which draws that incident even past the list.
+// The project's alerts, built as Langfuse's are: every alert with its
+// metric, filters, window, thresholds, severity, connectors and maintenance
+// windows, each made, edited, paused, muted and deleted here, and under each
+// the incidents it opened, acknowledged or resolved by any member. A trace a
+// notice showed links back with `?incident=`, which draws that incident
+// under its alert even past the list.
 export default async function AlertsPage({
   params,
   searchParams,
@@ -100,11 +97,26 @@ export default async function AlertsPage({
     );
   }
 
+  const connections: ConnectionChoice[] | null = listing
+    ? connectionChoices(listing.connections)
+    : null;
+  const connectionNames = new Map((connections ?? []).map((c) => [c.id, c.name]));
+  // A connection the listing lacks is one the project no longer has, unless
+  // the listing could not be read at all.
+  const unknownConnector = connections ? "a removed connector" : "a connector";
+  const who = memberNames(
+    everyone?.kind === "ok" ? everyone.members : null,
+    roster.kind === "ok" ? roster.members : null,
+  );
+  const now = access.at;
+  const everyAlert = windowsFor(access.mutes, null, now);
+
   const followed =
     typeof asked === "string" && z.guid().safeParse(asked).success ? asked.toLowerCase() : null;
   let incidents: Incident[] = access.incidents;
   // A full list leaves out the oldest resolved: the one a trace links is
-  // read on its own, and stands last, where the list's order puts it.
+  // read on its own, and stands last under its alert, where the list's order
+  // puts it.
   if (
     followed &&
     incidents.length >= INCIDENTS_MAX &&
@@ -113,139 +125,26 @@ export default async function AlertsPage({
     const one = await fetchIncident(project.id, followed);
     if (one.kind === "ok") incidents = [...incidents, one.incident];
   }
-
-  const connections: ConnectionChoice[] | null = listing
-    ? connectionChoices(listing.connections)
-    : null;
-  const connectionNames = new Map((connections ?? []).map((c) => [c.id, c.name]));
-  // A connection the listing lacks is one the project no longer has, unless
-  // the listing could not be read at all.
-  const unknownConnector = connections ? "a removed connector" : "a connector";
-  const rosters = [
-    everyone?.kind === "ok" ? everyone.members : [],
-    roster.kind === "ok" ? roster.members : [],
-  ];
-  const people = new Map(
-    rosters.flat().map((member) => [member.member_id, member.display_name || member.email]),
-  );
-  // Someone neither roster names has left, where the organization's was read;
-  // else they may be an admin of it, seated on no project.
-  const who = (id: string) =>
-    people.get(id) ??
-    (everyone?.kind === "ok"
-      ? "a former member"
-      : roster.kind === "ok"
-        ? "an organization admin or a former member"
-        : "someone");
-  const now = access.at;
-  const everyAlert = windowsFor(access.mutes, null, now);
+  const incidentsOf = Map.groupBy(incidents, (incident) => incident.rule_id);
 
   return (
     <>
       <PageHeader
         title="Alerts"
+        headingId={ALERTS_HEADING}
+        info="Each reads a measure of the project's spans over a window against its thresholds, every minute, with the incidents it opened under it, open ones first. Any member makes, edits, pauses, mutes and deletes alerts, and acknowledges or resolves their incidents."
         action={
           <div className="flex items-center gap-3">
-            <MuteButton projectId={project.id} ruleId={null} name={null} />
+            {/* A window over every alert mutes nothing until there is one. */}
+            {access.alerts.length > 0 && (
+              <MuteButton projectId={project.id} ruleId={null} name={null} />
+            )}
             <NewAlert projectId={project.id} connections={connections} />
           </div>
         }
       />
       <div className="grid gap-6">
-        <PrecisionRow precision={access.precision} />
-
-        <Section
-          title="Incidents"
-          description="Open ones first, then the newest. Any member of the project acknowledges one, which stops its reminders, or resolves it."
-        >
-          {incidents.length === 0 ? (
-            <Empty
-              title="No incidents."
-              detail="An alert that crosses its threshold opens one here, and tells the project's feed and the connectors it links."
-            />
-          ) : (
-            <DataTable>
-              <THead>
-                <Th>Alert</Th>
-                <Th>Severity</Th>
-                <Th>Status</Th>
-                <Th>Opened</Th>
-                <Th>Told</Th>
-                <Th />
-              </THead>
-              <tbody>
-                {incidents.map((incident) => {
-                  const run = incident.runs.at(-1);
-                  return (
-                    <tr
-                      key={incident.id}
-                      id={`incident-${incident.id}`}
-                      className={incident.id === followed ? "scroll-mt-3.5 bg-muted/60" : undefined}
-                      aria-current={incident.id === followed ? "true" : undefined}
-                      tabIndex={incident.id === followed ? -1 : undefined}
-                    >
-                      <Td className="min-w-48">
-                        <div className="grid gap-0.5">
-                          <a
-                            href={`#alert-${incident.rule_id}`}
-                            className="font-medium underline-offset-4 hover:underline"
-                          >
-                            {incident.rule_name}
-                          </a>
-                          {incident.reopened > 0 && (
-                            <span className="text-xs text-muted-foreground">
-                              Reopened {incident.reopened === 1 ? "once" : `${incident.reopened} times`}
-                            </span>
-                          )}
-                          {run && (
-                            <Link
-                              href={traceHref(organization, slug, run)}
-                              className="inline-flex w-fit items-center gap-0.5 text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
-                              title="The run its last notice showed"
-                            >
-                              run {shortId(run)}
-                              <ArrowUpRight className="size-3" aria-hidden="true" />
-                            </Link>
-                          )}
-                        </div>
-                      </Td>
-                      <Td className="whitespace-nowrap">
-                        <Badge variant={severityVariant(incident.severity)} className="font-normal">
-                          {SEVERITY_LABEL[incident.severity]}
-                        </Badge>
-                      </Td>
-                      <Td className="text-xs text-muted-foreground">
-                        <IncidentState incident={incident} who={who} />
-                      </Td>
-                      <Td className="text-xs whitespace-nowrap text-muted-foreground">
-                        <LocalTime iso={incident.opened_at} />
-                      </Td>
-                      <Td className="min-w-40 text-xs text-muted-foreground">
-                        {toldWords(incident, connectionNames, unknownConnector).join(", ")}
-                      </Td>
-                      <Td className="text-right">
-                        <IncidentActions
-                          projectId={project.id}
-                          incidentId={incident.id}
-                          status={incident.status}
-                          name={incident.rule_name}
-                          openedAt={incident.opened_at}
-                          voteHref={projectPath(organization, slug, `/alerts/incidents/${incident.id}/vote`)}
-                        />
-                      </Td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </DataTable>
-          )}
-        </Section>
-
-        <Section
-          title="Alerts"
-          headingId={ALERTS_HEADING}
-          description="Each reads a measure of the project's spans over a window against its thresholds, every minute. Any member makes, edits, pauses, mutes and deletes them."
-        >
+        <section className="grid gap-3">
           {everyAlert.length > 0 && (
             <Rows>
               {everyAlert.map((mute) => (
@@ -274,68 +173,24 @@ export default async function AlertsPage({
               <AlertCard
                 key={alert.id}
                 alert={alert}
+                organization={organization}
+                slug={slug}
                 projectId={project.id}
                 connections={connections}
                 connectionNames={connectionNames}
-                unknownConnector={unknownConnector.replace(/^a/, "A")}
+                unknownConnector={unknownConnector}
                 windows={windowsFor(access.mutes, alert.id, now)}
-                precision={access.precision.rules.find((rule) => rule.rule_id === alert.id) ?? null}
+                incidents={incidentsOf.get(alert.id) ?? []}
+                followed={followed}
                 who={who}
                 now={now}
               />
             ))
           )}
-        </Section>
+        </section>
       </div>
     </>
   );
-}
-
-/** The week's votes on the project's incidents: the share calling them
- *  useful, which the alerts are tuned by. */
-function PrecisionRow({ precision }: { precision: Precision }) {
-  const words = precisionWords(precision);
-  return (
-    <Rows>
-      <Row
-        label="Precision"
-        hint={`The share of the votes on the last ${precision.days} days' incidents that call them useful. Each notice links a page to vote from.`}
-        keep
-      >
-        {words ? (
-          <span className="grid gap-0.5 text-right">
-            <span className="font-medium">{words.share}</span>
-            <span className="text-xs text-muted-foreground">{words.votes}</span>
-          </span>
-        ) : (
-          <span className="text-muted-foreground">No votes yet</span>
-        )}
-      </Row>
-    </Rows>
-  );
-}
-
-/** Where an incident stands, and who moved it there. */
-function IncidentState({ incident, who }: { incident: Incident; who: (id: string) => string }) {
-  if (incident.status === IncidentStatus.Resolved && incident.resolved_at) {
-    return (
-      <span className="grid gap-0.5">
-        <span className="text-foreground">
-          {incident.resolved_by ? `Resolved by ${who(incident.resolved_by)}` : "Recovered"}
-        </span>
-        <LocalTime iso={incident.resolved_at} />
-      </span>
-    );
-  }
-  if (incident.status === IncidentStatus.Acknowledged && incident.acknowledged_by) {
-    return (
-      <span className="grid gap-0.5">
-        <span className="text-foreground">Acknowledged by {who(incident.acknowledged_by)}</span>
-        {incident.acknowledged_at && <LocalTime iso={incident.acknowledged_at} />}
-      </span>
-    );
-  }
-  return <span className="text-foreground">{STATUS_LABEL[incident.status]}</span>;
 }
 
 /** A window's span and who set it. */
@@ -377,33 +232,41 @@ function Detail({ label, children }: { label: string; children: ReactNode }) {
 }
 
 /** One alert: its name, where it stands and its controls, its metric in
- *  words, then what it reads, when it alerts, and where it is told. */
+ *  words, then what it reads, when it alerts, where it is told, and the
+ *  incidents it opened. */
 function AlertCard({
   alert,
+  organization,
+  slug,
   projectId,
   connections,
   connectionNames,
   unknownConnector,
   windows,
-  precision,
+  incidents,
+  followed,
   who,
   now,
 }: {
   alert: Alert;
+  organization: string;
+  slug: string;
   projectId: string;
   connections: ConnectionChoice[] | null;
   connectionNames: ReadonlyMap<string, string>;
-  /** What a linked connection the names lack is called. */
+  /** What a linked connection the names lack is called, mid-sentence. */
   unknownConnector: string;
   windows: Mute[];
-  precision: Precision["rules"][number] | null;
+  /** Its incidents, those not resolved first, then the newest. */
+  incidents: Incident[];
+  /** The incident a trace's link asked for, if any. */
+  followed: string | null;
   who: (id: string) => string;
   now: number;
 }) {
   const thresholds = thresholdWords(alert);
   const statuses = new Map((connections ?? []).map((connection) => [connection.id, connection.status]));
   const filters = filterWords(alert.filters);
-  const votes = precision ? precisionWords(precision) : null;
   return (
     <Card id={`alert-${alert.id}`} className="scroll-mt-4 gap-3">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -439,7 +302,8 @@ function AlertCard({
           ) : (
             <ul className="grid gap-1.5">
               {alert.connectors.map((link) => {
-                const name = connectionNames.get(link.connection_id) ?? unknownConnector;
+                const name =
+                  connectionNames.get(link.connection_id) ?? unknownConnector.replace(/^a/, "A");
                 const status = statuses.get(link.connection_id);
                 const stopped = status ? CONNECTION_STATUS_LABEL[status] : null;
                 return (
@@ -504,12 +368,126 @@ function AlertCard({
             </ul>
           )}
         </Detail>
-        <Detail label="Precision">
-          {votes ? `${votes.share}, ${votes.votes}` : "No votes yet"}
+        <Detail label="Incidents">
+          {incidents.length === 0 ? (
+            "None"
+          ) : (
+            <ul className="grid gap-3">
+              {incidents.map((incident) => (
+                <IncidentItem
+                  key={incident.id}
+                  incident={incident}
+                  followed={incident.id === followed}
+                  organization={organization}
+                  slug={slug}
+                  projectId={projectId}
+                  told={toldWords(incident, connectionNames, unknownConnector).join(", ")}
+                  who={who}
+                />
+              ))}
+            </ul>
+          )}
         </Detail>
       </dl>
     </Card>
   );
+}
+
+/** One incident of an alert: its severity, where it stands and its controls,
+ *  then when it opened, where its notices went and the run its last showed. */
+function IncidentItem({
+  incident,
+  followed,
+  organization,
+  slug,
+  projectId,
+  told,
+  who,
+}: {
+  incident: Incident;
+  /** Whether a trace's link asked for it, which marks it. */
+  followed: boolean;
+  organization: string;
+  slug: string;
+  projectId: string;
+  /** Where its notices went, in words. */
+  told: string;
+  who: (id: string) => string;
+}) {
+  const run = incident.runs.at(-1);
+  return (
+    <li
+      id={`incident-${incident.id}`}
+      className={cn("grid scroll-mt-4 gap-1 rounded-sm", followed && "bg-muted/60 ring-4 ring-muted/60")}
+      aria-current={followed ? "true" : undefined}
+      tabIndex={followed ? -1 : undefined}
+    >
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+        <Badge variant={severityVariant(incident.severity)} className="font-normal">
+          {SEVERITY_LABEL[incident.severity]}
+        </Badge>
+        <IncidentState incident={incident} who={who} />
+        <div className="ml-auto">
+          <IncidentActions
+            projectId={projectId}
+            ruleId={incident.rule_id}
+            incidentId={incident.id}
+            status={incident.status}
+            name={incident.rule_name}
+            openedAt={incident.opened_at}
+          />
+        </div>
+      </div>
+      <span className="text-xs text-muted-foreground">
+        Opened <LocalTime iso={incident.opened_at} />
+        {incident.reopened > 0 &&
+          `, reopened ${incident.reopened === 1 ? "once" : `${incident.reopened} times`}`}
+        {` · told ${told}`}
+        {run && (
+          <>
+            {" · "}
+            <Link
+              href={traceHref(organization, slug, run)}
+              className="inline-flex items-center gap-0.5 underline-offset-4 hover:text-foreground hover:underline"
+              title="The run its last notice showed"
+            >
+              run {shortId(run)}
+              <ArrowUpRight className="size-3" aria-hidden="true" />
+            </Link>
+          </>
+        )}
+      </span>
+    </li>
+  );
+}
+
+/** Where an incident stands, who moved it there, and when. */
+function IncidentState({ incident, who }: { incident: Incident; who: (id: string) => string }) {
+  if (incident.status === IncidentStatus.Resolved && incident.resolved_at) {
+    return (
+      <span>
+        {incident.resolved_by ? `Resolved by ${who(incident.resolved_by)}` : "Recovered"}
+        <span className="text-muted-foreground">
+          {" · "}
+          <LocalTime iso={incident.resolved_at} />
+        </span>
+      </span>
+    );
+  }
+  if (incident.status === IncidentStatus.Acknowledged && incident.acknowledged_by) {
+    return (
+      <span>
+        Acknowledged by {who(incident.acknowledged_by)}
+        {incident.acknowledged_at && (
+          <span className="text-muted-foreground">
+            {" · "}
+            <LocalTime iso={incident.acknowledged_at} />
+          </span>
+        )}
+      </span>
+    );
+  }
+  return <span>{STATUS_LABEL[incident.status]}</span>;
 }
 
 /** Where an alert stands: paused, and by whom; not yet evaluated; or its
