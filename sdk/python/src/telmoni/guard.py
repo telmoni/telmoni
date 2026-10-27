@@ -12,13 +12,13 @@ never sees it.
 from __future__ import annotations
 
 import json
-import math
 import threading
 from collections.abc import Iterable, Mapping
+from decimal import Decimal
 from importlib import resources
 from typing import NamedTuple
 
-from .models import Price
+from .models import Price, _dollars
 
 
 class CapExceededError(RuntimeError):
@@ -27,16 +27,25 @@ class CapExceededError(RuntimeError):
     run had used of it, its steps opened or the US dollars it spent."""
 
     def __init__(self, cap: str, limit: float, used: float) -> None:
+        # Its three arguments, so a pickle builds it again.
+        super().__init__(cap, limit, used)
         self.cap = cap
         self.limit = limit
         self.used = used
-        if cap == "steps":
-            text = f"the run reached its step cap of {limit:g}"
-        else:
-            text = (
-                f"the run reached its spend cap of ${limit:g}, having spent ${used:g}"
-            )
-        super().__init__(text)
+
+    def __str__(self) -> str:
+        if self.cap == "steps":
+            return f"the run reached its step cap of {_amount(self.limit)}"
+        return (
+            f"the run reached its spend cap of ${_amount(self.limit)}, "
+            f"having spent ${_amount(self.used)}"
+        )
+
+
+def _amount(value: float) -> str:
+    """The shortest decimal that reads back as `value`, with no exponent, as
+    the other SDKs print it."""
+    return f"{Decimal(repr(float(value))).normalize():f}"
 
 
 class Rate(NamedTuple):
@@ -167,16 +176,12 @@ class Guard:
 
 def caps(max_steps: object, max_spend: object) -> tuple[int | None, float | None]:
     """A run's caps, or why they are none: whole steps above 0, and a spend of
-    US dollars above 0 that is a number."""
+    US dollars above 0, read as a cost is."""
     if max_steps is not None and (
         isinstance(max_steps, bool) or not isinstance(max_steps, int) or max_steps < 1
     ):
         raise ValueError("max_steps must be a whole number above 0")
-    if max_spend is not None and (
-        isinstance(max_spend, bool)
-        or not isinstance(max_spend, (int, float))
-        or not math.isfinite(max_spend)
-        or max_spend <= 0
-    ):
+    spend = None if max_spend is None else _dollars(max_spend)
+    if max_spend is not None and not spend:
         raise ValueError("max_spend must be a finite number of US dollars above 0")
-    return max_steps, None if max_spend is None else float(max_spend)
+    return max_steps, spend

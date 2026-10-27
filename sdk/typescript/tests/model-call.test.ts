@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import type { Usage } from '../src/index';
 import { type FakeTransport, type Harness, type JsonSpan, answer, attributesOf, harness, one } from './helpers';
 
 let h: Harness;
@@ -101,6 +102,32 @@ describe('a model call', () => {
     const boxed = one(h.transport.spans().filter((each) => each.name === 'chat n'));
     expect(attributesOf(boxed)['gen_ai.usage.input_tokens']).toBe(7);
     expect(h.warnings).toHaveLength(2);
+  });
+
+  it("takes a usage carrying none of Usage's keys as none, with one warning", async () => {
+    // A provider's own usage, handed as it came: OpenAI's, then Anthropic's.
+    const openai = { prompt_tokens: 12, completion_tokens: 7, total_tokens: 19 };
+    const anthropic = { input_tokens: 12, output_tokens: 7, cache_read_input_tokens: 3 };
+    const spent = h.telmoni.run('bot', { maxSpend: 1 }, (run) => {
+      // Its own, its count unset, warns of nothing: checked first, the warning being once.
+      run.modelCall('n', (call) => call.answered({ usage: { inputTokens: undefined } }));
+      expect(h.warnings).toEqual([]);
+      run.modelCall('m', { provider: 'openai' }, (call) => {
+        call.answered({ responseModel: 'm-1', usage: openai as unknown as Usage });
+      });
+      run.modelCall('m', { provider: 'anthropic' }, (call) => call.answered({ usage: anthropic as unknown as Usage }));
+      return run.spent;
+    });
+    expect(await h.telmoni.flush()).toBe(true);
+    const [own, first, second] = calls(h.transport).map(attributesOf);
+    expect(first!['gen_ai.response.model']).toBe('m-1');
+    for (const held of [own!, first!, second!]) {
+      expect(Object.keys(held).filter((key) => key.startsWith('gen_ai.usage.'))).toEqual([]);
+    }
+    expect(spent).toBe(0);
+    expect(h.warnings).toEqual([
+      "telmoni: a usage must be telmoni's Usage, the provider's counts copied into it; the call is sent without it",
+    ]);
   });
 
   it('sends a provider or response model as its text, and an empty one not at all', async () => {

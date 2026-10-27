@@ -3,12 +3,20 @@
 
 mod common;
 
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Barrier, Mutex, mpsc};
+use std::thread;
+use std::time::Duration;
+
 use common::{
-    Failure, Harness, Outcome, attributes_of, field, int, keyed, load_fixture, named, text,
+    Failure, FakeTransport, Harness, Outcome, attributes_of, field, int, keyed, load_fixture, lock,
+    named, text,
 };
 use serde_json::{Value, json};
 use telmoni::{
-    Cap, Config, Error, ModelCallOptions, Price, Reply, Run, RunOptions, ToolCallOptions, Usage,
+    Cap, Config, Error, Hooks, ModelCall, ModelCallOptions, Price, Reply, Run, RunOptions, Telmoni,
+    ToolCallOptions, Usage,
 };
 
 fn near(a: f64, b: f64) -> bool {
@@ -95,19 +103,14 @@ fn each_call_is_counted_as_the_server_counts_it() -> Outcome {
         prices: prices(&fixture)?,
         ..keyed()
     })?;
-    let run = harness.telmoni.run("guarded", RunOptions::default())?;
     for spec in field(&fixture, "calls")?.as_array().ok_or("calls")? {
-        let before = run.spent();
+        let run = harness.telmoni.run("guarded", RunOptions::default())?;
         call(&run, spec)?;
         let counted = field(spec, "counted")?.as_f64().ok_or("counted")?;
-        assert!(
-            near(run.spent() - before, counted),
-            "{}: counted {}, want {counted}",
-            text(spec, "name")?,
-            run.spent() - before
-        );
+        // Exactly, as the server rounds each product and each sum.
+        assert_eq!(run.spent(), counted, "{}", text(spec, "name")?);
+        run.end();
     }
-    run.end();
     Ok(())
 }
 
@@ -177,6 +180,23 @@ fn a_run_past_a_cap_is_refused_what_it_opens_next() -> Outcome {
 }
 
 #[test]
+fn a_refusal_says_what_the_other_sdks_say() -> Outcome {
+    let fixture = load_fixture("guard.json")?;
+    for spec in field(&fixture, "refusals")?.as_array().ok_or("refusals")? {
+        let refusal = Error::CapExceeded {
+            cap: match text(spec, "cap")? {
+                "steps" => Cap::Steps,
+                _ => Cap::Spend,
+            },
+            limit: field(spec, "limit")?.as_f64().ok_or("limit")?,
+            used: field(spec, "used")?.as_f64().ok_or("used")?,
+        };
+        assert_eq!(refusal.to_string(), text(spec, "says")?);
+    }
+    Ok(())
+}
+
+#[test]
 fn a_refusal_carried_out_by_a_try_closure_is_the_callers_error() -> Outcome {
     #[derive(Debug)]
     enum Stopped {
@@ -211,6 +231,40 @@ fn a_refusal_carried_out_by_a_try_closure_is_the_callers_error() -> Outcome {
         "{second:?}"
     );
     run.end();
+    Ok(())
+}
+
+/// A refusal escaping a run fails it with its error's type, `telmoni::Error`.
+#[test]
+fn a_refusal_escaping_the_run_fails_it_with_its_type() -> Outcome {
+    let harness = Harness::new()?;
+    let escaped = harness.telmoni.try_run_with(
+        "guarded",
+        RunOptions {
+            max_steps: Some(1),
+            ..RunOptions::default()
+        },
+        |run| {
+            run.step("first")?.end();
+            run.step("second")?.end();
+            Ok::<(), Error>(())
+        },
+    );
+    assert!(
+        matches!(
+            escaped,
+            Err(Error::CapExceeded {
+                cap: Cap::Steps,
+                ..
+            })
+        ),
+        "{escaped:?}"
+    );
+    harness.flush()?;
+    let spans = harness.spans()?;
+    let run = named(&spans, "invoke_agent guarded")?;
+    assert_eq!(attributes_of(run)?.get("error.type"), Some(&json!("Error")));
+    assert_eq!(run.get("status"), Some(&json!({ "code": 2 })));
     Ok(())
 }
 
@@ -316,6 +370,84 @@ fn a_call_answered_again_counts_what_its_span_holds() -> Outcome {
     Ok(())
 }
 
+/// Two threads answering one call at once leave its span holding what was counted.
+#[test]
+fn answers_raced_from_two_threads_count_what_the_span_holds() -> Outcome {
+    const ROUNDS: usize = 2_000;
+    let harness = Harness::with(Config {
+        prices: vec![Price {
+            provider: "p".to_owned(),
+            model: "m".to_owned(),
+            input: 1e-6,
+            ..Price::default()
+        }],
+        ..keyed()
+    })?;
+    let mut spent = HashMap::new();
+    for round in 0..ROUNDS {
+        let run = harness.telmoni.run("raced", RunOptions::default())?;
+        let model_call = run.model_call(
+            "m",
+            ModelCallOptions {
+                provider: Some("p".to_owned()),
+                ..ModelCallOptions::default()
+            },
+        )?;
+        let start = Barrier::new(2);
+        let (start, answering) = (&start, &model_call);
+        thread::scope(|scope| {
+            for input in [1_000, 2_000] {
+                scope.spawn(move || {
+                    start.wait();
+                    answering.answered(Reply {
+                        usage: Some(Usage {
+                            input_tokens: Some(input),
+                            ..Usage::default()
+                        }),
+                        output_messages: Some("the answer".into()),
+                        ..Reply::default()
+                    });
+                });
+            }
+        });
+        model_call.end();
+        spent.insert(run.run_id().to_owned(), run.spent());
+        run.end();
+        // Within the queue's 2,048 spans.
+        if round % 256 == 255 {
+            harness.flush()?;
+        }
+    }
+    harness.flush()?;
+    let spans = harness.spans()?;
+    let calls: Vec<&Value> = spans
+        .iter()
+        .filter(|span| span.get("name") == Some(&json!("chat m")))
+        .collect();
+    assert_eq!(calls.len(), ROUNDS);
+    let mut astray = 0;
+    for span in calls {
+        let held = attributes_of(span)?;
+        let input = held
+            .get("gen_ai.usage.input_tokens")
+            .and_then(Value::as_f64)
+            .ok_or("an input count")?;
+        let run_id = held
+            .get("telmoni.run_id")
+            .and_then(Value::as_str)
+            .ok_or("a run id")?;
+        let counted = spent.get(run_id).copied().ok_or("its run")?;
+        if !near(counted, input * 1e-6) {
+            astray += 1;
+        }
+    }
+    assert_eq!(
+        astray, 0,
+        "{astray} of {ROUNDS} calls counted an answer their span did not hold"
+    );
+    Ok(())
+}
+
 #[test]
 fn the_release_carries_the_price_file_whole() -> Outcome {
     let core = std::fs::read_to_string(
@@ -375,6 +507,66 @@ fn a_call_with_neither_under_a_spend_cap_is_warned_of_once() -> Outcome {
         [
             "telmoni: no price for my-model (vllm), which reported no cost; it counts nothing toward the run's spend cap"
         ]
+    );
+    Ok(())
+}
+
+/// The application's sink runs with the call's lock released.
+#[test]
+fn a_sink_answering_the_call_it_warns_of_is_never_held_up() -> Outcome {
+    let transport = FakeTransport::new([])?;
+    let answering: Arc<Mutex<Option<Arc<ModelCall>>>> = Arc::default();
+    let stalled = Arc::new(AtomicBool::new(false));
+    let warn = {
+        let (answering, stalled) = (Arc::clone(&answering), Arc::clone(&stalled));
+        move |_: &str| {
+            let Some(call) = lock(&answering).clone() else {
+                return;
+            };
+            let (done, answered) = mpsc::channel();
+            thread::spawn(move || {
+                call.answered(Reply::default());
+                let _ = done.send(());
+            });
+            if answered.recv_timeout(Duration::from_secs(5)).is_err() {
+                stalled.store(true, Ordering::Relaxed);
+            }
+        }
+    };
+    let telmoni = Telmoni::with_hooks(
+        keyed(),
+        Hooks {
+            transport: Box::new(transport),
+            warn: Box::new(warn),
+            ..Hooks::default()
+        },
+    );
+    let run = telmoni.run(
+        "guarded",
+        RunOptions {
+            max_spend: Some(1.0),
+            ..RunOptions::default()
+        },
+    )?;
+    let call = Arc::new(run.model_call(
+        "my-model",
+        ModelCallOptions {
+            provider: Some("vllm".to_owned()),
+            ..ModelCallOptions::default()
+        },
+    )?);
+    *lock(&answering) = Some(Arc::clone(&call));
+    call.answered(Reply {
+        usage: Some(Usage {
+            input_tokens: Some(10),
+            ..Usage::default()
+        }),
+        ..Reply::default()
+    });
+    lock(&answering).take();
+    assert!(
+        !stalled.load(Ordering::Relaxed),
+        "the sink ran under the call's lock"
     );
     Ok(())
 }

@@ -5,8 +5,8 @@ import (
 	_ "embed"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"math"
+	"strconv"
 	"sync"
 )
 
@@ -32,11 +32,14 @@ type CapExceededError struct {
 	Used  float64
 }
 
+// Error words it as the other SDKs do: no package before it, and each amount
+// the shortest decimal that reads back as it, with no exponent.
 func (e *CapExceededError) Error() string {
 	if e.Cap == "steps" {
-		return fmt.Sprintf("telmoni: the run reached its step cap of %g", e.Limit)
+		return "the run reached its step cap of " + strconv.FormatFloat(e.Limit, 'f', -1, 64)
 	}
-	return fmt.Sprintf("telmoni: the run reached its spend cap of $%g, having spent $%g", e.Limit, e.Used)
+	return "the run reached its spend cap of $" + strconv.FormatFloat(e.Limit, 'f', -1, 64) +
+		", having spent $" + strconv.FormatFloat(e.Used, 'f', -1, 64)
 }
 
 // Price is a project's own price for one of a provider's models, as the
@@ -68,10 +71,12 @@ func (r rate) cost(t tokens) float64 {
 	if t.cacheRead <= t.input && t.cacheWrite <= t.input-t.cacheRead {
 		uncached = t.input - t.cacheRead - t.cacheWrite
 	}
-	return float64(uncached)*r.input +
-		float64(t.cacheRead)*r.cacheRead +
-		float64(t.cacheWrite)*r.cacheWrite +
-		float64(t.output)*r.output
+	// Each product converted, which the spec says rounds it: fused into its
+	// add, as arm64 does, the sum can end a bit off the server's.
+	return float64(float64(uncached)*r.input) +
+		float64(float64(t.cacheRead)*r.cacheRead) +
+		float64(float64(t.cacheWrite)*r.cacheWrite) +
+		float64(float64(t.output)*r.output)
 }
 
 type name struct{ provider, model string }

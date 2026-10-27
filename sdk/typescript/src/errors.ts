@@ -54,14 +54,27 @@ export class CapExceededError extends Error {
   constructor(cap: 'steps' | 'spend', limit: number, used: number) {
     super(
       cap === 'steps'
-        ? `the run reached its step cap of ${limit}`
-        : `the run reached its spend cap of $${limit}, having spent $${used}`,
+        ? `the run reached its step cap of ${plain(limit)}`
+        : `the run reached its spend cap of $${plain(limit)}, having spent $${plain(used)}`,
     );
     this.name = 'CapExceededError';
     this.cap = cap;
     this.limit = limit;
     this.used = used;
   }
+}
+
+/** The shortest decimal that reads back as `amount`, with no exponent, as the other SDKs print it. */
+function plain(amount: number): string {
+  const [digits = '', exponent] = String(amount).split('e');
+  if (exponent === undefined) return digits;
+  const sign = digits.startsWith('-') ? '-' : '';
+  const [whole = '', fraction = ''] = digits.slice(sign.length).split('.');
+  const all = whole + fraction;
+  const point = whole.length + Number(exponent);
+  if (point <= 0) return `${sign}0.${'0'.repeat(-point)}${all}`;
+  if (point >= all.length) return `${sign}${all}${'0'.repeat(point - all.length)}`;
+  return `${sign}${all.slice(0, point)}.${all.slice(point)}`;
 }
 
 /** An abort is the agent stopping, which is neither ok nor an error. */

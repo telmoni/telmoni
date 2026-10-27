@@ -190,7 +190,9 @@ impl Telmoni {
     /// # Errors
     ///
     /// [`Error::EmptyAgent`] for a blank name; [`Error::SampleRate`] for a
-    /// rate, given here or configured, not above 0 and up to 1.
+    /// rate, given here or configured, not above 0 and up to 1;
+    /// [`Error::MaxSteps`] for a `max_steps` of 0; [`Error::MaxSpend`] for a
+    /// `max_spend` not a finite number of US dollars above 0.
     pub fn run(&self, agent: &str, options: RunOptions) -> Result<Run, Error> {
         runs::open(&self.inner, agent, options)
     }

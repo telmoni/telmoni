@@ -5,13 +5,18 @@ from __future__ import annotations
 
 import json
 import logging
+import pickle
+import threading
+import time
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from conftest import FakeTransport, attributes_of, load_fixture
-from telmoni import CapExceededError, Config, Price, Run, Telmoni, Usage
+from telmoni import CapExceededError, Config, ModelCall, Price, Run, Telmoni, Usage
+from telmoni.guard import Guard
 
 CORE_PRICES = Path(__file__).resolve().parents[3] / "crates/telemetry/model_prices.json"
 CARRIED = Path(__file__).resolve().parents[1] / "src/telmoni/model_prices.json"
@@ -52,13 +57,11 @@ def test_each_call_is_counted_as_the_server_counts_it(transport: FakeTransport) 
     fixture = load_fixture("guard.json")
     telmoni = client(transport, handed(fixture))
     try:
-        with telmoni.run("guarded") as run:
-            for spec in fixture["calls"]:
-                before = run.spent
+        for spec in fixture["calls"]:
+            with telmoni.run("guarded") as run:
                 call(telmoni, run, spec)
-                assert run.spent - before == pytest.approx(
-                    spec["counted"], abs=1e-12
-                ), spec["name"]
+                # Exactly, as the server rounds each product and each sum.
+                assert run.spent == spec["counted"], spec["name"]
     finally:
         telmoni.shutdown()
 
@@ -96,6 +99,14 @@ def test_a_run_past_a_cap_raises_at_what_it_opens_next(
     ]
     performed = case["ops"] if refused is None else case["ops"][: refused["at"]]
     assert len(opened) == len(performed), "a refused op opened nothing"
+
+
+@pytest.mark.parametrize(
+    "case", load_fixture("guard.json")["refusals"], ids=lambda case: case["says"]
+)
+def test_a_refusal_says_what_the_other_sdks_say(case: dict[str, Any]) -> None:
+    refusal = CapExceededError(case["cap"], case["limit"], case["used"])
+    assert str(refusal) == case["says"]
 
 
 def test_an_escaping_refusal_fails_the_run_with_its_class(
@@ -169,6 +180,110 @@ def test_a_call_answered_again_counts_what_its_span_holds(
     assert spent == pytest.approx(0.003, abs=1e-12)
 
 
+def test_an_answer_after_its_call_ended_counts_nothing_with_one_warning(
+    transport: FakeTransport, caplog: pytest.LogCaptureFixture
+) -> None:
+    """An answer no span holds counts nothing toward the run's spend."""
+    telmoni = client(transport, [Price(provider="p", model="m", input=1e-6, output=0)])
+    try:
+        with telmoni.run("guarded") as run:
+            with run.model_call("m", provider="p") as c:
+                c.answered(usage=Usage(input_tokens=1000))
+            for _ in range(2):
+                c.answered(usage=Usage(input_tokens=5000))
+            spent = run.spent
+        assert telmoni.flush()
+    finally:
+        telmoni.shutdown()
+    (span,) = [s for s in transport.spans() if s["name"] == "chat m"]
+    assert attributes_of(span)["gen_ai.usage.input_tokens"] == 1000
+    assert spent == pytest.approx(0.001, abs=1e-12)
+    warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    assert warnings == [
+        (
+            "telmoni: a model call must be answered before it ends; an answer given "
+            "after is not sent and counts nothing toward the run's spend"
+        )
+    ]
+
+
+def test_answers_from_threads_at_once_count_the_call_once(
+    transport: FakeTransport, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Eight threads answering one call count it once, as Go's and Rust's do."""
+    telmoni = client(transport, [Price(provider="p", model="m", input=1e-6, output=0)])
+    counts = Guard.counts
+
+    def slowly(self: Guard, before: float, now: float) -> None:
+        time.sleep(0.05)
+        counts(self, before, now)
+
+    monkeypatch.setattr(Guard, "counts", slowly)
+    try:
+        with telmoni.run("guarded") as run:
+            with run.model_call("m", provider="p") as c:
+                start = threading.Barrier(8)
+
+                def answer() -> None:
+                    start.wait()
+                    c.answered(usage=Usage(input_tokens=1000))
+
+                threads = [threading.Thread(target=answer) for _ in range(8)]
+                for thread in threads:
+                    thread.start()
+                for thread in threads:
+                    thread.join()
+            spent = run.spent
+    finally:
+        telmoni.shutdown()
+    assert spent == pytest.approx(0.001, abs=1e-12)
+
+
+def test_a_handler_answering_the_call_it_warns_of_is_never_held_up(
+    transport: FakeTransport,
+) -> None:
+    """The application's logging handlers run with the call's lock released."""
+    answering: list[ModelCall] = []
+    stalled: list[bool] = []
+
+    class Answering(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            if answering:
+                other = threading.Thread(target=answering[0].answered)
+                other.start()
+                other.join(timeout=5)
+                stalled.append(other.is_alive())
+
+    handler = Answering()
+    logging.getLogger("telmoni").addHandler(handler)
+    telmoni = client(transport, [])
+    try:
+        with (
+            telmoni.run("guarded", max_spend=1.0) as run,
+            run.model_call("my-model", provider="vllm") as c,
+        ):
+            assert isinstance(c, ModelCall)
+            answering.append(c)
+            c.answered(usage=Usage(input_tokens=10))
+            answering.clear()
+    finally:
+        logging.getLogger("telmoni").removeHandler(handler)
+        telmoni.shutdown()
+    assert stalled == [False]
+
+
+def test_a_cap_refusal_crosses_a_process_whole() -> None:
+    """The refusal pickles, as a process pool sends it back to its parent."""
+    refused = CapExceededError("spend", 0.5, 0.75)
+    copy = pickle.loads(pickle.dumps(refused))
+    assert (copy.cap, copy.limit, copy.used, str(copy)) == (
+        "spend",
+        0.5,
+        0.75,
+        str(refused),
+    )
+
+
 def test_the_release_carries_the_price_file_whole() -> None:
     assert CARRIED.read_bytes() == CORE_PRICES.read_bytes(), "make prices writes it"
 
@@ -211,6 +326,10 @@ def test_a_call_with_neither_under_a_spend_cap_is_warned_of_once(
         ({"max_spend": float("inf")}, "max_spend"),
         ({"max_spend": float("nan")}, "max_spend"),
         ({"max_spend": "1"}, "max_spend"),
+        ({"max_spend": True}, "max_spend"),
+        ({"max_spend": Decimal(0)}, "max_spend"),
+        ({"max_spend": Decimal("NaN")}, "max_spend"),
+        ({"max_spend": Decimal("Infinity")}, "max_spend"),
     ],
 )
 def test_a_cap_is_above_0(telmoni: Telmoni, caps: dict[str, Any], why: str) -> None:
@@ -225,11 +344,31 @@ def test_a_price_handed_is_a_name_and_numbers_from_0() -> None:
         Price(provider="p", model="m", input=-1e-6, output=1e-6),
         Price(provider="p", model="m", input=1e-6, output=float("nan")),
         Price(provider="p", model="m", input=1e-6, output=1e-6, cache_read=True),
+        Price(provider="p", model="m", input=Decimal("-1E-6"), output=0),  # type: ignore[arg-type]
+        Price(provider="p", model="m", input=1e-6, output=Decimal("NaN")),  # type: ignore[arg-type]
     ):
         with pytest.raises(ValueError):
             Config(prices=[broken])
     with pytest.raises(TypeError):
         Config(prices=[{"provider": "p"}])  # type: ignore[list-item]
+
+
+def test_a_decimal_cap_and_price_hold_as_a_decimal_cost_does(
+    transport: FakeTransport,
+) -> None:
+    """A `Decimal` cap and price are taken as the floats they read as."""
+    price = Price(provider="p", model="m", input=Decimal("1E-6"), output=Decimal(0))  # type: ignore[arg-type]
+    telmoni = client(transport, [price])
+    try:
+        with telmoni.run("guarded", max_spend=Decimal("0.0005")) as run:  # type: ignore[arg-type]
+            with run.model_call("m", provider="p") as c:
+                c.answered(usage=Usage(input_tokens=1000))
+            with pytest.raises(CapExceededError) as refused, run.tool_call("lookup"):
+                pass
+    finally:
+        telmoni.shutdown()
+    assert refused.value.limit == 0.0005
+    assert refused.value.used == pytest.approx(0.001, abs=1e-12)
 
 
 def test_a_cost_goes_as_a_double_and_one_that_is_no_cost_is_left_off(

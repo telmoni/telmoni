@@ -105,7 +105,9 @@ holding the **ingest** scope.
     token count below 0 or past 64 bits, a cost below 0, not finite, or text,
     a tag whose key is not 1 to 64 characters or whose value is past 256, and
     the tags past the first 32 kept; an empty user, session, provider or
-    response model is left off as unset. A name, model, provider, user, session, response model or error
+    response model is left off as unset. A usage handed to `answered` that is
+    no `Usage`, your provider's own usage object say, is taken as none, with
+    one warning: copy its counts into a `Usage`. A name, model, provider, user, session, response model or error
     type that is no string goes as its text with one warning, as does a tag
     that is no string, finite number or bool; an exception or an
     exception's class handed to `fail()` goes as the class's name, never its
@@ -159,7 +161,10 @@ holding the **ingest** scope.
     token count below 0 or past 64 bits, a cost below 0, not finite, or no
     number, a tag whose key is not 1 to 64 characters or whose value is past
     256, and the tags past the first 32 kept; an empty user, session,
-    provider or response model is left off as unset. A name, model, provider, user, session, response model
+    provider or response model is left off as unset. A usage handed to
+    `answered` carrying none of `Usage`'s keys, your provider's own usage
+    object say, is taken as none, with one warning: copy its counts into
+    `inputTokens` and the rest. A name, model, provider, user, session, response model
     or error type that is no string goes as its text with one warning, as does
     a tag that is no string, finite number or boolean; an error, or a class,
     handed to `fail()` goes as its class's name, never its message. Past
@@ -210,7 +215,8 @@ holding the **ingest** scope.
     spans started with it nest under the run, and the handle to end with
     `defer`; `telmoni.RunFromContext(ctx)` finds the run deep in a call stack.
     `Fail(err)` marks the span failed with the error's Go type, never its
-    message, and marks it cancelled for `context.Canceled`;
+    message, and marks it cancelled for `context.Canceled`, unless its run
+    was [refused an opening](#the-guard);
     `FailWith("TimeoutError")` and `Cancel()` do the same by hand. The SDK
     never panics: a `Client` not from `New`, the nil a failed `New` returns
     among them, sends nothing; a blank agent name opens a run that does
@@ -600,13 +606,20 @@ Each call is counted as Telmoni counts it: its cost as reported in the usage
 handed to `answered`; else its tokens at its price in the table each SDK
 release carries — LiteLLM's, the one Telmoni
 [prices a call by](/docs/api/ingest#what-a-call-cost), by its provider and the
-model it answered as, whole; else nothing. Prices of your own, handed to the
+model it answered as, whole; else nothing. The table names each provider as
+the GenAI conventions spell it, the spelling the
+[field inventory](/docs/api/field-inventory) gives: `openai`, `anthropic`,
+`gcp.gemini`, `gcp.vertex_ai`, `aws.bedrock`, `azure.ai.openai`, `mistral_ai`,
+`x_ai`; a call naming its provider otherwise, `gemini` or `bedrock` say, finds
+no price there. Prices of your own, handed to the
 client as `prices`, come before the table's, for a model it lacks or prices
 otherwise than you pay; the SDK alone holds them, so Telmoni's own reads, an
 alert on what each run spent among them, still price that call by the table.
 A call answered more than once, as a stream's counts arrive, counts as its
 span then holds it: each count and the cost as last given, Go's `Usage` giving
-its four counts each time. A call with neither a cost nor a price is never
+its four counts each time. An answer given after its call ended is not sent
+and counts nothing, with one warning; in Rust, `end` takes the call, so none
+can come. A call with neither a cost nor a price is never
 stopped on cost, and under a spend cap the SDK warns once of each such model.
 `spent` reads what a run's calls have cost so far, as the guard counts them.
 
@@ -682,7 +695,12 @@ stopped on cost, and under a spend cap the SDK warns once of each such model.
     `ToolCall` open nothing and return a context already cancelled, its
     `context.Cause` a `*CapExceededError` naming the `Cap`, its `Limit` and
     what the run had `Used`, so a request made with it fails at once, as one
-    past its deadline does; `run.Err()` gives the last refusal too. A cap of
+    past its deadline does, and nothing opens under it; `run.Err()` gives the
+    last refusal too. Once the run was refused, the run's `Fail(err)`, and
+    each step's and call's, marks it failed with the refusal's type,
+    `telmoni.CapExceededError`, for an `err` that is or wraps
+    `context.Canceled`, as such a request's is, where it would otherwise mark
+    it cancelled, as the other SDKs fail what a refusal passes through. A cap of
     0 is none, and one below 0, or a spend that is no finite number, is none
     with one warning. `New` returns an error for a price that names no
     provider or model, or is no number from 0; a nil `CacheRead` or
@@ -707,8 +725,10 @@ stopped on cost, and under a spend cap the SDK warns once of each such model.
 
     `step`, `model_call` and `tool_call` return `Error::CapExceeded`, naming
     the `cap` (`Cap::Steps` or `Cap::Spend`), its `limit` and what the run had
-    `used`, and open nothing; `run` returns `Error::MaxSteps` for a step cap of
-    0 and `Error::MaxSpend` for a spend cap that is no finite number above 0.
+    `used`, and open nothing; carried out of `try_run_with`, it marks the run
+    failed with its type, `Error`. `run` returns `Error::MaxSteps` for a step
+    cap of 0 and `Error::MaxSpend` for a spend cap that is no finite number
+    above 0.
     A price that names no provider or model, or is no number from 0, is left
     out with one warning, since a client cannot fail; a cache price of `None`
     is the input price.

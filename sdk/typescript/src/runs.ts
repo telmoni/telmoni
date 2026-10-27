@@ -80,6 +80,11 @@ export class Handle {
     this.span.setAttribute(contract.CANCELLED, true);
   }
 
+  /** Whether its span has ended. */
+  protected get ended(): boolean {
+    return this.#ended;
+  }
+
   [END](outcome: Outcome): void {
     if (this.#ended) return;
     this.#ended = true;
@@ -191,15 +196,27 @@ export class ModelCall extends Handle {
     this.#prices = by.prices;
   }
 
-  /** What the model answered: its name, its tokens, and its messages. */
+  /**
+   * What the model answered: its name, its tokens, and its messages. An answer
+   * given after the call ended is not sent, and counts nothing.
+   */
   answered(answer: ModelAnswer): void {
-    const model = filled(answer.responseModel, 'response model', this.#warnOnce);
+    const named = filled(answer.responseModel, 'response model', this.#warnOnce);
+    const model = named === undefined ? undefined : cut(named, contract.MODEL_MAX, 'response model', this.#warnOnce);
+    const sent = usageOf(answer.usage, this.#warnOnce);
+    if (this.ended) {
+      this.#warnOnce(
+        'call:late',
+        'telmoni: a model call must be answered before it ends; an answer given after is not sent ' +
+          "and counts nothing toward the run's spend",
+      );
+      return;
+    }
     if (model !== undefined) {
       // The name the call is priced by, as ingest reads it.
-      this.#model = cut(model, contract.MODEL_MAX, 'response model', this.#warnOnce);
-      this.span.setAttribute(contract.RESPONSE_MODEL, this.#model);
+      this.#model = model;
+      this.span.setAttribute(contract.RESPONSE_MODEL, model);
     }
-    const sent = usageOf(answer.usage, this.#warnOnce);
     this.span.setAttributes(sent);
     this.#held = { ...this.#held, ...sent };
     if (answer.outputMessages !== undefined) {
@@ -691,6 +708,15 @@ function close(span: Span, outcome: RecordOutcome & { end: RecordTime }): void {
   span.end(hrTimeOf(outcome.end));
 }
 
+/** `Usage`'s keys, by which a usage is told from another's. */
+const USAGE_KEYS = [
+  'inputTokens',
+  'outputTokens',
+  'cacheReadInputTokens',
+  'cacheWriteInputTokens',
+  'cost',
+] as const satisfies ReadonlyArray<keyof Usage>;
+
 /**
  * The counts as integers, which alone ingest takes; one JSON's integers cannot
  * carry would go as `intValue: "NaN"` and lose the batch, so it is left off,
@@ -699,6 +725,15 @@ function close(span: Span, outcome: RecordOutcome & { end: RecordTime }): void {
 function usageOf(usage: Usage | undefined, warnOnce: WarnOnce): Attributes {
   const out: Attributes = {};
   if (!isSet(usage)) return out;
+  // A provider's own, OpenAI's or Anthropic's, would read as no counts without a word.
+  const given: object = Object(usage);
+  if (!USAGE_KEYS.some((key) => key in given)) {
+    warnOnce(
+      'usage:foreign',
+      "telmoni: a usage must be telmoni's Usage, the provider's counts copied into it; the call is sent without it",
+    );
+    return out;
+  }
   for (const [key, value] of [
     [contract.INPUT_TOKENS, usage.inputTokens],
     [contract.OUTPUT_TOKENS, usage.outputTokens],

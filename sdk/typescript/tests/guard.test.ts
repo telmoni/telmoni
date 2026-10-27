@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-import { CapExceededError, type Price, type Run, type Telmoni, type Usage } from '../src/index';
+import { CapExceededError, type ModelCall, type Price, type Run, type Telmoni, type Usage } from '../src/index';
 import { attributesOf, harness, loadFixture, one } from './helpers';
 
 interface AnswerSpec {
@@ -52,6 +52,7 @@ interface Guard {
   }>;
   calls: CallSpec[];
   runs: RunSpec[];
+  refusals: Array<{ cap: 'steps' | 'spend'; limit: number; used: number; says: string }>;
 }
 
 const FIXTURE = loadFixture<Guard>('guard.json');
@@ -100,13 +101,13 @@ async function closed(telmoni: Telmoni): Promise<void> {
 describe('guard.json', () => {
   it('counts each call as the server counts it', async () => {
     const { telmoni } = harness({ prices: handed() });
-    telmoni.run('guarded', (run) => {
-      for (const spec of FIXTURE.calls) {
-        const before = run.spent;
+    for (const spec of FIXTURE.calls) {
+      telmoni.run('guarded', (run) => {
         call(run, spec);
-        expect(run.spent - before, spec.name).toBeCloseTo(spec.counted, 12);
-      }
-    });
+        // Exactly, as the server rounds each product and each sum.
+        expect(run.spent, spec.name).toBe(spec.counted);
+      });
+    }
     await closed(telmoni);
   });
 
@@ -139,6 +140,10 @@ describe('guard.json', () => {
     const performed = spec.refused === null ? spec.ops : spec.ops.slice(0, spec.refused.at);
     const opened = transport.spans().filter((span) => span.name !== 'invoke_agent guarded');
     expect(opened, 'a refused op opened nothing').toHaveLength(performed.length);
+  });
+
+  it.each(FIXTURE.refusals.map((spec) => [spec.says, spec] as const))('says %s', (_says, spec) => {
+    expect(new CapExceededError(spec.cap, spec.limit, spec.used).message).toBe(spec.says);
   });
 });
 
@@ -201,6 +206,27 @@ describe('the guard', () => {
       12,
     );
     expect(spent).toBeCloseTo(0.003, 12);
+  });
+
+  it('counts nothing of an answer given after its call ended, with one warning', async () => {
+    const { telmoni, transport, warnings } = harness({ prices: [{ provider: 'p', model: 'm', input: 1e-6, output: 0 }] });
+    let spent = Number.NaN;
+    telmoni.run('guarded', (run) => {
+      let ended: ModelCall | undefined;
+      run.modelCall('m', { provider: 'p' }, (modelCall) => {
+        modelCall.answered({ usage: { inputTokens: 1000 } });
+        ended = modelCall;
+      });
+      for (let n = 0; n < 2; n++) ended?.answered({ usage: { inputTokens: 5000 } });
+      spent = run.spent;
+    });
+    await closed(telmoni);
+    const held = attributesOf(one(transport.spans().filter((span) => span.name === 'chat m')));
+    expect(held['gen_ai.usage.input_tokens']).toBe(1000);
+    expect(spent).toBeCloseTo(0.001, 12);
+    expect(warnings).toEqual([
+      "telmoni: a model call must be answered before it ends; an answer given after is not sent and counts nothing toward the run's spend",
+    ]);
   });
 
   it('is released with the price file whole', () => {

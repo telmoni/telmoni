@@ -596,35 +596,45 @@ impl Run {
 impl ModelCall {
     /// What the model answered: its name, its tokens, and its messages.
     pub fn answered(&self, reply: Reply) {
-        let span = self.handle.cx.span();
         let warner = &self.handle.client.warner;
         // Ingest refuses the call over an empty one.
         let answered_as = reply
             .response_model
             .filter(|model| !model.is_empty())
             .map(|model| cut(&model, contract::MODEL_MAX, "response model", warner));
-        if let Some(model) = &answered_as {
-            span.set_attribute(KeyValue::new(contract::RESPONSE_MODEL, model.clone()));
-        }
         let usage = reply.usage.map(|usage| sendable_usage(usage, warner));
-        if let Some(usage) = usage {
-            span.set_attributes(usage_attributes(usage));
-        }
-        if let Some(messages) = reply.output_messages {
-            span.set_attribute(KeyValue::new(contract::OUTPUT_MESSAGES, messages.0));
-        }
-        self.count(answered_as, usage);
+        self.count(answered_as, usage, reply.output_messages);
     }
 
-    /// Its cost to its run's spend, in place of what it counted before:
-    /// reported, else priced by its name as sent, else nothing.
-    fn count(&self, answered_as: Option<String>, usage: Option<Usage>) {
+    /// The answer on its span, and its cost to its run's spend in place of what
+    /// it counted before: reported, else priced by its name as sent, else nothing.
+    fn count(&self, answered_as: Option<String>, usage: Option<Usage>, messages: Option<Content>) {
+        // Given once the lock is released: the sink is the application's.
+        if let Some((key, text)) = self.hold(answered_as, usage, messages) {
+            self.handle.client.warner.once(key, &text);
+        }
+    }
+
+    /// [`Self::count`] under the call's lock, so answers given at once count
+    /// as the span is left holding them; and the warning it calls for.
+    fn hold(
+        &self,
+        answered_as: Option<String>,
+        usage: Option<Usage>,
+        messages: Option<Content>,
+    ) -> Option<(String, String)> {
         let mut priced = lock(&self.priced);
+        let span = self.handle.cx.span();
         if let Some(model) = answered_as {
+            span.set_attribute(KeyValue::new(contract::RESPONSE_MODEL, model.clone()));
             // The name the call is priced by, as ingest reads it.
             priced.model = model;
         }
+        if let Some(messages) = messages {
+            span.set_attribute(KeyValue::new(contract::OUTPUT_MESSAGES, messages.0));
+        }
         if let Some(sent) = usage {
+            span.set_attributes(usage_attributes(sent));
             let held = &mut priced.held;
             held.input_tokens = sent.input_tokens.or(held.input_tokens);
             held.output_tokens = sent.output_tokens.or(held.output_tokens);
@@ -653,7 +663,7 @@ impl ModelCall {
             )
         });
         let guard = &self.handle.guard;
-        if cost.is_none() && guard.capped() && tokens != Tokens::default() {
+        let warning = (cost.is_none() && guard.capped() && tokens != Tokens::default()).then(|| {
             let model = if priced.model.is_empty() {
                 "a call with no model"
             } else {
@@ -664,14 +674,15 @@ impl ModelCall {
             } else {
                 &priced.provider
             };
-            self.handle.client.warner.once(
+            (
                 format!("unpriced:{}:{}", priced.provider, priced.model),
-                &format!(
+                format!(
                     "telmoni: no price for {model} ({provider}), which reported no cost; it counts nothing toward the run's spend cap"
                 ),
-            );
-        }
+            )
+        });
         guard.count(&mut priced.counted, cost.unwrap_or(0.0));
+        warning
     }
 }
 

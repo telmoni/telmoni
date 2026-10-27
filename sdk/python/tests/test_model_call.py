@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 import pytest
@@ -94,6 +95,51 @@ def test_a_token_count_goes_as_a_whole_number_from_0_and_another_is_left_off(
     warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
     assert len(warnings) == 3, warnings
     assert all("must be a whole number from 0 within 64 bits" in w for w in warnings)
+
+
+@dataclass(frozen=True)
+class AnthropicUsage:
+    """Anthropic's usage, which names its cache writes otherwise and no cost."""
+
+    input_tokens: int
+    output_tokens: int
+    cache_creation_input_tokens: int | None = None
+    cache_read_input_tokens: int | None = None
+
+
+@dataclass(frozen=True)
+class CompletionUsage:
+    """OpenAI's usage, whose counts go by other names."""
+
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+
+
+def test_a_usage_that_is_not_a_usage_is_taken_as_none_with_one_warning(
+    telmoni: Telmoni, transport: FakeTransport, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A provider's own usage, handed as it came, never raises into the turn."""
+    anthropic = AnthropicUsage(input_tokens=12, output_tokens=7)
+    openai = CompletionUsage(prompt_tokens=12, completion_tokens=7, total_tokens=19)
+    with telmoni.run("bot", max_spend=1.0) as run:
+        with telmoni.model_call("m", provider="anthropic") as call:
+            call.answered(response_model="m-1", usage=anthropic)  # type: ignore[arg-type]
+        with telmoni.model_call("m", provider="openai") as call:
+            call.answered(usage=openai)  # type: ignore[arg-type]
+        spent = run.spent
+    assert telmoni.flush()
+    first, second = (attributes_of(span) for span in calls(transport))
+    assert first["gen_ai.response.model"] == "m-1"
+    assert not [key for key in {**first, **second} if key.startswith("gen_ai.usage.")]
+    assert spent == 0
+    warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    assert warnings == [
+        (
+            "telmoni: a usage must be telmoni's Usage, the provider's counts copied "
+            "into it; the call is sent without it"
+        )
+    ]
 
 
 def test_a_blank_operation_is_chat(telmoni: Telmoni, transport: FakeTransport) -> None:

@@ -138,30 +138,33 @@ type Run struct {
 	// sampledOut is whether the sample rate kept this run out: nothing of it
 	// is sent, nor handed to another service.
 	sampledOut bool
-	guard      *guard
+	// guard is held by every run with a span, a continued run's with no caps.
+	guard *guard
 }
 
 // Step is a step of a run.
 type Step struct {
 	handle
+	run *Run
 }
 
 // ModelCall is a call to a model inside a run.
 type ModelCall struct {
 	handle
 	run *Run
-	// provider and model are what it is priced by, as sent; held and reported
-	// are its counts and cost as its span holds them; counted is what it last
-	// counted to its run's spend.
+	// What it is priced by and what its span holds, as sent; what it last
+	// counted to its run's spend; and whether End was called.
 	provider, model string
 	held            tokens
 	reported        *float64
 	counted         float64
+	ended           bool
 }
 
 // ToolCall is a call to a tool inside a run.
 type ToolCall struct {
 	handle
+	run *Run
 }
 
 type runKey struct{}
@@ -276,11 +279,12 @@ func (r *Run) Err() error {
 	return r.guard.refused
 }
 
-// opens is nil where the run may open what it asks, else the cap it reached:
-// a continued run, which holds no guard, has none.
-func (r *Run) opens(step bool) error {
-	if r.guard == nil {
-		return nil
+// opens is nil where the run may open what it asks, else why not: a cap it
+// reached, or the refusal ctx carries, a refused opening's context handed on.
+func (r *Run) opens(ctx context.Context, step bool) error {
+	var refusal *CapExceededError
+	if ctx != nil && errors.As(context.Cause(ctx), &refusal) {
+		return refusal
 	}
 	return r.guard.opens(step)
 }
@@ -314,12 +318,45 @@ func (r *Run) End() {
 
 // Fail marks the run failed with err's Go type, never its message, or
 // cancelled for an error that is or wraps context.Canceled, as a step's Fail
-// does.
+// does; once the run was refused, such an error fails it as the refusal.
 func (r *Run) Fail(err error) {
 	if r == nil {
 		return
 	}
-	r.handle.Fail(err)
+	r.handle.Fail(r.failure(err))
+}
+
+// failure is err, but the run's refusal for a cancellation once it was
+// refused: the cancellation a refused opening's context ended a request with.
+func (r *Run) failure(err error) error {
+	if refusal := r.Err(); refusal != nil && errors.Is(err, context.Canceled) {
+		return refusal
+	}
+	return err
+}
+
+// Fail marks the step failed as its run's Fail would.
+func (s *Step) Fail(err error) {
+	if s == nil {
+		return
+	}
+	s.handle.Fail(s.run.failure(err))
+}
+
+// Fail marks the call failed as its run's Fail would.
+func (m *ModelCall) Fail(err error) {
+	if m == nil {
+		return
+	}
+	m.handle.Fail(m.run.failure(err))
+}
+
+// Fail marks the call failed as its run's Fail would.
+func (t *ToolCall) Fail(err error) {
+	if t == nil {
+		return
+	}
+	t.handle.Fail(t.run.failure(err))
 }
 
 // FailWith marks the run failed with errorType as its error.type, none if
@@ -341,14 +378,14 @@ func (r *Run) Cancel() {
 }
 
 // Step opens a step named name under the span in ctx: the run's, or a step's
-// to nest under it. The context returned carries the step's span. Past a cap
-// it opens nothing, and the context returned is cancelled, its cause the
-// *CapExceededError.
+// to nest under it. The context returned carries the step's span. Past a cap,
+// or under a refused opening's context, it opens nothing, and the context
+// returned is cancelled, its cause the *CapExceededError.
 func (r *Run) Step(ctx context.Context, name string) (context.Context, *Step) {
 	if r == nil || r.span == nil {
 		return ctx, &Step{}
 	}
-	if err := r.opens(true); err != nil {
+	if err := r.opens(ctx, true); err != nil {
 		return contextWithRun(refused(ctx, err), r), &Step{}
 	}
 	// Ingest refuses a span named nothing.
@@ -357,7 +394,7 @@ func (r *Run) Step(ctx context.Context, name string) (context.Context, *Step) {
 		name = "step"
 	}
 	ctx, span := r.child(ctx, r.client.cut(name, nameMax, "step's name"), trace.SpanKindInternal, nil)
-	return ctx, &Step{handle: handle{span: span, client: r.client}}
+	return ctx, &Step{handle: handle{span: span, client: r.client}, run: r}
 }
 
 // ModelCall opens a call to model under the span in ctx; Answered records
@@ -366,7 +403,7 @@ func (r *Run) ModelCall(ctx context.Context, model string, opts ModelCallOptions
 	if r == nil || r.span == nil {
 		return ctx, &ModelCall{}
 	}
-	if err := r.opens(false); err != nil {
+	if err := r.opens(ctx, false); err != nil {
 		return contextWithRun(refused(ctx, err), r), &ModelCall{}
 	}
 	c := r.client
@@ -402,7 +439,7 @@ func (r *Run) ToolCall(ctx context.Context, name string, opts ToolCallOptions) (
 	if r == nil || r.span == nil {
 		return ctx, &ToolCall{}
 	}
-	if err := r.opens(false); err != nil {
+	if err := r.opens(ctx, false); err != nil {
 		return contextWithRun(refused(ctx, err), r), &ToolCall{}
 	}
 	name = r.client.cut(name, nameMax, "tool's name")
@@ -414,7 +451,7 @@ func (r *Run) ToolCall(ctx context.Context, name string, opts ToolCallOptions) (
 		attrs = append(attrs, attribute.String(attrToolCallArguments, asJSON(opts.Arguments)))
 	}
 	ctx, span := r.child(ctx, toolOperation+" "+name, trace.SpanKindInternal, attrs)
-	return ctx, &ToolCall{handle: handle{span: span, client: r.client}}
+	return ctx, &ToolCall{handle: handle{span: span, client: r.client}, run: r}
 }
 
 func (r *Run) child(ctx context.Context, name string, kind trace.SpanKind, attrs []attribute.KeyValue) (context.Context, trace.Span) {
@@ -434,7 +471,7 @@ func (r *Run) child(ctx context.Context, name string, kind trace.SpanKind, attrs
 }
 
 // Answered records what the model answered: its name, its tokens, and its
-// messages.
+// messages; one given after End is not sent, and counts nothing.
 func (m *ModelCall) Answered(a Answer) {
 	if m == nil || m.span == nil {
 		return
@@ -450,22 +487,40 @@ func (m *ModelCall) Answered(a Answer) {
 	if a.OutputMessages != nil {
 		attrs = append(attrs, attribute.String(attrOutputMessages, asJSON(a.OutputMessages)))
 	}
-	if len(attrs) > 0 {
-		m.span.SetAttributes(attrs...)
+	// Given once the run's lock is released: the logger is the application's.
+	if w := m.hold(attrs, answeredAs, usage); w.key != "" {
+		m.client.exporter.warnOnce(w.key, w.text)
 	}
-	m.count(answeredAs, usage)
 }
 
-// count is the call's cost to its run's spend, in place of what it counted
-// before: reported, else priced by its name as sent, else nothing. Under the
-// run's lock, so answers given at once count one after the other.
-func (m *ModelCall) count(answeredAs string, usage []attribute.KeyValue) {
-	if m.run == nil || m.run.guard == nil {
+// warning is one the client gives once, by its key.
+type warning struct{ key, text string }
+
+// End ends the call's span; a second End does nothing.
+func (m *ModelCall) End() {
+	if m == nil || m.span == nil {
 		return
 	}
+	// Under the lock its answers are held under, so none lands past the end.
+	g := m.run.guard
+	g.mu.Lock()
+	m.ended = true
+	g.mu.Unlock()
+	m.handle.End()
+}
+
+// hold sets an answer on the span and counts its cost under the run's lock, so
+// answers count one at a time and none after End; it is the warning it calls for.
+func (m *ModelCall) hold(attrs []attribute.KeyValue, answeredAs string, usage []attribute.KeyValue) warning {
 	g := m.run.guard
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	if m.ended {
+		return warning{"call:late", "telmoni: a model call must be answered before it ends; an answer given after is not sent and counts nothing toward the run's spend"}
+	}
+	if len(attrs) > 0 {
+		m.span.SetAttributes(attrs...)
+	}
 	if answeredAs != "" {
 		// The name the call is priced by, as ingest reads it.
 		m.model = answeredAs
@@ -493,6 +548,7 @@ func (m *ModelCall) count(answeredAs string, usage []attribute.KeyValue) {
 	} else {
 		cost, priced = m.client.priced(m.provider, m.model, t)
 	}
+	var w warning
 	if !priced && g.maxSpend > 0 && t != (tokens{}) {
 		model, provider := m.model, m.provider
 		if model == "" {
@@ -501,11 +557,12 @@ func (m *ModelCall) count(answeredAs string, usage []attribute.KeyValue) {
 		if provider == "" {
 			provider = "no provider"
 		}
-		m.client.exporter.warnOnce("unpriced:"+m.provider+":"+m.model,
-			"telmoni: no price for "+model+" ("+provider+"), which reported no cost; it counts nothing toward the run's spend cap")
+		w = warning{"unpriced:" + m.provider + ":" + m.model,
+			"telmoni: no price for " + model + " (" + provider + "), which reported no cost; it counts nothing toward the run's spend cap"}
 	}
 	g.spent += cost - m.counted
 	m.counted = cost
+	return w
 }
 
 // Returned records what the tool returned: content, sent only when asked and

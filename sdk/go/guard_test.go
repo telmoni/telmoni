@@ -5,13 +5,18 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log/slog"
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	telmoni "github.com/telmoni/telmoni/sdk/go"
 )
@@ -52,6 +57,10 @@ type guardFixture struct {
 		} `json:"refused"`
 		Spent float64 `json:"spent"`
 	} `json:"runs"`
+	Refusals []struct {
+		telmoni.CapExceededError
+		Says string `json:"says"`
+	} `json:"refusals"`
 }
 
 func loadGuard(t *testing.T) guardFixture {
@@ -120,15 +129,15 @@ func (f guardFixture) perform(t *testing.T, ctx context.Context, run *telmoni.Ru
 func TestTheGuardCountsEachCallAsTheServerCountsIt(t *testing.T) {
 	fixture := loadGuard(t)
 	h := newHarness(t, telmoni.Config{APIKey: testKey, Prices: fixture.Prices}, nil)
-	ctx, run := h.client.Run(context.Background(), "guarded", telmoni.RunOptions{})
 	for n, spec := range fixture.Calls {
-		before := run.Spent()
+		ctx, run := h.client.Run(context.Background(), "guarded", telmoni.RunOptions{})
 		fixture.call(ctx, run, n)
-		if got := run.Spent() - before; !near(got, spec.Counted) {
-			t.Errorf("%s: counted %g, want %g", spec.Name, got, spec.Counted)
+		// Exactly: a multiply fused into its add, as arm64 may, ends a bit off.
+		if got := run.Spent(); got != spec.Counted {
+			t.Errorf("%s: counted %v, want %v", spec.Name, got, spec.Counted)
 		}
+		run.End()
 	}
-	run.End()
 }
 
 func TestARunPastACapIsRefusedWhatItOpensNext(t *testing.T) {
@@ -177,6 +186,14 @@ func TestARunPastACapIsRefusedWhatItOpensNext(t *testing.T) {
 	}
 }
 
+func TestARefusalSaysWhatTheOtherSDKsSay(t *testing.T) {
+	for _, spec := range loadGuard(t).Refusals {
+		if got := spec.CapExceededError.Error(); got != spec.Says {
+			t.Errorf("says %q, want %q", got, spec.Says)
+		}
+	}
+}
+
 func TestARefusedOpeningsContextIsCancelledWithTheCap(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
 	ctx, run := h.client.Run(context.Background(), "guarded", telmoni.RunOptions{MaxSteps: 1})
@@ -197,6 +214,81 @@ func TestARefusedOpeningsContextIsCancelledWithTheCap(t *testing.T) {
 		t.Error("the run's own context was cancelled")
 	}
 	run.End()
+}
+
+func TestNothingOpensUnderARefusedOpeningsContext(t *testing.T) {
+	h := newHarness(t, testConfig(), nil)
+	ctx, run := h.client.Run(context.Background(), "guarded", telmoni.RunOptions{MaxSteps: 1})
+	_, first := run.Step(ctx, "first")
+	first.End()
+	stepCtx, second := run.Step(ctx, "second")
+	second.End()
+	callCtx, call := run.ModelCall(stepCtx, "m", telmoni.ModelCallOptions{})
+	call.Answered(telmoni.Answer{Usage: &telmoni.Usage{InputTokens: 10}})
+	call.End()
+	toolCtx, tool := run.ToolCall(stepCtx, "lookup", telmoni.ToolCallOptions{})
+	tool.End()
+	for _, opened := range []context.Context{callCtx, toolCtx} {
+		if context.Cause(opened) != context.Cause(stepCtx) || telmoni.RunFromContext(opened) != run {
+			t.Errorf("opened under %v, want the step's refusal and its run", context.Cause(opened))
+		}
+	}
+	run.End()
+	h.flush()
+	if got := sortedNames(h.transport.spans(t)); !slices.Equal(got, []string{"first", "invoke_agent guarded"}) {
+		t.Errorf("spans sent: %v", got)
+	}
+}
+
+// A run failed with the cancellation of a refused opening fails as the refusal.
+func TestARefusalEscapingTheRunFailsItWithItsType(t *testing.T) {
+	h := newHarness(t, testConfig(), nil)
+	ctx, run := h.client.Run(context.Background(), "guarded", telmoni.RunOptions{MaxSteps: 1})
+	_, first := run.Step(ctx, "first")
+	first.End()
+	stepCtx, second := run.Step(ctx, "second")
+	second.End()
+	run.Fail(fmt.Errorf("asking the model: %w", stepCtx.Err()))
+	run.End()
+	h.flush()
+	span := runSpan(t, h)
+	attributes := attributesOf(t, span)
+	if attributes["error.type"] != "telmoni.CapExceededError" || attributes["telmoni.cancelled"] != nil {
+		t.Errorf("error.type %v, telmoni.cancelled %v", attributes["error.type"], attributes["telmoni.cancelled"])
+	}
+	if !reflect.DeepEqual(span["status"], map[string]any{"code": float64(2)}) {
+		t.Errorf("status = %v, want {code: 2}", span["status"])
+	}
+}
+
+// A step or call failed with that cancellation fails as the refusal too.
+func TestARefusalPassingThroughAStepOrCallFailsItWithItsType(t *testing.T) {
+	h := newHarness(t, testConfig(), nil)
+	ctx, run := h.client.Run(context.Background(), "guarded", telmoni.RunOptions{MaxSteps: 1})
+	stepCtx, step := run.Step(ctx, "outer")
+	toolCtx, tool := run.ToolCall(stepCtx, "lookup", telmoni.ToolCallOptions{})
+	callCtx, call := run.ModelCall(toolCtx, "m", telmoni.ModelCallOptions{})
+	innerCtx, _ := run.Step(callCtx, "inner")
+	for _, opened := range []interface {
+		Fail(error)
+		End()
+	}{call, tool, step} {
+		opened.Fail(fmt.Errorf("asking the model: %w", innerCtx.Err()))
+		opened.End()
+	}
+	run.End()
+	h.flush()
+	var failed []string
+	for _, span := range h.transport.spans(t) {
+		attributes := attributesOf(t, span)
+		if attributes["error.type"] == "telmoni.CapExceededError" && attributes["telmoni.cancelled"] == nil {
+			failed = append(failed, span["name"].(string))
+		}
+	}
+	slices.Sort(failed)
+	if want := []string{"chat m", "execute_tool lookup", "outer"}; !slices.Equal(failed, want) {
+		t.Errorf("failed with the refusal: %v, want %v", failed, want)
+	}
 }
 
 func TestATableNameIsPricedByTheTableTheReleaseCarries(t *testing.T) {
@@ -261,6 +353,33 @@ func TestACallAnsweredAgainCountsWhatItsSpanHolds(t *testing.T) {
 	}
 }
 
+func TestAnAnswerAfterItsCallEndedCountsNothingWithOneWarning(t *testing.T) {
+	h := newHarness(t, telmoni.Config{APIKey: testKey, Prices: []telmoni.Price{{Provider: "p", Model: "m", Input: 1e-6}}}, nil)
+	ctx, run := h.client.Run(context.Background(), "guarded", telmoni.RunOptions{})
+	_, call := run.ModelCall(ctx, "m", telmoni.ModelCallOptions{Provider: "p"})
+	call.Answered(telmoni.Answer{Usage: &telmoni.Usage{InputTokens: 1000}})
+	call.End()
+	for range 2 {
+		call.Answered(telmoni.Answer{Usage: &telmoni.Usage{InputTokens: 5000}})
+	}
+	spent := run.Spent()
+	run.End()
+	h.flush()
+	var held map[string]any
+	for _, span := range h.transport.spans(t) {
+		if span["name"] == "chat m" {
+			held = attributesOf(t, span)
+		}
+	}
+	if held["gen_ai.usage.input_tokens"] != int64(1000) || !near(spent, 0.001) {
+		t.Errorf("spent %g, the span holding %v", spent, held["gen_ai.usage.input_tokens"])
+	}
+	want := []string{"telmoni: a model call must be answered before it ends; an answer given after is not sent and counts nothing toward the run's spend"}
+	if got := h.logs.warnings(); !slices.Equal(got, want) {
+		t.Errorf("warned %q", got)
+	}
+}
+
 func TestTheReleaseCarriesThePriceFileWhole(t *testing.T) {
 	carried, err := os.ReadFile("model_prices.json")
 	if err != nil {
@@ -298,6 +417,45 @@ func TestACallWithNeitherUnderASpendCapIsWarnedOfOnce(t *testing.T) {
 	want := []string{"telmoni: no price for my-model (vllm), which reported no cost; it counts nothing toward the run's spend cap"}
 	if !slices.Equal(warned, want) {
 		t.Errorf("warned %q", warned)
+	}
+}
+
+// spendReader is a logger's handler that reads the run's spend from another
+// goroutine on each warning, and notes whether the read was held up.
+type spendReader struct {
+	run     atomic.Pointer[telmoni.Run]
+	stalled atomic.Bool
+}
+
+func (s *spendReader) Enabled(context.Context, slog.Level) bool { return true }
+func (s *spendReader) WithAttrs([]slog.Attr) slog.Handler       { return s }
+func (s *spendReader) WithGroup(string) slog.Handler            { return s }
+
+func (s *spendReader) Handle(context.Context, slog.Record) error {
+	if run := s.run.Load(); run != nil {
+		read := make(chan struct{})
+		go func() { run.Spent(); close(read) }()
+		select {
+		case <-read:
+		case <-time.After(waitTimeout):
+			s.stalled.Store(true)
+		}
+	}
+	return nil
+}
+
+// The application's logger runs with the run's lock released.
+func TestALoggerReadingTheRunsSpendIsNeverHeldUp(t *testing.T) {
+	reader := &spendReader{}
+	h := newHarness(t, testConfig(), nil, telmoni.WithLogger(slog.New(reader)))
+	ctx, run := h.client.Run(context.Background(), "guarded", telmoni.RunOptions{MaxSpend: 1})
+	reader.run.Store(run)
+	_, call := run.ModelCall(ctx, "my-model", telmoni.ModelCallOptions{Provider: "vllm"})
+	call.Answered(telmoni.Answer{Usage: &telmoni.Usage{InputTokens: 10}})
+	call.End()
+	run.End()
+	if reader.stalled.Load() {
+		t.Error("the logger ran under the run's lock")
 	}
 }
 

@@ -14,6 +14,7 @@ import itertools
 import json
 import math
 import random
+import threading
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from contextvars import Token
@@ -41,6 +42,7 @@ from .models import (
     StepRecord,
     ToolCallRecord,
     Usage,
+    _dollars,
 )
 
 if TYPE_CHECKING:
@@ -89,9 +91,8 @@ class Handle:
         self._span.set_attribute(contract.CANCELLED, True)
 
     def _end(self, exc: BaseException | None) -> None:
-        if self._ended:
+        if not self._ending():
             return
-        self._ended = True
         if isinstance(exc, (KeyboardInterrupt, asyncio.CancelledError)):
             self.cancel()
         elif exc is not None:
@@ -99,6 +100,11 @@ class Handle:
         self._span.end()
         if self._token is not None:
             context.detach(self._token)
+
+    def _ending(self) -> bool:
+        """Whether this end is its first; a second does nothing."""
+        ended, self._ended = self._ended, True
+        return not ended
 
 
 class Run(Handle):
@@ -173,6 +179,11 @@ class ModelCall(Handle):
     _held: Mapping[str, int | float] = MappingProxyType({})
     _counted = 0.0
 
+    def __init__(self, span: Span, client: Telmoni) -> None:
+        super().__init__(span, client)
+        # Answers from several threads are held and counted one at a time.
+        self._answering = threading.Lock()
+
     def answered(
         self,
         *,
@@ -180,28 +191,51 @@ class ModelCall(Handle):
         usage: Usage | None = None,
         output_messages: object | None = None,
     ) -> None:
-        """What the model answered: its name, its tokens, and its messages."""
+        """What the model answered: its name, its tokens, and its messages. An
+        answer given after the call ended is not sent, and counts nothing."""
         warn_once = self._client.exporter.warn_once
+        model = None
         # Ingest refuses the call over an empty one.
         if response_model is not None and (
-            model := _text(response_model, "response model", warn_once)
+            named := _text(response_model, "response model", warn_once)
         ):
-            # The name the call is priced by, as ingest reads it.
-            self._model = _cut(model, contract.MODEL_MAX, "response model", warn_once)
-            self._span.set_attribute(contract.RESPONSE_MODEL, self._model)
+            model = _cut(named, contract.MODEL_MAX, "response model", warn_once)
         sent = _usage(usage, warn_once)
-        self._span.set_attributes(sent)
-        self._held = {**self._held, **sent}
-        if output_messages is not None:
-            self._span.set_attribute(
-                contract.OUTPUT_MESSAGES, _as_json(output_messages)
-            )
-        if self._run is not None:
-            self._count(self._run)
+        messages = None if output_messages is None else _as_json(output_messages)
+        warning: tuple[str, str] | None = None
+        with self._answering:
+            if self._ended:
+                warning = (
+                    "call:late",
+                    (
+                        "telmoni: a model call must be answered before it ends; an "
+                        "answer given after is not sent and counts nothing toward the "
+                        "run's spend"
+                    ),
+                )
+            else:
+                if model is not None:
+                    # The name the call is priced by, as ingest reads it.
+                    self._model = model
+                    self._span.set_attribute(contract.RESPONSE_MODEL, model)
+                self._span.set_attributes(sent)
+                if messages is not None:
+                    self._span.set_attribute(contract.OUTPUT_MESSAGES, messages)
+                self._held = {**self._held, **sent}
+                if self._run is not None:
+                    warning = self._count(self._run)
+        # Given once the lock is released: a logging handler is the application's.
+        if warning is not None:
+            warn_once(*warning)
 
-    def _count(self, run: Run) -> None:
-        """Its cost to its run's spend, in place of what it counted before:
-        reported, else priced by its name as sent, else nothing."""
+    def _ending(self) -> bool:
+        # Under the lock its answers are held under, so none lands past the end.
+        with self._answering:
+            return super()._ending()
+
+    def _count(self, run: Run) -> tuple[str, str] | None:
+        """Its cost, reported, else priced by its name, else nothing, to its run's
+        spend in place of what it counted; and the warning that calls for."""
         held = self._held
         tokens = guard.Tokens(
             int(held.get(contract.INPUT_TOKENS, 0)),
@@ -214,17 +248,22 @@ class ModelCall(Handle):
             cost = guard.priced(
                 self._client.prices, self._provider, self._model, tokens
             )
+        warning = None
         if cost is None:
             cost = 0.0
             if run._guard.capped and tokens.some():
-                self._client.exporter.warn_once(
+                warning = (
                     f"unpriced:{self._provider}:{self._model}",
-                    f"telmoni: no price for {self._model or 'a call with no model'} "
-                    f"({self._provider or 'no provider'}), which reported no cost; it "
-                    "counts nothing toward the run's spend cap",
+                    (
+                        "telmoni: no price for "
+                        f"{self._model or 'a call with no model'} "
+                        f"({self._provider or 'no provider'}), which reported no "
+                        "cost; it counts nothing toward the run's spend cap"
+                    ),
                 )
         run._guard.counts(self._counted, cost)
         self._counted = cost
+        return warning
 
 
 class ToolCall(Handle):
@@ -683,12 +722,20 @@ class Opener:
 
 
 def _usage(
-    usage: Usage | None, warn_once: Callable[[str, str], None]
+    usage: object, warn_once: Callable[[str, str], None]
 ) -> dict[str, int | float]:
     """The counts as whole numbers from 0, and the cost as a finite number of
     dollars from 0, which alone ingest takes; another is left off the call with
     one warning, not the call refused."""
     if usage is None:
+        return {}
+    if not isinstance(usage, Usage):
+        # A provider's own, Anthropic's or OpenAI's, lacks a field read below.
+        warn_once(
+            "usage:foreign",
+            "telmoni: a usage must be telmoni's Usage, the provider's counts copied "
+            "into it; the call is sent without it",
+        )
         return {}
     counts = (
         (contract.INPUT_TOKENS, usage.input_tokens),
@@ -720,18 +767,6 @@ def _usage(
         else:
             out[contract.COST] = cost
     return out
-
-
-def _dollars(value: object) -> float | None:
-    """A cost as a float, sent as a double whatever it was given as; None for
-    one below 0, not finite, or no number, a `bool` or text among them."""
-    if isinstance(value, (bool, str, bytes)):
-        return None
-    try:
-        dollars = float(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError, OverflowError):
-        return None
-    return dollars if math.isfinite(dollars) and dollars >= 0 else None
 
 
 def _tags(
