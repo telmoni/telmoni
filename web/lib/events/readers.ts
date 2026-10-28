@@ -1,3 +1,4 @@
+import { administers } from "@/lib/roles";
 import type { ServerContext } from "@/lib/server/entities/organization";
 
 /** What the person reads, as `/me` answered when their stream opened. */
@@ -8,9 +9,7 @@ type Access = Pick<ServerContext, "organizations" | "memberships">;
  *  or administer, and each they hold a seat on. */
 export function readsProject(access: Access, organizationId: string, projectId: string): boolean {
   const role = access.organizations.find((o) => o.organizationId === organizationId)?.role;
-  return (
-    role === "owner" || role === "admin" || access.memberships.some((m) => m.projectId === projectId)
-  );
+  return administers(role) || access.memberships.some((m) => m.projectId === projectId);
 }
 
 /** Changes whenever what the person reads does: their stream reads it once,

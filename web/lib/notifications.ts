@@ -1,6 +1,7 @@
+import { roleLabel } from "@/lib/role-label";
+import { InviteScope } from "@/lib/types/enums";
 import type { GivenSeat } from "@/lib/types/given-seat";
 import type { IncomingInvite } from "@/lib/types/incoming-invite";
-import { roleLabel } from "@/lib/role-label";
 
 // The bell's accessible name. A screen reader hears the count and what is
 // waiting, because "Notifications" alone makes the badge — which is `aria-hidden`
@@ -21,10 +22,9 @@ export function badgeCount(count: number): string | null {
 }
 
 // What the invitation is for, in one line: the level it grants and the role it
-// grants there. `scope` is a free string on the wire, so anything that is not
-// the organization level is treated as a project rather than echoed back.
+// grants there.
 export function inviteSubtitle(invite: IncomingInvite): string {
-  const level = invite.scope === "organization" ? "Organization" : "Project";
+  const level = invite.scope === InviteScope.Organization ? "Organization" : "Project";
   return `${level} · ${roleLabel(invite.role)}`;
 }
 

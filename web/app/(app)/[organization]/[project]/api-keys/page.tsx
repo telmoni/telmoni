@@ -12,7 +12,7 @@ import { activeOrganization, fetchTokens } from "@/lib/server/data";
 import { projectPage } from "@/lib/server/project-page";
 import { SCOPE_LABEL } from "@/lib/api-key-scopes";
 import { projectPath } from "@/lib/slug";
-import { administersProject } from "@/lib/project-role";
+import { administers } from "@/lib/roles";
 
 import { KeysActions } from "./_manage";
 import { TokenRowActions } from "./_row-actions";
@@ -31,7 +31,7 @@ export default async function ApiKeysPage({
   const listing = await fetchTokens(project.id);
   if (listing.kind === "unavailable") return <ServiceUnavailable />;
 
-  const canManage = administersProject(project.role);
+  const canManage = administers(project.role);
 
   if (listing.kind === "forbidden") {
     return (

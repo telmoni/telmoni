@@ -10,7 +10,7 @@ import {
   IncomingInviteSchema,
   type IncomingInvite,
 } from "@/lib/types/incoming-invite";
-import { OrganizationRole, type Role, asRole } from "@/lib/types/enums";
+import { OrganizationRole, Role } from "@/lib/types/enums";
 import { type GivenSeat, GivenSeatSchema } from "@/lib/types/given-seat";
 
 import { getServerSession } from "../session";
@@ -67,13 +67,9 @@ export type ProjectOffer = z.infer<typeof ProjectOfferSchema>;
 const MembershipSchema = z.object({
   projectId:      z.string(),
   organizationId: z.string(),
-  role:           z.string(),
+  role:           z.enum(Role),
 });
-export type Membership = {
-  projectId: string;
-  organizationId: string;
-  role: Role | null;
-};
+export type Membership = z.infer<typeof MembershipSchema>;
 
 const MeSchema = z.object({
   person:                PersonSchema,
@@ -214,7 +210,7 @@ export const getServerContext = cache(
       activeOrganizationId:  d.activeOrganizationId,
       defaultOrganizationId: d.defaultOrganizationId,
       organizationNotFound:  named !== null && active?.slug !== named,
-      memberships:           (d.memberships ?? []).map((m) => ({ ...m, role: asRole(m.role) })),
+      memberships:           d.memberships ?? [],
       incomingInvites:       d.incomingInvites ?? [],
       givenSeats:            d.givenSeats ?? [],
       projectOffers:         d.projectOffers ?? [],

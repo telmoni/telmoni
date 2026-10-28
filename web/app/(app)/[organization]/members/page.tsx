@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { MemberCeilingNotice, atCeiling } from "@/components/member-ceiling";
 import { ownerContact } from "@/lib/identity";
+import { administers, owns } from "@/lib/roles";
 import {
   activeOrganization,
   fetchOrganizationInvites,
@@ -50,7 +51,7 @@ export default async function OrganizationMembersPage() {
   // A MEMBER holds none, and the roster is not a thing they have an interest
   // in: auth refuses `fetchOrganizationMembers` with a 403, and the page
   // refuses before it asks rather than rendering a half-loaded shell.
-  if (!organization || !ident || ident.role === "member") {
+  if (!organization || !ident || !administers(ident.role)) {
     return (
       <AccessDenied
         what="this organization's roster"
@@ -61,8 +62,7 @@ export default async function OrganizationMembersPage() {
   }
 
   const organizationId = organization.organizationId;
-  const isOwner = ident.role === "owner";
-  const canManage = isOwner || ident.role === "admin";
+  const isOwner = owns(ident.role);
 
   // The roster and the outstanding invitations, loaded in parallel. If the
   // roster cannot be fetched the page cannot serve its purpose.
@@ -90,15 +90,11 @@ export default async function OrganizationMembersPage() {
     <>
       <PageHeader
         title="Members"
-        action={
-          canManage && !full ? (
-            <AddOrganizationMember organizationId={organizationId} />
-          ) : undefined
-        }
+        action={full ? undefined : <AddOrganizationMember organizationId={organizationId} />}
       />
 
       <div className="grid gap-6">
-        {canManage && <MemberCeilingNotice ceiling={listing.ceiling} />}
+        <MemberCeilingNotice ceiling={listing.ceiling} />
         <section className="grid gap-3 lg:grid-cols-3">
           <Card className="gap-1.5">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -155,7 +151,6 @@ export default async function OrganizationMembersPage() {
                   key={m.id}
                   organizationId={organizationId}
                   member={m}
-                  canManage={canManage}
                   isOwnerCaller={isOwner}
                 />
               ))}
@@ -184,7 +179,6 @@ export default async function OrganizationMembersPage() {
                     key={i.id}
                     organizationId={organizationId}
                     invite={i}
-                    canManage={canManage}
                   />
                 ))}
               </tbody>

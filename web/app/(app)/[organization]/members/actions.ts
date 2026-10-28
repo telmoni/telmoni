@@ -29,18 +29,18 @@ import { displayName } from "@/lib/user-display";
 import { organizationLabel } from "@/lib/identity";
 import {
   InviteSentSchema,
-  NOT_A_GIVEN_ROLE,
   OfferChangeSchema,
   RosterChangeSchema,
   answerMemberAction,
-  isGivenRole,
 } from "@/lib/members/shared";
+import { type GivenRole, NOT_A_GIVEN_ROLE, administers, isGivenRole, owns } from "@/lib/roles";
+import { InviteScope } from "@/lib/types/enums";
 import { type ActionResult, type Refused, refused } from "@/lib/action-result";
 
 export async function inviteOrganizationMemberAction(
   organizationId: string,
   email: string,
-  role: "admin" | "member",
+  role: GivenRole,
 ): Promise<ActionResult<{ link?: string }>> {
   if (!isGivenRole(role)) return refused(NOT_A_GIVEN_ROLE);
   const gate = await open("members:invite", 10, organizationId);
@@ -72,7 +72,7 @@ export async function inviteOrganizationMemberAction(
       type: "invite:created",
       data: {
         id: String(data.id),
-        scope: "organization",
+        scope: InviteScope.Organization,
         targetId: gate.organizationId,
         // The ORGANIZATION's label, which `/me` would list for the same
         // invitation.
@@ -125,7 +125,7 @@ export async function revokeOrganizationInviteAction(
 export async function updateOrganizationMemberRoleAction(
   organizationId: string,
   memberId: string,
-  role: "admin" | "member",
+  role: GivenRole,
 ): Promise<ActionResult> {
   if (!isGivenRole(role)) return refused(NOT_A_GIVEN_ROLE);
   const gate = await open("members:role", 30, organizationId);
@@ -248,7 +248,7 @@ export async function leaveOrganizationAction(
   const ctx = await identityContext();
   if (!ctx) return refused(await unplacedOrganization());
   if (ctx.organizationId !== organizationId) return refused(SWITCHED_ORGANIZATION);
-  if (ctx.role === "owner") {
+  if (owns(ctx.role)) {
     return refused("You own this organization. To leave, hand it to an admin first or delete it.");
   }
 
@@ -304,10 +304,10 @@ async function open(
   const organization = context ? activeOrganization(context) : null;
   if (!ctx || !organization) return refused(await unplacedOrganization());
   if (ctx.organizationId !== organizationId) return refused(SWITCHED_ORGANIZATION);
-  if (lane === "ownership" && ctx.role !== "owner") {
+  if (lane === "ownership" && !owns(ctx.role)) {
     return refused("Only the organization owner can hand it over.");
   }
-  if (ctx.role !== "owner" && ctx.role !== "admin") {
+  if (!administers(ctx.role)) {
     return refused("Only an organization owner or admin can manage organization members.");
   }
   return {

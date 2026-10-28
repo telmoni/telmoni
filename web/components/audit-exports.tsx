@@ -5,7 +5,7 @@ import { toast } from "sonner";
 
 import { ProblemType, problemType } from "@/lib/api/problem";
 import { exportHref, exportSummary, exportsHref, failureText } from "@/lib/audit-exports";
-import { administersOrganization } from "@/lib/organization-role";
+import { administers } from "@/lib/roles";
 import {
   useActiveOrganization,
   useAuditExports,
@@ -149,7 +149,7 @@ export function useAuditExportsWatcher(): void {
   const forget = useForgetAuditExport();
 
   const watched =
-    organization && administersOrganization(organization.role) ? organization : null;
+    organization && administers(organization.role) ? organization : null;
   const slug = watched?.slug ?? null;
   const organizationId = watched?.organizationId ?? null;
   const building =

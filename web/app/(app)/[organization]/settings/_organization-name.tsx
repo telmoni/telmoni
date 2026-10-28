@@ -14,12 +14,10 @@ import { renameOrganizationAction } from "./settings-actions";
 export function OrganizationNameForm({
   organizationId,
   initialName,
-  canEdit,
 }: {
   /// The organization this page rendered; the rename refuses any other.
   organizationId: string;
   initialName: string;
-  canEdit: boolean;
 }) {
   const [name, setName] = useState(initialName);
   const [error, setError] = useState<string | null>(null);
@@ -40,7 +38,7 @@ export function OrganizationNameForm({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!canEdit || !isChanged || pending) return;
+    if (!isChanged || pending) return;
     setError(null);
     start(async () => {
       try {
@@ -68,24 +66,17 @@ export function OrganizationNameForm({
         <Input
           value={name}
           onChange={(e) => setName(e.target.value)}
-          disabled={!canEdit || pending}
+          disabled={pending}
           placeholder="Organization name"
           maxLength={typedBound(MAX_ORGANIZATION_NAME)}
           className="max-w-md"
           aria-label="Organization name"
         />
-        {canEdit && (
-          <Button type="submit" disabled={!isChanged || pending} variant="default">
-            {pending ? "Saving..." : "Save"}
-          </Button>
-        )}
+        <Button type="submit" disabled={!isChanged || pending} variant="default">
+          {pending ? "Saving..." : "Save"}
+        </Button>
       </div>
       {error && <p className="text-sm text-destructive">{error}</p>}
-      {!canEdit && (
-        <p className="text-sm text-muted-foreground">
-          Only an organization owner or admin can rename it.
-        </p>
-      )}
     </form>
   );
 }

@@ -8,7 +8,6 @@ import {
   AgentTool,
   AgentTurnEvent,
   ApiKeyScope,
-  asRole,
   AttemptOutcome,
   AttemptTrigger,
   ConnectionStatus,
@@ -213,15 +212,5 @@ describe("wire contract", () => {
   // is a project the console draws as a page, or a page it draws as a project.
   it("the console reserves exactly the words the server refuses a project", () => {
     expect([...RESERVED_PROJECT_SLUGS].sort()).toEqual([...contract.slugs.reserved.project].sort());
-  });
-
-  it("the role coercion takes the three roles and nothing else", () => {
-    expect(asRole("editor")).toBeNull();
-    expect(asRole("viewer")).toBeNull();
-    expect(asRole("guest")).toBeNull();
-
-    expect(asRole("owner")).toBe(Role.Owner);
-    expect(asRole("admin")).toBe(Role.Admin);
-    expect(asRole("member")).toBe(Role.Member);
   });
 });

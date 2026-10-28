@@ -7,7 +7,7 @@ import { PageHeader } from "@/components/page-header";
 import { ServiceUnavailable } from "@/components/service-unavailable";
 import { Card } from "@/components/ui/card";
 import { ownerContact } from "@/lib/identity";
-import { administersOrganization, organizationRoleOf } from "@/lib/organization-role";
+import { administers, organizationRoleOf, owns } from "@/lib/roles";
 import {
   activeOrganization,
   fetchProjectListing,
@@ -35,8 +35,7 @@ export default async function OrganizationProjectsPage() {
   const organization = activeOrganization(gate);
 
   const role = organizationRoleOf(gate, ident);
-  const administers = administersOrganization(role);
-  if (!organization || !ident || !administers) {
+  if (!organization || !ident || !administers(role)) {
     return (
       <AccessDenied
         what="this organization's projects"
@@ -83,7 +82,7 @@ export default async function OrganizationProjectsPage() {
               organization={organization.slug}
               projects={projects}
               action={(p) =>
-                membershipByProject.has(p.id) && role !== "owner" ? (
+                membershipByProject.has(p.id) && !owns(role) ? (
                   <LeaveProject projectId={p.id} name={p.name} />
                 ) : null
               }

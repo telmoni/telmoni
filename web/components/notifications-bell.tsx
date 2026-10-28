@@ -29,7 +29,7 @@ import {
   seatSubtitle,
 } from "@/lib/notifications";
 import { organizationLabel } from "@/lib/identity";
-import { administersOrganization } from "@/lib/organization-role";
+import { administers } from "@/lib/roles";
 import { usePageCovered } from "@/lib/page-cover";
 import { organizationPath } from "@/lib/slug";
 import type { OrganizationEntry, ProjectOffer } from "@/lib/server/entities/organization";
@@ -68,7 +68,7 @@ export function NotificationsBell() {
   const organization = useActiveOrganization();
   const auditExports = useAuditExports();
   const exportsHere =
-    organization && administersOrganization(organization.role)
+    organization && administers(organization.role)
       ? (auditExports[organization.organizationId] ?? [])
       : [];
   const exportsWaiting = exportsHere.filter(isWaiting);

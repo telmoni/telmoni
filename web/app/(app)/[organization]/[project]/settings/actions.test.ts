@@ -64,6 +64,7 @@ import { identityContext } from "@/lib/server/entities/identity-context";
 import { getServerContext } from "@/lib/server/entities/organization";
 import { fetchProject } from "@/lib/server/entities/projects";
 import { getServerSession } from "@/lib/server/session";
+import { Role } from "@/lib/types/enums";
 
 import { deleteProjectAction, updateContentModeAction, updateProjectNameAction } from "./actions";
 
@@ -79,7 +80,7 @@ const renamed = (slug: string) =>
   });
 
 function wentBy(slug: string) {
-  vi.mocked(fetchProject).mockResolvedValue({ id: PROJECT, slug, name: "Web", role: null });
+  vi.mocked(fetchProject).mockResolvedValue({ id: PROJECT, slug, name: "Web", role: Role.Owner });
 }
 
 beforeEach(() => {

@@ -28,18 +28,18 @@ import {
 import { displayName } from "@/lib/user-display";
 import {
   InviteSentSchema,
-  NOT_A_GIVEN_ROLE,
   OfferChangeSchema,
   RosterChangeSchema,
   answerMemberAction,
-  isGivenRole,
 } from "@/lib/members/shared";
+import { type GivenRole, NOT_A_GIVEN_ROLE, isGivenRole } from "@/lib/roles";
+import { InviteScope } from "@/lib/types/enums";
 import { type ActionResult, type Refused, refused } from "@/lib/action-result";
 
 export async function inviteMemberAction(
   projectId: string,
   email: string,
-  role: "admin" | "member",
+  role: GivenRole,
 ): Promise<ActionResult<{ link?: string }>> {
   if (!isGivenRole(role)) return refused(NOT_A_GIVEN_ROLE);
   const gate = await open("members:invite", 10, projectId);
@@ -72,7 +72,7 @@ export async function inviteMemberAction(
       type: "invite:created",
       data: {
         id: String(data.id),
-        scope: "project",
+        scope: InviteScope.Project,
         targetId: gate.projectId,
         targetName: project?.name || "Project",
         role,
@@ -102,7 +102,7 @@ export async function inviteMemberAction(
 export async function addMemberAction(
   projectId: string,
   memberId: string,
-  role: "admin" | "member",
+  role: GivenRole,
 ): Promise<ActionResult> {
   if (!isGivenRole(role)) return refused(NOT_A_GIVEN_ROLE);
   const gate = await open("members:add", 30, projectId);
@@ -164,7 +164,7 @@ export async function revokeInviteAction(
 export async function updateMemberRoleAction(
   projectId: string,
   memberId: string,
-  role: "admin" | "member",
+  role: GivenRole,
 ): Promise<ActionResult> {
   if (!isGivenRole(role)) return refused(NOT_A_GIVEN_ROLE);
   const gate = await open("members:role", 30, projectId);

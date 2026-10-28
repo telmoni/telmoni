@@ -15,6 +15,7 @@ export { organizationChannel, publishToAll, userChannel } from "@/lib/events/pub
 export { Flag } from "@/lib/flags";
 export { ownerContact } from "@/lib/identity";
 export { logger } from "@/lib/logger";
+export { administers, owns } from "@/lib/roles";
 export { branding } from "@/lib/server/branding";
 export { activeOrganization, getServerContext } from "@/lib/server/data";
 export {

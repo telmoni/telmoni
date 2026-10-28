@@ -2,8 +2,7 @@ import { cache } from "react";
 import { z } from "zod";
 
 import { env } from "@/lib/env";
-import type { OrganizationRole } from "@/lib/types/enums";
-import { asOrganizationRole } from "@/lib/types/organization-role";
+import { OrganizationRole } from "@/lib/types/enums";
 
 import { organizationHeaders, identityContext } from "./identity-context";
 import { readJson } from "./read";
@@ -13,16 +12,14 @@ const OrganizationMemberSchema = z.object({
   member_id: z.string(),
   email: z.string(),
   display_name: z.string().nullable().optional(),
-  role: z.string(),
+  role: z.enum(OrganizationRole),
   created_at: z.string(),
   is_owner: z.boolean(),
   /// When the owner's live offer of the organization to this admin lapses.
   ownership_offer_expires_at: z.string().nullable().optional(),
 });
 
-export type OrganizationMember = Omit<z.infer<typeof OrganizationMemberSchema>, "role"> & {
-  role: OrganizationRole | null;
-};
+export type OrganizationMember = z.infer<typeof OrganizationMemberSchema>;
 
 // How many people the organization may hold, as the deployment that sells
 // plans answers it, and what stands against that — its members and everyone
@@ -54,28 +51,19 @@ export const fetchOrganizationMembers = cache(
       }),
     );
     if (read.kind !== "ok") return read;
-    return {
-      kind: "ok",
-      members: read.value.members.map((m) => ({
-        ...m,
-        role: asOrganizationRole(m.role),
-      })),
-      ceiling: read.value.ceiling ?? null,
-    };
+    return { kind: "ok", members: read.value.members, ceiling: read.value.ceiling ?? null };
   },
 );
 
 const OrganizationInviteSchema = z.object({
   id: z.string(),
   email: z.string(),
-  role: z.string(),
+  role: z.enum(OrganizationRole),
   expires_at: z.string(),
   created_at: z.string(),
 });
 
-export type OrganizationInvite = Omit<z.infer<typeof OrganizationInviteSchema>, "role"> & {
-  role: OrganizationRole | null;
-};
+export type OrganizationInvite = z.infer<typeof OrganizationInviteSchema>;
 
 export type OrganizationInviteAccess =
   | { kind: "ok"; invites: OrganizationInvite[] }
@@ -93,12 +81,6 @@ export const fetchOrganizationInvites = cache(
       z.object({ invites: z.array(OrganizationInviteSchema) }),
     );
     if (read.kind !== "ok") return read;
-    return {
-      kind: "ok",
-      invites: read.value.invites.map((i) => ({
-        ...i,
-        role: asOrganizationRole(i.role),
-      })),
-    };
+    return { kind: "ok", invites: read.value.invites };
   },
 );

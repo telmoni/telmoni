@@ -4,7 +4,7 @@ import { z } from "zod";
 
 import { env } from "@/lib/env";
 import { compareProjects, compareProjectsByOrganization } from "@/lib/projects";
-import { asRole, type Role } from "@/lib/types/enums";
+import { Role } from "@/lib/types/enums";
 
 import { organizationHeaders, identityContext } from "./identity-context";
 import { getServerContext } from "./organization";
@@ -15,10 +15,10 @@ const ProjectSchema = z.object({
   /// Its segment under the organization's: `/{organization}/{slug}`.
   slug: z.string(),
   name: z.string(),
-  role: z.string(),
+  role: z.enum(Role),
 });
 
-export type Project = { id: string; slug: string; name: string; role: Role | null };
+export type Project = z.infer<typeof ProjectSchema>;
 
 export type ProjectListing =
   | { kind: "ok"; projects: Project[] }
@@ -36,12 +36,7 @@ export const fetchProjectListing = cache(async (): Promise<ProjectListing> => {
     z.object({ projects: z.array(ProjectSchema) }),
   );
   if (read.kind !== "ok") return { kind: "unavailable" };
-  return {
-    kind: "ok",
-    projects: read.value.projects
-      .map((t) => ({ ...t, role: asRole(t.role) }))
-      .sort(compareProjects),
-  };
+  return { kind: "ok", projects: read.value.projects.sort(compareProjects) };
 });
 
 export const fetchProjects = cache(async (): Promise<Project[]> => {
@@ -104,12 +99,7 @@ export const fetchProjectsEverywhere = cache(async (): Promise<ProjectEverywhere
     z.object({ projects: z.array(ProjectEverywhereSchema) }),
   );
   if (read.kind !== "ok") return { kind: "unavailable" };
-  return {
-    kind: "ok",
-    projects: read.value.projects
-      .map((t) => ({ ...t, role: asRole(t.role) }))
-      .sort(compareProjectsByOrganization),
-  };
+  return { kind: "ok", projects: read.value.projects.sort(compareProjectsByOrganization) };
 });
 
 /// A project the person can open, in whichever organization holds it, by id:

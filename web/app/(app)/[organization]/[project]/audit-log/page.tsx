@@ -4,7 +4,7 @@ import { ownerContact } from "@/lib/identity";
 import { activeOrganization, fetchAuditEvents } from "@/lib/server/data";
 import { projectPage } from "@/lib/server/project-page";
 import { projectPath } from "@/lib/slug";
-import { administersProject } from "@/lib/project-role";
+import { administers } from "@/lib/roles";
 
 import { AuditLog } from "../../../_audit-log";
 
@@ -21,7 +21,7 @@ export default async function AuditPage({
   const { gate, project } = resolved;
   const overview = projectPath(organization, slug);
 
-  if (!administersProject(project.role)) {
+  if (!administers(project.role)) {
     return (
       <AccessDenied
         what="this project's audit log"

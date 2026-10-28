@@ -9,7 +9,7 @@ import { SettingsRow } from "@/components/settings-row";
 import { Card } from "@/components/ui/card";
 import { env } from "@/lib/env";
 import { organizationLabel, ownerContact } from "@/lib/identity";
-import { administersOrganization } from "@/lib/organization-role";
+import { administers, owns } from "@/lib/roles";
 import { activeOrganization, getServerContext, identityContext } from "@/lib/server/data";
 import { getServerSession } from "@/lib/server/session";
 import { organizationPath } from "@/lib/slug";
@@ -42,7 +42,7 @@ export default async function OrganizationSettingsPage() {
   // (`can_manage_org_settings`). A MEMBER holds no organization-wide powers,
   // and organization settings are not a thing they have a reading interest in
   // either.
-  if (!organization || !ident || !administersOrganization(ident.role)) {
+  if (!organization || !ident || !administers(ident.role)) {
     return (
       <AccessDenied
         what="this organization's settings"
@@ -52,8 +52,7 @@ export default async function OrganizationSettingsPage() {
     );
   }
 
-  const isOwner = ident.role === "owner";
-  const canManage = isOwner || ident.role === "admin";
+  const isOwner = owns(ident.role);
   const label = organizationLabel(organization);
 
   return (
@@ -67,7 +66,6 @@ export default async function OrganizationSettingsPage() {
           <OrganizationNameForm
             organizationId={organization.organizationId}
             initialName={organization.name}
-            canEdit={canManage}
           />
         </Section>
 
@@ -79,7 +77,6 @@ export default async function OrganizationSettingsPage() {
             organizationId={organization.organizationId}
             slug={organization.slug}
             host={new URL(env.AUTH_URL).host}
-            canEdit={canManage}
           />
         </Section>
 

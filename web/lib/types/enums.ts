@@ -399,9 +399,3 @@ export const FlagOffDetail = {
   public_api: "The API is switched off right now.",
   signup:     "Sign-ups are closed right now.",
 } as const satisfies Record<Flag, string>;
-
-const ROLES: ReadonlySet<string> = new Set(Object.values(Role));
-
-export function asRole(value: string | null | undefined): Role | null {
-  return value && ROLES.has(value) ? (value as Role) : null;
-}

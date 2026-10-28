@@ -1,5 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import { roleLabel } from "@/lib/role-label";
+import type { OrganizationRole, Role } from "@/lib/types/enums";
 import { cn } from "@/lib/utils";
 
 /**
@@ -11,23 +12,18 @@ import { cn } from "@/lib/utils";
  * rank on top of the word that already carries it, so an outlined "Admin" beside
  * a filled "Owner" read as two kinds of thing rather than two roles. The rule
  * lived in two places and they disagreed; now it lives here.
- *
- * `null` draws nothing rather than guessing. A project reached without an
- * organization membership has no organization role to state, and a badge
- * invented for that case would be a claim about standing that nothing knows.
  */
 export function RoleBadge({
   role,
   testId,
   className,
 }: {
-  role: string | null | undefined;
+  role: Role | OrganizationRole;
   testId?: string;
   /// For density only — the dropdown's rows are tighter than a table cell's.
   /// Never for the variant: that is this component's to decide.
   className?: string;
 }) {
-  if (!role) return null;
   return (
     <Badge
       variant="secondary"

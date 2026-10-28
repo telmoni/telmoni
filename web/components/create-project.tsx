@@ -20,13 +20,13 @@ import { organizationLabel } from "@/lib/identity";
 import { projectPath } from "@/lib/slug";
 import { useActiveOrganization, useAddProject, useRoles } from "@/lib/store";
 import { MAX_PROJECT_NAME, typedBound } from "@/lib/names";
-import { administersOrganization } from "@/lib/organization-role";
+import { administers } from "@/lib/roles";
 
 /// Whether the caller may create a project in the organization they are STANDING
 /// IN: every entry point's question, since the panel creates there and asks
 /// about no other.
 export function useCanCreateProjects(): boolean {
-  return administersOrganization(useRoles().organization);
+  return administers(useRoles().organization);
 }
 
 /** New project, in the console's side panel (`create-panels.tsx`). */

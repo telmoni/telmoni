@@ -1,6 +1,7 @@
 import { PageHeader } from "@/components/page-header";
 import { ServiceUnavailable } from "@/components/service-unavailable";
 import { Card } from "@/components/ui/card";
+import { owns } from "@/lib/roles";
 import { getServerContext } from "@/lib/server/data";
 
 import { GivenSeatsSection } from "./_given-seats";
@@ -19,7 +20,7 @@ export default async function AccountNotificationsPage() {
   const projectOffers = gate.projectOffers ?? [];
   const seats = gate.givenSeats ?? [];
   // Where an accepted project may land: the organizations the person owns.
-  const owned = gate.organizations.filter((o) => o.role === "owner");
+  const owned = gate.organizations.filter((o) => owns(o.role));
   const nothing =
     invites.length === 0 && offers.length === 0 && projectOffers.length === 0 && seats.length === 0;
 

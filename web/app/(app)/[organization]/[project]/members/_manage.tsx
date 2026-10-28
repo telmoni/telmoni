@@ -34,6 +34,8 @@ import {
 import { personDetail, personName } from "@/lib/identity";
 import type { Invite, Member } from "@/lib/server/data";
 import { roleLabel } from "@/lib/role-label";
+import { type GivenRole, owns } from "@/lib/roles";
+import { Role } from "@/lib/types/enums";
 import { useAction } from "@/lib/use-action";
 
 import {
@@ -47,7 +49,6 @@ import {
   updateMemberRoleAction,
 } from "./actions";
 
-type Grantable = "admin" | "member";
 
 /// A member of the organization holding no seat on the project yet: the
 /// owner and admins may seat them here with nothing to accept.
@@ -118,7 +119,7 @@ function AddDialog({
   // Nobody chosen until somebody is: a seat given mails its person.
   const [memberId, setMemberId] = useState("");
   const [email, setEmail] = useState("");
-  const [role, setRole] = useState<Grantable>("member");
+  const [role, setRole] = useState<GivenRole>(Role.Member);
   const [link, setLink] = useState<string | null>(null);
   const { pending, error, setError, run } = useAction();
   const chosen = candidates.find((c) => c.memberId === memberId);
@@ -131,7 +132,7 @@ function AddDialog({
         () => addMemberAction(projectId, chosen.memberId, role),
         () => {
           toast.success(
-            `Added ${personName(chosen)} as ${role === "admin" ? "an admin" : "a member"}.`,
+            `Added ${personName(chosen)} as ${role === Role.Admin ? "an admin" : "a member"}.`,
           );
           startTransition(() => onOpenChange(false));
         },
@@ -247,15 +248,15 @@ function AddDialog({
           )}
           <div className="grid gap-1.5">
             <Label htmlFor="member-role">Role</Label>
-            <Select value={role} onValueChange={(v) => setRole(v as Grantable)}>
+            <Select value={role} onValueChange={(v) => setRole(v as GivenRole)}>
               <SelectTrigger id="member-role" className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="member">
+                <SelectItem value={Role.Member}>
                   Member — read-only access
                 </SelectItem>
-                <SelectItem value="admin">
+                <SelectItem value={Role.Admin}>
                   Admin — read access and the audit log
                 </SelectItem>
               </SelectContent>
@@ -301,7 +302,7 @@ export function InviteRow({
     <tr>
       <Td className="font-medium">{invite.email}</Td>
       <Td className="text-xs text-muted-foreground">
-        {invite.role ? roleLabel(invite.role) : "—"}
+        {roleLabel(invite.role)}
       </Td>
       <Td className="text-xs text-muted-foreground whitespace-nowrap">
         Expires <LocalTime iso={invite.expires_at} mode="date" />
@@ -353,9 +354,9 @@ export function MemberRow({
 }: MemberRowProps) {
   const { pending, error, run: act } = useAction();
 
-  const isOwner = member.is_owner || member.role === "owner";
+  const isOwner = member.is_owner || owns(member.role);
   // Only an admin can be handed the project, and only the owner hands it.
-  const canOffer = canManage && isOwnerCaller && !isOwner && member.role === "admin";
+  const canOffer = canManage && isOwnerCaller && !isOwner && member.role === Role.Admin;
   const offered = Boolean(member.transfer_offer_expires_at);
 
   return (
@@ -386,10 +387,10 @@ export function MemberRow({
           <span className="text-xs font-medium text-muted-foreground">Owner</span>
         ) : canManage ? (
           <Select
-            value={member.role ?? "member"}
+            value={member.role}
             disabled={pending}
             onValueChange={(v) =>
-              act(() => updateMemberRoleAction(projectId, member.member_id, v as Grantable))
+              act(() => updateMemberRoleAction(projectId, member.member_id, v as GivenRole))
             }
           >
             <SelectTrigger
@@ -399,12 +400,12 @@ export function MemberRow({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="member">Member</SelectItem>
-              <SelectItem value="admin">Admin</SelectItem>
+              <SelectItem value={Role.Member}>Member</SelectItem>
+              <SelectItem value={Role.Admin}>Admin</SelectItem>
             </SelectContent>
           </Select>
         ) : (
-          <span className="text-xs text-muted-foreground">{roleLabel(member.role ?? "member")}</span>
+          <span className="text-xs text-muted-foreground">{roleLabel(member.role)}</span>
         )}
         {error && <span className="ml-2 text-xs text-destructive">{error}</span>}
       </Td>

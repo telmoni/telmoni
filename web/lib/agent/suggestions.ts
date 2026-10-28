@@ -1,4 +1,4 @@
-import { administersProject } from "@/lib/project-role";
+import { administers } from "@/lib/roles";
 import { Role } from "@/lib/types/enums";
 
 export type SuggestionTopic = "members" | "deliveries" | "audit";
@@ -38,6 +38,6 @@ const AUDIT: AgentSuggestion = {
 // `crates/shared/src/rbac.rs` — since the agent would answer anyone else's
 // question with a refusal.
 export function agentSuggestions(role: Role | null): AgentSuggestion[] {
-  const auditor = administersProject(role);
+  const auditor = administers(role);
   return auditor ? [MEMBERS, DELIVERIES, AUDIT] : [MEMBERS, DELIVERIES];
 }

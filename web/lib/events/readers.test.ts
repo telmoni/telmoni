@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { Membership, OrganizationEntry } from "@/lib/server/entities/organization";
+import { Role } from "@/lib/types/enums";
 
 import { readingKey, readsProject } from "./readers";
 
@@ -8,7 +9,7 @@ function access(role: OrganizationEntry["role"], seats: string[] = []) {
   return {
     organizations: [{ organizationId: "org_1", slug: "acme", name: "Acme", role }],
     memberships: seats.map(
-      (projectId): Membership => ({ projectId, organizationId: "org_1", role: null }),
+      (projectId): Membership => ({ projectId, organizationId: "org_1", role: Role.Member }),
     ),
   };
 }

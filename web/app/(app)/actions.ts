@@ -14,6 +14,7 @@ import { createdOrganizationHref } from "@/lib/extension/created-organization";
 import { FlagOffDetail } from "@/lib/flags";
 import { logger } from "@/lib/logger";
 import { checkOrganizationName, checkOrganizationUrl, checkProjectName } from "@/lib/names";
+import { administers } from "@/lib/roles";
 import {
   identityContext,
   organizationHeaders,
@@ -25,13 +26,13 @@ import { FeatureOffProblemSchema } from "@/lib/server/flags";
 import { unplacedOrganization } from "@/lib/server/identity";
 import { getServerSession } from "@/lib/server/session";
 import { isSlug, organizationPath } from "@/lib/slug";
-import { asRole } from "@/lib/types/enums";
+import { Role } from "@/lib/types/enums";
 
 const CreatedProjectSchema = z.object({
   id: z.string(),
   slug: z.string(),
   name: z.string(),
-  role: z.string(),
+  role: z.enum(Role),
 });
 
 /** Done with the project as listed, or with none where its answer could not
@@ -69,12 +70,10 @@ export async function createProjectAction(
   let target = ctx.organizationId;
   if (organizationId && organizationId !== ctx.organizationId) {
     const gate = await getServerContext();
-    const administers =
-      gate?.organizations.some(
-        (o) =>
-          o.organizationId === organizationId && (o.role === "owner" || o.role === "admin"),
-      ) ?? false;
-    if (!administers) {
+    const mayCreate =
+      gate?.organizations.some((o) => o.organizationId === organizationId && administers(o.role)) ??
+      false;
+    if (!mayCreate) {
       return refused("You cannot create a project in that organization.");
     }
     target = organizationId;
@@ -110,15 +109,7 @@ export async function createProjectAction(
     return { ok: true };
   }
 
-  return {
-    ok: true,
-    project: {
-      id: parsed.data.id,
-      slug: parsed.data.slug,
-      name: parsed.data.name,
-      role: asRole(parsed.data.role),
-    },
-  };
+  return { ok: true, project: parsed.data };
 }
 
 // The new organization's path is spelled with its slug, so it is held to a

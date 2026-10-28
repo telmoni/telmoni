@@ -9,6 +9,7 @@ import { isSessionBlacklisted } from "@/lib/auth/session-blacklist";
 import { sessionEndKey } from "@/lib/auth/session-end-key";
 import { env } from "@/lib/env";
 import { publishToAll, userChannel } from "@/lib/events/publisher";
+import { owns } from "@/lib/roles";
 import { identityContext, organizationHeaders } from "@/lib/server/entities/identity-context";
 import { fetchOrganizationMembers } from "@/lib/server/entities/organization-member";
 import { SWITCHED_ORGANIZATION, unplacedOrganization } from "@/lib/server/identity";
@@ -42,7 +43,7 @@ export async function requestOrganizationDeletionCodeAction(
   // one the page is not showing is how typing it deletes the wrong one.
   if (ctx.organizationId !== organizationId) return refused(SWITCHED_ORGANIZATION);
   // Presentation only: auth refuses anybody but the owner, and says so.
-  if (ctx.role !== "owner") {
+  if (!owns(ctx.role)) {
     return refused("Only this organization's owner can delete it.");
   }
 
@@ -80,7 +81,7 @@ export async function deleteOrganizationAction(
   const ctx = await identityContext();
   if (!ctx) return refused(await unplacedOrganization());
   if (ctx.organizationId !== organizationId) return refused(SWITCHED_ORGANIZATION);
-  if (ctx.role !== "owner") {
+  if (!owns(ctx.role)) {
     return refused("Only this organization's owner can delete it.");
   }
 

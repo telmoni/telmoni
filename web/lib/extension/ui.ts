@@ -46,6 +46,7 @@ export { DOCS_URL, PRODUCT_NAME, SPONSORS_URL } from "@/lib/site";
 export { NETWORK_ERROR, useAction, useToastAction } from "@/lib/use-action";
 export { cn } from "@/lib/utils";
 export { organizationLabel } from "@/lib/identity";
+export { administers, owns } from "@/lib/roles";
 export {
   RESERVED_ORGANIZATION_SLUGS,
   RESERVED_PROJECT_SLUGS,

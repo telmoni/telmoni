@@ -22,17 +22,6 @@ export const RosterChangeSchema = z.object({ email: text, ownerOrganizationId: t
 export const OfferChangeSchema = z.object({ offeredToEmail: text, withdrawnFromEmail: text });
 
 /**
- * The roles an invitation or a role change may hand out. A Server Action takes
- * whatever is posted to it, whatever its parameter's type says, so the role
- * is checked here before it is sent anywhere; auth refuses anything else too.
- */
-export function isGivenRole(role: unknown): role is "admin" | "member" {
-  return role === "admin" || role === "member";
-}
-
-export const NOT_A_GIVEN_ROLE = "Choose admin or member.";
-
-/**
  * Standard upstream error unwrapper for member management actions.
  */
 export async function answerMemberAction(res: Response | null): Promise<ActionResult> {

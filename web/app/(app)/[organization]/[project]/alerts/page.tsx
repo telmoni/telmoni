@@ -34,6 +34,7 @@ import {
   type ConnectionChoice,
 } from "@/lib/alerts";
 import { ownerContact } from "@/lib/identity";
+import { administers } from "@/lib/roles";
 import {
   INCIDENTS_MAX,
   activeOrganization,
@@ -80,12 +81,11 @@ export default async function AlertsPage({
 
   // The organization's roster names its admins, who act on every project
   // with no seat on it; only its owner and admins may read it.
-  const role = activeOrganization(gate)?.role;
   const [access, listing, roster, everyone] = await Promise.all([
     fetchAlerts(project.id),
     fetchConnectors(project.id),
     fetchMembers(project.id),
-    role === "owner" || role === "admin" ? fetchOrganizationMembers() : null,
+    administers(activeOrganization(gate)?.role) ? fetchOrganizationMembers() : null,
   ]);
   if (access.kind === "unavailable") return <ServiceUnavailable />;
   if (access.kind === "forbidden") {

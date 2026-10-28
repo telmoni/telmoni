@@ -239,14 +239,13 @@ describe("what getServerContext asks /me to resolve", () => {
     expect((await getServerContext())?.givenSeats).toEqual([]);
   });
 
-  it("floors an unknown role spelling to null rather than passing it through", async () => {
+  it("is null when a seat names a role off the ladder, never passing it through", async () => {
     meAnswers(
       me({
         memberships: [{ projectId: "project_1", organizationId: "org_2", role: "superuser" }],
       }),
     );
-    const ctx = await getServerContext();
-    expect(ctx?.memberships[0]?.role).toBeNull();
+    expect(await getServerContext()).toBeNull();
   });
 
   it("is null when auth refuses, and null is not an empty organization", async () => {

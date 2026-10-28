@@ -2,7 +2,7 @@ import { cache } from "react";
 import { z } from "zod";
 
 import { env } from "@/lib/env";
-import { InviteScope, Role, asRole } from "@/lib/types/enums";
+import { InviteScope, Role } from "@/lib/types/enums";
 
 import { identityContext, projectHeaders } from "./identity-context";
 import { type RosterCeiling, RosterCeilingSchema } from "./organization-member";
@@ -13,18 +13,15 @@ const MemberSchema = z.object({
   member_id: z.string(),
   email: z.string(),
   display_name: z.string().nullable().optional(),
-  role: z.string(),
+  role: z.enum(Role),
   created_at: z.string(),
-  is_owner: z.boolean().optional(),
+  is_owner: z.boolean(),
   /// When the owner's live offer of the project to this admin lapses; absent
   /// when there is no live offer, and always for the owner's row.
   transfer_offer_expires_at: z.string().nullable().optional(),
 });
 
-export type Member = Omit<z.infer<typeof MemberSchema>, "role"> & {
-  role: Role | null;
-  is_owner: boolean;
-};
+export type Member = z.infer<typeof MemberSchema>;
 
 export type MemberAccess =
   | { kind: "ok"; members: Member[]; ceiling: RosterCeiling | null }
@@ -45,31 +42,18 @@ export const fetchMembers = cache(async (projectId: string): Promise<MemberAcces
     }),
   );
   if (read.kind !== "ok") return read;
-  return {
-    kind: "ok",
-    members: read.value.members.map((m) => {
-      const role = asRole(m.role);
-      return {
-        ...m,
-        role,
-        is_owner: m.is_owner ?? (role === Role.Owner || m.role === "owner"),
-      };
-    }),
-    ceiling: read.value.ceiling ?? null,
-  };
+  return { kind: "ok", members: read.value.members, ceiling: read.value.ceiling ?? null };
 });
 
 const InviteSchema = z.object({
   id: z.string(),
   email: z.string(),
-  role: z.string(),
+  role: z.enum(Role),
   expires_at: z.string(),
   created_at: z.string(),
 });
 
-export type Invite = Omit<z.infer<typeof InviteSchema>, "role"> & {
-  role: Role | null;
-};
+export type Invite = z.infer<typeof InviteSchema>;
 
 export type InviteAccess =
   | { kind: "ok"; invites: Invite[] }
@@ -86,10 +70,7 @@ export const fetchInvites = cache(async (projectId: string): Promise<InviteAcces
     z.object({ invites: z.array(InviteSchema) }),
   );
   if (read.kind !== "ok") return read;
-  return {
-    kind: "ok",
-    invites: read.value.invites.map((i) => ({ ...i, role: asRole(i.role) })),
-  };
+  return { kind: "ok", invites: read.value.invites };
 });
 
 const InviteLookSchema = z.object({
@@ -101,7 +82,7 @@ const InviteLookSchema = z.object({
   /// invite.
   organization: z.string(),
   email: z.string(),
-  role: z.string(),
+  role: z.enum(Role),
 });
 
 export type InviteLook = z.infer<typeof InviteLookSchema>;

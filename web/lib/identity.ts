@@ -1,3 +1,6 @@
+import { owns } from "@/lib/roles";
+import type { OrganizationRole } from "@/lib/types/enums";
+
 export function personName(who: {
   displayName?: string | null;
   email: string;
@@ -46,7 +49,7 @@ export function organizationLabel(org: { name: string }): string {
 /// How many organizations a person owns, as the account deletion counts them:
 /// a count, not their names, which read as a list past a few.
 export function ownedOrganizationCount(
-  organizations: readonly { role: string }[],
+  organizations: readonly { role: OrganizationRole }[],
 ): number {
-  return organizations.filter((o) => o.role === "owner").length;
+  return organizations.filter((o) => owns(o.role)).length;
 }

@@ -19,13 +19,4 @@ describe("roleLabel", () => {
     expect(roleLabel(Role.Admin)).toBe("Admin");
     expect(roleLabel(Role.Member)).toBe("Member");
   });
-
-  // Every copy answered an em dash for an absent role, and every call site
-  // relied on it — one of them wrapped the call in its own `? :` to say the
-  // same thing twice.
-  it("answers an em dash rather than an empty cell", () => {
-    expect(roleLabel(null)).toBe("—");
-    expect(roleLabel(undefined)).toBe("—");
-    expect(roleLabel("")).toBe("—");
-  });
 });

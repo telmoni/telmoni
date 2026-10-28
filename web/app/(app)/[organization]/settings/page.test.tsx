@@ -36,17 +36,14 @@ vi.mock("./_organization-name", () => ({
   OrganizationNameForm: ({
     organizationId,
     initialName,
-    canEdit,
   }: {
     organizationId: string;
     initialName: string;
-    canEdit: boolean;
   }) => (
     <div
       data-testid="name-form"
       data-organization-id={organizationId}
       data-initial={initialName}
-      data-can-edit={String(canEdit)}
     />
   ),
 }));
@@ -55,19 +52,16 @@ vi.mock("./_organization-url", () => ({
     organizationId,
     slug,
     host,
-    canEdit,
   }: {
     organizationId: string;
     slug: string;
     host: string;
-    canEdit: boolean;
   }) => (
     <div
       data-testid="url-form"
       data-organization-id={organizationId}
       data-slug={slug}
       data-host={host}
-      data-can-edit={String(canEdit)}
     />
   ),
 }));
@@ -177,10 +171,8 @@ describe("OrganizationSettingsPage", () => {
     expect(screen.getByTestId("page-header")).toHaveTextContent("Settings");
     expect(headings()).toEqual(["name", "url", "organization id", "danger zone"]);
     expect(screen.getByTestId("name-form")).toHaveAttribute("data-initial", "My Own Workspace");
-    expect(screen.getByTestId("name-form")).toHaveAttribute("data-can-edit", "true");
     expect(screen.getByTestId("url-form")).toHaveAttribute("data-slug", "mine");
     expect(screen.getByTestId("url-form")).toHaveAttribute("data-host", "console.example");
-    expect(screen.getByTestId("url-form")).toHaveAttribute("data-can-edit", "true");
     expect(screen.getByTestId("settings-row")).toHaveTextContent("org_mine");
     expect(screen.getByTestId("delete-form")).toHaveAttribute(
       "data-organization",
@@ -195,8 +187,8 @@ describe("OrganizationSettingsPage", () => {
     render(await OrganizationSettingsPage());
     expect(headings()).toEqual(["name", "url", "organization id"]);
     expect(screen.queryByTestId("delete-form")).toBeNull();
-    expect(screen.getByTestId("name-form")).toHaveAttribute("data-can-edit", "true");
-    expect(screen.getByTestId("url-form")).toHaveAttribute("data-can-edit", "true");
+    expect(screen.getByTestId("name-form")).toBeInTheDocument();
+    expect(screen.getByTestId("url-form")).toBeInTheDocument();
   });
 
   // Each action refuses an organization other than the one it is handed, so

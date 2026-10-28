@@ -15,7 +15,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { ownerContact } from "@/lib/identity";
 import { LIST_DIMS_WHILE_PENDING } from "@/lib/list-pending";
 import type { SearchParams } from "@/lib/list-query";
-import { administersProject } from "@/lib/project-role";
+import { administers } from "@/lib/roles";
 import {
   activeOrganization,
   fetchSessionFacets,
@@ -188,7 +188,7 @@ export default async function SessionsPage({
         window={{ days: query.days }}
         layouts={layouts.kind === "ok" ? layouts.layouts : null}
         project={setting}
-        canSave={administersProject(project.role)}
+        canSave={administers(project.role)}
       />
     </TooltipProvider>
   );

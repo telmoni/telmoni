@@ -15,7 +15,6 @@ export function OrganizationUrlForm({
   organizationId,
   slug,
   host,
-  canEdit,
 }: {
   /// The organization this page rendered; the change refuses any other.
   organizationId: string;
@@ -23,7 +22,6 @@ export function OrganizationUrlForm({
   slug: string;
   /// The console's host, shown ahead of the field.
   host: string;
-  canEdit: boolean;
 }) {
   const [value, setValue] = useState(slug);
   const [error, setError] = useState<string | null>(null);
@@ -42,7 +40,7 @@ export function OrganizationUrlForm({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!canEdit || !isChanged || pending) return;
+    if (!isChanged || pending) return;
     setError(null);
     start(async () => {
       try {
@@ -72,7 +70,7 @@ export function OrganizationUrlForm({
           <Input
             value={value}
             onChange={(e) => setValue(e.target.value)}
-            disabled={!canEdit || pending}
+            disabled={pending}
             placeholder="acme"
             maxLength={SLUG_MAX_LENGTH}
             autoCapitalize="none"
@@ -81,18 +79,11 @@ export function OrganizationUrlForm({
             aria-label="Organization URL"
           />
         </div>
-        {canEdit && (
-          <Button type="submit" disabled={!isChanged || pending} variant="default">
-            {pending ? "Saving..." : "Save"}
-          </Button>
-        )}
+        <Button type="submit" disabled={!isChanged || pending} variant="default">
+          {pending ? "Saving..." : "Save"}
+        </Button>
       </div>
       {error && <p className="text-sm text-destructive">{error}</p>}
-      {!canEdit && (
-        <p className="text-sm text-muted-foreground">
-          Only an organization owner or admin can change its URL.
-        </p>
-      )}
     </form>
   );
 }

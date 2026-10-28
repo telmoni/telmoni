@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 
 import { ServiceUnavailable } from "@/components/service-unavailable";
 import { organizationLabel } from "@/lib/identity";
+import { administers, owns } from "@/lib/roles";
 import {
   activeOrganization,
   fetchNotifications,
@@ -42,8 +43,8 @@ export default async function OrganizationOverviewPage() {
   // person who holds it. See `organizationLabel`.
   const name = organizationLabel(organization);
 
-  const isOwner = organization.role === "owner";
-  const isAdmin = isOwner || organization.role === "admin";
+  const isOwner = owns(organization.role);
+  const isAdmin = administers(organization.role);
   // The organization's own feed — the notices that name no project, such as
   // an `organization_alert` a service beside this one raises — answers its
   // owner and admins, so nobody else is sent to ask for it.

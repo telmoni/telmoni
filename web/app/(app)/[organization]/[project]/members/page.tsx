@@ -6,9 +6,8 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { MemberCeilingNotice, atCeiling } from "@/components/member-ceiling";
 import { ownerContact } from "@/lib/identity";
-import { administersOrganization } from "@/lib/organization-role";
-import { administersProject } from "@/lib/project-role";
-import { Role } from "@/lib/types/enums";
+import { administers, owns } from "@/lib/roles";
+import { OrganizationRole } from "@/lib/types/enums";
 import {
   activeOrganization,
   fetchInvites,
@@ -36,7 +35,7 @@ export default async function MembersPage({
   // The organization's roster is its owner's and admins' to seat from, so
   // they alone are handed it; a project admin invites by email.
   const home = activeOrganization(gate);
-  const fromRoster = home !== null && administersOrganization(home.role);
+  const fromRoster = home !== null && administers(home.role);
   const [listing, invited, roster] = await Promise.all([
     fetchMembers(project.id),
     fetchInvites(project.id),
@@ -53,8 +52,8 @@ export default async function MembersPage({
     );
   }
 
-  const isOwner = project.role === Role.Owner;
-  const canManage = administersProject(project.role);
+  const isOwner = owns(project.role);
+  const canManage = administers(project.role);
   const me = gate.person.userId;
   // Who may be seated here with nothing to accept: the organization's members
   // holding no seat on this project. Its owner and admins hold every project.
@@ -62,7 +61,7 @@ export default async function MembersPage({
   const candidates: Candidate[] =
     roster?.kind === "ok"
       ? roster.members
-          .filter((m) => m.role === "member" && !seated.has(m.member_id))
+          .filter((m) => m.role === OrganizationRole.Member && !seated.has(m.member_id))
           .map((m) => ({
             memberId: m.member_id,
             email: m.email,

@@ -33,6 +33,8 @@ import {
 import { personDetail, personName } from "@/lib/identity";
 import type { OrganizationInvite, OrganizationMember } from "@/lib/server/data";
 import { roleLabel } from "@/lib/role-label";
+import { type GivenRole, owns } from "@/lib/roles";
+import { OrganizationRole } from "@/lib/types/enums";
 import { useAction } from "@/lib/use-action";
 
 import {
@@ -43,8 +45,6 @@ import {
   removeOrganizationMemberAction,
   updateOrganizationMemberRoleAction,
 } from "./actions";
-
-type GrantableOrganizationRole = "admin" | "member";
 
 // Every control here takes `organizationId`, the organization the page
 // rendered, and hands it to its action, which refuses when its request
@@ -75,7 +75,7 @@ function AddOrganizationMemberDialog({
   onOpenChange: (v: boolean) => void;
 }) {
   const [email, setEmail] = useState("");
-  const [role, setRole] = useState<GrantableOrganizationRole>("member");
+  const [role, setRole] = useState<GivenRole>(OrganizationRole.Member);
   const [link, setLink] = useState<string | null>(null);
   const { pending, error, run } = useAction();
 
@@ -128,16 +128,16 @@ function AddOrganizationMemberDialog({
             <Label htmlFor="organization-member-role">Organization role</Label>
             <Select
               value={role}
-              onValueChange={(v) => setRole(v as GrantableOrganizationRole)}
+              onValueChange={(v) => setRole(v as GivenRole)}
             >
               <SelectTrigger id="organization-member-role" className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="admin">
+                <SelectItem value={OrganizationRole.Admin}>
                   Admin — create projects, manage members & work as an admin in every project
                 </SelectItem>
-                <SelectItem value="member">
+                <SelectItem value={OrganizationRole.Member}>
                   Member — project-level access only; no organization-wide powers
                 </SelectItem>
               </SelectContent>
@@ -161,19 +161,17 @@ function AddOrganizationMemberDialog({
 export function OrganizationMemberRow({
   organizationId,
   member,
-  canManage,
   isOwnerCaller = false,
 }: {
   organizationId: string;
   member: OrganizationMember;
-  canManage: boolean;
   isOwnerCaller?: boolean;
 }) {
   const { pending, error, run: act } = useAction();
 
-  const isOwner = member.is_owner || member.role === "owner";
+  const isOwner = member.is_owner || owns(member.role);
   // Only an admin can be handed the organization, and only the owner hands it.
-  const canOffer = isOwnerCaller && member.role === "admin";
+  const canOffer = isOwnerCaller && member.role === OrganizationRole.Admin;
   const offered = Boolean(member.ownership_offer_expires_at);
   const transferTrigger = (
     <Button
@@ -213,16 +211,16 @@ export function OrganizationMemberRow({
       <Td>
         {isOwner ? (
           <span className="text-xs font-medium text-muted-foreground">Owner</span>
-        ) : canManage ? (
+        ) : (
           <Select
-            value={member.role ?? "member"}
+            value={member.role}
             disabled={pending}
             onValueChange={(v) =>
               act(() =>
                 updateOrganizationMemberRoleAction(
                   organizationId,
                   member.member_id,
-                  v as GrantableOrganizationRole,
+                  v as GivenRole,
                 ),
               )
             }
@@ -234,14 +232,10 @@ export function OrganizationMemberRow({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="admin">Admin</SelectItem>
-              <SelectItem value="member">Member</SelectItem>
+              <SelectItem value={OrganizationRole.Admin}>Admin</SelectItem>
+              <SelectItem value={OrganizationRole.Member}>Member</SelectItem>
             </SelectContent>
           </Select>
-        ) : (
-          <span className="text-xs text-muted-foreground">
-            {roleLabel(member.role)}
-          </span>
         )}
         {error && <span className="ml-2 text-xs text-destructive">{error}</span>}
       </Td>
@@ -280,7 +274,7 @@ export function OrganizationMemberRow({
               onConfirm={() => act(() => cancelOwnershipOfferAction(organizationId))}
             />
           )}
-          {!isOwner && canManage && (
+          {!isOwner && (
             <ConfirmDialog
               trigger={
                 <Button
@@ -310,11 +304,9 @@ export function OrganizationMemberRow({
 export function OrganizationInviteRow({
   organizationId,
   invite,
-  canManage,
 }: {
   organizationId: string;
   invite: OrganizationInvite;
-  canManage: boolean;
 }) {
   const { pending, error, run } = useAction();
 
@@ -329,25 +321,23 @@ export function OrganizationInviteRow({
       </Td>
       <Td className="text-right whitespace-nowrap">
         {error && <span className="mr-2 text-xs text-destructive">{error}</span>}
-        {canManage && (
-          <ConfirmDialog
-            trigger={
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-9 text-xs"
-                disabled={pending}
-                aria-label={`Withdraw the invitation to ${invite.email}`}
-              >
-                Withdraw
-              </Button>
-            }
-            title={`Withdraw the invitation to ${invite.email}?`}
-            description="Their link stops working straight away. You can invite them again later."
-            confirmLabel="Withdraw"
-            onConfirm={() => run(() => revokeOrganizationInviteAction(organizationId, invite.id))}
-          />
-        )}
+        <ConfirmDialog
+          trigger={
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-9 text-xs"
+              disabled={pending}
+              aria-label={`Withdraw the invitation to ${invite.email}`}
+            >
+              Withdraw
+            </Button>
+          }
+          title={`Withdraw the invitation to ${invite.email}?`}
+          description="Their link stops working straight away. You can invite them again later."
+          confirmLabel="Withdraw"
+          onConfirm={() => run(() => revokeOrganizationInviteAction(organizationId, invite.id))}
+        />
       </Td>
     </tr>
   );

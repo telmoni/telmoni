@@ -64,6 +64,11 @@ describe("fetchProjectBySlug", () => {
     expect(await fetchProjectBySlug("web")).toBeNull();
   });
 
+  it("answers nothing for a listing that names a role off the ladder", async () => {
+    listing([WEB, { ...API, role: "editor" }]);
+    expect(await fetchProjectBySlug("web")).toBeNull();
+  });
+
   it("never reads a project's id as its slug", async () => {
     await expect(fetchProjectBySlug("project_1")).rejects.toThrow("NOT_FOUND");
   });

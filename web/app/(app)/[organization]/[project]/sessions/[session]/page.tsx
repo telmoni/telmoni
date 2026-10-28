@@ -13,7 +13,7 @@ import { WindowPicker } from "@/components/window-picker";
 import { ownerContact } from "@/lib/identity";
 import { parseLayoutUi, resolveLayout } from "@/lib/layout";
 import { MAX_LIMIT, parseWindow, type SearchParams } from "@/lib/list-query";
-import { administersProject } from "@/lib/project-role";
+import { administers } from "@/lib/roles";
 import {
   activeOrganization,
   fetchSession,
@@ -113,7 +113,7 @@ export default async function SessionPage({
         title="Session"
         backHref={list}
         backLabel="Sessions"
-        action={<LayoutControls {...page} canSave={administersProject(project.role)} />}
+        action={<LayoutControls {...page} canSave={administers(project.role)} />}
       />
       <div className="grid gap-6">
         <Section

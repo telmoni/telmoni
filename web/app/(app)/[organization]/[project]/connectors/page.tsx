@@ -26,7 +26,7 @@ import {
   type Connection,
 } from "@/lib/server/data";
 import { projectPage } from "@/lib/server/project-page";
-import { administersProject } from "@/lib/project-role";
+import { administers } from "@/lib/roles";
 
 import { DeliveriesButton } from "./_deliveries";
 import { ConnectionActions } from "./_manage";
@@ -79,7 +79,7 @@ export default async function ConnectorsPage({
   const projectId = project.id;
   const listing = await fetchConnectors(projectId);
 
-  const canManage = administersProject(project.role);
+  const canManage = administers(project.role);
   const notice =
     outcome === null
       ? null

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { administersOrganization, organizationRoleOf } from "./organization-role";
+import { administers, isGivenRole, organizationRoleOf, owns } from "./roles";
 
 const ctx = {
   organizations: [
@@ -34,11 +34,32 @@ describe("organizationRoleOf", () => {
   });
 });
 
-describe("administersOrganization", () => {
+describe("administers", () => {
+  // One rule for both ladders: a project's and an organization's.
   it("is the owner and the admins, and nobody else", () => {
-    expect(administersOrganization("owner")).toBe(true);
-    expect(administersOrganization("admin")).toBe(true);
-    expect(administersOrganization("member")).toBe(false);
-    expect(administersOrganization(null)).toBe(false);
+    expect(administers("owner")).toBe(true);
+    expect(administers("admin")).toBe(true);
+    expect(administers("member")).toBe(false);
+    expect(administers(null)).toBe(false);
+    expect(administers(undefined)).toBe(false);
+  });
+});
+
+describe("owns", () => {
+  it("is the owner alone", () => {
+    expect(owns("owner")).toBe(true);
+    expect(owns("admin")).toBe(false);
+    expect(owns(null)).toBe(false);
+  });
+});
+
+describe("isGivenRole", () => {
+  // Ownership is handed over, never given.
+  it("is admin and member, never owner nor anything posted", () => {
+    expect(isGivenRole("admin")).toBe(true);
+    expect(isGivenRole("member")).toBe(true);
+    expect(isGivenRole("owner")).toBe(false);
+    expect(isGivenRole("editor")).toBe(false);
+    expect(isGivenRole(["admin"])).toBe(false);
   });
 });

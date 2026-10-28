@@ -64,11 +64,8 @@ describe("inviteSubtitle", () => {
     ).toBe("Organization · Admin");
   });
 
-  // `scope` is a free string on the wire. Anything unrecognised is a project
-  // rather than echoed into the interface.
-  it("treats anything that is not the organization as a project", () => {
+  it("names the project level", () => {
     expect(inviteSubtitle(invite({ scope: "project" }))).toBe("Project · Admin");
-    expect(inviteSubtitle(invite({ scope: "wat" }))).toBe("Project · Admin");
   });
 });
 

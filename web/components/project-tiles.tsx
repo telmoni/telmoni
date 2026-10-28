@@ -4,12 +4,13 @@ import Link from "next/link";
 import { RoleBadge } from "@/components/role-badge";
 import { Card } from "@/components/ui/card";
 import { projectPath } from "@/lib/slug";
+import type { Role } from "@/lib/types/enums";
 
 export interface ProjectTile {
   id: string;
   slug: string;
   name: string;
-  role: string | null | undefined;
+  role: Role;
 }
 
 // A tile a project, three to a row from `lg`, so a dozen fit a screen: the

@@ -20,6 +20,7 @@ import {
 import { organizationLabel } from "@/lib/identity";
 import type { IncomingInvite, OrganizationEntry } from "@/lib/server/entities/organization";
 import type { Project, ProjectEverywhere } from "@/lib/server/entities/projects";
+import { Role } from "@/lib/types/enums";
 
 function organization(who: string): OrganizationEntry {
   return {
@@ -297,7 +298,7 @@ describe("the seats given slice", () => {
     organizationId: "org_alpha",
     organizationName: "alpha",
     organizationSlug: "alpha",
-    role: "member",
+    role: Role.Member,
     giverEmail: "alpha@example.test",
     giverDisplayName: null,
     createdAt: "2026-10-21T00:00:00Z",

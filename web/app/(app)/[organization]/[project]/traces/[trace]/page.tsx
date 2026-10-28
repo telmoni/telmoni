@@ -9,7 +9,7 @@ import { TraceMeta } from "@/components/traces/trace-view";
 import { Card } from "@/components/ui/card";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ownerContact } from "@/lib/identity";
-import { administersProject } from "@/lib/project-role";
+import { administers } from "@/lib/roles";
 import {
   activeOrganization,
   fetchRunIncidents,
@@ -90,7 +90,7 @@ export default async function TracePage({
         title={root.agent}
         backHref={list}
         backLabel="Traces"
-        action={<LayoutControls {...page} canSave={administersProject(project.role)} />}
+        action={<LayoutControls {...page} canSave={administers(project.role)} />}
       />
       {/* As tall as the window leaves under the header and the page's title,
           both of a set height, so the spans and the span chosen scroll each

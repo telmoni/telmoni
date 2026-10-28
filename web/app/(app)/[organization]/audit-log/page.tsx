@@ -4,7 +4,7 @@ import { AccessDenied } from "@/components/access-denied";
 import { ExportAuditLog } from "@/components/export-audit-log";
 import { ServiceUnavailable } from "@/components/service-unavailable";
 import { ownerContact } from "@/lib/identity";
-import { administersOrganization } from "@/lib/organization-role";
+import { administers } from "@/lib/roles";
 import {
   activeOrganization,
   fetchOrganizationAudit,
@@ -28,7 +28,7 @@ export default async function OrganizationAuditPage() {
   const organization = activeOrganization(gate);
   const overview = organization ? organizationPath(organization.slug) : "/console";
 
-  if (!organization || !ident || !administersOrganization(ident.role)) {
+  if (!organization || !ident || !administers(ident.role)) {
     return (
       <AccessDenied
         what="this organization's audit log"

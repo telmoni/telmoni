@@ -4,6 +4,7 @@ import { Card } from "@/components/ui/card";
 import { getServerSession } from "@/lib/server/session";
 import { lookUpInvite } from "@/lib/server/data";
 import { PRODUCT_NAME } from "@/lib/site";
+import { InviteScope, OrganizationRole, Role } from "@/lib/types/enums";
 
 import { AcceptInvite } from "./_accept";
 
@@ -36,12 +37,12 @@ export default async function InvitePage({
 
   // The two ladders spell their roles the same, so the level is auth's word
   // (`scope`), never inferred from the role.
-  const isOrganizationScope = invite.scope === "organization";
+  const isOrganizationScope = invite.scope === InviteScope.Organization;
   const roleSentence = isOrganizationScope
-    ? invite.role === "admin"
+    ? invite.role === OrganizationRole.Admin
       ? "You would be an admin of the organization: you could create projects, manage members and settings, and work as an admin on every project."
       : "You would be a member of the organization, with access to the projects you are given."
-    : invite.role === "admin"
+    : invite.role === Role.Admin
       ? "You would be an admin on the project: you could manage its members, keys and connectors, and read its audit log."
       : "You would be a member of the project, with read-only access.";
 
