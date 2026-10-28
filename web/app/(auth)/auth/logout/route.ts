@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 
+import { crossSite } from "@/lib/api/respond";
 import { destroySession, getSession } from "@/lib/auth/session";
 import { env } from "@/lib/env";
 
@@ -14,8 +15,7 @@ import { env } from "@/lib/env";
 // sends on a cross-origin post whether or not it sends Fetch Metadata, names
 // the page. Absent both, or `same-origin`/`none`, is the console's own form.
 function crossSitePost(request: NextRequest): boolean {
-  const site = request.headers.get("sec-fetch-site");
-  if (site !== null && site !== "same-origin" && site !== "none") return true;
+  if (crossSite(request)) return true;
   const origin = request.headers.get("origin");
   return origin !== null && origin !== new URL(env.AUTH_URL).origin;
 }

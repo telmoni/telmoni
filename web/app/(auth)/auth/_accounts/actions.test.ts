@@ -19,6 +19,7 @@ vi.mock("@/lib/auth/session", () => ({
 }));
 vi.mock("@/lib/api/rate-limit", () => ({
   rateLimit: vi.fn(async () => null),
+  rateLimitRetryAfter: vi.fn(async () => null),
   clientKeyFromHeaders: (headers: Headers, scope: string) =>
     `bfrl:${scope}:${headers.get("x-forwarded-for")}`,
   sessionKey: (session: { userId: string }, action: string) => `bfrl:${session.userId}:${action}`,

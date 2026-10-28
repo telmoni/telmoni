@@ -2,16 +2,15 @@ import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 
 import { ProblemType } from "@/lib/api/problem";
-import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
-import { problem } from "@/lib/api/respond";
+import { crossSite, privateProblem, problem } from "@/lib/api/respond";
+import { type Ceiling, admit } from "@/lib/server/admit";
 import { activeOrganization, auditExportFile, getServerContext } from "@/lib/server/data";
-import { getServerSession } from "@/lib/server/session";
 
 /** Downloads a person may make in an hour. A person takes a file once or
  *  twice; a script looping on this route would pull a whole file each time —
  *  up to 24 MiB, held in auth's memory and the console's on its way out — so
  *  the cap is what bounds the bytes a loop can draw. */
-const DOWNLOADS_AN_HOUR = { limit: 10, windowMs: 60 * 60_000 };
+const DOWNLOADS: Ceiling = { call: "audit-export:download", limit: 10, per: "hour" };
 
 // One finished export of the organization's audit log, as a download. Auth
 // hands it to the person who asked for it alone, while they still hold the
@@ -21,17 +20,9 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const site = request.headers.get("sec-fetch-site");
-  if (site && site !== "same-origin" && site !== "none") {
-    return problem(403, "forbidden");
-  }
-
-  const session = await getServerSession();
-  if (!session) {
-    return problem(401, "unauthenticated");
-  }
-  const limited = await rateLimit(sessionKey(session, "audit-export:download"), DOWNLOADS_AN_HOUR);
-  if (limited) return limited;
+  if (crossSite(request)) return problem(403, "forbidden");
+  const admitted = await admit(DOWNLOADS);
+  if (!admitted.ok) return privateProblem(admitted.status, admitted.error, admitted.retryAfter);
 
   const gate = await getServerContext();
   const organization = gate && !gate.organizationNotFound ? activeOrganization(gate) : null;

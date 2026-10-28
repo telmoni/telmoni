@@ -17,8 +17,8 @@ export function problem(
 const PRIVATE = { "cache-control": "private, no-store" };
 
 /** A read's answer: the session's own, so nothing in between keeps a copy. */
-export function privateJson(body: unknown): NextResponse {
-  return NextResponse.json(body, { headers: PRIVATE });
+export function privateJson(body: unknown, status = 200): NextResponse {
+  return NextResponse.json(body, { status, headers: PRIVATE });
 }
 
 /** A read turned away, in the sentence the page shows; a 429 says when to try
@@ -39,3 +39,12 @@ export function crossSite(request: Request): boolean {
   const site = request.headers.get("sec-fetch-site");
   return !!site && site !== "same-origin" && site !== "none";
 }
+
+/** A stream of server-sent events, held open: nothing between buffers it or
+ *  keeps a copy. */
+export const EVENT_STREAM_HEADERS = {
+  "Content-Type": "text/event-stream; charset=utf-8",
+  "Cache-Control": "no-cache, no-transform",
+  Connection: "keep-alive",
+  "X-Accel-Buffering": "no",
+} as const;

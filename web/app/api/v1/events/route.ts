@@ -1,8 +1,6 @@
 import { type NextRequest } from "next/server";
 
-import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
-import { problem } from "@/lib/api/respond";
-import { getSession } from "@/lib/auth/session";
+import { EVENT_STREAM_HEADERS, crossSite, privateProblem, problem } from "@/lib/api/respond";
 import { sessionEndKey } from "@/lib/auth/session-end-key";
 import {
   isSessionBlacklisted,
@@ -12,33 +10,22 @@ import { organizationChannel, userChannel } from "@/lib/events/publisher";
 import { readsProject } from "@/lib/events/readers";
 import { subscribe } from "@/lib/events/subscriber";
 import { RealtimeEventSchema, type RealtimeEvent } from "@/lib/events/types";
+import { type Ceiling, admit } from "@/lib/server/admit";
 import { getServerContext } from "@/lib/server/entities/organization";
 import { logger } from "@/lib/logger";
 
-const STREAM_OPENS = { limit: 60, windowMs: 60_000 };
+// The one authenticated door that allocates something long-lived per hit: a
+// stream, a keepalive timer and a share of the subscriber. Ceilinged before
+// the `/me` round trip below so a runaway client costs Redis one script call
+// and auth nothing. The listener reconnects at most twice a minute, so sixty
+// is a tab count nobody reaches by hand.
+const STREAM_OPENS: Ceiling = { call: "events:open", limit: 60 };
 
 export async function GET(request: NextRequest) {
-  const secFetchSite = request.headers.get("sec-fetch-site");
-  if (secFetchSite && secFetchSite !== "same-origin" && secFetchSite !== "none") {
-    return problem(403, "forbidden");
-  }
-
-  const session = await getSession();
-  if (!session) {
-    return problem(401, "unauthenticated");
-  }
-
-  if (await isSessionBlacklisted(sessionEndKey(session))) {
-    return problem(401, "unauthenticated");
-  }
-
-  // The one authenticated door that allocates something long-lived per hit:
-  // a stream, a keepalive timer and a share of the subscriber. Ceilinged
-  // before the `/me` round trip below so a runaway client costs Redis one
-  // script call and auth nothing. The listener reconnects at most twice a
-  // minute, so sixty is a tab count nobody reaches by hand.
-  const limited = await rateLimit(sessionKey(session, "events:open"), STREAM_OPENS);
-  if (limited) return limited;
+  if (crossSite(request)) return problem(403, "forbidden");
+  const gate = await admit(STREAM_OPENS);
+  if (!gate.ok) return privateProblem(gate.status, gate.error, gate.retryAfter);
+  const { session } = gate;
 
   const ctx = await getServerContext();
   if (!ctx) {
@@ -153,12 +140,5 @@ export async function GET(request: NextRequest) {
     },
   });
 
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "text/event-stream; charset=utf-8",
-      "Cache-Control": "no-cache, no-transform",
-      Connection: "keep-alive",
-      "X-Accel-Buffering": "no",
-    },
-  });
+  return new Response(stream, { headers: EVENT_STREAM_HEADERS });
 }

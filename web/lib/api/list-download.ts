@@ -1,17 +1,16 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
-import { problem } from "@/lib/api/respond";
+import { crossSite, privateProblem, problem } from "@/lib/api/respond";
 import { many, one, type SearchParams } from "@/lib/list-query";
+import { admit } from "@/lib/server/admit";
 import { fetchProjectBySlug, getServerContext } from "@/lib/server/data";
 import type { DownloadAccess, DownloadFormat } from "@/lib/server/entities/traces";
-import { getServerSession } from "@/lib/server/session";
 import { FILTERS, parseFilters, type ListName } from "@/lib/traces";
 
 /** Downloads a person may make of one list in an hour: a file or two a
  *  sitting, while a script looping here would have the server sum ten
  *  thousand rows a time. */
-const DOWNLOADS_AN_HOUR = { limit: 30, windowMs: 60 * 60_000 };
+const DOWNLOADS_AN_HOUR = 30;
 
 /** A list's download route: same-origin, as every authenticated route here
  *  is, refusing a filter value the list would let go, since dropped it would
@@ -26,17 +25,9 @@ export async function listDownload(
     format: DownloadFormat,
   ) => Promise<DownloadAccess | NextResponse>,
 ): Promise<NextResponse> {
-  const site = request.headers.get("sec-fetch-site");
-  if (site && site !== "same-origin" && site !== "none") {
-    return problem(403, "forbidden");
-  }
-
-  const session = await getServerSession();
-  if (!session) {
-    return problem(401, "unauthenticated");
-  }
-  const limited = await rateLimit(sessionKey(session, `${list}:download`), DOWNLOADS_AN_HOUR);
-  if (limited) return limited;
+  if (crossSite(request)) return problem(403, "forbidden");
+  const admitted = await admit({ call: `${list}:download`, limit: DOWNLOADS_AN_HOUR, per: "hour" });
+  if (!admitted.ok) return privateProblem(admitted.status, admitted.error, admitted.retryAfter);
 
   const { project: slug } = await params;
   const [gate, project] = await Promise.all([getServerContext(), fetchProjectBySlug(slug)]);

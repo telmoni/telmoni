@@ -1,17 +1,14 @@
-import { NextResponse, type NextRequest } from "next/server";
+import type { NextRequest } from "next/server";
 import { z } from "zod";
 
-import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
-import { problem } from "@/lib/api/respond";
+import { crossSite, privateJson, privateProblem, problem } from "@/lib/api/respond";
+import { type Ceiling, admit } from "@/lib/server/admit";
 import { listAuditExports, startAuditExport } from "@/lib/server/data";
-import { getServerSession } from "@/lib/server/session";
 import { ExportFormat } from "@/lib/types/enums";
-
-const NO_STORE = { "Cache-Control": "no-store, private" };
 
 /** Starts a person may make in an hour: a build reads up to a file's worth of
  *  the chain, and auth already keeps only their ten newest files. */
-const STARTS_AN_HOUR = { limit: 20, windowMs: 60 * 60_000 };
+const STARTS: Ceiling = { call: "audit-export:start", limit: 20, per: "hour" };
 
 const StartSchema = z
   .object({
@@ -21,17 +18,11 @@ const StartSchema = z
   })
   .strict();
 
-// Same-origin only, as every authenticated route here is: a page elsewhere
-// must not be able to start an export onto somebody's chain, nor read which
-// ones they hold.
-function crossSite(request: NextRequest): boolean {
-  const site = request.headers.get("sec-fetch-site");
-  return site !== null && site !== "same-origin" && site !== "none";
-}
-
 // The caller's exports of the organization's audit log, which the bell polls
 // while one is building and the export dialog lists. The organization is the
-// path's, resolved once inside the call.
+// path's, resolved once inside the call. Same-origin only, as every
+// authenticated route here is: a page elsewhere must not be able to start an
+// export onto somebody's chain, nor read which ones they hold.
 export async function GET(request: NextRequest) {
   if (crossSite(request)) {
     return problem(403, "forbidden");
@@ -43,7 +34,7 @@ export async function GET(request: NextRequest) {
   if (result.kind === "unavailable") {
     return problem(503, "unavailable");
   }
-  return NextResponse.json({ exports: result.exports, ...result.limits }, { headers: NO_STORE });
+  return privateJson({ exports: result.exports, ...result.limits });
 }
 
 // Start one: auth queues it and builds it in the background, and the answer is
@@ -52,12 +43,8 @@ export async function POST(request: NextRequest) {
   if (crossSite(request)) {
     return problem(403, "forbidden");
   }
-  const session = await getServerSession();
-  if (!session) {
-    return problem(401, "unauthenticated");
-  }
-  const limited = await rateLimit(sessionKey(session, "audit-export:start"), STARTS_AN_HOUR);
-  if (limited) return limited;
+  const gate = await admit(STARTS);
+  if (!gate.ok) return privateProblem(gate.status, gate.error, gate.retryAfter);
 
   const parsed = StartSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
@@ -70,7 +57,7 @@ export async function POST(request: NextRequest) {
   });
   switch (result.kind) {
     case "ok":
-      return NextResponse.json({ export: result.export }, { status: 202, headers: NO_STORE });
+      return privateJson({ export: result.export }, 202);
     case "forbidden":
       return problem(403, "forbidden");
     case "busy":

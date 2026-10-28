@@ -18,7 +18,7 @@ vi.mock("@/lib/auth/session", () => ({
 }));
 
 vi.mock("@/lib/api/rate-limit", () => ({
-  rateLimit: (key: string, opts: unknown) => mockRateLimit(key, opts),
+  rateLimitRetryAfter: (key: string, opts: unknown) => mockRateLimit(key, opts),
   sessionKey: (session: { userId: string }, action: string) =>
     `bfrl:${session.userId}:${action}`,
 }));
@@ -112,15 +112,6 @@ describe("GET /api/v1/events (SSE)", () => {
 
   it("returns 401 if unauthenticated", async () => {
     mockGetSession.mockResolvedValue(null);
-    const req = new NextRequest("http://localhost:3000/api/v1/events");
-
-    const res = await GET(req);
-    expect(res.status).toBe(401);
-  });
-
-  it("returns 401 if session is blacklisted", async () => {
-    mockGetSession.mockResolvedValue({ ...LIVE_SESSION, sessionRowId: "sess_revoked" });
-    mockIsSessionBlacklisted.mockResolvedValue(true);
     const req = new NextRequest("http://localhost:3000/api/v1/events");
 
     const res = await GET(req);
@@ -522,13 +513,7 @@ describe("GET /api/v1/events (SSE)", () => {
 
   it("ceilings stream opens per session, before spending a /me round trip", async () => {
     mockGetSession.mockResolvedValue(LIVE_SESSION);
-    const { NextResponse } = await import("next/server");
-    mockRateLimit.mockResolvedValueOnce(
-      NextResponse.json(
-        { type: "about:blank", title: "rate limit exceeded", status: 429 },
-        { status: 429, headers: { "retry-after": "17" } },
-      ),
-    );
+    mockRateLimit.mockResolvedValueOnce(17);
 
     const res = await GET(new NextRequest("http://localhost:3000/api/v1/events"));
     expect(res.status).toBe(429);

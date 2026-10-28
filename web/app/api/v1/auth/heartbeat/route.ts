@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 
-import { problem } from "@/lib/api/respond";
+import { crossSite, problem } from "@/lib/api/respond";
 import { SESSION_ENDED } from "@/lib/auth/heartbeat";
 import {
   SESSION_COOKIE,
@@ -11,8 +11,6 @@ import {
   sealSession,
   sessionEndedAlready,
 } from "@/lib/auth/session";
-import { isSessionBlacklisted } from "@/lib/auth/session-blacklist";
-import { sessionEndKey } from "@/lib/auth/session-end-key";
 
 // ⚠ **Refused cross-site before anything else, because the 401 below DELETES
 // THE COOKIE.** A page on another origin can auto-submit a form here; the
@@ -23,10 +21,7 @@ import { sessionEndKey } from "@/lib/auth/session-end-key";
 // a Route Handler gets nothing, so this is that check. Absent header, or
 // `same-origin`/`none`, is the console's own fetch and a direct load.
 export async function POST(request: NextRequest) {
-  const secFetchSite = request.headers.get("sec-fetch-site");
-  if (secFetchSite && secFetchSite !== "same-origin" && secFetchSite !== "none") {
-    return problem(403, "forbidden");
-  }
+  if (crossSite(request)) return problem(403, "forbidden");
 
   // A session the console ended is told apart from one that ran out, so the
   // heartbeat can sign it out to the home page rather than to sign-in. Read
@@ -35,12 +30,6 @@ export async function POST(request: NextRequest) {
   const session = await getSession();
   if (!session) {
     const response = problem(401, ended ? SESSION_ENDED : "unauthenticated");
-    response.cookies.delete(SESSION_COOKIE);
-    return response;
-  }
-
-  if (await isSessionBlacklisted(sessionEndKey(session))) {
-    const response = problem(401, SESSION_ENDED);
     response.cookies.delete(SESSION_COOKIE);
     return response;
   }

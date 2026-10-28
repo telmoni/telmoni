@@ -3,14 +3,11 @@ import { z } from "zod";
 
 import { readBodyCapped } from "@/lib/api/body";
 import { fetchWithTimeout } from "@/lib/api/fetch";
-import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
-import { problem } from "@/lib/api/respond";
-import { getSession } from "@/lib/auth/session";
-import { sessionEndKey } from "@/lib/auth/session-end-key";
-import { isSessionBlacklisted } from "@/lib/auth/session-blacklist";
+import { EVENT_STREAM_HEADERS, crossSite, privateProblem, problem } from "@/lib/api/respond";
 import { isProjectId } from "@/lib/ids";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
+import { type Ceiling, admit } from "@/lib/server/admit";
 import { agentHeaders } from "@/lib/server/entities/agent";
 import { AGENT_MESSAGE_MAX, AGENT_STREAM_TIMEOUT_MS } from "@/lib/types/agent";
 
@@ -22,7 +19,7 @@ const BODY_CAP_BYTES = 32 * 1024;
 // A turn holds a stream and a model call open for up to two minutes, so it is
 // ceilinged here before it costs the server anything. The server keeps its own
 // per-person budget and answers past it with a problem the panel words.
-const TURNS = { limit: 20, windowMs: 60_000 };
+const TURNS: Ceiling = { call: "agent:turn", limit: 20 };
 
 const TurnBody = z.object({
   projectId: z.string().refine(isProjectId),
@@ -43,18 +40,9 @@ const PROBLEM_JSON = "application/problem+json";
 // other path it redirects through the sign-in page — which a `fetch` would
 // follow and hand back as a 200 of HTML.
 export async function POST(request: NextRequest) {
-  const secFetchSite = request.headers.get("sec-fetch-site");
-  if (secFetchSite && secFetchSite !== "same-origin" && secFetchSite !== "none") {
-    return problem(403, "forbidden");
-  }
-
-  const session = await getSession();
-  if (!session || (await isSessionBlacklisted(sessionEndKey(session)))) {
-    return problem(401, "unauthenticated");
-  }
-
-  const limited = await rateLimit(sessionKey(session, "agent:turn"), TURNS);
-  if (limited) return limited;
+  if (crossSite(request)) return problem(403, "forbidden");
+  const gate = await admit(TURNS);
+  if (!gate.ok) return privateProblem(gate.status, gate.error, gate.retryAfter);
 
   const raw = await readBodyCapped(request, BODY_CAP_BYTES);
   if (raw === null) {
@@ -111,14 +99,7 @@ export async function POST(request: NextRequest) {
     return problem(502, "unavailable");
   }
 
-  return new Response(res.body, {
-    headers: {
-      "Content-Type": "text/event-stream; charset=utf-8",
-      "Cache-Control": "no-cache, no-transform",
-      Connection: "keep-alive",
-      "X-Accel-Buffering": "no",
-    },
-  });
+  return new Response(res.body, { headers: EVENT_STREAM_HEADERS });
 }
 
 // The server's refusal as it answered it, so the panel reads the agent's own

@@ -8,11 +8,11 @@ import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
 import { ProblemType } from "@/lib/api/problem";
 import { challengeOf } from "@/lib/auth/pkce";
 import { PKCE_COOKIE, unsealPkce } from "@/lib/auth/session";
-import { clientKeyFromHeaders, rateLimit, sessionKey } from "@/lib/api/rate-limit";
+import { clientKeyFromHeaders, rateLimit } from "@/lib/api/rate-limit";
 import { env } from "@/lib/env";
 import { MAX_EMAIL } from "@/lib/names";
+import { admit } from "@/lib/server/admit";
 import { personHeaders } from "@/lib/server/entities/identity-context";
-import { getServerSession } from "@/lib/server/session";
 
 // The console's half of accounts auth holds itself. Each action posts to one
 // of auth's `/internal/v1/auth/password/*` lanes, which exist only on a
@@ -236,20 +236,14 @@ export async function deviceDecisionAction(input: {
     .safeParse(input);
   if (!parsed.success) return refused("Enter the code the device shows.");
 
-  const session = await getServerSession();
-  if (!session) return refused("Your session expired — sign in again.");
-
-  const limited = await rateLimit(sessionKey(session, "device:decide"), {
-    limit: 10,
-    windowMs: 60_000,
-  });
-  if (limited) return refused("Too many attempts. Try again in a minute.");
+  const gate = await admit({ call: "device:decide", limit: 10 });
+  if (!gate.ok) return refused(gate.error);
 
   const res = await tryFetchWithTimeout(
     `${env.SERVER_URL}/internal/v1/auth/device/${parsed.data.decision}`,
     {
       method: "POST",
-      headers: { ...personHeaders(session), "content-type": "application/json" },
+      headers: { ...personHeaders(gate.session), "content-type": "application/json" },
       body: JSON.stringify({ userCode: parsed.data.userCode }),
     },
   );

@@ -4,26 +4,23 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const {
   fetchWithTimeout,
   getSession,
-  isSessionBlacklisted,
-  rateLimit,
+  rateLimitRetryAfter,
   identityContext,
   fetchProjectAnywhere,
 } = vi.hoisted(() => ({
   fetchWithTimeout: vi.fn(),
   getSession: vi.fn(),
-  isSessionBlacklisted: vi.fn(async () => false),
-  rateLimit: vi.fn(async (): Promise<Response | null> => null),
+  rateLimitRetryAfter: vi.fn(async (): Promise<number | null> => null),
   identityContext: vi.fn(),
   fetchProjectAnywhere: vi.fn(),
 }));
 
 vi.mock("@/lib/api/fetch", () => ({ fetchWithTimeout }));
 vi.mock("@/lib/api/rate-limit", () => ({
-  rateLimit,
+  rateLimitRetryAfter,
   sessionKey: (session: { userId: string }, action: string) => `bfrl:${session.userId}:${action}`,
 }));
 vi.mock("@/lib/auth/session", () => ({ getSession }));
-vi.mock("@/lib/auth/session-blacklist", () => ({ isSessionBlacklisted }));
 vi.mock("@/lib/env", () => ({
   env: { SERVER_URL: "http://server:8082", SERVICE_SECRET: "s3cret" },
 }));
@@ -74,8 +71,7 @@ function sse(text: string): Response {
 beforeEach(() => {
   fetchWithTimeout.mockReset().mockResolvedValue(sse('event: text\ndata: {"delta":"hi"}\n\n'));
   getSession.mockReset().mockResolvedValue({ userId: "user_1", sessionRowId: "sess_1" });
-  isSessionBlacklisted.mockReset().mockResolvedValue(false);
-  rateLimit.mockReset().mockResolvedValue(null);
+  rateLimitRetryAfter.mockReset().mockResolvedValue(null);
   // This route's path names no organization, so the request stands wherever
   // the cookie last pointed: `org_elsewhere`. The project is `org_1`'s.
   identityContext.mockReset().mockResolvedValue({
@@ -100,14 +96,12 @@ describe("POST /api/v1/agent/turns", () => {
     const res = await turn({ projectId: PROJECT, message: "hi" });
     expect(res.status).toBe(401);
     expect(res.headers.get("content-type")).toBe("application/problem+json");
-    expect(await res.json()).toEqual({ type: "about:blank", title: "unauthenticated", status: 401 });
+    expect(await res.json()).toEqual({
+      type: "about:blank",
+      title: "Your session expired — sign in again.",
+      status: 401,
+    });
     expect(fetchWithTimeout).not.toHaveBeenCalled();
-  });
-
-  it("answers 401 for a revoked session", async () => {
-    isSessionBlacklisted.mockResolvedValue(true);
-    const res = await turn({ projectId: PROJECT, message: "hi" });
-    expect(res.status).toBe(401);
   });
 
   it.each([
@@ -207,10 +201,11 @@ describe("POST /api/v1/agent/turns", () => {
     expect(res.status).toBe(503);
   });
 
-  it("stops at the console's own ceiling", async () => {
-    rateLimit.mockResolvedValue(new Response(null, { status: 429 }));
+  it("stops at the console's own ceiling, saying when to try again", async () => {
+    rateLimitRetryAfter.mockResolvedValue(12);
     const res = await turn({ projectId: PROJECT, message: "hi" });
     expect(res.status).toBe(429);
+    expect(res.headers.get("retry-after")).toBe("12");
     expect(fetchWithTimeout).not.toHaveBeenCalled();
   });
 });

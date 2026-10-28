@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mockGetSession = vi.fn();
 const mockRefreshSessionTokens = vi.fn();
 const mockSealSession = vi.fn();
-const mockIsSessionBlacklisted = vi.fn();
 const mockSessionEndedAlready = vi.fn();
 
 vi.mock("@/lib/auth/session", () => ({
@@ -17,10 +16,6 @@ vi.mock("@/lib/auth/session", () => ({
   refreshSessionTokens: (session: unknown) => mockRefreshSessionTokens(session),
   sealSession: (session: unknown) => mockSealSession(session),
   sessionEndedAlready: () => mockSessionEndedAlready(),
-}));
-
-vi.mock("@/lib/auth/session-blacklist", () => ({
-  isSessionBlacklisted: (id: string) => mockIsSessionBlacklisted(id),
 }));
 
 import { NextRequest } from "next/server";
@@ -39,7 +34,6 @@ function beat(headers: Record<string, string> = { "sec-fetch-site": "same-origin
 describe("POST /api/v1/auth/heartbeat", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockIsSessionBlacklisted.mockResolvedValue(false);
     mockSessionEndedAlready.mockResolvedValue(false);
     mockSealSession.mockResolvedValue("sealed_token_string");
   });
@@ -68,21 +62,6 @@ describe("POST /api/v1/auth/heartbeat", () => {
     const res = await beat();
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual(refusal("unauthenticated", 401));
-    expect(res.cookies.get("telmoni_session")?.value).toBe("");
-  });
-
-  it("returns 401 and deletes cookie when session is blacklisted", async () => {
-    mockGetSession.mockResolvedValue({
-      userId: "usr_1",
-      sessionRowId: "sess_revoked",
-      expiresAt: Date.now() + 3600_000,
-      refreshToken: "rt_1",
-    });
-    mockIsSessionBlacklisted.mockResolvedValue(true);
-
-    const res = await beat();
-    expect(res.status).toBe(401);
-    expect(await res.json()).toEqual(refusal("session_ended", 401));
     expect(res.cookies.get("telmoni_session")?.value).toBe("");
   });
 
