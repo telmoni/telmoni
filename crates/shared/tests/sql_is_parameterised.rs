@@ -60,6 +60,21 @@ const VALIDATED: &[(&str, &str, &str)] = &[
         "sql",
         "every caller in the file passes a literal, or a format! of the file's own constants",
     ),
+    (
+        "crates/auth/src/db/offers.rs",
+        "table",
+        "a `Roster`'s table, one of the two literals `Roster::parts` names",
+    ),
+    (
+        "crates/auth/src/db/offers.rs",
+        "key",
+        "the column naming a `Roster`'s whole, one of the two literals `Roster::parts` names",
+    ),
+    (
+        "crates/notifications/src/db.rs",
+        "column",
+        "the column naming a `FeedOf`'s whole, one of the two literals `FeedOf::key` names",
+    ),
 ];
 
 const SQL_START: &[&str] = &[

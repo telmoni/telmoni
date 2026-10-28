@@ -664,7 +664,7 @@ async fn a_person_reads_only_their_own_rows_and_a_roster_only_its_people() {
     .expect("seed organization");
     for person in [&member, &outsider] {
         seed_person(&pool, person).await;
-        sqlx::query("INSERT INTO auth.sessions (user_id, provider_sid) VALUES ($1, $1)")
+        sqlx::query("INSERT INTO auth.sessions (user_id, sid) VALUES ($1, $1)")
             .bind(person)
             .execute(&pool)
             .await
