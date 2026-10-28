@@ -27,6 +27,7 @@ pub struct SessionRow {
 const USER_AGENT_MAX: usize = 400;
 
 /// Record a sign-in. Returns the row id, which the BFF seals into the cookie.
+#[cfg(any(test, feature = "test-support"))]
 pub async fn create(
     tx: &mut Scoped<'_, Person>,
     user_id: &UserId,

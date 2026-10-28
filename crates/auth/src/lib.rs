@@ -30,6 +30,7 @@ pub mod provider;
 pub mod seam;
 pub mod smtp;
 pub mod sweep;
+#[cfg(any(test, feature = "test-support"))]
 pub mod test_provider;
 pub mod token_claims;
 

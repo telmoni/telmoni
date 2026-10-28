@@ -42,5 +42,8 @@ tokio      = { workspace = true }
 tower      = { workspace = true, features = ["util"] }
 tracing    = { workspace = true }
 
+[dev-dependencies]
+telmoni-auth = { path = "../auth", features = ["test-support"] }
+
 [lints]
 workspace = true
