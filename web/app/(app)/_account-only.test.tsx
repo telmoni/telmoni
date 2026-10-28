@@ -110,9 +110,9 @@ describe("AccountOnly", () => {
   it("lists the browsers they are signed in on, marking this one", () => {
     const SESSION = {
       id: "sess_1",
-      user_agent: null,
-      created_at: "2026-09-23T10:00:00Z",
-      last_seen_at: "2026-09-23T10:00:00Z",
+      userAgent: null,
+      createdAt: "2026-09-23T10:00:00Z",
+      lastSeenAt: "2026-09-23T10:00:00Z",
     };
     mount({ sessions: [SESSION], currentSessionId: "sess_1" });
     expect(screen.getByRole("heading", { name: /active sessions/i })).toBeInTheDocument();

@@ -974,7 +974,7 @@ async fn confirm_runs_the_hook_inline_and_the_row_waits_out_the_grace(pool: PgPo
     .unwrap();
     assert!(erase_after.is_some(), "the mark set no erase_after");
     assert!(
-        answer["erase_after"].is_string(),
+        answer["eraseAfter"].is_string(),
         "the answer does not say when the row goes: {answer}"
     );
     assert_eq!(
@@ -1356,7 +1356,7 @@ async fn a_pending_organization_is_refused_on_every_lane_that_acts_in_it(pool: P
         (
             "PUT",
             "/internal/v1/me/analytics".into(),
-            Some(json!({ "opt_in": true })),
+            Some(json!({ "optIn": true })),
         ),
         (
             "PUT",
@@ -1687,7 +1687,7 @@ async fn a_missing_organization_header_is_refused_on_every_lane_that_reads_one(p
         (
             "PUT",
             "/internal/v1/me/analytics",
-            Some(json!({ "opt_in": true })),
+            Some(json!({ "optIn": true })),
         ),
         (
             "POST",

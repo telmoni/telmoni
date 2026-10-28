@@ -7,9 +7,9 @@ const Asked = {
   id:         z.string(),
   format:     z.enum(ExportFormat),
   /// `null` from the chain's first row.
-  range_from: z.string().nullable(),
-  range_to:   z.string(),
-  created_at: z.string(),
+  rangeFrom: z.string().nullable(),
+  rangeTo:   z.string(),
+  createdAt: z.string(),
 };
 
 /// One export of the organization's audit log, as auth lists it for the
@@ -23,19 +23,19 @@ export const AuditExportSchema = z.discriminatedUnion("status", [
   z.object({
     ...Asked,
     status:        z.literal(ExportStatus.Ready),
-    row_count:     z.number(),
-    bytes:         z.number(),
-    finished_at:   z.string(),
-    expires_at:    z.string(),
-    downloaded_at: z.string().nullable(),
+    rowCount:     z.number(),
+    bytes:        z.number(),
+    finishedAt:   z.string(),
+    expiresAt:    z.string(),
+    downloadedAt: z.string().nullable(),
   }),
   z.object({
     ...Asked,
     status:      z.literal(ExportStatus.Failed),
     /// More rows than one file holds, or an error.
-    failure:     z.enum(ExportFailure),
-    finished_at: z.string(),
-    expires_at:  z.string(),
+    failure:    z.enum(ExportFailure),
+    finishedAt: z.string(),
+    expiresAt:  z.string(),
   }),
 ]);
 export type AuditExport = z.infer<typeof AuditExportSchema>;
@@ -48,8 +48,8 @@ export type AuditExportFormat = AuditExport["format"];
 /// bytes, which the organization's plan may hold lower. Past either, an export
 /// fails as `too_large`, and a shorter range is the answer.
 export const AuditExportLimitsSchema = z.object({
-  max_rows:  z.number().int().positive(),
-  max_bytes: z.number().int().positive(),
+  maxRows:  z.number().int().positive(),
+  maxBytes: z.number().int().positive(),
 });
 export type AuditExportLimits = z.infer<typeof AuditExportLimitsSchema>;
 
@@ -71,5 +71,5 @@ export function isBuilding(
 
 /// Ready and not yet taken: what the bell offers.
 export function isWaiting(entry: AuditExport): entry is ReadyAuditExport {
-  return entry.status === "ready" && entry.downloaded_at === null;
+  return entry.status === "ready" && entry.downloadedAt === null;
 }

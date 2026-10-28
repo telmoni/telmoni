@@ -43,7 +43,7 @@ describe("GET /api/v1/search/index", () => {
     } as never);
     vi.mocked(fetchMembers).mockResolvedValue({
       kind: "ok",
-      members: [{ member_id: "user_1", email: "ada@example.test", display_name: "Ada" }],
+      members: [{ memberId: "user_1", email: "ada@example.test", displayName: "Ada" }],
     } as never);
   });
 

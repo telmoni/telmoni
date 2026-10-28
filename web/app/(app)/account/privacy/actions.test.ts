@@ -357,7 +357,7 @@ describe("setAnalyticsPreferenceAction", () => {
           "x-organization-id": "org_active",
           "content-type": "application/json",
         }),
-        body: JSON.stringify({ opt_in: true }),
+        body: JSON.stringify({ optIn: true }),
       }),
     );
     expect(refresh).toHaveBeenCalledOnce();

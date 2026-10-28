@@ -284,6 +284,7 @@ pub async fn list_audit_exports(
 
 /// The person's exports, newest first, and what one file may hold.
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ExportList {
     pub exports: Vec<audit_exports::ExportEntry>,
     pub max_rows: i64,
@@ -293,6 +294,7 @@ pub struct ExportList {
 /// One page of a chain, and the cursor to the page after it while one may
 /// follow.
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AuditPage {
     pub events: Vec<AuditRow>,
     pub next_cursor: Option<Uuid>,

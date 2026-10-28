@@ -124,7 +124,7 @@ async fn set_preference(
                 caller,
             )
             .await
-            .body(Body::from(json!({ "opt_in": opt_in }).to_string()))
+            .body(Body::from(json!({ "optIn": opt_in }).to_string()))
             .unwrap(),
         )
         .await
@@ -203,7 +203,7 @@ async fn the_preference_is_stored_and_comes_back_on_me(pool: PgPool) {
 
     let (status, body) = set_preference(&pool, user, &organization, true).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["analytics_opt_in"], json!(true));
+    assert_eq!(body["analyticsOptIn"], json!(true));
 
     assert_eq!(opted_in(&me(&pool, user, None).await), &json!(true));
     let stored: bool =

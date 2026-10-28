@@ -2,20 +2,20 @@
   "events": [
     {
       "action": "created",
-      "actor_id": "user_7Hq2mK9xVb4LpR3s",
-      "created_at": "2027-01-15T08:00:00Z",
+      "actorId": "user_7Hq2mK9xVb4LpR3s",
+      "createdAt": "2027-01-15T08:00:00Z",
       "id": "0192f3a1-7c2e-7b4d-9a61-3c5e8f0d2f05",
-      "in_project": "project_4kRrX0bQhYd2LmZp",
+      "inProject": "project_4kRrX0bQhYd2LmZp",
       "metadata": {
         "name": "ci"
       },
-      "organization_id": "org_9TzQ1wXe5RkN8bVc",
-      "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
-      "request_id": "req_1",
-      "resource_id": "0192f3a1-7c2e-7b4d-9a61-3c5e8f0d2f03",
-      "resource_kind": "token",
-      "row_hash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      "organizationId": "org_9TzQ1wXe5RkN8bVc",
+      "prevHash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "requestId": "req_1",
+      "resourceId": "0192f3a1-7c2e-7b4d-9a61-3c5e8f0d2f03",
+      "resourceKind": "token",
+      "rowHash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
     }
   ],
-  "next_cursor": "0192f3a1-7c2e-7b4d-9a61-3c5e8f0d2f05"
+  "nextCursor": "0192f3a1-7c2e-7b4d-9a61-3c5e8f0d2f05"
 }

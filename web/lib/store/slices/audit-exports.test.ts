@@ -13,14 +13,14 @@ function entry(id: string, status: AuditExport["status"] = "queued"): AuditExpor
   const asked = {
     id,
     format: "json" as const,
-    range_from: null,
-    range_to: "2026-10-08T12:00:00Z",
-    created_at: "2026-10-08T12:00:00Z",
+    rangeFrom: null,
+    rangeTo: "2026-10-08T12:00:00Z",
+    createdAt: "2026-10-08T12:00:00Z",
   };
-  const finished = { finished_at: "2026-10-08T12:05:00Z", expires_at: "2026-10-15T12:05:00Z" };
+  const finished = { finishedAt: "2026-10-08T12:05:00Z", expiresAt: "2026-10-15T12:05:00Z" };
   switch (status) {
     case "ready":
-      return { ...asked, status, row_count: 3, bytes: 1024, ...finished, downloaded_at: null };
+      return { ...asked, status, rowCount: 3, bytes: 1024, ...finished, downloadedAt: null };
     case "failed":
       return { ...asked, status, failure: "error", ...finished };
     default:
@@ -90,8 +90,8 @@ describe("the audit exports slice", () => {
     );
     s.getState().markAuditExportDownloaded("taken");
     const [taken, left] = s.getState().auditExports.org_a!;
-    expect(taken).toMatchObject({ status: "ready", downloaded_at: expect.any(String) });
-    expect(left).toMatchObject({ status: "ready", downloaded_at: null });
+    expect(taken).toMatchObject({ status: "ready", downloadedAt: expect.any(String) });
+    expect(left).toMatchObject({ status: "ready", downloadedAt: null });
   });
 
   // A download that finds the file gone takes it off the bell at once,

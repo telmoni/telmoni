@@ -742,6 +742,7 @@ pub(crate) async fn deletion_response(
 /// An organization's deletion begun: whether its data is purged already,
 /// and when its row is erased.
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct OrganizationDeleted {
     pub purged: bool,
     pub erase_after: DateTime<Utc>,

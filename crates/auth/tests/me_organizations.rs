@@ -786,7 +786,7 @@ async fn a_person_event_is_refused_on_an_organization_the_person_is_not_in(pool:
         "/internal/v1/me/analytics",
         "user_me_consent",
         Some(&foreign),
-        Some(json!({ "opt_in": true })),
+        Some(json!({ "optIn": true })),
     )
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
@@ -799,7 +799,7 @@ async fn a_person_event_is_refused_on_an_organization_the_person_is_not_in(pool:
         "/internal/v1/me/analytics",
         "user_me_consent",
         Some(&own),
-        Some(json!({ "opt_in": true })),
+        Some(json!({ "optIn": true })),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
@@ -849,7 +849,7 @@ async fn somebody_in_no_organization_manages_their_account_without_naming_one(po
         "/internal/v1/me/analytics",
         "user_me_alone",
         None,
-        Some(json!({ "opt_in": true })),
+        Some(json!({ "optIn": true })),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
@@ -906,7 +906,7 @@ async fn somebody_in_no_organization_manages_their_account_without_naming_one(po
         "/internal/v1/me/analytics",
         "user_me_member",
         None,
-        Some(json!({ "opt_in": true })),
+        Some(json!({ "optIn": true })),
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
@@ -916,7 +916,7 @@ async fn somebody_in_no_organization_manages_their_account_without_naming_one(po
         "/internal/v1/me/analytics",
         "user_me_member",
         Some(&theirs),
-        Some(json!({ "opt_in": true })),
+        Some(json!({ "optIn": true })),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");

@@ -37,19 +37,19 @@ export function AuditTable({ events }: { events: AuditEvent[] }) {
           {events.map((event) => (
             <tr key={event.id} className="align-top">
               <Td className="whitespace-nowrap text-muted-foreground">
-                <LocalTime iso={event.created_at} />
+                <LocalTime iso={event.createdAt} />
               </Td>
               <Td className="text-xs whitespace-nowrap">
-                {event.actor_id}
+                {event.actorId}
               </Td>
               <Td className="text-center whitespace-nowrap">{event.action}</Td>
               <Td className="text-xs text-muted-foreground">
-                <span className="whitespace-nowrap">{resourceLabel(event.resource_kind)}</span>
-                {event.resource_id ? (
+                <span className="whitespace-nowrap">{resourceLabel(event.resourceKind)}</span>
+                {event.resourceId ? (
                   <span className="whitespace-nowrap">
                     {showDetails
-                      ? ` · ${event.resource_id}`
-                      : ` · ${event.resource_id.slice(0, 18)}`}
+                      ? ` · ${event.resourceId}`
+                      : ` · ${event.resourceId.slice(0, 18)}`}
                   </span>
                 ) : null}
                 {showDetails ? <EventDetails event={event} /> : null}
@@ -64,9 +64,9 @@ export function AuditTable({ events }: { events: AuditEvent[] }) {
 
 function EventDetails({ event }: { event: AuditEvent }) {
   const fields: [string, string][] = [];
-  if (event.in_project) fields.push(["Project", event.in_project]);
-  if (event.request_id) fields.push(["Request", event.request_id]);
-  if (event.row_hash) fields.push(["Row hash", event.row_hash]);
+  if (event.inProject) fields.push(["Project", event.inProject]);
+  if (event.requestId) fields.push(["Request", event.requestId]);
+  if (event.rowHash) fields.push(["Row hash", event.rowHash]);
   if (event.metadata !== null && event.metadata !== undefined) {
     fields.push(["Changed", stableJson(event.metadata)]);
   }

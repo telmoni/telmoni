@@ -66,7 +66,7 @@ export async function deleteOrganizationAction(
   // organization answers nothing afterwards.
   const roster = await fetchOrganizationMembers();
   const others =
-    roster.kind === "ok" ? roster.members.filter((m) => m.member_id !== ctx.userId) : [];
+    roster.kind === "ok" ? roster.members.filter((m) => m.memberId !== ctx.userId) : [];
 
   const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/v1/organization`, {
     method: "DELETE",

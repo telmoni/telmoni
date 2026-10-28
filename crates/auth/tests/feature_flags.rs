@@ -309,7 +309,7 @@ async fn validation_carries_the_set_and_v1_refuses_when_public_api_is_off(pool: 
     };
 
     let verdict = validate(pool.clone(), token.clone()).await;
-    assert_eq!(verdict["organization_id"], organization.as_str());
+    assert_eq!(verdict["organizationId"], organization.as_str());
     assert_eq!(verdict["flags"]["api_tokens"], true);
     assert_eq!(
         v1_organization(pool.clone(), token.clone()).await.status(),

@@ -389,16 +389,16 @@ async fn a_projects_page_lists_the_rows_written_inside_it_and_no_others(pool: Pg
             1 + own_creation,
             "the mint and this project's own creation on {project}'s page: {body}"
         );
-        assert_eq!(rows[0]["resource_kind"], "token");
+        assert_eq!(rows[0]["resourceKind"], "token");
         assert_eq!(rows[0]["action"], "created");
         assert_eq!(rows[0]["metadata"]["name"], name);
         assert!(
-            rows.iter().all(|r| r["in_project"] == json!(project)),
+            rows.iter().all(|r| r["inProject"] == json!(project)),
             "a foreign row on {project}'s page: {body}"
         );
-        assert_eq!(rows[0]["in_project"], json!(project));
+        assert_eq!(rows[0]["inProject"], json!(project));
         assert!(
-            body["next_cursor"].is_null(),
+            body["nextCursor"].is_null(),
             "a page that did not fill has no cursor"
         );
     }
@@ -415,14 +415,14 @@ async fn a_projects_page_lists_the_rows_written_inside_it_and_no_others(pool: Pg
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let rows = events(&body);
-    let projects_seen: Vec<&Value> = rows.iter().map(|r| &r["in_project"]).collect();
+    let projects_seen: Vec<&Value> = rows.iter().map(|r| &r["inProject"]).collect();
     assert!(
         projects_seen.contains(&&json!(first)) && projects_seen.contains(&&json!(second)),
         "both projects' rows are on the organization's page: {body}"
     );
     assert!(
         rows.iter()
-            .any(|r| r["in_project"].is_null() && r["resource_kind"] == "organization"),
+            .any(|r| r["inProject"].is_null() && r["resourceKind"] == "organization"),
         "the organization's own provisioning row is on its page: {body}"
     );
     assert_eq!(
@@ -431,8 +431,7 @@ async fn a_projects_page_lists_the_rows_written_inside_it_and_no_others(pool: Pg
     );
     for row in rows {
         assert!(
-            row["row_hash"].is_string() && row["prev_hash"].is_string()
-                || row["prev_hash"].is_null(),
+            row["rowHash"].is_string() && row["prevHash"].is_string() || row["prevHash"].is_null(),
             "every row carries its links: {row}"
         );
     }
@@ -487,8 +486,8 @@ async fn the_owner_and_admins_read_a_project_and_the_organization(pool: PgPool) 
         assert_eq!(status, StatusCode::OK, "{reader}: {body}");
         let rows = events(&body);
         assert_eq!(rows.len(), 2, "{reader}: {body}");
-        assert_eq!(rows[0]["resource_kind"], "token", "{reader}: {body}");
-        assert_eq!(rows[1]["resource_kind"], "project", "{reader}: {body}");
+        assert_eq!(rows[0]["resourceKind"], "token", "{reader}: {body}");
+        assert_eq!(rows[1]["resourceKind"], "project", "{reader}: {body}");
     }
     for refused in [MEMBER, STRANGER] {
         let (status, _) = call(&pool, "GET", &project_page, refused, &owners, None, None).await;
@@ -514,7 +513,7 @@ async fn the_owner_and_admins_read_a_project_and_the_organization(pool: PgPool) 
         assert!(
             events(&body)
                 .iter()
-                .any(|r| r["in_project"] == json!(project)),
+                .any(|r| r["inProject"] == json!(project)),
             "the mint is on the organization's page for {reader}: {body}"
         );
     }
@@ -555,11 +554,11 @@ async fn the_owner_and_admins_read_a_project_and_the_organization(pool: PgPool) 
     assert_eq!(status, StatusCode::OK, "{body}");
     let rows = events(&body);
     assert!(
-        rows.iter().all(|r| r["organization_id"] == json!(admins)),
+        rows.iter().all(|r| r["organizationId"] == json!(admins)),
         "a foreign organization's row on the admin's page: {body}"
     );
     assert!(
-        rows.iter().all(|r| r["in_project"] != json!(project)),
+        rows.iter().all(|r| r["inProject"] != json!(project)),
         "the owner's project on the admin's page: {body}"
     );
 }
@@ -604,7 +603,7 @@ async fn a_filter_narrows_the_page_and_a_word_outside_the_vocabulary_is_refused(
     let rows = events(&body);
     assert!(!rows.is_empty(), "the mint is a token row: {body}");
     assert!(
-        rows.iter().all(|r| r["resource_kind"] == json!("token")),
+        rows.iter().all(|r| r["resourceKind"] == json!("token")),
         "the filter let another kind through: {body}"
     );
 
@@ -657,7 +656,7 @@ async fn an_export_is_built_in_the_background_and_verifies_from_the_file_alone(p
     let entry = finished(&pool, &organization, OWNER, &id).await;
     assert_eq!(entry["status"], json!("ready"), "{entry}");
     assert_eq!(entry["format"], json!("json"));
-    assert!(entry["downloaded_at"].is_null(), "{entry}");
+    assert!(entry["downloadedAt"].is_null(), "{entry}");
 
     let (status, content_type, file) = download(&pool, &organization, OWNER, &id).await;
     assert_eq!(status, StatusCode::OK);
@@ -670,7 +669,7 @@ async fn an_export_is_built_in_the_background_and_verifies_from_the_file_alone(p
     assert!(body["from"].is_null(), "no start was asked for: {body}");
     let rows = events(&body);
     assert!(rows.len() >= 3, "the project and both keys: {body}");
-    assert_eq!(entry["row_count"], json!(rows.len()));
+    assert_eq!(entry["rowCount"], json!(rows.len()));
     assert_eq!(
         rows[0]["seq"],
         json!(1),
@@ -692,14 +691,14 @@ async fn an_export_is_built_in_the_background_and_verifies_from_the_file_alone(p
     assert_eq!(status, StatusCode::OK);
     let newest = &events(&body)[0];
     assert_eq!(newest["action"], json!("exported"));
-    assert_eq!(newest["actor_id"], json!(OWNER));
+    assert_eq!(newest["actorId"], json!(OWNER));
     assert_eq!(newest["metadata"]["export"], json!("audit_log"));
     assert_eq!(newest["metadata"]["format"], json!("json"));
     assert_eq!(newest["metadata"]["rows"], json!(rows.len()));
 
     // The download is noted, and the file stays for the rest of its week.
     let entry = listed(&pool, &organization, OWNER, &id).await;
-    assert!(entry["downloaded_at"].is_string(), "{entry}");
+    assert!(entry["downloadedAt"].is_string(), "{entry}");
     let (status, _, again) = download(&pool, &organization, OWNER, &id).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(again, file);
@@ -778,7 +777,7 @@ async fn a_csv_export_is_its_header_and_a_line_a_row(pool: PgPool) {
     let lines: Vec<&str> = lines.collect();
     assert_eq!(
         json!(lines.len()),
-        entry["row_count"],
+        entry["rowCount"],
         "one line a row: {text}"
     );
     assert!(
@@ -832,8 +831,8 @@ async fn the_export_list_says_how_much_one_file_holds(pool: PgPool) {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["max_rows"], json!(25_000));
-    assert_eq!(body["max_bytes"], json!(24 * 1024 * 1024));
+    assert_eq!(body["maxRows"], json!(25_000));
+    assert_eq!(body["maxBytes"], json!(24 * 1024 * 1024));
 }
 
 /// Another admin reads the same log, and still not somebody else's file: an

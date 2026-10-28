@@ -525,7 +525,7 @@ async fn a_refresh_rotates_the_token_and_a_reuse_ends_the_session(pool: PgPool) 
         async move {
             app.oneshot(post_json(
                 "/internal/v1/auth/refresh",
-                serde_json::json!({ "refresh_token": token }),
+                serde_json::json!({ "refreshToken": token }),
             ))
             .await
             .unwrap()

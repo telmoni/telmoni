@@ -192,7 +192,7 @@ async fn owner_lists_roster_and_starts_with_owner_row(pool: PgPool) {
     let members = body["members"].as_array().expect("members array");
     assert_eq!(members.len(), 1);
     assert_eq!(
-        members[0]["member_id"], owner,
+        members[0]["memberId"], owner,
         "the owner is a row naming the person, not the organization"
     );
     assert_eq!(members[0]["role"], "owner");
@@ -494,7 +494,7 @@ async fn owner_cannot_modify_or_remove_self(pool: PgPool) {
     assert_eq!(status, StatusCode::OK);
     let members = roster["members"].as_array().expect("members");
     assert_eq!(members.len(), 1);
-    assert_eq!(members[0]["member_id"], owner);
+    assert_eq!(members[0]["memberId"], owner);
     assert_eq!(
         members[0]["role"], "owner",
         "the owner's row moved: {roster}"
@@ -557,7 +557,7 @@ async fn owner_updates_role_and_removes_member(pool: PgPool) {
         .as_array()
         .unwrap()
         .iter()
-        .find(|m| m["member_id"] == user)
+        .find(|m| m["memberId"] == user)
         .expect("found user in roster");
     assert_eq!(member_row["role"], "member");
 
@@ -585,7 +585,7 @@ async fn owner_updates_role_and_removes_member(pool: PgPool) {
         .as_array()
         .unwrap()
         .iter()
-        .any(|m| m["member_id"] == user);
+        .any(|m| m["memberId"] == user);
     assert!(!found);
 }
 
@@ -726,7 +726,7 @@ async fn project_invite_accept_enrolls_organization_member_under_project_owner_o
         .expect("organization members");
     assert_eq!(acct_members.len(), 2);
     assert_eq!(acct_members[0]["role"], "owner");
-    assert_eq!(acct_members[1]["member_id"], invitee);
+    assert_eq!(acct_members[1]["memberId"], invitee);
     assert_eq!(acct_members[1]["role"], "member");
 
     let (status, inv_acct_body) = call_organization(
@@ -743,7 +743,7 @@ async fn project_invite_accept_enrolls_organization_member_under_project_owner_o
         .as_array()
         .expect("invitee organization members");
     assert_eq!(inv_acct_members.len(), 1);
-    assert_eq!(inv_acct_members[0]["member_id"], invitee);
+    assert_eq!(inv_acct_members[0]["memberId"], invitee);
     assert_eq!(inv_acct_members[0]["role"], "owner");
 
     let (status, inv_projects_body) = call_organization(
@@ -1813,9 +1813,9 @@ async fn incoming_organization_invites_are_accepted_and_declined_in_app(pool: Pg
     assert!(
         members
             .iter()
-            .any(|m| m["member_id"] == taker && m["role"] == "member")
+            .any(|m| m["memberId"] == taker && m["role"] == "member")
     );
-    assert!(members.iter().all(|m| m["member_id"] != refuser));
+    assert!(members.iter().all(|m| m["memberId"] != refuser));
     for (user, user_org) in [(taker, &taker_org), (refuser, &refuser_org)] {
         let (status, list) = call_organization(
             &pool,

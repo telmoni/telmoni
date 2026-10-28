@@ -403,7 +403,7 @@ async fn only_a_bearer_auth_minted_and_still_holds_resolves(pool: PgPool) {
                 .header("x-service-secret", SERVICE_SECRET)
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    json!({ "session_id": "ses_signed_out" }).to_string(),
+                    json!({ "sessionId": "ses_signed_out" }).to_string(),
                 ))
                 .unwrap(),
         )

@@ -18,16 +18,16 @@ import { readFailed, readJson } from "./read";
 
 const AuditEventSchema = z.object({
   id: z.string(),
-  actor_id: z.string(),
+  actorId: z.string(),
   action: z.string(),
-  resource_kind: z.enum(ResourceKind),
-  resource_id: z.string().nullable(),
-  created_at: z.string(),
-  request_id: z.string().nullish(),
+  resourceKind: z.enum(ResourceKind),
+  resourceId: z.string().nullable(),
+  createdAt: z.string(),
+  requestId: z.string().nullish(),
   metadata: z.unknown().nullish(),
-  in_project: z.string().nullish(),
-  prev_hash: z.string().nullish(),
-  row_hash: z.string().nullish(),
+  inProject: z.string().nullish(),
+  prevHash: z.string().nullish(),
+  rowHash: z.string().nullish(),
 });
 export type AuditEvent = z.infer<typeof AuditEventSchema>;
 
@@ -114,8 +114,8 @@ export async function listAuditExports(): Promise<AuditExportsAccess> {
     AuditExportListSchema,
   );
   if (read.kind !== "ok") return read;
-  const { exports, max_rows, max_bytes } = read.value;
-  return { kind: "ok", exports, limits: { max_rows, max_bytes } };
+  const { exports, maxRows, maxBytes } = read.value;
+  return { kind: "ok", exports, limits: { maxRows, maxBytes } };
 }
 
 /** Queue an export of the active organization's audit log; auth builds it in

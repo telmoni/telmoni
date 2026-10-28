@@ -424,7 +424,7 @@ async fn refresh_with(app: &Router, refresh_token: &str, row: &Value) -> axum::r
                 .header("x-service-secret", SERVICE_SECRET)
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    json!({ "refresh_token": refresh_token, "session_row_id": row }).to_string(),
+                    json!({ "refreshToken": refresh_token, "sessionRowId": row }).to_string(),
                 ))
                 .unwrap(),
         )
@@ -523,7 +523,7 @@ async fn refresh_touches_the_row_and_a_sign_out_ends_it(pool: PgPool) {
             Request::post("/internal/v1/auth/logout")
                 .header("x-service-secret", SERVICE_SECRET)
                 .header("content-type", "application/json")
-                .body(Body::from(json!({ "session_id": sid }).to_string()))
+                .body(Body::from(json!({ "sessionId": sid }).to_string()))
                 .unwrap(),
         )
         .await
@@ -566,9 +566,7 @@ async fn logout_revokes_the_row_and_asks_nothing_of_the_provider(pool: PgPool) {
             Request::post("/internal/v1/auth/logout")
                 .header("x-service-secret", SERVICE_SECRET)
                 .header("content-type", "application/json")
-                .body(Body::from(
-                    json!({ "session_id": "ses_logout" }).to_string(),
-                ))
+                .body(Body::from(json!({ "sessionId": "ses_logout" }).to_string()))
                 .unwrap(),
         )
         .await

@@ -57,8 +57,8 @@ describe("an export's labels", () => {
   it("names a custom range by its last day, not the midnight after it", () => {
     const label = rangeLabel(
       {
-        range_from: new Date(2026, 8, 1).toISOString(),
-        range_to: new Date(2026, 9, 1).toISOString(),
+        rangeFrom: new Date(2026, 8, 1).toISOString(),
+        rangeTo: new Date(2026, 9, 1).toISOString(),
       },
       NOW,
     );
@@ -68,7 +68,7 @@ describe("an export's labels", () => {
   });
 
   it("says everything up to its end for the whole chain", () => {
-    expect(rangeLabel({ range_from: null, range_to: NOW.toISOString() }, NOW)).toMatch(
+    expect(rangeLabel({ rangeFrom: null, rangeTo: NOW.toISOString() }, NOW)).toMatch(
       /^Everything to /,
     );
   });
@@ -79,7 +79,7 @@ describe("an export's labels", () => {
   });
 
   it("says a range too large is the range's fault", () => {
-    const limits = { max_rows: 25_000, max_bytes: 24 * 1024 * 1024 };
+    const limits = { maxRows: 25_000, maxBytes: 24 * 1024 * 1024 };
     expect(failureText({ failure: "too_large" }, limits)).toBe(
       "That range is too much for one file, which holds up to 25,000 events and 24 MiB. Export a shorter one.",
     );
@@ -88,7 +88,7 @@ describe("an export's labels", () => {
 
   // A plan that hands over less a day holds a file to that day.
   it("names the cap the organization's plan sets", () => {
-    expect(failureText({ failure: "too_large" }, { max_rows: 25_000, max_bytes: 5_000_000 })).toMatch(
+    expect(failureText({ failure: "too_large" }, { maxRows: 25_000, maxBytes: 5_000_000 })).toMatch(
       /25,000 events and 5 MB\./,
     );
     expect(sizeLabel(2_500_000)).toBe("2.5 MB");

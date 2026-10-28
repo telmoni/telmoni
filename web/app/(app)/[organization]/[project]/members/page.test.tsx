@@ -148,19 +148,19 @@ beforeEach(() => {
     members: [
       {
         id: "m_owner",
-        member_id: "user_owner",
+        memberId: "user_owner",
         email: "owner@example.com",
-        display_name: "Owner User",
+        displayName: "Owner User",
         role: Role.Owner,
-        created_at: "2026-08-01T00:00:00Z",
+        createdAt: "2026-08-01T00:00:00Z",
       },
       {
         id: "m_1",
-        member_id: "user_2",
+        memberId: "user_2",
         email: "admin@example.com",
-        display_name: "Admin User",
+        displayName: "Admin User",
         role: Role.Admin,
-        created_at: "2026-09-01T00:00:00Z",
+        createdAt: "2026-09-01T00:00:00Z",
       },
     ],
   };
@@ -176,10 +176,10 @@ beforeEach(() => {
 const ROSTER = {
   kind: "ok",
   members: [
-    { id: "om_owner", member_id: "user_owner", email: "owner@example.com", display_name: "Owner User", role: "owner", created_at: "2026-08-01T00:00:00Z" },
-    { id: "om_2", member_id: "user_2", email: "admin@example.com", display_name: "Admin User", role: "member", created_at: "2026-09-01T00:00:00Z" },
-    { id: "om_ada", member_id: "user_ada", email: "ada@example.com", display_name: "Ada", role: "admin", created_at: "2026-09-01T00:00:00Z" },
-    { id: "om_3", member_id: "user_dana", email: "dana@example.com", display_name: "Dana", role: "member", created_at: "2026-09-02T00:00:00Z" },
+    { id: "om_owner", memberId: "user_owner", email: "owner@example.com", displayName: "Owner User", role: "owner", createdAt: "2026-08-01T00:00:00Z" },
+    { id: "om_2", memberId: "user_2", email: "admin@example.com", displayName: "Admin User", role: "member", createdAt: "2026-09-01T00:00:00Z" },
+    { id: "om_ada", memberId: "user_ada", email: "ada@example.com", displayName: "Ada", role: "admin", createdAt: "2026-09-01T00:00:00Z" },
+    { id: "om_3", memberId: "user_dana", email: "dana@example.com", displayName: "Dana", role: "member", createdAt: "2026-09-02T00:00:00Z" },
   ],
 };
 
@@ -474,27 +474,27 @@ describe("MembersPage: handing the project over", () => {
       members: [
         {
           id: "m_owner",
-          member_id: "user_owner",
+          memberId: "user_owner",
           email: "owner@example.com",
-          display_name: "Owner User",
+          displayName: "Owner User",
           role: Role.Owner,
-          created_at: "2026-08-01T00:00:00Z",
+          createdAt: "2026-08-01T00:00:00Z",
         },
         {
           id: "m_1",
-          member_id: "user_2",
+          memberId: "user_2",
           email: "admin@example.com",
-          display_name: "Admin User",
+          displayName: "Admin User",
           role: Role.Admin,
-          created_at: "2026-09-01T00:00:00Z",
+          createdAt: "2026-09-01T00:00:00Z",
         },
         {
           id: "m_2",
-          member_id: "user_3",
+          memberId: "user_3",
           email: "member@example.com",
-          display_name: null,
+          displayName: null,
           role: Role.Member,
-          created_at: "2026-09-02T00:00:00Z",
+          createdAt: "2026-09-02T00:00:00Z",
         },
       ],
     };
@@ -532,12 +532,12 @@ describe("MembersPage: handing the project over", () => {
       members: [
         {
           id: "m_1",
-          member_id: "user_2",
+          memberId: "user_2",
           email: "admin@example.com",
-          display_name: "Admin User",
+          displayName: "Admin User",
           role: Role.Admin,
-          created_at: "2026-09-01T00:00:00Z",
-          offer_expires_at: "2026-10-05T00:00:00Z",
+          createdAt: "2026-09-01T00:00:00Z",
+          offerExpiresAt: "2026-10-05T00:00:00Z",
         },
       ],
     };
@@ -581,27 +581,27 @@ describe("MembersPage: leaving", () => {
   const ROWS = [
     {
       id: "m_owner",
-      member_id: "user_owner",
+      memberId: "user_owner",
       email: "owner@example.com",
-      display_name: "Owner User",
+      displayName: "Owner User",
       role: Role.Owner,
-      created_at: "2026-08-01T00:00:00Z",
+      createdAt: "2026-08-01T00:00:00Z",
     },
     {
       id: "m_1",
-      member_id: "user_2",
+      memberId: "user_2",
       email: "admin@example.com",
-      display_name: "Admin User",
+      displayName: "Admin User",
       role: Role.Admin,
-      created_at: "2026-09-01T00:00:00Z",
+      createdAt: "2026-09-01T00:00:00Z",
     },
     {
       id: "m_2",
-      member_id: "user_3",
+      memberId: "user_3",
       email: "member@example.com",
-      display_name: "Member User",
+      displayName: "Member User",
       role: Role.Member,
-      created_at: "2026-09-02T00:00:00Z",
+      createdAt: "2026-09-02T00:00:00Z",
     },
   ];
 

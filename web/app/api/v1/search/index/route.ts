@@ -59,10 +59,10 @@ export async function GET(request: NextRequest) {
       members.kind === "ok"
         ? ok(
             members.members.map((m) => ({
-              id: `member:${m.member_id}`,
+              id: `member:${m.memberId}`,
               kind: "member" as const,
               label: m.email,
-              hint: m.display_name ?? undefined,
+              hint: m.displayName ?? undefined,
               href: page("/members"),
             })),
           )

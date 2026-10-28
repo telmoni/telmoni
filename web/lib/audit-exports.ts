@@ -63,12 +63,12 @@ function dayLabel(date: Date, now: Date): string {
 /// to Oct 8`. The end is exclusive, so its last moment names the day: a
 /// custom range through Oct 7 ends at midnight on the 8th.
 export function rangeLabel(
-  entry: Pick<AuditExport, "range_from" | "range_to">,
+  entry: Pick<AuditExport, "rangeFrom" | "rangeTo">,
   now: Date,
 ): string {
-  const to = dayLabel(new Date(new Date(entry.range_to).getTime() - 1), now);
-  if (!entry.range_from) return `Everything to ${to}`;
-  const from = dayLabel(new Date(entry.range_from), now);
+  const to = dayLabel(new Date(new Date(entry.rangeTo).getTime() - 1), now);
+  if (!entry.rangeFrom) return `Everything to ${to}`;
+  const from = dayLabel(new Date(entry.rangeFrom), now);
   return from === to ? from : `${from} – ${to}`;
 }
 
@@ -84,7 +84,7 @@ export function eventsLabel(count: number): string {
 export function exportSummary(entry: AuditExport, now: Date): string {
   const parts = [entry.format.toUpperCase(), rangeLabel(entry, now)];
   if (entry.status === "ready") {
-    parts.push(eventsLabel(entry.row_count));
+    parts.push(eventsLabel(entry.rowCount));
   }
   return parts.join(" · ");
 }
@@ -98,8 +98,8 @@ export function failureText(
 ): string {
   return entry.failure === "too_large"
     ? `That range is too much for one file, which holds up to ${COUNT.format(
-        limits.max_rows,
-      )} events and ${sizeLabel(limits.max_bytes)}. Export a shorter one.`
+        limits.maxRows,
+      )} events and ${sizeLabel(limits.maxBytes)}. Export a shorter one.`
     : "The audit log export failed. Try again.";
 }
 

@@ -111,11 +111,11 @@ function standingAs(role: IdentityContext["role"], userId: string, incomingInvit
 
 const ADMIN = {
   id: "am_2",
-  member_id: "user_admin",
+  memberId: "user_admin",
   email: "admin@example.com",
-  display_name: "Admin User",
+  displayName: "Admin User",
   role: OrganizationRole.Admin,
-  created_at: "2026-08-15T00:00:00Z",
+  createdAt: "2026-08-15T00:00:00Z",
 };
 
 beforeEach(() => {
@@ -128,20 +128,20 @@ beforeEach(() => {
     members: [
       {
         id: "am_1",
-        member_id: "user_owner",
+        memberId: "user_owner",
         email: "owner@example.com",
-        display_name: "Owner User",
+        displayName: "Owner User",
         role: OrganizationRole.Owner,
-        created_at: "2026-08-01T00:00:00Z",
+        createdAt: "2026-08-01T00:00:00Z",
       },
       ADMIN,
       {
         id: "am_3",
-        member_id: "user_member",
+        memberId: "user_member",
         email: "member@example.com",
-        display_name: null,
+        displayName: null,
         role: OrganizationRole.Member,
-        created_at: "2026-09-01T00:00:00Z",
+        createdAt: "2026-09-01T00:00:00Z",
       },
     ],
   };
@@ -152,8 +152,8 @@ beforeEach(() => {
         id: "ai_1",
         email: "invited@example.com",
         role: OrganizationRole.Admin,
-        expires_at: "2026-09-20T00:00:00Z",
-        created_at: "2026-09-12T00:00:00Z",
+        expiresAt: "2026-09-20T00:00:00Z",
+        createdAt: "2026-09-12T00:00:00Z",
       },
     ],
   };
@@ -342,7 +342,7 @@ describe("OrganizationMembersPage: handing the organization over", () => {
   it("shows a live offer, and a way to withdraw it rather than make a second", async () => {
     mockOrganizationMembers = {
       kind: "ok",
-      members: [{ ...ADMIN, offer_expires_at: "2026-09-30T00:00:00Z" }],
+      members: [{ ...ADMIN, offerExpiresAt: "2026-09-30T00:00:00Z" }],
     };
     render(await OrganizationMembersPage());
     expect(document.body.textContent).toMatch(/ownership offered/i);

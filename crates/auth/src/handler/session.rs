@@ -170,7 +170,7 @@ enum PendingStatus {
 
 /// `POST /internal/v1/auth/refresh` request.
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RefreshRequest {
     /// The refresh token the BFF stored in the prior session.
     pub refresh_token: String,
@@ -191,7 +191,7 @@ impl std::fmt::Debug for RefreshRequest {
 
 /// `POST /internal/v1/auth/logout` request — the session to end.
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct LogoutRequest {
     /// The session id the exchange answered with.
     pub session_id: SessionId,
@@ -200,7 +200,7 @@ pub struct LogoutRequest {
 /// `POST /internal/v1/auth/logout-url` request — mint the external provider's
 /// **browser** logout URL, for a session that began there.
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct LogoutUrlRequest {
     /// The session id the exchange answered with.
     pub session_id: String,

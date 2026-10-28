@@ -723,7 +723,7 @@ async fn accepting_swaps_the_two_roles_and_both_steps_are_audited(pool: PgPool) 
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["members"][0]["member_id"], ADMIN);
+    assert_eq!(body["members"][0]["memberId"], ADMIN);
     assert_eq!(body["members"][0]["role"], "owner");
 }
 
@@ -906,11 +906,11 @@ async fn an_offer_older_than_seven_days_is_dead(pool: PgPool) {
         .as_array()
         .unwrap()
         .iter()
-        .find(|m| m["member_id"] == ADMIN)
+        .find(|m| m["memberId"] == ADMIN)
         .unwrap()
         .clone();
     assert_eq!(
-        admin_row["offer_expires_at"],
+        admin_row["offerExpiresAt"],
         Value::Null,
         "a lapsed offer is still listed as live"
     );

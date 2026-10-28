@@ -39,6 +39,7 @@ impl RosterInsert for Maintenance<AuthLane> {}
 /// One row of an organization's roster, the owner included, with the person's
 /// address and name joined in.
 #[derive(Debug, Clone, serde::Serialize, sqlx::FromRow)]
+#[serde(rename_all = "camelCase")]
 pub struct OrganizationMember {
     /// The membership row's id.
     pub id: Uuid,
@@ -55,6 +56,7 @@ pub struct OrganizationMember {
 
 /// One live organization invitation.
 #[derive(Debug, Clone, serde::Serialize, sqlx::FromRow)]
+#[serde(rename_all = "camelCase")]
 pub struct OrganizationInvite {
     pub id: Uuid,
     pub email: String,

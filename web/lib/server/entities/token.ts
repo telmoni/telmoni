@@ -10,11 +10,11 @@ import { readJson } from "./read";
 const ApiTokenSchema = z.object({
   id: z.string(),
   name: z.string(),
-  token_hint: z.string(),
+  tokenHint: z.string(),
   scopes: z.array(z.enum(ApiKeyScope)),
-  expires_at: z.string().nullable(),
-  last_used_at: z.string().nullable(),
-  created_at: z.string(),
+  expiresAt: z.string().nullable(),
+  lastUsedAt: z.string().nullable(),
+  createdAt: z.string(),
 });
 export type ApiToken = z.infer<typeof ApiTokenSchema>;
 

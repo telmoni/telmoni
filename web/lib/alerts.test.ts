@@ -395,9 +395,9 @@ describe("words", () => {
 
   // ⚠ An organization's admin acts on every project with no seat on it.
   it("names a member from the rosters read, and says what the rest may be", () => {
-    const ada = { member_id: "user_1", display_name: "Ada", email: "ada@example.test" };
-    const sam = { member_id: "user_2", display_name: null, email: "sam@example.test" };
-    const grace = { member_id: "user_3", display_name: "Grace", email: "grace@example.test" };
+    const ada = { memberId: "user_1", displayName: "Ada", email: "ada@example.test" };
+    const sam = { memberId: "user_2", displayName: null, email: "sam@example.test" };
+    const grace = { memberId: "user_3", displayName: "Grace", email: "grace@example.test" };
     const both = memberNames([grace], [ada, sam]);
     expect([both("user_1"), both("user_2"), both("user_3"), both("user_9")]).toEqual([
       "Ada",

@@ -753,7 +753,7 @@ export function incidentHref(organization: string, project: string, incidentId: 
 }
 
 /** One entry of a roster, the organization's or the project's. */
-type Named = { member_id: string; display_name?: string | null; email: string };
+type Named = { memberId: string; displayName?: string | null; email: string };
 
 /** Who a member's id names, from the rosters that could be read: the
  *  organization's, which its owner and admins alone read, then the project's.
@@ -765,8 +765,8 @@ export function memberNames(
 ): (id: string) => string {
   const people = new Map(
     [...(organization ?? []), ...(project ?? [])].map((member) => [
-      member.member_id,
-      member.display_name || member.email,
+      member.memberId,
+      member.displayName || member.email,
     ]),
   );
   const unknown = organization

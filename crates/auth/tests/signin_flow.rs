@@ -313,9 +313,9 @@ async fn logout_url_names_the_providers_page_only_for_a_session_that_began_there
         .oneshot(post_json(
             "/internal/v1/auth/logout-url",
             serde_json::json!({
-                "session_id": "session_42",
-                "id_token": "id.token.x",
-                "return_to": "http://localhost:3000/",
+                "sessionId": "session_42",
+                "idToken": "id.token.x",
+                "returnTo": "http://localhost:3000/",
             }),
         ))
         .await
@@ -340,8 +340,8 @@ async fn logout_url_names_the_providers_page_only_for_a_session_that_began_there
         .oneshot(post_json(
             "/internal/v1/auth/logout-url",
             serde_json::json!({
-                "session_id": "session_43",
-                "return_to": "http://localhost:3000/",
+                "sessionId": "session_43",
+                "returnTo": "http://localhost:3000/",
             }),
         ))
         .await
@@ -508,7 +508,7 @@ async fn refresh_exchanges_the_refresh_token_for_a_fresh_pair(pool: PgPool) {
     let resp = app
         .oneshot(post_json(
             "/internal/v1/auth/refresh",
-            serde_json::json!({ "refresh_token": refresh_token }),
+            serde_json::json!({ "refreshToken": refresh_token }),
         ))
         .await
         .unwrap();

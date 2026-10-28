@@ -116,7 +116,7 @@ export async function setAnalyticsPreferenceAction(
       ...headers,
       "content-type": "application/json",
     },
-    body: JSON.stringify({ opt_in: optIn }),
+    body: JSON.stringify({ optIn }),
   });
   if (!res) return refused(UNREACHABLE);
   if (!res.ok) {

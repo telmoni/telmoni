@@ -10,9 +10,9 @@ import { readJson } from "./read";
 // session of a project's runs, which `sessions.ts` reads.
 const ActiveSessionSchema = z.object({
   id: z.string(),
-  user_agent: z.string().nullable(),
-  created_at: z.string(),
-  last_seen_at: z.string(),
+  userAgent: z.string().nullable(),
+  createdAt: z.string(),
+  lastSeenAt: z.string(),
 });
 export type ActiveSession = z.infer<typeof ActiveSessionSchema>;
 

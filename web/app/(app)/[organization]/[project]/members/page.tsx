@@ -78,15 +78,15 @@ export default async function MembersPage({
   const me = gate.person.userId;
   // Who may be seated here with nothing to accept: the organization's members
   // holding no seat on this project. Its owner and admins hold every project.
-  const seated = new Set(listing.members.map((m) => m.member_id));
+  const seated = new Set(listing.members.map((m) => m.memberId));
   const candidates: Candidate[] =
     roster?.kind === "ok"
       ? roster.members
-          .filter((m) => m.role === OrganizationRole.Member && !seated.has(m.member_id))
+          .filter((m) => m.role === OrganizationRole.Member && !seated.has(m.memberId))
           .map((m) => ({
-            memberId: m.member_id,
+            memberId: m.memberId,
             email: m.email,
-            displayName: m.display_name ?? null,
+            displayName: m.displayName ?? null,
           }))
       : [];
   // An invitation counts against the owning organization's ceiling: at it,
@@ -143,7 +143,7 @@ export default async function MembersPage({
                   act={act}
                   canManage={canManage}
                   isOwnerCaller={isOwner}
-                  self={m.member_id === me ? self : undefined}
+                  self={m.memberId === me ? self : undefined}
                 />
               ))}
             </RosterTable>

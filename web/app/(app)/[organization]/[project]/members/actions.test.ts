@@ -61,7 +61,7 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/lib/server/entities/member", () => ({
   fetchMembers: vi.fn(async () => ({
     kind: "ok",
-    members: [{ member_id: "user_2", email: "removed@example.test" }],
+    members: [{ memberId: "user_2", email: "removed@example.test" }],
   })),
 }));
 const mockPublishEvent = vi.fn();

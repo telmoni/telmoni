@@ -2,8 +2,7 @@
 //! CLI to call straight, on the machine host. The device grant's start and
 //! poll carry only the device code, worth nothing until a person approves it;
 //! the refresh spends its token; `/me` and the session revoke act for the
-//! person the bearer names. The shapes are the CLI's, camelCase throughout,
-//! where the console's own refresh is snake_case.
+//! person the bearer names, camelCase as every internal lane is.
 //!
 //! Nothing here is for a page: a browser sends `Sec-Fetch-Site` on every
 //! request and a native client sends none, and a page that could reach the
@@ -17,8 +16,6 @@ use axum::{
     middleware::Next,
     response::{IntoResponse, Response},
 };
-use serde::Deserialize;
-use uuid::Uuid;
 
 use telmoni_shared::extract::Json;
 use telmoni_shared::middleware::problem;
@@ -33,32 +30,11 @@ use crate::handler::{me, recording_organization_of, session};
 /// a row id are a few hundred bytes.
 pub const BODY_CAP_BYTES: usize = 8 * 1024;
 
-/// `POST /cli/v1/auth/refresh` request: the console's refresh, in the CLI's
-/// spelling.
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct RefreshRequest {
-    /// The refresh token the CLI stored at sign-in or the last refresh.
-    pub refresh_token: String,
-    /// The `auth.sessions` row `/me` answered, which the revoke names.
-    #[serde(default)]
-    pub session_row_id: Option<Uuid>,
-}
-
-impl std::fmt::Debug for RefreshRequest {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RefreshRequest")
-            .field("refresh_token", &"***")
-            .field("session_row_id", &self.session_row_id)
-            .finish()
-    }
-}
-
 /// `POST /cli/v1/auth/refresh` — spend a refresh token for the next pair, as
-/// the console's own refresh does.
+/// the console's own refresh does, from the same body.
 pub async fn refresh(
     State(state): State<Arc<AppState>>,
-    Json(req): Json<RefreshRequest>,
+    Json(req): Json<session::RefreshRequest>,
 ) -> Result<impl IntoResponse, TelmoniError> {
     session::refresh_session(&state, &req.refresh_token, req.session_row_id)
         .await

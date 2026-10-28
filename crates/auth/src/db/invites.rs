@@ -12,6 +12,7 @@ use crate::model::InviteScope;
 
 /// One live invitation, as the roster shows it to owners and admins.
 #[derive(Debug, serde::Serialize, sqlx::FromRow)]
+#[serde(rename_all = "camelCase")]
 pub struct Invite {
     pub id: Uuid,
     pub email: String,

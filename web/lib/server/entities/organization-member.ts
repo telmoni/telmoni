@@ -9,13 +9,13 @@ import { readJson } from "./read";
 
 const OrganizationMemberSchema = z.object({
   id: z.string(),
-  member_id: z.string(),
+  memberId: z.string(),
   email: z.string(),
-  display_name: z.string().nullable().optional(),
+  displayName: z.string().nullable().optional(),
   role: z.enum(OrganizationRole),
-  created_at: z.string(),
+  createdAt: z.string(),
   /// When the owner's live offer of the organization to this admin lapses.
-  offer_expires_at: z.string().nullable().optional(),
+  offerExpiresAt: z.string().nullable().optional(),
 });
 
 export type OrganizationMember = z.infer<typeof OrganizationMemberSchema>;
@@ -62,8 +62,8 @@ const OrganizationInviteSchema = z.object({
   id: z.string(),
   email: z.string(),
   role: z.enum(OrganizationRole),
-  expires_at: z.string(),
-  created_at: z.string(),
+  expiresAt: z.string(),
+  createdAt: z.string(),
 });
 
 export type OrganizationInvite = z.infer<typeof OrganizationInviteSchema>;

@@ -25,15 +25,15 @@ const EDGE_WIN =
 const rows: ActiveSession[] = [
   {
     id: "s-current",
-    user_agent: CHROME_MAC,
-    created_at: "2026-08-26T14:00:00.000Z",
-    last_seen_at: "2026-08-26T15:00:00.000Z",
+    userAgent: CHROME_MAC,
+    createdAt: "2026-08-26T14:00:00.000Z",
+    lastSeenAt: "2026-08-26T15:00:00.000Z",
   },
   {
     id: "s-other",
-    user_agent: EDGE_WIN,
-    created_at: "2026-08-20T09:00:00.000Z",
-    last_seen_at: "2026-08-25T09:00:00.000Z",
+    userAgent: EDGE_WIN,
+    createdAt: "2026-08-20T09:00:00.000Z",
+    lastSeenAt: "2026-08-25T09:00:00.000Z",
   },
 ];
 

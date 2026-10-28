@@ -440,7 +440,7 @@ async fn an_owner_seats_a_member_of_the_organization_with_nothing_to_accept(pool
             .as_array()
             .unwrap()
             .iter()
-            .any(|m| m["member_id"] == "user_member" && m["role"] == "member"),
+            .any(|m| m["memberId"] == "user_member" && m["role"] == "member"),
         "the seat is on the roster at once: {roster}"
     );
 
@@ -1291,10 +1291,10 @@ async fn an_invitation_accepted_seats_a_member_and_both_sides_see_it(pool: PgPoo
     assert_eq!(status, StatusCode::OK);
     let members = body["members"].as_array().expect("members");
     assert_eq!(members.len(), 2);
-    assert_eq!(members[0]["member_id"], json!(owner));
+    assert_eq!(members[0]["memberId"], json!(owner));
     assert_eq!(members[0]["email"], json!(address_of(&owner)));
     assert_eq!(members[0]["role"], json!("owner"));
-    assert_eq!(members[1]["member_id"], json!(member));
+    assert_eq!(members[1]["memberId"], json!(member));
     assert_eq!(members[1]["email"], json!(address_of(&member)));
     assert_eq!(members[1]["role"], json!("admin"));
 
@@ -1553,7 +1553,7 @@ async fn re_inviting_an_address_kills_the_link_it_replaces(pool: PgPool) {
     assert_eq!(members.len(), 2);
     let admin = members
         .iter()
-        .find(|m| m["member_id"] == "user_member")
+        .find(|m| m["memberId"] == "user_member")
         .expect("member");
     assert_eq!(admin["role"], json!("admin"), "the newer offer");
 }
@@ -1743,7 +1743,7 @@ async fn a_seat_given_is_left_as_any_seat_is(pool: PgPool) {
             .as_array()
             .unwrap()
             .iter()
-            .any(|m| m["member_id"] == "user_member"),
+            .any(|m| m["memberId"] == "user_member"),
         "leaving the project took the person off the organization's roster: {roster}"
     );
 
@@ -1894,7 +1894,7 @@ async fn a_validated_token_carries_the_organizations_it_may_act_on(pool: PgPool)
     let verdict = json_body(resp).await;
 
     assert_eq!(
-        verdict["organization_id"],
+        verdict["organizationId"],
         organization_of(&pool, &member).await,
         "the token's own organization"
     );
@@ -1902,7 +1902,7 @@ async fn a_validated_token_carries_the_organizations_it_may_act_on(pool: PgPool)
         verdict["name"], "Acme",
         "the token names its organization by the name its owner gave it"
     );
-    assert_eq!(verdict["token_id"], minted["id"]);
+    assert_eq!(verdict["tokenId"], minted["id"]);
     assert!(
         verdict.get("memberships").is_none(),
         "the minter's seat on another organization's project rode along on their token: {verdict}"
@@ -1935,7 +1935,7 @@ async fn a_validated_token_carries_the_organizations_it_may_act_on(pool: PgPool)
     assert_eq!(resp.status(), StatusCode::OK);
     let verdict = json_body(resp).await;
     assert_eq!(
-        verdict["organization_id"],
+        verdict["organizationId"],
         organization_of(&pool, &owner).await
     );
     assert!(verdict.get("memberships").is_none(), "{verdict}");
@@ -2278,7 +2278,7 @@ async fn incoming_invites_are_listed_and_can_be_accepted_in_app(pool: PgPool) {
     .await;
     assert_eq!(status, StatusCode::OK);
     let members = members_body["members"].as_array().expect("members");
-    assert!(members.iter().any(|m| m["member_id"] == invitee));
+    assert!(members.iter().any(|m| m["memberId"] == invitee));
 }
 
 #[sqlx::test]
@@ -2365,7 +2365,7 @@ async fn project_members_list_includes_project_owner(pool: PgPool) {
     assert_eq!(status, StatusCode::OK);
     let members = body["members"].as_array().expect("members");
     assert_eq!(members.len(), 1);
-    assert_eq!(members[0]["member_id"], json!(owner));
+    assert_eq!(members[0]["memberId"], json!(owner));
     assert_eq!(members[0]["role"], json!("owner"));
 }
 

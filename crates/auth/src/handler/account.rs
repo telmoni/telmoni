@@ -83,7 +83,7 @@ impl std::fmt::Debug for ConfirmEmailChangeRequest {
 
 /// Body of `PUT /internal/v1/me/analytics`.
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AnalyticsPreferenceRequest {
     pub opt_in: bool,
 }
@@ -375,6 +375,7 @@ pub struct EmailChanged {
 
 /// Whether the person lets the console count their use.
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AnalyticsPreference {
     pub analytics_opt_in: bool,
 }

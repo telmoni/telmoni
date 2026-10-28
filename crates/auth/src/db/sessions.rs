@@ -15,6 +15,7 @@ use crate::db::AuthLane;
 
 /// A session as the settings page lists it.
 #[derive(Debug, FromRow, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SessionRow {
     pub id: Uuid,
     pub user_agent: Option<String>,

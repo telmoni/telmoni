@@ -24,17 +24,17 @@ export type RosterKind = "organization" | "project";
 /** A seat as either roster lists it. */
 export type Seat = {
   id: string;
-  member_id: string;
+  memberId: string;
   email: string;
-  display_name?: string | null;
+  displayName?: string | null;
   role: Role;
-  created_at: string;
+  createdAt: string;
   /** When the owner's live offer of the whole to this admin lapses. */
-  offer_expires_at?: string | null;
+  offerExpiresAt?: string | null;
 };
 
 /** An invitation as either roster lists it. */
-export type Invitation = { id: string; email: string; role: Role; expires_at: string };
+export type Invitation = { id: string; email: string; role: Role; expiresAt: string };
 
 /** What the roster's actions do to a seat, bound to the roster by its page. */
 export type SeatActions = {
@@ -107,13 +107,13 @@ export function MemberRow({
 }) {
   const { pending, error, run } = useAction();
   const words = WORDS[of];
-  const person = { displayName: member.display_name, email: member.email };
+  const person = { displayName: member.displayName, email: member.email };
   const isOwner = owns(member.role);
   // The seat's role as one that is given: an owner's is nobody's to set.
   const given = member.role === Role.Owner ? null : member.role;
   // Only an admin can be handed the whole, and only the owner hands it.
   const canOffer = canManage && isOwnerCaller && member.role === Role.Admin;
-  const offered = Boolean(member.offer_expires_at);
+  const offered = Boolean(member.offerExpiresAt);
   const control = (label: string, text: string) => (
     <Button variant="outline" size="sm" className="h-9 text-xs" disabled={pending} aria-label={label}>
       {text}
@@ -130,9 +130,9 @@ export function MemberRow({
               {words.owner}
             </Badge>
           )}
-          {offered && member.offer_expires_at && (
+          {offered && member.offerExpiresAt && (
             <Badge variant="outline" className="text-[10px] px-1.5 py-0">
-              {words.offered} · lapses <LocalTime iso={member.offer_expires_at} mode="date" />
+              {words.offered} · lapses <LocalTime iso={member.offerExpiresAt} mode="date" />
             </Badge>
           )}
         </div>
@@ -150,7 +150,7 @@ export function MemberRow({
             value={given}
             options={[Role.Admin, Role.Member]}
             label={roleLabel}
-            onChange={(role) => run(() => act.setRole(member.member_id, role))}
+            onChange={(role) => run(() => act.setRole(member.memberId, role))}
             disabled={pending}
             className="h-9 w-32 text-xs"
             ariaLabel={`Role for ${member.email}`}
@@ -161,7 +161,7 @@ export function MemberRow({
         {error && <span className="ml-2 text-xs text-destructive">{error}</span>}
       </Td>
       <Td className="text-xs text-muted-foreground whitespace-nowrap">
-        <LocalTime iso={member.created_at} mode="date" />
+        <LocalTime iso={member.createdAt} mode="date" />
       </Td>
       <Td className="text-right whitespace-nowrap">
         <div className="flex items-center justify-end gap-3">
@@ -171,7 +171,7 @@ export function MemberRow({
               title={words.hand(personName(person))}
               description={words.handed}
               confirmLabel="Send offer"
-              onConfirm={() => run(() => act.offer(member.member_id))}
+              onConfirm={() => run(() => act.offer(member.memberId))}
             />
           )}
           {canOffer && offered && (
@@ -198,7 +198,7 @@ export function MemberRow({
               title={words.remove(personName(person))}
               description={words.removed}
               confirmLabel="Remove"
-              onConfirm={() => run(() => act.remove(member.member_id))}
+              onConfirm={() => run(() => act.remove(member.memberId))}
             />
           )}
         </div>
@@ -224,7 +224,7 @@ export function InviteRow({
       <Td className="font-medium">{invite.email}</Td>
       <Td className="text-xs text-muted-foreground">{roleLabel(invite.role)}</Td>
       <Td className="text-xs text-muted-foreground whitespace-nowrap">
-        Expires <LocalTime iso={invite.expires_at} mode="date" />
+        Expires <LocalTime iso={invite.expiresAt} mode="date" />
       </Td>
       <Td className="text-right whitespace-nowrap">
         {error && <span className="mr-2 text-xs text-destructive">{error}</span>}

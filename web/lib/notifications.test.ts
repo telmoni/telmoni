@@ -155,22 +155,22 @@ const PROJECT_OFFER: ProjectOffer = {
 
 const ASKED = {
   format: "csv",
-  range_from: null,
-  range_to: "2026-10-01T00:00:00Z",
-  created_at: "2026-10-01T00:00:00Z",
+  rangeFrom: null,
+  rangeTo: "2026-10-01T00:00:00Z",
+  createdAt: "2026-10-01T00:00:00Z",
 } as const;
 
 const READY: AuditExport = {
   ...ASKED,
   id: "exp_ready",
   status: "ready",
-  row_count: 10,
+  rowCount: 10,
   bytes: 100,
-  finished_at: "2026-10-01T00:01:00Z",
-  expires_at: "2026-10-08T00:01:00Z",
-  downloaded_at: null,
+  finishedAt: "2026-10-01T00:01:00Z",
+  expiresAt: "2026-10-08T00:01:00Z",
+  downloadedAt: null,
 };
-const TAKEN: AuditExport = { ...READY, id: "exp_taken", downloaded_at: "2026-10-02T00:00:00Z" };
+const TAKEN: AuditExport = { ...READY, id: "exp_taken", downloadedAt: "2026-10-02T00:00:00Z" };
 const QUEUED: AuditExport = { ...ASKED, id: "exp_queued", status: "queued" };
 
 describe("bellItems", () => {

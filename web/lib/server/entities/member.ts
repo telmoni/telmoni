@@ -10,14 +10,14 @@ import { readJson, valueOf } from "./read";
 
 const MemberSchema = z.object({
   id: z.string(),
-  member_id: z.string(),
+  memberId: z.string(),
   email: z.string(),
-  display_name: z.string().nullable().optional(),
+  displayName: z.string().nullable().optional(),
   role: z.enum(Role),
-  created_at: z.string(),
+  createdAt: z.string(),
   /// When the owner's live offer of the project to this admin lapses; absent
   /// when there is no live offer, and always for the owner's row.
-  offer_expires_at: z.string().nullable().optional(),
+  offerExpiresAt: z.string().nullable().optional(),
 });
 
 export type Member = z.infer<typeof MemberSchema>;
@@ -50,8 +50,8 @@ const InviteSchema = z.object({
   id: z.string(),
   email: z.string(),
   role: z.enum(Role),
-  expires_at: z.string(),
-  created_at: z.string(),
+  expiresAt: z.string(),
+  createdAt: z.string(),
 });
 
 export type Invite = z.infer<typeof InviteSchema>;

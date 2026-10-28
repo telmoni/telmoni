@@ -681,16 +681,16 @@ async fn accepting_moves_the_project_with_its_keys_and_seats_and_both_chains_rec
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let members = body["members"].as_array().unwrap();
-    assert_eq!(members[0]["member_id"], ADMIN);
+    assert_eq!(members[0]["memberId"], ADMIN);
     assert_eq!(members[0]["role"], "owner");
     let previous = members
         .iter()
-        .find(|m| m["member_id"] == OWNER)
+        .find(|m| m["memberId"] == OWNER)
         .expect("the previous owner is on the roster");
     assert_eq!(previous["role"], "admin");
     let holder = members
         .iter()
-        .find(|m| m["member_id"] == MEMBER)
+        .find(|m| m["memberId"] == MEMBER)
         .expect("a seat holder is on the roster the new owner reads");
     assert_eq!(holder["role"], "member");
 
@@ -1053,11 +1053,11 @@ async fn an_offer_older_than_seven_days_is_dead(pool: PgPool) {
         .as_array()
         .unwrap()
         .iter()
-        .find(|m| m["member_id"] == ADMIN)
+        .find(|m| m["memberId"] == ADMIN)
         .unwrap()
         .clone();
     assert_eq!(
-        admin_row["offer_expires_at"],
+        admin_row["offerExpiresAt"],
         Value::Null,
         "a lapsed offer is still listed as live"
     );

@@ -62,7 +62,7 @@ export async function mintTokenAction(projectId: string, input: unknown): Promis
     return refused("Choose what the key opens: sending spans, reading the API, or both.");
   }
 
-  const expires_in_seconds = TTL_OPTIONS[ttl];
+  const expiresInSeconds = TTL_OPTIONS[ttl];
 
   const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/v1/tokens`, {
     method: "POST",
@@ -71,7 +71,7 @@ export async function mintTokenAction(projectId: string, input: unknown): Promis
       name:               name.value,
       description,
       scopes,
-      expires_in_seconds,
+      expiresInSeconds,
     }),
   });
   if (!res) return refused("The key service is unreachable. Try again.");

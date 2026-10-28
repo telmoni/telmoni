@@ -53,6 +53,7 @@ impl SeatRead for Maintenance<AuthLane> {}
 
 /// One row of a project's roster, with the person's address and name joined in.
 #[derive(Debug, Clone, serde::Serialize, sqlx::FromRow)]
+#[serde(rename_all = "camelCase")]
 pub struct Member {
     pub id: Uuid,
     /// The person's user id — what the role and removal lanes take.

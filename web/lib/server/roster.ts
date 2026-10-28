@@ -239,9 +239,9 @@ async function seated(roster: Roster, memberId: string): Promise<{ email: string
     roster.kind === "organization"
       ? await fetchOrganizationMembers()
       : await fetchMembers(roster.projectId);
-  const members: readonly { member_id: string; email: string }[] =
+  const members: readonly { memberId: string; email: string }[] =
     listing.kind === "ok" ? listing.members : [];
-  return members.find((m) => m.member_id === memberId);
+  return members.find((m) => m.memberId === memberId);
 }
 
 /** The seat's role changed, and its holder told. */

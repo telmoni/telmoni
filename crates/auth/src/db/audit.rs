@@ -12,6 +12,7 @@ use crate::db::AuthLane;
 
 /// One audit row, hashes included.
 #[derive(Debug, Serialize, sqlx::FromRow)]
+#[serde(rename_all = "camelCase")]
 pub struct AuditRow {
     pub id: Uuid,
     pub organization_id: OrganizationId,

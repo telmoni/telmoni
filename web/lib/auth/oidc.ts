@@ -143,7 +143,7 @@ export async function revokeSession(sessionId: string): Promise<void> {
     await fetchWithTimeout(`${env.SERVER_URL}/internal/v1/auth/logout`, {
       method: "POST",
       headers: serviceHeaders(),
-      body: JSON.stringify({ session_id: sessionId }),
+      body: JSON.stringify({ sessionId }),
     });
   } catch (err) {
     // Best effort — the cookie is gone either way — but a session that
@@ -178,7 +178,7 @@ export async function getLogoutUrl(
       {
         method: "POST",
         headers: serviceHeaders(),
-        body: JSON.stringify({ session_id: sessionId, id_token: idToken, return_to: returnTo }),
+        body: JSON.stringify({ sessionId, idToken, returnTo }),
       },
     );
     if (!res.ok) return null;
@@ -200,7 +200,7 @@ export type RefreshAnswer =
   | { kind: "refused" }
   | { kind: "unreachable" };
 
-// `session_row_id` names the `auth.sessions` row this sign-in was recorded
+// `sessionRowId` names the `auth.sessions` row this sign-in was recorded
 // under, so auth marks it seen as it rotates the tokens — there is no separate
 // touch. A refusal — the token spent, lapsed or revoked, the row with it — is
 // a 4xx, and asking again would be refused again: the session is over. No
@@ -217,7 +217,7 @@ export async function refreshTokens(
       {
         method: "POST",
         headers: serviceHeaders(),
-        body: JSON.stringify({ refresh_token: refreshToken, session_row_id: sessionRowId }),
+        body: JSON.stringify({ refreshToken, sessionRowId }),
       },
     );
     if (res.ok) {

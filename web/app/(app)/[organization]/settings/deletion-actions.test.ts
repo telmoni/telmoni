@@ -43,9 +43,9 @@ vi.mock("@/lib/server/entities/organization-member", () => ({
   fetchOrganizationMembers: vi.fn(async () => ({
     kind: "ok",
     members: [
-      { member_id: "user_1", email: "owner@example.test" },
-      { member_id: "user_2", email: "admin@example.test" },
-      { member_id: "user_3", email: "member@example.test" },
+      { memberId: "user_1", email: "owner@example.test" },
+      { memberId: "user_2", email: "admin@example.test" },
+      { memberId: "user_3", email: "member@example.test" },
     ],
   })),
 }));

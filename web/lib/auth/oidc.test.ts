@@ -66,9 +66,9 @@ describe("the two URLs that become redirects", () => {
     );
     const [, init] = fetchWithTimeout.mock.calls[0]!;
     expect(JSON.parse(String(init?.body))).toEqual({
-      session_id: "sid_1",
-      id_token: "id.token.x",
-      return_to: "https://app.test/",
+      sessionId: "sid_1",
+      idToken: "id.token.x",
+      returnTo: "https://app.test/",
     });
   });
 
@@ -113,14 +113,14 @@ describe("refreshTokens", () => {
       tokens: { accessToken: "at_new", sessionId: "ses_1" },
     });
     expect(sent().url).toBe("http://auth.test/internal/v1/auth/refresh");
-    expect(sent().body).toEqual({ refresh_token: "rt_old", session_row_id: "sess_1" });
+    expect(sent().body).toEqual({ refreshToken: "rt_old", sessionRowId: "sess_1" });
     expect(sent().headers["x-service-secret"]).toBe("s3cret");
   });
 
   it("sends a null row for a session that never got one", async () => {
     fetchWithTimeout.mockResolvedValue(rotated());
     await refreshTokens("rt_old", null);
-    expect(sent().body).toEqual({ refresh_token: "rt_old", session_row_id: null });
+    expect(sent().body).toEqual({ refreshToken: "rt_old", sessionRowId: null });
   });
 
   // A 401 is the grant refused — a row revoked from another device among the
@@ -179,7 +179,7 @@ describe("revokeSession", () => {
     await revokeSession("sid_1");
     const [url, init] = fetchWithTimeout.mock.calls[0]!;
     expect(url).toBe("http://auth.test/internal/v1/auth/logout");
-    expect(JSON.parse(init.body)).toEqual({ session_id: "sid_1" });
+    expect(JSON.parse(init.body)).toEqual({ sessionId: "sid_1" });
   });
 });
 

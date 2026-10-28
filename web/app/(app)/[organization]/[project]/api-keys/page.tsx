@@ -83,23 +83,23 @@ export default async function ApiKeysPage({
                   <tr key={t.id}>
                     <Td className="font-medium whitespace-nowrap">{t.name}</Td>
                     <Td className="whitespace-nowrap">
-                      <Badge variant="secondary">{t.token_hint}…</Badge>
+                      <Badge variant="secondary">{t.tokenHint}…</Badge>
                     </Td>
                     <Td className="text-xs text-muted-foreground whitespace-nowrap">
                       {t.scopes.map((s) => SCOPE_LABEL[s]).join(", ")}
                     </Td>
                     <Td className="text-xs text-muted-foreground whitespace-nowrap">
-                      <ExpiryCell expiresAt={t.expires_at} />
+                      <ExpiryCell expiresAt={t.expiresAt} />
                     </Td>
                     <Td className="text-xs text-muted-foreground whitespace-nowrap">
-                      {t.last_used_at ? (
-                        <LocalTime iso={t.last_used_at} mode="date" />
+                      {t.lastUsedAt ? (
+                        <LocalTime iso={t.lastUsedAt} mode="date" />
                       ) : (
                         "—"
                       )}
                     </Td>
                     <Td className="text-xs text-muted-foreground whitespace-nowrap">
-                      <LocalTime iso={t.created_at} mode="date" />
+                      <LocalTime iso={t.createdAt} mode="date" />
                     </Td>
                     <Td className="text-right whitespace-nowrap">
                       {canManage && (

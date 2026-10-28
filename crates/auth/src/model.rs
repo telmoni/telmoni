@@ -276,6 +276,7 @@ pub struct ProjectMember {
 }
 
 #[derive(Debug, Serialize, sqlx::FromRow)]
+#[serde(rename_all = "camelCase")]
 pub struct ApiToken {
     pub id: Uuid,
     /// The project it was minted in. Every key names one.
@@ -295,7 +296,7 @@ pub struct ApiToken {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CreateTokenRequest {
     pub name: String,
     #[serde(default)]
@@ -341,7 +342,7 @@ impl std::fmt::Debug for CreateTokenResponse {
 
 /// Request body for `POST /internal/v1/tokens/{token_id}/rotate`.
 #[derive(Debug, Deserialize, Default)]
-#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RotateTokenRequest {
     #[serde(default)]
     pub grace_seconds: Option<i64>,
@@ -364,6 +365,7 @@ impl std::fmt::Debug for ValidateTokenRequest {
 /// What `/internal/v1/tokens/validate` answers. A token acts for the project it
 /// was minted on and holds no seat, so there is no membership list to carry.
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ValidateTokenResponse {
     /// The organization the token belongs to — the tenancy boundary a `/v1`
     /// lane reads within.

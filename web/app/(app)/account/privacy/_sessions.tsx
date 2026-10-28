@@ -98,7 +98,7 @@ export function ActiveSessions({
           return (
             <tr key={session.id}>
               <Td className="whitespace-nowrap">
-                {deviceLabel(session.user_agent)}
+                {deviceLabel(session.userAgent)}
                 {isCurrent ? (
                   <Badge variant="secondary" className="ml-2">
                     Current
@@ -106,17 +106,17 @@ export function ActiveSessions({
                 ) : null}
               </Td>
               <Td className="whitespace-nowrap text-muted-foreground">
-                <LocalTime iso={session.created_at} />
+                <LocalTime iso={session.createdAt} />
               </Td>
               <Td className="whitespace-nowrap text-muted-foreground">
-                <LocalTime iso={session.last_seen_at} />
+                <LocalTime iso={session.lastSeenAt} />
               </Td>
               <Td className="text-right whitespace-nowrap">
                 {isCurrent ? null : (
                   <Button
                     variant="destructive"
                     size="sm"
-                    aria-label={`End session ${deviceLabel(session.user_agent)}`}
+                    aria-label={`End session ${deviceLabel(session.userAgent)}`}
                     disabled={pending && busyId === session.id}
                     onClick={() => revoke(session.id)}
                   >

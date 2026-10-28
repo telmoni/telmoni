@@ -26,6 +26,7 @@ const ENTRY: &str = "id, format, range_from, range_to, status, failure, row_coun
 
 /// One export as its requester's list shows it: never the file itself.
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ExportEntry {
     pub id: Uuid,
     pub format: ExportFormat,
@@ -39,7 +40,11 @@ pub struct ExportEntry {
 /// Where an export stands, each state with what it carries: the table's
 /// CHECKs pair a status with its columns, and this is their reading.
 #[derive(Debug, Serialize)]
-#[serde(tag = "status", rename_all = "snake_case")]
+#[serde(
+    tag = "status",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
 pub enum ExportState {
     Queued,
     Running,

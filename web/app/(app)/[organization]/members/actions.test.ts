@@ -30,7 +30,7 @@ vi.mock("@/lib/server/entities/organization-member", async (importOriginal) => (
   ...(await importOriginal<typeof import("@/lib/server/entities/organization-member")>()),
   fetchOrganizationMembers: vi.fn(async () => ({
     kind: "ok",
-    members: [{ member_id: "user_2", email: "removed@example.test" }],
+    members: [{ memberId: "user_2", email: "removed@example.test" }],
   })),
 }));
 // The answer read as the action reads it: no fetch in it to stand in for.

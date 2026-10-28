@@ -261,8 +261,8 @@ beforeEach(() => {
     kind: "ok",
     ceiling: null,
     members: [
-      { id: "m1", member_id: "user_1", email: "ada@example.test", display_name: "Ada", role: "member", created_at: "" },
-      { id: "m2", member_id: "user_2", email: "sam@example.test", display_name: null, role: "member", created_at: "" },
+      { id: "m1", memberId: "user_1", email: "ada@example.test", displayName: "Ada", role: "member", createdAt: "" },
+      { id: "m2", memberId: "user_2", email: "sam@example.test", displayName: null, role: "member", createdAt: "" },
     ],
   };
   mockIncident = { kind: "missing" };
@@ -580,7 +580,7 @@ describe("AlertsPage", () => {
     mockOrganizationMembers = {
       kind: "ok",
       ceiling: null,
-      members: [{ id: "o1", member_id: "user_admin", email: "grace@example.test", display_name: "Grace", role: "admin", created_at: "" }],
+      members: [{ id: "o1", memberId: "user_admin", email: "grace@example.test", displayName: "Grace", role: "admin", createdAt: "" }],
     };
     render(await AlertsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     const [admin, gone] = [incidentItem(RULE, 0), incidentItem(RULE, 1)];

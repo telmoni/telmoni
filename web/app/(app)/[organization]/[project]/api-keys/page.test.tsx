@@ -111,11 +111,11 @@ describe("ApiKeysPage", () => {
         {
           id: "tok_1",
           name: "Admin key",
-          token_hint: "tm_cHksNLsh",
+          tokenHint: "tm_cHksNLsh",
           scopes: ["read", "ingest"],
-          expires_at: null,
-          last_used_at: null,
-          created_at: "2026-09-01T00:00:00Z",
+          expiresAt: null,
+          lastUsedAt: null,
+          createdAt: "2026-09-01T00:00:00Z",
         },
       ],
     };
@@ -143,11 +143,11 @@ describe("ApiKeysPage", () => {
         {
           id: "tok_1",
           name: "Read only key",
-          token_hint: "tm_gJERKmx5",
+          tokenHint: "tm_gJERKmx5",
           scopes: ["read"],
-          expires_at: null,
-          last_used_at: null,
-          created_at: "2026-09-01T00:00:00Z",
+          expiresAt: null,
+          lastUsedAt: null,
+          createdAt: "2026-09-01T00:00:00Z",
         },
       ],
     };
