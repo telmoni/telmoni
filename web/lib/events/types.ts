@@ -106,8 +106,17 @@ export const RealtimeEventSchema = z.discriminatedUnion("type", [
 ]);
 
 export type RealtimeEvent = z.infer<typeof RealtimeEventSchema>;
+export type RealtimeEventType = RealtimeEvent["type"];
+/** Each event's data by its type: a map, which a generic key indexes
+ *  plainly where a conditional type would not resolve. */
+type RealtimeEventDataByType = { [E in RealtimeEvent as E["type"]]: E["data"] };
+export type RealtimeEventData<K extends RealtimeEventType> = RealtimeEventDataByType[K];
 
-export const RealtimeEventDataSchema = {
+/** Each event's data schema, held to the union above: a type left out here,
+ *  or given another's schema, does not compile. */
+export const RealtimeEventDataSchema: {
+  [K in RealtimeEventType]: z.ZodType<RealtimeEventDataByType[K]>;
+} = {
   "ownership:changed": OwnershipRefSchema,
   "membership:removed": MembershipRemovedSchema,
   "membership:changed": MembershipChangedSchema,
@@ -117,4 +126,4 @@ export const RealtimeEventDataSchema = {
   "invite:revoked": InviteRefSchema,
   "invite:resolved": InviteRefSchema,
   [Live.spansIngested]: SpansIngestedSchema,
-} as const;
+};

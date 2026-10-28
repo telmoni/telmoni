@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useEffectEvent, useRef } from "react";
-import { z } from "zod";
+import type { z } from "zod";
 import { usePathname, useRouter } from "next/navigation";
 import {
   useActiveOrganization,
@@ -13,7 +13,11 @@ import {
   useRemoveIncomingInvite,
 } from "@/lib/store";
 import { movedPath, projectAt } from "@/lib/console-nav";
-import { RealtimeEventDataSchema } from "@/lib/events/types";
+import {
+  RealtimeEventDataSchema,
+  type RealtimeEventData,
+  type RealtimeEventType,
+} from "@/lib/events/types";
 import { LIVE_HOLD_MS, liveRefresher } from "@/lib/live-refresh";
 import { projectPath } from "@/lib/slug";
 import { PEEK_PARAM, PEEK_NUDGED } from "@/lib/traces";
@@ -29,20 +33,21 @@ const ROSTER_PAGES = /^\/[^/]+(?:\/[^/]+)?\/(members|audit-log)$/;
 // with.
 const SPAN_PAGES = /^\/[^/]+\/[^/]+\/(traces|sessions|users)(?:\/([^/]+))?$/;
 
-function payload<K extends keyof typeof RealtimeEventDataSchema>(
+function payload<K extends RealtimeEventType>(
   e: MessageEvent,
   kind: K,
-): z.infer<(typeof RealtimeEventDataSchema)[K]> | undefined {
+): RealtimeEventData<K> | undefined {
   let body: unknown;
   try {
     body = JSON.parse(e.data);
   } catch {
     return undefined;
   }
-  const parsed = RealtimeEventDataSchema[kind].safeParse(body);
-  return parsed.success
-    ? (parsed.data as z.infer<(typeof RealtimeEventDataSchema)[K]>)
-    : undefined;
+  // Named before it is read: a method called on the map indexed by a generic
+  // key answers the union of every event's data.
+  const schema: z.ZodType<RealtimeEventData<K>> = RealtimeEventDataSchema[kind];
+  const parsed = schema.safeParse(body);
+  return parsed.success ? parsed.data : undefined;
 }
 
 /// `liveHoldMs` is how long a page reading spans holds between the redraws
