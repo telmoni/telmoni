@@ -319,11 +319,12 @@ pub async fn open(
             "CONNECTOR_KEK is not configured; the stored URL cannot be opened",
         ));
     };
-    let dek = kek
-        .unwrap_dek(
+    let row = kek
+        .open_row(
             &state.http,
+            &state.vault,
+            connection.id,
             &connection.wrapped_dek,
-            connection.id.as_bytes(),
             connection.key_version,
         )
         .await
@@ -336,26 +337,21 @@ pub async fn open(
                 format!("the row's wrapped key would not open: {why}"),
             ),
         })?;
-    let url = state
-        .vault
-        .open(&dek, &connection.target(), connection.id.as_bytes())
-        .map_err(|e| DeliveryError::terminal(Terminal::Spent { listed: true }, e.to_string()))?;
-    let open_sealed = |sealed: Option<telmoni_shared::envelope::Sealed>| {
-        sealed
-            .map(|sealed| {
-                state
-                    .vault
-                    .open(&dek, &sealed, connection.id.as_bytes())
-                    .map_err(|e| {
-                        DeliveryError::terminal(Terminal::Spent { listed: true }, e.to_string())
-                    })
-            })
-            .transpose()
-    };
+    let spent =
+        |e: TelmoniError| DeliveryError::terminal(Terminal::Spent { listed: true }, e.to_string());
+    let url = row.open(connection.target()).map_err(spent)?;
     let (token, prior) = if connector.delivers_with_token() {
         (
-            open_sealed(connection.token())?,
-            open_sealed(connection.prior_token(chrono::Utc::now()))?,
+            connection
+                .token()
+                .map(|sealed| row.open(sealed))
+                .transpose()
+                .map_err(spent)?,
+            connection
+                .prior_token(chrono::Utc::now())
+                .map(|sealed| row.open(sealed))
+                .transpose()
+                .map_err(spent)?,
         )
     } else {
         (None, None)

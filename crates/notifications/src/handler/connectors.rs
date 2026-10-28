@@ -696,11 +696,12 @@ pub async fn rotate_webhook_secret(
         ));
     };
 
-    let dek = kek
-        .unwrap_dek(
+    let row = kek
+        .open_row(
             &state.http,
+            &state.vault,
+            id,
             &sealed.wrapped_dek,
-            id.as_bytes(),
             sealed.key_version,
         )
         .await
@@ -711,8 +712,8 @@ pub async fn rotate_webhook_secret(
             }
         })?;
     let secret = webhook::mint_signing_secret()?;
-    let token = state.vault.seal(&dek, &secret, id.as_bytes())?;
-    drop(dek);
+    let token = row.seal(&secret)?;
+    drop(row);
 
     let mut tx = project_scope(&state.db, &identity.project_id)
         .await?
@@ -723,7 +724,7 @@ pub async fn rotate_webhook_secret(
         &mut tx,
         &identity.project_id,
         id,
-        &replacing,
+        replacing,
         &token,
         i32::from(req.keep_previous_for_hours),
     )

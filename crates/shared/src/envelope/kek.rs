@@ -140,6 +140,21 @@ impl Kek {
         }
     }
 
+    /// Unwrap row `id`'s data key, for opening and sealing its fields under
+    /// the same id.
+    pub async fn open_row<'v>(
+        &self,
+        http: &reqwest::Client,
+        vault: &'v super::Vault,
+        id: uuid::Uuid,
+        wrapped: &[u8],
+        key_version: i16,
+    ) -> Result<super::OpenedRow<'v>, KekError> {
+        let aad = *id.as_bytes();
+        let dek = self.unwrap_dek(http, wrapped, &aad, key_version).await?;
+        Ok(super::OpenedRow { vault, dek, aad })
+    }
+
     /// Open a row's wrapped DEK. A `key_version` this build does not hold is
     /// refused before any call, rather than spending a round trip to learn it.
     pub async fn unwrap_dek(

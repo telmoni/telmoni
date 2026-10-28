@@ -128,7 +128,7 @@ async fn open_target(sealed: &db::SealedConnection) -> Redacted {
         .await
         .unwrap();
     Vault::new()
-        .open(&dek, &sealed.target(), sealed.id.as_bytes())
+        .open(&dek, sealed.target(), sealed.id.as_bytes())
         .unwrap()
 }
 
@@ -4117,7 +4117,7 @@ async fn a_webhook_is_connected_by_url_and_its_secret_is_answered_once(pool: PgP
         .await
         .unwrap();
     let token = Vault::new()
-        .open(&dek, &sealed.token().unwrap(), sealed.id.as_bytes())
+        .open(&dek, sealed.token().unwrap(), sealed.id.as_bytes())
         .unwrap();
     assert_eq!(token.expose(), secret);
     let (target_ct, token_ct, scopes): (Vec<u8>, Vec<u8>, String) = sqlx::query_as(

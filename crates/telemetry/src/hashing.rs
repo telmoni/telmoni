@@ -207,9 +207,9 @@ async fn open_key(
         .map_err(|e| kek_refused(&e))?;
     let secret = state.vault.open(
         &dek,
-        &Sealed {
-            ciphertext: sealed.ciphertext.clone(),
-            nonce: sealed.nonce.clone(),
+        telmoni_shared::envelope::SealedRef {
+            ciphertext: &sealed.ciphertext,
+            nonce: &sealed.nonce,
         },
         aad,
     )?;

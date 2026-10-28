@@ -167,11 +167,12 @@ async fn open(
             "CONNECTOR_KEK is not configured on this replica".into(),
         ));
     };
-    let dek = kek
-        .unwrap_dek(
+    let row = kek
+        .open_row(
             &state.http,
+            &state.vault,
+            uninstall.id,
             &uninstall.wrapped_dek,
-            uninstall.id.as_bytes(),
             uninstall.key_version,
         )
         .await
@@ -183,9 +184,8 @@ async fn open(
                 TearDownError::Refused(format!("the wrapped key would not open: {why}"))
             }
         })?;
-    let token = state
-        .vault
-        .open(&dek, &uninstall.token(), uninstall.id.as_bytes())
+    let token = row
+        .open(uninstall.token())
         .map_err(|e| TearDownError::Refused(format!("the token would not open: {e}")))?;
     Ok((connector, token))
 }

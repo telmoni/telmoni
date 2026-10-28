@@ -13,7 +13,7 @@ use telmoni_shared::db::tenant_session::{
     Binding, HasProject, Lane, Maintenance, MaintenanceLane, Organization, Project,
     ProjectAndOrganization, Scoped,
 };
-use telmoni_shared::envelope::Sealed;
+use telmoni_shared::envelope::{Sealed, SealedRef};
 use telmoni_shared::{NotificationKind, OrganizationId, ProjectId, UserId};
 use uuid::Uuid;
 
@@ -589,21 +589,18 @@ impl std::fmt::Debug for SealedConnection {
 impl SealedConnection {
     /// The sealed target: a vendor's webhook URL or the customer's endpoint.
     #[must_use]
-    pub fn target(&self) -> Sealed {
-        Sealed {
-            ciphertext: self.target_ciphertext.clone(),
-            nonce: self.target_nonce.clone(),
+    pub fn target(&self) -> SealedRef<'_> {
+        SealedRef {
+            ciphertext: &self.target_ciphertext,
+            nonce: &self.target_nonce,
         }
     }
 
     /// The sealed token: Slack's bot token or the webhook's signing secret.
     #[must_use]
-    pub fn token(&self) -> Option<Sealed> {
+    pub fn token(&self) -> Option<SealedRef<'_>> {
         match (&self.token_ciphertext, &self.token_nonce) {
-            (Some(ciphertext), Some(nonce)) => Some(Sealed {
-                ciphertext: ciphertext.clone(),
-                nonce: nonce.clone(),
-            }),
+            (Some(ciphertext), Some(nonce)) => Some(SealedRef { ciphertext, nonce }),
             _ => None,
         }
     }
@@ -612,16 +609,15 @@ impl SealedConnection {
     /// expiry it is treated as gone even before the sweep clears it, so the
     /// overlap ends when the owner was told it would.
     #[must_use]
-    pub fn prior_token(&self, now: DateTime<Utc>) -> Option<Sealed> {
+    pub fn prior_token(&self, now: DateTime<Utc>) -> Option<SealedRef<'_>> {
         match (
             &self.prior_token_ciphertext,
             &self.prior_token_nonce,
             self.prior_token_expires_at,
         ) {
-            (Some(ciphertext), Some(nonce), Some(until)) if until > now => Some(Sealed {
-                ciphertext: ciphertext.clone(),
-                nonce: nonce.clone(),
-            }),
+            (Some(ciphertext), Some(nonce), Some(until)) if until > now => {
+                Some(SealedRef { ciphertext, nonce })
+            }
             _ => None,
         }
     }
@@ -870,10 +866,10 @@ impl std::fmt::Debug for Uninstall {
 impl Uninstall {
     /// The sealed bot token the vendor's uninstall is asked with.
     #[must_use]
-    pub fn token(&self) -> Sealed {
-        Sealed {
-            ciphertext: self.token_ciphertext.clone(),
-            nonce: self.token_nonce.clone(),
+    pub fn token(&self) -> SealedRef<'_> {
+        SealedRef {
+            ciphertext: &self.token_ciphertext,
+            nonce: &self.token_nonce,
         }
     }
 }
@@ -900,7 +896,7 @@ pub async fn file_uninstall<B: Binding>(
             external_workspace_id: &connection.external_workspace_id,
             key_version: connection.key_version,
             wrapped_dek: &connection.wrapped_dek,
-            token: &token,
+            token,
             shard_key: connection.shard_key,
         },
     )
@@ -931,7 +927,7 @@ pub async fn file_uninstall_for<B: Binding>(
             external_workspace_id: refused.external_workspace_id,
             key_version: refused.key_version,
             wrapped_dek: refused.wrapped_dek,
-            token,
+            token: token.borrow(),
             shard_key: telmoni_shared::derive_shard_key(refused.organization_id),
         },
     )
@@ -948,7 +944,7 @@ struct UninstallRow<'a> {
     external_workspace_id: &'a str,
     key_version: i16,
     wrapped_dek: &'a [u8],
-    token: &'a Sealed,
+    token: SealedRef<'a>,
     shard_key: Uuid,
 }
 
@@ -971,8 +967,8 @@ async fn insert_uninstall<B: Binding>(
     .bind(row.external_workspace_id)
     .bind(row.key_version)
     .bind(row.wrapped_dek)
-    .bind(&row.token.ciphertext)
-    .bind(&row.token.nonce)
+    .bind(row.token.ciphertext)
+    .bind(row.token.nonce)
     .bind(row.shard_key)
     .execute(tx.conn())
     .await?;
@@ -982,8 +978,8 @@ async fn insert_uninstall<B: Binding>(
         external_workspace_id: row.external_workspace_id.to_owned(),
         key_version: row.key_version,
         wrapped_dek: row.wrapped_dek.to_vec(),
-        token_ciphertext: row.token.ciphertext.clone(),
-        token_nonce: row.token.nonce.clone(),
+        token_ciphertext: row.token.ciphertext.to_vec(),
+        token_nonce: row.token.nonce.to_vec(),
         attempts: 0,
     })
 }
@@ -1187,7 +1183,7 @@ pub async fn reseal_webhook_secret(
     tx: &mut Scoped<'_, ProjectAndOrganization>,
     project_id: &ProjectId,
     id: Uuid,
-    replacing: &Sealed,
+    replacing: SealedRef<'_>,
     token: &Sealed,
     keep_prior_hours: i32,
 ) -> sqlx::Result<Option<ConnectionSummary>> {
@@ -1206,10 +1202,10 @@ pub async fn reseal_webhook_secret(
     .bind(id)
     .bind(project_id)
     .bind(Provider::Webhook)
-    .bind(&replacing.ciphertext)
+    .bind(replacing.ciphertext)
     .bind(&token.ciphertext)
     .bind(&token.nonce)
-    .bind(&replacing.nonce)
+    .bind(replacing.nonce)
     .bind(keep_prior_hours)
     .bind(ConnectionStatus::Active)
     .fetch_optional(tx.conn())

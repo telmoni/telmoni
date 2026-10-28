@@ -66,6 +66,26 @@ pub struct Sealed {
     pub nonce: Vec<u8>,
 }
 
+/// A sealed field as a row holds it, borrowed to open.
+#[derive(Clone, Copy)]
+pub struct SealedRef<'a> {
+    /// The field, encrypted, with the tag appended.
+    pub ciphertext: &'a [u8],
+    /// The 96-bit nonce this field was sealed under.
+    pub nonce: &'a [u8],
+}
+
+impl Sealed {
+    /// The field borrowed, to open.
+    #[must_use]
+    pub fn borrow(&self) -> SealedRef<'_> {
+        SealedRef {
+            ciphertext: &self.ciphertext,
+            nonce: &self.nonce,
+        }
+    }
+}
+
 impl std::fmt::Debug for Sealed {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Sealed")
@@ -146,13 +166,18 @@ impl Vault {
     }
 
     /// Open a row's ciphertext under its `dek` back into the secret it holds.
-    pub fn open(&self, dek: &Dek, sealed: &Sealed, aad: &[u8]) -> Result<Redacted, TelmoniError> {
+    pub fn open(
+        &self,
+        dek: &Dek,
+        sealed: SealedRef<'_>,
+        aad: &[u8],
+    ) -> Result<Redacted, TelmoniError> {
         let nonce: [u8; NONCE_LEN] = sealed
             .nonce
-            .as_slice()
             .try_into()
             .map_err(|_| TelmoniError::Internal("vault: nonce is not 96 bits".into()))?;
-        let mut in_out = sealed.ciphertext.clone();
+        // The one copy: the cipher opens the bytes in place.
+        let mut in_out = sealed.ciphertext.to_vec();
         let len = Self::cipher(dek)?
             .open_in_place(
                 Nonce::assume_unique_for_key(nonce),
@@ -170,6 +195,26 @@ impl Vault {
     }
 }
 
+/// One row's data key, unwrapped, with the row's id as the associated data
+/// every field of the row is sealed under: what [`Kek::open_row`] answers.
+pub struct OpenedRow<'v> {
+    vault: &'v Vault,
+    dek: Dek,
+    aad: [u8; 16],
+}
+
+impl OpenedRow<'_> {
+    /// One of the row's fields, in the clear.
+    pub fn open(&self, sealed: SealedRef<'_>) -> Result<Redacted, TelmoniError> {
+        self.vault.open(&self.dek, sealed, &self.aad)
+    }
+
+    /// A field sealed under the row's key, to be written beside the rest.
+    pub fn seal(&self, secret: &Redacted) -> Result<Sealed, TelmoniError> {
+        self.vault.seal(&self.dek, secret, &self.aad)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -184,7 +229,7 @@ mod tests {
             !sealed.ciphertext.windows(5).any(|w| w == b"hooks"),
             "the ciphertext carries the plaintext"
         );
-        let opened = v.open(&dek, &sealed, b"row-1").unwrap();
+        let opened = v.open(&dek, sealed.borrow(), b"row-1").unwrap();
         assert_eq!(opened.expose(), secret.expose());
     }
 
@@ -194,7 +239,10 @@ mod tests {
         let sealed = v
             .seal(&v.new_dek().unwrap(), &Redacted::from("secret"), b"row-1")
             .unwrap();
-        assert!(v.open(&v.new_dek().unwrap(), &sealed, b"row-1").is_err());
+        assert!(
+            v.open(&v.new_dek().unwrap(), sealed.borrow(), b"row-1")
+                .is_err()
+        );
     }
 
     /// The property the AAD buys: a ciphertext moved between rows fails.
@@ -203,7 +251,7 @@ mod tests {
         let v = Vault::new();
         let dek = v.new_dek().unwrap();
         let sealed = v.seal(&dek, &Redacted::from("secret"), b"row-1").unwrap();
-        assert!(v.open(&dek, &sealed, b"row-2").is_err());
+        assert!(v.open(&dek, sealed.borrow(), b"row-2").is_err());
     }
 
     #[test]
