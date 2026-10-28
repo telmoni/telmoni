@@ -57,6 +57,7 @@ use telmoni_shared::{
 
 use super::answer::Declined;
 use super::handover::{OfferAnswer, OfferRequest, Offered, offer_expires_at};
+use crate::mailer::AuthMail;
 use crate::{
     AppState,
     db::{
@@ -327,7 +328,13 @@ pub async fn cancel(
     if let (Some(to), Some(owner), Some(standing)) = (&holder_email, owner, standing)
         && let Err(e) = state
             .mailer
-            .send_project_offer_withdrawn(to.as_str(), &owner.display(), &standing.name)
+            .send_mail(
+                to.as_str(),
+                AuthMail::ProjectOfferWithdrawn {
+                    owner: &owner.display(),
+                    project: &standing.name,
+                },
+            )
             .await
     {
         // The withdrawal stands without the mail: their console no longer
@@ -382,7 +389,13 @@ pub async fn decline(
     if let (Some(owner), Some(admin), Some(standing)) = (owner, admin, standing)
         && let Err(e) = state
             .mailer
-            .send_project_declined(owner.email.as_str(), &admin.display(), &standing.name)
+            .send_mail(
+                owner.email.as_str(),
+                AuthMail::ProjectDeclined {
+                    admin: &admin.display(),
+                    project: &standing.name,
+                },
+            )
             .await
     {
         // The decline stands without the mail: the owner's roster no longer
@@ -915,11 +928,13 @@ pub async fn accept(
     if let Some(previous_contact) = previous_contact
         && let Err(e) = state
             .mailer
-            .send_project_accepted(
+            .send_mail(
                 previous_contact.email.as_str(),
-                &new_owner,
-                &standing.name,
-                &destination_label,
+                AuthMail::ProjectAccepted {
+                    new_owner: &new_owner,
+                    project: &standing.name,
+                    organization: &destination_label,
+                },
             )
             .await
     {

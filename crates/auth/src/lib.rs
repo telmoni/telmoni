@@ -248,7 +248,7 @@ pub struct AppState {
     /// policy it signs people in under.
     pub external: Option<external::External>,
     /// Outbound mail: the copy, over whatever transport the binary supplied.
-    pub mailer: Arc<dyn mailer::Mailer>,
+    pub mailer: Arc<mailer::ComposingMailer>,
     /// Idempotency cache for recent code exchange requests.
     pub exchange_cache: ExchangeCache,
     /// The modules beside this one that hold rows of its tenants.
@@ -260,7 +260,7 @@ impl AppState {
     /// environment or the binary's own, `siblings` as it links them.
     #[must_use]
     pub fn new(config: Config, db: PgPool, providers: Providers, siblings: Siblings) -> Self {
-        let mailer: Arc<dyn mailer::Mailer> = Arc::new(
+        let mailer = Arc::new(
             mailer::ComposingMailer::new(providers.mail)
                 .with_support_email(config.support_email.clone()),
         );

@@ -21,6 +21,7 @@ use telmoni_shared::{
 use uuid::Uuid;
 
 use super::authorize_organization;
+use crate::mailer::AuthMail;
 use crate::{
     AppState,
     db::{
@@ -241,13 +242,15 @@ pub async fn give_seat(
             .page(&format!("/{organization}/{project_id}"), &[]);
         if let Err(e) = state
             .mailer
-            .send_project_seat(
+            .send_mail(
                 person.email.as_str(),
-                &giver,
-                &project.name,
-                &home,
-                role,
-                &link,
+                AuthMail::ProjectSeat {
+                    giver: &giver,
+                    project: &project.name,
+                    organization: &home,
+                    role,
+                    link: &link,
+                },
             )
             .await
         {

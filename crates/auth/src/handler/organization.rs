@@ -26,6 +26,7 @@ use telmoni_shared::{
 };
 
 use super::authorize_organization;
+use crate::mailer::AuthMail;
 use crate::{
     AppState,
     db::{
@@ -92,7 +93,13 @@ pub async fn request_organization_deletion_code(
 
     if let Err(e) = state
         .mailer
-        .send_organization_deletion_code(person.email.as_str(), &code, &name)
+        .send_mail(
+            person.email.as_str(),
+            AuthMail::OrganizationDeletionCode {
+                code: &code,
+                organization: &name,
+            },
+        )
         .await
     {
         tracing::error!(organization_id = %organization, error = %e,

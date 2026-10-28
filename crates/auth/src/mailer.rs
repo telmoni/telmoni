@@ -21,7 +21,6 @@
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use telmoni_shared::mail::{Mail, MailSender};
 use telmoni_shared::{OrganizationRole, Role};
 
@@ -39,140 +38,98 @@ pub enum InvitedTo {
 }
 
 /// The mail auth sends directly.
-#[async_trait]
-pub trait Mailer: Send + Sync {
+/// One of auth's mails, each part named where it is sent: two of the same
+/// type cannot trade places unnoticed.
+#[derive(Debug, Clone, Copy)]
+#[expect(
+    missing_docs,
+    reason = "each field is the part of the mail it names, which its variant's doc reads"
+)]
+pub enum AuthMail<'a> {
     /// Send the code that authorizes deleting ONE organization, which the mail
     /// names: the irreversible cascade. Never logged.
-    async fn send_organization_deletion_code(
-        &self,
-        to: &str,
-        code: &str,
-        organization: &str,
-    ) -> Result<(), MailError>;
-
+    OrganizationDeletionCode {
+        code: &'a str,
+        organization: &'a str,
+    },
     /// Send the code that authorizes deleting the person's account. Never
     /// logged.
-    async fn send_account_deletion_code(&self, to: &str, code: &str) -> Result<(), MailError>;
-
+    AccountDeletionCode { code: &'a str },
     /// Send an email-change confirmation code to the account's CURRENT address.
-    async fn send_email_change_code(
-        &self,
-        to: &str,
-        code: &str,
-        new_email: &str,
-    ) -> Result<(), MailError>;
-
+    EmailChangeCode { code: &'a str, new_email: &'a str },
     /// Invite somebody to an organization or one of its projects, at the role
     /// `level` names on it.
-    async fn send_member_invite(
-        &self,
-        to: &str,
-        inviter: &str,
-        organization: &str,
+    MemberInvite {
+        inviter: &'a str,
+        organization: &'a str,
         level: InvitedTo,
-        link: &str,
-    ) -> Result<(), MailError>;
-
+        link: &'a str,
+    },
     /// Tell a member of the organization they were given a seat on one of its
     /// projects: by whom, at what role, and the way to it.
-    async fn send_project_seat(
-        &self,
-        to: &str,
-        giver: &str,
-        project: &str,
-        organization: &str,
+    ProjectSeat {
+        giver: &'a str,
+        project: &'a str,
+        organization: &'a str,
         role: Role,
-        link: &str,
-    ) -> Result<(), MailError>;
-
+        link: &'a str,
+    },
     /// Tell an admin their organization's owner has offered them the
     /// organization. Nothing changes until they accept in the console.
-    async fn send_ownership_offer(
-        &self,
-        to: &str,
-        owner: &str,
-        organization: &str,
-        link: &str,
-    ) -> Result<(), MailError>;
-
+    OwnershipOffer {
+        owner: &'a str,
+        organization: &'a str,
+        link: &'a str,
+    },
     /// Tell an admin the offer they held is gone: its owner withdrew it, or
     /// offered the organization to somebody else. Nothing changed for them.
-    async fn send_ownership_offer_withdrawn(
-        &self,
-        to: &str,
-        owner: &str,
-        organization: &str,
-    ) -> Result<(), MailError>;
-
+    OwnershipOfferWithdrawn {
+        owner: &'a str,
+        organization: &'a str,
+    },
     /// Tell the previous owner the admin they offered the organization to has
     /// accepted it. The console tells them only if a tab is open.
-    async fn send_ownership_accepted(
-        &self,
-        to: &str,
-        new_owner: &str,
-        organization: &str,
-    ) -> Result<(), MailError>;
-
+    OwnershipAccepted {
+        new_owner: &'a str,
+        organization: &'a str,
+    },
     /// Tell the owner the admin they offered the organization to has declined
     /// it. Nothing changed.
-    async fn send_ownership_declined(
-        &self,
-        to: &str,
-        admin: &str,
-        organization: &str,
-    ) -> Result<(), MailError>;
-
+    OwnershipDeclined {
+        admin: &'a str,
+        organization: &'a str,
+    },
     /// Tell a project admin its owner has offered them the project, which
     /// would move into an organization of theirs. Nothing changes until they
     /// accept in the console.
-    async fn send_project_offer(
-        &self,
-        to: &str,
-        owner: &str,
-        project: &str,
-        organization: &str,
-        link: &str,
-    ) -> Result<(), MailError>;
-
+    ProjectOffer {
+        owner: &'a str,
+        project: &'a str,
+        organization: &'a str,
+        link: &'a str,
+    },
     /// Tell an admin the offer of a project they held is gone: its owner
     /// withdrew it, or offered the project to somebody else.
-    async fn send_project_offer_withdrawn(
-        &self,
-        to: &str,
-        owner: &str,
-        project: &str,
-    ) -> Result<(), MailError>;
-
+    ProjectOfferWithdrawn { owner: &'a str, project: &'a str },
     /// Tell the previous owner the admin they offered a project to has taken
     /// it, and into which organization.
-    async fn send_project_accepted(
-        &self,
-        to: &str,
-        new_owner: &str,
-        project: &str,
-        organization: &str,
-    ) -> Result<(), MailError>;
-
+    ProjectAccepted {
+        new_owner: &'a str,
+        project: &'a str,
+        organization: &'a str,
+    },
     /// Tell the owner the admin they offered a project to has declined it.
     /// Nothing changed.
-    async fn send_project_declined(
-        &self,
-        to: &str,
-        admin: &str,
-        project: &str,
-    ) -> Result<(), MailError>;
-
+    ProjectDeclined { admin: &'a str, project: &'a str },
     /// The built-in provider's first mail: the link that proves a new
     /// account's address is the person's.
-    async fn send_email_verification(&self, to: &str, link: &str) -> Result<(), MailError>;
-
+    EmailVerification { link: &'a str },
     /// The built-in provider's reset: the link a new password is chosen from.
-    async fn send_password_reset(&self, to: &str, link: &str) -> Result<(), MailError>;
-
+    PasswordReset { link: &'a str },
     /// The code the built-in provider mails to the NEW address of a change,
     /// which proves that address is reachable; [`Mailer::send_email_change_code`]
     /// goes to the current one.
-    async fn send_new_address_code(&self, to: &str, code: &str) -> Result<(), MailError>;
+    NewAddressCode { code: &'a str },
 }
 
 /// Writes auth's mails and hands each to a transport.
@@ -243,8 +200,98 @@ fn what_the_level_allows(level: InvitedTo) -> &'static str {
     }
 }
 
-#[async_trait]
-impl Mailer for ComposingMailer {
+impl ComposingMailer {
+    /// Compose `mail` and send it to `to` over the transport.
+    ///
+    /// # Errors
+    ///
+    /// The transport's refusal.
+    pub async fn send_mail(&self, to: &str, mail: AuthMail<'_>) -> Result<(), MailError> {
+        match mail {
+            AuthMail::OrganizationDeletionCode { code, organization } => {
+                self.send_organization_deletion_code(to, code, organization)
+                    .await
+            }
+            AuthMail::AccountDeletionCode { code } => {
+                self.send_account_deletion_code(to, code).await
+            }
+            AuthMail::EmailChangeCode { code, new_email } => {
+                self.send_email_change_code(to, code, new_email).await
+            }
+            AuthMail::MemberInvite {
+                inviter,
+                organization,
+                level,
+                link,
+            } => {
+                self.send_member_invite(to, inviter, organization, level, link)
+                    .await
+            }
+            AuthMail::ProjectSeat {
+                giver,
+                project,
+                organization,
+                role,
+                link,
+            } => {
+                self.send_project_seat(to, giver, project, organization, role, link)
+                    .await
+            }
+            AuthMail::OwnershipOffer {
+                owner,
+                organization,
+                link,
+            } => {
+                self.send_ownership_offer(to, owner, organization, link)
+                    .await
+            }
+            AuthMail::OwnershipOfferWithdrawn {
+                owner,
+                organization,
+            } => {
+                self.send_ownership_offer_withdrawn(to, owner, organization)
+                    .await
+            }
+            AuthMail::OwnershipAccepted {
+                new_owner,
+                organization,
+            } => {
+                self.send_ownership_accepted(to, new_owner, organization)
+                    .await
+            }
+            AuthMail::OwnershipDeclined {
+                admin,
+                organization,
+            } => self.send_ownership_declined(to, admin, organization).await,
+            AuthMail::ProjectOffer {
+                owner,
+                project,
+                organization,
+                link,
+            } => {
+                self.send_project_offer(to, owner, project, organization, link)
+                    .await
+            }
+            AuthMail::ProjectOfferWithdrawn { owner, project } => {
+                self.send_project_offer_withdrawn(to, owner, project).await
+            }
+            AuthMail::ProjectAccepted {
+                new_owner,
+                project,
+                organization,
+            } => {
+                self.send_project_accepted(to, new_owner, project, organization)
+                    .await
+            }
+            AuthMail::ProjectDeclined { admin, project } => {
+                self.send_project_declined(to, admin, project).await
+            }
+            AuthMail::EmailVerification { link } => self.send_email_verification(to, link).await,
+            AuthMail::PasswordReset { link } => self.send_password_reset(to, link).await,
+            AuthMail::NewAddressCode { code } => self.send_new_address_code(to, code).await,
+        }
+    }
+
     async fn send_organization_deletion_code(
         &self,
         to: &str,
@@ -645,7 +692,7 @@ impl Mailer for ComposingMailer {
 
 #[cfg(test)]
 mod tests {
-    use super::{ComposingMailer, InvitedTo, Mailer};
+    use super::{ComposingMailer, InvitedTo};
     use std::sync::{Arc, Mutex};
     use telmoni_shared::mail::{Mail, MailError, MailSender};
     use telmoni_shared::{OrganizationRole, Role};

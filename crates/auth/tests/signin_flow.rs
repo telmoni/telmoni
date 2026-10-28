@@ -82,9 +82,9 @@ fn app_configured(pool: PgPool, setup: Setup) -> (Router, Arc<ScriptedProvider>)
         Issuer::new(db.clone(), APP_URL, true)
             .with_default_organization(setup.default_organization),
     );
-    let mailer: Arc<dyn telmoni_auth::mailer::Mailer> = Arc::new(
-        telmoni_auth::mailer::ComposingMailer::new(Arc::new(telmoni_shared::mail::NoopSender)),
-    );
+    let mailer = Arc::new(telmoni_auth::mailer::ComposingMailer::new(Arc::new(
+        telmoni_shared::mail::NoopSender,
+    )));
     let password = setup.login_form.then(|| {
         Arc::new(PasswordProvider::new(
             db.clone(),

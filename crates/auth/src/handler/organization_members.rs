@@ -23,6 +23,7 @@ use telmoni_shared::{
 };
 
 use super::authorize_organization;
+use crate::mailer::AuthMail;
 use crate::{
     AppState,
     db::{AuthLane, identities, locks, members, organization_members, organizations},
@@ -360,12 +361,14 @@ pub async fn create_organization_invite(
     let inviter = inviter.map_or_else(|| label.clone(), |c| c.display());
     if let Err(e) = state
         .mailer
-        .send_member_invite(
+        .send_mail(
             email.as_str(),
-            &inviter,
-            &label,
-            crate::mailer::InvitedTo::Organization(role),
-            &link,
+            AuthMail::MemberInvite {
+                inviter: &inviter,
+                organization: &label,
+                level: crate::mailer::InvitedTo::Organization(role),
+                link: &link,
+            },
         )
         .await
     {

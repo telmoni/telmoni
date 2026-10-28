@@ -28,7 +28,7 @@ use telmoni_auth::db::confirmation_codes::CODE_DIGITS;
 use telmoni_auth::db::{AuthLane, refresh_tokens};
 use telmoni_auth::default_organization::DefaultOrganization;
 use telmoni_auth::issuer::Issuer;
-use telmoni_auth::mailer::{ComposingMailer, Mailer};
+use telmoni_auth::mailer::ComposingMailer;
 use telmoni_auth::password::PasswordProvider;
 use telmoni_auth::test_provider::{full_router, test_issuer_verifying};
 use telmoni_auth::{AppState, Config};
@@ -140,7 +140,7 @@ fn password_provider(
 ) -> (Arc<PasswordProvider>, Arc<telmoni_auth::issuer::Issuer>) {
     let db = service_pool(pool, ServiceRole::Auth);
     let issuer = test_issuer_verifying(db.clone(), policy.verify_email);
-    let mailer: Arc<dyn Mailer> = Arc::new(ComposingMailer::new(sender));
+    let mailer: Arc<ComposingMailer> = Arc::new(ComposingMailer::new(sender));
     let provider = Arc::new(PasswordProvider::new(
         db,
         Arc::clone(&issuer),
@@ -1132,7 +1132,7 @@ async fn an_account_the_form_creates_joins_the_default_organization(pool: PgPool
     };
     let issuer =
         Arc::new(Issuer::new(db.clone(), APP_URL, false).with_default_organization(Some(landing)));
-    let mailer: Arc<dyn Mailer> = Arc::new(ComposingMailer::new(Arc::new(Outbox::default())));
+    let mailer: Arc<ComposingMailer> = Arc::new(ComposingMailer::new(Arc::new(Outbox::default())));
     let provider = PasswordProvider::new(db, issuer, mailer, true, Vec::new());
 
     provider

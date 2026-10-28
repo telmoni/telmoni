@@ -30,6 +30,7 @@ use telmoni_shared::{
 };
 
 use crate::db::invites::InviteTarget;
+use crate::mailer::AuthMail;
 use crate::{
     AppState,
     db::{AuthLane, identities, invites, locks, members, organization_members, organizations},
@@ -270,12 +271,14 @@ pub async fn create_invite(
     let inviter = inviter.map_or_else(|| label.clone(), |c| c.display());
     if let Err(e) = state
         .mailer
-        .send_member_invite(
+        .send_mail(
             email.as_str(),
-            &inviter,
-            &label,
-            crate::mailer::InvitedTo::Project(role),
-            &link,
+            AuthMail::MemberInvite {
+                inviter: &inviter,
+                organization: &label,
+                level: crate::mailer::InvitedTo::Project(role),
+                link: &link,
+            },
         )
         .await
     {

@@ -48,6 +48,7 @@ use telmoni_shared::{
 use super::answer::Declined;
 use super::authorize_organization;
 use super::handover::{OfferAnswer, OfferRequest, Offered, offer_expires_at};
+use crate::mailer::AuthMail;
 use crate::{
     AppState,
     db::{
@@ -364,7 +365,13 @@ pub async fn cancel(
     if let (Some(to), Some(owner), Some(name)) = (&holder_email, owner, name)
         && let Err(e) = state
             .mailer
-            .send_ownership_offer_withdrawn(to.as_str(), &owner.display(), &name)
+            .send_mail(
+                to.as_str(),
+                AuthMail::OwnershipOfferWithdrawn {
+                    owner: &owner.display(),
+                    organization: &name,
+                },
+            )
             .await
     {
         // The withdrawal stands without the mail: their console no longer
@@ -418,7 +425,13 @@ pub async fn decline(
     if let (Some(owner), Some(admin), Some(name)) = (owner, admin, name)
         && let Err(e) = state
             .mailer
-            .send_ownership_declined(owner.email.as_str(), &admin.display(), &name)
+            .send_mail(
+                owner.email.as_str(),
+                AuthMail::OwnershipDeclined {
+                    admin: &admin.display(),
+                    organization: &name,
+                },
+            )
             .await
     {
         // The decline stands without the mail: the owner's roster no longer
@@ -566,7 +579,13 @@ pub async fn accept(
     if let (Some(previous), Some(new_owner), Some(name)) = (previous_contact, new_owner, name)
         && let Err(e) = state
             .mailer
-            .send_ownership_accepted(previous.email.as_str(), &new_owner.display(), &name)
+            .send_mail(
+                previous.email.as_str(),
+                AuthMail::OwnershipAccepted {
+                    new_owner: &new_owner.display(),
+                    organization: &name,
+                },
+            )
             .await
     {
         // The transfer stands without the mail: the previous owner's console

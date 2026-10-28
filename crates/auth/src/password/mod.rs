@@ -40,7 +40,8 @@ use crate::db::{
 };
 use crate::default_organization;
 use crate::issuer::{Issuer, secret};
-use crate::mailer::Mailer;
+use crate::mailer::AuthMail;
+use crate::mailer::ComposingMailer;
 use crate::oidc::with_query;
 use crate::provider::{ConfirmedEmail, EmailChangeChallenge, PasswordResetLink};
 
@@ -66,7 +67,7 @@ pub enum SignedUp {
 pub struct PasswordProvider {
     db: PgPool,
     issuer: Arc<Issuer>,
-    mailer: Arc<dyn Mailer>,
+    mailer: Arc<ComposingMailer>,
     /// Whether anybody may create a password account (`AUTH_DISABLE_SIGNUP`
     /// unset or `false`). Off, an invited address alone may.
     allow_sign_up: bool,
@@ -82,7 +83,7 @@ impl PasswordProvider {
     pub fn new(
         db: PgPool,
         issuer: Arc<Issuer>,
-        mailer: Arc<dyn Mailer>,
+        mailer: Arc<ComposingMailer>,
         allow_sign_up: bool,
         sso_domains: Vec<String>,
     ) -> Self {
@@ -273,7 +274,7 @@ impl PasswordProvider {
             &[("uid", user_id.as_str()), ("token", token)],
         );
         self.mailer
-            .send_email_verification(email.as_str(), &link)
+            .send_mail(email.as_str(), AuthMail::EmailVerification { link: &link })
             .await
             .map_err(|e| {
                 tracing::error!(user_id = %user_id, error = %e,
@@ -571,7 +572,7 @@ impl PasswordProvider {
             .into());
         }
         self.mailer
-            .send_new_address_code(new_email.as_str(), &code)
+            .send_mail(new_email.as_str(), AuthMail::NewAddressCode { code: &code })
             .await
             .map_err(|e| {
                 tracing::error!(user_id = %user_id, error = %e,
@@ -642,7 +643,7 @@ impl PasswordProvider {
 struct ResetSender {
     db: PgPool,
     app_url: String,
-    mailer: Arc<dyn Mailer>,
+    mailer: Arc<ComposingMailer>,
 }
 
 impl ResetSender {
@@ -680,7 +681,7 @@ impl ResetSender {
             &[("uid", user_id.as_str()), ("token", &token)],
         );
         self.mailer
-            .send_password_reset(email.as_str(), &url)
+            .send_mail(email.as_str(), AuthMail::PasswordReset { link: &url })
             .await
             .map_err(|e| {
                 tracing::error!(user_id = %user_id, error = %e,

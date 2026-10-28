@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use telmoni_shared::Email;
 use telmoni_shared::{OrganizationId, ProjectId, UserId};
 
+use crate::mailer::AuthMail;
 use crate::{AppState, db::offers::OFFER_TTL_DAYS, mailer::MailError};
 
 /// Body of `POST /internal/v1/organization/owner-transfer` and of
@@ -101,7 +102,14 @@ impl Offered<'_> {
             Offered::Organization { name, .. } => {
                 state
                     .mailer
-                    .send_ownership_offer(to, owner, name, link)
+                    .send_mail(
+                        to,
+                        AuthMail::OwnershipOffer {
+                            owner,
+                            organization: name,
+                            link,
+                        },
+                    )
                     .await
             }
             Offered::Project {
@@ -109,7 +117,15 @@ impl Offered<'_> {
             } => {
                 state
                     .mailer
-                    .send_project_offer(to, owner, name, organization, link)
+                    .send_mail(
+                        to,
+                        AuthMail::ProjectOffer {
+                            owner,
+                            project: name,
+                            organization,
+                            link,
+                        },
+                    )
                     .await
             }
         }
@@ -125,13 +141,25 @@ impl Offered<'_> {
             Offered::Organization { name, .. } => {
                 state
                     .mailer
-                    .send_ownership_offer_withdrawn(to, owner, name)
+                    .send_mail(
+                        to,
+                        AuthMail::OwnershipOfferWithdrawn {
+                            owner,
+                            organization: name,
+                        },
+                    )
                     .await
             }
             Offered::Project { name, .. } => {
                 state
                     .mailer
-                    .send_project_offer_withdrawn(to, owner, name)
+                    .send_mail(
+                        to,
+                        AuthMail::ProjectOfferWithdrawn {
+                            owner,
+                            project: name,
+                        },
+                    )
                     .await
             }
         }

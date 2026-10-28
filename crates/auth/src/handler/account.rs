@@ -35,6 +35,7 @@ use telmoni_shared::{
     TelmoniResourceKind, TenantError,
 };
 
+use crate::mailer::AuthMail;
 use crate::{
     AppState,
     db::{
@@ -214,7 +215,13 @@ pub async fn request_email_change(
 
     if let Err(e) = state
         .mailer
-        .send_email_change_code(person.email.as_str(), &code, new_email.as_str())
+        .send_mail(
+            person.email.as_str(),
+            AuthMail::EmailChangeCode {
+                code: &code,
+                new_email: new_email.as_str(),
+            },
+        )
         .await
     {
         tracing::error!(user_id = %user_id, error = %e,
@@ -494,7 +501,10 @@ pub async fn request_account_deletion_code(
 
     if let Err(e) = state
         .mailer
-        .send_account_deletion_code(person.email.as_str(), &code)
+        .send_mail(
+            person.email.as_str(),
+            AuthMail::AccountDeletionCode { code: &code },
+        )
         .await
     {
         tracing::error!(user_id = %user_id, error = %e,
