@@ -17,6 +17,7 @@ use serde_json::json;
 use axum::http::HeaderMap;
 use uuid::Uuid;
 
+use telmoni_shared::OrganizationAction;
 use telmoni_shared::db::tenant_session::{PersonAndOrganization, Scoped, organization_scope};
 use telmoni_shared::error::TelmoniError;
 use telmoni_shared::extract::{Json, Query};
@@ -25,6 +26,7 @@ use telmoni_shared::rbac::{Resource, Verb};
 use telmoni_shared::types::CONNECTION_BYTES;
 use telmoni_shared::{AuditAction, AuthError, AuthzError, OrganizationId, TelmoniResourceKind};
 
+use super::authorize_organization;
 use crate::AppState;
 use crate::audit_export::{self, ExportFormat, MAX_KEPT, MAX_UNFINISHED};
 use crate::db::audit::{self, AuditQuery, AuditRow};
@@ -110,12 +112,7 @@ pub async fn list_organization_audit(
     let mut tx = organization_scope(&state.db, &organization_id).await?;
     let role = super::organization_role_or_forbidden(&mut tx, &organization_id, &principal.user_id)
         .await?;
-    if !role.can_view_rolled_up_audit() {
-        return Err(AuthzError::Forbidden(
-            "only an organization owner or admin reads its whole audit log".to_string(),
-        )
-        .into());
-    }
+    authorize_organization(role, OrganizationAction::ReadWholeAudit)?;
     let limit = params.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
     let events = audit::list(
         &mut tx,
@@ -192,13 +189,7 @@ async fn refuse_unless_exporter(
 ) -> Result<(), TelmoniError> {
     let role =
         super::organization_role_or_forbidden(tx, organization_id, &principal.user_id).await?;
-    if !role.can_view_rolled_up_audit() {
-        return Err(AuthzError::Forbidden(
-            "only an organization owner or admin exports its audit log".to_string(),
-        )
-        .into());
-    }
-    Ok(())
+    authorize_organization(role, OrganizationAction::ReadWholeAudit)
 }
 
 /// `POST /internal/v1/audit/organizations/{organization_id}/exports` — queue an

@@ -30,7 +30,7 @@ pub enum Audience {
     /// A role that may read the audit log: a project's own chain.
     Audit,
     /// The organization's owner and its admins, as the console reads it
-    /// (`OrganizationRole::can_view_rolled_up_audit`): its whole chain and
+    /// (`OrganizationAction::ReadWholeAudit`): its whole chain and
     /// its own feed.
     OrganizationAdmin,
 }

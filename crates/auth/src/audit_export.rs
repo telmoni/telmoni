@@ -23,7 +23,9 @@ use telmoni_shared::csv;
 use telmoni_shared::db::tenant_session::{
     PersonAndOrganization, Scoped, maintenance_scope, organization_scope,
 };
-use telmoni_shared::{AuditAction, OrganizationId, TelmoniError, TelmoniResourceKind, UserId};
+use telmoni_shared::{
+    AuditAction, OrganizationAction, OrganizationId, TelmoniError, TelmoniResourceKind, UserId,
+};
 
 use crate::AppState;
 use crate::db::AuthLane;
@@ -241,7 +243,7 @@ async fn still_exporter(
     Ok(
         organization_members::role_on_organization(tx, organization_id, user_id)
             .await?
-            .is_some_and(|role| role.can_view_rolled_up_audit()),
+            .is_some_and(|role| role.may(OrganizationAction::ReadWholeAudit)),
     )
 }
 

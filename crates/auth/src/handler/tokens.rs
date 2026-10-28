@@ -14,11 +14,10 @@ use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
 use telmoni_shared::db::tenant_session::maintenance_scope;
 use telmoni_shared::extract::Json;
 use telmoni_shared::person_token::Principal;
-use telmoni_shared::rbac::{Resource, Verb, can};
+use telmoni_shared::rbac::{Resource, Verb};
 use telmoni_shared::types::{API_TOKEN_PREFIX, ApiKeyScope};
 use telmoni_shared::{
-    AuditAction, AuthError, AuthzError, Flag, ProjectId, Role, TelmoniError, TelmoniResourceKind,
-    TenantError, UserId,
+    AuditAction, AuthError, Flag, ProjectId, TelmoniError, TelmoniResourceKind, TenantError, UserId,
 };
 
 use crate::{
@@ -88,18 +87,7 @@ fn hint_of(raw_token: &str) -> &str {
         .unwrap_or_default()
 }
 
-/// Gate a token verb on the actor's **authoritative** role. ⚠ Without this a
-/// Member could mint a full-access token: the policy was defined and
-/// matrix-tested but never enforced on this path. The role is resolved in the
-/// same transaction as the write, so there is no check-then-act race.
-fn ensure_token_authz(role: Role, verb: Verb) -> Result<(), TelmoniError> {
-    if !can(role, verb, Resource::Token) {
-        return Err(AuthzError::Forbidden(format!("role {role} may not {verb} API tokens")).into());
-    }
-    Ok(())
-}
-
-/// [`ensure_token_authz`] on the role first read, then the project held in its organization
+/// The matrix on the role first read, then the project held in its organization
 /// with the role read again (`ActingProject::hold`): a key minted, rotated or revoked as the
 /// project moves would be the old organization's row, and recorded on its chain.
 async fn held<'a>(
@@ -108,7 +96,9 @@ async fn held<'a>(
     actor: &UserId,
     verb: Verb,
 ) -> Result<ActingProject<'a>, TelmoniError> {
-    ensure_token_authz(access.role, verb)?;
+    // ⚠ Without this a Member could mint a full-access token; the role is
+    // read in the write's own transaction, so there is no check-then-act race.
+    super::authorize(access.role, verb, Resource::Token)?;
     access.hold(project_id, actor, verb, Resource::Token).await
 }
 
@@ -143,7 +133,7 @@ pub async fn list_tokens(
     let actor = principal.user_id;
     let project_id = project_of(&headers)?;
     let mut access = acting_project(&state, &project_id, &actor).await?;
-    ensure_token_authz(access.role, Verb::Read)?;
+    super::authorize(access.role, Verb::Read, Resource::Token)?;
     let token_list = tokens::list(&mut access.tx, &project_id).await?;
     access.tx.commit().await?;
     Ok(Json(token_list))
@@ -535,17 +525,20 @@ mod tests {
                 .await
                 .expect("a member");
             assert!(
-                ensure_token_authz(member_role, verb).is_err(),
+                telmoni_shared::rbac::authorize(member_role, verb, Resource::Token).is_err(),
                 "user_member ({member_role}) must not {verb:?} tokens"
             );
             let admin_role = resolve(&pool, &project, "user_admin")
                 .await
                 .expect("an admin");
             assert!(
-                ensure_token_authz(admin_role, verb).is_ok(),
+                telmoni_shared::rbac::authorize(admin_role, verb, Resource::Token).is_ok(),
                 "user_admin ({admin_role}) can {verb:?} tokens"
             );
-            assert!(ensure_token_authz(Role::Owner, verb).is_ok());
+            assert!(
+                telmoni_shared::rbac::authorize(telmoni_shared::Role::Owner, verb, Resource::Token)
+                    .is_ok()
+            );
         }
 
         assert!(

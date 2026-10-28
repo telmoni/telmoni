@@ -12,14 +12,14 @@ use serde::Deserialize;
 use serde_json::json;
 use uuid::Uuid;
 
+use telmoni_shared::OrganizationAction;
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
 use telmoni_shared::db::tenant_session::maintenance_scope;
 use telmoni_shared::extract::Json;
 use telmoni_shared::person_token::Principal;
-use telmoni_shared::{
-    AuditAction, AuthError, AuthzError, OrganizationRole, TelmoniError, TelmoniResourceKind,
-};
+use telmoni_shared::{AuditAction, AuthError, OrganizationRole, TelmoniError, TelmoniResourceKind};
 
+use super::authorize_organization;
 use crate::{
     AppState,
     db::{AuthLane, identities, locks, members, organization_members, organizations},
@@ -70,12 +70,9 @@ pub async fn list_organization_members(
     let ActingOrganization { mut tx, role } =
         acting_organization(&state, &organization, &actor).await?;
 
-    if !role.can_view_org_members() {
+    if let Err(refused) = authorize_organization(role, OrganizationAction::ViewMembers) {
         tx.commit().await?;
-        return Err(AuthzError::Forbidden(
-            "insufficient permissions to view organization members".into(),
-        )
-        .into());
+        return Err(refused);
     }
 
     let rows = organization_members::list_for_organization(&mut tx, &organization).await?;
@@ -106,12 +103,9 @@ pub async fn update_organization_member_role(
     locks::lock_organization(&mut tx, &organization).await?;
     let caller_role = organization_role_or_forbidden(&mut tx, &organization, &actor).await?;
 
-    if !caller_role.can_manage_org_members() {
+    if let Err(refused) = authorize_organization(caller_role, OrganizationAction::ManageMembers) {
         tx.commit().await?;
-        return Err(AuthzError::Forbidden(
-            "only an organization owner or admin can change organization member roles".into(),
-        )
-        .into());
+        return Err(refused);
     }
     if organization_members::role_on_organization(&mut tx, &organization, &member_id).await?
         == Some(OrganizationRole::Owner)
@@ -181,12 +175,11 @@ pub async fn remove_organization_member(
         .into());
     }
 
-    if !leaving && !caller_role.can_manage_org_members() {
+    if !leaving
+        && let Err(refused) = authorize_organization(caller_role, OrganizationAction::ManageMembers)
+    {
         tx.commit().await?;
-        return Err(AuthzError::Forbidden(
-            "only an organization owner or admin can remove organization members".into(),
-        )
-        .into());
+        return Err(refused);
     }
 
     let leaver_name =
@@ -261,12 +254,9 @@ pub async fn list_organization_invites(
     let ActingOrganization { mut tx, role } =
         acting_organization(&state, &organization, &actor).await?;
 
-    if !role.can_view_org_members() {
+    if let Err(refused) = authorize_organization(role, OrganizationAction::ViewMembers) {
         tx.commit().await?;
-        return Err(AuthzError::Forbidden(
-            "insufficient permissions to view organization invites".into(),
-        )
-        .into());
+        return Err(refused);
     }
 
     let rows = organization_members::list_invites(&mut tx, &organization).await?;
@@ -292,12 +282,9 @@ pub async fn create_organization_invite(
         role: caller_role,
     } = acting_organization(&state, &organization, &actor).await?;
 
-    if !caller_role.can_manage_org_members() {
+    if let Err(refused) = authorize_organization(caller_role, OrganizationAction::ManageMembers) {
         tx.commit().await?;
-        return Err(AuthzError::Forbidden(
-            "only an organization owner or admin can invite organization members".into(),
-        )
-        .into());
+        return Err(refused);
     }
 
     let flags = crate::db::flags::resolve_for_organization(&mut tx, &organization).await?;
@@ -416,12 +403,9 @@ pub async fn revoke_organization_invite(
         role: caller_role,
     } = acting_organization(&state, &organization, &actor).await?;
 
-    if !caller_role.can_manage_org_members() {
+    if let Err(refused) = authorize_organization(caller_role, OrganizationAction::ManageMembers) {
         tx.commit().await?;
-        return Err(AuthzError::Forbidden(
-            "only an organization owner or admin can revoke organization invitations".into(),
-        )
-        .into());
+        return Err(refused);
     }
 
     let Some(email) =

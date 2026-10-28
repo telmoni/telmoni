@@ -288,7 +288,7 @@ pub(crate) fn log_act_outside_every_organization(
 
 /// Gate an [`ActingProject`] transaction against the RBAC matrix, as every
 /// module's lanes are gated.
-pub(crate) use telmoni_shared::rbac::authorize;
+pub(crate) use telmoni_shared::rbac::{authorize, authorize_organization};
 
 /// The project a request acts on, from `x-project-id` and nothing else.
 pub(crate) fn project_of(

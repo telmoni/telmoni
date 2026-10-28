@@ -10,6 +10,7 @@
 //! to a role that reads the audit log, the organization's own chain and
 //! feed to its owner and admins, as the console's own pages give them.
 
+use telmoni_shared::OrganizationAction;
 use telmoni_shared::TelmoniError;
 use telmoni_shared::acting::Acting;
 use telmoni_shared::db::tenant_session::person_scope;
@@ -36,7 +37,7 @@ pub fn visibilities(acting: &Acting) -> Vec<Visibility> {
     }
     if acting
         .organization_role
-        .is_some_and(|role| role.can_view_rolled_up_audit())
+        .is_some_and(|role| role.may(OrganizationAction::ReadWholeAudit))
     {
         out.push(Visibility::OrganizationAdmin);
     }

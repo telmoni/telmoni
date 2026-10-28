@@ -94,7 +94,7 @@ sessions, its alerts, and project audit events.
 
 When you attempt an action your role does not allow, the API and console refuse
 the request with a `403 Forbidden` problem document. A project's members and
-invitations, its rename and deletion, and its content mode, answer
+invitations, its API keys, its rename and deletion, and its content mode, answer
 `/errors/authz/insufficient-role`, and `detail` names the least role that would
 do and the one you hold:
 
@@ -108,11 +108,13 @@ do and the one you hold:
 ```
 
 Every other refusal answers `/errors/authz/forbidden`, and `detail` says what
-is refused and to whom: API keys, connectors, saved views and layouts and the audit log
-(decided by the same role matrix), an organization's name and URL, the console agent, creating
-a project, the organization's roster and adding a member from it to a project, which a
-project Admin who is only a Member of the organization may not, its deletion and transfer, a
-project's transfer and, on the hosted service, billing. The server checks every
+is refused and to whom: connectors, saved views and layouts and the audit log (decided by
+the same role matrix), the console agent, a project's transfer and, on the hosted service,
+billing; and what is the organization's own, decided by your role on it, which `detail`
+names with the least role that may: its name and URL, creating a project, its roster and
+adding a member from it to a project, which a project Admin who is only a Member of the
+organization may not, its audit log across every project and its export, which its owner
+and admins have, and its deletion and transfer, which are its owner's alone. The server checks every
 request against the caller's roles; nothing is left to the browser.
 
 On the hosted service an organization's plan can refuse too, whatever your

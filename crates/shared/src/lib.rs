@@ -47,8 +47,9 @@ pub use extract::correlation_id;
 pub use types::{
     AlertCeilings, ApiKeyScope, AuditAction, ContentMode, Flag, FlagSet, Grants, IncidentStatus,
     LaneCeilings, LayoutDepth, LayoutOpen, MemberCeiling, MissingData, NotificationKind,
-    OrganizationId, OrganizationIdError, OrganizationRole, OrganizationStatus, ParseEnumError,
-    Paused, ProjectId, ProjectIdError, Redacted, Role, RuleAggregation, RuleLevel, RuleMeasure,
-    RuleOperator, RuleWindow, SessionSort, Severity, SortDirection, SpanKind, SpanStatus,
-    TelmoniResourceKind, TraceColumn, TraceSort, UserId, UserIdError, UserSort, ViewKind,
+    OrganizationAction, OrganizationId, OrganizationIdError, OrganizationRole, OrganizationStatus,
+    ParseEnumError, Paused, ProjectId, ProjectIdError, Redacted, Role, RuleAggregation, RuleLevel,
+    RuleMeasure, RuleOperator, RuleWindow, SessionSort, Severity, SortDirection, SpanKind,
+    SpanStatus, TelmoniResourceKind, TraceColumn, TraceSort, UserId, UserIdError, UserSort,
+    ViewKind,
 };

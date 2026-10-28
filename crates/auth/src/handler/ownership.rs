@@ -34,16 +34,18 @@ use chrono::{Duration, Utc};
 use serde::Deserialize;
 use serde_json::json;
 
+use telmoni_shared::OrganizationAction;
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
 use telmoni_shared::db::tenant_session::{Organization, Scoped, organization_scope};
 use telmoni_shared::extract::Json;
 use telmoni_shared::person_token::Principal;
 use telmoni_shared::seam::OwnershipChange;
 use telmoni_shared::{
-    AuditAction, AuthError, AuthzError, OrganizationId, OrganizationRole, TelmoniError,
-    TelmoniResourceKind, UserId,
+    AuditAction, AuthError, OrganizationId, OrganizationRole, TelmoniError, TelmoniResourceKind,
+    UserId,
 };
 
+use super::authorize_organization;
 use crate::{
     AppState,
     db::{identities, locks, members, organization_members, organizations},
@@ -198,11 +200,7 @@ async fn offerable(
     organization: &OrganizationId,
     target: &UserId,
 ) -> Result<String, TelmoniError> {
-    if role != OrganizationRole::Owner {
-        return Err(
-            AuthzError::Forbidden("only the organization's owner can hand it over".into()).into(),
-        );
-    }
+    authorize_organization(role, OrganizationAction::HandOver)?;
     let Some(name) = organizations::get(tx, organization).await?.map(|o| o.name) else {
         return Err(AuthError::NotFound("organization not found".into()).into());
     };
@@ -363,12 +361,7 @@ pub async fn cancel(
     let user_id = principal.user_id;
 
     let (mut tx, role) = locked(&state, &organization, &user_id, Lock::Organization).await?;
-    if role != OrganizationRole::Owner {
-        return Err(AuthzError::Forbidden(
-            "only the organization's owner can withdraw its offer".into(),
-        )
-        .into());
-    }
+    authorize_organization(role, OrganizationAction::HandOver)?;
     let Some(holder) = organization_members::live_offer_holder(&mut tx, &organization).await?
     else {
         return Err(AuthError::NotFound("there is no offer to withdraw".into()).into());

@@ -6,7 +6,7 @@
 //! verdict here fails a named test there.
 
 use crate::error::{AuthzError, TelmoniError};
-use crate::types::{OrganizationRole, Role};
+use crate::types::{OrganizationAction, OrganizationRole, Role};
 
 /// What the caller is trying to do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -138,6 +138,23 @@ pub fn authorize(role: Role, verb: Verb, resource: Resource) -> Result<(), Telmo
         None => AuthzError::Forbidden(format!("no role may {verb} {resource}")),
     }
     .into())
+}
+
+/// The organization's refusal, as [`authorize`] is the project's: the least
+/// role that would do, named with what it would do.
+pub fn authorize_organization(
+    role: OrganizationRole,
+    action: OrganizationAction,
+) -> Result<(), TelmoniError> {
+    if role.may(action) {
+        return Ok(());
+    }
+    let who = match action.minimum() {
+        OrganizationRole::Owner => "the organization's owner",
+        OrganizationRole::Admin => "the organization's owner or an admin",
+        OrganizationRole::Member => "a member of the organization",
+    };
+    Err(AuthzError::Forbidden(format!("only {who} can {}", action.phrase())).into())
 }
 
 /// A person's role on one project, from their organization role and their

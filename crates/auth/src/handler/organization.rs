@@ -17,6 +17,7 @@ use chrono::{Duration, Utc};
 use serde::Deserialize;
 use serde_json::json;
 
+use telmoni_shared::OrganizationAction;
 use telmoni_shared::extract::Json;
 use telmoni_shared::person_token::Principal;
 use telmoni_shared::seam::{FoundedOrganization, OrganizationFounding, OwnershipChange};
@@ -24,6 +25,7 @@ use telmoni_shared::{
     AuthError, Flag, OrganizationId, OrganizationRole, TelmoniError, TenantError, UserId,
 };
 
+use super::authorize_organization;
 use crate::{
     AppState,
     db::{
@@ -66,11 +68,7 @@ pub async fn request_organization_deletion_code(
         acting_organization(&state, &organization, &user_id).await?;
     let row = organizations::get(&mut tx, &organization).await?;
     tx.commit().await?;
-    if role != OrganizationRole::Owner {
-        return Err(
-            AuthzError::Forbidden("only the organization's owner can delete it".into()).into(),
-        );
-    }
+    authorize_organization(role, OrganizationAction::Delete)?;
     let Some(row) = row else {
         return Err(AuthError::NotFound("no such organization".into()).into());
     };
@@ -147,13 +145,8 @@ pub async fn delete_organization(
         );
     }
     locks::lock_organization(&mut tx, &organization).await?;
-    if organization_role_or_forbidden(&mut tx, &organization, &user_id).await?
-        != OrganizationRole::Owner
-    {
-        return Err(
-            AuthzError::Forbidden("only the organization's owner can delete it".into()).into(),
-        );
-    }
+    let role = organization_role_or_forbidden(&mut tx, &organization, &user_id).await?;
+    authorize_organization(role, OrganizationAction::Delete)?;
 
     let Some(code_id) = confirmation_codes::find_live(
         &mut tx,
@@ -578,12 +571,9 @@ pub async fn update_organization(
         mut tx,
         role: caller_role,
     } = acting_organization(&state, &organization, &actor).await?;
-    if !caller_role.can_manage_org_settings() {
+    if let Err(refused) = authorize_organization(caller_role, OrganizationAction::ManageSettings) {
         tx.commit().await?;
-        return Err(AuthzError::Forbidden(
-            "only an organization owner or admin can change the organization's name or URL".into(),
-        )
-        .into());
+        return Err(refused);
     }
 
     let Some(now) = organizations::update(

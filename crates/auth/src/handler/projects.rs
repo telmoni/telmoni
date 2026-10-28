@@ -7,12 +7,14 @@ use std::sync::Arc;
 use axum::{extract::State, http::HeaderMap, http::StatusCode, response::IntoResponse};
 use serde_json::json;
 
+use telmoni_shared::OrganizationAction;
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
 use telmoni_shared::db::tenant_session::maintenance_scope;
 use telmoni_shared::extract::Json;
 use telmoni_shared::person_token::Principal;
-use telmoni_shared::{AuditAction, AuthError, AuthzError, TelmoniError, TelmoniResourceKind};
+use telmoni_shared::{AuditAction, AuthError, TelmoniError, TelmoniResourceKind};
 
+use super::authorize_organization;
 use crate::AppState;
 use crate::db::{AuthLane, projects};
 
@@ -96,12 +98,9 @@ pub async fn create_project(
     let name = validate_project_name(&req.name)?;
 
     let mut acting = super::acting_organization(&state, &organization_id, &user_id).await?;
-    if !acting.role.can_create_projects() {
+    if let Err(refused) = authorize_organization(acting.role, OrganizationAction::CreateProjects) {
         acting.tx.commit().await?;
-        return Err(AuthzError::Forbidden(
-            "only an organization owner or admin can create projects".into(),
-        )
-        .into());
+        return Err(refused);
     }
     // The creator's role on the new project is the one their organization role
     // gives them on every project in it. The gate above admits only roles that

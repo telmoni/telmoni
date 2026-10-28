@@ -21,8 +21,8 @@ use telmoni_shared::seam::{
     OwnedOrganization, ProjectHome, ReadableProject, SourceDocument,
 };
 use telmoni_shared::{
-    AuthError, Flag, FlagSet, OrganizationId, OrganizationRole, OrganizationStatus, ProjectId,
-    TelmoniError, TenantError, UserId,
+    AuthError, Flag, FlagSet, OrganizationAction, OrganizationId, OrganizationRole,
+    OrganizationStatus, ProjectId, TelmoniError, TenantError, UserId,
 };
 
 use crate::AppState;
@@ -261,7 +261,7 @@ impl Auth for AppState {
         // model's tool call can come a minute after the turn was resolved.
         let whole_chain = current
             .organization_role
-            .is_some_and(|role| role.can_view_rolled_up_audit());
+            .is_some_and(|role| role.may(OrganizationAction::ReadWholeAudit));
         if !whole_chain && let Err(refused) = authorize(current.role, Verb::Read, Resource::Audit) {
             current.tx.commit().await?;
             return Err(refused);

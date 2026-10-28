@@ -64,47 +64,88 @@ impl OrganizationRole {
         }
     }
 
-    /// Whether this role can create new projects.
+    /// Whether this role may do `action` to the organization.
     #[must_use]
-    pub const fn can_create_projects(&self) -> bool {
-        matches!(self, Self::Owner | Self::Admin)
+    pub const fn may(self, action: OrganizationAction) -> bool {
+        match action.minimum() {
+            Self::Owner => matches!(self, Self::Owner),
+            Self::Admin => matches!(self, Self::Owner | Self::Admin),
+            Self::Member => true,
+        }
+    }
+}
+
+/// What a person may do to the organization itself, as distinct from a
+/// project in it ([`crate::rbac::can`]): each names the least role that may,
+/// and how a refusal says it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OrganizationAction {
+    /// Read its roster and its invitations.
+    ViewMembers,
+    /// Invite, change a role, remove, and revoke an invitation.
+    ManageMembers,
+    /// Seat a member on a project from the roster.
+    GiveSeats,
+    /// Change its name or URL.
+    ManageSettings,
+    /// Create a project in it.
+    CreateProjects,
+    /// Read, and export, its audit log across every project.
+    ReadWholeAudit,
+    /// Take its export.
+    Export,
+    /// Delete it, and everything in it.
+    Delete,
+    /// Hand it over, or withdraw the offer.
+    HandOver,
+}
+
+impl OrganizationAction {
+    /// Every action, in the order above.
+    #[must_use]
+    pub const fn all() -> [Self; 9] {
+        [
+            Self::ViewMembers,
+            Self::ManageMembers,
+            Self::GiveSeats,
+            Self::ManageSettings,
+            Self::CreateProjects,
+            Self::ReadWholeAudit,
+            Self::Export,
+            Self::Delete,
+            Self::HandOver,
+        ]
     }
 
-    /// Whether this role can delete projects.
+    /// The least role that may.
     #[must_use]
-    pub const fn can_delete_projects(&self) -> bool {
-        matches!(self, Self::Owner)
+    pub const fn minimum(self) -> OrganizationRole {
+        match self {
+            Self::Delete | Self::HandOver => OrganizationRole::Owner,
+            Self::ViewMembers
+            | Self::ManageMembers
+            | Self::GiveSeats
+            | Self::ManageSettings
+            | Self::CreateProjects
+            | Self::ReadWholeAudit
+            | Self::Export => OrganizationRole::Admin,
+        }
     }
 
-    /// Whether this role can manage organization-wide settings.
+    /// What it is, as a refusal names it after "can".
     #[must_use]
-    pub const fn can_manage_org_settings(&self) -> bool {
-        matches!(self, Self::Owner | Self::Admin)
-    }
-
-    /// Whether this role can view rolled-up audit logs across all projects.
-    #[must_use]
-    pub const fn can_view_rolled_up_audit(&self) -> bool {
-        matches!(self, Self::Owner | Self::Admin)
-    }
-
-    /// Whether this role can manage organization-level members and invites.
-    #[must_use]
-    pub const fn can_manage_org_members(&self) -> bool {
-        matches!(self, Self::Owner | Self::Admin)
-    }
-
-    /// Whether this role can view organization-level members.
-    #[must_use]
-    pub const fn can_view_org_members(&self) -> bool {
-        matches!(self, Self::Owner | Self::Admin)
-    }
-
-    /// Whether this role can take the organization's export: its roster,
-    /// invitations, key metadata and audit chain, which both already read.
-    #[must_use]
-    pub const fn can_export_organization(&self) -> bool {
-        matches!(self, Self::Owner | Self::Admin)
+    pub const fn phrase(self) -> &'static str {
+        match self {
+            Self::ViewMembers => "view its members and invitations",
+            Self::ManageMembers => "manage its members and invitations",
+            Self::GiveSeats => "add a member from its roster",
+            Self::ManageSettings => "change its name or URL",
+            Self::CreateProjects => "create projects",
+            Self::ReadWholeAudit => "read its whole audit log",
+            Self::Export => "export it",
+            Self::Delete => "delete it",
+            Self::HandOver => "hand it over",
+        }
     }
 }
 
@@ -124,30 +165,26 @@ mod tests {
         assert!("OWNER".parse::<OrganizationRole>().is_err());
     }
 
+    /// The owner may everything, an admin all but what is the owner's,
+    /// and a member nothing of the organization itself.
     #[test]
-    fn permissions_per_role() {
-        assert!(OrganizationRole::Owner.can_create_projects());
-        assert!(OrganizationRole::Owner.can_delete_projects());
-        assert!(OrganizationRole::Owner.can_manage_org_settings());
-        assert!(OrganizationRole::Owner.can_view_rolled_up_audit());
-        assert!(OrganizationRole::Owner.can_manage_org_members());
-        assert!(OrganizationRole::Owner.can_view_org_members());
-        assert!(OrganizationRole::Owner.can_export_organization());
-
-        assert!(OrganizationRole::Admin.can_create_projects());
-        assert!(!OrganizationRole::Admin.can_delete_projects());
-        assert!(OrganizationRole::Admin.can_manage_org_settings());
-        assert!(OrganizationRole::Admin.can_view_rolled_up_audit());
-        assert!(OrganizationRole::Admin.can_manage_org_members());
-        assert!(OrganizationRole::Admin.can_view_org_members());
-        assert!(OrganizationRole::Admin.can_export_organization());
-
-        assert!(!OrganizationRole::Member.can_create_projects());
-        assert!(!OrganizationRole::Member.can_delete_projects());
-        assert!(!OrganizationRole::Member.can_manage_org_settings());
-        assert!(!OrganizationRole::Member.can_view_rolled_up_audit());
-        assert!(!OrganizationRole::Member.can_manage_org_members());
-        assert!(!OrganizationRole::Member.can_view_org_members());
-        assert!(!OrganizationRole::Member.can_export_organization());
+    fn each_action_names_the_least_role_that_may() {
+        for action in OrganizationAction::all() {
+            assert!(OrganizationRole::Owner.may(action), "{action:?}");
+            assert_eq!(
+                OrganizationRole::Admin.may(action),
+                action.minimum() == OrganizationRole::Admin,
+                "{action:?}"
+            );
+            assert!(!OrganizationRole::Member.may(action), "{action:?}");
+        }
+        assert_eq!(
+            OrganizationAction::all()
+                .iter()
+                .filter(|action| action.minimum() == OrganizationRole::Owner)
+                .count(),
+            2,
+            "deleting and handing over are the owner's alone"
+        );
     }
 }

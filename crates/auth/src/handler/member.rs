@@ -11,6 +11,7 @@ use chrono::{Duration, Utc};
 use serde::Deserialize;
 use serde_json::json;
 
+use telmoni_shared::OrganizationAction;
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
 use telmoni_shared::db::tenant_session::maintenance_scope;
 use telmoni_shared::extract::Json;
@@ -21,6 +22,7 @@ use telmoni_shared::{
     UserId,
 };
 
+use super::authorize_organization;
 use crate::{
     AppState,
     db::{
@@ -270,15 +272,13 @@ pub async fn give_seat(
     ))
 }
 
-/// The roster is the organization's: its owner and admins give seats from it.
+/// The roster is the organization's: its owner and admins give seats from
+/// it, and someone not on it is refused as a member is.
 fn from_the_roster(role: Option<OrganizationRole>) -> Result<(), TelmoniError> {
-    match role {
-        Some(OrganizationRole::Owner | OrganizationRole::Admin) => Ok(()),
-        _ => Err(AuthzError::Forbidden(
-            "only the organization's owner or an admin can add a member from its roster".into(),
-        )
-        .into()),
-    }
+    authorize_organization(
+        role.unwrap_or(OrganizationRole::Member),
+        OrganizationAction::GiveSeats,
+    )
 }
 
 fn not_on_the_roster() -> TelmoniError {

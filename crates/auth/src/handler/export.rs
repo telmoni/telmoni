@@ -26,13 +26,15 @@ use std::sync::Arc;
 use axum::{extract::State, response::IntoResponse};
 use serde_json::{Value, json};
 
+use telmoni_shared::OrganizationAction;
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
 use telmoni_shared::db::tenant_session::person_scope;
 use telmoni_shared::extract::Json;
 use telmoni_shared::person_token::Principal;
 use telmoni_shared::types::CONNECTION_BYTES;
-use telmoni_shared::{AuditAction, AuthzError, TelmoniError, TelmoniResourceKind};
+use telmoni_shared::{AuditAction, TelmoniError, TelmoniResourceKind};
 
+use super::authorize_organization;
 use crate::{
     AppState,
     handler::{organization_of, organization_role_or_forbidden},
@@ -73,15 +75,8 @@ pub async fn export_organization(
     // organization's for its rows.
     let tx = person_scope(&state.db, &actor).await?;
     let mut tx = tx.bind_organization(&organization).await?;
-    if !organization_role_or_forbidden(&mut tx, &organization, &actor)
-        .await?
-        .can_export_organization()
-    {
-        return Err(AuthzError::Forbidden(
-            "only the organization's owner or an admin can export it".into(),
-        )
-        .into());
-    }
+    let role = organization_role_or_forbidden(&mut tx, &organization, &actor).await?;
+    authorize_organization(role, OrganizationAction::Export)?;
     // An export waits for the next day once the organization's data out is
     // spent, as every export is.
     if let Some(telemetry) = state.siblings.telemetry.as_ref() {

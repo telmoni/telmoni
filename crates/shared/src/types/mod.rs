@@ -43,7 +43,7 @@ pub use layout_depth::LayoutDepth;
 pub use layout_open::LayoutOpen;
 pub use missing_data::MissingData;
 pub use notification_kind::NotificationKind;
-pub use organization_role::OrganizationRole;
+pub use organization_role::{OrganizationAction, OrganizationRole};
 pub use organization_status::OrganizationStatus;
 pub use parse_error::ParseEnumError;
 pub use redacted::Redacted;
