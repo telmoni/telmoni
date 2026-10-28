@@ -7,6 +7,7 @@ import Link from "next/link";
 import { DataTable, THead, Td, Th } from "@/components/data-table";
 import { cellClass, cellOf, titleOf } from "@/components/traces/cells";
 import { rowClickTaken } from "@/components/traces/list-table";
+import { SignInAgain, readSession, readTrace, startRead } from "@/components/traces/peek-read";
 import { TraceOutline } from "@/components/traces/trace-outline";
 import { KindIcon } from "@/components/traces/trace-view";
 import { useLayout, type LayoutPage } from "@/components/traces/use-layout";
@@ -16,7 +17,8 @@ import {
   type LayoutOptions,
 } from "@/lib/layout";
 import type { WindowQuery } from "@/lib/list-query";
-import type { PinnedSpan, SessionDetail, SessionTrace, TraceDetail } from "@/lib/server/data";
+import type { TraceRead } from "@/lib/peek";
+import type { PinnedSpan, SessionTrace, TraceDetail } from "@/lib/server/data";
 import {
   STATUS_LABEL,
   TRACE_COLUMNS,
@@ -24,9 +26,11 @@ import {
   shortId,
   spanMillis,
   traceHref,
+  traceReadHref,
   tracesHref,
   type FilterKey,
 } from "@/lib/traces";
+import { sessionReadHref } from "@/lib/sessions";
 import { LayoutDepth, SpanStatus } from "@/lib/types/enums";
 import { offerPageSteps } from "@/lib/use-page-steps";
 import { cn } from "@/lib/utils";
@@ -39,9 +43,6 @@ import { cn } from "@/lib/utils";
 // opened; shut, the spans the layout pinned stand under it. `j` and `k` step
 // the trace stood on, and `o` opens it, through the console's one key
 // handler.
-
-/** How long a read of a trace's spans may take before the row says it failed. */
-const READ_TIMEOUT_MS = 15_000;
 
 type Props = LayoutPage & {
   organization: string;
@@ -89,31 +90,18 @@ function usePinnedSpans(
   const names = pinned.join("\u0000");
   useEffect(() => {
     if (same || names === "") return;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), READ_TIMEOUT_MS);
-    const params = new URLSearchParams({ project: projectId });
-    if (query.days !== undefined) params.set("days", String(query.days));
-    if (query.limit !== undefined) params.set("limit", String(query.limit));
-    for (const name of names.split("\u0000")) params.append("pinned", name);
-    // The route's answer is the session as the server checked it; a shape
-    // this build cannot read is left as nothing pinned.
-    void fetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}?${params}`, {
-      signal: controller.signal,
-      cache: "no-store",
-      headers: { accept: "application/json" },
-    })
-      .then(async (res) => (res.ok ? ((await res.json()) as SessionDetail) : null))
-      .then((detail) => {
-        clearTimeout(timer);
-        if (!detail || !Array.isArray(detail.traces)) return;
-        const spans = new Map(detail.traces.map((t) => [t.run_id, t.pinned ?? []]));
-        setRead({ key, spans });
-      })
-      .catch(() => clearTimeout(timer));
-    return () => {
-      clearTimeout(timer);
-      controller.abort();
-    };
+    const url = sessionReadHref(
+      sessionId,
+      projectId,
+      { days: query.days, limit: query.limit },
+      names.split("\u0000"),
+    );
+    // The route's answer is the session as the server checked it; a read that
+    // did not land is left as nothing pinned.
+    return startRead(url, readSession, (read) => {
+      if (read.kind !== "ok") return;
+      setRead({ key, spans: new Map(read.trace.traces.map((t) => [t.run_id, t.pinned ?? []])) });
+    });
   }, [same, names, key, projectId, sessionId, query.days, query.limit]);
 
   if (pinned.length === 0) return new Map();
@@ -297,12 +285,7 @@ function PinnedStrip({ spans }: { spans: readonly PinnedSpan[] }) {
   );
 }
 
-type Read =
-  | { kind: "ok"; trace: TraceDetail }
-  | { kind: "missing" }
-  | { kind: "forbidden" }
-  | { kind: "unavailable" }
-  | { kind: "signed-out" };
+type Read = TraceRead<TraceDetail>;
 
 /** A trace opened: its spans read once, through the trace list's own route,
  *  and drawn as far as the layout opens them. A run still going is read
@@ -325,31 +308,12 @@ function OpenedTrace({
   const [tries, setTries] = useState(0);
   useEffect(() => {
     if (reads.has(run) && tries === 0) return;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), READ_TIMEOUT_MS);
-    let current = true;
-    const url = `/api/v1/traces/${encodeURIComponent(run)}?project=${encodeURIComponent(projectId)}`;
-    void fetch(url, { signal: controller.signal, cache: "no-store", headers: { accept: "application/json" } })
-      .then(async (res): Promise<Read> => {
-        if (res.status === 401) return { kind: "signed-out" };
-        if (res.status === 404) return { kind: "missing" };
-        if (res.status === 403) return { kind: "forbidden" };
-        if (!res.ok) return { kind: "unavailable" };
-        const trace = (await res.json()) as TraceDetail;
-        if (trace.spans.length === 0) return { kind: "missing" };
-        if (trace.spans.some((s) => s.kind === "run")) reads.set(run, trace);
-        return { kind: "ok", trace };
-      })
-      .catch((): Read => ({ kind: "unavailable" }))
-      .then((result) => {
-        clearTimeout(timer);
-        if (current) setRead(result);
-      });
-    return () => {
-      current = false;
-      clearTimeout(timer);
-      controller.abort();
-    };
+    return startRead(traceReadHref(run, projectId), readTrace, (result) => {
+      if (result.kind === "ok" && result.trace.spans.some((s) => s.kind === "run")) {
+        reads.set(run, result.trace);
+      }
+      setRead(result);
+    });
   }, [run, projectId, reads, tries]);
 
   return (
@@ -372,7 +336,9 @@ function OpenedTrace({
       ) : read.kind === "forbidden" ? (
         <Note>This project&rsquo;s traces are not yours to read.</Note>
       ) : read.kind === "signed-out" ? (
-        <Note>Your session has ended. Sign in again to read it.</Note>
+        <Note>
+          Your session has ended. <SignInAgain /> to read it.
+        </Note>
       ) : (
         <Note>
           The trace could not be read.{" "}

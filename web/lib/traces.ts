@@ -197,6 +197,11 @@ export function traceHref(organization: string, project: string, runId: string):
   return projectPath(organization, project, `/traces/${encodeURIComponent(runId)}`);
 }
 
+/** A run's spans, through the console's own route. */
+export function traceReadHref(runId: string, projectId: string): string {
+  return `/api/v1/traces/${encodeURIComponent(runId)}?project=${encodeURIComponent(projectId)}`;
+}
+
 /** The list's key for the run its peek holds open (`components/traces/peek.tsx`):
  *  the browser's, never the server's, so the list is not read again for it. */
 export const PEEK_PARAM = "peek";

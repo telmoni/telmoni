@@ -1,44 +1,34 @@
 "use client";
 
-import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useLayoutEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import {
-  ArrowDown,
-  ArrowUp,
-  Maximize2,
-  MessagesSquare,
-  Minimize2,
-  SquareArrowOutUpRight,
-} from "lucide-react";
+import { MessagesSquare } from "lucide-react";
 import Link from "next/link";
-import { usePathname, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 
 import { useConsoleShell } from "@/components/console-shell";
 import { CopyButton } from "@/components/copy-button";
 import { LocalTime } from "@/components/local-time";
-import { PanelAction, SidePanel, SidePanelHeader } from "@/components/side-panel";
+import { SidePanel, SidePanelHeader } from "@/components/side-panel";
 import { LayoutControls } from "@/components/traces/layout-controls";
 import { PanelEdge, usePanelWidth } from "@/components/traces/panel-width";
+import {
+  FullSizeAction,
+  OpenPageAction,
+  PeekNote,
+  ReadFailure,
+  StepActions,
+  neighbours,
+  readSession,
+  usePeekEntry,
+  usePeekRead,
+} from "@/components/traces/peek-read";
 import { SessionRuns } from "@/components/traces/session-runs";
 import { useLayout, type LayoutPage } from "@/components/traces/use-layout";
-import { Button } from "@/components/ui/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { MAX_LIMIT, type WindowQuery } from "@/lib/list-query";
-import {
-  closePeek,
-  followEntry,
-  keepRead,
-  landOnList,
-  openPeek,
-  peekUrl,
-  pushedEntry,
-  shownRead,
-  type KeptRead,
-  type TraceRead,
-} from "@/lib/peek";
-import type { SessionDetail } from "@/lib/server/data";
-import { sessionHref, sessionSums } from "@/lib/sessions";
-import { PEEK_NUDGED, PEEK_PARAM, formatCount, tracesHref } from "@/lib/traces";
+import { landOnList, peekUrl } from "@/lib/peek";
+import { sessionHref, sessionReadHref, sessionSums } from "@/lib/sessions";
+import { PEEK_PARAM, formatCount, tracesHref } from "@/lib/traces";
 import { cn } from "@/lib/utils";
 
 // A session opened from the list without leaving it, in the console's side
@@ -49,9 +39,6 @@ import { cn } from "@/lib/utils";
 // `?peek=`, kept in the browser's history (`lib/peek.ts`), so a link holds
 // it and Back shuts it; the ↑ and ↓ buttons step the list's sessions, while
 // `j`, `k` and `o` are the runs' inside, as on the session's page.
-
-/** How long a read of the session may take before the panel says it failed. */
-const READ_TIMEOUT_MS = 15_000;
 
 /** The longest a session's id is, in characters as the server counts them. */
 const SESSION_ID_MAX = 200;
@@ -66,44 +53,6 @@ export function peekedSession(value: string | null): string | null {
 /** The session the panel holds open, from the URL; `null` while it is shut. */
 export function usePeekedSession(): string | null {
   return peekedSession(useSearchParams().get(PEEK_PARAM));
-}
-
-async function readSession(url: string, signal: AbortSignal): Promise<TraceRead<SessionDetail>> {
-  try {
-    const res = await fetch(url, { signal, cache: "no-store", headers: { accept: "application/json" } });
-    if (res.status === 401) return { kind: "signed-out" };
-    if (res.status === 404) return { kind: "missing" };
-    if (res.status === 403) return { kind: "forbidden" };
-    if (!res.ok) return { kind: "unavailable" };
-    const session = (await res.json()) as SessionDetail;
-    return Array.isArray(session.traces) && session.traces.length > 0
-      ? { kind: "ok", trace: session }
-      : { kind: "missing" };
-  } catch {
-    return { kind: "unavailable" };
-  }
-}
-
-/** The session's traces, read when it is opened and again at each
- *  `version`, a retry; kept and shown as a trace's are (`lib/peek.ts`),
- *  which names what a read holds a trace: here it is the session. */
-function useSessionRead(url: string, version: number) {
-  const [last, setLast] = useState<KeptRead<SessionDetail> | null>(null);
-  useEffect(() => {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), READ_TIMEOUT_MS);
-    let current = true;
-    void readSession(url, controller.signal).then((read) => {
-      clearTimeout(timer);
-      if (current) setLast((was) => keepRead(was, { url, version, read }));
-    });
-    return () => {
-      current = false;
-      clearTimeout(timer);
-      controller.abort();
-    };
-  }, [url, version]);
-  return shownRead(last, url, version);
 }
 
 type Props = LayoutPage & {
@@ -143,38 +92,17 @@ function SessionPanel({
   const { full, width, toggleFull, edge } = usePanelWidth(panel);
   // Read with the layout's pins, which the rows take as theirs: a pin changed reads once.
   const { options } = useLayout({ layouts, project });
-  const params = new URLSearchParams({ project: projectId });
-  if (query.days !== undefined) params.set("days", String(query.days));
-  if (query.limit !== undefined) params.set("limit", String(query.limit));
-  for (const name of options.pinned) params.append("pinned", name);
-  const url = `/api/v1/sessions/${encodeURIComponent(sessionId)}?${params}`;
-  const [version, setVersion] = useState(0);
-  const { read, stale } = useSessionRead(url, version);
   // Read again as the project's runs land, the list beside it redrawn.
-  useEffect(() => {
-    const again = () => setVersion((n) => n + 1);
-    window.addEventListener(PEEK_NUDGED, again);
-    return () => window.removeEventListener(PEEK_NUDGED, again);
-  }, []);
-  const pathname = usePathname();
-  const search = useSearchParams().toString();
-  const at = sessions.indexOf(sessionId);
-  const previous = at > 0 ? sessions[at - 1]! : null;
-  const next = at !== -1 && at + 1 < sessions.length ? sessions[at + 1]! : null;
+  const { read, stale, again } = usePeekRead(
+    sessionReadHref(sessionId, projectId, query, options.pinned),
+    readSession,
+  );
+  const { previous, next } = neighbours(sessions, sessionId);
   const session = read?.kind === "ok" ? read.trace : null;
   // The session on show: the one read while the next is on its way.
   const shown = session?.session_id ?? sessionId;
 
-  // The entry the panel pushed, followed through each draw, so shutting goes
-  // back over it only while it is the one in front (`peek.tsx`).
-  const entry = useRef<string | null>(null);
-  useLayoutEffect(() => {
-    entry.current = pushedEntry();
-  }, []);
-  useEffect(() => {
-    entry.current = followEntry(entry.current);
-  });
-  const close = () => closePeek(entry.current !== null);
+  const close = usePeekEntry();
 
   // The browser's own Back lands on the list as Close does (`landOnList`), from
   // the list's address as the peek last stood: once, off the peek's own entries.
@@ -236,45 +164,12 @@ function SessionPanel({
         beside={<CopyButton value={shown} label="the session's id" />}
         actions={
           <>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="text-muted-foreground hover:text-foreground"
-                  asChild
-                >
-                  <Link
-                    href={sessionHref(organization, slug, sessionId, query)}
-                    aria-label="Open the session's page"
-                  >
-                    <SquareArrowOutUpRight />
-                  </Link>
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Open the session&rsquo;s page</TooltipContent>
-            </Tooltip>
-            <PanelAction
-              label="Previous session"
-              unavailable={!previous}
-              onClick={() => previous && openPeek(previous)}
-            >
-              <ArrowUp />
-            </PanelAction>
-            <PanelAction
-              label="Next session"
-              unavailable={!next}
-              onClick={() => next && openPeek(next)}
-            >
-              <ArrowDown />
-            </PanelAction>
-            <PanelAction
-              label={full ? "Exit full size" : "Full size"}
-              onClick={toggleFull}
-              className="max-md:hidden"
-            >
-              {full ? <Minimize2 /> : <Maximize2 />}
-            </PanelAction>
+            <OpenPageAction
+              href={sessionHref(organization, slug, sessionId, query)}
+              label="Open the session's page"
+            />
+            <StepActions noun="session" previous={previous} next={next} />
+            <FullSizeAction full={full} toggleFull={toggleFull} />
           </>
         }
         onClose={close}
@@ -320,7 +215,7 @@ function SessionPanel({
         )}
       >
         {read === null ? (
-          <Note>Reading the session&hellip;</Note>
+          <PeekNote>Reading the session&hellip;</PeekNote>
         ) : read.kind === "ok" ? (
           <div className="grid content-start gap-3 p-3.5">
             <div>
@@ -347,48 +242,18 @@ function SessionPanel({
               </p>
             )}
           </div>
-        ) : read.kind === "missing" ? (
-          <Note title="No session with this id in this project's window.">
-            Its runs may lie outside the window or have passed their retention, or the session
-            belongs to another project.
-          </Note>
-        ) : read.kind === "forbidden" ? (
-          <Note title="This project's sessions are not yours to read.">
-            Ask an owner of the project for a role that reads them.
-          </Note>
-        ) : read.kind === "signed-out" ? (
-          <Note title="Your session has ended.">
-            <a
-              href={`/auth/login?returnTo=${encodeURIComponent(`${pathname}?${search}`)}`}
-              className="underline underline-offset-4"
-            >
-              Sign in again
-            </a>{" "}
-            to read it.
-          </Note>
         ) : (
-          <Note title="The session could not be read.">
-            <button
-              type="button"
-              onClick={() => setVersion((n) => n + 1)}
-              className="cursor-pointer underline underline-offset-4"
-            >
-              Try again
-            </button>{" "}
-            in a moment.
-          </Note>
+          <ReadFailure
+            read={read}
+            noun="session"
+            missing={{
+              title: "No session with this id in this project's window.",
+              body: "Its runs may lie outside the window or have passed their retention, or the session belongs to another project.",
+            }}
+            retry={again}
+          />
         )}
       </div>
     </SidePanel>
-  );
-}
-
-/** What the panel says in the session's place. */
-function Note({ title, children }: { title?: string; children: ReactNode }) {
-  return (
-    <div className="grid gap-1 p-3.5 text-sm">
-      {title && <p className="font-medium">{title}</p>}
-      <p className="text-muted-foreground">{children}</p>
-    </div>
   );
 }

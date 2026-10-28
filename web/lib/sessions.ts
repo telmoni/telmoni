@@ -152,6 +152,21 @@ export function sessionHref(
   return listHref(organization, project, `/sessions/${encodeURIComponent(sessionId)}`, query);
 }
 
+/** A session's traces in a window, through the console's own route, each
+ *  with the spans `pinned` names. */
+export function sessionReadHref(
+  sessionId: string,
+  projectId: string,
+  query: WindowQuery,
+  pinned: readonly string[],
+): string {
+  const params = new URLSearchParams({ project: projectId });
+  if (query.days !== undefined) params.set("days", String(query.days));
+  if (query.limit !== undefined) params.set("limit", String(query.limit));
+  for (const name of pinned) params.append("pinned", name);
+  return `/api/v1/sessions/${encodeURIComponent(sessionId)}?${params}`;
+}
+
 export const currentSessionSort = SESSIONS.current;
 export const nextSessionSort = SESSIONS.next;
 
