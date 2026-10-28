@@ -6,12 +6,11 @@ import { z } from "zod";
 
 import { type ActionResult, refused } from "@/lib/action-result";
 import { extractProblem, readBody, tryFetchWithTimeout } from "@/lib/api/fetch";
-import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
 import { env } from "@/lib/env";
 import { isOrganizationId, isProjectId } from "@/lib/ids";
 import { organizationChannel, publishEvent, publishToAll } from "@/lib/events/publisher";
+import { admit } from "@/lib/server/admit";
 import { personHeaders, sessionHeaders } from "@/lib/server/entities/identity-context";
-import { getServerSession } from "@/lib/server/session";
 import { projectPath } from "@/lib/slug";
 
 // Answering an ownership offer. The organization is the OFFER's, named
@@ -23,24 +22,15 @@ async function answerOffer(
   organizationId: string,
   verb: "accept" | "decline",
 ): Promise<ActionResult> {
-  const session = await getServerSession();
-  if (!session) return refused("Your session expired — sign in again.");
-
+  const gate = await admit({ call: "organization:ownership-answer", limit: 10 });
+  if (!gate.ok) return refused(gate.error);
   // The id travels as a header; anything but an organization id is refused
   // here rather than making `fetch` throw on a stray character.
-  if (!/^org_[A-Za-z0-9]+$/.test(organizationId)) {
-    return refused("That is not an organization.");
-  }
-
-  const limited = await rateLimit(sessionKey(session, "organization:ownership-answer"), {
-    limit: 10,
-    windowMs: 60_000,
-  });
-  if (limited) return refused("Too many requests — slow down a moment.");
+  if (!isOrganizationId(organizationId)) return refused("That is not an organization.");
 
   const res = await tryFetchWithTimeout(
     `${env.SERVER_URL}/internal/v1/organization/owner-transfer/${verb}`,
-    { method: "POST", headers: sessionHeaders(session, organizationId) },
+    { method: "POST", headers: sessionHeaders(gate.session, organizationId) },
   );
   if (!res) {
     return refused("Organizations are unavailable right now — try again shortly.");
@@ -96,21 +86,15 @@ async function answerProjectOffer(
   verb: "accept" | "decline",
   organizationId?: string,
 ): Promise<ProjectOfferAnswer> {
-  const session = await getServerSession();
-  if (!session) return refused("Your session expired — sign in again.");
-
+  const gate = await admit({ call: "project:offer-answer", limit: 10 });
+  if (!gate.ok) return refused(gate.error);
+  const { session } = gate;
   // Both ids reach auth in the URL or the body; anything but the shape each
   // has is refused here rather than making `fetch` throw on a stray character.
   if (!isProjectId(projectId)) return refused("That is not a project.");
   if (organizationId !== undefined && !isOrganizationId(organizationId)) {
     return refused("That is not an organization.");
   }
-
-  const limited = await rateLimit(sessionKey(session, "project:offer-answer"), {
-    limit: 10,
-    windowMs: 60_000,
-  });
-  if (limited) return refused("Too many requests — slow down a moment.");
 
   const res = await tryFetchWithTimeout(
     `${env.SERVER_URL}/internal/v1/projects/${encodeURIComponent(projectId)}/transfer/${verb}`,

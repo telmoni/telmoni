@@ -3,10 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
-import { type ActionResult, type Refused, refused } from "@/lib/action-result";
+import { type ActionResult, type Refused, SESSION_EXPIRED, refused } from "@/lib/action-result";
 import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
 import { ProblemType } from "@/lib/api/problem";
-import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
 import { env } from "@/lib/env";
 import { publishEvent, userChannel } from "@/lib/events/publisher";
 import { createOrganizationElsewhere } from "@/lib/extension/create-organization";
@@ -15,6 +14,7 @@ import { FlagOffDetail } from "@/lib/flags";
 import { logger } from "@/lib/logger";
 import { checkOrganizationName, checkOrganizationUrl, checkProjectName } from "@/lib/names";
 import { administers } from "@/lib/roles";
+import { admit } from "@/lib/server/admit";
 import {
   identityContext,
   organizationHeaders,
@@ -24,7 +24,6 @@ import { getServerContext } from "@/lib/server/entities/organization";
 import type { Project } from "@/lib/server/entities/projects";
 import { FeatureOffProblemSchema } from "@/lib/server/flags";
 import { unplacedOrganization } from "@/lib/server/identity";
-import { getServerSession } from "@/lib/server/session";
 import { isSlug, organizationPath } from "@/lib/slug";
 import { Role } from "@/lib/types/enums";
 
@@ -43,13 +42,8 @@ export async function createProjectAction(
   name: string,
   organizationId?: string,
 ): Promise<CreateProjectResult> {
-  const session = await getServerSession();
-  if (!session) return refused("Your session expired — sign in again.");
-  const limited = await rateLimit(sessionKey(session, "project:create"), {
-    limit: 10,
-    windowMs: 60_000,
-  });
-  if (limited) return refused("Too many requests — slow down a moment.");
+  const gate = await admit({ call: "project:create", limit: 10 });
+  if (!gate.ok) return refused(gate.error);
 
   const checked = checkProjectName(name);
   if (!checked.ok) return refused(checked.error);
@@ -141,13 +135,9 @@ export async function createOrganizationAction(
   slug: string,
   extras: Record<string, string> = {},
 ): Promise<CreateOrganizationResult> {
-  const session = await getServerSession();
-  if (!session) return refused("Your session expired — sign in again.");
-  const limited = await rateLimit(sessionKey(session, "organization:create"), {
-    limit: 10,
-    windowMs: 60_000,
-  });
-  if (limited) return refused("Too many requests — slow down a moment.");
+  const gate = await admit({ call: "organization:create", limit: 10 });
+  if (!gate.ok) return refused(gate.error);
+  const { session } = gate;
 
   const checkedName = checkOrganizationName(name);
   if (!checkedName.ok) return { ...refused(checkedName.error), field: "name" };
@@ -179,7 +169,7 @@ export async function createOrganizationAction(
     return refused("Organizations are unavailable right now — try again shortly.");
   }
   if (!res.ok) {
-    if (res.status === 401) return refused("Your session expired — sign in again.");
+    if (res.status === 401) return refused(SESSION_EXPIRED);
     const { message, problem } = await extractProblem(res);
     const off = FeatureOffProblemSchema.safeParse(problem);
     if (off.success) return refused(FlagOffDetail[off.data.flag]);

@@ -5,12 +5,11 @@ import { z } from "zod";
 
 import { type ActionResult, refused } from "@/lib/action-result";
 import { extractProblem, readBody, tryFetchWithTimeout } from "@/lib/api/fetch";
-import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
-import { blacklistSession, isSessionBlacklisted } from "@/lib/auth/session-blacklist";
+import { blacklistSession } from "@/lib/auth/session-blacklist";
 import { sessionEndKey } from "@/lib/auth/session-end-key";
 import { env } from "@/lib/env";
+import { admit } from "@/lib/server/admit";
 import { accountHeaders, personHeaders } from "@/lib/server/entities/identity-context";
-import { getServerSession } from "@/lib/server/session";
 
 // The person's own lanes: they act on the account, whichever organization the
 // console is standing in. The ones that change something send that
@@ -23,20 +22,12 @@ const UNRESOLVED = "Couldn't resolve your account right now. Try again in a mome
 const UNREACHABLE = "The organization service is unreachable. Try again.";
 
 export async function requestAccountDeletionCodeAction(): Promise<ActionResult> {
-  const session = await getServerSession();
-  if (!session || (await isSessionBlacklisted(sessionEndKey(session)))) {
-    return refused("Your session expired — sign in again.");
-  }
-
-  const limited = await rateLimit(sessionKey(session, "auth:delete-code"), {
-    limit: 3,
-    windowMs: 60 * 60 * 1000,
-  });
-  if (limited) return refused("Too many requests. Try again in an hour.");
+  const gate = await admit({ call: "auth:delete-code", limit: 3, per: "hour" });
+  if (!gate.ok) return refused(gate.error);
 
   const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/v1/me/deletion-code`, {
     method: "POST",
-    headers: personHeaders(session),
+    headers: personHeaders(gate.session),
   });
   if (!res) return refused(UNREACHABLE);
   if (!res.ok) return refused((await extractProblem(res)).message);
@@ -49,20 +40,12 @@ export async function requestAccountDeletionCodeAction(): Promise<ActionResult> 
 export async function deleteAccountAction(
   code: string,
 ): Promise<ActionResult<{ deleted: boolean }>> {
-  const session = await getServerSession();
-  if (!session || (await isSessionBlacklisted(sessionEndKey(session)))) {
-    return refused("Your session expired — sign in again.");
-  }
-
   if (!/^\d{6}$/.test(code)) {
     return refused("Enter the 6-digit code from your email.");
   }
-
-  const limited = await rateLimit(sessionKey(session, "auth:delete-confirm"), {
-    limit: 10,
-    windowMs: 60 * 60 * 1000,
-  });
-  if (limited) return refused("Too many attempts. Try again in an hour.");
+  const gate = await admit({ call: "auth:delete-confirm", limit: 10, per: "hour" });
+  if (!gate.ok) return refused(gate.error);
+  const { session } = gate;
 
   const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/v1/me`, {
     method: "DELETE",
@@ -93,16 +76,8 @@ export async function deleteAccountAction(
 export async function revokeSessionAction(
   sessionId: string,
 ): Promise<ActionResult> {
-  const session = await getServerSession();
-  if (!session || (await isSessionBlacklisted(sessionEndKey(session)))) {
-    return refused("Your session expired — sign in again.");
-  }
-
-  const limited = await rateLimit(sessionKey(session, "sessions:revoke"), {
-    limit: 10,
-    windowMs: 60_000,
-  });
-  if (limited) return refused("Too many requests — slow down a moment.");
+  const gate = await admit({ call: "sessions:revoke", limit: 10 });
+  if (!gate.ok) return refused(gate.error);
 
   const headers = await accountHeaders();
   if (!headers) return refused(UNRESOLVED);
@@ -129,14 +104,8 @@ export async function revokeSessionAction(
 export async function setAnalyticsPreferenceAction(
   optIn: boolean,
 ): Promise<ActionResult> {
-  const session = await getServerSession();
-  if (!session) return refused("Your session expired — sign in again.");
-
-  const limited = await rateLimit(sessionKey(session, "privacy:analytics"), {
-    limit: 20,
-    windowMs: 60_000,
-  });
-  if (limited) return refused("Too many requests — slow down a moment.");
+  const gate = await admit({ call: "privacy:analytics", limit: 20 });
+  if (!gate.ok) return refused(gate.error);
 
   const headers = await accountHeaders();
   if (!headers) return refused(UNRESOLVED);

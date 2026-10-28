@@ -9,7 +9,7 @@ vi.mock("@/lib/server/session", () => ({
   getServerSession: vi.fn(),
 }));
 vi.mock("@/lib/api/rate-limit", () => ({
-  rateLimit: vi.fn(async () => null),
+  rateLimitRetryAfter: vi.fn(async () => null),
   sessionKey: vi.fn(() => "k"),
 }));
 // The answer read as the action reads it: no fetch in it to stand in for.
@@ -26,7 +26,6 @@ vi.mock("@/lib/auth/session", () => ({
 }));
 vi.mock("@/lib/auth/session-blacklist", () => ({
   blacklistSession: vi.fn(async () => {}),
-  isSessionBlacklisted: vi.fn(async () => false),
 }));
 vi.mock("@/lib/env", () => ({
   env: {
@@ -54,8 +53,8 @@ import {
   revokeSessionAction,
   setAnalyticsPreferenceAction,
 } from "./actions";
-import { blacklistSession, isSessionBlacklisted } from "@/lib/auth/session-blacklist";
-import { rateLimit } from "@/lib/api/rate-limit";
+import { blacklistSession } from "@/lib/auth/session-blacklist";
+import { rateLimitRetryAfter } from "@/lib/api/rate-limit";
 
 const fetchMock = vi.mocked(tryFetchWithTimeout);
 
@@ -74,8 +73,7 @@ beforeEach(() => {
     accessToken: "at_1",
     sessionRowId: "sess_1",
   } as never);
-  vi.mocked(isSessionBlacklisted).mockResolvedValue(false);
-  vi.mocked(rateLimit).mockResolvedValue(null as never);
+  vi.mocked(rateLimitRetryAfter).mockResolvedValue(null);
   // Standing in somebody else's organization. These lanes act on the ACCOUNT
   // wherever the console is, and send that organization along for auth to
   // check the person is in and record against.
@@ -329,16 +327,14 @@ describe("revokeSessionAction", () => {
   });
 
   it("refuses a session that is not live, and a caller over the limit", async () => {
-    vi.mocked(isSessionBlacklisted).mockResolvedValue(true as never);
+    vi.mocked(getServerSession).mockResolvedValueOnce(null);
     expect(await revokeSessionAction("sess_abc")).toEqual({
       ok: false,
       error: "Your session expired — sign in again.",
     });
-    expect(isSessionBlacklisted).toHaveBeenCalledWith("sess_1");
     expect(fetchMock).not.toHaveBeenCalled();
 
-    vi.mocked(isSessionBlacklisted).mockResolvedValue(false as never);
-    vi.mocked(rateLimit).mockResolvedValue("limited" as never);
+    vi.mocked(rateLimitRetryAfter).mockResolvedValue(30);
     expect(await revokeSessionAction("sess_abc")).toEqual({
       ok: false,
       error: "Too many requests — slow down a moment.",

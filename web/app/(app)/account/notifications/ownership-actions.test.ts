@@ -4,7 +4,7 @@ vi.mock("@/lib/server/session", () => ({
   getServerSession: vi.fn(),
 }));
 vi.mock("@/lib/api/rate-limit", () => ({
-  rateLimit: vi.fn(async () => null),
+  rateLimitRetryAfter: vi.fn(async () => null),
   sessionKey: vi.fn(() => "k"),
 }));
 // The answer read as the action reads it: no fetch in it to stand in for.

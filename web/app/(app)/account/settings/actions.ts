@@ -3,13 +3,13 @@
 import { refresh } from "next/cache";
 import { z } from "zod";
 
-import { type ActionResult, refused } from "@/lib/action-result";
+import { type ActionResult, SESSION_EXPIRED, refused } from "@/lib/action-result";
 import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
-import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
-import { blacklistSession, isSessionBlacklisted } from "@/lib/auth/session-blacklist";
+import { blacklistSession } from "@/lib/auth/session-blacklist";
 import { sessionEndKey } from "@/lib/auth/session-end-key";
 import { env } from "@/lib/env";
 import { MAX_EMAIL } from "@/lib/names";
+import { admit } from "@/lib/server/admit";
 import { accountHeaders, personHeaders } from "@/lib/server/entities/identity-context";
 import { getServerSession } from "@/lib/server/session";
 import { canChangeEmail } from "@/lib/sign-in-method";
@@ -31,18 +31,8 @@ const NOT_ELIGIBLE =
 const UNRESOLVED = "Couldn't resolve your account right now. Try again in a moment.";
 
 export async function requestPasswordResetAction(): Promise<ActionResult> {
-  const session = await getServerSession();
-  if (!session || (await isSessionBlacklisted(sessionEndKey(session)))) {
-    return refused("Your session expired — sign in again.");
-  }
-
-  const limited = await rateLimit(sessionKey(session, "password:reset"), {
-    limit: 3,
-    windowMs: 60 * 60_000,
-  });
-  if (limited) {
-    return refused("Too many requests — try again in an hour.");
-  }
+  const gate = await admit({ call: "password:reset", limit: 3, per: "hour" });
+  if (!gate.ok) return refused(gate.error);
 
   const headers = await accountHeaders();
   if (!headers) return refused(UNRESOLVED);
@@ -68,9 +58,7 @@ export async function requestEmailChangeAction(
   email: string,
 ): Promise<ActionResult<{ email?: string }>> {
   const session = await getServerSession();
-  if (!session || (await isSessionBlacklisted(sessionEndKey(session)))) {
-    return refused("Your session expired — sign in again.");
-  }
+  if (!session) return refused(SESSION_EXPIRED);
   if (!canChangeEmail(session.authMethod)) return refused(NOT_ELIGIBLE);
 
   const next = email.trim().toLowerCase();
@@ -87,11 +75,8 @@ export async function requestEmailChangeAction(
   // an address the CALLER typed — a loose budget here is an open relay with our
   // sender reputation on it. Do not raise it to make "Resend code" feel
   // comfortable.
-  const limited = await rateLimit(sessionKey(session, "email:change-code"), {
-    limit: 3,
-    windowMs: 60 * 60_000,
-  });
-  if (limited) return refused("Too many requests — try again in an hour.");
+  const gate = await admit({ call: "email:change-code", limit: 3, per: "hour" });
+  if (!gate.ok) return refused(gate.error);
 
   const headers = await accountHeaders();
   if (!headers) return refused(UNRESOLVED);
@@ -119,20 +104,14 @@ export async function confirmEmailChangeAction(
   newCode: string,
 ): Promise<ActionResult<{ email?: string }>> {
   const session = await getServerSession();
-  if (!session || (await isSessionBlacklisted(sessionEndKey(session)))) {
-    return refused("Your session expired — sign in again.");
-  }
+  if (!session) return refused(SESSION_EXPIRED);
   if (!canChangeEmail(session.authMethod)) return refused(NOT_ELIGIBLE);
 
   if (!/^\d{6}$/.test(currentCode) || !/^\d{6}$/.test(newCode)) {
     return refused("Enter both 6-digit codes from your email.");
   }
-
-  const limited = await rateLimit(sessionKey(session, "email:change-confirm"), {
-    limit: 10,
-    windowMs: 60 * 60_000,
-  });
-  if (limited) return refused("Too many attempts. Try again in an hour.");
+  const gate = await admit({ call: "email:change-confirm", limit: 10, per: "hour" });
+  if (!gate.ok) return refused(gate.error);
 
   const headers = await accountHeaders();
   if (!headers) return refused(UNRESOLVED);
@@ -180,16 +159,9 @@ export async function confirmEmailChangeAction(
 export async function setDefaultOrganizationAction(
   organizationId: string,
 ): Promise<ActionResult> {
-  const session = await getServerSession();
-  if (!session || (await isSessionBlacklisted(sessionEndKey(session)))) {
-    return refused("Your session expired — sign in again.");
-  }
-
-  const limited = await rateLimit(sessionKey(session, "account:default-organization"), {
-    limit: 20,
-    windowMs: 60_000,
-  });
-  if (limited) return refused("Too many requests — slow down a moment.");
+  const gate = await admit({ call: "account:default-organization", limit: 20 });
+  if (!gate.ok) return refused(gate.error);
+  const { session } = gate;
 
   const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/v1/me/default-organization`, {
     method: "PUT",

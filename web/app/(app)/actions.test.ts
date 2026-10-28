@@ -14,10 +14,12 @@ vi.mock("@/lib/api/fetch", () => ({
   tryFetchWithTimeout: (...a: unknown[]) => mockFetch(...a),
   extractProblem: (res: unknown) => mockExtractProblem(res),
 }));
-const mockRateLimit = vi.fn<(key: string, opts: unknown) => Promise<unknown>>(async () => null);
+const mockRateLimit = vi.fn<(key: string, opts: unknown) => Promise<number | null>>(
+  async () => null,
+);
 const mockSessionKey = vi.fn<(session: unknown, bucket: string) => string>(() => "k");
 vi.mock("@/lib/api/rate-limit", () => ({
-  rateLimit: (key: string, opts: unknown) => mockRateLimit(key, opts),
+  rateLimitRetryAfter: (key: string, opts: unknown) => mockRateLimit(key, opts),
   sessionKey: (session: unknown, bucket: string) => mockSessionKey(session, bucket),
 }));
 const mockOrganizationHeaders = vi.fn((ctx: { organizationId: string }) => ({
@@ -329,7 +331,7 @@ describe("createOrganizationAction", () => {
     expect(mockRateLimit).toHaveBeenCalledWith("k", { limit: 10, windowMs: 60_000 });
 
     mockFetch.mockClear();
-    mockRateLimit.mockResolvedValueOnce({ status: 429 });
+    mockRateLimit.mockResolvedValueOnce(30);
     const r = await createOrganizationAction("Acme", "");
     expect(errorOf(r)).toMatch(/too many requests/i);
     expect(mockFetch).not.toHaveBeenCalled();

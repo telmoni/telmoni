@@ -5,11 +5,10 @@ import { redirect } from "next/navigation";
 
 import { type ActionResult, refused } from "@/lib/action-result";
 import { extractProblem, readBody, tryFetchWithTimeout } from "@/lib/api/fetch";
-import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
 import { env } from "@/lib/env";
+import { admit } from "@/lib/server/admit";
 import { setActiveOrganizationCookie } from "@/lib/server/cookies";
 import { personHeaders } from "@/lib/server/entities/identity-context";
-import { getServerSession } from "@/lib/server/session";
 import { SettledInviteSchema } from "@/lib/types/settled-invite";
 import {
   organizationChannel,
@@ -22,14 +21,9 @@ export async function acceptInviteAction(
 ): Promise<ActionResult> {
   // The page offers the signed-out its own links to sign in, back to it: a
   // session that ran out since it was drawn is told so.
-  const session = await getServerSession();
-  if (!session) return refused("Your session expired — sign in again.");
-
-  const limited = await rateLimit(sessionKey(session, "invites:accept"), {
-    limit: 10,
-    windowMs: 60_000,
-  });
-  if (limited) return refused("Too many requests — slow down a moment.");
+  const gate = await admit({ call: "invites:accept", limit: 10 });
+  if (!gate.ok) return refused(gate.error);
+  const { session } = gate;
 
   // Sent in no organization: whoever holds this link may belong to none yet,
   // and joining one is what it is for.

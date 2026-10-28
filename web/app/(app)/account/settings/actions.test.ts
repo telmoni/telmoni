@@ -10,14 +10,13 @@ vi.mock("@/lib/auth/session", () => ({
 }));
 vi.mock("@/lib/auth/session-blacklist", () => ({
   blacklistSession: vi.fn(async () => undefined),
-  isSessionBlacklisted: vi.fn(async () => false),
 }));
 vi.mock("next/cache", () => ({
   revalidatePath: vi.fn(),
   refresh: vi.fn(),
 }));
 vi.mock("@/lib/api/rate-limit", () => ({
-  rateLimit: vi.fn(async () => null),
+  rateLimitRetryAfter: vi.fn(async () => null),
   sessionKey: vi.fn(() => "k"),
 }));
 vi.mock("@/lib/api/fetch", () => ({
@@ -41,8 +40,8 @@ import { refresh, revalidatePath } from "next/cache";
 
 import { getServerSession } from "@/lib/server/session";
 import { writeSessionCookie } from "@/lib/auth/session";
-import { blacklistSession, isSessionBlacklisted } from "@/lib/auth/session-blacklist";
-import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
+import { blacklistSession } from "@/lib/auth/session-blacklist";
+import { rateLimitRetryAfter, sessionKey } from "@/lib/api/rate-limit";
 import { tryFetchWithTimeout } from "@/lib/api/fetch";
 import { getServerContext } from "@/lib/server/entities/organization";
 
@@ -64,8 +63,7 @@ beforeEach(() => {
     sessionRowId: "sess_1",
     accessToken: "at_1",
   } as never);
-  vi.mocked(rateLimit).mockResolvedValue(null as never);
-  vi.mocked(isSessionBlacklisted).mockResolvedValue(false);
+  vi.mocked(rateLimitRetryAfter).mockResolvedValue(null);
   vi.mocked(writeSessionCookie).mockResolvedValue(undefined);
   // Standing in somebody else's organization: an account lane acts on the
   // person wherever the console is, and sends that organization along.
@@ -153,10 +151,10 @@ describe("requestPasswordResetAction", () => {
   });
 
   it("refuses a caller over the limit without calling auth", async () => {
-    vi.mocked(rateLimit).mockResolvedValue("limited" as never);
+    vi.mocked(rateLimitRetryAfter).mockResolvedValue(30);
     expect(await requestPasswordResetAction()).toEqual({
       ok: false,
-      error: "Too many requests — try again in an hour.",
+      error: "Too many requests. Try again in an hour.",
     });
     expect(tryFetchWithTimeout).not.toHaveBeenCalled();
   });
@@ -168,17 +166,6 @@ describe("requestPasswordResetAction", () => {
       error: "Your session expired — sign in again.",
     });
     expect(tryFetchWithTimeout).not.toHaveBeenCalled();
-  });
-
-  it("refuses a session that was ended from another device", async () => {
-    vi.mocked(isSessionBlacklisted).mockResolvedValue(true);
-    expect(await requestPasswordResetAction()).toEqual({
-      ok: false,
-      error: "Your session expired — sign in again.",
-    });
-    expect(isSessionBlacklisted).toHaveBeenCalledWith("sess_1");
-    expect(tryFetchWithTimeout).not.toHaveBeenCalled();
-    expect(rateLimit).not.toHaveBeenCalled();
   });
 
   it("reports an unreachable service and a refusal distinctly", async () => {
@@ -331,26 +318,26 @@ describe("requestEmailChangeAction", () => {
       expect.anything(),
       "email:change-code",
     );
-    expect(rateLimit).toHaveBeenCalledWith("k", {
+    expect(rateLimitRetryAfter).toHaveBeenCalledWith("k", {
       limit: 3,
       windowMs: 3_600_000,
     });
 
-    vi.mocked(rateLimit).mockResolvedValue("limited" as never);
+    vi.mocked(rateLimitRetryAfter).mockResolvedValue(30);
     expect(await requestEmailChangeAction("new@example.test")).toEqual({
       ok: false,
-      error: "Too many requests — try again in an hour.",
+      error: "Too many requests. Try again in an hour.",
     });
   });
 
   it("refuses a dead session before spending a rate-limit slot", async () => {
-    vi.mocked(isSessionBlacklisted).mockResolvedValue(true);
+    vi.mocked(getServerSession).mockResolvedValue(null as never);
     expect(await requestEmailChangeAction("new@example.test")).toEqual({
       ok: false,
       error: "Your session expired — sign in again.",
     });
     expect(tryFetchWithTimeout).not.toHaveBeenCalled();
-    expect(rateLimit).not.toHaveBeenCalled();
+    expect(rateLimitRetryAfter).not.toHaveBeenCalled();
   });
 
   it("reports an unreachable service and a refusal distinctly", async () => {
@@ -440,7 +427,7 @@ describe("confirmEmailChangeAction", () => {
       expect.anything(),
       "email:change-confirm",
     );
-    expect(rateLimit).toHaveBeenCalledWith("k", {
+    expect(rateLimitRetryAfter).toHaveBeenCalledWith("k", {
       limit: 10,
       windowMs: 3_600_000,
     });
@@ -547,14 +534,13 @@ describe("setDefaultOrganizationAction", () => {
   });
 
   it("sends nothing for a session that has ended, or past the limit", async () => {
-    vi.mocked(isSessionBlacklisted).mockResolvedValue(true);
+    vi.mocked(getServerSession).mockResolvedValueOnce(null);
     expect(await setDefaultOrganizationAction("org_2")).toEqual({
       ok: false,
       error: "Your session expired — sign in again.",
     });
 
-    vi.mocked(isSessionBlacklisted).mockResolvedValue(false);
-    vi.mocked(rateLimit).mockResolvedValue({ retryAfterMs: 1_000 } as never);
+    vi.mocked(rateLimitRetryAfter).mockResolvedValue(30);
     expect(await setDefaultOrganizationAction("org_2")).toEqual({
       ok: false,
       error: "Too many requests — slow down a moment.",

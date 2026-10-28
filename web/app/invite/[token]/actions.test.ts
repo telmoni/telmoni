@@ -13,7 +13,7 @@ vi.mock("@/lib/server/session", () => ({
   getServerSession: vi.fn(),
 }));
 vi.mock("@/lib/api/rate-limit", () => ({
-  rateLimit: vi.fn(async () => null),
+  rateLimitRetryAfter: vi.fn(async () => null),
   sessionKey: vi.fn(() => "k"),
 }));
 // The real `personHeaders`: which organization reaches auth — none — is the
@@ -49,10 +49,9 @@ vi.mock("@/lib/events/publisher", () => ({
 }));
 
 import { revalidatePath } from "next/cache";
-import { NextResponse } from "next/server";
 
 import { tryFetchWithTimeout } from "@/lib/api/fetch";
-import { rateLimit } from "@/lib/api/rate-limit";
+import { rateLimitRetryAfter } from "@/lib/api/rate-limit";
 import { setActiveOrganizationCookie } from "@/lib/server/cookies";
 import { identityContext } from "@/lib/server/entities/identity-context";
 import { getServerSession } from "@/lib/server/session";
@@ -69,7 +68,7 @@ describe("acceptInviteAction", () => {
       email: "user@example.test",
       accessToken: "at_1",
     } as never);
-    vi.mocked(rateLimit).mockResolvedValue(null);
+    vi.mocked(rateLimitRetryAfter).mockResolvedValue(null);
     vi.mocked(identityContext).mockResolvedValue({
       userId: "usr_1",
       organizationId: "org_1",
@@ -103,7 +102,7 @@ describe("acceptInviteAction", () => {
   });
 
   it("returns rate limit error when limited", async () => {
-    vi.mocked(rateLimit).mockResolvedValue(new NextResponse(null, { status: 429 }));
+    vi.mocked(rateLimitRetryAfter).mockResolvedValue(30);
     const res = await acceptInviteAction("token_abc");
     expect(errorOf(res)).toMatch(/too many requests/i);
     expect(fetchMock).not.toHaveBeenCalled();
