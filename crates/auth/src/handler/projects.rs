@@ -10,9 +10,9 @@ use serde_json::json;
 use telmoni_shared::OrganizationAction;
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
 use telmoni_shared::db::tenant_session::maintenance_scope;
-use telmoni_shared::extract::Json;
+use telmoni_shared::extract::{Json, Path};
 use telmoni_shared::person_token::Principal;
-use telmoni_shared::{AuditAction, AuthError, TelmoniError, TelmoniResourceKind};
+use telmoni_shared::{AuditAction, AuthError, ProjectId, TelmoniError, TelmoniResourceKind};
 
 use super::authorize_organization;
 use crate::AppState;
@@ -161,10 +161,9 @@ pub async fn create_project(
 /// retention sweep.
 pub async fn delete_project(
     State(state): State<Arc<AppState>>,
-    axum::extract::Path(project_id): axum::extract::Path<String>,
+    Path(project_id): Path<ProjectId>,
     principal: Principal,
 ) -> Result<impl IntoResponse, telmoni_shared::TelmoniError> {
-    let project_id = super::parse_project_id(&project_id)?;
     let user_id = principal.user_id;
 
     let acting = super::acting_project(&state, &project_id, &user_id).await?;
@@ -236,11 +235,10 @@ pub struct UpdateProjectRequest {
 /// with the name, so the answer carries both and the console follows it.
 pub async fn update_project(
     State(state): State<Arc<AppState>>,
-    axum::extract::Path(project_id): axum::extract::Path<String>,
+    Path(project_id): Path<ProjectId>,
     principal: Principal,
     Json(req): Json<UpdateProjectRequest>,
 ) -> Result<impl IntoResponse, telmoni_shared::TelmoniError> {
-    let project_id = super::parse_project_id(&project_id)?;
     let user_id = principal.user_id;
     let trimmed = validate_project_name(&req.name)?;
 

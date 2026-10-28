@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::{Path, State},
+    extract::State,
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
 };
@@ -12,7 +12,7 @@ use uuid::Uuid;
 use serde_json::json;
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
 use telmoni_shared::db::tenant_session::maintenance_scope;
-use telmoni_shared::extract::Json;
+use telmoni_shared::extract::{Json, Path};
 use telmoni_shared::person_token::Principal;
 use telmoni_shared::rbac::{Resource, Verb};
 use telmoni_shared::types::{API_TOKEN_PREFIX, ApiKeyScope};

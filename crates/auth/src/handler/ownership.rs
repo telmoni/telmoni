@@ -52,7 +52,7 @@ use crate::{
         offers::{self, Roster},
         organization_members, organizations,
     },
-    handler::{organization_of, organization_role_or_forbidden, parse_user_id},
+    handler::{organization_of, organization_role_or_forbidden},
     model::AuditKind,
 };
 
@@ -226,7 +226,7 @@ pub async fn offer(
 ) -> Result<impl IntoResponse, TelmoniError> {
     let organization = organization_of(&headers)?;
     let user_id = principal.user_id;
-    let target = parse_user_id(&req.member_id)?;
+    let target = req.member_id;
     if target == user_id {
         return Err(AuthError::BadRequest("you already own this organization".into()).into());
     }

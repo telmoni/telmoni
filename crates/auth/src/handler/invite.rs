@@ -11,11 +11,7 @@
 
 use std::sync::Arc;
 
-use axum::{
-    extract::{Path, State},
-    http::StatusCode,
-    response::IntoResponse,
-};
+use axum::{extract::State, http::StatusCode, response::IntoResponse};
 use chrono::{Duration, Utc};
 use serde::Deserialize;
 use serde_json::json;
@@ -23,7 +19,7 @@ use uuid::Uuid;
 
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
 use telmoni_shared::db::tenant_session::{Maintenance, Scoped, maintenance_scope};
-use telmoni_shared::extract::Json;
+use telmoni_shared::extract::{Json, Path};
 use telmoni_shared::person_token::Principal;
 use telmoni_shared::rbac::{Resource, Verb};
 use telmoni_shared::{
@@ -36,8 +32,7 @@ use crate::{
     AppState,
     db::{AuthLane, identities, invites, locks, members, organization_members, organizations},
     handler::{
-        acting_project, authorize, lock_membership, member::grantable, parse_project_id,
-        refuse_unless_still_in,
+        acting_project, authorize, lock_membership, member::grantable, refuse_unless_still_in,
     },
     model::{AuditKind, InviteScope},
 };
@@ -184,11 +179,10 @@ pub(crate) async fn roster_ceiling(
 /// `POST /internal/v1/projects/{project_id}/invites` — offer somebody a role.
 pub async fn create_invite(
     State(state): State<Arc<AppState>>,
-    Path(project_id): Path<String>,
+    Path(project_id): Path<ProjectId>,
     principal: Principal,
     Json(req): Json<CreateInviteRequest>,
 ) -> Result<impl IntoResponse, TelmoniError> {
-    let project_id = parse_project_id(&project_id)?;
     let actor = principal.user_id;
     let role = grantable(req.role)?;
     let email = crate::identity::validate_email(&req.email)?;
@@ -312,10 +306,9 @@ pub async fn create_invite(
 /// `GET /internal/v1/projects/{project_id}/invites` — what is still outstanding.
 pub async fn list_invites(
     State(state): State<Arc<AppState>>,
-    Path(project_id): Path<String>,
+    Path(project_id): Path<ProjectId>,
     principal: Principal,
 ) -> Result<impl IntoResponse, TelmoniError> {
-    let project_id = parse_project_id(&project_id)?;
     let actor = principal.user_id;
 
     let mut acting = acting_project(&state, &project_id, &actor).await?;
@@ -330,10 +323,9 @@ pub async fn list_invites(
 /// offer back. The link dies immediately, because accept reads liveness.
 pub async fn revoke_invite(
     State(state): State<Arc<AppState>>,
-    Path((project_id, invite_id)): Path<(String, Uuid)>,
+    Path((project_id, invite_id)): Path<(ProjectId, Uuid)>,
     principal: Principal,
 ) -> Result<impl IntoResponse, TelmoniError> {
-    let project_id = parse_project_id(&project_id)?;
     let actor = principal.user_id;
 
     let acting = acting_project(&state, &project_id, &actor).await?;

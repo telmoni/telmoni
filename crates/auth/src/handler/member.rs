@@ -2,11 +2,7 @@
 
 use std::sync::Arc;
 
-use axum::{
-    extract::{Path, State},
-    http::StatusCode,
-    response::IntoResponse,
-};
+use axum::{extract::State, http::StatusCode, response::IntoResponse};
 use chrono::{Duration, Utc};
 use serde::Deserialize;
 use serde_json::json;
@@ -14,12 +10,12 @@ use serde_json::json;
 use telmoni_shared::OrganizationAction;
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
 use telmoni_shared::db::tenant_session::maintenance_scope;
-use telmoni_shared::extract::Json;
+use telmoni_shared::extract::{Json, Path};
 use telmoni_shared::person_token::Principal;
 use telmoni_shared::rbac::{Resource, Verb};
 use telmoni_shared::{
-    AuditAction, AuthError, AuthzError, OrganizationRole, Role, TelmoniError, TelmoniResourceKind,
-    UserId,
+    AuditAction, AuthError, AuthzError, OrganizationRole, ProjectId, Role, TelmoniError,
+    TelmoniResourceKind, UserId,
 };
 
 use super::authorize_organization;
@@ -29,10 +25,7 @@ use crate::{
         AuthLane, audit, flags, identities, invites, members, organization_members, organizations,
         projects,
     },
-    handler::{
-        ActingProject, acting_project, authorize, hold_project, invite::INVITE_DAILY_MAX,
-        parse_project_id, parse_user_id,
-    },
+    handler::{ActingProject, acting_project, authorize, hold_project, invite::INVITE_DAILY_MAX},
     model::AuditKind,
 };
 
@@ -47,7 +40,7 @@ pub struct UpdateRoleRequest {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct GiveSeatRequest {
     /// A member of the organization — their user id, as its roster lists them.
-    pub member_id: String,
+    pub member_id: UserId,
     pub role: Role,
 }
 
@@ -84,10 +77,9 @@ async fn is_organization_owner<'a>(
 /// `GET /internal/v1/projects/{project_id}/members` — the roster.
 pub async fn list_members(
     State(state): State<Arc<AppState>>,
-    Path(project_id): Path<String>,
+    Path(project_id): Path<ProjectId>,
     principal: Principal,
 ) -> Result<impl IntoResponse, TelmoniError> {
-    let project_id = parse_project_id(&project_id)?;
     let actor = principal.user_id;
 
     let acting = acting_project(&state, &project_id, &actor).await?;
@@ -120,12 +112,11 @@ pub async fn list_members(
 /// feed is told, and the person by mail and in their bell (`/me`).
 pub async fn give_seat(
     State(state): State<Arc<AppState>>,
-    Path(project_id): Path<String>,
+    Path(project_id): Path<ProjectId>,
     principal: Principal,
     Json(req): Json<GiveSeatRequest>,
 ) -> Result<impl IntoResponse, TelmoniError> {
-    let project_id = parse_project_id(&project_id)?;
-    let member = parse_user_id(&req.member_id)?;
+    let member = req.member_id;
     let actor = principal.user_id;
     let role = grantable(req.role)?;
     // Before the lane's transaction opens: a request never holds two of the
@@ -300,10 +291,9 @@ async fn leaving(state: &AppState, member: &UserId) -> Result<bool, TelmoniError
 /// consoles to be told, and `null` when none was.
 pub async fn mark_seat_seen(
     State(state): State<Arc<AppState>>,
-    Path(project_id): Path<String>,
+    Path(project_id): Path<ProjectId>,
     principal: Principal,
 ) -> Result<impl IntoResponse, TelmoniError> {
-    let project_id = parse_project_id(&project_id)?;
     let mut tx = maintenance_scope(&state.db, AuthLane).await?;
     // A move marks its project's seats under its own locks: a wait past the
     // role's `lock_timeout` answers 409, as every lock wait does.
@@ -315,12 +305,10 @@ pub async fn mark_seat_seen(
 /// `PUT /internal/v1/projects/{project_id}/members/{member_id}/role`.
 pub async fn update_role(
     State(state): State<Arc<AppState>>,
-    Path((project_id, member_id)): Path<(String, String)>,
+    Path((project_id, member_id)): Path<(ProjectId, UserId)>,
     principal: Principal,
     Json(req): Json<UpdateRoleRequest>,
 ) -> Result<impl IntoResponse, TelmoniError> {
-    let project_id = parse_project_id(&project_id)?;
-    let member_id = parse_user_id(&member_id)?;
     let actor = principal.user_id;
     let role = grantable(req.role)?;
 
@@ -362,11 +350,9 @@ pub async fn update_role(
 /// or an admin removes somebody.
 pub async fn remove_member(
     State(state): State<Arc<AppState>>,
-    Path((project_id, member_id)): Path<(String, String)>,
+    Path((project_id, member_id)): Path<(ProjectId, UserId)>,
     principal: Principal,
 ) -> Result<impl IntoResponse, TelmoniError> {
-    let project_id = parse_project_id(&project_id)?;
-    let member_id = parse_user_id(&member_id)?;
     let actor = principal.user_id;
 
     let acting = acting_project(&state, &project_id, &actor).await?;
@@ -411,10 +397,9 @@ pub async fn remove_member(
 /// seat. Maintenance lane: the seat is a row they may only read.
 pub async fn leave(
     State(state): State<Arc<AppState>>,
-    Path(project_id): Path<String>,
+    Path(project_id): Path<ProjectId>,
     principal: Principal,
 ) -> Result<impl IntoResponse, TelmoniError> {
-    let project_id = parse_project_id(&project_id)?;
     let actor = principal.user_id;
 
     let not_a_member = || -> TelmoniError {

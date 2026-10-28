@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::{Path, State},
+    extract::State,
     http::{StatusCode, header},
     response::IntoResponse,
 };
@@ -20,11 +20,13 @@ use uuid::Uuid;
 use telmoni_shared::OrganizationAction;
 use telmoni_shared::db::tenant_session::{PersonAndOrganization, Scoped, organization_scope};
 use telmoni_shared::error::TelmoniError;
-use telmoni_shared::extract::{Json, Query};
+use telmoni_shared::extract::{Json, Path, Query};
 use telmoni_shared::person_token::Principal;
 use telmoni_shared::rbac::{Resource, Verb};
 use telmoni_shared::types::CONNECTION_BYTES;
-use telmoni_shared::{AuditAction, AuthError, AuthzError, OrganizationId, TelmoniResourceKind};
+use telmoni_shared::{
+    AuditAction, AuthError, AuthzError, OrganizationId, ProjectId, TelmoniResourceKind,
+};
 
 use super::authorize_organization;
 use crate::AppState;
@@ -57,11 +59,10 @@ pub struct ListParams {
 /// ORGANIZATION's rows bearing that project.
 pub async fn list_project_audit(
     State(state): State<Arc<AppState>>,
-    Path(project_id): Path<String>,
+    Path(project_id): Path<ProjectId>,
     Query(params): Query<ListParams>,
     principal: Principal,
 ) -> Result<impl IntoResponse, TelmoniError> {
-    let project_id = super::parse_project_id(&project_id)?;
     let user_id = principal.user_id;
 
     let acting = super::acting_project(&state, &project_id, &user_id).await?;
@@ -99,12 +100,11 @@ pub async fn list_project_audit(
 /// record of the whole collaboration.
 pub async fn list_organization_audit(
     State(state): State<Arc<AppState>>,
-    Path(organization_id): Path<String>,
+    Path(organization_id): Path<OrganizationId>,
     Query(params): Query<ListParams>,
     principal: Principal,
     headers: HeaderMap,
 ) -> Result<impl IntoResponse, TelmoniError> {
-    let organization_id = super::parse_organization_id(&organization_id)?;
     if organization_id != super::organization_of(&headers)? {
         return Err(AuthzError::Forbidden("not the acting organization".to_string()).into());
     }
@@ -150,7 +150,7 @@ const EXPORTS_LISTED: i64 = 10;
 /// the organization's owner or an admin ([`refuse_unless_exporter`]).
 async fn exporter<'a>(
     state: &'a AppState,
-    organization_id: &str,
+    organization_id: &OrganizationId,
     principal: &Principal,
     headers: &HeaderMap,
 ) -> Result<(Scoped<'a, PersonAndOrganization>, OrganizationId), TelmoniError> {
@@ -165,19 +165,18 @@ async fn exporter<'a>(
 /// their exports to.
 async fn export_scope<'a>(
     state: &'a AppState,
-    organization_id: &str,
+    organization_id: &OrganizationId,
     principal: &Principal,
     headers: &HeaderMap,
 ) -> Result<(Scoped<'a, PersonAndOrganization>, OrganizationId), TelmoniError> {
-    let organization_id = super::parse_organization_id(organization_id)?;
-    if organization_id != super::organization_of(headers)? {
+    if *organization_id != super::organization_of(headers)? {
         return Err(AuthzError::Forbidden("not the acting organization".to_string()).into());
     }
-    let tx = organization_scope(&state.db, &organization_id)
+    let tx = organization_scope(&state.db, organization_id)
         .await?
         .bind_person(&principal.user_id)
         .await?;
-    Ok((tx, organization_id))
+    Ok((tx, organization_id.clone()))
 }
 
 /// Anybody but the organization's owner or an admin, who read the whole log
@@ -204,7 +203,7 @@ async fn refuse_unless_exporter(
 /// deletes their oldest finished one past [`MAX_KEPT`].
 pub async fn start_audit_export(
     State(state): State<Arc<AppState>>,
-    Path(organization_id): Path<String>,
+    Path(organization_id): Path<OrganizationId>,
     principal: Principal,
     headers: HeaderMap,
     Json(body): Json<StartExport>,
@@ -261,7 +260,7 @@ pub async fn start_audit_export(
 /// files: what the console's bell and export dialog show.
 pub async fn list_audit_exports(
     State(state): State<Arc<AppState>>,
-    Path(organization_id): Path<String>,
+    Path(organization_id): Path<OrganizationId>,
     principal: Principal,
     headers: HeaderMap,
 ) -> Result<impl IntoResponse, TelmoniError> {
@@ -291,7 +290,7 @@ pub async fn list_audit_exports(
 /// The first download is noted, so the bell stops offering it.
 pub async fn download_audit_export(
     State(state): State<Arc<AppState>>,
-    Path((organization_id, export_id)): Path<(String, Uuid)>,
+    Path((organization_id, export_id)): Path<(OrganizationId, Uuid)>,
     principal: Principal,
     headers: HeaderMap,
 ) -> Result<impl IntoResponse, TelmoniError> {

@@ -288,13 +288,7 @@ impl Requested {
 /// absent — a stale cookie must never cost somebody the console — and one the
 /// person does not belong to is ignored by [`choose_active`].
 fn requested_organization(headers: &HeaderMap) -> Option<Requested> {
-    let header = |name: &str| {
-        headers
-            .get(name)
-            .and_then(|v| v.to_str().ok())
-            .map(str::trim)
-            .filter(|v| !v.is_empty())
-    };
+    let header = |name: &str| telmoni_shared::extract::header(headers, name);
     header("x-organization-id")
         .and_then(|v| OrganizationId::try_new(v).ok())
         .map(Requested::Id)

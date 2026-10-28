@@ -29,8 +29,8 @@ use telmoni_shared::db::tenant_session::person_scope;
 use telmoni_shared::extract::Json;
 use telmoni_shared::person_token::Principal;
 use telmoni_shared::{
-    AuditAction, AuthError, AuthzError, OrganizationStatus, TelmoniError, TelmoniResourceKind,
-    TenantError,
+    AuditAction, AuthError, AuthzError, OrganizationId, OrganizationStatus, TelmoniError,
+    TelmoniResourceKind, TenantError,
 };
 
 use crate::{
@@ -42,7 +42,7 @@ use crate::{
     handler::{
         acting_person_in,
         deletion::{FINALIZE_GRACE_SECONDS, deletion_metadata, request_deletion},
-        log_act_outside_every_organization, parse_organization_id, recording_organization_of,
+        log_act_outside_every_organization, recording_organization_of,
     },
     model::{AuditKind, DeletionKind},
 };
@@ -91,7 +91,7 @@ pub struct AnalyticsPreferenceRequest {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DefaultOrganizationRequest {
-    pub organization_id: String,
+    pub organization_id: OrganizationId,
 }
 
 /// Body for `DELETE /internal/v1/me` and `DELETE /internal/v1/organization` — the
@@ -413,7 +413,7 @@ pub async fn set_default_organization(
     Json(req): Json<DefaultOrganizationRequest>,
 ) -> Result<impl IntoResponse, TelmoniError> {
     let user_id = principal.user_id;
-    let organization = parse_organization_id(&req.organization_id)?;
+    let organization = req.organization_id;
 
     // Their seat there, and the organization being active, are proved under
     // the person's lock, which their own deletion takes too.

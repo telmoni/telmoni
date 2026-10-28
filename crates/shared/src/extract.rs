@@ -7,7 +7,7 @@
 use axum::{
     extract::{
         FromRequest, FromRequestParts, Request,
-        rejection::{JsonRejection, QueryRejection},
+        rejection::{JsonRejection, PathRejection, QueryRejection},
     },
     http::{HeaderMap, request::Parts},
     response::{IntoResponse, Response},
@@ -63,6 +63,27 @@ where
     }
 }
 
+/// Like [`axum::extract::Path`], but a rejection — a segment that is no id
+/// of the kind the lane names — becomes a [`TelmoniError::BadRequest`]
+/// naming the shape, where axum's answers plain text quoting the segment.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Path<T>(pub T);
+
+impl<T, S> FromRequestParts<S> for Path<T>
+where
+    T: DeserializeOwned + Send,
+    S: Send + Sync,
+{
+    type Rejection = TelmoniError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        match axum::extract::Path::<T>::from_request_parts(parts, state).await {
+            Ok(axum::extract::Path(value)) => Ok(Self(value)),
+            Err(rejection) => Err(reject(&rejection)),
+        }
+    }
+}
+
 /// One conversion point so every extractor rejection renders the same 400 problem.
 fn reject(rejection: &impl RejectionText) -> TelmoniError {
     TelmoniError::BadRequest(rejection.text().into())
@@ -97,6 +118,17 @@ impl RejectionText for QueryRejection {
                 "the query string does not have the parameters this lane takes, or one holds a value of the wrong kind"
             }
             _ => "the query string was refused",
+        }
+    }
+}
+
+impl RejectionText for PathRejection {
+    fn text(&self) -> &'static str {
+        match self {
+            Self::FailedToDeserializePathParams(_) => {
+                "the path names something in a shape this lane does not take"
+            }
+            _ => "the path was refused",
         }
     }
 }
@@ -191,6 +223,33 @@ mod tests {
             err.to_problem_details().detail.as_deref(),
             Some("the body is not valid JSON")
         );
+    }
+
+    /// A segment that is no id of the kind the lane names is a 400 problem
+    /// with a fixed sentence, never axum's text, which quotes the segment.
+    #[tokio::test]
+    async fn path_of_the_wrong_shape_is_a_400_problem_that_echoes_nothing() {
+        use axum::{Router, routing::get};
+        use tower::ServiceExt;
+        async fn lane(Path(id): Path<u32>) -> String {
+            id.to_string()
+        }
+        let app = Router::new().route("/{id}", get(lane));
+        let request = HttpRequest::builder()
+            .uri("/abc%3Cscript%3E")
+            .body(Body::empty())
+            .expect("build request");
+        let response = app.oneshot(request).await.expect("the router answers");
+        assert_eq!(response.status(), 400);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("a body");
+        let text = String::from_utf8_lossy(&body);
+        assert!(
+            text.contains("the path names something in a shape this lane does not take"),
+            "{text}"
+        );
+        assert!(!text.contains("script"), "{text}");
     }
 
     #[tokio::test]

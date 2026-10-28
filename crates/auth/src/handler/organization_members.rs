@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::{Path, State},
+    extract::State,
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
 };
@@ -15,9 +15,11 @@ use uuid::Uuid;
 use telmoni_shared::OrganizationAction;
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
 use telmoni_shared::db::tenant_session::maintenance_scope;
-use telmoni_shared::extract::Json;
+use telmoni_shared::extract::{Json, Path};
 use telmoni_shared::person_token::Principal;
-use telmoni_shared::{AuditAction, AuthError, OrganizationRole, TelmoniError, TelmoniResourceKind};
+use telmoni_shared::{
+    AuditAction, AuthError, OrganizationRole, TelmoniError, TelmoniResourceKind, UserId,
+};
 
 use super::authorize_organization;
 use crate::{
@@ -26,7 +28,7 @@ use crate::{
     handler::{
         ActingOrganization, acting_organization,
         invite::{admit_invitation, ceiling_of, roster_ceiling},
-        organization_of, organization_role_or_forbidden, parse_user_id,
+        organization_of, organization_role_or_forbidden,
     },
     model::{AuditKind, InviteScope},
 };
@@ -86,14 +88,13 @@ pub async fn list_organization_members(
 /// `PUT /internal/v1/organization/members/{member_id}/role` — update a member's role.
 pub async fn update_organization_member_role(
     State(state): State<Arc<AppState>>,
-    Path(member_id): Path<String>,
+    Path(member_id): Path<UserId>,
     principal: Principal,
     headers: HeaderMap,
     Json(req): Json<UpdateOrganizationRoleRequest>,
 ) -> Result<impl IntoResponse, TelmoniError> {
     let organization = organization_of(&headers)?;
     let actor = principal.user_id;
-    let member_id = parse_user_id(&member_id)?;
     let role = ensure_grantable(req.role)?;
 
     let ActingOrganization { mut tx, .. } =
@@ -144,13 +145,12 @@ pub async fn update_organization_member_role(
 /// `DELETE /internal/v1/organization/members/{member_id}` — remove an organization member.
 pub async fn remove_organization_member(
     State(state): State<Arc<AppState>>,
-    Path(member_id): Path<String>,
+    Path(member_id): Path<UserId>,
     principal: Principal,
     headers: HeaderMap,
 ) -> Result<impl IntoResponse, TelmoniError> {
     let organization = organization_of(&headers)?;
     let actor = principal.user_id;
-    let member_id = parse_user_id(&member_id)?;
 
     // The maintenance lane because leaving deletes a row the leaver may only
     // read. Membership before the lock, so a stranger is refused at once

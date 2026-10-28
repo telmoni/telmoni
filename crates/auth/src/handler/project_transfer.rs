@@ -36,11 +36,7 @@
 
 use std::sync::Arc;
 
-use axum::{
-    extract::{Path, State},
-    http::StatusCode,
-    response::IntoResponse,
-};
+use axum::{extract::State, http::StatusCode, response::IntoResponse};
 use serde::Deserialize;
 use serde_json::json;
 
@@ -50,7 +46,7 @@ use telmoni_shared::db::tenant_session::{
     Maintenance, ProjectAndOrganization, Scoped, maintenance_scope,
 };
 use telmoni_shared::error::lock_timed_out;
-use telmoni_shared::extract::Json;
+use telmoni_shared::extract::{Json, Path};
 use telmoni_shared::person_token::Principal;
 use telmoni_shared::{
     AuditAction, AuthError, AuthzError, OrganizationId, OrganizationRole, OrganizationStatus,
@@ -67,8 +63,7 @@ use crate::{
     },
     handler::{
         ActingProject, BEING_DELETED, acting_project, deletion, hold_project,
-        parse_organization_id, parse_project_id, parse_user_id, projects::MAX_PROJECT_NAME,
-        refuse_unless_active,
+        projects::MAX_PROJECT_NAME, refuse_unless_active,
     },
     model::AuditKind,
 };
@@ -81,7 +76,7 @@ pub struct AcceptRequest {
     /// somebody who owns exactly one; required, and refused unless theirs,
     /// for somebody who owns several.
     #[serde(default)]
-    pub organization_id: Option<String>,
+    pub organization_id: Option<OrganizationId>,
 }
 
 /// The project's transaction, its organization bound and held ([`hold_project`]), and the
@@ -171,13 +166,12 @@ fn name_taken_in(e: sqlx::Error, name: &str) -> TelmoniError {
 /// own lock.
 pub async fn offer(
     State(state): State<Arc<AppState>>,
-    Path(project_id): Path<String>,
+    Path(project_id): Path<ProjectId>,
     principal: Principal,
     Json(req): Json<OfferRequest>,
 ) -> Result<impl IntoResponse, TelmoniError> {
-    let project_id = parse_project_id(&project_id)?;
     let user_id = principal.user_id;
-    let target = parse_user_id(&req.member_id)?;
+    let target = req.member_id;
     if target == user_id {
         return Err(AuthError::BadRequest("you already own this project".into()).into());
     }
@@ -286,10 +280,9 @@ pub async fn offer(
 /// the offer, and the admin who held it is mailed.
 pub async fn cancel(
     State(state): State<Arc<AppState>>,
-    Path(project_id): Path<String>,
+    Path(project_id): Path<ProjectId>,
     principal: Principal,
 ) -> Result<impl IntoResponse, TelmoniError> {
-    let project_id = parse_project_id(&project_id)?;
     let user_id = principal.user_id;
 
     let mut acting = locked(&state, &project_id, &user_id).await?;
@@ -352,10 +345,9 @@ pub async fn cancel(
 /// holding the offer turns it down, and the owner is mailed.
 pub async fn decline(
     State(state): State<Arc<AppState>>,
-    Path(project_id): Path<String>,
+    Path(project_id): Path<ProjectId>,
     principal: Principal,
 ) -> Result<impl IntoResponse, TelmoniError> {
-    let project_id = parse_project_id(&project_id)?;
     let user_id = principal.user_id;
 
     let mut acting = locked(&state, &project_id, &user_id).await?;
@@ -799,17 +791,12 @@ async fn lock_project_for_move(
 /// wherever auth then holds it.
 pub async fn accept(
     State(state): State<Arc<AppState>>,
-    Path(project_id): Path<String>,
+    Path(project_id): Path<ProjectId>,
     principal: Principal,
     Json(req): Json<AcceptRequest>,
 ) -> Result<impl IntoResponse, TelmoniError> {
-    let project_id = parse_project_id(&project_id)?;
     let user_id = principal.user_id;
-    let named = req
-        .organization_id
-        .as_deref()
-        .map(parse_organization_id)
-        .transpose()?;
+    let named = req.organization_id;
 
     let mut tx = maintenance_scope(&state.db, AuthLane).await?;
 
@@ -960,7 +947,7 @@ pub async fn accept(
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MoveRequest {
     /// The organization of the caller's the project moves into.
-    pub organization_id: String,
+    pub organization_id: OrganizationId,
 }
 
 /// `POST /internal/v1/projects/{project_id}/move` — the owner of two
@@ -977,13 +964,12 @@ pub struct MoveRequest {
 /// the project's move lock, as the accept takes it.
 pub async fn move_project(
     State(state): State<Arc<AppState>>,
-    Path(project_id): Path<String>,
+    Path(project_id): Path<ProjectId>,
     principal: Principal,
     Json(req): Json<MoveRequest>,
 ) -> Result<impl IntoResponse, TelmoniError> {
-    let project_id = parse_project_id(&project_id)?;
     let user_id = principal.user_id;
-    let destination = parse_organization_id(&req.organization_id)?;
+    let destination = req.organization_id;
 
     let mut tx = maintenance_scope(&state.db, AuthLane).await?;
 

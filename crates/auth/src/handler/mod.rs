@@ -60,13 +60,9 @@ pub(crate) fn parse_user_id(
 pub(crate) fn organization_of(
     headers: &axum::http::HeaderMap,
 ) -> Result<telmoni_shared::OrganizationId, telmoni_shared::TelmoniError> {
-    let raw = headers
-        .get("x-organization-id")
-        .and_then(|v| v.to_str().ok())
-        .filter(|v| !v.is_empty())
-        .ok_or_else(|| {
-            telmoni_shared::AuthError::BadRequest("missing x-organization-id header".to_string())
-        })?;
+    let raw = telmoni_shared::extract::header(headers, "x-organization-id").ok_or_else(|| {
+        telmoni_shared::AuthError::BadRequest("missing x-organization-id header".to_string())
+    })?;
     parse_organization_id(raw)
 }
 
@@ -210,11 +206,7 @@ pub(crate) async fn refuse_unless_active<B: Binding>(
 pub(crate) fn recording_organization_of(
     headers: &axum::http::HeaderMap,
 ) -> Result<Option<telmoni_shared::OrganizationId>, telmoni_shared::TelmoniError> {
-    match headers
-        .get("x-organization-id")
-        .and_then(|v| v.to_str().ok())
-        .filter(|v| !v.is_empty())
-    {
+    match telmoni_shared::extract::header(headers, "x-organization-id") {
         Some(raw) => parse_organization_id(raw).map(Some),
         None => Ok(None),
     }
@@ -295,14 +287,9 @@ pub(crate) use telmoni_shared::rbac::{authorize, authorize_organization};
 pub(crate) fn project_of(
     headers: &axum::http::HeaderMap,
 ) -> Result<telmoni_shared::types::ProjectId, telmoni_shared::TelmoniError> {
-    let raw = headers
-        .get("x-project-id")
-        .and_then(|v| v.to_str().ok())
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .ok_or_else(|| {
-            telmoni_shared::AuthError::BadRequest("missing x-project-id header".to_string())
-        })?;
+    let raw = telmoni_shared::extract::header(headers, "x-project-id").ok_or_else(|| {
+        telmoni_shared::AuthError::BadRequest("missing x-project-id header".to_string())
+    })?;
     telmoni_shared::types::ProjectId::try_new(raw).map_err(|e| {
         telmoni_shared::error::AuthError::BadRequest(format!("invalid x-project-id: {e}")).into()
     })

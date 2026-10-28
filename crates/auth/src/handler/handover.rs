@@ -16,7 +16,7 @@ use crate::{AppState, db::offers::OFFER_TTL_DAYS, mailer::MailError};
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct OfferRequest {
     /// The admin to offer it to — their user id, as the roster lists it.
-    pub member_id: String,
+    pub member_id: UserId,
 }
 
 /// An offer made or withdrawn: who holds it, at the address the roster has,

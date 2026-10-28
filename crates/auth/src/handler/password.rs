@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use telmoni_shared::extract::Json;
-use telmoni_shared::{AuthError, Redacted, TelmoniError};
+use telmoni_shared::{AuthError, Redacted, TelmoniError, UserId};
 
 use crate::AppState;
 use crate::password::{PasswordProvider, SignedUp};
@@ -81,7 +81,7 @@ impl std::fmt::Debug for SignInResponse {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct VerifyEmailRequest {
-    pub user_id: String,
+    pub user_id: UserId,
     pub token: Redacted,
 }
 
@@ -97,7 +97,7 @@ pub struct ForgotPasswordRequest {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ResetPasswordRequest {
-    pub user_id: String,
+    pub user_id: UserId,
     pub token: Redacted,
     pub password: Redacted,
 }
@@ -142,7 +142,7 @@ pub async fn verify_email(
     State(state): State<Arc<AppState>>,
     Json(req): Json<VerifyEmailRequest>,
 ) -> Result<impl IntoResponse, TelmoniError> {
-    let user_id = super::parse_user_id(&req.user_id)?;
+    let user_id = req.user_id;
     provider(&state)?
         .verify_email(&user_id, req.token.expose())
         .await?;
@@ -165,7 +165,7 @@ pub async fn reset_password(
     State(state): State<Arc<AppState>>,
     Json(req): Json<ResetPasswordRequest>,
 ) -> Result<impl IntoResponse, TelmoniError> {
-    let user_id = super::parse_user_id(&req.user_id)?;
+    let user_id = req.user_id;
     provider(&state)?
         .reset_password(&user_id, req.token.expose(), req.password.expose())
         .await?;

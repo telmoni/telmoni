@@ -9,7 +9,7 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::{Path, State},
+    extract::State,
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
 };
@@ -18,7 +18,7 @@ use uuid::Uuid;
 
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
 use telmoni_shared::db::tenant_session::person_scope;
-use telmoni_shared::extract::Json;
+use telmoni_shared::extract::{Json, Path};
 use telmoni_shared::person_token::Principal;
 use telmoni_shared::{AuditAction, AuthError, TelmoniError, TelmoniResourceKind};
 
@@ -42,13 +42,11 @@ pub async fn list(
 /// sessions.
 pub async fn revoke(
     State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
+    Path(id): Path<Uuid>,
     principal: Principal,
     headers: HeaderMap,
 ) -> Result<impl IntoResponse, TelmoniError> {
     let organization = recording_organization_of(&headers)?;
-    let id = Uuid::parse_str(&id)
-        .map_err(|_| AuthError::BadRequest("session id is not a uuid".into()))?;
 
     let mut tx = acting_person_in(&state, &principal.user_id, organization.as_ref()).await?;
     let Some(sid) = crate::db::sessions::revoke(&mut tx, &principal.user_id, id).await? else {
