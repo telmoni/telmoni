@@ -95,7 +95,7 @@ pub async fn request_organization_deletion_code(
 
     if let Err(e) = state
         .mailer
-        .send_organization_deletion_code(&person.email, &code, &row.name)
+        .send_organization_deletion_code(person.email.as_str(), &code, &row.name)
         .await
     {
         tracing::error!(organization_id = %organization, error = %e,

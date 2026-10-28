@@ -3,6 +3,7 @@
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
+use telmoni_shared::Email;
 use telmoni_shared::db::tenant_session::{Maintenance, Project, ProjectAndOrganization, Scoped};
 use telmoni_shared::{OrganizationId, OrganizationRole, ProjectId, Role, UserId, derive_shard_key};
 
@@ -15,7 +16,7 @@ use crate::model::InviteScope;
 #[serde(rename_all = "camelCase")]
 pub struct Invite {
     pub id: Uuid,
-    pub email: String,
+    pub email: Email,
     pub role: Role,
     pub expires_at: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
@@ -31,11 +32,11 @@ pub struct LiveInvite {
     /// The organization that holds it.
     pub organization_id: OrganizationId,
     /// The address this invitation was sent to; the acceptor must hold it.
-    pub email: String,
+    pub email: Email,
     pub role: Role,
     /// The person who sent it, for the accept page's "X invited you". `None`
     /// once they have been erased: the invitation outlives them.
-    pub inviter_email: Option<String>,
+    pub inviter_email: Option<Email>,
     pub inviter_display_name: Option<String>,
     /// What the organization is called.
     pub organization_name: String,
@@ -47,7 +48,7 @@ pub struct LiveInvite {
 pub async fn create(
     tx: &mut Scoped<'_, Project>,
     project_id: &ProjectId,
-    email: &str,
+    email: &Email,
     role: Role,
     token_hash: &str,
     invited_by: &UserId,
@@ -75,7 +76,7 @@ pub async fn create(
 pub async fn revoke_live_for_email(
     tx: &mut Scoped<'_, Project>,
     project_id: &ProjectId,
-    email: &str,
+    email: &Email,
 ) -> sqlx::Result<u64> {
     let result = sqlx::query(
         "UPDATE auth.member_invites SET revoked_at = now()
@@ -113,8 +114,8 @@ pub async fn revoke(
     tx: &mut Scoped<'_, Project>,
     project_id: &ProjectId,
     invite_id: Uuid,
-) -> sqlx::Result<Option<String>> {
-    sqlx::query_scalar::<_, String>(
+) -> sqlx::Result<Option<Email>> {
+    sqlx::query_scalar::<_, Email>(
         "UPDATE auth.member_invites SET revoked_at = now()
           WHERE project_id = $1 AND id = $2
             AND accepted_at IS NULL AND revoked_at IS NULL
@@ -194,7 +195,7 @@ pub async fn count_since(
 pub async fn already_a_member_by_email(
     tx: &mut Scoped<'_, ProjectAndOrganization>,
     project_id: &ProjectId,
-    email: &str,
+    email: &Email,
 ) -> sqlx::Result<bool> {
     sqlx::query_scalar::<_, bool>(
         "SELECT EXISTS (
@@ -214,7 +215,7 @@ pub async fn already_a_member_by_email(
 /// closed. Read in the maintenance lane, since there is no person yet.
 pub async fn any_live_for_email(
     tx: &mut Scoped<'_, Maintenance<AuthLane>>,
-    email: &str,
+    email: &Email,
 ) -> sqlx::Result<bool> {
     sqlx::query_scalar::<_, bool>(
         "SELECT EXISTS (
@@ -247,7 +248,7 @@ pub struct IncomingInvite {
     pub target_name: String,
     pub role: String,
     /// Who sent it. `None` once they have been erased.
-    pub inviter_email: Option<String>,
+    pub inviter_email: Option<Email>,
     pub inviter_display_name: Option<String>,
     pub expires_at: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
@@ -294,9 +295,9 @@ pub struct Invitation {
     pub organization_id: OrganizationId,
     pub organization_name: String,
     /// The address it was sent to; the acceptor must hold it.
-    pub email: String,
+    pub email: Email,
     /// Who sent it; `None` once they have been erased.
-    pub inviter_email: Option<String>,
+    pub inviter_email: Option<Email>,
     pub inviter_display_name: Option<String>,
     pub target: InviteTarget,
 }
@@ -350,8 +351,8 @@ pub async fn find_live_by_token(
 #[derive(Debug, Clone)]
 pub struct Pending {
     pub id: Uuid,
-    pub email: String,
-    pub inviter_email: Option<String>,
+    pub email: Email,
+    pub inviter_email: Option<Email>,
     /// The organization it is recorded on.
     pub owner_organization_id: OrganizationId,
     pub target: InviteTarget,
@@ -362,7 +363,7 @@ pub struct Pending {
 pub async fn find_incoming(
     tx: &mut Scoped<'_, Maintenance<AuthLane>>,
     invite_id: Uuid,
-    email: &str,
+    email: &Email,
 ) -> sqlx::Result<Option<Pending>> {
     if let Some(invite) = find_incoming_member_invite(tx, invite_id, email).await? {
         return Ok(Some(Pending {
@@ -407,9 +408,9 @@ pub async fn decline_incoming(
 pub struct PendingMemberInvite {
     pub id: Uuid,
     pub project_id: ProjectId,
-    pub email: String,
+    pub email: Email,
     pub role: Role,
-    pub inviter_email: Option<String>,
+    pub inviter_email: Option<Email>,
     pub owner_organization_id: OrganizationId,
 }
 
@@ -418,9 +419,9 @@ pub struct PendingMemberInvite {
 pub struct PendingOrganizationInvite {
     pub id: Uuid,
     pub organization_id: OrganizationId,
-    pub email: String,
+    pub email: Email,
     pub role: telmoni_shared::OrganizationRole,
-    pub inviter_email: Option<String>,
+    pub inviter_email: Option<Email>,
     pub owner_organization_id: OrganizationId,
 }
 
@@ -430,7 +431,7 @@ pub struct PendingOrganizationInvite {
 /// another organization's.
 pub async fn list_incoming(
     tx: &mut Scoped<'_, Maintenance<AuthLane>>,
-    email: &str,
+    email: &Email,
     caller: &UserId,
 ) -> sqlx::Result<Vec<IncomingInvite>> {
     sqlx::query_as::<_, IncomingInvite>(
@@ -495,7 +496,7 @@ pub async fn list_incoming(
 pub async fn find_incoming_member_invite(
     tx: &mut Scoped<'_, Maintenance<AuthLane>>,
     invite_id: Uuid,
-    email: &str,
+    email: &Email,
 ) -> sqlx::Result<Option<PendingMemberInvite>> {
     sqlx::query_as::<_, PendingMemberInvite>(
         "SELECT i.id, i.project_id, i.email, i.role,
@@ -519,7 +520,7 @@ pub async fn find_incoming_member_invite(
 pub async fn find_incoming_organization_invite(
     tx: &mut Scoped<'_, Maintenance<AuthLane>>,
     invite_id: Uuid,
-    email: &str,
+    email: &Email,
 ) -> sqlx::Result<Option<PendingOrganizationInvite>> {
     sqlx::query_as::<_, PendingOrganizationInvite>(
         "SELECT i.id, i.organization_id, i.email, i.role,
@@ -542,7 +543,7 @@ pub async fn find_incoming_organization_invite(
 pub async fn decline_incoming_member_invite(
     tx: &mut Scoped<'_, Maintenance<AuthLane>>,
     invite_id: Uuid,
-    email: &str,
+    email: &Email,
 ) -> sqlx::Result<bool> {
     let res = sqlx::query(
         "UPDATE auth.member_invites
@@ -561,7 +562,7 @@ pub async fn decline_incoming_member_invite(
 pub async fn decline_incoming_organization_invite(
     tx: &mut Scoped<'_, Maintenance<AuthLane>>,
     invite_id: Uuid,
-    email: &str,
+    email: &Email,
 ) -> sqlx::Result<bool> {
     let res = sqlx::query(
         "UPDATE auth.organization_invites

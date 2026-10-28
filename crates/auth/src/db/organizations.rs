@@ -7,6 +7,7 @@ use uuid::Uuid;
 
 use crate::db::AuthLane;
 use crate::model::{DeletionKind, Organization};
+use telmoni_shared::Email;
 use telmoni_shared::db::tenant_session::{
     self, Binding, HasOrganization, Maintenance, PersonAndOrganization, Scoped,
 };
@@ -38,7 +39,7 @@ pub async fn get<B: Binding>(
 pub struct OrganizationSummary {
     pub slug: Slug,
     pub name: String,
-    pub owner_email: Option<String>,
+    pub owner_email: Option<Email>,
     pub owner_display_name: Option<String>,
 }
 

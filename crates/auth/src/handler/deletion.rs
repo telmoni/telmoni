@@ -502,7 +502,7 @@ async fn erase_in_agent(
     agent
         .erase_person(
             user_id,
-            &person.email,
+            person.email.as_str(),
             person.display_name.as_deref(),
             organizations,
         )

@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use uuid::Uuid;
 
+use telmoni_shared::Email;
 use telmoni_shared::Redacted;
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
 use telmoni_shared::db::tenant_session::{Maintenance, Scoped, maintenance_scope};
@@ -98,7 +99,7 @@ pub(crate) async fn admit_invitation(
     state: &AppState,
     organization: &OrganizationId,
     ceiling: Option<MemberCeiling>,
-    email: &str,
+    email: &Email,
 ) -> Result<(), TelmoniError> {
     let Some(ceiling) = ceiling else {
         return Ok(());
@@ -177,7 +178,7 @@ pub async fn create_invite(
 ) -> Result<impl IntoResponse, TelmoniError> {
     let actor = principal.user_id;
     let role = grantable(req.role)?;
-    let email = crate::identity::validate_email(&req.email)?;
+    let email = Email::parse(&req.email)?;
 
     let acting = acting_project(&state, &project_id, &actor).await?;
     authorize(acting.role, Verb::Create, Resource::Member)?;
@@ -271,7 +272,7 @@ pub async fn create_invite(
     if let Err(e) = state
         .mailer
         .send_member_invite(
-            &email,
+            email.as_str(),
             &inviter,
             &label,
             crate::mailer::InvitedTo::Project(role),
@@ -355,7 +356,7 @@ pub async fn revoke_invite(
 /// What the accept page prints for who is inviting: the person who sent it,
 /// or the organization when they have since been erased.
 fn inviter_label(
-    inviter_email: Option<&str>,
+    inviter_email: Option<&Email>,
     inviter_display_name: Option<&str>,
     organization: &str,
 ) -> String {
@@ -372,7 +373,7 @@ pub struct InviteLook {
     pub scope: InviteScope,
     pub inviter: String,
     pub organization: String,
-    pub email: String,
+    pub email: Email,
     pub role: &'static str,
 }
 
@@ -395,7 +396,7 @@ pub async fn look_up_invite(
     Ok(Json(InviteLook {
         scope: invite.target.scope(),
         inviter: inviter_label(
-            invite.inviter_email.as_deref(),
+            invite.inviter_email.as_ref(),
             invite.inviter_display_name.as_deref(),
             &invite.organization_name,
         ),
@@ -782,7 +783,7 @@ pub struct Seated {
     #[serde(flatten)]
     pub on: SeatedOn,
     pub invite_id: Uuid,
-    pub inviter_email: Option<String>,
+    pub inviter_email: Option<Email>,
     pub owner_organization_id: OrganizationId,
 }
 
@@ -864,7 +865,7 @@ pub struct Settled {
     pub scope: InviteScope,
     pub target_id: String,
     pub invite_id: Uuid,
-    pub inviter_email: Option<String>,
+    pub inviter_email: Option<Email>,
     pub owner_organization_id: OrganizationId,
 }
 

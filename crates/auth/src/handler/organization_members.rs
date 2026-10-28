@@ -12,6 +12,7 @@ use serde::Deserialize;
 use serde_json::json;
 use uuid::Uuid;
 
+use telmoni_shared::Email;
 use telmoni_shared::OrganizationAction;
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
 use telmoni_shared::db::tenant_session::maintenance_scope;
@@ -276,7 +277,7 @@ pub async fn create_organization_invite(
     let organization = organization_of(&headers)?;
     let actor = principal.user_id;
     let role = ensure_grantable(req.role)?;
-    let email = crate::identity::validate_email(&req.email)?;
+    let email = Email::parse(&req.email)?;
 
     let ActingOrganization {
         mut tx,
@@ -367,7 +368,7 @@ pub async fn create_organization_invite(
     if let Err(e) = state
         .mailer
         .send_member_invite(
-            &email,
+            email.as_str(),
             &inviter,
             &label,
             crate::mailer::InvitedTo::Organization(role),

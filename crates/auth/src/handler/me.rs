@@ -19,6 +19,7 @@ use axum::{extract::State, http::HeaderMap, response::IntoResponse};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use telmoni_shared::Email;
 use telmoni_shared::db::tenant_session::{maintenance_scope, person_scope};
 use telmoni_shared::extract::Json;
 use telmoni_shared::person_token::Principal;
@@ -50,7 +51,7 @@ pub struct MeRequest {
 pub struct PersonSummary {
     pub user_id: UserId,
     /// The address this person signs in with.
-    pub email: String,
+    pub email: Email,
     pub display_name: Option<String>,
     /// Whether this person opted in to product analytics; served here so the
     /// privacy page costs no second fetch.
@@ -123,7 +124,7 @@ pub async fn test_session(
 ) -> Result<impl IntoResponse, TelmoniError> {
     let user_id = UserId::try_new(req.user_id.as_str())
         .map_err(|_| TelmoniError::BadRequest("userId is not a usable user id".into()))?;
-    let email = crate::identity::validate_email(&req.email)?;
+    let email = Email::parse(&req.email)?;
     let mut tx = person_scope(&state.db, &user_id).await?;
     let created = identities::identity(&mut tx, &user_id).await?.is_none();
     identities::record(

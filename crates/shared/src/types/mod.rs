@@ -3,6 +3,7 @@
 pub mod api_key_scope;
 pub mod audit_action;
 pub mod content_mode;
+pub mod email;
 pub mod flag;
 pub mod grants;
 pub mod incident_status;
@@ -36,6 +37,7 @@ pub mod wire_enum;
 pub use api_key_scope::ApiKeyScope;
 pub use audit_action::AuditAction;
 pub use content_mode::ContentMode;
+pub use email::{Email, EmailError};
 pub use flag::{Flag, FlagSet};
 pub use grants::{AlertCeilings, CONNECTION_BYTES, Grants, LaneCeilings, MemberCeiling, Paused};
 pub use incident_status::IncidentStatus;

@@ -4,6 +4,7 @@
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
+use telmoni_shared::Email;
 use telmoni_shared::db::tenant_session::{
     Binding, Maintenance, Person, PersonAndOrganization, PersonOrganizationProject, Project,
     ProjectAndOrganization, Scoped,
@@ -59,7 +60,7 @@ pub struct Member {
     pub id: Uuid,
     /// The person's user id — what the role and removal lanes take.
     pub member_id: UserId,
-    pub email: String,
+    pub email: Email,
     pub display_name: Option<String>,
     pub role: Role,
     pub created_at: DateTime<Utc>,
@@ -82,7 +83,7 @@ pub struct ProjectOffer {
     /// What that organization is called.
     pub organization_name: String,
     /// Its owner — who is offering — by address and name.
-    pub owner_email: Option<String>,
+    pub owner_email: Option<Email>,
     pub owner_display_name: Option<String>,
     /// When the offer lapses.
     pub expires_at: DateTime<Utc>,
@@ -327,7 +328,7 @@ pub struct GivenSeat {
     pub organization_slug: Slug,
     pub role: Role,
     /// Who gave it. `None` once they have been erased.
-    pub giver_email: Option<String>,
+    pub giver_email: Option<Email>,
     pub giver_display_name: Option<String>,
     pub created_at: DateTime<Utc>,
 }

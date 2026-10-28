@@ -4,6 +4,7 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 use uuid::Uuid;
 
+use telmoni_shared::Email;
 use telmoni_shared::OrganizationId;
 
 use super::invite::RosterCeiling;
@@ -34,7 +35,7 @@ pub struct InviteCreated {
 #[serde(rename_all = "camelCase")]
 pub struct InviteRevoked {
     pub invite_id: Uuid,
-    pub email: String,
+    pub email: Email,
     pub owner_organization_id: OrganizationId,
 }
 

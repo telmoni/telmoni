@@ -40,6 +40,7 @@ use axum::{extract::State, http::StatusCode, response::IntoResponse};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
+use telmoni_shared::Email;
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit, lock_chain};
 use telmoni_shared::db::project_move;
 use telmoni_shared::db::tenant_session::{
@@ -261,8 +262,8 @@ pub async fn offer(
         .mail(
             &state,
             &owner,
-            recipient_email.as_deref(),
-            withdrawn_from_email.as_deref(),
+            recipient_email.as_ref().map(Email::as_str),
+            withdrawn_from_email.as_ref().map(Email::as_str),
         )
         .await;
     }
@@ -328,7 +329,7 @@ pub async fn cancel(
     if let (Some(to), Some(owner), Some(standing)) = (&holder_email, owner, standing)
         && let Err(e) = state
             .mailer
-            .send_project_offer_withdrawn(to, &owner.display(), &standing.name)
+            .send_project_offer_withdrawn(to.as_str(), &owner.display(), &standing.name)
             .await
     {
         // The withdrawal stands without the mail: their console no longer
@@ -383,7 +384,7 @@ pub async fn decline(
     if let (Some(owner), Some(admin), Some(standing)) = (owner, admin, standing)
         && let Err(e) = state
             .mailer
-            .send_project_declined(&owner.email, &admin.display(), &standing.name)
+            .send_project_declined(owner.email.as_str(), &admin.display(), &standing.name)
             .await
     {
         // The decline stands without the mail: the owner's roster no longer
@@ -920,7 +921,7 @@ pub async fn accept(
         && let Err(e) = state
             .mailer
             .send_project_accepted(
-                &previous_contact.email,
+                previous_contact.email.as_str(),
                 &new_owner,
                 &standing.name,
                 &destination_label,

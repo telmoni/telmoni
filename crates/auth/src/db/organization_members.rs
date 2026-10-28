@@ -9,6 +9,7 @@
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
+use telmoni_shared::Email;
 use telmoni_shared::db::tenant_session::{
     Binding, Maintenance, Organization, Person, PersonAndOrganization, PersonOrganizationProject,
     ProjectAndOrganization, Scoped,
@@ -46,7 +47,7 @@ pub struct OrganizationMember {
     pub id: Uuid,
     /// The person's user id — what the role and removal lanes take.
     pub member_id: UserId,
-    pub email: String,
+    pub email: Email,
     pub display_name: Option<String>,
     pub role: OrganizationRole,
     pub created_at: DateTime<Utc>,
@@ -60,7 +61,7 @@ pub struct OrganizationMember {
 #[serde(rename_all = "camelCase")]
 pub struct OrganizationInvite {
     pub id: Uuid,
-    pub email: String,
+    pub email: Email,
     pub role: OrganizationRole,
     pub expires_at: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
@@ -71,11 +72,11 @@ pub struct OrganizationInvite {
 pub struct LiveOrganizationInvite {
     pub id: Uuid,
     pub organization_id: OrganizationId,
-    pub email: String,
+    pub email: Email,
     pub role: OrganizationRole,
     /// The person who sent it. `None` once they have been erased — the
     /// invitation outlives them, so this is a LEFT JOIN.
-    pub inviter_email: Option<String>,
+    pub inviter_email: Option<Email>,
     pub inviter_display_name: Option<String>,
     /// What the organization is called.
     pub organization_name: String,
@@ -92,7 +93,7 @@ pub struct OrganizationMembership {
     pub name: String,
     /// The owner's address and name, for the console to name whom to ask.
     /// `None` only for an organization caught mid-transfer or mid-erasure.
-    pub owner_email: Option<String>,
+    pub owner_email: Option<Email>,
     pub owner_display_name: Option<String>,
     /// The caller's role there.
     pub role: OrganizationRole,
@@ -145,7 +146,7 @@ pub async fn member_display_name<B: RosterRead>(
     organization_id: &OrganizationId,
     user_id: &UserId,
 ) -> sqlx::Result<Option<String>> {
-    let row: Option<(String, Option<String>)> = sqlx::query_as(
+    let row: Option<(Email, Option<String>)> = sqlx::query_as(
         "SELECT i.email, i.display_name
            FROM auth.organization_members m
            JOIN auth.identities i ON i.user_id = m.user_id
@@ -302,7 +303,7 @@ pub struct Held {
 pub async fn held(
     tx: &mut Scoped<'_, Maintenance<AuthLane>>,
     organization_id: &OrganizationId,
-    email: Option<&str>,
+    email: Option<&Email>,
 ) -> sqlx::Result<Held> {
     sqlx::query_as::<_, Held>(
         "WITH roster AS (
@@ -508,7 +509,7 @@ pub async fn list_invites(
 pub async fn address_on_roster(
     tx: &mut Scoped<'_, Organization>,
     organization_id: &OrganizationId,
-    email: &str,
+    email: &Email,
 ) -> sqlx::Result<bool> {
     sqlx::query_scalar(
         "SELECT EXISTS (
@@ -526,7 +527,7 @@ pub async fn address_on_roster(
 pub async fn create_invite(
     tx: &mut Scoped<'_, Organization>,
     organization_id: &OrganizationId,
-    email: &str,
+    email: &Email,
     role: OrganizationRole,
     token_hash: &str,
     invited_by: &UserId,
@@ -554,7 +555,7 @@ pub async fn create_invite(
 pub async fn revoke_live_for_email(
     tx: &mut Scoped<'_, Organization>,
     organization_id: &OrganizationId,
-    email: &str,
+    email: &Email,
 ) -> sqlx::Result<u64> {
     let result = sqlx::query(
         "UPDATE auth.organization_invites SET revoked_at = now()
@@ -575,8 +576,8 @@ pub async fn revoke_invite(
     tx: &mut Scoped<'_, Organization>,
     organization_id: &OrganizationId,
     invite_id: Uuid,
-) -> sqlx::Result<Option<String>> {
-    sqlx::query_scalar::<_, String>(
+) -> sqlx::Result<Option<Email>> {
+    sqlx::query_scalar::<_, Email>(
         "UPDATE auth.organization_invites SET revoked_at = now()
           WHERE organization_id = $1 AND id = $2
             AND accepted_at IS NULL AND revoked_at IS NULL

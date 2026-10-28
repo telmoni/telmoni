@@ -24,6 +24,7 @@ use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
+use telmoni_shared::Email;
 use telmoni_shared::Redacted;
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
 use telmoni_shared::db::tenant_session::person_scope;
@@ -133,7 +134,7 @@ pub async fn request_password_reset(
     let link = state
         .account_holder(&principal.user_id)
         .await?
-        .create_password_reset(&person.email)
+        .create_password_reset(person.email.as_str())
         .await?;
 
     tracing::info!(user_id = %principal.user_id, expires_at = %link.expires_at,
@@ -161,7 +162,7 @@ pub async fn request_email_change(
     Json(req): Json<RequestEmailChangeRequest>,
 ) -> Result<impl IntoResponse, TelmoniError> {
     let user_id = principal.user_id;
-    let new_email = crate::identity::validate_email(&req.new_email)?;
+    let new_email = Email::parse(&req.new_email)?;
     let person = person_of(&state, &user_id).await?;
 
     if person.deletion_requested_at.is_some() {
@@ -190,10 +191,10 @@ pub async fn request_email_change(
     let challenge = state
         .account_holder(&user_id)
         .await?
-        .send_email_change(&user_id, &new_email)
+        .send_email_change(&user_id, new_email.as_str())
         .await?;
 
-    if !challenge.new_email.eq_ignore_ascii_case(&new_email) {
+    if !challenge.new_email.eq_ignore_ascii_case(new_email.as_str()) {
         tracing::warn!(user_id = %user_id,
             "the provider opened an email change against a different address than the one sent");
     }
@@ -213,7 +214,7 @@ pub async fn request_email_change(
 
     if let Err(e) = state
         .mailer
-        .send_email_change_code(&person.email, &code, &new_email)
+        .send_email_change_code(person.email.as_str(), &code, new_email.as_str())
         .await
     {
         tracing::error!(user_id = %user_id, error = %e,
@@ -282,7 +283,11 @@ pub async fn confirm_email_change(
         .await?
         .confirm_email_change(&user_id, req.new_code.expose().trim())
         .await?;
-    let new_email = identities::normalize_email(&confirmed.email);
+    let new_email = Email::parse(&confirmed.email).map_err(|e| {
+        TelmoniError::Internal(format!(
+            "the provider confirmed an address that is not one: {e}"
+        ))
+    })?;
     if !confirmed.email_verified {
         tracing::warn!(user_id = %user_id,
             "the provider confirmed an email change and reports the address unverified; \
@@ -353,7 +358,7 @@ pub async fn confirm_email_change(
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EmailChanged {
-    pub email: String,
+    pub email: Email,
     pub sessions_revoked: usize,
 }
 
@@ -489,7 +494,7 @@ pub async fn request_account_deletion_code(
 
     if let Err(e) = state
         .mailer
-        .send_account_deletion_code(&person.email, &code)
+        .send_account_deletion_code(person.email.as_str(), &code)
         .await
     {
         tracing::error!(user_id = %user_id, error = %e,

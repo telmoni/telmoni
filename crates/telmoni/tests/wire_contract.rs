@@ -12,12 +12,12 @@ use telmoni_auth::db::confirmation_codes::CODE_DIGITS;
 use telmoni_auth::db::organizations::MAX_ORGANIZATION_NAME;
 use telmoni_auth::handler::projects::MAX_PROJECT_NAME;
 use telmoni_auth::handler::tokens::{MAX_KEY_DESCRIPTION, MAX_KEY_NAME};
-use telmoni_auth::identity::MAX_EMAIL_LEN;
 use telmoni_auth::model::InviteScope;
 use telmoni_notifications::connector::{ConnectionStatus, Provider};
 use telmoni_notifications::db::{AttemptOutcome, AttemptTrigger, DeliveryStatus};
 use telmoni_shared::test_util::pin_contract;
 use telmoni_shared::types::WireEnum;
+use telmoni_shared::types::email::MAX_EMAIL_LEN;
 use telmoni_shared::{
     ApiKeyScope, ContentMode, Flag, IncidentStatus, LayoutDepth, LayoutOpen, MissingData,
     NotificationKind, OrganizationRole, OrganizationStatus, Role, RuleAggregation, RuleLevel,

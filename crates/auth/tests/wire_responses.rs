@@ -38,6 +38,7 @@ use telmoni_auth::handler::session::{
 };
 use telmoni_auth::handler::sessions::Sessions;
 use telmoni_auth::model::{ApiToken, CreateTokenResponse, InviteScope};
+use telmoni_shared::Email;
 use telmoni_shared::slug::Slug;
 use telmoni_shared::test_util::pin_contract;
 use telmoni_shared::{
@@ -181,7 +182,7 @@ fn me_answers_as_the_console_reads() {
         &MeResponse {
             person: PersonSummary {
                 user_id: person(),
-                email: EMAIL.into(),
+                email: Email::from_trusted(EMAIL),
                 display_name: Some("Sam Rivera".into()),
                 analytics_opt_in: true,
                 email_verified: true,
@@ -190,7 +191,7 @@ fn me_answers_as_the_console_reads() {
                 organization_id: organization(),
                 slug: Slug::from_trusted("acme"),
                 name: "Acme".into(),
-                owner_email: Some(EMAIL.into()),
+                owner_email: Some(Email::from_trusted(EMAIL)),
                 owner_display_name: Some("Sam Rivera".into()),
                 role: OrganizationRole::Owner,
                 ownership_offer_expires_at: Some(at(604_800)),
@@ -209,7 +210,7 @@ fn me_answers_as_the_console_reads() {
                 target_id: project().into_inner(),
                 target_name: "Support bot".into(),
                 role: "member".into(),
-                inviter_email: Some("alex@example.com".into()),
+                inviter_email: Some(Email::from_trusted("alex@example.com")),
                 inviter_display_name: None,
                 expires_at: at(604_800),
                 created_at: at(0),
@@ -222,7 +223,7 @@ fn me_answers_as_the_console_reads() {
                 organization_name: "Acme".into(),
                 organization_slug: Slug::from_trusted("acme"),
                 role: Role::Member,
-                giver_email: Some("alex@example.com".into()),
+                giver_email: Some(Email::from_trusted("alex@example.com")),
                 giver_display_name: Some("Alex".into()),
                 created_at: at(0),
             }],
@@ -231,7 +232,7 @@ fn me_answers_as_the_console_reads() {
                 name: "Support bot".into(),
                 organization_id: elsewhere(),
                 organization_name: "Elsewhere".into(),
-                owner_email: Some("alex@example.com".into()),
+                owner_email: Some(Email::from_trusted("alex@example.com")),
                 owner_display_name: None,
                 expires_at: at(604_800),
             }],
@@ -254,7 +255,7 @@ fn an_email_change_answers_as_the_console_reads() {
     pin(
         "email-changed",
         &EmailChanged {
-            email: EMAIL.into(),
+            email: Email::from_trusted(EMAIL),
             sessions_revoked: 2,
         },
     );
@@ -281,7 +282,7 @@ fn a_settled_invitation_answers_as_the_console_reads() {
             scope: InviteScope::Project,
             target_id: project().into_inner(),
             invite_id: INVITE,
-            inviter_email: Some("alex@example.com".into()),
+            inviter_email: Some(Email::from_trusted("alex@example.com")),
             owner_organization_id: organization(),
         },
     );
@@ -310,7 +311,7 @@ fn an_invitation_looked_up_answers_as_the_console_reads() {
             scope: InviteScope::Organization,
             inviter: "Alex".into(),
             organization: "Acme".into(),
-            email: EMAIL.into(),
+            email: Email::from_trusted(EMAIL),
             role: "admin",
         },
     );
@@ -372,7 +373,7 @@ fn a_project_roster_answers_as_the_console_reads() {
             members: vec![Member {
                 id: SEAT,
                 member_id: person(),
-                email: EMAIL.into(),
+                email: Email::from_trusted(EMAIL),
                 display_name: Some("Sam Rivera".into()),
                 role: Role::Admin,
                 created_at: at(0),
@@ -386,7 +387,7 @@ fn a_project_roster_answers_as_the_console_reads() {
         &Invites {
             invites: vec![Invite {
                 id: INVITE,
-                email: "alex@example.com".into(),
+                email: Email::from_trusted("alex@example.com"),
                 role: Role::Member,
                 expires_at: at(604_800),
                 created_at: at(0),
@@ -403,7 +404,7 @@ fn a_seat_given_answers_as_the_console_reads() {
         &SeatGiven {
             id: SEAT,
             member_id: person(),
-            email: EMAIL.into(),
+            email: Email::from_trusted(EMAIL),
             role: Role::Member,
             owner_organization_id: organization(),
         },
@@ -426,7 +427,7 @@ fn an_invitation_made_or_withdrawn_answers_as_the_console_reads() {
         "invite-revoked",
         &InviteRevoked {
             invite_id: INVITE,
-            email: "alex@example.com".into(),
+            email: Email::from_trusted("alex@example.com"),
             owner_organization_id: organization(),
         },
     );
@@ -439,8 +440,8 @@ fn an_offer_answers_as_the_console_reads() {
         "offer",
         &OfferAnswer {
             offered_to: person(),
-            offered_to_email: Some(EMAIL.into()),
-            withdrawn_from_email: Some("alex@example.com".into()),
+            offered_to_email: Some(Email::from_trusted(EMAIL)),
+            withdrawn_from_email: Some(Email::from_trusted("alex@example.com")),
             expires_at: Some(at(604_800)),
             owner_organization_id: organization(),
         },
@@ -508,7 +509,7 @@ fn the_organization_roster_answers_as_the_console_reads() {
             members: vec![OrganizationMember {
                 id: SEAT,
                 member_id: person(),
-                email: EMAIL.into(),
+                email: Email::from_trusted(EMAIL),
                 display_name: None,
                 role: OrganizationRole::Admin,
                 created_at: at(0),
@@ -522,7 +523,7 @@ fn the_organization_roster_answers_as_the_console_reads() {
         &Invites {
             invites: vec![OrganizationInvite {
                 id: INVITE,
-                email: "alex@example.com".into(),
+                email: Email::from_trusted("alex@example.com"),
                 role: OrganizationRole::Member,
                 expires_at: at(604_800),
                 created_at: at(0),

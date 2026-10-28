@@ -33,6 +33,7 @@ use axum::{
 use serde::Serialize;
 use serde_json::json;
 
+use telmoni_shared::Email;
 use telmoni_shared::OrganizationAction;
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
 use telmoni_shared::db::tenant_session::{Organization, Scoped, organization_scope};
@@ -302,8 +303,8 @@ pub async fn offer(
         .mail(
             &state,
             &owner,
-            recipient_email.as_deref(),
-            withdrawn_from_email.as_deref(),
+            recipient_email.as_ref().map(Email::as_str),
+            withdrawn_from_email.as_ref().map(Email::as_str),
         )
         .await;
     }
@@ -365,7 +366,7 @@ pub async fn cancel(
     if let (Some(to), Some(owner), Some(name)) = (&holder_email, owner, name)
         && let Err(e) = state
             .mailer
-            .send_ownership_offer_withdrawn(to, &owner.display(), &name)
+            .send_ownership_offer_withdrawn(to.as_str(), &owner.display(), &name)
             .await
     {
         // The withdrawal stands without the mail: their console no longer
@@ -421,7 +422,7 @@ pub async fn decline(
     if let (Some(owner), Some(admin), Some(name)) = (owner, admin, name)
         && let Err(e) = state
             .mailer
-            .send_ownership_declined(&owner.email, &admin.display(), &name)
+            .send_ownership_declined(owner.email.as_str(), &admin.display(), &name)
             .await
     {
         // The decline stands without the mail: the owner's roster no longer
@@ -571,7 +572,7 @@ pub async fn accept(
     if let (Some(previous), Some(new_owner), Some(name)) = (previous_contact, new_owner, name)
         && let Err(e) = state
             .mailer
-            .send_ownership_accepted(&previous.email, &new_owner.display(), &name)
+            .send_ownership_accepted(previous.email.as_str(), &new_owner.display(), &name)
             .await
     {
         // The transfer stands without the mail: the previous owner's console

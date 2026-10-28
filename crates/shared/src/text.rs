@@ -2,6 +2,16 @@
 
 use crate::digest::hex_digit;
 
+/// True for a character that carries no glyph but changes how the rest reads:
+/// bidi overrides, zero-width characters, the BOM. Two names identical on
+/// screen can differ by these, which is how one person is made to look like another.
+#[must_use]
+pub fn is_invisible_formatting(c: char) -> bool {
+    matches!(c,
+        '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2064}'
+        | '\u{2066}'..='\u{2069}' | '\u{FEFF}')
+}
+
 /// `s` as a query-string value: percent-encoded, a space `%20` and never `+`.
 #[must_use]
 pub fn urlencoding(s: &str) -> String {

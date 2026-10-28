@@ -29,7 +29,7 @@ use serde::Deserialize;
 
 use telmoni_shared::oidc::{Discovery, Endpoints, IdTokenVerifier};
 use telmoni_shared::text::urlencoding;
-use telmoni_shared::{AuthError, Redacted, TelmoniError};
+use telmoni_shared::{AuthError, Email, Redacted, TelmoniError};
 
 use crate::provider::{AuthProvider, Authenticated, Binding, Proof, Subject};
 
@@ -107,7 +107,7 @@ impl IdTokenClaims {
     /// gave one; an address and its verdict come from one source, so
     /// neither vouches for the other's address.
     fn merged(self, userinfo: Self) -> Self {
-        let same = |a: &str, b: &str| a.trim().to_lowercase() == b.trim().to_lowercase();
+        let same = |a: &str, b: &str| Email::parse(a).is_ok_and(|a| Email::parse(b) == Ok(a));
         let (email, email_verified) = match userinfo.email {
             Some(email) if self.email.as_deref().is_some_and(|e| same(e, &email)) => {
                 (Some(email), userinfo.email_verified.or(self.email_verified))

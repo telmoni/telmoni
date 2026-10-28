@@ -220,7 +220,7 @@ impl Issuer {
         Ok(TokenResponse {
             subject: Subject {
                 sub: user_id.to_string(),
-                email: Some(identity.email.clone()),
+                email: Some(identity.email.clone().into()),
                 email_verified: self.address_verified(&identity),
                 given_name: identity.first_name,
                 family_name: identity.last_name,

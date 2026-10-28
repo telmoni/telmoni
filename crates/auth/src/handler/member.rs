@@ -7,6 +7,7 @@ use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
+use telmoni_shared::Email;
 use telmoni_shared::OrganizationAction;
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
 use telmoni_shared::db::tenant_session::maintenance_scope;
@@ -242,7 +243,7 @@ pub async fn give_seat(
         if let Err(e) = state
             .mailer
             .send_project_seat(
-                &person.email,
+                person.email.as_str(),
                 &giver,
                 &project.name,
                 &home.name,
@@ -275,7 +276,7 @@ pub async fn give_seat(
 pub struct SeatGiven {
     pub id: Uuid,
     pub member_id: UserId,
-    pub email: String,
+    pub email: Email,
     pub role: Role,
     pub owner_organization_id: OrganizationId,
 }

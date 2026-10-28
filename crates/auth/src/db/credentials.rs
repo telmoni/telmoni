@@ -7,6 +7,7 @@
 //! anything but `user_id`.
 
 use chrono::{DateTime, Duration, Utc};
+use telmoni_shared::Email;
 use telmoni_shared::UserId;
 use telmoni_shared::db::tenant_session::{Person, Scoped};
 
@@ -45,7 +46,7 @@ impl std::fmt::Debug for Credential {
 /// An address change the provider mailed a code for and is waiting on.
 #[derive(Clone, sqlx::FromRow)]
 pub struct PendingEmail {
-    pub email: String,
+    pub email: Email,
     pub code_hash: String,
     pub expires_at: DateTime<Utc>,
     pub attempts: i32,
@@ -66,7 +67,7 @@ impl std::fmt::Debug for PendingEmail {
 pub async fn create(
     tx: &mut Scoped<'_, Person>,
     user_id: &UserId,
-    email: &str,
+    email: &Email,
     password_hash: &str,
 ) -> sqlx::Result<bool> {
     let inserted = sqlx::query(
@@ -164,7 +165,7 @@ pub async fn set_password(
 pub async fn set_pending_email(
     tx: &mut Scoped<'_, Person>,
     user_id: &UserId,
-    new_email: &str,
+    new_email: &Email,
     code_hash: &str,
     expires_at: DateTime<Utc>,
 ) -> sqlx::Result<bool> {

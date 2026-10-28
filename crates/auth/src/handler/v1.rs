@@ -21,6 +21,7 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 use uuid::Uuid;
 
+use telmoni_shared::Email;
 use telmoni_shared::acting::ActingKey;
 use telmoni_shared::db::tenant_session::{maintenance_scope, project_scope};
 use telmoni_shared::extract::Json;
@@ -327,7 +328,7 @@ pub struct V1Organization {
 /// The organization's owner, by address and name.
 #[derive(Debug, Serialize)]
 pub struct V1Owner {
-    pub email: String,
+    pub email: Email,
     pub display_name: Option<String>,
 }
 
@@ -343,7 +344,7 @@ pub struct V1Members {
 pub struct V1Member {
     pub id: Uuid,
     pub member_id: UserId,
-    pub email: String,
+    pub email: Email,
     pub display_name: Option<String>,
     pub role: Role,
     pub created_at: DateTime<Utc>,

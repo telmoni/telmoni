@@ -84,7 +84,7 @@ fn sso_domains() -> Vec<String> {
 }
 
 /// The domains a list names, lowercased as an address is
-/// (`identity::validate_email`), so one typed in capitals still matches.
+/// (`Email::parse`), so one typed in capitals still matches.
 fn held_domains(list: &str) -> Vec<String> {
     list.split(',')
         .map(|domain| domain.trim().trim_start_matches('@').to_lowercase())
@@ -169,6 +169,8 @@ async fn seed_admin_from_env(password: &PasswordProvider) -> anyhow::Result<()> 
     match (optional("ADMIN_EMAIL"), optional("ADMIN_PASSWORD")) {
         (None, None) => Ok(()),
         (Some(email), Some(secret)) => {
+            let email = telmoni_shared::Email::parse(&email)
+                .map_err(|e| anyhow::anyhow!("ADMIN_EMAIL: {e}"))?;
             if password.held_to_sso(&email) {
                 anyhow::bail!(
                     "ADMIN_EMAIL is under AUTH_DOMAINS_WITH_SSO_ENFORCEMENT: its password could \
@@ -177,7 +179,7 @@ async fn seed_admin_from_env(password: &PasswordProvider) -> anyhow::Result<()> 
             }
             let secret = Redacted::from(secret);
             let created = password
-                .seed_admin(&email, secret.expose())
+                .seed_admin(email.as_str(), secret.expose())
                 .await
                 .map_err(|e| anyhow::anyhow!("ADMIN_EMAIL/ADMIN_PASSWORD: {e}"))?;
             if created {

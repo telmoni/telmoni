@@ -6,6 +6,7 @@
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 
+use telmoni_shared::Email;
 use telmoni_shared::{OrganizationId, ProjectId, UserId};
 
 use crate::{AppState, db::offers::OFFER_TTL_DAYS, mailer::MailError};
@@ -26,9 +27,9 @@ pub struct OfferRequest {
 #[serde(rename_all = "camelCase")]
 pub struct OfferAnswer {
     pub offered_to: UserId,
-    pub offered_to_email: Option<String>,
+    pub offered_to_email: Option<Email>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub withdrawn_from_email: Option<String>,
+    pub withdrawn_from_email: Option<Email>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expires_at: Option<DateTime<Utc>>,
     pub owner_organization_id: OrganizationId,

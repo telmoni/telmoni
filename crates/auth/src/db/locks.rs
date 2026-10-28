@@ -30,6 +30,7 @@
 //! hashes the bare organization id.
 
 use sqlx::PgConnection;
+use telmoni_shared::Email;
 use telmoni_shared::{OrganizationId, UserId};
 
 /// Serialise the lanes that decide what a person holds or belongs to: `/me`'s
@@ -45,7 +46,7 @@ pub async fn lock_person(conn: &mut PgConnection, user_id: &UserId) -> sqlx::Res
 /// Serialise the two lanes that give an address to a built-in account: a
 /// sign-up and a confirmed address change. Each checks nobody holds the
 /// address before taking it, and two doing so at once would both pass.
-pub async fn lock_email(conn: &mut PgConnection, email: &str) -> sqlx::Result<()> {
+pub async fn lock_email(conn: &mut PgConnection, email: &Email) -> sqlx::Result<()> {
     sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended('email:' || $1, 0))")
         .bind(email)
         .execute(conn)

@@ -29,6 +29,7 @@ use std::sync::Arc;
 use chrono::{Duration, Utc};
 use sqlx::PgPool;
 
+use telmoni_shared::Email;
 use telmoni_shared::db::tenant_session::{maintenance_scope, person_scope};
 use telmoni_shared::{AuthError, AuthzError, Redacted, TelmoniError, TenantError, UserId};
 
@@ -97,15 +98,14 @@ impl PasswordProvider {
     /// Whether `email` signs in at a provider alone: its domain, after the
     /// last `@`, one the deployment holds to single sign-on.
     #[must_use]
-    pub fn held_to_sso(&self, email: &str) -> bool {
-        email.rsplit_once('@').is_some_and(|(_, domain)| {
-            let domain = domain.trim().to_lowercase();
-            self.sso_domains.contains(&domain)
-        })
+    pub fn held_to_sso(&self, email: &Email) -> bool {
+        self.sso_domains
+            .iter()
+            .any(|domain| domain == email.domain())
     }
 
     /// The form refused for an address its domain holds to a provider.
-    fn refuse_if_held_to_sso(&self, email: &str) -> Result<(), TelmoniError> {
+    fn refuse_if_held_to_sso(&self, email: &Email) -> Result<(), TelmoniError> {
         if self.held_to_sso(email) {
             return Err(AuthError::SsoRequired(
                 "addresses at this domain sign in through single sign-on".into(),
@@ -122,7 +122,7 @@ impl PasswordProvider {
     }
 
     /// Who holds `email`, if anybody. The one read keyed on an address.
-    async fn holder_of(&self, email: &str) -> Result<Option<UserId>, TelmoniError> {
+    async fn holder_of(&self, email: &Email) -> Result<Option<UserId>, TelmoniError> {
         let mut tx = maintenance_scope(&self.db, AuthLane).await?;
         let holder = identities::find_by_email(&mut tx, email).await?;
         tx.commit().await?;
@@ -131,7 +131,7 @@ impl PasswordProvider {
 
     /// Whether a live invitation names `email`: what lets the invited in
     /// while sign-ups are closed.
-    async fn invited(&self, email: &str) -> Result<bool, TelmoniError> {
+    async fn invited(&self, email: &Email) -> Result<bool, TelmoniError> {
         let mut tx = maintenance_scope(&self.db, AuthLane).await?;
         let invited = invites::any_live_for_email(&mut tx, email).await?;
         tx.commit().await?;
@@ -148,7 +148,7 @@ impl PasswordProvider {
         (given_name, family_name): (Option<&str>, Option<&str>),
         code_challenge: &str,
     ) -> Result<SignedUp, TelmoniError> {
-        let email = crate::identity::validate_email(email)?;
+        let email = Email::parse(email)?;
         self.refuse_if_held_to_sso(&email)?;
         hashing::validate(password)?;
 
@@ -228,7 +228,7 @@ impl PasswordProvider {
     /// has no account yet, and left alone from then on. `true` when this
     /// boot created it.
     pub async fn seed_admin(&self, email: &str, password: &str) -> Result<bool, TelmoniError> {
-        let email = crate::identity::validate_email(email)?;
+        let email = Email::parse(email)?;
         hashing::validate(password)?;
         if self.holder_of(&email).await?.is_some() {
             return Ok(false);
@@ -263,7 +263,7 @@ impl PasswordProvider {
     async fn mail_verification(
         &self,
         user_id: &UserId,
-        email: &str,
+        email: &Email,
         token: &str,
     ) -> Result<(), TelmoniError> {
         let link = self.issuer.page(
@@ -271,7 +271,7 @@ impl PasswordProvider {
             &[("uid", user_id.as_str()), ("token", token)],
         );
         self.mailer
-            .send_email_verification(email, &link)
+            .send_email_verification(email.as_str(), &link)
             .await
             .map_err(|e| {
                 tracing::error!(user_id = %user_id, error = %e,
@@ -284,7 +284,11 @@ impl PasswordProvider {
 
     /// Mail a fresh verification link to an account that never confirmed its
     /// address, within the daily cap.
-    async fn resend_verification(&self, user_id: &UserId, email: &str) -> Result<(), TelmoniError> {
+    async fn resend_verification(
+        &self,
+        user_id: &UserId,
+        email: &Email,
+    ) -> Result<(), TelmoniError> {
         let mut tx = person_scope(&self.db, user_id).await?;
         let since = Utc::now() - Duration::days(1);
         let issued =
@@ -342,7 +346,7 @@ impl PasswordProvider {
         password: &str,
         code_challenge: &str,
     ) -> Result<String, TelmoniError> {
-        let email = crate::identity::validate_email(email)?;
+        let email = Email::parse(email)?;
         self.refuse_if_held_to_sso(&email)?;
         if password.is_empty() {
             return Err(TelmoniError::BadRequest("enter your password".into()));
@@ -408,7 +412,7 @@ impl PasswordProvider {
     /// either way. The send is not waited for: an answer that took longer
     /// for a real address would say which addresses are real.
     pub async fn forgot_password(&self, email: &str) -> Result<(), TelmoniError> {
-        let email = crate::identity::validate_email(email)?;
+        let email = Email::parse(email)?;
         self.refuse_if_held_to_sso(&email)?;
         if let Some(user_id) = self.holder_of(&email).await? {
             let mut tx = person_scope(&self.db, &user_id).await?;
@@ -440,7 +444,7 @@ impl PasswordProvider {
     async fn send_reset_link(
         &self,
         user_id: &UserId,
-        email: &str,
+        email: &Email,
     ) -> Result<PasswordResetLink, TelmoniError> {
         self.clone_for_task().send_reset_link(user_id, email).await
     }
@@ -515,7 +519,7 @@ impl PasswordProvider {
         &self,
         email: &str,
     ) -> Result<PasswordResetLink, TelmoniError> {
-        let email = crate::identity::validate_email(email)?;
+        let email = Email::parse(email)?;
         self.refuse_if_held_to_sso(&email)?;
         let Some(user_id) = self.holder_of(&email).await? else {
             return Err(AuthError::NotFound("no account holds that address".into()).into());
@@ -530,7 +534,7 @@ impl PasswordProvider {
         user_id: &UserId,
         new_email: &str,
     ) -> Result<EmailChangeChallenge, TelmoniError> {
-        let new_email = crate::identity::validate_email(new_email)?;
+        let new_email = Email::parse(new_email)?;
         // The provider holds such an address: moved off its domain, the form
         // would open to the account again.
         let mut tx = person_scope(&self.db, user_id).await?;
@@ -565,7 +569,7 @@ impl PasswordProvider {
             .into());
         }
         self.mailer
-            .send_new_address_code(&new_email, &code)
+            .send_new_address_code(new_email.as_str(), &code)
             .await
             .map_err(|e| {
                 tracing::error!(user_id = %user_id, error = %e,
@@ -575,7 +579,7 @@ impl PasswordProvider {
                 }
             })?;
         Ok(EmailChangeChallenge {
-            new_email,
+            new_email: new_email.into(),
             expires_at: expires_at.to_rfc3339(),
         })
     }
@@ -625,7 +629,7 @@ impl PasswordProvider {
         }
         tx.commit().await?;
         Ok(ConfirmedEmail {
-            email: pending.email,
+            email: pending.email.into(),
             email_verified: true,
         })
     }
@@ -643,7 +647,7 @@ impl ResetSender {
     async fn send_reset_link(
         &self,
         user_id: &UserId,
-        email: &str,
+        email: &Email,
     ) -> Result<PasswordResetLink, TelmoniError> {
         let mut tx = person_scope(&self.db, user_id).await?;
         let since = Utc::now() - Duration::days(1);
@@ -674,7 +678,7 @@ impl ResetSender {
             &[("uid", user_id.as_str()), ("token", &token)],
         );
         self.mailer
-            .send_password_reset(email, &url)
+            .send_password_reset(email.as_str(), &url)
             .await
             .map_err(|e| {
                 tracing::error!(user_id = %user_id, error = %e,

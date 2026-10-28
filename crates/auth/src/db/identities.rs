@@ -6,6 +6,7 @@
 //! in, and a pending deletion.
 
 use chrono::{DateTime, Utc};
+use telmoni_shared::Email;
 use telmoni_shared::db::tenant_session::{
     self, Binding, HasOrganization, Maintenance, PersonAndOrganization, Scoped,
 };
@@ -25,7 +26,7 @@ impl IdentityRead for Maintenance<AuthLane> {}
 /// One person, as the provider describes them.
 #[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
 pub struct Identity {
-    pub email: String,
+    pub email: Email,
     pub email_verified: bool,
     pub first_name: Option<String>,
     pub last_name: Option<String>,
@@ -37,19 +38,6 @@ impl Identity {
     pub fn display_name(&self) -> Option<String> {
         display_name(self.first_name.as_deref(), self.last_name.as_deref())
     }
-
-    /// The address, normalised the way `auth.identities.email` stores it.
-    #[must_use]
-    pub fn normalized_email(&self) -> String {
-        normalize_email(&self.email)
-    }
-}
-
-/// The address as every writer stores it: trimmed and lowercased, which the
-/// column's CHECK holds them to.
-#[must_use]
-pub fn normalize_email(email: &str) -> String {
-    email.trim().to_lowercase()
 }
 
 /// A first and last name joined and sanitised, or `None` when neither says
@@ -70,7 +58,7 @@ pub fn display_name(first_name: Option<&str>, last_name: Option<&str>) -> Option
 /// theirs (`auth.accounts`, defaults when they have no row).
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct Person {
-    pub email: String,
+    pub email: Email,
     pub email_verified: bool,
     /// Already sanitised by the writer.
     pub display_name: Option<String>,
@@ -112,7 +100,7 @@ pub async fn record(
              updated_at = now()",
     )
     .bind(user_id)
-    .bind(identity.normalized_email())
+    .bind(&identity.email)
     .bind(identity.email_verified)
     .bind(identity.first_name.as_deref())
     .bind(identity.last_name.as_deref())
@@ -145,13 +133,13 @@ pub async fn identity<B: IdentityRead>(
 /// still be here beside the built-in account that holds it now.
 pub async fn find_by_email(
     tx: &mut Scoped<'_, Maintenance<AuthLane>>,
-    email: &str,
+    email: &Email,
 ) -> sqlx::Result<Option<UserId>> {
     sqlx::query_scalar(
         "SELECT user_id FROM auth.identities WHERE email = $1
           ORDER BY updated_at DESC LIMIT 1",
     )
-    .bind(normalize_email(email))
+    .bind(email)
     .fetch_optional(tx.conn())
     .await
 }
@@ -195,7 +183,7 @@ pub async fn get<B: IdentityRead>(
 /// How to reach and name a person: their address and display name.
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct Contact {
-    pub email: String,
+    pub email: Email,
     pub display_name: Option<String>,
 }
 
@@ -226,7 +214,7 @@ pub async fn contact<B: HasOrganization>(
 pub async fn set_email(
     tx: &mut Scoped<'_, tenant_session::Person>,
     user_id: &UserId,
-    email: &str,
+    email: &Email,
     verified: bool,
 ) -> sqlx::Result<()> {
     sqlx::query(
@@ -234,7 +222,7 @@ pub async fn set_email(
           WHERE user_id = $1",
     )
     .bind(user_id)
-    .bind(normalize_email(email))
+    .bind(email)
     .bind(verified)
     .execute(tx.conn())
     .await?;

@@ -9,6 +9,7 @@
 
 use std::sync::Arc;
 
+use telmoni_shared::Email;
 use telmoni_shared::db::tenant_session::{maintenance_scope, person_scope};
 use telmoni_shared::{AuthError, AuthzError, TelmoniError, UserId};
 
@@ -53,7 +54,7 @@ impl External {
             )
             .into());
         };
-        let email = crate::identity::validate_email(email)?;
+        let email = Email::parse(email)?;
         let mut identity = identities::Identity {
             email,
             // The provider's word, recorded as given: with `VERIFY_EMAIL` off
@@ -170,7 +171,11 @@ impl External {
 }
 
 /// Whether someone other than `user_id` holds `email`.
-async fn by_other(db: &sqlx::PgPool, email: &str, user_id: &UserId) -> Result<bool, TelmoniError> {
+async fn by_other(
+    db: &sqlx::PgPool,
+    email: &Email,
+    user_id: &UserId,
+) -> Result<bool, TelmoniError> {
     let mut tx = maintenance_scope(db, AuthLane).await?;
     let holder = identities::find_by_email(&mut tx, email).await?;
     tx.commit().await?;
@@ -178,7 +183,7 @@ async fn by_other(db: &sqlx::PgPool, email: &str, user_id: &UserId) -> Result<bo
 }
 
 /// Whether a live invitation names `email`, as the login form asks.
-async fn invited(db: &sqlx::PgPool, email: &str) -> Result<bool, TelmoniError> {
+async fn invited(db: &sqlx::PgPool, email: &Email) -> Result<bool, TelmoniError> {
     let mut tx = maintenance_scope(db, AuthLane).await?;
     let invited = invites::any_live_for_email(&mut tx, email).await?;
     tx.commit().await?;
