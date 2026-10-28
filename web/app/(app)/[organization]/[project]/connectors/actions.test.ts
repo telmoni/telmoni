@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { errorOf } from "@/lib/action-result";
+
 vi.mock("next/cache", () => ({
   revalidatePath: vi.fn(),
 }));
@@ -106,7 +108,7 @@ describe("disconnectConnectorAction", () => {
   // derive from them.
   it("deletes the connection under the project's headers, bearer included", async () => {
     const res = await disconnectConnectorAction(PROJECT, ID);
-    expect(res).toEqual({ error: null });
+    expect(res).toEqual({ ok: true });
     expect(fetchMock).toHaveBeenCalledWith(
       `http://notifications.test/internal/v1/connectors/${ID}`,
       expect.objectContaining({
@@ -123,47 +125,47 @@ describe("disconnectConnectorAction", () => {
 
   it("treats an already-gone connection as done", async () => {
     fetchMock.mockResolvedValue(new Response(null, { status: 404 }));
-    expect(await disconnectConnectorAction(PROJECT, ID)).toEqual({ error: null });
+    expect(await disconnectConnectorAction(PROJECT, ID)).toEqual({ ok: true });
   });
 
   it("returns the service's refusal as the message", async () => {
     fetchMock.mockResolvedValue(new Response("{}", { status: 403 }));
     const res = await disconnectConnectorAction(PROJECT, ID);
-    expect(res.error).toBe("connection not found");
+    expect(errorOf(res)).toBe("connection not found");
     expect(vi.mocked(revalidatePath)).not.toHaveBeenCalled();
   });
 
   it("refuses a malformed id before any request", async () => {
     const res = await disconnectConnectorAction(PROJECT, "not-a-uuid");
-    expect(res.error).toMatch(/invalid connection/i);
+    expect(errorOf(res)).toMatch(/invalid connection/i);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("stops at the ceiling", async () => {
     vi.mocked(rateLimit).mockResolvedValue(new NextResponse(null, { status: 429 }));
     const res = await disconnectConnectorAction(PROJECT, ID);
-    expect(res.error).toMatch(/too many requests/i);
+    expect(errorOf(res)).toMatch(/too many requests/i);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("stops when there is no session", async () => {
     vi.mocked(getServerSession).mockResolvedValue(null);
     const res = await disconnectConnectorAction(PROJECT, ID);
-    expect(res.error).toMatch(/session expired/i);
+    expect(errorOf(res)).toMatch(/session expired/i);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("stops when the project cannot be resolved", async () => {
     vi.mocked(fetchProjectAnywhere).mockResolvedValue(null);
     const res = await disconnectConnectorAction(PROJECT, ID);
-    expect(res.error).toMatch(/resolve this project/i);
+    expect(errorOf(res)).toMatch(/resolve this project/i);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("reports an unreachable service rather than swallowing it", async () => {
     fetchMock.mockResolvedValue(null);
     const res = await disconnectConnectorAction(PROJECT, ID);
-    expect(res.error).toMatch(/unavailable/i);
+    expect(errorOf(res)).toMatch(/unavailable/i);
   });
 });
 
@@ -173,7 +175,7 @@ describe("sendTestMessageAction", () => {
       new Response(JSON.stringify({ delivered: true, error: null }), { status: 200 }),
     );
     const res = await sendTestMessageAction(PROJECT, ID);
-    expect(res).toEqual({ error: null, delivered: true });
+    expect(res).toEqual({ ok: true });
     expect(fetchMock).toHaveBeenCalledWith(
       `http://notifications.test/internal/v1/connectors/${ID}/test`,
       expect.objectContaining({
@@ -198,7 +200,7 @@ describe("sendTestMessageAction", () => {
       }),
     );
     const res = await sendTestMessageAction(PROJECT, ID);
-    expect(res).toEqual({ error: "slack: no_service", delivered: false });
+    expect(res).toEqual({ ok: false, error: "slack: no_service" });
     // Re-read either way: a dead-install answer retired the row upstream.
     expect(vi.mocked(revalidatePath)).toHaveBeenCalledWith(
       "/(app)/[organization]/[project]/connectors",
@@ -211,7 +213,7 @@ describe("sendTestMessageAction", () => {
   it("returns the service's refusal as the message, and re-reads the page", async () => {
     fetchMock.mockResolvedValue(new Response("{}", { status: 409 }));
     const res = await sendTestMessageAction(PROJECT, ID);
-    expect(res.error).toBe("connection not found");
+    expect(errorOf(res)).toBe("connection not found");
     expect(vi.mocked(revalidatePath)).toHaveBeenCalledWith(
       "/(app)/[organization]/[project]/connectors",
       "page",
@@ -239,7 +241,7 @@ describe("createWebhookConnectorAction", () => {
       "  https://hooks.example.com/x ",
       null,
     );
-    expect(res).toEqual({ error: null, signingSecret: "whsec_abc", host: "hooks.example.com" });
+    expect(res).toEqual({ ok: true, signingSecret: "whsec_abc", host: "hooks.example.com" });
     expect(fetchMock).toHaveBeenCalledWith(
       "http://notifications.test/internal/v1/connectors/webhook",
       expect.objectContaining({
@@ -279,7 +281,7 @@ describe("createWebhookConnectorAction", () => {
   // it, and so does the action, before spending the request.
   it("refuses an empty selection before any request", async () => {
     const res = await createWebhookConnectorAction(PROJECT, "https://hooks.example.com/x", []);
-    expect(res.error).toMatch(/at least one event/i);
+    expect(errorOf(res)).toMatch(/at least one event/i);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -287,34 +289,33 @@ describe("createWebhookConnectorAction", () => {
     const res = await createWebhookConnectorAction(PROJECT, "https://hooks.example.com/x", [
       "member_removed" as never,
     ]);
-    expect(res.error).toMatch(/unknown event/i);
+    expect(errorOf(res)).toMatch(/unknown event/i);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("returns the service's refusal as the message and stores nothing", async () => {
     fetchMock.mockResolvedValue(new Response("{}", { status: 400 }));
     const res = await createWebhookConnectorAction(PROJECT, "http://hooks.example.com/x", null);
-    expect(res).toEqual({ error: "connection not found" });
+    expect(res).toEqual({ ok: false, error: "connection not found" });
     expect(vi.mocked(revalidatePath)).not.toHaveBeenCalled();
   });
 
   it("refuses an empty URL before any request", async () => {
     const res = await createWebhookConnectorAction(PROJECT, "   ", null);
-    expect(res.error).toMatch(/enter the endpoint/i);
+    expect(errorOf(res)).toMatch(/enter the endpoint/i);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("does not treat a shape it cannot read as a secret", async () => {
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 201 }));
     const res = await createWebhookConnectorAction(PROJECT, "https://hooks.example.com/x", null);
-    expect(res.error).toMatch(/unexpected response/i);
-    expect(res.signingSecret).toBeUndefined();
+    expect(res).toEqual({ ok: false, error: expect.stringMatching(/unexpected response/i) });
   });
 
   it("stops at the ceiling", async () => {
     vi.mocked(rateLimit).mockResolvedValue(new NextResponse(null, { status: 429 }));
     const res = await createWebhookConnectorAction(PROJECT, "https://hooks.example.com/x", null);
-    expect(res.error).toMatch(/too many requests/i);
+    expect(errorOf(res)).toMatch(/too many requests/i);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
@@ -325,7 +326,7 @@ describe("updateWebhookEventsAction", () => {
       json({ connection: webhookConnection({ event_kinds: ["member_added"] }) }),
     );
     const res = await updateWebhookEventsAction(PROJECT, ID, ["member_added"]);
-    expect(res).toEqual({ error: null });
+    expect(res).toEqual({ ok: true });
     expect(fetchMock).toHaveBeenCalledWith(
       `http://notifications.test/internal/v1/connectors/${ID}/events`,
       expect.objectContaining({
@@ -354,33 +355,33 @@ describe("updateWebhookEventsAction", () => {
 
   it("refuses an empty selection before any request", async () => {
     const res = await updateWebhookEventsAction(PROJECT, ID, []);
-    expect(res.error).toMatch(/at least one event/i);
+    expect(errorOf(res)).toMatch(/at least one event/i);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("refuses a kind outside the generated vocabulary", async () => {
     const res = await updateWebhookEventsAction(PROJECT, ID, ["nope" as never]);
-    expect(res.error).toMatch(/unknown event/i);
+    expect(errorOf(res)).toMatch(/unknown event/i);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("refuses a malformed id before any request", async () => {
     const res = await updateWebhookEventsAction(PROJECT, "not-a-uuid", null);
-    expect(res.error).toMatch(/invalid connection/i);
+    expect(errorOf(res)).toMatch(/invalid connection/i);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("returns the service's refusal as the message", async () => {
     fetchMock.mockResolvedValue(new Response("{}", { status: 403 }));
     const res = await updateWebhookEventsAction(PROJECT, ID, null);
-    expect(res.error).toBe("connection not found");
+    expect(errorOf(res)).toBe("connection not found");
     expect(vi.mocked(revalidatePath)).not.toHaveBeenCalled();
   });
 
   it("reports a shape it cannot read", async () => {
     fetchMock.mockResolvedValue(json({ ok: true }));
     const res = await updateWebhookEventsAction(PROJECT, ID, null);
-    expect(res.error).toMatch(/unexpected response/i);
+    expect(errorOf(res)).toMatch(/unexpected response/i);
     expect(vi.mocked(revalidatePath)).not.toHaveBeenCalled();
   });
 });
@@ -395,7 +396,7 @@ describe("rotateWebhookSecretAction", () => {
   it("posts the rotation with its overlap and returns the new secret once", async () => {
     fetchMock.mockResolvedValue(rotated());
     const res = await rotateWebhookSecretAction(PROJECT, ID, 24);
-    expect(res).toEqual({ error: null, signingSecret: "whsec_new", host: "hooks.example.com" });
+    expect(res).toEqual({ ok: true, signingSecret: "whsec_new", host: "hooks.example.com" });
     expect(fetchMock).toHaveBeenCalledWith(
       `http://notifications.test/internal/v1/connectors/${ID}/rotate`,
       expect.objectContaining({
@@ -426,20 +427,21 @@ describe("rotateWebhookSecretAction", () => {
 
   it.each([-1, 25, 1.5, Number.NaN])("refuses an overlap of %s hours", async (hours) => {
     const res = await rotateWebhookSecretAction(PROJECT, ID, hours);
-    expect(res.error).toMatch(/0 to 24 hours/i);
+    expect(errorOf(res)).toMatch(/0 to 24 hours/i);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("returns the service's refusal as the message", async () => {
     fetchMock.mockResolvedValue(new Response("{}", { status: 400 }));
     expect(await rotateWebhookSecretAction(PROJECT, ID, 1)).toEqual({
+      ok: false,
       error: "connection not found",
     });
   });
 
   it("refuses a malformed id before any request", async () => {
     const res = await rotateWebhookSecretAction(PROJECT, "not-a-uuid", 24);
-    expect(res.error).toMatch(/invalid connection/i);
+    expect(errorOf(res)).toMatch(/invalid connection/i);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
@@ -450,7 +452,7 @@ describe("redeliverAction", () => {
   it("posts the resend and reports a delivery", async () => {
     fetchMock.mockResolvedValue(json({ delivered: true, error: null }));
     const res = await redeliverAction(PROJECT, ID, DELIVERY);
-    expect(res).toEqual({ error: null, delivered: true });
+    expect(res).toEqual({ ok: true });
     expect(fetchMock).toHaveBeenCalledWith(
       url,
       expect.objectContaining({
@@ -468,7 +470,7 @@ describe("redeliverAction", () => {
   it("surfaces the receiver's answer when the resend did not land", async () => {
     fetchMock.mockResolvedValue(json({ delivered: false, error: "HTTP 503" }));
     const res = await redeliverAction(PROJECT, ID, DELIVERY);
-    expect(res).toEqual({ error: "HTTP 503", delivered: false });
+    expect(res).toEqual({ ok: false, error: "HTTP 503" });
     expect(vi.mocked(revalidatePath)).toHaveBeenCalledWith(
       "/(app)/[organization]/[project]/connectors",
       "page",
@@ -482,6 +484,7 @@ describe("redeliverAction", () => {
   it("returns the service's refusal as the message, and re-reads the page", async () => {
     fetchMock.mockResolvedValue(new Response("{}", { status: 409 }));
     expect(await redeliverAction(PROJECT, ID, DELIVERY)).toEqual({
+      ok: false,
       error: "connection not found",
     });
     expect(vi.mocked(revalidatePath)).toHaveBeenCalledWith(
@@ -492,20 +495,19 @@ describe("redeliverAction", () => {
 
   it("refuses a malformed delivery id before any request", async () => {
     const res = await redeliverAction(PROJECT, ID, "not-a-uuid");
-    expect(res.error).toMatch(/invalid delivery/i);
+    expect(errorOf(res)).toMatch(/invalid delivery/i);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("refuses a malformed connection id before any request", async () => {
     const res = await redeliverAction(PROJECT, "not-a-uuid", DELIVERY);
-    expect(res.error).toMatch(/invalid connection/i);
+    expect(errorOf(res)).toMatch(/invalid connection/i);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("reports a shape it cannot read", async () => {
     fetchMock.mockResolvedValue(json({ ok: true }));
     const res = await redeliverAction(PROJECT, ID, DELIVERY);
-    expect(res.error).toMatch(/unexpected response/i);
-    expect(res.delivered).toBeUndefined();
+    expect(res).toEqual({ ok: false, error: expect.stringMatching(/unexpected response/i) });
   });
 });

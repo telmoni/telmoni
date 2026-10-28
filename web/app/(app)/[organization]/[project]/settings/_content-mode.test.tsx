@@ -2,6 +2,8 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { ActionResult } from "@/lib/action-result";
+
 import { ContentMode } from "@/lib/types/enums";
 
 const refresh = vi.hoisted(() => vi.fn());
@@ -13,8 +15,8 @@ const toast = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn() }));
 vi.mock("sonner", () => ({ toast }));
 
 const updateContentModeAction = vi.hoisted(() =>
-  vi.fn<(projectId: string, mode: ContentMode) => Promise<{ error: string | null }>>(
-    async () => ({ error: null }),
+  vi.fn<(projectId: string, mode: ContentMode) => Promise<ActionResult>>(
+    async () => ({ ok: true }),
   ),
 );
 vi.mock("./actions", () => ({ updateContentModeAction }));
@@ -23,7 +25,7 @@ import { ContentModeForm } from "./_content-mode";
 
 beforeEach(() => {
   vi.clearAllMocks();
-  updateContentModeAction.mockResolvedValue({ error: null });
+  updateContentModeAction.mockResolvedValue({ ok: true });
 });
 
 function form({
@@ -101,6 +103,7 @@ describe("ContentModeForm", () => {
   // the choice is kept to retry: a refresh here on top would draw it twice.
   it("shows the server's refusal, keeps the choice, and draws nothing twice", async () => {
     updateContentModeAction.mockResolvedValue({
+      ok: false,
       error: "insufficient role: required owner, have admin",
     });
     render(form({ offered: [ContentMode.Off, ContentMode.On] }));
@@ -117,10 +120,10 @@ describe("ContentModeForm", () => {
   it("holds every control while a save is on its way, and sends it once", async () => {
     // Settled before the test ends: a transition left pending would hold
     // React's action scope for every test after it.
-    let answer: (result: { error: string | null }) => void = () => {};
+    let answer: (result: ActionResult) => void = () => {};
     updateContentModeAction.mockImplementation(
       () =>
-        new Promise<{ error: string | null }>((resolve) => {
+        new Promise<ActionResult>((resolve) => {
           answer = resolve;
         }),
     );
@@ -138,7 +141,7 @@ describe("ContentModeForm", () => {
     expect(updateContentModeAction).toHaveBeenCalledTimes(1);
 
     await act(async () => {
-      answer({ error: null });
+      answer({ ok: true });
     });
     expect(toast.success).toHaveBeenCalledWith("Content mode set to On.");
   });

@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { errorOf } from "@/lib/action-result";
+
 vi.mock("@/lib/server/session", () => ({
   getServerSession: vi.fn(),
 }));
@@ -107,6 +109,7 @@ describe("updateProjectNameAction", () => {
   it("refuses anything but a project id before asking auth", async () => {
     for (const id of ["../organization", "x?limit=1", "", "a/b"]) {
       expect(await updateProjectNameAction(id, "Marketing Site")).toEqual({
+        ok: false,
         error: "Couldn't resolve that project. Reload and try again.",
       });
     }
@@ -115,7 +118,7 @@ describe("updateProjectNameAction", () => {
 
   it("renames the project by its id, in the organization the request acts in", async () => {
     fetchMock.mockResolvedValue(renamed("marketing-site"));
-    expect(await updateProjectNameAction(PROJECT, "  Marketing Site  ")).toEqual({ error: null });
+    expect(await updateProjectNameAction(PROJECT, "  Marketing Site  ")).toEqual({ ok: true });
     expect(fetchMock).toHaveBeenCalledWith(
       `http://auth.test/internal/v1/projects/${PROJECT}`,
       expect.objectContaining({
@@ -178,7 +181,7 @@ describe("updateProjectNameAction", () => {
   it("revalidates in place when it cannot tell whether the slug moved", async () => {
     vi.mocked(fetchProject).mockResolvedValue(null);
     fetchMock.mockResolvedValue(renamed("marketing-site"));
-    expect(await updateProjectNameAction(PROJECT, "Marketing Site")).toEqual({ error: null });
+    expect(await updateProjectNameAction(PROJECT, "Marketing Site")).toEqual({ ok: true });
     expect(mockRevalidate).toHaveBeenCalledWith("/(app)/[organization]/[project]", "layout");
     expect(mockPublishEvent).not.toHaveBeenCalled();
     expect(mockRedirect).not.toHaveBeenCalled();
@@ -187,16 +190,18 @@ describe("updateProjectNameAction", () => {
   it("surfaces auth's refusal, and tells nobody", async () => {
     wentBy("web");
     fetchMock.mockResolvedValue(new Response(null, { status: 409 }));
-    expect(await updateProjectNameAction(PROJECT, "Marketing Site")).toEqual({ error: "problem" });
+    expect(await updateProjectNameAction(PROJECT, "Marketing Site")).toEqual({ ok: false, error: "problem" });
     expect(mockPublishEvent).not.toHaveBeenCalled();
     expect(mockRevalidate).not.toHaveBeenCalled();
   });
 
   it("refuses an empty or overlong name without asking auth", async () => {
     expect(await updateProjectNameAction(PROJECT, "   ")).toEqual({
+      ok: false,
       error: "Project name cannot be empty.",
     });
     expect(await updateProjectNameAction(PROJECT, "x".repeat(101))).toEqual({
+      ok: false,
       error: "Project name must be 100 characters or fewer.",
     });
     expect(fetchMock).not.toHaveBeenCalled();
@@ -205,6 +210,7 @@ describe("updateProjectNameAction", () => {
   it("refuses without asking auth when it cannot tell where the caller stands", async () => {
     vi.mocked(identityContext).mockResolvedValue(null);
     expect(await updateProjectNameAction(PROJECT, "Marketing Site")).toEqual({
+      ok: false,
       error: "Couldn't resolve your organization right now. Try again in a moment.",
     });
     expect(fetchMock).not.toHaveBeenCalled();
@@ -219,7 +225,7 @@ describe("updateProjectNameAction", () => {
       organizationNotFound: true,
     } as Awaited<ReturnType<typeof getServerContext>>);
     const res = await updateProjectNameAction(PROJECT, "Marketing Site");
-    expect(res.error).toMatch(/URL was changed, or you're no longer in it/);
+    expect(errorOf(res)).toMatch(/URL was changed, or you're no longer in it/);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
@@ -237,6 +243,7 @@ describe("updateContentModeAction", () => {
       ["project_1"],
     ]) {
       expect(await updateContentModeAction(id as string, "off")).toEqual({
+        ok: false,
         error: "Couldn't resolve that project. Reload and try again.",
       });
     }
@@ -247,6 +254,7 @@ describe("updateContentModeAction", () => {
   it("refuses anything but a content mode before asking the server", async () => {
     for (const mode of ["plain", "Off", "", "true"]) {
       expect(await updateContentModeAction(PROJECT, mode as never)).toEqual({
+        ok: false,
         error: "That is not a content mode.",
       });
     }
@@ -257,7 +265,7 @@ describe("updateContentModeAction", () => {
     fetchMock.mockResolvedValue(
       new Response(JSON.stringify({ content_mode: "off", offered: ["off"] }), { status: 200 }),
     );
-    expect(await updateContentModeAction(PROJECT, "off")).toEqual({ error: null });
+    expect(await updateContentModeAction(PROJECT, "off")).toEqual({ ok: true });
     expect(fetchMock).toHaveBeenCalledWith(
       "http://auth.test/internal/v1/telemetry/content-mode",
       expect.objectContaining({
@@ -281,7 +289,7 @@ describe("updateContentModeAction", () => {
   it("surfaces the server's refusal, and draws the page again", async () => {
     for (const status of [403, 409]) {
       fetchMock.mockResolvedValueOnce(new Response(null, { status }));
-      expect(await updateContentModeAction(PROJECT, "on")).toEqual({ error: "problem" });
+      expect(await updateContentModeAction(PROJECT, "on")).toEqual({ ok: false, error: "problem" });
     }
     expect(mockRefresh).toHaveBeenCalledTimes(2);
     expect(mockRevalidate).not.toHaveBeenCalled();
@@ -291,6 +299,7 @@ describe("updateContentModeAction", () => {
   it("says the change failed when the server cannot be reached, and draws nothing again", async () => {
     fetchMock.mockResolvedValue(null);
     expect(await updateContentModeAction(PROJECT, "off")).toEqual({
+      ok: false,
       error: "Failed to change the content mode. Please try again.",
     });
     expect(mockRevalidate).not.toHaveBeenCalled();
@@ -300,6 +309,7 @@ describe("updateContentModeAction", () => {
   it("refuses without asking the server when the session has ended", async () => {
     vi.mocked(getServerSession).mockResolvedValue(null);
     expect(await updateContentModeAction(PROJECT, "off")).toEqual({
+      ok: false,
       error: "Your session expired — sign in again.",
     });
     expect(fetchMock).not.toHaveBeenCalled();
@@ -308,6 +318,7 @@ describe("updateContentModeAction", () => {
   it("refuses without asking the server when it cannot tell where the caller stands", async () => {
     vi.mocked(identityContext).mockResolvedValue(null);
     expect(await updateContentModeAction(PROJECT, "off")).toEqual({
+      ok: false,
       error: "Couldn't resolve your organization right now. Try again in a moment.",
     });
     expect(fetchMock).not.toHaveBeenCalled();
@@ -344,7 +355,7 @@ describe("deleteProjectAction", () => {
 
   it("surfaces auth's refusal, and tells nobody", async () => {
     fetchMock.mockResolvedValue(new Response(null, { status: 403 }));
-    expect(await deleteProjectAction(PROJECT)).toEqual({ error: "problem" });
+    expect(await deleteProjectAction(PROJECT)).toEqual({ ok: false, error: "problem" });
     expect(mockPublishEvent).not.toHaveBeenCalled();
     expect(mockRevalidate).not.toHaveBeenCalled();
     expect(mockRedirect).not.toHaveBeenCalled();

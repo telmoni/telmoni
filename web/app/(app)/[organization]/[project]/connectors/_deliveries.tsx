@@ -96,7 +96,7 @@ export function DeliveriesButton({
     setResending(deliveryId);
     try {
       const r = await redeliverAction(projectId, connectionId, deliveryId);
-      if (r.error) toast.error(r.error);
+      if (!r.ok) toast.error(r.error);
       else toast.success(`Delivered to ${label}.`);
       await loadFirst();
     } catch (err) {

@@ -4,6 +4,8 @@ import { redirect, RedirectType } from "next/navigation";
 import { Component, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { ActionResult } from "@/lib/action-result";
+
 const replace = vi.hoisted(() => vi.fn());
 const refresh = vi.hoisted(() => vi.fn());
 // Next's own redirect and `unstable_rethrow`; only the router is a stand-in.
@@ -36,9 +38,7 @@ vi.mock("sonner", () => ({
 }));
 
 const deleteProjectAction = vi.hoisted(() =>
-  vi.fn<(projectId: string) => Promise<{ error: string | null }>>(async () => ({
-    error: null,
-  })),
+  vi.fn<(projectId: string) => Promise<ActionResult>>(async () => ({ ok: true })),
 );
 vi.mock("./actions", () => ({ deleteProjectAction }));
 
@@ -46,7 +46,7 @@ import { DeleteProjectForm } from "./_delete-project";
 
 beforeEach(() => {
   vi.clearAllMocks();
-  deleteProjectAction.mockResolvedValue({ error: null });
+  deleteProjectAction.mockResolvedValue({ ok: true });
 });
 
 function open() {
@@ -113,6 +113,7 @@ describe("DeleteProjectForm", () => {
 
   it("stays put when the service refuses", async () => {
     deleteProjectAction.mockResolvedValue({
+      ok: false,
       error: "only the organization owner can delete a project",
     });
     render(<DeleteProjectForm projectId="project_1" projectName="Payments" />);

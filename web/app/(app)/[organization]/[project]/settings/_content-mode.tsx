@@ -86,7 +86,7 @@ export function ContentModeForm({
     startTransition(async () => {
       try {
         const res = await updateContentModeAction(projectId, choice);
-        if (res.error) {
+        if (!res.ok) {
           // A refusal the server gave also redraws the page (the action's
           // `refresh()`): it can mean the page is out of date.
           setError(res.error);

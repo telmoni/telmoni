@@ -4,6 +4,7 @@ import { refresh, revalidatePath } from "next/cache";
 import { redirect, RedirectType } from "next/navigation";
 import { z } from "zod";
 
+import { type ActionResult, refused } from "@/lib/action-result";
 import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
 import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
 import { isProjectId } from "@/lib/connect";
@@ -21,10 +22,6 @@ import { canonicalPath } from "@/lib/server/path";
 import { getServerSession } from "@/lib/server/session";
 import { ContentMode } from "@/lib/types/enums";
 
-interface ActionResult {
-  error: string | null;
-}
-
 const Renamed = z.object({ slug: z.string() });
 const Mode = z.enum(ContentMode);
 
@@ -39,24 +36,24 @@ export async function updateProjectNameAction(
   name: string,
 ): Promise<ActionResult> {
   const session = await getServerSession();
-  if (!session) return { error: "Your session expired — sign in again." };
+  if (!session) return refused("Your session expired — sign in again.");
   const limited = await rateLimit(sessionKey(session, "project:rename"), {
     limit: 10,
     windowMs: 60_000,
   });
-  if (limited) return { error: "Too many requests — slow down a moment." };
+  if (limited) return refused("Too many requests — slow down a moment.");
 
   const checked = checkProjectName(name);
-  if (!checked.ok) return { error: checked.error };
+  if (!checked.ok) return refused(checked.error);
   const trimmed = checked.value;
 
   // A Server Action is a public endpoint, and the id becomes a path segment
   // of the upstream URL: anything but a project id is refused before it can
   // aim the request at another lane.
-  if (!isProjectId(projectId)) return { error: UNRESOLVED_PROJECT };
+  if (!isProjectId(projectId)) return refused(UNRESOLVED_PROJECT);
 
   const ctx = await identityContext();
-  if (!ctx) return { error: await unplacedOrganization() };
+  if (!ctx) return refused(await unplacedOrganization());
   const was = (await fetchProject(projectId))?.slug;
   const gate = await getServerContext();
   const organization = gate ? activeOrganization(gate)?.slug : undefined;
@@ -77,7 +74,7 @@ export async function updateProjectNameAction(
     const error = res
       ? (await extractProblem(res)).message
       : "Failed to update project name. Please try again.";
-    return { error };
+    return refused(error);
   }
 
   const renamed = Renamed.safeParse(await res.json().catch(() => null));
@@ -107,7 +104,7 @@ export async function updateProjectNameAction(
     );
   }
   revalidatePath("/(app)/[organization]/[project]", "layout");
-  return { error: null };
+  return { ok: true };
 }
 
 /// The server decides who may (the organization's owner alone) and which modes
@@ -117,19 +114,19 @@ export async function updateContentModeAction(
   mode: ContentMode,
 ): Promise<ActionResult> {
   const session = await getServerSession();
-  if (!session) return { error: "Your session expired — sign in again." };
+  if (!session) return refused("Your session expired — sign in again.");
   const limited = await rateLimit(sessionKey(session, "project:content-mode"), {
     limit: 10,
     windowMs: 60_000,
   });
-  if (limited) return { error: "Too many requests — slow down a moment." };
-  if (!isProjectId(projectId)) return { error: UNRESOLVED_PROJECT };
+  if (limited) return refused("Too many requests — slow down a moment.");
+  if (!isProjectId(projectId)) return refused(UNRESOLVED_PROJECT);
   // A Server Action takes whatever a caller posts, whatever its type says.
   const chosen = Mode.safeParse(mode);
-  if (!chosen.success) return { error: "That is not a content mode." };
+  if (!chosen.success) return refused("That is not a content mode.");
 
   const ctx = await identityContext();
-  if (!ctx) return { error: await unplacedOrganization() };
+  if (!ctx) return refused(await unplacedOrganization());
 
   const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/v1/telemetry/content-mode`, {
     method: "PUT",
@@ -140,30 +137,30 @@ export async function updateContentModeAction(
     body: JSON.stringify({ content_mode: chosen.data }),
   });
 
-  if (!res) return { error: "Failed to change the content mode. Please try again." };
+  if (!res) return refused("Failed to change the content mode. Please try again.");
   if (!res.ok) {
     // A refusal can mean the page is out of date — the owner changed, or a
     // mode closed — so it is drawn again with the answer.
     refresh();
-    return { error: (await extractProblem(res)).message };
+    return refused((await extractProblem(res)).message);
   }
 
   revalidatePath("/(app)/[organization]/[project]/settings", "page");
-  return { error: null };
+  return { ok: true };
 }
 
 export async function deleteProjectAction(projectId: string): Promise<ActionResult> {
   const session = await getServerSession();
-  if (!session) return { error: "Your session expired — sign in again." };
+  if (!session) return refused("Your session expired — sign in again.");
   const limited = await rateLimit(sessionKey(session, "project:delete"), {
     limit: 3,
     windowMs: 60_000,
   });
-  if (limited) return { error: "Too many requests — slow down a moment." };
-  if (!isProjectId(projectId)) return { error: UNRESOLVED_PROJECT };
+  if (limited) return refused("Too many requests — slow down a moment.");
+  if (!isProjectId(projectId)) return refused(UNRESOLVED_PROJECT);
 
   const ctx = await identityContext();
-  if (!ctx) return { error: await unplacedOrganization() };
+  if (!ctx) return refused(await unplacedOrganization());
 
   const res = await tryFetchWithTimeout(
     `${env.SERVER_URL}/internal/v1/projects/${encodeURIComponent(projectId)}`,
@@ -177,7 +174,7 @@ export async function deleteProjectAction(projectId: string): Promise<ActionResu
     const error = res
       ? (await extractProblem(res)).message
       : "Failed to delete the project. Please try again.";
-    return { error };
+    return refused(error);
   }
 
   // Everybody in the organization is told, the owner and admins who hold no

@@ -3,6 +3,7 @@
 import { refresh } from "next/cache";
 import { z } from "zod";
 
+import { type ActionResult, refused } from "@/lib/action-result";
 import { isApiKeyScope } from "@/lib/api-key-scopes";
 import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
 import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
@@ -31,12 +32,9 @@ function isTtl(s: unknown): s is TtlOption {
 
 const MintedToken = z.object({ id: z.string(), token: z.string() });
 
-export interface MintResult {
-  status:  "ok" | "error";
-  token?:  string;
-  id?:     string;
-  error?:  string;
-}
+/** A key, shown this once, and its id. */
+export type MintedKey = { token: string; id: string };
+export type MintResult = ActionResult<MintedKey>;
 
 /** What the mint dialog sends: what the browser could send, before each field
  *  is checked below. */
@@ -49,35 +47,35 @@ const MintInputSchema = z.object({
 
 export async function mintTokenAction(projectId: string, input: unknown): Promise<MintResult> {
   if (!projectId) {
-    return { status: "error", error: "API keys are scoped by project, not organization." };
+    return refused("API keys are scoped by project, not organization.");
   }
   const session = await getServerSession();
-  if (!session) return { status: "error", error: "Your session expired — sign in again." };
+  if (!session) return refused("Your session expired — sign in again.");
 
   const limited = await rateLimit(
     sessionKey(session, "tokens:mint"),
     { limit: 5, windowMs: 60_000 },
   );
-  if (limited) return { status: "error", error: "Too many mint requests. Try again in a minute." };
+  if (limited) return refused("Too many mint requests. Try again in a minute.");
   const off = await featureOff(Flag.ApiTokens);
-  if (off) return { status: "error", error: off };
+  if (off) return refused(off);
 
   const asked = MintInputSchema.safeParse(input);
-  if (!asked.success) return { status: "error", error: "That key could not be read." };
+  if (!asked.success) return refused("That key could not be read.");
   const name = checkApiKeyName(asked.data.name);
-  if (!name.ok) return { status: "error", error: name.error };
+  if (!name.ok) return refused(name.error);
   const described = checkApiKeyDescription(asked.data.description);
-  if (!described.ok) return { status: "error", error: described.error };
+  if (!described.ok) return refused(described.error);
   const description = described.value || null;
   const ttl = asked.data.ttl;
-  if (!isTtl(ttl)) return { status: "error", error: "Invalid TTL selection." };
+  if (!isTtl(ttl)) return refused("Invalid TTL selection.");
   const scopes = asked.data.scopes;
   if (scopes.length === 0 || !scopes.every(isApiKeyScope)) {
-    return { status: "error", error: "Choose what the key opens: sending spans, reading the API, or both." };
+    return refused("Choose what the key opens: sending spans, reading the API, or both.");
   }
 
   const resolved = await activeProjectForMutation(projectId);
-  if (resolved.error !== null) return { status: "error", error: resolved.error };
+  if (resolved.error !== null) return refused(resolved.error);
   const expires_in_seconds = TTL_OPTIONS[ttl];
 
   const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/v1/tokens`, {
@@ -94,10 +92,10 @@ export async function mintTokenAction(projectId: string, input: unknown): Promis
       expires_in_seconds,
     }),
   });
-  if (!res) return { status: "error", error: "The key service is unreachable. Try again." };
+  if (!res) return refused("The key service is unreachable. Try again.");
   if (!res.ok) {
     const { message } = await extractProblem(res);
-    return { status: "error", error: message };
+    return refused(message);
   }
 
   // The key exists from here on, whatever its answer reads as: the list is
@@ -105,10 +103,10 @@ export async function mintTokenAction(projectId: string, input: unknown): Promis
   refresh();
   const parsed = MintedToken.safeParse(await res.json().catch(() => null));
   if (!parsed.success) {
-    return { status: "error", error: "Unexpected response from the key service." };
+    return refused("Unexpected response from the key service.");
   }
   const body = parsed.data;
-  return { status: "ok", token: body.token, id: body.id };
+  return { ok: true, token: body.token, id: body.id };
 }
 
 export async function rotateTokenAction(
@@ -116,22 +114,22 @@ export async function rotateTokenAction(
   tokenId: string,
 ): Promise<MintResult> {
   if (!projectId) {
-    return { status: "error", error: "API keys are scoped by project, not organization." };
+    return refused("API keys are scoped by project, not organization.");
   }
   const session = await getServerSession();
-  if (!session) return { status: "error", error: "Your session expired — sign in again." };
+  if (!session) return refused("Your session expired — sign in again.");
 
   const limited = await rateLimit(
     sessionKey(session, "tokens:rotate"),
     { limit: 10, windowMs: 60_000 },
   );
-  if (limited) return { status: "error", error: "Too many rotate requests." };
+  if (limited) return refused("Too many rotate requests.");
   const off = await featureOff(Flag.ApiTokens);
-  if (off) return { status: "error", error: off };
-  if (!z.guid().safeParse(tokenId).success) return { status: "error", error: "Invalid key id." };
+  if (off) return refused(off);
+  if (!z.guid().safeParse(tokenId).success) return refused("Invalid key id.");
 
   const resolved = await activeProjectForMutation(projectId);
-  if (resolved.error !== null) return { status: "error", error: resolved.error };
+  if (resolved.error !== null) return refused(resolved.error);
   const res = await tryFetchWithTimeout(
     `${env.SERVER_URL}/internal/v1/tokens/${encodeURIComponent(tokenId)}/rotate`,
     {
@@ -143,39 +141,39 @@ export async function rotateTokenAction(
       body: JSON.stringify({}),
     },
   );
-  if (!res) return { status: "error", error: "The key service is unreachable. Try again." };
+  if (!res) return refused("The key service is unreachable. Try again.");
   if (!res.ok) {
     const { message } = await extractProblem(res);
-    return { status: "error", error: message };
+    return refused(message);
   }
   refresh();
   const parsed = MintedToken.safeParse(await res.json().catch(() => null));
   if (!parsed.success) {
-    return { status: "error", error: "Unexpected response from the key service." };
+    return refused("Unexpected response from the key service.");
   }
   const body = parsed.data;
-  return { status: "ok", token: body.token, id: body.id };
+  return { ok: true, token: body.token, id: body.id };
 }
 
 export async function revokeTokenAction(
   projectId: string,
   tokenId: string,
-): Promise<{ error?: string }> {
+): Promise<ActionResult> {
   if (!projectId) {
-    return { error: "API keys are scoped by project, not organization." };
+    return refused("API keys are scoped by project, not organization.");
   }
   const session = await getServerSession();
-  if (!session) return { error: "Your session expired — sign in again." };
+  if (!session) return refused("Your session expired — sign in again.");
 
   const limited = await rateLimit(
     sessionKey(session, "tokens:revoke"),
     { limit: 20, windowMs: 60_000 },
   );
-  if (limited) return { error: "Too many revoke requests." };
-  if (!z.guid().safeParse(tokenId).success) return { error: "Invalid key id." };
+  if (limited) return refused("Too many revoke requests.");
+  if (!z.guid().safeParse(tokenId).success) return refused("Invalid key id.");
 
   const resolved = await activeProjectForMutation(projectId);
-  if (resolved.error !== null) return { error: resolved.error };
+  if (resolved.error !== null) return refused(resolved.error);
   const res = await tryFetchWithTimeout(
     `${env.SERVER_URL}/internal/v1/tokens/${encodeURIComponent(tokenId)}`,
     {
@@ -183,11 +181,11 @@ export async function revokeTokenAction(
       headers: sessionHeaders(session, resolved.organizationId, resolved.projectId),
     },
   );
-  if (!res) return { error: "The key service is unreachable. Try again." };
+  if (!res) return refused("The key service is unreachable. Try again.");
   if (!res.ok && res.status !== 404) {
     const { message } = await extractProblem(res);
-    return { error: message };
+    return refused(message);
   }
   refresh();
-  return {};
+  return { ok: true };
 }

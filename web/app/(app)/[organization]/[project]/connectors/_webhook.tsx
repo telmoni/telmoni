@@ -1,7 +1,6 @@
 "use client";
 
-import { unstable_rethrow } from "next/navigation";
-import { startTransition, useState, useTransition, type ReactNode } from "react";
+import { startTransition, useState, type ReactNode } from "react";
 
 import { PlaintextTokenDialog } from "@/components/plaintext-token-dialog";
 import { Button } from "@/components/ui/button";
@@ -17,9 +16,10 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { DOCS_URL } from "@/lib/site";
+import { useAction } from "@/lib/use-action";
 
 import { EventPicker, isChoiceEmpty, kindsFrom, type EventChoice } from "./_events";
-import { createWebhookConnectorAction, type SecretResult } from "./actions";
+import { createWebhookConnectorAction, type SigningSecret } from "./actions";
 
 // The webhook is the one connector with no handshake: an owner or admin types the
 // endpoint here, the service checks it and mints the signing secret, and the
@@ -27,7 +27,7 @@ import { createWebhookConnectorAction, type SecretResult } from "./actions";
 // route instead, because the browser has to leave for the vendor.
 export function ConnectWebhookButton({ projectId, label }: { projectId: string; label: string }) {
   const [open, setOpen] = useState(false);
-  const [minted, setMinted] = useState<SecretResult | null>(null);
+  const [minted, setMinted] = useState<SigningSecret | null>(null);
 
   return (
     <>
@@ -41,9 +41,7 @@ export function ConnectWebhookButton({ projectId, label }: { projectId: string; 
         onOpenChange={setOpen}
         onConnected={setMinted}
       />
-      {minted?.signingSecret && (
-        <SigningSecretDialog result={minted} onClose={() => setMinted(null)} />
-      )}
+      {minted && <SigningSecretDialog result={minted} onClose={() => setMinted(null)} />}
     </>
   );
 }
@@ -55,10 +53,9 @@ export function SigningSecretDialog({
   result,
   onClose,
 }: {
-  result: SecretResult;
+  result: SigningSecret;
   onClose: () => void;
 }) {
-  if (!result.signingSecret) return null;
   return (
     <PlaintextTokenDialog
       token={result.signingSecret}
@@ -102,35 +99,25 @@ function AddEndpointDialog({
   projectId: string;
   open: boolean;
   onOpenChange: (v: boolean) => void;
-  onConnected: (r: SecretResult) => void;
+  onConnected: (r: SigningSecret) => void;
 }) {
   const [url, setUrl] = useState("");
   const [events, setEvents] = useState<EventChoice>({ all: true, kinds: [] });
-  const [error, setError] = useState<string | null>(null);
-  const [pending, start] = useTransition();
+  const { pending, error, setError, run } = useAction();
 
   const canSubmit = url.trim().length > 0 && !isChoiceEmpty(events) && !pending;
 
   function submit() {
-    setError(null);
-    start(async () => {
-      try {
-        const r = await createWebhookConnectorAction(projectId, url, kindsFrom(events));
-        if (r.error !== null) {
-          setError(r.error);
-          return;
-        }
+    run(
+      () => createWebhookConnectorAction(projectId, url, kindsFrom(events)),
+      (r) =>
         // In the transition, with the list the action drew again: after the
         // `await` it would be an update of its own, a frame ahead of it.
         startTransition(() => {
           onOpenChange(false);
           onConnected(r);
-        });
-      } catch (err) {
-        unstable_rethrow(err);
-        setError("Network error. Try again.");
-      }
-    });
+        }),
+    );
   }
 
   return (

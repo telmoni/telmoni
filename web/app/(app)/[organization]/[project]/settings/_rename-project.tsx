@@ -49,7 +49,7 @@ export function RenameProjectForm({
     startTransition(async () => {
       try {
         const res = await updateProjectNameAction(projectId, trimmed);
-        if (res.error) {
+        if (!res.ok) {
           setError(res.error);
           toast.error(res.error);
         } else {

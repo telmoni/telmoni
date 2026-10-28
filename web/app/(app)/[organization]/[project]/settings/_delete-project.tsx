@@ -26,7 +26,7 @@ export function DeleteProjectForm({
         // (its `redirect`), which rejects this call: what comes back is a
         // refusal.
         const res = await deleteProjectAction(projectId);
-        if (res.error) toast.error(res.error);
+        if (!res.ok) toast.error(res.error);
       } catch (err) {
         unstable_rethrow(err);
         toast.error("Network error. Please try again.");

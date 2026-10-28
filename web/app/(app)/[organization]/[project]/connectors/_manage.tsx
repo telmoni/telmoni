@@ -1,7 +1,6 @@
 "use client";
 
-import { unstable_rethrow } from "next/navigation";
-import { startTransition, useState, useTransition } from "react";
+import { startTransition, useState } from "react";
 import { toast } from "sonner";
 
 import { ConfirmDialog } from "@/components/confirm-dialog";
@@ -24,6 +23,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { Connection } from "@/lib/server/data";
+import { useAction, useToastAction } from "@/lib/use-action";
 
 import { EventPicker, choiceFrom, isChoiceEmpty, kindsFrom, type EventChoice } from "./_events";
 import { SigningSecretDialog } from "./_webhook";
@@ -32,7 +32,7 @@ import {
   rotateWebhookSecretAction,
   sendTestMessageAction,
   updateWebhookEventsAction,
-  type SecretResult,
+  type SigningSecret,
 } from "./actions";
 
 export function ConnectionActions({
@@ -48,36 +48,18 @@ export function ConnectionActions({
   // whose repair is a rotation.
   reconnectHref: string | null;
 }) {
-  const [pending, start] = useTransition();
-  const [rotated, setRotated] = useState<SecretResult | null>(null);
+  const { pending, run } = useToastAction();
+  const [rotated, setRotated] = useState<SigningSecret | null>(null);
   const [rotating, setRotating] = useState(false);
   const [editingEvents, setEditingEvents] = useState(false);
   const isWebhook = connection.provider === "webhook";
 
   function sendTest() {
-    start(async () => {
-      try {
-        const r = await sendTestMessageAction(projectId, connection.id);
-        if (r.error) toast.error(r.error);
-        else toast.success(`Test message sent to ${label}.`);
-      } catch (err) {
-        unstable_rethrow(err);
-        toast.error("Network error. Try again.");
-      }
-    });
+    run(() => sendTestMessageAction(projectId, connection.id), `Test message sent to ${label}.`);
   }
 
   function disconnect() {
-    start(async () => {
-      try {
-        const r = await disconnectConnectorAction(projectId, connection.id);
-        if (r.error) toast.error(r.error);
-        else toast.success(`${label} disconnected.`);
-      } catch (err) {
-        unstable_rethrow(err);
-        toast.error("Network error. Try again.");
-      }
-    });
+    run(() => disconnectConnectorAction(projectId, connection.id), `${label} disconnected.`);
   }
 
   return (
@@ -186,28 +168,19 @@ function EventsDialog({
   onOpenChange: (v: boolean) => void;
 }) {
   const [events, setEvents] = useState<EventChoice>(() => choiceFrom(connection.event_kinds));
-  const [error, setError] = useState<string | null>(null);
-  const [pending, start] = useTransition();
+  const { pending, error, setError, run } = useAction();
 
   const canSubmit = !isChoiceEmpty(events) && !pending;
 
   function submit() {
-    setError(null);
-    start(async () => {
-      try {
-        const r = await updateWebhookEventsAction(projectId, connection.id, kindsFrom(events));
-        if (r.error !== null) {
-          setError(r.error);
-          return;
-        }
+    run(
+      () => updateWebhookEventsAction(projectId, connection.id, kindsFrom(events)),
+      () => {
         // In the transition, with the list the action drew again.
         startTransition(() => onOpenChange(false));
         toast.success(`Events updated for ${label}.`);
-      } catch (err) {
-        unstable_rethrow(err);
-        setError("Network error. Try again.");
-      }
-    });
+      },
+    );
   }
 
   return (
@@ -284,31 +257,21 @@ function RotateDialog({
   label: string;
   open: boolean;
   onOpenChange: (v: boolean) => void;
-  onRotated: (r: SecretResult) => void;
+  onRotated: (r: SigningSecret) => void;
 }) {
   const [hours, setHours] = useState<OverlapHours>("24");
-  const [error, setError] = useState<string | null>(null);
-  const [pending, start] = useTransition();
+  const { pending, error, run } = useAction();
 
   function submit() {
-    setError(null);
-    start(async () => {
-      try {
-        const r = await rotateWebhookSecretAction(projectId, connectionId, Number(hours));
-        if (r.error !== null) {
-          setError(r.error);
-          return;
-        }
+    run(
+      () => rotateWebhookSecretAction(projectId, connectionId, Number(hours)),
+      (r) =>
         // In the transition, with the list the action drew again.
         startTransition(() => {
           onOpenChange(false);
           onRotated(r);
-        });
-      } catch (err) {
-        unstable_rethrow(err);
-        setError("Network error. Try again.");
-      }
-    });
+        }),
+    );
   }
 
   return (

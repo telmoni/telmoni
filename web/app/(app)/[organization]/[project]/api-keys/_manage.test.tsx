@@ -49,7 +49,7 @@ describe("KeysActions", () => {
   });
 
   it("mints the key as filled in, shuts the panel, and shows the key once in a dialog", async () => {
-    mintTokenAction.mockResolvedValue({ status: "ok", token: "tm_abc123" });
+    mintTokenAction.mockResolvedValue({ ok: true, token: "tm_abc123", id: "key_1" });
     render(<KeysActions projectId={PROJECT} />);
     const panel = openPanel();
     const mint = within(panel).getByRole("button", { name: "Mint key" });
@@ -74,7 +74,7 @@ describe("KeysActions", () => {
   });
 
   it("keeps the panel open with the lane's refusal", async () => {
-    mintTokenAction.mockResolvedValue({ status: "error", error: "a key by that name exists" });
+    mintTokenAction.mockResolvedValue({ ok: false, error: "a key by that name exists" });
     render(<KeysActions projectId={PROJECT} />);
     const panel = openPanel();
     fireEvent.change(within(panel).getByLabelText("Name"), { target: { value: "ci-deploy" } });

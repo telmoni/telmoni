@@ -4,6 +4,8 @@ import { redirect, RedirectType } from "next/navigation";
 import { Component, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { ActionResult } from "@/lib/action-result";
+
 const refresh = vi.hoisted(() => vi.fn());
 const replace = vi.hoisted(() => vi.fn());
 // Next's own redirect and `unstable_rethrow`; only the router is a stand-in.
@@ -38,9 +40,7 @@ const renameProject = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/store", () => ({ useRenameProject: () => renameProject }));
 
 const updateProjectNameAction = vi.hoisted(() =>
-  vi.fn<(projectId: string, name: string) => Promise<{ error: string | null }>>(async () => ({
-    error: null,
-  })),
+  vi.fn<(projectId: string, name: string) => Promise<ActionResult>>(async () => ({ ok: true })),
 );
 vi.mock("./actions", () => ({ updateProjectNameAction }));
 
@@ -48,7 +48,7 @@ import { RenameProjectForm } from "./_rename-project";
 
 beforeEach(() => {
   vi.clearAllMocks();
-  updateProjectNameAction.mockResolvedValue({ error: null });
+  updateProjectNameAction.mockResolvedValue({ ok: true });
 });
 
 function form(initialName: string) {
@@ -123,7 +123,7 @@ describe("RenameProjectForm", () => {
   });
 
   it("moves nothing when the rename is refused", async () => {
-    updateProjectNameAction.mockResolvedValue({ error: "a project named that already exists" });
+    updateProjectNameAction.mockResolvedValue({ ok: false, error: "a project named that already exists" });
     render(form("Web"));
 
     await save("Taken");

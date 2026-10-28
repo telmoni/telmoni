@@ -1,13 +1,13 @@
 "use client";
 
-import { unstable_rethrow } from "next/navigation";
-import { startTransition, useState, useTransition } from "react";
+import { startTransition, useState } from "react";
 
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { PlaintextTokenDialog } from "@/components/plaintext-token-dialog";
 import { Button } from "@/components/ui/button";
+import { useAction } from "@/lib/use-action";
 
-import { revokeTokenAction, rotateTokenAction, type MintResult } from "./actions";
+import { revokeTokenAction, rotateTokenAction, type MintedKey } from "./actions";
 
 export function TokenRowActions({
   projectId,
@@ -21,39 +21,22 @@ export function TokenRowActions({
   name: string;
   canManage?: boolean;
 }) {
-  const [pending, start] = useTransition();
-  const [error, setError] = useState<string | null>(null);
-  const [rotated, setRotated] = useState<MintResult | null>(null);
+  const { pending, error, run } = useAction();
+  const [rotated, setRotated] = useState<MintedKey | null>(null);
 
   if (!canManage) return null;
 
   function revoke() {
-    start(async () => {
-      setError(null);
-      try {
-        const r = await revokeTokenAction(projectId, tokenId);
-        if (r.error) setError(r.error);
-      } catch (err) {
-        unstable_rethrow(err);
-        setError("Network error. Try again.");
-      }
-    });
+    run(() => revokeTokenAction(projectId, tokenId));
   }
 
   function rotate() {
-    start(async () => {
-      setError(null);
-      try {
-        const r = await rotateTokenAction(projectId, tokenId);
-        if (r.status === "error") setError(r.error ?? "Rotation failed");
-        // In the transition, with the list the action drew again: the new
-        // key's dialog opens as the list shows it.
-        else startTransition(() => setRotated(r));
-      } catch (err) {
-        unstable_rethrow(err);
-        setError("Network error. Try again.");
-      }
-    });
+    run(
+      () => rotateTokenAction(projectId, tokenId),
+      // In the transition, with the list the action drew again: the new key's
+      // dialog opens as the list shows it.
+      (r) => startTransition(() => setRotated(r)),
+    );
   }
 
   return (
@@ -96,7 +79,7 @@ export function TokenRowActions({
         onConfirm={revoke}
       />
 
-      {rotated?.status === "ok" && rotated.token && (
+      {rotated && (
         <PlaintextTokenDialog
           token={rotated.token}
           title="Rotated key"

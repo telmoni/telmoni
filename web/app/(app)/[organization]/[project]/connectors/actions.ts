@@ -11,11 +11,8 @@ import {
   admitConnectorsCall,
 } from "@/lib/server/connectors-admit";
 import { ConnectionSchema } from "@/lib/server/entities/connectors";
+import { type ActionResult, refused } from "@/lib/action-result";
 import type { NotificationKind } from "@/lib/types/enums";
-
-export interface ActionResult {
-  error: string | null;
-}
 
 // How long a test send or a resend is waited for. The service gives the far
 // end 10 seconds and the key service 5, around two transactions; waiting only
@@ -28,12 +25,12 @@ const SEND_WAIT_MS = 20_000;
 // webhook that receives nothing, which the service refuses too.
 function checkKinds(
   eventKinds: readonly NotificationKind[] | null,
-): { kinds: NotificationKind[] | null; error?: undefined } | { error: string } {
-  if (eventKinds === null) return { kinds: null };
-  if (!Array.isArray(eventKinds)) return { error: "Choose which events to send." };
-  if (eventKinds.length === 0) return { error: "Choose at least one event." };
-  if (!eventKinds.every(isNotificationKind)) return { error: "Unknown event kind." };
-  return { kinds: [...new Set(eventKinds)] };
+): ActionResult<{ kinds: NotificationKind[] | null }> {
+  if (eventKinds === null) return { ok: true, kinds: null };
+  if (!Array.isArray(eventKinds)) return refused("Choose which events to send.");
+  if (eventKinds.length === 0) return refused("Choose at least one event.");
+  if (!eventKinds.every(isNotificationKind)) return refused("Unknown event kind.");
+  return { ok: true, kinds: [...new Set(eventKinds)] };
 }
 
 export async function disconnectConnectorAction(
@@ -41,19 +38,15 @@ export async function disconnectConnectorAction(
   connectionId: string,
 ): Promise<ActionResult> {
   const gate = await admitConnectorsCall("connectors:disconnect", 10, projectId, connectionId);
-  if (gate.error !== undefined) return { error: gate.error };
+  if (gate.error !== undefined) return refused(gate.error);
   const res = await tryFetchWithTimeout(
     `${gate.base}/internal/v1/connectors/${encodeURIComponent(connectionId)}`,
     { method: "DELETE", headers: gate.headers },
   );
-  if (!res) return { error: CONNECTORS_UNAVAILABLE };
-  if (!res.ok && res.status !== 404) return { error: (await extractProblem(res)).message };
+  if (!res) return refused(CONNECTORS_UNAVAILABLE);
+  if (!res.ok && res.status !== 404) return refused((await extractProblem(res)).message);
   revalidatePath("/(app)/[organization]/[project]/connectors", "page");
-  return { error: null };
-}
-
-export interface TestResult extends ActionResult {
-  delivered?: boolean;
+  return { ok: true };
 }
 
 // The service posts now and reports the vendor's answer; a refusal that
@@ -61,25 +54,22 @@ export interface TestResult extends ActionResult {
 export async function sendTestMessageAction(
   projectId: string,
   connectionId: string,
-): Promise<TestResult> {
+): Promise<ActionResult> {
   const gate = await admitConnectorsCall("connectors:test", 10, projectId, connectionId);
-  if (gate.error !== undefined) return { error: gate.error };
+  if (gate.error !== undefined) return refused(gate.error);
   const res = await tryFetchWithTimeout(
     `${gate.base}/internal/v1/connectors/${encodeURIComponent(connectionId)}/test`,
     { method: "POST", headers: gate.headers },
     SEND_WAIT_MS,
   );
-  if (!res) return { error: CONNECTORS_UNAVAILABLE };
+  if (!res) return refused(CONNECTORS_UNAVAILABLE);
   revalidatePath("/(app)/[organization]/[project]/connectors", "page");
-  if (!res.ok) return { error: (await extractProblem(res)).message };
+  if (!res.ok) return refused((await extractProblem(res)).message);
   const body = (await res.json().catch(() => null)) as
     | { delivered?: boolean; error?: string | null }
     | null;
-  if (body?.delivered === true) return { error: null, delivered: true };
-  return {
-    error: body?.error || "The message was not delivered.",
-    delivered: false,
-  };
+  if (body?.delivered === true) return { ok: true };
+  return refused(body?.error || "The message was not delivered.");
 }
 
 // What the service answers when it mints a signing secret: the row, and the
@@ -90,17 +80,16 @@ const MintedSecret = z.object({
   signing_secret: z.string().min(1),
 });
 
-export interface SecretResult extends ActionResult {
-  signingSecret?: string;
-  host?: string;
-}
+/** A signing secret, shown this once, and the host that titles its dialog. */
+export type SigningSecret = { signingSecret: string; host: string };
+export type SecretResult = ActionResult<SigningSecret>;
 
 async function readSecret(res: Response): Promise<SecretResult> {
   const parsed = MintedSecret.safeParse(await res.json().catch(() => null));
-  if (!parsed.success) return { error: CONNECTORS_UNEXPECTED };
+  if (!parsed.success) return refused(CONNECTORS_UNEXPECTED);
   revalidatePath("/(app)/[organization]/[project]/connectors", "page");
   return {
-    error: null,
+    ok: true,
     signingSecret: parsed.data.signing_secret,
     host: parsed.data.connection.channel_name,
   };
@@ -117,19 +106,19 @@ export async function createWebhookConnectorAction(
   eventKinds: NotificationKind[] | null,
 ): Promise<SecretResult> {
   const gate = await admitConnectorsCall("connectors:webhook", 10, projectId, null);
-  if (gate.error !== undefined) return { error: gate.error };
+  if (gate.error !== undefined) return refused(gate.error);
   const trimmed = url.trim();
-  if (trimmed.length === 0) return { error: "Enter the endpoint URL." };
-  if (trimmed.length > 2048) return { error: "That URL is too long." };
+  if (trimmed.length === 0) return refused("Enter the endpoint URL.");
+  if (trimmed.length > 2048) return refused("That URL is too long.");
   const checked = checkKinds(eventKinds);
-  if (checked.error !== undefined) return { error: checked.error };
+  if (!checked.ok) return checked;
   const res = await tryFetchWithTimeout(`${gate.base}/internal/v1/connectors/webhook`, {
     method: "POST",
     headers: { ...gate.headers, "content-type": "application/json" },
     body: JSON.stringify({ url: trimmed, event_kinds: checked.kinds }),
   });
-  if (!res) return { error: CONNECTORS_UNAVAILABLE };
-  if (!res.ok) return { error: (await extractProblem(res)).message };
+  if (!res) return refused(CONNECTORS_UNAVAILABLE);
+  if (!res.ok) return refused((await extractProblem(res)).message);
   return readSecret(res);
 }
 
@@ -143,9 +132,9 @@ export async function updateWebhookEventsAction(
   eventKinds: NotificationKind[] | null,
 ): Promise<ActionResult> {
   const gate = await admitConnectorsCall("connectors:events", 20, projectId, connectionId);
-  if (gate.error !== undefined) return { error: gate.error };
+  if (gate.error !== undefined) return refused(gate.error);
   const checked = checkKinds(eventKinds);
-  if (checked.error !== undefined) return { error: checked.error };
+  if (!checked.ok) return checked;
   const res = await tryFetchWithTimeout(
     `${gate.base}/internal/v1/connectors/${encodeURIComponent(connectionId)}/events`,
     {
@@ -154,12 +143,12 @@ export async function updateWebhookEventsAction(
       body: JSON.stringify({ event_kinds: checked.kinds }),
     },
   );
-  if (!res) return { error: CONNECTORS_UNAVAILABLE };
-  if (!res.ok) return { error: (await extractProblem(res)).message };
+  if (!res) return refused(CONNECTORS_UNAVAILABLE);
+  if (!res.ok) return refused((await extractProblem(res)).message);
   const parsed = UpdatedConnection.safeParse(await res.json().catch(() => null));
-  if (!parsed.success) return { error: CONNECTORS_UNEXPECTED };
+  if (!parsed.success) return refused(CONNECTORS_UNEXPECTED);
   revalidatePath("/(app)/[organization]/[project]/connectors", "page");
-  return { error: null };
+  return { ok: true };
 }
 
 // A new signing secret, shown once, and an errored webhook comes back active
@@ -174,13 +163,13 @@ export async function rotateWebhookSecretAction(
   keepPreviousForHours: number,
 ): Promise<SecretResult> {
   const gate = await admitConnectorsCall("connectors:rotate", 10, projectId, connectionId);
-  if (gate.error !== undefined) return { error: gate.error };
+  if (gate.error !== undefined) return refused(gate.error);
   if (
     !Number.isInteger(keepPreviousForHours) ||
     keepPreviousForHours < 0 ||
     keepPreviousForHours > 24
   ) {
-    return { error: "Choose how long the current secret keeps working, from 0 to 24 hours." };
+    return refused("Choose how long the current secret keeps working, from 0 to 24 hours.");
   }
   const res = await tryFetchWithTimeout(
     `${gate.base}/internal/v1/connectors/${encodeURIComponent(connectionId)}/rotate`,
@@ -190,8 +179,8 @@ export async function rotateWebhookSecretAction(
       body: JSON.stringify({ keep_previous_for_hours: keepPreviousForHours }),
     },
   );
-  if (!res) return { error: CONNECTORS_UNAVAILABLE };
-  if (!res.ok) return { error: (await extractProblem(res)).message };
+  if (!res) return refused(CONNECTORS_UNAVAILABLE);
+  if (!res.ok) return refused((await extractProblem(res)).message);
   return readSecret(res);
 }
 
@@ -208,25 +197,22 @@ export async function redeliverAction(
   projectId: string,
   connectionId: string,
   deliveryId: string,
-): Promise<TestResult> {
+): Promise<ActionResult> {
   const gate = await admitConnectorsCall("connectors:redeliver", 10, projectId, connectionId);
-  if (gate.error !== undefined) return { error: gate.error };
+  if (gate.error !== undefined) return refused(gate.error);
   if (!z.guid().safeParse(deliveryId).success) {
-    return { error: "Invalid delivery." };
+    return refused("Invalid delivery.");
   }
   const res = await tryFetchWithTimeout(
     `${gate.base}/internal/v1/connectors/${encodeURIComponent(connectionId)}/deliveries/${encodeURIComponent(deliveryId)}/redeliver`,
     { method: "POST", headers: gate.headers },
     SEND_WAIT_MS,
   );
-  if (!res) return { error: CONNECTORS_UNAVAILABLE };
+  if (!res) return refused(CONNECTORS_UNAVAILABLE);
   revalidatePath("/(app)/[organization]/[project]/connectors", "page");
-  if (!res.ok) return { error: (await extractProblem(res)).message };
+  if (!res.ok) return refused((await extractProblem(res)).message);
   const parsed = Redelivered.safeParse(await res.json().catch(() => null));
-  if (!parsed.success) return { error: CONNECTORS_UNEXPECTED };
-  if (parsed.data.delivered) return { error: null, delivered: true };
-  return {
-    error: parsed.data.error || "The delivery failed again.",
-    delivered: false,
-  };
+  if (!parsed.success) return refused(CONNECTORS_UNEXPECTED);
+  if (parsed.data.delivered) return { ok: true };
+  return refused(parsed.data.error || "The delivery failed again.");
 }

@@ -1,7 +1,6 @@
 "use client";
 
-import { unstable_rethrow } from "next/navigation";
-import { startTransition, useId, useRef, useState, useTransition } from "react";
+import { startTransition, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { KeyRound } from "lucide-react";
 
@@ -29,8 +28,9 @@ import { API_KEY_SCOPES } from "@/lib/api-key-scopes";
 import { MAX_API_KEY_DESCRIPTION, MAX_API_KEY_NAME, typedBound } from "@/lib/names";
 import { PRODUCT_NAME } from "@/lib/site";
 import type { ApiKeyScope } from "@/lib/types/enums";
+import { useAction } from "@/lib/use-action";
 
-import { mintTokenAction, type MintResult } from "./actions";
+import { mintTokenAction, type MintedKey } from "./actions";
 
 // Mint key opens in the console's side panel, full over the content area, as
 // New project and New organization do (`components/create-project.tsx`); the
@@ -50,7 +50,7 @@ export function KeysActions({
   canManage?: boolean;
 }) {
   const [opening, setOpening] = useState<Opening | null>(null);
-  const [minted, setMinted] = useState<MintResult | null>(null);
+  const [minted, setMinted] = useState<MintedKey | null>(null);
   const openings = useRef(0);
   const { element } = useConsoleShell();
 
@@ -81,7 +81,7 @@ export function KeysActions({
 
       {panel && (element ? createPortal(panel, element) : panel)}
 
-      {minted?.token && (
+      {minted && (
         <PlaintextTokenDialog
           token={minted.token}
           title="Key created"
@@ -109,7 +109,7 @@ function MintKeyPanel({
 }: {
   projectId: string;
   onClose: () => void;
-  onMinted: (r: MintResult) => void;
+  onMinted: (r: MintedKey) => void;
   returnFocus?: () => HTMLElement | null;
 }) {
   const titleId = useId();
@@ -119,8 +119,7 @@ function MintKeyPanel({
   const [description, setDescription] = useState("");
   const [ttl, setTtl] = useState("90d");
   const [scopes, setScopes] = useState<ApiKeyScope[]>(API_KEY_SCOPES.map(({ scope }) => scope));
-  const [error, setError] = useState<string | null>(null);
-  const [pending, start] = useTransition();
+  const { pending, error, setError, run } = useAction();
 
   const canSubmit = name.trim().length > 0 && scopes.length > 0 && !pending;
 
@@ -130,23 +129,13 @@ function MintKeyPanel({
   }
 
   function submit() {
-    setError(null);
-    start(async () => {
-      try {
-        const r = await mintTokenAction(projectId, { name, description, ttl, scopes });
-        if (r.status === "error") {
-          setError(r.error ?? "Something went wrong. Try again.");
-          return;
-        }
-        // In the transition, with the list the action drew again: after the
-        // `await` it would be an update of its own, and the panel would
-        // shut a frame before the new key is listed.
-        startTransition(() => onMinted(r));
-      } catch (err) {
-        unstable_rethrow(err);
-        setError("Network error. Try again.");
-      }
-    });
+    run(
+      () => mintTokenAction(projectId, { name, description, ttl, scopes }),
+      // In the transition, with the list the action drew again: after the
+      // `await` it would be an update of its own, and the panel would shut a
+      // frame before the new key is listed.
+      (r) => startTransition(() => onMinted(r)),
+    );
   }
 
   return (
