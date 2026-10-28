@@ -15,7 +15,6 @@ use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
 
-use telmoni_shared::db::retention::RETENTION;
 use telmoni_shared::db::tenant_session::maintenance_scope;
 use telmoni_shared::{OrganizationId, ProjectId, TelmoniError};
 
@@ -46,22 +45,12 @@ const PAIRS_PAGE: i64 = 500;
 /// Chunks one sweep takes before waiting for the next hour.
 const SWEEP_MAX_ROUNDS: usize = 200;
 
-/// The audit chain's window, from the rotation registry that drops its
-/// partitions.
-fn audit_retention_days() -> i32 {
-    RETENTION
-        .iter()
-        .find(|t| t.schema == "audit" && t.table == "events")
-        .and_then(|t| i32::try_from(t.retention_days).ok())
-        .unwrap_or(i32::MAX)
-}
-
 /// Each indexed source and how long its copies stay. The docs are not
 /// here: a page stays while the corpus has it, and leaves when it does not.
 fn window(source: Source) -> Option<i32> {
     match source {
         Source::Docs => None,
-        Source::Audit => Some(audit_retention_days()),
+        Source::Audit => Some(telmoni_shared::db::retention::AUDIT_RETENTION_DAYS),
         Source::Feed => Some(telmoni_shared::db::retention::FEED_RETENTION_DAYS),
         Source::Delivery => Some(telmoni_shared::db::retention::DELIVERY_RETENTION_DAYS),
         Source::Conversation => Some(CONVERSATION_RETENTION_DAYS),

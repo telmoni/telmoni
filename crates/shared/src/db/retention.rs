@@ -69,13 +69,17 @@ pub const FEED_RETENTION_DAYS: i32 = 90;
 /// keeps its copies of deliveries to this window too.
 pub const DELIVERY_RETENTION_DAYS: i32 = 30;
 
+/// How long the audit chain is kept: its partitions older than this drop. The
+/// agent index keeps its copies of audit events to this window too.
+pub const AUDIT_RETENTION_DAYS: i32 = 730;
+
 /// The rotation registry. Every parent must exist in the migrated schema:
 /// `rotate()` aborts at the first failing DDL, so a phantom entry starves
 /// create-ahead for everything after it.
 pub const RETENTION: &[PartitionedTable] = &[PartitionedTable {
     schema: "audit",
     table: "events",
-    retention_days: 730,
+    retention_days: AUDIT_RETENTION_DAYS.unsigned_abs(),
     drop_enabled: false,
     tenant_key: TenantKey::Organization,
     lanes: &[MaintenanceLane::Auth, MaintenanceLane::Notifications],
