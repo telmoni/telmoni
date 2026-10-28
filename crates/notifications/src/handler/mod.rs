@@ -397,21 +397,28 @@ pub async fn get_feed(
 ) -> Result<impl IntoResponse, TelmoniError> {
     let (items, unread) = match feed_scope(&state, &headers).await? {
         FeedScope::Project(project_id) => {
-            let mut tx = project_scope(&state.db, &project_id).await?;
-            let items = db::list_feed(&mut tx, &project_id, FEED_LIMIT).await?;
-            let unread = db::count_unread(&mut tx, &project_id).await?;
-            tx.commit().await?;
-            (items, unread)
+            read_feed(project_scope(&state.db, &project_id).await?, &project_id).await?
         }
         FeedScope::Organization(organization_id) => {
-            let mut tx = organization_scope(&state.db, &organization_id).await?;
-            let items = db::list_organization_feed(&mut tx, &organization_id, FEED_LIMIT).await?;
-            let unread = db::count_organization_unread(&mut tx, &organization_id).await?;
-            tx.commit().await?;
-            (items, unread)
+            read_feed(
+                organization_scope(&state.db, &organization_id).await?,
+                &organization_id,
+            )
+            .await?
         }
     };
     Ok(Json(json!({ "items": items, "unread": unread })))
+}
+
+/// The feed and its unread count, read together.
+async fn read_feed<S: db::FeedScope>(
+    mut tx: Scoped<'_, S>,
+    key: &S::Key,
+) -> Result<(Vec<db::FeedItem>, i64), TelmoniError> {
+    let items = db::list_feed(&mut tx, key, FEED_LIMIT).await?;
+    let unread = db::count_unread(&mut tx, key).await?;
+    tx.commit().await?;
+    Ok((items, unread))
 }
 
 /// What a mark-read asks: the feed read up to `before`, the newest notice the
@@ -432,19 +439,34 @@ pub async fn mark_read(
 ) -> Result<impl IntoResponse, TelmoniError> {
     let marked = match feed_scope(&state, &headers).await? {
         FeedScope::Project(project_id) => {
-            let mut tx = project_scope(&state.db, &project_id).await?;
-            let marked = db::mark_all_read(&mut tx, &project_id, before).await?;
-            tx.commit().await?;
-            marked
+            mark_feed_read(
+                project_scope(&state.db, &project_id).await?,
+                &project_id,
+                before,
+            )
+            .await?
         }
         FeedScope::Organization(organization_id) => {
-            let mut tx = organization_scope(&state.db, &organization_id).await?;
-            let marked = db::mark_organization_read(&mut tx, &organization_id, before).await?;
-            tx.commit().await?;
-            marked
+            mark_feed_read(
+                organization_scope(&state.db, &organization_id).await?,
+                &organization_id,
+                before,
+            )
+            .await?
         }
     };
     Ok(Json(json!({ "marked": marked })))
+}
+
+/// The feed marked read up to `before`, committed.
+async fn mark_feed_read<S: db::FeedScope>(
+    mut tx: Scoped<'_, S>,
+    key: &S::Key,
+    before: DateTime<Utc>,
+) -> Result<u64, TelmoniError> {
+    let marked = db::mark_all_read(&mut tx, key, before).await?;
+    tx.commit().await?;
+    Ok(marked)
 }
 
 /// Everything held for the organization, before its row goes, and an uninstall
@@ -454,7 +476,7 @@ pub async fn purge_organization(
     organization_id: &OrganizationId,
 ) -> Result<u64, TelmoniError> {
     let mut tx = maintenance_scope(&state.db, NotificationsLane).await?;
-    let purged = db::purge_organization_connections(&mut tx, organization_id).await?;
+    let purged = db::purge_connections(&mut tx, db::FeedOf::Organization(organization_id)).await?;
     let filed = uninstall::file(&mut tx, &purged.connections).await?;
     tx.commit().await?;
     uninstall::settle_soon(state, filed);
@@ -477,7 +499,7 @@ pub async fn purge_project(
 ) -> Result<u64, TelmoniError> {
     let mut tx = maintenance_scope(&state.db, NotificationsLane).await?;
     db::wait_no_longer(&mut tx).await?;
-    let purged = db::purge_project_connections(&mut tx, project_id).await?;
+    let purged = db::purge_connections(&mut tx, db::FeedOf::Project(project_id)).await?;
     let filed = uninstall::file(&mut tx, &purged.connections).await?;
     tx.commit().await?;
     uninstall::settle_soon(state, filed);
@@ -514,7 +536,7 @@ pub async fn purge_project_for_move(
             break;
         }
     }
-    let purged = db::purge_project_connections(&mut tx, project_id).await?;
+    let purged = db::purge_connections(&mut tx, db::FeedOf::Project(project_id)).await?;
     let filed = uninstall::file(&mut tx, &purged.connections).await?;
     rows += purged.rows;
     // A notice raised while the feed went — a seat's emitted after auth's

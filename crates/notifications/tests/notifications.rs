@@ -448,7 +448,7 @@ async fn an_organization_purge_clears_every_table_and_spares_every_other_organiz
     }
 
     let mut tx = maintenance_scope(&pool, NotificationsLane).await.unwrap();
-    let purged = db::purge_organization_connections(&mut tx, &oid(ORGANIZATION))
+    let purged = db::purge_connections(&mut tx, db::FeedOf::Organization(&oid(ORGANIZATION)))
         .await
         .unwrap();
     let feed = db::purge_feed_chunk(&mut tx, db::FeedOf::Organization(&oid(ORGANIZATION)), 5)

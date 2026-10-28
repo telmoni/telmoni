@@ -234,108 +234,79 @@ pub async fn feed_id_for_dedup_key<B: EmitBinding>(
     .await
 }
 
-/// A project's feed, newest first.
-pub async fn list_feed(
-    tx: &mut Scoped<'_, Project>,
-    project_id: &ProjectId,
-    limit: i64,
-) -> sqlx::Result<Vec<FeedItem>> {
-    sqlx::query_as::<_, FeedItem>(
-        "SELECT id, kind, title, body, metadata, read_at, created_at
+/// A feed a binding reads, counts and marks under one predicate: a project's
+/// rows, or the organization's own, the rows naming no project. Three readers
+/// over three sets would be a badge nothing can clear.
+pub trait FeedScope: Binding {
+    /// What the predicate is keyed on.
+    type Key: for<'q> sqlx::Encode<'q, sqlx::Postgres> + sqlx::Type<sqlx::Postgres> + Sync + 'static;
+    const LIST: &'static str;
+    const UNREAD: &'static str;
+    const MARK_READ: &'static str;
+}
+
+impl FeedScope for Project {
+    type Key = ProjectId;
+    const LIST: &'static str = "SELECT id, kind, title, body, metadata, read_at, created_at
            FROM notifications.feed
           WHERE project_id = $1
           ORDER BY created_at DESC, id DESC
-          LIMIT $2",
-    )
-    .bind(project_id)
-    .bind(limit)
-    .fetch_all(tx.conn())
-    .await
+          LIMIT $2";
+    const UNREAD: &'static str = "SELECT count(*) FROM notifications.feed
+          WHERE project_id = $1 AND read_at IS NULL";
+    const MARK_READ: &'static str = "UPDATE notifications.feed SET read_at = now()
+          WHERE project_id = $1 AND read_at IS NULL AND created_at <= $2";
+}
+
+impl FeedScope for Organization {
+    type Key = OrganizationId;
+    const LIST: &'static str = "SELECT id, kind, title, body, metadata, read_at, created_at
+           FROM notifications.feed
+          WHERE project_id IS NULL AND organization_id = $1
+          ORDER BY created_at DESC, id DESC
+          LIMIT $2";
+    const UNREAD: &'static str = "SELECT count(*) FROM notifications.feed
+          WHERE project_id IS NULL AND organization_id = $1 AND read_at IS NULL";
+    const MARK_READ: &'static str = "UPDATE notifications.feed SET read_at = now()
+          WHERE project_id IS NULL AND organization_id = $1 AND read_at IS NULL
+            AND created_at <= $2";
+}
+
+/// The feed, newest first.
+pub async fn list_feed<S: FeedScope>(
+    tx: &mut Scoped<'_, S>,
+    key: &S::Key,
+    limit: i64,
+) -> sqlx::Result<Vec<FeedItem>> {
+    sqlx::query_as::<_, FeedItem>(S::LIST)
+        .bind(key)
+        .bind(limit)
+        .fetch_all(tx.conn())
+        .await
 }
 
 /// The total unread count, counted rather than taken from a capped page,
 /// which would undercount a backlog.
-pub async fn count_unread(
-    tx: &mut Scoped<'_, Project>,
-    project_id: &ProjectId,
-) -> sqlx::Result<i64> {
-    sqlx::query_scalar::<_, i64>(
-        "SELECT count(*) FROM notifications.feed
-          WHERE project_id = $1 AND read_at IS NULL",
-    )
-    .bind(project_id)
-    .fetch_one(tx.conn())
-    .await
+pub async fn count_unread<S: FeedScope>(tx: &mut Scoped<'_, S>, key: &S::Key) -> sqlx::Result<i64> {
+    sqlx::query_scalar::<_, i64>(S::UNREAD)
+        .bind(key)
+        .fetch_one(tx.conn())
+        .await
 }
 
 /// Mark every unread row up to `before` read — what a page drew, its newest
 /// notice at `before`, and nothing that landed since — with the list's
 /// predicate.
-pub async fn mark_all_read(
-    tx: &mut Scoped<'_, Project>,
-    project_id: &ProjectId,
+pub async fn mark_all_read<S: FeedScope>(
+    tx: &mut Scoped<'_, S>,
+    key: &S::Key,
     before: DateTime<Utc>,
 ) -> sqlx::Result<u64> {
-    let done = sqlx::query(
-        "UPDATE notifications.feed SET read_at = now()
-          WHERE project_id = $1 AND read_at IS NULL AND created_at <= $2",
-    )
-    .bind(project_id)
-    .bind(before)
-    .execute(tx.conn())
-    .await?;
-    Ok(done.rows_affected())
-}
-
-/// The organization's feed, newest first: the rows that name no project.
-pub async fn list_organization_feed(
-    tx: &mut Scoped<'_, Organization>,
-    organization_id: &OrganizationId,
-    limit: i64,
-) -> sqlx::Result<Vec<FeedItem>> {
-    sqlx::query_as::<_, FeedItem>(
-        "SELECT id, kind, title, body, metadata, read_at, created_at
-           FROM notifications.feed
-          WHERE project_id IS NULL AND organization_id = $1
-          ORDER BY created_at DESC, id DESC
-          LIMIT $2",
-    )
-    .bind(organization_id)
-    .bind(limit)
-    .fetch_all(tx.conn())
-    .await
-}
-
-/// The organization's unread count, counted for the same reason.
-pub async fn count_organization_unread(
-    tx: &mut Scoped<'_, Organization>,
-    organization_id: &OrganizationId,
-) -> sqlx::Result<i64> {
-    sqlx::query_scalar::<_, i64>(
-        "SELECT count(*) FROM notifications.feed
-          WHERE project_id IS NULL AND organization_id = $1 AND read_at IS NULL",
-    )
-    .bind(organization_id)
-    .fetch_one(tx.conn())
-    .await
-}
-
-/// Mark the organization's unread rows up to `before` read, as
-/// [`mark_all_read`] marks a project's.
-pub async fn mark_organization_read(
-    tx: &mut Scoped<'_, Organization>,
-    organization_id: &OrganizationId,
-    before: DateTime<Utc>,
-) -> sqlx::Result<u64> {
-    let done = sqlx::query(
-        "UPDATE notifications.feed SET read_at = now()
-          WHERE project_id IS NULL AND organization_id = $1 AND read_at IS NULL
-            AND created_at <= $2",
-    )
-    .bind(organization_id)
-    .bind(before)
-    .execute(tx.conn())
-    .await?;
+    let done = sqlx::query(S::MARK_READ)
+        .bind(key)
+        .bind(before)
+        .execute(tx.conn())
+        .await?;
     Ok(done.rows_affected())
 }
 
@@ -382,33 +353,47 @@ pub struct Purged {
     pub connections: Vec<SealedConnection>,
 }
 
-/// Hard-delete the organization's connections and handshakes, but not the
-/// uninstalls it files; its feeds go after, chunk by chunk ([`purge_feed_chunk`]).
-pub async fn purge_organization_connections(
-    tx: &mut Scoped<'_, Maintenance<NotificationsLane>>,
-    organization_id: &OrganizationId,
-) -> sqlx::Result<Purged> {
-    let connections = sqlx::query_as::<_, SealedConnection>(sqlx::AssertSqlSafe(format!(
-        "DELETE FROM notifications.connections WHERE organization_id = $1
-         RETURNING {SEALED_COLUMNS}"
-    )))
-    .bind(organization_id)
-    .fetch_all(tx.conn())
-    .await?;
-    let mut rows = u64::try_from(connections.len()).unwrap_or(u64::MAX);
-    rows += sqlx::query("DELETE FROM notifications.oauth_states WHERE organization_id = $1")
-        .bind(organization_id)
-        .execute(tx.conn())
-        .await?
-        .rows_affected();
-    Ok(Purged { rows, connections })
-}
-
-/// Whose feed a purge deletes.
+/// Whose rows a purge deletes: a project's, or an organization's.
 #[derive(Debug, Clone, Copy)]
 pub enum FeedOf<'a> {
     Project(&'a ProjectId),
     Organization(&'a OrganizationId),
+}
+
+impl<'a> FeedOf<'a> {
+    /// The column naming the whole, and its id.
+    fn key(self) -> (&'static str, &'a str) {
+        match self {
+            FeedOf::Project(id) => ("project_id", id.as_str()),
+            FeedOf::Organization(id) => ("organization_id", id.as_str()),
+        }
+    }
+}
+
+/// Hard-delete the whole's connections and handshakes, as a transfer or a
+/// delete leaves them, but not the uninstalls it files; deliveries and their
+/// attempts go by the cascade, and the feed after, chunk by chunk
+/// ([`purge_feed_chunk`]).
+pub async fn purge_connections(
+    tx: &mut Scoped<'_, Maintenance<NotificationsLane>>,
+    of: FeedOf<'_>,
+) -> sqlx::Result<Purged> {
+    let (column, id) = of.key();
+    let connections = sqlx::query_as::<_, SealedConnection>(sqlx::AssertSqlSafe(format!(
+        "DELETE FROM notifications.connections WHERE {column} = $1 RETURNING {SEALED_COLUMNS}"
+    )))
+    .bind(id)
+    .fetch_all(tx.conn())
+    .await?;
+    let mut rows = u64::try_from(connections.len()).unwrap_or(u64::MAX);
+    rows += sqlx::query(sqlx::AssertSqlSafe(format!(
+        "DELETE FROM notifications.oauth_states WHERE {column} = $1"
+    )))
+    .bind(id)
+    .execute(tx.conn())
+    .await?
+    .rows_affected();
+    Ok(Purged { rows, connections })
 }
 
 /// Deletes up to `chunk` of the feed's rows in one bounded statement, as the retention
@@ -418,19 +403,16 @@ pub async fn purge_feed_chunk(
     of: FeedOf<'_>,
     chunk: i64,
 ) -> sqlx::Result<u64> {
-    let query = match of {
-        FeedOf::Project(project_id) => sqlx::query(
-            "DELETE FROM notifications.feed
-              WHERE id IN (SELECT id FROM notifications.feed WHERE project_id = $1 LIMIT $2)",
-        )
-        .bind(project_id),
-        FeedOf::Organization(organization_id) => sqlx::query(
-            "DELETE FROM notifications.feed
-              WHERE id IN (SELECT id FROM notifications.feed WHERE organization_id = $1 LIMIT $2)",
-        )
-        .bind(organization_id),
-    };
-    Ok(query.bind(chunk).execute(tx.conn()).await?.rows_affected())
+    let (column, id) = of.key();
+    Ok(sqlx::query(sqlx::AssertSqlSafe(format!(
+        "DELETE FROM notifications.feed
+          WHERE id IN (SELECT id FROM notifications.feed WHERE {column} = $1 LIMIT $2)"
+    )))
+    .bind(id)
+    .bind(chunk)
+    .execute(tx.conn())
+    .await?
+    .rows_affected())
 }
 
 /// A page of the projects this module's rows name, in id order after
@@ -521,28 +503,6 @@ pub async fn workspace_organizations(
     // By byte, as auth orders the chains it takes; a collation might not.
     organizations.sort();
     Ok(organizations)
-}
-
-/// Hard-delete one PROJECT's connections and handshakes, as a transfer or a delete
-/// leaves them, but not its uninstalls; deliveries and their attempts go by the
-/// cascade, and the feed after, chunk by chunk ([`purge_feed_chunk`]).
-pub async fn purge_project_connections(
-    tx: &mut Scoped<'_, Maintenance<NotificationsLane>>,
-    project_id: &ProjectId,
-) -> sqlx::Result<Purged> {
-    let connections = sqlx::query_as::<_, SealedConnection>(sqlx::AssertSqlSafe(format!(
-        "DELETE FROM notifications.connections WHERE project_id = $1 RETURNING {SEALED_COLUMNS}"
-    )))
-    .bind(project_id)
-    .fetch_all(tx.conn())
-    .await?;
-    let mut rows = u64::try_from(connections.len()).unwrap_or(u64::MAX);
-    rows += sqlx::query("DELETE FROM notifications.oauth_states WHERE project_id = $1")
-        .bind(project_id)
-        .execute(tx.conn())
-        .await?
-        .rows_affected();
-    Ok(Purged { rows, connections })
 }
 
 /// A connection as served to the BFF — **never the target or the token.**
