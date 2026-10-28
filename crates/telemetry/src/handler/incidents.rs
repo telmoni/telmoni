@@ -147,15 +147,7 @@ pub async fn acknowledge_incident(
         .project_id;
     let id = incident_id(&id)?;
     let (row, _) = chain::write(&state.db, &acting, project_id, "incident", async |tx| {
-        moved(
-            &state,
-            &acting,
-            &headers,
-            tx,
-            id,
-            IncidentStatus::Acknowledged,
-        )
-        .await
+        moved(&state, &acting, tx, id, IncidentStatus::Acknowledged).await
     })
     .await?;
     tracing::info!(project_id = %project_id, incident_id = %id, "telemetry: an incident acknowledged");
@@ -168,7 +160,6 @@ pub async fn acknowledge_incident(
 async fn moved(
     state: &AppState,
     acting: &Acting,
-    headers: &HeaderMap,
     tx: &mut Scoped<'_, ProjectAndOrganization>,
     id: Uuid,
     to: IncidentStatus,
@@ -197,7 +188,7 @@ async fn moved(
             id,
             metadata: json!({ "alert": row.rule_name, "rule_id": row.rule_id, "status": to }),
         };
-        chain::file(tx, acting, project_id, headers, change).await?;
+        chain::file(tx, acting, project_id, change).await?;
     }
     Ok((row, moved))
 }
@@ -216,7 +207,7 @@ pub async fn resolve_incident(
         .project_id;
     let id = incident_id(&id)?;
     let (row, resolved) = chain::write(&state.db, &acting, project_id, "incident", async |tx| {
-        moved(&state, &acting, &headers, tx, id, IncidentStatus::Resolved).await
+        moved(&state, &acting, tx, id, IncidentStatus::Resolved).await
     })
     .await?;
     if resolved {

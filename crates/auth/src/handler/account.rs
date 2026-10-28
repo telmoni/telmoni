@@ -331,18 +331,14 @@ pub async fn confirm_email_change(
         Some(organization) => {
             emit_audit(
                 &mut tx,
-                AuditEvent {
-                    organization_id: organization,
-                    in_project: None,
-                    actor: Actor::User(user_id.as_str()),
-                    action: AuditAction::Updated,
-                    resource_kind: TelmoniResourceKind::Member,
-                    resource_id: Some(user_id.as_str()),
-                    request_id: None,
-                    ip_address: None,
-                    user_agent: None,
-                    metadata: Some(metadata),
-                },
+                AuditEvent::new(
+                    organization,
+                    Actor::User(user_id.as_str()),
+                    AuditAction::Updated,
+                    TelmoniResourceKind::Member,
+                )
+                .on(user_id.as_str())
+                .details(metadata),
             )
             .await?;
         }
@@ -389,18 +385,14 @@ pub async fn set_analytics_preference(
         Some(organization) => {
             emit_audit(
                 &mut tx,
-                AuditEvent {
-                    organization_id: organization,
-                    in_project: None,
-                    actor: Actor::User(user_id.as_str()),
-                    action: AuditAction::Updated,
-                    resource_kind: TelmoniResourceKind::Member,
-                    resource_id: Some(user_id.as_str()),
-                    request_id: None,
-                    ip_address: None,
-                    user_agent: None,
-                    metadata: Some(metadata),
-                },
+                AuditEvent::new(
+                    organization,
+                    Actor::User(user_id.as_str()),
+                    AuditAction::Updated,
+                    TelmoniResourceKind::Member,
+                )
+                .on(user_id.as_str())
+                .details(metadata),
             )
             .await?;
         }
@@ -442,18 +434,14 @@ pub async fn set_default_organization(
 
     emit_audit(
         &mut tx,
-        AuditEvent {
-            organization_id: &organization,
-            in_project: None,
-            actor: Actor::User(user_id.as_str()),
-            action: AuditAction::Updated,
-            resource_kind: TelmoniResourceKind::Member,
-            resource_id: Some(user_id.as_str()),
-            request_id: None,
-            ip_address: None,
-            user_agent: None,
-            metadata: Some(json!({ "default_organization": true })),
-        },
+        AuditEvent::new(
+            &organization,
+            Actor::User(user_id.as_str()),
+            AuditAction::Updated,
+            TelmoniResourceKind::Member,
+        )
+        .on(user_id.as_str())
+        .details(json!({ "default_organization": true })),
     )
     .await?;
     tx.commit().await?;
@@ -625,23 +613,19 @@ pub async fn delete_account(
         if let Some((erase_after, step)) = marked {
             emit_audit(
                 &mut otx,
-                AuditEvent {
-                    organization_id: organization,
-                    in_project: None,
-                    actor: Actor::User(user_id.as_str()),
-                    action: AuditAction::Updated,
-                    resource_kind: TelmoniResourceKind::Organization,
-                    resource_id: Some(organization.as_str()),
-                    request_id: None,
-                    ip_address: None,
-                    user_agent: None,
-                    metadata: Some(deletion_metadata(
-                        step,
-                        DeletionKind::Account,
-                        erase_after,
-                        Some(revoked),
-                    )),
-                },
+                AuditEvent::new(
+                    organization,
+                    Actor::User(user_id.as_str()),
+                    AuditAction::Updated,
+                    TelmoniResourceKind::Organization,
+                )
+                .on(organization.as_str())
+                .details(deletion_metadata(
+                    step,
+                    DeletionKind::Account,
+                    erase_after,
+                    Some(revoked),
+                )),
             )
             .await?;
         }

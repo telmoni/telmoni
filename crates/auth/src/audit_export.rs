@@ -455,24 +455,20 @@ async fn write_and_store(
     }
     emit_audit(
         &mut tx,
-        AuditEvent {
+        AuditEvent::new(
             organization_id,
-            in_project: None,
-            actor: Actor::User(user_id.as_str()),
-            action: AuditAction::Exported,
-            resource_kind: TelmoniResourceKind::Organization,
-            resource_id: Some(organization_id.as_str()),
-            request_id: None,
-            ip_address: None,
-            user_agent: None,
-            metadata: Some(json!({
-                "export": "audit_log",
-                "format": claimed.format.as_str(),
-                "from": claimed.range_from,
-                "to": claimed.range_to,
-                "rows": row_count,
-            })),
-        },
+            Actor::User(user_id.as_str()),
+            AuditAction::Exported,
+            TelmoniResourceKind::Organization,
+        )
+        .on(organization_id.as_str())
+        .details(json!({
+            "export": "audit_log",
+            "format": claimed.format.as_str(),
+            "from": claimed.range_from,
+            "to": claimed.range_to,
+            "rows": row_count,
+        })),
     )
     .await?;
     // And once more with the chain's lock held, which a change of role takes

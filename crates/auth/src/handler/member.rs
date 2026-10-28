@@ -206,23 +206,20 @@ pub async fn give_seat(
     };
     emit_audit(
         &mut acting.tx,
-        AuditEvent {
-            organization_id: &organization,
-            in_project: Some(&project_id),
-            actor: Actor::User(actor.as_str()),
-            action: AuditAction::Created,
-            resource_kind: TelmoniResourceKind::Member,
-            resource_id: Some(member.as_str()),
-            request_id: None,
-            ip_address: None,
-            user_agent: None,
-            metadata: Some(json!({
-                "kind": AuditKind::SeatGiven,
-                "role": role,
-                "seat_id": seat,
-                "invitations_withdrawn": withdrawn,
-            })),
-        },
+        AuditEvent::new(
+            &organization,
+            Actor::User(actor.as_str()),
+            AuditAction::Created,
+            TelmoniResourceKind::Member,
+        )
+        .in_project(&project_id)
+        .on(member.as_str())
+        .details(json!({
+            "kind": AuditKind::SeatGiven,
+            "role": role,
+            "seat_id": seat,
+            "invitations_withdrawn": withdrawn,
+        })),
     )
     .await?;
     acting.tx.commit().await?;
@@ -344,18 +341,15 @@ pub async fn update_role(
     }
     emit_audit(
         &mut acting.tx,
-        AuditEvent {
-            organization_id: &acting.organization,
-            in_project: Some(&project_id),
-            actor: Actor::User(actor.as_str()),
-            action: AuditAction::Updated,
-            resource_kind: TelmoniResourceKind::Member,
-            resource_id: Some(member_id.as_str()),
-            request_id: None,
-            ip_address: None,
-            user_agent: None,
-            metadata: Some(json!({ "role": role })),
-        },
+        AuditEvent::new(
+            &acting.organization,
+            Actor::User(actor.as_str()),
+            AuditAction::Updated,
+            TelmoniResourceKind::Member,
+        )
+        .in_project(&project_id)
+        .on(member_id.as_str())
+        .details(json!({ "role": role })),
     )
     .await?;
     acting.tx.commit().await?;
@@ -392,18 +386,15 @@ pub async fn remove_member(
     }
     emit_audit(
         &mut acting.tx,
-        AuditEvent {
-            organization_id: &acting.organization,
-            in_project: Some(&project_id),
-            actor: Actor::User(actor.as_str()),
-            action: AuditAction::Deleted,
-            resource_kind: TelmoniResourceKind::Member,
-            resource_id: Some(member_id.as_str()),
-            request_id: None,
-            ip_address: None,
-            user_agent: None,
-            metadata: Some(json!({ "kind": AuditKind::RemovedByOwner })),
-        },
+        AuditEvent::new(
+            &acting.organization,
+            Actor::User(actor.as_str()),
+            AuditAction::Deleted,
+            TelmoniResourceKind::Member,
+        )
+        .in_project(&project_id)
+        .on(member_id.as_str())
+        .details(json!({ "kind": AuditKind::RemovedByOwner })),
     )
     .await?;
     let organization = acting.organization.clone();
@@ -463,18 +454,15 @@ pub async fn leave(
     }
     emit_audit(
         &mut tx,
-        AuditEvent {
-            organization_id: &owner,
-            in_project: Some(&project_id),
-            actor: Actor::User(actor.as_str()),
-            action: AuditAction::Deleted,
-            resource_kind: TelmoniResourceKind::Member,
-            resource_id: Some(actor.as_str()),
-            request_id: None,
-            ip_address: None,
-            user_agent: None,
-            metadata: Some(json!({ "kind": AuditKind::Left })),
-        },
+        AuditEvent::new(
+            &owner,
+            Actor::User(actor.as_str()),
+            AuditAction::Deleted,
+            TelmoniResourceKind::Member,
+        )
+        .in_project(&project_id)
+        .on(actor.as_str())
+        .details(json!({ "kind": AuditKind::Left })),
     )
     .await?;
     tx.commit().await?;

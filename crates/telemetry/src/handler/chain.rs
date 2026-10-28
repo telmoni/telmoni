@@ -7,7 +7,6 @@
 //! so auth's answer under the lock is the one that stands, and a write
 //! resolved before the change committed is refused.
 
-use axum::http::HeaderMap;
 use serde_json::Value;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -15,7 +14,6 @@ use uuid::Uuid;
 use telmoni_shared::acting::Acting;
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit, lock_chain_in_time};
 use telmoni_shared::db::tenant_session::{ProjectAndOrganization, Scoped, project_scope};
-use telmoni_shared::extract::correlation_id;
 use telmoni_shared::rbac::{Resource, Verb};
 use telmoni_shared::seam::{ANSWER_BUDGET, Auth, resolve_again_in_time};
 use telmoni_shared::{
@@ -115,24 +113,20 @@ pub(crate) async fn file(
     tx: &mut Scoped<'_, ProjectAndOrganization>,
     acting: &Acting,
     project_id: &ProjectId,
-    headers: &HeaderMap,
     change: Change,
 ) -> Result<(), TelmoniError> {
     let id = change.id.to_string();
     emit_audit(
         tx,
-        AuditEvent {
-            organization_id: &acting.organization_id,
-            in_project: Some(project_id),
-            actor: Actor::User(acting.user_id.as_str()),
-            action: change.action,
-            resource_kind: change.kind,
-            resource_id: Some(&id),
-            request_id: correlation_id(headers),
-            ip_address: None,
-            user_agent: None,
-            metadata: Some(change.metadata),
-        },
+        AuditEvent::new(
+            &acting.organization_id,
+            Actor::User(acting.user_id.as_str()),
+            change.action,
+            change.kind,
+        )
+        .in_project(project_id)
+        .on(&id)
+        .details(change.metadata),
     )
     .await?;
     Ok(())

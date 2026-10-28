@@ -781,9 +781,7 @@ fn parse_emit_audit_calls(body: &str) -> Vec<EmitCall> {
         let abs = cursor + idx;
         let end = call_end(&body[abs..]).map_or(body.len(), |n| abs + n);
         let window = &body[abs..end];
-        let action = extract_field(window, "action").unwrap_or_default();
-        let resource_kind = extract_field(window, "resource_kind").unwrap_or_default();
-        let actor_id = extract_field(window, "actor").unwrap_or_default();
+        let [_, actor_id, action, resource_kind] = new_arguments(window).unwrap_or_default();
         out.push(EmitCall {
             action,
             resource_kind,
@@ -824,7 +822,34 @@ fn parse_change_emits(root: &Path, body: &str) -> Vec<EmitCall> {
     out
 }
 
-/// Read the value of a struct field in an `AuditEvent { ... }` literal.
+/// The arguments of the `AuditEvent::new(…)` in `window`: organization,
+/// actor, action and resource kind, each as written.
+fn new_arguments(window: &str) -> Option<[String; 4]> {
+    let start = window.find("AuditEvent::new(")? + "AuditEvent::new(".len();
+    let (mut depth, mut current, mut args) = (0usize, String::new(), Vec::new());
+    for c in window[start..].chars() {
+        match c {
+            ')' | ']' | '}' if depth == 0 => break,
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth -= 1,
+            ',' if depth == 0 => {
+                args.push(std::mem::take(&mut current));
+                continue;
+            }
+            _ => {}
+        }
+        current.push(c);
+    }
+    args.push(current);
+    let args: Vec<String> = args
+        .into_iter()
+        .map(|arg| arg.trim().to_owned())
+        .filter(|arg| !arg.is_empty())
+        .collect();
+    args.try_into().ok()
+}
+
+/// Read the value of a struct field in a `Change { ... }` literal.
 fn extract_field(window: &str, field: &str) -> Option<String> {
     let needle = format!("{field}:");
     if let Some(start) = window.find(&needle) {

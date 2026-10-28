@@ -46,6 +46,32 @@ pub async fn fresh_request_id(mut request: Request<Body>, next: Next) -> Respons
     next.run(request).await
 }
 
+tokio::task_local! {
+    static REQUEST_ID: String;
+}
+
+/// Mount INSIDE [`request_id_layers`], beside [`trace_layer`]: the request's
+/// id held for everything its handler runs, so an audit row written while it
+/// is answered records it ([`request_id`]).
+pub async fn request_scope(request: Request<Body>, next: Next) -> Response {
+    let id = request
+        .headers()
+        .get(REQUEST_ID_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .filter(|id| is_request_id(id))
+        .map(str::to_owned);
+    match id {
+        Some(id) => REQUEST_ID.scope(id, next.run(request)).await,
+        None => next.run(request).await,
+    }
+}
+
+/// The id of the request this task is answering; none outside one.
+#[must_use]
+pub fn request_id() -> Option<String> {
+    REQUEST_ID.try_with(Clone::clone).ok()
+}
+
 /// Mount OUTSIDE [`trace_layer`] (add it to the router after), so the id
 /// exists before the span reads it, and [`fresh_request_id`] outside both.
 /// An id a request still carries is kept, a missing one is minted, and
@@ -284,6 +310,36 @@ mod tests {
         let lines = logs.text();
         assert!(lines.contains(r#""request_id":"-""#), "{lines}");
         assert!(!lines.contains("free text"), "{lines}");
+    }
+
+    // What an audit row written while the request is answered records is the
+    // id the response echoes; outside a request there is none.
+    #[tokio::test]
+    async fn a_handler_holds_the_id_the_response_echoes() {
+        let response = Router::new()
+            .route(
+                "/",
+                get(|| async { request_id().unwrap_or_else(|| "-".into()) }),
+            )
+            .layer(axum::middleware::from_fn(request_scope))
+            .layer(trace_layer())
+            .layer(request_id_layers())
+            .layer(axum::middleware::from_fn(fresh_request_id))
+            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let echoed = response
+            .headers()
+            .get(REQUEST_ID_HEADER)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let body = axum::body::to_bytes(response.into_body(), 1024)
+            .await
+            .unwrap();
+        assert_eq!(std::str::from_utf8(&body).unwrap(), echoed);
+        assert_eq!(request_id(), None);
     }
 
     /// ⚠ The span cuts any segment shaped as an API key, wherever it sits.

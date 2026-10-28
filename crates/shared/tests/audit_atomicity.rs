@@ -110,18 +110,13 @@ async fn flag_exists(pool: &PgPool, id: Uuid) -> bool {
 }
 
 fn event<'a>(organization: &'a OrganizationId, resource_id: &'a str) -> AuditEvent<'a> {
-    AuditEvent {
-        organization_id: organization,
-        in_project: None,
-        actor: Actor::User("user_atomicity_probe"),
-        action: AuditAction::Updated,
-        resource_kind: TelmoniResourceKind::Organization,
-        resource_id: Some(resource_id),
-        request_id: None,
-        ip_address: None,
-        user_agent: None,
-        metadata: None,
-    }
+    AuditEvent::new(
+        organization,
+        Actor::User("user_atomicity_probe"),
+        AuditAction::Updated,
+        TelmoniResourceKind::Organization,
+    )
+    .on(resource_id)
 }
 
 #[tokio::test]

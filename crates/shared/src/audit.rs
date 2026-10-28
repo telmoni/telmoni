@@ -59,21 +59,55 @@ pub struct AuditEvent<'a> {
     pub resource_kind: TelmoniResourceKind,
     /// UUID or slug of the resource. None when the action names no single row.
     pub resource_id: Option<&'a str>,
-    /// The request's id, as its span prints it on every log line, so the row
-    /// and the request's logs find each other: `correlation_id`'s answer.
-    pub request_id: Option<&'a str>,
-    /// Client IP as a string literal (e.g. `"192.0.2.1"` / `"2001:db8::1"`).
-    /// Bound as `$8::inet`, so an unparseable value fails the transaction —
-    /// a programmer bug, not a customer fault.
-    pub ip_address: Option<&'a str>,
-    /// Browser / SDK / CLI user agent. None for service-driven actions.
-    pub user_agent: Option<&'a str>,
     /// Action-specific extras as a JSON object. Keep it small.
     pub metadata: Option<Value>,
     /// The project the action happened inside, when it happened inside one.
     /// Hashed when present, and never the chain's root: a project has no chain
     /// of its own, so nothing locks, sequences or verifies on it.
     pub in_project: Option<&'a ProjectId>,
+}
+
+impl<'a> AuditEvent<'a> {
+    /// `actor`'s `action` on a `resource_kind` in `organization_id`, naming no
+    /// resource, project or details until told.
+    #[must_use]
+    pub fn new(
+        organization_id: &'a OrganizationId,
+        actor: Actor<'a>,
+        action: AuditAction,
+        resource_kind: TelmoniResourceKind,
+    ) -> Self {
+        Self {
+            organization_id,
+            actor,
+            action,
+            resource_kind,
+            resource_id: None,
+            metadata: None,
+            in_project: None,
+        }
+    }
+
+    /// On the resource `resource_id` names.
+    #[must_use]
+    pub fn on(mut self, resource_id: &'a str) -> Self {
+        self.resource_id = Some(resource_id);
+        self
+    }
+
+    /// Inside `project_id`.
+    #[must_use]
+    pub fn in_project(mut self, project_id: &'a ProjectId) -> Self {
+        self.in_project = Some(project_id);
+        self
+    }
+
+    /// With `metadata`, a small JSON object.
+    #[must_use]
+    pub fn details(mut self, metadata: Value) -> Self {
+        self.metadata = Some(metadata);
+        self
+    }
 }
 
 /// The organization's newest chain row by `seq`, as its `seq` and `row_hash`.
@@ -212,12 +246,16 @@ pub async fn emit_audit(conn: &mut PgConnection, evt: AuditEvent<'_>) -> sqlx::R
         evt.in_project.map(AsRef::as_ref),
     );
 
+    // The request this row was written in, so the row and its logs find each
+    // other; none for a sweep or a loop.
+    let request_id = crate::middleware::http::request_id();
+
     sqlx::query(
         "INSERT INTO audit.events
              (id, organization_id, actor_id, action, resource_kind,
-              resource_id, request_id, ip_address, user_agent, metadata,
+              resource_id, request_id, metadata,
               created_at, prev_hash, row_hash, shard_key, seq, in_project)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8::inet, $9, $10, $11, $12, $13, $14, $15, $16)",
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
     )
     .bind(id)
     .bind(evt.organization_id)
@@ -225,9 +263,7 @@ pub async fn emit_audit(conn: &mut PgConnection, evt: AuditEvent<'_>) -> sqlx::R
     .bind(&action)
     .bind(&resource_kind)
     .bind(evt.resource_id)
-    .bind(evt.request_id)
-    .bind(evt.ip_address)
-    .bind(evt.user_agent)
+    .bind(request_id.as_deref())
     .bind(evt.metadata.as_ref())
     .bind(created_at)
     .bind(&prev_hash)
@@ -255,7 +291,7 @@ pub async fn emit_audit(conn: &mut PgConnection, evt: AuditEvent<'_>) -> sqlx::R
         action      = %action,
         resource    = %resource_kind,
         resource_id = evt.resource_id,
-        request_id  = evt.request_id,
+        request_id  = request_id.as_deref(),
         in_project  = evt.in_project.map(AsRef::as_ref),
         row_hash    = %hash,
         "audit event",

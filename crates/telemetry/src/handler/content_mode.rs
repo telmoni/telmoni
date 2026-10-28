@@ -13,7 +13,7 @@ use serde_json::json;
 use telmoni_shared::acting::Acting;
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
 use telmoni_shared::db::tenant_session::{ProjectAndOrganization, Scoped, project_scope};
-use telmoni_shared::extract::{Json, correlation_id};
+use telmoni_shared::extract::Json;
 use telmoni_shared::rbac::{Resource, Verb};
 use telmoni_shared::seam::Auth;
 use telmoni_shared::{
@@ -105,7 +105,7 @@ pub async fn put_content_mode(
     let organization_id = &acting.organization_id;
 
     let switched = chain::write(&state.db, &acting, project_id, "content mode", async |tx| {
-        switch_content_mode(&*state.auth, &acting, project_id, tx, &headers, mode).await
+        switch_content_mode(&*state.auth, &acting, project_id, tx, mode).await
     })
     .await?;
     if let Some(filed_under) = &switched.refiled_from {
@@ -138,7 +138,6 @@ async fn switch_content_mode(
     acting: &Acting,
     project_id: &ProjectId,
     tx: &mut Scoped<'_, ProjectAndOrganization>,
-    headers: &HeaderMap,
     mode: ContentMode,
 ) -> Result<Switched, TelmoniError> {
     let organization_id = &acting.organization_id;
@@ -158,18 +157,15 @@ async fn switch_content_mode(
     if changed {
         emit_audit(
             tx,
-            AuditEvent {
+            AuditEvent::new(
                 organization_id,
-                in_project: Some(project_id),
-                actor: Actor::User(acting.user_id.as_str()),
-                action: AuditAction::Updated,
-                resource_kind: TelmoniResourceKind::Project,
-                resource_id: Some(project_id.as_str()),
-                request_id: correlation_id(headers),
-                ip_address: None,
-                user_agent: None,
-                metadata: Some(json!({ "content_mode": { "from": from, "to": mode } })),
-            },
+                Actor::User(acting.user_id.as_str()),
+                AuditAction::Updated,
+                TelmoniResourceKind::Project,
+            )
+            .in_project(project_id)
+            .on(project_id.as_str())
+            .details(json!({ "content_mode": { "from": from, "to": mode } })),
         )
         .await?;
     }

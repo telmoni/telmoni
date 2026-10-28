@@ -432,23 +432,19 @@ pub async fn terminate(
     };
     emit_audit(
         &mut tx,
-        AuditEvent {
-            organization_id: organization,
-            in_project: None,
-            actor: Actor::Service("operator"),
-            action: AuditAction::Updated,
-            resource_kind: TelmoniResourceKind::Organization,
-            resource_id: Some(organization.as_str()),
-            request_id: None,
-            ip_address: None,
-            user_agent: None,
-            metadata: Some(deletion::deletion_metadata(
-                "requested",
-                DeletionKind::Operator,
-                erase_after,
-                None,
-            )),
-        },
+        AuditEvent::new(
+            organization,
+            Actor::Service("operator"),
+            AuditAction::Updated,
+            TelmoniResourceKind::Organization,
+        )
+        .on(organization.as_str())
+        .details(deletion::deletion_metadata(
+            "requested",
+            DeletionKind::Operator,
+            erase_after,
+            None,
+        )),
     )
     .await?;
     tx.commit().await?;

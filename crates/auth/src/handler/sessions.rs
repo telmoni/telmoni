@@ -63,18 +63,14 @@ pub async fn revoke(
         Some(organization) => {
             emit_audit(
                 &mut tx,
-                AuditEvent {
-                    organization_id: organization,
-                    in_project: None,
-                    actor: Actor::User(principal.user_id.as_str()),
-                    action: AuditAction::Deleted,
-                    resource_kind: TelmoniResourceKind::Session,
-                    resource_id: Some(&resource_id),
-                    request_id: None,
-                    ip_address: None,
-                    user_agent: None,
-                    metadata: Some(metadata),
-                },
+                AuditEvent::new(
+                    organization,
+                    Actor::User(principal.user_id.as_str()),
+                    AuditAction::Deleted,
+                    TelmoniResourceKind::Session,
+                )
+                .on(&resource_id)
+                .details(metadata),
             )
             .await?;
         }

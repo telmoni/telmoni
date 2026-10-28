@@ -275,22 +275,19 @@ pub async fn offer(
     }
     emit_audit(
         &mut acting.tx,
-        AuditEvent {
-            organization_id: &organization,
-            in_project: Some(&project_id),
-            actor: Actor::User(user_id.as_str()),
-            action: AuditAction::Updated,
-            resource_kind: TelmoniResourceKind::Project,
-            resource_id: Some(project_id.as_str()),
-            request_id: None,
-            ip_address: None,
-            user_agent: None,
-            metadata: Some(json!({
-                "kind": AuditKind::ProjectOffered,
-                "to": target.as_str(),
-                "replaces": replaced.as_ref().map(UserId::as_str),
-            })),
-        },
+        AuditEvent::new(
+            &organization,
+            Actor::User(user_id.as_str()),
+            AuditAction::Updated,
+            TelmoniResourceKind::Project,
+        )
+        .in_project(&project_id)
+        .on(project_id.as_str())
+        .details(json!({
+            "kind": AuditKind::ProjectOffered,
+            "to": target.as_str(),
+            "replaces": replaced.as_ref().map(UserId::as_str),
+        })),
     )
     .await?;
 
@@ -367,21 +364,18 @@ pub async fn cancel(
     members::clear_project_offers(&mut acting.tx, &project_id).await?;
     emit_audit(
         &mut acting.tx,
-        AuditEvent {
-            organization_id: &organization,
-            in_project: Some(&project_id),
-            actor: Actor::User(user_id.as_str()),
-            action: AuditAction::Updated,
-            resource_kind: TelmoniResourceKind::Project,
-            resource_id: Some(project_id.as_str()),
-            request_id: None,
-            ip_address: None,
-            user_agent: None,
-            metadata: Some(json!({
-                "kind": AuditKind::ProjectOfferCancelled,
-                "to": holder.as_str(),
-            })),
-        },
+        AuditEvent::new(
+            &organization,
+            Actor::User(user_id.as_str()),
+            AuditAction::Updated,
+            TelmoniResourceKind::Project,
+        )
+        .in_project(&project_id)
+        .on(project_id.as_str())
+        .details(json!({
+            "kind": AuditKind::ProjectOfferCancelled,
+            "to": holder.as_str(),
+        })),
     )
     .await?;
     let holder_email = identities::contact(&mut acting.tx, &holder)
@@ -426,18 +420,15 @@ pub async fn decline(
     let organization = acting.organization.clone();
     emit_audit(
         &mut acting.tx,
-        AuditEvent {
-            organization_id: &organization,
-            in_project: Some(&project_id),
-            actor: Actor::User(user_id.as_str()),
-            action: AuditAction::Updated,
-            resource_kind: TelmoniResourceKind::Project,
-            resource_id: Some(project_id.as_str()),
-            request_id: None,
-            ip_address: None,
-            user_agent: None,
-            metadata: Some(json!({ "kind": AuditKind::ProjectOfferDeclined })),
-        },
+        AuditEvent::new(
+            &organization,
+            Actor::User(user_id.as_str()),
+            AuditAction::Updated,
+            TelmoniResourceKind::Project,
+        )
+        .in_project(&project_id)
+        .on(project_id.as_str())
+        .details(json!({ "kind": AuditKind::ProjectOfferDeclined })),
     )
     .await?;
     let owner = match organization_members::owner_of(&mut acting.tx, &organization).await? {
@@ -484,138 +475,118 @@ async fn emit_project_transfer_audits(
     // Both chains, the source's first, their locks taken already by id.
     emit_audit(
         conn,
-        AuditEvent {
-            organization_id: audits.source,
-            in_project: Some(audits.project_id),
-            actor: Actor::User(audits.user_id.as_str()),
-            action: AuditAction::Updated,
-            resource_kind: TelmoniResourceKind::Project,
-            resource_id: Some(audits.project_id.as_str()),
-            request_id: None,
-            ip_address: None,
-            user_agent: None,
-            metadata: Some(json!({
-                "kind": AuditKind::ProjectTransferred,
-                "to_organization": audits.destination.as_str(),
-                "to": audits.user_id.as_str(),
-                "from": audits.previous.as_str(),
-            })),
-        },
+        AuditEvent::new(
+            audits.source,
+            Actor::User(audits.user_id.as_str()),
+            AuditAction::Updated,
+            TelmoniResourceKind::Project,
+        )
+        .in_project(audits.project_id)
+        .on(audits.project_id.as_str())
+        .details(json!({
+            "kind": AuditKind::ProjectTransferred,
+            "to_organization": audits.destination.as_str(),
+            "to": audits.user_id.as_str(),
+            "from": audits.previous.as_str(),
+        })),
     )
     .await?;
     emit_audit(
         conn,
-        AuditEvent {
-            organization_id: audits.destination,
-            in_project: Some(audits.project_id),
-            actor: Actor::User(audits.user_id.as_str()),
-            action: AuditAction::Updated,
-            resource_kind: TelmoniResourceKind::Project,
-            resource_id: Some(audits.project_id.as_str()),
-            request_id: None,
-            ip_address: None,
-            user_agent: None,
-            metadata: Some({
-                let mut received = json!({
-                    "kind": AuditKind::ProjectReceived,
-                    "from_organization": audits.source.as_str(),
-                    "from": audits.previous.as_str(),
-                    "to": audits.user_id.as_str(),
-                    "name": audits.project_name,
-                });
-                // Only when it happened: the console's audit table prints
-                // metadata whole, and a `null` on every handover is noise.
-                if let (Some(renamed_from), Some(fields)) =
-                    (audits.renamed_from, received.as_object_mut())
-                {
-                    fields.insert("renamed_from".into(), json!(renamed_from));
-                }
-                received
-            }),
-        },
+        AuditEvent::new(
+            audits.destination,
+            Actor::User(audits.user_id.as_str()),
+            AuditAction::Updated,
+            TelmoniResourceKind::Project,
+        )
+        .in_project(audits.project_id)
+        .on(audits.project_id.as_str())
+        .details({
+            let mut received = json!({
+                "kind": AuditKind::ProjectReceived,
+                "from_organization": audits.source.as_str(),
+                "from": audits.previous.as_str(),
+                "to": audits.user_id.as_str(),
+                "name": audits.project_name,
+            });
+            // Only when it happened: the console's audit table prints
+            // metadata whole, and a `null` on every handover is noise.
+            if let (Some(renamed_from), Some(fields)) =
+                (audits.renamed_from, received.as_object_mut())
+            {
+                fields.insert("renamed_from".into(), json!(renamed_from));
+            }
+            received
+        }),
     )
     .await?;
     // The seat the new owner held is folded into the ownership.
     emit_audit(
         conn,
-        AuditEvent {
-            organization_id: audits.destination,
-            in_project: Some(audits.project_id),
-            actor: Actor::User(audits.user_id.as_str()),
-            action: AuditAction::Deleted,
-            resource_kind: TelmoniResourceKind::Member,
-            resource_id: Some(audits.user_id.as_str()),
-            request_id: None,
-            ip_address: None,
-            user_agent: None,
-            metadata: Some(json!({
-                "kind": AuditKind::SeatFoldedIntoOwnership,
-                "role": Role::Admin,
-            })),
-        },
+        AuditEvent::new(
+            audits.destination,
+            Actor::User(audits.user_id.as_str()),
+            AuditAction::Deleted,
+            TelmoniResourceKind::Member,
+        )
+        .in_project(audits.project_id)
+        .on(audits.user_id.as_str())
+        .details(json!({
+            "kind": AuditKind::SeatFoldedIntoOwnership,
+            "role": Role::Admin,
+        })),
     )
     .await?;
     if audits.seated {
         emit_audit(
             conn,
-            AuditEvent {
-                organization_id: audits.destination,
-                in_project: Some(audits.project_id),
-                actor: Actor::User(audits.user_id.as_str()),
-                action: AuditAction::Created,
-                resource_kind: TelmoniResourceKind::Member,
-                resource_id: Some(audits.previous.as_str()),
-                request_id: None,
-                ip_address: None,
-                user_agent: None,
-                metadata: Some(json!({
-                    "kind": AuditKind::PreviousOwnerSeated,
-                    "role": Role::Admin,
-                })),
-            },
+            AuditEvent::new(
+                audits.destination,
+                Actor::User(audits.user_id.as_str()),
+                AuditAction::Created,
+                TelmoniResourceKind::Member,
+            )
+            .in_project(audits.project_id)
+            .on(audits.previous.as_str())
+            .details(json!({
+                "kind": AuditKind::PreviousOwnerSeated,
+                "role": Role::Admin,
+            })),
         )
         .await?;
     }
     if audits.enrolled {
         emit_audit(
             conn,
-            AuditEvent {
-                organization_id: audits.destination,
-                in_project: None,
-                actor: Actor::User(audits.user_id.as_str()),
-                action: AuditAction::Created,
-                resource_kind: TelmoniResourceKind::Member,
-                resource_id: Some(audits.previous.as_str()),
-                request_id: None,
-                ip_address: None,
-                user_agent: None,
-                metadata: Some(json!({
-                    "kind": AuditKind::PreviousOwnerEnrolled,
-                    "role": OrganizationRole::Member,
-                })),
-            },
+            AuditEvent::new(
+                audits.destination,
+                Actor::User(audits.user_id.as_str()),
+                AuditAction::Created,
+                TelmoniResourceKind::Member,
+            )
+            .on(audits.previous.as_str())
+            .details(json!({
+                "kind": AuditKind::PreviousOwnerEnrolled,
+                "role": OrganizationRole::Member,
+            })),
         )
         .await?;
     }
     for seat in audits.holders_enrolled {
         emit_audit(
             conn,
-            AuditEvent {
-                organization_id: audits.destination,
-                in_project: None,
-                actor: Actor::User(audits.user_id.as_str()),
-                action: AuditAction::Created,
-                resource_kind: TelmoniResourceKind::Member,
-                resource_id: Some(seat.user_id.as_str()),
-                request_id: None,
-                ip_address: None,
-                user_agent: None,
-                metadata: Some(json!({
-                    "kind": AuditKind::SeatHolderEnrolled,
-                    "role": OrganizationRole::Member,
-                    "seat": seat.role,
-                })),
-            },
+            AuditEvent::new(
+                audits.destination,
+                Actor::User(audits.user_id.as_str()),
+                AuditAction::Created,
+                TelmoniResourceKind::Member,
+            )
+            .on(seat.user_id.as_str())
+            .details(json!({
+                "kind": AuditKind::SeatHolderEnrolled,
+                "role": OrganizationRole::Member,
+                "seat": seat.role,
+            })),
         )
         .await?;
     }
@@ -1163,71 +1134,61 @@ async fn emit_project_move_audits(
     // Both chains, the source's first, their locks taken already by id.
     emit_audit(
         conn,
-        AuditEvent {
-            organization_id: audits.source,
-            in_project: Some(audits.project_id),
-            actor: Actor::User(audits.user_id.as_str()),
-            action: AuditAction::Updated,
-            resource_kind: TelmoniResourceKind::Project,
-            resource_id: Some(audits.project_id.as_str()),
-            request_id: None,
-            ip_address: None,
-            user_agent: None,
-            metadata: Some(json!({
-                "kind": AuditKind::ProjectMoved,
-                "to_organization": audits.destination.as_str(),
-            })),
-        },
+        AuditEvent::new(
+            audits.source,
+            Actor::User(audits.user_id.as_str()),
+            AuditAction::Updated,
+            TelmoniResourceKind::Project,
+        )
+        .in_project(audits.project_id)
+        .on(audits.project_id.as_str())
+        .details(json!({
+            "kind": AuditKind::ProjectMoved,
+            "to_organization": audits.destination.as_str(),
+        })),
     )
     .await?;
     emit_audit(
         conn,
-        AuditEvent {
-            organization_id: audits.destination,
-            in_project: Some(audits.project_id),
-            actor: Actor::User(audits.user_id.as_str()),
-            action: AuditAction::Updated,
-            resource_kind: TelmoniResourceKind::Project,
-            resource_id: Some(audits.project_id.as_str()),
-            request_id: None,
-            ip_address: None,
-            user_agent: None,
-            metadata: Some({
-                let mut arrived = json!({
-                    "kind": AuditKind::ProjectMoved,
-                    "from_organization": audits.source.as_str(),
-                    "name": audits.project_name,
-                });
-                // Only when it happened, as the transfer records it.
-                if let (Some(renamed_from), Some(fields)) =
-                    (audits.renamed_from, arrived.as_object_mut())
-                {
-                    fields.insert("renamed_from".into(), json!(renamed_from));
-                }
-                arrived
-            }),
-        },
+        AuditEvent::new(
+            audits.destination,
+            Actor::User(audits.user_id.as_str()),
+            AuditAction::Updated,
+            TelmoniResourceKind::Project,
+        )
+        .in_project(audits.project_id)
+        .on(audits.project_id.as_str())
+        .details({
+            let mut arrived = json!({
+                "kind": AuditKind::ProjectMoved,
+                "from_organization": audits.source.as_str(),
+                "name": audits.project_name,
+            });
+            // Only when it happened, as the transfer records it.
+            if let (Some(renamed_from), Some(fields)) =
+                (audits.renamed_from, arrived.as_object_mut())
+            {
+                fields.insert("renamed_from".into(), json!(renamed_from));
+            }
+            arrived
+        }),
     )
     .await?;
     for seat in audits.holders_enrolled {
         emit_audit(
             conn,
-            AuditEvent {
-                organization_id: audits.destination,
-                in_project: None,
-                actor: Actor::User(audits.user_id.as_str()),
-                action: AuditAction::Created,
-                resource_kind: TelmoniResourceKind::Member,
-                resource_id: Some(seat.user_id.as_str()),
-                request_id: None,
-                ip_address: None,
-                user_agent: None,
-                metadata: Some(json!({
-                    "kind": AuditKind::SeatHolderEnrolled,
-                    "role": OrganizationRole::Member,
-                    "seat": seat.role,
-                })),
-            },
+            AuditEvent::new(
+                audits.destination,
+                Actor::User(audits.user_id.as_str()),
+                AuditAction::Created,
+                TelmoniResourceKind::Member,
+            )
+            .on(seat.user_id.as_str())
+            .details(json!({
+                "kind": AuditKind::SeatHolderEnrolled,
+                "role": OrganizationRole::Member,
+                "seat": seat.role,
+            })),
         )
         .await?;
     }

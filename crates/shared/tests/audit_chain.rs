@@ -23,18 +23,14 @@ async fn emit_one(pool: &PgPool, organization: &str, rid: &str, meta: serde_json
     let mut tx = pool.begin().await.expect("begin");
     emit_audit(
         &mut tx,
-        AuditEvent {
-            organization_id: &organization_id,
-            in_project: None,
-            actor: Actor::User(organization),
-            action: AuditAction::Created,
-            resource_kind: TelmoniResourceKind::Member,
-            resource_id: Some(rid),
-            request_id: None,
-            ip_address: None,
-            user_agent: None,
-            metadata: Some(meta),
-        },
+        AuditEvent::new(
+            &organization_id,
+            Actor::User(organization),
+            AuditAction::Created,
+            TelmoniResourceKind::Member,
+        )
+        .on(rid)
+        .details(meta),
     )
     .await
     .expect("emit");
@@ -49,18 +45,14 @@ async fn emit_in_project(pool: &PgPool, organization: &str, project: &str, rid: 
     let mut tx = pool.begin().await.expect("begin");
     emit_audit(
         &mut tx,
-        AuditEvent {
-            organization_id: &organization_id,
-            in_project: Some(&in_project),
-            actor: Actor::User(organization),
-            action: AuditAction::Created,
-            resource_kind: TelmoniResourceKind::Token,
-            resource_id: Some(rid),
-            request_id: None,
-            ip_address: None,
-            user_agent: None,
-            metadata: None,
-        },
+        AuditEvent::new(
+            &organization_id,
+            Actor::User(organization),
+            AuditAction::Created,
+            TelmoniResourceKind::Token,
+        )
+        .in_project(&in_project)
+        .on(rid),
     )
     .await
     .expect("emit");

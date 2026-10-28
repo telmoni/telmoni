@@ -225,7 +225,7 @@ pub async fn create_rule(
     let rule = input.checked()?;
     let ceilings = seam::alert_ceilings(state.entitlements.as_ref(), &acting.organization_id).await;
     let row = chain::write(&state.db, &acting, &project_id, "alert", async |tx| {
-        save(&state, &acting, &headers, tx, &rule, ceilings.as_ref()).await
+        save(&state, &acting, tx, &rule, ceilings.as_ref()).await
     })
     .await?;
     tracing::info!(project_id = %project_id, rule_id = %row.id, "telemetry: an alert made");
@@ -242,7 +242,6 @@ pub async fn create_rule(
 async fn save(
     state: &AppState,
     acting: &Acting,
-    headers: &HeaderMap,
     tx: &mut Scoped<'_, ProjectAndOrganization>,
     rule: &Rule,
     ceilings: Option<&AlertCeilings>,
@@ -269,7 +268,7 @@ async fn save(
         id: row.id,
         metadata: json!({ "name": row.name }),
     };
-    chain::file(tx, acting, project_id, headers, change).await?;
+    chain::file(tx, acting, project_id, change).await?;
     Ok(row)
 }
 
@@ -325,7 +324,7 @@ pub async fn update_rule(
             id,
             metadata: json!({ "name": row.name, "changed": changed(&before, &linked, &rule) }),
         };
-        chain::file(tx, &acting, project_id, &headers, change).await?;
+        chain::file(tx, &acting, project_id, change).await?;
         Ok(row)
     })
     .await?;
@@ -401,7 +400,7 @@ pub async fn delete_rule(
                 id,
                 metadata: json!({ "name": row.name }),
             };
-            chain::file(tx, &acting, project_id, &headers, change).await?;
+            chain::file(tx, &acting, project_id, change).await?;
             Ok((open, links))
         })
         .await?;
@@ -473,7 +472,7 @@ pub async fn unmute_link(
                 id,
                 metadata: json!({ "name": row.name, "unmuted": connection_id }),
             };
-            chain::file(tx, &acting, project_id, &headers, change).await?;
+            chain::file(tx, &acting, project_id, change).await?;
         }
         Ok((row, links))
     })
@@ -518,7 +517,7 @@ pub async fn pause_rule(
                     "paused": { "from": before.paused, "to": row.paused },
                 }),
             };
-            chain::file(tx, &acting, project_id, &headers, change).await?;
+            chain::file(tx, &acting, project_id, change).await?;
         }
         Ok((row, rules::links(tx, project_id, &[id]).await?))
     })
@@ -569,7 +568,7 @@ pub async fn resume_rule(
                     "paused": { "from": before.paused, "to": row.paused },
                 }),
             };
-            chain::file(tx, &acting, project_id, &headers, change).await?;
+            chain::file(tx, &acting, project_id, change).await?;
         }
         Ok((row, rules::links(tx, project_id, &[id]).await?))
     })

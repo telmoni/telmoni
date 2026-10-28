@@ -138,7 +138,7 @@ pub async fn create_mute(
         &acting,
         project_id,
         "maintenance window",
-        async |tx| open(&state, &acting, &headers, tx, &input, starts_at).await,
+        async |tx| open(&state, &acting, tx, &input, starts_at).await,
     )
     .await?;
     tracing::info!(project_id = %project_id, mute_id = %row.id, "telemetry: a maintenance window made");
@@ -152,7 +152,6 @@ pub async fn create_mute(
 async fn open(
     state: &AppState,
     acting: &Acting,
-    headers: &HeaderMap,
     tx: &mut Scoped<'_, ProjectAndOrganization>,
     input: &MuteInput,
     starts_at: DateTime<Utc>,
@@ -202,7 +201,7 @@ async fn open(
             "ends_at": row.ends_at,
         }),
     };
-    chain::file(tx, acting, project_id, headers, change).await?;
+    chain::file(tx, acting, project_id, change).await?;
     Ok(row)
 }
 
@@ -224,7 +223,7 @@ pub async fn end_mute(
         &acting,
         project_id,
         "maintenance window",
-        async |tx| ended(&state, &acting, &headers, tx, id).await,
+        async |tx| ended(&state, &acting, tx, id).await,
     )
     .await?;
     Ok(Json(Mute::from(row)))
@@ -235,7 +234,6 @@ pub async fn end_mute(
 async fn ended(
     state: &AppState,
     acting: &Acting,
-    headers: &HeaderMap,
     tx: &mut Scoped<'_, ProjectAndOrganization>,
     id: Uuid,
 ) -> Result<MuteRow, TelmoniError> {
@@ -260,7 +258,7 @@ async fn ended(
             id,
             metadata: json!({ "rule_id": row.rule_id, "ended_at": row.ends_at }),
         };
-        chain::file(tx, acting, project_id, headers, change).await?;
+        chain::file(tx, acting, project_id, change).await?;
     }
     Ok(row)
 }

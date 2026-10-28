@@ -181,22 +181,18 @@ pub async fn export_organization(
 
     emit_audit(
         &mut tx,
-        AuditEvent {
-            organization_id: &organization,
-            in_project: None,
-            actor: Actor::User(actor.as_str()),
-            action: AuditAction::Exported,
-            resource_kind: TelmoniResourceKind::Organization,
-            resource_id: Some(organization.as_str()),
-            request_id: None,
-            ip_address: None,
-            user_agent: None,
-            // `export` names what left, as the audit log's own export's does.
-            metadata: Some(json!({
-                "export": "organization",
-                "audit_truncated": audit_truncated,
-            })),
-        },
+        AuditEvent::new(
+            &organization,
+            Actor::User(actor.as_str()),
+            AuditAction::Exported,
+            TelmoniResourceKind::Organization,
+        )
+        .on(organization.as_str())
+        // `export` names what left, as the audit log's own export's does.
+        .details(json!({
+            "export": "organization",
+            "audit_truncated": audit_truncated,
+        })),
     )
     .await?;
 

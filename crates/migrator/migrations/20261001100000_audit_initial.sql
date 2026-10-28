@@ -42,8 +42,6 @@ CREATE TABLE audit.events (
     resource_kind   TEXT        NOT NULL,
     resource_id     TEXT,
     request_id      TEXT,
-    ip_address      INET,
-    user_agent      TEXT,
     metadata        JSONB,
     seq             BIGINT      NOT NULL,
     prev_hash       TEXT,

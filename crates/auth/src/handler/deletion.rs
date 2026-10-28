@@ -443,18 +443,14 @@ pub async fn finalize_organization(
 
     emit_audit(
         &mut tx,
-        AuditEvent {
+        AuditEvent::new(
             organization_id,
-            in_project: None,
-            actor: Actor::Service("auth"),
-            action: AuditAction::Deleted,
-            resource_kind: TelmoniResourceKind::Organization,
-            resource_id: Some(organization_id.as_str()),
-            request_id: None,
-            ip_address: None,
-            user_agent: None,
-            metadata: Some(json!({ "kind": AuditKind::DeletionFinalize })),
-        },
+            Actor::Service("auth"),
+            AuditAction::Deleted,
+            TelmoniResourceKind::Organization,
+        )
+        .on(organization_id.as_str())
+        .details(json!({ "kind": AuditKind::DeletionFinalize })),
     )
     .await?;
 
@@ -648,16 +644,15 @@ pub async fn erase_person(
         emit_audit(
             &mut mtx,
             AuditEvent {
-                organization_id: organization,
                 in_project,
-                actor: Actor::Service("deletion-saga"),
-                action: AuditAction::Deleted,
-                resource_kind: TelmoniResourceKind::Member,
-                resource_id: Some(user_id.as_str()),
-                request_id: None,
-                ip_address: None,
-                user_agent: None,
-                metadata: Some(json!({ "kind": AuditKind::AccountDeletion, "role": role })),
+                ..AuditEvent::new(
+                    organization,
+                    Actor::Service("deletion-saga"),
+                    AuditAction::Deleted,
+                    TelmoniResourceKind::Member,
+                )
+                .on(user_id.as_str())
+                .details(json!({ "kind": AuditKind::AccountDeletion, "role": role }))
             },
         )
         .await?;

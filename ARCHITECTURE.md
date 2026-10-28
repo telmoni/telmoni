@@ -575,7 +575,7 @@ The ones that shape the design, each kept here until it is closed:
 - **The egress guard holds only while the cluster's pod and Service ranges are private**.
 - **The password-reset mail can be lost** to a rollout, and nothing retries it.
 - **Delivery is at least once, unordered, and unpaced per vendor**.
-- **Audit partitions are never dropped**, and `ip_address`, `user_agent` and `shard_key` are filled by nothing.
+- **Audit partitions are never dropped.**
 - **Every project keeps the longest retention**, since no plan's limit is read yet.
 - **A transfer whose settling of telemetry's settings fails every try**, or never runs, leaves them under an organization that no longer holds the project, until the project moves again, is deleted or has its content mode changed. Auth logs the project's id at `error`.
 - **Leader locks prevent overlap, not repetition.** Each replica's timer starts at its own boot, so a daily sweep runs once a day for each replica (`crates/telmoni/src/sweeps.rs`).

@@ -427,6 +427,9 @@ impl App {
             // A path no lane serves is the server's own problem document, as
             // a lane's is under it.
             .fallback(not_found)
+            .layer(middleware::from_fn(
+                telmoni_shared::middleware::http::request_scope,
+            ))
             .layer(telmoni_shared::middleware::http::trace_layer())
             .layer(telmoni_shared::middleware::http::request_id_layers())
             .layer(middleware::from_fn(

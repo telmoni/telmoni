@@ -125,18 +125,15 @@ pub async fn create_project(
 
     emit_audit(
         &mut acting.tx,
-        AuditEvent {
-            organization_id: &organization_id,
-            in_project: Some(&project_id),
-            actor: Actor::User(user_id.as_str()),
-            action: AuditAction::Created,
-            resource_kind: TelmoniResourceKind::Project,
-            resource_id: Some(project_id.as_str()),
-            request_id: None,
-            ip_address: None,
-            user_agent: None,
-            metadata: Some(json!({ "name": name })),
-        },
+        AuditEvent::new(
+            &organization_id,
+            Actor::User(user_id.as_str()),
+            AuditAction::Created,
+            TelmoniResourceKind::Project,
+        )
+        .in_project(&project_id)
+        .on(project_id.as_str())
+        .details(json!({ "name": name })),
     )
     .await?;
 
@@ -200,18 +197,15 @@ pub async fn delete_project(
 
     emit_audit(
         &mut acting.tx,
-        AuditEvent {
-            organization_id: &organization_id,
-            in_project: Some(&project_id),
-            actor: Actor::User(user_id.as_str()),
-            action: AuditAction::Deleted,
-            resource_kind: TelmoniResourceKind::Project,
-            resource_id: Some(project_id.as_str()),
-            request_id: None,
-            ip_address: None,
-            user_agent: None,
-            metadata: Some(json!({ "name": name })),
-        },
+        AuditEvent::new(
+            &organization_id,
+            Actor::User(user_id.as_str()),
+            AuditAction::Deleted,
+            TelmoniResourceKind::Project,
+        )
+        .in_project(&project_id)
+        .on(project_id.as_str())
+        .details(json!({ "name": name })),
     )
     .await?;
 

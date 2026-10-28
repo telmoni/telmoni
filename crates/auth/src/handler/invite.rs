@@ -257,22 +257,19 @@ pub async fn create_invite(
 
     emit_audit(
         &mut acting.tx,
-        AuditEvent {
-            organization_id: &organization,
-            in_project: Some(&project_id),
-            actor: Actor::User(actor.as_str()),
-            action: AuditAction::Created,
-            resource_kind: TelmoniResourceKind::Member,
-            resource_id: Some(invite_id.to_string().as_str()),
-            request_id: None,
-            ip_address: None,
-            user_agent: None,
-            metadata: Some(json!({
-                "kind": AuditKind::Invited,
-                "email": email,
-                "role": role,
-            })),
-        },
+        AuditEvent::new(
+            &organization,
+            Actor::User(actor.as_str()),
+            AuditAction::Created,
+            TelmoniResourceKind::Member,
+        )
+        .in_project(&project_id)
+        .on(invite_id.to_string().as_str())
+        .details(json!({
+            "kind": AuditKind::Invited,
+            "email": email,
+            "role": role,
+        })),
     )
     .await?;
     acting.tx.commit().await?;
@@ -345,18 +342,15 @@ pub async fn revoke_invite(
     let owner = acting.organization.clone();
     emit_audit(
         &mut acting.tx,
-        AuditEvent {
-            organization_id: &owner,
-            in_project: Some(&project_id),
-            actor: Actor::User(actor.as_str()),
-            action: AuditAction::Deleted,
-            resource_kind: TelmoniResourceKind::Member,
-            resource_id: Some(invite_id.to_string().as_str()),
-            request_id: None,
-            ip_address: None,
-            user_agent: None,
-            metadata: Some(json!({ "kind": AuditKind::InviteRevoked })),
-        },
+        AuditEvent::new(
+            &owner,
+            Actor::User(actor.as_str()),
+            AuditAction::Deleted,
+            TelmoniResourceKind::Member,
+        )
+        .in_project(&project_id)
+        .on(invite_id.to_string().as_str())
+        .details(json!({ "kind": AuditKind::InviteRevoked })),
     )
     .await?;
     acting.tx.commit().await?;
@@ -523,45 +517,38 @@ async fn seat_project_member(
     {
         emit_audit(
             &mut tx,
-            AuditEvent {
-                organization_id: organization,
-                in_project: None,
-                actor: Actor::User(actor.as_str()),
-                action: AuditAction::Created,
-                resource_kind: TelmoniResourceKind::Member,
-                resource_id: Some(actor.as_str()),
-                request_id: None,
-                ip_address: None,
-                user_agent: None,
-                metadata: Some(json!({
-                    "kind": AuditKind::EnrolledWithProjectInvite,
-                    "invite_id": invite.id,
-                    "role": OrganizationRole::Member,
-                    "scope": InviteScope::Organization,
-                })),
-            },
+            AuditEvent::new(
+                organization,
+                Actor::User(actor.as_str()),
+                AuditAction::Created,
+                TelmoniResourceKind::Member,
+            )
+            .on(actor.as_str())
+            .details(json!({
+                "kind": AuditKind::EnrolledWithProjectInvite,
+                "invite_id": invite.id,
+                "role": OrganizationRole::Member,
+                "scope": InviteScope::Organization,
+            })),
         )
         .await?;
     }
 
     emit_audit(
         &mut tx,
-        AuditEvent {
-            organization_id: organization,
-            in_project: Some(invite.project_id),
-            actor: Actor::User(actor.as_str()),
-            action: AuditAction::Created,
-            resource_kind: TelmoniResourceKind::Member,
-            resource_id: Some(actor.as_str()),
-            request_id: None,
-            ip_address: None,
-            user_agent: None,
-            metadata: Some(json!({
-                "kind": AuditKind::InviteAccepted,
-                "invite_id": invite.id,
-                "role": invite.role,
-            })),
-        },
+        AuditEvent::new(
+            organization,
+            Actor::User(actor.as_str()),
+            AuditAction::Created,
+            TelmoniResourceKind::Member,
+        )
+        .in_project(invite.project_id)
+        .on(actor.as_str())
+        .details(json!({
+            "kind": AuditKind::InviteAccepted,
+            "invite_id": invite.id,
+            "role": invite.role,
+        })),
     )
     .await?;
     tx.commit().await?;
@@ -608,23 +595,19 @@ async fn seat_organization_member(
 
     emit_audit(
         &mut tx,
-        AuditEvent {
-            organization_id: invite.organization_id,
-            in_project: None,
-            actor: Actor::User(actor.as_str()),
-            action: AuditAction::Created,
-            resource_kind: TelmoniResourceKind::Member,
-            resource_id: Some(actor.as_str()),
-            request_id: None,
-            ip_address: None,
-            user_agent: None,
-            metadata: Some(json!({
-                "kind": AuditKind::OrganizationInviteAccepted,
-                "invite_id": invite.id,
-                "role": invite.role,
-                "scope": InviteScope::Organization,
-            })),
-        },
+        AuditEvent::new(
+            invite.organization_id,
+            Actor::User(actor.as_str()),
+            AuditAction::Created,
+            TelmoniResourceKind::Member,
+        )
+        .on(actor.as_str())
+        .details(json!({
+            "kind": AuditKind::OrganizationInviteAccepted,
+            "invite_id": invite.id,
+            "role": invite.role,
+            "scope": InviteScope::Organization,
+        })),
     )
     .await?;
     tx.commit().await?;
@@ -918,18 +901,15 @@ pub async fn decline_my_incoming_invite(
         }
         emit_audit(
             &mut tx,
-            AuditEvent {
-                organization_id: &owner,
-                in_project: Some(&invite.project_id),
-                actor: Actor::User(actor.as_str()),
-                action: AuditAction::Deleted,
-                resource_kind: TelmoniResourceKind::Member,
-                resource_id: Some(invite_id.to_string().as_str()),
-                request_id: None,
-                ip_address: None,
-                user_agent: None,
-                metadata: Some(json!({ "kind": AuditKind::InviteDeclined })),
-            },
+            AuditEvent::new(
+                &owner,
+                Actor::User(actor.as_str()),
+                AuditAction::Deleted,
+                TelmoniResourceKind::Member,
+            )
+            .in_project(&invite.project_id)
+            .on(invite_id.to_string().as_str())
+            .details(json!({ "kind": AuditKind::InviteDeclined })),
         )
         .await?;
         tx.commit().await?;
@@ -957,21 +937,17 @@ pub async fn decline_my_incoming_invite(
         }
         emit_audit(
             &mut tx,
-            AuditEvent {
-                organization_id: &invite.organization_id,
-                in_project: None,
-                actor: Actor::User(actor.as_str()),
-                action: AuditAction::Deleted,
-                resource_kind: TelmoniResourceKind::Member,
-                resource_id: Some(invite_id.to_string().as_str()),
-                request_id: None,
-                ip_address: None,
-                user_agent: None,
-                metadata: Some(json!({
-                    "kind": AuditKind::OrganizationInviteDeclined,
-                    "scope": InviteScope::Organization,
-                })),
-            },
+            AuditEvent::new(
+                &invite.organization_id,
+                Actor::User(actor.as_str()),
+                AuditAction::Deleted,
+                TelmoniResourceKind::Member,
+            )
+            .on(invite_id.to_string().as_str())
+            .details(json!({
+                "kind": AuditKind::OrganizationInviteDeclined,
+                "scope": InviteScope::Organization,
+            })),
         )
         .await?;
         tx.commit().await?;

@@ -195,18 +195,14 @@ pub(crate) async fn join<'c>(
     {
         emit_audit(
             &mut tx,
-            AuditEvent {
+            AuditEvent::new(
                 organization_id,
-                in_project: None,
-                actor: Actor::Service(ACTOR),
-                action: AuditAction::Created,
-                resource_kind: TelmoniResourceKind::Member,
-                resource_id: Some(user_id.as_str()),
-                request_id: None,
-                ip_address: None,
-                user_agent: None,
-                metadata: Some(json!({ "kind": AuditKind::DefaultOrganization, "role": to.role })),
-            },
+                Actor::Service(ACTOR),
+                AuditAction::Created,
+                TelmoniResourceKind::Member,
+            )
+            .on(user_id.as_str())
+            .details(json!({ "kind": AuditKind::DefaultOrganization, "role": to.role })),
         )
         .await?;
     }
@@ -226,18 +222,15 @@ pub(crate) async fn join<'c>(
     } else if members::insert_if_absent(&mut tx, project_id, user_id, *role, user_id).await? {
         emit_audit(
             &mut tx,
-            AuditEvent {
+            AuditEvent::new(
                 organization_id,
-                in_project: Some(project_id),
-                actor: Actor::Service(ACTOR),
-                action: AuditAction::Created,
-                resource_kind: TelmoniResourceKind::Member,
-                resource_id: Some(user_id.as_str()),
-                request_id: None,
-                ip_address: None,
-                user_agent: None,
-                metadata: Some(json!({ "kind": AuditKind::DefaultOrganization, "role": role })),
-            },
+                Actor::Service(ACTOR),
+                AuditAction::Created,
+                TelmoniResourceKind::Member,
+            )
+            .in_project(project_id)
+            .on(user_id.as_str())
+            .details(json!({ "kind": AuditKind::DefaultOrganization, "role": role })),
         )
         .await?;
     }

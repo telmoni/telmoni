@@ -212,23 +212,20 @@ pub async fn create_token(
     })?;
     emit_audit(
         &mut tx,
-        AuditEvent {
-            organization_id: &token_organization,
-            in_project: Some(&project_id),
-            actor: Actor::User(&req.created_by),
-            action: AuditAction::Created,
-            resource_kind: TelmoniResourceKind::Token,
-            resource_id: Some(&record.id.to_string()),
-            request_id: None,
-            ip_address: None,
-            user_agent: None,
-            metadata: Some(json!({
-                "name": name,
-                "description": description,
-                "scopes": scopes,
-                "expires_at": expires_at,
-            })),
-        },
+        AuditEvent::new(
+            &token_organization,
+            Actor::User(&req.created_by),
+            AuditAction::Created,
+            TelmoniResourceKind::Token,
+        )
+        .in_project(&project_id)
+        .on(&record.id.to_string())
+        .details(json!({
+            "name": name,
+            "description": description,
+            "scopes": scopes,
+            "expires_at": expires_at,
+        })),
     )
     .await?;
     tx.commit().await?;
@@ -327,21 +324,18 @@ pub async fn rotate_token(
 
     emit_audit(
         &mut tx,
-        AuditEvent {
-            organization_id: &token_organization,
-            in_project: Some(&project_id),
-            actor: Actor::User(actor.as_str()),
-            action: AuditAction::Updated,
-            resource_kind: TelmoniResourceKind::Token,
-            resource_id: Some(&new_record.id.to_string()),
-            request_id: None,
-            ip_address: None,
-            user_agent: None,
-            metadata: Some(json!({
-                "rotated_from": token_id,
-                "grace_seconds": grace,
-            })),
-        },
+        AuditEvent::new(
+            &token_organization,
+            Actor::User(actor.as_str()),
+            AuditAction::Updated,
+            TelmoniResourceKind::Token,
+        )
+        .in_project(&project_id)
+        .on(&new_record.id.to_string())
+        .details(json!({
+            "rotated_from": token_id,
+            "grace_seconds": grace,
+        })),
     )
     .await?;
 
@@ -411,18 +405,14 @@ pub async fn revoke_token(
     }
     emit_audit(
         &mut tx,
-        AuditEvent {
-            organization_id: &token_organization,
-            in_project: Some(&project_id),
-            actor: Actor::User(actor.as_str()),
-            action: AuditAction::Deleted,
-            resource_kind: TelmoniResourceKind::Token,
-            resource_id: Some(&token_id.to_string()),
-            request_id: None,
-            ip_address: None,
-            user_agent: None,
-            metadata: None,
-        },
+        AuditEvent::new(
+            &token_organization,
+            Actor::User(actor.as_str()),
+            AuditAction::Deleted,
+            TelmoniResourceKind::Token,
+        )
+        .in_project(&project_id)
+        .on(&token_id.to_string()),
     )
     .await?;
     tx.commit().await?;

@@ -269,22 +269,18 @@ pub async fn offer(
     }
     emit_audit(
         &mut tx,
-        AuditEvent {
-            organization_id: &organization,
-            in_project: None,
-            actor: Actor::User(user_id.as_str()),
-            action: AuditAction::Updated,
-            resource_kind: TelmoniResourceKind::Organization,
-            resource_id: Some(organization.as_str()),
-            request_id: None,
-            ip_address: None,
-            user_agent: None,
-            metadata: Some(json!({
-                "kind": AuditKind::OwnershipOffered,
-                "to": target.as_str(),
-                "replaces": replaced.as_ref().map(UserId::as_str),
-            })),
-        },
+        AuditEvent::new(
+            &organization,
+            Actor::User(user_id.as_str()),
+            AuditAction::Updated,
+            TelmoniResourceKind::Organization,
+        )
+        .on(organization.as_str())
+        .details(json!({
+            "kind": AuditKind::OwnershipOffered,
+            "to": target.as_str(),
+            "replaces": replaced.as_ref().map(UserId::as_str),
+        })),
     )
     .await?;
 
@@ -380,21 +376,17 @@ pub async fn cancel(
     organization_members::clear_offers(&mut tx, &organization).await?;
     emit_audit(
         &mut tx,
-        AuditEvent {
-            organization_id: &organization,
-            in_project: None,
-            actor: Actor::User(user_id.as_str()),
-            action: AuditAction::Updated,
-            resource_kind: TelmoniResourceKind::Organization,
-            resource_id: Some(organization.as_str()),
-            request_id: None,
-            ip_address: None,
-            user_agent: None,
-            metadata: Some(json!({
-                "kind": AuditKind::OwnershipOfferCancelled,
-                "to": holder.as_str(),
-            })),
-        },
+        AuditEvent::new(
+            &organization,
+            Actor::User(user_id.as_str()),
+            AuditAction::Updated,
+            TelmoniResourceKind::Organization,
+        )
+        .on(organization.as_str())
+        .details(json!({
+            "kind": AuditKind::OwnershipOfferCancelled,
+            "to": holder.as_str(),
+        })),
     )
     .await?;
     let holder_email = identities::contact(&mut tx, &holder)
@@ -440,18 +432,14 @@ pub async fn decline(
     }
     emit_audit(
         &mut tx,
-        AuditEvent {
-            organization_id: &organization,
-            in_project: None,
-            actor: Actor::User(user_id.as_str()),
-            action: AuditAction::Updated,
-            resource_kind: TelmoniResourceKind::Organization,
-            resource_id: Some(organization.as_str()),
-            request_id: None,
-            ip_address: None,
-            user_agent: None,
-            metadata: Some(json!({ "kind": AuditKind::OwnershipOfferDeclined })),
-        },
+        AuditEvent::new(
+            &organization,
+            Actor::User(user_id.as_str()),
+            AuditAction::Updated,
+            TelmoniResourceKind::Organization,
+        )
+        .on(organization.as_str())
+        .details(json!({ "kind": AuditKind::OwnershipOfferDeclined })),
     )
     .await?;
     let owner = match organization_members::owner_of(&mut tx, &organization).await? {
@@ -546,22 +534,18 @@ pub async fn accept(
     }
     emit_audit(
         &mut tx,
-        AuditEvent {
-            organization_id: &organization,
-            in_project: None,
-            actor: Actor::User(user_id.as_str()),
-            action: AuditAction::Updated,
-            resource_kind: TelmoniResourceKind::Organization,
-            resource_id: Some(organization.as_str()),
-            request_id: None,
-            ip_address: None,
-            user_agent: None,
-            metadata: Some(json!({
-                "kind": AuditKind::OwnershipTransferred,
-                "from": previous.as_ref().map(UserId::as_str),
-                "to": user_id.as_str(),
-            })),
-        },
+        AuditEvent::new(
+            &organization,
+            Actor::User(user_id.as_str()),
+            AuditAction::Updated,
+            TelmoniResourceKind::Organization,
+        )
+        .on(organization.as_str())
+        .details(json!({
+            "kind": AuditKind::OwnershipTransferred,
+            "from": previous.as_ref().map(UserId::as_str),
+            "to": user_id.as_str(),
+        })),
     )
     .await?;
 
@@ -577,21 +561,18 @@ pub async fn accept(
         if members::remove(&mut ptx, &seat.project_id, &user_id).await? {
             emit_audit(
                 &mut ptx,
-                AuditEvent {
-                    organization_id: &organization,
-                    in_project: Some(&seat.project_id),
-                    actor: Actor::User(user_id.as_str()),
-                    action: AuditAction::Deleted,
-                    resource_kind: TelmoniResourceKind::Member,
-                    resource_id: Some(user_id.as_str()),
-                    request_id: None,
-                    ip_address: None,
-                    user_agent: None,
-                    metadata: Some(json!({
-                        "kind": AuditKind::SeatFoldedIntoOwnership,
-                        "role": seat.role,
-                    })),
-                },
+                AuditEvent::new(
+                    &organization,
+                    Actor::User(user_id.as_str()),
+                    AuditAction::Deleted,
+                    TelmoniResourceKind::Member,
+                )
+                .in_project(&seat.project_id)
+                .on(user_id.as_str())
+                .details(json!({
+                    "kind": AuditKind::SeatFoldedIntoOwnership,
+                    "role": seat.role,
+                })),
             )
             .await?;
         }

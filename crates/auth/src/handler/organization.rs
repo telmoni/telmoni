@@ -181,23 +181,19 @@ pub async fn delete_organization(
     };
     emit_audit(
         &mut tx,
-        AuditEvent {
-            organization_id: &organization,
-            in_project: None,
-            actor: Actor::User(user_id.as_str()),
-            action: AuditAction::Updated,
-            resource_kind: TelmoniResourceKind::Organization,
-            resource_id: Some(organization.as_str()),
-            request_id: None,
-            ip_address: None,
-            user_agent: None,
-            metadata: Some(deletion_metadata(
-                "requested",
-                DeletionKind::Owner,
-                erase_after,
-                None,
-            )),
-        },
+        AuditEvent::new(
+            &organization,
+            Actor::User(user_id.as_str()),
+            AuditAction::Updated,
+            TelmoniResourceKind::Organization,
+        )
+        .on(organization.as_str())
+        .details(deletion_metadata(
+            "requested",
+            DeletionKind::Owner,
+            erase_after,
+            None,
+        )),
     )
     .await?;
     tx.commit().await?;
@@ -516,37 +512,29 @@ pub(crate) async fn found_organization(
     organization_members::insert_owner(&mut tx, &organization, founder).await?;
     emit_audit(
         &mut tx,
-        AuditEvent {
-            organization_id: &organization,
-            in_project: None,
-            actor: Actor::User(founder.as_str()),
-            action: AuditAction::Created,
-            resource_kind: TelmoniResourceKind::Organization,
-            resource_id: Some(organization.as_str()),
-            request_id: None,
-            ip_address: None,
-            user_agent: None,
-            metadata: Some(json!({ "kind": founding.kind() })),
-        },
+        AuditEvent::new(
+            &organization,
+            Actor::User(founder.as_str()),
+            AuditAction::Created,
+            TelmoniResourceKind::Organization,
+        )
+        .on(organization.as_str())
+        .details(json!({ "kind": founding.kind() })),
     )
     .await?;
     emit_audit(
         &mut tx,
-        AuditEvent {
-            organization_id: &organization,
-            in_project: None,
-            actor: Actor::User(founder.as_str()),
-            action: AuditAction::Created,
-            resource_kind: TelmoniResourceKind::Member,
-            resource_id: Some(founder.as_str()),
-            request_id: None,
-            ip_address: None,
-            user_agent: None,
-            metadata: Some(json!({
-                "kind": founding.kind(),
-                "role": OrganizationRole::Owner,
-            })),
-        },
+        AuditEvent::new(
+            &organization,
+            Actor::User(founder.as_str()),
+            AuditAction::Created,
+            TelmoniResourceKind::Member,
+        )
+        .on(founder.as_str())
+        .details(json!({
+            "kind": founding.kind(),
+            "role": OrganizationRole::Owner,
+        })),
     )
     .await?;
     tx.commit().await?;
@@ -613,18 +601,14 @@ pub async fn update_organization(
 
     emit_audit(
         &mut tx,
-        AuditEvent {
-            organization_id: &organization,
-            in_project: None,
-            actor: Actor::User(actor.as_str()),
-            action: AuditAction::Updated,
-            resource_kind: TelmoniResourceKind::Organization,
-            resource_id: Some(organization.as_str()),
-            request_id: None,
-            ip_address: None,
-            user_agent: None,
-            metadata: Some(json!({ "name": now.name, "slug": now.slug })),
-        },
+        AuditEvent::new(
+            &organization,
+            Actor::User(actor.as_str()),
+            AuditAction::Updated,
+            TelmoniResourceKind::Organization,
+        )
+        .on(organization.as_str())
+        .details(json!({ "name": now.name, "slug": now.slug })),
     )
     .await?;
 

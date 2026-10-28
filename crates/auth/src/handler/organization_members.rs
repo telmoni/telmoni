@@ -129,21 +129,17 @@ pub async fn update_organization_member_role(
 
     emit_audit(
         &mut tx,
-        AuditEvent {
-            organization_id: &organization,
-            in_project: None,
-            actor: Actor::User(actor.as_str()),
-            action: AuditAction::Updated,
-            resource_kind: TelmoniResourceKind::Member,
-            resource_id: Some(member_id.as_str()),
-            request_id: None,
-            ip_address: None,
-            user_agent: None,
-            metadata: Some(json!({
-                "role": role,
-                "scope": InviteScope::Organization,
-            })),
-        },
+        AuditEvent::new(
+            &organization,
+            Actor::User(actor.as_str()),
+            AuditAction::Updated,
+            TelmoniResourceKind::Member,
+        )
+        .on(member_id.as_str())
+        .details(json!({
+            "role": role,
+            "scope": InviteScope::Organization,
+        })),
     )
     .await?;
     tx.commit().await?;
@@ -206,21 +202,17 @@ pub async fn remove_organization_member(
 
     emit_audit(
         &mut tx,
-        AuditEvent {
-            organization_id: &organization,
-            in_project: None,
-            actor: Actor::User(actor.as_str()),
-            action: AuditAction::Deleted,
-            resource_kind: TelmoniResourceKind::Member,
-            resource_id: Some(member_id.as_str()),
-            request_id: None,
-            ip_address: None,
-            user_agent: None,
-            metadata: Some(json!({
-                "scope": InviteScope::Organization,
-                "kind": if leaving { AuditKind::Left } else { AuditKind::Removed },
-            })),
-        },
+        AuditEvent::new(
+            &organization,
+            Actor::User(actor.as_str()),
+            AuditAction::Deleted,
+            TelmoniResourceKind::Member,
+        )
+        .on(member_id.as_str())
+        .details(json!({
+            "scope": InviteScope::Organization,
+            "kind": if leaving { AuditKind::Left } else { AuditKind::Removed },
+        })),
     )
     .await?;
 
@@ -230,21 +222,18 @@ pub async fn remove_organization_member(
         }
         emit_audit(
             &mut tx,
-            AuditEvent {
-                organization_id: &organization,
-                in_project: Some(&pm.project_id),
-                actor: Actor::User(actor.as_str()),
-                action: AuditAction::Deleted,
-                resource_kind: TelmoniResourceKind::Member,
-                resource_id: Some(member_id.as_str()),
-                request_id: None,
-                ip_address: None,
-                user_agent: None,
-                metadata: Some(json!({
-                    "kind": AuditKind::OrganizationRemovalCascade,
-                    "role": pm.role,
-                })),
-            },
+            AuditEvent::new(
+                &organization,
+                Actor::User(actor.as_str()),
+                AuditAction::Deleted,
+                TelmoniResourceKind::Member,
+            )
+            .in_project(&pm.project_id)
+            .on(member_id.as_str())
+            .details(json!({
+                "kind": AuditKind::OrganizationRemovalCascade,
+                "role": pm.role,
+            })),
         )
         .await?;
     }
@@ -360,22 +349,18 @@ pub async fn create_organization_invite(
 
     emit_audit(
         &mut tx,
-        AuditEvent {
-            organization_id: &organization,
-            in_project: None,
-            actor: Actor::User(actor.as_str()),
-            action: AuditAction::Created,
-            resource_kind: TelmoniResourceKind::Member,
-            resource_id: Some(invite_id.to_string().as_str()),
-            request_id: None,
-            ip_address: None,
-            user_agent: None,
-            metadata: Some(json!({
-                "email": email,
-                "role": role,
-                "scope": InviteScope::Organization,
-            })),
-        },
+        AuditEvent::new(
+            &organization,
+            Actor::User(actor.as_str()),
+            AuditAction::Created,
+            TelmoniResourceKind::Member,
+        )
+        .on(invite_id.to_string().as_str())
+        .details(json!({
+            "email": email,
+            "role": role,
+            "scope": InviteScope::Organization,
+        })),
     )
     .await?;
     // Who is inviting, and into what, for the mail — read here, where the
@@ -448,21 +433,17 @@ pub async fn revoke_organization_invite(
 
     emit_audit(
         &mut tx,
-        AuditEvent {
-            organization_id: &organization,
-            in_project: None,
-            actor: Actor::User(actor.as_str()),
-            action: AuditAction::Deleted,
-            resource_kind: TelmoniResourceKind::Member,
-            resource_id: Some(invite_id.to_string().as_str()),
-            request_id: None,
-            ip_address: None,
-            user_agent: None,
-            metadata: Some(json!({
-                "kind": AuditKind::OrganizationInviteRevoked,
-                "scope": InviteScope::Organization,
-            })),
-        },
+        AuditEvent::new(
+            &organization,
+            Actor::User(actor.as_str()),
+            AuditAction::Deleted,
+            TelmoniResourceKind::Member,
+        )
+        .on(invite_id.to_string().as_str())
+        .details(json!({
+            "kind": AuditKind::OrganizationInviteRevoked,
+            "scope": InviteScope::Organization,
+        })),
     )
     .await?;
     tx.commit().await?;

@@ -17,7 +17,7 @@ use serde_json::json;
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
 use telmoni_shared::db::tenant_session::{maintenance_scope, project_scope};
 use telmoni_shared::envelope::{KEK_VERSION, Kek, KekError, Sealed};
-use telmoni_shared::extract::{Json, correlation_id};
+use telmoni_shared::extract::Json;
 use telmoni_shared::rbac::{Resource, Verb};
 use telmoni_shared::{
     AuditAction, AuthError, NotificationKind, OrganizationId, ParseEnumError, ProjectId, Redacted,
@@ -250,7 +250,6 @@ pub async fn callback(
     let provider = provider_of(&provider)?;
     let grant = grant_for(&state, provider)?;
     let kek = kek_for(&state)?;
-    let request_id = correlation_id(&headers);
 
     consume_verified_oauth_state(&state, &identity, provider, &req.state).await?;
 
@@ -292,26 +291,25 @@ pub async fn callback(
     };
     // A refusal past the exchange leaves the app installed with its token held by
     // nobody: its uninstall is filed as a delete's is, for the settle to decide.
-    let (summary, notices) =
-        match connect_installed(&state, &identity, &row, existing, request_id).await {
-            Ok(connected) => connected,
-            Err(refused) => {
-                file_refused_install(
-                    &state,
-                    RefusedInstall {
-                        id,
-                        project_id: identity.project_id.clone(),
-                        organization_id: identity.organization_id.clone(),
-                        user_id: identity.user_id.clone(),
-                        provider,
-                        installed,
-                        creds,
-                        reconnect: existing.is_some(),
-                    },
-                );
-                return Err(refused);
-            }
-        };
+    let (summary, notices) = match connect_installed(&state, &identity, &row, existing).await {
+        Ok(connected) => connected,
+        Err(refused) => {
+            file_refused_install(
+                &state,
+                RefusedInstall {
+                    id,
+                    project_id: identity.project_id.clone(),
+                    organization_id: identity.organization_id.clone(),
+                    user_id: identity.user_id.clone(),
+                    provider,
+                    installed,
+                    creds,
+                    reconnect: existing.is_some(),
+                },
+            );
+            return Err(refused);
+        }
+    };
     tracing::info!(
         connection_id = %summary.id,
         project_id = %identity.project_id,
@@ -415,7 +413,6 @@ async fn connect_installed(
     identity: &ProjectIdentity,
     row: &db::NewConnection<'_>,
     existing: Option<Uuid>,
-    request_id: Option<&str>,
 ) -> Result<(db::ConnectionSummary, Vec<Uuid>), TelmoniError> {
     let provider = row.provider;
     let mut tx = project_scope(&state.db, &identity.project_id)
@@ -448,23 +445,20 @@ async fn connect_installed(
     };
     emit_audit(
         &mut tx,
-        AuditEvent {
-            organization_id: &identity.organization_id,
-            in_project: Some(&identity.project_id),
-            actor: Actor::User(identity.user_id.as_str()),
-            action: AuditAction::Created,
-            resource_kind: TelmoniResourceKind::Connector,
-            resource_id: Some(&summary.id.to_string()),
-            request_id,
-            ip_address: None,
-            user_agent: None,
-            metadata: Some(json!({
-                "provider": provider.as_str(),
-                "workspace": row.external_workspace_id,
-                "channel": row.channel_name,
-                "reconnect": existing.is_some(),
-            })),
-        },
+        AuditEvent::new(
+            &identity.organization_id,
+            Actor::User(identity.user_id.as_str()),
+            AuditAction::Created,
+            TelmoniResourceKind::Connector,
+        )
+        .in_project(&identity.project_id)
+        .on(&summary.id.to_string())
+        .details(json!({
+            "provider": provider.as_str(),
+            "workspace": row.external_workspace_id,
+            "channel": row.channel_name,
+            "reconnect": existing.is_some(),
+        })),
     )
     .await?;
     let notices = notify::connector_connected(
@@ -536,7 +530,6 @@ pub async fn create_webhook(
     connector_for(&state, Provider::Webhook)?;
     let kek = kek_for(&state)?;
     require_flag(&state).await?;
-    let request_id = correlation_id(&headers);
 
     let url = webhook::validate_endpoint_url(&req.url).map_err(AuthError::BadRequest)?;
     let event_kinds = event_kinds_column(req.event_kinds)?;
@@ -615,23 +608,20 @@ pub async fn create_webhook(
     let summary = db::insert_connection(&mut tx, &row).await?;
     emit_audit(
         &mut tx,
-        AuditEvent {
-            organization_id: &identity.organization_id,
-            in_project: Some(&identity.project_id),
-            actor: Actor::User(identity.user_id.as_str()),
-            action: AuditAction::Created,
-            resource_kind: TelmoniResourceKind::Connector,
-            resource_id: Some(&summary.id.to_string()),
-            request_id,
-            ip_address: None,
-            user_agent: None,
-            metadata: Some(json!({
-                "provider": Provider::Webhook.as_str(),
-                "host": host,
-                "fingerprint": fingerprint,
-                "event_kinds": event_kinds,
-            })),
-        },
+        AuditEvent::new(
+            &identity.organization_id,
+            Actor::User(identity.user_id.as_str()),
+            AuditAction::Created,
+            TelmoniResourceKind::Connector,
+        )
+        .in_project(&identity.project_id)
+        .on(&summary.id.to_string())
+        .details(json!({
+            "provider": Provider::Webhook.as_str(),
+            "host": host,
+            "fingerprint": fingerprint,
+            "event_kinds": event_kinds,
+        })),
     )
     .await?;
     let notices = notify::connector_connected(
@@ -682,7 +672,6 @@ pub async fn rotate_webhook_secret(
 ) -> Result<impl IntoResponse, TelmoniError> {
     let identity = authorize(&state, &headers, Verb::Update, Resource::Connector).await?;
     let kek = kek_for(&state)?;
-    let request_id = correlation_id(&headers);
     if req.keep_previous_for_hours > MAX_OVERLAP_HOURS {
         return Err(AuthError::BadRequest(format!(
             "the previous secret can keep working for at most {MAX_OVERLAP_HOURS} hours"
@@ -748,23 +737,20 @@ pub async fn rotate_webhook_secret(
     };
     emit_audit(
         &mut tx,
-        AuditEvent {
-            organization_id: &identity.organization_id,
-            in_project: Some(&identity.project_id),
-            actor: Actor::User(identity.user_id.as_str()),
-            action: AuditAction::Updated,
-            resource_kind: TelmoniResourceKind::Connector,
-            resource_id: Some(&id.to_string()),
-            request_id,
-            ip_address: None,
-            user_agent: None,
-            metadata: Some(json!({
-                "provider": Provider::Webhook.as_str(),
-                "host": sealed.external_workspace_id,
-                "rotated": "signing_secret",
-                "previous_kept_for_hours": req.keep_previous_for_hours,
-            })),
-        },
+        AuditEvent::new(
+            &identity.organization_id,
+            Actor::User(identity.user_id.as_str()),
+            AuditAction::Updated,
+            TelmoniResourceKind::Connector,
+        )
+        .in_project(&identity.project_id)
+        .on(&id.to_string())
+        .details(json!({
+            "provider": Provider::Webhook.as_str(),
+            "host": sealed.external_workspace_id,
+            "rotated": "signing_secret",
+            "previous_kept_for_hours": req.keep_previous_for_hours,
+        })),
     )
     .await?;
     tx.commit().await?;
@@ -811,7 +797,6 @@ pub async fn delete_connector(
     headers: HeaderMap,
 ) -> Result<impl IntoResponse, TelmoniError> {
     let identity = authorize(&state, &headers, Verb::Delete, Resource::Connector).await?;
-    let request_id = correlation_id(&headers);
 
     let mut tx = project_scope(&state.db, &identity.project_id).await?;
     super::lock_audit_chain(&mut tx, &identity.organization_id).await?;
@@ -821,22 +806,19 @@ pub async fn delete_connector(
     let filed = uninstall::file(&mut tx, std::slice::from_ref(&sealed)).await?;
     emit_audit(
         &mut tx,
-        AuditEvent {
-            organization_id: &identity.organization_id,
-            in_project: Some(&identity.project_id),
-            actor: Actor::User(identity.user_id.as_str()),
-            action: AuditAction::Deleted,
-            resource_kind: TelmoniResourceKind::Connector,
-            resource_id: Some(&id.to_string()),
-            request_id,
-            ip_address: None,
-            user_agent: None,
-            metadata: Some(json!({
-                "provider": sealed.provider,
-                "workspace": sealed.external_workspace_id,
-                "channel": sealed.channel_name,
-            })),
-        },
+        AuditEvent::new(
+            &identity.organization_id,
+            Actor::User(identity.user_id.as_str()),
+            AuditAction::Deleted,
+            TelmoniResourceKind::Connector,
+        )
+        .in_project(&identity.project_id)
+        .on(&id.to_string())
+        .details(json!({
+            "provider": sealed.provider,
+            "workspace": sealed.external_workspace_id,
+            "channel": sealed.channel_name,
+        })),
     )
     .await?;
     tx.commit().await?;
@@ -946,7 +928,6 @@ pub async fn update_webhook_events(
     Json(req): Json<EventKindsRequest>,
 ) -> Result<impl IntoResponse, TelmoniError> {
     let identity = authorize(&state, &headers, Verb::Update, Resource::Connector).await?;
-    let request_id = correlation_id(&headers);
     let event_kinds = event_kinds_column(req.event_kinds)?;
 
     let mut tx = project_scope(&state.db, &identity.project_id)
@@ -964,22 +945,19 @@ pub async fn update_webhook_events(
     };
     emit_audit(
         &mut tx,
-        AuditEvent {
-            organization_id: &identity.organization_id,
-            in_project: Some(&identity.project_id),
-            actor: Actor::User(identity.user_id.as_str()),
-            action: AuditAction::Updated,
-            resource_kind: TelmoniResourceKind::Connector,
-            resource_id: Some(&id.to_string()),
-            request_id,
-            ip_address: None,
-            user_agent: None,
-            metadata: Some(json!({
-                "provider": Provider::Webhook.as_str(),
-                "host": summary.external_workspace_id,
-                "event_kinds": event_kinds,
-            })),
-        },
+        AuditEvent::new(
+            &identity.organization_id,
+            Actor::User(identity.user_id.as_str()),
+            AuditAction::Updated,
+            TelmoniResourceKind::Connector,
+        )
+        .in_project(&identity.project_id)
+        .on(&id.to_string())
+        .details(json!({
+            "provider": Provider::Webhook.as_str(),
+            "host": summary.external_workspace_id,
+            "event_kinds": event_kinds,
+        })),
     )
     .await?;
     tx.commit().await?;
@@ -1156,7 +1134,6 @@ async fn record_redelivery_outcome(
     claim: &db::Claimed,
     sealed: &db::SealedConnection,
     sent: &delivery::Sent,
-    request_id: Option<&str>,
 ) -> Result<Option<String>, TelmoniError> {
     let delivery = &claim.delivery;
     let attempt = sent.attempt(delivery.id, db::AttemptTrigger::Manual);
@@ -1177,24 +1154,21 @@ async fn record_redelivery_outcome(
     }
     emit_audit(
         &mut tx,
-        AuditEvent {
-            organization_id: &identity.organization_id,
-            in_project: Some(&identity.project_id),
-            actor: Actor::User(identity.user_id.as_str()),
-            action: AuditAction::Updated,
-            resource_kind: TelmoniResourceKind::Connector,
-            resource_id: Some(&id.to_string()),
-            request_id,
-            ip_address: None,
-            user_agent: None,
-            metadata: Some(json!({
-                "provider": sealed.provider,
-                "resent": delivery.id,
-                "kind": delivery.kind,
-                "delivered": error.is_none(),
-                "status_code": attempt.status_code,
-            })),
-        },
+        AuditEvent::new(
+            &identity.organization_id,
+            Actor::User(identity.user_id.as_str()),
+            AuditAction::Updated,
+            TelmoniResourceKind::Connector,
+        )
+        .in_project(&identity.project_id)
+        .on(&id.to_string())
+        .details(json!({
+            "provider": sealed.provider,
+            "resent": delivery.id,
+            "kind": delivery.kind,
+            "delivered": error.is_none(),
+            "status_code": attempt.status_code,
+        })),
     )
     .await?;
     tx.commit().await?;
@@ -1219,7 +1193,6 @@ pub async fn redeliver(
     headers: HeaderMap,
 ) -> Result<impl IntoResponse, TelmoniError> {
     let identity = authorize(&state, &headers, Verb::Update, Resource::Connector).await?;
-    let request_id = correlation_id(&headers);
 
     let (sealed, claim) =
         claim_webhook_for_redelivery(&state, &identity.project_id, id, delivery_id).await?;
@@ -1231,9 +1204,7 @@ pub async fn redeliver(
         }
     };
 
-    let error =
-        record_redelivery_outcome(&state, &identity, id, &claim, &sealed, &sent, request_id)
-            .await?;
+    let error = record_redelivery_outcome(&state, &identity, id, &claim, &sealed, &sent).await?;
 
     Ok(Json(
         json!({ "delivered": error.is_none(), "error": error }),

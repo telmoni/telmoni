@@ -137,22 +137,17 @@ async fn revoke_workspace(
             .map_err(|e| TelmoniError::Internal(format!("stored organization id: {e}")))?;
         emit_audit(
             &mut tx,
-            AuditEvent {
-                organization_id: &organization_id,
-                in_project: None,
-                actor: Actor::External("slack"),
-                action: AuditAction::Updated,
-                resource_kind: TelmoniResourceKind::Connector,
-                resource_id: None,
-                request_id: None,
-                ip_address: None,
-                user_agent: None,
-                metadata: Some(json!({
-                    "event": event_type,
-                    "workspace": workspace,
-                    "revoked": ids,
-                })),
-            },
+            AuditEvent::new(
+                &organization_id,
+                Actor::External("slack"),
+                AuditAction::Updated,
+                TelmoniResourceKind::Connector,
+            )
+            .details(json!({
+                "event": event_type,
+                "workspace": workspace,
+                "revoked": ids,
+            })),
         )
         .await?;
     }

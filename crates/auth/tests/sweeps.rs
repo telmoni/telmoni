@@ -380,19 +380,14 @@ async fn the_audit_walk_reports_a_forged_chain_and_verifies_the_rest(pool: PgPoo
         for n in 0..3 {
             telmoni_shared::audit::emit_audit(
                 &mut tx,
-                telmoni_shared::audit::AuditEvent {
-                    organization_id: &telmoni_shared::OrganizationId::try_new(organization)
-                        .unwrap(),
-                    in_project: None,
-                    actor: telmoni_shared::audit::Actor::Service("test"),
-                    action: telmoni_shared::AuditAction::Updated,
-                    resource_kind: telmoni_shared::TelmoniResourceKind::Organization,
-                    resource_id: Some(organization),
-                    request_id: None,
-                    ip_address: None,
-                    user_agent: None,
-                    metadata: Some(serde_json::json!({ "n": n })),
-                },
+                telmoni_shared::audit::AuditEvent::new(
+                    &telmoni_shared::OrganizationId::try_new(organization).unwrap(),
+                    telmoni_shared::audit::Actor::Service("test"),
+                    telmoni_shared::AuditAction::Updated,
+                    telmoni_shared::TelmoniResourceKind::Organization,
+                )
+                .on(organization)
+                .details(serde_json::json!({ "n": n })),
             )
             .await
             .unwrap();
