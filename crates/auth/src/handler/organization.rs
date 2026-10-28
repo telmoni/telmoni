@@ -13,14 +13,14 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
 };
-use chrono::{Duration, Utc};
+use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use telmoni_shared::OrganizationAction;
 use telmoni_shared::extract::Json;
 use telmoni_shared::person_token::Principal;
-use telmoni_shared::seam::{FoundedOrganization, OrganizationFounding, OwnershipChange};
+use telmoni_shared::seam::{Closing, FoundedOrganization, OrganizationFounding, OwnershipChange};
 use telmoni_shared::{
     AuthError, Flag, OrganizationId, OrganizationRole, TelmoniError, TenantError, UserId,
 };
@@ -31,7 +31,7 @@ use crate::{
     db::{
         AuthLane,
         confirmation_codes::{self, Act, Purpose},
-        flags, identities, locks, organization_members, organizations,
+        flags, identities, locks, organization_members, organizations, projects,
     },
     handler::{
         ActingOrganization,
@@ -46,7 +46,9 @@ use crate::{
 };
 use telmoni_shared::AuthzError;
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
-use telmoni_shared::db::tenant_session::{self, Scoped, maintenance_scope, person_scope};
+use telmoni_shared::db::tenant_session::{
+    self, PersonAndOrganization, Scoped, maintenance_scope, person_scope,
+};
 use telmoni_shared::slug::{self, Slug};
 use telmoni_shared::{AuditAction, TelmoniResourceKind};
 
@@ -129,16 +131,26 @@ pub async fn delete_organization(
     Json(req): Json<DeletionRequest>,
 ) -> Result<impl IntoResponse, TelmoniError> {
     let organization = organization_of(&headers)?;
-    let user_id = principal.user_id;
+    let tx = open_deletion(&state, &principal.user_id, &organization).await?;
+    let erase_after = spend_code(tx, &principal.user_id, &organization, &req.code).await?;
+    Ok(crate::handler::deletion::deletion_response(&state, &organization, erase_after).await)
+}
 
+/// A deletion's transaction, under the organization's lock, once `user_id` is
+/// read again there as the one who may delete it.
+async fn open_deletion<'a>(
+    state: &'a AppState,
+    user_id: &UserId,
+    organization: &OrganizationId,
+) -> Result<Scoped<'a, PersonAndOrganization>, TelmoniError> {
     // Both keys bound: the person's for their code, the organization's for its
     // roster, its projects and its audit chain.
-    let tx = person_scope(&state.db, &user_id).await?;
-    let mut tx = tx.bind_organization(&organization).await?;
+    let tx = person_scope(&state.db, user_id).await?;
+    let mut tx = tx.bind_organization(organization).await?;
     // Membership before the lock, so a stranger naming any organization's id
     // cannot queue on its lock holding a pooled connection; the owner is then
     // read again under it.
-    if organization_members::role_on_organization(&mut tx, &organization, &user_id)
+    if organization_members::role_on_organization(&mut tx, organization, user_id)
         .await?
         .is_none()
     {
@@ -146,27 +158,37 @@ pub async fn delete_organization(
             AuthzError::Forbidden("you are not a member of this organization".into()).into(),
         );
     }
-    locks::lock_organization(&mut tx, &organization).await?;
-    let role = organization_role_or_forbidden(&mut tx, &organization, &user_id).await?;
+    locks::lock_organization(&mut tx, organization).await?;
+    let role = organization_role_or_forbidden(&mut tx, organization, user_id).await?;
     authorize_organization(role, OrganizationAction::Delete)?;
+    Ok(tx)
+}
 
+/// Spend `code` on the organization's deletion and mark it, answering when
+/// the row goes. A wrong code is counted, and changes nothing else.
+async fn spend_code(
+    mut tx: Scoped<'_, PersonAndOrganization>,
+    user_id: &UserId,
+    organization: &OrganizationId,
+    code: &str,
+) -> Result<DateTime<Utc>, TelmoniError> {
     let Some(code_id) = confirmation_codes::find_live(
         &mut tx,
-        &user_id,
-        Act::OrganizationDeletion(&organization),
-        &confirmation_codes::hash_code(req.code.trim()),
+        user_id,
+        Act::OrganizationDeletion(organization),
+        &confirmation_codes::hash_code(code.trim()),
     )
     .await?
     else {
         let burned =
-            confirmation_codes::register_failure(&mut tx, &user_id, Purpose::OrganizationDeletion)
+            confirmation_codes::register_failure(&mut tx, user_id, Purpose::OrganizationDeletion)
                 .await?;
         tx.commit().await?;
         return Err(wrong_code(burned));
     };
     confirmation_codes::consume(&mut tx, code_id).await?;
 
-    let Some(erase_after) = request_deletion(&mut tx, &organization, DeletionKind::Owner).await?
+    let Some(erase_after) = request_deletion(&mut tx, organization, DeletionKind::Owner).await?
     else {
         // The role check above refused anything but an active organization,
         // under the same lock this still holds.
@@ -177,7 +199,7 @@ pub async fn delete_organization(
     emit_audit(
         &mut tx,
         AuditEvent::new(
-            &organization,
+            organization,
             Actor::User(user_id.as_str()),
             AuditAction::Updated,
             TelmoniResourceKind::Organization,
@@ -195,7 +217,28 @@ pub async fn delete_organization(
 
     tracing::info!(organization_id = %organization, erase_after = %erase_after,
         "organization deletion requested");
-    Ok(crate::handler::deletion::deletion_response(&state, &organization, erase_after).await)
+    Ok(erase_after)
+}
+
+/// [`delete_organization`] for a deployment's seam, unless a project is in
+/// the organization: counted under the lock a project made or landing there
+/// takes, and before the code is read, so the code stays good for the next
+/// try. Its tail runs inline as the lane runs it; the sweep finishes a purge
+/// that does not land.
+pub(crate) async fn close_if_empty(
+    state: &AppState,
+    user_id: &UserId,
+    organization: &OrganizationId,
+    code: &str,
+) -> Result<Closing, TelmoniError> {
+    let mut tx = open_deletion(state, user_id, organization).await?;
+    if projects::count_in(&mut tx, organization).await? > 0 {
+        tx.rollback().await?;
+        return Ok(Closing::Holding);
+    }
+    spend_code(tx, user_id, organization, code).await?;
+    crate::handler::deletion::run_inline_tail(state, organization).await;
+    Ok(Closing::Closed)
 }
 
 /// Body of `POST /internal/v1/organizations`.

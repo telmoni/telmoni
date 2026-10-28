@@ -999,18 +999,32 @@ pub async fn move_project(
     principal: Principal,
     Json(req): Json<MoveRequest>,
 ) -> Result<impl IntoResponse, TelmoniError> {
-    let user_id = principal.user_id;
-    let destination = req.organization_id;
+    let moved = move_into(
+        &state,
+        &principal.user_id,
+        &project_id,
+        &req.organization_id,
+    )
+    .await?;
+    Ok(Json(moved))
+}
 
+/// [`move_project`] for `user_id`, which the deployment's seam calls too.
+pub(crate) async fn move_into(
+    state: &AppState,
+    user_id: &UserId,
+    project_id: &ProjectId,
+    destination: &OrganizationId,
+) -> Result<ProjectMoved, TelmoniError> {
     let mut tx = maintenance_scope(&state.db, AuthLane).await?;
 
     // Ownership before any lock: the project's id arrives from the caller,
     // and a stranger must not stand in a queue holding a pooled connection.
-    let Some(standing) = projects::standing(&mut tx, &project_id).await? else {
+    let Some(standing) = projects::standing(&mut tx, project_id).await? else {
         return Err(AuthError::NotFound("project not found".into()).into());
     };
     let source = standing.organization_id.clone();
-    if organization_members::role_on_organization(&mut tx, &source, &user_id).await?
+    if organization_members::role_on_organization(&mut tx, &source, user_id).await?
         != Some(OrganizationRole::Owner)
     {
         return Err(AuthzError::Forbidden(
@@ -1018,14 +1032,14 @@ pub async fn move_project(
         )
         .into());
     }
-    if destination == source {
+    if *destination == source {
         return Err(TelmoniError::BadRequest(
             "the project is already in that organization".into(),
         ));
     }
 
-    locks::lock_person(&mut tx, &user_id).await?;
-    let Some(person) = identities::get(&mut tx, &user_id).await? else {
+    locks::lock_person(&mut tx, user_id).await?;
+    let Some(person) = identities::get(&mut tx, user_id).await? else {
         return Err(AuthError::NotFound("sign in again to move this project".into()).into());
     };
     if person.deletion_requested_at.is_some() {
@@ -1034,25 +1048,25 @@ pub async fn move_project(
         )
         .into());
     }
-    let owned = organization_members::active_organizations_owned_by(&mut tx, &user_id).await?;
-    if !owned.contains(&destination) {
+    let owned = organization_members::active_organizations_owned_by(&mut tx, user_id).await?;
+    if !owned.contains(destination) {
         return Err(AuthzError::Forbidden(
             "you do not own that organization — a project moves only into one of yours".into(),
         )
         .into());
     }
 
-    lock_transfer_organizations(&mut tx, &source, &destination).await?;
+    lock_transfer_organizations(&mut tx, &source, destination).await?;
 
     // Under the locks, everything again.
     if organizations::status(&mut tx, &source).await? != Some(OrganizationStatus::Active) {
         return Err(AuthzError::Forbidden(BEING_DELETED.to_string()).into());
     }
-    if organizations::status(&mut tx, &destination).await? != Some(OrganizationStatus::Active) {
+    if organizations::status(&mut tx, destination).await? != Some(OrganizationStatus::Active) {
         return Err(AuthzError::Forbidden("that organization is being deleted".into()).into());
     }
-    for organization in [&source, &destination] {
-        if organization_members::role_on_organization(&mut tx, organization, &user_id).await?
+    for organization in [&source, destination] {
+        if organization_members::role_on_organization(&mut tx, organization, user_id).await?
             != Some(OrganizationRole::Owner)
         {
             return Err(AuthError::Conflict("you no longer own both organizations".into()).into());
@@ -1061,18 +1075,18 @@ pub async fn move_project(
 
     // An offer of the project to one of its admins was an offer to take it
     // out of the organization it is leaving.
-    offers::clear(&mut tx, Roster::Project(&project_id)).await?;
-    let landed = land(&mut tx, &project_id, &standing, &destination).await?;
-    let holders_enrolled = enrol(&mut tx, &destination, &landed.staying, &user_id).await?;
+    offers::clear(&mut tx, Roster::Project(project_id)).await?;
+    let landed = land(&mut tx, project_id, &standing, destination).await?;
+    let holders_enrolled = enrol(&mut tx, destination, &landed.staying, user_id).await?;
 
-    lock_for_audits(&mut tx, &project_id, &source, &destination).await?;
+    lock_for_audits(&mut tx, project_id, &source, destination).await?;
     emit_project_move_audits(
         &mut tx,
         MoveAudits {
             source: &source,
-            destination: &destination,
-            project_id: &project_id,
-            user_id: &user_id,
+            destination,
+            project_id,
+            user_id,
             project_name: &landed.name,
             renamed_from: landed.renamed_from(&standing),
             holders_enrolled: &holders_enrolled,
@@ -1080,7 +1094,7 @@ pub async fn move_project(
     )
     .await?;
 
-    move_purge_and_commit(&state, tx, &project_id, &source, &destination).await?;
+    move_purge_and_commit(state, tx, project_id, &source, destination).await?;
 
     tracing::info!(
         project_id = %project_id,
@@ -1088,14 +1102,14 @@ pub async fn move_project(
         to = %destination,
         "project moved"
     );
-    Ok(Json(ProjectMoved {
-        project_id,
+    Ok(ProjectMoved {
+        project_id: project_id.clone(),
         slug: landed.slug,
-        organization_id: destination,
+        organization_id: destination.clone(),
         organization_slug: landed.organization_slug,
         previous_organization_id: source,
         name: landed.name,
-    }))
+    })
 }
 
 struct MoveAudits<'a> {
@@ -1166,7 +1180,7 @@ async fn emit_project_move_audits(
 /// so the settling after finds its locks free; telemetry's settings are
 /// settled ([`SettleTelemetry`]) when any step fails.
 async fn move_purge_and_commit(
-    state: &Arc<AppState>,
+    state: &AppState,
     tx: Scoped<'_, Maintenance<AuthLane>>,
     project_id: &ProjectId,
     source: &OrganizationId,
@@ -1216,7 +1230,8 @@ async fn move_purge_and_commit(
 struct SettleTelemetry(Option<Settle>);
 
 struct Settle {
-    state: Arc<AppState>,
+    db: sqlx::PgPool,
+    telemetry: Arc<dyn telmoni_shared::seam::Telemetry>,
     project_id: ProjectId,
     source: OrganizationId,
     destination: OrganizationId,
@@ -1237,13 +1252,14 @@ const SETTLE_RETRIES: [std::time::Duration; 4] = [
 impl SettleTelemetry {
     /// Armed, unless no telemetry module holds settings to settle.
     fn arm(
-        state: &Arc<AppState>,
+        state: &AppState,
         project_id: &ProjectId,
         source: &OrganizationId,
         destination: &OrganizationId,
     ) -> Self {
-        Self(state.siblings.telemetry.is_some().then(|| Settle {
-            state: state.clone(),
+        Self(state.siblings.telemetry.clone().map(|telemetry| Settle {
+            db: state.db.clone(),
+            telemetry,
             project_id: project_id.clone(),
             source: source.clone(),
             destination: destination.clone(),
@@ -1302,7 +1318,7 @@ impl Settle {
     }
 
     async fn run(&self) -> Result<(), TelmoniError> {
-        let mut tx = maintenance_scope(&self.state.db, AuthLane).await?;
+        let mut tx = maintenance_scope(&self.db, AuthLane).await?;
         lock_transfer_organizations(&mut tx, &self.source, &self.destination).await?;
         // A project deleted since: its settings are its delete's to purge.
         let Some(standing) = projects::standing(&mut tx, &self.project_id).await? else {
@@ -1317,8 +1333,8 @@ impl Settle {
         // So that no export files the project's settings row beside the
         // move, under the organization the project is leaving.
         lock_project_for_move(&mut tx, &self.project_id).await?;
-        crate::handler::deletion::move_project_telemetry(
-            &self.state,
+        crate::handler::deletion::move_telemetry(
+            &*self.telemetry,
             &self.project_id,
             &standing.organization_id,
         )

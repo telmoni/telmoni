@@ -34,12 +34,16 @@ use telmoni_auth::test_provider::{
     SiblingCalls, as_person, bearer,
 };
 use telmoni_auth::{AppState, AuthProvider, Authenticated, Config, Siblings, router};
-use telmoni_shared::seam::Auth as _;
+use telmoni_shared::acting::Acting;
+use telmoni_shared::seam::{Auth as _, Closing};
 use telmoni_shared::test_util::{
     ServiceRole, apply_audit_migrations, chain_lock_held, holding_chain, seed_identity,
     service_pool, until_queued_on_advisory_locks,
 };
-use telmoni_shared::{AuthError, OrganizationId, OrganizationStatus, TelmoniError, UserId};
+use telmoni_shared::{
+    AuthError, OrganizationId, OrganizationRole, OrganizationStatus, ProjectId, TelmoniError,
+    UserId,
+};
 
 const SERVICE_SECRET: &str = "test-service-secret";
 /// The person deleting, and the owner of `ORGANIZATION`.
@@ -2657,6 +2661,80 @@ async fn the_standing_seam_answers_active_being_deleted_and_gone(pool: PgPool) {
             .unwrap();
         assert_eq!(answered, standing, "{organization}");
     }
+}
+
+/// The owner standing in `organization`, as a module's seam call carries them.
+fn owner_in(organization: &str) -> Acting {
+    Acting {
+        user_id: UserId::try_new(USER).unwrap(),
+        organization_id: oid(organization),
+        organization_role: Some(OrganizationRole::Owner),
+        project: None,
+        session_id: None,
+        expires_at: chrono::Utc::now().timestamp() + 60,
+    }
+}
+
+/// ⚠ **Empty, or kept.** A merge's close refuses while a project is left in
+/// the organization, its code neither spent nor counted, and closes it as its
+/// owner's deletion does once the merge's move has taken the last one out.
+#[sqlx::test]
+async fn a_merge_closes_the_organization_only_once_its_projects_have_moved(pool: PgPool) {
+    const INTO: &str = "org_merged_into";
+    seed_organization_deletion(&pool, "active").await;
+    seed_organization(&pool, INTO, USER, "active").await;
+    let (_, _provider, state) = app_and_state(pool.clone(), None, 8_000);
+    let acting = owner_in(ORGANIZATION);
+
+    assert_eq!(
+        state.close_if_empty(&acting, CODE).await.unwrap(),
+        Closing::Holding
+    );
+    assert_eq!(
+        org_status(&pool, ORGANIZATION).await.as_deref(),
+        Some("active")
+    );
+    let attempts: Vec<i32> = sqlx::query_scalar(
+        "SELECT attempts FROM auth.confirmation_codes
+          WHERE user_id = $1 AND consumed_at IS NULL",
+    )
+    .bind(USER)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(attempts, vec![0], "the refusal spent or counted the code");
+
+    let project = ProjectId::try_new(project_of(ORGANIZATION)).unwrap();
+    let moved = state
+        .move_project(&acting, &project, &oid(INTO))
+        .await
+        .unwrap();
+    let into_slug: String =
+        sqlx::query_scalar("SELECT slug FROM auth.organizations WHERE external_id = $1")
+            .bind(INTO)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(moved.project_id, project);
+    assert_eq!(moved.name, format!("Project {ORGANIZATION}"));
+    assert_eq!(
+        moved.organization_slug.as_ref().map(|slug| slug.as_str()),
+        Some(into_slug.as_str())
+    );
+
+    assert_eq!(
+        state.close_if_empty(&acting, CODE).await.unwrap(),
+        Closing::Closed
+    );
+    assert_eq!(
+        org_status(&pool, ORGANIZATION).await.as_deref(),
+        Some("pending_deletion")
+    );
+    assert_eq!(
+        wait_and_kind(&pool, ORGANIZATION).await,
+        (900.0, "owner".to_owned())
+    );
+    assert_eq!(org_status(&pool, INTO).await.as_deref(), Some("active"));
 }
 
 /// An invitation from an organization being deleted is withdrawn with it:

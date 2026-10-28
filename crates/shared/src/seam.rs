@@ -202,6 +202,29 @@ pub struct FoundedOrganization {
     pub slug: Slug,
 }
 
+/// A project moved into another organization of its owner's, as
+/// [`Auth::move_project`] answers it: where a page showing it follows it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MovedProject {
+    /// The project, under the id it keeps.
+    pub project_id: ProjectId,
+    /// Its name where it landed, numbered when the destination held it.
+    pub name: String,
+    /// Its segment in console paths.
+    pub slug: Slug,
+    /// The destination's segment in console paths.
+    pub organization_slug: Option<Slug>,
+}
+
+/// What [`Auth::close_if_empty`] came to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Closing {
+    /// Its deletion begun, as its owner's own deletion begins it.
+    Closed,
+    /// Kept, the code untouched: a project is in it still.
+    Holding,
+}
+
 /// What auth answers the modules beside it.
 #[async_trait]
 pub trait Auth: Send + Sync {
@@ -333,6 +356,29 @@ pub trait Auth: Send + Sync {
     ) -> Result<FoundedOrganization, TelmoniError> {
         let _ = founding;
         Err(not_linked("founding an organization"))
+    }
+
+    /// Move `project_id` into `into`, both held by organizations the person
+    /// `acting` owns, as their own move does (`POST
+    /// /internal/v1/projects/{id}/move`): its keys, its telemetry and its
+    /// seats go with it, and its connectors are purged.
+    async fn move_project(
+        &self,
+        acting: &Acting,
+        project_id: &ProjectId,
+        into: &OrganizationId,
+    ) -> Result<MovedProject, TelmoniError> {
+        let _ = (acting, project_id, into);
+        Err(not_linked("moving a project"))
+    }
+
+    /// Delete the organization `acting` stands in with the code mailed to its
+    /// owner, as their own deletion does (`DELETE /internal/v1/organization`),
+    /// unless a project is in it: counted under its lock, which a project made
+    /// or landing there takes too, so none goes with it.
+    async fn close_if_empty(&self, acting: &Acting, code: &str) -> Result<Closing, TelmoniError> {
+        let _ = (acting, code);
+        Err(not_linked("closing an emptied organization"))
     }
 
     /// The next page of audit events, oldest first after `after`, for the

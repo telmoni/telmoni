@@ -295,9 +295,19 @@ pub(crate) async fn move_project_telemetry(
     project_id: &ProjectId,
     organization_id: &OrganizationId,
 ) -> Result<(), TelmoniError> {
-    let Some(telemetry) = state.siblings.telemetry.as_ref() else {
-        return Ok(());
-    };
+    match state.siblings.telemetry.as_deref() {
+        Some(telemetry) => move_telemetry(telemetry, project_id, organization_id).await,
+        None => Ok(()),
+    }
+}
+
+/// [`move_project_telemetry`] on the module itself, for a settling that
+/// outlives the request.
+pub(crate) async fn move_telemetry(
+    telemetry: &dyn telmoni_shared::seam::Telemetry,
+    project_id: &ProjectId,
+    organization_id: &OrganizationId,
+) -> Result<(), TelmoniError> {
     match tokio::time::timeout(
         TELEMETRY_PROJECT_BUDGET,
         telemetry.move_project(project_id, organization_id),

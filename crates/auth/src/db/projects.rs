@@ -251,8 +251,8 @@ pub async fn homes(
 }
 
 /// How many projects an organization holds.
-pub async fn count_in(
-    tx: &mut Scoped<'_, Maintenance<AuthLane>>,
+pub async fn count_in<B: Binding>(
+    tx: &mut Scoped<'_, B>,
     organization_id: &OrganizationId,
 ) -> sqlx::Result<i64> {
     sqlx::query_scalar("SELECT count(*) FROM auth.projects WHERE organization_id = $1")

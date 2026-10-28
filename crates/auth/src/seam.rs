@@ -17,8 +17,8 @@ use telmoni_shared::db::tenant_session::{maintenance_scope, organization_scope};
 use telmoni_shared::extract::header;
 use telmoni_shared::rbac::{Resource, Verb};
 use telmoni_shared::seam::{
-    Audience, AuditEventsQuery, Auth, DocumentCursor, FoundedOrganization, OrganizationFounding,
-    OwnedOrganization, ProjectHome, ReadableProject, SourceDocument,
+    Audience, AuditEventsQuery, Auth, Closing, DocumentCursor, FoundedOrganization, MovedProject,
+    OrganizationFounding, OwnedOrganization, ProjectHome, ReadableProject, SourceDocument,
 };
 use telmoni_shared::slug::Slug;
 use telmoni_shared::{
@@ -218,6 +218,33 @@ impl Auth for AppState {
         founding: &OrganizationFounding,
     ) -> Result<FoundedOrganization, TelmoniError> {
         crate::handler::organization::found_for_deployment(self, founding).await
+    }
+
+    async fn move_project(
+        &self,
+        acting: &Acting,
+        project_id: &ProjectId,
+        into: &OrganizationId,
+    ) -> Result<MovedProject, TelmoniError> {
+        let moved =
+            crate::handler::project_transfer::move_into(self, &acting.user_id, project_id, into)
+                .await?;
+        Ok(MovedProject {
+            project_id: moved.project_id,
+            name: moved.name,
+            slug: moved.slug,
+            organization_slug: moved.organization_slug,
+        })
+    }
+
+    async fn close_if_empty(&self, acting: &Acting, code: &str) -> Result<Closing, TelmoniError> {
+        crate::handler::organization::close_if_empty(
+            self,
+            &acting.user_id,
+            &acting.organization_id,
+            code,
+        )
+        .await
     }
 
     async fn audit_documents(
