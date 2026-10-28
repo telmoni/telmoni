@@ -11,7 +11,7 @@ import {
   updateTraceViewAction,
 } from "@/app/(app)/[organization]/[project]/traces/actions";
 import { SavedMenu, useAnnounced } from "@/components/traces/saved-menu";
-import { useLayout, type LayoutPage } from "@/components/traces/use-layout";
+import { useLayout } from "@/components/traces/use-layout";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -71,9 +71,7 @@ import {
 // project, as the trace list's views are, and where owners and admins set
 // what the project opens in.
 
-type Props = LayoutPage & {
-  organization: string;
-  slug: string;
+type Props = {
   projectId: string;
   /** Whether the person may save, save over and delete layouts, and set the
    *  project's default: an owner or an admin, as the server holds. */
@@ -106,7 +104,7 @@ const FILTERED_KINDS: readonly SpanKind[] = [
 ];
 
 export function LayoutControls(props: Props) {
-  const layout = useLayout(props);
+  const layout = useLayout();
   const from = layout.current ? `“${layout.current.name}”` : DEFAULT_LAYOUT_NAME;
   return (
     <TooltipProvider>
@@ -501,8 +499,8 @@ function CallsDialog({
  *  each opening the page as it was saved; the one opened starred once the
  *  options move off it. Every member applies them; owners and admins save
  *  them, and set what the project opens in. */
-function LayoutsMenu({ projectId, layouts, project, canSave, layout }: Props & { layout: Layout }) {
-  const { options, current, isEdited, applyLayout } = layout;
+function LayoutsMenu({ projectId, canSave, layout }: Props & { layout: Layout }) {
+  const { layouts, project, options, current, isEdited, applyLayout } = layout;
   const search = useSearchParams();
   const announce = useAnnounced();
   // The page's layout as it stands, under `name`.

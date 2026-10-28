@@ -10,7 +10,7 @@ import { rowClickTaken } from "@/components/traces/list-table";
 import { SignInAgain, readSession, readTrace, startRead } from "@/components/traces/peek-read";
 import { TraceOutline } from "@/components/traces/trace-outline";
 import { PinnedChip } from "@/components/traces/span-parts";
-import { useLayout, type LayoutPage } from "@/components/traces/use-layout";
+import { useLayout } from "@/components/traces/use-layout";
 import { tracesOpenedFirst, type LayoutOptions } from "@/lib/layout";
 import type { WindowQuery } from "@/lib/list-query";
 import type { RouteRead } from "@/lib/route-read";
@@ -37,7 +37,7 @@ import { cn } from "@/lib/utils";
 // the trace stood on, and `o` opens it, through the console's one key
 // handler.
 
-type Props = LayoutPage & {
+type Props = {
   organization: string;
   slug: string;
   projectId: string;
@@ -49,7 +49,7 @@ type Props = LayoutPage & {
 };
 
 export function SessionRuns(props: Props) {
-  const { options } = useLayout(props);
+  const { options } = useLayout();
   const pinned = usePinnedSpans(props, options.pinned);
   // A new depth or opening starts the rows afresh: which are open follows
   // the layout, and a read already made is kept across it.

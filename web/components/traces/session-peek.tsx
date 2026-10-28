@@ -24,7 +24,7 @@ import {
   usePeekRead,
 } from "@/components/traces/peek-read";
 import { SessionRuns } from "@/components/traces/session-runs";
-import { useLayout, type LayoutPage } from "@/components/traces/use-layout";
+import { LayoutProvider, useLayout, type LayoutPage } from "@/components/traces/use-layout";
 import { MAX_LIMIT, type WindowQuery } from "@/lib/list-query";
 import { landOnList, peekUrl } from "@/lib/peek";
 import { sessionHref, sessionReadHref, sessionSums } from "@/lib/sessions";
@@ -73,7 +73,12 @@ export function SessionPeek(props: Props) {
   const sessionId = usePeekedSession();
   const { element } = useConsoleShell();
   if (!sessionId || !element) return null;
-  return createPortal(<SessionPanel {...props} sessionId={sessionId} />, element);
+  return createPortal(
+    <LayoutProvider layouts={props.layouts} project={props.project}>
+      <SessionPanel {...props} sessionId={sessionId} />
+    </LayoutProvider>,
+    element,
+  );
 }
 
 function SessionPanel({
@@ -82,8 +87,6 @@ function SessionPanel({
   projectId,
   sessions,
   window: query,
-  layouts,
-  project,
   canSave,
   sessionId,
 }: Props & { sessionId: string }) {
@@ -91,7 +94,7 @@ function SessionPanel({
   const panel = useRef<HTMLDivElement>(null);
   const { full, width, toggleFull, edge } = usePanelWidth(panel);
   // Read with the layout's pins, which the rows take as theirs: a pin changed reads once.
-  const { options } = useLayout({ layouts, project });
+  const { options } = useLayout();
   // Read again as the project's runs land, the list beside it redrawn.
   const { read, stale, again } = usePeekRead(
     sessionReadHref(sessionId, projectId, query, options.pinned),
@@ -140,7 +143,7 @@ function SessionPanel({
     if (!panel.current?.contains(document.activeElement)) panel.current?.focus({ preventScroll: true });
   }, [session?.session_id]);
 
-  const page = { organization, slug, projectId, layouts, project };
+  const page = { organization, slug, projectId };
   const sums = session ? sessionSums(session.traces) : null;
 
   return (
@@ -219,7 +222,7 @@ function SessionPanel({
         ) : read.kind === "ok" ? (
           <div className="grid content-start gap-3 p-3.5">
             <div>
-              <LayoutControls {...page} canSave={canSave} />
+              <LayoutControls projectId={projectId} canSave={canSave} />
             </div>
             <SessionRuns
               key={read.value.session_id}

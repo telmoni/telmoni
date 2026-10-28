@@ -5,6 +5,7 @@ import { PageHeader } from "@/components/page-header";
 import { ServiceUnavailable } from "@/components/service-unavailable";
 import { LayoutControls } from "@/components/traces/layout-controls";
 import { TraceLayoutBody } from "@/components/traces/trace-layout";
+import { LayoutProvider } from "@/components/traces/use-layout";
 import { TraceMeta } from "@/components/traces/trace-view";
 import { Card } from "@/components/ui/card";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -77,32 +78,27 @@ export default async function TracePage({
 
   const { trace } = access;
   const { root } = summarizeTrace(trace.spans);
-  const page = {
-    organization,
-    slug,
-    projectId: project.id,
-    layouts: layouts.kind === "ok" ? layouts.layouts : null,
-    project: setting,
-  };
   return (
-    <TooltipProvider>
-      <PageHeader
-        title={root.agent}
-        backHref={list}
-        backLabel="Traces"
-        action={<LayoutControls {...page} canSave={administers(project.role)} />}
-      />
-      {/* As tall as the window leaves under the header and the page's title,
-          both of a set height, so the spans and the span chosen scroll each
-          on its own, as they do in the peek; never so short that neither
-          reads. The trace's line stands inside, where its wrapping on a
-          narrow window takes the panes' room rather than the page's. */}
-      <Card className="h-[calc(100svh-10rem)] min-h-[28rem] gap-0 overflow-hidden p-0">
-        <div className="shrink-0 border-b border-border p-3.5">
-          <TraceMeta trace={trace} organization={organization} slug={slug} incidents={incidents} />
-        </div>
-        <TraceLayoutBody {...page} trace={trace} />
-      </Card>
-    </TooltipProvider>
+    <LayoutProvider layouts={layouts.kind === "ok" ? layouts.layouts : null} project={setting}>
+        <TooltipProvider>
+        <PageHeader
+          title={root.agent}
+          backHref={list}
+          backLabel="Traces"
+          action={<LayoutControls projectId={project.id} canSave={administers(project.role)} />}
+        />
+        {/* As tall as the window leaves under the header and the page's title,
+            both of a set height, so the spans and the span chosen scroll each
+            on its own, as they do in the peek; never so short that neither
+            reads. The trace's line stands inside, where its wrapping on a
+            narrow window takes the panes' room rather than the page's. */}
+        <Card className="h-[calc(100svh-10rem)] min-h-[28rem] gap-0 overflow-hidden p-0">
+          <div className="shrink-0 border-b border-border p-3.5">
+            <TraceMeta trace={trace} organization={organization} slug={slug} incidents={incidents} />
+          </div>
+          <TraceLayoutBody trace={trace} organization={organization} slug={slug} />
+        </Card>
+        </TooltipProvider>
+    </LayoutProvider>
   );
 }

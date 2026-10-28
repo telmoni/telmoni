@@ -9,7 +9,7 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(mockSearch),
 }));
 
-import { useLayout } from "@/components/traces/use-layout";
+import { useLayoutState } from "@/components/traces/use-layout";
 import { DEFAULT_LAYOUT, choiceOfLayout } from "@/lib/layout";
 import { PEEKED } from "@/lib/peek";
 import type { TraceLayout } from "@/lib/server/data";
@@ -57,7 +57,7 @@ afterEach(() => {
 describe("useLayout", () => {
   it("opens on the link's saved layout, which becomes the browser's last choice", () => {
     mockSearch = `days=30&view=${VIEW}`;
-    const { result } = renderHook(() => useLayout(PAGE));
+    const { result } = renderHook(() => useLayoutState(PAGE));
     expect(result.current.source).toBe("link");
     expect(result.current.current?.name).toBe("Review");
     expect(result.current.isEdited).toBe(false);
@@ -69,7 +69,7 @@ describe("useLayout", () => {
   // the old link, which would then be written back over the choice.
   it("rewrites the link's part of the URL with a fresh state, and stands until the router follows", () => {
     mockSearch = `days=30&view=${VIEW}`;
-    const { result, rerender } = renderHook(() => useLayout(PAGE));
+    const { result, rerender } = renderHook(() => useLayoutState(PAGE));
     // Customized, the link's part goes, the cut stands, and the layout it
     // began from is named as edited.
     act(() => result.current.setOptions({ timeline: true }));
@@ -91,7 +91,7 @@ describe("useLayout", () => {
   });
 
   it("lets a link or a save's redirect take over from the choice applied", () => {
-    const { result, rerender } = renderHook(() => useLayout(PAGE));
+    const { result, rerender } = renderHook(() => useLayoutState(PAGE));
     act(() => result.current.setOptions({ depth: "calls" }));
     expect(result.current.isEdited).toBe(true);
     // Elsewhere than the rewrite went: a layout just saved, redirected to.
@@ -104,7 +104,7 @@ describe("useLayout", () => {
   });
 
   it("opens in the default, customizes it, and goes back to it; a saved layout applied opens as saved", () => {
-    const { result } = renderHook(() => useLayout(PAGE));
+    const { result } = renderHook(() => useLayoutState(PAGE));
     expect(result.current.source).toBe("project");
     expect(result.current.options).toEqual(DEFAULT_LAYOUT);
     expect(result.current.current).toBeUndefined();
@@ -125,7 +125,7 @@ describe("useLayout", () => {
   it("keeps a peek's mark through its rewrite", () => {
     window.history.pushState({ [PEEKED]: true }, "", "/acme/web/sessions?days=30&peek=conv-1");
     mockSearch = "days=30&peek=conv-1";
-    const { result } = renderHook(() => useLayout(PAGE));
+    const { result } = renderHook(() => useLayoutState(PAGE));
     act(() => result.current.applyLayout(REVIEW));
     expect(window.history.replaceState).toHaveBeenLastCalledWith(
       { [PEEKED]: true },
@@ -135,7 +135,7 @@ describe("useLayout", () => {
   });
 
   it("opens in the project's default layout where the browser holds no choice", () => {
-    const { result } = renderHook(() => useLayout({ layouts: [REVIEW], project: { view_id: VIEW } }));
+    const { result } = renderHook(() => useLayoutState({ layouts: [REVIEW], project: { view_id: VIEW } }));
     expect(result.current.source).toBe("project");
     expect(result.current.current?.name).toBe("Review");
     expect(result.current.isEdited).toBe(false);

@@ -8,6 +8,7 @@ import { Section } from "@/components/section";
 import { ServiceUnavailable } from "@/components/service-unavailable";
 import { LayoutControls } from "@/components/traces/layout-controls";
 import { SessionRuns } from "@/components/traces/session-runs";
+import { LayoutProvider } from "@/components/traces/use-layout";
 import { Card } from "@/components/ui/card";
 import { WindowPicker } from "@/components/window-picker";
 import { ownerContact } from "@/lib/identity";
@@ -99,21 +100,15 @@ export default async function SessionPage({
   const days = query.days ?? session.days;
   const here = (patch: { days?: number; limit?: number }) =>
     sessionHref(organization, slug, session.session_id, { ...query, ...patch });
-  const page = {
-    organization,
-    slug,
-    projectId: project.id,
-    layouts: layouts.kind === "ok" ? layouts.layouts : null,
-    project: setting,
-  };
+  const page = { organization, slug, projectId: project.id };
 
   return (
-    <>
+    <LayoutProvider layouts={layouts.kind === "ok" ? layouts.layouts : null} project={setting}>
       <PageHeader
         title="Session"
         backHref={list}
         backLabel="Sessions"
-        action={<LayoutControls {...page} canSave={administers(project.role)} />}
+        action={<LayoutControls projectId={project.id} canSave={administers(project.role)} />}
       />
       <div className="grid gap-6">
         <Section
@@ -204,6 +199,6 @@ export default async function SessionPage({
           )}
         </Section>
       </div>
-    </>
+    </LayoutProvider>
   );
 }

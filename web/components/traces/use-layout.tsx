@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
 
 import {
@@ -20,12 +20,12 @@ import { PEEKED, pushedHere } from "@/lib/peek";
 import type { SessionLayoutSetting, TraceLayout } from "@/lib/server/data";
 import { setTracePrefs, useTracePrefs } from "@/lib/use-trace-prefs";
 
-// The layout a session's page or a trace's stands in, as the header's
-// controls and the page's body both read it: the link's, the browser's or
-// the project's (`lib/layout.ts`). A change is kept in the browser as the
-// person's last choice, and the link's part of the URL is rewritten in
-// place, with the browser's own history, so a copied link holds a saved
-// layout and never a half-made cut.
+// The layout a session's page or a trace's stands in, one per page, as the
+// header's controls and the page's body both read it: the link's, the
+// browser's or the project's (`lib/layout.ts`). A change is kept in the
+// browser as the person's last choice, and the link's part of the URL is
+// rewritten in place, with the browser's own history, so a copied link holds
+// a saved layout and never a half-made cut.
 
 export type LayoutPage = {
   /** The project's saved layouts, or `null` where they could not be read. */
@@ -34,7 +34,7 @@ export type LayoutPage = {
   project: SessionLayoutSetting | null;
 };
 
-export type Layout = {
+export type Layout = LayoutPage & {
   choice: LayoutChoice;
   options: LayoutOptions;
   source: LayoutSource;
@@ -64,7 +64,22 @@ function rewrite(choice: LayoutChoice, isEdited: boolean): string | null {
   return new URLSearchParams(query).get(VIEW_PARAM);
 }
 
-export function useLayout({ layouts, project }: LayoutPage): Layout {
+const LayoutContext = createContext<Layout | null>(null);
+
+/** The page's one layout, for everything under it that reads or moves it. */
+export function LayoutProvider({ layouts, project, children }: LayoutPage & { children: ReactNode }) {
+  const layout = useLayoutState({ layouts, project });
+  return <LayoutContext value={layout}>{children}</LayoutContext>;
+}
+
+export function useLayout(): Layout {
+  const layout = useContext(LayoutContext);
+  if (!layout) throw new Error("useLayout needs a LayoutProvider above it");
+  return layout;
+}
+
+/** The layout's state, held once by the page's provider. */
+export function useLayoutState({ layouts, project }: LayoutPage): Layout {
   const search = useSearchParams();
   const prefs = useTracePrefs();
   const known = layouts ?? [];
@@ -110,6 +125,8 @@ export function useLayout({ layouts, project }: LayoutPage): Layout {
   const from = choice.view ? known.find((layout) => layout.id === choice.view) : undefined;
 
   return {
+    layouts,
+    project,
     choice,
     options: choice.options,
     source,
