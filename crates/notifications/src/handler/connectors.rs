@@ -151,6 +151,8 @@ pub async fn authorize_connector(
     require_flag(&state).await?;
 
     let raw_state = mint_state()?;
+    // Built before the state row, so a URL that will not build mints nothing.
+    let url = grant.authorize_url(&raw_state, &redirect_uri(&state, provider))?;
     let mut tx = project_scope(&state.db, &identity.project_id).await?;
     db::insert_oauth_state(
         &mut tx,
@@ -164,7 +166,6 @@ pub async fn authorize_connector(
     .await?;
     tx.commit().await?;
 
-    let url = grant.authorize_url(&raw_state, &redirect_uri(&state, provider));
     Ok(Json(Authorize {
         url,
         state: raw_state,

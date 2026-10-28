@@ -86,7 +86,7 @@ pub const HEARTBEAT: &str = "delivery";
 /// logged once a minute beside it. A failed tick is logged and the next one
 /// runs.
 pub async fn run(state: Arc<AppState>) {
-    let poll = state.config.delivery_poll_secs.max(1);
+    let poll = state.config.delivery_poll_secs.get();
     let a_minute = (60 / poll).max(1);
     let ticks = Arc::new(AtomicU64::new(0));
     let every = Duration::from_secs(poll);
@@ -138,9 +138,9 @@ pub async fn tick_once(state: &Arc<AppState>) -> Result<u32, TelmoniError> {
         return Ok(0);
     }
 
-    let batch = state.config.delivery_batch;
+    let batch = i64::from(state.config.delivery_batch.get());
     let mut attempted: u32 = 0;
-    for _ in 0..state.config.delivery_drain_rounds {
+    for _ in 0..state.config.delivery_drain_rounds.get() {
         let settled = drain_batch(state, batch).await?;
         attempted = attempted.saturating_add(settled.attempted);
         if settled.held > 0 {
@@ -191,7 +191,7 @@ async fn settle(
     let connections: HashMap<Uuid, Arc<SealedConnection>> =
         found.into_iter().map(|c| (c.id, Arc::new(c))).collect();
 
-    let slots = Arc::new(Semaphore::new(state.config.delivery_concurrency));
+    let slots = Arc::new(Semaphore::new(state.config.delivery_concurrency.get()));
     let opened = open_batch(state, &connections, &slots).await;
     let outcomes = attempt_batch(state, leased, &connections, &opened, &slots).await;
     let held = outcomes
@@ -525,7 +525,7 @@ async fn attempt_one(
             id: delivery.id,
             connection_id: delivery.connection_id,
             wait: next_wait(
-                state.config.delivery_backoff_secs,
+                i64::from(state.config.delivery_backoff_secs),
                 delivery.attempts,
                 retry_after,
             ),
@@ -739,7 +739,12 @@ impl Bookkeeping<'_> {
         db::touch_connections(&mut tx, self.touched).await?;
         let counts = db::record_consecutive_failures(&mut tx, self.tallies).await?;
         db::mark_delivered(&mut tx, self.delivered).await?;
-        db::fail_deliveries(&mut tx, self.failures, state.config.delivery_max_attempts).await?;
+        db::fail_deliveries(
+            &mut tx,
+            self.failures,
+            i32::from(state.config.delivery_max_attempts.get()),
+        )
+        .await?;
         let failed: Vec<Uuid> = self.failures.iter().map(|f| f.id).collect();
         db::count_routes(&mut tx, self.delivered, &failed).await?;
         for (why, ids) in self.held {

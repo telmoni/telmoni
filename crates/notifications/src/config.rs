@@ -1,5 +1,7 @@
 //! Notifications configuration, loaded once from the environment.
 
+use std::num::{NonZeroU16, NonZeroU32, NonZeroU64, NonZeroUsize};
+
 use telmoni_shared::Redacted;
 use telmoni_shared::config::{env_parse, optional, optional_base_url, require};
 
@@ -41,19 +43,31 @@ pub struct Config {
     pub metadata_api_base: String,
     /// Delivery-loop poll cadence, seconds: the IDLE heartbeat of an empty
     /// queue, not the send rate.
-    pub delivery_poll_secs: u64,
+    pub delivery_poll_secs: NonZeroU64,
     /// Rows leased per batch (`NOTIFICATIONS_DELIVERY_BATCH`, default 200).
-    pub delivery_batch: i64,
+    pub delivery_batch: NonZeroU32,
     /// Sends in flight at once, across every connection — the real throughput
     /// ceiling. Nothing paces per vendor; `Retry-After` is the only brake.
-    pub delivery_concurrency: usize,
+    pub delivery_concurrency: NonZeroUsize,
     /// Batches one tick will drain before waiting for the next. The cap keeps
     /// a flag thrown mid-drain effective within this many batches.
-    pub delivery_drain_rounds: u32,
+    pub delivery_drain_rounds: NonZeroU32,
     /// Attempts per delivery before it is terminally `failed`
-    pub delivery_max_attempts: i32,
+    pub delivery_max_attempts: NonZeroU16,
     /// Delivery backoff base, seconds; the wait grows fourfold per attempt.
-    pub delivery_backoff_secs: i64,
+    pub delivery_backoff_secs: u32,
+}
+
+/// The delivery loop's defaults, each at least one by its type; a zero
+/// here fails the build, since a const's unwrap is evaluated there.
+pub mod defaults {
+    use std::num::{NonZeroU16, NonZeroU32, NonZeroU64, NonZeroUsize};
+
+    pub const POLL_SECS: NonZeroU64 = NonZeroU64::new(5).unwrap();
+    pub const BATCH: NonZeroU32 = NonZeroU32::new(200).unwrap();
+    pub const CONCURRENCY: NonZeroUsize = NonZeroUsize::new(64).unwrap();
+    pub const DRAIN_ROUNDS: NonZeroU32 = NonZeroU32::new(20).unwrap();
+    pub const MAX_ATTEMPTS: NonZeroU16 = NonZeroU16::new(5).unwrap();
 }
 
 impl Config {
@@ -73,31 +87,22 @@ impl Config {
                 .unwrap_or_else(|| "https://cloudkms.googleapis.com".to_owned()),
             metadata_api_base: optional_base_url("METADATA_API_BASE")
                 .unwrap_or_else(|| "http://metadata.google.internal".to_owned()),
-            delivery_poll_secs: env_parse("NOTIFICATIONS_DELIVERY_POLL_SECS", 5)?,
-            delivery_batch: env_parse("NOTIFICATIONS_DELIVERY_BATCH", 200)?,
-            delivery_concurrency: env_parse("NOTIFICATIONS_DELIVERY_CONCURRENCY", 64)?,
-            delivery_drain_rounds: env_parse("NOTIFICATIONS_DELIVERY_DRAIN_ROUNDS", 20)?,
-            delivery_max_attempts: env_parse("NOTIFICATIONS_DELIVERY_MAX_ATTEMPTS", 5)?,
+            delivery_poll_secs: env_parse("NOTIFICATIONS_DELIVERY_POLL_SECS", defaults::POLL_SECS)?,
+            delivery_batch: env_parse("NOTIFICATIONS_DELIVERY_BATCH", defaults::BATCH)?,
+            delivery_concurrency: env_parse(
+                "NOTIFICATIONS_DELIVERY_CONCURRENCY",
+                defaults::CONCURRENCY,
+            )?,
+            delivery_drain_rounds: env_parse(
+                "NOTIFICATIONS_DELIVERY_DRAIN_ROUNDS",
+                defaults::DRAIN_ROUNDS,
+            )?,
+            delivery_max_attempts: env_parse(
+                "NOTIFICATIONS_DELIVERY_MAX_ATTEMPTS",
+                defaults::MAX_ATTEMPTS,
+            )?,
             delivery_backoff_secs: env_parse("NOTIFICATIONS_DELIVERY_BACKOFF_SECS", 30)?,
         };
-        if config.delivery_backoff_secs < 0 {
-            anyhow::bail!("NOTIFICATIONS_DELIVERY_BACKOFF_SECS must not be negative");
-        }
-        if config.delivery_max_attempts < 1 {
-            anyhow::bail!("NOTIFICATIONS_DELIVERY_MAX_ATTEMPTS must be at least 1");
-        }
-        if config.delivery_poll_secs < 1 {
-            anyhow::bail!("NOTIFICATIONS_DELIVERY_POLL_SECS must be at least 1");
-        }
-        if config.delivery_batch < 1 {
-            anyhow::bail!("NOTIFICATIONS_DELIVERY_BATCH must be at least 1");
-        }
-        if config.delivery_concurrency < 1 {
-            anyhow::bail!("NOTIFICATIONS_DELIVERY_CONCURRENCY must be at least 1");
-        }
-        if config.delivery_drain_rounds < 1 {
-            anyhow::bail!("NOTIFICATIONS_DELIVERY_DRAIN_ROUNDS must be at least 1");
-        }
         if config.slack.is_some() && config.connector_kek.is_none() {
             anyhow::bail!(
                 "SLACK_* credentials are set but CONNECTOR_KEK is not; \

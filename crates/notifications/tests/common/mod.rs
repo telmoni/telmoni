@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use telmoni_notifications::config::defaults;
 
 use async_trait::async_trait;
 use axum::{
@@ -326,11 +327,11 @@ pub(crate) fn config() -> Config {
         connector_kek: None,
         kms_api_base: "https://cloudkms.googleapis.com".into(),
         metadata_api_base: "http://metadata.google.internal".into(),
-        delivery_poll_secs: 5,
-        delivery_batch: 200,
-        delivery_concurrency: 64,
-        delivery_drain_rounds: 20,
-        delivery_max_attempts: 5,
+        delivery_poll_secs: defaults::POLL_SECS,
+        delivery_batch: defaults::BATCH,
+        delivery_concurrency: defaults::CONCURRENCY,
+        delivery_drain_rounds: defaults::DRAIN_ROUNDS,
+        delivery_max_attempts: defaults::MAX_ATTEMPTS,
         delivery_backoff_secs: 30,
     }
 }

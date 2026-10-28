@@ -310,7 +310,7 @@ impl std::fmt::Display for TearDownError {
 pub trait Grant: Send + Sync {
     /// Where to send the browser. `redirect_uri` must be sent again, unchanged,
     /// at the exchange.
-    fn authorize_url(&self, state: &str, redirect_uri: &str) -> String;
+    fn authorize_url(&self, state: &str, redirect_uri: &str) -> Result<String, TelmoniError>;
 
     /// Trade the vendor's `code` for the install.
     async fn exchange(

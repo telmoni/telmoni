@@ -4486,7 +4486,7 @@ async fn one_tick_drains_a_backlog_larger_than_one_batch(pool: PgPool) {
         .await;
     let st = state(pool.clone(), &mocks, None);
 
-    let queued = i32::try_from(st.config.delivery_batch).unwrap() + 20;
+    let queued = i32::try_from(st.config.delivery_batch.get()).unwrap() + 20;
     seed_backlog(&pool, ORGANIZATION, connection, queued).await;
 
     let attempted = delivery::tick_once(&st).await.unwrap();
@@ -4595,13 +4595,13 @@ async fn a_kek_outage_ends_the_tick_instead_of_draining_against_it(pool: PgPool)
         "whsec_held",
     )
     .await;
-    let queued = i32::try_from(st.config.delivery_batch).unwrap() + 20;
+    let queued = i32::try_from(st.config.delivery_batch.get()).unwrap() + 20;
     seed_backlog(&pool, ORGANIZATION, connection, queued).await;
 
     let attempted = delivery::tick_once(&st).await.unwrap();
     assert_eq!(
         attempted,
-        u32::try_from(st.config.delivery_batch).unwrap(),
+        st.config.delivery_batch.get(),
         "one batch was leased, held, and the tick stopped there"
     );
     assert_eq!(

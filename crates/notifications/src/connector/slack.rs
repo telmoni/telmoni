@@ -232,7 +232,7 @@ struct OkResponse {
 
 #[async_trait]
 impl Grant for SlackConnector {
-    fn authorize_url(&self, state: &str, redirect_uri: &str) -> String {
+    fn authorize_url(&self, state: &str, redirect_uri: &str) -> Result<String, TelmoniError> {
         reqwest::Url::parse_with_params(
             &format!("{}/oauth/v2/authorize", self.api_base),
             &[
@@ -243,7 +243,7 @@ impl Grant for SlackConnector {
             ],
         )
         .map(String::from)
-        .unwrap_or_default()
+        .map_err(|e| TelmoniError::Internal(format!("slack's authorize URL would not build: {e}")))
     }
 
     async fn exchange(
@@ -566,7 +566,9 @@ mod tests {
     #[test]
     fn the_authorize_url_asks_for_the_one_scope_and_encodes_the_redirect() {
         let c = SlackConnector::new("cid", Redacted::from("sec"), "https://slack.com/");
-        let url = c.authorize_url("st8", "https://app.example/connect/slack/callback");
+        let url = c
+            .authorize_url("st8", "https://app.example/connect/slack/callback")
+            .unwrap();
         assert!(
             url.starts_with("https://slack.com/oauth/v2/authorize?"),
             "{url}"
