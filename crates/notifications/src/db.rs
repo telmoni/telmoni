@@ -421,13 +421,13 @@ pub async fn purge_feed_chunk(
 /// project's notices.
 pub async fn projects_after(
     tx: &mut Scoped<'_, Maintenance<NotificationsLane>>,
-    after: &str,
+    after: Option<&ProjectId>,
     limit: i64,
 ) -> sqlx::Result<Vec<ProjectId>> {
     sqlx::query_scalar(
         "WITH RECURSIVE notified (project_id, n) AS (
              (SELECT project_id, 1::bigint FROM notifications.feed
-               WHERE project_id > $1 ORDER BY project_id LIMIT 1)
+               WHERE project_id > coalesce($1, '') ORDER BY project_id LIMIT 1)
              UNION ALL
              (SELECT (SELECT f.project_id FROM notifications.feed f
                        WHERE f.project_id > notified.project_id
@@ -438,10 +438,10 @@ pub async fn projects_after(
          )
          SELECT project_id FROM (
              (SELECT DISTINCT project_id FROM notifications.connections
-               WHERE project_id > $1 ORDER BY project_id LIMIT $2)
+               WHERE project_id > coalesce($1, '') ORDER BY project_id LIMIT $2)
              UNION
              (SELECT DISTINCT project_id FROM notifications.oauth_states
-               WHERE project_id > $1 ORDER BY project_id LIMIT $2)
+               WHERE project_id > coalesce($1, '') ORDER BY project_id LIMIT $2)
              UNION
              (SELECT project_id FROM notified WHERE project_id IS NOT NULL)
          ) named
@@ -490,8 +490,8 @@ pub async fn workspace_organizations(
     tx: &mut Scoped<'_, Maintenance<NotificationsLane>>,
     provider: Provider,
     external_workspace_id: &str,
-) -> sqlx::Result<Vec<String>> {
-    let mut organizations: Vec<String> = sqlx::query_scalar(
+) -> sqlx::Result<Vec<OrganizationId>> {
+    let mut organizations: Vec<OrganizationId> = sqlx::query_scalar(
         "SELECT DISTINCT organization_id FROM notifications.connections
           WHERE provider = $1 AND external_workspace_id = $2 AND status <> $3",
     )
@@ -549,8 +549,8 @@ pub async fn list_connections(
 #[derive(FromRow)]
 pub struct SealedConnection {
     pub id: Uuid,
-    pub project_id: String,
-    pub organization_id: String,
+    pub project_id: ProjectId,
+    pub organization_id: OrganizationId,
     pub provider: Provider,
     pub status: ConnectionStatus,
     pub external_workspace_id: String,
@@ -925,8 +925,8 @@ pub async fn file_uninstall_for<B: Binding>(
         tx,
         &UninstallRow {
             id: refused.id,
-            project_id: refused.project_id.as_str(),
-            organization_id: refused.organization_id.as_str(),
+            project_id: refused.project_id,
+            organization_id: refused.organization_id,
             provider: refused.provider,
             external_workspace_id: refused.external_workspace_id,
             key_version: refused.key_version,
@@ -942,8 +942,8 @@ pub async fn file_uninstall_for<B: Binding>(
 /// What an uninstall is filed with, from a deleted row or a refused install.
 struct UninstallRow<'a> {
     id: Uuid,
-    project_id: &'a str,
-    organization_id: &'a str,
+    project_id: &'a ProjectId,
+    organization_id: &'a OrganizationId,
     provider: Provider,
     external_workspace_id: &'a str,
     key_version: i16,
@@ -1055,8 +1055,8 @@ pub async fn give_up_uninstalls(
 #[derive(Debug, FromRow)]
 pub struct RetiredConnection {
     pub id: Uuid,
-    pub project_id: String,
-    pub organization_id: String,
+    pub project_id: ProjectId,
+    pub organization_id: OrganizationId,
     pub provider: Provider,
     pub external_workspace_id: String,
     pub external_workspace_name: Option<String>,
@@ -1099,7 +1099,7 @@ pub async fn revoke_workspace(
     tx: &mut Scoped<'_, Maintenance<NotificationsLane>>,
     provider: Provider,
     external_workspace_id: &str,
-    organizations: &[String],
+    organizations: &[OrganizationId],
     reason: &str,
 ) -> sqlx::Result<Vec<RetiredConnection>> {
     sqlx::query_as::<_, RetiredConnection>(sqlx::AssertSqlSafe(format!(
@@ -1223,7 +1223,7 @@ const LAST_ERROR_MAX: usize = 500;
 #[derive(Debug, Clone, Copy)]
 pub struct NewDelivery<'a> {
     pub connection_id: Uuid,
-    pub project_id: &'a str,
+    pub project_id: &'a ProjectId,
     pub organization_id: &'a OrganizationId,
     pub kind: NotificationKind,
     pub subject: &'a str,
@@ -2173,9 +2173,9 @@ pub async fn insert_oauth_state(
 /// Who started the handshake a `state` belongs to.
 #[derive(Debug, FromRow)]
 pub struct OAuthState {
-    pub project_id: String,
-    pub organization_id: String,
-    pub user_id: String,
+    pub project_id: ProjectId,
+    pub organization_id: OrganizationId,
+    pub user_id: UserId,
     pub provider: Provider,
 }
 

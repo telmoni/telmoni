@@ -67,7 +67,7 @@ macro_rules! tenant_id_newtype {
         impl std::error::Error for $error {}
 
         $(#[$id_doc])*
-        #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
+        #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, sqlx::Type)]
         #[serde(try_from = "String")]
         #[sqlx(transparent)]
         pub struct $name(String);
@@ -137,14 +137,6 @@ macro_rules! tenant_id_newtype {
 
         impl AsRef<str> for $name {
             fn as_ref(&self) -> &str {
-                &self.0
-            }
-        }
-
-        impl std::ops::Deref for $name {
-            type Target = str;
-
-            fn deref(&self) -> &Self::Target {
                 &self.0
             }
         }

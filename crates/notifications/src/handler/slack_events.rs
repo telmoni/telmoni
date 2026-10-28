@@ -111,11 +111,7 @@ async fn revoke_workspace(
     let organizations =
         crate::db::workspace_organizations(&mut tx, Provider::Slack, workspace).await?;
     for organization in &organizations {
-        super::lock_audit_chain(
-            &mut tx,
-            &OrganizationId::from_trusted(organization.as_str()),
-        )
-        .await?;
+        super::lock_audit_chain(&mut tx, organization).await?;
     }
     // Only these organizations': one the read did not find has no lock held here.
     let retired =
@@ -124,21 +120,19 @@ async fn revoke_workspace(
     let ids: Vec<_> = retired.iter().map(|c| c.id).collect();
     crate::db::fail_pending_for_connections(&mut tx, &ids, &reason).await?;
     let mut notices = Vec::new();
-    let mut per_organization: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut per_organization: BTreeMap<&OrganizationId, Vec<String>> = BTreeMap::new();
     for connection in &retired {
         notices.extend(notify::connector_disconnected(&mut tx, connection, &reason).await?);
         per_organization
-            .entry(connection.organization_id.clone())
+            .entry(&connection.organization_id)
             .or_default()
             .push(connection.id.to_string());
     }
     for (organization, ids) in &per_organization {
-        let organization_id = OrganizationId::try_new(organization.as_str())
-            .map_err(|e| TelmoniError::Internal(format!("stored organization id: {e}")))?;
         emit_audit(
             &mut tx,
             AuditEvent::new(
-                &organization_id,
+                organization,
                 Actor::External("slack"),
                 AuditAction::Updated,
                 TelmoniResourceKind::Connector,

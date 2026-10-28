@@ -111,10 +111,10 @@ pub async fn tick(state: &Arc<AppState>) {
 /// other failed purge is logged and left for the next sweep.
 pub async fn purge_gone_projects(state: &Arc<AppState>) -> Result<Purged, TelmoniError> {
     let mut swept = Purged::default();
-    let mut after = String::new();
+    let mut after: Option<ProjectId> = None;
     loop {
         let mut tx = maintenance_scope(&state.db, NotificationsLane).await?;
-        let page = db::projects_after(&mut tx, &after, PROJECTS_PAGE).await?;
+        let page = db::projects_after(&mut tx, after.as_ref(), PROJECTS_PAGE).await?;
         tx.commit().await?;
         let Some(last) = page.last() else {
             return Ok(swept);
@@ -144,7 +144,7 @@ pub async fn purge_gone_projects(state: &Arc<AppState>) -> Result<Purged, Telmon
         if i64::try_from(page.len()).is_ok_and(|n| n < PROJECTS_PAGE) {
             return Ok(swept);
         }
-        after = last.as_str().to_owned();
+        after = Some(last.clone());
     }
 }
 

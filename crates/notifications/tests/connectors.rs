@@ -451,7 +451,7 @@ async fn seed_delivery(pool: &PgPool, organization: &str, connection: Uuid) -> U
         &mut tx,
         &db::NewDelivery {
             connection_id: connection,
-            project_id: &project_of(organization),
+            project_id: &ProjectId::from_trusted(project_of(organization)),
             organization_id: &oid(organization),
             kind: NotificationKind::MemberAdded,
             subject: "Sam joined",
@@ -4885,7 +4885,7 @@ async fn erasing_a_person_rewrites_the_deliveries_that_named_them(pool: PgPool) 
                 &mut tx,
                 &db::NewDelivery {
                     connection_id: connection,
-                    project_id: &project_of(ORGANIZATION),
+                    project_id: &ProjectId::from_trusted(project_of(ORGANIZATION)),
                     organization_id: &oid(ORGANIZATION),
                     kind: NotificationKind::MemberAdded,
                     subject,

@@ -227,8 +227,8 @@ async fn consume_verified_oauth_state(
         .into());
     };
     tx.commit().await?;
-    if begun.user_id != identity.user_id.as_str()
-        || begun.project_id != identity.project_id.as_str()
+    if begun.user_id != identity.user_id
+        || begun.project_id != identity.project_id
         || begun.provider != provider
     {
         return Err(telmoni_shared::AuthzError::Forbidden(

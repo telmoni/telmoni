@@ -112,8 +112,8 @@ pub async fn connector_disconnected(
     );
     emit_project_notice(
         tx,
-        &ProjectId::from_trusted(retired.project_id.as_str()),
-        &OrganizationId::from_trusted(retired.organization_id.as_str()),
+        &retired.project_id,
+        &retired.organization_id,
         NotificationKind::ConnectorDisconnected,
         &format!("{} disconnected", provider.label()),
         &format!(
