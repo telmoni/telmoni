@@ -68,4 +68,15 @@ describe("fetchProjectAnnouncement", () => {
       message: "Telmoni Cloud v2 is now live!",
     });
   });
+
+  // A hand-typed value whose link is no string reaches no `<Link>`: the
+  // broadcast is passed over for the environment's, as one with no message is.
+  it("passes over a shape that is no announcement, rather than drawing it", async () => {
+    mockGet.mockResolvedValue(JSON.stringify({ message: "Read this", linkText: "Here", href: 5 }));
+    process.env.TELMONI_ANNOUNCEMENT = JSON.stringify({ message: "From the environment" });
+    expect(await fetchProjectAnnouncement()).toEqual({ message: "From the environment" });
+    mockGet.mockResolvedValue(JSON.stringify({ href: "/somewhere" }));
+    delete process.env.TELMONI_ANNOUNCEMENT;
+    expect(await fetchProjectAnnouncement()).toBeNull();
+  });
 });
