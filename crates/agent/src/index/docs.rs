@@ -61,7 +61,7 @@ pub async fn refresh(state: &AppState) -> Result<(), TelmoniError> {
         let dropped = db::drop_source_except(&mut tx, SOURCE, &keep).await?;
         // Settled last, as a page is: the cursor row stays locked only for
         // the moment before the commit.
-        if !db::settle_lease(&mut tx, SOURCE, lease.lease_id).await? {
+        if !db::end_lease(&mut tx, SOURCE, lease.lease_id).await? {
             tx.rollback().await?;
             return Ok(None);
         }

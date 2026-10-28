@@ -267,7 +267,9 @@ CREATE TABLE agent.cursors (
     lease_id      UUID,
     leased_until  TIMESTAMPTZ,
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT cursors_source_check CHECK (source IN ('docs', 'audit', 'feed', 'delivery'))
+    CONSTRAINT cursors_source_check CHECK (source IN ('docs', 'audit', 'feed', 'delivery')),
+    CONSTRAINT cursors_after_paired_check CHECK ((after_at IS NULL) = (after_id IS NULL)),
+    CONSTRAINT cursors_lease_paired_check CHECK ((lease_id IS NULL) = (leased_until IS NULL))
 );
 
 INSERT INTO agent.cursors (source) VALUES ('docs'), ('audit'), ('feed'), ('delivery');

@@ -15,7 +15,7 @@ use telmoni_shared::db::tenant_session::{
     Binding, HasOrganization, HasPerson, Lane, Maintenance, MaintenanceLane,
     PersonOrganizationProject, Scoped, maintenance_scope,
 };
-use telmoni_shared::seam::Audience;
+use telmoni_shared::seam::{Audience, DocumentCursor};
 use telmoni_shared::{OrganizationId, ProjectId, UserId};
 use uuid::Uuid;
 
@@ -503,12 +503,25 @@ pub async fn search(
 // ── Cursors ──────────────────────────────────────────────────────────────────
 
 /// A source's cursor, leased to one replica until `leased_until`.
-#[derive(Debug, FromRow)]
+#[derive(Debug)]
 pub struct Lease {
     pub lease_id: Uuid,
-    pub after_at: Option<DateTime<Utc>>,
-    pub after_id: Option<Uuid>,
+    /// The last row taken; `None` before the first.
+    pub after: Option<DocumentCursor>,
     pub digest: Option<String>,
+}
+
+impl<'r> FromRow<'r, sqlx::postgres::PgRow> for Lease {
+    fn from_row(row: &'r sqlx::postgres::PgRow) -> sqlx::Result<Self> {
+        use sqlx::Row as _;
+        let at: Option<DateTime<Utc>> = row.try_get("after_at")?;
+        let id: Option<Uuid> = row.try_get("after_id")?;
+        Ok(Self {
+            lease_id: row.try_get("lease_id")?,
+            after: at.zip(id).map(|(at, id)| DocumentCursor { at, id }),
+            digest: row.try_get("digest")?,
+        })
+    }
 }
 
 /// Lease a source's cursor for `secs`, or `None` while another replica holds
@@ -554,14 +567,15 @@ pub async fn renew_lease(
         == 1)
 }
 
-/// End a lease and lock its row for this transaction: `false` when the lease
-/// ran out and another replica took the cursor, whose work then stands and
-/// this one's is dropped, or an erasure ended it.
+/// End a lease and lock its row for this transaction — settling a write, or
+/// handing it back early: `false` when the lease ran out and another replica
+/// took the cursor, whose work then stands and this one's is dropped, or an
+/// erasure ended it.
 ///
-/// ⚠ **Last in the write, before the cursor moves and the commit.** Settled
+/// ⚠ **Last in a write, before the cursor moves and the commit.** Settled
 /// first, the row stayed locked while every passage was written, and an
 /// erasure ending the leases queued behind the whole write.
-pub async fn settle_lease(
+pub async fn end_lease(
     tx: &mut Scoped<'_, Maintenance<AgentLane>>,
     source: Source,
     lease_id: Uuid,
@@ -592,24 +606,6 @@ pub async fn advance_cursor(
     .bind(source)
     .bind(at)
     .bind(id)
-    .execute(tx.conn())
-    .await?;
-    Ok(())
-}
-
-/// Hand a lease back before it runs out: its page had nothing to write, or
-/// failed and is read again from the cursor.
-pub async fn release_lease(
-    tx: &mut Scoped<'_, Maintenance<AgentLane>>,
-    source: Source,
-    lease_id: Uuid,
-) -> sqlx::Result<()> {
-    sqlx::query(
-        "UPDATE agent.cursors SET lease_id = NULL, leased_until = NULL
-          WHERE source = $1 AND lease_id = $2",
-    )
-    .bind(source)
-    .bind(lease_id)
     .execute(tx.conn())
     .await?;
     Ok(())

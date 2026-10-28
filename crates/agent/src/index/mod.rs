@@ -285,11 +285,7 @@ async fn index_page(
     lease: &Lease,
 ) -> Result<Page, TelmoniError> {
     let source = paged.source();
-    let after = match (lease.after_at, lease.after_id) {
-        (Some(at), Some(id)) => Some(DocumentCursor { at, id }),
-        _ => None,
-    };
-    let page = match fetch(state, paged, after.as_ref()).await {
+    let page = match fetch(state, paged, lease.after.as_ref()).await {
         Ok(page) => page,
         Err(e) => {
             release(state, source, lease.lease_id).await;
@@ -308,7 +304,7 @@ async fn index_page(
         let prepared = prepare(&state.db, embedder, source, &entries).await?;
         let mut tx = maintenance_scope(&state.db, AgentLane).await?;
         store(&mut tx, source, &entries, &prepared).await?;
-        if !db::settle_lease(&mut tx, source, lease.lease_id).await? {
+        if !db::end_lease(&mut tx, source, lease.lease_id).await? {
             tx.rollback().await?;
             tracing::warn!(
                 source = source.as_str(),
@@ -442,7 +438,7 @@ async fn renew(state: &AppState, source: Source, lease_id: Uuid) -> bool {
 pub(crate) async fn release(state: &AppState, source: Source, lease_id: Uuid) {
     let released = db::in_lane(&state.db, |tx| {
         Box::pin(async move {
-            db::release_lease(tx, source, lease_id).await?;
+            db::end_lease(tx, source, lease_id).await?;
             Ok::<_, sqlx::Error>(())
         })
     })
