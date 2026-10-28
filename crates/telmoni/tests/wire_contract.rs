@@ -24,8 +24,9 @@ use telmoni_shared::{
     RuleMeasure, RuleOperator, RuleWindow, SessionSort, Severity, SortDirection, SpanKind,
     SpanStatus, TelmoniResourceKind, TraceColumn, TraceSort, UserSort, ViewKind, slug,
 };
+use telmoni_telemetry::contract::UTC_OFFSET_RANGE;
 use telmoni_telemetry::handler::incidents::INCIDENTS_MAX;
-use telmoni_telemetry::handler::traces::{FILTER_VALUE_MAX, UTC_OFFSET_RANGE};
+use telmoni_telemetry::handler::traces::FILTER_VALUE_MAX;
 use telmoni_telemetry::live;
 use telmoni_telemetry::rules::db::PausedBy;
 use telmoni_telemetry::rules::mutes::MUTE_DAYS_MAX;
