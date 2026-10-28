@@ -26,6 +26,7 @@ use crate::rules::example::{self, ExampleRun, Pick};
 use crate::rules::incidents::{self, IncidentRow, Move, Telling, Told};
 use crate::rules::{Link, deliveries, mutes};
 use crate::spend::Unread;
+use crate::traces::Facet;
 
 /// What an evaluation's moves say, told after its commit: each opening and
 /// resolution emitted to the feed, keyed by the incident and the kind, and
@@ -399,19 +400,19 @@ fn traces_link(state: &AppState, rule: &RuleRow) -> Option<String> {
                 RuleWindow::Week => "7",
             },
         );
-        for (key, values) in [
-            ("agent", &filters.agent),
-            ("model", &filters.model),
-            ("tool", &filters.tool),
-            ("environment", &filters.environment),
-            ("release", &filters.release),
+        for (facet, values) in [
+            (Facet::Agent, &filters.agent),
+            (Facet::Model, &filters.model),
+            (Facet::Tool, &filters.tool),
+            (Facet::Environment, &filters.environment),
+            (Facet::Release, &filters.release),
         ] {
             for value in values {
-                query.append_pair(key, value);
+                query.append_pair(facet.as_str(), value);
             }
         }
         for status in statuses {
-            query.append_pair("status", &status.to_string());
+            query.append_pair(Facet::Status.as_str(), &status.to_string());
         }
     }
     let url: String = url.into();

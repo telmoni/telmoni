@@ -32,8 +32,8 @@ use crate::contract::{
 use crate::spend::{self, Unread};
 use crate::store::{self, Projects, SpanRow};
 use crate::traces::{
-    self, Bar, DEFAULT_LIMIT, EXPORT_MAX, FACET_VALUES_MAX, FILTER_VALUES_MAX, FacetRow, MAX_DAYS,
-    MAX_LIMIT, MAX_PAGE, RUNS_MAX, SPANS_MAX, TRACE_UNITS_MAX, TraceFilter, TraceRow,
+    self, Bar, DEFAULT_LIMIT, EXPORT_MAX, FACET_VALUES_MAX, FILTER_VALUES_MAX, Facet, FacetRow,
+    MAX_DAYS, MAX_LIMIT, MAX_PAGE, RUNS_MAX, SPANS_MAX, TRACE_UNITS_MAX, TraceFilter, TraceRow,
 };
 
 /// The longest value each filter takes, in characters, by its name in a URL:
@@ -135,47 +135,11 @@ impl TraceQuery {
         use Reading::{Export, Histogram, List, TraceExport};
         let mut query = Self::default();
         for (name, value) in pairs {
+            if let Ok(facet) = name.parse::<Facet>() {
+                query.filter_mut(facet).push(value);
+                continue;
+            }
             let once = match (name.as_str(), reading) {
-                ("agent", _) => {
-                    query.agent.push(value);
-                    continue;
-                }
-                ("user", _) => {
-                    query.user.push(value);
-                    continue;
-                }
-                ("session", _) => {
-                    query.session.push(value);
-                    continue;
-                }
-                ("status", _) => {
-                    query.status.push(value);
-                    continue;
-                }
-                ("model", _) => {
-                    query.model.push(value);
-                    continue;
-                }
-                ("tool", _) => {
-                    query.tool.push(value);
-                    continue;
-                }
-                ("environment", _) => {
-                    query.environment.push(value);
-                    continue;
-                }
-                ("release", _) => {
-                    query.release.push(value);
-                    continue;
-                }
-                ("tag", _) => {
-                    query.tag.push(value);
-                    continue;
-                }
-                ("prompt", _) => {
-                    query.prompt.push(value);
-                    continue;
-                }
                 ("run", TraceExport) => {
                     query.run.push(value);
                     continue;
@@ -200,6 +164,22 @@ impl TraceQuery {
             }
         }
         Ok(query)
+    }
+
+    /// One filter's values, by its facet.
+    fn filter_mut(&mut self, facet: Facet) -> &mut Vec<String> {
+        match facet {
+            Facet::Agent => &mut self.agent,
+            Facet::User => &mut self.user,
+            Facet::Session => &mut self.session,
+            Facet::Status => &mut self.status,
+            Facet::Model => &mut self.model,
+            Facet::Tool => &mut self.tool,
+            Facet::Environment => &mut self.environment,
+            Facet::Release => &mut self.release,
+            Facet::Tag => &mut self.tag,
+            Facet::Prompt => &mut self.prompt,
+        }
     }
 
     /// The filter the query asks for, each value checked.
@@ -664,23 +644,23 @@ impl Trace {
 pub struct Facets {
     /// How many days back they read.
     pub days: u16,
-    pub agent: Facet,
-    pub user: Facet,
-    pub session: Facet,
-    pub status: Facet,
-    pub model: Facet,
-    pub tool: Facet,
-    pub environment: Facet,
-    pub release: Facet,
+    pub agent: FacetValues,
+    pub user: FacetValues,
+    pub session: FacetValues,
+    pub status: FacetValues,
+    pub model: FacetValues,
+    pub tool: FacetValues,
+    pub environment: FacetValues,
+    pub release: FacetValues,
     /// Each tag as `key:value`.
-    pub tag: Facet,
-    pub prompt: Facet,
+    pub tag: FacetValues,
+    pub prompt: FacetValues,
 }
 
 /// One filter's values: the ticked ones first, then the most rows, up to
 /// [`FACET_VALUES_MAX`].
 #[derive(Debug, Default, Serialize)]
-pub struct Facet {
+pub struct FacetValues {
     pub values: Vec<FacetValue>,
     /// Whether the window holds values past these.
     pub more: bool,
@@ -694,6 +674,22 @@ pub struct FacetValue {
 }
 
 impl Facets {
+    /// One facet's values.
+    fn values_of(&mut self, facet: Facet) -> &mut FacetValues {
+        match facet {
+            Facet::Agent => &mut self.agent,
+            Facet::User => &mut self.user,
+            Facet::Session => &mut self.session,
+            Facet::Status => &mut self.status,
+            Facet::Model => &mut self.model,
+            Facet::Tool => &mut self.tool,
+            Facet::Environment => &mut self.environment,
+            Facet::Release => &mut self.release,
+            Facet::Tag => &mut self.tag,
+            Facet::Prompt => &mut self.prompt,
+        }
+    }
+
     /// The read's rows, by facet, in the read's order.
     pub(crate) fn of(days: u16, rows: Vec<FacetRow>) -> Self {
         let mut facets = Self {
@@ -701,19 +697,7 @@ impl Facets {
             ..Self::default()
         };
         for row in rows {
-            let facet = match row.facet.as_str() {
-                "agent" => &mut facets.agent,
-                "user" => &mut facets.user,
-                "session" => &mut facets.session,
-                "status" => &mut facets.status,
-                "model" => &mut facets.model,
-                "tool" => &mut facets.tool,
-                "environment" => &mut facets.environment,
-                "release" => &mut facets.release,
-                "tag" => &mut facets.tag,
-                "prompt" => &mut facets.prompt,
-                _ => continue,
-            };
+            let facet = facets.values_of(row.facet);
             if facet.values.len() == FACET_VALUES_MAX {
                 facet.more = true;
                 continue;
@@ -1318,13 +1302,13 @@ mod tests {
         let mut rows: Vec<FacetRow> = (0..=FACET_VALUES_MAX)
             .zip((0..100_u64).rev())
             .map(|(i, listed)| FacetRow {
-                facet: "model".into(),
+                facet: Facet::Model,
                 value: format!("model-{i}"),
                 listed,
             })
             .collect();
         rows.push(FacetRow {
-            facet: "status".into(),
+            facet: Facet::Status,
             value: "error".into(),
             listed: 3,
         });

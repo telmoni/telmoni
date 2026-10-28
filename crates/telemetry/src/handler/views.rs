@@ -730,4 +730,37 @@ mod tests {
         assert_eq!(refused.status, 400);
         assert!(!refused.detail.unwrap_or_default().contains("script"));
     }
+
+    /// A saved view's keys are the list's facets, each by its one word, and
+    /// the window's and the sort's four: a filter added to the list is a key
+    /// the view keeps.
+    #[test]
+    fn a_views_keys_are_the_facets_words() {
+        let every = ViewQuery {
+            agent: vec!["a".into()],
+            user: vec!["u".into()],
+            session: vec!["s".into()],
+            status: vec![telmoni_shared::SpanStatus::Ok],
+            model: vec!["m".into()],
+            tool: vec!["t".into()],
+            environment: vec!["e".into()],
+            release: vec!["r".into()],
+            tag: vec!["k:v".into()],
+            prompt: vec!["p".into()],
+            sort: Some(telmoni_shared::TraceSort::Started),
+            dir: Some(telmoni_shared::SortDirection::Asc),
+            days: Some(7),
+            limit: Some(50),
+        };
+        let json = serde_json::to_value(&every).unwrap();
+        let mut keys: Vec<String> = json.as_object().unwrap().keys().cloned().collect();
+        keys.sort();
+        let mut expected: Vec<String> = crate::traces::Facet::all()
+            .iter()
+            .map(|facet| facet.as_str().to_owned())
+            .chain(["sort", "dir", "days", "limit"].map(str::to_owned))
+            .collect();
+        expected.sort();
+        assert_eq!(keys, expected);
+    }
 }

@@ -196,13 +196,51 @@ pub(crate) struct CountRow {
     pub(crate) total: u64,
 }
 
+/// The list's filters, which are its facets: each one word, the URL's
+/// parameter, a saved view's key and the facets read's first column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
+#[serde(try_from = "String")]
+pub enum Facet {
+    Agent,
+    User,
+    Session,
+    Status,
+    Model,
+    Tool,
+    Environment,
+    Release,
+    Tag,
+    Prompt,
+}
+
+// In the sidebar's order.
+telmoni_shared::wire_enum!(Facet {
+    Agent => "agent",
+    User => "user",
+    Session => "session",
+    Status => "status",
+    Model => "model",
+    Tool => "tool",
+    Environment => "environment",
+    Release => "release",
+    Tag => "tag",
+    Prompt => "prompt",
+});
+
+impl TryFrom<String> for Facet {
+    type Error = telmoni_shared::ParseEnumError;
+
+    fn try_from(word: String) -> Result<Self, Self::Error> {
+        word.parse()
+    }
+}
+
 /// One value of one facet: how many of a list's rows, among those the other
-/// filters admit, carry it.
+/// filters admit, carry it. A facet the read spells as none of the ten fails
+/// the read, never vanishes from the answer.
 #[derive(Debug, Clone, PartialEq, Eq, Row, Deserialize)]
 pub struct FacetRow {
-    /// `agent`, `user`, `session`, `status`, `model`, `tool`, `environment`,
-    /// `release`, `tag` or `prompt`.
-    pub facet: String,
+    pub facet: Facet,
     /// The value, as stored.
     pub value: String,
     /// How many of the list's rows carry it: runs, sessions or users.
@@ -275,6 +313,48 @@ pub struct Bar {
 }
 
 /// What a run carries where any of its spans does, each value once and
+/// A run's status: its own span's once that has arrived, else `error` where
+/// any span failed and `ok` otherwise.
+macro_rules! run_status {
+    () => {
+        "if(countIf(kind = 'run') > 0, anyIf(status, kind = 'run'), \
+         if(countIf(status = 'error') > 0, 'error', 'ok'))"
+    };
+}
+
+/// Whether the run's sums pass one filter, each admitting every run while
+/// it is empty: what the list keeps and the facets flag.
+macro_rules! admits {
+    (user) => {
+        "(empty({users:Array(String)}) OR has({users:Array(String)}, run_user_id))"
+    };
+    (session) => {
+        "(empty({sessions:Array(String)}) OR has({sessions:Array(String)}, run_session_id))"
+    };
+    (status) => {
+        "(empty({statuses:Array(String)}) OR has({statuses:Array(String)}, run_status))"
+    };
+    (model) => {
+        "(empty({models:Array(String)}) OR hasAny(models, {models:Array(String)}))"
+    };
+    (tool) => {
+        "(empty({tools:Array(String)}) OR hasAny(tools, {tools:Array(String)}))"
+    };
+    (environment) => {
+        "(empty({environments:Array(String)}) \
+         OR hasAny(environments, {environments:Array(String)}))"
+    };
+    (release) => {
+        "(empty({releases:Array(String)}) OR hasAny(releases, {releases:Array(String)}))"
+    };
+    (tag) => {
+        "(empty({tags:Array(String)}) OR hasAny(tag_pairs, {tags:Array(String)}))"
+    };
+    (prompt) => {
+        "(empty({prompts:Array(String)}) OR hasAny(prompts, {prompts:Array(String)}))"
+    };
+}
+
 /// sorted: the deployments and releases its spans were sent from, its tags
 /// as `key:value`, and the prompt names among its attributes. Named apart
 /// from the columns, as the sums below are.
@@ -302,8 +382,8 @@ macro_rules! run_sums {
             "anyIf(user_id, user_id != '') AS run_user_id, ",
             "anyIf(session_id, session_id != '') AS run_session_id, ",
             "toUInt8(countIf(kind = 'run') > 0) AS run_ended, ",
-            "if(countIf(kind = 'run') > 0, anyIf(status, kind = 'run'), ",
-            "if(countIf(status = 'error') > 0, 'error', 'ok')) AS run_status, ",
+            run_status!(),
+            " AS run_status, ",
             "anyIf(error_type, kind = 'run') AS run_error_type, ",
             "min(started_at) AS first_started_at, max(ended_at) AS last_ended_at, ",
             "greatest(dateDiff('millisecond', first_started_at, last_ended_at), 0) AS duration_ms, ",
@@ -348,16 +428,24 @@ macro_rules! runs {
             window!(),
             "AND (empty({agents:Array(String)}) OR has({agents:Array(String)}, agent)) ",
             "GROUP BY run_id ",
-            "HAVING (empty({users:Array(String)}) OR has({users:Array(String)}, run_user_id)) ",
-            "AND (empty({sessions:Array(String)}) OR has({sessions:Array(String)}, run_session_id)) ",
-            "AND (empty({statuses:Array(String)}) OR has({statuses:Array(String)}, run_status)) ",
-            "AND (empty({models:Array(String)}) OR hasAny(models, {models:Array(String)})) ",
-            "AND (empty({tools:Array(String)}) OR hasAny(tools, {tools:Array(String)})) ",
-            "AND (empty({environments:Array(String)}) ",
-            "OR hasAny(environments, {environments:Array(String)})) ",
-            "AND (empty({releases:Array(String)}) OR hasAny(releases, {releases:Array(String)})) ",
-            "AND (empty({tags:Array(String)}) OR hasAny(tag_pairs, {tags:Array(String)})) ",
-            "AND (empty({prompts:Array(String)}) OR hasAny(prompts, {prompts:Array(String)}))"
+            "HAVING ",
+            admits!(user),
+            " AND ",
+            admits!(session),
+            " AND ",
+            admits!(status),
+            " AND ",
+            admits!(model),
+            " AND ",
+            admits!(tool),
+            " AND ",
+            admits!(environment),
+            " AND ",
+            admits!(release),
+            " AND ",
+            admits!(tag),
+            " AND ",
+            admits!(prompt)
         )
     };
 }
@@ -379,8 +467,8 @@ macro_rules! run_rows {
             "AND (empty({users:Array(String)}) OR has({users:Array(String)}, run_user_id)) ",
             "AND (empty({sessions:Array(String)}) OR has({sessions:Array(String)}, run_session_id)) ",
             "AND (empty({statuses:Array(String)}) OR has({statuses:Array(String)}, ",
-            "if(countIf(kind = 'run') > 0, anyIf(status, kind = 'run'), ",
-            "if(countIf(status = 'error') > 0, 'error', 'ok')))) ",
+            $crate::traces::run_status!(),
+            ")) ",
             "AND (empty({models:Array(String)}) ",
             "OR countIf(kind = 'model_call' AND has({models:Array(String)}, model)) > 0) ",
             "AND (empty({tools:Array(String)}) ",
@@ -400,8 +488,10 @@ macro_rules! run_rows {
     };
 }
 
+pub(crate) use admits;
 pub(crate) use run_carries;
 pub(crate) use run_rows;
+pub(crate) use run_status;
 pub(crate) use window;
 
 /// The list's SQL with one `ORDER BY`, so every (column, direction) is a
@@ -502,61 +592,44 @@ macro_rules! facets_sql {
             "FROM (SELECT run_id, any(agent) AS run_agent, ",
             "anyIf(user_id, user_id != '') AS run_user_id, ",
             "anyIf(session_id, session_id != '') AS run_session_id, ",
-            "if(countIf(kind = 'run') > 0, anyIf(status, kind = 'run'), ",
-            "if(countIf(status = 'error') > 0, 'error', 'ok')) AS run_status, ",
+            $crate::traces::run_status!(),
+            " AS run_status, ",
             "arraySort(groupUniqArrayIf(model, kind = 'model_call' AND model != '')) AS models, ",
             "arraySort(groupUniqArrayIf(name, kind = 'tool_call')) AS tools, ",
             $crate::traces::run_carries!(),
             ", toUInt8(empty({agents:Array(String)}) OR has({agents:Array(String)}, run_agent)) ",
             "AS m_agent, ",
-            "toUInt8(empty({users:Array(String)}) OR has({users:Array(String)}, run_user_id)) ",
-            "AS m_user, ",
-            "toUInt8(empty({sessions:Array(String)}) ",
-            "OR has({sessions:Array(String)}, run_session_id)) AS m_session, ",
-            "toUInt8(empty({statuses:Array(String)}) OR has({statuses:Array(String)}, run_status)) ",
-            "AS m_status, ",
-            "toUInt8(empty({models:Array(String)}) OR hasAny(models, {models:Array(String)})) ",
-            "AS m_model, ",
-            "toUInt8(empty({tools:Array(String)}) OR hasAny(tools, {tools:Array(String)})) ",
-            "AS m_tool, ",
-            "toUInt8(empty({environments:Array(String)}) ",
-            "OR hasAny(environments, {environments:Array(String)})) AS m_environment, ",
-            "toUInt8(empty({releases:Array(String)}) ",
-            "OR hasAny(releases, {releases:Array(String)})) AS m_release, ",
-            "toUInt8(empty({tags:Array(String)}) OR hasAny(tag_pairs, {tags:Array(String)})) ",
-            "AS m_tag, ",
-            "toUInt8(empty({prompts:Array(String)}) OR hasAny(prompts, {prompts:Array(String)})) ",
-            "AS m_prompt ",
+            "toUInt8(", $crate::traces::admits!(user), ") AS m_user, ",
+            "toUInt8(", $crate::traces::admits!(session), ") AS m_session, ",
+            "toUInt8(", $crate::traces::admits!(status), ") AS m_status, ",
+            "toUInt8(", $crate::traces::admits!(model), ") AS m_model, ",
+            "toUInt8(", $crate::traces::admits!(tool), ") AS m_tool, ",
+            "toUInt8(", $crate::traces::admits!(environment), ") AS m_environment, ",
+            "toUInt8(", $crate::traces::admits!(release), ") AS m_release, ",
+            "toUInt8(", $crate::traces::admits!(tag), ") AS m_tag, ",
+            "toUInt8(", $crate::traces::admits!(prompt), ") AS m_prompt, ",
+            // How many filters the run fails, so a value counts where no
+            // filter but its own refuses the run: with its own flag up it
+            // needs no miss, with it down that one miss alone.
+            "(1 - m_agent) + (1 - m_user) + (1 - m_session) + (1 - m_status) + (1 - m_model) ",
+            "+ (1 - m_tool) + (1 - m_environment) + (1 - m_release) + (1 - m_tag) ",
+            "+ (1 - m_prompt) AS misses ",
             $crate::traces::window!(),
             "GROUP BY run_id) ",
             "ARRAY JOIN arrayConcat(",
-            "[tuple('agent', CAST(run_agent AS String), toUInt8(m_user AND m_session AND m_status ",
-            "AND m_model AND m_tool AND m_environment AND m_release AND m_tag AND m_prompt))], ",
-            "[tuple('user', CAST(run_user_id AS String), toUInt8(m_agent AND m_session AND m_status ",
-            "AND m_model AND m_tool AND m_environment AND m_release AND m_tag AND m_prompt))], ",
-            "[tuple('session', CAST(run_session_id AS String), toUInt8(m_agent AND m_user ",
-            "AND m_status AND m_model AND m_tool AND m_environment AND m_release AND m_tag ",
-            "AND m_prompt))], ",
-            "[tuple('status', CAST(run_status AS String), toUInt8(m_agent AND m_user AND m_session ",
-            "AND m_model AND m_tool AND m_environment AND m_release AND m_tag AND m_prompt))], ",
-            "arrayMap(x -> tuple('model', CAST(x AS String), toUInt8(m_agent AND m_user ",
-            "AND m_session AND m_status AND m_tool AND m_environment AND m_release AND m_tag ",
-            "AND m_prompt)), models), ",
-            "arrayMap(x -> tuple('tool', CAST(x AS String), toUInt8(m_agent AND m_user ",
-            "AND m_session AND m_status AND m_model AND m_environment AND m_release AND m_tag ",
-            "AND m_prompt)), tools), ",
-            "arrayMap(x -> tuple('environment', CAST(x AS String), toUInt8(m_agent AND m_user ",
-            "AND m_session AND m_status AND m_model AND m_tool AND m_release AND m_tag ",
-            "AND m_prompt)), environments), ",
-            "arrayMap(x -> tuple('release', CAST(x AS String), toUInt8(m_agent AND m_user ",
-            "AND m_session AND m_status AND m_model AND m_tool AND m_environment AND m_tag ",
-            "AND m_prompt)), releases), ",
-            "arrayMap(x -> tuple('tag', CAST(x AS String), toUInt8(m_agent AND m_user ",
-            "AND m_session AND m_status AND m_model AND m_tool AND m_environment AND m_release ",
-            "AND m_prompt)), tag_pairs), ",
-            "arrayMap(x -> tuple('prompt', CAST(x AS String), toUInt8(m_agent AND m_user ",
-            "AND m_session AND m_status AND m_model AND m_tool AND m_environment AND m_release ",
-            "AND m_tag)), prompts)",
+            "[tuple('agent', CAST(run_agent AS String), toUInt8(misses + m_agent = 1))], ",
+            "[tuple('user', CAST(run_user_id AS String), toUInt8(misses + m_user = 1))], ",
+            "[tuple('session', CAST(run_session_id AS String), toUInt8(misses + m_session = 1))], ",
+            "[tuple('status', CAST(run_status AS String), toUInt8(misses + m_status = 1))], ",
+            "arrayMap(x -> tuple('model', CAST(x AS String), toUInt8(misses + m_model = 1)), models), ",
+            "arrayMap(x -> tuple('tool', CAST(x AS String), toUInt8(misses + m_tool = 1)), tools), ",
+            "arrayMap(x -> tuple('environment', CAST(x AS String), ",
+            "toUInt8(misses + m_environment = 1)), environments), ",
+            "arrayMap(x -> tuple('release', CAST(x AS String), toUInt8(misses + m_release = 1)), ",
+            "releases), ",
+            "arrayMap(x -> tuple('tag', CAST(x AS String), toUInt8(misses + m_tag = 1)), tag_pairs), ",
+            "arrayMap(x -> tuple('prompt', CAST(x AS String), toUInt8(misses + m_prompt = 1)), ",
+            "prompts)",
             ") AS facet_value ",
             "WHERE tupleElement(facet_value, 3) = 1 AND tupleElement(facet_value, 2) != '' ",
             $holds,
@@ -567,7 +640,8 @@ macro_rules! facets_sql {
             "facet = 'tool', {tools:Array(String)}, ",
             "facet = 'environment', {environments:Array(String)}, ",
             "facet = 'release', {releases:Array(String)}, facet = 'tag', {tags:Array(String)}, ",
-            "{prompts:Array(String)}), value) DESC, listed DESC, value ",
+            "facet = 'prompt', {prompts:Array(String)}, emptyArrayString()), value) DESC, ",
+            "listed DESC, value ",
             "LIMIT 51 BY facet"
         )
     };
@@ -939,6 +1013,29 @@ mod tests {
         for facet in ["'environment'", "'release'", "'tag'", "'prompt'"] {
             assert!(FACETS_SQL.contains(facet), "no facet {facet}");
         }
+    }
+
+    /// Every facet is spread to its tuple and ranked by its own filter, in
+    /// the facets read, under the one spelling of a run's status the list,
+    /// the sessions' and users' rows and the facets share.
+    #[test]
+    fn every_facet_is_counted_and_ranked_and_a_runs_status_is_spelled_once() {
+        for facet in Facet::all() {
+            let word = facet.as_str();
+            assert!(
+                FACETS_SQL.contains(&format!("tuple('{word}'")),
+                "no tuple for {word}"
+            );
+            assert!(
+                FACETS_SQL.contains(&format!("facet = '{word}'")),
+                "no rank for {word}"
+            );
+        }
+        let status = run_status!();
+        assert!(list_sql(TraceSort::Started, SortDirection::Desc).contains(status));
+        assert!(run_rows!().contains(status));
+        assert!(FACETS_SQL.contains(status));
+        assert!(FACETS_SQL.contains("AS misses"));
     }
 
     /// Each row of the list carries the class of error its run ended on,
