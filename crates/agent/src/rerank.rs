@@ -4,11 +4,12 @@
 
 use std::time::Duration;
 
-use serde_json::{Value, json};
+use serde::Deserialize;
+use serde_json::json;
 use telmoni_shared::TelmoniError;
 
 use crate::config::RerankConfig;
-use crate::model::{error_kind, http_client, send, unavailable};
+use crate::model::{Endpoint, error_kind, http_client, send, unavailable, with_key};
 
 /// How long a rerank may take. It sits inside a search the model is
 /// waiting on, and past this the fused order is good enough.
@@ -33,39 +34,47 @@ impl Reranker {
         query: &str,
         documents: &[String],
     ) -> Result<Vec<usize>, TelmoniError> {
-        let mut request = self.http.post(&self.config.url).json(&json!({
-            "model": self.config.model,
-            "query": query,
-            "documents": documents,
-            "top_n": documents.len(),
-        }));
-        if let Some(key) = &self.config.api_key {
-            request = request.bearer_auth(key.expose());
-        }
-        let response = send("rerank", request).await?;
-        let body: Value = response
+        let request = with_key(
+            self.http.post(&self.config.url).json(&json!({
+                "model": self.config.model,
+                "query": query,
+                "documents": documents,
+                "top_n": documents.len(),
+            })),
+            self.config.api_key.as_ref(),
+        );
+        let response = send(Endpoint::Rerank, request).await?;
+        let answer: Results = response
             .json()
             .await
             .map_err(|e| unavailable(format!("rerank {}", error_kind(&e))))?;
-        Ok(order(&body, documents.len()))
+        Ok(order(answer, documents.len()))
     }
+}
+
+/// The endpoint's answer: each document sent, scored.
+#[derive(Deserialize)]
+pub(crate) struct Results {
+    #[serde(default)]
+    results: Vec<Ranked>,
+}
+
+#[derive(Deserialize)]
+struct Ranked {
+    index: u64,
+    #[serde(alias = "score")]
+    relevance_score: f64,
 }
 
 /// `results` by descending score, keeping only indexes that were sent, each
 /// once; anything the endpoint left out follows in its fused order.
-pub(crate) fn order(body: &Value, sent: usize) -> Vec<usize> {
-    let mut scored: Vec<(usize, f64)> = body
-        .get("results")
-        .and_then(Value::as_array)
+pub(crate) fn order(answer: Results, sent: usize) -> Vec<usize> {
+    let mut scored: Vec<(usize, f64)> = answer
+        .results
         .into_iter()
-        .flatten()
         .filter_map(|r| {
-            let index = usize::try_from(r.get("index")?.as_u64()?).ok()?;
-            let score = r
-                .get("relevance_score")
-                .or_else(|| r.get("score"))?
-                .as_f64()?;
-            (index < sent).then_some((index, score))
+            let index = usize::try_from(r.index).ok()?;
+            (index < sent).then_some((index, r.relevance_score))
         })
         .collect();
     scored.sort_by(|a, b| b.1.total_cmp(&a.1));
@@ -94,6 +103,9 @@ mod tests {
             {"index": 0, "relevance_score": 0.1},
             {"index": 7, "relevance_score": 1.0},
         ]});
-        assert_eq!(order(&body, 4), vec![2, 0, 1, 3]);
+        assert_eq!(
+            order(serde_json::from_value(body).unwrap(), 4),
+            vec![2, 0, 1, 3]
+        );
     }
 }

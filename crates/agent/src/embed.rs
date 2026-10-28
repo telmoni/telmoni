@@ -4,11 +4,12 @@
 use std::time::Duration;
 
 use async_trait::async_trait;
-use serde_json::{Value, json};
+use serde::Deserialize;
+use serde_json::json;
 use telmoni_shared::TelmoniError;
 
 use crate::config::{EMBEDDING_DIMENSIONS, EmbeddingsConfig};
-use crate::model::{error_kind, http_client, not_now_error, send, unavailable};
+use crate::model::{Endpoint, error_kind, http_client, not_now_error, send, unavailable, with_key};
 
 /// How many texts one request carries.
 pub(crate) const BATCH: usize = 32;
@@ -46,14 +47,13 @@ impl OpenAiEmbedder {
         } else {
             json!({ "model": self.config.model, "input": texts })
         };
-        let mut request = self
-            .http
-            .post(format!("{}/embeddings", self.config.url))
-            .json(&body);
-        if let Some(key) = &self.config.api_key {
-            request = request.bearer_auth(key.expose());
-        }
-        let response = send("embeddings", request).await?;
+        let request = with_key(
+            self.http
+                .post(format!("{}/embeddings", self.config.url))
+                .json(&body),
+            self.config.api_key.as_ref(),
+        );
+        let response = send(Endpoint::Embeddings, request).await?;
         // Read, then parsed: a body that never arrived whole is the
         // endpoint's state, and a whole one that does not parse — a
         // gateway's page in place of vectors, say — is its answer, and may be
@@ -61,50 +61,42 @@ impl OpenAiEmbedder {
         let body = response
             .bytes()
             .await
-            .map_err(|e| not_now_error("embeddings", error_kind(&e)))?;
-        let body: Value = serde_json::from_slice(&body)
+            .map_err(|e| not_now_error(Endpoint::Embeddings, error_kind(&e)))?;
+        let answer: Embeddings = serde_json::from_slice(&body)
             .map_err(|_| unavailable("embeddings answered a body that does not parse"))?;
-        vectors(&body, texts.len())
+        vectors(answer, texts.len())
     }
 }
 
+/// The endpoint's answer: one vector per input, each saying which.
+#[derive(Deserialize)]
+pub(crate) struct Embeddings {
+    data: Vec<Embedded>,
+}
+
+#[derive(Deserialize)]
+struct Embedded {
+    #[serde(default)]
+    index: Option<u64>,
+    embedding: Vec<f32>,
+}
+
 /// The `data` array, put back in input order by each entry's `index`.
-pub(crate) fn vectors(body: &Value, expected: usize) -> Result<Vec<Vec<f32>>, TelmoniError> {
-    let data = body
-        .get("data")
-        .and_then(Value::as_array)
-        .ok_or_else(|| unavailable("embeddings answered without `data`"))?;
+pub(crate) fn vectors(answer: Embeddings, expected: usize) -> Result<Vec<Vec<f32>>, TelmoniError> {
     let mut out: Vec<Option<Vec<f32>>> = vec![None; expected];
-    for (position, entry) in data.iter().enumerate() {
+    for (position, entry) in answer.data.into_iter().enumerate() {
         let index = entry
-            .get("index")
-            .and_then(Value::as_u64)
+            .index
             .and_then(|i| usize::try_from(i).ok())
             .unwrap_or(position);
-        let vector: Vec<f32> = entry
-            .get("embedding")
-            .and_then(Value::as_array)
-            .ok_or_else(|| unavailable("an embedding without a vector"))?
-            .iter()
-            .map(|x| x.as_f64().map(narrow))
-            .collect::<Option<_>>()
-            .ok_or_else(|| unavailable("an embedding with a non-number in it"))?;
         match out.get_mut(index) {
-            Some(slot) => *slot = Some(vector),
+            Some(slot) => *slot = Some(entry.embedding),
             None => return Err(unavailable("an embedding for an input that was not sent")),
         }
     }
     out.into_iter()
         .collect::<Option<Vec<_>>>()
         .ok_or_else(|| unavailable("embeddings answered fewer vectors than inputs"))
-}
-
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "an embedding is f32 on every provider's side; the JSON number is its widening"
-)]
-const fn narrow(x: f64) -> f32 {
-    x as f32
 }
 
 #[async_trait]
@@ -162,11 +154,9 @@ mod tests {
             {"index": 1, "embedding": [2.0, 2.5]},
             {"index": 0, "embedding": [1.0, 1.5]},
         ]});
-        assert_eq!(
-            vectors(&body, 2).unwrap(),
-            vec![vec![1.0, 1.5], vec![2.0, 2.5]]
-        );
-        assert!(vectors(&body, 3).is_err());
+        let answer = |n| vectors(serde_json::from_value(body.clone()).unwrap(), n);
+        assert_eq!(answer(2).unwrap(), vec![vec![1.0, 1.5], vec![2.0, 2.5]]);
+        assert!(answer(3).is_err());
     }
 
     #[test]

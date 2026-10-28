@@ -8,15 +8,17 @@
 //! thought signature (`extra_content`) to its calls that must come back on
 //! the next request, or the second round of a tool loop is refused.
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use telmoni_shared::TelmoniError;
 
 use super::{
-    Message, Model, ModelTurn, StopReason, TextSink, TokenUsage, ToolCall, ToolSpec, read_events,
-    send, unavailable,
+    Assemble, Endpoint, Flow, Message, Model, ModelTurn, SseEvent, StopReason, TextSink,
+    TokenUsage, ToolCall, ToolSpec, stream_turn, tool_input, unavailable, with_key,
 };
 use crate::config::ModelConfig;
 
@@ -32,69 +34,185 @@ impl OpenAi {
     }
 }
 
+/// One message of the transcript in Chat Completions' shape.
+#[derive(Serialize)]
+#[serde(tag = "role", rename_all = "lowercase")]
+pub(crate) enum ChatMessage<'a> {
+    System {
+        content: &'a str,
+    },
+    User {
+        content: &'a str,
+    },
+    Assistant {
+        content: Option<&'a str>,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        tool_calls: Vec<ChatToolCall<'a>>,
+    },
+    Tool {
+        tool_call_id: &'a str,
+        content: Cow<'a, str>,
+    },
+}
+
+/// One call of an assistant message, as the request carries it.
+#[derive(Serialize)]
+pub(crate) struct ChatToolCall<'a> {
+    id: &'a str,
+    r#type: &'static str,
+    function: ChatFunction<'a>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    extra_content: Option<&'a Value>,
+}
+
+#[derive(Serialize)]
+struct ChatFunction<'a> {
+    name: &'a str,
+    arguments: String,
+}
+
 /// The system prompt and the transcript in Chat Completions' shape.
-pub(crate) fn messages(system: &str, transcript: &[Message]) -> Vec<Value> {
-    let mut out = vec![json!({ "role": "system", "content": system })];
+pub(crate) fn messages<'a>(system: &'a str, transcript: &'a [Message]) -> Vec<ChatMessage<'a>> {
+    let mut out = vec![ChatMessage::System { content: system }];
     for message in transcript {
         match message {
-            Message::User(text) => out.push(json!({ "role": "user", "content": text })),
+            Message::User(text) => out.push(ChatMessage::User { content: text }),
             Message::Assistant {
                 text,
                 tool_calls,
                 raw,
             } => {
                 let extras = raw.as_ref().and_then(|r| r.get("extra_content"));
-                let content = if text.is_empty() {
-                    Value::Null
-                } else {
-                    json!(text)
-                };
-                if tool_calls.is_empty() {
-                    out.push(json!({ "role": "assistant", "content": content }));
-                    continue;
-                }
-                let calls: Vec<Value> = tool_calls
-                    .iter()
-                    .map(|c| {
-                        let mut call = json!({
-                            "id": c.id,
-                            "type": "function",
-                            "function": {
-                                "name": c.name,
-                                "arguments": if c.input.is_null() {
+                out.push(ChatMessage::Assistant {
+                    content: (!text.is_empty()).then_some(text.as_str()),
+                    tool_calls: tool_calls
+                        .iter()
+                        .map(|c| ChatToolCall {
+                            id: &c.id,
+                            r#type: "function",
+                            function: ChatFunction {
+                                name: &c.name,
+                                arguments: if c.input.is_null() {
                                     "{}".to_owned()
                                 } else {
                                     c.input.to_string()
                                 },
                             },
-                        });
-                        if let (Some(fields), Some(extra)) =
-                            (call.as_object_mut(), extras.and_then(|e| e.get(&c.id)))
-                        {
-                            fields.insert("extra_content".to_owned(), extra.clone());
-                        }
-                        call
-                    })
-                    .collect();
-                out.push(json!({ "role": "assistant", "content": content, "tool_calls": calls }));
+                            extra_content: extras.and_then(|e| e.get(&c.id)),
+                        })
+                        .collect(),
+                });
             }
             Message::ToolResults(results) => {
                 for r in results {
-                    let content = if r.is_error {
-                        format!("error: {}", r.content)
-                    } else {
-                        r.content.clone()
-                    };
-                    out.push(json!({
-                        "role": "tool",
-                        "tool_call_id": r.id,
-                        "content": content,
-                    }));
+                    out.push(ChatMessage::Tool {
+                        tool_call_id: &r.id,
+                        content: if r.is_error {
+                            Cow::Owned(format!("error: {}", r.content))
+                        } else {
+                            Cow::Borrowed(&r.content)
+                        },
+                    });
                 }
             }
         }
     }
     out
+}
+
+/// One streamed chunk, framed as the server sends it: Google sends an error
+/// mid-stream as a one-element array.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum Framed<'a> {
+    One(#[serde(borrow)] Chunk<'a>),
+    Many(#[serde(borrow)] Vec<Chunk<'a>>),
+}
+
+#[derive(Deserialize, Default)]
+struct Chunk<'a> {
+    #[serde(default)]
+    error: Option<ChunkError>,
+    #[serde(default)]
+    usage: Option<Usage>,
+    #[serde(default)]
+    model: Option<String>,
+    #[serde(borrow, default)]
+    choices: Vec<Choice<'a>>,
+}
+
+/// An error's name, in whichever field a server puts it.
+#[derive(Deserialize)]
+struct ChunkError {
+    #[serde(default, rename = "type")]
+    kind: Option<Value>,
+    #[serde(default)]
+    status: Option<Value>,
+    #[serde(default)]
+    code: Option<Value>,
+}
+
+/// Chat Completions' `usage`, each count where it is given.
+#[derive(Deserialize)]
+struct Usage {
+    #[serde(default)]
+    prompt_tokens: Option<u64>,
+    #[serde(default)]
+    completion_tokens: Option<u64>,
+    #[serde(default)]
+    prompt_tokens_details: Option<PromptDetails>,
+    #[serde(default)]
+    completion_tokens_details: Option<CompletionDetails>,
+}
+
+#[derive(Deserialize)]
+struct PromptDetails {
+    #[serde(default)]
+    cached_tokens: Option<u64>,
+}
+
+#[derive(Deserialize)]
+struct CompletionDetails {
+    #[serde(default)]
+    reasoning_tokens: Option<u64>,
+}
+
+#[derive(Deserialize)]
+struct Choice<'a> {
+    #[serde(borrow, default)]
+    finish_reason: Option<Cow<'a, str>>,
+    #[serde(borrow, default)]
+    delta: Delta<'a>,
+}
+
+#[derive(Deserialize, Default)]
+struct Delta<'a> {
+    #[serde(borrow, default)]
+    content: Option<Cow<'a, str>>,
+    #[serde(borrow, default)]
+    tool_calls: Vec<ToolCallDelta<'a>>,
+}
+
+/// A tool call's fragment: the id and the name once, the arguments a piece
+/// at a time.
+#[derive(Deserialize)]
+struct ToolCallDelta<'a> {
+    #[serde(default)]
+    index: Option<u64>,
+    #[serde(borrow, default)]
+    id: Option<Cow<'a, str>>,
+    #[serde(default)]
+    extra_content: Option<Value>,
+    #[serde(borrow, default)]
+    function: Function<'a>,
+}
+
+#[derive(Deserialize, Default)]
+struct Function<'a> {
+    #[serde(borrow, default)]
+    name: Option<Cow<'a, str>>,
+    #[serde(borrow, default)]
+    arguments: Option<Cow<'a, str>>,
 }
 
 #[derive(Debug, Default)]
@@ -119,53 +237,82 @@ pub(crate) struct Assembler {
 /// choices; Gemini's endpoint repeats the totals so far on its chunks, so
 /// each one read replaces the last rather than adding to it, which would
 /// count a reply's tokens once per chunk.
-fn usage(usage: &Value) -> Option<TokenUsage> {
-    let count = |pointer: &str| usage.pointer(pointer).and_then(Value::as_u64).unwrap_or(0);
+fn usage(usage: &Usage) -> Option<TokenUsage> {
     Some(TokenUsage {
-        input_tokens: usage.get("prompt_tokens").and_then(Value::as_u64)?,
-        output_tokens: count("/completion_tokens"),
-        cache_read_tokens: count("/prompt_tokens_details/cached_tokens"),
+        input_tokens: usage.prompt_tokens?,
+        output_tokens: usage.completion_tokens.unwrap_or(0),
+        cache_read_tokens: usage
+            .prompt_tokens_details
+            .as_ref()
+            .and_then(|d| d.cached_tokens)
+            .unwrap_or(0),
         cache_write_tokens: 0,
-        reasoning_tokens: count("/completion_tokens_details/reasoning_tokens"),
+        reasoning_tokens: usage
+            .completion_tokens_details
+            .as_ref()
+            .and_then(|d| d.reasoning_tokens)
+            .unwrap_or(0),
     })
 }
 
 impl Assembler {
-    /// Take one chunk; answer the text it added, if any.
-    pub(crate) fn take(&mut self, chunk: &Value) -> Result<Option<String>, TelmoniError> {
-        // Google sends an error mid-stream as a one-element array.
-        let chunk = chunk.as_array().and_then(|a| a.first()).unwrap_or(chunk);
-        if let Some(kind) = chunk
-            .pointer("/error/type")
-            .or_else(|| chunk.pointer("/error/status"))
-            .or_else(|| chunk.pointer("/error/code"))
-        {
+    /// The server said `[DONE]`: a stream that named no `finish_reason`
+    /// still ended where its server meant it to.
+    fn done(&mut self) {
+        if self.finish_reason == StopReason::Unfinished {
+            self.finish_reason = StopReason::Finished;
+        }
+    }
+}
+
+#[cfg(test)]
+impl Assembler {
+    fn take_json(&mut self, chunk: &Value) -> Result<Flow, TelmoniError> {
+        self.take(&SseEvent {
+            event: None,
+            data: chunk.to_string(),
+        })
+    }
+}
+
+impl Assemble for Assembler {
+    const ENDPOINT: Endpoint = Endpoint::OpenAiCompatible;
+
+    fn take(&mut self, event: &SseEvent) -> Result<Flow, TelmoniError> {
+        if event.data.trim() == "[DONE]" {
+            self.done();
+            return Ok(Flow::Done);
+        }
+        let chunk = match serde_json::from_str::<Framed<'_>>(&event.data) {
+            Ok(Framed::One(chunk)) => chunk,
+            Ok(Framed::Many(chunks)) => chunks.into_iter().next().unwrap_or_default(),
+            Err(_) => return Ok(Flow::Continue),
+        };
+        if let Some(error) = chunk.error {
+            let kind = [error.kind, error.status, error.code]
+                .into_iter()
+                .flatten()
+                .next();
             return Err(unavailable(format!(
                 "openai-compatible stream error {}",
-                kind.as_str().unwrap_or("error")
+                kind.as_ref().and_then(Value::as_str).unwrap_or("error")
             )));
         }
-        if let Some(counted) = chunk.get("usage").and_then(usage) {
+        if let Some(counted) = chunk.usage.as_ref().and_then(usage) {
             self.usage = Some(counted);
         }
-        if let Some(model) = chunk.get("model").and_then(Value::as_str) {
-            model.clone_into(self.model.get_or_insert_with(String::new));
+        if let Some(model) = chunk.model {
+            self.model = Some(model);
         }
-        let Some(choice) = chunk.pointer("/choices/0") else {
-            return Ok(None);
+        let Some(choice) = chunk.choices.into_iter().next() else {
+            return Ok(Flow::Continue);
         };
-        if let Some(reason) = choice.get("finish_reason").and_then(Value::as_str) {
+        if let Some(reason) = &choice.finish_reason {
             self.finish_reason = StopReason::from_openai(reason);
         }
-        let delta = choice.get("delta").unwrap_or(&Value::Null);
-        for call in delta
-            .get("tool_calls")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-        {
-            let id = call.get("id").and_then(Value::as_str);
-            let index = match call.get("index").and_then(Value::as_u64) {
+        for call in choice.delta.tool_calls {
+            let id = call.id.as_deref();
+            let index = match call.index {
                 Some(index) => index,
                 // No index: a new id is a new call, a fragment without one
                 // continues the last.
@@ -179,38 +326,30 @@ impl Assembler {
             if let Some(id) = id {
                 id.clone_into(&mut partial.id);
             }
-            if let Some(extra) = call.get("extra_content") {
-                partial.extra_content = Some(extra.clone());
+            if let Some(extra) = call.extra_content {
+                partial.extra_content = Some(extra);
             }
             // Some servers repeat the whole name on every fragment; appending
             // that made `searchsearch`, a tool that does not exist.
-            if let Some(name) = call.pointer("/function/name").and_then(Value::as_str)
+            if let Some(name) = call.function.name.as_deref()
                 && partial.name != name
             {
                 partial.name.push_str(name);
             }
-            if let Some(arguments) = call.pointer("/function/arguments").and_then(Value::as_str) {
+            if let Some(arguments) = call.function.arguments.as_deref() {
                 partial.arguments.push_str(arguments);
             }
         }
-        match delta.get("content").and_then(Value::as_str) {
+        match choice.delta.content {
             Some(text) if !text.is_empty() => {
-                self.text.push_str(text);
-                Ok(Some(text.to_owned()))
+                self.text.push_str(&text);
+                Ok(Flow::Text(text.into_owned()))
             }
-            _ => Ok(None),
+            _ => Ok(Flow::Continue),
         }
     }
 
-    /// The server said `[DONE]`: a stream that named no `finish_reason`
-    /// still ended where its server meant it to.
-    pub(crate) fn done(&mut self) {
-        if self.finish_reason == StopReason::Unfinished {
-            self.finish_reason = StopReason::Finished;
-        }
-    }
-
-    pub(crate) fn finish(self) -> ModelTurn {
+    fn finish(self) -> ModelTurn {
         let mut extras = serde_json::Map::new();
         let tool_calls = self
             .calls
@@ -228,11 +367,7 @@ impl Assembler {
                 ToolCall {
                     id,
                     name: call.name,
-                    input: if call.arguments.trim().is_empty() {
-                        json!({})
-                    } else {
-                        serde_json::from_str(&call.arguments).unwrap_or(Value::Null)
-                    },
+                    input: tool_input(&call.arguments),
                 }
             })
             .collect();
@@ -273,31 +408,13 @@ impl Model for OpenAi {
             // servers that count anyway take the field as given.
             "stream_options": { "include_usage": true },
         });
-        let mut request = self
-            .http
-            .post(format!("{}/chat/completions", self.config.url))
-            .json(&body);
-        if let Some(key) = &self.config.api_key {
-            request = request.bearer_auth(key.expose());
-        }
-        let response = send("openai-compatible", request).await?;
-
-        let mut assembler = Assembler::default();
-        read_events("openai-compatible", response, |event| {
-            if event.data.trim() == "[DONE]" {
-                assembler.done();
-                return Ok(false);
-            }
-            let Ok(chunk) = serde_json::from_str::<Value>(&event.data) else {
-                return Ok(true);
-            };
-            if let Some(text) = assembler.take(&chunk)? {
-                on_text(&text);
-            }
-            Ok(true)
-        })
-        .await?;
-        Ok(assembler.finish())
+        let request = with_key(
+            self.http
+                .post(format!("{}/chat/completions", self.config.url))
+                .json(&body),
+            self.config.api_key.as_ref(),
+        );
+        stream_turn::<Assembler>(request, on_text).await
     }
 }
 
@@ -316,7 +433,7 @@ mod tests {
             json!({"choices":[{"delta":{"tool_calls":[{"index":1,"function":{"arguments":"ry\":\"x\"}"}}]}}]}),
             json!({"choices":[{"delta":{},"finish_reason":"tool_calls"}]}),
         ] {
-            assembler.take(&chunk).unwrap();
+            assembler.take_json(&chunk).unwrap();
         }
         let turn = assembler.finish();
         assert_eq!(turn.text, "Let me look.");
@@ -334,7 +451,7 @@ mod tests {
             json!({"choices":[{"delta":{"tool_calls":[{"id":"g2","function":{"name":"search","arguments":"{\"query\":\"x\"}"}}]}}]}),
             json!({"choices":[{"delta":{},"finish_reason":"tool_calls"}]}),
         ] {
-            assembler.take(&chunk).unwrap();
+            assembler.take_json(&chunk).unwrap();
         }
         let turn = assembler.finish();
         assert_eq!(turn.tool_calls.len(), 2);
@@ -351,7 +468,7 @@ mod tests {
             json!({"choices":[{"delta":{},"finish_reason":"stop"}],"usage":null}),
             json!({"choices":[],"usage":{"prompt_tokens":120,"completion_tokens":7,"prompt_tokens_details":{"cached_tokens":100},"completion_tokens_details":{"reasoning_tokens":3}}}),
         ] {
-            assembler.take(&chunk).unwrap();
+            assembler.take_json(&chunk).unwrap();
         }
         let turn = assembler.finish();
         assert_eq!(turn.model.as_deref(), Some("gpt-x"));
@@ -372,7 +489,7 @@ mod tests {
         let mut assembler = Assembler::default();
         for (n, text) in ["a", "b", "c"].into_iter().enumerate() {
             assembler
-                .take(&json!({"choices":[{"delta":{"content":text}}],"usage":{"prompt_tokens":50,"completion_tokens":n + 1}}))
+                .take_json(&json!({"choices":[{"delta":{"content":text}}],"usage":{"prompt_tokens":50,"completion_tokens":n + 1}}))
                 .unwrap();
         }
         let usage = assembler.finish().usage.unwrap();
@@ -382,7 +499,7 @@ mod tests {
     #[test]
     fn a_google_error_array_mid_stream_is_an_error() {
         let chunk = json!([{"error": {"code": 503, "status": "UNAVAILABLE"}}]);
-        assert!(Assembler::default().take(&chunk).is_err());
+        assert!(Assembler::default().take_json(&chunk).is_err());
     }
 
     #[test]
@@ -390,18 +507,19 @@ mod tests {
         let signature = json!({"google": {"thought_signature": "sig"}});
         let mut assembler = Assembler::default();
         assembler
-            .take(&json!({"choices":[{"delta":{"tool_calls":[{"id":"g1","extra_content":signature,"function":{"name":"search","arguments":"{}"}}]}}]}))
+            .take_json(&json!({"choices":[{"delta":{"tool_calls":[{"id":"g1","extra_content":signature,"function":{"name":"search","arguments":"{}"}}]}}]}))
             .unwrap();
-        let out = messages(
+        let out = serde_json::to_value(messages(
             "sys",
             &[Message::User("q".into()), assembler.finish().into_message()],
-        );
+        ))
+        .unwrap();
         assert_eq!(out[2]["tool_calls"][0]["extra_content"], signature);
     }
 
     #[test]
     fn the_transcript_puts_each_result_on_its_own_tool_message() {
-        let out = messages(
+        let out = serde_json::to_value(messages(
             "sys",
             &[
                 Message::User("q".into()),
@@ -420,8 +538,9 @@ mod tests {
                     is_error: false,
                 }]),
             ],
-        );
-        assert_eq!(out.len(), 4);
+        ))
+        .unwrap();
+        assert_eq!(out.as_array().map(Vec::len), Some(4));
         assert_eq!(out[0]["role"], "system");
         assert_eq!(out[2]["content"], Value::Null);
         assert_eq!(

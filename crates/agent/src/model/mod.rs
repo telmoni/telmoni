@@ -126,19 +126,6 @@ impl StopReason {
             _ => Self::Other,
         }
     }
-
-    /// The reason as a question's record names it.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Finished => "finished",
-            Self::ToolUse => "tool_use",
-            Self::MaxTokens => "max_tokens",
-            Self::Refused => "refused",
-            Self::Other => "other",
-            Self::Unfinished => "unfinished",
-        }
-    }
 }
 
 /// What one call came to.
@@ -172,6 +159,86 @@ impl ModelTurn {
 
 /// Where the text goes as it streams.
 pub type TextSink<'a> = &'a (dyn Fn(&str) + Send + Sync);
+
+/// The endpoints the agent speaks to, named for the log's context alone,
+/// never for a problem's detail.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Endpoint {
+    Anthropic,
+    OpenAiCompatible,
+    Embeddings,
+    Rerank,
+}
+
+impl Endpoint {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Anthropic => "anthropic",
+            Self::OpenAiCompatible => "openai-compatible",
+            Self::Embeddings => "embeddings",
+            Self::Rerank => "rerank",
+        }
+    }
+}
+
+/// What one streamed event moved a turn by: text to hand on as it arrives,
+/// nothing the person sees, or the end of the stream.
+#[derive(Debug)]
+pub(crate) enum Flow {
+    Text(String),
+    Continue,
+    Done,
+}
+
+/// A provider's stream folded into a turn, one event at a time.
+pub(crate) trait Assemble: Default {
+    const ENDPOINT: Endpoint;
+    /// Take one event; one that will not decode is passed over.
+    fn take(&mut self, event: &SseEvent) -> Result<Flow, TelmoniError>;
+    fn finish(self) -> ModelTurn;
+}
+
+/// One streamed call: sent, read to its end through `A`, and folded.
+pub(crate) async fn stream_turn<A: Assemble>(
+    request: reqwest::RequestBuilder,
+    on_text: TextSink<'_>,
+) -> Result<ModelTurn, TelmoniError> {
+    let response = send(A::ENDPOINT, request).await?;
+    let mut assembler = A::default();
+    read_events(A::ENDPOINT, response, |event| {
+        match assembler.take(&event)? {
+            Flow::Text(text) => {
+                on_text(&text);
+                Ok(true)
+            }
+            Flow::Continue => Ok(true),
+            Flow::Done => Ok(false),
+        }
+    })
+    .await?;
+    Ok(assembler.finish())
+}
+
+/// A tool's input from the arguments a stream assembled: none is `{}`, and
+/// what is not JSON is `Null`, which the tool answers as an error rather
+/// than guessing.
+pub(crate) fn tool_input(arguments: &str) -> Value {
+    if arguments.trim().is_empty() {
+        return serde_json::json!({});
+    }
+    serde_json::from_str(arguments).unwrap_or(Value::Null)
+}
+
+/// `request` with the endpoint's key as a bearer, where it has one.
+pub(crate) fn with_key(
+    request: reqwest::RequestBuilder,
+    key: Option<&telmoni_shared::Redacted>,
+) -> reqwest::RequestBuilder {
+    match key {
+        Some(key) => request.bearer_auth(key.expose()),
+        None => request,
+    }
+}
 
 /// A chat model that streams.
 #[async_trait]
@@ -235,7 +302,7 @@ fn failed(failure: ModelFailure, context: impl Into<String>) -> TelmoniError {
 /// Google says `status` (`UNAVAILABLE`, `NOT_FOUND`), inside a one-element
 /// array on its OpenAI-compatible endpoint. One that says "not now" is
 /// classed so ([`not_now`]).
-pub(crate) async fn refused(provider: &str, response: reqwest::Response) -> TelmoniError {
+pub(crate) async fn refused(endpoint: Endpoint, response: reqwest::Response) -> TelmoniError {
     let status = response.status().as_u16();
     let kind = response
         .json::<Value>()
@@ -248,7 +315,10 @@ pub(crate) async fn refused(provider: &str, response: reqwest::Response) -> Telm
         status if NOT_NOW.contains(&status) => ModelFailure::NotNow,
         _ => ModelFailure::Answered,
     };
-    failed(failure, format!("{provider} answered {status} {kind}"))
+    failed(
+        failure,
+        format!("{} answered {status} {kind}", endpoint.as_str()),
+    )
 }
 
 /// Answers that say "not now" whatever was sent: a timeout, a rate limit,
@@ -259,8 +329,11 @@ const NOT_NOW: [u16; 4] = [408, 429, 503, 529];
 
 /// A failure that is the endpoint's state, never what it was sent: no
 /// answer in time, no connection, a body that never arrived whole.
-pub(crate) fn not_now_error(provider: &str, detail: &str) -> TelmoniError {
-    failed(ModelFailure::NotNow, format!("{provider} {detail}"))
+pub(crate) fn not_now_error(endpoint: Endpoint, detail: &str) -> TelmoniError {
+    failed(
+        ModelFailure::NotNow,
+        format!("{} {detail}", endpoint.as_str()),
+    )
 }
 
 /// Whether an error is the endpoint's state rather than anything about the
@@ -311,24 +384,24 @@ const MAX_PAUSE: std::time::Duration = std::time::Duration::from_secs(5);
 /// busy. Repeating is safe: a refusal arrives before any body, so nothing
 /// has streamed to the person yet. The turn's deadline still bounds it all.
 pub(crate) async fn send(
-    provider: &str,
+    endpoint: Endpoint,
     request: reqwest::RequestBuilder,
 ) -> Result<reqwest::Response, TelmoniError> {
     let mut attempt = 0;
     loop {
-        let this = request
-            .try_clone()
-            .ok_or_else(|| unavailable(format!("{provider} request cannot be repeated")))?;
+        let this = request.try_clone().ok_or_else(|| {
+            unavailable(format!("{} request cannot be repeated", endpoint.as_str()))
+        })?;
         let response = this
             .send()
             .await
-            .map_err(|e| not_now_error(provider, error_kind(&e)))?;
+            .map_err(|e| not_now_error(endpoint, error_kind(&e)))?;
         let status = response.status().as_u16();
         if response.status().is_success() {
             return Ok(response);
         }
         if attempt == RETRIES || !BUSY.contains(&status) {
-            return Err(refused(provider, response).await);
+            return Err(refused(endpoint, response).await);
         }
         attempt += 1;
         let wait = pause(
@@ -336,7 +409,7 @@ pub(crate) async fn send(
             response.headers().get(reqwest::header::RETRY_AFTER),
         );
         tracing::info!(
-            provider,
+            endpoint = endpoint.as_str(),
             status,
             attempt,
             "agent endpoint busy; asking again"
@@ -411,16 +484,19 @@ impl SseReader {
 /// Read a streaming response to its end, handing each event to `on_event`,
 /// which answers `false` to stop early.
 pub(crate) async fn read_events(
-    provider: &str,
+    endpoint: Endpoint,
     mut response: reqwest::Response,
     mut on_event: impl FnMut(SseEvent) -> Result<bool, TelmoniError>,
 ) -> Result<(), TelmoniError> {
     let mut reader = SseReader::default();
     loop {
-        let chunk = response
-            .chunk()
-            .await
-            .map_err(|e| unavailable(format!("{provider} stream broke: {}", error_kind(&e))))?;
+        let chunk = response.chunk().await.map_err(|e| {
+            unavailable(format!(
+                "{} stream broke: {}",
+                endpoint.as_str(),
+                error_kind(&e)
+            ))
+        })?;
         let Some(chunk) = chunk else {
             return Ok(());
         };
@@ -506,7 +582,11 @@ mod tests {
 
     async fn post(server: &wiremock::MockServer) -> Result<reqwest::Response, TelmoniError> {
         let http = http_client(std::time::Duration::from_secs(5)).unwrap();
-        send("test", http.post(server.uri()).json(&serde_json::json!({}))).await
+        send(
+            Endpoint::Anthropic,
+            http.post(server.uri()).json(&serde_json::json!({})),
+        )
+        .await
     }
 
     fn busy() -> wiremock::ResponseTemplate {
@@ -556,7 +636,7 @@ mod tests {
     /// code the provider chose says, it cannot pass for "not now".
     #[test]
     fn only_the_endpoints_state_reads_as_not_now() {
-        let timed_out = not_now_error("embeddings", "timed out");
+        let timed_out = not_now_error(Endpoint::Embeddings, "timed out");
         assert!(not_now(&timed_out));
         assert!(!rate_limited(&timed_out));
         assert!(!not_now(&unavailable(

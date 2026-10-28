@@ -4,15 +4,17 @@
 //! as `raw`, so a thinking block goes back exactly as it came — a model that
 //! thinks by default refuses a transcript whose thinking was altered.
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use telmoni_shared::TelmoniError;
 
 use super::{
-    Message, Model, ModelTurn, StopReason, TextSink, TokenUsage, ToolCall, ToolSpec, read_events,
-    send, unavailable,
+    Assemble, Endpoint, Flow, Message, Model, ModelTurn, SseEvent, StopReason, TextSink,
+    TokenUsage, ToolCall, ToolSpec, stream_turn, tool_input, unavailable,
 };
 use crate::config::ModelConfig;
 
@@ -30,43 +32,190 @@ impl Anthropic {
     }
 }
 
+/// One message of the transcript in the Messages API's shape.
+#[derive(Serialize)]
+pub(crate) struct Turn<'a> {
+    role: &'static str,
+    content: Content<'a>,
+}
+
+/// A message's content: text, blocks, or the provider's own blocks back
+/// verbatim.
+#[derive(Serialize)]
+#[serde(untagged)]
+enum Content<'a> {
+    Text(&'a str),
+    Blocks(Vec<BlockOut<'a>>),
+    Raw(&'a Value),
+}
+
+/// One content block as the request carries it.
+#[derive(Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum BlockOut<'a> {
+    Text {
+        text: &'a str,
+    },
+    ToolUse {
+        id: &'a str,
+        name: &'a str,
+        input: Cow<'a, Value>,
+    },
+    ToolResult {
+        tool_use_id: &'a str,
+        content: &'a str,
+        is_error: bool,
+    },
+}
+
 /// The transcript in the Messages API's shape.
-pub(crate) fn messages(transcript: &[Message]) -> Vec<Value> {
+pub(crate) fn messages(transcript: &[Message]) -> Vec<Turn<'_>> {
     transcript
         .iter()
         .map(|message| match message {
-            Message::User(text) => json!({ "role": "user", "content": text }),
-            Message::Assistant {
-                raw: Some(raw), ..
-            } => json!({ "role": "assistant", "content": raw }),
+            Message::User(text) => Turn {
+                role: "user",
+                content: Content::Text(text),
+            },
+            Message::Assistant { raw: Some(raw), .. } => Turn {
+                role: "assistant",
+                content: Content::Raw(raw),
+            },
             Message::Assistant {
                 text, tool_calls, ..
             } => {
                 let mut content = Vec::new();
                 if !text.is_empty() {
-                    content.push(json!({ "type": "text", "text": text }));
+                    content.push(BlockOut::Text { text });
                 }
                 for call in tool_calls {
-                    content.push(json!({
-                        "type": "tool_use",
-                        "id": call.id,
-                        "name": call.name,
-                        "input": if call.input.is_object() { call.input.clone() } else { json!({}) },
-                    }));
+                    content.push(BlockOut::ToolUse {
+                        id: &call.id,
+                        name: &call.name,
+                        input: if call.input.is_object() {
+                            Cow::Borrowed(&call.input)
+                        } else {
+                            Cow::Owned(json!({}))
+                        },
+                    });
                 }
-                json!({ "role": "assistant", "content": content })
+                Turn {
+                    role: "assistant",
+                    content: Content::Blocks(content),
+                }
             }
-            Message::ToolResults(results) => json!({
-                "role": "user",
-                "content": results.iter().map(|r| json!({
-                    "type": "tool_result",
-                    "tool_use_id": r.id,
-                    "content": r.content,
-                    "is_error": r.is_error,
-                })).collect::<Vec<_>>(),
-            }),
+            Message::ToolResults(results) => Turn {
+                role: "user",
+                content: Content::Blocks(
+                    results
+                        .iter()
+                        .map(|r| BlockOut::ToolResult {
+                            tool_use_id: &r.id,
+                            content: &r.content,
+                            is_error: r.is_error,
+                        })
+                        .collect(),
+                ),
+            },
         })
         .collect()
+}
+
+/// One streamed event, by its `type`; one the API adds later is `Other`.
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum Event<'a> {
+    MessageStart {
+        message: Start,
+    },
+    ContentBlockStart {
+        #[serde(default)]
+        index: u64,
+        content_block: Value,
+    },
+    ContentBlockDelta {
+        #[serde(default)]
+        index: u64,
+        #[serde(borrow)]
+        delta: Delta<'a>,
+    },
+    MessageDelta {
+        #[serde(borrow)]
+        delta: Stop<'a>,
+        #[serde(default)]
+        usage: Option<Counted>,
+    },
+    MessageStop,
+    Error {
+        #[serde(borrow, default)]
+        error: Option<Failure<'a>>,
+    },
+    #[serde(other)]
+    Other,
+}
+
+/// `message_start`'s message: the model answering, and the input's counts.
+#[derive(Deserialize)]
+struct Start {
+    #[serde(default)]
+    model: Option<String>,
+    #[serde(default)]
+    usage: Option<Counted>,
+}
+
+/// A usage block as the stream gives it, each count where it is given.
+#[derive(Deserialize)]
+struct Counted {
+    #[serde(default)]
+    input_tokens: Option<u64>,
+    #[serde(default)]
+    cache_read_input_tokens: Option<u64>,
+    #[serde(default)]
+    cache_creation_input_tokens: Option<u64>,
+    #[serde(default)]
+    output_tokens: Option<u64>,
+}
+
+/// A block's delta, by its `type`.
+#[derive(Deserialize)]
+#[serde(tag = "type")]
+enum Delta<'a> {
+    #[serde(rename = "text_delta")]
+    Text {
+        #[serde(borrow)]
+        text: Cow<'a, str>,
+    },
+    #[serde(rename = "input_json_delta")]
+    InputJson {
+        #[serde(borrow)]
+        partial_json: Cow<'a, str>,
+    },
+    #[serde(rename = "thinking_delta")]
+    Thinking {
+        #[serde(borrow)]
+        thinking: Cow<'a, str>,
+    },
+    #[serde(rename = "signature_delta")]
+    Signature {
+        #[serde(borrow)]
+        signature: Cow<'a, str>,
+    },
+    #[serde(other)]
+    Other,
+}
+
+/// `message_delta`'s delta: why the model stopped, once it has.
+#[derive(Deserialize)]
+struct Stop<'a> {
+    #[serde(borrow, default)]
+    stop_reason: Option<Cow<'a, str>>,
+}
+
+/// An `error` event's error: its type, which is all the log says of it.
+#[derive(Deserialize)]
+struct Failure<'a> {
+    #[serde(borrow, default, rename = "type")]
+    kind: Option<Cow<'a, str>>,
 }
 
 /// One content block as its deltas build it.
@@ -113,12 +262,15 @@ impl Block {
     fn into_raw(self) -> Value {
         match self {
             Self::Text(text) => json!({ "type": "text", "text": text }),
-            Self::ToolUse { id, name, json } => json!({
-                "type": "tool_use",
-                "id": id,
-                "name": name,
-                "input": parse_input(&json).filter(Value::is_object).unwrap_or_else(|| json!({})),
-            }),
+            Self::ToolUse { id, name, json } => {
+                let input = tool_input(&json);
+                json!({
+                    "type": "tool_use",
+                    "id": id,
+                    "name": name,
+                    "input": if input.is_object() { input } else { json!({}) },
+                })
+            }
             Self::Thinking {
                 thinking,
                 signature,
@@ -126,13 +278,6 @@ impl Block {
             Self::Other(value) => value,
         }
     }
-}
-
-fn parse_input(json: &str) -> Option<Value> {
-    if json.trim().is_empty() {
-        return Some(json!({}));
-    }
-    serde_json::from_str(json).ok()
 }
 
 /// The streamed events of one turn, folded into its blocks.
@@ -156,18 +301,17 @@ struct Counts {
 }
 
 impl Counts {
-    fn take(&mut self, usage: &Value) {
-        let field = |key: &str| usage.get(key).and_then(Value::as_u64);
-        if let Some(input) = field("input_tokens") {
+    fn take(&mut self, usage: &Counted) {
+        if let Some(input) = usage.input_tokens {
             self.input = Some(input);
         }
-        if let Some(read) = field("cache_read_input_tokens") {
+        if let Some(read) = usage.cache_read_input_tokens {
             self.cache_read = read;
         }
-        if let Some(write) = field("cache_creation_input_tokens") {
+        if let Some(write) = usage.cache_creation_input_tokens {
             self.cache_write = write;
         }
-        if let Some(output) = field("output_tokens") {
+        if let Some(output) = usage.output_tokens {
             self.output = output;
         }
     }
@@ -186,75 +330,73 @@ impl Counts {
     }
 }
 
-impl Assembler {
-    /// Take one event; answer the text it added, if any.
-    pub(crate) fn take(&mut self, event: &Value) -> Result<Option<String>, TelmoniError> {
-        let index = event.get("index").and_then(Value::as_u64).unwrap_or(0);
-        match event.get("type").and_then(Value::as_str) {
-            Some("content_block_start") => {
-                if let Some(block) = event.get("content_block") {
-                    let block = Block::start(block);
-                    let initial = match &block {
-                        Block::Text(text) if !text.is_empty() => Some(text.clone()),
-                        _ => None,
-                    };
-                    self.blocks.insert(index, block);
-                    return Ok(initial);
-                }
+impl Assemble for Assembler {
+    const ENDPOINT: Endpoint = Endpoint::Anthropic;
+
+    fn take(&mut self, event: &SseEvent) -> Result<Flow, TelmoniError> {
+        let Ok(event) = serde_json::from_str::<Event<'_>>(&event.data) else {
+            return Ok(Flow::Continue);
+        };
+        match event {
+            Event::ContentBlockStart {
+                index,
+                content_block,
+            } => {
+                let block = Block::start(&content_block);
+                let initial = match &block {
+                    Block::Text(text) if !text.is_empty() => Some(text.clone()),
+                    _ => None,
+                };
+                self.blocks.insert(index, block);
+                return Ok(initial.map_or(Flow::Continue, Flow::Text));
             }
-            Some("content_block_delta") => {
-                let delta = event.get("delta").unwrap_or(&Value::Null);
-                let piece = |key: &str| delta.get(key).and_then(Value::as_str).unwrap_or_default();
-                match (
-                    self.blocks.get_mut(&index),
-                    delta.get("type").and_then(Value::as_str),
-                ) {
-                    (Some(Block::Text(text)), Some("text_delta")) => {
-                        let added = piece("text");
-                        text.push_str(added);
-                        return Ok(Some(added.to_owned()));
+            Event::ContentBlockDelta { index, delta } => {
+                match (self.blocks.get_mut(&index), delta) {
+                    (Some(Block::Text(text)), Delta::Text { text: added }) => {
+                        text.push_str(&added);
+                        return Ok(Flow::Text(added.into_owned()));
                     }
-                    (Some(Block::ToolUse { json, .. }), Some("input_json_delta")) => {
-                        json.push_str(piece("partial_json"));
+                    (Some(Block::ToolUse { json, .. }), Delta::InputJson { partial_json }) => {
+                        json.push_str(&partial_json);
                     }
-                    (Some(Block::Thinking { thinking, .. }), Some("thinking_delta")) => {
-                        thinking.push_str(piece("thinking"));
-                    }
-                    (Some(Block::Thinking { signature, .. }), Some("signature_delta")) => {
-                        signature.push_str(piece("signature"));
-                    }
+                    (
+                        Some(Block::Thinking { thinking, .. }),
+                        Delta::Thinking { thinking: added },
+                    ) => thinking.push_str(&added),
+                    (
+                        Some(Block::Thinking { signature, .. }),
+                        Delta::Signature { signature: added },
+                    ) => signature.push_str(&added),
                     _ => {}
                 }
             }
-            Some("message_start") => {
-                if let Some(model) = event.pointer("/message/model").and_then(Value::as_str) {
-                    self.model = Some(model.to_owned());
+            Event::MessageStart { message } => {
+                if let Some(model) = message.model {
+                    self.model = Some(model);
                 }
-                if let Some(usage) = event.pointer("/message/usage") {
+                if let Some(usage) = &message.usage {
                     self.counts.take(usage);
                 }
             }
-            Some("message_delta") => {
-                if let Some(reason) = event.pointer("/delta/stop_reason").and_then(Value::as_str) {
-                    self.stop_reason = StopReason::from_anthropic(reason);
+            Event::MessageDelta { delta, usage } => {
+                if let Some(reason) = delta.stop_reason {
+                    self.stop_reason = StopReason::from_anthropic(&reason);
                 }
-                if let Some(usage) = event.get("usage") {
+                if let Some(usage) = &usage {
                     self.counts.take(usage);
                 }
             }
-            Some("error") => {
-                let kind = event
-                    .pointer("/error/type")
-                    .and_then(Value::as_str)
-                    .unwrap_or("error");
+            Event::MessageStop => return Ok(Flow::Done),
+            Event::Error { error } => {
+                let kind = error.and_then(|e| e.kind).unwrap_or(Cow::Borrowed("error"));
                 return Err(unavailable(format!("anthropic stream error {kind}")));
             }
-            _ => {}
+            Event::Other => {}
         }
-        Ok(None)
+        Ok(Flow::Continue)
     }
 
-    pub(crate) fn finish(self) -> ModelTurn {
+    fn finish(self) -> ModelTurn {
         let mut turn = ModelTurn {
             stop_reason: self.stop_reason,
             usage: self.counts.usage(),
@@ -268,7 +410,7 @@ impl Assembler {
                 Block::ToolUse { id, name, json } => turn.tool_calls.push(ToolCall {
                     id: id.clone(),
                     name: name.clone(),
-                    input: parse_input(json).unwrap_or(Value::Null),
+                    input: tool_input(json),
                 }),
                 Block::Thinking { .. } | Block::Other(_) => {}
             }
@@ -276,6 +418,16 @@ impl Assembler {
         }
         turn.raw = Some(Value::Array(raw));
         turn
+    }
+}
+
+#[cfg(test)]
+impl Assembler {
+    fn take_json(&mut self, event: &Value) -> Result<Flow, TelmoniError> {
+        self.take(&SseEvent {
+            event: None,
+            data: event.to_string(),
+        })
     }
 }
 
@@ -308,20 +460,7 @@ impl Model for Anthropic {
         if let Some(key) = &self.config.api_key {
             request = request.header("x-api-key", key.expose());
         }
-        let response = send("anthropic", request).await?;
-
-        let mut assembler = Assembler::default();
-        read_events("anthropic", response, |event| {
-            let Ok(event) = serde_json::from_str::<Value>(&event.data) else {
-                return Ok(true);
-            };
-            if let Some(text) = assembler.take(&event)? {
-                on_text(&text);
-            }
-            Ok(event.get("type").and_then(Value::as_str) != Some("message_stop"))
-        })
-        .await?;
-        Ok(assembler.finish())
+        stream_turn::<Assembler>(request, on_text).await
     }
 }
 
@@ -332,7 +471,7 @@ mod tests {
     fn feed(events: &[Value]) -> ModelTurn {
         let mut assembler = Assembler::default();
         for event in events {
-            assembler.take(event).unwrap();
+            assembler.take_json(event).unwrap();
         }
         assembler.finish()
     }
@@ -413,7 +552,7 @@ mod tests {
     fn a_stream_error_is_a_model_failure() {
         let mut assembler = Assembler::default();
         let err = assembler
-            .take(&json!({"type":"error","error":{"type":"overloaded_error","message":"x"}}))
+            .take_json(&json!({"type":"error","error":{"type":"overloaded_error","message":"x"}}))
             .unwrap_err();
         assert!(matches!(err, TelmoniError::AgentModelUnavailable { .. }));
     }
