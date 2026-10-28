@@ -86,7 +86,7 @@ export function ViewsMenu({ organization, slug, projectId, query, ui, views, can
         query: viewQueryOf(query),
         columns: orderedColumns(prefs.columns),
       });
-      if (result.status === "error") {
+      if (!result.ok) {
         toast.error(result.error);
         return;
       }
@@ -99,7 +99,7 @@ export function ViewsMenu({ organization, slug, projectId, query, ui, views, can
   const remove = (view: TraceView) =>
     start(async () => {
       const result = await deleteTraceViewAction(projectId, view.id);
-      if (result.status === "error") {
+      if (!result.ok) {
         toast.error(result.error);
         return;
       }
@@ -212,7 +212,7 @@ export function ViewsMenu({ organization, slug, projectId, query, ui, views, can
               query: current.query,
               columns: current.columns,
             });
-            if (result.status === "error") return result.error;
+            if (!result.ok) return result.error;
             toast.success(`Renamed to “${name}”`);
             return null;
           }
@@ -224,7 +224,7 @@ export function ViewsMenu({ organization, slug, projectId, query, ui, views, can
             query: viewQueryOf(query),
             columns: orderedColumns(prefs.columns),
           });
-          if (result.status === "error") return result.error;
+          if (!result.ok) return result.error;
           toast.success(`Saved “${name}”`);
           return null;
         }}

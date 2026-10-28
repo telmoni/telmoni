@@ -58,7 +58,7 @@ export function CreateProjectPanel({
     start(async () => {
       try {
         const res = await createProjectAction(name.trim(), organization.organizationId);
-        if (res.error) {
+        if (!res.ok) {
           setError(res.error);
           return;
         }

@@ -4,11 +4,12 @@ import { unstable_rethrow } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 
+import type { ActionResult, Refused } from "@/lib/action-result";
 import { ALERTS_HEADING } from "@/lib/alerts";
 
-/** What an act answers: `gone` where what it acted on is gone, and the page
- *  is drawn again without it. */
-export type Answer = { error: string | null; gone?: boolean };
+/** What an act answers: refused as `gone` where what it acted on is gone, and
+ *  the page is drawn again without it. */
+export type Answer = ActionResult | (Refused & { gone: true });
 
 /** Once `moved` is set, the control's going hands the focus to the element
  *  `landing` names, or the page's heading where that went too, rather than
@@ -29,7 +30,7 @@ export function useLanding(landing: string) {
   /** Whether `r` is refused for what is gone: the refresh takes its row away,
    *  and what the row would say with it, so a toast says it. */
   const gone = (r: Answer) => {
-    if (!r.gone || !r.error) return false;
+    if (r.ok || !("gone" in r)) return false;
     toast.error(r.error);
     moved.current = true;
     return true;
@@ -50,7 +51,7 @@ export function useAct(landing: string) {
       try {
         const r = await run();
         if (gone(r)) return;
-        if (r.error) setError(r.error);
+        if (!r.ok) setError(r.error);
         else moved.current = takesItAway;
       } catch (err) {
         unstable_rethrow(err);

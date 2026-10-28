@@ -2,6 +2,8 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { Answer as Act } from "./_act";
+
 vi.mock("next/navigation", () => ({
   unstable_rethrow: () => {},
 }));
@@ -14,14 +16,14 @@ vi.mock("sonner", () => ({
   toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }),
 }));
 
-type Answer = Promise<{ error: string | null; gone?: boolean }>;
-const saveAlertAction = vi.fn<(p: string, r: string | null, i: unknown) => Answer>(async () => ({ error: null }));
-const pauseAlertAction = vi.fn<(p: string, r: string, paused: boolean) => Answer>(async () => ({ error: null }));
-const deleteAlertAction = vi.fn<(p: string, r: string) => Answer>(async () => ({ error: null }));
-const hearAgainAction = vi.fn<(p: string, r: string, c: string) => Answer>(async () => ({ error: null }));
-const incidentAction = vi.fn<(p: string, i: string, act: string) => Answer>(async () => ({ error: null }));
-const muteAction = vi.fn<(p: string, i: unknown) => Answer>(async () => ({ error: null }));
-const endMuteAction = vi.fn<(p: string, m: string) => Answer>(async () => ({ error: null }));
+type Answer = Promise<Act>;
+const saveAlertAction = vi.fn<(p: string, r: string | null, i: unknown) => Answer>(async () => ({ ok: true }));
+const pauseAlertAction = vi.fn<(p: string, r: string, paused: boolean) => Answer>(async () => ({ ok: true }));
+const deleteAlertAction = vi.fn<(p: string, r: string) => Answer>(async () => ({ ok: true }));
+const hearAgainAction = vi.fn<(p: string, r: string, c: string) => Answer>(async () => ({ ok: true }));
+const incidentAction = vi.fn<(p: string, i: string, act: string) => Answer>(async () => ({ ok: true }));
+const muteAction = vi.fn<(p: string, i: unknown) => Answer>(async () => ({ ok: true }));
+const endMuteAction = vi.fn<(p: string, m: string) => Answer>(async () => ({ ok: true }));
 vi.mock("./actions", () => ({
   saveAlertAction: (p: string, r: string | null, i: unknown) => saveAlertAction(p, r, i),
   pauseAlertAction: (p: string, r: string, paused: boolean) => pauseAlertAction(p, r, paused),
@@ -160,7 +162,7 @@ describe("the alert's form", { timeout: 15_000 }, () => {
     expect(within(panel).getByRole("alert")).toHaveTextContent("below the alert threshold");
     expect(saveAlertAction).not.toHaveBeenCalled();
 
-    saveAlertAction.mockResolvedValueOnce({ error: "this project has an alert by that name already" });
+    saveAlertAction.mockResolvedValueOnce({ ok: false, error: "this project has an alert by that name already" });
     fireEvent.change(within(panel).getByLabelText("Warn when"), { target: { value: "" } });
     fireEvent.click(within(panel).getByRole("button", { name: "Make alert" }));
     expect(await within(panel).findByRole("alert")).toHaveTextContent("an alert by that name already");
@@ -332,7 +334,7 @@ describe("an alert's controls", { timeout: 15_000 }, () => {
   });
 
   it("says what the lane refused beside the alert", async () => {
-    pauseAlertAction.mockResolvedValueOnce({ error: "This organization's plan holds 2 alerts." });
+    pauseAlertAction.mockResolvedValueOnce({ ok: false, error: "This organization's plan holds 2 alerts." });
     render(<AlertActions projectId={PROJECT} alert={{ ...ALERT, paused: "plan" }} connections={CONNECTIONS} />);
     fireEvent.click(screen.getByRole("button", { name: "Resume Slow calls" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("plan holds 2 alerts");
@@ -519,7 +521,7 @@ describe("an incident's controls", { timeout: 15_000 }, () => {
 // ⚠ Another member deleted the alert: the refresh takes its card away, with
 // what a control on it would say and the focus it held.
 describe("a refusal for what is gone", { timeout: 15_000 }, () => {
-  const GONE = { error: "Not Found: no alert with that id in this project", gone: true };
+  const GONE = { ok: false, error: "Not Found: no alert with that id in this project", gone: true } as const;
   const section = (
     <h2 id={ALERTS_HEADING} tabIndex={-1}>
       Alerts

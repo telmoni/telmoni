@@ -51,7 +51,7 @@ export function OrganizationUrlForm({
         // router from the catch below. One that moved nothing is drawn again
         // by the action's revalidation.
         const res = await changeOrganizationUrlAction(organizationId, trimmed);
-        if (res.error) {
+        if (!res.ok) {
           setError(res.error);
           toast.error(res.error);
         }

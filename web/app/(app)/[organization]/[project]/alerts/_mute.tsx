@@ -115,7 +115,7 @@ function MuteDialog({
           minutes,
         });
         if (gone(r)) return;
-        if (r.error) {
+        if (!r.ok) {
           setError(r.error);
           return;
         }

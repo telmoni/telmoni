@@ -3,6 +3,7 @@
 import { refresh } from "next/cache";
 import { z } from "zod";
 
+import { refused } from "@/lib/action-result";
 import { MUTE_MINUTES_MAX } from "@/lib/alerts";
 import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
 import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
@@ -21,6 +22,8 @@ import {
   SpanStatus,
 } from "@/lib/types/enums";
 
+import type { Answer } from "./_act";
+
 // Every change the alerts page makes, each open to any member of the project
 // (`Resource::Rule`): an alert made, saved over, paused, resumed or deleted;
 // a connector it muted after five failed deliveries heard again; an incident
@@ -29,7 +32,7 @@ import {
 // before it becomes part of a lane's path, and an alert's shape before it is
 // sent; the lane checks the rest and says what it refused.
 
-type Result = { error: string | null; gone?: true };
+type Result = Answer;
 
 const Id = z.guid();
 const Values = z.array(z.string()).optional();
@@ -88,11 +91,11 @@ async function send(
   init: { method: "POST" | "PUT" | "DELETE"; body?: unknown; goneIsDone?: boolean },
 ): Promise<Result> {
   const session = await getServerSession();
-  if (!session) return { error: "Your session expired — sign in again." };
+  if (!session) return refused("Your session expired — sign in again.");
   const limited = await rateLimit(sessionKey(session, bucket), { limit: 30, windowMs: 60_000 });
-  if (limited) return { error: "Too many requests — slow down a moment." };
+  if (limited) return refused("Too many requests — slow down a moment.");
   const resolved = await activeProjectForMutation(projectId);
-  if (resolved.error !== null) return { error: resolved.error };
+  if (resolved.error !== null) return refused(resolved.error);
   const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/v1/telemetry${path}`, {
     method: init.method,
     headers: {
@@ -101,18 +104,18 @@ async function send(
     },
     ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
   });
-  if (!res) return { error: UNAVAILABLE };
+  if (!res) return refused(UNAVAILABLE);
   if (!res.ok && !(init.goneIsDone && res.status === 404)) {
     const { message } = await extractProblem(res);
     // Gone, as another member deleted it: the page is drawn again without it.
     if (res.status === 404) {
       refresh();
-      return { error: message, gone: true };
+      return { ...refused(message), gone: true };
     }
-    return { error: message };
+    return refused(message);
   }
   refresh();
-  return { error: null };
+  return { ok: true };
 }
 
 /** A new alert of the project, or one of its alerts saved over whole. */
@@ -122,10 +125,10 @@ export async function saveAlertAction(
   input: unknown,
 ): Promise<Result> {
   if (ruleId !== null && !Id.safeParse(ruleId).success) {
-    return { error: "Couldn't tell which alert this is. Reload and try again." };
+    return refused("Couldn't tell which alert this is. Reload and try again.");
   }
   const rule = RuleInputSchema.safeParse(input);
-  if (!rule.success) return { error: "That alert could not be read. Reload and try again." };
+  if (!rule.success) return refused("That alert could not be read. Reload and try again.");
   return ruleId === null
     ? send(projectId, "alerts:save", "/rules", { method: "POST", body: rule.data })
     : send(projectId, "alerts:save", `/rules/${ruleId}`, { method: "PUT", body: rule.data });
@@ -135,7 +138,7 @@ export async function saveAlertAction(
  *  as another member may have deleted it, is drawn gone. */
 export async function deleteAlertAction(projectId: string, ruleId: string): Promise<Result> {
   if (!Id.safeParse(ruleId).success) {
-    return { error: "Couldn't tell which alert this is. Reload and try again." };
+    return refused("Couldn't tell which alert this is. Reload and try again.");
   }
   return send(projectId, "alerts:change", `/rules/${ruleId}`, {
     method: "DELETE",
@@ -150,7 +153,7 @@ export async function pauseAlertAction(
   paused: boolean,
 ): Promise<Result> {
   if (!Id.safeParse(ruleId).success || typeof paused !== "boolean") {
-    return { error: "Couldn't tell which alert this is. Reload and try again." };
+    return refused("Couldn't tell which alert this is. Reload and try again.");
   }
   return send(projectId, "alerts:change", `/rules/${ruleId}/${paused ? "pause" : "resume"}`, {
     method: "POST",
@@ -164,7 +167,7 @@ export async function hearAgainAction(
   connectionId: string,
 ): Promise<Result> {
   if (!Id.safeParse(ruleId).success || !Id.safeParse(connectionId).success) {
-    return { error: "Couldn't tell which connector this is. Reload and try again." };
+    return refused("Couldn't tell which connector this is. Reload and try again.");
   }
   return send(projectId, "alerts:change", `/rules/${ruleId}/connectors/${connectionId}/unmute`, {
     method: "POST",
@@ -178,7 +181,7 @@ export async function incidentAction(
   act: "acknowledge" | "resolve",
 ): Promise<Result> {
   if (!Id.safeParse(incidentId).success || (act !== "acknowledge" && act !== "resolve")) {
-    return { error: "Couldn't tell which incident this is. Reload and try again." };
+    return refused("Couldn't tell which incident this is. Reload and try again.");
   }
   return send(projectId, "alerts:incident", `/incidents/${incidentId}/${act}`, { method: "POST" });
 }
@@ -189,7 +192,7 @@ export async function incidentAction(
  *  longer by the server's. */
 export async function muteAction(projectId: string, input: unknown): Promise<Result> {
   const mute = MuteInputSchema.safeParse(input);
-  if (!mute.success) return { error: "That window could not be read. Reload and try again." };
+  if (!mute.success) return refused("That window could not be read. Reload and try again.");
   const start = mute.data.starts_at === null ? Date.now() : Date.parse(mute.data.starts_at);
   return send(projectId, "alerts:mute", "/mutes", {
     method: "POST",
@@ -204,7 +207,7 @@ export async function muteAction(projectId: string, input: unknown): Promise<Res
 /** One of the project's maintenance windows ended now. */
 export async function endMuteAction(projectId: string, muteId: string): Promise<Result> {
   if (!Id.safeParse(muteId).success) {
-    return { error: "Couldn't tell which window this is. Reload and try again." };
+    return refused("Couldn't tell which window this is. Reload and try again.");
   }
   return send(projectId, "alerts:mute", `/mutes/${muteId}/end`, { method: "POST" });
 }

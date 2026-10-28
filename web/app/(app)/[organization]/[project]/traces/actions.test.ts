@@ -129,7 +129,7 @@ describe("saving a new view", () => {
   it("stays, saying why, when the lane refuses it", async () => {
     fetchMock.mockResolvedValue(new Response(null, { status: 409 }));
     expect(await saveTraceViewAction(PROJECT, input)).toEqual({
-      status: "error",
+      ok: false,
       error: "a view by that name exists",
     });
     expect(mockRefresh).not.toHaveBeenCalled();
@@ -149,10 +149,10 @@ describe("saving a new view", () => {
   it("refuses a layout whose options are not ones the page reads before asking the lane", async () => {
     expect(
       await saveTraceViewAction(PROJECT, { ...layoutInput, query: { ...layoutInput.query, depth: "spans" } }),
-    ).toEqual({ status: "error", error: "That view could not be read." });
+    ).toEqual({ ok: false, error: "That view could not be read." });
     expect(
       await saveTraceViewAction(PROJECT, { ...layoutInput, kind: "list" }),
-    ).toEqual({ status: "error", error: "That view could not be read." });
+    ).toEqual({ ok: false, error: "That view could not be read." });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -160,7 +160,7 @@ describe("saving a new view", () => {
   it("draws the list again when the lane's answer cannot be read", async () => {
     fetchMock.mockResolvedValue(new Response("{}", { status: 201 }));
     expect(await saveTraceViewAction(PROJECT, input)).toEqual({
-      status: "error",
+      ok: false,
       error: "Unexpected response from telemetry.",
     });
     expect(mockRefresh).toHaveBeenCalledOnce();
@@ -168,7 +168,7 @@ describe("saving a new view", () => {
 
   it("refuses what is not a view before asking the lane", async () => {
     expect(await saveTraceViewAction(PROJECT, { name: 3 })).toEqual({
-      status: "error",
+      ok: false,
       error: "That view could not be read.",
     });
     expect(fetchMock).not.toHaveBeenCalled();
@@ -177,7 +177,7 @@ describe("saving a new view", () => {
   it("tells a session that ran out to sign in again, asking the lane nothing", async () => {
     vi.mocked(getServerSession).mockResolvedValue(null);
     expect(await saveTraceViewAction(PROJECT, input)).toEqual({
-      status: "error",
+      ok: false,
       error: "Your session expired — sign in again.",
     });
     expect(fetchMock).not.toHaveBeenCalled();
@@ -187,7 +187,7 @@ describe("saving a new view", () => {
 describe("saving over a view", () => {
   it("draws the list again where it is, its menu with the change", async () => {
     fetchMock.mockResolvedValue(view(OPEN));
-    expect(await updateTraceViewAction(PROJECT, OPEN, input)).toMatchObject({ status: "ok" });
+    expect(await updateTraceViewAction(PROJECT, OPEN, input)).toMatchObject({ ok: true });
     expect(fetchMock).toHaveBeenCalledWith(
       `http://telemetry.test/internal/v1/telemetry/views/${OPEN}`,
       expect.objectContaining({ method: "PUT" }),
@@ -208,13 +208,13 @@ describe("deleting a view", () => {
 
   it("draws any other page again where it is, its menu without the view", async () => {
     fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
-    expect(await deleteTraceViewAction(PROJECT, OTHER)).toEqual({ status: "ok" });
+    expect(await deleteTraceViewAction(PROJECT, OTHER)).toEqual({ ok: true });
     expect(mockRefresh).toHaveBeenCalledOnce();
   });
 
   it("refuses what is not a view's id before asking the lane", async () => {
     expect(await deleteTraceViewAction(PROJECT, "../views")).toEqual({
-      status: "error",
+      ok: false,
       error: "Invalid view id.",
     });
     expect(fetchMock).not.toHaveBeenCalled();
@@ -228,7 +228,7 @@ describe("setting what the project opens in", () => {
   it("sends a saved layout, or null for the default, and draws the page again with the answer", async () => {
     fetchMock.mockResolvedValue(setting({ view_id: OPEN }));
     expect(await setSessionLayoutAction(PROJECT, { view_id: OPEN })).toEqual({
-      status: "ok",
+      ok: true,
       setting: { view_id: OPEN },
     });
     expect(fetchMock).toHaveBeenCalledWith(
@@ -239,7 +239,7 @@ describe("setting what the project opens in", () => {
 
     fetchMock.mockResolvedValue(setting({ view_id: null }));
     expect(await setSessionLayoutAction(PROJECT, { view_id: null })).toEqual({
-      status: "ok",
+      ok: true,
       setting: { view_id: null },
     });
   });
@@ -247,14 +247,14 @@ describe("setting what the project opens in", () => {
   it("refuses what is no layout before asking the lane, and says why the lane refused", async () => {
     for (const input of [{}, { layout: "complex" }, { view_id: "mine" }, { view_id: OPEN, layout: "simple" }]) {
       expect(await setSessionLayoutAction(PROJECT, input)).toEqual({
-        status: "error",
+        ok: false,
         error: "That layout could not be read.",
       });
     }
     expect(fetchMock).not.toHaveBeenCalled();
     fetchMock.mockResolvedValue(new Response(null, { status: 404 }));
     expect(await setSessionLayoutAction(PROJECT, { view_id: OTHER })).toEqual({
-      status: "error",
+      ok: false,
       error: "a view by that name exists",
     });
     expect(mockRefresh).not.toHaveBeenCalled();

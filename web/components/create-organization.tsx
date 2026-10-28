@@ -60,8 +60,8 @@ export function CreateOrganizationPanel({
     start(async () => {
       try {
         const res = await createOrganizationAction(name, slug, extras);
-        if (res.error) {
-          setRefusal({ message: res.error, field: res.field });
+        if (!res.ok) {
+          setRefusal({ message: res.error, field: "field" in res ? res.field : undefined });
           return;
         }
         // A console built on this one may send the person off this console

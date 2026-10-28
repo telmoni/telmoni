@@ -194,7 +194,7 @@ function AlertPanel({
       try {
         const r = await saveAlertAction(projectId, ruleId, checked.input);
         if (gone(r)) return;
-        if (r.error) {
+        if (!r.ok) {
           setError(r.error);
           return;
         }

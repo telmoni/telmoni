@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { errorOf } from "@/lib/action-result";
+
 vi.mock("@/lib/server/session", () => ({
   getServerSession: vi.fn(),
 }));
@@ -100,9 +102,7 @@ beforeEach(() => {
 describe("renameOrganizationAction", () => {
   it("renames the organization the page rendered, under the session's bearer", async () => {
     fetchMock.mockResolvedValue(renamed("acme-robotics"));
-    expect(await renameOrganizationAction(ORGANIZATION, "  Acme Robotics  ")).toEqual({
-      error: null,
-    });
+    expect(await renameOrganizationAction(ORGANIZATION, "  Acme Robotics  ")).toEqual({ ok: true });
     expect(fetchMock).toHaveBeenCalledWith(
       "http://auth.test/internal/v1/organization",
       expect.objectContaining({
@@ -123,9 +123,7 @@ describe("renameOrganizationAction", () => {
   it("revalidates in place when it cannot tell whether the slug moved", async () => {
     vi.mocked(getServerContext).mockResolvedValue(null);
     fetchMock.mockResolvedValue(renamed("acme-robotics"));
-    expect(await renameOrganizationAction(ORGANIZATION, "Acme Robotics")).toEqual({
-      error: null,
-    });
+    expect(await renameOrganizationAction(ORGANIZATION, "Acme Robotics")).toEqual({ ok: true });
     expect(mockRevalidate).toHaveBeenCalledWith("/", "layout");
     expect(mockPublishEvent).not.toHaveBeenCalled();
   });
@@ -134,6 +132,7 @@ describe("renameOrganizationAction", () => {
     wentBy("org-4k2j9x0q1z");
     fetchMock.mockResolvedValue(new Response(null, { status: 409 }));
     expect(await renameOrganizationAction(ORGANIZATION, "Acme Robotics")).toEqual({
+      ok: false,
       error: "problem",
     });
     expect(mockPublishEvent).not.toHaveBeenCalled();
@@ -147,6 +146,7 @@ describe("renameOrganizationAction", () => {
   it("refuses without asking auth when the request resolves another organization", async () => {
     standingIn("org_elsewhere");
     expect(await renameOrganizationAction(ORGANIZATION, "Acme Robotics")).toEqual({
+      ok: false,
       error: SWITCHED,
     });
     expect(fetchMock).not.toHaveBeenCalled();
@@ -156,6 +156,7 @@ describe("renameOrganizationAction", () => {
   it("refuses without asking auth when it cannot tell where the caller stands", async () => {
     vi.mocked(identityContext).mockResolvedValue(null);
     expect(await renameOrganizationAction(ORGANIZATION, "Acme Robotics")).toEqual({
+      ok: false,
       error: "Couldn't resolve your organization right now. Try again in a moment.",
     });
     expect(fetchMock).not.toHaveBeenCalled();
@@ -171,7 +172,7 @@ describe("renameOrganizationAction", () => {
       organizationNotFound: true,
     } as never);
     const res = await renameOrganizationAction(ORGANIZATION, "Acme Robotics");
-    expect(res.error).toMatch(/URL was changed, or you're no longer in it/);
+    expect(errorOf(res)).toMatch(/URL was changed, or you're no longer in it/);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
@@ -218,9 +219,7 @@ describe("changeOrganizationUrlAction", () => {
 
   it("revalidates in place when auth kept the URL it had", async () => {
     fetchMock.mockResolvedValue(renamed("acme-robotics"));
-    expect(await changeOrganizationUrlAction(ORGANIZATION, "acme-robotics")).toEqual({
-      error: null,
-    });
+    expect(await changeOrganizationUrlAction(ORGANIZATION, "acme-robotics")).toEqual({ ok: true });
     expect(mockRevalidate).toHaveBeenCalledWith("/", "layout");
     expect(mockPublishEvent).not.toHaveBeenCalled();
   });
@@ -231,7 +230,7 @@ describe("changeOrganizationUrlAction", () => {
     "refuses %s, which is not a slug, without asking auth",
     async (slug) => {
       const res = await changeOrganizationUrlAction(ORGANIZATION, slug);
-      expect(res.error).toMatch(/lowercase letters and digits/);
+      expect(errorOf(res)).toMatch(/lowercase letters and digits/);
       expect(fetchMock).not.toHaveBeenCalled();
     },
   );
@@ -240,7 +239,7 @@ describe("changeOrganizationUrlAction", () => {
     "refuses %s, a word the console's own pages use, without asking auth",
     async (slug) => {
       const res = await changeOrganizationUrlAction(ORGANIZATION, slug);
-      expect(res.error).toMatch(/console's own pages/);
+      expect(errorOf(res)).toMatch(/console's own pages/);
       expect(fetchMock).not.toHaveBeenCalled();
     },
   );
@@ -248,6 +247,7 @@ describe("changeOrganizationUrlAction", () => {
   it("passes on auth's refusal of a URL another organization holds, telling nobody", async () => {
     fetchMock.mockResolvedValue(new Response(null, { status: 409 }));
     expect(await changeOrganizationUrlAction(ORGANIZATION, "globex")).toEqual({
+      ok: false,
       error: "problem",
     });
     expect(mockPublishEvent).not.toHaveBeenCalled();
@@ -257,6 +257,7 @@ describe("changeOrganizationUrlAction", () => {
   it("refuses without asking auth when the request resolves another organization", async () => {
     standingIn("org_elsewhere");
     expect(await changeOrganizationUrlAction(ORGANIZATION, "acme")).toEqual({
+      ok: false,
       error: SWITCHED,
     });
     expect(fetchMock).not.toHaveBeenCalled();

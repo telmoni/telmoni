@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { errorOf } from "@/lib/action-result";
+
 vi.mock("next/cache", () => ({
   refresh: vi.fn(),
 }));
@@ -95,7 +97,7 @@ beforeEach(() => {
 
 describe("saveAlertAction", () => {
   it("makes a new alert, as the person, on the project, and draws the page again", async () => {
-    expect(await saveAlertAction(PROJECT, null, INPUT)).toEqual({ error: null });
+    expect(await saveAlertAction(PROJECT, null, INPUT)).toEqual({ ok: true });
     const { url, method, body, init } = sent();
     expect([url, method]).toEqual([`${BASE}/rules`, "POST"]);
     expect(body).toEqual(INPUT);
@@ -109,7 +111,7 @@ describe("saveAlertAction", () => {
   });
 
   it("saves one over whole, by its id", async () => {
-    expect(await saveAlertAction(PROJECT, RULE, INPUT)).toEqual({ error: null });
+    expect(await saveAlertAction(PROJECT, RULE, INPUT)).toEqual({ ok: true });
     expect(sent()).toMatchObject({ url: `${BASE}/rules/${RULE}`, method: "PUT", body: INPUT });
   });
 
@@ -125,33 +127,34 @@ describe("saveAlertAction", () => {
     [null, null],
   ])("refuses the alert %j, %j, asking the server nothing", async (ruleId, input) => {
     const res = await saveAlertAction(PROJECT, ruleId, input);
-    expect(res.error).toMatch(/Couldn't tell which alert|could not be read/);
+    expect(errorOf(res)).toMatch(/Couldn't tell which alert|could not be read/);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("says what the lane refused, or that it could not be reached, and draws nothing again", async () => {
     fetchMock.mockResolvedValueOnce(new Response(null, { status: 409 }));
     expect(await saveAlertAction(PROJECT, null, INPUT)).toEqual({
+      ok: false,
       error: "this project has an alert by that name already",
     });
     fetchMock.mockResolvedValueOnce(null);
-    expect((await saveAlertAction(PROJECT, null, INPUT)).error).toMatch(/Alerts are unavailable/);
+    expect(errorOf(await saveAlertAction(PROJECT, null, INPUT))).toMatch(/Alerts are unavailable/);
     expect(refresh).not.toHaveBeenCalled();
   });
 
   // Another member deleted it: the page is drawn again without it.
   it("draws the page again where what it acted on is gone, and answers that it is", async () => {
     fetchMock.mockResolvedValueOnce(new Response(null, { status: 404 }));
-    expect(await saveAlertAction(PROJECT, RULE, INPUT)).toEqual({ error: expect.any(String), gone: true });
+    expect(await saveAlertAction(PROJECT, RULE, INPUT)).toEqual({ ok: false, error: expect.any(String), gone: true });
     expect(refresh).toHaveBeenCalledOnce();
   });
 
   it("asks nothing for an expired session, past the minute's room, or for another header", async () => {
     vi.mocked(getServerSession).mockResolvedValueOnce(null);
-    expect((await saveAlertAction(PROJECT, null, INPUT)).error).toMatch(/session expired/);
+    expect(errorOf(await saveAlertAction(PROJECT, null, INPUT))).toMatch(/session expired/);
     vi.mocked(rateLimit).mockResolvedValueOnce({ retryAfter: 30 } as never);
-    expect((await saveAlertAction(PROJECT, null, INPUT)).error).toMatch(/Too many requests/);
-    expect((await saveAlertAction("p\r\nx-project-id: q", null, INPUT)).error).toMatch(
+    expect(errorOf(await saveAlertAction(PROJECT, null, INPUT))).toMatch(/Too many requests/);
+    expect(errorOf(await saveAlertAction("p\r\nx-project-id: q", null, INPUT))).toMatch(
       /Couldn't tell which project/,
     );
     expect(fetchMock).not.toHaveBeenCalled();
@@ -168,10 +171,10 @@ describe("the alert's own changes", () => {
   });
 
   it("deletes an alert, and draws one another member deleted first as gone", async () => {
-    expect(await deleteAlertAction(PROJECT, RULE)).toEqual({ error: null });
+    expect(await deleteAlertAction(PROJECT, RULE)).toEqual({ ok: true });
     expect(sent()).toMatchObject({ url: `${BASE}/rules/${RULE}`, method: "DELETE" });
     fetchMock.mockResolvedValueOnce(new Response(null, { status: 404 }));
-    expect(await deleteAlertAction(PROJECT, RULE)).toEqual({ error: null });
+    expect(await deleteAlertAction(PROJECT, RULE)).toEqual({ ok: true });
     expect(refresh).toHaveBeenCalledTimes(2);
   });
 
@@ -201,7 +204,7 @@ describe("the alert's own changes", () => {
       await incidentAction(PROJECT, "x", "resolve"),
       await endMuteAction(PROJECT, `${MUTE}/end`),
     ]) {
-      expect(res.error).toMatch(/Couldn't tell which/);
+      expect(errorOf(res)).toMatch(/Couldn't tell which/);
     }
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -243,7 +246,7 @@ describe("maintenance windows", () => {
     { rule_id: "../rules", starts_at: null, minutes: 60 },
     { rule_id: RULE, starts_at: null, minutes: 60, ends_at: "2027-01-01T00:00:00Z" },
   ])("refuses the window %j, asking the server nothing", async (input) => {
-    expect((await muteAction(PROJECT, input)).error).toMatch(/could not be read/);
+    expect(errorOf(await muteAction(PROJECT, input))).toMatch(/could not be read/);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

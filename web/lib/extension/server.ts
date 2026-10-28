@@ -5,6 +5,7 @@
 // `PaperShell` is here, not there, because its footer reads the environment.
 import "server-only";
 
+export { type ActionResult, type Refused, refused } from "@/lib/action-result";
 export { extractProblem, fetchWithTimeout, tryFetchWithTimeout } from "@/lib/api/fetch";
 export { ProblemType } from "@/lib/api/problem";
 export { rateLimit, sessionKey } from "@/lib/api/rate-limit";

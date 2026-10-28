@@ -4,6 +4,7 @@ import { refresh } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 
+import { type ActionResult, refused } from "@/lib/action-result";
 import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
 import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
 import { env } from "@/lib/env";
@@ -30,9 +31,7 @@ import { TraceColumn, ViewKind } from "@/lib/types/enums";
 // read it, and the layout the project opens in, set through its lane: what
 // this checks is only that the browser sent the shape each has.
 
-export type ViewResult =
-  | { status: "ok"; view?: TraceView | TraceLayout }
-  | { status: "error"; error: string };
+export type ViewResult = ActionResult<{ view?: TraceView | TraceLayout }>;
 
 const name = z.string().max(200);
 const columns = z.array(z.enum(TraceColumn)).max(64);
@@ -53,8 +52,6 @@ const SessionLayoutInputSchema = z.strictObject({ view_id: z.guid().nullable() }
  *  that a loop cannot fill a project's hundred views in one. */
 const SAVES_A_MINUTE = { limit: 20, windowMs: 60_000 };
 
-type Refusal = { status: "error"; error: string };
-
 /** One of telemetry's lanes under `/internal/v1/telemetry`, called as the
  *  person: the answer, or why it was not sent or was refused. */
 async function call(
@@ -62,13 +59,13 @@ async function call(
   lane: string,
   projectId: string,
   body?: unknown,
-): Promise<{ status: "sent"; res: Response } | Refusal> {
+): Promise<ActionResult<{ res: Response }>> {
   const session = await getServerSession();
-  if (!session) return { status: "error", error: "Your session expired — sign in again." };
+  if (!session) return refused("Your session expired — sign in again.");
   const limited = await rateLimit(sessionKey(session, "traces:views"), SAVES_A_MINUTE);
-  if (limited) return { status: "error", error: "Too many saves at once. Try again in a minute." };
+  if (limited) return refused("Too many saves at once. Try again in a minute.");
   const resolved = await activeProjectForMutation(projectId);
-  if (resolved.error !== null) return { status: "error", error: resolved.error };
+  if (resolved.error !== null) return refused(resolved.error);
 
   const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/v1/telemetry${lane}`, {
     method,
@@ -78,12 +75,12 @@ async function call(
     },
     body: body ? JSON.stringify(body) : undefined,
   });
-  if (!res) return { status: "error", error: "Telemetry is unreachable. Try again." };
+  if (!res) return refused("Telemetry is unreachable. Try again.");
   if (!res.ok) {
     const { message } = await extractProblem(res);
-    return { status: "error", error: message };
+    return refused(message);
   }
-  return { status: "sent", res };
+  return { ok: true, res };
 }
 
 async function send(
@@ -93,15 +90,15 @@ async function send(
   body?: z.infer<typeof ViewInputSchema>,
 ): Promise<ViewResult> {
   const sent = await call(method, `/views${path}`, projectId, body);
-  if (sent.status === "error") return sent;
-  if (sent.res.status === 204) return { status: "ok" };
+  if (!sent.ok) return sent;
+  if (sent.res.status === 204) return { ok: true };
   const parsed = SavedViewOfAnyKindSchema.safeParse(await sent.res.json().catch(() => null));
   if (!parsed.success) {
     // Saved all the same: the page is drawn again, its menu with it.
     refresh();
-    return { status: "error", error: "Unexpected response from telemetry." };
+    return refused("Unexpected response from telemetry.");
   }
-  return { status: "ok", view: parsed.data };
+  return { ok: true, view: parsed.data };
 }
 
 /** A new view of the project's list, or a new layout, which the page then
@@ -109,9 +106,9 @@ async function send(
  *  this answer. */
 export async function saveTraceViewAction(projectId: string, input: unknown): Promise<ViewResult> {
   const parsed = ViewInputSchema.safeParse(input);
-  if (!parsed.success) return { status: "error", error: "That view could not be read." };
+  if (!parsed.success) return refused("That view could not be read.");
   const result = await send("POST", "", projectId, parsed.data);
-  if (result.status === "error") return result;
+  if (!result.ok) return result;
   if (!result.view) {
     refresh();
     return result;
@@ -127,21 +124,21 @@ export async function updateTraceViewAction(
   viewId: string,
   input: unknown,
 ): Promise<ViewResult> {
-  if (!z.guid().safeParse(viewId).success) return { status: "error", error: "Invalid view id." };
+  if (!z.guid().safeParse(viewId).success) return refused("Invalid view id.");
   const parsed = ViewInputSchema.safeParse(input);
-  if (!parsed.success) return { status: "error", error: "That view could not be read." };
+  if (!parsed.success) return refused("That view could not be read.");
   const result = await send("PUT", `/${viewId}`, projectId, parsed.data);
   // Saved over or renamed: the list is drawn again, its views menu with it.
-  if (result.status === "ok") refresh();
+  if (result.ok) refresh();
   return result;
 }
 
 /** One of the project's views, gone. A page opened from it goes back to the
  *  list it showed, without it; any other is drawn again, its menu without it. */
 export async function deleteTraceViewAction(projectId: string, viewId: string): Promise<ViewResult> {
-  if (!z.guid().safeParse(viewId).success) return { status: "error", error: "Invalid view id." };
+  if (!z.guid().safeParse(viewId).success) return refused("Invalid view id.");
   const result = await send("DELETE", `/${viewId}`, projectId);
-  if (result.status === "error") return result;
+  if (!result.ok) return result;
   const here = await requestUrl();
   if (here.searchParams.get("view") !== viewId) {
     refresh();
@@ -151,9 +148,7 @@ export async function deleteTraceViewAction(projectId: string, viewId: string): 
   redirect(pathAndQuery(here));
 }
 
-export type SessionLayoutResult =
-  | { status: "ok"; setting: SessionLayoutSetting }
-  | { status: "error"; error: string };
+export type SessionLayoutResult = ActionResult<{ setting: SessionLayoutSetting }>;
 
 /** What the project's sessions and traces open in, set: one of its saved
  *  layouts, or the default. The page is drawn again with it. */
@@ -162,11 +157,11 @@ export async function setSessionLayoutAction(
   input: unknown,
 ): Promise<SessionLayoutResult> {
   const parsed = SessionLayoutInputSchema.safeParse(input);
-  if (!parsed.success) return { status: "error", error: "That layout could not be read." };
+  if (!parsed.success) return refused("That layout could not be read.");
   const sent = await call("PUT", "/session-layout", projectId, parsed.data);
-  if (sent.status === "error") return sent;
+  if (!sent.ok) return sent;
   const setting = SessionLayoutSettingSchema.safeParse(await sent.res.json().catch(() => null));
   refresh();
-  if (!setting.success) return { status: "error", error: "Unexpected response from telemetry." };
-  return { status: "ok", setting: setting.data };
+  if (!setting.success) return refused("Unexpected response from telemetry.");
+  return { ok: true, setting: setting.data };
 }

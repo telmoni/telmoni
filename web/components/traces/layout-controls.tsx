@@ -547,7 +547,7 @@ function LayoutsMenu({ projectId, layouts, project, canSave, layout }: Props & {
   const saveOver = (saved: TraceLayout) =>
     start(async () => {
       const result = await updateTraceViewAction(projectId, saved.id, input(saved.name));
-      if (result.status === "error") {
+      if (!result.ok) {
         toast.error(result.error);
         return;
       }
@@ -560,7 +560,7 @@ function LayoutsMenu({ projectId, layouts, project, canSave, layout }: Props & {
   const remove = (saved: TraceLayout) =>
     start(async () => {
       const result = await deleteTraceViewAction(projectId, saved.id);
-      if (result.status === "error") {
+      if (!result.ok) {
         toast.error(result.error);
         return;
       }
@@ -571,7 +571,7 @@ function LayoutsMenu({ projectId, layouts, project, canSave, layout }: Props & {
     start(async () => {
       const viewId = value === DEFAULT_CHOICE ? null : value;
       const result = await setSessionLayoutAction(projectId, { view_id: viewId });
-      if (result.status === "error") {
+      if (!result.ok) {
         toast.error(result.error);
         return;
       }
@@ -713,14 +713,14 @@ function LayoutsMenu({ projectId, layouts, project, canSave, layout }: Props & {
               query: current.query,
               columns: current.columns,
             });
-            if (result.status === "error") return result.error;
+            if (!result.ok) return result.error;
             toast.success(`Renamed to “${name}”`);
             return null;
           }
           // A layout saved opens the page on it in the action itself, whose
           // redirect goes on to the router; only a refusal answers here.
           const result = await saveTraceViewAction(projectId, input(name));
-          if (result.status === "error") return result.error;
+          if (!result.ok) return result.error;
           toast.success(`Saved “${name}”`);
           return null;
         }}

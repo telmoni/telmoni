@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { errorOf } from "@/lib/action-result";
+
 vi.mock("@/lib/server/session", () => ({ getServerSession: vi.fn() }));
 vi.mock("@/lib/server/entities/organization", () => ({ getServerContext: vi.fn() }));
 // `createProjectAction` now chooses which organization to NAME, so the rest of
@@ -137,13 +139,13 @@ describe("createProjectAction — which organization the project lands in", () =
 
   it("names an organization the caller administers", async () => {
     const r = await createProjectAction("Platform", "org_admin");
-    expect(r.error).toBeNull();
+    expect(errorOf(r)).toBeNull();
     expect(namedOrganization()).toBe("org_admin");
   });
 
   it("names an organization the caller owns", async () => {
     const r = await createProjectAction("Platform", "org_mine");
-    expect(r.error).toBeNull();
+    expect(errorOf(r)).toBeNull();
     expect(namedOrganization()).toBe("org_mine");
   });
 
@@ -152,14 +154,14 @@ describe("createProjectAction — which organization the project lands in", () =
   // refused HERE, without a request, rather than left for auth to reject.
   it("refuses to name an organization the caller only holds a seat in", async () => {
     const r = await createProjectAction("Platform", "org_seat_other");
-    expect(r.error).toMatch(/cannot create a project in that organization/i);
+    expect(errorOf(r)).toMatch(/cannot create a project in that organization/i);
     expect(mockFetch).not.toHaveBeenCalled();
     expect(mockOrganizationHeaders).not.toHaveBeenCalled();
   });
 
   it("refuses to name an organization the caller is not in at all", async () => {
     const r = await createProjectAction("Platform", "org_stranger");
-    expect(r.error).toMatch(/cannot create a project in that organization/i);
+    expect(errorOf(r)).toMatch(/cannot create a project in that organization/i);
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
@@ -167,7 +169,7 @@ describe("createProjectAction — which organization the project lands in", () =
   // names no organization is refused like any stranger's.
   it("refuses the caller's user id, which names no organization", async () => {
     const r = await createProjectAction("Platform", "user_me");
-    expect(r.error).toMatch(/cannot create a project in that organization/i);
+    expect(errorOf(r)).toMatch(/cannot create a project in that organization/i);
     expect(mockFetch).not.toHaveBeenCalled();
     expect(mockOrganizationHeaders).not.toHaveBeenCalled();
   });
@@ -178,14 +180,14 @@ describe("createProjectAction — which organization the project lands in", () =
   // side, where the roster actually lives.
   it("passes the active organization through and leaves the role to auth", async () => {
     const r = await createProjectAction("Platform", "org_seat");
-    expect(r.error).toBeNull();
+    expect(errorOf(r)).toBeNull();
     expect(namedOrganization()).toBe("org_seat");
     expect(mockFetch).toHaveBeenCalled();
   });
 
   it("falls back to the active organization when none is named", async () => {
     const r = await createProjectAction("Platform");
-    expect(r.error).toBeNull();
+    expect(errorOf(r)).toBeNull();
     expect(namedOrganization()).toBe("org_seat");
   });
 });
@@ -218,7 +220,7 @@ describe("createProjectAction — what the dialog is handed to follow the projec
   it("answers the project with the slug auth minted for it", async () => {
     const r = await createProjectAction("Platform", "org_admin");
     expect(r).toEqual({
-      error: null,
+      ok: true,
       project: { id: "project_1", slug: "platform-2", name: "Platform", role: "owner" },
     });
   });
@@ -229,14 +231,13 @@ describe("createProjectAction — what the dialog is handed to follow the projec
       json: async () => ({ id: "project_1", name: "Platform", role: "owner" }),
     });
     const r = await createProjectAction("Platform", "org_admin");
-    expect(r).toEqual({ error: null });
+    expect(r).toEqual({ ok: true });
   });
 
   it("answers no project when it was not created", async () => {
     mockFetch.mockResolvedValue({ ok: false });
     const r = await createProjectAction("Platform", "org_admin");
-    expect(r.error).toBe("problem");
-    expect(r.project).toBeUndefined();
+    expect(r).toEqual({ ok: false, error: "problem" });
   });
 });
 
@@ -264,7 +265,7 @@ describe("createOrganizationAction", () => {
   // need, on a chain it does not touch.
   it("founds it with the person's own headers, naming no organization, and answers its Overview", async () => {
     const r = await createOrganizationAction("  Acme  ", "");
-    expect(r).toEqual({ error: null, href: "/acme" });
+    expect(r).toEqual({ ok: true, href: "/acme" });
     const [url, init] = sent()!;
     expect(url).toBe("http://auth.test/internal/v1/organizations");
     expect(init.method).toBe("POST");
@@ -287,7 +288,7 @@ describe("createOrganizationAction", () => {
   it("goes where a console built on this one sends the new organization", async () => {
     mockCreatedHref.mockResolvedValueOnce("/acme/billing");
     const r = await createOrganizationAction("Acme", "");
-    expect(r).toEqual({ error: null, href: "/acme/billing" });
+    expect(r).toEqual({ ok: true, href: "/acme/billing" });
     expect(mockCreatedHref).toHaveBeenCalledWith({ id: "org_new", slug: "acme", name: "Acme" });
   });
 
@@ -297,7 +298,7 @@ describe("createOrganizationAction", () => {
   it("goes where a console built on this one takes the founding first, with the notice's fields", async () => {
     mockElsewhere.mockResolvedValueOnce({ href: "https://checkout.stripe.test/c/pay_1" });
     const r = await createOrganizationAction("  Acme  ", " acme-labs ", { plan: "pro" });
-    expect(r).toEqual({ error: null, href: "https://checkout.stripe.test/c/pay_1" });
+    expect(r).toEqual({ ok: true, href: "https://checkout.stripe.test/c/pay_1" });
     expect(mockElsewhere).toHaveBeenCalledWith({
       name: "Acme",
       slug: "acme-labs",
@@ -309,13 +310,13 @@ describe("createOrganizationAction", () => {
   it("reads a refusal from the console built on this one under its field", async () => {
     mockElsewhere.mockResolvedValueOnce({ error: "Choose a plan first.", field: "name" });
     const r = await createOrganizationAction("Acme", "");
-    expect(r).toEqual({ error: "Choose a plan first.", field: "name" });
+    expect(r).toEqual({ ok: false, error: "Choose a plan first.", field: "name" });
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it("asks the console built on this one only once the name and URL pass", async () => {
     const r = await createOrganizationAction("", "");
-    expect(r.field).toBe("name");
+    expect(r).toMatchObject({ ok: false, field: "name" });
     expect(mockElsewhere).not.toHaveBeenCalled();
   });
 
@@ -330,7 +331,7 @@ describe("createOrganizationAction", () => {
     mockFetch.mockClear();
     mockRateLimit.mockResolvedValueOnce({ status: 429 });
     const r = await createOrganizationAction("Acme", "");
-    expect(r.error).toMatch(/too many requests/i);
+    expect(errorOf(r)).toMatch(/too many requests/i);
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
@@ -348,8 +349,7 @@ describe("createOrganizationAction", () => {
   it("refuses a name it cannot take under Name, without a request", async () => {
     for (const name of ["", "   ", "x".repeat(81)]) {
       const r = await createOrganizationAction(name, "");
-      expect(r.field, name).toBe("name");
-      expect(r.error, name).toBeTruthy();
+      expect(r, name).toMatchObject({ ok: false, field: "name", error: expect.any(String) });
     }
     expect(mockFetch).not.toHaveBeenCalled();
   });
@@ -358,20 +358,19 @@ describe("createOrganizationAction", () => {
   // them would read as 160 and be refused.
   it("counts a name in characters, as auth does", async () => {
     const r = await createOrganizationAction("\u{1D49C}".repeat(80), "");
-    expect(r.error).toBeNull();
+    expect(errorOf(r)).toBeNull();
     expect(mockFetch).toHaveBeenCalled();
 
     mockFetch.mockClear();
     const over = await createOrganizationAction("\u{1D49C}".repeat(81), "");
-    expect(over.field).toBe("name");
+    expect(over).toMatchObject({ ok: false, field: "name" });
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it("refuses a URL of the wrong shape or a console word under URL, without a request", async () => {
     for (const slug of ["Acme", "acme--labs", "a".repeat(49), "settings", "console"]) {
       const r = await createOrganizationAction("Acme", slug);
-      expect(r.field, slug).toBe("slug");
-      expect(r.error, slug).toBeTruthy();
+      expect(r, slug).toMatchObject({ ok: false, field: "slug", error: expect.any(String) });
     }
     expect(mockFetch).not.toHaveBeenCalled();
   });
@@ -384,6 +383,7 @@ describe("createOrganizationAction", () => {
     });
     const r = await createOrganizationAction("Acme", "acme");
     expect(r).toEqual({
+      ok: false,
       error: "conflict: another organization already has that URL",
       field: "slug",
     });
@@ -399,7 +399,7 @@ describe("createOrganizationAction", () => {
       problem: { type: "/errors/auth/bad-request", title: "bad request", status: 400 },
     });
     const r = await createOrganizationAction("\u200B", "");
-    expect(r).toEqual({ error: "bad request: give the organization a name", field: "name" });
+    expect(r).toEqual({ ok: false, error: "bad request: give the organization a name", field: "name" });
   });
 
   // The console keeps no list of the words no URL may hold, so auth's refusal
@@ -412,6 +412,7 @@ describe("createOrganizationAction", () => {
     });
     const r = await createOrganizationAction("Acme", "acme-labs");
     expect(r).toEqual({
+      ok: false,
       error: "bad url: that URL holds a word no URL here may hold \u2014 choose another URL",
       field: "slug",
     });
@@ -430,7 +431,7 @@ describe("createOrganizationAction", () => {
       },
     });
     const r = await createOrganizationAction("Acme", "");
-    expect(r).toEqual({ error: "Sign-ups are closed right now." });
+    expect(r).toEqual({ ok: false, error: "Sign-ups are closed right now." });
   });
 
   // With no URL asked for, a conflict is about nothing the person typed.
@@ -441,13 +442,13 @@ describe("createOrganizationAction", () => {
       problem: { type: "/errors/auth/conflict", title: "conflict", status: 409 },
     });
     const r = await createOrganizationAction("Acme", "");
-    expect(r).toEqual({ error: "conflict: That already exists" });
+    expect(r).toEqual({ ok: false, error: "conflict: That already exists" });
   });
 
   it("asks for a sign-in when auth no longer takes the session", async () => {
     mockFetch.mockResolvedValue({ ok: false, status: 401 });
     const r = await createOrganizationAction("Acme", "");
-    expect(r).toEqual({ error: "Your session expired — sign in again." });
+    expect(r).toEqual({ ok: false, error: "Your session expired — sign in again." });
     expect(mockExtractProblem).not.toHaveBeenCalled();
   });
 
@@ -458,20 +459,19 @@ describe("createOrganizationAction", () => {
       problem: { type: "/errors/authz/forbidden", title: "forbidden", status: 403 },
     });
     const r = await createOrganizationAction("Acme", "");
-    expect(r).toEqual({ error: "forbidden: account deletion in progress" });
+    expect(r).toEqual({ ok: false, error: "forbidden: account deletion in progress" });
   });
 
   it("says so when auth cannot be reached", async () => {
     mockFetch.mockResolvedValue(null);
     const r = await createOrganizationAction("Acme", "");
-    expect(r.error).toMatch(/unavailable/i);
-    expect(r.field).toBeUndefined();
+    expect(r).toEqual({ ok: false, error: expect.stringMatching(/unavailable/i) });
   });
 
   it("asks for a sign-in when the session is gone, without a request", async () => {
     vi.mocked(getServerSession).mockResolvedValue(null as never);
     const r = await createOrganizationAction("Acme", "");
-    expect(r.error).toMatch(/session expired/i);
+    expect(errorOf(r)).toMatch(/session expired/i);
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
@@ -484,7 +484,7 @@ describe("createOrganizationAction", () => {
     ]) {
       mockFetch.mockResolvedValueOnce({ ok: true, status: 201, json: async () => body });
       const r = await createOrganizationAction("Acme", "");
-      expect(r).toEqual({ error: null });
+      expect(r).toEqual({ ok: true });
     }
     expect(mockPublishEvent).not.toHaveBeenCalled();
     expect(revalidatePath).toHaveBeenCalledWith("/", "layout");

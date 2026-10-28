@@ -45,7 +45,7 @@ export function OrganizationNameForm({
     start(async () => {
       try {
         const res = await renameOrganizationAction(organizationId, trimmed);
-        if (res.error) {
+        if (!res.ok) {
           setError(res.error);
           toast.error(res.error);
           return;

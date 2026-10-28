@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect, RedirectType } from "next/navigation";
 import { z } from "zod";
 
+import { type ActionResult, refused } from "@/lib/action-result";
 import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
 import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
 import { env } from "@/lib/env";
@@ -22,9 +23,7 @@ const Updated = z.object({ slug: z.string() });
 /// at the new path instead, drawn there rather than here, where the old path
 /// names no organization any more; everybody else with one of the
 /// organization's pages open is told, and follows it too.
-interface Answer {
-  error: string | null;
-}
+type Answer = ActionResult;
 
 /// `PATCH /internal/v1/organization` for the organization the page rendered: the
 /// name, the slug, or both. The name and the URL are two settings: a name
@@ -35,17 +34,17 @@ async function patchOrganization(
   body: { name?: string; slug?: string },
 ): Promise<Answer> {
   const session = await getServerSession();
-  if (!session) return { error: "Your session expired — sign in again." };
+  if (!session) return refused("Your session expired — sign in again.");
 
   const limited = await rateLimit(sessionKey(session, bucket), {
     limit: 10,
     windowMs: 60_000,
   });
-  if (limited) return { error: "Too many requests — slow down a moment." };
+  if (limited) return refused("Too many requests — slow down a moment.");
 
   const ctx = await identityContext();
-  if (!ctx) return { error: await unplacedOrganization() };
-  if (ctx.organizationId !== organizationId) return { error: SWITCHED_ORGANIZATION };
+  if (!ctx) return refused(await unplacedOrganization());
+  if (ctx.organizationId !== organizationId) return refused(SWITCHED_ORGANIZATION);
   const gate = await getServerContext();
   const was = gate ? activeOrganization(gate)?.slug : undefined;
 
@@ -55,9 +54,9 @@ async function patchOrganization(
     body: JSON.stringify(body),
   });
   if (!res) {
-    return { error: "Organizations are unavailable right now — try again shortly." };
+    return refused("Organizations are unavailable right now — try again shortly.");
   }
-  if (!res.ok) return { error: (await extractProblem(res)).message };
+  if (!res.ok) return refused((await extractProblem(res)).message);
 
   const updated = Updated.safeParse(await res.json().catch(() => null));
   if (updated.success && was !== undefined && updated.data.slug !== was) {
@@ -72,7 +71,7 @@ async function patchOrganization(
     redirect(await canonicalPath([updated.data.slug]), RedirectType.replace);
   }
   revalidatePath("/", "layout");
-  return { error: null };
+  return { ok: true };
 }
 
 /// Rename the organization from its Settings page. A name moves nothing: the
@@ -82,7 +81,7 @@ export async function renameOrganizationAction(
   name: string,
 ): Promise<Answer> {
   const checked = checkOrganizationName(name);
-  if (!checked.ok) return { error: checked.error };
+  if (!checked.ok) return refused(checked.error);
   return patchOrganization(organizationId, "organization:rename", { name: checked.value });
 }
 
@@ -94,6 +93,6 @@ export async function changeOrganizationUrlAction(
   slug: string,
 ): Promise<Answer> {
   const checked = checkOrganizationUrl(slug);
-  if (!checked.ok) return { error: checked.error };
+  if (!checked.ok) return refused(checked.error);
   return patchOrganization(organizationId, "organization:url", { slug: checked.value });
 }

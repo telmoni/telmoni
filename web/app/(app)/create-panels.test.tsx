@@ -74,7 +74,7 @@ describe("New project", () => {
 
   it("creates it in that organization and opens it", async () => {
     createProjectAction.mockResolvedValue({
-      error: null,
+      ok: true,
       project: { id: "p1", slug: "support-agent", name: "Support agent", role: "owner" },
     });
     panels();
@@ -87,7 +87,7 @@ describe("New project", () => {
   });
 
   it("says what refused it and stays open", async () => {
-    createProjectAction.mockResolvedValue({ error: "A project with that name already exists." });
+    createProjectAction.mockResolvedValue({ ok: false, error: "A project with that name already exists." });
     panels();
     fireEvent.change(screen.getByLabelText("Project name"), { target: { value: "Web" } });
     fireEvent.click(screen.getByRole("button", { name: "Create project" }));
@@ -145,7 +145,7 @@ describe("New organization", () => {
   });
 
   it("hands the action the notice's own fields by name, and opens what it answers", async () => {
-    createOrganizationAction.mockResolvedValue({ error: null, href: "/acme-robotics" });
+    createOrganizationAction.mockResolvedValue({ ok: true, href: "/acme-robotics" });
     panels(<input type="hidden" name="plan" value="teams" />);
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Acme Robotics" } });
     fireEvent.click(screen.getByRole("button", { name: "Create organization" }));
@@ -155,7 +155,7 @@ describe("New organization", () => {
   });
 
   it("says a refusal of the URL under the URL", async () => {
-    createOrganizationAction.mockResolvedValue({ error: "That URL is taken.", field: "slug" });
+    createOrganizationAction.mockResolvedValue({ ok: false, error: "That URL is taken.", field: "slug" });
     panels();
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Acme" } });
     fireEvent.change(screen.getByLabelText("URL"), { target: { value: "acme" } });
