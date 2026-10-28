@@ -21,15 +21,17 @@ import {
 import {
   MAX_DAYS,
   compact,
+  isUuid,
   listHref,
   many,
   one,
   oneOf,
+  sameValues,
   sortAfterClick,
   sortInForce,
-  whole,
   type Column,
   type SearchParams,
+  whole,
 } from "./list-query";
 
 // A list's URL is its state — the trace list's, and the sessions' and the
@@ -94,8 +96,6 @@ export type TraceUi = {
   /** The saved view the page was opened from. */
   view?: string;
 };
-
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** A list left empty, as the URL leaves a filter out. */
 function some<T>(values: T[]): T[] | undefined {
@@ -165,7 +165,7 @@ export function parseTraceUi(searchParams: SearchParams): TraceUi {
   const view = one(searchParams.view);
   return compact({
     display: one(searchParams.display) === "chart" ? ("chart" as const) : undefined,
-    view: view !== undefined && UUID.test(view) ? view : undefined,
+    view: view !== undefined && isUuid(view) ? view : undefined,
   });
 }
 
@@ -674,8 +674,6 @@ export function viewHref(organization: string, project: string, view: TraceView,
  *  filter's values in any order. */
 export function showsView(query: TraceQuery, view: TraceView): boolean {
   const saved = queryOfView(view.query);
-  const sameValues = (a?: readonly string[], b?: readonly string[]) =>
-    [...(a ?? [])].sort().join("\u0000") === [...(b ?? [])].sort().join("\u0000");
   const a = currentSort(query);
   const b = currentSort(saved);
   return (

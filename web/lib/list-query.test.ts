@@ -5,16 +5,18 @@ import { SortDirection, SpanStatus } from "@/lib/types/enums";
 import {
   FILTER_VALUES_MAX,
   compact,
+  isUuid,
   listHref,
   many,
   one,
   oneOf,
   parseWindow,
   queryString,
+  sameValues,
+  sole,
   sortAfterClick,
   sortInForce,
   whole,
-  sole,
   windowReaching,
 } from "./list-query";
 
@@ -140,5 +142,22 @@ describe("sole", () => {
     expect(sole("")).toBeUndefined();
     expect(sole(["x", "y"])).toBeUndefined();
     expect(sole(undefined)).toBeUndefined();
+  });
+});
+
+describe("sameValues", () => {
+  it("holds two lists the same in any order, and none the same as none", () => {
+    expect(sameValues(["a", "b"], ["b", "a"])).toBe(true);
+    expect(sameValues(["a"], ["a", "a"])).toBe(false);
+    expect(sameValues(undefined, [])).toBe(true);
+  });
+});
+
+describe("isUuid", () => {
+  it("knows a UUID of any version, and nothing shorter or wider", () => {
+    expect(isUuid("7bQx2mNv9BcK4dLp")).toBe(false);
+    expect(isUuid("0192f4b2-8c3a-7d1e-9f00-123456789abc")).toBe(true);
+    expect(isUuid("0192F4B2-8C3A-4D1E-9F00-123456789ABC")).toBe(true);
+    expect(isUuid("0192f4b2-8c3a-7d1e-9f00-123456789ab")).toBe(false);
   });
 });

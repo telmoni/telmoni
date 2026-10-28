@@ -22,6 +22,6 @@ describe("the reader's clock, from the cookie the browser leaves", () => {
 
   it("gives this browser's offset east of UTC, as the server takes it", () => {
     const date = new Date("2026-10-11T12:00:00Z");
-    expect(browserUtcOffset(date)).toBe(-date.getTimezoneOffset());
+    expect(browserUtcOffset(date)).toBe(-date.getTimezoneOffset() || 0);
   });
 });

@@ -21,7 +21,7 @@ export function parseUtcOffset(value: string | undefined): number {
   return minutes >= UTC_OFFSET_WEST && minutes <= UTC_OFFSET_EAST ? minutes : 0;
 }
 
-/** This browser's offset now, in whole minutes east of UTC. */
+/** This browser's offset now, in whole minutes east of UTC; never `-0`. */
 export function browserUtcOffset(date: Date = new Date()): number {
-  return -date.getTimezoneOffset();
+  return -date.getTimezoneOffset() || 0;
 }

@@ -393,10 +393,6 @@ export const OFFSETS: number[] = Array.from(
   (_, i) => UTC_OFFSET_WEST + i * 15,
 );
 
-/** The browser's own offset from UTC now, in minutes east. */
-export function browserOffset(): number {
-  return -new Date().getTimezoneOffset() || 0;
-}
 
 /** Hours in words: `Mon–Fri 09:00–18:00 UTC+01:00`, a day's whole span as
  *  `all day`, and a run of days joined by a dash. */

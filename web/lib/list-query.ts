@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 import { isOneOf } from "@/lib/one-of";
 import { projectPath } from "@/lib/slug";
 import { SortDirection } from "@/lib/types/enums";
@@ -66,8 +68,11 @@ export const FILTER_VALUES_MAX = 50;
 /** A filter's values as the URL repeats it, each trimmed and once, an empty
  *  one dropped; past `max`, the rest are let go rather than turning the page
  *  into a refusal. */
-export function many(value: string | string[] | undefined, max = FILTER_VALUES_MAX): string[] {
-  const given = Array.isArray(value) ? value : value === undefined ? [] : [value];
+export function many(
+  value: string | readonly string[] | undefined,
+  max = FILTER_VALUES_MAX,
+): string[] {
+  const given: readonly string[] = Array.isArray(value) ? value : value === undefined ? [] : [value];
   const kept: string[] = [];
   for (const text of given) {
     const trimmed = text.trim();
@@ -75,6 +80,14 @@ export function many(value: string | string[] | undefined, max = FILTER_VALUES_M
   }
   return kept.slice(0, max);
 }
+
+/** Whether two lists hold the same values, in any order. */
+export function sameValues(a: readonly string[] = [], b: readonly string[] = []): boolean {
+  return [...a].sort().join("\u0000") === [...b].sort().join("\u0000");
+}
+
+/** Whether `value` is spelled as a UUID, whatever its version. */
+export const isUuid = (value: string): boolean => z.guid().safeParse(value).success;
 
 /** A whole number from 1 to `max`, or none: a day count or a page's limit. */
 export function whole(value: string | string[] | undefined, max: number): number | undefined {

@@ -1,3 +1,4 @@
+import { isUuid } from "@/lib/list-query";
 import { VIEW_PARAM } from "@/lib/layout";
 import { draggedPanelWidth } from "@/lib/panel-width";
 import { PEEK_PARAM } from "@/lib/traces";
@@ -15,11 +16,9 @@ import { PEEK_PARAM } from "@/lib/traces";
  *  over it. */
 export const PEEKED = "telmoniPeek";
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
 /** The run a `?peek=` value names, or `null` for a value that names none. */
 export function peekedRun(value: string | null): string | null {
-  return value && UUID.test(value) ? value : null;
+  return value && isUuid(value) ? value : null;
 }
 
 /** The page's own URL with `run` peeked, or with the peek shut. */

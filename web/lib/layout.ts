@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { PinnedSpan } from "@/lib/server/entities/sessions";
 import type { LayoutQuery, TraceLayout, TraceSpan } from "@/lib/server/entities/traces";
 import type { SearchParams } from "@/lib/list-query";
-import { one } from "@/lib/list-query";
+import { isUuid, many, one, sameValues } from "@/lib/list-query";
 import { isOneOf } from "@/lib/one-of";
 import type { SpanNode } from "@/lib/trace-tree";
 import { orderedColumns } from "@/lib/traces";
@@ -91,9 +91,6 @@ export const DEFAULT_LAYOUT: LayoutOptions = {
 /** What the console calls the default layout where a name is wanted. */
 export const DEFAULT_LAYOUT_NAME = "the default layout";
 
-const sameList = (a: readonly string[], b: readonly string[]) =>
-  [...a].sort().join("\u0000") === [...b].sort().join("\u0000");
-
 /** Whether two layouts show the same: every option the same, a list's
  *  values in any order. */
 export function sameLayout(a: LayoutOptions, b: LayoutOptions): boolean {
@@ -103,24 +100,12 @@ export function sameLayout(a: LayoutOptions, b: LayoutOptions): boolean {
     a.timeline === b.timeline &&
     a.messages === b.messages &&
     a.scores === b.scores &&
-    sameList(a.columns, b.columns) &&
-    sameList(a.pinned, b.pinned) &&
-    sameList(a.filter.kind, b.filter.kind) &&
-    sameList(a.filter.status, b.filter.status) &&
-    sameList(a.filter.name, b.filter.name)
+    sameValues(a.columns, b.columns) &&
+    sameValues(a.pinned, b.pinned) &&
+    sameValues(a.filter.kind, b.filter.kind) &&
+    sameValues(a.filter.status, b.filter.status) &&
+    sameValues(a.filter.name, b.filter.name)
   );
-}
-
-/** A list of names as a layout keeps them: each trimmed and once, up to
- *  `max`. */
-function names(given: readonly string[], max: number): string[] {
-  const kept: string[] = [];
-  for (const text of given) {
-    const trimmed = text.trim();
-    if (trimmed && !kept.includes(trimmed)) kept.push(trimmed);
-    if (kept.length === max) break;
-  }
-  return kept;
 }
 
 /** The options a saved layout holds: its query and its columns, read as one,
@@ -132,11 +117,11 @@ export function layoutOf(layout: Pick<TraceLayout, "query" | "columns">): Layout
     open: query.open,
     timeline: query.timeline,
     columns: orderedColumns(layout.columns),
-    pinned: names(query.pinned ?? [], PINNED_MAX),
+    pinned: many(query.pinned, PINNED_MAX),
     filter: {
       kind: [...new Set(query.filter.kind ?? [])],
       status: [...new Set(query.filter.status ?? [])],
-      name: names(query.filter.name ?? [], 50),
+      name: many(query.filter.name, 50),
     },
     messages: query.messages,
     scores: query.scores,
@@ -181,13 +166,13 @@ const StoredOptionsSchema = z.object({
   open: z.enum(LayoutOpen),
   timeline: z.boolean(),
   columns: Strings.transform((v) => orderedColumns(v)),
-  pinned: Strings.transform((v) => names(v, PINNED_MAX)),
+  pinned: Strings.transform((v) => many(v, PINNED_MAX)),
   filter: z.object({
     kind: Strings.transform((v) => [...new Set(v.filter((k): k is SpanKind => isOneOf(kinds, k)))]),
     status: Strings.transform((v) => [
       ...new Set(v.filter((s): s is SpanStatus => isOneOf(statuses, s))),
     ]),
-    name: Strings.transform((v) => names(v, 50)),
+    name: Strings.transform((v) => many(v, 50)),
   }),
   messages: z.boolean(),
   scores: z.boolean(),
@@ -207,13 +192,11 @@ export type LayoutChoice = {
   options: LayoutOptions;
 };
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
 /** What the browser kept of a choice; `null` for one this build cannot read
  *  whole. A view that names none reads as a cut of the default, and a key
  *  an older build kept beside these is passed over. */
 const StoredChoiceSchema = z.object({
-  view: z.string().regex(UUID).nullable().catch(null),
+  view: z.guid().nullable().catch(null),
   options: StoredOptionsSchema,
 });
 
@@ -230,7 +213,7 @@ export const VIEW_PARAM = "view";
 
 export function parseLayoutUi(searchParams: SearchParams): LayoutUi {
   const view = one(searchParams[VIEW_PARAM]);
-  return view !== undefined && UUID.test(view) ? { view } : {};
+  return view !== undefined && isUuid(view) ? { view } : {};
 }
 
 /** The choice a saved layout opens as it was saved. */

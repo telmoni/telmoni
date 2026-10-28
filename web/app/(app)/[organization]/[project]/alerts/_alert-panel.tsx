@@ -1,5 +1,6 @@
 "use client";
 
+import { browserUtcOffset } from "@/lib/utc-offset";
 import { startTransition, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { BellPlus, BellRing } from "lucide-react";
@@ -46,7 +47,6 @@ import {
   WINDOW_LABEL,
   aggregationLabel,
   aggregationsFor,
-  browserOffset,
   filterFieldsFor,
   filtersStatus,
   incidentKindsLabel,
@@ -631,7 +631,7 @@ function LinkFields({
                 ...link,
                 hours:
                   mode === "set"
-                    ? { days: [1, 2, 3, 4, 5], from: "09:00", to: "18:00", utc_offset: browserOffset() }
+                    ? { days: [1, 2, 3, 4, 5], from: "09:00", to: "18:00", utc_offset: browserUtcOffset() }
                     : null,
               })
             }
