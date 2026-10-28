@@ -1,7 +1,6 @@
 "use client";
 
-import { unstable_rethrow } from "next/navigation";
-import { startTransition, useId, useRef, useState, useTransition } from "react";
+import { startTransition, useId, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -23,6 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ALERTS_HEADING, MUTE_LENGTHS } from "@/lib/alerts";
+import { useAction } from "@/lib/use-action";
 
 import { useAct, useLanding } from "./_act";
 import { endMuteAction, muteAction } from "./actions";
@@ -94,8 +94,7 @@ function MuteDialog({
   const [starts, setStarts] = useState<"now" | "later">("now");
   const [at, setAt] = useState("");
   const [minutes, setMinutes] = useState<number>(60);
-  const [error, setError] = useState<string | null>(null);
-  const [pending, start] = useTransition();
+  const { pending, error, setError, run } = useAction();
   // An alert's dialog goes with its card.
   const { gone } = useLanding(ALERTS_HEADING);
 
@@ -106,25 +105,18 @@ function MuteDialog({
       setError("Set when the window starts.");
       return;
     }
-    setError(null);
-    start(async () => {
-      try {
+    run(
+      async () => {
         const r = await muteAction(projectId, {
           rule_id: ruleId,
           starts_at: startsAt?.toISOString() ?? null,
           minutes,
         });
-        if (gone(r)) return;
-        if (!r.ok) {
-          setError(r.error);
-          return;
-        }
-        startTransition(() => onOpenChange(false));
-      } catch (err) {
-        unstable_rethrow(err);
-        setError("Network error. Try again.");
-      }
-    });
+        // What is gone takes the dialog with it.
+        return gone(r) ? { ok: true, close: false } : r.ok ? { ok: true, close: true } : r;
+      },
+      ({ close }) => close && startTransition(() => onOpenChange(false)),
+    );
   }
 
   return (

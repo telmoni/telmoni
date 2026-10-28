@@ -1,11 +1,11 @@
 "use client";
 
-import { unstable_rethrow } from "next/navigation";
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useRef } from "react";
 import { toast } from "sonner";
 
 import type { ActionResult, Refused } from "@/lib/action-result";
 import { ALERTS_HEADING } from "@/lib/alerts";
+import { useAction } from "@/lib/use-action";
 
 /** What an act answers: refused as `gone` where what it acted on is gone, and
  *  the page is drawn again without it. */
@@ -42,21 +42,15 @@ export function useLanding(landing: string) {
  *  its control away has, or one is refused for what is gone, the focus is
  *  handed on (`useLanding`). */
 export function useAct(landing: string) {
-  const [pending, start] = useTransition();
-  const [error, setError] = useState<string | null>(null);
+  const { pending, error, run } = useAction();
   const { moved, gone } = useLanding(landing);
-  const act = (run: () => Promise<Answer>, takesItAway = false) =>
-    start(async () => {
-      setError(null);
-      try {
-        const r = await run();
-        if (gone(r)) return;
-        if (!r.ok) setError(r.error);
-        else moved.current = takesItAway;
-      } catch (err) {
-        unstable_rethrow(err);
-        setError("Network error. Try again.");
-      }
+  const act = (action: () => Promise<Answer>, takesItAway = false) =>
+    run(async () => {
+      const r = await action();
+      // A toast said what is gone, and handed the focus on.
+      if (gone(r)) return { ok: true };
+      if (r.ok) moved.current = takesItAway;
+      return r;
     });
   return { pending, error, act, movedRef: moved };
 }

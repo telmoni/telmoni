@@ -1,7 +1,6 @@
 "use client";
 
-import { unstable_rethrow } from "next/navigation";
-import { startTransition, useEffect, useId, useRef, useState, useTransition } from "react";
+import { startTransition, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { BellPlus, BellRing } from "lucide-react";
 
@@ -72,6 +71,7 @@ import {
   RuleWindow,
   SpanStatus,
 } from "@/lib/types/enums";
+import { useAction } from "@/lib/use-action";
 
 import { useLanding } from "./_act";
 import { saveAlertAction } from "./actions";
@@ -164,8 +164,7 @@ function AlertPanel({
   const panel = useRef<HTMLDivElement>(null);
   const field = useRef<HTMLInputElement>(null);
   const [draft, setDraft] = useState<AlertDraft>(initial);
-  const [error, setError] = useState<string | null>(null);
-  const [pending, start] = useTransition();
+  const { pending, error, setError, run } = useAction();
   const said = useRef<HTMLParagraphElement>(null);
   // An alert's panel goes with its card.
   const { gone } = useLanding(ALERTS_HEADING);
@@ -189,23 +188,16 @@ function AlertPanel({
       setError(checked.error);
       return;
     }
-    setError(null);
-    start(async () => {
-      try {
+    run(
+      async () => {
         const r = await saveAlertAction(projectId, ruleId, checked.input);
-        if (gone(r)) return;
-        if (!r.ok) {
-          setError(r.error);
-          return;
-        }
-        // In the transition, with the page the action drew again, so the
-        // panel shuts as the alert is listed rather than a frame before.
-        startTransition(onClose);
-      } catch (err) {
-        unstable_rethrow(err);
-        setError("Network error. Try again.");
-      }
-    });
+        // What is gone takes the panel with it.
+        return gone(r) ? { ok: true, close: false } : r.ok ? { ok: true, close: true } : r;
+      },
+      // In the transition, with the page the action drew again, so the panel
+      // shuts as the alert is listed rather than a frame before.
+      ({ close }) => close && startTransition(onClose),
+    );
   }
 
   return (

@@ -1,8 +1,8 @@
 "use client";
 
-import { unstable_rethrow, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { FolderPlus, Plus } from "lucide-react";
-import { startTransition, useId, useRef, useState, useTransition } from "react";
+import { startTransition, useId, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { useConsoleUi } from "@/components/console-ui-context";
@@ -21,6 +21,7 @@ import { projectPath } from "@/lib/slug";
 import { useActiveOrganization, useAddProject } from "@/lib/store";
 import { MAX_PROJECT_NAME, typedBound } from "@/lib/names";
 import { administers } from "@/lib/roles";
+import { useAction } from "@/lib/use-action";
 
 /// Whether the caller may create a project in the organization they are STANDING
 /// IN: every entry point's question, since the panel creates there and asks
@@ -47,21 +48,15 @@ export function CreateProjectPanel({
   const panel = useRef<HTMLDivElement>(null);
   const field = useRef<HTMLInputElement>(null);
   const [name, setName] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [pending, start] = useTransition();
+  const { pending, error, run } = useAction();
 
   const canSubmit = name.trim().length > 0 && organization !== null && !pending;
 
   function submit() {
     if (!organization) return;
-    setError(null);
-    start(async () => {
-      try {
-        const res = await createProjectAction(name.trim(), organization.organizationId);
-        if (!res.ok) {
-          setError(res.error);
-          return;
-        }
+    run(
+      () => createProjectAction(name.trim(), organization.organizationId),
+      (res) => {
         // On to the project; an answer that could not be read leaves this
         // page, which the action's revalidation draws again with it listed.
         // The panel shuts in one transition with either, so it goes as the
@@ -74,11 +69,8 @@ export function CreateProjectPanel({
           }
         });
         toast.success("Project created.");
-      } catch (err) {
-        unstable_rethrow(err);
-        setError("Something went wrong. Please try again.");
-      }
-    });
+      },
+    );
   }
 
   return (

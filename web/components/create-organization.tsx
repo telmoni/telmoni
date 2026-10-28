@@ -1,8 +1,8 @@
 "use client";
 
-import { unstable_rethrow, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { Building2 } from "lucide-react";
-import { startTransition, useId, useRef, useState, useTransition } from "react";
+import { startTransition, useId, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import {
@@ -19,11 +19,7 @@ import {
 } from "@/app/(app)/actions";
 import { MAX_ORGANIZATION_NAME, typedBound } from "@/lib/names";
 import { SLUG_MAX_LENGTH } from "@/lib/slug";
-
-interface Refusal {
-  message: string;
-  field?: CreateOrganizationField;
-}
+import { useAction } from "@/lib/use-action";
 
 /** New organization, in the console's side panel (`create-panels.tsx`). */
 export function CreateOrganizationPanel({
@@ -48,22 +44,21 @@ export function CreateOrganizationPanel({
   const field = useRef<HTMLInputElement>(null);
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
-  const [refusal, setRefusal] = useState<Refusal | null>(null);
-  const [pending, start] = useTransition();
+  const { pending, error, run } = useAction();
+  // The field a refusal is about, said under it; none is said below them all.
+  const [refusedField, setRefusedField] = useState<CreateOrganizationField>();
 
   const canSubmit = name.trim().length > 0 && !pending;
-  const under = (field: CreateOrganizationField) =>
-    refusal?.field === field ? refusal.message : null;
+  const under = (field: CreateOrganizationField) => (refusedField === field ? error : null);
 
   function submit(extras: Record<string, string>) {
-    setRefusal(null);
-    start(async () => {
-      try {
+    run(
+      async () => {
         const res = await createOrganizationAction(name, slug, extras);
-        if (!res.ok) {
-          setRefusal({ message: res.error, field: "field" in res ? res.field : undefined });
-          return;
-        }
+        setRefusedField(!res.ok && "field" in res ? res.field : undefined);
+        return res;
+      },
+      (res) => {
         // A console built on this one may send the person off this console
         // first — to pay for it — and founds it itself after: the page is
         // left for that address, and nothing is created yet to say so.
@@ -80,11 +75,8 @@ export function CreateOrganizationPanel({
           if (res.href) router.push(res.href);
         });
         toast.success("Organization created.");
-      } catch (err) {
-        unstable_rethrow(err);
-        setRefusal({ message: "Something went wrong. Please try again." });
-      }
-    });
+      },
+    );
   }
 
   const nameError = under("name");
@@ -181,9 +173,9 @@ export function CreateOrganizationPanel({
           <SidePanelRow label="Your role">
             <span>Owner, with every right in it.</span>
           </SidePanelRow>
-          {refusal && !refusal.field && (
+          {error && !refusedField && (
             <p className="py-2 text-sm text-destructive" role="alert">
-              {refusal.message}
+              {error}
             </p>
           )}
         </div>

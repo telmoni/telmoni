@@ -1,9 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { unstable_rethrow } from "next/navigation";
 import { Bell, Check, ChevronRight, Download, Loader2, X } from "lucide-react";
-import { useId, useRef, useState, useTransition } from "react";
+import { useId, useRef, useState } from "react";
 
 import { downloadExport, useAuditExportsWatcher } from "@/components/audit-exports";
 import {
@@ -44,6 +43,7 @@ import {
   useProjectOffers,
   useRemoveIncomingInvite,
 } from "@/lib/store";
+import { useAction } from "@/lib/use-action";
 import { useLetterKeys } from "@/lib/use-accessibility";
 import { isBuilding, isWaiting, type AuditExport } from "@/lib/types/audit-export";
 import type { GivenSeat } from "@/lib/types/given-seat";
@@ -382,30 +382,11 @@ function focusPast(row: HTMLElement | null) {
 // answering from here rather than from the page.
 function InviteRow({ invite }: { invite: IncomingInvite }) {
   const removeIncomingInvite = useRemoveIncomingInvite();
-  const [error, setError] = useState<string | null>(null);
-  const [pending, start] = useTransition();
-
-  function settle(
-    run: () => Promise<ActionResult>,
-    failure: string,
-  ) {
-    setError(null);
-    start(async () => {
-      try {
-        const res = await run();
-        if (!res.ok) {
-          setError(res.error);
-          return;
-        }
-        // The row leaves at once; the projects the accept just granted come
-        // with the page the action's revalidation draws again.
-        removeIncomingInvite(invite.id);
-      } catch (err) {
-        unstable_rethrow(err);
-        setError(failure);
-      }
-    });
-  }
+  const { pending, error, run } = useAction();
+  // The row leaves at once; the projects the accept just granted come with the
+  // page the action's revalidation draws again.
+  const settle = (answer: () => Promise<ActionResult>) =>
+    run(answer, () => removeIncomingInvite(invite.id));
 
   return (
     <div
@@ -435,12 +416,7 @@ function InviteRow({ invite }: { invite: IncomingInvite }) {
           size="sm"
           className="h-7 flex-1 gap-1 text-xs"
           disabled={pending}
-          onClick={() =>
-            settle(
-              () => acceptIncomingInviteAction(invite.id),
-              "Couldn't accept that invitation. Try again.",
-            )
-          }
+          onClick={() => settle(() => acceptIncomingInviteAction(invite.id))}
         >
           <Check className="size-3.5" />
           Accept
@@ -453,12 +429,7 @@ function InviteRow({ invite }: { invite: IncomingInvite }) {
           size="sm"
           className="h-7 flex-1 gap-1 text-xs text-muted-foreground hover:text-foreground"
           disabled={pending}
-          onClick={() =>
-            settle(
-              () => declineIncomingInviteAction(invite.id),
-              "Couldn't decline that invitation. Try again.",
-            )
-          }
+          onClick={() => settle(() => declineIncomingInviteAction(invite.id))}
         >
           <X className="size-3.5" />
           Decline
