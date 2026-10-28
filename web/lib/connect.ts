@@ -8,6 +8,7 @@
 
 import { type SearchParams, one } from "@/lib/list-query";
 import type { Connection } from "@/lib/server/data";
+import { isOneOf } from "@/lib/one-of";
 import { projectPath } from "@/lib/slug";
 import { ConnectorProvider } from "@/lib/types/enums";
 
@@ -18,7 +19,7 @@ export const PROVIDERS = Object.values(ConnectorProvider);
 export type Provider = ConnectorProvider;
 
 export function isOAuthProvider(value: string): value is OAuthProvider {
-  return (OAUTH_PROVIDERS as readonly string[]).includes(value);
+  return isOneOf(OAUTH_PROVIDERS, value);
 }
 
 export const PROVIDER_LABEL: Record<Provider, string> = {

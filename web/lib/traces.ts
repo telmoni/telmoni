@@ -8,6 +8,7 @@ import type {
   ViewQuery,
 } from "@/lib/server/entities/traces";
 import { FILTER_KEYS, filtersIn } from "@/lib/server/entities/traces";
+import { isOneOf } from "@/lib/one-of";
 import { projectPath } from "@/lib/slug";
 import {
   SortDirection,
@@ -116,9 +117,9 @@ function capped(filter: Exclude<FilterKey, "status">, searchParams: SearchParams
  *  — a status that is no status, a value past its length — so a stale or
  *  hand-edited link opens the list, not a 400. */
 export function parseFilters(searchParams: SearchParams): ListFilters {
-  const statuses = Object.values(SpanStatus) as string[];
+  const statuses = Object.values(SpanStatus);
   const values = (filter: FilterKey): string[] => {
-    if (filter === "status") return many(searchParams.status).filter((s) => statuses.includes(s));
+    if (filter === "status") return many(searchParams.status).filter((s) => isOneOf(statuses, s));
     const kept = capped(filter, searchParams);
     return filter === "tag" ? kept.filter(isTagPair) : kept;
   };
@@ -141,7 +142,7 @@ export function parseListQuery<S extends string>(
     sort: oneOf(searchParams.sort, sorts),
     dir: oneOf(searchParams.dir, SortDirection),
     days: whole(searchParams.days, MAX_DAYS),
-    limit: rows !== undefined && (ROWS_PER_PAGE as readonly number[]).includes(rows) ? rows : undefined,
+    limit: isOneOf(ROWS_PER_PAGE, rows) ? rows : undefined,
     page: page !== undefined && page > 1 ? page : undefined,
   });
 }

@@ -5,6 +5,7 @@
 // said beside the field before anything is sent.
 
 import { connectionName } from "@/lib/connect";
+import { isOneOf } from "@/lib/one-of";
 import type {
   Alert,
   Connection,
@@ -36,7 +37,7 @@ export const ALERT_KINDS = [SpanKind.Run, SpanKind.Step, SpanKind.ModelCall, Spa
 export type AlertKind = (typeof ALERT_KINDS)[number];
 
 export function isAlertKind(kind: SpanKind): kind is AlertKind {
-  return (ALERT_KINDS as readonly SpanKind[]).includes(kind);
+  return isOneOf(ALERT_KINDS, kind);
 }
 
 export const KIND_PLURAL: Record<AlertKind, string> = {

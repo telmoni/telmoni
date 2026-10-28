@@ -84,9 +84,9 @@ export function bootAccessibility() {
   };
   const before = root().value;
   const motion = read(MOTION_STORAGE_KEY);
-  applyMotion(motion === "reduce" || motion === "allow" ? motion : "system");
+  applyMotion(isMotionChoice(motion) ? motion : "system");
   const contrast = read(CONTRAST_STORAGE_KEY);
-  applyContrast(contrast === "more" || contrast === "standard" ? contrast : "system");
+  applyContrast(isContrastChoice(contrast) ? contrast : "system");
   root().toggle(LETTER_KEYS_OFF_CLASS, read(LETTER_KEYS_STORAGE_KEY) === "1");
   root().toggle(FOCUS_RINGS_CLASS, read(FOCUS_RINGS_STORAGE_KEY) === "1");
   if (root().value !== before) emit();

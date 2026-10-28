@@ -1,7 +1,10 @@
+import { z } from "zod";
+
 import type { PinnedSpan } from "@/lib/server/entities/sessions";
 import type { LayoutQuery, TraceLayout, TraceSpan } from "@/lib/server/entities/traces";
 import type { SearchParams } from "@/lib/list-query";
 import { one } from "@/lib/list-query";
+import { isOneOf } from "@/lib/one-of";
 import type { SpanNode } from "@/lib/trace-tree";
 import { orderedColumns } from "@/lib/traces";
 import { LayoutDepth, LayoutOpen, SpanKind, SpanStatus, TraceColumn } from "@/lib/types/enums";
@@ -158,49 +161,41 @@ export function layoutQueryOf(options: LayoutOptions): LayoutQuery {
   };
 }
 
-const strings = (value: unknown): string[] =>
-  Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
+/** A list of names as the browser kept it, whatever else it put among them;
+ *  none where it kept no list. Optional before the transform, which alone
+ *  would make the key required. */
+const Strings = z
+  .unknown()
+  .optional()
+  .transform((v) => (Array.isArray(v) ? v.filter((c): c is string => typeof c === "string") : []));
 
-const oneOf = <T extends string>(value: unknown, vocabulary: Record<string, T>): T | null =>
-  typeof value === "string" && (Object.values(vocabulary) as string[]).includes(value)
-    ? (value as T)
-    : null;
+const kinds = Object.values(SpanKind);
+const statuses = Object.values(SpanStatus);
 
-/** What the browser kept of a layout's options, read: a value this build
- *  does not know — an older spelling, a column since renamed — makes the
- *  whole unreadable, since a layout half-read would show something nobody
- *  chose. */
+/** What the browser kept of a layout's options: a value this build does not
+ *  know — an older spelling, a column since renamed — makes the whole
+ *  unreadable, since a layout half-read would show something nobody chose;
+ *  a column or a kind it does not know is left out of its list. */
+const StoredOptionsSchema = z.object({
+  depth: z.enum(LayoutDepth),
+  open: z.enum(LayoutOpen),
+  timeline: z.boolean(),
+  columns: Strings.transform((v) => orderedColumns(v)),
+  pinned: Strings.transform((v) => names(v, PINNED_MAX)),
+  filter: z.object({
+    kind: Strings.transform((v) => [...new Set(v.filter((k): k is SpanKind => isOneOf(kinds, k)))]),
+    status: Strings.transform((v) => [
+      ...new Set(v.filter((s): s is SpanStatus => isOneOf(statuses, s))),
+    ]),
+    name: Strings.transform((v) => names(v, 50)),
+  }),
+  messages: z.boolean(),
+  scores: z.boolean(),
+});
+
 export function readLayoutOptions(raw: unknown): LayoutOptions | null {
-  if (typeof raw !== "object" || raw === null) return null;
-  const kept = raw as Record<string, unknown>;
-  const depth = oneOf(kept.depth, LayoutDepth);
-  const open = oneOf(kept.open, LayoutOpen);
-  if (!depth || !open) return null;
-  if (typeof kept.timeline !== "boolean") return null;
-  if (typeof kept.messages !== "boolean" || typeof kept.scores !== "boolean") return null;
-  const filter =
-    typeof kept.filter === "object" && kept.filter !== null
-      ? (kept.filter as Record<string, unknown>)
-      : null;
-  if (!filter) return null;
-  const kinds = Object.values(SpanKind) as string[];
-  const statuses = Object.values(SpanStatus) as string[];
-  return {
-    depth,
-    open,
-    timeline: kept.timeline,
-    columns: orderedColumns(strings(kept.columns)),
-    pinned: names(strings(kept.pinned), PINNED_MAX),
-    filter: {
-      kind: [...new Set(strings(filter.kind).filter((k): k is SpanKind => kinds.includes(k)))],
-      status: [
-        ...new Set(strings(filter.status).filter((s): s is SpanStatus => statuses.includes(s))),
-      ],
-      name: names(strings(filter.name), 50),
-    },
-    messages: kept.messages,
-    scores: kept.scores,
-  };
+  const parsed = StoredOptionsSchema.safeParse(raw);
+  return parsed.success ? parsed.data : null;
 }
 
 /** A layout as a person chose it: the saved layout it was opened from, if
@@ -214,16 +209,17 @@ export type LayoutChoice = {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** What the browser kept of a choice, read; `null` for one this build
- *  cannot read whole. A key an older build kept beside these is passed
- *  over. */
+/** What the browser kept of a choice; `null` for one this build cannot read
+ *  whole. A view that names none reads as a cut of the default, and a key
+ *  an older build kept beside these is passed over. */
+const StoredChoiceSchema = z.object({
+  view: z.string().regex(UUID).nullable().catch(null),
+  options: StoredOptionsSchema,
+});
+
 export function readLayoutChoice(raw: unknown): LayoutChoice | null {
-  if (typeof raw !== "object" || raw === null) return null;
-  const kept = raw as Record<string, unknown>;
-  const options = readLayoutOptions(kept.options);
-  if (!options) return null;
-  const view = typeof kept.view === "string" && UUID.test(kept.view) ? kept.view : null;
-  return { view, options };
+  const parsed = StoredChoiceSchema.safeParse(raw);
+  return parsed.success ? parsed.data : null;
 }
 
 /** The saved layout a link names in `?view=`: a value that names none is as

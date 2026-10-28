@@ -59,7 +59,7 @@ export function bootCorners() {
   } catch {
     // Storage disabled: nothing to restore, as the boot script finds.
   }
-  const next: Corners = saved === "sharp" ? "sharp" : CORNERS_DEFAULT;
+  const next = isCorners(saved) ? saved : CORNERS_DEFAULT;
   if (getSnapshot() === next) return;
   document.documentElement.classList.toggle(SHARP_CLASS, next === "sharp");
   emit();

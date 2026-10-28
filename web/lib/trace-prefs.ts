@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 import { readLayoutChoice, type LayoutChoice } from "@/lib/layout";
 import { keptFiltersWidth } from "@/lib/panel-width";
 import { PEEK_WIDTH_MIN } from "@/lib/peek";
@@ -75,9 +77,28 @@ function keptWidth(value: unknown): number | null {
 /** Where the browser keeps them. */
 export const TRACE_PREFS_KEY = "telmoni-traces";
 
-/** What the browser kept, read: a value this build does not know — an older
- *  spelling, a column since renamed, storage edited by hand — falls back to
- *  the default rather than being applied blind. */
+/** A list of names as the browser kept it, whatever else it put among them. */
+const Strings = z.array(z.unknown()).transform((v) => v.filter((c): c is string => typeof c === "string"));
+
+/** What the browser kept, each choice read alone: a value this build does
+ *  not know — an older spelling, a column since renamed, storage edited by
+ *  hand — falls back to the default rather than being applied blind. */
+const PrefsSchema = z.object({
+  columns: Strings.transform((v) => orderedColumns(v)).catch([...DEFAULT_PREFS.columns]),
+  sessionColumns: Strings.transform((v) => orderedSessionColumns(v)).catch([
+    ...DEFAULT_PREFS.sessionColumns,
+  ]),
+  userColumns: Strings.transform((v) => orderedUserColumns(v)).catch([...DEFAULT_PREFS.userColumns]),
+  density: z.enum(DENSITIES).catch(DEFAULT_PREFS.density),
+  refresh: z.literal(REFRESH_INTERVALS).catch(DEFAULT_PREFS.refresh),
+  filters: z.boolean().catch(DEFAULT_PREFS.filters),
+  // Optional before the transform: a transform alone makes the key required.
+  filtersWidth: z.unknown().optional().transform((v) => keptFiltersWidth(v)),
+  peekFull: z.boolean().catch(DEFAULT_PREFS.peekFull),
+  peekWidth: z.unknown().optional().transform((v) => keptWidth(v)),
+  layout: z.unknown().optional().transform((v) => readLayoutChoice(v)),
+});
+
 export function readPrefs(stored: string | null): TracePrefs {
   if (!stored) return DEFAULT_PREFS;
   let raw: unknown;
@@ -86,31 +107,8 @@ export function readPrefs(stored: string | null): TracePrefs {
   } catch {
     return DEFAULT_PREFS;
   }
-  if (typeof raw !== "object" || raw === null) return DEFAULT_PREFS;
-  const kept = raw as Record<string, unknown>;
-  const strings = (value: unknown): string[] | null =>
-    Array.isArray(value) ? value.filter((c): c is string => typeof c === "string") : null;
-  const columns = strings(kept.columns);
-  const sessionColumns = strings(kept.sessionColumns);
-  const userColumns = strings(kept.userColumns);
-  return {
-    columns: columns ? orderedColumns(columns) : DEFAULT_PREFS.columns,
-    sessionColumns: sessionColumns
-      ? orderedSessionColumns(sessionColumns)
-      : DEFAULT_PREFS.sessionColumns,
-    userColumns: userColumns ? orderedUserColumns(userColumns) : DEFAULT_PREFS.userColumns,
-    density: DENSITIES.includes(kept.density as Density)
-      ? (kept.density as Density)
-      : DEFAULT_PREFS.density,
-    refresh: REFRESH_INTERVALS.includes(kept.refresh as RefreshSeconds)
-      ? (kept.refresh as RefreshSeconds)
-      : DEFAULT_PREFS.refresh,
-    filters: typeof kept.filters === "boolean" ? kept.filters : DEFAULT_PREFS.filters,
-    filtersWidth: keptFiltersWidth(kept.filtersWidth),
-    peekFull: typeof kept.peekFull === "boolean" ? kept.peekFull : DEFAULT_PREFS.peekFull,
-    peekWidth: keptWidth(kept.peekWidth),
-    layout: readLayoutChoice(kept.layout),
-  };
+  const parsed = PrefsSchema.safeParse(raw);
+  return parsed.success ? parsed.data : DEFAULT_PREFS;
 }
 
 /** Where each list's columns are kept. */

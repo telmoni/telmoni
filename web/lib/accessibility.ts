@@ -1,3 +1,5 @@
+import { isOneOf } from "@/lib/one-of";
+
 /**
  * The person's accessibility settings, kept in this browser beside the theme
  * and corners: whether bare letter keys act as shortcuts, whether keyboard
@@ -46,11 +48,11 @@ export const LETTER_KEYS_OFF_CLASS = "a11y-no-letter-keys";
 export const FOCUS_RINGS_CLASS = "a11y-focus-rings";
 
 export function isMotionChoice(value: unknown): value is MotionChoice {
-  return MOTION_CHOICES.includes(value as MotionChoice);
+  return isOneOf(MOTION_CHOICES, value);
 }
 
 export function isContrastChoice(value: unknown): value is ContrastChoice {
-  return CONTRAST_CHOICES.includes(value as ContrastChoice);
+  return isOneOf(CONTRAST_CHOICES, value);
 }
 
 /**

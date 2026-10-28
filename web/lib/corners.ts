@@ -8,6 +8,8 @@
  * what two booleans already say.
  */
 
+import { isOneOf } from "@/lib/one-of";
+
 export const CORNERS = ["rounded", "sharp"] as const;
 export type Corners = (typeof CORNERS)[number];
 
@@ -23,7 +25,7 @@ export const CORNERS_STORAGE_KEY = "telmoni-corners";
 export const SHARP_CLASS = "theme-sharp";
 
 export function isCorners(value: unknown): value is Corners {
-  return CORNERS.includes(value as Corners);
+  return isOneOf(CORNERS, value);
 }
 
 /**

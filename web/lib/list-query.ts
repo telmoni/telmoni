@@ -1,3 +1,4 @@
+import { isOneOf } from "@/lib/one-of";
 import { projectPath } from "@/lib/slug";
 import { SortDirection } from "@/lib/types/enums";
 
@@ -90,8 +91,7 @@ export function oneOf<T extends string>(
   vocabulary: Record<string, T>,
 ): T | undefined {
   const text = one(value);
-  if (text === undefined) return undefined;
-  return (Object.values(vocabulary) as string[]).includes(text) ? (text as T) : undefined;
+  return isOneOf(Object.values(vocabulary), text) ? text : undefined;
 }
 
 /** The window the URL carries, every value the server would refuse dropped. */
