@@ -127,9 +127,9 @@ pub async fn example(
     rule: &RuleRow,
     now: DateTime<Utc>,
 ) -> Result<Option<ExampleRun>, Unread> {
-    let window = Window::ending(now, rule.lookback.duration());
-    let filters = &rule.filters.0;
-    let pick = Pick::of(rule.measure);
+    let window = Window::ending(now, rule.definition.window.duration());
+    let filters = &rule.definition.filters;
+    let pick = Pick::of(rule.definition.measure);
     let projects = Projects::one(rule.project_id.clone());
     let run_id = if pick == Pick::MostSpent {
         let spent = spend::runs(state, &projects, window, filters).await?;
@@ -140,7 +140,7 @@ pub async fn example(
             .read(&projects, PICK_SQL)
             .param("from", micros(window.from))
             .param("to", micros(window.to))
-            .param("kind", rule.kind.to_string())
+            .param("kind", rule.definition.kind.to_string())
             .param("pick", pick.as_str());
         let picked: Option<Picked> = filters.bind(read).fetch_optional().await?;
         picked.map(|Picked { run_id }| run_id)

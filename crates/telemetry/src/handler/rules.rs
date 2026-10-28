@@ -26,8 +26,7 @@ use telmoni_shared::extract::Json;
 use telmoni_shared::rbac::{Resource, Verb};
 use telmoni_shared::seam;
 use telmoni_shared::{
-    AuditAction, AuthError, MissingData, ProjectId, RuleAggregation, RuleMeasure, RuleOperator,
-    RuleWindow, Severity, SpanKind, TelmoniError, TelmoniResourceKind,
+    AuditAction, AuthError, ProjectId, Severity, TelmoniError, TelmoniResourceKind,
 };
 
 use crate::AppState;
@@ -35,7 +34,7 @@ use crate::db;
 use crate::handler::chain::{self, Change};
 use crate::rules::db::{self as rules, LinkRow, RuleRow};
 use crate::rules::incidents::{self, IncidentRow};
-use crate::rules::{Link, Rule, RuleFilters, RuleInput};
+use crate::rules::{Definition, Link, Rule, RuleInput};
 
 /// The unique index a second alert of one name in a project, in any case,
 /// runs into.
@@ -45,17 +44,8 @@ const NAME_TAKEN: &str = "rules_project_name_idx";
 #[derive(Debug, Serialize)]
 pub struct Alert {
     pub id: Uuid,
-    pub name: String,
-    pub kind: SpanKind,
-    pub measure: RuleMeasure,
-    pub aggregation: RuleAggregation,
-    pub filters: RuleFilters,
-    pub window: RuleWindow,
-    pub operator: RuleOperator,
-    pub alert_threshold: f64,
-    pub warning_threshold: Option<f64>,
-    pub missing_data: MissingData,
-    pub renotify_minutes: Option<i32>,
+    #[serde(flatten)]
+    pub definition: Definition,
     /// Who paused it; none while it runs.
     pub paused: Option<crate::rules::db::PausedBy>,
     pub paused_at: Option<DateTime<Utc>>,
@@ -103,17 +93,7 @@ impl From<RuleRow> for Alert {
         Self {
             connectors: Vec::new(),
             id: row.id,
-            name: row.name,
-            kind: row.kind,
-            measure: row.measure,
-            aggregation: row.aggregation,
-            filters: row.filters.0,
-            window: row.lookback,
-            operator: row.operator,
-            alert_threshold: row.alert_threshold,
-            warning_threshold: row.warning_threshold,
-            missing_data: row.missing_data,
-            renotify_minutes: row.renotify_minutes,
+            definition: row.definition,
             paused: row.paused,
             paused_at: row.paused_at,
             value: row.value,
@@ -282,7 +262,7 @@ async fn save(
         action: AuditAction::Created,
         kind: TelmoniResourceKind::Alert,
         id: row.id,
-        metadata: json!({ "name": row.name }),
+        metadata: json!({ "name": row.definition.name }),
     };
     chain::file(tx, acting, project_id, change).await?;
     Ok(row)
@@ -338,7 +318,7 @@ pub async fn update_rule(
             action: AuditAction::Updated,
             kind: TelmoniResourceKind::Alert,
             id,
-            metadata: json!({ "name": row.name, "changed": changed(&before, &linked, &rule) }),
+            metadata: json!({ "name": row.definition.name, "changed": changed(&before.definition, &linked, &rule) }),
         };
         chain::file(tx, &acting, project_id, change).await?;
         Ok(row)
@@ -349,31 +329,46 @@ pub async fn update_rule(
     Ok(Json(Alert::of(row, rule.connectors, &muted)))
 }
 
-/// The fields a save over changes, by the names the lane takes them under.
-fn changed(before: &RuleRow, linked: &[Link], rule: &Rule) -> Vec<&'static str> {
+/// The fields saved over, named for the audit row: the definition destructured
+/// whole, so a field added later cannot be left out; the thresholds compared
+/// by their bits, so a NaN saved over itself reads as unchanged.
+fn changed(before: &Definition, linked: &[Link], rule: &Rule) -> Vec<&'static str> {
     let bits = |value: Option<f64>| value.map(f64::to_bits);
+    let Definition {
+        name,
+        kind,
+        measure,
+        aggregation,
+        filters,
+        window,
+        operator,
+        alert_threshold,
+        warning_threshold,
+        missing_data,
+        renotify_minutes,
+    } = &rule.definition;
     let relinked = linked.len() != rule.connectors.len()
         || !linked.iter().all(|link| rule.connectors.contains(link));
     [
-        ("name", before.name != rule.name),
-        ("kind", before.kind != rule.kind),
-        ("measure", before.measure != rule.measure),
-        ("aggregation", before.aggregation != rule.aggregation),
-        ("filters", before.filters.0 != rule.filters),
-        ("window", before.lookback != rule.window),
-        ("operator", before.operator != rule.operator),
+        ("name", before.name != *name),
+        ("kind", before.kind != *kind),
+        ("measure", before.measure != *measure),
+        ("aggregation", before.aggregation != *aggregation),
+        ("filters", before.filters != *filters),
+        ("window", before.window != *window),
+        ("operator", before.operator != *operator),
         (
             "alert_threshold",
-            bits(Some(before.alert_threshold)) != bits(Some(rule.alert_threshold)),
+            bits(Some(before.alert_threshold)) != bits(Some(*alert_threshold)),
         ),
         (
             "warning_threshold",
-            bits(before.warning_threshold) != bits(rule.warning_threshold),
+            bits(before.warning_threshold) != bits(*warning_threshold),
         ),
-        ("missing_data", before.missing_data != rule.missing_data),
+        ("missing_data", before.missing_data != *missing_data),
         (
             "renotify_minutes",
-            before.renotify_minutes != rule.renotify_minutes,
+            before.renotify_minutes != *renotify_minutes,
         ),
         ("connectors", relinked),
     ]
@@ -414,7 +409,7 @@ pub async fn delete_rule(
                 action: AuditAction::Deleted,
                 kind: TelmoniResourceKind::Alert,
                 id,
-                metadata: json!({ "name": row.name }),
+                metadata: json!({ "name": row.definition.name }),
             };
             chain::file(tx, &acting, project_id, change).await?;
             Ok((open, links))
@@ -486,7 +481,7 @@ pub async fn unmute_link(
                 action: AuditAction::Updated,
                 kind: TelmoniResourceKind::Alert,
                 id,
-                metadata: json!({ "name": row.name, "unmuted": connection_id }),
+                metadata: json!({ "name": row.definition.name, "unmuted": connection_id }),
             };
             chain::file(tx, &acting, project_id, change).await?;
         }
@@ -529,7 +524,7 @@ pub async fn pause_rule(
                 kind: TelmoniResourceKind::Alert,
                 id,
                 metadata: json!({
-                    "name": row.name,
+                    "name": row.definition.name,
                     "paused": { "from": before.paused, "to": row.paused },
                 }),
             };
@@ -580,7 +575,7 @@ pub async fn resume_rule(
                 kind: TelmoniResourceKind::Alert,
                 id,
                 metadata: json!({
-                    "name": row.name,
+                    "name": row.definition.name,
                     "paused": { "from": before.paused, "to": row.paused },
                 }),
             };

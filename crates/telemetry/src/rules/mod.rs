@@ -292,20 +292,33 @@ pub struct RuleInput {
     pub connectors: Vec<Link>,
 }
 
-/// An alert checked whole, as the table keeps it.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Rule {
+/// What an alert is: the eleven fields the table keeps, a person writes and
+/// the lanes answer, spelled once. The row and the answer embed it.
+#[derive(Debug, Clone, PartialEq, Serialize, sqlx::FromRow)]
+pub struct Definition {
     pub name: String,
+    /// The spans it reads: runs, steps, model calls or tool calls.
     pub kind: SpanKind,
     pub measure: RuleMeasure,
     pub aggregation: RuleAggregation,
+    #[sqlx(json)]
     pub filters: RuleFilters,
+    /// The column is `lookback`.
+    #[sqlx(rename = "lookback")]
     pub window: RuleWindow,
     pub operator: RuleOperator,
     pub alert_threshold: f64,
     pub warning_threshold: Option<f64>,
     pub missing_data: MissingData,
+    /// How often a severity held is told again, in minutes; never if none.
     pub renotify_minutes: Option<i32>,
+}
+
+/// An alert checked whole, as the table keeps it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Rule {
+    pub definition: Definition,
+    /// The project's connectors its notices go to; none, the feed alone.
     pub connectors: Vec<Link>,
 }
 
@@ -387,17 +400,19 @@ impl RuleInput {
         }
         Ok(Rule {
             connectors,
-            name,
-            kind: self.kind,
-            measure: self.measure,
-            aggregation: self.aggregation,
-            filters: self.filters.checked()?,
-            window: self.window,
-            operator: self.operator,
-            alert_threshold: self.alert_threshold,
-            warning_threshold: self.warning_threshold,
-            missing_data: self.missing_data,
-            renotify_minutes: self.renotify_minutes,
+            definition: Definition {
+                name,
+                kind: self.kind,
+                measure: self.measure,
+                aggregation: self.aggregation,
+                filters: self.filters.checked()?,
+                window: self.window,
+                operator: self.operator,
+                alert_threshold: self.alert_threshold,
+                warning_threshold: self.warning_threshold,
+                missing_data: self.missing_data,
+                renotify_minutes: self.renotify_minutes,
+            },
         })
     }
 }
@@ -447,14 +462,17 @@ mod tests {
             SpanStatus::Ok,
         ];
         let rule = given.checked().expect("an alert");
-        assert_eq!(rule.filters.status, [SpanStatus::Error, SpanStatus::Ok]);
+        assert_eq!(
+            rule.definition.filters.status,
+            [SpanStatus::Error, SpanStatus::Ok]
+        );
     }
 
     #[test]
     fn an_alert_is_kept_as_its_checks_leave_it() {
         let rule = input().checked().expect("an alert");
-        assert_eq!(rule.name, "Slow model calls");
-        assert_eq!(rule.filters.model, ["claude-sonnet-5-5"]);
+        assert_eq!(rule.definition.name, "Slow model calls");
+        assert_eq!(rule.definition.filters.model, ["claude-sonnet-5-5"]);
     }
 
     /// ⚠ Each measure folds only as the hourly totals can answer it.

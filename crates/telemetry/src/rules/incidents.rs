@@ -83,13 +83,13 @@ pub fn crossed(operator: RuleOperator, alert: f64, warning: Option<f64>, value: 
 pub fn next_severity(rule: &RuleRow, value: Option<f64>) -> Severity {
     let cross = |value| {
         crossed(
-            rule.operator,
-            rule.alert_threshold,
-            rule.warning_threshold,
+            rule.definition.operator,
+            rule.definition.alert_threshold,
+            rule.definition.warning_threshold,
             value,
         )
     };
-    match (value, rule.missing_data) {
+    match (value, rule.definition.missing_data) {
         (Some(value), _) => cross(value),
         (None, MissingData::Zero) => cross(0.0),
         (None, MissingData::Keep) => rule.severity,
@@ -240,7 +240,10 @@ fn moves(
         // A reading of no data found its whole window empty already: told
         // then, once a spell.
         let untold = rule.told_at.is_none_or(|at| at < since);
-        if next == Severity::NoData && rule.missing_data == MissingData::NotifyNoData && untold {
+        if next == Severity::NoData
+            && rule.definition.missing_data == MissingData::NotifyNoData
+            && untold
+        {
             return vec![move_to(Move::Opened, Severity::NoData)];
         }
         return Vec::new();
@@ -256,7 +259,7 @@ fn moves(
     // ever; where the alert asks to be told of no data, the incident follows.
     let next = match next {
         Severity::NoData if incident.severity != Severity::NoData => {
-            if rule.missing_data == MissingData::NotifyNoData {
+            if rule.definition.missing_data == MissingData::NotifyNoData {
                 return vec![Told {
                     telling: Telling::Again,
                     ..move_to(Move::Opened, Severity::NoData)
@@ -277,7 +280,7 @@ fn moves(
             ..move_to(Move::Opened, next)
         }];
     }
-    let due = rule.renotify_minutes.is_some_and(|minutes| {
+    let due = rule.definition.renotify_minutes.is_some_and(|minutes| {
         rule.told_at
             .is_none_or(|at| at + TimeDelta::minutes(i64::from(minutes)) <= now)
     });

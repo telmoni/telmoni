@@ -156,8 +156,8 @@ async fn tell_one(
         "rule_id": rule.id,
         "severity": one.severity,
         "value": value,
-        "alert_threshold": rule.alert_threshold,
-        "warning_threshold": rule.warning_threshold,
+        "alert_threshold": rule.definition.alert_threshold,
+        "warning_threshold": rule.definition.warning_threshold,
         "reminder": one.telling == Telling::Reminder,
         "run": shown.map(|run| run_json(state, rule, run)),
         "traces_url": traces_url,
@@ -369,9 +369,10 @@ fn traces_link(state: &AppState, rule: &RuleRow) -> Option<String> {
         rule.organization_id, rule.project_id
     ))
     .ok()?;
-    let filters = &rule.filters.0;
+    let filters = &rule.definition.filters;
     let failed = vec![SpanStatus::Error];
-    let statuses = if filters.status.is_empty() && rule.measure == RuleMeasure::Failures {
+    let statuses = if filters.status.is_empty() && rule.definition.measure == RuleMeasure::Failures
+    {
         &failed
     } else {
         &filters.status
@@ -380,7 +381,7 @@ fn traces_link(state: &AppState, rule: &RuleRow) -> Option<String> {
         let mut query = url.query_pairs_mut();
         query.append_pair(
             "days",
-            match rule.lookback {
+            match rule.definition.window {
                 RuleWindow::Hour | RuleWindow::Day => "1",
                 RuleWindow::Week => "7",
             },
@@ -420,7 +421,7 @@ fn run_link(state: &AppState, rule: &RuleRow, run_id: Uuid) -> Option<String> {
 /// error, its steps, its tokens and what it spent, the models it called that
 /// no price covers, and where it opens.
 fn run_line(state: &AppState, rule: &RuleRow, run: &ExampleRun) -> String {
-    let label = picked(rule.kind, run.pick);
+    let label = picked(rule.definition.kind, run.pick);
     let mut parts = Vec::new();
     if let Some(step) = &run.last_step {
         parts.push(format!("last step {}", clipped(step)));
@@ -587,9 +588,9 @@ fn words(rule: &RuleRow, value: Option<f64>, told: &Told) -> (String, String) {
     let what = metric(rule);
     let shown = value.map_or_else(
         || "no value".to_owned(),
-        |v| amount(rule.measure, rule.aggregation, v),
+        |v| amount(rule.definition.measure, rule.definition.aggregation, v),
     );
-    let threshold = |t: f64| amount(rule.measure, rule.aggregation, t);
+    let threshold = |t: f64| amount(rule.definition.measure, rule.definition.aggregation, t);
     // An incident held through a window with no span has no value to give.
     let past = |level: &str, at: String| match value {
         Some(_) => format!("{what} is {shown}, past the {level} threshold of {at}."),
@@ -610,23 +611,31 @@ fn words(rule: &RuleRow, value: Option<f64>, told: &Told) -> (String, String) {
             "warning",
             past(
                 "warning",
-                rule.warning_threshold.map_or_else(String::new, threshold),
+                rule.definition
+                    .warning_threshold
+                    .map_or_else(String::new, threshold),
             ),
         ),
-        (Move::Opened, _) => ("alert", past("alert", threshold(rule.alert_threshold))),
+        (Move::Opened, _) => (
+            "alert",
+            past("alert", threshold(rule.definition.alert_threshold)),
+        ),
     };
     let lead = if told.telling == Telling::Reminder {
         "Still: "
     } else {
         ""
     };
-    (format!("{}: {state}", rule.name), format!("{lead}{body}"))
+    (
+        format!("{}: {state}", rule.definition.name),
+        format!("{lead}{body}"),
+    )
 }
 
 /// The alert's metric in words: "The p95 duration of model calls over the
 /// last hour", "The most a run spent over the last day".
 fn metric(rule: &RuleRow) -> String {
-    let folded = match (rule.measure, rule.aggregation) {
+    let folded = match (rule.definition.measure, rule.definition.aggregation) {
         (RuleMeasure::Count, _) => "The count".to_owned(),
         (RuleMeasure::Failures, RuleAggregation::Avg) => "The share failed".to_owned(),
         (RuleMeasure::Failures, _) => "The failures".to_owned(),
@@ -641,17 +650,17 @@ fn metric(rule: &RuleRow) -> String {
                 RuleAggregation::Avg => "The average a run spent",
                 _ => "What the runs spent",
             };
-            return format!("{spent} over the last {}", rule.lookback);
+            return format!("{spent} over the last {}", rule.definition.window);
         }
     };
-    let of = match rule.kind {
+    let of = match rule.definition.kind {
         SpanKind::Run => "runs",
         SpanKind::Step => "steps",
         SpanKind::ModelCall => "model calls",
         SpanKind::ToolCall => "tool calls",
         SpanKind::Span => "spans",
     };
-    format!("{folded} of {of} over the last {}", rule.lookback)
+    format!("{folded} of {of} over the last {}", rule.definition.window)
 }
 
 /// A value as a notice writes it: durations in milliseconds, a share as a

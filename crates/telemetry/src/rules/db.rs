@@ -7,13 +7,10 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use telmoni_shared::db::tenant_session::{HasProject, Maintenance, ProjectAndOrganization, Scoped};
-use telmoni_shared::{
-    MissingData, OrganizationId, ProjectId, RuleAggregation, RuleMeasure, RuleOperator, RuleWindow,
-    Severity, SpanKind,
-};
+use telmoni_shared::{OrganizationId, ProjectId, Severity};
 
 use crate::db::TelemetryLane;
-use crate::rules::{Rule, RuleFilters};
+use crate::rules::{Definition, Rule};
 
 /// An alert as its row keeps it: its definition, whether and why it is
 /// paused, and its last evaluation.
@@ -22,17 +19,8 @@ pub struct RuleRow {
     pub id: Uuid,
     pub project_id: ProjectId,
     pub organization_id: OrganizationId,
-    pub name: String,
-    pub kind: SpanKind,
-    pub measure: RuleMeasure,
-    pub aggregation: RuleAggregation,
-    pub filters: sqlx::types::Json<RuleFilters>,
-    pub lookback: RuleWindow,
-    pub operator: RuleOperator,
-    pub alert_threshold: f64,
-    pub warning_threshold: Option<f64>,
-    pub missing_data: MissingData,
-    pub renotify_minutes: Option<i32>,
+    #[sqlx(flatten)]
+    pub definition: Definition,
     /// Who paused it, and when; none while it runs.
     pub paused: Option<PausedBy>,
     pub paused_at: Option<DateTime<Utc>>,
@@ -45,6 +33,30 @@ pub struct RuleRow {
     pub told_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+/// The definition's eleven columns bound, in the order the insert and the
+/// update name them after their own.
+trait BindDefinition<'q> {
+    fn bind_definition(self, definition: &'q Definition) -> Self;
+}
+
+impl<'q> BindDefinition<'q>
+    for sqlx::query::QueryAs<'q, sqlx::Postgres, RuleRow, sqlx::postgres::PgArguments>
+{
+    fn bind_definition(self, definition: &'q Definition) -> Self {
+        self.bind(&definition.name)
+            .bind(definition.kind)
+            .bind(definition.measure)
+            .bind(definition.aggregation)
+            .bind(sqlx::types::Json(&definition.filters))
+            .bind(definition.window)
+            .bind(definition.operator)
+            .bind(definition.alert_threshold)
+            .bind(definition.warning_threshold)
+            .bind(definition.missing_data)
+            .bind(definition.renotify_minutes)
+    }
 }
 
 /// The columns a [`RuleRow`] is read from, in its order.
@@ -146,17 +158,7 @@ pub async fn insert(
     .bind(id)
     .bind(project_id)
     .bind(organization_id)
-    .bind(&rule.name)
-    .bind(rule.kind)
-    .bind(rule.measure)
-    .bind(rule.aggregation)
-    .bind(sqlx::types::Json(&rule.filters))
-    .bind(rule.window)
-    .bind(rule.operator)
-    .bind(rule.alert_threshold)
-    .bind(rule.warning_threshold)
-    .bind(rule.missing_data)
-    .bind(rule.renotify_minutes)
+    .bind_definition(&rule.definition)
     .fetch_one(tx.conn())
     .await
 }
@@ -181,17 +183,7 @@ pub async fn update<B: HasProject>(
     )))
     .bind(project_id)
     .bind(id)
-    .bind(&rule.name)
-    .bind(rule.kind)
-    .bind(rule.measure)
-    .bind(rule.aggregation)
-    .bind(sqlx::types::Json(&rule.filters))
-    .bind(rule.window)
-    .bind(rule.operator)
-    .bind(rule.alert_threshold)
-    .bind(rule.warning_threshold)
-    .bind(rule.missing_data)
-    .bind(rule.renotify_minutes)
+    .bind_definition(&rule.definition)
     .fetch_optional(tx.conn())
     .await
 }

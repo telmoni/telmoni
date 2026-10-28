@@ -178,7 +178,7 @@ pub async fn totals(
     rule: &RuleRow,
     now: DateTime<Utc>,
 ) -> clickhouse::error::Result<Totals> {
-    let window = Window::ending(now, rule.lookback.duration());
+    let window = Window::ending(now, rule.definition.window.duration());
     let read = state
         .store
         .read(&Projects::one(rule.project_id.clone()), TOTALS_SQL)
@@ -186,8 +186,8 @@ pub async fn totals(
         .param("to", micros(window.to))
         .param("full_from", seconds(window.full_from))
         .param("full_to", seconds(window.full_to))
-        .param("kind", rule.kind.to_string());
-    rule.filters.0.bind(read).fetch_one().await
+        .param("kind", rule.definition.kind.to_string());
+    rule.definition.filters.bind(read).fetch_one().await
 }
 
 /// What one replica holds of the organizations' plans: when it last held
@@ -431,15 +431,15 @@ pub async fn value_of(
     rule: &RuleRow,
     now: DateTime<Utc>,
 ) -> Result<Option<f64>, Unread> {
-    if rule.measure == RuleMeasure::Cost {
-        let window = Window::ending(now, rule.lookback.duration());
+    if rule.definition.measure == RuleMeasure::Cost {
+        let window = Window::ending(now, rule.definition.window.duration());
         let projects = Projects::one(rule.project_id.clone());
-        let spent = spend::runs(state, &projects, window, &rule.filters.0).await?;
-        return Ok(spent.value(rule.aggregation));
+        let spent = spend::runs(state, &projects, window, &rule.definition.filters).await?;
+        return Ok(spent.value(rule.definition.aggregation));
     }
     Ok(totals(state, rule, now)
         .await?
-        .value(rule.measure, rule.aggregation))
+        .value(rule.definition.measure, rule.definition.aggregation))
 }
 
 /// One alert: its value read and settled. Answers whether it was; one
@@ -463,7 +463,7 @@ async fn evaluate(state: &AppState, rule: &RuleRow, lease_id: Uuid) -> Result<bo
         }
     };
     // A window holding no span, read as 0, is kept and told as the 0 it crossed at.
-    let value = value.or((rule.missing_data == MissingData::Zero).then_some(0.0));
+    let value = value.or((rule.definition.missing_data == MissingData::Zero).then_some(0.0));
     let (settled, told) = incidents::settle(state, rule, lease_id, value, now).await?;
     crate::notify::tell_incidents(state, rule, value, &told, now).await;
     // An incident left standing reaches the connectors a hold kept it from.
