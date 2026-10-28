@@ -224,15 +224,10 @@ pub async fn create_rule(
         .clone();
     let rule = input.checked()?;
     let ceilings = seam::alert_ceilings(state.entitlements.as_ref(), &acting.organization_id).await;
-    let mut tx = chain::scoped(&state.db, &acting, &project_id).await?;
-    let row = match save(&state, &acting, &headers, &mut tx, &rule, ceilings.as_ref()).await {
-        Ok(row) => row,
-        Err(refused) => {
-            chain::rolled_back(tx.rollback().await, &project_id, "alert");
-            return Err(refused);
-        }
-    };
-    tx.commit().await?;
+    let row = chain::write(&state.db, &acting, &project_id, "alert", async |tx| {
+        save(&state, &acting, &headers, tx, &rule, ceilings.as_ref()).await
+    })
+    .await?;
     tracing::info!(project_id = %project_id, rule_id = %row.id, "telemetry: an alert made");
     Ok((
         StatusCode::CREATED,
@@ -290,31 +285,8 @@ async fn held(
         .require_project(verb, Resource::Alert)?
         .project_id
         .clone();
-    let now = chain::hold(state.auth.as_ref(), acting, tx).await?;
-    now.require_project(verb, Resource::Alert)?;
+    chain::held(state.auth.as_ref(), acting, tx, verb, Resource::Alert).await?;
     Ok(project_id)
-}
-
-/// `write` run in a transaction bound to the project and its organization:
-/// committed where it answers, rolled back at once where it is refused, so
-/// its chain lock goes before the answer.
-async fn under_chain<T>(
-    state: &AppState,
-    acting: &Acting,
-    project_id: &ProjectId,
-    write: impl AsyncFnOnce(&mut Scoped<'_, ProjectAndOrganization>) -> Result<T, TelmoniError>,
-) -> Result<T, TelmoniError> {
-    let mut tx = chain::scoped(&state.db, acting, project_id).await?;
-    match write(&mut tx).await {
-        Ok(done) => {
-            tx.commit().await?;
-            Ok(done)
-        }
-        Err(refused) => {
-            chain::rolled_back(tx.rollback().await, project_id, "alert");
-            Err(refused)
-        }
-    }
 }
 
 /// `PUT /internal/v1/telemetry/rules/{id}` — one of the project's alerts,
@@ -332,7 +304,7 @@ pub async fn update_rule(
         .project_id;
     let id = rule_id(&id)?;
     let rule = input.checked()?;
-    let row = under_chain(&state, &acting, project_id, async |tx| {
+    let row = chain::write(&state.db, &acting, project_id, "alert", async |tx| {
         held(&state, &acting, tx, Verb::Update).await?;
         let before = rules::rule(tx, project_id, id)
             .await?
@@ -409,7 +381,7 @@ pub async fn delete_rule(
         .project_id;
     let id = rule_id(&id)?;
     let (open, links): (Option<IncidentRow>, Vec<Link>) =
-        under_chain(&state, &acting, project_id, async |tx| {
+        chain::write(&state.db, &acting, project_id, "alert", async |tx| {
             held(&state, &acting, tx, Verb::Delete).await?;
             let row = rules::rule(tx, project_id, id)
                 .await?
@@ -476,7 +448,7 @@ pub async fn unmute_link(
         .project_id;
     let id = rule_id(&id)?;
     let connection_id: Uuid = connection_id.parse().map_err(|_| not_linked())?;
-    let (row, links) = under_chain(&state, &acting, project_id, async |tx| {
+    let (row, links) = chain::write(&state.db, &acting, project_id, "alert", async |tx| {
         held(&state, &acting, tx, Verb::Update).await?;
         let row = rules::rule(tx, project_id, id)
             .await?
@@ -528,7 +500,7 @@ pub async fn pause_rule(
         .require_project(Verb::Update, Resource::Alert)?
         .project_id;
     let id = rule_id(&id)?;
-    let (row, links) = under_chain(&state, &acting, project_id, async |tx| {
+    let (row, links) = chain::write(&state.db, &acting, project_id, "alert", async |tx| {
         held(&state, &acting, tx, Verb::Update).await?;
         let before = rules::rule(tx, project_id, id)
             .await?
@@ -575,7 +547,7 @@ pub async fn resume_rule(
         .project_id;
     let id = rule_id(&id)?;
     let ceilings = seam::alert_ceilings(state.entitlements.as_ref(), &acting.organization_id).await;
-    let (row, links) = under_chain(&state, &acting, project_id, async |tx| {
+    let (row, links) = chain::write(&state.db, &acting, project_id, "alert", async |tx| {
         held(&state, &acting, tx, Verb::Update).await?;
         let before = rules::rule(tx, project_id, id)
             .await?

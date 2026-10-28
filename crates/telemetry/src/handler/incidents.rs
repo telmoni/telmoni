@@ -146,24 +146,18 @@ pub async fn acknowledge_incident(
         .require_project(Verb::Update, Resource::Alert)?
         .project_id;
     let id = incident_id(&id)?;
-    let mut tx = chain::scoped(&state.db, &acting, project_id).await?;
-    let row = match moved(
-        &state,
-        &acting,
-        &headers,
-        &mut tx,
-        id,
-        IncidentStatus::Acknowledged,
-    )
-    .await
-    {
-        Ok((row, _)) => row,
-        Err(refused) => {
-            chain::rolled_back(tx.rollback().await, project_id, "incident");
-            return Err(refused);
-        }
-    };
-    tx.commit().await?;
+    let (row, _) = chain::write(&state.db, &acting, project_id, "incident", async |tx| {
+        moved(
+            &state,
+            &acting,
+            &headers,
+            tx,
+            id,
+            IncidentStatus::Acknowledged,
+        )
+        .await
+    })
+    .await?;
     tracing::info!(project_id = %project_id, incident_id = %id, "telemetry: an incident acknowledged");
     Ok(Json(Incident::from(row)))
 }
@@ -182,8 +176,14 @@ async fn moved(
     let project_id = &acting
         .require_project(Verb::Update, Resource::Alert)?
         .project_id;
-    let now = chain::hold(state.auth.as_ref(), acting, tx).await?;
-    now.require_project(Verb::Update, Resource::Alert)?;
+    chain::held(
+        state.auth.as_ref(),
+        acting,
+        tx,
+        Verb::Update,
+        Resource::Alert,
+    )
+    .await?;
     let (row, moved) = if to == IncidentStatus::Resolved {
         incidents::resolve(tx, project_id, id, &acting.user_id).await?
     } else {
@@ -215,24 +215,10 @@ pub async fn resolve_incident(
         .require_project(Verb::Update, Resource::Alert)?
         .project_id;
     let id = incident_id(&id)?;
-    let mut tx = chain::scoped(&state.db, &acting, project_id).await?;
-    let (row, resolved) = match moved(
-        &state,
-        &acting,
-        &headers,
-        &mut tx,
-        id,
-        IncidentStatus::Resolved,
-    )
-    .await
-    {
-        Ok(moved) => moved,
-        Err(refused) => {
-            chain::rolled_back(tx.rollback().await, project_id, "incident");
-            return Err(refused);
-        }
-    };
-    tx.commit().await?;
+    let (row, resolved) = chain::write(&state.db, &acting, project_id, "incident", async |tx| {
+        moved(&state, &acting, &headers, tx, id, IncidentStatus::Resolved).await
+    })
+    .await?;
     if resolved {
         tracing::info!(project_id = %project_id, incident_id = %id, "telemetry: an incident resolved by hand");
         crate::notify::resolved_by_hand(&state, &row).await;

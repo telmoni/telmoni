@@ -104,17 +104,10 @@ pub async fn put_content_mode(
     }
     let organization_id = &acting.organization_id;
 
-    let mut tx = chain::scoped(&state.db, &acting, project_id).await?;
-    let switched =
-        match switch_content_mode(&*state.auth, &acting, project_id, &mut tx, &headers, mode).await
-        {
-            Ok(switched) => switched,
-            Err(refused) => {
-                chain::rolled_back(tx.rollback().await, project_id, "content mode");
-                return Err(refused);
-            }
-        };
-    tx.commit().await?;
+    let switched = chain::write(&state.db, &acting, project_id, "content mode", async |tx| {
+        switch_content_mode(&*state.auth, &acting, project_id, tx, &headers, mode).await
+    })
+    .await?;
     if let Some(filed_under) = &switched.refiled_from {
         // The settling's repair, which records nothing on a chain, as the
         // settling itself does not; logged as its failure was.

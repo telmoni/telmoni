@@ -16,6 +16,7 @@ use telmoni_shared::acting::Acting;
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit, lock_chain_in_time};
 use telmoni_shared::db::tenant_session::{ProjectAndOrganization, Scoped, project_scope};
 use telmoni_shared::extract::correlation_id;
+use telmoni_shared::rbac::{Resource, Verb};
 use telmoni_shared::seam::{ANSWER_BUDGET, Auth, resolve_again_in_time};
 use telmoni_shared::{
     AuditAction, AuthError, OrganizationId, OrganizationStatus, ProjectId, TelmoniError,
@@ -33,6 +34,29 @@ pub(crate) async fn scoped<'a>(
         .await?
         .bind_organization(&acting.organization_id)
         .await?)
+}
+
+/// `write` in a transaction bound to the project and its organization:
+/// committed where it answers, rolled back at once where it is refused, so
+/// its chain lock goes before the answer. `lane` names it in the log.
+pub(crate) async fn write<T>(
+    pool: &PgPool,
+    acting: &Acting,
+    project_id: &ProjectId,
+    lane: &'static str,
+    write: impl AsyncFnOnce(&mut Scoped<'_, ProjectAndOrganization>) -> Result<T, TelmoniError>,
+) -> Result<T, TelmoniError> {
+    let mut tx = scoped(pool, acting, project_id).await?;
+    match write(&mut tx).await {
+        Ok(done) => {
+            tx.commit().await?;
+            Ok(done)
+        }
+        Err(refused) => {
+            rolled_back(tx.rollback().await, project_id, lane);
+            Err(refused)
+        }
+    }
 }
 
 /// The rollback of a transaction that will not commit, logged if it failed.
@@ -61,6 +85,20 @@ pub(crate) async fn hold(
 ) -> Result<Acting, TelmoniError> {
     lock_chain_in_time(tx.conn(), &acting.organization_id).await?;
     resolve_again_in_time(auth, acting).await
+}
+
+/// [`hold`], and `verb` on `resource` checked on the answer it gives.
+pub(crate) async fn held(
+    auth: &dyn Auth,
+    acting: &Acting,
+    tx: &mut Scoped<'_, ProjectAndOrganization>,
+    verb: Verb,
+    resource: Resource,
+) -> Result<(), TelmoniError> {
+    hold(auth, acting, tx)
+        .await?
+        .require_project(verb, resource)?;
+    Ok(())
 }
 
 /// A member's change to the project's alerting, as its audit row names it.

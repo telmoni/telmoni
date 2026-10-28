@@ -442,15 +442,10 @@ pub async fn create_view(
         .project_id
         .clone();
     let view = input.checked()?;
-    let mut tx = chain::scoped(&state.db, &acting, &project_id).await?;
-    let row = match save(&*state.auth, &acting, &project_id, &mut tx, &view).await {
-        Ok(row) => row,
-        Err(refused) => {
-            chain::rolled_back(tx.rollback().await, &project_id, "view");
-            return Err(refused);
-        }
-    };
-    tx.commit().await?;
+    let row = chain::write(&state.db, &acting, &project_id, "view", async |tx| {
+        save(&*state.auth, &acting, &project_id, tx, &view).await
+    })
+    .await?;
     tracing::info!(project_id = %project_id, view_id = %row.id, kind = %row.kind, "telemetry: a view saved");
     Ok((StatusCode::CREATED, Json(View::from(row))))
 }
@@ -466,8 +461,7 @@ async fn save(
     tx: &mut Scoped<'_, ProjectAndOrganization>,
     view: &Checked,
 ) -> Result<ViewRow, TelmoniError> {
-    let now = chain::hold(auth, acting, tx).await?;
-    now.require_project(Verb::Create, Resource::View)?;
+    chain::held(auth, acting, tx, Verb::Create, Resource::View).await?;
     db::ensure_settings(tx, project_id, &acting.organization_id).await?;
     if db::view_count(tx, project_id, view.kind).await? >= VIEWS_MAX {
         return Err(AuthError::Conflict(format!(

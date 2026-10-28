@@ -133,15 +133,14 @@ pub async fn create_mute(
             "a maintenance window is at most {MUTE_DAYS_MAX} days long"
         )));
     }
-    let mut tx = chain::scoped(&state.db, &acting, project_id).await?;
-    let row = match open(&state, &acting, &headers, &mut tx, &input, starts_at).await {
-        Ok(row) => row,
-        Err(refused) => {
-            chain::rolled_back(tx.rollback().await, project_id, "maintenance window");
-            return Err(refused);
-        }
-    };
-    tx.commit().await?;
+    let row = chain::write(
+        &state.db,
+        &acting,
+        project_id,
+        "maintenance window",
+        async |tx| open(&state, &acting, &headers, tx, &input, starts_at).await,
+    )
+    .await?;
     tracing::info!(project_id = %project_id, mute_id = %row.id, "telemetry: a maintenance window made");
     Ok((StatusCode::CREATED, Json(Mute::from(row))))
 }
@@ -161,8 +160,14 @@ async fn open(
     let project_id = &acting
         .require_project(Verb::Create, Resource::Alert)?
         .project_id;
-    let now = chain::hold(state.auth.as_ref(), acting, tx).await?;
-    now.require_project(Verb::Create, Resource::Alert)?;
+    chain::held(
+        state.auth.as_ref(),
+        acting,
+        tx,
+        Verb::Create,
+        Resource::Alert,
+    )
+    .await?;
     // The settings row, by which the organization's erasure finds the window.
     db::ensure_settings(tx, project_id, &acting.organization_id).await?;
     if mutes::unended(tx, project_id).await? >= MUTES_UNENDED_MAX {
@@ -214,15 +219,14 @@ pub async fn end_mute(
         .require_project(Verb::Update, Resource::Alert)?
         .project_id;
     let id: Uuid = id.parse().map_err(|_| not_found())?;
-    let mut tx = chain::scoped(&state.db, &acting, project_id).await?;
-    let row = match ended(&state, &acting, &headers, &mut tx, id).await {
-        Ok(row) => row,
-        Err(refused) => {
-            chain::rolled_back(tx.rollback().await, project_id, "maintenance window");
-            return Err(refused);
-        }
-    };
-    tx.commit().await?;
+    let row = chain::write(
+        &state.db,
+        &acting,
+        project_id,
+        "maintenance window",
+        async |tx| ended(&state, &acting, &headers, tx, id).await,
+    )
+    .await?;
     Ok(Json(Mute::from(row)))
 }
 
@@ -238,8 +242,14 @@ async fn ended(
     let project_id = &acting
         .require_project(Verb::Update, Resource::Alert)?
         .project_id;
-    let now = chain::hold(state.auth.as_ref(), acting, tx).await?;
-    now.require_project(Verb::Update, Resource::Alert)?;
+    chain::held(
+        state.auth.as_ref(),
+        acting,
+        tx,
+        Verb::Update,
+        Resource::Alert,
+    )
+    .await?;
     let (row, ended) = mutes::end(tx, project_id, id, &acting.user_id).await?;
     let row = row.ok_or_else(not_found)?;
     if ended {

@@ -70,26 +70,25 @@ pub async fn put_session_layout(
         .project_id
         .clone();
     let view_id = change.view_id;
-    let mut tx = chain::scoped(&state.db, &acting, &project_id).await?;
-    let set = async {
-        let now = chain::hold(&*state.auth, &acting, &mut tx).await?;
-        now.require_project(Verb::Update, Resource::View)?;
-        if let Some(id) = view_id
-            && !db::layout_exists(&mut tx, &project_id, id).await?
-        {
-            return Err(
-                AuthError::NotFound("no layout with that id in this project".into()).into(),
-            );
-        }
-        db::set_session_layout(&mut tx, &project_id, &acting.organization_id, view_id).await?;
-        Ok::<_, TelmoniError>(())
-    }
-    .await;
-    if let Err(refused) = set {
-        chain::rolled_back(tx.rollback().await, &project_id, "session layout");
-        return Err(refused);
-    }
-    tx.commit().await?;
+    chain::write(
+        &state.db,
+        &acting,
+        &project_id,
+        "session layout",
+        async |tx| {
+            chain::held(&*state.auth, &acting, tx, Verb::Update, Resource::View).await?;
+            if let Some(id) = view_id
+                && !db::layout_exists(tx, &project_id, id).await?
+            {
+                return Err(
+                    AuthError::NotFound("no layout with that id in this project".into()).into(),
+                );
+            }
+            db::set_session_layout(tx, &project_id, &acting.organization_id, view_id).await?;
+            Ok(())
+        },
+    )
+    .await?;
     tracing::info!(
         project_id = %project_id,
         view_id = ?view_id,
