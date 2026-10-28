@@ -24,6 +24,7 @@ use http_body_util::BodyExt;
 use sqlx::PgPool;
 use tower::ServiceExt;
 
+use telmoni_auth::db::confirmation_codes::CODE_DIGITS;
 use telmoni_auth::db::{AuthLane, refresh_tokens};
 use telmoni_auth::default_organization::DefaultOrganization;
 use telmoni_auth::issuer::Issuer;
@@ -94,10 +95,10 @@ impl Outbox {
         (get("uid"), get("token"))
     }
 
-    /// The six digits after "code is " in `mail`.
+    /// The code's digits after "code is " in `mail`.
     fn code(mail: &Mail) -> String {
         let at = mail.text.find("code is ").expect("a code") + "code is ".len();
-        mail.text[at..at + 6].to_owned()
+        mail.text[at..at + CODE_DIGITS as usize].to_owned()
     }
 }
 

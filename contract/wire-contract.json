@@ -282,6 +282,7 @@
     "api_key_description_max": 500,
     "api_key_name_max": 100,
     "audit_export_kept_days": 7,
+    "confirmation_code_length": 6,
     "email_max": 254,
     "filter_value_max": {
       "agent": 128,

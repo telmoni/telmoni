@@ -111,13 +111,18 @@ pub fn hash_code(code: &str) -> String {
     telmoni_shared::digest::sha256_hex(code.as_bytes())
 }
 
-/// A 6-digit numeric confirmation code from CSPRNG bytes. Every purpose mints
-/// here: a second generator is a second chance to reach for a weaker source.
+/// How many digits an emailed confirmation code has.
+pub const CODE_DIGITS: u32 = 6;
+
+/// A [`CODE_DIGITS`]-digit confirmation code from CSPRNG bytes. Every purpose
+/// mints here: a second generator is a second chance to reach for a weaker
+/// source.
 #[must_use]
 pub fn generate_code() -> String {
     let b = Uuid::new_v4().into_bytes();
-    let n = u32::from_be_bytes([b[0], b[1], b[2], b[3]]) % 1_000_000;
-    format!("{n:06}")
+    let n = u32::from_be_bytes([b[0], b[1], b[2], b[3]]) % 10u32.pow(CODE_DIGITS);
+    let width = CODE_DIGITS as usize;
+    format!("{n:0width$}")
 }
 
 /// Insert a live confirmation code (hashed), burning the person's earlier

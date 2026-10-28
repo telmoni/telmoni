@@ -1,11 +1,10 @@
 "use client";
 
-import { useState } from "react";
-
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useAction } from "@/lib/use-action";
+import { CONFIRMATION_CODE_LENGTH } from "@/lib/confirmation-code";
+import { useCodeConfirmed } from "@/lib/use-code-confirmed";
 
 import {
   deleteOrganizationAction,
@@ -26,42 +25,19 @@ export function DeleteOrganizationForm({
   organization: string;
   email: string;
 }) {
-  const [codeSent, setCodeSent] = useState(false);
-  const [code, setCode] = useState("");
-  // The name is kept with the outcome rather than read from props: anything
-  // that refreshes the page from here on renders whichever organization the
-  // console fell back to, and the heading must still name the deleted one.
-  const [done, setDone] = useState<{ organization: string; purged: boolean | null } | null>(null);
-  // One line under both steps: either clears what the other said.
-  const send = useAction();
-  const remove = useAction();
-  const error = remove.error ?? send.error;
-  const sending = send.pending;
-  const deleting = remove.pending;
-  const clearError = () => {
-    send.setError(null);
-    remove.setError(null);
-  };
+  const flow = useCodeConfirmed(
+    () => requestOrganizationDeletionCodeAction(organizationId),
+    async (code) => {
+      const r = await deleteOrganizationAction(organizationId, code);
+      // The name is kept with the outcome rather than read from props: anything
+      // that refreshes the page from here on renders whichever organization the
+      // console fell back to, and the heading must still name the deleted one.
+      return r.ok ? { ...r, organization } : r;
+    },
+  );
 
-  function handleSendCode() {
-    clearError();
-    send.run(
-      () => requestOrganizationDeletionCodeAction(organizationId),
-      () => setCodeSent(true),
-    );
-  }
-
-  function handleDelete() {
-    clearError();
-    remove.run(
-      () => deleteOrganizationAction(organizationId, code),
-      (r) => setDone({ organization, purged: r.purged }),
-    );
-  }
-
-  const canDelete = /^\d{6}$/.test(code) && !deleting;
-
-  if (done) {
+  if (flow.step.step === "done") {
+    const done = flow.step.done;
     return (
       <div className="grid gap-4">
         <h3 className="text-base font-medium">{done.organization} is deleted</h3>
@@ -90,10 +66,10 @@ export function DeleteOrganizationForm({
         included.
       </p>
 
-      {!codeSent ? (
+      {flow.step.step === "ask" ? (
         <div>
-          <Button variant="destructive" disabled={sending} onClick={handleSendCode}>
-            {sending ? "Sending…" : "Send confirmation code"}
+          <Button variant="destructive" disabled={flow.sending} onClick={flow.sendCode}>
+            {flow.sending ? "Sending…" : "Send confirmation code"}
           </Button>
         </div>
       ) : (
@@ -101,37 +77,34 @@ export function DeleteOrganizationForm({
           className="grid gap-4"
           onSubmit={(e) => {
             e.preventDefault();
-            if (canDelete) handleDelete();
+            if (flow.canConfirm) flow.confirmCode();
           }}
         >
           <div className="grid gap-2">
             <Label htmlFor="delete-organization-code">
-              Enter the 6-digit code sent to{" "}
+              Enter the {CONFIRMATION_CODE_LENGTH}-digit code sent to{" "}
               <span className="font-medium">{email}</span>
             </Label>
             <Input
               id="delete-organization-code"
               inputMode="numeric"
               autoComplete="one-time-code"
-              maxLength={6}
-              value={code}
-              onChange={(e) => {
-                setCode(e.target.value.replace(/\D/g, "").slice(0, 6));
-                clearError();
-              }}
+              maxLength={CONFIRMATION_CODE_LENGTH}
+              value={flow.code}
+              onChange={(e) => flow.type(e.target.value)}
               placeholder="000000"
-              disabled={deleting}
+              disabled={flow.confirming}
             />
           </div>
           <div className="flex items-center gap-3">
-            <Button type="submit" variant="destructive" disabled={!canDelete}>
-              {deleting ? "Deleting…" : "Delete this organization"}
+            <Button type="submit" variant="destructive" disabled={!flow.canConfirm}>
+              {flow.confirming ? "Deleting…" : "Delete this organization"}
             </Button>
             <Button
               type="button"
               variant="outline"
-              disabled={sending || deleting}
-              onClick={handleSendCode}
+              disabled={flow.sending || flow.confirming}
+              onClick={flow.sendCode}
             >
               Resend code
             </Button>
@@ -139,9 +112,9 @@ export function DeleteOrganizationForm({
         </form>
       )}
 
-      {error && (
+      {flow.error && (
         <p className="text-sm text-destructive" role="alert">
-          {error}
+          {flow.error}
         </p>
       )}
     </div>

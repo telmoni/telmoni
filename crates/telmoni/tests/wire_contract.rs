@@ -8,6 +8,7 @@ use telmoni_agent::handler::{MESSAGE_MAX_CHARS, TurnEventKind};
 use telmoni_agent::tools::Tool;
 use telmoni_agent::turn::STREAM_MAX;
 use telmoni_auth::audit_export::{ExportFailure, ExportFormat, ExportStatus, KEEP_FOR_SECS};
+use telmoni_auth::db::confirmation_codes::CODE_DIGITS;
 use telmoni_auth::db::organizations::MAX_ORGANIZATION_NAME;
 use telmoni_auth::handler::projects::MAX_PROJECT_NAME;
 use telmoni_auth::handler::tokens::{MAX_KEY_DESCRIPTION, MAX_KEY_NAME};
@@ -161,6 +162,7 @@ fn generated_contract() -> Value {
             "agent_message_max": MESSAGE_MAX_CHARS,
             "agent_stream_max_secs": STREAM_MAX.as_secs(),
             "audit_export_kept_days": KEEP_FOR_SECS / 86_400,
+            "confirmation_code_length": CODE_DIGITS,
         },
         "rules": { "folds": rule_folds(), "measures": rule_measures() },
     })

@@ -44,6 +44,8 @@ export { RoleRestricted } from "@/components/role-restricted";
 export { ServiceUnavailable } from "@/components/service-unavailable";
 export { DOCS_URL, PRODUCT_NAME, SPONSORS_URL } from "@/lib/site";
 export { NETWORK_ERROR, useAction, useToastAction } from "@/lib/use-action";
+export { CONFIRMATION_CODE_LENGTH } from "@/lib/confirmation-code";
+export { useCodeConfirmed } from "@/lib/use-code-confirmed";
 export { cn } from "@/lib/utils";
 export { organizationLabel } from "@/lib/identity";
 export { administers, owns } from "@/lib/roles";

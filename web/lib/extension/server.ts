@@ -13,6 +13,7 @@ export {
   refused,
 } from "@/lib/action-result";
 export { extractProblem, fetchWithTimeout, tryFetchWithTimeout } from "@/lib/api/fetch";
+export { NOT_A_CODE, isConfirmationCode } from "@/lib/confirmation-code";
 export { ProblemType } from "@/lib/api/problem";
 export { rateLimit, sessionKey } from "@/lib/api/rate-limit";
 export type { SessionData } from "@/lib/auth/session";

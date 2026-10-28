@@ -5,6 +5,7 @@ import { refresh } from "next/cache";
 import { type ActionResult, refused } from "@/lib/action-result";
 import { extractProblem, readBody, tryFetchWithTimeout } from "@/lib/api/fetch";
 import { blacklistSession } from "@/lib/auth/session-blacklist";
+import { NOT_A_CODE, isConfirmationCode } from "@/lib/confirmation-code";
 import { sessionEndKey } from "@/lib/auth/session-end-key";
 import { env } from "@/lib/env";
 import { admit } from "@/lib/server/admit";
@@ -40,9 +41,7 @@ export async function requestAccountDeletionCodeAction(): Promise<ActionResult> 
 export async function deleteAccountAction(
   code: string,
 ): Promise<ActionResult<{ deleted: boolean }>> {
-  if (!/^\d{6}$/.test(code)) {
-    return refused("Enter the 6-digit code from your email.");
-  }
+  if (!isConfirmationCode(code)) return refused(NOT_A_CODE);
   const gate = await admit({ call: "auth:delete-confirm", limit: 10, per: "hour" });
   if (!gate.ok) return refused(gate.error);
   const { session } = gate;

@@ -5,6 +5,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { CONFIRMATION_CODE_LENGTH, codeTyped, isConfirmationCode } from "@/lib/confirmation-code";
 import { signOut } from "@/lib/auth/sign-out";
 import { emailPosture } from "@/lib/sign-in-method";
 import { useAction } from "@/lib/use-action";
@@ -57,7 +58,7 @@ export function ChangeEmail({
     trimmed.toLowerCase() !== email.toLowerCase() &&
     !sending;
   const canConfirm =
-    /^\d{6}$/.test(currentCode) && /^\d{6}$/.test(newCode) && !confirming;
+    isConfirmationCode(currentCode) && isConfirmationCode(newCode) && !confirming;
 
   const send = () => {
     clearError();
@@ -129,7 +130,7 @@ export function ChangeEmail({
           }}
         >
           <p className="text-muted-foreground">
-            We send a 6-digit code to the new address and another to this one.
+            We send a {CONFIRMATION_CODE_LENGTH}-digit code to the new address and another to this one.
             Both are needed, so a mistyped address can&rsquo;t lock you out and
             nothing changes until you finish.
           </p>
@@ -170,10 +171,10 @@ export function ChangeEmail({
               id="email-code-new"
               inputMode="numeric"
               autoComplete="one-time-code"
-              maxLength={6}
+              maxLength={CONFIRMATION_CODE_LENGTH}
               value={newCode}
               onChange={(e) => {
-                setNewCode(e.target.value.replace(/\D/g, "").slice(0, 6));
+                setNewCode(codeTyped(e.target.value));
                 clearError();
               }}
               placeholder="000000"
@@ -187,10 +188,10 @@ export function ChangeEmail({
             <Input
               id="email-code-current"
               inputMode="numeric"
-              maxLength={6}
+              maxLength={CONFIRMATION_CODE_LENGTH}
               value={currentCode}
               onChange={(e) => {
-                setCurrentCode(e.target.value.replace(/\D/g, "").slice(0, 6));
+                setCurrentCode(codeTyped(e.target.value));
                 clearError();
               }}
               placeholder="000000"

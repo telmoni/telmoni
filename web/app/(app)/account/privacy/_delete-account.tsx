@@ -1,13 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { signOut } from "@/lib/auth/sign-out";
+import { CONFIRMATION_CODE_LENGTH } from "@/lib/confirmation-code";
 import { PRODUCT_NAME } from "@/lib/site";
-import { useAction } from "@/lib/use-action";
+import { useCodeConfirmed } from "@/lib/use-code-confirmed";
 
 import { deleteAccountAction, requestAccountDeletionCodeAction } from "./actions";
 
@@ -27,20 +28,8 @@ export function DeleteAccountForm({
   /// named: twenty names read as a list, and the switcher has them all.
   ownedOrganizations: number;
 }) {
-  const [codeSent, setCodeSent] = useState(false);
-  const [code, setCode] = useState("");
-  const [farewell, setFarewell] = useState(false);
-  const [erased, setErased] = useState(false);
-  // One line under both steps: either clears what the other said.
-  const send = useAction();
-  const remove = useAction();
-  const error = remove.error ?? send.error;
-  const sending = send.pending;
-  const deleting = remove.pending;
-  const clearError = () => {
-    send.setError(null);
-    remove.setError(null);
-  };
+  const flow = useCodeConfirmed(requestAccountDeletionCodeAction, deleteAccountAction);
+  const farewell = flow.step.step === "done";
 
   useEffect(() => {
     if (!farewell) return;
@@ -48,30 +37,12 @@ export function DeleteAccountForm({
     return () => clearTimeout(t);
   }, [farewell]);
 
-  function handleSendCode() {
-    clearError();
-    send.run(requestAccountDeletionCodeAction, () => setCodeSent(true));
-  }
-
-  function handleDelete() {
-    clearError();
-    remove.run(
-      () => deleteAccountAction(code),
-      (r) => {
-        setErased(r.deleted === true);
-        setFarewell(true);
-      },
-    );
-  }
-
-  const canDelete = /^\d{6}$/.test(code) && !deleting;
-
-  if (farewell) {
+  if (flow.step.step === "done") {
     return (
       <div className="grid gap-4">
         <h3 className="text-base font-medium">Sorry to see you go</h3>
         <p className="text-sm text-muted-foreground">
-          {erased
+          {flow.step.done.deleted === true
             ? "Your account has been deleted: your sign-in is gone, and so is every organization you owned on your own. "
             : "Your deletion is confirmed and underway. Your access ends now, and your sign-in and the organizations you owned on your own are erased shortly, usually within the hour. "}
           Thank you for having used {PRODUCT_NAME} — if you ever want to come
@@ -115,10 +86,10 @@ export function DeleteAccountForm({
         </div>
       )}
 
-      {!codeSent ? (
+      {flow.step.step === "ask" ? (
         <div>
-          <Button variant="destructive" disabled={sending} onClick={handleSendCode}>
-            {sending ? "Sending…" : "Send confirmation code"}
+          <Button variant="destructive" disabled={flow.sending} onClick={flow.sendCode}>
+            {flow.sending ? "Sending…" : "Send confirmation code"}
           </Button>
         </div>
       ) : (
@@ -126,37 +97,34 @@ export function DeleteAccountForm({
           className="grid gap-4"
           onSubmit={(e) => {
             e.preventDefault();
-            if (canDelete) handleDelete();
+            if (flow.canConfirm) flow.confirmCode();
           }}
         >
           <div className="grid gap-2">
             <Label htmlFor="delete-account-code">
-              Enter the 6-digit code sent to{" "}
+              Enter the {CONFIRMATION_CODE_LENGTH}-digit code sent to{" "}
               <span className="font-medium">{email}</span>
             </Label>
             <Input
               id="delete-account-code"
               inputMode="numeric"
               autoComplete="one-time-code"
-              maxLength={6}
-              value={code}
-              onChange={(e) => {
-                setCode(e.target.value.replace(/\D/g, "").slice(0, 6));
-                clearError();
-              }}
+              maxLength={CONFIRMATION_CODE_LENGTH}
+              value={flow.code}
+              onChange={(e) => flow.type(e.target.value)}
               placeholder="000000"
-              disabled={deleting}
+              disabled={flow.confirming}
             />
           </div>
           <div className="flex items-center gap-3">
-            <Button type="submit" variant="destructive" disabled={!canDelete}>
-              {deleting ? "Deleting…" : "Permanently delete my account"}
+            <Button type="submit" variant="destructive" disabled={!flow.canConfirm}>
+              {flow.confirming ? "Deleting…" : "Permanently delete my account"}
             </Button>
             <Button
               type="button"
               variant="outline"
-              disabled={sending || deleting}
-              onClick={handleSendCode}
+              disabled={flow.sending || flow.confirming}
+              onClick={flow.sendCode}
             >
               Resend code
             </Button>
@@ -164,9 +132,9 @@ export function DeleteAccountForm({
         </form>
       )}
 
-      {error && (
+      {flow.error && (
         <p className="text-sm text-destructive" role="alert">
-          {error}
+          {flow.error}
         </p>
       )}
     </div>

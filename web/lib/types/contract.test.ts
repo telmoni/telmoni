@@ -58,6 +58,7 @@ import {
   aggregationsFor,
   measuresFor,
 } from "../alerts";
+import { CONFIRMATION_CODE_LENGTH } from "../confirmation-code";
 import { PINNED_MAX, PINNED_PER_TRACE } from "../layout";
 import { FILTER_VALUES_MAX, MAX_DAYS, MAX_LIMIT, OPENING_DAYS } from "../list-query";
 import {
@@ -183,6 +184,7 @@ describe("wire contract", () => {
       email_max: MAX_EMAIL,
       agent_message_max: AGENT_MESSAGE_MAX,
       audit_export_kept_days: AUDIT_EXPORT_KEPT_DAYS,
+      confirmation_code_length: CONFIRMATION_CODE_LENGTH,
     }).toEqual(LIMITS);
   });
 

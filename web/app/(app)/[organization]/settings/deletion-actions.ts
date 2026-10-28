@@ -3,6 +3,7 @@
 
 import { type ActionResult, refused } from "@/lib/action-result";
 import { extractProblem, readBody, tryFetchWithTimeout } from "@/lib/api/fetch";
+import { NOT_A_CODE, isConfirmationCode } from "@/lib/confirmation-code";
 import { env } from "@/lib/env";
 import { publishToAll, userChannel } from "@/lib/events/publisher";
 import { admitOrganization } from "@/lib/server/admit";
@@ -49,9 +50,7 @@ export async function deleteOrganizationAction(
   organizationId: string,
   code: string,
 ): Promise<ActionResult<{ purged: boolean | null }>> {
-  if (!/^\d{6}$/.test(code)) {
-    return refused("Enter the 6-digit code from your email.");
-  }
+  if (!isConfirmationCode(code)) return refused(NOT_A_CODE);
   const gate = await admitOrganization(
     { call: "organization:delete-confirm", limit: 10, per: "hour" },
     organizationId,

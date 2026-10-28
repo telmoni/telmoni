@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { type ActionResult, SESSION_EXPIRED, refused } from "@/lib/action-result";
 import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
+import { CONFIRMATION_CODE_LENGTH, isConfirmationCode } from "@/lib/confirmation-code";
 import { blacklistSession } from "@/lib/auth/session-blacklist";
 import { sessionEndKey } from "@/lib/auth/session-end-key";
 import { env } from "@/lib/env";
@@ -108,8 +109,8 @@ export async function confirmEmailChangeAction(
   if (!session) return refused(SESSION_EXPIRED);
   if (!canChangeEmail(session.authMethod)) return refused(NOT_ELIGIBLE);
 
-  if (!/^\d{6}$/.test(currentCode) || !/^\d{6}$/.test(newCode)) {
-    return refused("Enter both 6-digit codes from your email.");
+  if (!isConfirmationCode(currentCode) || !isConfirmationCode(newCode)) {
+    return refused(`Enter both ${CONFIRMATION_CODE_LENGTH}-digit codes from your email.`);
   }
   const gate = await admit({ call: "email:change-confirm", limit: 10, per: "hour" });
   if (!gate.ok) return refused(gate.error);
