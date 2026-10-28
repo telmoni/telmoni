@@ -12,7 +12,7 @@ import { cn } from "@/lib/utils";
  * via ConsoleUiContext, so a second press closes what the first opened, as ⌘J does.
  */
 export function AgentButton() {
-  const { agentOpen, toggleAgent } = useConsoleUi();
+  const { agentOpen, setAgentOpen } = useConsoleUi();
   const isMac = useIsMac();
   const key = AGENT_MODIFIER_KEY.toUpperCase();
   return (
@@ -24,7 +24,7 @@ export function AgentButton() {
       aria-expanded={agentOpen}
       aria-keyshortcuts={isMac ? `Meta+${key}` : `Control+${key}`}
       title={`Agent (${isMac ? "⌘" : "Ctrl "}${key})`}
-      onClick={toggleAgent}
+      onClick={() => setAgentOpen((open) => !open)}
       className={cn(
         "relative flex size-9 shrink-0 items-center justify-center",
         "rounded-md text-muted-foreground hover:text-foreground",

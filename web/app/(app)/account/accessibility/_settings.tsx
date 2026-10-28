@@ -42,7 +42,7 @@ export function AccessibilitySettings({ supportEmail }: { supportEmail: string |
   const contrast = useContrast();
   const deviceReducesMotion = useSystemReducesMotion();
   const deviceWantsContrast = useSystemWantsMoreContrast();
-  const { openShortcuts } = useConsoleUi();
+  const { setShortcutsOpen } = useConsoleUi();
 
   return (
     <div className="grid gap-6">
@@ -61,7 +61,7 @@ export function AccessibilitySettings({ supportEmail }: { supportEmail: string |
             <Switch id="a11y-focus-rings" checked={focusRings} onCheckedChange={setFocusRings} />
           </Row>
           <Row label="Keyboard shortcuts" hint="Every shortcut that works where you are.">
-            <Button type="button" variant="outline" size="sm" onClick={openShortcuts}>
+            <Button type="button" variant="outline" size="sm" onClick={() => setShortcutsOpen(true)}>
               Show
             </Button>
           </Row>

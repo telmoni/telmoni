@@ -53,12 +53,10 @@ export function InviteToastNotifier() {
         duration: 15000,
         action: {
           label: "Review",
-          // ⚠ **GOES TO THE PAGE, not the account menu.** This used to dispatch
-          // ACCOUNT_MENU_EVENT, which opened the header dropdown — and the
-          // dropdown's invitation rows are themselves links to this same href,
-          // so "Review" cost a press and arrived nowhere. Accept and Decline
-          // live only on `/account/notifications`; a control called Review that
-          // does not reach them is a dead end dressed as an action.
+          // ⚠ **GOES TO THE PAGE, not the account menu**, whose invitation
+          // rows are themselves links to this same href: opened from here,
+          // "Review" cost a press and arrived nowhere. Accept and Decline
+          // live only on `/account/notifications`.
           onClick: () => router.push(NOTIFICATIONS_HREF),
         },
         onDismiss: () => {

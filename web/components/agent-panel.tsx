@@ -46,8 +46,7 @@ const COMPOSER_MAX_PX = 160;
 const COUNT_FROM = AGENT_MESSAGE_MAX - 500;
 
 export function AgentPanel() {
-  const { agentOpen, closeAgent, toggleAgent, openAgent, searchOpen, closeSearch } =
-    useConsoleUi();
+  const { agentOpen, setAgentOpen, searchOpen, setSearchOpen } = useConsoleUi();
   const projects = useProjects();
   const organization = useActiveOrganization()?.slug ?? null;
   // The project the page stands in: none on the organization's own pages or
@@ -135,17 +134,17 @@ export function AgentPanel() {
       if (!isChord(e, AGENT_MODIFIER_KEY)) return;
       if (searchOpen) {
         e.preventDefault();
-        closeSearch();
-        openAgent();
+        setSearchOpen(false);
+        setAgentOpen(true);
         return;
       }
       if (inFront()) return;
       e.preventDefault();
-      toggleAgent();
+      setAgentOpen((open) => !open);
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [toggleAgent, openAgent, searchOpen, closeSearch]);
+  }, [searchOpen, setSearchOpen, setAgentOpen]);
 
   // Focus on open, and Escape from inside the window closes it. Only from
   // inside: the window does not shut the page off, so Escape on the page, in
@@ -162,7 +161,7 @@ export function AgentPanel() {
       if (e.key !== "Escape" || e.defaultPrevented) return;
       if (!panelRef.current?.contains(document.activeElement)) return;
       e.preventDefault();
-      closeAgent();
+      setAgentOpen(false);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => {
@@ -170,7 +169,7 @@ export function AgentPanel() {
       window.removeEventListener("keydown", onKeyDown);
       previous?.focus();
     };
-  }, [agentOpen, closeAgent]);
+  }, [agentOpen, setAgentOpen]);
 
   // The field is disabled until the agent answers that it is there, so focus
   // opened on the window itself; it moves to the field once there is one.
@@ -527,7 +526,13 @@ export function AgentPanel() {
   }
 
   return (
-    <AgentWindow id={PANEL_ID} ref={panelRef} title={title} actions={actions} onClose={closeAgent}>
+    <AgentWindow
+      id={PANEL_ID}
+      ref={panelRef}
+      title={title}
+      actions={actions}
+      onClose={() => setAgentOpen(false)}
+    >
       <div
         ref={bodyRef}
         onScroll={onBodyScroll}

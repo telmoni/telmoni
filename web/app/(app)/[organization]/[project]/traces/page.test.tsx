@@ -33,6 +33,11 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(),
 }));
 
+// The peek is drawn in the console's content area.
+vi.mock("@/components/console-shell", () => ({
+  useConsoleShell: () => ({ element: document.body, cover: () => () => {} }),
+}));
+
 let mockOffset: string | undefined;
 vi.mock("next/headers", () => ({
   cookies: async () => ({

@@ -7,18 +7,11 @@ import {
 import type { FlagSet } from "./flags";
 import { organizationPath } from "./slug";
 
-export const SHORTCUTS_SHEET_EVENT = "telmoni:shortcuts-sheet";
-
-export const SEARCH_OPEN_EVENT = "telmoni:search-open";
-
 export const SEARCH_KEY = "/";
 
 // ⚠ **⌘K is the search key everywhere else, so it is the search key here.**
 // The account menu uses ⌘⇧K — see `nav-user.tsx`.
 export const SEARCH_MODIFIER_KEY = "k";
-
-// The header's agent button: opens the agent's window, or closes it when it is open.
-export const AGENT_TOGGLE_EVENT = "telmoni:agent-toggle";
 
 // What stands in front of the page and takes its keys and its presses: a
 // modal dialog, an alert, a menu. One list for every reader — the letter keys,
@@ -68,8 +61,6 @@ export function isChord(e: KeyboardEvent, key: string, shift = false): boolean {
     pressedKey(e).toLowerCase() === key
   );
 }
-
-export const ACCOUNT_MENU_EVENT = "telmoni:account-menu";
 
 export const SEQUENCE_TIMEOUT_MS = 1000;
 

@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils";
 export function SearchButton() {
   const isMac = useIsMac();
   const letterKeys = useLetterKeys();
-  const { openSearch } = useConsoleUi();
+  const { setSearchOpen } = useConsoleUi();
   const chord = isMac ? "⌘K" : "Ctrl K";
   return (
     <button
@@ -22,7 +22,7 @@ export function SearchButton() {
       aria-label="Search"
       aria-keyshortcuts={isMac ? "Meta+K" : "Control+K"}
       title={letterKeys ? `Search (${chord} or ${SEARCH_KEY})` : `Search (${chord})`}
-      onClick={openSearch}
+      onClick={() => setSearchOpen(true)}
       className={cn(
         "flex size-9 shrink-0 items-center justify-center",
         "rounded-md text-muted-foreground hover:text-foreground",

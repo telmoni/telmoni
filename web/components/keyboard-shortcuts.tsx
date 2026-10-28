@@ -51,12 +51,11 @@ export function KeyboardShortcuts() {
   const steps = usePageSteps();
   const isMac = useIsMac();
 
-  const { shortcutsOpen: sheetOpen, setShortcutsOpen: setSheetOpen, openSearch } = useConsoleUi();
+  const { shortcutsOpen: sheetOpen, setShortcutsOpen: setSheetOpen, setSearchOpen } = useConsoleUi();
   const [filter, setFilter] = useState("");
   // Letter-key shortcuts are an Accessibility setting (`lib/accessibility.ts`):
   // off, the handler below ignores bare keys and the sheet lists only chords.
   const letterKeys = useLetterKeys();
-  const openSheet = useCallback(() => setSheetOpen(true), [setSheetOpen]);
 
   const pendingG = useRef(false);
   const pendingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -132,17 +131,17 @@ export function KeyboardShortcuts() {
       // sheet's left those people no `/` for Search at all.
       if (k === "?") {
         e.preventDefault();
-        openSheet();
+        setSheetOpen(true);
         return;
       }
       if (k === SEARCH_KEY) {
         e.preventDefault();
-        openSearch();
+        setSearchOpen(true);
       }
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [router, openSheet, clearPending, openSearch]);
+  }, [router, clearPending, setSheetOpen, setSearchOpen]);
 
 
   const q = filter.trim().toLowerCase();

@@ -46,11 +46,11 @@ import { cn } from "@/lib/utils";
  * The command palette.
  *
  * ⚠ **It has no trigger of its own — it is mounted once by the app layout and
- * opened by an event.** The trigger was a field in the header, which put a
- * second search box on the screen every time this opened and tied the panel's
- * size and position to whatever the header row happened to be doing. The way
- * in is the header's search button (`search-button.tsx`), ⌘K or `/`, and all
- * of them do the same thing: dispatch `SEARCH_OPEN_EVENT`.
+ * opened through the console's UI context.** The trigger was a field in the
+ * header, which put a second search box on the screen every time this opened
+ * and tied the panel's size and position to whatever the header row happened
+ * to be doing. The way in is the header's search button (`search-button.tsx`),
+ * ⌘K or `/`, and all of them do the same thing: set `searchOpen`.
  */
 export function ConsoleSearch() {
   const router = useRouter();

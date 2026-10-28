@@ -2,19 +2,15 @@
 
 import {
   createContext,
-  useCallback,
   useContext,
-  useEffect,
+  useMemo,
   useRef,
   useState,
+  type Dispatch,
   type ReactNode,
+  type SetStateAction,
 } from "react";
 import { usePathname } from "next/navigation";
-import {
-  AGENT_TOGGLE_EVENT,
-  SEARCH_OPEN_EVENT,
-  SHORTCUTS_SHEET_EVENT,
-} from "@/lib/keys";
 
 /** What a create panel makes (`components/create-panels.tsx`). */
 export type CreateKind = "project" | "organization";
@@ -28,25 +24,15 @@ export interface Creating {
   opened: number;
 }
 
+/** The console's windows, each a flag and its setter: the search palette,
+ *  the agent's window, the shortcuts sheet and the create panel. */
 export interface ConsoleUiContextValue {
   searchOpen: boolean;
-  setSearchOpen: (open: boolean) => void;
-  openSearch: () => void;
-  closeSearch: () => void;
-  toggleSearch: () => void;
-
+  setSearchOpen: Dispatch<SetStateAction<boolean>>;
   agentOpen: boolean;
-  setAgentOpen: (open: boolean) => void;
-  openAgent: () => void;
-  closeAgent: () => void;
-  toggleAgent: () => void;
-
+  setAgentOpen: Dispatch<SetStateAction<boolean>>;
   shortcutsOpen: boolean;
-  setShortcutsOpen: (open: boolean) => void;
-  openShortcuts: () => void;
-  closeShortcuts: () => void;
-  toggleShortcuts: () => void;
-
+  setShortcutsOpen: Dispatch<SetStateAction<boolean>>;
   creating: Creating | null;
   openCreate: (kind: CreateKind, returnTo?: HTMLElement | null) => void;
   closeCreate: () => void;
@@ -69,72 +55,26 @@ export function ConsoleUiProvider({ children }: { children: ReactNode }) {
     setCreating(null);
   }
 
-  const openSearch = useCallback(() => setSearchOpen(true), []);
-  const closeSearch = useCallback(() => setSearchOpen(false), []);
-  const toggleSearch = useCallback(() => setSearchOpen((prev) => !prev), []);
-
-  const openAgent = useCallback(() => setAgentOpen(true), []);
-  const closeAgent = useCallback(() => setAgentOpen(false), []);
-  const toggleAgent = useCallback(() => setAgentOpen((prev) => !prev), []);
-
-  const openShortcuts = useCallback(() => setShortcutsOpen(true), []);
-  const closeShortcuts = useCallback(() => setShortcutsOpen(false), []);
-  const toggleShortcuts = useCallback(() => setShortcutsOpen((prev) => !prev), []);
-
   const openings = useRef(0);
-  const openCreate = useCallback(
-    (kind: CreateKind, returnTo: HTMLElement | null = null) =>
-      setCreating({ kind, returnTo, opened: ++openings.current }),
-    [],
+  // One value until a flag moves: the provider renders at every navigation,
+  // and its consumers need not.
+  const value = useMemo<ConsoleUiContextValue>(
+    () => ({
+      searchOpen,
+      setSearchOpen,
+      agentOpen,
+      setAgentOpen,
+      shortcutsOpen,
+      setShortcutsOpen,
+      creating,
+      openCreate: (kind, returnTo = null) =>
+        setCreating({ kind, returnTo, opened: ++openings.current }),
+      closeCreate: () => setCreating(null),
+    }),
+    [searchOpen, agentOpen, shortcutsOpen, creating],
   );
-  const closeCreate = useCallback(() => setCreating(null), []);
 
-  // Backward compatibility adapter for legacy DOM CustomEvents.
-  useEffect(() => {
-    const handleSearchOpen = () => openSearch();
-    const handleAgentToggle = () => toggleAgent();
-    const handleShortcutsSheet = () => openShortcuts();
-
-    window.addEventListener(SEARCH_OPEN_EVENT, handleSearchOpen);
-    window.addEventListener(AGENT_TOGGLE_EVENT, handleAgentToggle);
-    window.addEventListener(SHORTCUTS_SHEET_EVENT, handleShortcutsSheet);
-
-    return () => {
-      window.removeEventListener(SEARCH_OPEN_EVENT, handleSearchOpen);
-      window.removeEventListener(AGENT_TOGGLE_EVENT, handleAgentToggle);
-      window.removeEventListener(SHORTCUTS_SHEET_EVENT, handleShortcutsSheet);
-    };
-  }, [openSearch, toggleAgent, openShortcuts]);
-
-  return (
-    <ConsoleUiContext.Provider
-      value={{
-        searchOpen,
-        setSearchOpen,
-        openSearch,
-        closeSearch,
-        toggleSearch,
-
-        agentOpen,
-        setAgentOpen,
-        openAgent,
-        closeAgent,
-        toggleAgent,
-
-        shortcutsOpen,
-        setShortcutsOpen,
-        openShortcuts,
-        closeShortcuts,
-        toggleShortcuts,
-
-        creating,
-        openCreate,
-        closeCreate,
-      }}
-    >
-      {children}
-    </ConsoleUiContext.Provider>
-  );
+  return <ConsoleUiContext value={value}>{children}</ConsoleUiContext>;
 }
 
 export function useConsoleUi(): ConsoleUiContextValue {

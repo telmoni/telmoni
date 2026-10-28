@@ -30,13 +30,16 @@ type ConsoleShellValue = {
   cover: () => () => void;
 };
 
-const ConsoleShellContext = createContext<ConsoleShellValue>({
-  element: null,
-  cover: () => () => {},
-});
+const ConsoleShellContext = createContext<ConsoleShellValue | null>(null);
 
+// No no-op fallback, as the sidebar's and the store's: a panel drawn with
+// nowhere to go and a cover that covers nothing is a missing provider.
 export function useConsoleShell(): ConsoleShellValue {
-  return useContext(ConsoleShellContext);
+  const ctx = useContext(ConsoleShellContext);
+  if (!ctx) {
+    throw new Error("useConsoleShell requires a <ConsoleShell> ancestor");
+  }
+  return ctx;
 }
 
 export function ConsoleShell({

@@ -11,7 +11,7 @@ vi.mock("next/navigation", () => ({
   usePathname: () => "/acme/web/traces",
 }));
 vi.mock("@/components/console-ui-context", () => ({
-  useConsoleUi: () => ({ shortcutsOpen: mockSheetOpen, setShortcutsOpen: vi.fn(), openSearch: vi.fn() }),
+  useConsoleUi: () => ({ shortcutsOpen: mockSheetOpen, setShortcutsOpen: vi.fn(), setSearchOpen: vi.fn() }),
 }));
 vi.mock("@/components/page-action", () => ({ usePagePrimaryAction: () => mockAction }));
 vi.mock("@/lib/store", () => ({
