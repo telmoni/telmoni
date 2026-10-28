@@ -2,10 +2,13 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { ActionResult } from "@/lib/action-result";
+
+
 import type { GivenSeat } from "@/lib/types/given-seat";
 
 const markSeatSeenAction = vi.hoisted(() =>
-  vi.fn<(projectId: string) => Promise<{ error: string | null }>>(async () => ({ error: null })),
+  vi.fn<(projectId: string) => Promise<ActionResult>>(async () => ({ ok: true })),
 );
 vi.mock("./seat-actions", () => ({ markSeatSeenAction }));
 
@@ -42,7 +45,7 @@ const SEAT: GivenSeat = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  markSeatSeenAction.mockResolvedValue({ error: null });
+  markSeatSeenAction.mockResolvedValue({ ok: true });
 });
 
 const press = async (name: string) => {
@@ -115,7 +118,7 @@ describe("GivenSeatsSection", () => {
     markSeatSeenAction.mockImplementationOnce(async () => {
       expect(push, "it led away before the mark was answered").not.toHaveBeenCalled();
       answered = true;
-      return { error: null };
+      return { ok: true };
     });
     render(<GivenSeatsSection seats={[SEAT]} />);
     await act(async () => {
@@ -127,7 +130,7 @@ describe("GivenSeatsSection", () => {
   });
 
   it("still leads to the project when the mark is refused, the row staying", async () => {
-    markSeatSeenAction.mockResolvedValueOnce({ error: "Too many requests — slow down a moment." });
+    markSeatSeenAction.mockResolvedValueOnce({ ok: false, error: "Too many requests — slow down a moment." });
     render(<GivenSeatsSection seats={[SEAT]} />);
     await act(async () => {
       fireEvent.click(screen.getByRole("link", { name: "Open Support agent in Acme" }));
@@ -147,7 +150,7 @@ describe("GivenSeatsSection", () => {
   });
 
   it("keeps the row and says why when the mark is refused", async () => {
-    markSeatSeenAction.mockResolvedValue({ error: "Your session expired — sign in again." });
+    markSeatSeenAction.mockResolvedValue({ ok: false, error: "Your session expired — sign in again." });
     render(<GivenSeatsSection seats={[SEAT]} />);
     await press("Dismiss Support agent in Acme");
     expect(screen.getByRole("alert")).toHaveTextContent("Your session expired");

@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { errorOf } from "@/lib/action-result";
+
 vi.mock("@/lib/server/session", () => ({
   getServerSession: vi.fn(),
 }));
@@ -167,12 +169,12 @@ describe("organization members actions", () => {
     });
 
     it.each(ROSTER_ACTIONS.slice(0, 4))("%s refuses, asking auth nothing", async (_, act) => {
-      expect(await act()).toEqual({ error: MANAGERS_ONLY });
+      expect(await act()).toEqual({ ok: false, error: MANAGERS_ONLY });
       expect(fetchMock).not.toHaveBeenCalled();
     });
 
     it.each(ROSTER_ACTIONS.slice(4))("%s refuses, asking auth nothing and telling nobody", async (_, act) => {
-      expect(await act()).toEqual({ error: OWNER_ONLY });
+      expect(await act()).toEqual({ ok: false, error: OWNER_ONLY });
       expect(fetchMock).not.toHaveBeenCalled();
       expect(mockPublishEvent).not.toHaveBeenCalled();
     });
@@ -189,7 +191,7 @@ describe("organization members actions", () => {
 
     it.each(ROSTER_ACTIONS.slice(0, 4))("%s goes to auth, under the organization the page rendered", async (_, act) => {
       fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
-      expect(await act()).toEqual({ error: null });
+      expect(await act()).toEqual({ ok: true });
       expect(fetchMock).toHaveBeenCalledTimes(1);
       expect(fetchMock.mock.calls[0]![1]).toEqual(
         expect.objectContaining({
@@ -205,12 +207,13 @@ describe("organization members actions", () => {
           new Response(JSON.stringify(body), { status: 201 }),
         );
         const res = await inviteOrganizationMemberAction(ORGANIZATION, "colleague@example.test", "member");
-        expect(res.link).toBeUndefined();
+        // Done, with no link: never the string "null".
+        expect(res).toEqual({ ok: true });
       },
     );
 
     it.each(ROSTER_ACTIONS.slice(4))("%s refuses, asking auth nothing and telling nobody", async (_, act) => {
-      expect(await act()).toEqual({ error: OWNER_ONLY });
+      expect(await act()).toEqual({ ok: false, error: OWNER_ONLY });
       expect(fetchMock).not.toHaveBeenCalled();
       expect(mockPublishEvent).not.toHaveBeenCalled();
     });
@@ -231,7 +234,7 @@ describe("organization members actions", () => {
 
     it.each(ROSTER_ACTIONS)("%s says the address is gone, asking auth nothing", async (_, act) => {
       const res = await act();
-      expect(res.error).toMatch(/URL was changed, or you're no longer in it/);
+      expect(errorOf(res)).toMatch(/URL was changed, or you're no longer in it/);
       expect(fetchMock).not.toHaveBeenCalled();
       expect(mockPublishEvent).not.toHaveBeenCalled();
     });
@@ -252,7 +255,7 @@ describe("organization members actions", () => {
       });
 
       it.each(ROSTER_ACTIONS)("%s refuses, asking auth nothing and telling nobody", async (_, act) => {
-        expect(await act()).toEqual({ error: SWITCHED });
+        expect(await act()).toEqual({ ok: false, error: SWITCHED });
         expect(fetchMock).not.toHaveBeenCalled();
         expect(mockPublishEvent).not.toHaveBeenCalled();
         expect(mockRevalidate).not.toHaveBeenCalled();
@@ -268,7 +271,7 @@ describe("organization members actions", () => {
     it("rejects inviteOrganizationMemberAction", async () => {
       vi.mocked(identityContext).mockResolvedValue(null);
       const res = await inviteOrganizationMemberAction(ORGANIZATION, "new@example.test", "member");
-      expect(res).toEqual({ error: UNRESOLVED });
+      expect(res).toEqual({ ok: false, error: UNRESOLVED });
       expect(fetchMock).not.toHaveBeenCalled();
     });
 
@@ -277,7 +280,7 @@ describe("organization members actions", () => {
     it("rejects offerOwnershipAction when auth cannot say which organization it is", async () => {
       vi.mocked(getServerContext).mockResolvedValue(null);
       const res = await offerOwnershipAction(ORGANIZATION, "user_2");
-      expect(res).toEqual({ error: UNRESOLVED });
+      expect(res).toEqual({ ok: false, error: UNRESOLVED });
       expect(fetchMock).not.toHaveBeenCalled();
     });
   });
@@ -296,7 +299,7 @@ describe("organization members actions", () => {
         "colleague@example.test",
         "admin",
       );
-      expect(res).toEqual({ error: null, link: "http://test/invite/abc" });
+      expect(res).toEqual({ ok: true, link: "http://test/invite/abc" });
       expect(fetchMock).toHaveBeenCalledWith(
         "http://auth.test/internal/v1/organization/invites",
         expect.objectContaining({
@@ -372,7 +375,7 @@ describe("organization members actions", () => {
         ),
       );
       const res = await revokeOrganizationInviteAction(ORGANIZATION, "inv_org_1");
-      expect(res).toEqual({ error: null });
+      expect(res).toEqual({ ok: true });
       expect(fetchMock).toHaveBeenCalledWith(
         "http://auth.test/internal/v1/organization/invites/inv_org_1",
         expect.objectContaining({
@@ -389,7 +392,7 @@ describe("organization members actions", () => {
     it("updateOrganizationMemberRoleAction changes the role in the organization the page rendered", async () => {
       fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
       const res = await updateOrganizationMemberRoleAction(ORGANIZATION, "user_2", "admin");
-      expect(res).toEqual({ error: null });
+      expect(res).toEqual({ ok: true });
       expect(fetchMock).toHaveBeenCalledWith(
         "http://auth.test/internal/v1/organization/members/user_2/role",
         expect.objectContaining({
@@ -407,7 +410,7 @@ describe("organization members actions", () => {
     it("tells the member whose role changed, at the roster's address, and nobody else", async () => {
       fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
       const res = await updateOrganizationMemberRoleAction(ORGANIZATION, "user_2", "admin");
-      expect(res).toEqual({ error: null });
+      expect(res).toEqual({ ok: true });
       expect(mockPublishEvent).toHaveBeenCalledTimes(1);
       expect(mockPublishEvent).toHaveBeenCalledWith("bfev:user:removed@example.test", {
         type: "membership:changed",
@@ -418,7 +421,7 @@ describe("organization members actions", () => {
     it("tells nobody about a role change auth refused", async () => {
       fetchMock.mockResolvedValue(new Response(null, { status: 403 }));
       const res = await updateOrganizationMemberRoleAction(ORGANIZATION, "user_2", "admin");
-      expect(res).toEqual({ error: "problem" });
+      expect(res).toEqual({ ok: false, error: "problem" });
       expect(mockPublishEvent).not.toHaveBeenCalled();
       expect(mockRefresh).not.toHaveBeenCalled();
     });
@@ -426,7 +429,7 @@ describe("organization members actions", () => {
     it("removeOrganizationMemberAction removes from the organization the page rendered", async () => {
       fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
       const res = await removeOrganizationMemberAction(ORGANIZATION, "user_2");
-      expect(res).toEqual({ error: null });
+      expect(res).toEqual({ ok: true });
       expect(fetchMock).toHaveBeenCalledWith(
         "http://auth.test/internal/v1/organization/members/user_2",
         expect.objectContaining({
@@ -440,7 +443,7 @@ describe("organization members actions", () => {
     it("notifies the removed member on their personal channel, at the roster's address", async () => {
       fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
       const res = await removeOrganizationMemberAction(ORGANIZATION, "user_2");
-      expect(res).toEqual({ error: null });
+      expect(res).toEqual({ ok: true });
       expect(mockPublishEvent).toHaveBeenCalledWith(
         "bfev:user:removed@example.test",
         {
@@ -462,7 +465,7 @@ describe("offerOwnershipAction", () => {
   it("asks auth to offer the organization to one member, under the owner's headers", async () => {
     fetchMock.mockResolvedValue(offered());
     const res = await offerOwnershipAction(ORGANIZATION, "user_admin");
-    expect(res).toEqual({ error: null });
+    expect(res).toEqual({ ok: true });
     expect(fetchMock).toHaveBeenCalledWith(
       "http://auth.test/internal/v1/organization/owner-transfer",
       expect.objectContaining({
@@ -504,7 +507,7 @@ describe("offerOwnershipAction", () => {
         { status: 200 },
       ),
     );
-    expect(await offerOwnershipAction(ORGANIZATION, "user_admin")).toEqual({ error: null });
+    expect(await offerOwnershipAction(ORGANIZATION, "user_admin")).toEqual({ ok: true });
 
     const changed = { type: "ownership:changed", data: { organizationId: ORGANIZATION } };
     expect(mockPublishEvent).toHaveBeenCalledTimes(2);
@@ -556,7 +559,7 @@ describe("offerOwnershipAction", () => {
         status: 200,
       }),
     );
-    expect(await offerOwnershipAction(ORGANIZATION, "user_admin")).toEqual({ error: null });
+    expect(await offerOwnershipAction(ORGANIZATION, "user_admin")).toEqual({ ok: true });
     expect(mockPublishEvent).not.toHaveBeenCalled();
     expect(mockRevalidate).toHaveBeenCalledWith("/(app)/[organization]/members", "page");
   });
@@ -564,6 +567,7 @@ describe("offerOwnershipAction", () => {
   it("tells nobody when auth refuses the offer", async () => {
     fetchMock.mockResolvedValue(new Response(null, { status: 409 }));
     expect(await offerOwnershipAction(ORGANIZATION, "user_admin")).toEqual({
+      ok: false,
       error: "problem",
     });
     expect(mockPublishEvent).not.toHaveBeenCalled();
@@ -573,6 +577,7 @@ describe("offerOwnershipAction", () => {
   it("reports an unreachable service rather than claiming the offer went out", async () => {
     fetchMock.mockResolvedValue(null);
     expect(await offerOwnershipAction(ORGANIZATION, "user_admin")).toEqual({
+      ok: false,
       error: "Organizations are unavailable right now — try again shortly.",
     });
     expect(mockPublishEvent).not.toHaveBeenCalled();
@@ -589,7 +594,7 @@ describe("cancelOwnershipOfferAction", () => {
   it("asks auth to withdraw the organization's offer, naming no member", async () => {
     fetchMock.mockResolvedValue(offered());
     const res = await cancelOwnershipOfferAction(ORGANIZATION);
-    expect(res).toEqual({ error: null });
+    expect(res).toEqual({ ok: true });
     expect(fetchMock).toHaveBeenCalledWith(
       "http://auth.test/internal/v1/organization/owner-transfer",
       expect.objectContaining({
@@ -613,6 +618,7 @@ describe("cancelOwnershipOfferAction", () => {
   it("tells nobody when auth refuses the withdrawal", async () => {
     fetchMock.mockResolvedValue(new Response(null, { status: 404 }));
     expect(await cancelOwnershipOfferAction(ORGANIZATION)).toEqual({
+      ok: false,
       error: "problem",
     });
     expect(mockPublishEvent).not.toHaveBeenCalled();
@@ -662,7 +668,7 @@ describe("leaveOrganizationAction", () => {
         role,
         accessToken: "at_1",
       });
-      expect(await leaveOrganizationAction(LEAVING)).toEqual({ error: SWITCHED });
+      expect(await leaveOrganizationAction(LEAVING)).toEqual({ ok: false, error: SWITCHED });
       expect(fetchMock).not.toHaveBeenCalled();
       expect(mockCookieDelete).not.toHaveBeenCalled();
       expect(mockRevalidate).not.toHaveBeenCalled();
@@ -691,8 +697,8 @@ describe("leaveOrganizationAction", () => {
       accessToken: "at_1",
     });
     const r = await leaveOrganizationAction(LEAVING);
-    expect(r.error).toMatch(/you own this organization/i);
-    expect(r.error).toMatch(/hand it to an admin/i);
+    expect(errorOf(r)).toMatch(/you own this organization/i);
+    expect(errorOf(r)).toMatch(/hand it to an admin/i);
     expect(fetchMock).not.toHaveBeenCalled();
     expect(mockCookieDelete).not.toHaveBeenCalled();
   });
@@ -712,7 +718,7 @@ describe("leaveOrganizationAction", () => {
   it("keeps the cookie when auth refuses the leave", async () => {
     fetchMock.mockResolvedValue({ ok: false, status: 403 } as never);
     const r = await leaveOrganizationAction(LEAVING);
-    expect(r.error).toBe("problem");
+    expect(errorOf(r)).toBe("problem");
     expect(
       mockCookieDelete,
       "the cookie was cleared for a leave that did not happen",

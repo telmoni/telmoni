@@ -1,11 +1,9 @@
 "use client";
 
-import { unstable_rethrow } from "next/navigation";
-import { useState, useTransition } from "react";
-
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { useAction } from "@/lib/use-action";
 
 import { leaveOrganizationAction } from "./members/actions";
 
@@ -33,8 +31,7 @@ export function LeaveOrganization({
   organizationId: string;
   name: string;
 }) {
-  const [error, setError] = useState<string | null>(null);
-  const [pending, start] = useTransition();
+  const { pending, error, run } = useAction();
 
   return (
     <Card className="gap-3">
@@ -67,21 +64,8 @@ export function LeaveOrganization({
           title={`Leave ${name}?`}
           description="You will lose access to this organization and every project in it immediately."
           confirmLabel="Leave"
-          onConfirm={() =>
-            start(async () => {
-              setError(null);
-              try {
-                const r = await leaveOrganizationAction(organizationId);
-                // Anything returned is a refusal the person can act on.
-                if (r?.error) setError(r.error);
-              } catch (err) {
-                // A success redirects, which rejects this call with Next's
-                // redirect: it goes back to the router, never to the person.
-                unstable_rethrow(err);
-                setError("Network error. Try again.");
-              }
-            })
-          }
+          // A success redirects; what comes back is a refusal to say.
+          onConfirm={() => run(() => leaveOrganizationAction(organizationId))}
         />
       </div>
     </Card>

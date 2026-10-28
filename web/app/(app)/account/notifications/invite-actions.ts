@@ -13,10 +13,7 @@ import {
 } from "@/lib/events/publisher";
 import { personHeaders } from "@/lib/server/entities/identity-context";
 import { getServerSession } from "@/lib/server/session";
-
-export interface ActionResult {
-  error: string | null;
-}
+import { type ActionResult, refused } from "@/lib/action-result";
 
 const SettledInvite = z
   .object({
@@ -42,22 +39,22 @@ function settledChannels(
 
 async function answer(res: Response | null): Promise<ActionResult> {
   if (!res) {
-    return { error: "Organizations are unavailable right now — try again shortly." };
+    return refused("Organizations are unavailable right now — try again shortly.");
   }
-  if (!res.ok) return { error: (await extractProblem(res)).message };
-  return { error: null };
+  if (!res.ok) return refused((await extractProblem(res)).message);
+  return { ok: true };
 }
 
 export async function acceptIncomingInviteAction(
   inviteId: string,
 ): Promise<ActionResult> {
   const session = await getServerSession();
-  if (!session) return { error: "Your session expired — sign in again." };
+  if (!session) return refused("Your session expired — sign in again.");
   const limited = await rateLimit(sessionKey(session, "members:accept-invite"), {
     limit: 10,
     windowMs: 60_000,
   });
-  if (limited) return { error: "Too many requests — slow down a moment." };
+  if (limited) return refused("Too many requests — slow down a moment.");
 
   // The person's own lane, sent in no organization: an invitation is how
   // somebody in none gets into one.
@@ -69,9 +66,9 @@ export async function acceptIncomingInviteAction(
     },
   );
   if (!res) {
-    return { error: "Organizations are unavailable right now — try again shortly." };
+    return refused("Organizations are unavailable right now — try again shortly.");
   }
-  if (!res.ok) return { error: (await extractProblem(res)).message };
+  if (!res.ok) return refused((await extractProblem(res)).message);
 
   const body: unknown = await res.json().catch(() => null);
   const data = SettledInvite.safeParse(body).data ?? null;
@@ -84,19 +81,19 @@ export async function acceptIncomingInviteAction(
   // read again for the projects the accept just granted: a revalidation in
   // an action draws the current route again, whichever path it names.
   revalidatePath("/(app)/[organization]/projects", "page");
-  return { error: null };
+  return { ok: true };
 }
 
 export async function declineIncomingInviteAction(
   inviteId: string,
 ): Promise<ActionResult> {
   const session = await getServerSession();
-  if (!session) return { error: "Your session expired — sign in again." };
+  if (!session) return refused("Your session expired — sign in again.");
   const limited = await rateLimit(sessionKey(session, "members:decline-invite"), {
     limit: 10,
     windowMs: 60_000,
   });
-  if (limited) return { error: "Too many requests — slow down a moment." };
+  if (limited) return refused("Too many requests — slow down a moment.");
 
   const res = await tryFetchWithTimeout(
     `${env.SERVER_URL}/internal/v1/me/invites/${encodeURIComponent(inviteId)}/decline`,
@@ -106,7 +103,7 @@ export async function declineIncomingInviteAction(
     },
   );
   const ans = await answer(res);
-  if (ans.error || !res) return ans;
+  if (!ans.ok || !res) return ans;
 
   const body: unknown = await res.json().catch(() => null);
   const data = SettledInvite.safeParse(body).data ?? null;

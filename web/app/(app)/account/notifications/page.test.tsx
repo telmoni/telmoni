@@ -4,6 +4,8 @@ import { redirect } from "next/navigation";
 import { Component, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { ActionResult } from "@/lib/action-result";
+
 import type { OrganizationEntry, ProjectOffer } from "@/lib/server/entities/organization";
 
 vi.mock("@/components/page-header", () => ({
@@ -55,24 +57,18 @@ class RouterStandIn extends Component<{ children: ReactNode }, { error: unknown 
 }
 
 const acceptOwnershipAction = vi.hoisted(() =>
-  vi.fn<(organizationId: string) => Promise<{ error: string | null }>>(async () => ({
-    error: null,
-  })),
+  vi.fn<(organizationId: string) => Promise<ActionResult>>(async () => ({ ok: true })),
 );
 const declineOwnershipAction = vi.hoisted(() =>
-  vi.fn<(organizationId: string) => Promise<{ error: string | null }>>(async () => ({
-    error: null,
-  })),
+  vi.fn<(organizationId: string) => Promise<ActionResult>>(async () => ({ ok: true })),
 );
 const acceptProjectOfferAction = vi.hoisted(() =>
-  vi.fn<(projectId: string, organizationId?: string) => Promise<{ error: string | null }>>(
-    async () => ({ error: null }),
+  vi.fn<(projectId: string, organizationId?: string) => Promise<ActionResult>>(
+    async () => ({ ok: true }),
   ),
 );
 const declineProjectOfferAction = vi.hoisted(() =>
-  vi.fn<(projectId: string) => Promise<{ error: string | null }>>(async () => ({
-    error: null,
-  })),
+  vi.fn<(projectId: string) => Promise<ActionResult>>(async () => ({ ok: true })),
 );
 vi.mock("./ownership-actions", () => ({
   acceptOwnershipAction,
@@ -181,9 +177,9 @@ const press = async (name: string) => {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  acceptOwnershipAction.mockResolvedValue({ error: null });
-  declineOwnershipAction.mockResolvedValue({ error: null });
-  acceptProjectOfferAction.mockResolvedValue({ error: null });
+  acceptOwnershipAction.mockResolvedValue({ ok: true });
+  declineOwnershipAction.mockResolvedValue({ ok: true });
+  acceptProjectOfferAction.mockResolvedValue({ ok: true });
   me([OWN, OFFERED, NOT_OFFERED]);
 });
 
@@ -236,7 +232,7 @@ describe("AccountNotificationsPage: ownership offers", () => {
   });
 
   it("shows auth's refusal, and keeps the offer on the page", async () => {
-    declineOwnershipAction.mockResolvedValue({ error: "that offer has lapsed" });
+    declineOwnershipAction.mockResolvedValue({ ok: false, error: "that offer has lapsed" });
     render(await AccountNotificationsPage());
     await press("Decline");
     expect(screen.getByRole("alert")).toHaveTextContent("that offer has lapsed");
@@ -314,7 +310,7 @@ describe("AccountNotificationsPage: project offers", () => {
   });
 
   it("shows auth's refusal, and keeps the offer on the page", async () => {
-    declineProjectOfferAction.mockResolvedValue({ error: "that offer has lapsed" });
+    declineProjectOfferAction.mockResolvedValue({ ok: false, error: "that offer has lapsed" });
     me([OWN], [], [PROJECT_OFFERED]);
     render(await AccountNotificationsPage());
     await press("Decline");

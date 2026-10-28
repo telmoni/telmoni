@@ -2,10 +2,12 @@
 import { act, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { ActionResult } from "@/lib/action-result";
+
 import type { GivenSeat } from "@/lib/types/given-seat";
 
 const markSeatSeenAction = vi.hoisted(() =>
-  vi.fn<(projectId: string) => Promise<{ error: string | null }>>(async () => ({ error: null })),
+  vi.fn<(projectId: string) => Promise<ActionResult>>(async () => ({ ok: true })),
 );
 vi.mock("@/app/(app)/account/notifications/seat-actions", () => ({ markSeatSeenAction }));
 
@@ -46,7 +48,7 @@ async function openProject(projectId: string, seats: GivenSeat[]) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  markSeatSeenAction.mockResolvedValue({ error: null });
+  markSeatSeenAction.mockResolvedValue({ ok: true });
 });
 
 // Reached by the mail's link or the sidebar rather than the bell's Open, the
@@ -64,7 +66,7 @@ describe("GivenSeatSeen", () => {
   });
 
   it("leaves the seat in the bell when the mark is refused", async () => {
-    markSeatSeenAction.mockResolvedValue({ error: "Too many requests — slow down a moment." });
+    markSeatSeenAction.mockResolvedValue({ ok: false, error: "Too many requests — slow down a moment." });
     await openProject("project_support", [seat("project_support")]);
     expect(screen.getByTestId("waiting")).toHaveTextContent(/^project_support$/);
   });

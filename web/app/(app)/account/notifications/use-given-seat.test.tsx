@@ -2,10 +2,13 @@
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { ActionResult } from "@/lib/action-result";
+
+
 import type { GivenSeat } from "@/lib/types/given-seat";
 
 const markSeatSeenAction = vi.hoisted(() =>
-  vi.fn<(projectId: string) => Promise<{ error: string | null }>>(async () => ({ error: null })),
+  vi.fn<(projectId: string) => Promise<ActionResult>>(async () => ({ ok: true })),
 );
 vi.mock("./seat-actions", () => ({ markSeatSeenAction }));
 const removeGivenSeat = vi.hoisted(() => vi.fn());
@@ -51,7 +54,7 @@ const click = (over: Partial<MouseEvent> = {}) => {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  markSeatSeenAction.mockResolvedValue({ error: null });
+  markSeatSeenAction.mockResolvedValue({ ok: true });
 });
 
 // Open leaves its row behind — the bell closes, or the page is left — so its
@@ -75,7 +78,7 @@ describe("useGivenSeat", () => {
   });
 
   it("says Open's refusal by a toast, from the page as from the bell, and still leads on", async () => {
-    markSeatSeenAction.mockResolvedValue({ error: "Too many requests — slow down a moment." });
+    markSeatSeenAction.mockResolvedValue({ ok: false, error: "Too many requests — slow down a moment." });
     const { result } = renderHook(() => useGivenSeat(SEAT));
     await act(async () => result.current.open(click().event));
     expect(toast.error).toHaveBeenCalledWith("Too many requests — slow down a moment.");
@@ -85,7 +88,7 @@ describe("useGivenSeat", () => {
   });
 
   it("leaves a click for a new tab to the browser, marking the seat beside it", async () => {
-    markSeatSeenAction.mockResolvedValue({ error: "Your session expired — sign in again." });
+    markSeatSeenAction.mockResolvedValue({ ok: false, error: "Your session expired — sign in again." });
     const leave = vi.fn();
     const { result } = renderHook(() => useGivenSeat(SEAT, { onLeave: leave }));
     const { event, preventDefault } = click({ ctrlKey: true });
@@ -109,7 +112,7 @@ describe("useGivenSeat", () => {
   });
 
   it("says a refused Dismiss on the row, which stays", async () => {
-    markSeatSeenAction.mockResolvedValue({ error: "Your session expired — sign in again." });
+    markSeatSeenAction.mockResolvedValue({ ok: false, error: "Your session expired — sign in again." });
     const gone = vi.fn();
     const { result } = renderHook(() => useGivenSeat(SEAT, { onGone: gone }));
     await act(async () => result.current.dismiss());

@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { errorOf } from "@/lib/action-result";
+
 vi.mock("next/cache", () => ({
   revalidatePath: vi.fn(),
   refresh: vi.fn(),
@@ -115,7 +117,7 @@ describe("Incoming invites server actions", () => {
   describe("acceptIncomingInviteAction", () => {
     it("calls accept endpoint at the server url and returns ok", async () => {
       const res = await acceptIncomingInviteAction("inv_123");
-      expect(res).toEqual({ error: null });
+      expect(res).toEqual({ ok: true });
       expect(fetchMock).toHaveBeenCalledWith(
         "http://auth.test/internal/v1/me/invites/inv_123/accept",
         expect.objectContaining({
@@ -148,7 +150,7 @@ describe("Incoming invites server actions", () => {
         ),
       );
       const res = await acceptIncomingInviteAction("inv_123");
-      expect(res).toEqual({ error: null });
+      expect(res).toEqual({ ok: true });
       expect(mockPublishEvent).toHaveBeenCalledWith(
         "bfev:user:user@example.test",
         { type: "invite:resolved", data: { inviteId: "inv_123" } },
@@ -184,7 +186,7 @@ describe("Incoming invites server actions", () => {
           { status: 200 },
         ),
       );
-      expect(await acceptIncomingInviteAction("inv_123")).toEqual({ error: null });
+      expect(await acceptIncomingInviteAction("inv_123")).toEqual({ ok: true });
       const settled = { type: "invite:resolved", data: { inviteId: "inv_123" } };
       expect(mockPublishEvent).toHaveBeenCalledTimes(2);
       expect(mockPublishEvent).toHaveBeenCalledWith("bfev:user:user@example.test", settled);
@@ -194,7 +196,7 @@ describe("Incoming invites server actions", () => {
     it("returns error message when rate limited", async () => {
       vi.mocked(rateLimit).mockResolvedValue(new NextResponse(null, { status: 429 }));
       const res = await acceptIncomingInviteAction("inv_123");
-      expect(res.error).toMatch(/too many requests/i);
+      expect(errorOf(res)).toMatch(/too many requests/i);
       expect(fetchMock).not.toHaveBeenCalled();
     });
 
@@ -202,7 +204,7 @@ describe("Incoming invites server actions", () => {
     // an invitee stands in none. It goes out under the person's bearer alone.
     it("accepts for somebody in no organization, under their own bearer", async () => {
       vi.mocked(identityContext).mockResolvedValue(null);
-      expect(await acceptIncomingInviteAction("inv_123")).toEqual({ error: null });
+      expect(await acceptIncomingInviteAction("inv_123")).toEqual({ ok: true });
       expect(personHeaders).toHaveBeenCalledWith(
         expect.objectContaining({ accessToken: "at_1" }),
       );
@@ -214,7 +216,7 @@ describe("Incoming invites server actions", () => {
         new Response(JSON.stringify({ error: "conflict" }), { status: 409 }),
       );
       const res = await acceptIncomingInviteAction("inv_123");
-      expect(res.error).toBe("invitation already used");
+      expect(errorOf(res)).toBe("invitation already used");
       expect(vi.mocked(refresh)).not.toHaveBeenCalled();
     });
   });
@@ -223,7 +225,7 @@ describe("Incoming invites server actions", () => {
     it("calls decline endpoint at the server url and returns ok", async () => {
       fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
       const res = await declineIncomingInviteAction("inv_456");
-      expect(res).toEqual({ error: null });
+      expect(res).toEqual({ ok: true });
       expect(fetchMock).toHaveBeenCalledWith(
         "http://auth.test/internal/v1/me/invites/inv_456/decline",
         expect.objectContaining({
@@ -239,7 +241,7 @@ describe("Incoming invites server actions", () => {
     it("declines for somebody in no organization, under their own bearer", async () => {
       vi.mocked(identityContext).mockResolvedValue(null);
       fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
-      expect(await declineIncomingInviteAction("inv_456")).toEqual({ error: null });
+      expect(await declineIncomingInviteAction("inv_456")).toEqual({ ok: true });
       expect(personHeaders).toHaveBeenCalledWith(
         expect.objectContaining({ accessToken: "at_1" }),
       );
@@ -260,7 +262,7 @@ describe("Incoming invites server actions", () => {
         ),
       );
       const res = await declineIncomingInviteAction("inv_456");
-      expect(res).toEqual({ error: null });
+      expect(res).toEqual({ ok: true });
       const settled = { type: "invite:resolved", data: { inviteId: "inv_456" } };
       expect(mockPublishEvent).toHaveBeenCalledWith("bfev:user:user@example.test", settled);
       expect(mockPublishEvent).toHaveBeenCalledWith("bfev:user:inviter@example.com", settled);
@@ -281,7 +283,7 @@ describe("Incoming invites server actions", () => {
           { status: 200 },
         ),
       );
-      expect(await declineIncomingInviteAction("inv_456")).toEqual({ error: null });
+      expect(await declineIncomingInviteAction("inv_456")).toEqual({ ok: true });
       const settled = { type: "invite:resolved", data: { inviteId: "inv_456" } };
       expect(mockPublishEvent).toHaveBeenCalledTimes(2);
       expect(mockPublishEvent).toHaveBeenCalledWith("bfev:user:user@example.test", settled);
@@ -312,7 +314,7 @@ describe("Incoming invites server actions", () => {
         ),
       );
       const res = await revokeInviteAction("project_1", "inv_789");
-      expect(res).toEqual({ error: null });
+      expect(res).toEqual({ ok: true });
       expect(fetchMock).toHaveBeenCalledWith(
         "http://auth.test/internal/v1/projects/project_1/invites/inv_789",
         expect.objectContaining({ method: "DELETE" }),
@@ -326,7 +328,7 @@ describe("Incoming invites server actions", () => {
     it("pushes nothing when auth names nobody", async () => {
       fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
       const res = await revokeInviteAction("project_1", "inv_789");
-      expect(res).toEqual({ error: null });
+      expect(res).toEqual({ ok: true });
       expect(mockPublishEvent).not.toHaveBeenCalled();
     });
 
@@ -335,7 +337,7 @@ describe("Incoming invites server actions", () => {
         new Response(JSON.stringify({ error: "nope" }), { status: 404 }),
       );
       const res = await revokeInviteAction("project_1", "inv_789");
-      expect(res.error).toBe("invitation already used");
+      expect(errorOf(res)).toBe("invitation already used");
       expect(mockPublishEvent).not.toHaveBeenCalled();
       expect(vi.mocked(refresh)).not.toHaveBeenCalled();
     });
@@ -355,7 +357,7 @@ describe("Incoming invites server actions", () => {
         ),
       );
       const res = await inviteMemberAction("project_1", " New@Example.test ", "admin");
-      expect(res).toEqual({ error: null, link: "http://test/invite/abc" });
+      expect(res).toEqual({ ok: true, link: "http://test/invite/abc" });
       expect(mockPublishEvent).toHaveBeenCalledTimes(2);
       expect(mockPublishEvent).toHaveBeenCalledWith("bfev:organization:org_owner", {
         type: "invite:sent",
@@ -384,8 +386,9 @@ describe("Incoming invites server actions", () => {
         expect(
           await inviteMemberAction("project_1", "new@example.test", role as never),
           role,
-        ).toEqual({ error: "Choose admin or member." });
+        ).toEqual({ ok: false, error: "Choose admin or member." });
         expect(await updateMemberRoleAction("project_1", "user_2", role as never), role).toEqual({
+          ok: false,
           error: "Choose admin or member.",
         });
       }
@@ -412,7 +415,7 @@ describe("Incoming invites server actions", () => {
         new Response(JSON.stringify({ link: "http://test/invite/abc" }), { status: 201 }),
       );
       const res = await inviteMemberAction("project_1", "new@example.test", "member");
-      expect(res).toEqual({ error: null, link: "http://test/invite/abc" });
+      expect(res).toEqual({ ok: true, link: "http://test/invite/abc" });
       expect(mockPublishEvent).not.toHaveBeenCalled();
     });
 
@@ -427,7 +430,8 @@ describe("Incoming invites server actions", () => {
           new Response(JSON.stringify(body), { status: 201 }),
         );
         const res = await inviteMemberAction("project_1", "new@example.test", "member");
-        expect(res.link).toBeUndefined();
+        // Done, with no link: never the string "null".
+        expect(res).toEqual({ ok: true });
       },
     );
   });
@@ -455,7 +459,7 @@ describe("Incoming invites server actions", () => {
           { status: 200 },
         ),
       );
-      expect(await offerProjectAction("project_1", "user_2")).toEqual({ error: null });
+      expect(await offerProjectAction("project_1", "user_2")).toEqual({ ok: true });
       expect(fetchMock).toHaveBeenCalledWith(
         "http://auth.test/internal/v1/projects/project_1/transfer",
         expect.objectContaining({
@@ -484,7 +488,7 @@ describe("Incoming invites server actions", () => {
           { status: 200 },
         ),
       );
-      expect(await cancelProjectOfferAction("project_1")).toEqual({ error: null });
+      expect(await cancelProjectOfferAction("project_1")).toEqual({ ok: true });
       expect(fetchMock).toHaveBeenCalledWith(
         "http://auth.test/internal/v1/projects/project_1/transfer",
         expect.objectContaining({ method: "DELETE" }),
@@ -498,10 +502,10 @@ describe("Incoming invites server actions", () => {
       fetchMock.mockResolvedValue(
         new Response(JSON.stringify({ error: "nope" }), { status: 409 }),
       );
-      expect((await offerProjectAction("project_1", "user_2")).error).toBe(
+      expect(errorOf(await offerProjectAction("project_1", "user_2"))).toBe(
         "invitation already used",
       );
-      expect((await cancelProjectOfferAction("project_1")).error).toBe(
+      expect(errorOf(await cancelProjectOfferAction("project_1"))).toBe(
         "invitation already used",
       );
       expect(mockPublishEvent).not.toHaveBeenCalled();
@@ -512,14 +516,14 @@ describe("Incoming invites server actions", () => {
     it("tells nobody about a removal the roster does not know", async () => {
       fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
       const res = await removeMemberAction("project_1", "user_9");
-      expect(res).toEqual({ error: null });
+      expect(res).toEqual({ ok: true });
       expect(mockPublishEvent).not.toHaveBeenCalled();
     });
 
     it("calls delete member endpoint and tells the removed member at the roster's address", async () => {
       fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
       const res = await removeMemberAction("project_1", "user_2");
-      expect(res).toEqual({ error: null });
+      expect(res).toEqual({ ok: true });
       expect(fetchMock).toHaveBeenCalledWith(
         "http://auth.test/internal/v1/projects/project_1/members/user_2",
         expect.objectContaining({
@@ -541,7 +545,7 @@ describe("Incoming invites server actions", () => {
     it("changes the role and tells the member at the roster's address, and nobody else", async () => {
       fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
       const res = await updateMemberRoleAction("project_1", "user_2", "admin");
-      expect(res).toEqual({ error: null });
+      expect(res).toEqual({ ok: true });
       expect(fetchMock).toHaveBeenCalledWith(
         "http://auth.test/internal/v1/projects/project_1/members/user_2/role",
         expect.objectContaining({ method: "PUT", body: JSON.stringify({ role: "admin" }) }),
@@ -556,9 +560,10 @@ describe("Incoming invites server actions", () => {
 
     it("tells nobody about a role change the roster does not know, or auth refused", async () => {
       fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
-      expect(await updateMemberRoleAction("project_1", "user_9", "admin")).toEqual({ error: null });
+      expect(await updateMemberRoleAction("project_1", "user_9", "admin")).toEqual({ ok: true });
       fetchMock.mockResolvedValue(new Response(null, { status: 403 }));
       expect(await updateMemberRoleAction("project_1", "user_2", "admin")).toEqual({
+        ok: false,
         error: "invitation already used",
       });
       expect(mockPublishEvent).not.toHaveBeenCalled();
@@ -602,7 +607,7 @@ describe("addMemberAction", () => {
 
   it("posts the member and the role to the project's members lane, and tells their console", async () => {
     const res = await addMemberAction("project_1", "user_dana", "member");
-    expect(res).toEqual({ error: null });
+    expect(res).toEqual({ ok: true });
     expect(fetchMock).toHaveBeenCalledWith(
       "http://auth.test/internal/v1/projects/project_1/members",
       expect.objectContaining({
@@ -625,13 +630,13 @@ describe("addMemberAction", () => {
 
   it("refuses a role nobody can be given before any request", async () => {
     const res = await addMemberAction("project_1", "user_dana", "owner" as never);
-    expect(res.error).toMatch(/admin or member/i);
+    expect(errorOf(res)).toMatch(/admin or member/i);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("refuses anything but a project id before any request", async () => {
     const res = await addMemberAction("../organization", "user_dana", "member");
-    expect(res.error).toMatch(/resolve that project/i);
+    expect(errorOf(res)).toMatch(/resolve that project/i);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -644,7 +649,7 @@ describe("addMemberAction", () => {
     vi.mocked(extractProblem).mockResolvedValueOnce({ message: detail } as never);
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ detail }), { status }));
     const res = await addMemberAction("project_1", "user_dana", "member");
-    expect(res.error).toBe(detail);
+    expect(errorOf(res)).toBe(detail);
     expect(mockPublishEvent).not.toHaveBeenCalled();
     expect(vi.mocked(refresh)).toHaveBeenCalledOnce();
   });
@@ -657,14 +662,14 @@ describe("addMemberAction", () => {
       new Response(JSON.stringify({ detail: "This organization is paused." }), { status: 402 }),
     );
     const res = await addMemberAction("project_1", "user_dana", "member");
-    expect(res.error).toBe("This organization is paused.");
+    expect(errorOf(res)).toBe("This organization is paused.");
     expect(vi.mocked(refresh)).not.toHaveBeenCalled();
   });
 
   it("refuses before any request while the members feature is off", async () => {
     vi.mocked(featureOff).mockResolvedValueOnce("Adding a member is switched off right now.");
     const res = await addMemberAction("project_1", "user_dana", "member");
-    expect(res.error).toBe("Adding a member is switched off right now.");
+    expect(errorOf(res)).toBe("Adding a member is switched off right now.");
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -672,7 +677,7 @@ describe("addMemberAction", () => {
     fetchMock.mockResolvedValue(
       new Response(JSON.stringify({ id: "seat_1", memberId: "user_dana" }), { status: 201 }),
     );
-    expect(await addMemberAction("project_1", "user_dana", "member")).toEqual({ error: null });
+    expect(await addMemberAction("project_1", "user_dana", "member")).toEqual({ ok: true });
     expect(mockPublishEvent).not.toHaveBeenCalled();
     expect(vi.mocked(refresh)).toHaveBeenCalled();
   });
@@ -700,7 +705,7 @@ describe("leaveProjectAction", () => {
   });
 
   it("gives up the seat by the memberships lane and draws the Projects page again", async () => {
-    expect(await leaveProjectAction("project_1")).toEqual({ error: null });
+    expect(await leaveProjectAction("project_1")).toEqual({ ok: true });
     expect(fetchMock).toHaveBeenCalledWith(
       "http://auth.test/internal/v1/memberships/project_1",
       expect.objectContaining({ method: "DELETE" }),
@@ -727,6 +732,7 @@ describe("leaveProjectAction", () => {
   it("stays put on a refusal, and goes nowhere", async () => {
     fetchMock.mockResolvedValue(new Response(null, { status: 403 }));
     expect(await leaveProjectAction("project_1", "project")).toEqual({
+      ok: false,
       error: "invitation already used",
     });
     expect(mockRedirect).not.toHaveBeenCalled();
@@ -736,7 +742,7 @@ describe("leaveProjectAction", () => {
 
   it("refuses anything but a project id before asking auth", async () => {
     const r = await leaveProjectAction("../organization/members/usr_2", "project");
-    expect(r.error).toMatch(/couldn't resolve that project/i);
+    expect(errorOf(r)).toMatch(/couldn't resolve that project/i);
     expect(fetchMock).not.toHaveBeenCalled();
     expect(mockRedirect).not.toHaveBeenCalled();
   });

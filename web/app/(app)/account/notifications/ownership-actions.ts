@@ -10,6 +10,7 @@ import { organizationChannel, publishEvent, publishToAll } from "@/lib/events/pu
 import { personHeaders, sessionHeaders } from "@/lib/server/entities/identity-context";
 import { getServerSession } from "@/lib/server/session";
 import { projectPath } from "@/lib/slug";
+import { type ActionResult, refused } from "@/lib/action-result";
 
 // Answering an ownership offer. The organization is the OFFER's, named
 // explicitly, not the one the console is standing in: an offer is answered
@@ -19,30 +20,30 @@ import { projectPath } from "@/lib/slug";
 async function answerOffer(
   organizationId: string,
   verb: "accept" | "decline",
-): Promise<{ error: string | null }> {
+): Promise<ActionResult> {
   const session = await getServerSession();
-  if (!session) return { error: "Your session expired — sign in again." };
+  if (!session) return refused("Your session expired — sign in again.");
 
   // The id travels as a header; anything but an organization id is refused
   // here rather than making `fetch` throw on a stray character.
   if (!/^org_[A-Za-z0-9]+$/.test(organizationId)) {
-    return { error: "That is not an organization." };
+    return refused("That is not an organization.");
   }
 
   const limited = await rateLimit(sessionKey(session, "organization:ownership-answer"), {
     limit: 10,
     windowMs: 60_000,
   });
-  if (limited) return { error: "Too many requests — slow down a moment." };
+  if (limited) return refused("Too many requests — slow down a moment.");
 
   const res = await tryFetchWithTimeout(
     `${env.SERVER_URL}/internal/v1/organization/owner-transfer/${verb}`,
     { method: "POST", headers: sessionHeaders(session, organizationId) },
   );
   if (!res) {
-    return { error: "Organizations are unavailable right now — try again shortly." };
+    return refused("Organizations are unavailable right now — try again shortly.");
   }
-  if (!res.ok) return { error: (await extractProblem(res)).message };
+  if (!res.ok) return refused((await extractProblem(res)).message);
 
   // Everyone in the organization sees the roles move — the previous owner
   // included — and the offer leave the owner's roster.
@@ -51,18 +52,18 @@ async function answerOffer(
     data: { organizationId },
   });
   revalidatePath("/", "layout");
-  return { error: null };
+  return { ok: true };
 }
 
 export async function acceptOwnershipAction(
   organizationId: string,
-): Promise<{ error: string | null }> {
+): Promise<ActionResult> {
   return answerOffer(organizationId, "accept");
 }
 
 export async function declineOwnershipAction(
   organizationId: string,
-): Promise<{ error: string | null }> {
+): Promise<ActionResult> {
   return answerOffer(organizationId, "decline");
 }
 
@@ -71,9 +72,7 @@ const ORGANIZATION_ID = /^org_[A-Za-z0-9]+$/;
 
 /// What answering a project offer comes back with. An accept that landed
 /// answers with the project's page instead, in the caller's organization now.
-export interface ProjectOfferAnswer {
-  error: string | null;
-}
+export type ProjectOfferAnswer = ActionResult;
 
 // Answering the offer of a project. The project is the OFFER's, named
 // explicitly, and the lane is the person's: the offer is answered from the
@@ -86,20 +85,20 @@ async function answerProjectOffer(
   organizationId?: string,
 ): Promise<ProjectOfferAnswer> {
   const session = await getServerSession();
-  if (!session) return { error: "Your session expired — sign in again." };
+  if (!session) return refused("Your session expired — sign in again.");
 
   // Both ids reach auth in the URL or the body; anything but the shape each
   // has is refused here rather than making `fetch` throw on a stray character.
-  if (!PROJECT_ID.test(projectId)) return { error: "That is not a project." };
+  if (!PROJECT_ID.test(projectId)) return refused("That is not a project.");
   if (organizationId !== undefined && !ORGANIZATION_ID.test(organizationId)) {
-    return { error: "That is not an organization." };
+    return refused("That is not an organization.");
   }
 
   const limited = await rateLimit(sessionKey(session, "project:offer-answer"), {
     limit: 10,
     windowMs: 60_000,
   });
-  if (limited) return { error: "Too many requests — slow down a moment." };
+  if (limited) return refused("Too many requests — slow down a moment.");
 
   const res = await tryFetchWithTimeout(
     `${env.SERVER_URL}/internal/v1/projects/${encodeURIComponent(projectId)}/transfer/${verb}`,
@@ -110,9 +109,9 @@ async function answerProjectOffer(
     },
   );
   if (!res) {
-    return { error: "Organizations are unavailable right now — try again shortly." };
+    return refused("Organizations are unavailable right now — try again shortly.");
   }
-  if (!res.ok) return { error: (await extractProblem(res)).message };
+  if (!res.ok) return refused((await extractProblem(res)).message);
 
   const body = (await res.json().catch(() => null)) as {
     slug?: unknown;
@@ -132,7 +131,7 @@ async function answerProjectOffer(
       });
     }
     revalidatePath("/", "layout");
-    return { error: null };
+    return { ok: true };
   }
 
   // Both organizations see the project move — the one it left, whose owner
@@ -164,7 +163,7 @@ async function answerProjectOffer(
   // without the offer.
   if (organization && project) redirect(projectPath(organization, project));
   revalidatePath("/", "layout");
-  return { error: null };
+  return { ok: true };
 }
 
 export async function acceptProjectOfferAction(

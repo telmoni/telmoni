@@ -9,6 +9,7 @@ import { DataTable, THead, Th, Td } from "@/components/data-table";
 import { LocalTime } from "@/components/local-time";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import type { ActionResult } from "@/lib/action-result";
 import type { IncomingInvite } from "@/lib/types/incoming-invite";
 import { inviterText } from "@/lib/notifications";
 import { useRemoveIncomingInvite } from "@/lib/store";
@@ -62,12 +63,12 @@ function IncomingInviteRow({ invite }: { invite: IncomingInvite }) {
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
-  function settle(run: () => Promise<{ error: string | null }>, failure: string) {
+  function settle(run: () => Promise<ActionResult>, failure: string) {
     setError(null);
     start(async () => {
       try {
         const res = await run();
-        if (res.error) {
+        if (!res.ok) {
           setError(res.error);
           return;
         }

@@ -1,8 +1,5 @@
+import { type ActionResult, refused } from "@/lib/action-result";
 import { extractProblem } from "@/lib/api/fetch";
-
-export interface ActionResult {
-  error: string | null;
-}
 
 /**
  * Safely extracts a shareable invite link from the upstream response.
@@ -36,8 +33,8 @@ export const NOT_A_GIVEN_ROLE = "Choose admin or member.";
  */
 export async function answerMemberAction(res: Response | null): Promise<ActionResult> {
   if (!res) {
-    return { error: "Organizations are unavailable right now — try again shortly." };
+    return refused("Organizations are unavailable right now — try again shortly.");
   }
-  if (!res.ok) return { error: (await extractProblem(res)).message };
-  return { error: null };
+  if (!res.ok) return refused((await extractProblem(res)).message);
+  return { ok: true };
 }

@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { errorOf } from "@/lib/action-result";
+
 vi.mock("next/cache", () => ({ refresh: vi.fn() }));
 vi.mock("@/lib/server/session", () => ({ getServerSession: vi.fn() }));
 vi.mock("@/lib/api/rate-limit", () => ({
@@ -46,7 +48,7 @@ describe("markSeatSeenAction", () => {
     fetchMock.mockResolvedValue(
       new Response(JSON.stringify({ organizationId: "org_acme" }), { status: 200 }),
     );
-    expect(await markSeatSeenAction(PROJECT)).toEqual({ error: null });
+    expect(await markSeatSeenAction(PROJECT)).toEqual({ ok: true });
     expect(fetchMock).toHaveBeenCalledWith(
       `http://auth.test/internal/v1/me/seats/${PROJECT}/seen`,
       expect.objectContaining({ method: "POST", headers: { authorization: "Bearer at_1" } }),
@@ -62,25 +64,25 @@ describe("markSeatSeenAction", () => {
     fetchMock.mockResolvedValue(
       new Response(JSON.stringify({ organizationId: null }), { status: 200 }),
     );
-    expect(await markSeatSeenAction(PROJECT)).toEqual({ error: null });
+    expect(await markSeatSeenAction(PROJECT)).toEqual({ ok: true });
     expect(publishEvent).not.toHaveBeenCalled();
   });
 
   it("refuses anything but a project id before any request", async () => {
     const r = await markSeatSeenAction("../organization");
-    expect(r.error).toMatch(/resolve that project/i);
+    expect(errorOf(r)).toMatch(/resolve that project/i);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("asks for a sign-in when the session is gone", async () => {
     vi.mocked(getServerSession).mockResolvedValue(null as never);
-    expect((await markSeatSeenAction(PROJECT)).error).toMatch(/sign in again/i);
+    expect(errorOf(await markSeatSeenAction(PROJECT))).toMatch(/sign in again/i);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("hands back auth's refusal, and tells nobody", async () => {
     fetchMock.mockResolvedValue(new Response("{}", { status: 404 }));
-    expect(await markSeatSeenAction(PROJECT)).toEqual({ error: "not found" });
+    expect(await markSeatSeenAction(PROJECT)).toEqual({ ok: false, error: "not found" });
     expect(publishEvent).not.toHaveBeenCalled();
   });
 });

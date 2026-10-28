@@ -8,7 +8,7 @@ import { OrganizationRole } from "@/lib/types/enums";
 // The actions, not their effects: which organization the page hands its
 // controls is the assertion, and each action refuses any other.
 const actions = vi.hoisted(() => {
-  const ok = async () => ({ error: null });
+  const ok = async () => ({ ok: true });
   return {
     cancelOwnershipOfferAction: vi.fn(ok),
     inviteOrganizationMemberAction: vi.fn(ok),

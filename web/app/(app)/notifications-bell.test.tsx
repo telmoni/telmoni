@@ -2,10 +2,12 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { ActionResult } from "@/lib/action-result";
+
 import type { GivenSeat } from "@/lib/types/given-seat";
 
 const markSeatSeenAction = vi.hoisted(() =>
-  vi.fn<(projectId: string) => Promise<{ error: string | null }>>(async () => ({ error: null })),
+  vi.fn<(projectId: string) => Promise<ActionResult>>(async () => ({ ok: true })),
 );
 vi.mock("@/app/(app)/account/notifications/seat-actions", () => ({ markSeatSeenAction }));
 vi.mock("@/app/(app)/account/notifications/invite-actions", () => ({
@@ -57,7 +59,7 @@ function openBell(seats: GivenSeat[]): HTMLElement {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  markSeatSeenAction.mockResolvedValue({ error: null });
+  markSeatSeenAction.mockResolvedValue({ ok: true });
 });
 
 // A seat given waits in the bell with Open and Dismiss, both menu items the
@@ -103,7 +105,7 @@ describe("NotificationsBell: a seat given", () => {
     const order: string[] = [];
     markSeatSeenAction.mockImplementationOnce(async () => {
       order.push("marked");
-      return { error: null };
+      return { ok: true };
     });
     push.mockImplementationOnce(() => order.push("led away"));
     const menu = openBell([SUPPORT]);

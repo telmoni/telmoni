@@ -3,8 +3,7 @@
 import { InviteSentDialog } from "@/components/members/invite-sent-dialog";
 
 import { UserPlus } from "lucide-react";
-import { unstable_rethrow } from "next/navigation";
-import { startTransition, useState, useTransition } from "react";
+import { startTransition, useState } from "react";
 import { toast } from "sonner";
 
 import { ChoiceGroup, type Choice } from "@/components/choice-group";
@@ -35,6 +34,7 @@ import {
 import { personDetail, personName } from "@/lib/identity";
 import type { Invite, Member } from "@/lib/server/data";
 import { roleLabel } from "@/lib/role-label";
+import { useAction } from "@/lib/use-action";
 
 import {
   addMemberAction,
@@ -119,40 +119,33 @@ function AddDialog({
   const [memberId, setMemberId] = useState("");
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<Grantable>("member");
-  const [error, setError] = useState<string | null>(null);
   const [link, setLink] = useState<string | null>(null);
-  const [pending, start] = useTransition();
+  const { pending, error, setError, run } = useAction();
   const chosen = candidates.find((c) => c.memberId === memberId);
   const fromRoster = way === "roster" && candidates.length > 0;
 
   function submit() {
-    setError(null);
-    start(async () => {
-      try {
-        if (fromRoster) {
-          if (!chosen) return;
-          const r = await addMemberAction(projectId, chosen.memberId, role);
-          if (r.error) setError(r.error);
-          else {
-            toast.success(
-              `Added ${personName(chosen)} as ${role === "admin" ? "an admin" : "a member"}.`,
-            );
-            startTransition(() => onOpenChange(false));
-          }
-          return;
-        }
-        const r = await inviteMemberAction(projectId, email, role);
-        if (r.error) setError(r.error);
-        else {
-          // In the transition, with the invitations the action drew again.
-          startTransition(() => setLink(r.link ?? null));
-          toast.success(`Invitation sent to ${email}`);
-        }
-      } catch (err) {
-        unstable_rethrow(err);
-        setError("Network error. Try again.");
-      }
-    });
+    if (fromRoster) {
+      if (!chosen) return;
+      run(
+        () => addMemberAction(projectId, chosen.memberId, role),
+        () => {
+          toast.success(
+            `Added ${personName(chosen)} as ${role === "admin" ? "an admin" : "a member"}.`,
+          );
+          startTransition(() => onOpenChange(false));
+        },
+      );
+      return;
+    }
+    run(
+      () => inviteMemberAction(projectId, email, role),
+      (r) => {
+        // In the transition, with the invitations the action drew again.
+        startTransition(() => setLink(r.link ?? null));
+        toast.success(`Invitation sent to ${email}`);
+      },
+    );
   }
 
   if (link) {
@@ -302,8 +295,7 @@ export function InviteRow({
   invite: Invite;
   canManage?: boolean;
 }) {
-  const [error, setError] = useState<string | null>(null);
-  const [pending, start] = useTransition();
+  const { pending, error, run } = useAction();
 
   return (
     <tr>
@@ -332,18 +324,7 @@ export function InviteRow({
             title={`Withdraw the invitation to ${invite.email}?`}
             description="Their link stops working straight away. You can invite them again later."
             confirmLabel="Withdraw"
-            onConfirm={() =>
-              start(async () => {
-                setError(null);
-                try {
-                  const r = await revokeInviteAction(projectId, invite.id);
-                  if (r.error) setError(r.error);
-                } catch (err) {
-                  unstable_rethrow(err);
-                  setError("Network error. Try again.");
-                }
-              })
-            }
+            onConfirm={() => run(() => revokeInviteAction(projectId, invite.id))}
           />
         )}
       </Td>
@@ -370,21 +351,7 @@ export function MemberRow({
   isOwnerCaller = false,
   isSelf = false,
 }: MemberRowProps) {
-  const [error, setError] = useState<string | null>(null);
-  const [pending, start] = useTransition();
-
-  function act(work: () => Promise<{ error: string | null }>) {
-    start(async () => {
-      setError(null);
-      try {
-        const r = await work();
-        if (r.error) setError(r.error);
-      } catch (err) {
-        unstable_rethrow(err);
-        setError("Network error. Try again.");
-      }
-    });
-  }
+  const { pending, error, run: act } = useAction();
 
   const isOwner = member.is_owner || member.role === "owner";
   // Only an admin can be handed the project, and only the owner hands it.

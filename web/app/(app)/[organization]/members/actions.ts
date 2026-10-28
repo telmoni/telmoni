@@ -33,24 +33,21 @@ import {
   extractInviteLink,
   isGivenRole,
 } from "@/lib/members/shared";
-
-export interface ActionResult {
-  error: string | null;
-}
+import { type ActionResult, type Refused, refused } from "@/lib/action-result";
 
 export async function inviteOrganizationMemberAction(
   organizationId: string,
   email: string,
   role: "admin" | "member",
-): Promise<ActionResult & { link?: string }> {
-  if (!isGivenRole(role)) return { error: NOT_A_GIVEN_ROLE };
+): Promise<ActionResult<{ link?: string }>> {
+  if (!isGivenRole(role)) return refused(NOT_A_GIVEN_ROLE);
   const gate = await open("members:invite", 10, organizationId);
   if ("error" in gate) return gate;
   const off = await featureOff(Flag.Members);
-  if (off) return { error: off };
+  if (off) return refused(off);
 
   const trimmed = email.trim();
-  if (!trimmed) return { error: "Enter the email address of the person to invite." };
+  if (!trimmed) return refused("Enter the email address of the person to invite.");
 
   const res = await tryFetchWithTimeout(
     `${gate.base}/internal/v1/organization/invites`,
@@ -61,9 +58,9 @@ export async function inviteOrganizationMemberAction(
     },
   );
   if (!res) {
-    return { error: "Organizations are unavailable right now — try again shortly." };
+    return refused("Organizations are unavailable right now — try again shortly.");
   }
-  if (!res.ok) return { error: (await extractProblem(res)).message };
+  if (!res.ok) return refused((await extractProblem(res)).message);
 
   const body: unknown = await res.json().catch(() => null);
   const data = body as {
@@ -102,7 +99,7 @@ export async function inviteOrganizationMemberAction(
   }
 
   refresh();
-  return { error: null, link };
+  return { ok: true, link };
 }
 
 export async function revokeOrganizationInviteAction(
@@ -116,7 +113,7 @@ export async function revokeOrganizationInviteAction(
     { method: "DELETE", headers: gate.headers },
   );
   const ans = await answer(res);
-  if (ans.error || !res) return ans;
+  if (!ans.ok || !res) return ans;
 
   const body: unknown = await res.json().catch(() => null);
   const data = body as { email?: string; ownerOrganizationId?: string } | null;
@@ -136,7 +133,7 @@ export async function updateOrganizationMemberRoleAction(
   memberId: string,
   role: "admin" | "member",
 ): Promise<ActionResult> {
-  if (!isGivenRole(role)) return { error: NOT_A_GIVEN_ROLE };
+  if (!isGivenRole(role)) return refused(NOT_A_GIVEN_ROLE);
   const gate = await open("members:role", 30, organizationId);
   if ("error" in gate) return gate;
   // The channel told is the member's own console, so their address comes
@@ -212,7 +209,7 @@ export async function offerOwnershipAction(
 
   await tellOfferRecipients(res, gate.organizationId);
   revalidatePath("/(app)/[organization]/members", "page");
-  return { error: null };
+  return { ok: true };
 }
 
 /// Withdraw the organization's live offer.
@@ -227,7 +224,7 @@ export async function cancelOwnershipOfferAction(organizationId: string): Promis
 
   await tellOfferRecipients(res, gate.organizationId);
   revalidatePath("/(app)/[organization]/members", "page");
-  return { error: null };
+  return { ok: true };
 }
 
 /// The live notice to everybody whose offer just changed, at the addresses
@@ -250,20 +247,18 @@ export async function leaveOrganizationAction(
   organizationId: string,
 ): Promise<ActionResult> {
   const session = await getServerSession();
-  if (!session) return { error: "Your session expired — sign in again." };
+  if (!session) return refused("Your session expired — sign in again.");
   const limited = await rateLimit(sessionKey(session, "members:leave"), {
     limit: 20,
     windowMs: 60_000,
   });
-  if (limited) return { error: "Too many requests — slow down a moment." };
+  if (limited) return refused("Too many requests — slow down a moment.");
 
   const ctx = await identityContext();
-  if (!ctx) return { error: await unplacedOrganization() };
-  if (ctx.organizationId !== organizationId) return { error: SWITCHED_ORGANIZATION };
+  if (!ctx) return refused(await unplacedOrganization());
+  if (ctx.organizationId !== organizationId) return refused(SWITCHED_ORGANIZATION);
   if (ctx.role === "owner") {
-    return {
-      error: "You own this organization. To leave, hand it to an admin first or delete it.",
-    };
+    return refused("You own this organization. To leave, hand it to an admin first or delete it.");
   }
 
   const res = await tryFetchWithTimeout(
@@ -271,9 +266,9 @@ export async function leaveOrganizationAction(
     { method: "DELETE", headers: organizationHeaders(ctx) },
   );
   if (!res) {
-    return { error: "Organizations are unavailable right now — try again shortly." };
+    return refused("Organizations are unavailable right now — try again shortly.");
   }
-  if (!res.ok) return { error: (await extractProblem(res)).message };
+  if (!res.ok) return refused((await extractProblem(res)).message);
 
   // Evict the active-organization cookie so `/console` falls back to their
   // first remaining organization or the no-organization gate.
@@ -302,27 +297,27 @@ async function open(
       label: string;
       session: SessionData;
     }
-  | { error: string; base?: undefined }
+  | Refused
 > {
   const session = await getServerSession();
-  if (!session) return { error: "Your session expired — sign in again." };
+  if (!session) return refused("Your session expired — sign in again.");
   const limited = await rateLimit(sessionKey(session, bucket), {
     limit,
     windowMs: 60_000,
   });
-  if (limited) return { error: "Too many requests — slow down a moment." };
+  if (limited) return refused("Too many requests — slow down a moment.");
   const [ctx, context] = await Promise.all([
     identityContext(),
     getServerContext(),
   ]);
   const organization = context ? activeOrganization(context) : null;
-  if (!ctx || !organization) return { error: await unplacedOrganization() };
-  if (ctx.organizationId !== organizationId) return { error: SWITCHED_ORGANIZATION };
+  if (!ctx || !organization) return refused(await unplacedOrganization());
+  if (ctx.organizationId !== organizationId) return refused(SWITCHED_ORGANIZATION);
   if (lane === "ownership" && ctx.role !== "owner") {
-    return { error: "Only the organization owner can hand it over." };
+    return refused("Only the organization owner can hand it over.");
   }
   if (ctx.role !== "owner" && ctx.role !== "admin") {
-    return { error: "Only an organization owner or admin can manage organization members." };
+    return refused("Only an organization owner or admin can manage organization members.");
   }
   return {
     base: env.SERVER_URL,

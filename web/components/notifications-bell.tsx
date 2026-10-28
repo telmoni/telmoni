@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
+import type { ActionResult } from "@/lib/action-result";
 import { exportSummary } from "@/lib/audit-exports";
 import { NOTIFICATIONS_HREF } from "@/lib/console-nav";
 import { NOTIFICATIONS_KEY, sequenceHint } from "@/lib/keys";
@@ -385,14 +386,14 @@ function InviteRow({ invite }: { invite: IncomingInvite }) {
   const [pending, start] = useTransition();
 
   function settle(
-    run: () => Promise<{ error: string | null }>,
+    run: () => Promise<ActionResult>,
     failure: string,
   ) {
     setError(null);
     start(async () => {
       try {
         const res = await run();
-        if (res.error) {
+        if (!res.ok) {
           setError(res.error);
           return;
         }

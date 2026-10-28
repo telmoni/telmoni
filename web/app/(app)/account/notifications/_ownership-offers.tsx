@@ -1,8 +1,5 @@
 "use client";
 
-import { unstable_rethrow } from "next/navigation";
-import { useState, useTransition } from "react";
-
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { LocalTime } from "@/components/local-time";
 import { Badge } from "@/components/ui/badge";
@@ -10,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { organizationLabel, personName } from "@/lib/identity";
 import type { OrganizationEntry } from "@/lib/server/entities/organization";
+import { useAction } from "@/lib/use-action";
 
 import { acceptOwnershipAction, declineOwnershipAction } from "./ownership-actions";
 
@@ -37,26 +35,12 @@ export function OwnershipOffersSection({
 }
 
 function OwnershipOffer({ offer }: { offer: OrganizationEntry }) {
-  const [error, setError] = useState<string | null>(null);
-  const [pending, start] = useTransition();
+  const { pending, error, run: answer } = useAction();
 
   const label = organizationLabel(offer);
   const owner = offer.ownerEmail
     ? personName({ displayName: offer.ownerDisplayName, email: offer.ownerEmail })
     : "The owner";
-
-  function answer(run: () => Promise<{ error: string | null }>) {
-    setError(null);
-    start(async () => {
-      try {
-        const r = await run();
-        if (r.error) setError(r.error);
-      } catch (err) {
-        unstable_rethrow(err);
-        setError("Network error. Try again.");
-      }
-    });
-  }
 
   return (
     <Card className="grid gap-3">

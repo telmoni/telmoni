@@ -1,10 +1,8 @@
 "use client";
 
-import { unstable_rethrow } from "next/navigation";
-import { useState, useTransition } from "react";
-
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { Button } from "@/components/ui/button";
+import { useAction } from "@/lib/use-action";
 
 import { leaveProjectAction } from "../[project]/members/actions";
 
@@ -15,8 +13,7 @@ export function LeaveProject({
   projectId: string;
   name: string;
 }) {
-  const [error, setError] = useState<string | null>(null);
-  const [pending, start] = useTransition();
+  const { pending, error, run } = useAction();
 
   return (
     <div className="flex items-center justify-end gap-3">
@@ -36,18 +33,7 @@ export function LeaveProject({
         title={`Leave ${name}?`}
         description="You will lose access to this project immediately."
         confirmLabel="Leave"
-        onConfirm={() =>
-          start(async () => {
-            setError(null);
-            try {
-              const r = await leaveProjectAction(projectId);
-              if (r.error) setError(r.error);
-            } catch (err) {
-              unstable_rethrow(err);
-              setError("Network error. Try again.");
-            }
-          })
-        }
+        onConfirm={() => run(() => leaveProjectAction(projectId))}
       />
     </div>
   );

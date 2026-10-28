@@ -81,7 +81,7 @@ describe.each([
 ] as const)("answering an ownership offer: %s", (verb, answer) => {
   it("sends the organization the offer is for, not the one the console stands in", async () => {
     fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
-    expect(await answer("org_offered")).toEqual({ error: null });
+    expect(await answer("org_offered")).toEqual({ ok: true });
 
     expect(fetchMock).toHaveBeenCalledWith(
       `http://auth.test/internal/v1/organization/owner-transfer/${verb}`,
@@ -116,11 +116,12 @@ describe.each([
   it("reports an unreachable service and a refusal distinctly, and tells nobody of either", async () => {
     fetchMock.mockResolvedValue(null);
     expect(await answer("org_offered")).toEqual({
+      ok: false,
       error: "Organizations are unavailable right now — try again shortly.",
     });
 
     fetchMock.mockResolvedValue(new Response(null, { status: 409 }));
-    expect(await answer("org_offered")).toEqual({ error: "problem" });
+    expect(await answer("org_offered")).toEqual({ ok: false, error: "problem" });
 
     expect(mockPublishEvent).not.toHaveBeenCalled();
     expect(mockRevalidate).not.toHaveBeenCalled();
@@ -131,6 +132,7 @@ describe.each([
   it("tells a signed-out caller to sign in again, and asks auth nothing", async () => {
     vi.mocked(getServerSession).mockResolvedValue(null);
     expect(await answer("org_offered")).toEqual({
+      ok: false,
       error: "Your session expired — sign in again.",
     });
     expect(fetchMock).not.toHaveBeenCalled();
@@ -141,6 +143,7 @@ describe.each([
   it("refuses anything but an organization id, and asks auth nothing", async () => {
     for (const bad of ["", "user_1", "org_offered\r\nx-service-secret: leaked"]) {
       expect(await answer(bad), JSON.stringify(bad)).toEqual({
+        ok: false,
         error: "That is not an organization.",
       });
     }
@@ -216,9 +219,7 @@ describe("answering the offer of a project", () => {
         { status: 200 },
       ),
     );
-    expect(await acceptProjectOfferAction("project_offered", "org_own")).toEqual({
-      error: null,
-    });
+    expect(await acceptProjectOfferAction("project_offered", "org_own")).toEqual({ ok: true });
     expect(mockRedirect).not.toHaveBeenCalled();
     expect(mockRevalidate).toHaveBeenCalledWith("/", "layout");
   });
@@ -227,7 +228,7 @@ describe("answering the offer of a project", () => {
     fetchMock.mockResolvedValue(
       new Response(JSON.stringify({ ownerOrganizationId: "org_from" }), { status: 200 }),
     );
-    expect(await declineProjectOfferAction("project_offered")).toEqual({ error: null });
+    expect(await declineProjectOfferAction("project_offered")).toEqual({ ok: true });
     expect(fetchMock).toHaveBeenCalledWith(
       "http://auth.test/internal/v1/projects/project_offered/transfer/decline",
       expect.objectContaining({ method: "POST", body: JSON.stringify({}) }),
@@ -242,11 +243,13 @@ describe("answering the offer of a project", () => {
   it("reports an unreachable service and a refusal distinctly, and moves nothing", async () => {
     fetchMock.mockResolvedValue(null);
     expect(await acceptProjectOfferAction("project_offered", "org_own")).toEqual({
+      ok: false,
       error: "Organizations are unavailable right now — try again shortly.",
     });
 
     fetchMock.mockResolvedValue(new Response(null, { status: 409 }));
     expect(await acceptProjectOfferAction("project_offered", "org_own")).toEqual({
+      ok: false,
       error: "problem",
     });
 
@@ -259,13 +262,16 @@ describe("answering the offer of a project", () => {
   it("refuses anything but a project and an organization id, and asks auth nothing", async () => {
     for (const bad of ["", "org_1", "project_offered\r\nx: leaked"]) {
       expect(await acceptProjectOfferAction(bad, "org_own"), JSON.stringify(bad)).toEqual({
+        ok: false,
         error: "That is not a project.",
       });
     }
     expect(await acceptProjectOfferAction("project_offered", "user_1")).toEqual({
+      ok: false,
       error: "That is not an organization.",
     });
     expect(await declineProjectOfferAction("org_1")).toEqual({
+      ok: false,
       error: "That is not a project.",
     });
     expect(fetchMock).not.toHaveBeenCalled();

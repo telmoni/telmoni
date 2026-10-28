@@ -78,7 +78,7 @@ function ProjectOfferCard({
     start(async () => {
       try {
         const r = await declineProjectOfferAction(offer.projectId);
-        if (r.error) setError(r.error);
+        if (!r.ok) setError(r.error);
       } catch (err) {
         unstable_rethrow(err);
         setError("Network error. Try again.");
@@ -166,7 +166,7 @@ function AcceptDialog({
         // catch below. One that answers is a refusal, or a landing auth did
         // not place, whose page the action draws again without the offer.
         const r = await acceptProjectOfferAction(offer.projectId, destination);
-        if (r.error) {
+        if (!r.ok) {
           onError(r.error);
           onOpenChange(false);
         }

@@ -32,24 +32,21 @@ import {
   extractInviteLink,
   isGivenRole,
 } from "@/lib/members/shared";
-
-export interface ActionResult {
-  error: string | null;
-}
+import { type ActionResult, type Refused, refused } from "@/lib/action-result";
 
 export async function inviteMemberAction(
   projectId: string,
   email: string,
   role: "admin" | "member",
-): Promise<ActionResult & { link?: string }> {
-  if (!isGivenRole(role)) return { error: NOT_A_GIVEN_ROLE };
+): Promise<ActionResult<{ link?: string }>> {
+  if (!isGivenRole(role)) return refused(NOT_A_GIVEN_ROLE);
   const gate = await open("members:invite", 10, projectId);
   if ("error" in gate) return gate;
   const off = await featureOff(Flag.Members);
-  if (off) return { error: off };
+  if (off) return refused(off);
 
   const trimmed = email.trim();
-  if (!trimmed) return { error: "Enter the email address of the person to invite." };
+  if (!trimmed) return refused("Enter the email address of the person to invite.");
 
   const res = await tryFetchWithTimeout(
     `${gate.base}/internal/v1/projects/${encodeURIComponent(gate.projectId)}/invites`,
@@ -60,9 +57,9 @@ export async function inviteMemberAction(
     },
   );
   if (!res) {
-    return { error: "Organizations are unavailable right now — try again shortly." };
+    return refused("Organizations are unavailable right now — try again shortly.");
   }
-  if (!res.ok) return { error: (await extractProblem(res)).message };
+  if (!res.ok) return refused((await extractProblem(res)).message);
   const body: unknown = await res.json().catch(() => null);
   const data = body as {
     id?: string;
@@ -100,7 +97,7 @@ export async function inviteMemberAction(
   }
 
   refresh();
-  return { error: null, link };
+  return { ok: true, link };
 }
 
 // A seat for a member of the organization, given with nothing to accept: the
@@ -112,11 +109,11 @@ export async function addMemberAction(
   memberId: string,
   role: "admin" | "member",
 ): Promise<ActionResult> {
-  if (!isGivenRole(role)) return { error: NOT_A_GIVEN_ROLE };
+  if (!isGivenRole(role)) return refused(NOT_A_GIVEN_ROLE);
   const gate = await open("members:add", 30, projectId);
   if ("error" in gate) return gate;
   const off = await featureOff(Flag.Members);
-  if (off) return { error: off };
+  if (off) return refused(off);
 
   const res = await tryFetchWithTimeout(
     `${gate.base}/internal/v1/projects/${encodeURIComponent(gate.projectId)}/members`,
@@ -142,7 +139,7 @@ export async function addMemberAction(
     });
   }
   refresh();
-  return { error: null };
+  return { ok: true };
 }
 
 export async function revokeInviteAction(
@@ -156,7 +153,7 @@ export async function revokeInviteAction(
     { method: "DELETE", headers: gate.headers },
   );
   const ans = await answer(res);
-  if (ans.error || !res) return ans;
+  if (!ans.ok || !res) return ans;
 
   const body: unknown = await res.json().catch(() => null);
   const data = body as { email?: string; ownerOrganizationId?: string } | null;
@@ -176,7 +173,7 @@ export async function updateMemberRoleAction(
   memberId: string,
   role: "admin" | "member",
 ): Promise<ActionResult> {
-  if (!isGivenRole(role)) return { error: NOT_A_GIVEN_ROLE };
+  if (!isGivenRole(role)) return refused(NOT_A_GIVEN_ROLE);
   const gate = await open("members:role", 30, projectId);
   if ("error" in gate) return gate;
   // The channel told is the member's own console, so their address comes
@@ -252,7 +249,7 @@ export async function offerProjectAction(
 
   await tellOfferRecipients(res, gate.organizationId, gate.projectId);
   revalidatePath("/(app)/[organization]/[project]/members", "page");
-  return { error: null };
+  return { ok: true };
 }
 
 /// Withdraw the project's live offer.
@@ -267,7 +264,7 @@ export async function cancelProjectOfferAction(projectId: string): Promise<Actio
 
   await tellOfferRecipients(res, gate.organizationId, gate.projectId);
   revalidatePath("/(app)/[organization]/[project]/members", "page");
-  return { error: null };
+  return { ok: true };
 }
 
 /// The live notice to everybody whose offer just changed, at the addresses
@@ -342,22 +339,22 @@ async function open(
       headers: Record<string, string>;
       session: SessionData;
     }
-  | { error: string; base?: undefined }
+  | Refused
 > {
   const session = await getServerSession();
-  if (!session) return { error: "Your session expired — sign in again." };
+  if (!session) return refused("Your session expired — sign in again.");
   const limited = await rateLimit(sessionKey(session, bucket), {
     limit,
     windowMs: 60_000,
   });
-  if (limited) return { error: "Too many requests — slow down a moment." };
+  if (limited) return refused("Too many requests — slow down a moment.");
   // The id becomes a header and a path segment of the upstream URL: anything
   // but a project id is refused before it can aim the request elsewhere.
   if (!isProjectId(projectId)) {
-    return { error: "Couldn't resolve that project. Reload and try again." };
+    return refused("Couldn't resolve that project. Reload and try again.");
   }
   const ctx = await identityContext();
-  if (!ctx) return { error: await unplacedOrganization() };
+  if (!ctx) return refused(await unplacedOrganization());
   return {
     base: env.SERVER_URL,
     projectId,

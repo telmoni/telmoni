@@ -2,17 +2,19 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { ActionResult } from "@/lib/action-result";
+
 import { Role } from "@/lib/types/enums";
 
 const actions = vi.hoisted(() => ({
-  addMemberAction: vi.fn(async (): Promise<{ error: string | null }> => ({ error: null })),
-  inviteMemberAction: vi.fn(async () => ({ error: null })),
-  leaveProjectAction: vi.fn(async (): Promise<{ error: string | null }> => ({ error: null })),
-  removeMemberAction: vi.fn(async () => ({ error: null })),
-  revokeInviteAction: vi.fn(async () => ({ error: null })),
-  updateMemberRoleAction: vi.fn(async () => ({ error: null })),
-  offerProjectAction: vi.fn(async () => ({ error: null })),
-  cancelProjectOfferAction: vi.fn(async () => ({ error: null })),
+  addMemberAction: vi.fn(async (): Promise<ActionResult> => ({ ok: true })),
+  inviteMemberAction: vi.fn(async () => ({ ok: true })),
+  leaveProjectAction: vi.fn(async (): Promise<ActionResult> => ({ ok: true })),
+  removeMemberAction: vi.fn(async () => ({ ok: true })),
+  revokeInviteAction: vi.fn(async () => ({ ok: true })),
+  updateMemberRoleAction: vi.fn(async () => ({ ok: true })),
+  offerProjectAction: vi.fn(async () => ({ ok: true })),
+  cancelProjectOfferAction: vi.fn(async () => ({ ok: true })),
 }));
 vi.mock("./actions", () => actions);
 
@@ -238,7 +240,7 @@ describe("MembersPage: adding from the organization", () => {
   });
 
   it("keeps the dialog open with auth's refusal", async () => {
-    actions.addMemberAction.mockResolvedValueOnce({ error: "that person is already a member" });
+    actions.addMemberAction.mockResolvedValueOnce({ ok: false, error: "that person is already a member" });
     const dialog = await asOwner();
     await choose(dialog, "user_dana");
     await press("Add");
@@ -287,7 +289,7 @@ describe("MembersPage: adding from the organization", () => {
   });
 
   it("forgets one way's refusal on switching to the other", async () => {
-    actions.addMemberAction.mockResolvedValueOnce({ error: "that person is already a member" });
+    actions.addMemberAction.mockResolvedValueOnce({ ok: false, error: "that person is already a member" });
     const dialog = await asOwner();
     await choose(dialog, "user_dana");
     await press("Add");
@@ -663,7 +665,7 @@ describe("MembersPage: leaving", () => {
   });
 
   it("shows auth's refusal on the row", async () => {
-    actions.leaveProjectAction.mockResolvedValueOnce({ error: "the project is busy — try again in a moment" });
+    actions.leaveProjectAction.mockResolvedValueOnce({ ok: false, error: "the project is busy — try again in a moment" });
     asPerson("user_2");
     mockProject = projectAs(Role.Admin);
     render(await page());

@@ -42,7 +42,7 @@ export function useGivenSeat(
     start(async () => {
       try {
         const r = await markSeatSeenAction(seat.projectId);
-        if (r.error) say(r.error);
+        if (!r.ok) say(r.error);
         else {
           onGone?.();
           removeGivenSeat(seat.projectId);

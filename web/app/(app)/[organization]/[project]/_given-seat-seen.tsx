@@ -16,7 +16,7 @@ export function GivenSeatSeen({ projectId }: { projectId: string }) {
     if (!waiting) return;
     markSeatSeenAction(projectId).then(
       (r) => {
-        if (!r.error) removeGivenSeat(projectId);
+        if (r.ok) removeGivenSeat(projectId);
       },
       // Left waiting, as a refused mark leaves it: the bell still offers it.
       () => {},
