@@ -27,6 +27,7 @@ use crate::{
     db::{AuthLane, identities, locks, members, organization_members, organizations},
     handler::{
         ActingOrganization, acting_organization,
+        answer::{InviteCreated, InviteRevoked, Invites, Roster},
         invite::{admit_invitation, ceiling_of, roster_ceiling},
         organization_of, organization_role_or_forbidden,
     },
@@ -81,7 +82,10 @@ pub async fn list_organization_members(
     // Read once the roster's connection is back, never beside it.
     let ceiling = roster_ceiling(&state, &organization).await?;
 
-    Ok(Json(json!({ "members": rows, "ceiling": ceiling })))
+    Ok(Json(Roster {
+        members: rows,
+        ceiling,
+    }))
 }
 
 /// `PUT /internal/v1/organization/members/{member_id}/role` — update a member's role.
@@ -259,7 +263,7 @@ pub async fn list_organization_invites(
     let rows = organization_members::list_invites(&mut tx, &organization).await?;
     tx.commit().await?;
 
-    Ok(Json(json!({ "invites": rows })))
+    Ok(Json(Invites { invites: rows }))
 }
 
 /// `POST /internal/v1/organization/invites` — invite a person to the organization.
@@ -376,12 +380,12 @@ pub async fn create_organization_invite(
 
     Ok((
         StatusCode::CREATED,
-        Json(json!({
-            "id": invite_id,
-            "link": link,
-            "expiresAt": expires_at,
-            "ownerOrganizationId": organization,
-        })),
+        Json(InviteCreated {
+            id: invite_id,
+            link,
+            expires_at,
+            owner_organization_id: organization,
+        }),
     ))
 }
 
@@ -429,9 +433,9 @@ pub async fn revoke_organization_invite(
     .await?;
     tx.commit().await?;
 
-    Ok(Json(json!({
-        "inviteId": invite_id,
-        "email": email,
-        "ownerOrganizationId": organization,
-    })))
+    Ok(Json(InviteRevoked {
+        invite_id,
+        email,
+        owner_organization_id: organization,
+    }))
 }

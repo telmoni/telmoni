@@ -17,7 +17,9 @@ use axum::{
     response::{IntoResponse, Response},
     routing::get,
 };
-use serde_json::json;
+use chrono::{DateTime, Utc};
+use serde::Serialize;
+use uuid::Uuid;
 
 use telmoni_shared::acting::ActingKey;
 use telmoni_shared::db::tenant_session::{maintenance_scope, project_scope};
@@ -26,10 +28,10 @@ use telmoni_shared::middleware::api_key::{ApiKeyGate, Refusal, require_api_key};
 use telmoni_shared::middleware::problem;
 use telmoni_shared::openapi::{Answer, Method, Route};
 use telmoni_shared::types::{API_TOKEN_PREFIX, ApiKeyScope, CONNECTION_BYTES};
-use telmoni_shared::{AuthError, Flag, TelmoniError, TenantError};
+use telmoni_shared::{AuthError, Flag, OrganizationId, Role, TelmoniError, TenantError, UserId};
 
 use crate::AppState;
-use crate::db::{AuthLane, organizations};
+use crate::db::{AuthLane, members, organizations};
 
 /// One `/v1` lane this service serves: what it is, and which handler answers.
 pub struct V1Lane {
@@ -300,12 +302,65 @@ pub async fn get_organization(
     let Some(summary) = summary else {
         return Err(AuthError::InvalidToken.into());
     };
-    Ok(Json(json!({
-        "organization_id": key.organization_id,
-        "slug": summary.slug,
-        "name": summary.name,
-        "owner": summary.owner_email.map(|email| json!({ "email": email, "display_name": summary.owner_display_name })),
-    })))
+    Ok(Json(V1Organization {
+        organization_id: key.organization_id,
+        slug: summary.slug,
+        name: summary.name,
+        owner: summary.owner_email.map(|email| V1Owner {
+            email,
+            display_name: summary.owner_display_name,
+        }),
+    }))
+}
+
+/// `/v1/organization`'s answer, as `api/reference.mdx` publishes it.
+#[derive(Debug, Serialize)]
+pub struct V1Organization {
+    pub organization_id: OrganizationId,
+    pub slug: String,
+    pub name: String,
+    /// None once the owner's row is gone.
+    pub owner: Option<V1Owner>,
+}
+
+/// The organization's owner, by address and name.
+#[derive(Debug, Serialize)]
+pub struct V1Owner {
+    pub email: String,
+    pub display_name: Option<String>,
+}
+
+/// `/v1/members`' answer.
+#[derive(Debug, Serialize)]
+pub struct V1Members {
+    pub members: Vec<V1Member>,
+}
+
+/// One row of `/v1/members`, as `api/reference.mdx` publishes it: a copy of
+/// the console's roster row, so a field the console gains is not published.
+#[derive(Debug, Serialize)]
+pub struct V1Member {
+    pub id: Uuid,
+    pub member_id: UserId,
+    pub email: String,
+    pub display_name: Option<String>,
+    pub role: Role,
+    pub created_at: DateTime<Utc>,
+    pub offer_expires_at: Option<DateTime<Utc>>,
+}
+
+impl From<members::Member> for V1Member {
+    fn from(row: members::Member) -> Self {
+        Self {
+            id: row.id,
+            member_id: row.member_id,
+            email: row.email,
+            display_name: row.display_name,
+            role: row.role,
+            created_at: row.created_at,
+            offer_expires_at: row.offer_expires_at,
+        }
+    }
 }
 
 /// `GET /v1/members` — the roster of the PROJECT the key was minted on,
@@ -321,7 +376,9 @@ pub async fn list_members(
 ) -> Result<impl IntoResponse, TelmoniError> {
     let tx = project_scope(&state.db, &key.project_id).await?;
     let mut tx = tx.bind_organization(&key.organization_id).await?;
-    let rows = crate::db::members::list_for_project(&mut tx, &key.project_id).await?;
+    let rows = members::list_for_project(&mut tx, &key.project_id).await?;
     tx.commit().await?;
-    Ok(Json(json!({ "members": rows })))
+    Ok(Json(V1Members {
+        members: rows.into_iter().map(V1Member::from).collect(),
+    }))
 }

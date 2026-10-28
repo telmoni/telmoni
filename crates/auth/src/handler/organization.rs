@@ -14,7 +14,7 @@ use axum::{
     response::IntoResponse,
 };
 use chrono::{Duration, Utc};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use telmoni_shared::OrganizationAction;
@@ -38,6 +38,7 @@ use crate::{
         account::DeletionRequest,
         account::wrong_code,
         acting_organization,
+        answer::Sent,
         deletion::{deletion_metadata, request_deletion},
         organization_of, organization_role_or_forbidden,
     },
@@ -102,7 +103,7 @@ pub async fn request_organization_deletion_code(
     }
 
     tracing::info!(organization_id = %organization, "organization-deletion confirmation code issued");
-    Ok((StatusCode::ACCEPTED, Json(json!({ "sent": true }))))
+    Ok((StatusCode::ACCEPTED, Json(Sent::MAILED)))
 }
 
 /// `DELETE /internal/v1/organization` — the owner deletes the organization in
@@ -279,8 +280,27 @@ pub async fn create_organization(
     tracing::info!(organization_id = %founded.id, user_id = %founder, "organization created");
     Ok((
         StatusCode::CREATED,
-        Json(json!({ "id": founded.id, "slug": founded.slug, "name": name })),
+        Json(OrganizationCreated {
+            id: founded.id,
+            slug: founded.slug,
+            name,
+        }),
     ))
+}
+
+/// An organization founded: its id, and the slug and name it goes by.
+#[derive(Debug, Serialize)]
+pub struct OrganizationCreated {
+    pub id: OrganizationId,
+    pub slug: String,
+    pub name: String,
+}
+
+/// An organization renamed: the name and slug it goes by now.
+#[derive(Debug, Serialize)]
+pub struct OrganizationNamed {
+    pub name: String,
+    pub slug: String,
 }
 
 /// What a deployment that founds an organization itself asks first
@@ -606,7 +626,10 @@ pub async fn update_organization(
 
     tx.commit().await?;
     tracing::info!(organization_id = %organization, "organization updated");
-    Ok(Json(json!({ "name": now.name, "slug": now.slug })))
+    Ok(Json(OrganizationNamed {
+        name: now.name,
+        slug: now.slug,
+    }))
 }
 
 /// A slug another organization holds, chosen on Settings, as a 409 rather than

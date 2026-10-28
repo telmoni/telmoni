@@ -46,6 +46,7 @@
 
 use axum::http::StatusCode;
 use chrono::{DateTime, Utc};
+use serde::Serialize;
 use serde_json::json;
 
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
@@ -724,15 +725,33 @@ pub(crate) async fn deletion_response(
     state: &AppState,
     organization: &OrganizationId,
     erase_after: DateTime<Utc>,
-) -> (StatusCode, Json<serde_json::Value>) {
+) -> (StatusCode, Json<OrganizationDeleted>) {
     let purged = matches!(
         run_inline_tail(state, organization).await,
         TailOutcome::Purged
     );
     (
         StatusCode::ACCEPTED,
-        Json(json!({ "purged": purged, "erase_after": erase_after })),
+        Json(OrganizationDeleted {
+            purged,
+            erase_after,
+        }),
     )
+}
+
+/// An organization's deletion begun: whether its data is purged already,
+/// and when its row is erased.
+#[derive(Debug, Serialize)]
+pub struct OrganizationDeleted {
+    pub purged: bool,
+    pub erase_after: DateTime<Utc>,
+}
+
+/// An account's deletion: whether the person is gone now, or the sweeps
+/// finish it.
+#[derive(Debug, Serialize)]
+pub struct AccountDeleted {
+    pub deleted: bool,
 }
 
 /// Run an account's tails inline, within one budget, and answer: 200 when
@@ -745,7 +764,7 @@ pub(crate) async fn account_deletion_response(
     state: &AppState,
     user_id: &UserId,
     owned: &[OrganizationId],
-) -> (StatusCode, Json<serde_json::Value>) {
+) -> (StatusCode, Json<AccountDeleted>) {
     let budget = std::time::Duration::from_millis(state.config.deletion_tail_budget_ms);
     let tails = async {
         for organization in owned {
@@ -774,5 +793,5 @@ pub(crate) async fn account_deletion_response(
     } else {
         StatusCode::ACCEPTED
     };
-    (status, Json(json!({ "deleted": deleted })))
+    (status, Json(AccountDeleted { deleted }))
 }

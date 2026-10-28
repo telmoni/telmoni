@@ -30,6 +30,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
 };
+use serde::Serialize;
 use serde_json::json;
 
 use telmoni_shared::OrganizationAction;
@@ -43,6 +44,7 @@ use telmoni_shared::{
     UserId,
 };
 
+use super::answer::Declined;
 use super::authorize_organization;
 use super::handover::{OfferAnswer, OfferRequest, Offered, offer_expires_at};
 use crate::{
@@ -427,7 +429,9 @@ pub async fn decline(
         tracing::warn!(organization_id = %organization, error = %e, "ownership declined mail failed");
     }
 
-    Ok(Json(json!({ "ownerOrganizationId": organization })))
+    Ok(Json(Declined {
+        owner_organization_id: organization,
+    }))
 }
 
 /// `POST /internal/v1/organization/owner-transfer/accept` — the admin holding a
@@ -576,8 +580,17 @@ pub async fn accept(
     }
 
     tracing::info!(organization_id = %organization, to = %user_id, "ownership transferred");
-    Ok(Json(json!({
-        "ownerOrganizationId": organization,
-        "previousOwner": previous,
-    })))
+    Ok(Json(OwnershipAccepted {
+        owner_organization_id: organization,
+        previous_owner: previous,
+    }))
+}
+
+/// The organization taken over: whose console to tell, and who owned it
+/// until now.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OwnershipAccepted {
+    pub owner_organization_id: OrganizationId,
+    pub previous_owner: Option<UserId>,
 }

@@ -37,7 +37,7 @@
 use std::sync::Arc;
 
 use axum::{extract::State, http::StatusCode, response::IntoResponse};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit, lock_chain};
@@ -53,6 +53,7 @@ use telmoni_shared::{
     ProjectId, Role, TelmoniError, TelmoniResourceKind, UserId,
 };
 
+use super::answer::Declined;
 use super::handover::{OfferAnswer, OfferRequest, Offered, offer_expires_at};
 use crate::{
     AppState,
@@ -389,7 +390,9 @@ pub async fn decline(
         tracing::warn!(project_id = %project_id, error = %e, "project declined mail failed");
     }
 
-    Ok(Json(json!({ "ownerOrganizationId": organization })))
+    Ok(Json(Declined {
+        owner_organization_id: organization,
+    }))
 }
 
 /// Where a project landed, and the seats that came with it.
@@ -934,15 +937,39 @@ pub async fn accept(
         to = %destination,
         "project transferred"
     );
-    Ok(Json(json!({
-        "projectId": project_id,
-        "slug": landed.slug,
-        "organizationId": destination,
-        "organizationSlug": landed.organization_slug,
-        "previousOrganizationId": source,
-        "previousOwner": previous,
-        "name": landed.name,
-    })))
+    Ok(Json(ProjectAccepted {
+        moved: ProjectMoved {
+            project_id,
+            slug: landed.slug,
+            organization_id: destination,
+            organization_slug: landed.organization_slug,
+            previous_organization_id: source,
+            name: landed.name,
+        },
+        previous_owner: previous,
+    }))
+}
+
+/// A project moved to another organization: where it landed, by the slugs
+/// its pages go by, where it came from, and its name.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectMoved {
+    pub project_id: ProjectId,
+    pub slug: String,
+    pub organization_id: OrganizationId,
+    pub organization_slug: Option<String>,
+    pub previous_organization_id: OrganizationId,
+    pub name: String,
+}
+
+/// A project taken over: the move, and who owned it until now.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectAccepted {
+    #[serde(flatten)]
+    pub moved: ProjectMoved,
+    pub previous_owner: UserId,
 }
 
 /// Body of `POST /internal/v1/projects/{project_id}/move`.
@@ -1060,14 +1087,14 @@ pub async fn move_project(
         to = %destination,
         "project moved"
     );
-    Ok(Json(json!({
-        "projectId": project_id,
-        "slug": landed.slug,
-        "organizationId": destination,
-        "organizationSlug": landed.organization_slug,
-        "previousOrganizationId": source,
-        "name": landed.name,
-    })))
+    Ok(Json(ProjectMoved {
+        project_id,
+        slug: landed.slug,
+        organization_id: destination,
+        organization_slug: landed.organization_slug,
+        previous_organization_id: source,
+        name: landed.name,
+    }))
 }
 
 struct MoveAudits<'a> {

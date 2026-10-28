@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use axum::{extract::State, http::StatusCode, response::IntoResponse};
 use chrono::{Duration, Utc};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use telmoni_shared::OrganizationAction;
@@ -14,9 +14,10 @@ use telmoni_shared::extract::{Json, Path};
 use telmoni_shared::person_token::Principal;
 use telmoni_shared::rbac::{Resource, Verb};
 use telmoni_shared::{
-    AuditAction, AuthError, AuthzError, OrganizationRole, ProjectId, Role, TelmoniError,
-    TelmoniResourceKind, UserId,
+    AuditAction, AuthError, AuthzError, OrganizationId, OrganizationRole, ProjectId, Role,
+    TelmoniError, TelmoniResourceKind, UserId,
 };
+use uuid::Uuid;
 
 use super::authorize_organization;
 use crate::{
@@ -25,7 +26,10 @@ use crate::{
         AuthLane, audit, flags, identities, invites, members, organization_members, organizations,
         projects,
     },
-    handler::{ActingProject, acting_project, authorize, hold_project, invite::INVITE_DAILY_MAX},
+    handler::{
+        ActingProject, acting_project, answer::Roster, authorize, hold_project,
+        invite::INVITE_DAILY_MAX,
+    },
     model::AuditKind,
 };
 
@@ -102,7 +106,10 @@ pub async fn list_members(
         None
     };
 
-    Ok(Json(json!({ "members": rows, "ceiling": ceiling })))
+    Ok(Json(Roster {
+        members: rows,
+        ceiling,
+    }))
 }
 
 /// `POST /internal/v1/projects/{project_id}/members` — a seat for a member of
@@ -251,14 +258,34 @@ pub async fn give_seat(
     tracing::info!(project_id = %project_id, member = %member, %role, "member seated from the roster");
     Ok((
         StatusCode::CREATED,
-        Json(json!({
-            "id": seat,
-            "memberId": member,
-            "email": person.email,
-            "role": role,
-            "ownerOrganizationId": organization,
-        })),
+        Json(SeatGiven {
+            id: seat,
+            member_id: member,
+            email: person.email,
+            role,
+            owner_organization_id: organization,
+        }),
     ))
+}
+
+/// A seat given from the roster: whose, at which role, and whose console to
+/// tell.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SeatGiven {
+    pub id: Uuid,
+    pub member_id: UserId,
+    pub email: String,
+    pub role: Role,
+    pub owner_organization_id: OrganizationId,
+}
+
+/// A seat seen by its holder: whose console to tell, none where the seat
+/// is gone.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SeatSeen {
+    pub organization_id: Option<OrganizationId>,
 }
 
 /// The roster is the organization's: its owner and admins give seats from
@@ -297,7 +324,9 @@ pub async fn mark_seat_seen(
     // role's `lock_timeout` answers 409, as every lock wait does.
     let organization = members::mark_seen(&mut tx, &project_id, &principal.user_id).await?;
     tx.commit().await?;
-    Ok(Json(json!({ "organizationId": organization })))
+    Ok(Json(SeatSeen {
+        organization_id: organization,
+    }))
 }
 
 /// `PUT /internal/v1/projects/{project_id}/members/{member_id}/role`.

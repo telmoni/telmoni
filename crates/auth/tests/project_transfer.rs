@@ -548,7 +548,7 @@ async fn accepting_moves_the_project_with_its_keys_and_seats_and_both_chains_rec
         OWNER,
         Some(&h.source),
         Some(&h.project),
-        Some(json!({ "name": "ci", "created_by": OWNER, "scopes": ["read"] })),
+        Some(json!({ "name": "ci", "scopes": ["read"] })),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{minted}");
@@ -2062,7 +2062,7 @@ async fn the_owner_moves_a_project_into_another_of_their_organizations(pool: PgP
         OWNER,
         Some(&h.source),
         Some(&h.project),
-        Some(json!({ "name": "ci", "created_by": OWNER, "scopes": ["read"] })),
+        Some(json!({ "name": "ci", "scopes": ["read"] })),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{minted}");
@@ -3065,7 +3065,7 @@ async fn mint_key(pool: &PgPool, h: &Handover) -> String {
         OWNER,
         Some(&h.source),
         Some(&h.project),
-        Some(json!({ "name": "ci", "created_by": OWNER, "scopes": ["read"] })),
+        Some(json!({ "name": "ci", "scopes": ["read"] })),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "minting a key: {body}");
@@ -3168,7 +3168,7 @@ async fn a_key_minted_as_its_project_is_accepted_is_refused(pool: PgPool) {
                 OWNER,
                 Some(&source),
                 Some(&project),
-                Some(json!({ "name": "ci", "created_by": OWNER, "scopes": ["read"] })),
+                Some(json!({ "name": "ci", "scopes": ["read"] })),
             )
             .await
         }
@@ -3386,7 +3386,7 @@ async fn a_key_or_invitation_lane_kept_waiting_for_its_organization_is_a_conflic
             "/internal/v1/tokens".to_owned(),
             OWNER,
             Some(h.source.as_str()),
-            Some(json!({ "name": "ci", "created_by": OWNER, "scopes": ["read"] })),
+            Some(json!({ "name": "ci", "scopes": ["read"] })),
         ),
         (
             "POST",
@@ -3455,7 +3455,7 @@ async fn a_stranger_is_refused_by_the_key_and_invitation_lanes_without_queueing(
         (
             "POST",
             "/internal/v1/tokens".to_owned(),
-            Some(json!({ "name": "ci", "created_by": stranger, "scopes": ["read"] })),
+            Some(json!({ "name": "ci", "scopes": ["read"] })),
             StatusCode::FORBIDDEN,
         ),
         (

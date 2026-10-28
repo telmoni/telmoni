@@ -176,7 +176,7 @@ async fn mint(pool: &PgPool, owner: &str, organization: &str, project: &str, nam
         owner,
         organization,
         Some(project),
-        Some(json!({ "name": name, "created_by": owner, "scopes": ["read"] })),
+        Some(json!({ "name": name, "scopes": ["read"] })),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "mint on {project}");

@@ -11,8 +11,7 @@ use axum::{
     response::IntoResponse,
 };
 use chrono::{DateTime, Utc};
-use serde::Deserialize;
-use serde_json::json;
+use serde::{Deserialize, Serialize};
 
 use axum::http::HeaderMap;
 use uuid::Uuid;
@@ -276,11 +275,27 @@ pub async fn list_audit_exports(
     // What one file may hold, for the console's word on a `too_large`: the
     // bytes are the plan's, so only the server can say.
     let max_bytes = audit_export::cap_for(&state, &organization_id).await;
-    Ok(Json(json!({
-        "exports": exports,
-        "max_rows": audit_export::MAX_ROWS,
-        "max_bytes": max_bytes,
-    })))
+    Ok(Json(ExportList {
+        exports,
+        max_rows: audit_export::MAX_ROWS,
+        max_bytes,
+    }))
+}
+
+/// The person's exports, newest first, and what one file may hold.
+#[derive(Debug, Serialize)]
+pub struct ExportList {
+    pub exports: Vec<audit_exports::ExportEntry>,
+    pub max_rows: i64,
+    pub max_bytes: usize,
+}
+
+/// One page of a chain, and the cursor to the page after it while one may
+/// follow.
+#[derive(Debug, Serialize)]
+pub struct AuditPage {
+    pub events: Vec<AuditRow>,
+    pub next_cursor: Option<Uuid>,
 }
 
 /// `GET /internal/v1/audit/organizations/{organization_id}/exports/{export_id}`
@@ -322,10 +337,13 @@ pub async fn download_audit_export(
 }
 
 /// One page of a chain, as both lists answer it.
-fn page(events: Vec<AuditRow>, limit: i64) -> Json<serde_json::Value> {
+fn page(events: Vec<AuditRow>, limit: i64) -> Json<AuditPage> {
     let next_cursor = events
         .last()
         .filter(|_| i64::try_from(events.len()).is_ok_and(|n| n == limit))
         .map(|r| r.id);
-    Json(json!({ "events": events, "next_cursor": next_cursor }))
+    Json(AuditPage {
+        events,
+        next_cursor,
+    })
 }

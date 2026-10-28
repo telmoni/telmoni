@@ -5,6 +5,7 @@
 use std::sync::Arc;
 
 use axum::{extract::State, http::HeaderMap, http::StatusCode, response::IntoResponse};
+use serde::Serialize;
 use serde_json::json;
 
 use telmoni_shared::OrganizationAction;
@@ -14,6 +15,7 @@ use telmoni_shared::extract::{Json, Path};
 use telmoni_shared::person_token::Principal;
 use telmoni_shared::{AuditAction, AuthError, ProjectId, TelmoniError, TelmoniResourceKind};
 
+use super::answer::Projects;
 use super::authorize_organization;
 use crate::AppState;
 use crate::db::{AuthLane, projects};
@@ -61,7 +63,9 @@ pub async fn list_projects(
     let project_list =
         projects::list_for_organization_user(&mut tx, &organization_id, &user_id).await?;
     tx.commit().await?;
-    Ok(Json(json!({ "projects": project_list })))
+    Ok(Json(Projects {
+        projects: project_list,
+    }))
 }
 
 /// `GET /internal/v1/projects/everywhere` — every project the caller can open, in
@@ -75,7 +79,9 @@ pub async fn list_projects_everywhere(
     let mut tx = maintenance_scope(&state.db, AuthLane).await?;
     let project_list = projects::list_everywhere_for_user(&mut tx, &user_id).await?;
     tx.commit().await?;
-    Ok(Json(json!({ "projects": project_list })))
+    Ok(Json(Projects {
+        projects: project_list,
+    }))
 }
 
 /// Request payload for creating a project.
@@ -140,7 +146,12 @@ pub async fn create_project(
 
     Ok((
         StatusCode::CREATED,
-        Json(json!({ "id": project_id, "slug": slug, "name": name, "role": role })),
+        Json(projects::ProjectSummary {
+            id: project_id,
+            slug,
+            name,
+            role,
+        }),
     ))
 }
 
@@ -221,7 +232,20 @@ pub async fn delete_project(
     if let Err(e) = super::deletion::purge_project_telemetry(&state, &project_id).await {
         tracing::warn!(project_id = %project_id, error = %e, "telemetry's project purge failed after the delete");
     }
-    Ok(Json(json!({ "status": "deleted", "id": project_id })))
+    Ok(Json(ProjectDeleted { id: project_id }))
+}
+
+/// A project deleted, by its id.
+#[derive(Debug, Serialize)]
+pub struct ProjectDeleted {
+    pub id: ProjectId,
+}
+
+/// A project renamed: its name now, and the slug that follows it.
+#[derive(Debug, Serialize)]
+pub struct ProjectRenamed {
+    pub name: String,
+    pub slug: String,
 }
 
 /// Request payload for updating a project.
@@ -263,7 +287,8 @@ pub async fn update_project(
     };
 
     acting.tx.commit().await?;
-    Ok(Json(
-        json!({ "status": "ok", "name": trimmed, "slug": slug }),
-    ))
+    Ok(Json(ProjectRenamed {
+        name: trimmed,
+        slug,
+    }))
 }

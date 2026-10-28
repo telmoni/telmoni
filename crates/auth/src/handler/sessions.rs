@@ -35,7 +35,13 @@ pub async fn list(
     let sessions = crate::db::sessions::list(&mut tx, &principal.user_id).await?;
     tx.commit().await?;
 
-    Ok(Json(json!({ "sessions": sessions })))
+    Ok(Json(Sessions { sessions }))
+}
+
+/// The person's live sessions, newest first.
+#[derive(Debug, serde::Serialize)]
+pub struct Sessions {
+    pub sessions: Vec<crate::db::sessions::SessionRow>,
 }
 
 /// `POST /internal/v1/auth/sessions/{id}/revoke` — end one of the caller's own

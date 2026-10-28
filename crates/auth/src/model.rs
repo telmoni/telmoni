@@ -300,9 +300,6 @@ pub struct CreateTokenRequest {
     pub name: String,
     #[serde(default)]
     pub description: Option<String>,
-    /// Provider sub of the minter, supplied by the BFF, which holds the
-    /// request's authenticated identity.
-    pub created_by: String,
     /// What the key opens: one scope or both, never none. Required, so no
     /// caller mints a key that opens what nobody chose.
     pub scopes: Vec<ApiKeyScope>,

@@ -265,7 +265,7 @@ async fn validation_carries_the_set_and_v1_refuses_when_public_api_is_off(pool: 
             )
             .await
             .body(Body::from(
-                json!({ "name": "ci", "created_by": "u_owner", "scopes": ["read"] }).to_string(),
+                json!({ "name": "ci", "scopes": ["read"] }).to_string(),
             ))
             .unwrap(),
         )
@@ -385,7 +385,7 @@ async fn a_served_read_stamps_last_used_and_an_organizations_own_switch_refuses_
             )
             .await
             .body(Body::from(
-                json!({ "name": "ci", "created_by": "u_owner", "scopes": ["read"] }).to_string(),
+                json!({ "name": "ci", "scopes": ["read"] }).to_string(),
             ))
             .unwrap(),
         )
@@ -483,7 +483,7 @@ async fn a_switched_off_api_tokens_flag_refuses_minting_and_rotating_but_not_rev
         &project,
         "POST",
         "/internal/v1/tokens",
-        json!({ "name": "ci", "created_by": "u_owner", "scopes": ["read"] }),
+        json!({ "name": "ci", "scopes": ["read"] }),
     )
     .await;
     assert_eq!(minted.status(), StatusCode::CREATED);
@@ -500,7 +500,7 @@ async fn a_switched_off_api_tokens_flag_refuses_minting_and_rotating_but_not_rev
         &project,
         "POST",
         "/internal/v1/tokens",
-        json!({ "name": "ci-2", "created_by": "u_owner", "scopes": ["read"] }),
+        json!({ "name": "ci-2", "scopes": ["read"] }),
     )
     .await;
     assert_eq!(refused.status(), StatusCode::SERVICE_UNAVAILABLE);

@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use axum::{extract::State, http::StatusCode, response::IntoResponse};
 use chrono::{Duration, Utc};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use uuid::Uuid;
 
@@ -32,7 +32,11 @@ use crate::{
     AppState,
     db::{AuthLane, identities, invites, locks, members, organization_members, organizations},
     handler::{
-        acting_project, authorize, lock_membership, member::grantable, refuse_unless_still_in,
+        acting_project,
+        answer::{InviteCreated, InviteRevoked, Invites},
+        authorize, lock_membership,
+        member::grantable,
+        refuse_unless_still_in,
     },
     model::{AuditKind, InviteScope},
 };
@@ -139,7 +143,7 @@ async fn admit_seat(
 
 /// The ceiling as a roster page reads it: `null` where none is held.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
-pub(crate) struct RosterCeiling {
+pub struct RosterCeiling {
     /// How many the organization may hold, those invited among them.
     pub limit: u32,
     /// How many it holds against that: its members and everyone invited.
@@ -293,12 +297,12 @@ pub async fn create_invite(
     tracing::info!(project_id = %project_id, invite = %invite_id, %role, "member invited");
     Ok((
         StatusCode::CREATED,
-        Json(json!({
-            "id": invite_id,
-            "link": link,
-            "expiresAt": expires_at,
-            "ownerOrganizationId": organization,
-        })),
+        Json(InviteCreated {
+            id: invite_id,
+            link,
+            expires_at,
+            owner_organization_id: organization,
+        }),
     ))
 }
 
@@ -315,7 +319,7 @@ pub async fn list_invites(
     let rows = invites::list_pending(&mut acting.tx, &project_id).await?;
     acting.tx.commit().await?;
 
-    Ok(Json(json!({ "invites": rows })))
+    Ok(Json(Invites { invites: rows }))
 }
 
 /// `DELETE /internal/v1/projects/{project_id}/invites/{invite_id}` — take the
@@ -353,11 +357,11 @@ pub async fn revoke_invite(
     acting.tx.commit().await?;
 
     tracing::info!(project_id = %project_id, invite = %invite_id, "invitation revoked");
-    Ok(Json(json!({
-        "inviteId": invite_id,
-        "email": email,
-        "ownerOrganizationId": owner,
-    })))
+    Ok(Json(InviteRevoked {
+        invite_id,
+        email,
+        owner_organization_id: owner,
+    }))
 }
 
 /// What the accept page prints for who is inviting: the person who sent it,
@@ -373,11 +377,22 @@ fn inviter_label(
     )
 }
 
+/// What an invitation's link opens: the roster it seats somebody on, who sent
+/// it from which organization, to whom, and at which role.
+#[derive(Debug, Serialize)]
+pub struct InviteLook {
+    pub scope: InviteScope,
+    pub inviter: String,
+    pub organization: String,
+    pub email: String,
+    pub role: &'static str,
+}
+
 /// `POST /internal/v1/invites/look` — what does this link open?
 pub async fn look_up_invite(
     State(state): State<Arc<AppState>>,
     Json(req): Json<InviteTokenRequest>,
-) -> Result<impl IntoResponse, TelmoniError> {
+) -> Result<Json<InviteLook>, TelmoniError> {
     let mut tx = maintenance_scope(&state.db, AuthLane).await?;
     let token_hash = hash_invite_token(&req.token);
     let found = invites::find_live_by_token(&mut tx, &token_hash).await?;
@@ -389,17 +404,17 @@ pub async fn look_up_invite(
     };
     // ⚠ `scope` says which roster the link seats somebody on. The two
     // ladders spell their roles the same, so the role alone cannot.
-    Ok(Json(json!({
-        "scope": invite.target.scope(),
-        "inviter": inviter_label(
+    Ok(Json(InviteLook {
+        scope: invite.target.scope(),
+        inviter: inviter_label(
             invite.inviter_email.as_deref(),
             invite.inviter_display_name.as_deref(),
             &invite.organization_name,
         ),
-        "organization": invite.organization_name,
-        "email": invite.email,
-        "role": invite.target.role_word(),
-    })))
+        organization: invite.organization_name,
+        email: invite.email,
+        role: invite.target.role_word(),
+    }))
 }
 
 /// An invitation both lanes have already decided to honour.
@@ -746,20 +761,41 @@ pub async fn accept_invite(
         role = invite.target.role_word(),
         "invitation accepted"
     );
-    // The roster seated, under its own key.
-    let seated = match &invite.target {
-        InviteTarget::Project { project_id, .. } => ("projectId", project_id.to_string()),
-        InviteTarget::Organization { .. } => ("organizationId", invite.organization_id.to_string()),
+    let on = match &invite.target {
+        InviteTarget::Project { project_id, .. } => SeatedOn::ProjectId(project_id.clone()),
+        InviteTarget::Organization { .. } => {
+            SeatedOn::OrganizationId(invite.organization_id.clone())
+        }
     };
     Ok((
         StatusCode::CREATED,
-        Json(json!({
-            seated.0: seated.1,
-            "inviteId": invite.id,
-            "inviterEmail": invite.inviter_email,
-            "ownerOrganizationId": invite.organization_id,
-        })),
+        Json(Seated {
+            on,
+            invite_id: invite.id,
+            inviter_email: invite.inviter_email,
+            owner_organization_id: invite.organization_id,
+        }),
     ))
+}
+
+/// The roster an invitation seated somebody on, under its own key.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SeatedOn {
+    ProjectId(ProjectId),
+    OrganizationId(OrganizationId),
+}
+
+/// What an invitation accepted by its link answers: the roster seated, who
+/// sent it, and whose console to tell.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Seated {
+    #[serde(flatten)]
+    pub on: SeatedOn,
+    pub invite_id: Uuid,
+    pub inviter_email: Option<String>,
+    pub owner_organization_id: OrganizationId,
 }
 
 /// The URL that opens an invitation, on the console this service belongs to.
@@ -782,7 +818,7 @@ pub async fn list_my_incoming_invites(
     let rows = invites::list_incoming(&mut tx, &me.email, &actor).await?;
     tx.commit().await?;
 
-    Ok(Json(json!({ "invites": rows })))
+    Ok(Json(Invites { invites: rows }))
 }
 
 /// `POST /internal/v1/me/invites/{invite_id}/accept` — accept an incoming invitation directly.
@@ -820,20 +856,39 @@ pub async fn accept_my_incoming_invite(
         role = invite.target.role_word(),
         "incoming invitation accepted"
     );
-    Ok((StatusCode::OK, Json(settled("accepted", &invite))))
+    Ok((StatusCode::OK, Json(settled(Settlement::Accepted, &invite))))
+}
+
+/// Whether an incoming invitation was taken up or turned down.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Settlement {
+    Accepted,
+    Declined,
 }
 
 /// What the console is answered once an incoming invitation is settled: who
 /// to tell, and which organization's console.
-fn settled(status: &str, invite: &invites::Pending) -> serde_json::Value {
-    json!({
-        "status": status,
-        "scope": invite.target.scope(),
-        "targetId": target_id(invite),
-        "inviteId": invite.id,
-        "inviterEmail": invite.inviter_email,
-        "ownerOrganizationId": invite.owner_organization_id,
-    })
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Settled {
+    pub status: Settlement,
+    pub scope: InviteScope,
+    pub target_id: String,
+    pub invite_id: Uuid,
+    pub inviter_email: Option<String>,
+    pub owner_organization_id: OrganizationId,
+}
+
+fn settled(status: Settlement, invite: &invites::Pending) -> Settled {
+    Settled {
+        status,
+        scope: invite.target.scope(),
+        target_id: target_id(invite),
+        invite_id: invite.id,
+        inviter_email: invite.inviter_email.clone(),
+        owner_organization_id: invite.owner_organization_id.clone(),
+    }
 }
 
 /// What the invitation seats somebody on, by id: the project, or the
@@ -906,7 +961,7 @@ pub async fn decline_my_incoming_invite(
         member = %actor,
         "invitation declined"
     );
-    Ok(Json(settled("declined", &invite)))
+    Ok(Json(settled(Settlement::Declined, &invite)))
 }
 
 #[cfg(test)]

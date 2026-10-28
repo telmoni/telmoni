@@ -21,7 +21,7 @@ use axum::{
     response::IntoResponse,
 };
 use chrono::{Duration, Utc};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
@@ -41,7 +41,8 @@ use crate::{
     },
     handler::{
         acting_person_in,
-        deletion::{FINALIZE_GRACE_SECONDS, deletion_metadata, request_deletion},
+        answer::Sent,
+        deletion::{AccountDeleted, FINALIZE_GRACE_SECONDS, deletion_metadata, request_deletion},
         log_act_outside_every_organization, recording_organization_of,
     },
     model::{AuditKind, DeletionKind},
@@ -153,7 +154,7 @@ pub async fn request_password_reset(
 
     tracing::info!(user_id = %principal.user_id, expires_at = %link.expires_at,
         "password-reset link minted");
-    Ok((StatusCode::ACCEPTED, Json(json!({ "sent": true }))))
+    Ok((StatusCode::ACCEPTED, Json(Sent::MAILED)))
 }
 
 /// `POST /internal/v1/me/email-change` — open a pending address change: the
@@ -243,7 +244,7 @@ pub async fn request_email_change(
         provider_expires_at = %challenge.expires_at,
         "email change requested; a code was issued to each address"
     );
-    Ok((StatusCode::ACCEPTED, Json(json!({ "sent": true }))))
+    Ok((StatusCode::ACCEPTED, Json(Sent::MAILED)))
 }
 
 /// `POST /internal/v1/me/email-change/confirm` — spend both codes and move the
@@ -356,8 +357,33 @@ pub async fn confirm_email_change(
     tracing::info!(user_id = %user_id, sessions_revoked = revoked, "account email changed");
     Ok((
         StatusCode::OK,
-        Json(json!({ "email": new_email, "sessionsRevoked": revoked })),
+        Json(EmailChanged {
+            email: new_email,
+            sessions_revoked: revoked,
+        }),
     ))
+}
+
+/// An address changed: the one the account goes by now, and how many of its
+/// sessions were ended for it.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EmailChanged {
+    pub email: String,
+    pub sessions_revoked: usize,
+}
+
+/// Whether the person lets the console count their use.
+#[derive(Debug, Serialize)]
+pub struct AnalyticsPreference {
+    pub analytics_opt_in: bool,
+}
+
+/// The organization the console opens on now.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DefaultOrganization {
+    pub default_organization_id: OrganizationId,
 }
 
 /// `PUT /internal/v1/me/analytics` — record whether this person wants to be
@@ -399,7 +425,9 @@ pub async fn set_analytics_preference(
     }
 
     tx.commit().await?;
-    Ok(Json(json!({ "analytics_opt_in": req.opt_in })))
+    Ok(Json(AnalyticsPreference {
+        analytics_opt_in: req.opt_in,
+    }))
 }
 
 /// `PUT /internal/v1/me/default-organization` — the organization a sign-in opens
@@ -444,7 +472,9 @@ pub async fn set_default_organization(
     )
     .await?;
     tx.commit().await?;
-    Ok(Json(json!({ "defaultOrganizationId": organization })))
+    Ok(Json(DefaultOrganization {
+        default_organization_id: organization,
+    }))
 }
 
 /// `POST /internal/v1/me/deletion-code` — mail the code that authorizes deleting
@@ -485,7 +515,7 @@ pub async fn request_account_deletion_code(
     }
 
     tracing::info!(user_id = %user_id, "account-deletion confirmation code issued");
-    Ok((StatusCode::ACCEPTED, Json(json!({ "sent": true }))))
+    Ok((StatusCode::ACCEPTED, Json(Sent::MAILED)))
 }
 
 /// `DELETE /internal/v1/me` — erase the account, gated by its emailed code.
@@ -526,7 +556,10 @@ pub async fn delete_account(
         // pending, so this request passed it before the first one committed.
         // That one is running the tails, and the sweeps finish what it cannot.
         tx.commit().await?;
-        return Ok((StatusCode::ACCEPTED, Json(json!({ "deleted": false }))));
+        return Ok((
+            StatusCode::ACCEPTED,
+            Json(AccountDeleted { deleted: false }),
+        ));
     }
 
     let Some(code_id) = confirmation_codes::find_live(

@@ -1,4 +1,5 @@
 pub mod account;
+pub mod answer;
 pub mod audit;
 pub mod cli;
 pub mod deletion;
@@ -40,16 +41,6 @@ pub(crate) fn parse_organization_id(
     telmoni_shared::OrganizationId::try_new(s).map_err(|e| {
         telmoni_shared::TelmoniError::BadRequest(format!("invalid organization id: {e}"))
     })
-}
-
-/// Validate a user id at the HTTP boundary. It becomes `added_by`,
-/// `created_by` and the audit `actor_id`, so an unbounded or control-character
-/// value once reached those columns and every log line naming the actor.
-pub(crate) fn parse_user_id(
-    s: &str,
-) -> Result<telmoni_shared::UserId, telmoni_shared::TelmoniError> {
-    telmoni_shared::UserId::try_new(s)
-        .map_err(|e| telmoni_shared::TelmoniError::BadRequest(format!("invalid user id: {e}")))
 }
 
 /// The organization a request ACTS ON, from the console's `x-organization-id`

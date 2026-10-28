@@ -9,11 +9,11 @@ use std::sync::Arc;
 
 use axum::{extract::State, http::StatusCode, response::IntoResponse};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 
 use telmoni_shared::extract::Json;
 use telmoni_shared::{AuthError, Redacted, TelmoniError, UserId};
 
+use super::answer::Sent;
 use crate::AppState;
 use crate::password::{PasswordProvider, SignedUp};
 
@@ -121,7 +121,7 @@ pub async fn sign_up(
         )
         .await?;
     Ok(match signed_up {
-        SignedUp::LinkSent => (StatusCode::ACCEPTED, Json(json!({ "sent": true }))).into_response(),
+        SignedUp::LinkSent => (StatusCode::ACCEPTED, Json(Sent::MAILED)).into_response(),
         SignedUp::Code(code) => Json(SignInResponse { code }).into_response(),
     })
 }
@@ -158,7 +158,7 @@ pub async fn forgot_password(
     Json(req): Json<ForgotPasswordRequest>,
 ) -> Result<impl IntoResponse, TelmoniError> {
     provider(&state)?.forgot_password(&req.email).await?;
-    Ok((StatusCode::ACCEPTED, Json(json!({ "sent": true }))))
+    Ok((StatusCode::ACCEPTED, Json(Sent::MAILED)))
 }
 
 /// `POST /internal/v1/auth/password/reset` — spend the reset link and set the
@@ -176,6 +176,8 @@ pub async fn reset_password(
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
     use super::*;
 
     #[test]

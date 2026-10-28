@@ -223,7 +223,7 @@ async fn token_with(pool: &PgPool, scopes: &[&str]) -> Fixture {
             )
             .await
             .body(Body::from(
-                json!({ "name": "ci", "created_by": USER, "scopes": scopes }).to_string(),
+                json!({ "name": "ci", "scopes": scopes }).to_string(),
             ))
             .unwrap(),
         )

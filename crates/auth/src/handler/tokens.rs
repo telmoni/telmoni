@@ -145,9 +145,6 @@ pub async fn create_token(
     Json(req): Json<CreateTokenRequest>,
 ) -> Result<impl IntoResponse, TelmoniError> {
     let project_id = project_of(&headers)?;
-    if req.created_by.is_empty() {
-        return Err(TelmoniError::BadRequest("created_by is required".into()));
-    }
     let name = crate::identity::name(&req.name, "key", MAX_KEY_NAME)?;
     let description = crate::identity::note(
         req.description.as_deref(),
@@ -169,11 +166,6 @@ pub async fn create_token(
     let token_hash = hash_token(&raw_token);
 
     let actor = principal.user_id;
-    if req.created_by != actor.as_str() {
-        return Err(TelmoniError::BadRequest(
-            "created_by must be the acting user".into(),
-        ));
-    }
     let access = acting_project(&state, &project_id, &actor).await?;
     let access = held(access, &project_id, &actor, Verb::Create).await?;
     let access = refuse_unless_tokens_on(access).await?;
@@ -185,7 +177,7 @@ pub async fn create_token(
         &project_id,
         &name,
         description.as_deref(),
-        &crate::handler::parse_user_id(&req.created_by)?,
+        &actor,
         &scopes,
         expires_at,
         &token_hash,
@@ -204,7 +196,7 @@ pub async fn create_token(
         &mut tx,
         AuditEvent::new(
             &token_organization,
-            Actor::User(&req.created_by),
+            Actor::User(actor.as_str()),
             AuditAction::Created,
             TelmoniResourceKind::Token,
         )
@@ -220,7 +212,7 @@ pub async fn create_token(
     .await?;
     tx.commit().await?;
 
-    tracing::info!(project_id = %project_id, token_id = %record.id, created_by = %req.created_by, "API token created");
+    tracing::info!(project_id = %project_id, token_id = %record.id, created_by = %actor, "API token created");
 
     Ok((
         StatusCode::CREATED,

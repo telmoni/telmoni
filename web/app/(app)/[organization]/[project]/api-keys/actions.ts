@@ -70,7 +70,6 @@ export async function mintTokenAction(projectId: string, input: unknown): Promis
     body: JSON.stringify({
       name:               name.value,
       description,
-      created_by:         gate.session.userId,
       scopes,
       expires_in_seconds,
     }),
