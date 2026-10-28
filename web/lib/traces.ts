@@ -7,6 +7,7 @@ import type {
   TraceView,
   ViewQuery,
 } from "@/lib/server/entities/traces";
+import { FILTER_KEYS, filtersIn } from "@/lib/server/entities/traces";
 import { projectPath } from "@/lib/slug";
 import {
   SortDirection,
@@ -49,19 +50,8 @@ export const DEFAULT_ROWS = 50;
 export const MAX_PAGE = 1_000;
 
 /** The filters every list takes, each a list of values any of which admits a
- *  run, in the order the sidebar shows them. */
-export const FILTERS = [
-  "agent",
-  "status",
-  "model",
-  "tool",
-  "user",
-  "session",
-  "environment",
-  "release",
-  "tag",
-  "prompt",
-] as const;
+ *  run, in the order the sidebar shows them: the keys of the one schema. */
+export const FILTERS = FILTER_KEYS;
 export type FilterKey = (typeof FILTERS)[number];
 
 /** The word the page gives each filter. */
@@ -127,20 +117,14 @@ function capped(filter: Exclude<FilterKey, "status">, searchParams: SearchParams
  *  hand-edited link opens the list, not a 400. */
 export function parseFilters(searchParams: SearchParams): ListFilters {
   const statuses = Object.values(SpanStatus) as string[];
-  return compact({
-    agent: some(capped("agent", searchParams)),
-    user: some(capped("user", searchParams)),
-    session: some(capped("session", searchParams)),
-    status: some(
-      many(searchParams.status).filter((s): s is SpanStatus => statuses.includes(s)),
-    ),
-    model: some(capped("model", searchParams)),
-    tool: some(capped("tool", searchParams)),
-    environment: some(capped("environment", searchParams)),
-    release: some(capped("release", searchParams)),
-    tag: some(capped("tag", searchParams).filter(isTagPair)),
-    prompt: some(capped("prompt", searchParams)),
-  });
+  const values = (filter: FilterKey): string[] => {
+    if (filter === "status") return many(searchParams.status).filter((s) => statuses.includes(s));
+    const kept = capped(filter, searchParams);
+    return filter === "tag" ? kept.filter(isTagPair) : kept;
+  };
+  return compact(
+    Object.fromEntries(FILTERS.map((filter) => [filter, some(values(filter))])) as ListFilters,
+  );
 }
 
 /** A list's query as the URL carries it, its sort among `sorts`: the
@@ -608,16 +592,7 @@ export function listDownloadHref(
   runs: readonly string[] = [],
 ): string {
   return listHref(organization, project, DOWNLOAD_PATH[list], {
-    agent: query.agent,
-    user: query.user,
-    session: query.session,
-    status: query.status,
-    model: query.model,
-    tool: query.tool,
-    environment: query.environment,
-    release: query.release,
-    tag: query.tag,
-    prompt: query.prompt,
+    ...filtersIn(query),
     sort: query.sort,
     dir: query.dir,
     days: query.days,
@@ -629,16 +604,7 @@ export function listDownloadHref(
 /** What a saved view keeps of the list's query: all of it but the page. */
 export function viewQueryOf(query: TraceQuery): ViewQuery {
   return compact({
-    agent: query.agent,
-    user: query.user,
-    session: query.session,
-    status: query.status,
-    model: query.model,
-    tool: query.tool,
-    environment: query.environment,
-    release: query.release,
-    tag: query.tag,
-    prompt: query.prompt,
+    ...filtersIn(query),
     sort: query.sort,
     dir: query.dir,
     days: query.days,
@@ -650,16 +616,7 @@ export function viewQueryOf(query: TraceQuery): ViewQuery {
  *  dropped, as it drops a stale URL's. */
 export function queryOfView(view: ViewQuery): TraceQuery {
   return parseTraceQuery({
-    agent: view.agent,
-    user: view.user,
-    session: view.session,
-    status: view.status,
-    model: view.model,
-    tool: view.tool,
-    environment: view.environment,
-    release: view.release,
-    tag: view.tag,
-    prompt: view.prompt,
+    ...filtersIn(view),
     sort: view.sort,
     dir: view.dir,
     days: view.days === undefined ? undefined : String(view.days),

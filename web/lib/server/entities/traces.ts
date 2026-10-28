@@ -76,20 +76,42 @@ const FacetSchema = z.object({
 });
 export type Facet = z.infer<typeof FacetSchema>;
 
-export const FacetsSchema = z.object({
-  days: z.number(),
-  agent: FacetSchema,
-  user: FacetSchema,
-  session: FacetSchema,
-  status: FacetSchema,
-  model: FacetSchema,
-  tool: FacetSchema,
-  environment: FacetSchema,
-  release: FacetSchema,
-  /** Each tag as `key:value`. */
-  tag: FacetSchema,
-  prompt: FacetSchema,
+const Values = z.array(z.string()).optional();
+
+/** What narrows a list as the URL carries it, in the sidebar's order: a
+ *  filter is the values any of which admits a run, a key left out narrowing
+ *  nothing; a session or a user is admitted by a run of theirs. The one list
+ *  of the keys: the facets, a saved view and every lane's query take them
+ *  from here. */
+export const ListFiltersSchema = z.object({
+  agent: Values,
+  status: z.array(z.enum(SpanStatus)).optional(),
+  model: Values,
+  tool: Values,
+  user: Values,
+  session: Values,
+  environment: Values,
+  release: Values,
+  /** Each `key:value`. */
+  tag: Values,
+  prompt: Values,
 });
+export type ListFilters = z.infer<typeof ListFiltersSchema>;
+export type FilterKey = keyof ListFilters;
+/** The filters' keys, in the sidebar's order. */
+export const FILTER_KEYS = ListFiltersSchema.keyof().options;
+
+/** `query`'s filters alone, every key present. */
+export function filtersIn(query: ListFilters): ListFilters {
+  return Object.fromEntries(FILTER_KEYS.map((key) => [key, query[key]])) as ListFilters;
+}
+
+const facetShape = Object.fromEntries(FILTER_KEYS.map((key) => [key, FacetSchema])) as Record<
+  FilterKey,
+  typeof FacetSchema
+>;
+
+export const FacetsSchema = z.object({ days: z.number(), ...facetShape });
 export type Facets = z.infer<typeof FacetsSchema>;
 
 // The window in bars of equal width, each starting on the reader's clock:
@@ -116,16 +138,7 @@ export type TraceHistogram = z.infer<typeof TraceHistogramSchema>;
 // A saved view's query: the list's, each filter's values a list, and no
 // key the list does not take, as the server refuses one.
 export const ViewQuerySchema = z.strictObject({
-  agent: z.array(z.string()).optional(),
-  user: z.array(z.string()).optional(),
-  session: z.array(z.string()).optional(),
-  status: z.array(z.enum(SpanStatus)).optional(),
-  model: z.array(z.string()).optional(),
-  tool: z.array(z.string()).optional(),
-  environment: z.array(z.string()).optional(),
-  release: z.array(z.string()).optional(),
-  tag: z.array(z.string()).optional(),
-  prompt: z.array(z.string()).optional(),
+  ...ListFiltersSchema.shape,
   sort: z.enum(TraceSort).optional(),
   dir: z.enum(SortDirection).optional(),
   days: z.number().optional(),
@@ -239,23 +252,6 @@ const TraceDetailSchema = z.object({
 });
 export type TraceDetail = z.infer<typeof TraceDetailSchema>;
 
-/** What narrows a list as the URL carries it: a filter is the values any of
- *  which admits a run, a key left out narrowing nothing; a session or a user
- *  is admitted by a run of theirs. */
-export type ListFilters = {
-  agent?: string[];
-  user?: string[];
-  session?: string[];
-  status?: SpanStatus[];
-  model?: string[];
-  tool?: string[];
-  environment?: string[];
-  release?: string[];
-  /** Each `key:value`. */
-  tag?: string[];
-  prompt?: string[];
-};
-
 /** What narrows and orders a list, and which page of it shows, as the URL
  *  carries it, `S` its columns' sorts. The server checks every value; the
  *  page drops what it cannot read before asking (`lib/traces.ts`). */
@@ -272,19 +268,7 @@ export type TraceQuery = ListQuery<TraceSort>;
 /** The filters and the window alone: what the facets and the histogram take,
  *  each lane refusing a parameter it has no use for. */
 export function filtersOf(query: ListFilters & { days?: number }) {
-  return {
-    agent: query.agent,
-    user: query.user,
-    session: query.session,
-    status: query.status,
-    model: query.model,
-    tool: query.tool,
-    environment: query.environment,
-    release: query.release,
-    tag: query.tag,
-    prompt: query.prompt,
-    days: query.days,
-  };
+  return { ...filtersIn(query), days: query.days };
 }
 
 /** The two shapes a download comes in. */
