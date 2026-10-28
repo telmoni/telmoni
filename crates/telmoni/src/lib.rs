@@ -174,7 +174,7 @@ impl Auth for LateAuth {
     async fn organization_slugs(
         &self,
         organizations: &[OrganizationId],
-    ) -> Result<Vec<(OrganizationId, String)>, TelmoniError> {
+    ) -> Result<Vec<(OrganizationId, telmoni_shared::slug::Slug)>, TelmoniError> {
         self.get()?.organization_slugs(organizations).await
     }
 

@@ -28,6 +28,7 @@ use telmoni_auth::{AppState, Config, Siblings, router};
 use telmoni_shared::seam::{
     Auth, Entitlements, OrganizationFounding, OwnershipChange, OwnershipHook,
 };
+use telmoni_shared::slug::{self, Slug};
 use telmoni_shared::test_util::{ServiceRole, apply_audit_migrations, seed_identity, service_pool};
 use telmoni_shared::{
     Flag, Grants, MemberCeiling, OrganizationId, Paused, PlanError, TelmoniError, UserId,
@@ -473,7 +474,7 @@ async fn the_deployment_founds_an_organization_under_its_own_id_once(pool: PgPoo
         organization_id: minted.clone(),
         founder: UserId::try_new(OWNER).unwrap(),
         name: "Paid Labs".into(),
-        slug: Some("paid-labs".into()),
+        slug: Some(Slug::from_trusted("paid-labs")),
     };
     let founded_first = state.found_organization(&founding).await.unwrap();
     assert_eq!(founded_first.organization_id, minted);
@@ -503,18 +504,22 @@ async fn the_deployment_founds_an_organization_under_its_own_id_once(pool: PgPoo
     let derived = state.found_organization(&other).await.unwrap();
     assert_ne!(derived.slug, "paid-labs");
     assert!(
-        derived.slug.starts_with("paid-labs") || derived.slug.starts_with("org-"),
+        derived.slug.as_str().starts_with("paid-labs") || derived.slug.as_str().starts_with("org-"),
         "{}",
         derived.slug
     );
 
-    for (name, slug) in [("   ", None), ("Acme", Some("Bad Slug"))] {
+    // A URL that is no slug never reaches the seam: its parse refuses it.
+    assert!(slug::asked_url("Bad Slug").is_err());
+    let reserved = Slug::from_trusted("account");
+    for (name, slug) in [("   ", None), ("Acme", Some(&reserved))] {
         assert!(
             state.check_founding(name, slug).await.is_err(),
             "{name:?} {slug:?} passed the check"
         );
     }
-    assert!(state.check_founding("Acme", Some("acme")).await.is_ok());
+    let acme = Slug::from_trusted("acme");
+    assert!(state.check_founding("Acme", Some(&acme)).await.is_ok());
 
     // New organizations closed: the check refuses, before the deployment
     // takes anything of the founder; a founding already paid for is owed,

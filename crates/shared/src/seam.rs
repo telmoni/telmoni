@@ -17,6 +17,7 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use crate::acting::{Acting, ActingKey};
+use crate::slug::Slug;
 use crate::{
     AlertCeilings, AuditAction, AuthError, FlagSet, Grants, LaneCeilings, MemberCeiling,
     NotificationKind, OrganizationId, OrganizationStatus, ProjectId, Role, TelmoniError, UserId,
@@ -142,11 +143,11 @@ pub struct ProjectHome {
     /// The project asked about.
     pub project_id: ProjectId,
     /// The project's segment in console paths.
-    pub slug: String,
+    pub slug: Slug,
     /// The organization holding it now.
     pub organization_id: OrganizationId,
     /// The organization's segment, which the project's follows.
-    pub organization_slug: String,
+    pub organization_slug: Slug,
 }
 
 /// A project a person can open, as auth answers a module that shows each
@@ -156,7 +157,7 @@ pub struct ReadableProject {
     /// The project.
     pub project_id: ProjectId,
     /// Its segment in console paths, under its organization's.
-    pub slug: String,
+    pub slug: Slug,
     /// Its name, as the console shows it.
     pub name: String,
     /// The person's role on it, as [`crate::rbac::project_role`] decides it.
@@ -189,7 +190,7 @@ pub struct OrganizationFounding {
     pub name: String,
     /// The URL the founder asked for, if any. One no longer free, or none,
     /// is derived from the name, never refused: the founding is owed.
-    pub slug: Option<String>,
+    pub slug: Option<Slug>,
 }
 
 /// An organization founded for a deployment, as its founder is sent to it.
@@ -198,7 +199,7 @@ pub struct FoundedOrganization {
     /// The organization, under the id the deployment minted.
     pub organization_id: OrganizationId,
     /// Its segment in console paths.
-    pub slug: String,
+    pub slug: Slug,
 }
 
 /// What auth answers the modules beside it.
@@ -254,7 +255,7 @@ pub trait Auth: Send + Sync {
     async fn organization_slugs(
         &self,
         organizations: &[OrganizationId],
-    ) -> Result<Vec<(OrganizationId, String)>, TelmoniError> {
+    ) -> Result<Vec<(OrganizationId, Slug)>, TelmoniError> {
         let _ = organizations;
         Err(not_linked("organization slugs"))
     }
@@ -312,7 +313,7 @@ pub trait Auth: Send + Sync {
     /// nothing, the URL a word the console keeps, new organizations closed
     /// — for a deployment that takes something of the founder first, a
     /// payment, and must refuse before it does rather than after.
-    async fn check_founding(&self, name: &str, slug: Option<&str>) -> Result<(), TelmoniError> {
+    async fn check_founding(&self, name: &str, slug: Option<&Slug>) -> Result<(), TelmoniError> {
         let _ = (name, slug);
         Err(not_linked("a founding's check"))
     }

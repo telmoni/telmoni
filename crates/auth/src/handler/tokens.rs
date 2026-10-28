@@ -481,7 +481,13 @@ mod tests {
         let added_by = telmoni_shared::UserId::try_new("user_authz").expect("valid test user id");
 
         let mut tx = organization_scope(&pool, &organization).await?;
-        crate::db::organizations::create(&mut tx, &organization, "Acme", "acme").await?;
+        crate::db::organizations::create(
+            &mut tx,
+            &organization,
+            "Acme",
+            &telmoni_shared::slug::Slug::from_trusted("acme"),
+        )
+        .await?;
         crate::db::projects::create(&mut tx, &project, &organization, "Default project").await?;
         tx.commit().await?;
         for (who, role) in [("member", Role::Member), ("admin", Role::Admin)] {

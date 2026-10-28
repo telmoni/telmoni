@@ -6,6 +6,7 @@ use sqlx::{Postgres, QueryBuilder};
 use uuid::Uuid;
 
 use telmoni_shared::db::tenant_session::{HasOrganization, Maintenance, Scoped};
+use telmoni_shared::slug::Slug;
 use telmoni_shared::{AuditAction, OrganizationId, ProjectId, TelmoniResourceKind};
 
 use crate::db::AuthLane;
@@ -221,11 +222,11 @@ pub struct IndexedEvent {
     /// chain outlives the organization, not the other way round: the inner
     /// join leaves a deleted organization's events unindexed, on purpose —
     /// nobody is left to read them.
-    pub organization_slug: String,
+    pub organization_slug: Slug,
     pub in_project: Option<ProjectId>,
     /// The project's segment, `None` when the event was the organization's own
     /// or the project has since been deleted.
-    pub project_slug: Option<String>,
+    pub project_slug: Option<Slug>,
     pub actor_id: String,
     pub action: String,
     pub resource_kind: String,

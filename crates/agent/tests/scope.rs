@@ -33,6 +33,7 @@ use telmoni_shared::acting::{Acting, ActingProject};
 use telmoni_shared::db::tenant_session::{maintenance_scope, person_scope};
 use telmoni_shared::middleware::service_auth::ServiceSecrets;
 use telmoni_shared::seam::{Agent, Auth, Emitted, Notice, Notifications, ProjectHome};
+use telmoni_shared::slug::Slug;
 use telmoni_shared::test_util::{ServiceRole, service_pool};
 use telmoni_shared::{
     AuthError, FlagSet, OrganizationId, OrganizationRole, OrganizationStatus, ProjectId, Role,
@@ -745,9 +746,9 @@ impl Auth for Homes {
             .filter(|(project, _)| projects.iter().any(|p| p.as_str() == *project))
             .map(|(project, organization)| ProjectHome {
                 project_id: ProjectId::try_new(project).unwrap(),
-                slug: project.replace('_', "-"),
+                slug: Slug::from_trusted(project.replace('_', "-")),
                 organization_id: OrganizationId::try_new(organization).unwrap(),
-                organization_slug: organization.replace('_', "-"),
+                organization_slug: Slug::from_trusted(organization.replace('_', "-")),
             })
             .collect())
     }

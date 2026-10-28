@@ -38,6 +38,7 @@ use telmoni_auth::handler::session::{
 };
 use telmoni_auth::handler::sessions::Sessions;
 use telmoni_auth::model::{ApiToken, CreateTokenResponse, InviteScope};
+use telmoni_shared::slug::Slug;
 use telmoni_shared::test_util::pin_contract;
 use telmoni_shared::{
     ApiKeyScope, FlagSet, OrganizationId, OrganizationRole, ProjectId, Role, UserId,
@@ -187,7 +188,7 @@ fn me_answers_as_the_console_reads() {
             },
             organizations: vec![OrganizationMembership {
                 organization_id: organization(),
-                slug: "acme".into(),
+                slug: Slug::from_trusted("acme"),
                 name: "Acme".into(),
                 owner_email: Some(EMAIL.into()),
                 owner_display_name: Some("Sam Rivera".into()),
@@ -216,10 +217,10 @@ fn me_answers_as_the_console_reads() {
             given_seats: vec![GivenSeat {
                 project_id: project(),
                 project_name: "Support bot".into(),
-                project_slug: "support-bot".into(),
+                project_slug: Slug::from_trusted("support-bot"),
                 organization_id: organization(),
                 organization_name: "Acme".into(),
-                organization_slug: "acme".into(),
+                organization_slug: Slug::from_trusted("acme"),
                 role: Role::Member,
                 giver_email: Some("alex@example.com".into()),
                 giver_display_name: Some("Alex".into()),
@@ -318,7 +319,7 @@ fn an_invitation_looked_up_answers_as_the_console_reads() {
 fn summary() -> ProjectSummary {
     ProjectSummary {
         id: project(),
-        slug: "support-bot".into(),
+        slug: Slug::from_trusted("support-bot"),
         name: "Support bot".into(),
         role: Role::Admin,
     }
@@ -338,7 +339,7 @@ fn the_projects_answer_as_the_console_reads() {
         "project-renamed",
         &ProjectRenamed {
             name: "Support bot".into(),
-            slug: "support-bot".into(),
+            slug: Slug::from_trusted("support-bot"),
         },
     );
 }
@@ -351,11 +352,11 @@ fn the_projects_everywhere_answer_as_the_console_reads() {
         &Projects {
             projects: vec![ProjectEverywhere {
                 id: project(),
-                slug: "support-bot".into(),
+                slug: Slug::from_trusted("support-bot"),
                 name: "Support bot".into(),
                 role: Role::Member,
                 organization_id: organization(),
-                organization_slug: "acme".into(),
+                organization_slug: Slug::from_trusted("acme"),
                 organization_name: "Acme".into(),
             }],
         },
@@ -454,9 +455,9 @@ fn a_project_handover_answers_as_the_console_reads() {
         &ProjectAccepted {
             moved: ProjectMoved {
                 project_id: project(),
-                slug: "support-bot".into(),
+                slug: Slug::from_trusted("support-bot"),
                 organization_id: elsewhere(),
-                organization_slug: Some("elsewhere".into()),
+                organization_slug: Some(Slug::from_trusted("elsewhere")),
                 previous_organization_id: organization(),
                 name: "Support bot".into(),
             },
@@ -478,7 +479,7 @@ fn an_organization_answers_as_the_console_reads() {
         "organization-created",
         &OrganizationCreated {
             id: organization(),
-            slug: "acme".into(),
+            slug: Slug::from_trusted("acme"),
             name: "Acme".into(),
         },
     );
@@ -486,7 +487,7 @@ fn an_organization_answers_as_the_console_reads() {
         "organization-named",
         &OrganizationNamed {
             name: "Acme".into(),
-            slug: "acme".into(),
+            slug: Slug::from_trusted("acme"),
         },
     );
     pin(

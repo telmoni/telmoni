@@ -250,7 +250,7 @@ async fn a_member_seated_in_one_project_of_two_sees_that_ones_incidents_alone(po
     assert_eq!(shown["severity"], "alert");
     assert_eq!(
         shown["project"],
-        json!({ "id": first.as_str(), "slug": first.as_str(), "name": format!("Project {first}") }),
+        json!({ "id": first.as_str(), "slug": common::slug_of(first.as_str()).as_str(), "name": format!("Project {first}") }),
         "its project as auth names it, for the Overview to link",
     );
 }

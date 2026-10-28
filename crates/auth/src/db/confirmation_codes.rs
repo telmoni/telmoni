@@ -290,7 +290,7 @@ mod tests {
         OrganizationId::try_new(s).expect("valid test organization id")
     }
 
-    fn any_slug() -> String {
+    fn any_slug() -> telmoni_shared::slug::Slug {
         telmoni_shared::slug::placeholder(telmoni_shared::slug::Scope::Organization)
     }
 

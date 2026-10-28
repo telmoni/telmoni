@@ -7,6 +7,7 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 use uuid::Uuid;
 
+use telmoni_shared::slug::Slug;
 use telmoni_shared::test_util::pin_contract;
 use telmoni_shared::{
     ContentMode, IncidentStatus, LayoutDepth, LayoutOpen, MissingData, OrganizationId, ProjectId,
@@ -510,7 +511,7 @@ fn the_organization_health_answers_as_the_console_reads() {
             incidents: vec![HealthIncident {
                 project: HealthProject {
                     id: project(),
-                    slug: "support-bot".into(),
+                    slug: Slug::from_trusted("support-bot"),
                     name: "Support bot".into(),
                 },
                 incident: incident(),

@@ -27,6 +27,7 @@ use telmoni_shared::extract::Json;
 use telmoni_shared::middleware::api_key::{ApiKeyGate, Refusal, require_api_key};
 use telmoni_shared::middleware::problem;
 use telmoni_shared::openapi::{Answer, Method, Route};
+use telmoni_shared::slug::Slug;
 use telmoni_shared::types::{API_TOKEN_PREFIX, ApiKeyScope, CONNECTION_BYTES};
 use telmoni_shared::{AuthError, Flag, OrganizationId, Role, TelmoniError, TenantError, UserId};
 
@@ -317,7 +318,7 @@ pub async fn get_organization(
 #[derive(Debug, Serialize)]
 pub struct V1Organization {
     pub organization_id: OrganizationId,
-    pub slug: String,
+    pub slug: Slug,
     pub name: String,
     /// None once the owner's row is gone.
     pub owner: Option<V1Owner>,

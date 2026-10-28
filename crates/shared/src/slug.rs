@@ -355,11 +355,172 @@ pub fn is_slug(s: &str) -> bool {
         })
 }
 
+/// A path segment with a slug's shape ([`is_slug`]): held by the type, so a
+/// field that is one was checked where it was made, read or parsed.
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+#[serde(try_from = "String")]
+pub struct Slug(String);
+
+/// A string without a slug's shape.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NotASlug;
+
+impl std::fmt::Display for NotASlug {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "lowercase letters and digits in runs joined by single hyphens, at most {MAX_LEN} long"
+        )
+    }
+}
+
+impl std::error::Error for NotASlug {}
+
+impl Slug {
+    /// `s`, where it has a slug's shape.
+    pub fn try_new(s: impl Into<String>) -> Result<Self, NotASlug> {
+        let s = s.into();
+        if is_slug(&s) {
+            Ok(Self(s))
+        } else {
+            Err(NotASlug)
+        }
+    }
+
+    /// One this module built, or a test's: debug builds hold it to the shape.
+    #[must_use]
+    pub fn from_trusted(s: impl Into<String>) -> Self {
+        let s = s.into();
+        debug_assert!(is_slug(&s), "{s:?} is not a slug");
+        Self(s)
+    }
+
+    /// The segment, for a path or a bind.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// The segment, owned.
+    #[must_use]
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+}
+
+/// The organization URL a person asked for, refused as the console says why:
+/// not a slug's shape, or one [`admit_url`] refuses, each refusal the URL's
+/// (`/errors/auth/bad-url`), so the form puts it under the URL.
+pub fn asked_url(raw: &str) -> Result<Slug, crate::TelmoniError> {
+    let Ok(asked) = Slug::try_new(raw.trim()) else {
+        return Err(crate::AuthError::BadUrl(format!(
+            "a URL is lowercase letters and digits, in words joined by single hyphens, at \
+             most {MAX_LEN} characters"
+        ))
+        .into());
+    };
+    admit_url(&asked)?;
+    Ok(asked)
+}
+
+/// Refuses an organization URL the console's own paths use, or one holding a
+/// word no URL here may hold.
+pub fn admit_url(asked: &Slug) -> Result<(), crate::TelmoniError> {
+    if Scope::Organization.reserves(asked.as_str()) {
+        return Err(crate::AuthError::BadUrl(format!(
+            "{asked} is a word the console's own paths use — choose another URL"
+        ))
+        .into());
+    }
+    // Not echoed back: the refusal is about the word, and repeating a slur in
+    // an error is no kinder than taking it.
+    if offends(asked.as_str()) {
+        return Err(crate::AuthError::BadUrl(
+            "that URL holds a word no URL here may hold — choose another URL".into(),
+        )
+        .into());
+    }
+    Ok(())
+}
+
+impl TryFrom<String> for Slug {
+    type Error = NotASlug;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        Self::try_new(s)
+    }
+}
+
+impl std::fmt::Display for Slug {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl AsRef<str> for Slug {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl PartialEq<str> for Slug {
+    fn eq(&self, other: &str) -> bool {
+        self.0 == other
+    }
+}
+
+impl PartialEq<&str> for Slug {
+    fn eq(&self, other: &&str) -> bool {
+        self.0 == *other
+    }
+}
+
+impl sqlx::Type<sqlx::Postgres> for Slug {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        <String as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+
+    fn compatible(ty: &sqlx::postgres::PgTypeInfo) -> bool {
+        <String as sqlx::Type<sqlx::Postgres>>::compatible(ty)
+    }
+}
+
+impl sqlx::postgres::PgHasArrayType for Slug {
+    fn array_type_info() -> sqlx::postgres::PgTypeInfo {
+        <String as sqlx::postgres::PgHasArrayType>::array_type_info()
+    }
+}
+
+/// A row's slug is held to the shape the column's CHECK already is.
+impl<'r> sqlx::Decode<'r, sqlx::Postgres> for Slug {
+    fn decode(value: sqlx::postgres::PgValueRef<'r>) -> Result<Self, sqlx::error::BoxDynError> {
+        Ok(Self::try_new(<String as sqlx::Decode<
+            'r,
+            sqlx::Postgres,
+        >>::decode(value)?)?)
+    }
+}
+
+impl sqlx::Encode<'_, sqlx::Postgres> for Slug {
+    fn encode_by_ref(
+        &self,
+        buf: &mut sqlx::postgres::PgArgumentBuffer,
+    ) -> Result<sqlx::encode::IsNull, sqlx::error::BoxDynError> {
+        <String as sqlx::Encode<'_, sqlx::Postgres>>::encode_by_ref(&self.0, buf)
+    }
+
+    fn size_hint(&self) -> usize {
+        <String as sqlx::Encode<'_, sqlx::Postgres>>::size_hint(&self.0)
+    }
+}
+
 /// The slug `name` reads as: Latin letters without their accents, digits, and
 /// a hyphen wherever anything else stood, cut to [`MAX_LEN`]. `None` when
 /// nothing in it survives — a name in a script with no Latin letters.
 #[must_use]
-pub fn slugify(name: &str) -> Option<String> {
+pub fn slugify(name: &str) -> Option<Slug> {
     let mut slug = String::new();
     let mut gap = false;
     for c in name.chars().flat_map(char::to_lowercase) {
@@ -385,7 +546,7 @@ pub fn slugify(name: &str) -> Option<String> {
         slug.truncate(MAX_LEN);
         slug.truncate(whole_words(&slug, inside_a_word).len());
     }
-    (!slug.is_empty()).then_some(slug)
+    (!slug.is_empty()).then(|| Slug::from_trusted(slug))
 }
 
 /// The slugs a row called `name` may take, best first: the name's own, then
@@ -397,16 +558,17 @@ pub fn slugify(name: &str) -> Option<String> {
 /// everybody's, so the numbers of a common name ("Personal", "Test") run out,
 /// and the slug should still read as the name it follows.
 #[must_use]
-pub fn candidates(scope: Scope, name: &str) -> Vec<String> {
+pub fn candidates(scope: Scope, name: &str) -> Vec<Slug> {
     let Some(base) = slugify(name) else {
         return Vec::new();
     };
     // Checked on the base, not only on each candidate: a word spelled apart
     // (`f-u-c-k`) reads whole only while nothing follows it, so its numbers
     // and its random tail would otherwise slip past.
-    if offends(&base) {
+    if offends(base.as_str()) {
         return Vec::new();
     }
+    let base = base.into_inner();
     let tail = match scope {
         Scope::Organization => Some(suffixed(&base, &random(TAIL_LEN))),
         Scope::Project => None,
@@ -415,6 +577,7 @@ pub fn candidates(scope: Scope, name: &str) -> Vec<String> {
         .chain((2..=NUMBERED).map(|n| suffixed(&base, &n.to_string())))
         .chain(tail)
         .filter(|slug| !scope.reserves(slug) && !offends(slug))
+        .map(Slug::from_trusted)
         .collect()
 }
 
@@ -422,9 +585,9 @@ pub fn candidates(scope: Scope, name: &str) -> Vec<String> {
 /// has named yet, or every candidate already taken: the scope's word and ten
 /// random base-36 characters.
 #[must_use]
-pub fn placeholder(scope: Scope) -> String {
+pub fn placeholder(scope: Scope) -> Slug {
     const RANDOM_LEN: usize = 10;
-    format!("{}-{}", scope.prefix(), random(RANDOM_LEN))
+    Slug::from_trusted(format!("{}-{}", scope.prefix(), random(RANDOM_LEN)))
 }
 
 /// `len` random base-36 characters.
@@ -516,21 +679,39 @@ mod tests {
 
     #[test]
     fn a_name_reads_as_lowercase_words_joined_by_hyphens() {
-        assert_eq!(slugify("Acme").as_deref(), Some("acme"));
+        assert_eq!(slugify("Acme").as_ref().map(Slug::as_str), Some("acme"));
         assert_eq!(
-            slugify("Default Project").as_deref(),
+            slugify("Default Project").as_ref().map(Slug::as_str),
             Some("default-project")
         );
-        assert_eq!(slugify("  Web -- App!  ").as_deref(), Some("web-app"));
-        assert_eq!(slugify("api_v2.1").as_deref(), Some("api-v2-1"));
+        assert_eq!(
+            slugify("  Web -- App!  ").as_ref().map(Slug::as_str),
+            Some("web-app")
+        );
+        assert_eq!(
+            slugify("api_v2.1").as_ref().map(Slug::as_str),
+            Some("api-v2-1")
+        );
     }
 
     #[test]
     fn accents_fold_and_apostrophes_vanish() {
-        assert_eq!(slugify("Müller GmbH").as_deref(), Some("muller-gmbh"));
-        assert_eq!(slugify("Ærø Straße").as_deref(), Some("aero-strasse"));
-        assert_eq!(slugify("Ada's Lab").as_deref(), Some("adas-lab"));
-        assert_eq!(slugify("İstanbul").as_deref(), Some("istanbul"));
+        assert_eq!(
+            slugify("Müller GmbH").as_ref().map(Slug::as_str),
+            Some("muller-gmbh")
+        );
+        assert_eq!(
+            slugify("Ærø Straße").as_ref().map(Slug::as_str),
+            Some("aero-strasse")
+        );
+        assert_eq!(
+            slugify("Ada's Lab").as_ref().map(Slug::as_str),
+            Some("adas-lab")
+        );
+        assert_eq!(
+            slugify("İstanbul").as_ref().map(Slug::as_str),
+            Some("istanbul")
+        );
     }
 
     #[test]
@@ -543,7 +724,10 @@ mod tests {
     #[test]
     fn a_long_name_is_cut_without_a_dangling_hyphen() {
         let slug = slugify(&format!("{} tail", "a".repeat(MAX_LEN - 1)));
-        assert_eq!(slug.as_deref(), Some("a".repeat(MAX_LEN - 1).as_str()));
+        assert_eq!(
+            slug.as_ref().map(Slug::as_str),
+            Some("a".repeat(MAX_LEN - 1).as_str())
+        );
     }
 
     #[test]
@@ -551,7 +735,7 @@ mod tests {
         let long = "z".repeat(90);
         for name in ["Acme", "Müller GmbH", "  x  ", "a-b", long.as_str()] {
             let slug = slugify(name).unwrap();
-            assert!(is_slug(&slug), "{slug}");
+            assert!(is_slug(slug.as_str()), "{slug}");
         }
     }
 
@@ -584,8 +768,8 @@ mod tests {
     #[test]
     fn candidates_run_from_the_name_through_its_numbers() {
         let all = candidates(Scope::Project, "Web App");
-        assert_eq!(all.first().map(String::as_str), Some("web-app"));
-        assert_eq!(all.get(1).map(String::as_str), Some("web-app-2"));
+        assert_eq!(all.first().map(Slug::as_str), Some("web-app"));
+        assert_eq!(all.get(1).map(Slug::as_str), Some("web-app-2"));
         assert_eq!(all.len(), 20);
         assert!(candidates(Scope::Project, "株式会社").is_empty());
     }
@@ -593,11 +777,11 @@ mod tests {
     #[test]
     fn an_organization_skips_a_reserved_word_but_not_its_numbers() {
         let all = candidates(Scope::Organization, "Account");
-        assert_eq!(all.first().map(String::as_str), Some("account-2"));
+        assert_eq!(all.first().map(Slug::as_str), Some("account-2"));
         assert_eq!(
             candidates(Scope::Project, "Account")
                 .first()
-                .map(String::as_str),
+                .map(Slug::as_str),
             Some("account")
         );
     }
@@ -607,12 +791,12 @@ mod tests {
     #[test]
     fn a_project_skips_its_organizations_page_names() {
         let all = candidates(Scope::Project, "Members");
-        assert_eq!(all.first().map(String::as_str), Some("members-2"));
+        assert_eq!(all.first().map(Slug::as_str), Some("members-2"));
         assert_eq!(all.len(), 19);
         assert_eq!(
             candidates(Scope::Organization, "Members")
                 .first()
-                .map(String::as_str),
+                .map(Slug::as_str),
             Some("members")
         );
     }
@@ -623,12 +807,12 @@ mod tests {
     fn an_organizations_candidates_end_with_the_name_and_a_random_tail() {
         let all = candidates(Scope::Organization, "Personal");
         assert_eq!(all.len(), 21);
-        assert_eq!(all.get(19).map(String::as_str), Some("personal-20"));
+        assert_eq!(all.get(19).map(Slug::as_str), Some("personal-20"));
         let last = all.last().unwrap();
-        let tail = last.strip_prefix("personal-").unwrap();
+        let tail = last.as_str().strip_prefix("personal-").unwrap();
         assert_eq!(tail.len(), TAIL_LEN);
         assert!(
-            is_slug(last) && !Scope::Organization.reserves(last),
+            is_slug(last.as_str()) && !Scope::Organization.reserves(last.as_str()),
             "{last}"
         );
         assert_ne!(
@@ -637,7 +821,7 @@ mod tests {
         );
 
         let long = candidates(Scope::Organization, &"c".repeat(90));
-        assert!(long.iter().all(|slug| is_slug(slug)), "{long:?}");
+        assert!(long.iter().all(|slug| is_slug(slug.as_str())), "{long:?}");
     }
 
     #[test]
@@ -653,11 +837,15 @@ mod tests {
     fn a_placeholder_is_a_slug_of_its_scope() {
         let org = placeholder(Scope::Organization);
         let project = placeholder(Scope::Project);
-        assert!(org.starts_with("org-") && is_slug(&org) && !Scope::Organization.reserves(&org));
         assert!(
-            project.starts_with("project-")
-                && is_slug(&project)
-                && !Scope::Project.reserves(&project)
+            org.as_str().starts_with("org-")
+                && is_slug(org.as_str())
+                && !Scope::Organization.reserves(org.as_str())
+        );
+        assert!(
+            project.as_str().starts_with("project-")
+                && is_slug(project.as_str())
+                && !Scope::Project.reserves(project.as_str())
         );
         assert_ne!(org, placeholder(Scope::Organization));
     }
@@ -723,7 +911,9 @@ mod tests {
     #[test]
     fn a_long_name_is_cut_back_to_a_whole_word() {
         assert_eq!(
-            slugify("Engineering Council and Software Houses of Pakistan").as_deref(),
+            slugify("Engineering Council and Software Houses of Pakistan")
+                .as_ref()
+                .map(Slug::as_str),
             Some("engineering-council-and-software-houses-of")
         );
         assert_eq!(
@@ -767,7 +957,7 @@ mod tests {
         assert_eq!(
             candidates(Scope::Organization, "Dick's organization")
                 .first()
-                .map(String::as_str),
+                .map(Slug::as_str),
             Some("dicks-organization")
         );
     }

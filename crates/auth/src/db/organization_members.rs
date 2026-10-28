@@ -13,6 +13,7 @@ use telmoni_shared::db::tenant_session::{
     Binding, Maintenance, Organization, Person, PersonAndOrganization, PersonOrganizationProject,
     ProjectAndOrganization, Scoped,
 };
+use telmoni_shared::slug::Slug;
 use telmoni_shared::{OrganizationId, OrganizationRole, UserId, derive_shard_key};
 
 use crate::db::AuthLane;
@@ -86,7 +87,7 @@ pub struct LiveOrganizationInvite {
 pub struct OrganizationMembership {
     pub organization_id: OrganizationId,
     /// Where its paths begin in the console: `/{slug}`.
-    pub slug: String,
+    pub slug: Slug,
     /// What it is called.
     pub name: String,
     /// The owner's address and name, for the console to name whom to ask.

@@ -44,10 +44,11 @@ use crate::{
     },
     model::{AuditKind, DeletionKind},
 };
+use telmoni_shared::AuthzError;
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
 use telmoni_shared::db::tenant_session::{self, Scoped, maintenance_scope, person_scope};
+use telmoni_shared::slug::{self, Slug};
 use telmoni_shared::{AuditAction, TelmoniResourceKind};
-use telmoni_shared::{AuthzError, slug};
 
 /// The longest name worth storing: a real company with a qualifier, still
 /// whole in a rail row rather than an ellipsis.
@@ -239,7 +240,7 @@ pub async fn create_organization(
         .as_deref()
         .map(str::trim)
         .filter(|asked| !asked.is_empty())
-        .map(asked_url)
+        .map(slug::asked_url)
         .transpose()?;
     if !signups_open(&state).await? {
         return Err(TenantError::FeatureOff { flag: Flag::Signup }.into());
@@ -292,7 +293,7 @@ pub async fn create_organization(
 #[derive(Debug, Serialize)]
 pub struct OrganizationCreated {
     pub id: OrganizationId,
-    pub slug: String,
+    pub slug: Slug,
     pub name: String,
 }
 
@@ -300,17 +301,17 @@ pub struct OrganizationCreated {
 #[derive(Debug, Serialize)]
 pub struct OrganizationNamed {
     pub name: String,
-    pub slug: String,
+    pub slug: Slug,
 }
 
 /// What a deployment that founds an organization itself asks first
 /// ([`telmoni_shared::seam::Auth::check_founding`]): the name and the URL,
 /// refused as the founder's own asking would refuse them. Whether new
 /// organizations are open is the seam's to read, in the lane, before this.
-pub(crate) fn check_founding(name: &str, slug: Option<&str>) -> Result<(), TelmoniError> {
+pub(crate) fn check_founding(name: &str, asked: Option<&Slug>) -> Result<(), TelmoniError> {
     organization_name(name)?;
-    if let Some(asked) = slug.map(str::trim).filter(|asked| !asked.is_empty()) {
-        asked_url(asked)?;
+    if let Some(asked) = asked {
+        slug::admit_url(asked)?;
     }
     Ok(())
 }
@@ -340,14 +341,11 @@ pub(crate) async fn found_for_deployment(
         });
     }
     let name = organization_name(&founding.name)?;
-    let asked = founding
-        .slug
-        .as_deref()
-        .map(str::trim)
-        .filter(|asked| !asked.is_empty())
-        .map(asked_url)
-        .transpose()?;
-    let mut candidates: Vec<String> = asked.into_iter().collect();
+    let asked = founding.slug.clone();
+    if let Some(asked) = &asked {
+        slug::admit_url(asked)?;
+    }
+    let mut candidates: Vec<Slug> = asked.into_iter().collect();
     candidates.extend(slug::candidates(slug::Scope::Organization, &name));
     let url = NewUrl::Derived(free_url(state, organization, &candidates).await?);
 
@@ -406,8 +404,8 @@ pub(crate) async fn signups_open(state: &AppState) -> Result<bool, TelmoniError>
 pub(crate) async fn free_url(
     state: &AppState,
     organization: &OrganizationId,
-    candidates: &[String],
-) -> Result<Option<String>, TelmoniError> {
+    candidates: &[Slug],
+) -> Result<Option<Slug>, TelmoniError> {
     if candidates.is_empty() {
         return Ok(None);
     }
@@ -443,9 +441,9 @@ pub(crate) async fn founder_under_lock(
 /// The URL a new organization takes, settled before the person's lock.
 pub(crate) enum NewUrl {
     /// The one its founder asked for: written as asked, or refused as taken.
-    Chosen(String),
+    Chosen(Slug),
     /// The one [`free_url`] found; with none, a placeholder.
-    Derived(Option<String>),
+    Derived(Option<Slug>),
 }
 
 /// How an organization came to be, as its first two audit events record it.
@@ -469,7 +467,7 @@ impl Founding {
 /// A new organization, as its founder is answered.
 pub(crate) struct Founded {
     pub(crate) id: OrganizationId,
-    pub(crate) slug: String,
+    pub(crate) slug: Slug,
 }
 
 /// Make `founder` the owner of `organization`, minted by the caller and
@@ -587,7 +585,7 @@ pub async fn update_organization(
         ));
     }
     let name = req.name.as_deref().map(organization_name).transpose()?;
-    let asked_slug = req.slug.as_deref().map(asked_url).transpose()?;
+    let asked_slug = req.slug.as_deref().map(slug::asked_url).transpose()?;
 
     let ActingOrganization {
         mut tx,
@@ -598,14 +596,10 @@ pub async fn update_organization(
         return Err(refused);
     }
 
-    let Some(now) = organizations::update(
-        &mut tx,
-        &organization,
-        name.as_deref(),
-        asked_slug.as_deref(),
-    )
-    .await
-    .map_err(slug_taken)?
+    let Some(now) =
+        organizations::update(&mut tx, &organization, name.as_deref(), asked_slug.as_ref())
+            .await
+            .map_err(slug_taken)?
     else {
         tx.commit().await?;
         return Err(AuthError::NotFound("organization not found".into()).into());
@@ -653,36 +647,4 @@ fn url_taken() -> TelmoniError {
 /// rule for a new organization and a rename, so the two cannot drift.
 fn organization_name(raw: &str) -> Result<String, TelmoniError> {
     crate::identity::name(raw, "organization", MAX_ORGANIZATION_NAME)
-}
-
-/// A URL asked for, at creation or on Settings: a slug's shape, no word the
-/// console's own paths use, and no [`slug::BLOCKED`] word, each refusal typed
-/// as the URL's (`/errors/auth/bad-url`) so the console's form puts it under
-/// the URL rather than the name. Whether another organization holds it is the
-/// write's to say.
-fn asked_url(raw: &str) -> Result<String, TelmoniError> {
-    let asked = raw.trim();
-    if !slug::is_slug(asked) {
-        return Err(AuthError::BadUrl(format!(
-            "a URL is lowercase letters and digits, in words joined by single hyphens, at \
-             most {} characters",
-            slug::MAX_LEN
-        ))
-        .into());
-    }
-    if slug::Scope::Organization.reserves(asked) {
-        return Err(AuthError::BadUrl(format!(
-            "{asked} is a word the console's own paths use — choose another URL"
-        ))
-        .into());
-    }
-    // Not echoed back: the refusal is about the word, and repeating a slur in
-    // an error is no kinder than taking it.
-    if slug::offends(asked) {
-        return Err(AuthError::BadUrl(
-            "that URL holds a word no URL here may hold — choose another URL".into(),
-        )
-        .into());
-    }
-    Ok(asked.to_owned())
 }

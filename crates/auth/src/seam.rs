@@ -20,6 +20,7 @@ use telmoni_shared::seam::{
     Audience, AuditEventsQuery, Auth, DocumentCursor, FoundedOrganization, OrganizationFounding,
     OwnedOrganization, ProjectHome, ReadableProject, SourceDocument,
 };
+use telmoni_shared::slug::Slug;
 use telmoni_shared::{
     AuthError, Flag, FlagSet, OrganizationAction, OrganizationId, OrganizationRole,
     OrganizationStatus, ProjectId, TelmoniError, TenantError, UserId,
@@ -128,7 +129,7 @@ impl Auth for AppState {
     async fn organization_slugs(
         &self,
         organizations: &[OrganizationId],
-    ) -> Result<Vec<(OrganizationId, String)>, TelmoniError> {
+    ) -> Result<Vec<(OrganizationId, Slug)>, TelmoniError> {
         let mut tx = maintenance_scope(&self.db, AuthLane).await?;
         let slugs = organizations::slugs(&mut tx, organizations).await?;
         tx.commit().await?;
@@ -205,7 +206,7 @@ impl Auth for AppState {
         Ok(owners)
     }
 
-    async fn check_founding(&self, name: &str, slug: Option<&str>) -> Result<(), TelmoniError> {
+    async fn check_founding(&self, name: &str, slug: Option<&Slug>) -> Result<(), TelmoniError> {
         if !crate::handler::organization::signups_open(self).await? {
             return Err(TenantError::FeatureOff { flag: Flag::Signup }.into());
         }

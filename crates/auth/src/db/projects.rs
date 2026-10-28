@@ -8,6 +8,7 @@ use telmoni_shared::db::tenant_session::{
 };
 use telmoni_shared::rbac;
 use telmoni_shared::seam::ProjectHome;
+use telmoni_shared::slug::Slug;
 use telmoni_shared::{
     OrganizationId, OrganizationRole, OrganizationStatus, ProjectId, Role, UserId,
     derive_shard_key, slug,
@@ -34,7 +35,7 @@ const FIRST_FREE_SLUG: &str =
 
 /// The slugs a project called `name` may take, with a placeholder last for a
 /// write that must find one.
-fn slugs_for(name: &str) -> Vec<String> {
+fn slugs_for(name: &str) -> Vec<slug::Slug> {
     let mut slugs = slug::candidates(slug::Scope::Project, name);
     slugs.push(slug::placeholder(slug::Scope::Project));
     slugs
@@ -47,7 +48,7 @@ pub async fn create<B: ProjectCreate>(
     project_id: &ProjectId,
     owner: &OrganizationId,
     name: &str,
-) -> sqlx::Result<Option<String>> {
+) -> sqlx::Result<Option<Slug>> {
     sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "INSERT INTO auth.projects
              (id, external_id, organization_id, name, slug, shard_key)
@@ -71,7 +72,7 @@ pub struct ProjectSummary {
     /// The project's `external_id` — the value the services key on.
     pub id: ProjectId,
     /// The project's segment in console paths, under its organization's.
-    pub slug: String,
+    pub slug: Slug,
     pub name: String,
     /// The caller's role on it, as `telmoni_shared::rbac::project_role`
     /// decides it.
@@ -83,7 +84,7 @@ pub struct ProjectSummary {
 #[derive(FromRow)]
 struct Reached {
     id: ProjectId,
-    slug: String,
+    slug: Slug,
     name: String,
     organization_role: Option<OrganizationRole>,
     seat: Option<Role>,
@@ -227,7 +228,7 @@ pub async fn homes(
     tx: &mut Scoped<'_, Maintenance<AuthLane>>,
     projects: &[ProjectId],
 ) -> sqlx::Result<Vec<ProjectHome>> {
-    let rows: Vec<(ProjectId, String, OrganizationId, String)> = sqlx::query_as(
+    let rows: Vec<(ProjectId, Slug, OrganizationId, Slug)> = sqlx::query_as(
         "SELECT p.external_id, p.slug, p.organization_id, o.slug
            FROM auth.projects p
            JOIN auth.organizations o ON o.external_id = p.organization_id
@@ -314,7 +315,7 @@ pub async fn move_to_organization(
     from: &OrganizationId,
     to: &OrganizationId,
     name: &str,
-) -> sqlx::Result<Option<String>> {
+) -> sqlx::Result<Option<Slug>> {
     sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "UPDATE auth.projects
             SET organization_id = $2, name = $5, slug = ({FIRST_FREE_SLUG}), updated_at = now()
@@ -340,7 +341,7 @@ pub async fn update_name(
     organization_id: &OrganizationId,
     project_id: &ProjectId,
     name: &str,
-) -> sqlx::Result<Option<String>> {
+) -> sqlx::Result<Option<Slug>> {
     sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "UPDATE auth.projects
             SET name = $4, slug = COALESCE(({FIRST_FREE_SLUG}), slug), updated_at = now()
@@ -379,12 +380,12 @@ pub async fn delete(
 #[serde(rename_all = "camelCase")]
 pub struct ProjectEverywhere {
     pub id: ProjectId,
-    pub slug: String,
+    pub slug: Slug,
     pub name: String,
     pub role: Role,
     pub organization_id: OrganizationId,
     /// Where the organization's paths begin, so a link names both segments.
-    pub organization_slug: String,
+    pub organization_slug: Slug,
     /// What the organization is called.
     pub organization_name: String,
 }
@@ -448,6 +449,6 @@ struct ReachedEverywhere {
     #[sqlx(flatten)]
     project: Reached,
     organization_id: OrganizationId,
-    organization_slug: String,
+    organization_slug: Slug,
     organization_name: String,
 }

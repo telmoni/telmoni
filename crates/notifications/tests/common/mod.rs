@@ -304,9 +304,9 @@ impl Auth for AuthStub {
             .filter_map(|project| {
                 held.get(project).map(|organization| ProjectHome {
                     project_id: project.clone(),
-                    slug: project.to_string(),
+                    slug: slug_of(project.as_str()),
                     organization_id: organization.clone(),
-                    organization_slug: organization.to_string(),
+                    organization_slug: slug_of(organization.as_str()),
                 })
             })
             .collect())
@@ -452,4 +452,9 @@ async fn redact_person_lane(
         .map_err(|e| TelmoniError::BadRequest(format!("invalid user id: {e}")))?;
     let redacted = handler::redact_person(&state, &user_id).await?;
     Ok(axum::Json(json!({ "redacted": redacted })))
+}
+
+/// A slug spelled from an id, as a test's stand-in for the one auth keeps.
+fn slug_of(id: &str) -> telmoni_shared::slug::Slug {
+    telmoni_shared::slug::slugify(id).expect("an id spells a slug")
 }

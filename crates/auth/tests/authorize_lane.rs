@@ -350,7 +350,14 @@ async fn the_seam_answers_the_projects_a_person_can_open(pool: PgPool) {
             .await
             .unwrap()
             .into_iter()
-            .map(|p| (p.project_id.to_string(), p.slug, p.name, p.role.to_string()))
+            .map(|p| {
+                (
+                    p.project_id.to_string(),
+                    p.slug.into_inner(),
+                    p.name,
+                    p.role.to_string(),
+                )
+            })
             .collect();
         assert_eq!(
             answered.iter().map(|p| p.0.as_str()).collect::<Vec<_>>(),

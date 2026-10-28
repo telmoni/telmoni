@@ -48,6 +48,7 @@ use telmoni_shared::db::tenant_session::{
 use telmoni_shared::error::lock_timed_out;
 use telmoni_shared::extract::{Json, Path};
 use telmoni_shared::person_token::Principal;
+use telmoni_shared::slug::Slug;
 use telmoni_shared::{
     AuditAction, AuthError, AuthzError, OrganizationId, OrganizationRole, OrganizationStatus,
     ProjectId, Role, TelmoniError, TelmoniResourceKind, UserId,
@@ -398,8 +399,8 @@ pub async fn decline(
 /// Where a project landed, and the seats that came with it.
 struct Landed {
     name: String,
-    slug: String,
-    organization_slug: Option<String>,
+    slug: Slug,
+    organization_slug: Option<Slug>,
     staying: Vec<members::Seat>,
 }
 
@@ -956,9 +957,9 @@ pub async fn accept(
 #[serde(rename_all = "camelCase")]
 pub struct ProjectMoved {
     pub project_id: ProjectId,
-    pub slug: String,
+    pub slug: Slug,
     pub organization_id: OrganizationId,
-    pub organization_slug: Option<String>,
+    pub organization_slug: Option<Slug>,
     pub previous_organization_id: OrganizationId,
     pub name: String,
 }

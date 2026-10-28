@@ -13,6 +13,7 @@ use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
 use telmoni_shared::db::tenant_session::maintenance_scope;
 use telmoni_shared::extract::{Json, Path};
 use telmoni_shared::person_token::Principal;
+use telmoni_shared::slug::Slug;
 use telmoni_shared::{AuditAction, AuthError, ProjectId, TelmoniError, TelmoniResourceKind};
 
 use super::answer::Projects;
@@ -245,7 +246,7 @@ pub struct ProjectDeleted {
 #[derive(Debug, Serialize)]
 pub struct ProjectRenamed {
     pub name: String,
-    pub slug: String,
+    pub slug: Slug,
 }
 
 /// Request payload for updating a project.

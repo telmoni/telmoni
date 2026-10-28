@@ -8,6 +8,7 @@ use telmoni_shared::db::tenant_session::{
     Binding, Maintenance, Person, PersonAndOrganization, PersonOrganizationProject, Project,
     ProjectAndOrganization, Scoped,
 };
+use telmoni_shared::slug::Slug;
 use telmoni_shared::{OrganizationId, ProjectId, Role, UserId, derive_shard_key};
 
 use crate::db::AuthLane;
@@ -320,10 +321,10 @@ pub async fn give<B: SeatInsert>(
 pub struct GivenSeat {
     pub project_id: ProjectId,
     pub project_name: String,
-    pub project_slug: String,
+    pub project_slug: Slug,
     pub organization_id: OrganizationId,
     pub organization_name: String,
-    pub organization_slug: String,
+    pub organization_slug: Slug,
     pub role: Role,
     /// Who gave it. `None` once they have been erased.
     pub giver_email: Option<String>,

@@ -10,6 +10,7 @@ use crate::model::{DeletionKind, Organization};
 use telmoni_shared::db::tenant_session::{
     self, Binding, HasOrganization, Maintenance, PersonAndOrganization, Scoped,
 };
+use telmoni_shared::slug::Slug;
 use telmoni_shared::{OrganizationId, OrganizationStatus, derive_shard_key};
 
 /// Every column `Organization` reads, in `FromRow` order. Written once because a
@@ -35,7 +36,7 @@ pub async fn get<B: Binding>(
 /// maintenance lane's to read.
 #[derive(Debug, sqlx::FromRow)]
 pub struct OrganizationSummary {
-    pub slug: String,
+    pub slug: Slug,
     pub name: String,
     pub owner_email: Option<String>,
     pub owner_display_name: Option<String>,
@@ -77,7 +78,7 @@ pub async fn create<B: HasOrganization>(
     tx: &mut Scoped<'_, B>,
     external_id: &OrganizationId,
     name: &str,
-    slug: &str,
+    slug: &Slug,
 ) -> sqlx::Result<Option<Organization>> {
     sqlx::query_as::<_, Organization>(sqlx::AssertSqlSafe(format!(
         "INSERT INTO auth.organizations
@@ -102,8 +103,8 @@ pub async fn create<B: HasOrganization>(
 pub async fn first_free_slug(
     tx: &mut Scoped<'_, Maintenance<AuthLane>>,
     external_id: &OrganizationId,
-    candidates: &[String],
-) -> sqlx::Result<Option<String>> {
+    candidates: &[Slug],
+) -> sqlx::Result<Option<Slug>> {
     sqlx::query_scalar(
         "SELECT c.slug FROM unnest($2::text[]) WITH ORDINALITY AS c(slug, position)
           WHERE NOT EXISTS (SELECT 1 FROM auth.organizations o
@@ -121,7 +122,7 @@ pub async fn first_free_slug(
 pub async fn slug_of<B: Binding>(
     tx: &mut Scoped<'_, B>,
     external_id: &OrganizationId,
-) -> sqlx::Result<Option<String>> {
+) -> sqlx::Result<Option<Slug>> {
     sqlx::query_scalar("SELECT slug FROM auth.organizations WHERE external_id = $1")
         .bind(external_id)
         .fetch_optional(tx.conn())
@@ -134,7 +135,7 @@ pub async fn slug_of<B: Binding>(
 pub async fn slugs(
     tx: &mut Scoped<'_, Maintenance<AuthLane>>,
     organizations: &[OrganizationId],
-) -> sqlx::Result<Vec<(OrganizationId, String)>> {
+) -> sqlx::Result<Vec<(OrganizationId, Slug)>> {
     sqlx::query_as("SELECT external_id, slug FROM auth.organizations WHERE external_id = ANY($1)")
         .bind(organizations)
         .fetch_all(tx.conn())
@@ -146,7 +147,7 @@ pub async fn slugs(
 #[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
 pub struct NameAndSlug {
     pub name: String,
-    pub slug: String,
+    pub slug: Slug,
 }
 
 /// Set the organization's name, its slug, or both, and answer what it goes by
@@ -159,7 +160,7 @@ pub async fn update(
     tx: &mut Scoped<'_, tenant_session::Organization>,
     external_id: &OrganizationId,
     name: Option<&str>,
-    slug: Option<&str>,
+    slug: Option<&Slug>,
 ) -> sqlx::Result<Option<NameAndSlug>> {
     sqlx::query_as::<_, NameAndSlug>(
         "UPDATE auth.organizations

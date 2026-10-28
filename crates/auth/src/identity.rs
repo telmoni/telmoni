@@ -138,7 +138,7 @@ pub fn display_for(display_name: Option<&str>, email: &str) -> String {
 /// No slugs when the holder's own name gives none: "李明's organization"
 /// would read as `s-organization`, so it takes a placeholder instead.
 #[must_use]
-pub fn default_organization(display_name: Option<&str>) -> (String, Vec<String>) {
+pub fn default_organization(display_name: Option<&str>) -> (String, Vec<slug::Slug>) {
     const POSSESSIVE: &str = "'s organization";
     let room = crate::db::organizations::MAX_ORGANIZATION_NAME - POSSESSIVE.chars().count();
     let Some(first) = display_name.and_then(|name| name.split_whitespace().next()) else {
@@ -267,12 +267,18 @@ mod tests {
     fn a_first_organization_is_named_after_its_holder_not_their_address() {
         let (name, slugs) = default_organization(Some("Ada Lovelace"));
         assert_eq!(name, "Ada's organization");
-        assert_eq!(slugs.first().map(String::as_str), Some("adas-organization"));
+        assert_eq!(
+            slugs.first().map(telmoni_shared::slug::Slug::as_str),
+            Some("adas-organization")
+        );
 
         for nobody in [None, Some("   ")] {
             let (name, slugs) = default_organization(nobody);
             assert_eq!(name, "My organization");
-            assert_eq!(slugs.first().map(String::as_str), Some("my-organization"));
+            assert_eq!(
+                slugs.first().map(telmoni_shared::slug::Slug::as_str),
+                Some("my-organization")
+            );
         }
 
         let (long, _) = default_organization(Some(&"a".repeat(300)));

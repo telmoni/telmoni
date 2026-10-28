@@ -272,7 +272,7 @@ pub(crate) async fn answer(
 /// by slug, as the console reads one off the path it is rendering.
 enum Requested {
     Id(OrganizationId),
-    Slug(String),
+    Slug(slug::Slug),
 }
 
 impl Requested {
@@ -294,8 +294,8 @@ fn requested_organization(headers: &HeaderMap) -> Option<Requested> {
         .map(Requested::Id)
         .or_else(|| {
             header("x-organization-slug")
-                .filter(|v| slug::is_slug(v))
-                .map(|v| Requested::Slug(v.to_owned()))
+                .and_then(|v| slug::Slug::try_new(v).ok())
+                .map(Requested::Slug)
         })
 }
 

@@ -229,8 +229,8 @@ pub struct Organization {
     pub id: Uuid,
     #[serde(rename = "organization_id")]
     pub external_id: OrganizationId,
-    /// The organization's segment in console paths (`telmoni_shared::slug`).
-    pub slug: String,
+    /// The organization's segment in console paths.
+    pub slug: telmoni_shared::slug::Slug,
     /// What the organization is called: the name it was created under, or its
     /// owner's when it was provisioned ("Ada's organization"), whatever an
     /// owner or admin renames it to after.

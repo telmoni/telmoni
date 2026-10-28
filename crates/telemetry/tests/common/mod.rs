@@ -441,8 +441,8 @@ impl Auth for AuthStub {
                     })
                     .map(|organization| ProjectHome {
                         project_id: project.clone(),
-                        slug: project.to_string(),
-                        organization_slug: organization.to_string(),
+                        slug: slug_of(project.as_str()),
+                        organization_slug: slug_of(organization.as_str()),
                         organization_id: organization,
                     })
             })
@@ -475,7 +475,7 @@ impl Auth for AuthStub {
                 let role = project_role(acting.organization_role, seat)?;
                 Some(ReadableProject {
                     project_id: ProjectId::try_new(project.as_str()).ok()?,
-                    slug: project.clone(),
+                    slug: slug_of(project),
                     name: format!("Project {project}"),
                     role,
                 })
@@ -1265,4 +1265,9 @@ pub(crate) fn received(
         sample_rate: None,
         attributes: Vec::new(),
     }
+}
+
+/// A slug spelled from an id, as a test's stand-in for the one auth keeps.
+pub(crate) fn slug_of(id: &str) -> telmoni_shared::slug::Slug {
+    telmoni_shared::slug::slugify(id).expect("an id spells a slug")
 }

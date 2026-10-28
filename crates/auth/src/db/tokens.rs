@@ -289,10 +289,15 @@ mod tests {
         let mut tx = organization_scope(pool, &organization)
             .await
             .expect("scope");
-        crate::db::organizations::create(&mut tx, &organization, "Acme", "acme")
-            .await
-            .unwrap()
-            .expect("the slug is free");
+        crate::db::organizations::create(
+            &mut tx,
+            &organization,
+            "Acme",
+            &telmoni_shared::slug::Slug::from_trusted("acme"),
+        )
+        .await
+        .unwrap()
+        .expect("the slug is free");
         crate::db::projects::create(&mut tx, &project, &organization, "Default project")
             .await
             .unwrap();

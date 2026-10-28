@@ -13,6 +13,7 @@ use telmoni_shared::db::tenant_session::organization_scope;
 use telmoni_shared::extract::Json;
 use telmoni_shared::rbac::{Resource, Verb, can};
 use telmoni_shared::seam::ReadableProject;
+use telmoni_shared::slug::Slug;
 use telmoni_shared::{AuthzError, ProjectId, TelmoniError};
 
 use crate::AppState;
@@ -24,7 +25,7 @@ use crate::rules::incidents::IncidentRow;
 #[derive(Debug, Serialize)]
 pub struct HealthProject {
     pub id: ProjectId,
-    pub slug: String,
+    pub slug: Slug,
     pub name: String,
 }
 

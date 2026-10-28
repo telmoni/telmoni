@@ -210,7 +210,7 @@ const DELIVERIES_TOOL_MAX: i64 = 20;
 /// is the choice made for every link (`ARCHITECTURE.md`, "Ids name rows, slugs
 /// spell links").
 struct Addresses {
-    organizations: HashMap<OrganizationId, String>,
+    organizations: HashMap<OrganizationId, telmoni_shared::slug::Slug>,
     projects: HashMap<ProjectId, ProjectHome>,
 }
 
