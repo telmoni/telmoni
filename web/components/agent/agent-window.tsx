@@ -1,9 +1,12 @@
 "use client";
 
-import { useEffect, useId, useRef, useState, type ReactNode, type Ref } from "react";
+import { useEffect, useId, useState, type PointerEvent, type ReactNode, type RefObject } from "react";
 import { Maximize2, Minimize2, X as XIcon } from "lucide-react";
 
-import { ICON_BUTTON } from "@/components/agent/agent-history-list";
+import { PanelAction } from "@/components/side-panel";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { useNonModal } from "@/components/use-non-modal";
+import { usePointerGesture } from "@/components/use-pointer-gesture";
 import {
   floatingRect,
   fullRect,
@@ -35,7 +38,10 @@ const HANDLES: { edge: Edge; className: string }[] = [
   { edge: "sw", className: "-bottom-1.5 -left-1.5 size-4 cursor-nesw-resize" },
 ];
 
-type Gesture = { kind: "move" | Edge; pointerId: number; x: number; y: number; start: Rect };
+/** What a drag of the window holds: the edge it sizes by, or the whole of it
+ *  moved; where the press was and the window then; and where it has the
+ *  window so far, `null` until the pointer moves. */
+type Gesture = { kind: "move" | Edge; x: number; y: number; start: Rect; rect: Rect | null };
 
 // The layout viewport, which everything is measured in, and the part of it a
 // phone's keyboard leaves visible: the visual viewport's top and height.
@@ -92,7 +98,8 @@ const headerBottom = () =>
  * ⚠ **Non-modal, and marked so: `aria-modal="false"`.** The page beside it
  * keeps its pointer and its keys — the letter shortcuts and the rail's drawer
  * read that attribute to tell this window from a dialog that does shut the
- * page off (`MODAL_SELECTOR` in `lib/keys.ts`).
+ * page off (`MODAL_SELECTOR` in `lib/keys.ts`). It takes the focus as it
+ * opens and shuts on Escape from inside, as the side panel does.
  *
  * The panel's state lives in `AgentPanel`, which hands the conversation in as
  * `children`: a drag re-renders this frame alone, never the conversation.
@@ -102,14 +109,17 @@ export function AgentWindow({
   ref,
   title,
   actions,
+  initialFocus,
   onClose,
   children,
 }: {
   id: string;
-  ref: Ref<HTMLDivElement>;
+  ref: RefObject<HTMLDivElement | null>;
   title: ReactNode;
   /** The panel's own controls, before full size and close. */
   actions: ReactNode;
+  /** What takes the focus as the window opens; the window itself if none. */
+  initialFocus?: RefObject<HTMLElement | null>;
   onClose: () => void;
   children: ReactNode;
 }) {
@@ -118,8 +128,7 @@ export function AgentWindow({
   const viewport: Viewport = { width: viewports.width, height: viewports.height };
   const [below] = useState(headerBottom);
   const [layout, setLayout] = useState<WindowLayout>(readWindowLayout);
-  const [gesture, setGesture] = useState<Gesture["kind"] | null>(null);
-  const gestureRef = useRef<Gesture | null>(null);
+  useNonModal(ref, { onClose, initialFocus });
 
   const compact = isCompact(viewport);
   const full = compact || layout.mode === "full";
@@ -131,49 +140,39 @@ export function AgentWindow({
       ? fullRect(viewport)
       : floatingRect(layout, viewport, below);
 
-  // Kept once a gesture ends, never while one runs: one write per drag, not
-  // one per pointer move.
-  useEffect(() => {
-    if (gesture === null) writeWindowLayout(layout);
-  }, [layout, gesture]);
+  // Kept as a drag ends and as the window fills the screen or floats again:
+  // one write per gesture, not one per pointer move.
+  const keep = (next: WindowLayout) => {
+    setLayout(next);
+    writeWindowLayout(next);
+  };
+  const toggleFull = () => keep({ ...layout, mode: layout.mode === "full" ? "float" : "full" });
 
-  const toggleFull = () =>
-    setLayout((l) => ({ ...l, mode: l.mode === "full" ? "float" : "full" }));
+  const {
+    held: gesture,
+    press,
+    handlers: gestureHandlers,
+  } = usePointerGesture<Gesture>({
+    move: (g, e) => {
+      const dx = e.clientX - g.x;
+      const dy = e.clientY - g.y;
+      const next =
+        g.kind === "move"
+          ? moveRect(g.start, dx, dy, viewport)
+          : resizeRect(g.start, g.kind, dx, dy, viewport);
+      setLayout({ mode: "float", rect: next });
+      return { ...g, rect: next };
+    },
+    end: (g) => {
+      if (g.rect) writeWindowLayout({ mode: "float", rect: g.rect });
+    },
+  });
 
-  const begin = (kind: Gesture["kind"], e: React.PointerEvent<HTMLElement>) => {
-    if (full || e.button !== 0 || !e.isPrimary) return;
+  const begin = (kind: Gesture["kind"], e: PointerEvent<HTMLElement>) => {
+    if (full) return;
     // A press on one of the title bar's controls is the control's.
     if (kind === "move" && (e.target as Element).closest("button, a")) return;
-    e.preventDefault();
-    e.currentTarget.setPointerCapture(e.pointerId);
-    gestureRef.current = { kind, pointerId: e.pointerId, x: e.clientX, y: e.clientY, start: rect };
-    setGesture(kind);
-  };
-
-  const track = (e: React.PointerEvent<HTMLElement>) => {
-    const g = gestureRef.current;
-    if (!g || g.pointerId !== e.pointerId) return;
-    const dx = e.clientX - g.x;
-    const dy = e.clientY - g.y;
-    const next =
-      g.kind === "move"
-        ? moveRect(g.start, dx, dy, viewport)
-        : resizeRect(g.start, g.kind, dx, dy, viewport);
-    setLayout({ mode: "float", rect: next });
-  };
-
-  const end = (e: React.PointerEvent<HTMLElement>) => {
-    const g = gestureRef.current;
-    if (!g || g.pointerId !== e.pointerId) return;
-    gestureRef.current = null;
-    setGesture(null);
-  };
-
-  const gestureHandlers = {
-    onPointerMove: track,
-    onPointerUp: end,
-    onPointerCancel: end,
-    onLostPointerCapture: end,
+    press(e, { kind, x: e.clientX, y: e.clientY, start: rect, rect: null });
   };
 
   return (
@@ -218,7 +217,7 @@ export function AgentWindow({
           className={cn(
             "flex shrink-0 items-center gap-3 p-3.5 select-none",
             !full && "touch-none",
-            !full && (gesture === "move" ? "cursor-grabbing" : "cursor-grab"),
+            !full && (gesture?.kind === "move" ? "cursor-grabbing" : "cursor-grab"),
           )}
         >
           <h2
@@ -227,29 +226,19 @@ export function AgentWindow({
           >
             {title}
           </h2>
-          <div className="ml-auto flex shrink-0 items-center gap-1">
-            {actions}
-            {!compact && (
-              <button
-                type="button"
-                aria-label={full ? "Exit full size" : "Full size"}
-                title={full ? "Exit full size" : "Full size"}
-                onClick={toggleFull}
-                className={ICON_BUTTON}
-              >
-                {full ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
-              </button>
-            )}
-            <button
-              type="button"
-              aria-label="Close the agent"
-              title="Close"
-              onClick={onClose}
-              className={ICON_BUTTON}
-            >
-              <XIcon className="size-4" />
-            </button>
-          </div>
+          <TooltipProvider>
+            <div className="ml-auto flex shrink-0 items-center gap-1">
+              {actions}
+              {!compact && (
+                <PanelAction label={full ? "Exit full size" : "Full size"} onClick={toggleFull}>
+                  {full ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+                </PanelAction>
+              )}
+              <PanelAction label="Close the agent" onClick={onClose}>
+                <XIcon className="size-4" />
+              </PanelAction>
+            </div>
+          </TooltipProvider>
         </div>
         {children}
       </div>

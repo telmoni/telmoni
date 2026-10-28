@@ -1,13 +1,12 @@
 "use client";
 
 import {
-  useRef,
-  useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   type RefObject,
 } from "react";
 
+import { usePointerGesture } from "@/components/use-pointer-gesture";
 import {
   FILTERS_WIDTH_DEFAULT,
   FILTERS_WIDTH_MAX,
@@ -43,55 +42,34 @@ type EdgeHandlers = {
  *  handlers: the bounds read off the area the panel stands in, its parent,
  *  as a drag starts; `keep` called once with the width a drag ends at, or
  *  with `null` on a double click, which gives the panel its own width back. */
+/** What a drag of the edge holds: where it began and the width then, the
+ *  bounds, and the width it has the panel at. */
+type Drag = { x: number; start: number; bounds: DragBounds; width: number | null };
+
 function useDraggedEdge(
   panel: RefObject<HTMLElement | null>,
   bounds: (area: number) => DragBounds,
   keep: (width: number | null) => void,
 ): { dragged: number | null; handlers: EdgeHandlers } {
-  const [dragged, setDragged] = useState<number | null>(null);
-  const drag = useRef<{
-    pointerId: number;
-    x: number;
-    start: number;
-    bounds: DragBounds;
-    width: number | null;
-  } | null>(null);
+  const { held, press, handlers } = usePointerGesture<Drag, HTMLDivElement>({
+    move: (d, e) => ({ ...d, width: draggedPanelWidth(d.start, d.x, e.clientX, d.bounds) }),
+    end: (d) => {
+      if (d.width !== null) keep(d.width);
+    },
+  });
   const onPointerDown = (e: Pointer) => {
-    if (e.button !== 0 || !e.isPrimary || !panel.current) return;
-    e.preventDefault();
-    e.currentTarget.setPointerCapture(e.pointerId);
+    if (!panel.current) return;
     const area = panel.current.parentElement?.getBoundingClientRect().width ?? 0;
-    drag.current = {
-      pointerId: e.pointerId,
+    press(e, {
       x: e.clientX,
       start: panel.current.getBoundingClientRect().width,
       bounds: bounds(area),
       width: null,
-    };
-  };
-  const onPointerMove = (e: Pointer) => {
-    const d = drag.current;
-    if (!d || d.pointerId !== e.pointerId) return;
-    d.width = draggedPanelWidth(d.start, d.x, e.clientX, d.bounds);
-    setDragged(d.width);
-  };
-  const end = (e: Pointer) => {
-    const d = drag.current;
-    if (!d || d.pointerId !== e.pointerId) return;
-    drag.current = null;
-    if (d.width !== null) keep(d.width);
-    setDragged(null);
+    });
   };
   return {
-    dragged,
-    handlers: {
-      onPointerDown,
-      onPointerMove,
-      onPointerUp: end,
-      onPointerCancel: end,
-      onLostPointerCapture: end,
-      onDoubleClick: () => keep(null),
-    },
+    dragged: held?.width ?? null,
+    handlers: { onPointerDown, ...handlers, onDoubleClick: () => keep(null) },
   };
 }
 

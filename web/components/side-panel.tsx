@@ -1,10 +1,7 @@
 "use client";
 
 import {
-  useEffect,
-  useEffectEvent,
   useLayoutEffect,
-  useRef,
   useState,
   type ComponentProps,
   type CSSProperties,
@@ -18,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
 import { Label } from "@/components/ui/label";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { useNonModal } from "@/components/use-non-modal";
 import { cn } from "@/lib/utils";
 
 // The console's side panel: over the right
@@ -135,39 +133,7 @@ export function SidePanel({
   // so a panel shutting uncovers the page before handing the focus back.
   useLayoutEffect(() => (covering ? cover() : undefined), [covering, cover]);
 
-  // Read as the panel shuts, in the layout effect's cleanup, which an Effect
-  // Event may not serve.
-  const back = useRef(returnFocus);
-  useEffect(() => {
-    back.current = returnFocus;
-  });
-  const shut = useEffectEvent(() => onClose());
-
-  // A layout effect, so the panel is still in the document when its cleanup
-  // asks where the focus is: shut by a click on the page beside it, the
-  // focus is that click's.
-  useLayoutEffect(() => {
-    const before = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const element = panel.current;
-    (initialFocus?.current ?? element)?.focus({ preventScroll: true });
-    return () => {
-      if (!element?.contains(document.activeElement)) return;
-      (back.current?.() ?? before)?.focus({ preventScroll: true });
-    };
-  }, [panel, initialFocus]);
-
-  // Escape from inside shuts it. Only from inside: the panel does not shut
-  // the page off, so Escape on the page is the page's.
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || e.defaultPrevented) return;
-      if (!panel.current?.contains(document.activeElement)) return;
-      e.preventDefault();
-      shut();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [panel]);
+  useNonModal(panel, { onClose, initialFocus, returnFocus });
 
   return (
     <div

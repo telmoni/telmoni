@@ -8,7 +8,7 @@ import { HistoryIcon, MessageSquare, Plus } from "lucide-react";
 import { deleteAgentConversationAction } from "@/app/(app)/agent-actions";
 import { useConsoleUi } from "@/components/console-ui-context";
 import { Conversation } from "@/components/agent/agent-messages";
-import { Empty, HistoryList, ICON_BUTTON, type HistoryState } from "@/components/agent/agent-history-list";
+import { Empty, HistoryList, type HistoryState } from "@/components/agent/agent-history-list";
 import { Welcome } from "@/components/agent/agent-welcome";
 import { AgentWindow } from "@/components/agent/agent-window";
 import { Composer } from "@/components/agent/composer";
@@ -16,6 +16,7 @@ import { readAgentConversation, readAgentConversations } from "@/components/agen
 import { useAgentStatus } from "@/components/agent/use-agent-status";
 import { useAgentTurn } from "@/components/agent/use-agent-turn";
 import { useStickToEnd } from "@/components/agent/use-stick-to-end";
+import { PanelAction } from "@/components/side-panel";
 import { agentReducer, initialAgentState } from "@/lib/agent/stream";
 import { type ActionResult, refused } from "@/lib/action-result";
 import { agentSuggestions } from "@/lib/agent/suggestions";
@@ -101,31 +102,6 @@ export function AgentPanel() {
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [searchOpen, setSearchOpen, setAgentOpen]);
-
-  // Focus on open, and Escape from inside the window closes it. Only from
-  // inside: the window does not shut the page off, so Escape on the page, in
-  // a dialog or in the search palette is theirs.
-  useEffect(() => {
-    if (!agentOpen) return;
-    const previous = document.activeElement as HTMLElement | null;
-    const timer = setTimeout(() => {
-      inputRef.current?.focus();
-      if (document.activeElement !== inputRef.current) panelRef.current?.focus();
-    }, 50);
-
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || e.defaultPrevented) return;
-      if (!panelRef.current?.contains(document.activeElement)) return;
-      e.preventDefault();
-      setAgentOpen(false);
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => {
-      clearTimeout(timer);
-      window.removeEventListener("keydown", onKeyDown);
-      previous?.focus();
-    };
-  }, [agentOpen, setAgentOpen]);
 
   // The field is disabled until the agent answers that it is there, so focus
   // opened on the window itself; it moves to the field once there is one.
@@ -266,30 +242,20 @@ export function AgentPanel() {
 
   const actions = (
     <>
-      <button
-        type="button"
-        aria-label="New conversation"
-        title="New conversation"
-        disabled={!canAsk}
-        onClick={newConversation}
-        className={ICON_BUTTON}
-      >
+      <PanelAction label="New conversation" disabled={!canAsk} onClick={newConversation}>
         <Plus className="size-4" />
-      </button>
-      <button
-        type="button"
-        aria-label={view === "history" ? "Back to the conversation" : "Conversation history"}
-        title={view === "history" ? "Conversation" : "History"}
+      </PanelAction>
+      <PanelAction
+        label={view === "history" ? "Back to the conversation" : "Conversation history"}
         disabled={!projectId}
         onClick={toggleHistory}
-        className={ICON_BUTTON}
       >
         {view === "history" ? (
           <MessageSquare className="size-4" />
         ) : (
           <HistoryIcon className="size-4" />
         )}
-      </button>
+      </PanelAction>
     </>
   );
 
@@ -366,6 +332,7 @@ export function AgentPanel() {
       ref={panelRef}
       title={title}
       actions={actions}
+      initialFocus={inputRef}
       onClose={() => setAgentOpen(false)}
     >
       <div
