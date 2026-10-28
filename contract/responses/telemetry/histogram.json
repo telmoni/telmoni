@@ -1,0 +1,25 @@
+{
+  "bars": [
+    {
+      "at": "2027-01-15T08:00:00Z",
+      "cancelled": 1,
+      "duration_p50_ms": 1800.0,
+      "duration_p95_ms": 4000.0,
+      "error": 1,
+      "ok": 10,
+      "tokens": 18000
+    },
+    {
+      "at": "2027-01-15T09:00:00Z",
+      "cancelled": 0,
+      "duration_p50_ms": null,
+      "duration_p95_ms": null,
+      "error": 0,
+      "ok": 0,
+      "tokens": 0
+    }
+  ],
+  "bucket_seconds": 3600,
+  "days": 7,
+  "utc_offset": -300
+}

@@ -8,7 +8,7 @@ import { readLane } from "./traces";
 
 // A project's content mode, and the modes its switch offers. The server
 // decides both, so a mode it starts offering needs no change here.
-const ContentModeSettingSchema = z.object({
+export const ContentModeSettingSchema = z.object({
   content_mode: z.enum(ContentMode),
   offered: z.array(z.enum(ContentMode)),
 });

@@ -318,7 +318,9 @@ e2e: deps-check docker-up db-wait clickhouse-wait schema-check
 contract:
 	UPDATE_CONTRACT=1 cargo test -p telmoni-server --test wire_contract -- --exact wire_contract_is_in_sync
 	UPDATE_CONTRACT=1 cargo test -p telmoni-shared --test openapi_contract -- --exact openapi_contract_is_in_sync
-	@echo "wrote contract/wire-contract.json + contract/openapi.json"
+	rm -rf contract/responses
+	UPDATE_CONTRACT=1 cargo test -p telmoni-telemetry --test wire_responses
+	@echo "wrote contract/wire-contract.json, contract/openapi.json and contract/responses/"
 
 # The price file, converted from LiteLLM's at the commit it names, or at
 # LITELLM_COMMIT to move the pin: fetched from GitHub, never kept here.

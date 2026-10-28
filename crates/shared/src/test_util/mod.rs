@@ -198,6 +198,36 @@ pub fn project_root() -> std::path::PathBuf {
         .to_path_buf()
 }
 
+/// Holds `value` to the JSON file at `path`: written there under
+/// `UPDATE_CONTRACT` (`make contract`), else compared, so what changes the
+/// file is a commit someone reads.
+#[expect(clippy::panic, reason = "a missing or stale file is a failing test")]
+pub fn pin_json(path: &std::path::Path, value: &serde_json::Value) {
+    if std::env::var_os("UPDATE_CONTRACT").is_some() {
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).expect("the file's directory");
+        }
+        let pretty = serde_json::to_string_pretty(value).expect("JSON serializes");
+        std::fs::write(path, format!("{pretty}\n")).expect("the file is written");
+        return;
+    }
+    let text = std::fs::read_to_string(path)
+        .unwrap_or_else(|e| panic!("{} ({e}): run `make contract`", path.display()));
+    let on_disk: serde_json::Value = serde_json::from_str(&text)
+        .unwrap_or_else(|e| panic!("{} is not JSON ({e})", path.display()));
+    assert_eq!(
+        &on_disk,
+        value,
+        "{} is stale: run `make contract` and read the diff",
+        path.display()
+    );
+}
+
+/// [`pin_json`] for `contract/<name>` in this repository.
+pub fn pin_contract(name: &str, value: &serde_json::Value) {
+    pin_json(&project_root().join("contract").join(name), value);
+}
+
 /// A page of the customer documentation, by its path in the book,
 /// `web/content/docs` (`"errors.mdx"`, `"api/field-inventory.mdx"`).
 ///

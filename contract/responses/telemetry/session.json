@@ -1,0 +1,60 @@
+{
+  "days": 7,
+  "limit": 50,
+  "more": false,
+  "pinned": [
+    "plan"
+  ],
+  "session_id": "s_9c2e",
+  "traces": [
+    {
+      "agent": "support",
+      "cache_read_input_tokens": 800,
+      "cache_write_input_tokens": 0,
+      "duration_ms": 4000,
+      "ended": true,
+      "ended_at": "2027-01-15T08:00:04Z",
+      "environments": [
+        "production"
+      ],
+      "error_type": "TimeoutError",
+      "errors": 1,
+      "input_tokens": 1200,
+      "model_calls": 2,
+      "models": [
+        "gpt-4o-mini"
+      ],
+      "output_tokens": 340,
+      "pinned": [
+        {
+          "ended_at": "2027-01-15T08:00:02Z",
+          "error_type": "",
+          "input_tokens": 300,
+          "kind": "step",
+          "model": "gpt-4o-mini",
+          "name": "plan",
+          "output_tokens": 90,
+          "parent_span_id": "00f067aa0ba902b7",
+          "run_id": "0192f3a1-7c2e-7b4d-9a61-3c5e8f0d2b17",
+          "span_id": "00f067aa0ba902b9",
+          "started_at": "2027-01-15T08:00:01Z",
+          "status": "ok"
+        }
+      ],
+      "releases": [
+        "1.4.2"
+      ],
+      "run_id": "0192f3a1-7c2e-7b4d-9a61-3c5e8f0d2b17",
+      "session_id": "s_9c2e",
+      "spans": 6,
+      "started_at": "2027-01-15T08:00:00Z",
+      "status": "error",
+      "steps": 2,
+      "tool_calls": 1,
+      "tools": [
+        "search"
+      ],
+      "user_id": "u_1f3a"
+    }
+  ]
+}

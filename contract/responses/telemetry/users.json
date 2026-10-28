@@ -1,0 +1,21 @@
+{
+  "days": 7,
+  "dir": "desc",
+  "limit": 50,
+  "more": false,
+  "page": 1,
+  "sort": "tokens",
+  "total": 1,
+  "users": [
+    {
+      "errors": 1,
+      "first_seen": "2027-01-15T08:00:00Z",
+      "input_tokens": 120,
+      "last_seen": "2027-01-15T08:01:30Z",
+      "output_tokens": 40,
+      "steps": 9,
+      "traces": 3,
+      "user_id": "u_1f3a"
+    }
+  ]
+}

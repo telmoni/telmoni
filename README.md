@@ -155,7 +155,7 @@ crates/
   shared/         errors, RBAC, tenancy, the seams between modules
 web/              the console, a thin proxy in front of the server, and the docs it serves (content/docs)
 sdk/              the SDKs: python/, typescript/, go/, rust/, and the fixtures every suite replays
-contract/         the generated wire contract and OpenAPI document
+contract/         the generated wire contract, OpenAPI document and lanes' answers
 deploy/           the Helm chart and the self-host compose file
 scripts/          `up.sh` behind `make up`, and the webhook tunnel and receiver
 .github/          CI, the image publishing workflow, and the logo and diagram this README shows

@@ -1,0 +1,28 @@
+{
+  "views": [
+    {
+      "columns": [
+        "started",
+        "agent",
+        "tokens"
+      ],
+      "created_at": "2027-01-15T08:00:00Z",
+      "id": "0192f3a1-7c2e-7b4d-9a61-3c5e8f0d2b1b",
+      "kind": "list",
+      "name": "Failed support runs",
+      "query": {
+        "agent": [
+          "support"
+        ],
+        "days": 7,
+        "dir": "desc",
+        "limit": 50,
+        "sort": "duration",
+        "status": [
+          "error"
+        ]
+      },
+      "updated_at": "2027-01-15T08:01:00Z"
+    }
+  ]
+}

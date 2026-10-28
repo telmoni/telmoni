@@ -2,8 +2,6 @@
 //! from each module this binary links, as `contract/wire-contract.json`
 //! holds it for the console's `contract.test.ts`.
 
-use std::path::PathBuf;
-
 use serde_json::{Value, json};
 use telmoni_agent::db::MessageRole;
 use telmoni_agent::handler::{MESSAGE_MAX_CHARS, TurnEventKind};
@@ -17,6 +15,7 @@ use telmoni_auth::identity::MAX_EMAIL_LEN;
 use telmoni_auth::model::InviteScope;
 use telmoni_notifications::connector::{ConnectionStatus, Provider};
 use telmoni_notifications::db::{AttemptOutcome, AttemptTrigger, DeliveryStatus};
+use telmoni_shared::test_util::pin_contract;
 use telmoni_shared::types::WireEnum;
 use telmoni_shared::{
     ApiKeyScope, ContentMode, Flag, IncidentStatus, LayoutDepth, LayoutOpen, MissingData,
@@ -167,29 +166,7 @@ fn generated_contract() -> Value {
     })
 }
 
-fn contract_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../contract/wire-contract.json")
-}
-
 #[test]
 fn wire_contract_is_in_sync() {
-    let generated = generated_contract();
-    let path = contract_path();
-
-    if std::env::var("UPDATE_CONTRACT").is_ok() {
-        let pretty = serde_json::to_string_pretty(&generated).expect("serialize contract");
-        std::fs::write(&path, format!("{pretty}\n")).expect("write contract");
-        return;
-    }
-
-    let on_disk: Value = serde_json::from_str(
-        &std::fs::read_to_string(&path)
-            .expect("read contract/wire-contract.json — run `make contract` to generate it"),
-    )
-    .expect("contract/wire-contract.json is valid JSON");
-
-    assert_eq!(
-        on_disk, generated,
-        "contract/wire-contract.json is stale — run `make contract` to regenerate"
-    );
+    pin_contract("wire-contract.json", &generated_contract());
 }

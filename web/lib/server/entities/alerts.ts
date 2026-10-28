@@ -111,6 +111,11 @@ const MuteSchema = z.object({
 });
 export type Mute = z.infer<typeof MuteSchema>;
 
+// The three lanes the page reads, each its rows under one key.
+export const AlertListSchema = z.object({ rules: z.array(AlertSchema) });
+export const IncidentListSchema = z.object({ incidents: z.array(IncidentSchema) });
+export const MuteListSchema = z.object({ mutes: z.array(MuteSchema) });
+
 export type AlertsAccess =
   | {
       kind: "ok";
@@ -138,9 +143,9 @@ export { INCIDENTS_MAX } from "@/lib/alerts";
 export const fetchAlerts = cache(async (projectId: string): Promise<AlertsAccess> => {
   const at = Date.now();
   const [alerts, incidents, mutes] = await Promise.all([
-    readLane("fetchAlerts", projectId, "/rules", z.object({ rules: z.array(AlertSchema) })),
-    readLane("fetchAlerts", projectId, "/incidents", z.object({ incidents: z.array(IncidentSchema) })),
-    readLane("fetchAlerts", projectId, "/mutes", z.object({ mutes: z.array(MuteSchema) })),
+    readLane("fetchAlerts", projectId, "/rules", AlertListSchema),
+    readLane("fetchAlerts", projectId, "/incidents", IncidentListSchema),
+    readLane("fetchAlerts", projectId, "/mutes", MuteListSchema),
   ]);
   const reads = [alerts, incidents, mutes];
   if (reads.some((read) => read.kind === "forbidden")) return { kind: "forbidden" };
@@ -166,7 +171,7 @@ export const fetchRunIncidents = cache(
       "fetchRunIncidents",
       projectId,
       `/incidents?run=${encodeURIComponent(runId)}`,
-      z.object({ incidents: z.array(IncidentSchema) }),
+      IncidentListSchema,
     );
     return read.kind === "ok" ? read.value.incidents : [];
   },

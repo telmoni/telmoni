@@ -1,0 +1,79 @@
+{
+  "run_id": "0192f3a1-7c2e-7b4d-9a61-3c5e8f0d2b17",
+  "spans": [
+    {
+      "agent": "support",
+      "attributes": {
+        "gen_ai.operation.name": "chat"
+      },
+      "cache_read_input_tokens": 400,
+      "cache_write_input_tokens": 0,
+      "cost": null,
+      "ended_at": "2027-01-15T08:00:04Z",
+      "environment": "production",
+      "error_type": "",
+      "input_tokens": 600,
+      "kind": "run",
+      "model": "gpt-4o-mini",
+      "name": "answer",
+      "output_tokens": 170,
+      "parent_span_id": "",
+      "provider": "openai",
+      "received_at": "2027-01-15T08:00:05Z",
+      "release": "1.4.2",
+      "sample_rate": null,
+      "session_id": "s_9c2e",
+      "span_id": "00f067aa0ba902b7",
+      "started_at": "2027-01-15T08:00:00Z",
+      "status": "ok",
+      "tags": {
+        "tier": "pro"
+      },
+      "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+      "units": 1,
+      "user_id": "u_1f3a"
+    },
+    {
+      "agent": "support",
+      "attributes": {
+        "gen_ai.operation.name": "chat"
+      },
+      "cache_read_input_tokens": 400,
+      "cache_write_input_tokens": 0,
+      "cost": 0.0012,
+      "ended_at": "2027-01-15T08:00:04Z",
+      "environment": "production",
+      "error_type": "",
+      "input_tokens": 600,
+      "kind": "model_call",
+      "model": "gpt-4o-mini",
+      "name": "answer",
+      "output_tokens": 170,
+      "parent_span_id": "",
+      "provider": "openai",
+      "received_at": "2027-01-15T08:00:05Z",
+      "release": "1.4.2",
+      "sample_rate": 0.5,
+      "session_id": "s_9c2e",
+      "span_id": "00f067aa0ba902b8",
+      "started_at": "2027-01-15T08:00:00Z",
+      "status": "ok",
+      "tags": {
+        "tier": "pro"
+      },
+      "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+      "units": 1,
+      "user_id": "u_1f3a"
+    }
+  ],
+  "spend": {
+    "spent": 0.0012,
+    "unpriced": [
+      {
+        "model": "acme-1",
+        "provider": "acme"
+      }
+    ]
+  },
+  "truncated": false
+}

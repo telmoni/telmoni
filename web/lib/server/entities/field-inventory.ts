@@ -16,7 +16,7 @@ const InventoryRowSchema = z.object({
   rule: z.string(),
 });
 
-const FieldInventorySchema = z.object({
+export const FieldInventorySchema = z.object({
   conventions_commit: z.string(),
   rows: z.array(InventoryRowSchema),
 });

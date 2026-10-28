@@ -45,7 +45,7 @@ export {
 } from "@/lib/types/traces";
 
 // A page of the list, and how many traces the filters admit on every page.
-const TraceListSchema = z.object({
+export const TraceListSchema = z.object({
   traces: z.array(TraceSchema),
   days: z.number(),
   limit: z.number(),
@@ -86,7 +86,7 @@ const HistogramBarSchema = z.object({
   duration_p95_ms: z.number().nullable(),
 });
 
-const TraceHistogramSchema = z.object({
+export const TraceHistogramSchema = z.object({
   days: z.number(),
   bucket_seconds: z.number(),
   utc_offset: z.number(),
@@ -156,8 +156,8 @@ export const SavedViewOfAnyKindSchema = z.discriminatedUnion("kind", [
   TraceLayoutSchema,
 ]);
 
-const TraceViewListSchema = z.object({ views: z.array(TraceViewSchema) });
-const TraceLayoutListSchema = z.object({ views: z.array(TraceLayoutSchema) });
+export const TraceViewListSchema = z.object({ views: z.array(TraceViewSchema) });
+export const TraceLayoutListSchema = z.object({ views: z.array(TraceLayoutSchema) });
 
 /** What narrows and orders a list, and which page of it shows, as the URL
  *  carries it, `S` its columns' sorts. The server checks every value; the

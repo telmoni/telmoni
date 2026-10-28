@@ -14,6 +14,8 @@ const HealthIncidentSchema = IncidentSchema.extend({
 });
 export type HealthIncident = z.infer<typeof HealthIncidentSchema>;
 
+export const OrganizationHealthSchema = z.object({ incidents: z.array(HealthIncidentSchema) });
+
 export type OrganizationHealth =
   | { kind: "ok"; incidents: HealthIncident[] }
   | { kind: "forbidden" }
@@ -30,7 +32,7 @@ export const fetchOrganizationHealth = cache(async (): Promise<OrganizationHealt
       ctx.organizationId,
     )}/health`,
     { headers: organizationHeaders(ctx), cache: "no-store" },
-    z.object({ incidents: z.array(HealthIncidentSchema) }),
+    OrganizationHealthSchema,
   );
   return read.kind === "ok" ? { kind: "ok", incidents: read.value.incidents } : read;
 });

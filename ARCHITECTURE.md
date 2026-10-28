@@ -475,7 +475,7 @@ A deployment that needs more builds on the core rather than forking it, and the 
 - **Configuration** comes only from the environment, read once at boot, and is refused when unsafe in a pod.
 - **Shutdown** drains HTTP on `SIGTERM` or `SIGINT`.
 - **Connections** are HTTP/1 alone, each given 620 seconds from its accept or its last answer to send a request's head, then closed: past the 600 seconds Google's load balancer holds an idle connection to a backend, which a backend must outlast (`crates/telmoni/src/serve.rs`, hyper's own timer, which `axum::serve` never gave it).
-- **Contracts** are generated: the wire contract and the OpenAPI document come from the code, the router is built from the same table as the document, and the console's copies are held to them by tests.
+- **Contracts** are generated: the wire contract, the OpenAPI document and each lane's answer (`contract/responses/`) come from the code, the router is built from the same table as the document, and the console's copies and schemas are held to them by tests.
 
 ## When something fails
 

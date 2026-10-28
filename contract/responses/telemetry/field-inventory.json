@@ -1,0 +1,12 @@
+{
+  "conventions_commit": "a1b2c3d",
+  "rows": [
+    {
+      "attribute": "gen_ai.request.model",
+      "kept": "model",
+      "needs": "any",
+      "on": "a model call",
+      "rule": "at most 256 characters"
+    }
+  ]
+}

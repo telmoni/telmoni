@@ -1,9 +1,7 @@
 //! `contract/openapi.json` — the public API, generated and pinned.
 
-use std::path::PathBuf;
-
-use serde_json::Value;
 use telmoni_shared::openapi::{Answer, Method, Route, document};
+use telmoni_shared::test_util::pin_contract;
 
 /// The refusals every `/v1` lane makes because of what it is, merged into every operation.
 const UNIVERSAL: &[Answer] = &[
@@ -40,34 +38,11 @@ fn lanes() -> Vec<Route> {
         .collect()
 }
 
-fn contract_path() -> PathBuf {
-    repo_root().join("contract/openapi.json")
-}
-
-fn repo_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
-}
-
 #[test]
 fn openapi_contract_is_in_sync() {
-    let generated = document(TITLE, VERSION, SERVER, UNIVERSAL, &lanes());
-    let path = contract_path();
-
-    if std::env::var("UPDATE_CONTRACT").is_ok() {
-        let pretty = serde_json::to_string_pretty(&generated).expect("serialize the document");
-        std::fs::write(&path, format!("{pretty}\n")).expect("write the document");
-        return;
-    }
-
-    let on_disk: Value = serde_json::from_str(
-        &std::fs::read_to_string(&path)
-            .expect("read contract/openapi.json — run `make contract` to generate it"),
-    )
-    .expect("contract/openapi.json is valid JSON");
-
-    assert_eq!(
-        on_disk, generated,
-        "contract/openapi.json is stale — run `make contract` to regenerate"
+    pin_contract(
+        "openapi.json",
+        &document(TITLE, VERSION, SERVER, UNIVERSAL, &lanes()),
     );
 }
 

@@ -1,0 +1,88 @@
+{
+  "agent": {
+    "more": false,
+    "values": [
+      {
+        "count": 12,
+        "value": "support"
+      }
+    ]
+  },
+  "days": 7,
+  "environment": {
+    "more": false,
+    "values": [
+      {
+        "count": 12,
+        "value": "production"
+      }
+    ]
+  },
+  "model": {
+    "more": false,
+    "values": [
+      {
+        "count": 12,
+        "value": "gpt-4o-mini"
+      }
+    ]
+  },
+  "prompt": {
+    "more": true,
+    "values": []
+  },
+  "release": {
+    "more": false,
+    "values": [
+      {
+        "count": 12,
+        "value": "1.4.2"
+      }
+    ]
+  },
+  "session": {
+    "more": false,
+    "values": [
+      {
+        "count": 2,
+        "value": "s_9c2e"
+      }
+    ]
+  },
+  "status": {
+    "more": false,
+    "values": [
+      {
+        "count": 1,
+        "value": "error"
+      }
+    ]
+  },
+  "tag": {
+    "more": false,
+    "values": [
+      {
+        "count": 5,
+        "value": "tier:pro"
+      }
+    ]
+  },
+  "tool": {
+    "more": false,
+    "values": [
+      {
+        "count": 4,
+        "value": "search"
+      }
+    ]
+  },
+  "user": {
+    "more": false,
+    "values": [
+      {
+        "count": 3,
+        "value": "u_1f3a"
+      }
+    ]
+  }
+}

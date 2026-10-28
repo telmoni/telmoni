@@ -36,7 +36,7 @@ const SessionRowSchema = z.object({
 export type SessionRow = z.infer<typeof SessionRowSchema>;
 
 // A page of the list, and how many sessions the filters admit on every page.
-const SessionListSchema = z.object({
+export const SessionListSchema = z.object({
   sessions: z.array(SessionRowSchema),
   days: z.number(),
   limit: z.number(),

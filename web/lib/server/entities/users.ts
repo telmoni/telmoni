@@ -32,7 +32,7 @@ const UserRowSchema = z.object({
 export type UserRow = z.infer<typeof UserRowSchema>;
 
 // A page of the list, and how many users the filters admit on every page.
-const UserListSchema = z.object({
+export const UserListSchema = z.object({
   users: z.array(UserRowSchema),
   days: z.number(),
   limit: z.number(),

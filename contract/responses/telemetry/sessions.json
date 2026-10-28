@@ -1,0 +1,22 @@
+{
+  "days": 7,
+  "dir": "desc",
+  "limit": 50,
+  "more": false,
+  "page": 1,
+  "sessions": [
+    {
+      "errors": 1,
+      "first_seen": "2027-01-15T08:00:00Z",
+      "input_tokens": 2400,
+      "last_seen": "2027-01-15T08:01:30Z",
+      "output_tokens": 680,
+      "session_id": "s_9c2e",
+      "steps": 4,
+      "traces": 2,
+      "user_id": "u_1f3a"
+    }
+  ],
+  "sort": "last_seen",
+  "total": 1
+}
