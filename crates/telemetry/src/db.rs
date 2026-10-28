@@ -426,17 +426,7 @@ pub struct SealedHashingKey {
     pub key_version: i16,
 }
 
-/// What a project's settings say of its user ids.
-#[derive(Debug, Clone)]
-pub struct HashingSettings {
-    /// Hashed before they are a row, or kept as sent.
-    pub user_id_hashed: bool,
-    /// The key that hashes them, once one has been made.
-    pub key: Option<SealedHashingKey>,
-}
-
 type HashingRow = (
-    bool,
     Option<Vec<u8>>,
     Option<Vec<u8>>,
     Option<Vec<u8>>,
@@ -458,13 +448,14 @@ pub async fn settings_organization<B: HasProject>(
     .await
 }
 
-/// A project's hashing settings, or `None` where it has no row yet.
-pub async fn hashing_settings<B: HasProject>(
+/// The key a project's user ids are hashed under, or `None` where it has no
+/// row or no key yet.
+pub async fn hashing_key<B: HasProject>(
     tx: &mut Scoped<'_, B>,
     project_id: &ProjectId,
-) -> sqlx::Result<Option<HashingSettings>> {
+) -> sqlx::Result<Option<SealedHashingKey>> {
     let row: Option<HashingRow> = sqlx::query_as(
-        "SELECT user_id_hashed, hashing_key_ciphertext, hashing_key_nonce,
+        "SELECT hashing_key_ciphertext, hashing_key_nonce,
                 hashing_key_wrapped_dek, hashing_key_version
            FROM telemetry.project_settings
           WHERE project_id = $1",
@@ -472,24 +463,18 @@ pub async fn hashing_settings<B: HasProject>(
     .bind(project_id)
     .fetch_optional(tx.conn())
     .await?;
-    Ok(row.map(
-        |(user_id_hashed, ciphertext, nonce, wrapped_dek, key_version)| HashingSettings {
-            user_id_hashed,
-            // The CHECK keeps the four together; a row with some of them is
-            // one no write of ours left, read as a row with none.
-            key: match (ciphertext, nonce, wrapped_dek, key_version) {
-                (Some(ciphertext), Some(nonce), Some(wrapped_dek), Some(key_version)) => {
-                    Some(SealedHashingKey {
-                        ciphertext,
-                        nonce,
-                        wrapped_dek,
-                        key_version,
-                    })
-                }
-                _ => None,
-            },
-        },
-    ))
+    // The CHECK keeps the four together; a row with some of them is one no
+    // write of ours left, read as a row with none.
+    Ok(
+        row.and_then(|(ciphertext, nonce, wrapped_dek, key_version)| {
+            Some(SealedHashingKey {
+                ciphertext: ciphertext?,
+                nonce: nonce?,
+                wrapped_dek: wrapped_dek?,
+                key_version: key_version?,
+            })
+        }),
+    )
 }
 
 /// A project's row, made where it has none and filed under

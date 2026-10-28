@@ -274,18 +274,15 @@ async fn an_export_is_kept_its_content_dropped_and_its_user_hashed(pool: PgPool)
     }
     assert_eq!(rows[0].2, rows[1].2, "the same user hashes the same");
 
-    let (sealed, hashed): (bool, bool) = sqlx::query_as(
-        "SELECT hashing_key_ciphertext IS NOT NULL, user_id_hashed \
+    let sealed: bool = sqlx::query_scalar(
+        "SELECT hashing_key_ciphertext IS NOT NULL \
            FROM telemetry.project_settings WHERE project_id = $1",
     )
     .bind(lane.project.as_str())
     .fetch_one(&pool)
     .await
     .expect("the settings row the first export files");
-    assert!(
-        sealed && hashed,
-        "the project's key is made and sealed with its row"
-    );
+    assert!(sealed, "the project's key is made and sealed with its row");
 }
 
 #[sqlx::test]

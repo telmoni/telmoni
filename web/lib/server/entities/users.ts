@@ -16,9 +16,8 @@ import {
 } from "./traces";
 
 // One user of the page: a user id's runs in the window, summed by the server,
-// which reads the project's spans and no other's. `user_id` is as stored —
-// hashed, unless the project keeps ids plain — so the page names nobody the
-// project did not choose to name.
+// which reads the project's spans and no other's. `user_id` is as stored,
+// hashed, so the page names nobody.
 const UserRowSchema = z.object({
   user_id: z.string(),
   traces: z.number(),

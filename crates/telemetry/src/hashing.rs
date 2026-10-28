@@ -19,39 +19,29 @@ use telmoni_shared::envelope::{KEK_VERSION, KekError, Sealed};
 use telmoni_shared::{AuthError, ProjectId, Redacted, TelemetryError, TelmoniError};
 
 use crate::AppState;
-use crate::db::{self, HashingSettings, SealedHashingKey};
+use crate::db::{self, SealedHashingKey};
 use crate::handler::chain;
 
 /// How much of the HMAC is kept: 16 bytes, 32 hex characters, which no two
 /// users of one project share in practice and nobody reverses.
 pub const HASH_BYTES: usize = 16;
 
-/// How a project stores the user ids its spans carry.
+/// How a project stores the user ids its spans carry: hashed under the
+/// project's own key, always.
 #[derive(Clone)]
-pub enum UserIdStorage {
-    /// Hashed under the project's own key.
-    Hashed(Arc<HmacKey>),
-    /// As sent: the project chose to keep them plain.
-    Plain,
-}
+pub struct UserIdStorage(Arc<HmacKey>);
 
 impl UserIdStorage {
     /// `raw`, as the row holds it.
     #[must_use]
     pub fn store(&self, raw: &str) -> String {
-        match self {
-            Self::Hashed(key) => key.prefix_hex(raw.as_bytes(), HASH_BYTES),
-            Self::Plain => raw.to_owned(),
-        }
+        self.0.prefix_hex(raw.as_bytes(), HASH_BYTES)
     }
 }
 
 impl std::fmt::Debug for UserIdStorage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Self::Hashed(_) => "UserIdStorage::Hashed(***)",
-            Self::Plain => "UserIdStorage::Plain",
-        })
+        f.write_str("UserIdStorage(***)")
     }
 }
 
@@ -107,20 +97,13 @@ pub async fn storage_for_project(
     }
     let aad = project_id.as_str().as_bytes();
     let mut tx = project_scope(&state.db, project_id).await?;
-    let read = db::hashing_settings(&mut tx, project_id).await?;
+    let read = db::hashing_key(&mut tx, project_id).await?;
     tx.commit().await?;
-    let settings = match read {
-        Some(settings) if settings.key.is_some() => settings,
-        _ => key_project(state, project_id, aad).await?,
+    let sealed = match read {
+        Some(sealed) => sealed,
+        None => key_project(state, project_id, aad).await?,
     };
-    let storage = if settings.user_id_hashed {
-        let sealed = settings.key.ok_or_else(|| {
-            TelmoniError::Internal("telemetry: the hashing key just written is not there".into())
-        })?;
-        UserIdStorage::Hashed(Arc::new(open_key(state, &sealed, aad).await?))
-    } else {
-        UserIdStorage::Plain
-    };
+    let storage = UserIdStorage(Arc::new(open_key(state, &sealed, aad).await?));
     state.hashing_keys.put(project_id.clone(), storage.clone());
     Ok(storage)
 }
@@ -137,7 +120,7 @@ async fn key_project(
     state: &AppState,
     project_id: &ProjectId,
     aad: &[u8],
-) -> Result<HashingSettings, TelmoniError> {
+) -> Result<SealedHashingKey, TelmoniError> {
     let sealed = seal_new_key(state, aad).await?;
     let mut tx = project_scope(&state.db, project_id).await?;
     if !project_move::try_hold_in_place(tx.conn(), project_id).await? {
@@ -166,10 +149,10 @@ async fn key_project(
     let mut tx = tx.bind_organization(&organization_id).await?;
     db::ensure_settings(&mut tx, project_id, &organization_id).await?;
     db::set_hashing_key_if_none(&mut tx, project_id, &sealed).await?;
-    let settings = db::hashing_settings(&mut tx, project_id).await?;
+    let written = db::hashing_key(&mut tx, project_id).await?;
     tx.commit().await?;
-    settings.ok_or_else(|| {
-        TelmoniError::Internal("telemetry: the settings row just written is not there".into())
+    written.ok_or_else(|| {
+        TelmoniError::Internal("telemetry: the hashing key just written is not there".into())
     })
 }
 
@@ -258,8 +241,8 @@ mod tests {
 
     #[test]
     fn a_hashed_id_is_sixteen_bytes_of_hex_the_same_each_time_and_per_key() {
-        let one = UserIdStorage::Hashed(Arc::new(HmacKey::new(&[1; 32])));
-        let two = UserIdStorage::Hashed(Arc::new(HmacKey::new(&[2; 32])));
+        let one = UserIdStorage(Arc::new(HmacKey::new(&[1; 32])));
+        let two = UserIdStorage(Arc::new(HmacKey::new(&[2; 32])));
         let stored = one.store("acme-42");
         assert_eq!(stored.len(), HASH_BYTES * 2);
         assert!(stored.bytes().all(|b| b.is_ascii_hexdigit()));
@@ -270,7 +253,6 @@ mod tests {
             two.store("acme-42"),
             "another project's key, another hash"
         );
-        assert_eq!(UserIdStorage::Plain.store("acme-42"), "acme-42");
     }
 
     #[test]
@@ -284,7 +266,7 @@ mod tests {
 
     #[test]
     fn storage_prints_no_key() {
-        let hashed = UserIdStorage::Hashed(Arc::new(HmacKey::new(&[7; 32])));
-        assert_eq!(format!("{hashed:?}"), "UserIdStorage::Hashed(***)");
+        let hashed = UserIdStorage(Arc::new(HmacKey::new(&[7; 32])));
+        assert_eq!(format!("{hashed:?}"), "UserIdStorage(***)");
     }
 }

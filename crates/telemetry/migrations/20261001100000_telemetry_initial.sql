@@ -40,11 +40,9 @@ CREATE TABLE telemetry.project_settings (
     project_id              TEXT        PRIMARY KEY,
     organization_id         TEXT        NOT NULL,
     content_mode            TEXT        NOT NULL DEFAULT 'off',
-    -- Whether a span's user id is stored as its HMAC-SHA-256 under the
-    -- project's own key, or as sent where the project keeps it plain.
-    user_id_hashed          BOOLEAN     NOT NULL DEFAULT true,
-    -- That key, sealed under a data key of the row's own, which TELEMETRY_KEK
-    -- wraps, as a connector's grant is sealed under CONNECTOR_KEK. Made by the
+    -- The key a span's user id is stored under, as its HMAC-SHA-256: sealed
+    -- under a data key of the row's own, which TELEMETRY_KEK wraps, as a
+    -- connector's grant is sealed under CONNECTOR_KEK. Made by the
     -- project's first export, so a row the content switch made has none yet.
     hashing_key_ciphertext  BYTEA,
     hashing_key_nonce       BYTEA,

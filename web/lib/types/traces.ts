@@ -36,8 +36,8 @@ export function filtersIn(query: ListFilters): ListFilters {
 }
 
 // One trace of the list: a run's spans summed by the server, which reads the
-// project's spans and no other's. `user_id` is as stored — hashed, unless
-// the project keeps it plain — and `ended` says whether the run's own span has
+// project's spans and no other's. `user_id` is as stored, hashed, and
+// `ended` says whether the run's own span has
 // arrived; until it has, `status` is read off the spans that have.
 export const TraceSchema = z.object({
   run_id: z.string(),

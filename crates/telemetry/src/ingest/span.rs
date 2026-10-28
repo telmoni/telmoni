@@ -32,8 +32,7 @@ pub struct Context<'a> {
     pub release: &'a str,
     /// The resource's attributes the inventory names.
     pub resource: &'a [(String, String)],
-    /// What a `user_id` is stored as: the project's own hash of it, or
-    /// itself where the project keeps it plain.
+    /// What a `user_id` is stored as: the project's own hash of it.
     pub store_user_id: &'a dyn Fn(&str) -> String,
 }
 

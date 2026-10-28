@@ -20,8 +20,8 @@ import {
 // Sessions: a project's runs grouped by the id the application gave each
 // session (`session_id`, sent as `gen_ai.conversation.id`). Sign-in sessions
 // are `active-sessions.ts`'s. One session of the page is its runs in the
-// window, summed by the server, with the end user it was with, as stored —
-// hashed, unless the project keeps ids plain.
+// window, summed by the server, with the end user it was with, as stored,
+// hashed.
 const SessionRowSchema = z.object({
   session_id: z.string(),
   user_id: z.string(),

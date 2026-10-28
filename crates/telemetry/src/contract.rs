@@ -107,9 +107,8 @@ pub const AGENT: &str = "telmoni.agent";
 /// The end user a span was for, as the application's own id for them:
 /// OpenTelemetry's own name, so an application instrumented without our SDK
 /// is read the same. Never who signs in to the console, and never the
-/// organization that pays: an id, hashed before it is a row unless the
-/// project keeps ids plain, and the one `user.*` attribute that is not
-/// content.
+/// organization that pays: an id, hashed before it is a row, and the one
+/// `user.*` attribute that is not content.
 pub const USER_ID: &str = "user.id";
 /// A tag: `telmoni.tag.<key>`.
 pub const TAG_PREFIX: &str = "telmoni.tag.";
@@ -514,7 +513,7 @@ pub const INVENTORY: &[InventoryRow] = &[
         USER_ID,
         ReadOn::AnySpan,
         "the column user_id, as its HMAC-SHA-256 under a key of the project's own, the first \
-         16 bytes in hex, unless the project keeps it plain",
+         16 bytes in hex",
         Needs::AnyMode,
         RULE_UP_TO_128,
     ),

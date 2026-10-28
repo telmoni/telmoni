@@ -1,6 +1,6 @@
 //! The users page's reads, through the one query module ([`crate::store`]):
 //! the end users the project's runs were for in a window of days, as stored
-//! — hashed under the project's key unless it keeps ids plain — each summed
+//! — hashed under the project's key — each summed
 //! over all of their runs, admitted by any run the trace list's filters
 //! admit, with its page, total, facets and download. The spans within the
 //! window are read, since the rollups name no user; a run with no user is

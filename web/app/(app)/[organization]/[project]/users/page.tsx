@@ -12,8 +12,8 @@ import { parseUserQuery } from "@/lib/users";
 export const metadata = { title: "Users" };
 
 // The users list, laid out as the trace list is, all of it in the URL: a row
-// per end user in a window of days, by the id as stored — hashed unless the
-// project keeps ids plain — admitted by any of their runs the filters admit.
+// per end user in a window of days, by the id as stored — hashed — admitted
+// by any of their runs the filters admit.
 // A user opens their traces.
 export default async function UsersPage({
   params,
@@ -59,7 +59,7 @@ export default async function UsersPage({
             SDKs
           </Link>
           , <code>user.id</code> on the span — and every user lists here, hashed under the
-          project&rsquo;s own key unless the project keeps ids plain.
+          project&rsquo;s own key.
         </>
       )}
       table={(list) => (
