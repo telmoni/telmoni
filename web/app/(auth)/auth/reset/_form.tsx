@@ -1,20 +1,19 @@
 "use client";
 
-import { unstable_rethrow } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useState } from "react";
 
 import { PasswordInput } from "@/components/password-input";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { useAction } from "@/lib/use-action";
 
 import { resetPasswordAction } from "../_accounts/actions";
 
 export function ResetForm({ userId, token }: { userId: string; token: string }) {
   const [password, setPassword] = useState("");
   const [again, setAgain] = useState("");
-  const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
-  const [pending, start] = useTransition();
+  const { pending, error, run } = useAction();
 
   if (done) {
     return (
@@ -40,17 +39,7 @@ export function ResetForm({ userId, token }: { userId: string; token: string }) 
       onSubmit={(e) => {
         e.preventDefault();
         if (pending || mismatch) return;
-        setError(null);
-        start(async () => {
-          try {
-            const res = await resetPasswordAction({ userId, token, password });
-            if (!res.ok) setError(res.error);
-            else setDone(true);
-          } catch (err) {
-            unstable_rethrow(err);
-            setError("Network error. Try again.");
-          }
-        });
+        run(() => resetPasswordAction({ userId, token, password }), () => setDone(true));
       }}
     >
       <div className="grid gap-2">

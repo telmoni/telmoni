@@ -1,19 +1,18 @@
 "use client";
 
-import { unstable_rethrow } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useAction } from "@/lib/use-action";
 
 import { forgotPasswordAction } from "../_accounts/actions";
 
 export function ForgotForm() {
   const [email, setEmail] = useState("");
-  const [error, setError] = useState<string | null>(null);
   const [sent, setSent] = useState(false);
-  const [pending, start] = useTransition();
+  const { pending, error, run } = useAction();
 
   if (sent) {
     return (
@@ -30,17 +29,7 @@ export function ForgotForm() {
       onSubmit={(e) => {
         e.preventDefault();
         if (pending) return;
-        setError(null);
-        start(async () => {
-          try {
-            const res = await forgotPasswordAction({ email: email.trim() });
-            if (!res.ok) setError(res.error);
-            else setSent(true);
-          } catch (err) {
-            unstable_rethrow(err);
-            setError("Network error. Try again.");
-          }
-        });
+        run(() => forgotPasswordAction({ email: email.trim() }), () => setSent(true));
       }}
     >
       <div className="grid gap-2">

@@ -1,19 +1,18 @@
 "use client";
 
-import { unstable_rethrow } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useAction } from "@/lib/use-action";
 
 import { deviceDecisionAction } from "../_accounts/actions";
 
 export function DeviceForm({ code: initialCode }: { code: string }) {
   const [code, setCode] = useState(initialCode);
-  const [error, setError] = useState<string | null>(null);
   const [decided, setDecided] = useState<"approve" | "deny" | null>(null);
-  const [pending, start] = useTransition();
+  const { pending, error, run } = useAction();
 
   if (decided === "approve") {
     return <p className="text-sm">Approved. The device is signing in; you can close this window.</p>;
@@ -23,17 +22,10 @@ export function DeviceForm({ code: initialCode }: { code: string }) {
   }
 
   const decide = (decision: "approve" | "deny") => {
-    setError(null);
-    start(async () => {
-      try {
-        const res = await deviceDecisionAction({ userCode: code.trim(), decision });
-        if (!res.ok) setError(res.error);
-        else setDecided(decision);
-      } catch (err) {
-        unstable_rethrow(err);
-        setError("Network error. Try again.");
-      }
-    });
+    run(
+      () => deviceDecisionAction({ userCode: code.trim(), decision }),
+      () => setDecided(decision),
+    );
   };
 
   return (

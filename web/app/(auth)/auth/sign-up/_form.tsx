@@ -1,12 +1,12 @@
 "use client";
 
-import { unstable_rethrow } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useState } from "react";
 
 import { PasswordInput } from "@/components/password-input";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useAction } from "@/lib/use-action";
 
 import { signUpAction } from "../_accounts/actions";
 
@@ -24,39 +24,28 @@ export function SignUpForm({
   const [email, setEmail] = useState(initialEmail);
   const [password, setPassword] = useState("");
   const [again, setAgain] = useState("");
-  const [error, setError] = useState<string | null>(null);
   // The address the account was created under, once it was and a mail is
   // what comes next.
   const [sentTo, setSentTo] = useState<string | null>(null);
-  const [pending, start] = useTransition();
+  const { pending, error, run } = useAction();
 
   const submit = () => {
-    setError(null);
-    start(async () => {
-      try {
-        const res = await signUpAction({
+    run(
+      () =>
+        signUpAction({
           email: email.trim(),
           password,
           givenName: givenName.trim(),
           familyName: familyName.trim(),
           state,
-        });
-        if (!res.ok) {
-          setError(res.error);
-          return;
-        }
-        // With no address to confirm, the account is signed in at once:
-        // the callback, with the code and the state the door sealed.
-        if (res.next) {
-          window.location.replace(res.next);
-          return;
-        }
-        setSentTo(email.trim());
-      } catch (err) {
-        unstable_rethrow(err);
-        setError("Network error. Try again.");
-      }
-    });
+        }),
+      (res) => {
+        // With no address to confirm, the account is signed in at once: the
+        // callback, with the code and the state the door sealed.
+        if (res.next) window.location.replace(res.next);
+        else setSentTo(email.trim());
+      },
+    );
   };
 
   if (sentTo) {

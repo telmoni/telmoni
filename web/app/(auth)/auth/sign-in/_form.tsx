@@ -1,12 +1,12 @@
 "use client";
 
-import { unstable_rethrow } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useState } from "react";
 
 import { PasswordInput } from "@/components/password-input";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useAction } from "@/lib/use-action";
 
 import { signInAction } from "../_accounts/actions";
 
@@ -24,28 +24,20 @@ export function SignInForm({
 }) {
   const [email, setEmail] = useState(initialEmail);
   const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
   const [sso, setSso] = useState(false);
-  const [pending, start] = useTransition();
+  const { pending, error, run } = useAction();
 
   const submit = () => {
-    setError(null);
-    start(async () => {
-      try {
+    run(
+      async () => {
         const res = await signInAction({ email: email.trim(), password, state });
-        if (!res.ok) {
-          setError(res.error);
-          if ("sso" in res) setSso(true);
-          return;
-        }
-        // The callback, with the code and the state the door sealed: the
-        // same hop an external provider's page makes, from here.
-        window.location.replace(res.next);
-      } catch (err) {
-        unstable_rethrow(err);
-        setError("Network error. Try again.");
-      }
-    });
+        if (!res.ok && "sso" in res) setSso(true);
+        return res;
+      },
+      // The callback, with the code and the state the door sealed: the same
+      // hop an external provider's page makes, from here.
+      (res) => window.location.replace(res.next),
+    );
   };
 
   // A Route Handler, not a page: it carries the pending sign-in on to the

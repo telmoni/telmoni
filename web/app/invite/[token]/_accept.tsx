@@ -1,36 +1,21 @@
 "use client";
 
-import { unstable_rethrow } from "next/navigation";
-import { useState, useTransition } from "react";
-
 import { Button } from "@/components/ui/button";
+import { useAction } from "@/lib/use-action";
 
 import { acceptInviteAction } from "./actions";
 
 export function AcceptInvite({ token }: { token: string }) {
-  const [error, setError] = useState<string | null>(null);
-  const [pending, start] = useTransition();
+  const { pending, error, run } = useAction();
 
   return (
     <div className="grid gap-2">
       <div>
         <Button
           disabled={pending}
-          onClick={() =>
-            start(async () => {
-              setError(null);
-              try {
-                // An accept that landed goes on to the console in the action
-                // itself (its `redirect`), which rejects this call: what
-                // comes back is a refusal.
-                const r = await acceptInviteAction(token);
-                if (!r.ok) setError(r.error);
-              } catch (err) {
-                unstable_rethrow(err);
-                setError("Network error. Try again.");
-              }
-            })
-          }
+          // An accept that landed goes on to the console in the action itself
+          // (its `redirect`): what comes back here is a refusal.
+          onClick={() => run(() => acceptInviteAction(token))}
         >
           {pending ? "Accepting…" : "Accept invitation"}
         </Button>

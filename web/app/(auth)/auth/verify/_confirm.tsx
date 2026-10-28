@@ -1,16 +1,15 @@
 "use client";
 
-import { unstable_rethrow } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useState } from "react";
 
 import { Button, buttonVariants } from "@/components/ui/button";
+import { useAction } from "@/lib/use-action";
 
 import { verifyEmailAction } from "../_accounts/actions";
 
 export function ConfirmEmail({ userId, token }: { userId: string; token: string }) {
-  const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
-  const [pending, start] = useTransition();
+  const { pending, error, run } = useAction();
 
   if (done) {
     return (
@@ -33,19 +32,7 @@ export function ConfirmEmail({ userId, token }: { userId: string; token: string 
       <div>
         <Button
           disabled={pending}
-          onClick={() =>
-            start(async () => {
-              setError(null);
-              try {
-                const res = await verifyEmailAction({ userId, token });
-                if (!res.ok) setError(res.error);
-                else setDone(true);
-              } catch (err) {
-                unstable_rethrow(err);
-                setError("Network error. Try again.");
-              }
-            })
-          }
+          onClick={() => run(() => verifyEmailAction({ userId, token }), () => setDone(true))}
         >
           {pending ? "Confirming…" : "Confirm"}
         </Button>
