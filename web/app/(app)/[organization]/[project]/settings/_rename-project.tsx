@@ -27,16 +27,6 @@ export function RenameProjectForm({
   const [name, setName] = useState(initialName);
   const { pending, error, run } = useAction();
 
-  // A rename elsewhere — another tab, or a router.refresh() from the realtime
-  // listener — sends a new initialName down. Without this the input keeps the
-  // old text while isChanged compares it against the new server value. Only a
-  // genuine change resets, so a plain refresh does not discard what is typed.
-  const [lastInitial, setLastInitial] = useState(initialName);
-  if (initialName !== lastInitial) {
-    setLastInitial(initialName);
-    setName(initialName);
-  }
-
   const isChanged = name.trim() !== initialName && name.trim().length > 0;
 
   const handleSubmit = (e: React.FormEvent) => {

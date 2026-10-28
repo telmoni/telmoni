@@ -5,6 +5,7 @@ import { startTransition, useState } from "react";
 import { toast } from "sonner";
 
 import { ChoiceGroup, type Choice } from "@/components/choice-group";
+import { EnumSelect } from "@/components/enum-select";
 import { InviteSentDialog } from "@/components/members/invite-sent-dialog";
 import { PageAction } from "@/components/page-action";
 import { Button } from "@/components/ui/button";
@@ -231,19 +232,16 @@ function AddDialog({
           )}
           <div className="grid gap-1.5">
             <Label htmlFor="member-role">Role</Label>
-            <Select value={role} onValueChange={(v) => setRole(v as GivenRole)}>
-              <SelectTrigger id="member-role" className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={Role.Member}>
-                  Member — read-only access
-                </SelectItem>
-                <SelectItem value={Role.Admin}>
-                  Admin — read access and the audit log
-                </SelectItem>
-              </SelectContent>
-            </Select>
+            <EnumSelect
+              id="member-role"
+              value={role}
+              options={[Role.Member, Role.Admin]}
+              label={(given) =>
+                given === Role.Admin ? "Admin — read access and the audit log" : "Member — read-only access"
+              }
+              onChange={setRole}
+              className="w-full"
+            />
           </div>
           {error && (
             <p className="text-sm text-destructive" role="alert">

@@ -4,6 +4,7 @@ import { UserPlus } from "lucide-react";
 import { startTransition, useState } from "react";
 import { toast } from "sonner";
 
+import { EnumSelect } from "@/components/enum-select";
 import { InviteSentDialog } from "@/components/members/invite-sent-dialog";
 import { PageAction } from "@/components/page-action";
 import { Button } from "@/components/ui/button";
@@ -18,13 +19,6 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import type { GivenRole } from "@/lib/roles";
 import { OrganizationRole } from "@/lib/types/enums";
 import { useAction } from "@/lib/use-action";
@@ -114,22 +108,18 @@ function AddOrganizationMemberDialog({
           </div>
           <div className="grid gap-1.5">
             <Label htmlFor="organization-member-role">Organization role</Label>
-            <Select
+            <EnumSelect
+              id="organization-member-role"
               value={role}
-              onValueChange={(v) => setRole(v as GivenRole)}
-            >
-              <SelectTrigger id="organization-member-role" className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={OrganizationRole.Admin}>
-                  Admin — create projects, manage members & work as an admin in every project
-                </SelectItem>
-                <SelectItem value={OrganizationRole.Member}>
-                  Member — project-level access only; no organization-wide powers
-                </SelectItem>
-              </SelectContent>
-            </Select>
+              options={[OrganizationRole.Admin, OrganizationRole.Member]}
+              label={(given) =>
+                given === OrganizationRole.Admin
+                  ? "Admin — create projects, manage members & work as an admin in every project"
+                  : "Member — project-level access only; no organization-wide powers"
+              }
+              onChange={setRole}
+              className="w-full"
+            />
           </div>
           {error && <p className="text-sm text-destructive">{error}</p>}
         </DialogBody>

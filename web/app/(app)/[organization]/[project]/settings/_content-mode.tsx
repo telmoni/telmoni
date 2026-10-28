@@ -38,17 +38,6 @@ export function ContentModeForm({
   const [choice, setChoice] = useState<ContentMode>(mode);
   const { pending, error, run } = useAction();
 
-  // A change from another tab arrives as a new `mode` on refresh: the choice
-  // follows it, and an unsaved choice is not kept against a mode that moved,
-  // nor against one the server has stopped offering since it was picked.
-  const [lastMode, setLastMode] = useState(mode);
-  if (mode !== lastMode) {
-    setLastMode(mode);
-    setChoice(mode);
-  } else if (choice !== mode && !offered.includes(choice)) {
-    setChoice(mode);
-  }
-
   // Anyone but the owner reads the mode as text: a group of closed radios
   // is dimmed and out of the tab order, which is no way to show an answer.
   if (!canEdit) {

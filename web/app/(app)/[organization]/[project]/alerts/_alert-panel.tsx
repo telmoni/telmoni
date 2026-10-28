@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { EnumSelect } from "@/components/enum-select";
 import {
   Select,
   SelectContent,
@@ -57,16 +58,13 @@ import {
   withKind,
   withMeasure,
   type AlertDraft,
-  type AlertKind,
   type ConnectionChoice,
   type LinkDraft,
 } from "@/lib/alerts";
 import { STATUS_LABEL } from "@/lib/traces";
 import {
   MissingData,
-  RuleAggregation,
   RuleLevel,
-  RuleMeasure,
   RuleOperator,
   RuleWindow,
   SpanStatus,
@@ -242,78 +240,44 @@ function AlertPanel({
             />
           </SidePanelRow>
           <SidePanelRow label="Reads" htmlFor={`${id}-kind`}>
-            <Select
+            <EnumSelect
+              id={`${id}-kind`}
               value={draft.kind}
-              onValueChange={(kind) => change(withKind(draft, kind as AlertKind))}
+              options={ALERT_KINDS}
+              label={(kind) => KIND_PLURAL[kind].replace(/^./, (c) => c.toUpperCase())}
+              onChange={(kind) => change(withKind(draft, kind))}
               disabled={pending}
-            >
-              <SelectTrigger id={`${id}-kind`} className="w-full max-w-md">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {ALERT_KINDS.map((kind) => (
-                  <SelectItem key={kind} value={kind}>
-                    {KIND_PLURAL[kind].replace(/^./, (c) => c.toUpperCase())}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            />
           </SidePanelRow>
           <SidePanelRow label="Measure" htmlFor={`${id}-measure`}>
-            <Select
+            <EnumSelect
+              id={`${id}-measure`}
               value={draft.measure}
-              onValueChange={(measure) => change(withMeasure(draft, measure as RuleMeasure))}
+              options={measuresFor(draft.kind)}
+              label={(measure) => MEASURE_LABEL[measure]}
+              onChange={(measure) => change(withMeasure(draft, measure))}
               disabled={pending}
-            >
-              <SelectTrigger id={`${id}-measure`} className="w-full max-w-md">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {measuresFor(draft.kind).map((measure) => (
-                  <SelectItem key={measure} value={measure}>
-                    {MEASURE_LABEL[measure]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            />
           </SidePanelRow>
           <SidePanelRow label="Folded as" htmlFor={`${id}-aggregation`}>
-            <Select
+            <EnumSelect
+              id={`${id}-aggregation`}
               value={draft.aggregation}
-              onValueChange={(aggregation) =>
-                change({ ...draft, aggregation: aggregation as RuleAggregation })
-              }
+              options={aggregationsFor(draft.measure)}
+              label={(aggregation) => aggregationLabel(draft.measure, aggregation)}
+              onChange={(aggregation) => change({ ...draft, aggregation })}
               disabled={pending}
-            >
-              <SelectTrigger id={`${id}-aggregation`} className="w-full max-w-md">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {aggregationsFor(draft.measure).map((aggregation) => (
-                  <SelectItem key={aggregation} value={aggregation}>
-                    {aggregationLabel(draft.measure, aggregation)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            />
           </SidePanelRow>
           <SidePanelRow label="Window" htmlFor={`${id}-window`}>
-            <Select
+            <EnumSelect
+              id={`${id}-window`}
               value={draft.window}
-              onValueChange={(window) => change({ ...draft, window: window as RuleWindow })}
+              options={Object.values(RuleWindow)}
+              label={(window) => WINDOW_LABEL[window]}
+              onChange={(window) => change({ ...draft, window })}
               disabled={pending}
-            >
-              <SelectTrigger id={`${id}-window`} className="w-full max-w-md">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {Object.values(RuleWindow).map((window) => (
-                  <SelectItem key={window} value={window}>
-                    {WINDOW_LABEL[window]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            />
           </SidePanelRow>
           <SidePanelRow label="Filters">
             <div className="grid max-w-md gap-2">
@@ -371,22 +335,14 @@ function AlertPanel({
             </div>
           </SidePanelRow>
           <SidePanelRow label="Compared as" htmlFor={`${id}-operator`}>
-            <Select
+            <EnumSelect
+              id={`${id}-operator`}
               value={draft.operator}
-              onValueChange={(operator) => change({ ...draft, operator: operator as RuleOperator })}
+              options={Object.values(RuleOperator)}
+              label={(operator) => OPERATOR_LABEL[operator]}
+              onChange={(operator) => change({ ...draft, operator })}
               disabled={pending}
-            >
-              <SelectTrigger id={`${id}-operator`} className="w-full max-w-md">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {Object.values(RuleOperator).map((operator) => (
-                  <SelectItem key={operator} value={operator}>
-                    {OPERATOR_LABEL[operator]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            />
           </SidePanelRow>
           <SidePanelRow label="Alert when" htmlFor={`${id}-alert`}>
             <div className="flex max-w-md flex-wrap items-center gap-3">
@@ -420,26 +376,15 @@ function AlertPanel({
             </SidePanelRow>
           )}
           <SidePanelRow label="No data" htmlFor={`${id}-missing`}>
-            <Select
+            <EnumSelect
+              id={`${id}-missing`}
               value={draft.missingData}
-              onValueChange={(missingData) => change({ ...draft, missingData: missingData as MissingData })}
+              options={Object.values(MissingData)}
+              label={(missing) => MISSING_DATA_LABEL[missing]}
+              onChange={(missingData) => change({ ...draft, missingData })}
               disabled={pending}
-            >
-              <SelectTrigger
-                id={`${id}-missing`}
-                aria-describedby={`${id}-missing-hint`}
-                className="w-full max-w-md"
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {Object.values(MissingData).map((missing) => (
-                  <SelectItem key={missing} value={missing}>
-                    {MISSING_DATA_LABEL[missing]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              describedBy={`${id}-missing-hint`}
+            />
             <p id={`${id}-missing-hint`} className="text-muted-foreground">
               What a window holding no span means.
             </p>
@@ -664,22 +609,16 @@ function LinkFields({
           <Label htmlFor={`${id}-level`} className="font-normal text-muted-foreground">
             Hears
           </Label>
-          <Select
+          <EnumSelect
+            id={`${id}-level`}
             value={link.level}
-            onValueChange={(level) => onChange({ ...link, level: level as RuleLevel })}
+            options={Object.values(RuleLevel)}
+            label={(level) => LEVEL_LABEL[level]}
+            onChange={(level) => onChange({ ...link, level })}
             disabled={disabled}
-          >
-            <SelectTrigger id={`${id}-level`} aria-describedby={levelHint} className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {Object.values(RuleLevel).map((level) => (
-                <SelectItem key={level} value={level}>
-                  {LEVEL_LABEL[level]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            className="w-full"
+            describedBy={levelHint}
+          />
         </div>
         <div className="grid gap-1.5">
           <Label htmlFor={`${id}-when`} className="font-normal text-muted-foreground">

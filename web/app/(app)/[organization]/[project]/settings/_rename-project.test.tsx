@@ -52,7 +52,16 @@ beforeEach(() => {
 });
 
 function form(initialName: string) {
-  return <RenameProjectForm projectId="project_1" slug="web" initialName={initialName} canEdit />;
+  // Keyed as the page keys it: a name changed elsewhere draws a fresh form.
+  return (
+    <RenameProjectForm
+      key={initialName}
+      projectId="project_1"
+      slug="web"
+      initialName={initialName}
+      canEdit
+    />
+  );
 }
 
 async function save(name: string) {

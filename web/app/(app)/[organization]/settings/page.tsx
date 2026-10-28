@@ -63,7 +63,9 @@ export default async function OrganizationSettingsPage() {
           title="Name"
           description="Your organization's visible name within Telmoni — your company or group, not a person's name. Everyone in it sees it: the rail, the resource selector and every invitation it sends. Renaming moves nothing: its address stays as it is."
         >
+          {/* A value changed elsewhere draws a fresh form; the same one keeps what is typed. */}
           <OrganizationNameForm
+            key={organization.name}
             organizationId={organization.organizationId}
             initialName={organization.name}
           />
@@ -74,6 +76,7 @@ export default async function OrganizationSettingsPage() {
           description="Your organization's address on Telmoni, where its pages and every project in it live. Lowercase letters and digits, in words joined by hyphens. Changing it moves every link to those pages: the old address stops working."
         >
           <OrganizationUrlForm
+            key={organization.slug}
             organizationId={organization.organizationId}
             slug={organization.slug}
             host={new URL(env.AUTH_URL).host}

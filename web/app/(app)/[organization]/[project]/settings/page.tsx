@@ -54,7 +54,9 @@ export default async function SettingsPage({
           description="Used to identify this project across the console and notifications. Its address follows the name: a rename moves every link to its pages, and a name with no Latin letters or digits keeps the address it has."
         >
           <Card>
+            {/* A name changed elsewhere draws a fresh form; the same name keeps what is typed. */}
             <RenameProjectForm
+              key={project.name}
               projectId={project.id}
               slug={project.slug}
               initialName={project.name}
@@ -70,6 +72,7 @@ export default async function SettingsPage({
           <Card>
             {contentMode ? (
               <ContentModeForm
+                key={`${contentMode.content_mode}:${contentMode.offered.join()}`}
                 projectId={project.id}
                 mode={contentMode.content_mode}
                 offered={contentMode.offered}

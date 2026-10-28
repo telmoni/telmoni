@@ -32,7 +32,16 @@ function form({
   offered = [ContentMode.Off],
   canEdit = true,
 }: { mode?: ContentMode; offered?: ContentMode[]; canEdit?: boolean } = {}) {
-  return <ContentModeForm projectId="project_1" mode={mode} offered={offered} canEdit={canEdit} />;
+  // Keyed as the page keys it: a mode or an offer changed draws a fresh form.
+  return (
+    <ContentModeForm
+      key={`${mode}:${offered.join()}`}
+      projectId="project_1"
+      mode={mode}
+      offered={offered}
+      canEdit={canEdit}
+    />
+  );
 }
 
 function radio(name: string): HTMLElement {

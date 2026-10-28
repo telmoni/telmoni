@@ -4,14 +4,8 @@ import { ConfirmDialog } from "@/components/confirm-dialog";
 import { Td } from "@/components/data-table";
 import { LocalTime } from "@/components/local-time";
 import { Badge } from "@/components/ui/badge";
+import { EnumSelect } from "@/components/enum-select";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import type { ActionResult } from "@/lib/action-result";
 import { personDetail, personName } from "@/lib/identity";
 import { roleLabel } from "@/lib/role-label";
@@ -115,6 +109,8 @@ export function MemberRow({
   const words = WORDS[of];
   const person = { displayName: member.display_name, email: member.email };
   const isOwner = owns(member.role);
+  // The seat's role as one that is given: an owner's is nobody's to set.
+  const given = member.role === Role.Owner ? null : member.role;
   // Only an admin can be handed the whole, and only the owner hands it.
   const canOffer = canManage && isOwnerCaller && member.role === Role.Admin;
   const offered = Boolean(member.offer_expires_at);
@@ -147,24 +143,20 @@ export function MemberRow({
         )}
       </Td>
       <Td>
-        {isOwner ? (
+        {given === null ? (
           <span className="text-xs font-medium text-muted-foreground">Owner</span>
         ) : canManage ? (
-          <Select
-            value={member.role}
+          <EnumSelect
+            value={given}
+            options={[Role.Admin, Role.Member]}
+            label={roleLabel}
+            onChange={(role) => run(() => act.setRole(member.member_id, role))}
             disabled={pending}
-            onValueChange={(v) => run(() => act.setRole(member.member_id, v as GivenRole))}
-          >
-            <SelectTrigger className="h-9 w-32 text-xs" aria-label={`Role for ${member.email}`}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={Role.Admin}>Admin</SelectItem>
-              <SelectItem value={Role.Member}>Member</SelectItem>
-            </SelectContent>
-          </Select>
+            className="h-9 w-32 text-xs"
+            ariaLabel={`Role for ${member.email}`}
+          />
         ) : (
-          <span className="text-xs text-muted-foreground">{roleLabel(member.role)}</span>
+          <span className="text-xs text-muted-foreground">{roleLabel(given)}</span>
         )}
         {error && <span className="ml-2 text-xs text-destructive">{error}</span>}
       </Td>

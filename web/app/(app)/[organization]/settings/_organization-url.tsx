@@ -24,14 +24,6 @@ export function OrganizationUrlForm({
   const [value, setValue] = useState(slug);
   const { pending, error, run } = useAction();
 
-  // A change elsewhere — another tab, or a router.refresh() from the realtime
-  // listener — sends a new slug down; only a genuine change resets the field.
-  const [lastSlug, setLastSlug] = useState(slug);
-  if (slug !== lastSlug) {
-    setLastSlug(slug);
-    setValue(slug);
-  }
-
   const trimmed = value.trim();
   const isChanged = trimmed !== slug && trimmed.length > 0;
 
