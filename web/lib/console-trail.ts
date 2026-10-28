@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { type ConsolePlace, consolePlace } from "@/lib/console-nav";
+import { sameOriginUrl } from "@/lib/same-origin";
 import { organizationPath, projectPath } from "@/lib/slug";
 
 /**
@@ -56,9 +57,10 @@ const TrailSchema = z.array(z.string());
  *   never stood.
  */
 export function isReturnablePath(path: string): path is ReturnablePath {
-  if (!path.startsWith("/") || path.startsWith("//")) return false;
-  if (path.includes("\\")) return false;
-  const place = consolePlace(path);
+  // Only a path already in its normal form: the trail is written from the
+  // address bar, which spells one no other way.
+  const url = sameOriginUrl(path);
+  const place = url && url.pathname + url.search === path ? consolePlace(path) : null;
   return place !== null && place.kind !== "account";
 }
 

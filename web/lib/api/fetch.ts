@@ -2,6 +2,7 @@ import type { z } from "zod";
 
 import { Problem } from "./problem";
 import { logger } from "@/lib/logger";
+import { sameOriginUrl } from "@/lib/same-origin";
 
 const SERVICE_USER_AGENT = "telmoni-web/0.1.0";
 
@@ -57,28 +58,15 @@ export async function tryFetchWithTimeout(
   }
 }
 
+/** Where to return after sign-in: `raw` as a path on this console, else the
+ *  root. ⚠ Every caller spends this as `new URL(returnTo, request.url)`, so
+ *  it is held to `sameOriginUrl`'s rule, which refuses the `/..//evil.com`
+ *  that parses as same-origin here and as another host there: reachable on
+ *  `/auth/login`, `/auth/signup` and, sealed into the PKCE cookie, on the
+ *  post-sign-in redirect, the one a phisher wants. */
 export function safeReturnTo(raw: string | undefined, base: URL): string {
-  if (!raw) return "/";
-  try {
-    const url = new URL(raw, base);
-    if (url.origin !== base.origin) return "/";
-    const path = url.pathname + url.search;
-    // ⚠ **The origin check above is not enough, because the path it leaves
-    // behind gets re-resolved by the caller.** Every caller spends this value
-    // as `new URL(returnTo, request.url)`, and `/..//evil.com` parses HERE as
-    // same-origin — the `..` climbs to the root — while `url.pathname`
-    // normalises to `//evil.com`. Handed back, that is protocol-relative, and
-    // the caller's `new URL` reads it as `https://evil.com`. The whole
-    // round-trip is same-origin at every step except the last.
-    //
-    // Reachable on `/auth/login`, `/auth/signup` and — sealed into the PKCE
-    // cookie — on the post-sign-in redirect, which is the one a phisher wants:
-    // it lands somebody on an attacker's page seconds after they authenticated.
-    if (path.startsWith("//") || path.startsWith("/\\")) return "/";
-    return path;
-  } catch {
-    return "/";
-  }
+  const url = raw ? sameOriginUrl(raw, base.href) : null;
+  return url ? url.pathname + url.search : "/";
 }
 
 /** An answer's body as `schema` reads it, else `null`: never cast. */

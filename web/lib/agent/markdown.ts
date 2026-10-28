@@ -12,6 +12,7 @@
  */
 
 import { consolePlace } from "@/lib/console-nav";
+import { sameOriginUrl } from "@/lib/same-origin";
 
 export type Inline =
   | { type: "text"; text: string }
@@ -28,24 +29,17 @@ export type Block =
   | { type: "code"; lang: string | null; text: string };
 
 // `null` when the href may not be a link: only a page of the console is one,
-// the docs' included. The path is resolved as the browser will — `/a/..//evil`
-// is `//evil`, another host — and a door is no page: `/auth/logout` signs out
-// on a GET.
+// the docs' included, resolved as the browser will (`sameOriginUrl`), and a
+// door is no page: `/auth/logout` signs out on a GET.
 const DOOR = /^\/(auth|connect|api|_next)(\/|$)/;
 
 export function allowedHref(raw: string): string | null {
   const href = raw.trim();
-  if (href === "" || /[\s\\\u0000-\u001f\u007f]/.test(href)) return null;
-  if (!href.startsWith("/") || href.startsWith("//")) return null;
-  let url: URL;
-  try {
-    url = new URL(href, "http://n");
-  } catch {
-    return null;
-  }
+  if (href === "" || /\s/.test(href)) return null;
+  const url = sameOriginUrl(href);
+  if (!url) return null;
   const path = url.pathname + url.search + url.hash;
-  if (url.origin !== "http://n" || path.startsWith("//") || DOOR.test(path)) return null;
-  return path;
+  return DOOR.test(path) ? null : path;
 }
 
 // Whether an allowed href is a page of the console, which the window stays

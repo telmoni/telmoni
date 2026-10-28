@@ -1,21 +1,14 @@
 import { z } from "zod";
 
+import { sameOriginUrl } from "@/lib/same-origin";
+
 const STORAGE_KEY = "telmoni-recent-visits";
 
 export const RECENT_LIMIT = 5;
 
 // Storage is the browser's to change, so a link read back is followed only if
-// it stays on this origin, which `//`, `/\` and a tab inside a path all escape.
-const OWN_ORIGIN = "https://console.invalid";
-
-function isOwnPath(href: string): boolean {
-  if (!href.startsWith("/")) return false;
-  try {
-    return new URL(href, OWN_ORIGIN).origin === OWN_ORIGIN;
-  } catch {
-    return false;
-  }
-}
+// it stays on this origin.
+const isOwnPath = (href: string): boolean => sameOriginUrl(href) !== null;
 
 const VisitSchema = z.object({
   href: z.string().refine(isOwnPath),
