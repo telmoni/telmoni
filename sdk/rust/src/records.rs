@@ -61,6 +61,7 @@ pub struct RunRecord {
 /// What a run record holds: a step, with its own calls, or a call made in
 /// the run itself.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum RecordItem {
     /// A step, with the calls made inside it.
     Step(StepRecord),
@@ -72,6 +73,7 @@ pub enum RecordItem {
 
 /// What a step record holds: a model call or a tool call.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum CallRecord {
     /// A model call.
     Model(ModelCallRecord),
