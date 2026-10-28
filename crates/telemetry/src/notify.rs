@@ -43,7 +43,7 @@ pub async fn tell_incidents(
     if told.iter().all(|one| one.telling == Telling::Silent) {
         return;
     }
-    let links = match links_of(state, rule).await {
+    let links = match links_of(state, rule.id).await {
         Ok(links) => links,
         Err(error) => {
             tracing::warn!(
@@ -142,13 +142,6 @@ async fn tell_one(
     hearers: &[Uuid],
     shown: Option<&ExampleRun>,
 ) {
-    let route_key = db::route_key(rule.id);
-    let taken = deliveries::take(state, &rule.organization_id, hearers.len()).await;
-    let route = Route {
-        key: &route_key,
-        connections: hearers,
-        most: taken.room(),
-    };
     let traces_url = traces_link(state, rule);
     let (title, body) = words(rule, value, one);
     let body = carrying(
@@ -178,20 +171,12 @@ async fn tell_one(
         metadata: metadata.clone(),
         dedup_key,
     };
-    let reached = tell(
-        state,
-        &rule.organization_id,
-        &rule.project_id,
-        notice,
-        &key,
-        route,
-        one.telling.again(),
-    )
-    .await;
-    let made = reached
-        .as_ref()
-        .map_or(0, |reached| reached.connections.len());
-    deliveries::settle(state, &rule.organization_id, taken, made).await;
+    let of = Of {
+        organization_id: &rule.organization_id,
+        project_id: &rule.project_id,
+        rule_id: rule.id,
+    };
+    let reached = told(state, of, hearers, notice, &key, one.telling.again()).await;
     match reached {
         Ok(reached) => {
             let run = shown.filter(|_| reached.anyone).map(|run| run.run_id);
@@ -544,11 +529,55 @@ fn clipped(name: &str) -> String {
 const NAME_SHOWN: usize = 120;
 
 /// The connectors the alert links, read in the module's lane.
-async fn links_of(state: &AppState, rule: &RuleRow) -> Result<Vec<Link>, TelmoniError> {
+async fn links_of(state: &AppState, rule_id: Uuid) -> Result<Vec<Link>, TelmoniError> {
     let mut tx = maintenance_scope(&state.db, TelemetryLane).await?;
-    let links = db::links_of(&mut tx, rule.id).await?;
+    let links = db::links_of(&mut tx, rule_id).await?;
     tx.commit().await?;
     Ok(links.into_iter().map(db::LinkRow::link).collect())
+}
+
+/// Whose notice: the organization and project it is filed under, and the
+/// alert whose route it goes by.
+#[derive(Clone, Copy)]
+struct Of<'a> {
+    organization_id: &'a OrganizationId,
+    project_id: &'a ProjectId,
+    rule_id: Uuid,
+}
+
+/// `notice` told to `hearers` within the day's room, under the alert's
+/// route, the room settled after by what was made; keyed in the feed as
+/// `key`, or to the route alone where it is said `again`.
+async fn told<'a>(
+    state: &AppState,
+    of: Of<'_>,
+    hearers: &[Uuid],
+    notice: impl Fn(Option<&'a str>) -> Notice<'a>,
+    key: &'a str,
+    again: bool,
+) -> Result<Reached, TelmoniError> {
+    let taken = deliveries::take(state, of.organization_id, hearers.len()).await;
+    let route_key = db::route_key(of.rule_id);
+    let route = Route {
+        key: &route_key,
+        connections: hearers,
+        most: taken.room(),
+    };
+    let reached = tell(
+        state,
+        of.organization_id,
+        of.project_id,
+        notice,
+        key,
+        route,
+        again,
+    )
+    .await;
+    let made = reached
+        .as_ref()
+        .map_or(0, |reached| reached.connections.len());
+    deliveries::settle(state, of.organization_id, taken, made).await;
+    reached
 }
 
 /// A notice's title and body: the alert's name and where it stands, and its
@@ -672,13 +701,7 @@ fn dollars(value: f64) -> String {
 /// keyed as the incident's resolution, and to the linked connectors that hear
 /// it or heard the incident; to them alone once it reopened.
 pub async fn resolved_by_hand(state: &AppState, incident: &IncidentRow) {
-    let read = async {
-        let mut tx = maintenance_scope(&state.db, TelemetryLane).await?;
-        let links = db::links_of(&mut tx, incident.rule_id).await?;
-        tx.commit().await?;
-        Ok::<_, TelmoniError>(links.into_iter().map(db::LinkRow::link).collect())
-    };
-    let links = match read.await {
+    let links = match links_of(state, incident.rule_id).await {
         Ok(links) => links,
         Err(error) => {
             tracing::warn!(
@@ -734,27 +757,12 @@ async fn tell_resolved(state: &AppState, incident: &IncidentRow, links: &[Link],
         .filter(|link| link.hears_end(severity, &incident.told_to, muted, now))
         .map(|link| link.connection_id)
         .collect();
-    let taken = deliveries::take(state, organization_id, hearers.len()).await;
-    let route_key = db::route_key(rule_id);
-    let route = Route {
-        key: &route_key,
-        connections: &hearers,
-        most: taken.room(),
-    };
-    let reached = tell(
-        state,
+    let of = Of {
         organization_id,
         project_id,
-        notice,
-        &key,
-        route,
-        incident.reopened > 0,
-    )
-    .await;
-    let made = reached
-        .as_ref()
-        .map_or(0, |reached| reached.connections.len());
-    deliveries::settle(state, organization_id, taken, made).await;
+        rule_id,
+    };
+    let reached = told(state, of, &hearers, notice, &key, incident.reopened > 0).await;
     match reached {
         // A deleted incident keeps nothing.
         Ok(_) if deleted => {}
