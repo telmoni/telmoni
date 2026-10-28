@@ -286,7 +286,7 @@ async fn plant_code(pool: &PgPool, user: &str, act: Act<'_>, code: &str) {
         &mut tx,
         &uid(user),
         act,
-        &confirmation_codes::hash_code(code),
+        &telmoni_auth::issuer::hash(code),
         chrono::Utc::now() + chrono::Duration::minutes(15),
     )
     .await

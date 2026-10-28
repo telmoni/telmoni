@@ -320,8 +320,8 @@ pub async fn create_organization_invite(
 
     organization_members::revoke_live_for_email(&mut tx, &organization, &email).await?;
 
-    let raw_token = Uuid::new_v4().to_string();
-    let token_hash = telmoni_shared::digest::sha256_hex(raw_token.as_bytes());
+    let raw_token = crate::issuer::secret();
+    let token_hash = crate::issuer::hash(&raw_token);
     let expires_at = Utc::now() + Duration::days(crate::handler::invite::INVITE_TTL_DAYS);
 
     let invite_id = organization_members::create_invite(

@@ -40,7 +40,7 @@ use crate::model::InviteScope;
 impl Auth for AppState {
     async fn resolve_api_key(&self, headers: &HeaderMap) -> Result<ActingKey, TelmoniError> {
         let token = crate::handler::v1::presented_key(headers).ok_or(AuthError::InvalidToken)?;
-        let token_hash = crate::handler::tokens::hash_token(token);
+        let token_hash = crate::issuer::hash(token);
         // An outage, not the caller's doing: logged, and answered as one,
         // so a machine retries rather than taking its key for revoked.
         let unavailable = |e: &dyn std::fmt::Display| -> TelmoniError {

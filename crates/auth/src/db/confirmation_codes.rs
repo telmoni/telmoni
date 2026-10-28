@@ -105,12 +105,6 @@ impl<'a> Act<'a> {
 /// long enough to paste from an email client.
 pub const CODE_TTL_MINUTES: i64 = 15;
 
-/// SHA-256 hex of a code; the plaintext is emailed, never stored.
-#[must_use]
-pub fn hash_code(code: &str) -> String {
-    telmoni_shared::digest::sha256_hex(code.as_bytes())
-}
-
 /// How many digits an emailed confirmation code has.
 pub const CODE_DIGITS: u32 = 6;
 

@@ -87,7 +87,7 @@ pub async fn request_organization_deletion_code(
         &mut tx,
         &user_id,
         Act::OrganizationDeletion(&organization),
-        &confirmation_codes::hash_code(&code),
+        &crate::issuer::hash(&code),
         expires_at,
     )
     .await?;
@@ -176,7 +176,7 @@ async fn spend_code(
         &mut tx,
         user_id,
         Act::OrganizationDeletion(organization),
-        &confirmation_codes::hash_code(code.trim()),
+        &crate::issuer::hash(code.trim()),
     )
     .await?
     else {

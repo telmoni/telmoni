@@ -83,8 +83,10 @@ pub(crate) fn secret() -> String {
     URL_SAFE_NO_PAD.encode(bytes)
 }
 
-/// The stored form of any secret this service mints.
-pub(crate) fn hash(secret: &str) -> String {
+/// The stored form of any secret this service mints or mails: its SHA-256,
+/// in hex.
+#[must_use]
+pub fn hash(secret: &str) -> String {
     telmoni_shared::digest::sha256_hex(secret.as_bytes())
 }
 
@@ -445,6 +447,21 @@ impl Issuer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_secret_hashes_the_same_each_time_and_apart_from_another() {
+        assert_eq!(hash("tm_test_input"), hash("tm_test_input"));
+        assert_ne!(hash("tm_aaa"), hash("tm_bbb"));
+    }
+
+    /// The at-rest form is pinned: a change stops every stored secret matching.
+    #[test]
+    fn the_stored_form_is_lowercase_sha256_hex() {
+        assert_eq!(
+            hash("tor_anything"),
+            "03cbb8777a5c0a4051ebe87e1b001f63eeca99f04111ec6c99c2178ffe02a2d0"
+        );
+    }
 
     #[test]
     fn a_user_code_is_eight_consonants_shown_in_two_halves() {

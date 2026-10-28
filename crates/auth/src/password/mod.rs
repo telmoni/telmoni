@@ -221,7 +221,7 @@ impl PasswordProvider {
             &mut tx,
             &user_id,
             Act::EmailVerification,
-            &confirmation_codes::hash_code(&token),
+            &crate::issuer::hash(&token),
             Utc::now() + Duration::hours(VERIFICATION_TTL_HOURS),
         )
         .await?;
@@ -311,7 +311,7 @@ impl PasswordProvider {
             &mut tx,
             user_id,
             Act::EmailVerification,
-            &confirmation_codes::hash_code(&token),
+            &crate::issuer::hash(&token),
             Utc::now() + Duration::hours(VERIFICATION_TTL_HOURS),
         )
         .await?;
@@ -326,7 +326,7 @@ impl PasswordProvider {
             &mut tx,
             user_id,
             Act::EmailVerification,
-            &confirmation_codes::hash_code(token.trim()),
+            &crate::issuer::hash(token.trim()),
         )
         .await?;
         let Some(code_id) = live else {
@@ -480,7 +480,7 @@ impl PasswordProvider {
             &mut tx,
             user_id,
             Act::PasswordReset,
-            &confirmation_codes::hash_code(token.trim()),
+            &crate::issuer::hash(token.trim()),
         )
         .await?;
         let Some(code_id) = live else {
@@ -562,7 +562,7 @@ impl PasswordProvider {
             &mut tx,
             user_id,
             &new_email,
-            &confirmation_codes::hash_code(&code),
+            &crate::issuer::hash(&code),
             expires_at,
         )
         .await?;
@@ -607,7 +607,7 @@ impl PasswordProvider {
             tx.commit().await?;
             return Err(crate::handler::account::wrong_code(false));
         }
-        if confirmation_codes::hash_code(code.trim()) != pending.code_hash {
+        if crate::issuer::hash(code.trim()) != pending.code_hash {
             let burned = credentials::register_pending_email_failure(&mut tx, user_id).await?;
             tx.commit().await?;
             return Err(crate::handler::account::wrong_code(burned));
@@ -672,7 +672,7 @@ impl ResetSender {
             &mut tx,
             user_id,
             Act::PasswordReset,
-            &confirmation_codes::hash_code(&token),
+            &crate::issuer::hash(&token),
             expires_at,
         )
         .await?;

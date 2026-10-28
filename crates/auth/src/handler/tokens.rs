@@ -64,10 +64,6 @@ fn bounded_expiry(secs: u32) -> Result<chrono::DateTime<Utc>, TelmoniError> {
         })
 }
 
-pub(crate) fn hash_token(raw_token: &str) -> String {
-    telmoni_shared::digest::sha256_hex(raw_token.as_bytes())
-}
-
 pub(crate) fn generate_token() -> String {
     let mut bytes = [0u8; 32];
     bytes[..16].copy_from_slice(Uuid::new_v4().as_bytes());
@@ -163,7 +159,7 @@ pub async fn create_token(
     };
     let scopes = minted_scopes(&req.scopes)?;
     let raw_token = generate_token();
-    let token_hash = hash_token(&raw_token);
+    let token_hash = crate::issuer::hash(&raw_token);
 
     let actor = principal.user_id;
     let access = acting_project(&state, &project_id, &actor).await?;
@@ -277,7 +273,7 @@ pub async fn rotate_token(
     })?;
 
     let raw_token = generate_token();
-    let token_hash = hash_token(&raw_token);
+    let token_hash = crate::issuer::hash(&raw_token);
     let expires_at = default_ttl_expiry();
 
     // The replacement is the rotator's: they alone ever see its secret, and
@@ -350,7 +346,7 @@ pub async fn validate_token(
         return Err(AuthError::Unauthenticated.into());
     }
 
-    let token_hash = hash_token(&req.token);
+    let token_hash = crate::issuer::hash(&req.token);
 
     let mut tx = maintenance_scope(&state.db, AuthLane).await?;
     let result = tokens::validate(&mut tx, &token_hash).await?;
@@ -425,32 +421,6 @@ mod tests {
         let t1 = generate_token();
         let t2 = generate_token();
         assert_ne!(t1, t2, "two generated tokens must not be identical");
-    }
-
-    #[test]
-    fn test_hash_token_deterministic() {
-        let tok = "tm_test_input";
-        assert_eq!(hash_token(tok), hash_token(tok));
-    }
-
-    #[test]
-    fn test_hash_token_distinct_inputs() {
-        assert_ne!(hash_token("tm_aaa"), hash_token("tm_bbb"));
-    }
-
-    #[test]
-    fn test_hash_token_is_sha256_hex() {
-        let h = hash_token("tor_anything");
-        assert_eq!(
-            h, "03cbb8777a5c0a4051ebe87e1b001f63eeca99f04111ec6c99c2178ffe02a2d0",
-            "the at-rest token hash changed; every stored token just stopped validating"
-        );
-        assert_eq!(h.len(), 64, "SHA-256 hex digest must be 64 chars");
-        assert!(
-            h.chars()
-                .all(|c| c.is_ascii_digit() || c.is_ascii_lowercase()),
-            "the digest must be LOWERCASE hex: {h}"
-        );
     }
 
     #[test]

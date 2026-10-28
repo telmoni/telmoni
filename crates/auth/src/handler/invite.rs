@@ -73,11 +73,6 @@ impl std::fmt::Debug for InviteTokenRequest {
     }
 }
 
-/// Hash the secret the way [`create_invite`] stored it.
-fn hash_invite_token(raw: &str) -> String {
-    telmoni_shared::digest::sha256_hex(raw.as_bytes())
-}
-
 /// What the deployment says before a seat is promised or taken: a paused
 /// organization's refusal now, and the ceiling its roster is held to once
 /// the count is read ([`admit_invitation`], [`admit_seat`]). Nothing in a
@@ -243,7 +238,7 @@ pub async fn create_invite(
         .into());
     }
 
-    let secret = Uuid::new_v4().to_string();
+    let secret = crate::issuer::secret();
     let expires_at = Utc::now() + Duration::days(INVITE_TTL_DAYS);
 
     invites::revoke_live_for_email(&mut acting.tx, &project_id, &email).await?;
@@ -252,7 +247,7 @@ pub async fn create_invite(
         &project_id,
         &email,
         role,
-        &hash_invite_token(&secret),
+        &crate::issuer::hash(&secret),
         &actor,
         expires_at,
     )
@@ -394,7 +389,7 @@ pub async fn look_up_invite(
     Json(req): Json<InviteTokenRequest>,
 ) -> Result<Json<InviteLook>, TelmoniError> {
     let mut tx = maintenance_scope(&state.db, AuthLane).await?;
-    let token_hash = hash_invite_token(&req.token);
+    let token_hash = crate::issuer::hash(&req.token);
     let found = invites::find_live_by_token(&mut tx, &token_hash).await?;
     tx.commit().await?;
     let Some(invite) = found else {
@@ -729,7 +724,7 @@ pub async fn accept_invite(
     let actor = principal.user_id;
 
     let mut tx = maintenance_scope(&state.db, AuthLane).await?;
-    let token_hash = hash_invite_token(&req.token);
+    let token_hash = crate::issuer::hash(&req.token);
     let Some(invite) = invites::find_live_by_token(&mut tx, &token_hash).await? else {
         return Err(
             AuthError::NotFound("this invitation has expired or been withdrawn".into()).into(),

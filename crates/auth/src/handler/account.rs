@@ -221,7 +221,7 @@ pub async fn request_email_change(
         &mut tx,
         &user_id,
         Act::EmailChange,
-        &confirmation_codes::hash_code(&code),
+        &crate::issuer::hash(&code),
         expires_at,
     )
     .await?;
@@ -279,7 +279,7 @@ pub async fn confirm_email_change(
         &mut tx,
         &user_id,
         Act::EmailChange,
-        &confirmation_codes::hash_code(req.current_code.trim()),
+        &crate::issuer::hash(req.current_code.trim()),
     )
     .await?;
     if live.is_none() {
@@ -497,7 +497,7 @@ pub async fn request_account_deletion_code(
         &mut tx,
         &user_id,
         Act::AccountDeletion,
-        &confirmation_codes::hash_code(&code),
+        &crate::issuer::hash(&code),
         expires_at,
     )
     .await?;
@@ -567,7 +567,7 @@ pub async fn delete_account(
         &mut tx,
         &user_id,
         Act::AccountDeletion,
-        &confirmation_codes::hash_code(req.code.trim()),
+        &crate::issuer::hash(req.code.trim()),
     )
     .await?
     else {
