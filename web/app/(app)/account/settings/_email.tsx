@@ -1,13 +1,13 @@
 "use client";
 
-import { unstable_rethrow } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { signOut } from "@/lib/auth/sign-out";
 import { emailPosture } from "@/lib/sign-in-method";
+import { useAction } from "@/lib/use-action";
 
 import {
   confirmEmailChangeAction,
@@ -37,11 +37,17 @@ export function ChangeEmail({
   const [currentCode, setCurrentCode] = useState("");
   const [newCode, setNewCode] = useState("");
   const [changedTo, setChangedTo] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  // Two transitions, so a spinning "Resend code" does not also disable the
-  // confirm button's own label logic.
-  const [sending, startSending] = useTransition();
-  const [confirming, startConfirming] = useTransition();
+  // Two, so a spinning "Resend code" does not also disable the confirm
+  // button's own label logic; one line under both.
+  const sendCodes = useAction();
+  const change = useAction();
+  const error = change.error ?? sendCodes.error;
+  const sending = sendCodes.pending;
+  const confirming = change.pending;
+  const clearError = () => {
+    sendCodes.setError(null);
+    change.setError(null);
+  };
 
   const posture = emailPosture(method);
 
@@ -54,42 +60,26 @@ export function ChangeEmail({
     /^\d{6}$/.test(currentCode) && /^\d{6}$/.test(newCode) && !confirming;
 
   const send = () => {
-    setError(null);
-    startSending(async () => {
-      try {
-        const res = await requestEmailChangeAction(trimmed);
-        if (!res.ok) {
-          setError(res.error);
-          return;
-        }
+    clearError();
+    sendCodes.run(
+      () => requestEmailChangeAction(trimmed),
+      (res) => {
         setSentTo(res.email ?? trimmed);
         setCurrentCode("");
         setNewCode("");
-      } catch (err) {
-        unstable_rethrow(err);
-        setError("Network error. Try again.");
-      }
-    });
+      },
+    );
   };
 
+  // ⚠ **No refresh.** The session ended with the change, so a re-render would
+  // redirect to sign-out mid-sentence, before the person has read which
+  // address the account now has and why they are signed out.
   const confirm = () => {
-    setError(null);
-    startConfirming(async () => {
-      try {
-        const res = await confirmEmailChangeAction(currentCode, newCode);
-        if (!res.ok) {
-          setError(res.error);
-          return;
-        }
-        // ⚠ **No refresh.** The session ended with the change, so a re-render
-        // would redirect to sign-out mid-sentence, before the person has read
-        // which address the account now has and why they are signed out.
-        setChangedTo(res.email ?? sentTo);
-      } catch (err) {
-        unstable_rethrow(err);
-        setError("Network error. Try again.");
-      }
-    });
+    clearError();
+    change.run(
+      () => confirmEmailChangeAction(currentCode, newCode),
+      (res) => setChangedTo(res.email ?? sentTo),
+    );
   };
 
   // ⚠ **NOTHING, not an explanation.** `provider` and `unknown` each used to
@@ -152,7 +142,7 @@ export function ChangeEmail({
               value={nextEmail}
               onChange={(e) => {
                 setNextEmail(e.target.value);
-                setError(null);
+                clearError();
               }}
               placeholder="you@example.com"
               disabled={sending}
@@ -184,7 +174,7 @@ export function ChangeEmail({
               value={newCode}
               onChange={(e) => {
                 setNewCode(e.target.value.replace(/\D/g, "").slice(0, 6));
-                setError(null);
+                clearError();
               }}
               placeholder="000000"
               disabled={confirming}
@@ -201,7 +191,7 @@ export function ChangeEmail({
               value={currentCode}
               onChange={(e) => {
                 setCurrentCode(e.target.value.replace(/\D/g, "").slice(0, 6));
-                setError(null);
+                clearError();
               }}
               placeholder="000000"
               disabled={confirming}
@@ -230,7 +220,7 @@ export function ChangeEmail({
                 setSentTo(null);
                 setCurrentCode("");
                 setNewCode("");
-                setError(null);
+                clearError();
               }}
             >
               Use a different address

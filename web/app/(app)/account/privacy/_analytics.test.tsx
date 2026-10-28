@@ -85,7 +85,7 @@ describe("AnalyticsPreference", () => {
     });
 
     expect(toggle()).toBeChecked();
-    expect(toastError).toHaveBeenCalledWith("Network error. Please try again.");
+    expect(toastError).toHaveBeenCalledWith("Network error. Try again.");
   });
 
   it("says it is off by default, what it sends, and what it never sends", () => {

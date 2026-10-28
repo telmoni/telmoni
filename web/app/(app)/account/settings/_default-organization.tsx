@@ -1,8 +1,6 @@
 "use client";
 
-import { unstable_rethrow } from "next/navigation";
-import { useState, useTransition } from "react";
-import { toast } from "sonner";
+import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -12,6 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useToastAction } from "@/lib/use-action";
 
 import { setDefaultOrganizationAction } from "./actions";
 
@@ -31,23 +30,9 @@ export function DefaultOrganization({
   current: string;
 }) {
   const [chosen, setChosen] = useState(current);
-  const [pending, startTransition] = useTransition();
+  const { pending, run } = useToastAction();
 
-  const onSave = () => {
-    startTransition(async () => {
-      try {
-        const res = await setDefaultOrganizationAction(chosen);
-        if (!res.ok) {
-          toast.error(res.error);
-          return;
-        }
-        toast.success("Default organization saved.");
-      } catch (err) {
-        unstable_rethrow(err);
-        toast.error("Network error. Please try again.");
-      }
-    });
-  };
+  const onSave = () => run(() => setDefaultOrganizationAction(chosen), "Default organization saved.");
 
   return (
     <div className="grid gap-3">

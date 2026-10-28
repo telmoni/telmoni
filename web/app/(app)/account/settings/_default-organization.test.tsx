@@ -116,7 +116,7 @@ describe("DefaultOrganization", () => {
       fireEvent.click(screen.getByRole("button", { name: "Save" }));
     });
 
-    expect(toastError).toHaveBeenCalledWith("Network error. Please try again.");
+    expect(toastError).toHaveBeenCalledWith("Network error. Try again.");
     expect(refresh).not.toHaveBeenCalled();
   });
 });

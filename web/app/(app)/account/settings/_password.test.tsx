@@ -84,7 +84,7 @@ describe("PasswordReset", () => {
       fireEvent.click(button());
     });
 
-    expect(toastError).toHaveBeenCalledWith("Network error. Please try again.");
+    expect(toastError).toHaveBeenCalledWith("Network error. Try again.");
     expect(toastSuccess).not.toHaveBeenCalled();
   });
 

@@ -1,36 +1,25 @@
 "use client";
 
-import { unstable_rethrow } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { passwordPosture } from "@/lib/sign-in-method";
+import { useToastAction } from "@/lib/use-action";
 
 import { requestPasswordResetAction } from "./actions";
 
 export function PasswordReset({ method }: { method: string | null }) {
-  const [pending, startTransition] = useTransition();
+  const { pending, run } = useToastAction();
   const [sent, setSent] = useState(false);
 
   const posture = passwordPosture(method);
 
-  const onPress = () => {
-    startTransition(async () => {
-      try {
-        const res = await requestPasswordResetAction();
-        if (!res.ok) {
-          toast.error(res.error);
-          return;
-        }
-        setSent(true);
-        toast.success("Check your email for a link to set a new password.");
-      } catch (err) {
-        unstable_rethrow(err);
-        toast.error("Network error. Please try again.");
-      }
+  const onPress = () =>
+    run(requestPasswordResetAction, () => {
+      setSent(true);
+      toast.success("Check your email for a link to set a new password.");
     });
-  };
 
   // ⚠ **NOTHING, not an explanation** — and still no offer to "add" a password
   // for a provider account; see `passwordPosture` for why the second way in was

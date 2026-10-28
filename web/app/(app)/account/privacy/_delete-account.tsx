@@ -1,13 +1,13 @@
 "use client";
 
-import { unstable_rethrow } from "next/navigation";
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { signOut } from "@/lib/auth/sign-out";
 import { PRODUCT_NAME } from "@/lib/site";
+import { useAction } from "@/lib/use-action";
 
 import { deleteAccountAction, requestAccountDeletionCodeAction } from "./actions";
 
@@ -31,9 +31,16 @@ export function DeleteAccountForm({
   const [code, setCode] = useState("");
   const [farewell, setFarewell] = useState(false);
   const [erased, setErased] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [sending, startSending] = useTransition();
-  const [deleting, startDeleting] = useTransition();
+  // One line under both steps: either clears what the other said.
+  const send = useAction();
+  const remove = useAction();
+  const error = remove.error ?? send.error;
+  const sending = send.pending;
+  const deleting = remove.pending;
+  const clearError = () => {
+    send.setError(null);
+    remove.setError(null);
+  };
 
   useEffect(() => {
     if (!farewell) return;
@@ -42,38 +49,19 @@ export function DeleteAccountForm({
   }, [farewell]);
 
   function handleSendCode() {
-    setError(null);
-    startSending(async () => {
-      try {
-        const r = await requestAccountDeletionCodeAction();
-        if (!r.ok) {
-          setError(r.error);
-          return;
-        }
-        setCodeSent(true);
-      } catch (err) {
-        unstable_rethrow(err);
-        setError("Network error. Try again.");
-      }
-    });
+    clearError();
+    send.run(requestAccountDeletionCodeAction, () => setCodeSent(true));
   }
 
   function handleDelete() {
-    setError(null);
-    startDeleting(async () => {
-      try {
-        const r = await deleteAccountAction(code);
-        if (!r.ok) {
-          setError(r.error);
-          return;
-        }
+    clearError();
+    remove.run(
+      () => deleteAccountAction(code),
+      (r) => {
         setErased(r.deleted === true);
         setFarewell(true);
-      } catch (err) {
-        unstable_rethrow(err);
-        setError("Network error. Try again.");
-      }
-    });
+      },
+    );
   }
 
   const canDelete = /^\d{6}$/.test(code) && !deleting;
@@ -154,7 +142,7 @@ export function DeleteAccountForm({
               value={code}
               onChange={(e) => {
                 setCode(e.target.value.replace(/\D/g, "").slice(0, 6));
-                setError(null);
+                clearError();
               }}
               placeholder="000000"
               disabled={deleting}

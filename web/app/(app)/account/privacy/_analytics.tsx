@@ -1,33 +1,26 @@
 "use client";
 
-import { unstable_rethrow } from "next/navigation";
-import { useState, useTransition } from "react";
-import { toast } from "sonner";
+import { useOptimistic, useState } from "react";
 
 import { Switch } from "@/components/ui/switch";
+import { useToastAction } from "@/lib/use-action";
 
 import { setAnalyticsPreferenceAction } from "./actions";
 
 export function AnalyticsPreference({ optIn }: { optIn: boolean }) {
-  const [pending, startTransition] = useTransition();
-  const [checked, setChecked] = useState(optIn);
+  const { pending, run } = useToastAction();
+  const [saved, setSaved] = useState(optIn);
+  // Flipped at once, and back to what is saved when the write does not land.
+  const [checked, flip] = useOptimistic(saved);
 
-  const onChange = (next: boolean) => {
-    setChecked(next);
-    startTransition(async () => {
-      try {
-        const res = await setAnalyticsPreferenceAction(next);
-        if (!res.ok) {
-          setChecked(!next);
-          toast.error(res.error);
-        }
-      } catch (err) {
-        unstable_rethrow(err);
-        setChecked(!next);
-        toast.error("Network error. Please try again.");
-      }
-    });
-  };
+  const onChange = (next: boolean) =>
+    run(
+      () => {
+        flip(next);
+        return setAnalyticsPreferenceAction(next);
+      },
+      () => setSaved(next),
+    );
 
   return (
     <div className="flex items-start justify-between gap-6">

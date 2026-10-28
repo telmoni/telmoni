@@ -1,8 +1,6 @@
 "use client";
 
 import { Check, X } from "lucide-react";
-import { unstable_rethrow } from "next/navigation";
-import { useState, useTransition } from "react";
 
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { DataTable, THead, Th, Td } from "@/components/data-table";
@@ -14,6 +12,7 @@ import type { IncomingInvite } from "@/lib/types/incoming-invite";
 import { inviterText } from "@/lib/notifications";
 import { useRemoveIncomingInvite } from "@/lib/store";
 import { roleLabel } from "@/lib/role-label";
+import { useAction } from "@/lib/use-action";
 
 import {
   acceptIncomingInviteAction,
@@ -60,25 +59,9 @@ export function IncomingInvitesSection({
 
 function IncomingInviteRow({ invite }: { invite: IncomingInvite }) {
   const removeIncomingInvite = useRemoveIncomingInvite();
-  const [error, setError] = useState<string | null>(null);
-  const [pending, start] = useTransition();
-
-  function settle(run: () => Promise<ActionResult>, failure: string) {
-    setError(null);
-    start(async () => {
-      try {
-        const res = await run();
-        if (!res.ok) {
-          setError(res.error);
-          return;
-        }
-        removeIncomingInvite(invite.id);
-      } catch (err) {
-        unstable_rethrow(err);
-        setError(failure);
-      }
-    });
-  }
+  const { pending, error, run } = useAction();
+  const settle = (answer: () => Promise<ActionResult>) =>
+    run(answer, () => removeIncomingInvite(invite.id));
 
   const inviter = inviterText(invite);
 
@@ -113,12 +96,7 @@ function IncomingInviteRow({ invite }: { invite: IncomingInvite }) {
             size="sm"
             className="h-9 text-xs gap-1"
             disabled={pending}
-            onClick={() =>
-              settle(
-                () => acceptIncomingInviteAction(invite.id),
-                "Failed to accept invitation. Try again.",
-              )
-            }
+            onClick={() => settle(() => acceptIncomingInviteAction(invite.id))}
           >
             <Check className="size-3.5" />
             Accept
@@ -138,12 +116,7 @@ function IncomingInviteRow({ invite }: { invite: IncomingInvite }) {
             title={`Decline invitation to join ${invite.targetName}?`}
             description="You will not receive access to it. You can be invited again later if needed."
             confirmLabel="Decline"
-            onConfirm={() =>
-              settle(
-                () => declineIncomingInviteAction(invite.id),
-                "Failed to decline invitation. Try again.",
-              )
-            }
+            onConfirm={() => settle(() => declineIncomingInviteAction(invite.id))}
           />
         </div>
       </Td>

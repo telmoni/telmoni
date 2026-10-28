@@ -1,7 +1,6 @@
 "use client";
 
-import { unstable_rethrow } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useState } from "react";
 
 import { LocalTime } from "@/components/local-time";
 import { Badge } from "@/components/ui/badge";
@@ -26,6 +25,7 @@ import {
 } from "@/components/ui/select";
 import { organizationLabel, personName } from "@/lib/identity";
 import type { OrganizationEntry, ProjectOffer } from "@/lib/server/entities/organization";
+import { useAction } from "@/lib/use-action";
 
 import { acceptProjectOfferAction, declineProjectOfferAction } from "./ownership-actions";
 
@@ -64,27 +64,15 @@ function ProjectOfferCard({
   offer: ProjectOffer;
   owned: readonly OrganizationEntry[];
 }) {
-  const [error, setError] = useState<string | null>(null);
+  const { pending, error, setError, run } = useAction();
   const [open, setOpen] = useState(false);
-  const [pending, start] = useTransition();
 
   const from = organizationLabel({ name: offer.organizationName });
   const owner = offer.ownerEmail
     ? personName({ displayName: offer.ownerDisplayName, email: offer.ownerEmail })
     : "The owner";
 
-  function decline() {
-    setError(null);
-    start(async () => {
-      try {
-        const r = await declineProjectOfferAction(offer.projectId);
-        if (!r.ok) setError(r.error);
-      } catch (err) {
-        unstable_rethrow(err);
-        setError("Network error. Try again.");
-      }
-    });
-  }
+  const decline = () => run(() => declineProjectOfferAction(offer.projectId));
 
   return (
     <Card className="grid gap-3">
@@ -116,16 +104,31 @@ function ProjectOfferCard({
           </p>
         ) : (
           <>
-            <Button size="sm" disabled={pending} onClick={() => setOpen(true)}>
+            <Button
+              size="sm"
+              disabled={pending}
+              onClick={() => {
+                setError(null);
+                setOpen(true);
+              }}
+            >
               Accept
             </Button>
             <AcceptDialog
               key={`accept-${offer.projectId}-${open}`}
               offer={offer}
               owned={owned}
-              open={open}
+              // A refusal closes it, to be said on the card.
+              open={open && error === null}
               onOpenChange={setOpen}
-              onError={setError}
+              pending={pending}
+              // An accept that landed never answers here: the action takes the
+              // page on to the project. One that answers is a refusal, or a
+              // landing auth did not place, whose page the action draws again
+              // without the offer.
+              onConfirm={(destination) =>
+                run(() => acceptProjectOfferAction(offer.projectId, destination))
+              }
             />
           </>
         )}
@@ -145,38 +148,18 @@ function AcceptDialog({
   owned,
   open,
   onOpenChange,
-  onError,
+  pending,
+  onConfirm,
 }: {
   offer: ProjectOffer;
   owned: readonly OrganizationEntry[];
   open: boolean;
   onOpenChange: (v: boolean) => void;
-  onError: (message: string | null) => void;
+  pending: boolean;
+  onConfirm: (destination: string) => void;
 }) {
   const [destination, setDestination] = useState(owned[0]?.organizationId ?? "");
-  const [pending, start] = useTransition();
   const chosen = owned.find((o) => o.organizationId === destination) ?? owned[0];
-
-  function confirm() {
-    onError(null);
-    start(async () => {
-      try {
-        // An accept that landed never answers here: the action takes the page
-        // on to the project, and its redirect goes on to the router from the
-        // catch below. One that answers is a refusal, or a landing auth did
-        // not place, whose page the action draws again without the offer.
-        const r = await acceptProjectOfferAction(offer.projectId, destination);
-        if (!r.ok) {
-          onError(r.error);
-          onOpenChange(false);
-        }
-      } catch (err) {
-        unstable_rethrow(err);
-        onError("Network error. Try again.");
-        onOpenChange(false);
-      }
-    });
-  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -216,7 +199,7 @@ function AcceptDialog({
           )}
         </DialogBody>
         <DialogFooter>
-          <Button onClick={confirm} disabled={pending || !destination}>
+          <Button onClick={() => onConfirm(destination)} disabled={pending || !destination}>
             {pending ? "Taking it over…" : "Take it over"}
           </Button>
         </DialogFooter>
