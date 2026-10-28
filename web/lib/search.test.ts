@@ -4,7 +4,11 @@ import {
   GROUP_ORDER,
   filterItems,
   groupItems,
+  listNames,
   rankItem,
+  searchItems,
+  unsearched,
+  type SearchIndex,
   type SearchItem,
 } from "./search";
 
@@ -112,5 +116,85 @@ describe("groupItems", () => {
       expect(group.label, group.kind).toBeTruthy();
     }
     expect(groupItems(items, "")).toHaveLength(GROUP_ORDER.length);
+  });
+});
+
+const INDEX: SearchIndex = {
+  keys: {
+    items: [item("prod key", { kind: "key", id: "key:1", href: "/acme/web/api-keys" })],
+    forbidden: false,
+    unavailable: false,
+  },
+  members: { items: [], forbidden: false, unavailable: false },
+};
+
+describe("searchItems", () => {
+  const visit = { href: "/acme/web/traces", label: "Traces", hint: "kept", at: 1 };
+
+  it("lists the recent visits placed, then the organization's projects, then the index", () => {
+    const items = searchItems({
+      recent: [visit],
+      organization: "acme",
+      projects: [{ id: "project_web", slug: "web", name: "Web" }],
+      index: INDEX,
+      placeOf: () => "Web",
+    });
+    expect(items.map((i) => [i.id, i.kind, i.hint, i.href])).toEqual([
+      ["recent:/acme/web/traces", "recent", "Web", "/acme/web/traces"],
+      ["project:project_web", "project", "project_web", "/acme/web"],
+      ["key:1", "key", undefined, "/acme/web/api-keys"],
+    ]);
+  });
+
+  it("keeps a visit's own hint where it names no place now", () => {
+    const [recent] = searchItems({
+      recent: [visit],
+      organization: null,
+      projects: [],
+      index: null,
+      placeOf: () => undefined,
+    });
+    expect(recent?.hint).toBe("kept");
+  });
+
+  it("lists no project outside an organization, and nothing of an index not read", () => {
+    const items = searchItems({
+      recent: [],
+      organization: null,
+      projects: [{ id: "project_web", slug: "web", name: "Web" }],
+      index: null,
+      placeOf: () => undefined,
+    });
+    expect(items).toEqual([]);
+  });
+});
+
+describe("listNames", () => {
+  it("lists names as a sentence does", () => {
+    expect(listNames([])).toBe("");
+    expect(listNames(["a"])).toBe("a");
+    expect(listNames(["a", "b"])).toBe("a and b");
+    expect(listNames(["a", "b", "c"])).toBe("a, b and c");
+  });
+});
+
+describe("unsearched", () => {
+  it("names nothing of an index read whole", () => {
+    expect(unsearched(INDEX)).toEqual({ refused: "", broken: "" });
+  });
+
+  it("names the sections the role may not list, and the ones that could not be read", () => {
+    expect(
+      unsearched({
+        keys: { items: [], forbidden: true, unavailable: false },
+        members: { items: [], forbidden: true, unavailable: false },
+      }),
+    ).toEqual({ refused: "API keys and members", broken: "" });
+    expect(
+      unsearched({
+        keys: { items: [], forbidden: false, unavailable: true },
+        members: { items: [], forbidden: true, unavailable: false },
+      }),
+    ).toEqual({ refused: "members", broken: "API keys" });
   });
 });

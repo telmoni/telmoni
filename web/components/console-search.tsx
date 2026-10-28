@@ -27,12 +27,13 @@ import {
 } from "@/components/ui/dialog";
 
 import { consolePlace, projectAt } from "@/lib/console-nav";
-import { projectPath } from "@/lib/slug";
 import { useActiveOrganization, useProjects, useUser } from "@/lib/store";
 import { SEARCH_MODIFIER_KEY, isChord } from "@/lib/keys";
 import {
   GROUP_LABELS,
   groupItems,
+  searchItems,
+  unsearched,
   type SearchIndex,
   type SearchItem,
   type SearchKind,
@@ -113,35 +114,10 @@ export function ConsoleSearch() {
     [organization, projects],
   );
 
-  const items = useMemo<SearchItem[]>(() => {
-    const out: SearchItem[] = [];
-    for (const visit of recent) {
-      out.push({
-        id: `recent:${visit.href}`,
-        kind: "recent",
-        label: visit.label,
-        hint: placeOf(visit.href) ?? visit.hint,
-        href: visit.href,
-      });
-    }
-    if (organization) {
-      for (const project of projects) {
-        out.push({
-          id: `project:${project.id}`,
-          kind: "project",
-          label: project.name,
-          hint: project.id,
-          href: projectPath(organization, project.slug),
-        });
-      }
-    }
-    if (index) {
-      for (const section of [index.keys, index.members]) {
-        out.push(...section.items);
-      }
-    }
-    return out;
-  }, [recent, organization, projects, index, placeOf]);
+  const items = useMemo(
+    () => searchItems({ recent, organization, projects, index, placeOf }),
+    [recent, organization, projects, index, placeOf],
+  );
 
   const docsItem = useMemo<SearchItem>(() => {
     return {
@@ -427,32 +403,20 @@ function rowId(itemId: string): string {
 }
 
 function IndexNotices({ index }: { index: SearchIndex }) {
-  const refused = SECTIONS.filter(([, pick]) => pick(index).forbidden);
-  const broken = SECTIONS.filter(([, pick]) => pick(index).unavailable);
-  if (refused.length === 0 && broken.length === 0) return null;
+  const { refused, broken } = unsearched(index);
+  if (!refused && !broken) return null;
   return (
     <div className="border-b border-border px-3.5 py-2">
-      {refused.length > 0 && (
+      {refused && (
         <p className="text-xs text-muted-foreground">
-          Not searched — your role on this project cannot list{" "}
-          {readable(refused.map(([name]) => name))}.
+          Not searched — your role on this project cannot list {refused}.
         </p>
       )}
-      {broken.length > 0 && (
+      {broken && (
         <p className="text-xs text-muted-foreground">
-          Couldn&rsquo;t read {readable(broken.map(([name]) => name))} just now.
+          Couldn&rsquo;t read {broken} just now.
         </p>
       )}
     </div>
   );
-}
-
-const SECTIONS: [string, (i: SearchIndex) => SearchIndex[keyof SearchIndex]][] = [
-  ["API keys", (i) => i.keys],
-  ["members", (i) => i.members],
-];
-
-function readable(names: string[]): string {
-  if (names.length <= 1) return names[0] ?? "";
-  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 }

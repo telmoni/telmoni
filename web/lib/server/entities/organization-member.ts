@@ -22,11 +22,13 @@ export type OrganizationMember = z.infer<typeof OrganizationMemberSchema>;
 
 // How many people the organization may hold, as the deployment that sells
 // plans answers it, and what stands against that — its members and everyone
-// invited — with the sentence an invitation past it is refused with; `null`
-// where none is held, as on a self-hosted installation.
+// invited — whether an invitation would be refused now, by auth's own rule,
+// and the sentence it is refused with; `null` where none is held, as on a
+// self-hosted installation.
 export const RosterCeilingSchema = z.object({
   limit: z.number().int().min(0),
   held: z.number().int().min(0),
+  reached: z.boolean(),
   detail: z.string(),
 });
 export type RosterCeiling = z.infer<typeof RosterCeilingSchema>;

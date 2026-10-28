@@ -17,8 +17,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useCanCreateProjects } from "@/components/create-project";
-import { resourceUrl, standingResource } from "@/lib/console-trail";
-import { organizationLabel } from "@/lib/identity";
+import { standingResource } from "@/lib/console-trail";
 import { resolveActiveOrganization } from "@/lib/organization-label";
 import { Flag, flagOn } from "@/lib/flags";
 import {
@@ -28,7 +27,7 @@ import {
   useProjects,
   useProjectsElsewhere,
 } from "@/lib/store";
-import { organizationPath, projectPath } from "@/lib/slug";
+import { organizationRows, projectRows, type SwitcherRow } from "@/lib/switcher";
 import { useConsoleTrail, useLiveResources } from "@/lib/use-console-trail";
 import { cn } from "@/lib/utils";
 
@@ -55,16 +54,6 @@ const MENU_OFFSET = 12.5;
 const ORGANIZATIONS_MENU_ALIGN = 8;
 const PROJECTS_MENU_ALIGN = 10;
 
-type Row = {
-  key: string;
-  label: string;
-  href: string;
-  // Absent where the person has no standing to open the settings: an
-  // organization reached through a project alone.
-  settingsHref: string | null;
-  active: boolean;
-};
-
 // A row with two targets, each a menu item of its own so both are reached
 // from the keyboard: the name opens the resource, the gear its settings.
 // Under the pointer, or with either target focused, the whole row fills —
@@ -74,7 +63,7 @@ type Row = {
 // you stand in carries a check after its name rather than a fill, so hover
 // and current never look alike. Neither item fills on its own: the menu's
 // per-item fill is turned off here and the row carries it.
-function ResourceRow({ row, settingsLabel }: { row: Row; settingsLabel: string }) {
+function ResourceRow({ row, settingsLabel }: { row: SwitcherRow; settingsLabel: string }) {
   return (
     <div className="flex items-center gap-0.5 rounded-md hover:bg-accent/50 focus-within:bg-accent/50">
       <DropdownMenuItem
@@ -190,46 +179,13 @@ export function ResourceSelector({
   // neither, rather than a prompt that would say you stand in none.
   const projectSlot = activeProject !== undefined || here?.kind === "organization";
 
-  // Every organization the person can stand in, the active one first: the
-  // ones they are in, then the ones they reach through a project alone.
-  const organizationRows: Row[] = [];
-  const seen = new Set<string>();
-  const addOrganization = (id: string, slug: string, label: string, member: boolean) => {
-    if (!id || seen.has(id)) return;
-    seen.add(id);
-    const isActive = id === activeOrganizationId;
-    organizationRows.push({
-      key: id,
-      label,
-      href:
-        isActive && active
-          ? resourceUrl(trail, { kind: "organization", organization: active.slug })
-          : organizationPath(slug),
-      settingsHref: member ? organizationPath(slug, "/settings") : null,
-      active: isActive,
-    });
-  };
-  if (active) addOrganization(active.organizationId, active.slug, activeOrganizationName, true);
-  for (const o of organizations) addOrganization(o.organizationId, o.slug, organizationLabel(o), true);
-  for (const t of elsewhere) {
-    addOrganization(
-      t.organizationId,
-      t.organizationSlug,
-      organizationLabel({ name: t.organizationName }),
-      false,
-    );
-  }
-
-  const projectRows: Row[] = active
-    ? projects.map((p) => ({
-        key: p.id,
-        label: p.name,
-        href: resourceUrl(trail, { kind: "project", organization: active.slug, project: p.slug }),
-        settingsHref: projectPath(active.slug, p.slug, "/settings"),
-        active: p.id === activeProject?.id,
-      }))
-    : [];
-
+  const organizationMenu = organizationRows({ active, organizations, elsewhere, trail });
+  const projectMenu = projectRows({
+    active,
+    projects,
+    activeProjectId: activeProject?.id ?? null,
+    trail,
+  });
 
   return (
     <div className="flex min-w-0 items-center gap-1">
@@ -263,7 +219,7 @@ export function ResourceSelector({
             <DropdownMenuLabel className="px-2 py-1.5 text-xs font-normal text-muted-foreground">
               Organizations
             </DropdownMenuLabel>
-            {organizationRows.map((row) => (
+            {organizationMenu.map((row) => (
               <ResourceRow key={row.key} row={row} settingsLabel={`${row.label} settings`} />
             ))}
           </DropdownMenuGroup>
@@ -338,12 +294,12 @@ export function ResourceSelector({
                 <DropdownMenuLabel className="px-2 py-1.5 text-xs font-normal text-muted-foreground">
                   Projects
                 </DropdownMenuLabel>
-                {projectRows.length === 0 && (
+                {projectMenu.length === 0 && (
                   <p className="flex h-9 items-center px-2 text-sm text-muted-foreground">
                     {canCreate ? "No projects yet" : "No projects you can open"}
                   </p>
                 )}
-                {projectRows.map((row) => (
+                {projectMenu.map((row) => (
                   <ResourceRow key={row.key} row={row} settingsLabel={`${row.label} settings`} />
                 ))}
               </DropdownMenuGroup>

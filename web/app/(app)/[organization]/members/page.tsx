@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 
 import { AccessDenied } from "@/components/access-denied";
-import { MemberCeilingNotice, atCeiling } from "@/components/member-ceiling";
+import { MemberCeilingNotice } from "@/components/member-ceiling";
 import { Invited, RoleCards, RosterTable, type RoleCard } from "@/components/members/roster";
 import { MemberRow } from "@/components/members/rows";
 import { PageHeader } from "@/components/page-header";
@@ -102,7 +102,7 @@ export default async function OrganizationMembersPage() {
   // At the plan's ceiling an invitation would be refused, so the button goes
   // and the deployment's sentence stands in its place: a refusal here is a
   // stale page, never a button that cannot work.
-  const full = atCeiling(listing.ceiling);
+  const full = listing.ceiling?.reached ?? false;
   const act = {
     setRole: updateOrganizationMemberRoleAction.bind(null, organizationId),
     remove: removeOrganizationMemberAction.bind(null, organizationId),

@@ -1026,7 +1026,7 @@ async fn an_organization_at_its_ceiling_promises_no_seat_and_its_rosters_say_so(
         "a refused invitation was written"
     );
 
-    let expected = json!({ "limit": 1, "held": 2, "detail": holds(1) });
+    let expected = json!({ "limit": 1, "held": 2, "reached": true, "detail": holds(1) });
     assert_eq!(
         deployment
             .ceiling_read(&pool, &organization, "/internal/v1/organization/members")

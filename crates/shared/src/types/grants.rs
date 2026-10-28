@@ -66,10 +66,16 @@ pub struct MemberCeiling {
 }
 
 impl MemberCeiling {
+    /// Whether `held` fills it: the one rule, which the roster pages read
+    /// rather than restate.
+    pub fn reached(&self, held: u64) -> bool {
+        held >= u64::from(self.limit)
+    }
+
     /// Whether one more person may be promised a seat, or take one, with
     /// `held` already held. Refused, as a 402, at the ceiling.
     pub fn admit(&self, held: u64) -> Result<(), TelmoniError> {
-        if held < u64::from(self.limit) {
+        if !self.reached(held) {
             return Ok(());
         }
         Err(PlanError::LimitReached {
@@ -190,6 +196,8 @@ mod tests {
         };
         assert!(ceiling.admit(0).is_ok());
         assert!(ceiling.admit(1).is_ok());
+        assert!(!ceiling.reached(1));
+        assert!(ceiling.reached(2));
         let pd = ceiling
             .admit(2)
             .expect_err("a seat past the ceiling")

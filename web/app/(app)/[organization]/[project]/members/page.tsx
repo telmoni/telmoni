@@ -1,5 +1,5 @@
 import { AccessDenied } from "@/components/access-denied";
-import { MemberCeilingNotice, atCeiling } from "@/components/member-ceiling";
+import { MemberCeilingNotice } from "@/components/member-ceiling";
 import { Invited, RoleCards, RosterTable, type RoleCard } from "@/components/members/roster";
 import { MemberRow } from "@/components/members/rows";
 import { PageHeader } from "@/components/page-header";
@@ -92,7 +92,7 @@ export default async function MembersPage({
   // An invitation counts against the owning organization's ceiling: at it,
   // one would be refused, so the deployment's sentence stands in its place. A
   // seat from the roster adds nobody, so it stays while there is one to give.
-  const full = atCeiling(listing.ceiling);
+  const full = listing.ceiling?.reached ?? false;
   const offered = canManage && (!full || candidates.length > 0);
   // Every action bound to the project the page rendered, by id.
   const act = {

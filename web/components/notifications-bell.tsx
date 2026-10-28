@@ -21,6 +21,7 @@ import { NOTIFICATIONS_HREF } from "@/lib/console-nav";
 import { NOTIFICATIONS_KEY, sequenceHint } from "@/lib/keys";
 import {
   badgeCount,
+  bellItems,
   bellLabel,
   giverText,
   inviteSubtitle,
@@ -28,7 +29,6 @@ import {
   seatSubtitle,
 } from "@/lib/notifications";
 import { organizationLabel } from "@/lib/identity";
-import { administers } from "@/lib/roles";
 import { usePageCovered } from "@/lib/page-cover";
 import { organizationPath } from "@/lib/slug";
 import type { OrganizationEntry, ProjectOffer } from "@/lib/server/entities/organization";
@@ -45,7 +45,7 @@ import {
 } from "@/lib/store";
 import { useAction } from "@/lib/use-action";
 import { useLetterKeys } from "@/lib/use-accessibility";
-import { isBuilding, isWaiting, type AuditExport } from "@/lib/types/audit-export";
+import type { AuditExport } from "@/lib/types/audit-export";
 import type { GivenSeat } from "@/lib/types/given-seat";
 import type { IncomingInvite } from "@/lib/types/incoming-invite";
 import { cn } from "@/lib/utils";
@@ -60,21 +60,18 @@ export function NotificationsBell() {
   useAuditExportsWatcher();
   const invites = useIncomingInvites() ?? [];
   const seats = useGivenSeats() ?? [];
-  const offers = useOrganizations().filter((o) => o.ownershipOfferExpiresAt);
   const projectOffers = useProjectOffers() ?? [];
-  // The person's audit log exports of the organization the console stands
-  // in, while they still administer it: a file waiting to be taken counts,
-  // one still building only shows.
+  const organizations = useOrganizations();
   const organization = useActiveOrganization();
   const auditExports = useAuditExports();
-  const exportsHere =
-    organization && administers(organization.role)
-      ? (auditExports[organization.organizationId] ?? [])
-      : [];
-  const exportsWaiting = exportsHere.filter(isWaiting);
-  const exportsBuilding = exportsHere.filter(isBuilding);
-  const count =
-    invites.length + seats.length + offers.length + projectOffers.length + exportsWaiting.length;
+  const { offers, exportsWaiting, exportsBuilding, count } = bellItems({
+    invites,
+    seats,
+    projectOffers,
+    organizations,
+    organization,
+    auditExports,
+  });
   const badge = badgeCount(count);
   const letterKeys = useLetterKeys();
   const covered = usePageCovered();

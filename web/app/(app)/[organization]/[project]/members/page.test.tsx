@@ -319,7 +319,7 @@ describe("MembersPage: adding from the organization", () => {
   it("keeps the roster open at the organization's ceiling, the invitation closed with its sentence", async () => {
     mockMembers = {
       ...(mockMembers as object),
-      ceiling: { limit: 1, held: 3, detail: "Hobby holds one member." },
+      ceiling: { limit: 1, held: 3, reached: true, detail: "Hobby holds one member." },
     };
     const dialog = await asOwner();
     expect(within(dialog).getByRole("radio", { name: "By email" })).toBeDisabled();
@@ -338,7 +338,7 @@ describe("MembersPage: adding from the organization", () => {
     mockRoster = { kind: "ok", members: ROSTER.members.slice(0, 2) };
     mockMembers = {
       ...(mockMembers as object),
-      ceiling: { limit: 1, held: 3, detail: "Hobby holds one member." },
+      ceiling: { limit: 1, held: 3, reached: true, detail: "Hobby holds one member." },
     };
     render(await MembersPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.queryByTestId("header-action")).toBeNull();
@@ -397,7 +397,7 @@ describe("MembersPage", () => {
       mockProject = projectAs(Role.Owner);
       mockMembers = {
         ...(mockMembers as object),
-        ceiling: { limit: 1, held: 1, detail: "Hobby holds one member." },
+        ceiling: { limit: 1, held: 1, reached: true, detail: "Hobby holds one member." },
       };
       render(await MembersPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
       expect(screen.queryByTestId("header-action")).toBeNull();
@@ -408,7 +408,7 @@ describe("MembersPage", () => {
       mockProject = projectAs(Role.Member);
       mockMembers = {
         ...(mockMembers as object),
-        ceiling: { limit: 1, held: 1, detail: "Hobby holds one member." },
+        ceiling: { limit: 1, held: 1, reached: true, detail: "Hobby holds one member." },
       };
       render(await MembersPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
       expect(screen.queryByTestId("member-ceiling")).toBeNull();

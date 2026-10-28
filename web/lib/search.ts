@@ -1,6 +1,9 @@
 
 import { z } from "zod";
 
+import type { RecentVisit } from "@/lib/search-recent";
+import { projectPath } from "@/lib/slug";
+
 export const SEARCH_KINDS = ["recent", "project", "key", "member", "docs"] as const;
 export type SearchKind = (typeof SEARCH_KINDS)[number];
 
@@ -30,6 +33,65 @@ export const SearchIndexSchema = z.object({
   members: SearchSectionSchema,
 });
 export type SearchIndex = z.infer<typeof SearchIndexSchema>;
+
+/** What the palette lists, in the order its groups show: where the person
+ *  was lately, each placed by `placeOf` where it names a place; the projects
+ *  of `organization`; and the index's sections, read of the project the
+ *  palette opened on. */
+export function searchItems({
+  recent,
+  organization,
+  projects,
+  index,
+  placeOf,
+}: {
+  recent: readonly RecentVisit[];
+  organization: string | null;
+  projects: readonly { id: string; slug: string; name: string }[];
+  index: SearchIndex | null;
+  placeOf: (href: string) => string | undefined;
+}): SearchItem[] {
+  const out: SearchItem[] = recent.map((visit) => ({
+    id: `recent:${visit.href}`,
+    kind: "recent",
+    label: visit.label,
+    hint: placeOf(visit.href) ?? visit.hint,
+    href: visit.href,
+  }));
+  if (organization) {
+    for (const project of projects) {
+      out.push({
+        id: `project:${project.id}`,
+        kind: "project",
+        label: project.name,
+        hint: project.id,
+        href: projectPath(organization, project.slug),
+      });
+    }
+  }
+  if (index) out.push(...index.keys.items, ...index.members.items);
+  return out;
+}
+
+/** Names as a sentence lists them: "a", "a and b", "a, b and c". */
+export function listNames(names: readonly string[]): string {
+  if (names.length <= 1) return names[0] ?? "";
+  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
+
+const SECTIONS: readonly (readonly [string, (index: SearchIndex) => SearchSection])[] = [
+  ["API keys", (index) => index.keys],
+  ["members", (index) => index.members],
+];
+
+/** What the palette could not search of the index, named: the sections the
+ *  reader's role may not list, and the ones that could not be read; empty
+ *  where every section was. */
+export function unsearched(index: SearchIndex): { refused: string; broken: string } {
+  const named = (of: (section: SearchSection) => boolean) =>
+    listNames(SECTIONS.filter(([, pick]) => of(pick(index))).map(([name]) => name));
+  return { refused: named((s) => s.forbidden), broken: named((s) => s.unavailable) };
+}
 
 export const GROUP_ORDER: readonly SearchKind[] = [
   "recent",

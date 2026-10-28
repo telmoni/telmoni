@@ -149,6 +149,9 @@ pub(crate) struct RosterCeiling {
     pub limit: u32,
     /// How many it holds against that: its members and everyone invited.
     pub held: u64,
+    /// Whether an invitation would be refused now: the seam's own rule, so
+    /// no page restates it.
+    pub reached: bool,
     /// The sentence an invitation past it is refused with.
     pub detail: String,
 }
@@ -169,9 +172,11 @@ pub(crate) async fn roster_ceiling(
     let mut lane = maintenance_scope(&state.db, AuthLane).await?;
     let held = organization_members::held(&mut lane, organization, None).await?;
     lane.commit().await?;
+    let held = count(held.people);
     Ok(Some(RosterCeiling {
         limit: ceiling.limit,
-        held: count(held.people),
+        held,
+        reached: ceiling.reached(held),
         detail: ceiling.detail,
     }))
 }

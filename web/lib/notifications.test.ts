@@ -2,12 +2,15 @@ import { describe, expect, it } from "vitest";
 
 import {
   badgeCount,
+  bellItems,
   bellLabel,
   inviteSubtitle,
   inviterText,
   giverText,
   seatSubtitle,
 } from "@/lib/notifications";
+import type { OrganizationEntry, ProjectOffer } from "@/lib/server/entities/organization";
+import type { AuditExport } from "@/lib/types/audit-export";
 import type { GivenSeat } from "@/lib/types/given-seat";
 import type { IncomingInvite } from "@/lib/types/incoming-invite";
 
@@ -135,5 +138,101 @@ describe("giverText", () => {
 
   it("credits the organization when the giver's account is gone", () => {
     expect(giverText({ ...SEAT, giverEmail: null, giverDisplayName: null })).toBe("Acme");
+  });
+});
+
+function organization(over: Partial<OrganizationEntry> = {}): OrganizationEntry {
+  return { organizationId: "org_1", slug: "acme", name: "Acme", role: "owner", ...over };
+}
+
+const PROJECT_OFFER: ProjectOffer = {
+  projectId: "project_2",
+  name: "Billing",
+  organizationId: "org_2",
+  organizationName: "Globex",
+  expiresAt: "2026-11-01T00:00:00Z",
+};
+
+const ASKED = {
+  format: "csv",
+  range_from: null,
+  range_to: "2026-10-01T00:00:00Z",
+  created_at: "2026-10-01T00:00:00Z",
+} as const;
+
+const READY: AuditExport = {
+  ...ASKED,
+  id: "exp_ready",
+  status: "ready",
+  row_count: 10,
+  bytes: 100,
+  finished_at: "2026-10-01T00:01:00Z",
+  expires_at: "2026-10-08T00:01:00Z",
+  downloaded_at: null,
+};
+const TAKEN: AuditExport = { ...READY, id: "exp_taken", downloaded_at: "2026-10-02T00:00:00Z" };
+const QUEUED: AuditExport = { ...ASKED, id: "exp_queued", status: "queued" };
+
+describe("bellItems", () => {
+  const home = organization();
+
+  it("counts what waits on the person, and shows an export still building without counting it", () => {
+    const { offers, exportsWaiting, exportsBuilding, count } = bellItems({
+      invites: [invite()],
+      seats: [SEAT],
+      projectOffers: [PROJECT_OFFER],
+      organizations: [
+        home,
+        organization({ organizationId: "org_2", slug: "globex", name: "Globex", role: "member" }),
+        organization({
+          organizationId: "org_3",
+          slug: "initech",
+          name: "Initech",
+          role: "admin",
+          ownershipOfferExpiresAt: "2026-11-01T00:00:00Z",
+        }),
+      ],
+      organization: home,
+      auditExports: { org_1: [READY, TAKEN, QUEUED] },
+    });
+    expect(offers.map((o) => o.organizationId)).toEqual(["org_3"]);
+    expect(exportsWaiting.map((e) => e.id)).toEqual(["exp_ready"]);
+    expect(exportsBuilding.map((e) => e.id)).toEqual(["exp_queued"]);
+    expect(count).toBe(5);
+  });
+
+  it("holds no export of another organization, nor any for a member, who has no audit log", () => {
+    const elsewhere = bellItems({
+      invites: [],
+      seats: [],
+      projectOffers: [],
+      organizations: [home],
+      organization: home,
+      auditExports: { org_2: [READY] },
+    });
+    expect(elsewhere.exportsWaiting).toEqual([]);
+    expect(elsewhere.count).toBe(0);
+    const member = bellItems({
+      invites: [],
+      seats: [],
+      projectOffers: [],
+      organizations: [organization({ role: "member" })],
+      organization: organization({ role: "member" }),
+      auditExports: { org_1: [READY, QUEUED] },
+    });
+    expect(member.exportsWaiting).toEqual([]);
+    expect(member.exportsBuilding).toEqual([]);
+  });
+
+  it("holds nothing outside an organization but what is the person's own", () => {
+    const { count } = bellItems({
+      invites: [invite()],
+      seats: [],
+      projectOffers: [],
+      organizations: [],
+      organization: null,
+      auditExports: { org_1: [READY] },
+    });
+    expect(count).toBe(1);
   });
 });
