@@ -1,14 +1,6 @@
-import type { UserQuery } from "@/lib/server/entities/users";
 import { SortDirection, UserSort } from "@/lib/types/enums";
 
-import {
-  listHref,
-  sortAfterClick,
-  sortInForce,
-  type Column,
-  type SearchParams,
-} from "./list-query";
-import { columnMenu, ordered, parseListQuery, sortsOf, type ColumnSpec, type ListTable } from "./traces";
+import { listSpec, type ColumnSpec, type ListTable } from "./traces";
 
 // The users list's URL is its state, as the trace list's is: its filters,
 // the sort, the window and the page, read with every value the server would
@@ -120,49 +112,20 @@ export const USER_TABLE: ListTable<UserColumn, UserSort> = {
   defaults: DEFAULT_USER_COLUMNS,
 };
 
-/** The users list's columns menu, in its rows. */
-export const USER_COLUMN_MENU = columnMenu(USER_COLUMNS);
+/** The users list: its table, menu, links and sorts, the id's among them;
+ *  the server's default is most tokens first, until a call is priced and
+ *  spend takes its place. */
+export const USERS = listSpec({
+  path: "/users",
+  table: USER_TABLE,
+  sorts: UserSort,
+  idSort: { sort: UserSort.User, label: USER_ID_COLUMN.label, first: SortDirection.Asc },
+  defaultSort: UserSort.Tokens,
+});
 
-/** `columns` as the users table shows them. */
-export function orderedUserColumns(columns: readonly string[]): UserColumn[] {
-  return ordered(USER_COLUMNS, columns);
-}
-
-/** Every sort the list takes, the id's among them. */
-const SORTS: readonly Column<UserSort>[] = [
-  { sort: UserSort.User, label: USER_ID_COLUMN.label, first: SortDirection.Asc },
-  ...sortsOf(USER_COLUMNS),
-];
-
-// The server's default: most tokens first, until a call is priced and spend
-// takes its place.
-const DEFAULT_SORT = UserSort.Tokens;
-
-/** The query the URL carries, every value the server would refuse dropped. */
-export function parseUserQuery(searchParams: SearchParams): UserQuery {
-  return parseListQuery(searchParams, UserSort);
-}
-
-/** The list's path with `query` in its URL: `patch` changes some keys, and a
- *  key patched to `undefined` is dropped. */
-export function usersHref(
-  organization: string,
-  project: string,
-  query: UserQuery,
-  patch: Partial<UserQuery> = {},
-): string {
-  return listHref(organization, project, "/users", query, patch);
-}
-
-/** The sort in force: the URL's, else the server's default. */
-export function currentUserSort(query: UserQuery): { sort: UserSort; dir: SortDirection } {
-  return sortInForce(SORTS, DEFAULT_SORT, query);
-}
-
-/** What clicking a column heading asks for, from the first page. */
-export function nextUserSort(
-  query: UserQuery,
-  column: UserSort,
-): { sort: UserSort; dir: SortDirection; page: undefined } {
-  return { ...sortAfterClick(SORTS, DEFAULT_SORT, query, column), page: undefined };
-}
+export const USER_COLUMN_MENU = USERS.menu;
+export const orderedUserColumns = USERS.ordered;
+export const parseUserQuery = USERS.parse;
+export const usersHref = USERS.href;
+export const currentUserSort = USERS.current;
+export const nextUserSort = USERS.next;

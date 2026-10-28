@@ -148,7 +148,7 @@ export function parseListQuery<S extends string>(
 
 /** The trace list's query the URL carries. */
 export function parseTraceQuery(searchParams: SearchParams): TraceQuery {
-  return parseListQuery(searchParams, TraceSort);
+  return TRACES.parse(searchParams);
 }
 
 /** Whether `value` is a tag as the filter takes one, `key:value` with a key
@@ -464,9 +464,50 @@ export function sortsOf<S extends string>(columns: readonly ColumnSpec<string, S
   );
 }
 
+/** A list's scaffold, from what alone differs between the three: its path,
+ *  its table, its sorts' vocabulary, an id sort beside the columns' where the
+ *  id sorts, and the server's default sort. */
+export function listSpec<K extends string, S extends string>(spec: {
+  path: `/${ListName}`;
+  table: ListTable<K, S>;
+  sorts: Record<string, S>;
+  idSort?: Column<S>;
+  defaultSort: S;
+}) {
+  const sorts: readonly Column<S>[] = [
+    ...(spec.idSort ? [spec.idSort] : []),
+    ...sortsOf(spec.table.columns),
+  ];
+  return {
+    table: spec.table,
+    /** The columns menu, in its rows. */
+    menu: columnMenu(spec.table.columns),
+    /** `columns` as the table shows them. */
+    ordered: (columns: readonly string[]): K[] => ordered(spec.table.columns, columns),
+    /** The query the URL carries, every value the server would refuse dropped. */
+    parse: (searchParams: SearchParams): ListQuery<S> => parseListQuery(searchParams, spec.sorts),
+    /** The list's path with `query` in its URL: `patch` changes some keys, and
+     *  a key patched to `undefined` is dropped. */
+    href: (
+      organization: string,
+      project: string,
+      query: ListQuery<S>,
+      patch: Partial<ListQuery<S>> = {},
+    ): string => listHref(organization, project, spec.path, query, patch),
+    /** The sort in force: the URL's, else the server's default. */
+    current: (query: ListQuery<S>): { sort: S; dir: SortDirection } =>
+      sortInForce(sorts, spec.defaultSort, query),
+    /** What clicking a column heading asks for, from the first page. */
+    next: (query: ListQuery<S>, column: S): { sort: S; dir: SortDirection; page: undefined } => ({
+      ...sortAfterClick(sorts, spec.defaultSort, query, column),
+      page: undefined,
+    }),
+  };
+}
+
 /** `columns` as the trace table shows them. */
 export function orderedColumns(columns: readonly string[]): TraceColumn[] {
-  return ordered(TRACE_COLUMNS, columns);
+  return TRACES.ordered(columns);
 }
 
 /** The columns a list shows until a person picks others: what it showed
@@ -489,25 +530,19 @@ export const TRACE_TABLE: ListTable<TraceColumn, TraceSort> = {
   defaults: DEFAULT_COLUMNS,
 };
 
+/** The trace list: its table, menu and sorts, the server's default newest
+ *  first. Its links are `tracesHref`'s, which carry the page's own state. */
+export const TRACES = listSpec({
+  path: "/traces",
+  table: TRACE_TABLE,
+  sorts: TraceSort,
+  defaultSort: TraceSort.Started,
+});
+
 /** The trace list's columns menu, in its rows. */
-export const COLUMN_MENU: readonly ColumnBlock<TraceColumn, TraceSort>[] = columnMenu(TRACE_COLUMNS);
-
-/** The sortable columns, as the shared sort reads them. */
-const SORTS = sortsOf(TRACE_COLUMNS);
-
-/** The sort in force: the URL's, else the server's default, newest first. */
-export function currentSort(query: TraceQuery): { sort: TraceSort; dir: SortDirection } {
-  return sortInForce(SORTS, TraceSort.Started, query);
-}
-
-/** What clicking a column heading asks for: the other way when the list is
- *  already sorted by it, its own first way otherwise, from the first page. */
-export function nextSort(
-  query: TraceQuery,
-  column: TraceSort,
-): { sort: TraceSort; dir: SortDirection; page: undefined } {
-  return { ...sortAfterClick(SORTS, TraceSort.Started, query, column), page: undefined };
-}
+export const COLUMN_MENU: readonly ColumnBlock<TraceColumn, TraceSort>[] = TRACES.menu;
+export const currentSort = TRACES.current;
+export const nextSort = TRACES.next;
 
 /** A ready-made query a toolbar button applies; a cost preset waits for the list to read spend. */
 export type Preset = {

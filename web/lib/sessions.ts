@@ -1,15 +1,8 @@
-import type { SessionQuery, SessionTrace } from "@/lib/server/entities/sessions";
+import type { SessionTrace } from "@/lib/server/entities/sessions";
 import { SessionSort, SortDirection } from "@/lib/types/enums";
 
-import {
-  listHref,
-  sortAfterClick,
-  sortInForce,
-  type Column,
-  type SearchParams,
-  type WindowQuery,
-} from "./list-query";
-import { columnMenu, ordered, parseListQuery, sortsOf, type ColumnSpec, type ListTable } from "./traces";
+import { listHref, type WindowQuery } from "./list-query";
+import { listSpec, type ColumnSpec, type ListTable } from "./traces";
 
 // The sessions list's URL is its state, as the trace list's is: its filters,
 // the sort, the window and the page, read with every value the server would
@@ -132,38 +125,20 @@ export const SESSION_TABLE: ListTable<SessionColumn, SessionSort> = {
   defaults: DEFAULT_SESSION_COLUMNS,
 };
 
-/** The sessions list's columns menu, in its rows. */
-export const SESSION_COLUMN_MENU = columnMenu(SESSION_COLUMNS);
+/** The sessions list: its table, menu, links and sorts, the id's among them;
+ *  the server's default is the session last heard from first. */
+export const SESSIONS = listSpec({
+  path: "/sessions",
+  table: SESSION_TABLE,
+  sorts: SessionSort,
+  idSort: { sort: SessionSort.Session, label: SESSION_ID_COLUMN.label, first: SortDirection.Asc },
+  defaultSort: SessionSort.LastSeen,
+});
 
-/** `columns` as the sessions table shows them. */
-export function orderedSessionColumns(columns: readonly string[]): SessionColumn[] {
-  return ordered(SESSION_COLUMNS, columns);
-}
-
-/** Every sort the list takes, the id's among them. */
-const SORTS: readonly Column<SessionSort>[] = [
-  { sort: SessionSort.Session, label: SESSION_ID_COLUMN.label, first: SortDirection.Asc },
-  ...sortsOf(SESSION_COLUMNS),
-];
-
-// The server's default: the session last heard from first.
-const DEFAULT_SORT = SessionSort.LastSeen;
-
-/** The query the URL carries, every value the server would refuse dropped. */
-export function parseSessionQuery(searchParams: SearchParams): SessionQuery {
-  return parseListQuery(searchParams, SessionSort);
-}
-
-/** The list's path with `query` in its URL: `patch` changes some keys, and a
- *  key patched to `undefined` is dropped. */
-export function sessionsHref(
-  organization: string,
-  project: string,
-  query: SessionQuery,
-  patch: Partial<SessionQuery> = {},
-): string {
-  return listHref(organization, project, "/sessions", query, patch);
-}
+export const SESSION_COLUMN_MENU = SESSIONS.menu;
+export const orderedSessionColumns = SESSIONS.ordered;
+export const parseSessionQuery = SESSIONS.parse;
+export const sessionsHref = SESSIONS.href;
 
 /** A session's own page, by its id, which the path carries URL-encoded: it is
  *  up to 200 characters of the application's choosing, and Next hands the
@@ -177,21 +152,8 @@ export function sessionHref(
   return listHref(organization, project, `/sessions/${encodeURIComponent(sessionId)}`, query);
 }
 
-/** The sort in force: the URL's, else the server's default. */
-export function currentSessionSort(query: SessionQuery): {
-  sort: SessionSort;
-  dir: SortDirection;
-} {
-  return sortInForce(SORTS, DEFAULT_SORT, query);
-}
-
-/** What clicking a column heading asks for, from the first page. */
-export function nextSessionSort(
-  query: SessionQuery,
-  column: SessionSort,
-): { sort: SessionSort; dir: SortDirection; page: undefined } {
-  return { ...sortAfterClick(SORTS, DEFAULT_SORT, query, column), page: undefined };
-}
+export const currentSessionSort = SESSIONS.current;
+export const nextSessionSort = SESSIONS.next;
 
 /** What a session's traces add up to, as its page and its panel show them:
  *  the user the first run that named one was with; the runs with a span that
