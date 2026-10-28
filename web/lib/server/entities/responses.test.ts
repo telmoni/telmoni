@@ -5,6 +5,9 @@ import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
 vi.mock("@/lib/env", () => ({ env: { SERVER_URL: "http://server" } }));
+import { parseAgentEvent } from "@/lib/agent/stream";
+
+import { ConversationListSchema, ConversationSchema, StatusSchema } from "./agent";
 import { AlertListSchema, IncidentListSchema, MuteListSchema } from "./alerts";
 import {
   AuthorizeSchema,
@@ -31,9 +34,20 @@ import {
 } from "./traces";
 import { UserListSchema } from "./users";
 
+// A turn's stream, each frame read as the agent panel's parser reads it.
+const TurnFramesSchema = z.array(
+  z
+    .object({ event: z.string(), data: z.unknown() })
+    .refine(({ event, data }) => parseAgentEvent(event, JSON.stringify(data)) !== null),
+);
+
 // Every answer the server's suites pin under `contract/responses`, written
 // from its struct (`make contract`), by the schema the console reads it with.
 const READERS: Record<string, z.ZodType> = {
+  "agent/conversation.json": ConversationSchema,
+  "agent/conversations.json": ConversationListSchema,
+  "agent/status.json": StatusSchema,
+  "agent/turn.json": TurnFramesSchema,
   "notifications/authorize.json": AuthorizeSchema,
   "notifications/connection.json": ConnectionAnswerSchema,
   "notifications/connectors.json": ConnectorListingSchema,

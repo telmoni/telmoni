@@ -16,8 +16,8 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use chrono::{DateTime, Utc};
-use serde::Deserialize;
-use serde_json::json;
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
@@ -26,7 +26,7 @@ use telmoni_shared::db::tenant_session::{PersonAndOrganization, Scoped, person_s
 use telmoni_shared::extract::Json;
 use telmoni_shared::{AuthError, AuthzError, ProblemDetails, ProjectId, TelmoniError};
 
-use crate::db::{self, MessageRole, StoredMessage};
+use crate::db::{self, ConversationSummary, MessageRole, StoredMessage};
 use crate::index::conversations;
 use crate::model::{Message, ToolCall, ToolResult};
 use crate::observe::Recorder;
@@ -82,13 +82,21 @@ fn not_found() -> TelmoniError {
     AuthError::NotFound("no such conversation".into()).into()
 }
 
+/// What the status lane answers: whether this deployment runs the agent.
+#[derive(Debug, Serialize)]
+pub struct Status {
+    pub enabled: bool,
+}
+
 /// `GET /internal/v1/agent/status`.
 pub async fn status(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-) -> Result<impl IntoResponse, TelmoniError> {
+) -> Result<Json<Status>, TelmoniError> {
     asker(&state, &headers).await?;
-    Ok(Json(json!({ "enabled": state.live.is_some() })))
+    Ok(Json(Status {
+        enabled: state.live.is_some(),
+    }))
 }
 
 #[derive(Debug, Deserialize)]
@@ -209,7 +217,7 @@ telmoni_shared::wire_enum!(TurnEventKind {
 });
 
 /// One event of a turn's stream, as `web/lib/agent/stream.ts` parses it.
-enum TurnEvent<'a> {
+pub enum TurnEvent<'a> {
     Conversation {
         conversation_id: Uuid,
     },
@@ -229,8 +237,10 @@ enum TurnEvent<'a> {
 }
 
 impl TurnEvent<'_> {
-    fn into_sse(self) -> Event {
-        let (kind, data) = match self {
+    /// Its name on the stream, and its data.
+    #[must_use]
+    pub fn frame(&self) -> (TurnEventKind, Value) {
+        match self {
             Self::Conversation { conversation_id } => (
                 TurnEventKind::Conversation,
                 json!({ "conversation_id": conversation_id }),
@@ -257,7 +267,11 @@ impl TurnEvent<'_> {
                     "detail": problem.detail,
                 }),
             ),
-        };
+        }
+    }
+
+    fn into_sse(self) -> Event {
+        let (kind, data) = self.frame();
         Event::default().event(kind.as_str()).data(data.to_string())
     }
 }
@@ -539,18 +553,34 @@ async fn save_answer(
     Ok(Saved { id, withheld })
 }
 
+/// What the list answers: the person's conversations asked from this
+/// project, newest first.
+#[derive(Debug, Serialize)]
+pub struct ConversationList {
+    pub conversations: Vec<ConversationSummary>,
+}
+
 /// `GET /internal/v1/agent/conversations` — the person's own, asked from this
 /// project, newest first.
 pub async fn list_conversations(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-) -> Result<impl IntoResponse, TelmoniError> {
+) -> Result<Json<ConversationList>, TelmoniError> {
     let (acting, project_id) = asker(&state, &headers).await?;
     let mut tx = author_scope(&state, &acting).await?;
     let conversations =
         db::list_conversations(&mut tx, &acting.user_id, &project_id, LIST_LIMIT).await?;
     tx.commit().await?;
-    Ok(Json(json!({ "conversations": conversations })))
+    Ok(Json(ConversationList { conversations }))
+}
+
+/// What one conversation's lane answers: the conversation, and its latest
+/// messages, oldest first.
+#[derive(Debug, Serialize)]
+pub struct Conversation {
+    #[serde(flatten)]
+    pub conversation: ConversationSummary,
+    pub messages: Vec<StoredMessage>,
 }
 
 /// `GET /internal/v1/agent/conversations/{id}`.
@@ -558,7 +588,7 @@ pub async fn get_conversation(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Path(id): Path<Uuid>,
-) -> Result<impl IntoResponse, TelmoniError> {
+) -> Result<Json<Conversation>, TelmoniError> {
     let (acting, project_id) = asker(&state, &headers).await?;
     let mut tx = author_scope(&state, &acting).await?;
     let Some(conversation) = db::conversation(&mut tx, &acting.user_id, &project_id, id).await?
@@ -567,13 +597,10 @@ pub async fn get_conversation(
     };
     let messages = db::messages(&mut tx, id, OPEN_LIMIT).await?;
     tx.commit().await?;
-    Ok(Json(json!({
-        "id": conversation.id,
-        "title": conversation.title,
-        "project_id": conversation.project_id,
-        "created_at": conversation.created_at,
-        "messages": messages,
-    })))
+    Ok(Json(Conversation {
+        conversation,
+        messages,
+    }))
 }
 
 /// `DELETE /internal/v1/agent/conversations/{id}` — the conversation, its
@@ -595,8 +622,8 @@ pub async fn delete_conversation(
 }
 
 /// Every lane, when the deployment has no agent at all.
-pub async fn absent_status() -> impl IntoResponse {
-    Json(json!({ "enabled": false }))
+pub async fn absent_status() -> Json<Status> {
+    Json(Status { enabled: false })
 }
 
 /// Every other lane, when the deployment has no agent at all.

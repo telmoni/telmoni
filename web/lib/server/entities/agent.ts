@@ -15,9 +15,9 @@ import { identityContext, projectHeaders } from "./identity-context";
 import { fetchProjectAnywhere } from "./projects";
 import { readFailed, readJson } from "./read";
 
-const StatusSchema = z.object({ enabled: z.boolean() });
+export const StatusSchema = z.object({ enabled: z.boolean() });
 
-const ConversationListSchema = z.object({
+export const ConversationListSchema = z.object({
   conversations: z.array(
     z.object({
       id: z.string(),
@@ -29,7 +29,7 @@ const ConversationListSchema = z.object({
   ),
 });
 
-const ConversationSchema = z.object({
+export const ConversationSchema = z.object({
   id: z.string(),
   title: z.string(),
   project_id: z.string(),

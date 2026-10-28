@@ -1,0 +1,44 @@
+[
+  {
+    "data": {
+      "conversation_id": "0192f3a1-7c2e-7b4d-9a61-3c5e8f0d2d01"
+    },
+    "event": "conversation"
+  },
+  {
+    "data": {
+      "name": "search"
+    },
+    "event": "tool"
+  },
+  {
+    "data": {
+      "delta": "The p95 rose"
+    },
+    "event": "text"
+  },
+  {
+    "data": {
+      "index": 1,
+      "title": "Alerts",
+      "url": "/docs/alerts"
+    },
+    "event": "citation"
+  },
+  {
+    "data": {
+      "conversation_id": "0192f3a1-7c2e-7b4d-9a61-3c5e8f0d2d01",
+      "message_id": "0192f3a1-7c2e-7b4d-9a61-3c5e8f0d2d03"
+    },
+    "event": "done"
+  },
+  {
+    "data": {
+      "conversation_id": "0192f3a1-7c2e-7b4d-9a61-3c5e8f0d2d01",
+      "detail": "the model behind the agent did not answer",
+      "title": "agent model unavailable",
+      "type": "/errors/agent/model-unavailable"
+    },
+    "event": "error"
+  }
+]
