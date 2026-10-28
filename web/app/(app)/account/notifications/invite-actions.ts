@@ -4,15 +4,14 @@ import { refresh, revalidatePath } from "next/cache";
 
 import { type ActionResult, refused } from "@/lib/action-result";
 import { extractProblem, readBody, tryFetchWithTimeout } from "@/lib/api/fetch";
-import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
 import { env } from "@/lib/env";
 import {
   organizationChannel,
   publishToAll,
   userChannel,
 } from "@/lib/events/publisher";
+import { admit } from "@/lib/server/admit";
 import { personHeaders } from "@/lib/server/entities/identity-context";
-import { getServerSession } from "@/lib/server/session";
 import { type SettledInvite, SettledInviteSchema } from "@/lib/types/settled-invite";
 
 function settledChannels(
@@ -37,13 +36,9 @@ async function answer(res: Response | null): Promise<ActionResult> {
 export async function acceptIncomingInviteAction(
   inviteId: string,
 ): Promise<ActionResult> {
-  const session = await getServerSession();
-  if (!session) return refused("Your session expired — sign in again.");
-  const limited = await rateLimit(sessionKey(session, "members:accept-invite"), {
-    limit: 10,
-    windowMs: 60_000,
-  });
-  if (limited) return refused("Too many requests — slow down a moment.");
+  const gate = await admit({ call: "members:accept-invite", limit: 10 });
+  if (!gate.ok) return refused(gate.error);
+  const { session } = gate;
 
   // The person's own lane, sent in no organization: an invitation is how
   // somebody in none gets into one.
@@ -75,13 +70,9 @@ export async function acceptIncomingInviteAction(
 export async function declineIncomingInviteAction(
   inviteId: string,
 ): Promise<ActionResult> {
-  const session = await getServerSession();
-  if (!session) return refused("Your session expired — sign in again.");
-  const limited = await rateLimit(sessionKey(session, "members:decline-invite"), {
-    limit: 10,
-    windowMs: 60_000,
-  });
-  if (limited) return refused("Too many requests — slow down a moment.");
+  const gate = await admit({ call: "members:decline-invite", limit: 10 });
+  if (!gate.ok) return refused(gate.error);
+  const { session } = gate;
 
   const res = await tryFetchWithTimeout(
     `${env.SERVER_URL}/internal/v1/me/invites/${encodeURIComponent(inviteId)}/decline`,

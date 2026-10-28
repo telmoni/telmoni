@@ -155,7 +155,7 @@ describe("saveAlertAction", () => {
     vi.mocked(rateLimitRetryAfter).mockResolvedValueOnce(30);
     expect(errorOf(await saveAlertAction(PROJECT, null, INPUT))).toMatch(/Too many requests/);
     expect(errorOf(await saveAlertAction("p\r\nx-project-id: q", null, INPUT))).toMatch(
-      /Couldn't tell which project/,
+      /Couldn't resolve that project/,
     );
     expect(fetchMock).not.toHaveBeenCalled();
   });

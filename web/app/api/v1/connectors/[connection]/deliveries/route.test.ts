@@ -193,7 +193,7 @@ describe("GET /api/v1/connectors/[connection]/deliveries", () => {
     const res = await get();
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual(
-      refusal("Couldn't resolve this project. Reload and try again.", 404),
+      refusal("Couldn't resolve that project. Reload and try again.", 404),
     );
     expect(fetchMock).not.toHaveBeenCalled();
   });

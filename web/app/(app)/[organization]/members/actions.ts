@@ -6,19 +6,15 @@ import { redirect } from "next/navigation";
 
 import { extractProblem, readBody, tryFetchWithTimeout } from "@/lib/api/fetch";
 import type { SessionData } from "@/lib/auth/session";
-import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
 import { env } from "@/lib/env";
 import { Flag } from "@/lib/flags";
 import { featureOff } from "@/lib/server/flags";
-import {
-  organizationHeaders,
-  identityContext,
-} from "@/lib/server/entities/identity-context";
+import { admitOrganization } from "@/lib/server/admit";
+import { organizationHeaders } from "@/lib/server/entities/identity-context";
 import { ACTIVE_ORGANIZATION_COOKIE } from "@/lib/proxy/organization";
 import { activeOrganization, getServerContext } from "@/lib/server/entities/organization";
 import { fetchOrganizationMembers } from "@/lib/server/entities/organization-member";
-import { SWITCHED_ORGANIZATION, unplacedOrganization } from "@/lib/server/identity";
-import { getServerSession } from "@/lib/server/session";
+import { unplacedOrganization } from "@/lib/server/identity";
 import {
   organizationChannel,
   publishEvent,
@@ -33,7 +29,7 @@ import {
   RosterChangeSchema,
   answerMemberAction,
 } from "@/lib/members/shared";
-import { type GivenRole, NOT_A_GIVEN_ROLE, administers, isGivenRole, owns } from "@/lib/roles";
+import { type GivenRole, NOT_A_GIVEN_ROLE, isGivenRole, owns } from "@/lib/roles";
 import { InviteScope } from "@/lib/types/enums";
 import { type ActionResult, type Refused, refused } from "@/lib/action-result";
 
@@ -44,7 +40,7 @@ export async function inviteOrganizationMemberAction(
 ): Promise<ActionResult<{ link?: string }>> {
   if (!isGivenRole(role)) return refused(NOT_A_GIVEN_ROLE);
   const gate = await open("members:invite", 10, organizationId);
-  if ("error" in gate) return gate;
+  if (!gate.ok) return gate;
   const off = await featureOff(Flag.Members);
   if (off) return refused(off);
 
@@ -102,7 +98,7 @@ export async function revokeOrganizationInviteAction(
   inviteId: string,
 ): Promise<ActionResult> {
   const gate = await open("members:invite-revoke", 30, organizationId);
-  if ("error" in gate) return gate;
+  if (!gate.ok) return gate;
   const res = await tryFetchWithTimeout(
     `${gate.base}/internal/v1/organization/invites/${encodeURIComponent(inviteId)}`,
     { method: "DELETE", headers: gate.headers },
@@ -129,7 +125,7 @@ export async function updateOrganizationMemberRoleAction(
 ): Promise<ActionResult> {
   if (!isGivenRole(role)) return refused(NOT_A_GIVEN_ROLE);
   const gate = await open("members:role", 30, organizationId);
-  if ("error" in gate) return gate;
+  if (!gate.ok) return gate;
   // The channel told is the member's own console, so their address comes
   // from the roster auth answers, never from the caller, who could otherwise
   // name anybody's.
@@ -161,7 +157,7 @@ export async function removeOrganizationMemberAction(
   memberId: string,
 ): Promise<ActionResult> {
   const gate = await open("members:remove", 30, organizationId);
-  if ("error" in gate) return gate;
+  if (!gate.ok) return gate;
   // The channel told is the removed person's own console, so their address
   // comes from the roster auth answers, never from the caller, who could
   // otherwise name anybody's.
@@ -190,7 +186,7 @@ export async function offerOwnershipAction(
   memberId: string,
 ): Promise<ActionResult> {
   const gate = await open("members:transfer", 10, organizationId, "ownership");
-  if ("error" in gate) return gate;
+  if (!gate.ok) return gate;
   const res = await tryFetchWithTimeout(
     `${gate.base}/internal/v1/organization/owner-transfer`,
     {
@@ -209,7 +205,7 @@ export async function offerOwnershipAction(
 /// Withdraw the organization's live offer.
 export async function cancelOwnershipOfferAction(organizationId: string): Promise<ActionResult> {
   const gate = await open("members:transfer", 10, organizationId, "ownership");
-  if ("error" in gate) return gate;
+  if (!gate.ok) return gate;
   const res = await tryFetchWithTimeout(
     `${gate.base}/internal/v1/organization/owner-transfer`,
     { method: "DELETE", headers: gate.headers },
@@ -237,17 +233,9 @@ async function tellOfferRecipients(res: Response, organizationId: string): Promi
 export async function leaveOrganizationAction(
   organizationId: string,
 ): Promise<ActionResult> {
-  const session = await getServerSession();
-  if (!session) return refused("Your session expired — sign in again.");
-  const limited = await rateLimit(sessionKey(session, "members:leave"), {
-    limit: 20,
-    windowMs: 60_000,
-  });
-  if (limited) return refused("Too many requests — slow down a moment.");
-
-  const ctx = await identityContext();
-  if (!ctx) return refused(await unplacedOrganization());
-  if (ctx.organizationId !== organizationId) return refused(SWITCHED_ORGANIZATION);
+  const gate = await admitOrganization({ call: "members:leave", limit: 20 }, organizationId);
+  if (!gate.ok) return refused(gate.error);
+  const { ctx } = gate;
   if (owns(ctx.role)) {
     return refused("You own this organization. To leave, hand it to an admin first or delete it.");
   }
@@ -276,12 +264,13 @@ export async function leaveOrganizationAction(
 /// controls by the same rule, so a refusal here is a stale page, never a
 /// button that cannot work.
 async function open(
-  bucket: string,
+  call: string,
   limit: number,
   organizationId: string,
   lane: "members" | "ownership" = "members",
 ): Promise<
   | {
+      ok: true;
       base: string;
       organizationId: string;
       headers: Record<string, string>;
@@ -290,32 +279,27 @@ async function open(
     }
   | Refused
 > {
-  const session = await getServerSession();
-  if (!session) return refused("Your session expired — sign in again.");
-  const limited = await rateLimit(sessionKey(session, bucket), {
-    limit,
-    windowMs: 60_000,
-  });
-  if (limited) return refused("Too many requests — slow down a moment.");
-  const [ctx, context] = await Promise.all([
-    identityContext(),
-    getServerContext(),
-  ]);
+  const gate = await admitOrganization(
+    { call, limit },
+    organizationId,
+    lane === "ownership"
+      ? { role: "owner", refused: "Only the organization owner can hand it over." }
+      : {
+          role: "admin",
+          refused: "Only an organization owner or admin can manage organization members.",
+        },
+  );
+  if (!gate.ok) return refused(gate.error);
+  const context = await getServerContext();
   const organization = context ? activeOrganization(context) : null;
-  if (!ctx || !organization) return refused(await unplacedOrganization());
-  if (ctx.organizationId !== organizationId) return refused(SWITCHED_ORGANIZATION);
-  if (lane === "ownership" && !owns(ctx.role)) {
-    return refused("Only the organization owner can hand it over.");
-  }
-  if (!administers(ctx.role)) {
-    return refused("Only an organization owner or admin can manage organization members.");
-  }
+  if (!organization) return refused(await unplacedOrganization());
   return {
+    ok: true,
     base: env.SERVER_URL,
-    headers: organizationHeaders(ctx),
-    organizationId: ctx.organizationId,
+    headers: organizationHeaders(gate.ctx),
+    organizationId: gate.ctx.organizationId,
     label: organizationLabel(organization),
-    session,
+    session: gate.session,
   };
 }
 

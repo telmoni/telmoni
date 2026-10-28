@@ -3,7 +3,7 @@ import "server-only";
 import { z } from "zod";
 
 import { env } from "@/lib/env";
-import { type Turned, admit } from "@/lib/server/admit";
+import { type Turned, UNRESOLVED_PROJECT, admit } from "@/lib/server/admit";
 import { fetchProjectAnywhere, identityContext, projectHeaders } from "@/lib/server/data";
 
 /** Where an admitted call goes, and under which headers. */
@@ -35,7 +35,7 @@ export async function admitConnectorsCall(
   // the cookie follows whichever tab opened a page last.
   const [ctx, project] = await Promise.all([identityContext(), fetchProjectAnywhere(projectId)]);
   if (!ctx || !project) {
-    return { ok: false, error: "Couldn't resolve this project. Reload and try again.", status: 404 };
+    return { ok: false, error: UNRESOLVED_PROJECT, status: 404 };
   }
   return {
     ok: true,

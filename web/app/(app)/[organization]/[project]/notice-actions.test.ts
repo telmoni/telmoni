@@ -99,7 +99,7 @@ describe("markProjectReadAction", () => {
     "refuses %j, asking the server nothing",
     async (posted) => {
       const res = await markProjectReadAction(posted as string, DRAWN);
-      expect(errorOf(res)).toMatch(/Couldn't tell which project this is/);
+      expect(errorOf(res)).toMatch(/Couldn't resolve that project/);
       expect(fetchMock).not.toHaveBeenCalled();
       expect(refresh).not.toHaveBeenCalled();
     },

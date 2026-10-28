@@ -6,15 +6,13 @@ import { z } from "zod";
 
 import { type ActionResult, refused } from "@/lib/action-result";
 import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
-import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
 import { env } from "@/lib/env";
 import { organizationChannel, publishEvent } from "@/lib/events/publisher";
 import { checkOrganizationName, checkOrganizationUrl } from "@/lib/names";
-import { identityContext, organizationHeaders } from "@/lib/server/entities/identity-context";
+import { admitOrganization } from "@/lib/server/admit";
+import { organizationHeaders } from "@/lib/server/entities/identity-context";
 import { activeOrganization, getServerContext } from "@/lib/server/entities/organization";
-import { SWITCHED_ORGANIZATION, unplacedOrganization } from "@/lib/server/identity";
 import { canonicalPath } from "@/lib/server/path";
-import { getServerSession } from "@/lib/server/session";
 
 const Updated = z.object({ slug: z.string() });
 
@@ -33,24 +31,14 @@ async function patchOrganization(
   bucket: string,
   body: { name?: string; slug?: string },
 ): Promise<Answer> {
-  const session = await getServerSession();
-  if (!session) return refused("Your session expired — sign in again.");
-
-  const limited = await rateLimit(sessionKey(session, bucket), {
-    limit: 10,
-    windowMs: 60_000,
-  });
-  if (limited) return refused("Too many requests — slow down a moment.");
-
-  const ctx = await identityContext();
-  if (!ctx) return refused(await unplacedOrganization());
-  if (ctx.organizationId !== organizationId) return refused(SWITCHED_ORGANIZATION);
+  const admitted = await admitOrganization({ call: bucket, limit: 10 }, organizationId);
+  if (!admitted.ok) return refused(admitted.error);
   const gate = await getServerContext();
   const was = gate ? activeOrganization(gate)?.slug : undefined;
 
   const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/v1/organization`, {
     method: "PATCH",
-    headers: { ...organizationHeaders(ctx), "content-type": "application/json" },
+    headers: { ...organizationHeaders(admitted.ctx), "content-type": "application/json" },
     body: JSON.stringify(body),
   });
   if (!res) {

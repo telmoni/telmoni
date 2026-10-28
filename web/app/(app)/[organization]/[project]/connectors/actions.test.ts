@@ -157,7 +157,7 @@ describe("disconnectConnectorAction", () => {
   it("stops when the project cannot be resolved", async () => {
     vi.mocked(fetchProjectAnywhere).mockResolvedValue(null);
     const res = await disconnectConnectorAction(PROJECT, ID);
-    expect(errorOf(res)).toMatch(/resolve this project/i);
+    expect(errorOf(res)).toMatch(/resolve that project/i);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

@@ -37,6 +37,8 @@ export type Turned = {
 
 export type Admitted = { ok: true; session: SessionData };
 
+export const UNRESOLVED_PROJECT = "Couldn't resolve that project. Reload and try again.";
+
 const turned = (status: Turned["status"], error: string): Turned => ({ ok: false, error, status });
 
 /** A live session, under the call's ceiling. */
@@ -63,9 +65,7 @@ export async function admitProject(
   if (!admitted.ok) return admitted;
   // The id becomes a header of the lane's request, and a Server Action takes
   // whatever is posted to it.
-  if (!isProjectId(projectId)) {
-    return turned(404, "Couldn't tell which project this is. Reload and try again.");
-  }
+  if (!isProjectId(projectId)) return turned(404, UNRESOLVED_PROJECT);
   const ident = await identityContext();
   if (!ident) return turned(404, await unplacedOrganization());
   return {

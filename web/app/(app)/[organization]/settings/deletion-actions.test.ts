@@ -4,7 +4,7 @@ vi.mock("@/lib/server/session", () => ({
   getServerSession: vi.fn(),
 }));
 vi.mock("@/lib/api/rate-limit", () => ({
-  rateLimit: vi.fn(async () => null),
+  rateLimitRetryAfter: vi.fn(async () => null),
   sessionKey: vi.fn(() => "k"),
 }));
 // The answer read as the action reads it: no fetch in it to stand in for.
@@ -20,7 +20,6 @@ vi.mock("@/lib/auth/session", () => ({
 }));
 vi.mock("@/lib/auth/session-blacklist", () => ({
   blacklistSession: vi.fn(async () => {}),
-  isSessionBlacklisted: vi.fn(async () => false),
 }));
 vi.mock("@/lib/env", () => ({
   env: {
@@ -82,7 +81,7 @@ vi.mock("next/headers", () => ({
 
 import { tryFetchWithTimeout } from "@/lib/api/fetch";
 import { destroySession } from "@/lib/auth/session";
-import { blacklistSession, isSessionBlacklisted } from "@/lib/auth/session-blacklist";
+import { blacklistSession } from "@/lib/auth/session-blacklist";
 import { identityContext } from "@/lib/server/entities/identity-context";
 import { getServerSession } from "@/lib/server/session";
 
@@ -123,7 +122,6 @@ function standingAs(
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getServerSession).mockResolvedValue(SESSION as never);
-  vi.mocked(isSessionBlacklisted).mockResolvedValue(false);
   standingAs("owner");
 });
 
@@ -333,14 +331,14 @@ describe("deleteOrganizationAction", () => {
   });
 
   // Said, not redirected: an action's redirect is fetched by the server
-  // before the browser goes, and sign-in's own lane is no page to fetch.
+  // before the browser goes, and sign-in's own lane is no page to fetch. A
+  // session ended elsewhere reads as none (`getSession`).
   it("tells a session ended elsewhere to sign in again, and deletes nothing", async () => {
-    vi.mocked(isSessionBlacklisted).mockResolvedValue(true);
+    vi.mocked(getServerSession).mockResolvedValue(null);
     expect(await deleteOrganizationAction(ORGANIZATION, "123456")).toEqual({
       ok: false,
       error: "Your session expired — sign in again.",
     });
-    expect(isSessionBlacklisted).toHaveBeenCalledWith("sess_1");
     expect(fetchMock).not.toHaveBeenCalled();
     expect(mockRedirect).not.toHaveBeenCalled();
   });

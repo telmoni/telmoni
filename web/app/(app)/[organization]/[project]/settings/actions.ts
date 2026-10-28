@@ -6,26 +6,18 @@ import { z } from "zod";
 
 import { type ActionResult, refused } from "@/lib/action-result";
 import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
-import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
-import { isProjectId } from "@/lib/ids";
 import { env } from "@/lib/env";
 import { organizationChannel, publishEvent } from "@/lib/events/publisher";
 import { checkProjectName } from "@/lib/names";
-import {
-  identityContext,
-  projectHeaders,
-} from "@/lib/server/entities/identity-context";
+import { admitProject } from "@/lib/server/admit";
 import { activeOrganization, getServerContext } from "@/lib/server/entities/organization";
 import { fetchProject } from "@/lib/server/entities/projects";
-import { unplacedOrganization } from "@/lib/server/identity";
 import { canonicalPath } from "@/lib/server/path";
-import { getServerSession } from "@/lib/server/session";
 import { ContentMode } from "@/lib/types/enums";
 
 const Renamed = z.object({ slug: z.string() });
 const Mode = z.enum(ContentMode);
 
-const UNRESOLVED_PROJECT = "Couldn't resolve that project. Reload and try again.";
 
 /// A rename moves the project's slug with its name, and the page follows it:
 /// the answer is the same page at the project's new path, drawn there rather
@@ -35,37 +27,22 @@ export async function updateProjectNameAction(
   projectId: string,
   name: string,
 ): Promise<ActionResult> {
-  const session = await getServerSession();
-  if (!session) return refused("Your session expired — sign in again.");
-  const limited = await rateLimit(sessionKey(session, "project:rename"), {
-    limit: 10,
-    windowMs: 60_000,
-  });
-  if (limited) return refused("Too many requests — slow down a moment.");
+  const gate = await admitProject({ call: "project:rename", limit: 10 }, projectId);
+  if (!gate.ok) return refused(gate.error);
 
   const checked = checkProjectName(name);
   if (!checked.ok) return refused(checked.error);
   const trimmed = checked.value;
 
-  // A Server Action is a public endpoint, and the id becomes a path segment
-  // of the upstream URL: anything but a project id is refused before it can
-  // aim the request at another lane.
-  if (!isProjectId(projectId)) return refused(UNRESOLVED_PROJECT);
-
-  const ctx = await identityContext();
-  if (!ctx) return refused(await unplacedOrganization());
   const was = (await fetchProject(projectId))?.slug;
-  const gate = await getServerContext();
-  const organization = gate ? activeOrganization(gate)?.slug : undefined;
+  const context = await getServerContext();
+  const organization = context ? activeOrganization(context)?.slug : undefined;
 
   const res = await tryFetchWithTimeout(
     `${env.SERVER_URL}/internal/v1/projects/${encodeURIComponent(projectId)}`,
     {
       method: "PATCH",
-      headers: {
-        ...projectHeaders(ctx, projectId),
-        "content-type": "application/json",
-      },
+      headers: { ...gate.headers, "content-type": "application/json" },
       body: JSON.stringify({ name: trimmed }),
     },
   );
@@ -80,10 +57,10 @@ export async function updateProjectNameAction(
   const renamed = Renamed.safeParse(await res.json().catch(() => null));
   if (renamed.success && was !== undefined && renamed.data.slug !== was) {
     if (organization !== undefined) {
-      await publishEvent(organizationChannel(ctx.organizationId), {
+      await publishEvent(organizationChannel(gate.organizationId), {
         type: "slug:moved",
         data: {
-          organizationId: ctx.organizationId,
+          organizationId: gate.organizationId,
           organization,
           projectId,
           from: was,
@@ -113,27 +90,15 @@ export async function updateContentModeAction(
   projectId: string,
   mode: ContentMode,
 ): Promise<ActionResult> {
-  const session = await getServerSession();
-  if (!session) return refused("Your session expired — sign in again.");
-  const limited = await rateLimit(sessionKey(session, "project:content-mode"), {
-    limit: 10,
-    windowMs: 60_000,
-  });
-  if (limited) return refused("Too many requests — slow down a moment.");
-  if (!isProjectId(projectId)) return refused(UNRESOLVED_PROJECT);
+  const gate = await admitProject({ call: "project:content-mode", limit: 10 }, projectId);
+  if (!gate.ok) return refused(gate.error);
   // A Server Action takes whatever a caller posts, whatever its type says.
   const chosen = Mode.safeParse(mode);
   if (!chosen.success) return refused("That is not a content mode.");
 
-  const ctx = await identityContext();
-  if (!ctx) return refused(await unplacedOrganization());
-
   const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/v1/telemetry/content-mode`, {
     method: "PUT",
-    headers: {
-      ...projectHeaders(ctx, projectId),
-      "content-type": "application/json",
-    },
+    headers: { ...gate.headers, "content-type": "application/json" },
     body: JSON.stringify({ content_mode: chosen.data }),
   });
 
@@ -150,24 +115,12 @@ export async function updateContentModeAction(
 }
 
 export async function deleteProjectAction(projectId: string): Promise<ActionResult> {
-  const session = await getServerSession();
-  if (!session) return refused("Your session expired — sign in again.");
-  const limited = await rateLimit(sessionKey(session, "project:delete"), {
-    limit: 3,
-    windowMs: 60_000,
-  });
-  if (limited) return refused("Too many requests — slow down a moment.");
-  if (!isProjectId(projectId)) return refused(UNRESOLVED_PROJECT);
-
-  const ctx = await identityContext();
-  if (!ctx) return refused(await unplacedOrganization());
+  const gate = await admitProject({ call: "project:delete", limit: 3 }, projectId);
+  if (!gate.ok) return refused(gate.error);
 
   const res = await tryFetchWithTimeout(
     `${env.SERVER_URL}/internal/v1/projects/${encodeURIComponent(projectId)}`,
-    {
-      method: "DELETE",
-      headers: projectHeaders(ctx, projectId),
-    },
+    { method: "DELETE", headers: gate.headers },
   );
 
   if (!res || !res.ok) {
@@ -180,9 +133,9 @@ export async function deleteProjectAction(projectId: string): Promise<ActionResu
   // Everybody in the organization is told, the owner and admins who hold no
   // seat included: a tab on the project leaves it, and every other draws its
   // rail again. The deleting tab leaves for the console's entry page itself.
-  await publishEvent(organizationChannel(ctx.organizationId), {
+  await publishEvent(organizationChannel(gate.organizationId), {
     type: "membership:removed",
-    data: { organizationId: ctx.organizationId, projectId },
+    data: { organizationId: gate.organizationId, projectId },
   });
 
   // Every console page lists the organization's projects in its header's

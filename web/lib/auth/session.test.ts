@@ -1,5 +1,21 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+
+const jar = vi.hoisted(() => ({ sealed: undefined as string | undefined, delete: vi.fn() }));
+vi.mock("next/headers", () => ({
+  cookies: async () => ({
+    get: () => (jar.sealed === undefined ? undefined : { value: jar.sealed }),
+    delete: jar.delete,
+  }),
+}));
+const ended = vi.hoisted(() => vi.fn<(key: string | null) => Promise<boolean>>(async () => false));
+vi.mock("@/lib/auth/session-blacklist", () => ({
+  blacklistSession: vi.fn(),
+  isSessionBlacklisted: (key: string | null) => ended(key),
+}));
+
 import {
+  SESSION_COOKIE,
+  getSession,
   sealConnect,
   sealPkce,
   unsealConnect,
@@ -119,5 +135,19 @@ describe("a sign-in cookie without its proof", () => {
   it("does not unseal", async () => {
     const sealed = await sealPkce({ state: "st8", returnTo: "/console" } as never);
     expect(await unsealPkce(sealed)).toBeNull();
+  });
+});
+
+describe("getSession", () => {
+  // Every action and route reads the session here, so a session ended on
+  // another device is refused once, for all of them.
+  it("reads a session ended elsewhere as none, and forgets its cookie", async () => {
+    jar.sealed = await sealSession({ ...sessionPayload, sessionRowId: "row_1" });
+    expect(await getSession()).toMatchObject({ userId: "user_01" });
+
+    ended.mockResolvedValueOnce(true);
+    expect(await getSession()).toBeNull();
+    expect(ended).toHaveBeenLastCalledWith("row_1");
+    expect(jar.delete).toHaveBeenCalledWith(SESSION_COOKIE);
   });
 });

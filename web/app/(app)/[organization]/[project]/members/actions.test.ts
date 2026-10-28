@@ -10,13 +10,18 @@ vi.mock("@/lib/server/session", () => ({
   getServerSession: vi.fn(),
 }));
 vi.mock("@/lib/api/rate-limit", () => ({
-  rateLimit: vi.fn(async () => null),
+  rateLimitRetryAfter: vi.fn(async () => null),
   sessionKey: vi.fn(() => "k"),
 }));
 vi.mock("@/lib/server/entities/identity-context", () => ({
   identityContext: vi.fn(),
   personHeaders: vi.fn(() => ({ authorization: "Bearer at_1" })),
   projectHeaders: vi.fn(() => ({
+    authorization: "Bearer at_1",
+    "x-organization-id": "org_1",
+    "x-project-id": "project_1",
+  })),
+  sessionHeaders: vi.fn(() => ({
     authorization: "Bearer at_1",
     "x-organization-id": "org_1",
     "x-project-id": "project_1",
@@ -72,20 +77,22 @@ vi.mock("@/lib/events/publisher", () => ({
 }));
 
 import { refresh, revalidatePath } from "next/cache";
-import { NextResponse } from "next/server";
 
 import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
 import { featureOff } from "@/lib/server/flags";
-import { rateLimit } from "@/lib/api/rate-limit";
+import { rateLimitRetryAfter } from "@/lib/api/rate-limit";
 import { getServerContext } from "@/lib/server/data";
 import { identityContext, personHeaders } from "@/lib/server/entities/identity-context";
 import { getServerSession } from "@/lib/server/session";
 
 import {
   acceptIncomingInviteAction,
+  declineIncomingInviteAction,
+} from "@/app/(app)/account/notifications/invite-actions";
+
+import {
   addMemberAction,
   cancelProjectOfferAction,
-  declineIncomingInviteAction,
   inviteMemberAction,
   leaveProjectAction,
   offerProjectAction,
@@ -104,7 +111,7 @@ describe("Incoming invites server actions", () => {
       email: "user@example.test",
       accessToken: "at_1",
     } as never);
-    vi.mocked(rateLimit).mockResolvedValue(null);
+    vi.mocked(rateLimitRetryAfter).mockResolvedValue(null);
     vi.mocked(identityContext).mockResolvedValue({
       userId: "usr_1",
       organizationId: "org_1",
@@ -196,7 +203,7 @@ describe("Incoming invites server actions", () => {
     });
 
     it("returns error message when rate limited", async () => {
-      vi.mocked(rateLimit).mockResolvedValue(new NextResponse(null, { status: 429 }));
+      vi.mocked(rateLimitRetryAfter).mockResolvedValue(30);
       const res = await acceptIncomingInviteAction("inv_123");
       expect(errorOf(res)).toMatch(/too many requests/i);
       expect(fetchMock).not.toHaveBeenCalled();
@@ -586,7 +593,7 @@ describe("addMemberAction", () => {
       email: "owner@example.test",
       accessToken: "at_1",
     } as never);
-    vi.mocked(rateLimit).mockResolvedValue(null);
+    vi.mocked(rateLimitRetryAfter).mockResolvedValue(null);
     vi.mocked(identityContext).mockResolvedValue({
       userId: "usr_1",
       organizationId: "org_1",
@@ -696,7 +703,7 @@ describe("leaveProjectAction", () => {
       email: "member@example.test",
       accessToken: "at_1",
     } as never);
-    vi.mocked(rateLimit).mockResolvedValue(null);
+    vi.mocked(rateLimitRetryAfter).mockResolvedValue(null);
     vi.mocked(identityContext).mockResolvedValue({
       userId: "usr_1",
       organizationId: "org_1",

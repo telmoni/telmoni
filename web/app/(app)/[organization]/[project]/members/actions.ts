@@ -5,19 +5,12 @@ import { redirect } from "next/navigation";
 
 import { extractProblem, readBody, tryFetchWithTimeout } from "@/lib/api/fetch";
 import type { SessionData } from "@/lib/auth/session";
-import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
-import { isProjectId } from "@/lib/ids";
 import { env } from "@/lib/env";
 import { Flag } from "@/lib/flags";
 import { featureOff } from "@/lib/server/flags";
-import {
-  identityContext,
-  projectHeaders,
-} from "@/lib/server/entities/identity-context";
+import { admitProject } from "@/lib/server/admit";
 import { activeOrganization, fetchProjects, getServerContext } from "@/lib/server/data";
 import { fetchMembers } from "@/lib/server/entities/member";
-import { unplacedOrganization } from "@/lib/server/identity";
-import { getServerSession } from "@/lib/server/session";
 import { organizationPath } from "@/lib/slug";
 import {
   organizationChannel,
@@ -43,7 +36,7 @@ export async function inviteMemberAction(
 ): Promise<ActionResult<{ link?: string }>> {
   if (!isGivenRole(role)) return refused(NOT_A_GIVEN_ROLE);
   const gate = await open("members:invite", 10, projectId);
-  if ("error" in gate) return gate;
+  if (!gate.ok) return gate;
   const off = await featureOff(Flag.Members);
   if (off) return refused(off);
 
@@ -106,7 +99,7 @@ export async function addMemberAction(
 ): Promise<ActionResult> {
   if (!isGivenRole(role)) return refused(NOT_A_GIVEN_ROLE);
   const gate = await open("members:add", 30, projectId);
-  if ("error" in gate) return gate;
+  if (!gate.ok) return gate;
   const off = await featureOff(Flag.Members);
   if (off) return refused(off);
 
@@ -141,7 +134,7 @@ export async function revokeInviteAction(
   inviteId: string,
 ): Promise<ActionResult> {
   const gate = await open("members:invite-revoke", 30, projectId);
-  if ("error" in gate) return gate;
+  if (!gate.ok) return gate;
   const res = await tryFetchWithTimeout(
     `${gate.base}/internal/v1/projects/${encodeURIComponent(gate.projectId)}/invites/${encodeURIComponent(inviteId)}`,
     { method: "DELETE", headers: gate.headers },
@@ -168,7 +161,7 @@ export async function updateMemberRoleAction(
 ): Promise<ActionResult> {
   if (!isGivenRole(role)) return refused(NOT_A_GIVEN_ROLE);
   const gate = await open("members:role", 30, projectId);
-  if ("error" in gate) return gate;
+  if (!gate.ok) return gate;
   // The channel told is the member's own console, so their address comes
   // from the roster auth answers for this project, never from the caller,
   // who could otherwise name anybody's.
@@ -200,7 +193,7 @@ export async function removeMemberAction(
   memberId: string,
 ): Promise<ActionResult> {
   const gate = await open("members:remove", 30, projectId);
-  if ("error" in gate) return gate;
+  if (!gate.ok) return gate;
   // The channel told is the removed person's own console, so their address
   // comes from the roster auth answers for this project, never from the
   // caller, who could otherwise name anybody's.
@@ -229,7 +222,7 @@ export async function offerProjectAction(
   memberId: string,
 ): Promise<ActionResult> {
   const gate = await open("members:transfer", 10, projectId);
-  if ("error" in gate) return gate;
+  if (!gate.ok) return gate;
   const res = await tryFetchWithTimeout(
     `${gate.base}/internal/v1/projects/${encodeURIComponent(gate.projectId)}/transfer`,
     {
@@ -248,7 +241,7 @@ export async function offerProjectAction(
 /// Withdraw the project's live offer.
 export async function cancelProjectOfferAction(projectId: string): Promise<ActionResult> {
   const gate = await open("members:transfer", 10, projectId);
-  if ("error" in gate) return gate;
+  if (!gate.ok) return gate;
   const res = await tryFetchWithTimeout(
     `${gate.base}/internal/v1/projects/${encodeURIComponent(gate.projectId)}/transfer`,
     { method: "DELETE", headers: gate.headers },
@@ -284,7 +277,7 @@ export async function leaveProjectAction(
   from: "organization" | "project" = "organization",
 ): Promise<ActionResult> {
   const gate = await open("members:leave", 20, projectId);
-  if ("error" in gate) return gate;
+  if (!gate.ok) return gate;
   const res = await tryFetchWithTimeout(
     `${gate.base}/internal/v1/memberships/${encodeURIComponent(projectId)}`,
     { method: "DELETE", headers: gate.headers },
@@ -300,27 +293,13 @@ export async function leaveProjectAction(
   return answer(res);
 }
 
-import {
-  acceptIncomingInviteAction as _acceptIncomingInviteAction,
-  declineIncomingInviteAction as _declineIncomingInviteAction,
-} from "@/app/(app)/account/notifications/invite-actions";
-
-// Forward incoming invite actions for backwards compatibility.
-// These actions operate on personal invites and have been moved to account/notifications/invite-actions.
-export async function acceptIncomingInviteAction(inviteId: string) {
-  return _acceptIncomingInviteAction(inviteId);
-}
-
-export async function declineIncomingInviteAction(inviteId: string) {
-  return _declineIncomingInviteAction(inviteId);
-}
-
 async function open(
-  bucket: string,
+  call: string,
   limit: number,
   projectId: string,
 ): Promise<
   | {
+      ok: true;
       base: string;
       projectId: string;
       /// The organization the session stands in, which holds the project:
@@ -331,27 +310,9 @@ async function open(
     }
   | Refused
 > {
-  const session = await getServerSession();
-  if (!session) return refused("Your session expired — sign in again.");
-  const limited = await rateLimit(sessionKey(session, bucket), {
-    limit,
-    windowMs: 60_000,
-  });
-  if (limited) return refused("Too many requests — slow down a moment.");
-  // The id becomes a header and a path segment of the upstream URL: anything
-  // but a project id is refused before it can aim the request elsewhere.
-  if (!isProjectId(projectId)) {
-    return refused("Couldn't resolve that project. Reload and try again.");
-  }
-  const ctx = await identityContext();
-  if (!ctx) return refused(await unplacedOrganization());
-  return {
-    base: env.SERVER_URL,
-    projectId,
-    organizationId: ctx.organizationId,
-    headers: projectHeaders(ctx, projectId),
-    session,
-  };
+  const gate = await admitProject({ call, limit }, projectId);
+  if (!gate.ok) return refused(gate.error);
+  return { ...gate, base: env.SERVER_URL };
 }
 
 async function answer(res: Response | null): Promise<ActionResult> {

@@ -95,7 +95,7 @@ describe("admitProject", () => {
     for (const id of ["", "project_1\r\nx-service-secret: leaked", "../organization", "a/b"]) {
       const gate = await admitProject({ call: "x", limit: 1 }, id);
       expect(gate, JSON.stringify(id)).toMatchObject({ ok: false, status: 404 });
-      expect(gate.ok ? null : gate.error).toMatch(/which project/i);
+      expect(gate.ok ? null : gate.error).toMatch(/resolve that project/i);
     }
     expect(identityContext).not.toHaveBeenCalled();
   });
