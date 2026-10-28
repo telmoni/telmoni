@@ -651,9 +651,13 @@ async fn an_erasure_fences_answers_and_remembers_where_it_reached(pool: PgPool) 
 
     // A fence down and its scrub not yet done holds back every answer.
     let mut tx = maintenance_scope(&state.db, AgentLane).await.unwrap();
-    let open = db::fence_erasure(&mut tx, &me, &["org_a".to_owned()])
-        .await
-        .unwrap();
+    let open = db::fence_erasure(
+        &mut tx,
+        &me,
+        &BTreeSet::from([OrganizationId::from_trusted("org_a")]),
+    )
+    .await
+    .unwrap();
     tx.commit().await.unwrap();
     assert!(
         fenced(&state, "org_a", clock(&pool).await).await,

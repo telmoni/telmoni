@@ -8,6 +8,9 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::{FromRow, PgPool};
+use std::collections::BTreeSet;
+
+use futures_util::future::BoxFuture;
 use telmoni_shared::db::tenant_session::{
     Binding, HasOrganization, HasPerson, Lane, Maintenance, MaintenanceLane,
     PersonOrganizationProject, Scoped, maintenance_scope,
@@ -1090,8 +1093,7 @@ pub async fn revoke_leases(tx: &mut Scoped<'_, Maintenance<AgentLane>>) -> sqlx:
 #[derive(Debug)]
 pub struct Fence {
     pub id: Uuid,
-    /// Sorted, each once.
-    pub organizations: Vec<String>,
+    pub organizations: BTreeSet<OrganizationId>,
 }
 
 /// Fence a person's erasure on every organization it reaches — the
@@ -1114,21 +1116,20 @@ pub struct Fence {
 pub async fn fence_erasure(
     tx: &mut Scoped<'_, Maintenance<AgentLane>>,
     user_id: &UserId,
-    organizations: &[String],
+    organizations: &BTreeSet<OrganizationId>,
 ) -> sqlx::Result<Fence> {
-    let mut reached: Vec<String> = sqlx::query_scalar(
+    let earlier: Vec<OrganizationId> = sqlx::query_scalar(
         "SELECT DISTINCT organization_id FROM agent.erasures WHERE user_id = $1",
     )
     .bind(user_id)
     .fetch_all(tx.conn())
     .await?;
-    reached.extend_from_slice(organizations);
-    reached.sort_unstable();
-    reached.dedup();
+    let reached: BTreeSet<OrganizationId> = organizations.iter().cloned().chain(earlier).collect();
     for organization in &reached {
-        lock_key(tx, ERASURE_KEY, organization, Hold::Exclusive).await?;
+        lock_key(tx, ERASURE_KEY, organization.as_str(), Hold::Exclusive).await?;
     }
     let id = Uuid::new_v4();
+    let keys: Vec<&str> = reached.iter().map(OrganizationId::as_str).collect();
     // Rows of this fence's own, beside any other erase's: an earlier close
     // still holds the turns begun before it, and another erase of the person
     // running at the same time keeps its fence down until it lifts it.
@@ -1138,7 +1139,7 @@ pub async fn fence_erasure(
            FROM unnest($2::text[]) AS reached (organization_id)",
     )
     .bind(user_id)
-    .bind(&reached)
+    .bind(&keys)
     .bind(id)
     .execute(tx.conn())
     .await?;
@@ -1158,7 +1159,7 @@ pub async fn close_erasure(
     fence: &Fence,
 ) -> sqlx::Result<()> {
     for organization in &fence.organizations {
-        lock_key(tx, ERASURE_KEY, organization, Hold::Exclusive).await?;
+        lock_key(tx, ERASURE_KEY, organization.as_str(), Hold::Exclusive).await?;
     }
     sqlx::query(
         "UPDATE agent.erasures SET scrubbed_at = clock_timestamp()
@@ -1207,7 +1208,7 @@ pub async fn erase_person(
     fence: &Fence,
     addresses: &[String],
     names: &[String],
-) -> sqlx::Result<(u64, Vec<String>)> {
+) -> sqlx::Result<(u64, BTreeSet<OrganizationId>)> {
     let mut organizations = fence.organizations.clone();
     let mut gone = 0u64;
     for sql in [
@@ -1216,12 +1217,12 @@ pub async fn erase_person(
          RETURNING organization_id",
     ] {
         let mut tx = scrub_step(pool).await?;
-        let found: Vec<Option<String>> = sqlx::query_scalar(sql)
+        let found: Vec<Option<OrganizationId>> = sqlx::query_scalar(sql)
             .bind(user_id)
             .fetch_all(tx.conn())
             .await?;
         gone += u64::try_from(found.len()).unwrap_or(u64::MAX);
-        let found: Vec<String> = found.into_iter().flatten().collect();
+        let found: Vec<OrganizationId> = found.into_iter().flatten().collect();
         record_reached(&mut tx, user_id, fence.id, &found).await?;
         step_done(tx, user_id, fence.id).await?;
         organizations.extend(found);
@@ -1235,8 +1236,6 @@ pub async fn erase_person(
             organizations.extend(found);
         }
     }
-    organizations.sort_unstable();
-    organizations.dedup();
     for name in names {
         for organization in &organizations {
             for batched in Batched::ALL {
@@ -1302,7 +1301,7 @@ enum Reach<'a> {
     /// One organization's rows, through its `(organization_id, id)` index: a
     /// name is many people's, and goes only where they could have been
     /// quoted, at a cost that follows those organizations, not the index.
-    In(&'a str),
+    In(&'a OrganizationId),
 }
 
 /// A scrub's three reads of a table, each taken a batch of rows at a time
@@ -1421,7 +1420,7 @@ async fn scrub_in_batches(
     reach: Reach<'_>,
     user_id: &UserId,
     fence_id: Uuid,
-) -> sqlx::Result<(u64, Vec<String>)> {
+) -> sqlx::Result<(u64, Vec<OrganizationId>)> {
     let mut touched = 0u64;
     let mut reached = Vec::new();
     let mut after = Uuid::nil();
@@ -1435,7 +1434,7 @@ async fn scrub_in_batches(
             Reach::In(organization) => end.bind(organization),
         };
         let end: Option<Uuid> = end.fetch_optional(tx.conn()).await?;
-        let query = sqlx::query_scalar::<_, Option<String>>(batched.statement(reach))
+        let query = sqlx::query_scalar::<_, Option<OrganizationId>>(batched.statement(reach))
             .bind(pattern)
             .bind(after)
             .bind(end.unwrap_or(LAST_ID));
@@ -1447,9 +1446,9 @@ async fn scrub_in_batches(
             Batched::Passages => query,
             Batched::Messages | Batched::Titles => query.bind(FORMER_MEMBER),
         };
-        let found: Vec<Option<String>> = query.fetch_all(tx.conn()).await?;
+        let found: Vec<Option<OrganizationId>> = query.fetch_all(tx.conn()).await?;
         touched += u64::try_from(found.len()).unwrap_or(u64::MAX);
-        let found: Vec<String> = found.into_iter().flatten().collect();
+        let found: Vec<OrganizationId> = found.into_iter().flatten().collect();
         record_reached(&mut tx, user_id, fence_id, &found).await?;
         step_done(tx, user_id, fence_id).await?;
         reached.extend(found);
@@ -1470,11 +1469,12 @@ async fn record_reached(
     tx: &mut Scoped<'_, Maintenance<AgentLane>>,
     user_id: &UserId,
     fence_id: Uuid,
-    found: &[String],
+    found: &[OrganizationId],
 ) -> sqlx::Result<()> {
     if found.is_empty() {
         return Ok(());
     }
+    let found: Vec<&str> = found.iter().map(OrganizationId::as_str).collect();
     sqlx::query(
         "WITH clock AS MATERIALIZED (SELECT clock_timestamp() AS at)
          INSERT INTO agent.erasures (user_id, organization_id, fence_id, fenced_at, scrubbed_at)
@@ -1522,9 +1522,10 @@ pub async fn purge_organization(
 /// index — one probe a pair — rather than a read of every row.
 pub async fn held_pairs(
     tx: &mut Scoped<'_, Maintenance<AgentLane>>,
-    after: (&str, &str),
+    after: Option<(&OrganizationId, &ProjectId)>,
     limit: i64,
-) -> sqlx::Result<Vec<(String, String)>> {
+) -> sqlx::Result<Vec<(OrganizationId, ProjectId)>> {
+    let (organization, project) = after.map_or(("", ""), |(o, p)| (o.as_str(), p.as_str()));
     sqlx::query_as(
         "WITH RECURSIVE
          chunk_pairs (organization_id, project_id) AS (
@@ -1559,8 +1560,8 @@ pub async fn held_pairs(
           ORDER BY organization_id, project_id
           LIMIT $3",
     )
-    .bind(after.0)
-    .bind(after.1)
+    .bind(organization)
+    .bind(project)
     .bind(limit)
     .fetch_all(tx.conn())
     .await
@@ -1571,8 +1572,8 @@ pub async fn held_pairs(
 /// holds. Answers how many went.
 pub async fn drop_held(
     tx: &mut Scoped<'_, Maintenance<AgentLane>>,
-    organization: &str,
-    project: &str,
+    organization: &OrganizationId,
+    project: &ProjectId,
     chunk: i64,
 ) -> sqlx::Result<u64> {
     let mut gone = 0;
@@ -1595,6 +1596,19 @@ pub async fn drop_held(
             .rows_affected();
     }
     Ok(gone)
+}
+
+/// One unit of work in a transaction of the lane's own, committed once it
+/// answers: what every single-statement site opens, uses and commits. Boxed,
+/// so the future is `Send` wherever it is spawned.
+pub(crate) async fn in_lane<'p, T, E: From<sqlx::Error>>(
+    pool: &'p PgPool,
+    work: impl for<'a> FnOnce(&'a mut Scoped<'p, Maintenance<AgentLane>>) -> BoxFuture<'a, Result<T, E>>,
+) -> Result<T, E> {
+    let mut tx = maintenance_scope(pool, AgentLane).await?;
+    let out = work(&mut tx).await?;
+    tx.commit().await?;
+    Ok(out)
 }
 
 /// Forget the erasure fences last put down, and last lifted, more than

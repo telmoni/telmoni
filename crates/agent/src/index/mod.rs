@@ -305,10 +305,10 @@ async fn index_page(
 
 /// Lease a source's cursor in a transaction of its own.
 pub(crate) async fn lease(state: &AppState, source: Source) -> Result<Option<Lease>, TelmoniError> {
-    let mut tx = maintenance_scope(&state.db, AgentLane).await?;
-    let lease = db::lease_cursor(&mut tx, source, LEASE_SECS).await?;
-    tx.commit().await?;
-    Ok(lease)
+    Ok(db::in_lane(&state.db, |tx| {
+        Box::pin(db::lease_cursor(tx, source, LEASE_SECS))
+    })
+    .await?)
 }
 
 /// Run `work` under a source's lease, putting the lease's end off every
@@ -364,11 +364,12 @@ const BACKOFF_SECS: i32 = 5 * 60;
 /// Keep a failed page's lease, unworked, for [`BACKOFF_SECS`], so no replica
 /// reads the source again before then. Best effort, as [`release`] is.
 async fn back_off(state: &AppState, source: Source, lease_id: Uuid) {
-    let kept = async {
-        let mut tx = maintenance_scope(&state.db, AgentLane).await?;
-        db::renew_lease(&mut tx, source, lease_id, BACKOFF_SECS).await?;
-        tx.commit().await
-    }
+    let kept = db::in_lane(&state.db, |tx| {
+        Box::pin(async move {
+            db::renew_lease(tx, source, lease_id, BACKOFF_SECS).await?;
+            Ok::<_, sqlx::Error>(())
+        })
+    })
     .await;
     if let Err(e) = kept {
         tracing::warn!(
@@ -388,14 +389,11 @@ const fn embedder_failed(error: &TelmoniError) -> bool {
 /// Put a lease's end off once: `false` when it is no longer this replica's,
 /// so nothing asks again. A failure to ask is not that, and asks again.
 async fn renew(state: &AppState, source: Source, lease_id: Uuid) -> bool {
-    let renewed = async {
-        let mut tx = maintenance_scope(&state.db, AgentLane).await?;
-        let held = db::renew_lease(&mut tx, source, lease_id, LEASE_SECS).await?;
-        tx.commit().await?;
-        Ok::<_, sqlx::Error>(held)
-    }
+    let renewed = db::in_lane(&state.db, |tx| {
+        Box::pin(db::renew_lease(tx, source, lease_id, LEASE_SECS))
+    })
     .await;
-    renewed.unwrap_or_else(|e| {
+    renewed.unwrap_or_else(|e: sqlx::Error| {
         tracing::warn!(
             source = source.as_str(),
             error = %e,
@@ -409,11 +407,12 @@ async fn renew(state: &AppState, source: Source, lease_id: Uuid) -> bool {
 /// next tick reads from the cursor again now rather than when the lease
 /// runs out. Best effort: a lease not handed back only runs out.
 pub(crate) async fn release(state: &AppState, source: Source, lease_id: Uuid) {
-    let released = async {
-        let mut tx = maintenance_scope(&state.db, AgentLane).await?;
-        db::release_lease(&mut tx, source, lease_id).await?;
-        tx.commit().await
-    }
+    let released = db::in_lane(&state.db, |tx| {
+        Box::pin(async move {
+            db::release_lease(tx, source, lease_id).await?;
+            Ok::<_, sqlx::Error>(())
+        })
+    })
     .await;
     if let Err(e) = released {
         tracing::warn!(
@@ -467,12 +466,7 @@ pub async fn prepare(
     entries: &[Entry],
 ) -> Result<Prepared, TelmoniError> {
     let ids: Vec<&str> = entries.iter().map(|e| e.source_id.as_str()).collect();
-    let indexed = {
-        let mut tx = maintenance_scope(pool, AgentLane).await?;
-        let indexed = db::indexed(&mut tx, source, &ids).await?;
-        tx.commit().await?;
-        indexed
-    };
+    let indexed = db::in_lane(pool, |tx| Box::pin(db::indexed(tx, source, &ids))).await?;
     let current: HashMap<(&str, i32), (&str, &str)> = indexed
         .iter()
         .map(|i| {
@@ -858,12 +852,10 @@ pub async fn reindex(state: &AppState) -> Result<u64, TelmoniError> {
     // and a last page of one it takes at no length does not fail the run.
     let mut proven = false;
     loop {
-        let stale = {
-            let mut tx = maintenance_scope(&state.db, AgentLane).await?;
-            let stale = db::stale_chunks(&mut tx, embedder.model(), after, PAGE).await?;
-            tx.commit().await?;
-            stale
-        };
+        let stale = db::in_lane(&state.db, |tx| {
+            Box::pin(db::stale_chunks(tx, embedder.model(), after, PAGE))
+        })
+        .await?;
         let Some(last) = stale.last() else {
             return Ok(redone);
         };

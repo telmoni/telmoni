@@ -3,15 +3,17 @@
 //! organization goes. What it holds of a project that left an organization,
 //! it finds and removes itself ([`crate::retention`]).
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use telmoni_shared::db::tenant_session::maintenance_scope;
 use telmoni_shared::seam::Agent;
 use telmoni_shared::{OrganizationId, TelmoniError, UserId};
 
 use crate::AppState;
-use crate::db::{self, AgentLane};
+use futures_util::future::BoxFuture;
+
+use crate::db;
 
 /// The module as auth holds it.
 pub struct AgentSeam(pub Arc<AppState>);
@@ -52,7 +54,7 @@ async fn erase_rounds(
     user_id: UserId,
     addresses: Vec<String>,
     names: Vec<String>,
-    mut reached: Vec<String>,
+    mut reached: BTreeSet<OrganizationId>,
 ) -> Result<u64, TelmoniError> {
     let mut gone = 0;
     for _ in 0..ERASE_ROUNDS {
@@ -65,9 +67,9 @@ async fn erase_rounds(
         let (round, found) = scrubbed?;
         closed?;
         gone += round;
-        let beyond: Vec<String> = found
+        let beyond: Vec<OrganizationId> = found
             .into_iter()
-            .filter(|o| fence.organizations.binary_search(o).is_err())
+            .filter(|o| !fence.organizations.contains(o))
             .collect();
         if beyond.is_empty() {
             tracing::info!(user_id = %user_id, gone, "agent erasure: the person's conversations and passages removed");
@@ -87,46 +89,46 @@ async fn erase_rounds(
 const FENCE_TRIES: u32 = 4;
 
 /// Put a fence down, asked again after a pause when it fails.
-async fn fence(state: &AppState, user_id: &UserId, reached: &[String]) -> sqlx::Result<db::Fence> {
-    let mut tries = 1;
-    loop {
-        let fenced = async {
-            let mut tx = maintenance_scope(&state.db, AgentLane).await?;
-            let fence = db::fence_erasure(&mut tx, user_id, reached).await?;
-            tx.commit().await?;
-            Ok(fence)
-        }
-        .await;
-        match fenced {
-            Err(e) if tries < FENCE_TRIES => {
-                tracing::info!(user_id = %user_id, error = %e, "an agent erasure's fence did not go down; asking again");
-                tokio::time::sleep(std::time::Duration::from_secs(1 << tries)).await;
-                tries += 1;
-            }
-            fenced => return fenced,
-        }
-    }
+async fn fence(
+    state: &AppState,
+    user_id: &UserId,
+    reached: &BTreeSet<OrganizationId>,
+) -> sqlx::Result<db::Fence> {
+    retried("did not go down", user_id, || {
+        Box::pin(db::in_lane(&state.db, |tx| {
+            Box::pin(db::fence_erasure(tx, user_id, reached))
+        }))
+    })
+    .await
 }
 
 /// Lift a fence, asked again after a pause when it fails: a fence left down
 /// holds every answer in its organizations until it lapses, a quarter of an
 /// hour after the scrub's last step.
 async fn close(state: &AppState, user_id: &UserId, fence: &db::Fence) -> sqlx::Result<()> {
+    retried("did not lift", user_id, || {
+        Box::pin(db::in_lane(&state.db, |tx| {
+            Box::pin(db::close_erasure(tx, user_id, fence))
+        }))
+    })
+    .await
+}
+
+/// `op`, asked again after a pause each time it fails, [`FENCE_TRIES`] times.
+async fn retried<'a, T>(
+    what: &'static str,
+    user_id: &UserId,
+    mut op: impl FnMut() -> BoxFuture<'a, sqlx::Result<T>>,
+) -> sqlx::Result<T> {
     let mut tries = 1;
     loop {
-        let closed = async {
-            let mut tx = maintenance_scope(&state.db, AgentLane).await?;
-            db::close_erasure(&mut tx, user_id, fence).await?;
-            tx.commit().await
-        }
-        .await;
-        match closed {
+        match op().await {
             Err(e) if tries < FENCE_TRIES => {
-                tracing::info!(user_id = %user_id, error = %e, "an agent erasure's fence did not lift; asking again");
+                tracing::info!(user_id = %user_id, error = %e, "an agent erasure's fence {what}; asking again");
                 tokio::time::sleep(std::time::Duration::from_secs(1 << tries)).await;
                 tries += 1;
             }
-            closed => return closed,
+            done => return done,
         }
     }
 }
@@ -168,10 +170,7 @@ impl Agent for AgentSeam {
             .and_then(name_pattern)
             .into_iter()
             .collect();
-        let reached: Vec<String> = organizations
-            .iter()
-            .map(|o| o.as_str().to_owned())
-            .collect();
+        let reached: BTreeSet<OrganizationId> = organizations.iter().cloned().collect();
         // ⚠ **A task of its own, awaited.** The callers give up on it — the
         // account deletion's budget, the sweep's, a request the person left —
         // and a dropped erase between its fence and its close left every
@@ -195,14 +194,13 @@ impl Agent for AgentSeam {
         &self,
         organization_id: &OrganizationId,
     ) -> Result<u64, TelmoniError> {
-        let mut tx = maintenance_scope(&self.0.db, AgentLane).await?;
-        db::revoke_leases(&mut tx).await?;
-        tx.commit().await?;
+        db::in_lane(&self.0.db, |tx| Box::pin(db::revoke_leases(tx))).await?;
         let mut gone = 0;
         loop {
-            let mut tx = maintenance_scope(&self.0.db, AgentLane).await?;
-            let went = db::purge_organization(&mut tx, organization_id, PURGE_CHUNK).await?;
-            tx.commit().await?;
+            let went = db::in_lane(&self.0.db, |tx| {
+                Box::pin(db::purge_organization(tx, organization_id, PURGE_CHUNK))
+            })
+            .await?;
             gone += went;
             if went == 0 {
                 break;

@@ -11,13 +11,13 @@
 //! slow one, and what a turn or an index write still landed there afterwards
 //! goes the same way.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
 
 use telmoni_shared::db::retention::RETENTION;
 use telmoni_shared::db::tenant_session::maintenance_scope;
-use telmoni_shared::{ProjectId, TelmoniError};
+use telmoni_shared::{OrganizationId, ProjectId, TelmoniError};
 
 use crate::AppState;
 use crate::db::{self, AgentLane, Source};
@@ -124,11 +124,15 @@ pub async fn sweep_once(state: &AppState) -> Result<u64, TelmoniError> {
             break;
         }
     }
-    let mut tx = maintenance_scope(&state.db, AgentLane).await?;
-    if db::try_retention_lock(&mut tx).await? {
-        db::forget_fences(&mut tx, ERASURE_FENCE_DAYS).await?;
-    }
-    tx.commit().await?;
+    db::in_lane(&state.db, |tx| {
+        Box::pin(async move {
+            if db::try_retention_lock(tx).await? {
+                db::forget_fences(tx, ERASURE_FENCE_DAYS).await?;
+            }
+            Ok::<_, sqlx::Error>(())
+        })
+    })
+    .await?;
     Ok(removed)
 }
 
@@ -139,18 +143,19 @@ pub async fn sweep_once(state: &AppState) -> Result<u64, TelmoniError> {
 /// that finds another listing a page leaves the pass to it.
 async fn drop_projects_that_left(state: &AppState) -> u64 {
     let mut removed = 0u64;
-    let mut after = (String::new(), String::new());
+    let mut after: Option<(OrganizationId, ProjectId)> = None;
     loop {
-        let page = async {
-            let mut tx = maintenance_scope(&state.db, AgentLane).await?;
-            if !db::try_projects_lock(&mut tx).await? {
-                tx.commit().await?;
-                return Ok::<_, sqlx::Error>(None);
-            }
-            let pairs = db::held_pairs(&mut tx, (&after.0, &after.1), PAIRS_PAGE).await?;
-            tx.commit().await?;
-            Ok(Some(pairs))
-        }
+        let cursor = after
+            .as_ref()
+            .map(|(organization, project)| (organization, project));
+        let page = db::in_lane(&state.db, |tx| {
+            Box::pin(async move {
+                if !db::try_projects_lock(tx).await? {
+                    return Ok::<_, sqlx::Error>(None);
+                }
+                Ok(Some(db::held_pairs(tx, cursor, PAIRS_PAGE).await?))
+            })
+        })
         .await;
         let pairs = match page {
             Ok(Some(pairs)) if !pairs.is_empty() => pairs,
@@ -160,12 +165,13 @@ async fn drop_projects_that_left(state: &AppState) -> u64 {
                 break;
             }
         };
-        let mut projects: Vec<ProjectId> = pairs
+        let projects: Vec<ProjectId> = pairs
             .iter()
-            .filter_map(|(_, project)| ProjectId::try_new(project.as_str()).ok())
+            .map(|(_, project)| project)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .cloned()
             .collect();
-        projects.sort_by(|a, b| a.as_str().cmp(b.as_str()));
-        projects.dedup_by(|a, b| a.as_str() == b.as_str());
         let homes = match state.auth.project_homes(&projects).await {
             Ok(homes) => homes,
             Err(e) => {
@@ -173,20 +179,19 @@ async fn drop_projects_that_left(state: &AppState) -> u64 {
                 break;
             }
         };
-        let home: HashMap<&str, &str> = homes
+        let home: HashMap<&ProjectId, &OrganizationId> = homes
             .iter()
-            .map(|h| (h.project_id.as_str(), h.organization_id.as_str()))
+            .map(|h| (&h.project_id, &h.organization_id))
             .collect();
         for (organization, project) in &pairs {
-            let asked = projects.iter().any(|p| p.as_str() == project.as_str());
-            if !asked || home.get(project.as_str()) == Some(&organization.as_str()) {
+            if home.get(project).copied() == Some(organization) {
                 continue;
             }
             removed += drop_left(state, organization, project).await;
         }
         let full = i64::try_from(pairs.len()).is_ok_and(|n| n >= PAIRS_PAGE);
         if let Some(last) = pairs.last() {
-            after = last.clone();
+            after = Some(last.clone());
         }
         if !full {
             break;
@@ -197,14 +202,13 @@ async fn drop_projects_that_left(state: &AppState) -> u64 {
 
 /// Whether `project` is, by auth's answer now, held by an organization other
 /// than `organization`, or by none. No answer is no.
-async fn still_left(state: &AppState, organization: &str, project: &str) -> bool {
-    let Ok(id) = ProjectId::try_new(project) else {
-        return false;
-    };
-    match state.auth.project_homes(std::slice::from_ref(&id)).await {
-        Ok(homes) => !homes
-            .iter()
-            .any(|h| h.organization_id.as_str() == organization),
+async fn still_left(state: &AppState, organization: &OrganizationId, project: &ProjectId) -> bool {
+    match state
+        .auth
+        .project_homes(std::slice::from_ref(project))
+        .await
+    {
+        Ok(homes) => !homes.iter().any(|h| &h.organization_id == organization),
         Err(_) => false,
     }
 }
@@ -216,19 +220,16 @@ async fn still_left(state: &AppState, organization: &str, project: &str) -> bool
 /// ⚠ **Auth is asked again before every chunk.** The page's answer can be
 /// minutes old, and a large project's rows take many chunks: a project that
 /// came back meanwhile keeps what it has, and what it wrote since.
-async fn drop_left(state: &AppState, organization: &str, project: &str) -> u64 {
+async fn drop_left(state: &AppState, organization: &OrganizationId, project: &ProjectId) -> u64 {
     let chunk = u64::try_from(LEFT_CHUNK).unwrap_or(u64::MAX);
     let mut removed = 0u64;
     for _ in 0..SWEEP_MAX_ROUNDS {
         if !still_left(state, organization, project).await {
             break;
         }
-        let round = async {
-            let mut tx = maintenance_scope(&state.db, AgentLane).await?;
-            let n = db::drop_held(&mut tx, organization, project, LEFT_CHUNK).await?;
-            tx.commit().await?;
-            Ok::<_, sqlx::Error>(n)
-        }
+        let round = db::in_lane(&state.db, |tx| {
+            Box::pin(db::drop_held(tx, organization, project, LEFT_CHUNK))
+        })
         .await;
         match round {
             Ok(n) => {
@@ -238,7 +239,7 @@ async fn drop_left(state: &AppState, organization: &str, project: &str) -> u64 {
                 }
             }
             Err(e) => {
-                tracing::warn!(project_id = project, error = %e,
+                tracing::warn!(project_id = %project, error = %e,
                     "removing what a project left behind failed; the next sweep carries on");
                 break;
             }
@@ -246,7 +247,7 @@ async fn drop_left(state: &AppState, organization: &str, project: &str) -> u64 {
     }
     if removed > 0 {
         tracing::info!(
-            project_id = project,
+            project_id = %project,
             removed,
             "agent rows of a project that left removed"
         );
