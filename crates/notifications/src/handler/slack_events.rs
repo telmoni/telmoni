@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use axum::{body::Bytes, extract::State, http::HeaderMap, response::IntoResponse};
+use serde::Deserialize;
 use serde_json::json;
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
 use telmoni_shared::db::tenant_session::maintenance_scope;
@@ -18,7 +19,8 @@ use crate::notify;
 
 /// The events that retire a workspace's connections, by Slack's name for
 /// them, which the stored reason and the audit row both carry.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
+#[serde(rename_all = "snake_case")]
 enum Revocation {
     AppUninstalled,
     TokensRevoked,
@@ -29,12 +31,30 @@ telmoni_shared::wire_enum!(Revocation {
     TokensRevoked => "tokens_revoked",
 });
 
-impl Revocation {
-    /// The revocation an event's `type` names; `None` for every other event,
-    /// which is acknowledged and otherwise ignored.
-    fn parse(event_type: &str) -> Option<Self> {
-        event_type.parse().ok()
-    }
+/// The slice of Slack's envelope this lane reads; any other type is
+/// acknowledged and otherwise ignored.
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum Envelope {
+    /// The handshake that registers the URL: the challenge, answered back.
+    UrlVerification { challenge: String },
+    EventCallback {
+        team_id: Option<String>,
+        event: Event,
+    },
+    #[serde(other)]
+    Other,
+}
+
+/// An event's `type`: a revocation, or anything else Slack sends.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum Event {
+    Revocation {
+        #[serde(rename = "type")]
+        revocation: Revocation,
+    },
+    Other {},
 }
 
 /// `POST /webhooks/v1/slack`.
@@ -63,39 +83,19 @@ pub async fn slack_events(
         return Err(AuthError::Unauthenticated.into());
     }
 
-    let payload: serde_json::Value = serde_json::from_slice(&body)
+    let envelope: Envelope = serde_json::from_slice(&body)
         .map_err(|e| TelmoniError::BadRequest(format!("unparseable slack event: {e}")))?;
-    let kind = payload
-        .get("type")
-        .and_then(|t| t.as_str())
-        .unwrap_or_default();
-
-    if kind == "url_verification" {
-        let challenge = payload
-            .get("challenge")
-            .and_then(|c| c.as_str())
-            .unwrap_or_default();
-        return Ok(Json(json!({ "challenge": challenge })));
-    }
-
-    if kind == "event_callback" {
-        let event_type = payload
-            .pointer("/event/type")
-            .and_then(|t| t.as_str())
-            .unwrap_or_default();
-        let workspace = payload
-            .get("team_id")
-            .and_then(|t| t.as_str())
-            .unwrap_or_default();
-        if let Some(revocation) = Revocation::parse(event_type)
-            && !workspace.is_empty()
-        {
-            let revoked = revoke_workspace(&state, workspace, revocation).await?;
-            return Ok(Json(json!({ "ok": true, "revoked": revoked })));
+    match envelope {
+        Envelope::UrlVerification { challenge } => Ok(Json(json!({ "challenge": challenge }))),
+        Envelope::EventCallback {
+            team_id: Some(workspace),
+            event: Event::Revocation { revocation },
+        } if !workspace.is_empty() => {
+            let revoked = revoke_workspace(&state, &workspace, revocation).await?;
+            Ok(Json(json!({ "ok": true, "revoked": revoked })))
         }
+        Envelope::EventCallback { .. } | Envelope::Other => Ok(Json(json!({ "ok": true }))),
     }
-
-    Ok(Json(json!({ "ok": true })))
 }
 
 /// Retire the connections into `workspace`, across tenants, on Slack's word,
@@ -163,33 +163,49 @@ async fn revoke_workspace(
 mod tests {
     use super::*;
 
+    /// The revocation an `event_callback` carries, if any.
+    fn revocation_in(event_type: &str) -> Option<Revocation> {
+        let body =
+            json!({ "type": "event_callback", "team_id": "T1", "event": { "type": event_type } });
+        match serde_json::from_value::<Envelope>(body).unwrap() {
+            Envelope::EventCallback {
+                event: Event::Revocation { revocation },
+                ..
+            } => Some(revocation),
+            _ => None,
+        }
+    }
+
     /// Slack's own spelling, which `slack: app_uninstalled` on the row and
     /// the audit row's `event` repeat.
     #[test]
     fn a_revocation_is_read_by_slacks_event_name() {
         assert_eq!(
-            Revocation::parse("app_uninstalled"),
+            revocation_in("app_uninstalled"),
             Some(Revocation::AppUninstalled)
         );
         assert_eq!(
-            Revocation::parse("tokens_revoked"),
+            revocation_in("tokens_revoked"),
             Some(Revocation::TokensRevoked)
         );
         for revocation in Revocation::all() {
-            assert_eq!(Revocation::parse(revocation.as_str()), Some(revocation));
+            assert_eq!(revocation_in(revocation.as_str()), Some(revocation));
         }
     }
 
     #[test]
     fn every_other_event_revokes_nothing() {
-        for event in [
-            "url_verification",
-            "event_callback",
-            "app_home_opened",
-            "App_Uninstalled",
-            "",
-        ] {
-            assert_eq!(Revocation::parse(event), None, "parsed: {event:?}");
+        for event in ["app_home_opened", "App_Uninstalled", ""] {
+            assert_eq!(revocation_in(event), None, "parsed: {event:?}");
         }
+        let other: Envelope =
+            serde_json::from_value(json!({ "type": "app_rate_limited" })).unwrap();
+        assert!(matches!(other, Envelope::Other));
+    }
+
+    /// A handshake with no challenge is refused, never answered with an empty one.
+    #[test]
+    fn a_url_verification_without_a_challenge_is_refused() {
+        assert!(serde_json::from_value::<Envelope>(json!({ "type": "url_verification" })).is_err());
     }
 }
