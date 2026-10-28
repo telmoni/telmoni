@@ -357,9 +357,10 @@ fn answer(encoding: Encoding, content_mode: ContentMode, body: Vec<u8>) -> Respo
         header::CONTENT_TYPE,
         HeaderValue::from_static(encoding.content_type()),
     );
-    if let Ok(value) = HeaderValue::from_str(&content_mode.to_string()) {
-        response.headers_mut().insert(CONTENT_MODE_HEADER, value);
-    }
+    response.headers_mut().insert(
+        CONTENT_MODE_HEADER,
+        HeaderValue::from_static(content_mode.as_str()),
+    );
     response
 }
 

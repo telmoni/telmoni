@@ -185,16 +185,17 @@ fn bearer_token(request: &Request) -> Option<&str> {
 /// known, as the console reads it. An IPv6 address is keyed by its /64, the
 /// block one subscriber holds, or one host would walk its own block.
 fn client_address(request: &Request, hops: u8) -> String {
-    let forwarded: Vec<String> = request
+    // Each line read once, copied only where it is not UTF-8, and its
+    // entries borrowed from it: the one chosen is the one spelled out.
+    let lines: Vec<std::borrow::Cow<'_, str>> = request
         .headers()
         .get_all("x-forwarded-for")
         .iter()
-        .map(|v| String::from_utf8_lossy(v.as_bytes()).into_owned())
-        .flat_map(|v| {
-            v.split(',')
-                .map(|part| part.trim().to_owned())
-                .collect::<Vec<_>>()
-        })
+        .map(|v| String::from_utf8_lossy(v.as_bytes()))
+        .collect();
+    let forwarded: Vec<&str> = lines
+        .iter()
+        .flat_map(|line| line.split(',').map(str::trim))
         .filter(|part| !part.is_empty())
         .collect();
     let peer = request

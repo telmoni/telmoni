@@ -2,8 +2,8 @@
 //! where it breaks a field's rule, kept with an attribute dropped where only
 //! the attribute does.
 
+use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::fmt::Write as _;
 
 use chrono::{DateTime, Utc};
 use opentelemetry_proto::tonic::common::v1::{KeyValue, any_value::Value};
@@ -11,6 +11,7 @@ use opentelemetry_proto::tonic::resource::v1::Resource;
 use opentelemetry_proto::tonic::trace::v1::{Span, status::StatusCode};
 use uuid::Uuid;
 
+use telmoni_shared::digest::hex_lower as hex;
 use telmoni_shared::{ProjectId, SpanKind, SpanStatus};
 
 use crate::contract::{self, ATTRIBUTES_MAX, SPAN_FIXED_BYTES, SPAN_UNIT_BYTES};
@@ -187,7 +188,7 @@ pub fn read_resource(resource: Option<&Resource>) -> ResourceFields {
                 continue;
             }
             bytes = taken;
-            fields.attributes.push((kv.key.clone(), text));
+            fields.attributes.push((kv.key.clone(), text.into_owned()));
         }
     }
     fields
@@ -199,7 +200,7 @@ fn resource_text(value: Option<&Value>, max: usize) -> String {
     value
         .and_then(text)
         .filter(|text| text.chars().count() <= max)
-        .unwrap_or_default()
+        .map_or_else(String::new, Cow::into_owned)
 }
 
 /// The span as a row, or the refusal; every attribute dropped on the way is
@@ -225,8 +226,12 @@ pub fn map(span: &Span, context: &Context<'_>, dropped: &mut Drops) -> Result<Sp
         return Err(refuse(Refusal::Invalid("parent_span_id")));
     }
 
+    // Room for the resource's attributes and the span's own, grown once.
+    let mut attributes =
+        Vec::with_capacity(context.resource.len() + span.attributes.len().min(ATTRIBUTES_MAX));
+    attributes.extend_from_slice(context.resource);
     let mut fields = Fields {
-        attributes: context.resource.to_vec(),
+        attributes,
         ..Fields::default()
     };
     for kv in &span.attributes {
@@ -426,10 +431,10 @@ impl Fields {
             }
             // Ours, for sealed content later: consumed now, read then.
             contract::CONTENT_MARK => {}
-            contract::OPERATION => self.operation = text(value),
-            contract::AGENT_NAME => self.agent_name = text(value),
-            contract::WORKFLOW_NAME => self.workflow_name = text(value),
-            contract::TOOL_NAME => self.tool_name = text(value),
+            contract::OPERATION => self.operation = text(value).map(Cow::into_owned),
+            contract::AGENT_NAME => self.agent_name = text(value).map(Cow::into_owned),
+            contract::WORKFLOW_NAME => self.workflow_name = text(value).map(Cow::into_owned),
+            contract::TOOL_NAME => self.tool_name = text(value).map(Cow::into_owned),
             contract::ERROR_TYPE => {
                 self.error_type = Some(bounded_text(
                     value,
@@ -445,11 +450,11 @@ impl Fields {
                 )?);
             }
             contract::REQUEST_MODEL => {
-                self.request_model = Some(bounded_text(
-                    value,
-                    contract::MODEL_MAX,
-                    contract::REQUEST_MODEL,
-                )?);
+                // Checked all the same; kept only until the response names its model.
+                let model = checked_text(value, contract::MODEL_MAX, contract::REQUEST_MODEL)?;
+                if self.response_model.is_none() {
+                    self.request_model = Some(model.into_owned());
+                }
             }
             contract::PROVIDER => {
                 self.provider = Some(bounded_text(
@@ -530,13 +535,13 @@ impl Fields {
         if self.tags.len() >= contract::TAGS_MAX {
             return drop(key, DropReason::OverCap(Cap::Tags));
         }
-        self.tags.push((tag.to_owned(), rendered));
+        self.tags.push((tag.to_owned(), rendered.into_owned()));
     }
 
     fn keep_attribute(
         &mut self,
         key: &str,
-        rendered: String,
+        rendered: Cow<'_, str>,
         drop: &mut impl FnMut(&str, DropReason),
     ) {
         if key.chars().count() > contract::ATTRIBUTE_KEY_MAX {
@@ -548,22 +553,32 @@ impl Fields {
         if self.attributes.len() >= ATTRIBUTES_MAX {
             return drop(key, DropReason::OverCap(Cap::Attributes));
         }
-        self.attributes.push((key.to_owned(), rendered));
+        self.attributes
+            .push((key.to_owned(), rendered.into_owned()));
     }
 }
 
 /// A text field: any scalar, as text; empty reads as unset.
-fn text(value: &Value) -> Option<String> {
+fn text(value: &Value) -> Option<Cow<'_, str>> {
     scalar(value).filter(|t| !t.is_empty())
 }
 
-/// A text field under its cap, in characters.
-fn bounded_text(value: &Value, max: usize, field: &'static str) -> Result<String, Refusal> {
+/// A text field under its cap, in characters, still borrowed where it can be.
+fn checked_text<'v>(
+    value: &'v Value,
+    max: usize,
+    field: &'static str,
+) -> Result<Cow<'v, str>, Refusal> {
     let text = text(value).ok_or(Refusal::Invalid(field))?;
     if text.chars().count() > max {
         return Err(Refusal::OverCap(field));
     }
     Ok(text)
+}
+
+/// A text field under its cap, in characters, as the row keeps it.
+fn bounded_text(value: &Value, max: usize, field: &'static str) -> Result<String, Refusal> {
+    checked_text(value, max, field).map(Cow::into_owned)
 }
 
 /// A count: an integer, 0 or more.
@@ -586,12 +601,12 @@ fn number(value: &Value) -> Option<f64> {
 /// A scalar as text, the shape every column and map value takes. A string
 /// given as an index into the profiles signal's string table is read as
 /// absent, as OTLP asks of every other signal's receiver.
-fn scalar(value: &Value) -> Option<String> {
+fn scalar(value: &Value) -> Option<Cow<'_, str>> {
     match value {
-        Value::StringValue(s) => Some(s.clone()),
-        Value::BoolValue(b) => Some(b.to_string()),
-        Value::IntValue(n) => Some(n.to_string()),
-        Value::DoubleValue(d) => Some(d.to_string()),
+        Value::StringValue(s) => Some(Cow::Borrowed(s.as_str())),
+        Value::BoolValue(b) => Some(Cow::Owned(b.to_string())),
+        Value::IntValue(n) => Some(Cow::Owned(n.to_string())),
+        Value::DoubleValue(d) => Some(Cow::Owned(d.to_string())),
         Value::StringValueStrindex(_)
         | Value::ArrayValue(_)
         | Value::KvlistValue(_)
@@ -601,7 +616,7 @@ fn scalar(value: &Value) -> Option<String> {
 
 /// An attribute's value as `attributes` keeps it: a scalar as text, an array
 /// of scalars as its JSON; nothing nested, and no bytes.
-fn as_text(value: &Value) -> Option<String> {
+fn as_text(value: &Value) -> Option<Cow<'_, str>> {
     match value {
         Value::ArrayValue(array) => {
             let items = array
@@ -618,7 +633,7 @@ fn as_text(value: &Value) -> Option<String> {
                     | Value::BytesValue(_) => None,
                 })
                 .collect::<Option<Vec<_>>>()?;
-            Some(serde_json::Value::Array(items).to_string())
+            Some(Cow::Owned(serde_json::Value::Array(items).to_string()))
         }
         scalar_value => scalar(scalar_value),
     }
@@ -634,16 +649,6 @@ fn instant(unix_nanos: u64) -> Option<DateTime<Utc>> {
     let secs = i64::try_from(unix_nanos / 1_000_000_000).ok()?;
     let micros = u32::try_from(unix_nanos % 1_000_000_000 / 1_000).ok()?;
     DateTime::from_timestamp(secs, micros * 1_000)
-}
-
-/// Bytes as lowercase hex: how the table spells an id.
-fn hex(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        // Writing to a String cannot fail.
-        let _ = write!(out, "{byte:02x}");
-    }
-    out
 }
 
 #[cfg(test)]

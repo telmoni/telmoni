@@ -7,6 +7,7 @@
 //! hold each to the cap once per replica.
 
 use std::collections::HashMap;
+use std::sync::LazyLock;
 
 use chrono::{DateTime, NaiveDate, Utc};
 use sha2::{Digest as _, Sha256};
@@ -18,6 +19,9 @@ use crate::ingest::report::Drops;
 use crate::ingest::span::{self, Cap, DropReason};
 use crate::replica::Redis;
 use crate::store::SpanRow;
+
+/// The cap's script, hashed once rather than for every export.
+static CAP_SCRIPT: LazyLock<redis::Script> = LazyLock::new(|| redis::Script::new(CAP));
 
 /// The cap, in one round trip. `KEYS[1]` is the project's keys of the day,
 /// `KEYS[1 + i]` the values of the export's `i`th key; `ARGV` the values'
@@ -162,18 +166,18 @@ async fn ask(
 ) -> Option<Vec<Verdict>> {
     let mut connection = redis.connection().await?;
     let day_key = day_key(project_id, day);
-    let script = redis::Script::new(CAP);
-    let mut invocation = script.prepare_invoke();
+    let hashed: Vec<String> = keys.iter().map(|key| digest(key)).collect();
+    let mut invocation = CAP_SCRIPT.prepare_invoke();
     invocation.key(&day_key);
-    for key in keys {
-        invocation.key(format!("{day_key}:{}", digest(key)));
+    for key in &hashed {
+        invocation.key(format!("{day_key}:{key}"));
     }
     invocation
         .arg(TAG_VALUES_PER_DAY)
         .arg(TAG_KEYS_PER_DAY)
         .arg(expire_at(day));
-    for key in keys {
-        invocation.arg(digest(key));
+    for key in &hashed {
+        invocation.arg(key);
     }
     for (k, value) in tags {
         invocation.arg(k + 1).arg(digest(value));

@@ -67,7 +67,10 @@ pub fn read(
         return Err(BatchError::TooManySpans(count));
     }
 
-    let mut batch = Batch::default();
+    let mut batch = Batch {
+        rows: Vec::with_capacity(count),
+        report: Report::default(),
+    };
     let mut resources = Vec::with_capacity(request.resource_spans.len());
     for resource_spans in &request.resource_spans {
         let first = batch.rows.len();

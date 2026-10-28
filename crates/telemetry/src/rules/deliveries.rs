@@ -5,6 +5,8 @@
 //! that day. Without Redis every delivery is made, as a replica's own count
 //! would hold the plan once per replica.
 
+use std::sync::LazyLock;
+
 use chrono::{NaiveDate, Utc};
 use serde_json::json;
 
@@ -12,6 +14,10 @@ use telmoni_shared::seam::{self, Notice};
 use telmoni_shared::{AlertCeilings, NotificationKind, OrganizationId};
 
 use crate::AppState;
+
+/// The scripts, hashed once rather than at every notice.
+static TAKE_SCRIPT: LazyLock<redis::Script> = LazyLock::new(|| redis::Script::new(TAKE));
+static GIVE_BACK_SCRIPT: LazyLock<redis::Script> = LazyLock::new(|| redis::Script::new(GIVE_BACK));
 
 /// Up to `ARGV[2]` deliveries taken from the day's room under the ceiling
 /// `ARGV[1]`, the key kept `ARGV[3]` seconds: answers how many were taken.
@@ -82,7 +88,7 @@ pub async fn take(state: &AppState, organization_id: &OrganizationId, wanted: us
     let Some(mut connection) = state.redis.connection().await else {
         return uncounted;
     };
-    let taken: Result<i64, redis::RedisError> = redis::Script::new(TAKE)
+    let taken: Result<i64, redis::RedisError> = TAKE_SCRIPT
         .key(day_key(organization_id, day))
         .arg(deliveries_per_day)
         .arg(wanted)
@@ -128,7 +134,7 @@ async fn give_back(
     let Some(mut connection) = state.redis.connection().await else {
         return;
     };
-    let given: Result<i64, redis::RedisError> = redis::Script::new(GIVE_BACK)
+    let given: Result<i64, redis::RedisError> = GIVE_BACK_SCRIPT
         .key(day_key(organization_id, day))
         .arg(unused)
         .invoke_async(&mut connection)
