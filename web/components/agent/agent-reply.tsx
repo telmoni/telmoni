@@ -1,5 +1,3 @@
-"use client";
-
 import { Fragment, useMemo } from "react";
 import Link from "next/link";
 import {

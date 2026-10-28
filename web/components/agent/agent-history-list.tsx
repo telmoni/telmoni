@@ -1,5 +1,3 @@
-"use client";
-
 import { MessageSquare, Trash2 } from "lucide-react";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { LocalTime } from "@/components/local-time";

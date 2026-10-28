@@ -1,5 +1,3 @@
-"use client";
-
 import { ArrowRight, Bot, History, Plug, Users, type LucideIcon } from "lucide-react";
 
 import type { AgentSuggestion, SuggestionTopic } from "@/lib/agent/suggestions";

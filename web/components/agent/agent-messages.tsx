@@ -1,5 +1,3 @@
-"use client";
-
 import { Reply, Sources } from "@/components/agent/agent-reply";
 import { AgentThinking } from "@/components/agent/agent-thinking";
 import { toolStatus, type Turn } from "@/lib/agent/stream";
