@@ -150,6 +150,13 @@ pub(crate) fn priced(own: &OwnRates, provider: &str, model: &str, tokens: Tokens
         .map(|rate| rate.cost(tokens))
 }
 
+/// What opens under a run: a step, which its step cap counts, or a call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Opening {
+    Step,
+    Call,
+}
+
 /// One run's caps, and what it has used of them.
 #[derive(Debug, Default)]
 pub(crate) struct Guard {
@@ -184,9 +191,9 @@ impl Guard {
         self.max_spend.is_some()
     }
 
-    /// Counts a step opening, or refuses where the run reached a cap: its
-    /// spend for whatever opens, its steps for a step.
-    pub(crate) fn opens(&self, step: bool) -> Result<(), Error> {
+    /// Counts an opening, or refuses where the run reached a cap: its spend
+    /// for whatever opens, its steps for a step.
+    pub(crate) fn opens(&self, opening: Opening) -> Result<(), Error> {
         let mut used = lock(&self.used);
         if let Some(limit) = self.max_spend
             && used.spent >= limit
@@ -197,7 +204,7 @@ impl Guard {
                 used: used.spent,
             });
         }
-        if step {
+        if opening == Opening::Step {
             if let Some(limit) = self.max_steps
                 && used.steps >= limit
             {

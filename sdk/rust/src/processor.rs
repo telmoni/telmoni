@@ -67,15 +67,22 @@ struct State {
     /// each fence, a record's first span and one past its last.
     taken: usize,
     fences: VecDeque<usize>,
-    /// The record being built, and the room its hold keeps for it.
+    /// The record being built, with the room its hold keeps for it.
     stage: Option<Stage>,
-    reserved: usize,
     dropped: usize,
     flushing: usize,
-    shutdown: bool,
     exporting: bool,
-    /// Whether the worker has returned, which `shutdown` waits for.
-    finished: bool,
+    life: Life,
+}
+
+/// Where the processor is in its life: taking spans, draining them for a
+/// shutdown, or with its worker gone, which `shutdown` waits for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum Life {
+    #[default]
+    Running,
+    Stopping,
+    Finished,
 }
 
 impl Processor {
@@ -99,10 +106,7 @@ impl Processor {
             .spawn(move || work(&worker, &exporter, &warner));
         if let Err(error) = spawned {
             // Without the worker nothing leaves, and nothing should wait for it.
-            let mut state = lock(&shared.state);
-            state.shutdown = true;
-            state.finished = true;
-            drop(state);
+            lock(&shared.state).life = Life::Finished;
             exporter_thread_failed(error.kind());
         }
         Self { shared }
@@ -122,8 +126,8 @@ impl Processor {
         state.stage = Some(Stage {
             trace,
             spans: Vec::new(),
+            reserved: need,
         });
-        state.reserved = need;
         Some(Hold {
             shared: &self.shared,
             built: false,
@@ -135,7 +139,7 @@ impl Processor {
     pub(crate) fn flush_within(&self, timeout: Duration) -> OTelSdkResult {
         let deadline = Instant::now() + timeout;
         let mut state = lock(&self.shared.state);
-        if state.shutdown {
+        if state.life != Life::Running {
             return Ok(());
         }
         state.flushing += 1;
@@ -179,7 +183,7 @@ impl SpanProcessor for Processor {
             return;
         }
         let mut state = lock(&self.shared.state);
-        if state.shutdown {
+        if state.life != Life::Running {
             return;
         }
         if let Some(stage) = &mut state.stage
@@ -188,7 +192,8 @@ impl SpanProcessor for Processor {
             stage.spans.push(span);
             return;
         }
-        if state.queue.len() + state.reserved >= self.shared.batching.max_queue_size {
+        let reserved = state.stage.as_ref().map_or(0, |stage| stage.reserved);
+        if state.queue.len() + reserved >= self.shared.batching.max_queue_size {
             state.dropped += 1;
             return;
         }
@@ -205,12 +210,12 @@ impl SpanProcessor for Processor {
     fn shutdown_with_timeout(&self, timeout: Duration) -> OTelSdkResult {
         let deadline = Instant::now() + timeout;
         let mut state = lock(&self.shared.state);
-        if state.shutdown {
+        if state.life != Life::Running {
             return Ok(());
         }
-        state.shutdown = true;
+        state.life = Life::Stopping;
         self.shared.wake.notify_all();
-        while !state.finished {
+        while state.life != Life::Finished {
             let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
                 return Err(OTelSdkError::Timeout(timeout));
             };
@@ -238,7 +243,7 @@ fn work(shared: &Shared, exporter: &Exporter, warner: &Warner) {
                     .unwrap_or_else(PoisonError::into_inner)
                     .0;
             }
-            if state.shutdown && state.queue.is_empty() {
+            if state.life != Life::Running && state.queue.is_empty() {
                 return;
             }
             let mut size = state.queue.len().min(shared.batching.max_batch_size);
@@ -283,16 +288,18 @@ fn work(shared: &Shared, exporter: &Exporter, warner: &Warner) {
 /// Under the lock: whether the worker should export without waiting; a
 /// record queued goes at once.
 fn due(state: &State, batching: &Batching) -> bool {
-    state.shutdown
+    state.life != Life::Running
         || state.flushing > 0
         || !state.fences.is_empty()
         || state.queue.len() >= batching.max_batch_size
 }
 
-/// A record being built: its trace, and its spans as they end.
+/// A record being built: its trace, its spans as they end, and the room in
+/// the queue kept for them.
 struct Stage {
     trace: TraceId,
     spans: Vec<SpanData>,
+    reserved: usize,
 }
 
 /// A record being built, its spans staged until the guard drops: queued
@@ -319,8 +326,7 @@ impl Drop for Hold<'_> {
             .take()
             .map(|stage| stage.spans)
             .unwrap_or_default();
-        state.reserved = 0;
-        if !self.built || state.shutdown || staged.is_empty() {
+        if !self.built || state.life != Life::Running || staged.is_empty() {
             return;
         }
         let first = state.taken + state.queue.len();
@@ -342,7 +348,7 @@ struct Finished<'a>(&'a Shared);
 impl Drop for Finished<'_> {
     fn drop(&mut self) {
         let mut state = lock(&self.0.state);
-        state.finished = true;
+        state.life = Life::Finished;
         state.exporting = false;
         drop(state);
         self.0.wake.notify_all();

@@ -20,7 +20,7 @@ use uuid::Uuid;
 use crate::client::Inner;
 use crate::contract;
 use crate::error::Error;
-use crate::guard::{self, Guard, Tokens};
+use crate::guard::{self, Guard, Opening, Tokens};
 use crate::lock;
 use crate::propagation::Continued;
 use crate::warnings::Warner;
@@ -220,7 +220,7 @@ impl Handle {
     }
 
     fn step(&self, name: &str) -> Result<Step, Error> {
-        self.guard.opens(true)?;
+        self.guard.opens(Opening::Step)?;
         let warner = &self.client.warner;
         // Ingest refuses a span named nothing.
         let name = if name.is_empty() {
@@ -239,7 +239,7 @@ impl Handle {
     }
 
     fn model_call(&self, model: &str, options: ModelCallOptions) -> Result<ModelCall, Error> {
-        self.guard.opens(false)?;
+        self.guard.opens(Opening::Call)?;
         let warner = &self.client.warner;
         if model.is_empty() {
             warner.once(
@@ -272,7 +272,7 @@ impl Handle {
     }
 
     fn tool_call(&self, name: &str, options: ToolCallOptions) -> Result<ToolCall, Error> {
-        self.guard.opens(false)?;
+        self.guard.opens(Opening::Call)?;
         let name = cut(name, contract::NAME_MAX, "tool's name", &self.client.warner);
         let (name, mut attributes) = tool_call_opening(&name);
         if let Some(arguments) = options.arguments {
