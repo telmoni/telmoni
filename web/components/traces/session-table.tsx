@@ -2,8 +2,14 @@
 
 import Link from "next/link";
 
-import { DataTable, THead, Td, Th } from "@/components/data-table";
+import { DataTable, THead, Td } from "@/components/data-table";
 import { SortHeading } from "@/components/sort-heading";
+import {
+  ColumnHeadings,
+  compactPadding,
+  rowClass,
+  rowClickTaken,
+} from "@/components/traces/list-table";
 import { SessionLink } from "@/components/traces/session-link";
 import { usePeekedSession } from "@/components/traces/session-peek";
 import { sumCell, sumClass, sumTitle } from "@/components/traces/sum-cells";
@@ -37,7 +43,7 @@ export function SessionTable({ organization, slug, query, sessions }: Props) {
   const peeked = usePeekedSession();
   const columns = SESSION_COLUMNS.filter((c) => prefs.sessionColumns.includes(c.key));
   const { sort, dir } = currentSessionSort(query);
-  const tight = prefs.density === "compact" ? "py-1.5" : undefined;
+  const tight = compactPadding(prefs.density);
   const sorted = (column: SessionSort) =>
     sessionsHref(organization, slug, query, nextSessionSort(query, column));
 
@@ -51,40 +57,20 @@ export function SessionTable({ organization, slug, query, sessions }: Props) {
           dir={dir}
           href={sorted(SessionSort.Session)}
         />
-        {columns.map((column) =>
-          column.sort ? (
-            <SortHeading
-              key={column.key}
-              label={column.label}
-              column={column.sort}
-              sort={sort}
-              dir={dir}
-              href={sorted(column.sort)}
-              className={column.numeric ? "text-right" : undefined}
-            />
-          ) : (
-            <Th key={column.key} className={cn("whitespace-nowrap", column.numeric && "text-right")}>
-              {column.label}
-            </Th>
-          ),
-        )}
+        <ColumnHeadings columns={columns} sort={sort} dir={dir} sortHref={sorted} />
       </THead>
       <tbody>
         {sessions.map((session) => (
           <tr
             key={session.session_id}
             aria-current={peeked === session.session_id ? "true" : undefined}
-            // Anywhere on the row but a link of its own, and but a drag that
-            // chose some text to copy: the keyboard's way is the id's link.
+            // Anywhere on the row but what keeps its own way: the keyboard's
+            // way is the id's link.
             onClick={(event) => {
-              if ((event.target as HTMLElement).closest("a, button, input, label")) return;
-              if (window.getSelection()?.toString()) return;
+              if (rowClickTaken(event)) return;
               openPeek(session.session_id);
             }}
-            className={cn(
-              "cursor-pointer",
-              peeked === session.session_id ? "bg-muted" : "hover:bg-muted/50",
-            )}
+            className={rowClass(peeked === session.session_id)}
           >
             <Td className={cn("max-w-64 truncate text-xs", tight)} title={session.session_id}>
               <SessionLink

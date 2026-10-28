@@ -3,6 +3,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 
+import { plainClick } from "@/components/traces/list-table";
 import { openPeek } from "@/lib/peek";
 
 /** A session's id in the list: a plain click opens the session beside the
@@ -23,9 +24,7 @@ export function SessionLink({
       href={href}
       data-peek-session={sessionId}
       onClick={(event) => {
-        if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
-          return;
-        }
+        if (!plainClick(event)) return;
         event.preventDefault();
         openPeek(sessionId);
       }}

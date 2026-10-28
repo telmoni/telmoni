@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 
-import { DataTable, THead, Td, Th } from "@/components/data-table";
+import { DataTable, THead, Td } from "@/components/data-table";
 import { SortHeading } from "@/components/sort-heading";
+import { ColumnHeadings, compactPadding } from "@/components/traces/list-table";
 import { sumCell, sumClass, sumTitle } from "@/components/traces/sum-cells";
 import type { UserQuery, UserRow } from "@/lib/server/entities/users";
 import { tracesHref } from "@/lib/traces";
@@ -32,7 +33,7 @@ export function UserTable({ organization, slug, query, users }: Props) {
   const prefs = useTracePrefs();
   const columns = USER_COLUMNS.filter((c) => prefs.userColumns.includes(c.key));
   const { sort, dir } = currentUserSort(query);
-  const tight = prefs.density === "compact" ? "py-1.5" : undefined;
+  const tight = compactPadding(prefs.density);
   const sorted = (column: UserSort) => usersHref(organization, slug, query, nextUserSort(query, column));
 
   return (
@@ -45,23 +46,7 @@ export function UserTable({ organization, slug, query, users }: Props) {
           dir={dir}
           href={sorted(UserSort.User)}
         />
-        {columns.map((column) =>
-          column.sort ? (
-            <SortHeading
-              key={column.key}
-              label={column.label}
-              column={column.sort}
-              sort={sort}
-              dir={dir}
-              href={sorted(column.sort)}
-              className={column.numeric ? "text-right" : undefined}
-            />
-          ) : (
-            <Th key={column.key} className={cn("whitespace-nowrap", column.numeric && "text-right")}>
-              {column.label}
-            </Th>
-          ),
-        )}
+        <ColumnHeadings columns={columns} sort={sort} dir={dir} sortHref={sorted} />
       </THead>
       <tbody>
         {users.map((user) => (

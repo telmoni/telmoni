@@ -1,5 +1,7 @@
 "use client";
 
+import { plainClick } from "@/components/traces/list-table";
+
 /** Moves the focus without following the fragment, whose history entry has no
  *  state: Next's router passes over one, which would leave a peek open on Back. */
 export function SkipLink() {
@@ -8,7 +10,7 @@ export function SkipLink() {
       href="#console-main"
       onClick={(event) => {
         // One asking for another tab or window is the link's own.
-        if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        if (!plainClick(event)) return;
         const main = document.getElementById("console-main");
         // A panel over the page whole stands in its place, the page out of reach.
         const content = main?.inert

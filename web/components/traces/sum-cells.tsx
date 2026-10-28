@@ -3,21 +3,15 @@ import type { ReactNode } from "react";
 import { LocalTime } from "@/components/local-time";
 import type { UserRow } from "@/lib/server/entities/users";
 import { formatCount } from "@/lib/traces";
+import type { UserColumn } from "@/lib/users";
 import { cn } from "@/lib/utils";
 
 // The cells a session's row and a user's share: what their runs added up to
 // in the window, as the sessions and users tables show them.
 
-/** A column of what a row's runs added up to. */
-export type SumColumn =
-  | "traces"
-  | "errors"
-  | "steps"
-  | "input_tokens"
-  | "output_tokens"
-  | "tokens"
-  | "first_seen"
-  | "last_seen";
+/** A column of what a row's runs added up to: the users table's, which a
+ *  session's row shows too. */
+export type SumColumn = UserColumn;
 
 /** A row's sums, which a session's row and a user's both hold. */
 type Sums = Omit<UserRow, "user_id">;

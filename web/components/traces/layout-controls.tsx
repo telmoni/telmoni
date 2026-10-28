@@ -5,7 +5,6 @@ import {
   BookmarkIcon,
   CheckIcon,
   ChevronDownIcon,
-  InfoIcon,
   PencilIcon,
   PlusIcon,
   SaveIcon,
@@ -53,7 +52,13 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  ColumnHint,
+  columnsCounted,
+  plainClick,
+  toggledColumn,
+} from "@/components/traces/list-table";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import {
   DEFAULT_LAYOUT_NAME,
   PINNED_MAX,
@@ -140,11 +145,7 @@ function CustomizeMenu({ layout, from }: { layout: Layout; from: string }) {
   const [calls, setCalls] = useState(false);
   const shown = (key: TraceColumn) => options.columns.includes(key);
   const flip = (key: TraceColumn) =>
-    setOptions({
-      columns: orderedColumns(
-        shown(key) ? options.columns.filter((c) => c !== key) : [...options.columns, key],
-      ),
-    });
+    setOptions({ columns: orderedColumns(toggledColumn(options.columns, key)) });
   // The menu stays open while options are changed one after another.
   const keep = (event: Event) => event.preventDefault();
   const filtered =
@@ -188,7 +189,7 @@ function CustomizeMenu({ layout, from }: { layout: Layout; from: string }) {
             <DropdownMenuSubTrigger>
               <span className="flex-1 truncate">Columns</span>
               <span className="shrink-0 pl-2 text-xs tabular-nums text-muted-foreground">
-                {options.columns.length + 1}/{TRACE_COLUMNS.length + 1}
+                {columnsCounted(options.columns.length, TRACE_COLUMNS.length)}
               </span>
             </DropdownMenuSubTrigger>
             <DropdownMenuSubContent className="w-56">
@@ -309,23 +310,7 @@ function HintedItem({
   return (
     <DropdownMenuCheckboxItem aria-describedby={hint ? id : undefined} {...props}>
       {children}
-      {hint && (
-        <>
-          <span id={id} hidden>
-            {hint}
-          </span>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span className="pointer-events-auto ml-auto pl-2 text-muted-foreground" aria-hidden="true">
-                <InfoIcon className="size-3.5" />
-              </span>
-            </TooltipTrigger>
-            <TooltipContent side="right" className="max-w-56">
-              {hint}
-            </TooltipContent>
-          </Tooltip>
-        </>
-      )}
+      {hint && <ColumnHint id={id} text={hint} className="ml-auto pl-2" />}
     </DropdownMenuCheckboxItem>
   );
 }
@@ -627,9 +612,7 @@ function LayoutsMenu({ projectId, layouts, project, canSave, layout }: Props & {
                     )}
                     scroll={false}
                     onClick={(event) => {
-                      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
-                        return;
-                      }
+                      if (!plainClick(event)) return;
                       event.preventDefault();
                       applyLayout(saved);
                     }}

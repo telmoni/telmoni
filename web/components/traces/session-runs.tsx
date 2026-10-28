@@ -6,6 +6,7 @@ import Link from "next/link";
 
 import { DataTable, THead, Td, Th } from "@/components/data-table";
 import { cellClass, cellOf, titleOf } from "@/components/traces/cells";
+import { rowClickTaken } from "@/components/traces/list-table";
 import { TraceOutline } from "@/components/traces/trace-outline";
 import { KindIcon } from "@/components/traces/trace-view";
 import { useLayout, type LayoutPage } from "@/components/traces/use-layout";
@@ -211,8 +212,7 @@ function Runs({
                 data-run={run}
                 aria-current={stood ? "true" : undefined}
                 onClick={(event) => {
-                  if ((event.target as HTMLElement).closest("a, button, input, label")) return;
-                  if (window.getSelection()?.toString()) return;
+                  if (rowClickTaken(event)) return;
                   setCurrent(run);
                   toggle(run);
                 }}

@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useId, useState, useTransition, type ReactNode } from "react";
+import { Fragment, useEffect, useId, useState, useTransition } from "react";
 import {
   ChartColumnIcon,
   ChevronDownIcon,
@@ -9,7 +9,6 @@ import {
   CoinsIcon,
   Columns3Icon,
   DownloadIcon,
-  InfoIcon,
   RefreshCwIcon,
   Rows3Icon,
   TableIcon,
@@ -35,6 +34,12 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Toggle } from "@/components/ui/toggle";
+import {
+  ColumnHint,
+  DownloadItems,
+  columnsCounted,
+  toggledColumn,
+} from "@/components/traces/list-table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { WindowPicker } from "@/components/window-picker";
 import type { ListQuery, TraceQuery, TraceView } from "@/lib/server/entities/traces";
@@ -279,7 +284,7 @@ function ColumnsMenu({ list }: { list: ListName }) {
   // Held to the list's own columns, in its order, so the cast names what they are.
   const keep = (keys: readonly string[]) =>
     setTracePrefs({ [pref]: ordered(table.columns, keys) } as Partial<TracePrefs>);
-  const flip = (key: string) => keep(shown(key) ? columns.filter((c) => c !== key) : [...columns, key]);
+  const flip = (key: string) => keep(toggledColumn(columns, key));
   const toggleGroup = (group: ColumnGroup) =>
     setOpened((was) => {
       const next = new Set(was);
@@ -295,7 +300,7 @@ function ColumnsMenu({ list }: { list: ListName }) {
           <Columns3Icon />
           Columns
           <Badge variant="secondary" className="px-1.5 tabular-nums">
-            {columns.length + 1}/{table.columns.length + 1}
+            {columnsCounted(columns.length, table.columns.length)}
           </Badge>
         </Button>
       </DropdownMenuTrigger>
@@ -396,30 +401,8 @@ function ColumnItem({
         className="pointer-events-none"
       />
       <span className="flex-1 truncate">{label}</span>
-      {hint && <Hint id={hintId} text={hint} />}
+      {hint && <ColumnHint id={hintId} text={hint} />}
     </DropdownMenuItem>
-  );
-}
-
-/** What a column means: on hover beside its name, and as the copy `id` names,
- *  which describes its item to a screen reader. */
-function Hint({ id, text }: { id: string; text: string }): ReactNode {
-  return (
-    <>
-      <span id={id} hidden>
-        {text}
-      </span>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <span className="pointer-events-auto text-muted-foreground" aria-hidden="true">
-            <InfoIcon className="size-3.5" />
-          </span>
-        </TooltipTrigger>
-        <TooltipContent side="right" className="max-w-56">
-          {text}
-        </TooltipContent>
-      </Tooltip>
-    </>
   );
 }
 
@@ -482,16 +465,7 @@ function DownloadMenu({ list, organization, slug, query, total }: ListControlsPr
             ? `The first ${formatCount(DOWNLOAD_MAX)} of ${formatCount(total)} ${many}`
             : `${formatCount(total)} ${total === 1 ? one : many}, as the list is sorted`}
         </DropdownMenuLabel>
-        <DropdownMenuItem asChild>
-          <a href={listDownloadHref(list, organization, slug, query, "csv")} download>
-            CSV, for a spreadsheet
-          </a>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild>
-          <a href={listDownloadHref(list, organization, slug, query, "json")} download>
-            JSON
-          </a>
-        </DropdownMenuItem>
+        <DownloadItems href={(format) => listDownloadHref(list, organization, slug, query, format)} />
       </DropdownMenuContent>
     </DropdownMenu>
   );

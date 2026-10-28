@@ -5,15 +5,21 @@ import { DownloadIcon } from "lucide-react";
 import Link from "next/link";
 
 import { DataTable, THead, Td, Th } from "@/components/data-table";
-import { SortHeading } from "@/components/sort-heading";
 import { cellClass, cellOf, titleOf } from "@/components/traces/cells";
+import {
+  ColumnHeadings,
+  DownloadItems,
+  compactPadding,
+  plainClick,
+  rowClass,
+  rowClickTaken,
+} from "@/components/traces/list-table";
 import { usePeekedRun } from "@/components/traces/peek";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { openPeek } from "@/lib/peek";
@@ -53,7 +59,7 @@ export function TraceTable({ organization, slug, query, ui, traces }: Props) {
   const [chosen, setChosen] = useState<ReadonlySet<string>>(() => new Set());
   const columns = TRACE_COLUMNS.filter((c) => prefs.columns.includes(c.key));
   const { sort, dir } = currentSort(query);
-  const tight = prefs.density === "compact" ? "py-1.5" : undefined;
+  const tight = compactPadding(prefs.density);
   const every = traces.length > 0 && traces.every((t) => chosen.has(t.run_id));
   const some = !every && traces.some((t) => chosen.has(t.run_id));
   const narrowedTo = (filter: FilterKey, value: string) =>
@@ -82,16 +88,9 @@ export function TraceTable({ organization, slug, query, ui, traces }: Props) {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem asChild>
-                <a href={downloadHref(organization, slug, query, "csv", [...chosen])} download>
-                  CSV, for a spreadsheet
-                </a>
-              </DropdownMenuItem>
-              <DropdownMenuItem asChild>
-                <a href={downloadHref(organization, slug, query, "json", [...chosen])} download>
-                  JSON
-                </a>
-              </DropdownMenuItem>
+              <DownloadItems
+                href={(format) => downloadHref(organization, slug, query, format, [...chosen])}
+              />
             </DropdownMenuContent>
           </DropdownMenu>
           <Button variant="ghost" size="sm" onClick={() => setChosen(new Set())}>
@@ -111,23 +110,12 @@ export function TraceTable({ organization, slug, query, ui, traces }: Props) {
             />
           </Th>
           <Th className="whitespace-nowrap">Trace</Th>
-          {columns.map((column) =>
-            column.sort ? (
-              <SortHeading
-                key={column.key}
-                label={column.label}
-                column={column.sort}
-                sort={sort}
-                dir={dir}
-                href={tracesHref(organization, slug, query, nextSort(query, column.sort), ui)}
-                className={column.numeric ? "text-right" : undefined}
-              />
-            ) : (
-              <Th key={column.key} className={cn("whitespace-nowrap", column.numeric && "text-right")}>
-                {column.label}
-              </Th>
-            ),
-          )}
+          <ColumnHeadings
+            columns={columns}
+            sort={sort}
+            dir={dir}
+            sortHref={(column) => tracesHref(organization, slug, query, nextSort(query, column), ui)}
+          />
         </THead>
         <tbody>
           {traces.map((trace) => (
@@ -135,18 +123,13 @@ export function TraceTable({ organization, slug, query, ui, traces }: Props) {
               key={trace.run_id}
               data-state={chosen.has(trace.run_id) ? "selected" : undefined}
               aria-current={peeked === trace.run_id ? "true" : undefined}
-              // Anywhere on the row but a control or a link of its own, which
-              // keep their own way, and but a drag that chose some text to
-              // copy: the keyboard's way is the id's link.
+              // Anywhere on the row but what keeps its own way: the
+              // keyboard's way is the id's link.
               onClick={(event) => {
-                if ((event.target as HTMLElement).closest("a, button, input, label")) return;
-                if (window.getSelection()?.toString()) return;
+                if (rowClickTaken(event)) return;
                 openPeek(trace.run_id);
               }}
-              className={cn(
-                "cursor-pointer",
-                peeked === trace.run_id ? "bg-muted" : "hover:bg-muted/50",
-              )}
+              className={rowClass(peeked === trace.run_id)}
             >
               <Td className={cn("pr-0", tight)}>
                 <Checkbox
@@ -163,9 +146,7 @@ export function TraceTable({ organization, slug, query, ui, traces }: Props) {
                   // for a new tab or window, or a copy of the link, gets the
                   // trace's own page, as the link says.
                   onClick={(event) => {
-                    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
-                      return;
-                    }
+                    if (!plainClick(event)) return;
                     event.preventDefault();
                     openPeek(trace.run_id);
                   }}
