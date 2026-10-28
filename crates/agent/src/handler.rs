@@ -135,35 +135,31 @@ pub async fn post_turn(
             retry_after_secs: u64::try_from(next).unwrap_or(0).max(1),
         });
     }
+    let author = db::Author {
+        organization_id: &acting.organization_id,
+        project_id: &project_id,
+        user_id: &acting.user_id,
+    };
     let (conversation_id, history) = match body.conversation_id {
         Some(id) => {
             if !db::touch_conversation(&mut tx, &acting.user_id, &project_id, id).await? {
                 return Err(not_found());
             }
-            (id, db::messages(&mut tx, id, HISTORY).await?)
+            (id, db::transcript(&mut tx, id, HISTORY).await?)
         }
         None => {
             let title: String = message.chars().take(TITLE_CHARS).collect();
-            let id = db::create_conversation(
-                &mut tx,
-                &acting.organization_id,
-                &project_id,
-                &acting.user_id,
-                &title,
-            )
-            .await?;
+            let id = db::create_conversation(&mut tx, author, &title).await?;
             (id, Vec::new())
         }
     };
     db::insert_message(
         &mut tx,
         conversation_id,
-        &acting.organization_id,
-        &project_id,
-        &acting.user_id,
+        author,
         MessageRole::User,
         &message,
-        &json!([]),
+        &[],
     )
     .await?;
     let asked_at = db::now(&mut tx).await?;
@@ -534,19 +530,22 @@ async fn save_answer(
     let mut tx = author_scope(state, acting).await?;
     let withheld = db::erased_during(&mut tx, &acting.organization_id, asker.asked_at).await?;
     let (content, citations) = if withheld {
-        (WITHHELD, json!([]))
+        (WITHHELD, &[][..])
     } else {
-        (answer, json!(citations))
+        (answer, citations)
+    };
+    let author = db::Author {
+        organization_id: &acting.organization_id,
+        project_id: &project.project_id,
+        user_id: &acting.user_id,
     };
     let id = db::insert_message(
         &mut tx,
         conversation_id,
-        &acting.organization_id,
-        &project.project_id,
-        &acting.user_id,
+        author,
         MessageRole::Assistant,
         content,
-        &citations,
+        citations,
     )
     .await?;
     tx.commit().await?;
@@ -637,7 +636,7 @@ pub async fn absent() -> TelmoniError {
 /// the window can open on an answer or hold two questions in a row — which
 /// a strict chat template refuses on every turn of the conversation after.
 /// An unanswered question is dropped; the one asked now stands.
-fn alternating(history: Vec<StoredMessage>, question: &str) -> Vec<Message> {
+fn alternating(history: Vec<db::Said>, question: &str) -> Vec<Message> {
     let mut out: Vec<Message> = Vec::with_capacity(history.len() + 1);
     for m in history {
         match m.role {
@@ -669,13 +668,10 @@ fn alternating(history: Vec<StoredMessage>, question: &str) -> Vec<Message> {
 mod tests {
     use super::*;
 
-    fn stored(role: MessageRole, content: &str) -> StoredMessage {
-        StoredMessage {
-            id: Uuid::nil(),
+    fn stored(role: MessageRole, content: &str) -> db::Said {
+        db::Said {
             role,
             content: content.to_owned(),
-            citations: json!([]),
-            created_at: Utc::now(),
         }
     }
 

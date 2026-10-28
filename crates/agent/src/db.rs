@@ -19,6 +19,8 @@ use telmoni_shared::seam::Audience;
 use telmoni_shared::{OrganizationId, ProjectId, UserId};
 use uuid::Uuid;
 
+use crate::tools::Citation;
+
 /// This module's cross-tenant lane. See `tenant_session::Lane`.
 #[derive(Debug, Clone, Copy)]
 pub struct AgentLane;
@@ -706,21 +708,28 @@ pub async fn recent_questions<B: AuthorBinding>(
     .await
 }
 
+/// Who a conversation and its messages belong to: the person, asking in a
+/// project of an organization.
+#[derive(Debug, Clone, Copy)]
+pub struct Author<'a> {
+    pub organization_id: &'a OrganizationId,
+    pub project_id: &'a ProjectId,
+    pub user_id: &'a UserId,
+}
+
 /// Start a conversation.
 pub async fn create_conversation<B: AuthorBinding>(
     tx: &mut Scoped<'_, B>,
-    organization_id: &OrganizationId,
-    project_id: &ProjectId,
-    user_id: &UserId,
+    author: Author<'_>,
     title: &str,
 ) -> sqlx::Result<Uuid> {
     sqlx::query_scalar(
         "INSERT INTO agent.conversations (organization_id, project_id, user_id, title)
          VALUES ($1, $2, $3, $4) RETURNING id",
     )
-    .bind(organization_id)
-    .bind(project_id)
-    .bind(user_id)
+    .bind(author.organization_id)
+    .bind(author.project_id)
+    .bind(author.user_id)
     .bind(title)
     .fetch_one(tx.conn())
     .await
@@ -750,20 +759,14 @@ pub async fn touch_conversation<B: AuthorBinding>(
         == 1)
 }
 
-/// Add one message to a conversation.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "each is one column of the row; a struct for one call site would only rename them"
-)]
+/// Add one message to a conversation, with the sources an answer cites.
 pub async fn insert_message<B: AuthorBinding>(
     tx: &mut Scoped<'_, B>,
     conversation_id: Uuid,
-    organization_id: &OrganizationId,
-    project_id: &ProjectId,
-    user_id: &UserId,
+    author: Author<'_>,
     role: MessageRole,
     content: &str,
-    citations: &Value,
+    citations: &[Citation],
 ) -> sqlx::Result<Uuid> {
     sqlx::query_scalar(
         "INSERT INTO agent.messages
@@ -771,12 +774,12 @@ pub async fn insert_message<B: AuthorBinding>(
          VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id",
     )
     .bind(conversation_id)
-    .bind(organization_id)
-    .bind(project_id)
-    .bind(user_id)
+    .bind(author.organization_id)
+    .bind(author.project_id)
+    .bind(author.user_id)
     .bind(role)
     .bind(content)
-    .bind(citations)
+    .bind(sqlx::types::Json(citations))
     .fetch_one(tx.conn())
     .await
 }
@@ -864,6 +867,35 @@ pub async fn messages<B: AuthorBinding>(
     sqlx::query_as::<_, StoredMessage>(
         "SELECT id, role, content, citations, created_at FROM (
              SELECT id, role, content, citations, created_at FROM agent.messages
+              WHERE conversation_id = $1
+              ORDER BY created_at DESC, id DESC
+              LIMIT $2
+         ) latest
+         ORDER BY created_at, id",
+    )
+    .bind(conversation_id)
+    .bind(limit)
+    .fetch_all(tx.conn())
+    .await
+}
+
+/// One message as the model's transcript reads it.
+#[derive(Debug, Clone, FromRow)]
+pub struct Said {
+    pub role: MessageRole,
+    pub content: String,
+}
+
+/// The conversation's last `limit` messages, oldest first, as the model is
+/// shown them: who said what, and nothing the panel alone reads.
+pub async fn transcript<B: AuthorBinding>(
+    tx: &mut Scoped<'_, B>,
+    conversation_id: Uuid,
+    limit: i64,
+) -> sqlx::Result<Vec<Said>> {
+    sqlx::query_as::<_, Said>(
+        "SELECT role, content FROM (
+             SELECT role, content, created_at, id FROM agent.messages
               WHERE conversation_id = $1
               ORDER BY created_at DESC, id DESC
               LIMIT $2
