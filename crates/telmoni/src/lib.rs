@@ -508,26 +508,22 @@ impl App {
         // the restart is the recovery.
         tokio::select! {
             () = serve => {},
-            ended = delivery => match ended {
-                Ok(()) => anyhow::bail!("the delivery loop exited; restarting the process"),
-                Err(e) => anyhow::bail!("the delivery loop died: {e}"),
-            },
-            ended = purges => match ended {
-                Ok(()) => anyhow::bail!("telemetry's purge sweep exited; restarting the process"),
-                Err(e) => anyhow::bail!("telemetry's purge sweep died: {e}"),
-            },
-            ended = refusals => match ended {
-                Ok(()) => anyhow::bail!("the plan refusals' notices exited; restarting the process"),
-                Err(e) => anyhow::bail!("the plan refusals' notices died: {e}"),
-            },
-            ended = alerts => match ended {
-                Ok(()) => anyhow::bail!("the alerts' evaluation exited; restarting the process"),
-                Err(e) => anyhow::bail!("the alerts' evaluation died: {e}"),
-            },
+            ended = delivery => return died("the delivery loop", ended),
+            ended = purges => return died("telemetry's purge sweep", ended),
+            ended = refusals => return died("the plan refusals' notices", ended),
+            ended = alerts => return died("the alerts' evaluation", ended),
         }
         // The alert in hand is settled and told before the process ends.
         self.telemetry.alerts_stopping.stop(ALERTS_STOP_WAIT).await;
         Ok(())
+    }
+}
+
+/// A loop raced against the server ended, which it never does on its own.
+fn died(name: &str, ended: Result<(), tokio::task::JoinError>) -> anyhow::Result<()> {
+    match ended {
+        Ok(()) => anyhow::bail!("{name} exited; restarting the process"),
+        Err(e) => anyhow::bail!("{name} died: {e}"),
     }
 }
 
@@ -556,19 +552,7 @@ where
             let app = build().await?;
             tracing::info!(sweep = sweep.as_str(), "sweep starting");
             match sweep {
-                Sweep::Deletion => {
-                    let swept = telmoni_auth::sweep::deletion(&app.auth).await?;
-                    tracing::info!(
-                        organizations = swept.organizations,
-                        purged = swept.purged,
-                        people = swept.people,
-                        "deletion sweep complete"
-                    );
-                }
-                Sweep::AuditVerify => telmoni_auth::sweep::audit_verify(&app.auth).await?,
-                Sweep::Retention => {
-                    telmoni_auth::sweep::retention(&app.auth).await?;
-                }
+                Sweep::Auth(sweep) => sweeps::once(&app.auth, sweep).await?,
                 Sweep::AgentReindex => {
                     let Some(agent) = app.agent.as_ref().filter(|a| a.config.enabled()) else {
                         anyhow::bail!(
@@ -586,14 +570,6 @@ where
                     }
                     let redone = telmoni_agent::index::reindex(agent).await?;
                     tracing::info!(redone, "agent reindex complete");
-                }
-                Sweep::AuditExports => {
-                    let swept = telmoni_auth::audit_export::sweep(&app.auth).await?;
-                    tracing::info!(
-                        finished = swept.finished,
-                        expired = swept.expired,
-                        "audit exports sweep complete"
-                    );
                 }
             }
             Ok(())

@@ -14,9 +14,10 @@ use std::time::Duration;
 
 use telmoni_auth::AppState;
 use telmoni_auth::db::AuthLane;
+use telmoni_shared::TelmoniError;
 use telmoni_shared::heartbeat::Heartbeats;
 
-use crate::cli::Sweep;
+use crate::cli::AuthSweep;
 
 /// How long after boot the first tick of each sweep runs: a minute, past the
 /// readiness probe's first passes and the thirty seconds Kubernetes gives the
@@ -50,49 +51,42 @@ enum Start {
 /// Start the four sweeps as tasks of this process, each beating in
 /// `heartbeats`.
 pub fn spawn(auth: Arc<AppState>, heartbeats: &Arc<Heartbeats<AuthLane>>) {
-    tokio::spawn(every(
-        auth.clone(),
-        heartbeats.clone(),
-        Sweep::Deletion,
-        DELETION_EVERY,
-        Start::Logged,
-        |auth| async move {
-            let swept = telmoni_auth::sweep::deletion(&auth).await?;
+    for (sweep, period, start) in [
+        (AuthSweep::Deletion, DELETION_EVERY, Start::Logged),
+        (AuthSweep::Retention, RETENTION_EVERY, Start::Logged),
+        (AuthSweep::AuditVerify, AUDIT_VERIFY_EVERY, Start::Logged),
+        (AuthSweep::AuditExports, AUDIT_EXPORTS_EVERY, Start::Quiet),
+    ] {
+        tokio::spawn(every(
+            auth.clone(),
+            heartbeats.clone(),
+            sweep,
+            period,
+            start,
+        ));
+    }
+}
+
+/// One run of `sweep`, as its timer and `sweep <name>` both run it.
+pub(crate) async fn once(auth: &AppState, sweep: AuthSweep) -> Result<(), TelmoniError> {
+    match sweep {
+        AuthSweep::Deletion => {
+            let swept = telmoni_auth::sweep::deletion(auth).await?;
             tracing::info!(
                 organizations = swept.organizations,
                 purged = swept.purged,
                 people = swept.people,
                 "deletion sweep complete"
             );
-            Ok(())
-        },
-    ));
-    tokio::spawn(every(
-        auth.clone(),
-        heartbeats.clone(),
-        Sweep::Retention,
-        RETENTION_EVERY,
-        Start::Logged,
-        |auth| async move { telmoni_auth::sweep::retention(&auth).await.map(|_| ()) },
-    ));
-    tokio::spawn(every(
-        auth.clone(),
-        heartbeats.clone(),
-        Sweep::AuditVerify,
-        AUDIT_VERIFY_EVERY,
-        Start::Logged,
-        |auth| async move { telmoni_auth::sweep::audit_verify(&auth).await },
-    ));
-    tokio::spawn(every(
-        auth,
-        heartbeats.clone(),
-        Sweep::AuditExports,
-        AUDIT_EXPORTS_EVERY,
-        Start::Quiet,
-        |auth| async move {
-            let swept = telmoni_auth::audit_export::sweep(&auth).await?;
-            // Most ticks find nothing to do; a tick that did something is the
-            // one worth a line.
+        }
+        AuthSweep::Retention => {
+            telmoni_auth::sweep::retention(auth).await?;
+        }
+        AuthSweep::AuditVerify => telmoni_auth::sweep::audit_verify(auth).await?,
+        AuthSweep::AuditExports => {
+            let swept = telmoni_auth::audit_export::sweep(auth).await?;
+            // Most runs find nothing to do; one that did something is the one
+            // worth a line.
             if swept != telmoni_auth::audit_export::ExportsSwept::default() {
                 tracing::info!(
                     finished = swept.finished,
@@ -100,31 +94,27 @@ pub fn spawn(auth: Arc<AppState>, heartbeats: &Arc<Heartbeats<AuthLane>>) {
                     "audit exports sweep complete"
                 );
             }
-            Ok(())
-        },
-    ));
+        }
+    }
+    Ok(())
 }
 
 /// One sweep on its timer, forever, the first tick after [`START_DELAY`].
-async fn every<F, Fut>(
+async fn every(
     auth: Arc<AppState>,
     heartbeats: Arc<Heartbeats<AuthLane>>,
-    sweep: Sweep,
+    sweep: AuthSweep,
     period: Duration,
     start: Start,
-    tick: F,
-) where
-    F: Fn(Arc<AppState>) -> Fut,
-    Fut: Future<Output = Result<(), telmoni_shared::TelmoniError>> + Send + 'static,
-{
+) {
     heartbeats
         .every(&auth.db, sweep.as_str(), START_DELAY, period, || {
-            let pass = tick(auth.clone());
+            let auth = auth.clone();
             async move {
                 if start == Start::Logged {
                     tracing::info!(sweep = sweep.as_str(), "sweep starting");
                 }
-                pass.await
+                once(&auth, sweep).await
             }
         })
         .await;

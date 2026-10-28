@@ -3,9 +3,9 @@
 
 use telmoni_shared::OrganizationId;
 
-/// Which of auth's sweeps to run once.
+/// One of auth's sweeps: on a timer in `serve`, or once by hand.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Sweep {
+pub enum AuthSweep {
     /// Drive every `pending_deletion` organization's tail, then every pending
     /// person's erasure, to completion.
     Deletion,
@@ -14,22 +14,42 @@ pub enum Sweep {
     /// Hard-delete what has aged out: revoked keys, stale invitations,
     /// revoked sessions, spent grants.
     Retention,
-    /// Embed again every passage of the agent's index that a model other
-    /// than `EMBEDDINGS_MODEL` embedded.
-    AgentReindex,
     /// Build again the audit exports a restart dropped, and delete every
     /// export's file past its week.
     AuditExports,
 }
 
+impl AuthSweep {
+    /// The word on the command line, in the log and in `auth.heartbeats`.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Deletion => "deletion",
+            Self::AuditVerify => "audit-verify",
+            Self::Retention => "retention",
+            Self::AuditExports => "audit-exports",
+        }
+    }
+}
+
+/// Which sweep to run once.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Sweep {
+    /// One of auth's.
+    Auth(AuthSweep),
+    /// Embed again every passage of the agent's index that a model other
+    /// than `EMBEDDINGS_MODEL` embedded.
+    AgentReindex,
+}
+
 impl Sweep {
     /// Every sweep, in the order the usage line lists them.
     pub const ALL: [Self; 5] = [
-        Self::Deletion,
-        Self::AuditVerify,
-        Self::Retention,
+        Self::Auth(AuthSweep::Deletion),
+        Self::Auth(AuthSweep::AuditVerify),
+        Self::Auth(AuthSweep::Retention),
         Self::AgentReindex,
-        Self::AuditExports,
+        Self::Auth(AuthSweep::AuditExports),
     ];
 
     fn parse(arg: &str) -> Option<Self> {
@@ -49,11 +69,8 @@ impl Sweep {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::Deletion => "deletion",
-            Self::AuditVerify => "audit-verify",
-            Self::Retention => "retention",
+            Self::Auth(sweep) => sweep.as_str(),
             Self::AgentReindex => "agent-reindex",
-            Self::AuditExports => "audit-exports",
         }
     }
 }
