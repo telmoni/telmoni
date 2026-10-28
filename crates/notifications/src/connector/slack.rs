@@ -14,8 +14,8 @@ use telmoni_shared::net_guard::Egress;
 use telmoni_shared::{AuthError, Redacted, TelmoniError};
 
 use super::{
-    Connector, DeliveryError, Event, Grant, Installed, Provider, TearDownError, Terminal,
-    parse_retry_after, refused, short_body, truncate, undialable,
+    Connector, DeliveryError, Event, Grant, Installed, Provider, Retirement, TearDownError,
+    Terminal, parse_retry_after, refused, short_body, truncate, undialable,
 };
 
 /// Slack's header block limit.
@@ -79,13 +79,19 @@ pub fn classify(
         return DeliveryError::transient_after(format!("slack returned {status}"), retry_after);
     }
     if RETIRE.contains(&word) {
-        return DeliveryError::terminal(Terminal::Retire, format!("slack: {word}"));
+        return DeliveryError::terminal(
+            Terminal::Retire(Retirement::Revoked),
+            format!("slack: {word}"),
+        );
     }
     if BAD_TARGET.contains(&word) {
-        return DeliveryError::terminal(Terminal::BadTarget, format!("slack: {word}"));
+        return DeliveryError::terminal(
+            Terminal::Retire(Retirement::Errored),
+            format!("slack: {word}"),
+        );
     }
     if OUR_BUG.contains(&word) {
-        return DeliveryError::terminal(Terminal::OurBug, format!("slack: {word}"));
+        return DeliveryError::terminal(Terminal::Spent { listed: true }, format!("slack: {word}"));
     }
     if status.is_client_error() {
         let named = if word.is_empty() {
@@ -94,7 +100,7 @@ pub fn classify(
             word
         };
         return DeliveryError::terminal(
-            Terminal::Unknown,
+            Terminal::Spent { listed: false },
             format!("slack returned {status}: {named}"),
         );
     }
@@ -461,17 +467,36 @@ mod tests {
             DeliveryError::Transient { .. } | DeliveryError::Held { .. } => None,
         };
         for word in RETIRE {
-            assert_eq!(class(404, word), Some(Terminal::Retire), "{word}");
-            assert_eq!(class(403, word), Some(Terminal::Retire), "{word}");
+            assert_eq!(
+                class(404, word),
+                Some(Terminal::Retire(Retirement::Revoked)),
+                "{word}"
+            );
+            assert_eq!(
+                class(403, word),
+                Some(Terminal::Retire(Retirement::Revoked)),
+                "{word}"
+            );
         }
         for word in BAD_TARGET {
-            assert_eq!(class(404, word), Some(Terminal::BadTarget), "{word}");
+            assert_eq!(
+                class(404, word),
+                Some(Terminal::Retire(Retirement::Errored)),
+                "{word}"
+            );
         }
         for word in OUR_BUG {
-            assert_eq!(class(400, word), Some(Terminal::OurBug), "{word}");
+            assert_eq!(
+                class(400, word),
+                Some(Terminal::Spent { listed: true }),
+                "{word}"
+            );
         }
-        assert_eq!(class(400, "something_new"), Some(Terminal::Unknown));
-        assert_eq!(class(404, ""), Some(Terminal::Unknown));
+        assert_eq!(
+            class(400, "something_new"),
+            Some(Terminal::Spent { listed: false })
+        );
+        assert_eq!(class(404, ""), Some(Terminal::Spent { listed: false }));
         assert_eq!(class(500, "server_error"), None);
         assert_eq!(class(502, ""), None);
         assert_eq!(class(429, "rate_limited"), None);

@@ -878,8 +878,8 @@ pub async fn test_connector(
             None
         }
         Err(DeliveryError::Terminal { class, reason, .. }) => {
-            if matches!(class, Terminal::Retire | Terminal::BadTarget) {
-                delivery::retire(&state, id, class, &reason).await?;
+            if let Terminal::Retire(to) = class {
+                delivery::retire(&state, id, to, &reason).await?;
             }
             Some(reason)
         }
@@ -1172,10 +1172,13 @@ async fn record_redelivery_outcome(
     )
     .await?;
     tx.commit().await?;
-    if let Err(DeliveryError::Terminal { class, reason, .. }) = &sent.result
-        && matches!(class, Terminal::Retire | Terminal::BadTarget)
+    if let Err(DeliveryError::Terminal {
+        class: Terminal::Retire(to),
+        reason,
+        ..
+    }) = &sent.result
     {
-        delivery::retire(state, id, *class, reason).await?;
+        delivery::retire(state, id, *to, reason).await?;
     }
     tracing::info!(
         connection_id = %id,

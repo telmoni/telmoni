@@ -22,9 +22,9 @@ use tokio::sync::Semaphore;
 use uuid::Uuid;
 
 use crate::AppState;
-use crate::connector::{ConnectionStatus, Connector, DeliveryError, Event, Terminal};
+use crate::connector::{ConnectionStatus, Connector, DeliveryError, Event, Retirement, Terminal};
 use crate::db::{
-    self, AttemptTrigger, FailedAttempt, LeasedDelivery, NewAttempt, NotificationsLane,
+    self, AttemptTrigger, FailedAttempt, Failure, LeasedDelivery, NewAttempt, NotificationsLane,
     SealedConnection,
 };
 use crate::notify;
@@ -299,14 +299,14 @@ fn connector_for(
     let provider = connection.provider;
     state.connectors.get(provider).ok_or_else(|| {
         DeliveryError::terminal(
-            Terminal::OurBug,
+            Terminal::Spent { listed: true },
             format!("{provider} is not configured on this deployment"),
         )
     })
 }
 
 /// Unwrap a connection's data key and open its sealed fields. A connection
-/// this build cannot open is [`Terminal::OurBug`]; a KEK that cannot be
+/// this build cannot open is spent; a KEK that cannot be
 /// REACHED is [`DeliveryError::Held`], because it may open next tick.
 pub async fn open(
     state: &AppState,
@@ -315,7 +315,7 @@ pub async fn open(
     let connector = connector_for(state, connection)?;
     let Some(kek) = state.kek.as_ref() else {
         return Err(DeliveryError::terminal(
-            Terminal::OurBug,
+            Terminal::Spent { listed: true },
             "CONNECTOR_KEK is not configured; the stored URL cannot be opened",
         ));
     };
@@ -332,21 +332,23 @@ pub async fn open(
                 message: format!("kek unavailable: {why}"),
             },
             KekError::Invalid(why) => DeliveryError::terminal(
-                Terminal::OurBug,
+                Terminal::Spent { listed: true },
                 format!("the row's wrapped key would not open: {why}"),
             ),
         })?;
     let url = state
         .vault
         .open(&dek, &connection.target(), connection.id.as_bytes())
-        .map_err(|e| DeliveryError::terminal(Terminal::OurBug, e.to_string()))?;
+        .map_err(|e| DeliveryError::terminal(Terminal::Spent { listed: true }, e.to_string()))?;
     let open_sealed = |sealed: Option<telmoni_shared::envelope::Sealed>| {
         sealed
             .map(|sealed| {
                 state
                     .vault
                     .open(&dek, &sealed, connection.id.as_bytes())
-                    .map_err(|e| DeliveryError::terminal(Terminal::OurBug, e.to_string()))
+                    .map_err(|e| {
+                        DeliveryError::terminal(Terminal::Spent { listed: true }, e.to_string())
+                    })
             })
             .transpose()
     };
@@ -459,7 +461,7 @@ enum Outcome {
     /// The connection is terminal; it and its whole queue go.
     Retire {
         connection_id: Uuid,
-        class: Terminal,
+        to: Retirement,
         reason: String,
         attempt: Option<NewAttempt>,
     },
@@ -582,20 +584,20 @@ async fn attempt_one(
             reason,
             status,
         }) => match class {
-            Terminal::Retire | Terminal::BadTarget => Outcome::Retire {
+            Terminal::Retire(to) => Outcome::Retire {
                 connection_id: delivery.connection_id,
-                class,
+                to,
                 reason,
                 attempt,
             },
-            Terminal::OurBug | Terminal::Unknown => {
+            Terminal::Spent { listed } => {
                 // The vendor's sentence goes to the row, never the log: a far
                 // end echoes what it was sent, which names people.
                 tracing::error!(
                     delivery_id = %delivery.id,
                     connection_id = %delivery.connection_id,
                     kind = %delivery.kind,
-                    class = ?class,
+                    listed,
                     status = ?status,
                     "delivery refused by the vendor for a reason retrying cannot fix"
                 );
@@ -625,8 +627,8 @@ async fn record(state: &Arc<AppState>, outcomes: Vec<Outcome>) -> Result<(), Tel
     let mut touched: Vec<Uuid> = Vec::new();
     let mut failures: Vec<FailedAttempt> = Vec::new();
     let mut held: HashMap<String, Vec<Uuid>> = HashMap::new();
-    let mut breaker: HashMap<Uuid, (i32, i32, String)> = HashMap::new();
-    let mut retires: Vec<(Uuid, Terminal, String)> = Vec::new();
+    let mut breaker: HashMap<Uuid, Breaker> = HashMap::new();
+    let mut retires: Vec<Retiring> = Vec::new();
     let mut attempts: Vec<NewAttempt> = Vec::new();
 
     for outcome in outcomes {
@@ -652,15 +654,16 @@ async fn record(state: &Arc<AppState>, outcomes: Vec<Outcome>) -> Result<(), Tel
                 failures.push(FailedAttempt {
                     id,
                     error: message.clone(),
-                    max_attempts: state.config.delivery_max_attempts,
-                    backoff_secs: wait,
+                    failure: Failure::Retry { after_secs: wait },
                 });
                 if let Some(limit) = breaker_limit {
-                    let entry = breaker
-                        .entry(connection_id)
-                        .or_insert_with(|| (0, limit, String::new()));
-                    entry.0 += 1;
-                    entry.2 = message;
+                    let entry = breaker.entry(connection_id).or_insert_with(|| Breaker {
+                        failures: 0,
+                        limit,
+                        last: String::new(),
+                    });
+                    entry.failures += 1;
+                    entry.last = message;
                 }
             }
             Outcome::Held { id, message } => held.entry(message).or_default().push(id),
@@ -673,18 +676,21 @@ async fn record(state: &Arc<AppState>, outcomes: Vec<Outcome>) -> Result<(), Tel
                 failures.push(FailedAttempt {
                     id,
                     error: reason,
-                    max_attempts: 0,
-                    backoff_secs: 0,
+                    failure: Failure::Spent,
                 });
             }
             Outcome::Retire {
                 connection_id,
-                class,
+                to,
                 reason,
                 attempt,
             } => {
                 attempts.extend(attempt);
-                retires.push((connection_id, class, reason));
+                retires.push(Retiring {
+                    connection_id,
+                    to,
+                    reason,
+                });
             }
         }
     }
@@ -695,7 +701,10 @@ async fn record(state: &Arc<AppState>, outcomes: Vec<Outcome>) -> Result<(), Tel
         note_rows_held(why);
     }
 
-    let tallies: Vec<(Uuid, i32)> = breaker.iter().map(|(&id, &(n, ..))| (id, n)).collect();
+    let tallies: Vec<(Uuid, i32)> = breaker
+        .iter()
+        .map(|(&id, breaker)| (id, breaker.failures))
+        .collect();
 
     let batch = Bookkeeping {
         delivered: &delivered,
@@ -725,23 +734,38 @@ async fn record(state: &Arc<AppState>, outcomes: Vec<Outcome>) -> Result<(), Tel
     }
 
     for (connection_id, count) in counts {
-        if let Some((_, limit, last)) = breaker.get(&connection_id)
+        if let Some(Breaker { limit, last, .. }) = breaker.get(&connection_id)
             && count >= *limit
         {
-            retires.push((
+            retires.push(Retiring {
                 connection_id,
-                Terminal::BadTarget,
-                format!("{count} deliveries in a row failed; the last answer was: {last}"),
-            ));
+                to: Retirement::Errored,
+                reason: format!("{count} deliveries in a row failed; the last answer was: {last}"),
+            });
         }
     }
 
-    retires.sort_by_key(|&(connection_id, ..)| connection_id);
-    retires.dedup_by_key(|&mut (connection_id, ..)| connection_id);
-    for (connection_id, class, reason) in retires {
-        retire(state, connection_id, class, &reason).await?;
+    retires.sort_by_key(|retiring| retiring.connection_id);
+    retires.dedup_by_key(|retiring| retiring.connection_id);
+    for retiring in retires {
+        retire(state, retiring.connection_id, retiring.to, &retiring.reason).await?;
     }
     Ok(())
+}
+
+/// A connection's failed sends in one batch, against its breaker.
+struct Breaker {
+    failures: i32,
+    limit: i32,
+    /// The last answer, kept for the retirement's reason.
+    last: String,
+}
+
+/// A connection the batch condemned, and why.
+struct Retiring {
+    connection_id: Uuid,
+    to: Retirement,
+    reason: String,
 }
 
 /// How many times a batch's bookkeeping is written before a deadlock is the
@@ -766,7 +790,7 @@ impl Bookkeeping<'_> {
         db::touch_connections(&mut tx, self.touched).await?;
         let counts = db::record_consecutive_failures(&mut tx, self.tallies).await?;
         db::mark_delivered(&mut tx, self.delivered).await?;
-        db::fail_deliveries(&mut tx, self.failures).await?;
+        db::fail_deliveries(&mut tx, self.failures, state.config.delivery_max_attempts).await?;
         let failed: Vec<Uuid> = self.failures.iter().map(|f| f.id).collect();
         db::count_routes(&mut tx, self.delivered, &failed).await?;
         for (why, ids) in self.held {
@@ -793,12 +817,10 @@ async fn log_attempts(state: &AppState, attempts: &[NewAttempt]) -> Result<(), T
 pub async fn retire(
     state: &Arc<AppState>,
     connection_id: Uuid,
-    class: Terminal,
+    to: Retirement,
     reason: &str,
 ) -> Result<(), TelmoniError> {
-    let Some(status) = class.retires_to() else {
-        return Ok(());
-    };
+    let status = to.status();
     let mut tx = maintenance_scope(&state.db, NotificationsLane).await?;
     let Some(retired) = db::retire_connection(&mut tx, connection_id, status, reason).await? else {
         tx.commit().await?;
@@ -814,7 +836,6 @@ pub async fn retire(
         project_id = %retired.project_id,
         provider = %retired.provider,
         status = %status,
-        class = ?class,
         failed,
         "connector retired on the far end's answer"
     );

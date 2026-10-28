@@ -27,8 +27,8 @@ use telmoni_shared::net_guard::{Egress, HostRejection, host_is_dialable};
 use telmoni_shared::{Redacted, TelmoniError};
 
 use super::{
-    Connector, DeliveryError, Event, Provider, TearDownError, Terminal, parse_retry_after, refused,
-    short_body,
+    Connector, DeliveryError, Event, Provider, Retirement, TearDownError, Terminal,
+    parse_retry_after, refused, short_body,
 };
 
 /// The header a receiver reads for the signature.
@@ -148,7 +148,7 @@ pub fn classify(
         format!("endpoint returned {status}: {body}")
     };
     if status == reqwest::StatusCode::GONE {
-        return DeliveryError::terminal(Terminal::BadTarget, message);
+        return DeliveryError::terminal(Terminal::Retire(Retirement::Errored), message);
     }
     DeliveryError::transient_after(message, retry_after)
 }
@@ -181,14 +181,14 @@ impl Connector for WebhookConnector {
     ) -> Result<u16, DeliveryError> {
         let Some(secret) = token else {
             return Err(DeliveryError::terminal(
-                Terminal::OurBug,
+                Terminal::Spent { listed: true },
                 "the webhook row holds no signing secret",
             ));
         };
         let now = chrono::Utc::now();
         let body = serde_json::to_vec(&render(event, now)).map_err(|e| {
             DeliveryError::terminal(
-                Terminal::OurBug,
+                Terminal::Spent { listed: true },
                 format!("payload would not serialise: {e}"),
             )
         })?;
@@ -350,7 +350,7 @@ mod tests {
         assert!(matches!(
             classify(reqwest::StatusCode::GONE, "", None),
             DeliveryError::Terminal {
-                class: Terminal::BadTarget,
+                class: Terminal::Retire(Retirement::Errored),
                 ..
             }
         ));

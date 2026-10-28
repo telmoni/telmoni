@@ -102,9 +102,9 @@ pub enum ConnectionStatus {
     /// Sent to: where a connection starts, and where a reconnect or a
     /// rotation puts it back.
     Active,
-    /// Its target refuses posts; see [`Terminal::BadTarget`].
+    /// Its target refuses posts; see [`Retirement::Errored`].
     Errored,
-    /// Its installation is dead; see [`Terminal::Retire`].
+    /// Its installation is dead; see [`Retirement::Revoked`].
     Revoked,
 }
 
@@ -114,31 +114,37 @@ telmoni_shared::wire_enum!(ConnectionStatus {
     Revoked => "revoked",
 });
 
-/// Why a terminal failure is terminal, and so what to do to the connection.
+/// Why a terminal failure is terminal, and so what it does to the connection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Terminal {
-    /// The installation is dead. The connection is `revoked`, its queue
-    /// failed, and the project told; reconnecting is the only cure.
-    Retire,
-    /// The target refuses posts — archived, gone, a tripped breaker, a host we
-    /// will not dial — while the install stands. `errored`; a reconnect or a
-    /// rotation brings it back.
-    BadTarget,
-    /// The vendor refused the body. The delivery fails, the connection is
-    /// untouched, and it logs at `error!` because the fix is a code change.
-    OurBug,
-    /// A 4xx whose body names nothing in the table. Treated as [`Self::OurBug`]
-    Unknown,
+    /// The connection goes to the status it names, its queue failed with it,
+    /// and the project told.
+    Retire(Retirement),
+    /// The row fails and the connection stands: the vendor refused the body.
+    /// `listed` when the answer is one the table names, which a code change
+    /// fixes, so it logs at `error!`; a 4xx whose body names nothing in the
+    /// table is treated the same, unlisted.
+    Spent { listed: bool },
 }
 
-impl Terminal {
-    /// What the connection becomes on this answer; `None` leaves it standing.
+/// A retired connection's status: never `active`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Retirement {
+    /// The installation is dead; reconnecting is the only cure.
+    Revoked,
+    /// The target refuses posts — archived, gone, a tripped breaker, a host
+    /// we will not dial — while the install stands; a reconnect or a
+    /// rotation brings it back.
+    Errored,
+}
+
+impl Retirement {
+    /// The status the connection is left at.
     #[must_use]
-    pub const fn retires_to(self) -> Option<ConnectionStatus> {
+    pub const fn status(self) -> ConnectionStatus {
         match self {
-            Self::Retire => Some(ConnectionStatus::Revoked),
-            Self::BadTarget => Some(ConnectionStatus::Errored),
-            Self::OurBug | Self::Unknown => None,
+            Self::Revoked => ConnectionStatus::Revoked,
+            Self::Errored => ConnectionStatus::Errored,
         }
     }
 }
@@ -231,9 +237,12 @@ pub fn loggable_status(status: Option<u16>) -> Option<u16> {
     status.filter(|code| (100..=599).contains(code))
 }
 
-/// A host the guard refused at the send: `BadTarget`, and the page says so.
+/// A host the guard refused at the send: `errored`, and the page says so.
 pub(crate) fn refused(why: HostRejection) -> DeliveryError {
-    DeliveryError::terminal(Terminal::BadTarget, format!("the target {why}"))
+    DeliveryError::terminal(
+        Terminal::Retire(Retirement::Errored),
+        format!("the target {why}"),
+    )
 }
 
 /// A host the guard refused on a non-delivery hop: a 500, since the host came
@@ -438,20 +447,11 @@ mod tests {
         }
     }
 
-    /// The statuses `Terminal`'s variants promise; the other two answers leave
-    /// the connection standing.
+    /// The statuses a retirement promises, neither of them `active`.
     #[test]
-    fn a_terminal_answer_retires_to_the_status_it_promises() {
-        assert_eq!(
-            Terminal::Retire.retires_to(),
-            Some(ConnectionStatus::Revoked)
-        );
-        assert_eq!(
-            Terminal::BadTarget.retires_to(),
-            Some(ConnectionStatus::Errored)
-        );
-        assert_eq!(Terminal::OurBug.retires_to(), None);
-        assert_eq!(Terminal::Unknown.retires_to(), None);
+    fn a_retirement_names_the_status_it_promises() {
+        assert_eq!(Retirement::Revoked.status(), ConnectionStatus::Revoked);
+        assert_eq!(Retirement::Errored.status(), ConnectionStatus::Errored);
     }
 
     /// The webhook is connected by a URL, so there is no handshake to start.
@@ -497,7 +497,7 @@ mod tests {
     fn both_variants_surface_their_reason() {
         assert_eq!(DeliveryError::transient("a").message(), "a");
         assert_eq!(
-            DeliveryError::terminal(Terminal::Retire, "b").message(),
+            DeliveryError::terminal(Terminal::Retire(Retirement::Revoked), "b").message(),
             "b"
         );
     }

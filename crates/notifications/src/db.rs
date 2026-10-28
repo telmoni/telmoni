@@ -1392,7 +1392,7 @@ pub async fn count_routes(
              SELECT route, connection_id, project_id, organization_id, count(*)::int,
                     CASE WHEN count(*) >= $2 THEN now() END
                FROM notifications.deliveries
-              WHERE id = ANY($1) AND route IS NOT NULL AND status = 'failed'
+              WHERE id = ANY($1) AND route IS NOT NULL AND status = $3
               GROUP BY route, connection_id, project_id, organization_id
              ON CONFLICT (route, connection_id) DO UPDATE
                 SET failures = routes.failures + EXCLUDED.failures,
@@ -1403,6 +1403,7 @@ pub async fn count_routes(
         )
         .bind(failed)
         .bind(ROUTE_FAILURES_MUTE)
+        .bind(DeliveryStatus::Failed)
         .execute(tx.conn())
         .await?;
     }
@@ -1539,7 +1540,7 @@ pub async fn lease_deliveries(
     sqlx::query_as::<_, LeasedDelivery>(sqlx::AssertSqlSafe(format!(
         "WITH candidate AS (
             SELECT d.id FROM notifications.deliveries d
-             WHERE d.status = 'pending'
+             WHERE d.status = $3
                AND d.next_attempt_at <= now()
                AND (d.lease_until IS NULL OR d.lease_until < now())
              LIMIT $1
@@ -1555,6 +1556,7 @@ pub async fn lease_deliveries(
     )))
     .bind(limit)
     .bind(lease_secs)
+    .bind(DeliveryStatus::Pending)
     .fetch_all(tx.conn())
     .await
 }
@@ -1572,7 +1574,7 @@ pub async fn lease_delivery(
                 lease_until = now() + make_interval(secs => $2::bigint),
                 updated_at = now()
           WHERE d.id = $1
-            AND d.status = 'pending'
+            AND d.status = $4
             AND (d.lease_until IS NULL OR d.lease_until < now())
             AND EXISTS (
                 SELECT 1 FROM notifications.connections c
@@ -1583,6 +1585,7 @@ pub async fn lease_delivery(
     .bind(id)
     .bind(lease_secs)
     .bind(ConnectionStatus::Active)
+    .bind(DeliveryStatus::Pending)
     .fetch_optional(tx.conn())
     .await
 }
@@ -1599,10 +1602,11 @@ pub async fn mark_delivered(
     }
     sqlx::query(
         "UPDATE notifications.deliveries
-            SET status = 'delivered', lease_until = NULL, last_error = NULL, updated_at = now()
+            SET status = $2, lease_until = NULL, last_error = NULL, updated_at = now()
           WHERE id = ANY($1)",
     )
     .bind(ids)
+    .bind(DeliveryStatus::Delivered)
     .execute(tx.conn())
     .await?;
     Ok(())
@@ -1614,14 +1618,24 @@ pub async fn mark_delivered(
 pub struct FailedAttempt {
     pub id: Uuid,
     pub error: String,
-    pub max_attempts: i32,
-    pub backoff_secs: i64,
+    pub failure: Failure,
 }
 
-/// Record every failed attempt in a batch, one statement.
+/// What a failed attempt does to its row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Failure {
+    /// Back to `pending` after the wait, while the budget lasts.
+    Retry { after_secs: i64 },
+    /// Terminal now, whatever the budget.
+    Spent,
+}
+
+/// Record every failed attempt in a batch, one statement: a row spent, or
+/// at `max_attempts`, has failed; the rest wait their backoff.
 pub async fn fail_deliveries(
     tx: &mut Scoped<'_, Maintenance<NotificationsLane>>,
     failures: &[FailedAttempt],
+    max_attempts: i32,
 ) -> sqlx::Result<()> {
     if failures.is_empty() {
         return Ok(());
@@ -1633,25 +1647,37 @@ pub async fn fail_deliveries(
             telmoni_shared::text::truncate_on_char_boundary(&f.error, LAST_ERROR_MAX).to_owned()
         })
         .collect();
-    let budgets: Vec<i32> = failures.iter().map(|f| f.max_attempts).collect();
-    let waits: Vec<i64> = failures.iter().map(|f| f.backoff_secs).collect();
+    let spent: Vec<bool> = failures
+        .iter()
+        .map(|f| f.failure == Failure::Spent)
+        .collect();
+    let waits: Vec<i64> = failures
+        .iter()
+        .map(|f| match f.failure {
+            Failure::Retry { after_secs } => after_secs,
+            Failure::Spent => 0,
+        })
+        .collect();
     sqlx::query(
         "UPDATE notifications.deliveries d
-            SET status = CASE WHEN d.attempts >= f.max_attempts THEN 'failed' ELSE 'pending' END,
-                next_attempt_at = CASE WHEN d.attempts >= f.max_attempts
+            SET status = CASE WHEN f.spent OR d.attempts >= $5 THEN $6 ELSE $7 END,
+                next_attempt_at = CASE WHEN f.spent OR d.attempts >= $5
                     THEN d.next_attempt_at
                     ELSE now() + make_interval(secs => f.backoff_secs::double precision) END,
                 lease_until = NULL,
                 last_error = f.error,
                 updated_at = now()
-           FROM unnest($1::uuid[], $2::text[], $3::int4[], $4::int8[])
-                AS f(id, error, max_attempts, backoff_secs)
-          WHERE d.id = f.id AND d.status = 'pending'",
+           FROM unnest($1::uuid[], $2::text[], $3::bool[], $4::int8[])
+                AS f(id, error, spent, backoff_secs)
+          WHERE d.id = f.id AND d.status = $7",
     )
     .bind(&ids)
     .bind(&errors)
-    .bind(&budgets)
+    .bind(&spent)
     .bind(&waits)
+    .bind(max_attempts)
+    .bind(DeliveryStatus::Failed)
+    .bind(DeliveryStatus::Pending)
     .execute(tx.conn())
     .await?;
     Ok(())
@@ -1674,13 +1700,14 @@ pub async fn unlease_deliveries(
                 lease_until = NULL,
                 last_error = $2,
                 updated_at = now()
-          WHERE id = ANY($1) AND status = 'pending'",
+          WHERE id = ANY($1) AND status = $3",
     )
     .bind(ids)
     .bind(telmoni_shared::text::truncate_on_char_boundary(
         error,
         LAST_ERROR_MAX,
     ))
+    .bind(DeliveryStatus::Pending)
     .execute(tx.conn())
     .await?;
     Ok(())
@@ -1707,14 +1734,16 @@ pub async fn fail_pending_for_connections(
     }
     let done = sqlx::query(
         "UPDATE notifications.deliveries
-            SET status = 'failed', lease_until = NULL, last_error = $2, updated_at = now()
-          WHERE connection_id = ANY($1) AND status = 'pending'",
+            SET status = $3, lease_until = NULL, last_error = $2, updated_at = now()
+          WHERE connection_id = ANY($1) AND status = $4",
     )
     .bind(connection_ids)
     .bind(telmoni_shared::text::truncate_on_char_boundary(
         reason,
         LAST_ERROR_MAX,
     ))
+    .bind(DeliveryStatus::Failed)
+    .bind(DeliveryStatus::Pending)
     .execute(tx.conn())
     .await?;
     Ok(done.rows_affected())
@@ -2037,8 +2066,8 @@ pub async fn finish_redelivery(
 ) -> sqlx::Result<bool> {
     let settled = sqlx::query(
         "UPDATE notifications.deliveries
-            SET status = CASE WHEN $4::text IS NULL THEN 'delivered' ELSE status END,
-                updated_at = CASE WHEN $4::text IS NULL AND status <> 'delivered'
+            SET status = CASE WHEN $4::text IS NULL THEN $5 ELSE status END,
+                updated_at = CASE WHEN $4::text IS NULL AND status <> $5
                     THEN now() ELSE updated_at END,
                 last_error = $4,
                 lease_until = NULL
@@ -2048,6 +2077,7 @@ pub async fn finish_redelivery(
     .bind(project_id)
     .bind(claim.lease_until)
     .bind(error.map(|e| telmoni_shared::text::truncate_on_char_boundary(e, LAST_ERROR_MAX)))
+    .bind(DeliveryStatus::Delivered)
     .execute(tx.conn())
     .await?
     .rows_affected();
@@ -2125,7 +2155,7 @@ pub async fn sweep_connector_rows(
         "DELETE FROM notifications.deliveries
           WHERE id IN (
               SELECT id FROM notifications.deliveries
-               WHERE status IN ('delivered', 'failed')
+               WHERE status IN ($3, $4)
                  AND updated_at < now() - make_interval(days => $1)
                  AND (lease_until IS NULL OR lease_until < now())
                LIMIT $2
@@ -2133,6 +2163,8 @@ pub async fn sweep_connector_rows(
     )
     .bind(delivery_retention_days)
     .bind(chunk)
+    .bind(DeliveryStatus::Delivered)
+    .bind(DeliveryStatus::Failed)
     .execute(tx.conn())
     .await?
     .rows_affected();
@@ -2304,8 +2336,9 @@ pub async fn queue_stats(
     sqlx::query_as(
         "SELECT count(*), extract(epoch FROM (now() - min(next_attempt_at)))::bigint
            FROM notifications.deliveries
-          WHERE status = 'pending'",
+          WHERE status = $1",
     )
+    .bind(DeliveryStatus::Pending)
     .fetch_one(tx.conn())
     .await
 }
