@@ -1,19 +1,8 @@
 "use client";
 
-import { useId, useState, useTransition, type ComponentProps, type ReactNode } from "react";
-import {
-  BookmarkIcon,
-  CheckIcon,
-  ChevronDownIcon,
-  PencilIcon,
-  PlusIcon,
-  SaveIcon,
-  SlidersHorizontalIcon,
-  Trash2Icon,
-  XIcon,
-} from "lucide-react";
-import Link from "next/link";
-import { toast } from "sonner";
+import { useId, useState, type ComponentProps, type ReactNode } from "react";
+import { SlidersHorizontalIcon, XIcon } from "lucide-react";
+import { useSearchParams } from "next/navigation";
 
 import {
   deleteTraceViewAction,
@@ -21,10 +10,8 @@ import {
   setSessionLayoutAction,
   updateTraceViewAction,
 } from "@/app/(app)/[organization]/[project]/traces/actions";
-import { ConfirmDialog } from "@/components/confirm-dialog";
-import { NameDialog } from "@/components/traces/views-menu";
+import { SavedMenu, useAnnounced } from "@/components/traces/saved-menu";
 import { useLayout, type LayoutPage } from "@/components/traces/use-layout";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -41,7 +28,6 @@ import {
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
@@ -68,7 +54,6 @@ import {
   withLayoutParams,
   type LayoutFilter,
 } from "@/lib/layout";
-import type { TraceLayout } from "@/lib/server/data";
 import { KIND_LABEL, STATUS_LABEL, TRACE_COLUMNS, TRACE_ID_COLUMN, orderedColumns } from "@/lib/traces";
 import {
   LayoutDepth,
@@ -78,7 +63,6 @@ import {
   ViewKind,
   type TraceColumn,
 } from "@/lib/types/enums";
-import { cn } from "@/lib/utils";
 
 // The layout a session's page and a trace's open in, in the page header's
 // action: Customize, which changes any option from the default or from the
@@ -519,9 +503,9 @@ function CallsDialog({
  *  them, and set what the project opens in. */
 function LayoutsMenu({ projectId, layouts, project, canSave, layout }: Props & { layout: Layout }) {
   const { options, current, isEdited, applyLayout } = layout;
-  const [, start] = useTransition();
-  const [naming, setNaming] = useState<"new" | "rename" | null>(null);
-  const [deleting, setDeleting] = useState(false);
+  const search = useSearchParams();
+  const announce = useAnnounced();
+  // The page's layout as it stands, under `name`.
   const input = (name: string) => ({
     name,
     kind: ViewKind.Layout,
@@ -529,201 +513,72 @@ function LayoutsMenu({ projectId, layouts, project, canSave, layout }: Props & {
     columns: [...options.columns],
   });
 
-  const saveOver = (saved: TraceLayout) =>
-    start(async () => {
-      const result = await updateTraceViewAction(projectId, saved.id, input(saved.name));
-      if (!result.ok) {
-        toast.error(result.error);
-        return;
-      }
-      toast.success(`Saved “${saved.name}”`);
-    });
-
-  // A layout deleted from the page it opened takes the page back to the
-  // layout it would otherwise open in, in the action itself, whose redirect
-  // rejects the call and goes on to the router; only a refusal answers here.
-  const remove = (saved: TraceLayout) =>
-    start(async () => {
-      const result = await deleteTraceViewAction(projectId, saved.id);
-      if (!result.ok) {
-        toast.error(result.error);
-        return;
-      }
-      toast.success(`Deleted “${saved.name}”`);
-    });
-
-  const setDefault = (value: string) =>
-    start(async () => {
-      const viewId = value === DEFAULT_CHOICE ? null : value;
-      const result = await setSessionLayoutAction(projectId, { view_id: viewId });
-      if (!result.ok) {
-        toast.error(result.error);
-        return;
-      }
-      const name = viewId
-        ? `“${layouts?.find((l) => l.id === viewId)?.name ?? "the layout"}”`
-        : DEFAULT_LAYOUT_NAME;
-      toast.success(`The project opens in ${name}`);
-    });
-
+  const setDefault = (value: string) => {
+    const viewId = value === DEFAULT_CHOICE ? null : value;
+    const name = viewId
+      ? `“${layouts?.find((l) => l.id === viewId)?.name ?? "the layout"}”`
+      : DEFAULT_LAYOUT_NAME;
+    announce(
+      () => setSessionLayoutAction(projectId, { view_id: viewId }),
+      `The project opens in ${name}`,
+    );
+  };
   const defaultValue = project ? (project.view_id ?? DEFAULT_CHOICE) : "";
 
   return (
-    <>
-      {/* Not modal: an item here opens a dialog, and a modal menu closing as
-          the dialog opens would leave the page's pointer events locked. */}
-      <DropdownMenu modal={false}>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="outline"
-            aria-label={current ? `Saved layout: ${current.name}` : "Saved layouts"}
-          >
-            <BookmarkIcon />
-            <span className="max-w-40 truncate">{current ? current.name : "Layouts"}</span>
-            {current && isEdited && (
-              <span aria-hidden="true" title="Changed since it was saved">
-                *
-              </span>
-            )}
-            <Badge variant="secondary" className="px-1.5 tabular-nums">
-              {layouts?.length ?? 0}
-            </Badge>
-            <ChevronDownIcon className="text-muted-foreground" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="w-72">
-          <DropdownMenuLabel>Saved layouts</DropdownMenuLabel>
-          {layouts === null ? (
-            <DropdownMenuItem disabled>The layouts could not be read</DropdownMenuItem>
-          ) : layouts.length === 0 ? (
-            <DropdownMenuItem disabled>No saved layouts yet</DropdownMenuItem>
-          ) : (
-            // Each a link, so a layout opens as any page does — in a new tab
-            // as well; a plain click applies it in place.
-            layouts.map((saved) => {
-              const applied = saved.id === current?.id;
-              return (
-                <DropdownMenuItem key={saved.id} asChild>
-                  <Link
-                    href={withLayoutParams(
-                      typeof window === "undefined" ? "" : window.location.search,
-                      choiceOfLayout(saved),
-                      false,
-                    )}
-                    scroll={false}
-                    onClick={(event) => {
-                      if (!plainClick(event)) return;
-                      event.preventDefault();
-                      applyLayout(saved);
-                    }}
-                    aria-current={applied ? "true" : undefined}
-                  >
-                    <CheckIcon className={cn(!applied && "invisible")} aria-hidden="true" />
-                    <span className="truncate">{saved.name}</span>
-                  </Link>
-                </DropdownMenuItem>
-              );
-            })
-          )}
-          <DropdownMenuSeparator />
-          <DropdownMenuItem disabled={!canSave || layouts === null} onSelect={() => setNaming("new")}>
-            <PlusIcon />
-            Save as a new layout…
-          </DropdownMenuItem>
-          {current && (
-            <>
-              <DropdownMenuItem disabled={!canSave || !isEdited} onSelect={() => saveOver(current)}>
-                <SaveIcon />
-                <span className="truncate">Save changes to “{current.name}”</span>
-              </DropdownMenuItem>
-              <DropdownMenuItem disabled={!canSave} onSelect={() => setNaming("rename")}>
-                <PencilIcon />
-                Rename…
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                variant="destructive"
-                disabled={!canSave}
-                onSelect={() => setDeleting(true)}
-              >
-                <Trash2Icon />
-                <span className="truncate">Delete “{current.name}”</span>
-              </DropdownMenuItem>
-            </>
-          )}
-          <DropdownMenuSeparator />
-          <DropdownMenuSub>
-            <DropdownMenuSubTrigger disabled={!canSave || project === null}>
-              The project opens in
-            </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent className="w-56">
-              <DropdownMenuRadioGroup value={defaultValue} onValueChange={setDefault}>
-                <DropdownMenuRadioItem value={DEFAULT_CHOICE}>The default layout</DropdownMenuRadioItem>
-                {layouts && layouts.length > 0 && <DropdownMenuSeparator />}
-                {layouts?.map((saved) => (
-                  <DropdownMenuRadioItem key={saved.id} value={saved.id}>
-                    <span className="truncate">{saved.name}</span>
-                  </DropdownMenuRadioItem>
-                ))}
-              </DropdownMenuRadioGroup>
-            </DropdownMenuSubContent>
-          </DropdownMenuSub>
-          {!canSave && (
-            <p className="px-2 py-1.5 text-xs text-muted-foreground">
-              Owners and admins save layouts and set the project&rsquo;s; everyone on the
-              project applies them.
-            </p>
-          )}
-        </DropdownMenuContent>
-      </DropdownMenu>
-
-      <NameDialog
-        key={`${naming ?? "closed"}:${current?.id ?? ""}`}
-        open={naming !== null}
-        onOpenChange={(open) => !open && setNaming(null)}
-        title={naming === "rename" ? "Rename the layout" : "Save as a new layout"}
-        description={
-          naming === "rename"
-            ? "The layout keeps its options and columns."
-            : "Everyone on the project can open it from Layouts: this page's depth, what starts open, the timeline, columns, pinned spans and calls shown, under a name."
-        }
-        initial={naming === "rename" ? (current?.name ?? "") : ""}
-        submitLabel={naming === "rename" ? "Rename" : "Save layout"}
-        onSubmit={async (name) => {
-          if (naming === "rename" && current) {
-            const result = await updateTraceViewAction(projectId, current.id, {
-              name,
-              kind: ViewKind.Layout,
-              query: current.query,
-              columns: current.columns,
-            });
-            if (!result.ok) return result.error;
-            toast.success(`Renamed to “${name}”`);
-            return null;
-          }
-          // A layout saved opens the page on it in the action itself, whose
-          // redirect goes on to the router; only a refusal answers here.
-          const result = await saveTraceViewAction(projectId, input(name));
-          if (!result.ok) return result.error;
-          toast.success(`Saved “${name}”`);
-          return null;
-        }}
-      />
-
-      {current && (
-        <ConfirmDialog
-          open={deleting}
-          onOpenChange={setDeleting}
-          title={`Delete “${current.name}”?`}
-          description={
-            project?.view_id === current.id
-              ? "It goes for everyone on the project, which then opens in the default layout again."
-              : "It goes for everyone on the project. The traces it showed are not touched."
-          }
-          confirmLabel="Delete layout"
-          destructive
-          onConfirm={() => remove(current)}
-        />
-      )}
-    </>
+    <SavedMenu
+      noun="layout"
+      saved={layouts}
+      current={current}
+      edited={isEdited}
+      canSave={canSave}
+      hrefOf={(saved) => withLayoutParams(search.toString(), choiceOfLayout(saved), false)}
+      // A plain click applies it in place; any other opens it as a page.
+      onFollow={(saved, event) => {
+        if (!plainClick(event)) return;
+        event.preventDefault();
+        applyLayout(saved);
+      }}
+      saveNew={(name) => saveTraceViewAction(projectId, input(name))}
+      saveOver={(saved) => updateTraceViewAction(projectId, saved.id, input(saved.name))}
+      rename={(saved, name) =>
+        updateTraceViewAction(projectId, saved.id, {
+          name,
+          kind: ViewKind.Layout,
+          query: saved.query,
+          columns: saved.columns,
+        })
+      }
+      remove={(saved) => deleteTraceViewAction(projectId, saved.id)}
+      words={{
+        holds:
+          "this page's depth, what starts open, the timeline, columns, pinned spans and calls shown",
+        keeps: "its options and columns",
+        whoSaves:
+          "Owners and admins save layouts and set the project’s; everyone on the project applies them.",
+        deleting: (saved) =>
+          project?.view_id === saved.id
+            ? "It goes for everyone on the project, which then opens in the default layout again."
+            : "It goes for everyone on the project. The traces it showed are not touched.",
+      }}
+    >
+      <DropdownMenuSeparator />
+      <DropdownMenuSub>
+        <DropdownMenuSubTrigger disabled={!canSave || project === null}>
+          The project opens in
+        </DropdownMenuSubTrigger>
+        <DropdownMenuSubContent className="w-56">
+          <DropdownMenuRadioGroup value={defaultValue} onValueChange={setDefault}>
+            <DropdownMenuRadioItem value={DEFAULT_CHOICE}>The default layout</DropdownMenuRadioItem>
+            {layouts && layouts.length > 0 && <DropdownMenuSeparator />}
+            {layouts?.map((saved) => (
+              <DropdownMenuRadioItem key={saved.id} value={saved.id}>
+                <span className="truncate">{saved.name}</span>
+              </DropdownMenuRadioItem>
+            ))}
+          </DropdownMenuRadioGroup>
+        </DropdownMenuSubContent>
+      </DropdownMenuSub>
+    </SavedMenu>
   );
 }
