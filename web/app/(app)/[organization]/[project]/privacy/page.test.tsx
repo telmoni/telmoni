@@ -83,7 +83,7 @@ beforeEach(() => {
 
 describe("PrivacyPage", () => {
   it("shows the project's content mode, and where it is changed", async () => {
-    render(await PrivacyPage({ params: PARAMS }));
+    render(await PrivacyPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByTestId("page-header")).toHaveTextContent("Privacy");
     expect(screen.getByText("Off")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Settings" })).toHaveAttribute(
@@ -93,7 +93,7 @@ describe("PrivacyPage", () => {
   });
 
   it("lists every row the server holds, by the project's id, with the pinned commit", async () => {
-    render(await PrivacyPage({ params: PARAMS }));
+    render(await PrivacyPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(fetchProjectBySlug).toHaveBeenCalledWith("my-project");
     expect(fetchFieldInventory).toHaveBeenCalledWith("project_7bQx2mNv9BcK4dLp");
     expect(fetchContentMode).toHaveBeenCalledWith("project_7bQx2mNv9BcK4dLp");
@@ -113,7 +113,7 @@ describe("PrivacyPage", () => {
   it("says so when the inventory or the mode cannot be read, and keeps the rest", async () => {
     mockInventory = null;
     mockContentMode = null;
-    render(await PrivacyPage({ params: PARAMS }));
+    render(await PrivacyPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByText("The inventory could not be read.")).toBeInTheDocument();
     expect(
       screen.getByText("This project's content mode could not be read. Reload to try again."),
@@ -123,7 +123,7 @@ describe("PrivacyPage", () => {
 
   it("renders ServiceUnavailable when context fails", async () => {
     mockContext = null;
-    render(await PrivacyPage({ params: PARAMS }));
+    render(await PrivacyPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByTestId("outage")).toBeInTheDocument();
   });
 });

@@ -266,7 +266,7 @@ afterEach(() => {
 
 describe("SessionPage", () => {
   it("sums the session and replays its runs in order as turns of a conversation, each opening its trace", async () => {
-    render(await SessionPage({ params: PARAMS }));
+    render(await SessionPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByTestId("page-header")).toHaveTextContent("Session");
     expect(screen.getByTestId("page-header")).toHaveAttribute("data-back", "/acme/web/sessions");
     expect(fetchSession).toHaveBeenCalledWith("project_7bQx2mNv9BcK4dLp", SESSION, {}, []);
@@ -378,12 +378,12 @@ describe("SessionPage", () => {
 
   it("opens in the project's default layout where the link names none", async () => {
     mockSetting = { view_id: FULL_ID };
-    render(await SessionPage({ params: PARAMS }));
+    render(await SessionPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByRole("button", { name: "Saved layout: Full" })).toBeInTheDocument();
     expect(screen.getByRole("table")).toHaveTextContent("Agent");
     cleanup();
     mockSetting = { view_id: LAYOUT_ID };
-    render(await SessionPage({ params: PARAMS }));
+    render(await SessionPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(fetchSession).toHaveBeenLastCalledWith("project_7bQx2mNv9BcK4dLp", SESSION, {}, ["answer"]);
     expect(screen.getByRole("button", { name: "Saved layout: Review" })).toBeInTheDocument();
   });
@@ -412,7 +412,7 @@ describe("SessionPage", () => {
 
   it("says when no run of the window belonged to the session, and leads back", async () => {
     mockSession = { kind: "missing" };
-    render(await SessionPage({ params: PARAMS }));
+    render(await SessionPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByText(/No session with this id/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Back to the sessions" })).toHaveAttribute(
       "href",
@@ -423,20 +423,20 @@ describe("SessionPage", () => {
 
   it("sends a refused role back to the project's overview, and says so on an outage", async () => {
     mockSession = { kind: "forbidden" };
-    render(await SessionPage({ params: PARAMS }));
+    render(await SessionPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByRole("link", { name: "Back to overview" })).toHaveAttribute(
       "href",
       "/acme/web",
     );
 
     mockSession = { kind: "unavailable" };
-    render(await SessionPage({ params: PARAMS }));
+    render(await SessionPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByTestId("outage")).toBeInTheDocument();
   });
 
   it("renders ServiceUnavailable when context fails", async () => {
     mockContext = null;
-    render(await SessionPage({ params: PARAMS }));
+    render(await SessionPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByTestId("outage")).toBeInTheDocument();
   });
 });

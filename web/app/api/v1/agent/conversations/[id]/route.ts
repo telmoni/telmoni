@@ -9,7 +9,7 @@ import { openAgentConversation } from "@/lib/server/entities/agent";
 // Handler rather than a Server Action (`../../status`).
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> },
+  { params }: RouteContext<"/api/v1/agent/conversations/[id]">,
 ) {
   const { id } = await params;
   const projectId = request.nextUrl.searchParams.get("project") ?? "";

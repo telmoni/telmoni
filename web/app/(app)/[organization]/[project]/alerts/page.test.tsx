@@ -323,7 +323,7 @@ function contrast(one: number[], other: number[]): number {
 
 describe("AlertsPage", () => {
   it("offers a new alert and a mute over all", async () => {
-    render(await AlertsPage({ params: PARAMS }));
+    render(await AlertsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(fetchAlerts).toHaveBeenCalledWith("project_7bQx2mNv9BcK4dLp");
     const header = screen.getByTestId("page-header");
     // The title takes the focus a control hands it as its alert goes.
@@ -339,7 +339,7 @@ describe("AlertsPage", () => {
   });
 
   it("draws every alert with its metric, filters, window, thresholds, severity, connectors and windows", async () => {
-    render(await AlertsPage({ params: PARAMS }));
+    render(await AlertsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     const slow = document.getElementById(`alert-${RULE}`)!;
     expect(within(slow).getByRole("heading", { name: "Slow calls" })).toBeInTheDocument();
     expect(within(slow).getByText("The p95 duration of model calls over the last hour")).toBeInTheDocument();
@@ -378,7 +378,7 @@ describe("AlertsPage", () => {
         ...listing,
         connections: listing.connections.map((c) => (c.id === HOOK ? { ...c, event_kinds: kinds } : c)),
       };
-      render(await AlertsPage({ params: PARAMS }));
+      render(await AlertsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
       return within(detail(RULE, "Connectors")).getByText(/hooks\.example\.com/).closest("li")!;
     };
     expect(await taking(["member_added"])).toHaveTextContent("Takes no incidents");
@@ -396,7 +396,7 @@ describe("AlertsPage", () => {
   // ⚠ One level under the page's h1 (`PageHeader`), so the outline skips none;
   // its id and tabIndex take the focus a control on its card hands it as it goes.
   it("heads each alert one level under the page's title", async () => {
-    render(await AlertsPage({ params: PARAMS }));
+    render(await AlertsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     const slow = document.getElementById(`alert-${RULE}`)!;
     const heading = within(slow).getByRole("heading", { level: 2, name: "Slow calls" });
     expect(heading).toHaveAttribute("id", `alert-${RULE}-name`);
@@ -409,7 +409,7 @@ describe("AlertsPage", () => {
     const standing = async (over: Record<string, unknown>) => {
       cleanup();
       mockAlerts = { ...(mockAlerts as object), alerts: [{ ...SLOW, ...over }] };
-      render(await AlertsPage({ params: PARAMS }));
+      render(await AlertsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
       const card = document.getElementById(`alert-${RULE}`)!;
       return { badge: card.querySelector('[data-slot="badge"]'), now: detail(RULE, "Now") };
     };
@@ -447,7 +447,7 @@ describe("AlertsPage", () => {
 
   // ⚠ Under the alert that opened them, open ones first, each with where its notices went.
   it("lists each alert's incidents under it as the server ordered them", async () => {
-    render(await AlertsPage({ params: PARAMS }));
+    render(await AlertsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     const [open, taken, done] = incidentItems(RULE);
     expect(incidentItems(RULE).map((item) => item.id)).toEqual([
       "incident-i-open",
@@ -528,7 +528,7 @@ describe("AlertsPage", () => {
   });
 
   it("names the window over every alert at the page's head, with who set it", async () => {
-    render(await AlertsPage({ params: PARAMS }));
+    render(await AlertsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     const row = screen.getByText("Every alert is muted").closest("div")!.parentElement!;
     expect(row).toHaveTextContent("set by Ada");
     expect(within(row).getByTestId("end-mute").dataset.mute).toBe("m-all");
@@ -536,7 +536,7 @@ describe("AlertsPage", () => {
 
   it("says when there are no alerts yet", async () => {
     mockAlerts = { ...(mockAlerts as object), alerts: [], mutes: [] };
-    render(await AlertsPage({ params: PARAMS }));
+    render(await AlertsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByText("No alerts yet.")).toBeInTheDocument();
     // Nothing to mute: only New alert stands at the page's head.
     expect(screen.queryByTestId("mute")).toBeNull();
@@ -545,7 +545,7 @@ describe("AlertsPage", () => {
 
   it("names nobody when the roster cannot be read", async () => {
     mockMembers = { kind: "unavailable" };
-    render(await AlertsPage({ params: PARAMS }));
+    render(await AlertsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     const row = screen.getByText("Every alert is muted").closest("div")!.parentElement!;
     expect(row).toHaveTextContent("set by someone");
     expect(within(incidentItems(RULE)[1]).getByText("Acknowledged by someone")).toBeInTheDocument();
@@ -557,7 +557,7 @@ describe("AlertsPage", () => {
     const taken = (id: string, by: string) =>
       incident(id, { status: "acknowledged", acknowledged_by: by, acknowledged_at: "2026-10-26T11:10:00Z" });
     mockAlerts = { ...(mockAlerts as object), incidents: [taken("i-admin", "user_admin"), taken("i-gone", "user_gone")] };
-    render(await AlertsPage({ params: PARAMS }));
+    render(await AlertsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(fetchOrganizationMembers).not.toHaveBeenCalled();
     expect(within(incidentItems(RULE)[0]).getByText("Acknowledged by an organization admin or a former member")).toBeInTheDocument();
 
@@ -568,7 +568,7 @@ describe("AlertsPage", () => {
       ceiling: null,
       members: [{ id: "o1", member_id: "user_admin", email: "grace@example.test", display_name: "Grace", role: "admin", created_at: "" }],
     };
-    render(await AlertsPage({ params: PARAMS }));
+    render(await AlertsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     const [admin, gone] = incidentItems(RULE);
     expect(within(admin).getByText("Acknowledged by Grace")).toBeInTheDocument();
     expect(within(gone).getByText("Acknowledged by a former member")).toBeInTheDocument();
@@ -576,7 +576,7 @@ describe("AlertsPage", () => {
 
   it("calls a connection by no wrong name when the connectors cannot be read", async () => {
     mockConnectors = null;
-    render(await AlertsPage({ params: PARAMS }));
+    render(await AlertsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     const slow = document.getElementById(`alert-${RULE}`)!;
     expect(within(slow).getAllByText(/^A connector/).length).toBe(2);
     expect(within(slow).queryByText(/removed/)).toBeNull();
@@ -585,11 +585,11 @@ describe("AlertsPage", () => {
 
   it("draws the outage and the refusal as every page does", async () => {
     mockAlerts = { kind: "unavailable" };
-    render(await AlertsPage({ params: PARAMS }));
+    render(await AlertsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByTestId("outage")).toBeInTheDocument();
     cleanup();
     mockAlerts = { kind: "forbidden" };
-    render(await AlertsPage({ params: PARAMS }));
+    render(await AlertsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByTestId("denied")).toHaveTextContent("this project's alerts");
   });
 });

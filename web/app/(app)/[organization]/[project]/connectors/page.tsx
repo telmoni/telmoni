@@ -19,7 +19,6 @@ import {
   type Provider,
 } from "@/lib/connect";
 import { Flag, FlagOffDetail } from "@/lib/flags";
-import type { SearchParams } from "@/lib/list-query";
 import { eventKindLabel } from "@/lib/notification-kinds";
 import {
   fetchConnectors,
@@ -66,12 +65,9 @@ const NOTICES: Record<ConnectRefusal, string> = {
 export default async function ConnectorsPage({
   params,
   searchParams,
-}: {
-  params: Promise<{ project: string }>;
-  searchParams?: Promise<SearchParams>;
-}) {
+}: PageProps<"/[organization]/[project]/connectors">) {
   const { project: slug } = await params;
-  const outcome = connectOutcome((await searchParams) ?? {});
+  const outcome = connectOutcome(await searchParams);
 
   const resolved = await projectPage(slug);
   if (resolved.kind === "unavailable") return <ServiceUnavailable />;

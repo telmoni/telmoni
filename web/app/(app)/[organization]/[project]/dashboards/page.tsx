@@ -11,9 +11,7 @@ export const metadata = { title: "Dashboards" };
 // one does, and draws the one content wrapper every page keeps.
 export default async function DashboardsPage({
   params,
-}: {
-  params: Promise<{ organization: string; project: string }>;
-}) {
+}: PageProps<"/[organization]/[project]/dashboards">) {
   const { project: slug } = await params;
   if ((await projectPage(slug)).kind === "unavailable") return <ServiceUnavailable />;
 

@@ -17,10 +17,7 @@ import { StoreSeed } from "@/lib/store/provider";
 export default async function OrganizationLayout({
   children,
   params,
-}: {
-  children: React.ReactNode;
-  params: Promise<{ organization: string }>;
-}) {
+}: LayoutProps<"/[organization]">) {
   const { organization: segment } = await params;
   const [ctx, seed] = await Promise.all([getServerContext(), storeSeed()]);
   // Auth did not answer: each page says so itself.

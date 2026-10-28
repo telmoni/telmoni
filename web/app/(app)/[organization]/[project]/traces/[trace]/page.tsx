@@ -33,9 +33,7 @@ export const metadata = { title: "Trace" };
 // payload reaches this page, in any content mode.
 export default async function TracePage({
   params,
-}: {
-  params: Promise<{ organization: string; project: string; trace: string }>;
-}) {
+}: PageProps<"/[organization]/[project]/traces/[trace]">) {
   const { organization, project: slug, trace: runId } = await params;
   const resolved = await projectPage(slug);
   if (resolved.kind === "unavailable") return <ServiceUnavailable />;

@@ -1,6 +1,6 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
-import { one } from "../_accounts/pending";
+import { sole } from "@/lib/list-query";
 import { ConfirmEmail } from "./_confirm";
 
 export const metadata = { title: "Confirm your email address" };
@@ -10,12 +10,10 @@ export const metadata = { title: "Confirm your email address" };
 // did, and the button is what does.
 export default async function VerifyPage({
   searchParams,
-}: {
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
-}) {
+}: PageProps<"/auth/verify">) {
   const params = await searchParams;
-  const userId = one(params.uid);
-  const token = one(params.token);
+  const userId = sole(params.uid);
+  const token = sole(params.token);
 
   return (
     <Card className="gap-3">

@@ -206,7 +206,7 @@ beforeEach(() => {
 
 describe("TracesPage", () => {
   it("lists a page of runs in the default columns, each value a filter, and counts them all", async () => {
-    render(await TracesPage({ params: PARAMS }));
+    render(await TracesPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByTestId("page-header")).toHaveTextContent("Traces");
     expect(screen.getByText("Total 2")).toBeInTheDocument();
     expect(fetchProjectBySlug).toHaveBeenCalledWith("web");
@@ -256,7 +256,7 @@ describe("TracesPage", () => {
 
   // In Chrome a scroll into view moves where the page's first Tab starts, past the skip link.
   it("chooses no facet's value as its list mounts, so none is scrolled into view", async () => {
-    render(await TracesPage({ params: PARAMS }));
+    render(await TracesPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(document.querySelectorAll("[cmdk-item]").length).toBeGreaterThan(0);
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(document.querySelector('[cmdk-item][aria-selected="true"]')).toBeNull();
@@ -349,7 +349,7 @@ describe("TracesPage", () => {
 
   it("tells an empty project how to send its first run, and a filtered one to widen", async () => {
     mockTraces = list({ traces: [], total: 0 });
-    render(await TracesPage({ params: PARAMS }));
+    render(await TracesPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByText("Nothing to show yet.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "SDK" })).toHaveAttribute("href", "/docs/api/sdks");
     expect(screen.getByRole("link", { name: "coding-agent plugin" })).toHaveAttribute(
@@ -388,14 +388,14 @@ describe("TracesPage", () => {
   });
 
   it("describes each column in its menu by what it means, for a screen reader as for a pointer", async () => {
-    render(await TracesPage({ params: PARAMS }));
+    render(await TracesPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     fireEvent.keyDown(screen.getByRole("button", { name: /^Columns/ }), { key: "Enter" });
     const trace = await screen.findByRole("menuitemcheckbox", { name: "Trace ID" });
     expect(trace).toHaveAccessibleDescription("The run's id, which opens its trace. Always shown.");
   });
 
   it("names the project's saved views, and the one the page was opened from", async () => {
-    render(await TracesPage({ params: PARAMS }));
+    render(await TracesPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByRole("button", { name: "Saved views" })).toHaveTextContent("1");
 
     render(
@@ -411,7 +411,7 @@ describe("TracesPage", () => {
     mockFacets = { kind: "unavailable" };
     mockHistogram = { kind: "unavailable" };
     mockViews = { kind: "unavailable" };
-    render(await TracesPage({ params: PARAMS }));
+    render(await TracesPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByRole("table")).toBeInTheDocument();
     expect(screen.getByText(/The filters.*could not be read/)).toBeInTheDocument();
     expect(screen.queryByTestId("histogram")).toBeNull();
@@ -419,20 +419,20 @@ describe("TracesPage", () => {
 
   it("sends a refused role back to the project's overview, and says so on an outage", async () => {
     mockTraces = { kind: "forbidden" };
-    render(await TracesPage({ params: PARAMS }));
+    render(await TracesPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByRole("link", { name: "Back to overview" })).toHaveAttribute(
       "href",
       "/acme/web",
     );
 
     mockTraces = { kind: "unavailable" };
-    render(await TracesPage({ params: PARAMS }));
+    render(await TracesPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByTestId("outage")).toBeInTheDocument();
   });
 
   it("renders ServiceUnavailable when context fails", async () => {
     mockContext = null;
-    render(await TracesPage({ params: PARAMS }));
+    render(await TracesPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByTestId("outage")).toBeInTheDocument();
   });
 });

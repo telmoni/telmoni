@@ -46,9 +46,7 @@ const ROLES = {
 
 export default async function MembersPage({
   params,
-}: {
-  params: Promise<{ organization: string; project: string }>;
-}) {
+}: PageProps<"/[organization]/[project]/members">) {
   const { organization, project: slug } = await params;
 
   const resolved = await projectPage(slug);

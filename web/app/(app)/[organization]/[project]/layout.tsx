@@ -14,10 +14,7 @@ import { GivenSeatSeen } from "./_given-seat-seen";
 export default async function ProjectLayout({
   children,
   params,
-}: {
-  children: React.ReactNode;
-  params: Promise<{ organization: string; project: string }>;
-}) {
+}: LayoutProps<"/[organization]/[project]">) {
   const { organization, project: segment } = await params;
 
   const listing = await fetchProjectListing();

@@ -21,7 +21,7 @@ const PAGE_SIZE = 25;
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ connection: string }> },
+  { params }: RouteContext<"/api/v1/connectors/[connection]/deliveries">,
 ) {
   const { connection } = await params;
   const search = request.nextUrl.searchParams;

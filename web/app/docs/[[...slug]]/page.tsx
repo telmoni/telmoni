@@ -6,7 +6,7 @@ import { notFound } from "next/navigation";
 import { getMDXComponents } from "@/components/mdx";
 import { source } from "@/lib/source";
 
-type Params = { params: Promise<{ slug?: string[] }> };
+type Params = PageProps<"/docs/[[...slug]]">;
 
 // One page of the book, by its path under `content/docs`; `/docs` itself is
 // the index page.

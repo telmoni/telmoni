@@ -2,7 +2,7 @@ import Link from "next/link";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
-import { one } from "../_accounts/pending";
+import { sole } from "@/lib/list-query";
 import { ResetForm } from "./_form";
 
 export const metadata = { title: "Choose a new password" };
@@ -10,12 +10,10 @@ export const metadata = { title: "Choose a new password" };
 // The page the reset mail links to.
 export default async function ResetPage({
   searchParams,
-}: {
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
-}) {
+}: PageProps<"/auth/reset">) {
   const params = await searchParams;
-  const userId = one(params.uid);
-  const token = one(params.token);
+  const userId = sole(params.uid);
+  const token = sole(params.token);
 
   return (
     <Card className="gap-3">

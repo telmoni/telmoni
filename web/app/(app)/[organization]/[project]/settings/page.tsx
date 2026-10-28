@@ -19,9 +19,7 @@ export const metadata = {
 
 export default async function SettingsPage({
   params,
-}: {
-  params: Promise<{ organization: string; project: string }>;
-}) {
+}: PageProps<"/[organization]/[project]/settings">) {
   const { project: slug } = await params;
 
   const resolved = await projectPage(slug);

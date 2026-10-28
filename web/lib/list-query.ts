@@ -53,6 +53,12 @@ export function one(value: string | string[] | undefined): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
+/** A parameter's one value, as the sign-in pages read `state`: a repeated
+ *  parameter is nothing, and nothing is trimmed. */
+export function sole(value: string | string[] | undefined): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
 /** The most values one filter carries, as the server admits them. */
 export const FILTER_VALUES_MAX = 50;
 

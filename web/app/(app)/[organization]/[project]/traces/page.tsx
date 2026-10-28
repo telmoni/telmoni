@@ -10,7 +10,6 @@ import { TracePeek } from "@/components/traces/peek";
 import { TraceTable } from "@/components/traces/table";
 import { TraceToolbar } from "@/components/traces/toolbar";
 import { UtcOffsetCookie } from "@/components/traces/utc-offset";
-import type { SearchParams } from "@/lib/list-query";
 import { administers } from "@/lib/roles";
 import {
   fetchTraceFacets,
@@ -33,12 +32,9 @@ export const metadata = { title: "Traces" };
 export default async function TracesPage({
   params,
   searchParams,
-}: {
-  params: Promise<{ organization: string; project: string }>;
-  searchParams?: Promise<SearchParams>;
-}) {
+}: PageProps<"/[organization]/[project]/traces">) {
   const { organization, project: slug } = await params;
-  const given = (await searchParams) ?? {};
+  const given = await searchParams;
   const query = parseTraceQuery(given);
   const ui = parseTraceUi(given);
   const utcOffset = parseUtcOffset((await cookies()).get(UTC_OFFSET_COOKIE)?.value);

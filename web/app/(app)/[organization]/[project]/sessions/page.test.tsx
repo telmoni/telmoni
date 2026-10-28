@@ -164,7 +164,7 @@ beforeEach(() => {
 
 describe("SessionsPage", () => {
   it("lists a page of sessions with their users and sums, the session opening beside the list — its page from a new tab — and the user their traces", async () => {
-    render(await SessionsPage({ params: PARAMS }));
+    render(await SessionsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByTestId("page-header")).toHaveTextContent("Sessions");
     expect(screen.getByTestId("page-header").dataset.info).toMatch(/^Every session this project's agents/);
     // A page holds fifty rows unless the URL names another count.
@@ -222,7 +222,7 @@ describe("SessionsPage", () => {
   });
 
   it("opens a session from anywhere on its row, and marks the row while it is open", async () => {
-    render(await SessionsPage({ params: PARAMS }));
+    render(await SessionsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     const row = screen.getByRole("link", { name: "conv-1" }).closest("tr")!;
     fireEvent.click(within(row).getByText("1,500"));
     expect(new URL(window.location.href).searchParams.get("peek")).toBe("conv-1");
@@ -324,7 +324,7 @@ describe("SessionsPage", () => {
       TRACE_PREFS_KEY,
       JSON.stringify({ sessionColumns: ["output_tokens", "input_tokens"] }),
     );
-    render(await SessionsPage({ params: PARAMS }));
+    render(await SessionsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     const headings = within(screen.getByRole("table"))
       .getAllByRole("columnheader")
       .map((th) => th.textContent);
@@ -345,7 +345,7 @@ describe("SessionsPage", () => {
 
   it("tells a project that names no session which attribute to set", async () => {
     mockSessions = list({ sessions: [], total: 0 });
-    render(await SessionsPage({ params: PARAMS }));
+    render(await SessionsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByText("Nothing to show yet.")).toBeInTheDocument();
     expect(screen.getByText("gen_ai.conversation.id")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "SDKs" })).toHaveAttribute("href", "/docs/api/sdks");
@@ -354,27 +354,27 @@ describe("SessionsPage", () => {
 
   it("sends a refused role back to the project's overview, and says so on an outage", async () => {
     mockSessions = { kind: "forbidden" };
-    render(await SessionsPage({ params: PARAMS }));
+    render(await SessionsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByRole("link", { name: "Back to overview" })).toHaveAttribute(
       "href",
       "/acme/web",
     );
 
     mockSessions = { kind: "unavailable" };
-    render(await SessionsPage({ params: PARAMS }));
+    render(await SessionsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByTestId("outage")).toBeInTheDocument();
   });
 
   it("says the filters could not be read, and lists the sessions all the same", async () => {
     mockFacets = { kind: "unavailable" };
-    render(await SessionsPage({ params: PARAMS }));
+    render(await SessionsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByText("The filters’ values could not be read.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "conv-1" })).toBeInTheDocument();
   });
 
   it("renders ServiceUnavailable when context fails", async () => {
     mockContext = null;
-    render(await SessionsPage({ params: PARAMS }));
+    render(await SessionsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByTestId("outage")).toBeInTheDocument();
   });
 });

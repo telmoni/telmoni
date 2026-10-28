@@ -5,7 +5,6 @@ import { ListPage } from "@/components/traces/list-page";
 import { SessionPeek } from "@/components/traces/session-peek";
 import { SessionTable } from "@/components/traces/session-table";
 import { ListToolbar } from "@/components/traces/toolbar";
-import type { SearchParams } from "@/lib/list-query";
 import { administers } from "@/lib/roles";
 import {
   fetchSessionFacets,
@@ -27,12 +26,9 @@ export const metadata = { title: "Sessions" };
 export default async function SessionsPage({
   params,
   searchParams,
-}: {
-  params: Promise<{ organization: string; project: string }>;
-  searchParams?: Promise<SearchParams>;
-}) {
+}: PageProps<"/[organization]/[project]/sessions">) {
   const { organization, project: slug } = await params;
-  const query = parseSessionQuery((await searchParams) ?? {});
+  const query = parseSessionQuery(await searchParams);
   const resolved = await projectPage(slug);
   if (resolved.kind === "unavailable") return <ServiceUnavailable />;
   const { gate, project } = resolved;

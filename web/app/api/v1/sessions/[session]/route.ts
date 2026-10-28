@@ -24,7 +24,7 @@ const NAME_MAX = 145;
 // read here names it; telemetry decides whether the person may read it.
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ session: string }> },
+  { params }: RouteContext<"/api/v1/sessions/[session]">,
 ) {
   const gate = await admit(READS);
   if (!gate.ok) return privateProblem(gate.status, gate.error, gate.retryAfter);

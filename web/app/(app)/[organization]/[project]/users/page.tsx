@@ -4,7 +4,6 @@ import { ServiceUnavailable } from "@/components/service-unavailable";
 import { ListPage } from "@/components/traces/list-page";
 import { ListToolbar } from "@/components/traces/toolbar";
 import { UserTable } from "@/components/traces/user-table";
-import type { SearchParams } from "@/lib/list-query";
 import { fetchUserFacets, fetchUsers } from "@/lib/server/data";
 import { projectPage } from "@/lib/server/project-page";
 import { DEFAULT_ROWS } from "@/lib/traces";
@@ -19,12 +18,9 @@ export const metadata = { title: "Users" };
 export default async function UsersPage({
   params,
   searchParams,
-}: {
-  params: Promise<{ organization: string; project: string }>;
-  searchParams?: Promise<SearchParams>;
-}) {
+}: PageProps<"/[organization]/[project]/users">) {
   const { organization, project: slug } = await params;
-  const query = parseUserQuery((await searchParams) ?? {});
+  const query = parseUserQuery(await searchParams);
   const resolved = await projectPage(slug);
   if (resolved.kind === "unavailable") return <ServiceUnavailable />;
   const { gate, project } = resolved;

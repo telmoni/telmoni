@@ -18,7 +18,7 @@ const DOWNLOADS: Ceiling = { call: "audit-export:download", limit: 10, per: "hou
 // cache. Same-origin only, as every authenticated route here is.
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> },
+  { params }: RouteContext<"/api/v1/organizations/[organization]/audit-log/exports/[id]">,
 ) {
   if (crossSite(request)) return problem(403, "forbidden");
   const admitted = await admit(DOWNLOADS);

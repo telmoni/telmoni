@@ -137,7 +137,7 @@ beforeEach(() => {
 
 describe("UsersPage", () => {
   it("lists a page of users with their traces, errors, steps and tokens, each opening their traces", async () => {
-    render(await UsersPage({ params: PARAMS }));
+    render(await UsersPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByTestId("page-header")).toHaveTextContent("Users");
     expect(screen.getByTestId("page-header").dataset.info).toMatch(/^Everyone this project's agents served/);
     expect(fetchProjectBySlug).toHaveBeenCalledWith("web");
@@ -251,7 +251,7 @@ describe("UsersPage", () => {
 
   it("shows the columns the person picked, and puts them back to the defaults", async () => {
     window.localStorage.setItem(TRACE_PREFS_KEY, JSON.stringify({ userColumns: ["errors"] }));
-    render(await UsersPage({ params: PARAMS }));
+    render(await UsersPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     const headings = () =>
       within(screen.getByRole("table"))
         .getAllByRole("columnheader")
@@ -267,7 +267,7 @@ describe("UsersPage", () => {
     render(await UsersPage({ params: PARAMS, searchParams: Promise.resolve({ status: "error" }) }));
     expect(screen.getByText("No users match these filters.")).toBeInTheDocument();
 
-    render(await UsersPage({ params: PARAMS }));
+    render(await UsersPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByText("Nothing to show yet.")).toBeInTheDocument();
     expect(screen.getByText("user.id")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "SDKs" })).toHaveAttribute("href", "/docs/api/sdks");
@@ -276,20 +276,20 @@ describe("UsersPage", () => {
 
   it("sends a refused role back to the project's overview, and says so on an outage", async () => {
     mockUsers = { kind: "forbidden" };
-    render(await UsersPage({ params: PARAMS }));
+    render(await UsersPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByRole("link", { name: "Back to overview" })).toHaveAttribute(
       "href",
       "/acme/web",
     );
 
     mockUsers = { kind: "unavailable" };
-    render(await UsersPage({ params: PARAMS }));
+    render(await UsersPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByTestId("outage")).toBeInTheDocument();
   });
 
   it("renders ServiceUnavailable when context fails", async () => {
     mockContext = null;
-    render(await UsersPage({ params: PARAMS }));
+    render(await UsersPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByTestId("outage")).toBeInTheDocument();
   });
 });

@@ -15,7 +15,7 @@ vi.mock("@/lib/auth/session", () => ({
     sealed.startsWith("sealed:") ? JSON.parse(sealed.slice("sealed:".length)) : null,
 }));
 
-import { one, pendingSignIn } from "./pending";
+import { pendingSignIn } from "./pending";
 
 describe("pendingSignIn", () => {
   beforeEach(() => {
@@ -41,14 +41,5 @@ describe("pendingSignIn", () => {
     await expect(pendingSignIn("st8")).rejects.toThrow("redirect:/auth/login");
     jar.value = "garbage";
     await expect(pendingSignIn("st8")).rejects.toThrow("redirect:/auth/login");
-  });
-});
-
-describe("one", () => {
-  it("takes one string and nothing else", () => {
-    expect(one("x")).toBe("x");
-    expect(one("")).toBeUndefined();
-    expect(one(["x", "y"])).toBeUndefined();
-    expect(one(undefined)).toBeUndefined();
   });
 });

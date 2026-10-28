@@ -18,8 +18,3 @@ export async function pendingSignIn(state: string | undefined): Promise<PkceData
   if (!state || !pkce || pkce.state !== state) redirect("/auth/login");
   return pkce;
 }
-
-// One value of a query parameter, or nothing: a repeated parameter is nothing.
-export function one(value: string | string[] | undefined): string | undefined {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
-}

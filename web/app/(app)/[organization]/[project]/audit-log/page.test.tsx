@@ -74,7 +74,7 @@ describe("AuditPage (project)", () => {
       name: "Payments",
       role: Role.Member,
     };
-    render(await AuditPage({ params: PARAMS }));
+    render(await AuditPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByTestId("access-denied")).toBeInTheDocument();
     expect(document.body.textContent).toMatch(/this project.s audit log/i);
     expect(document.body.textContent).toMatch(
@@ -96,7 +96,7 @@ describe("AuditPage (project)", () => {
       name: "Payments",
       role: Role.Admin,
     };
-    render(await AuditPage({ params: PARAMS }));
+    render(await AuditPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.queryByTestId("access-denied")).toBeNull();
     expect(screen.getByTestId("page-header")).toHaveTextContent("Audit log");
     expect(auditFetches).toBe(1);
@@ -104,7 +104,7 @@ describe("AuditPage (project)", () => {
   });
 
   it("renders the audit log for an owner caller", async () => {
-    render(await AuditPage({ params: PARAMS }));
+    render(await AuditPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.queryByTestId("access-denied")).toBeNull();
     expect(screen.getByTestId("page-header")).toHaveTextContent("Audit log");
     expect(auditFetches).toBe(1);
@@ -112,7 +112,7 @@ describe("AuditPage (project)", () => {
 
   it("renders outage when server context is missing", async () => {
     mockContext = null;
-    render(await AuditPage({ params: PARAMS }));
+    render(await AuditPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByTestId("outage")).toBeInTheDocument();
   });
 
@@ -120,7 +120,7 @@ describe("AuditPage (project)", () => {
   // have no access because auth could not answer.
   it("renders outage, never a refusal, when the project cannot be read", async () => {
     mockProject = null;
-    render(await AuditPage({ params: PARAMS }));
+    render(await AuditPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByTestId("outage")).toBeInTheDocument();
     expect(screen.queryByTestId("access-denied")).toBeNull();
     expect(auditFetches).toBe(0);

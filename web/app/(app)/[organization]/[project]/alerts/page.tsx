@@ -34,6 +34,7 @@ import {
   type ConnectionChoice,
 } from "@/lib/alerts";
 import { ownerContact } from "@/lib/identity";
+import { sole } from "@/lib/list-query";
 import { administers } from "@/lib/roles";
 import {
   INCIDENTS_MAX,
@@ -69,12 +70,9 @@ export const metadata = { title: "Alerts" };
 export default async function AlertsPage({
   params,
   searchParams,
-}: {
-  params: Promise<{ organization: string; project: string }>;
-  searchParams?: Promise<{ incident?: string | string[] }>;
-}) {
+}: PageProps<"/[organization]/[project]/alerts">) {
   const { organization, project: slug } = await params;
-  const { incident: asked } = (await searchParams) ?? {};
+  const { incident } = await searchParams;
   const resolved = await projectPage(slug);
   if (resolved.kind === "unavailable") return <ServiceUnavailable />;
   const { gate, project } = resolved;
@@ -112,8 +110,8 @@ export default async function AlertsPage({
   const now = access.at;
   const everyAlert = windowsFor(access.mutes, null, now);
 
-  const followed =
-    typeof asked === "string" && z.guid().safeParse(asked).success ? asked.toLowerCase() : null;
+  const asked = sole(incident);
+  const followed = asked && z.guid().safeParse(asked).success ? asked.toLowerCase() : null;
   let incidents: Incident[] = access.incidents;
   // A full list leaves out the oldest resolved: the one a trace links is
   // read on its own, and stands last under its alert, where the list's order

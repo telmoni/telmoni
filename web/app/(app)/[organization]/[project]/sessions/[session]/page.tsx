@@ -13,7 +13,7 @@ import { Card } from "@/components/ui/card";
 import { WindowPicker } from "@/components/window-picker";
 import { ownerContact } from "@/lib/identity";
 import { parseLayoutUi, resolveLayout } from "@/lib/layout";
-import { MAX_LIMIT, parseWindow, type SearchParams } from "@/lib/list-query";
+import { MAX_LIMIT, parseWindow } from "@/lib/list-query";
 import { administers } from "@/lib/roles";
 import {
   activeOrganization,
@@ -40,12 +40,9 @@ export const metadata = { title: "Session" };
 export default async function SessionPage({
   params,
   searchParams,
-}: {
-  params: Promise<{ organization: string; project: string; session: string }>;
-  searchParams?: Promise<SearchParams>;
-}) {
+}: PageProps<"/[organization]/[project]/sessions/[session]">) {
   const { organization, project: slug, session: sessionId } = await params;
-  const given = (await searchParams) ?? {};
+  const given = await searchParams;
   const query = parseWindow(given);
   const ui = parseLayoutUi(given);
   const resolved = await projectPage(slug);

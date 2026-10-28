@@ -196,7 +196,7 @@ describe("MembersPage: adding from the organization", () => {
     mockProject = projectAs(Role.Owner);
     mockHome = { role: "owner" };
     mockRoster = roster;
-    render(await MembersPage({ params: PARAMS }));
+    render(await MembersPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     await press(/^Add member/);
     return screen.getByRole("dialog");
   };
@@ -269,7 +269,7 @@ describe("MembersPage: adding from the organization", () => {
     mockProject = projectAs(Role.Admin);
     mockHome = { role: "member" };
     mockRoster = ROSTER;
-    render(await MembersPage({ params: PARAMS }));
+    render(await MembersPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(fetchOrganizationMembers).not.toHaveBeenCalled();
     await press(/^Add member/);
     const dialog = screen.getByRole("dialog");
@@ -340,7 +340,7 @@ describe("MembersPage: adding from the organization", () => {
       ...(mockMembers as object),
       ceiling: { limit: 1, held: 3, detail: "Hobby holds one member." },
     };
-    render(await MembersPage({ params: PARAMS }));
+    render(await MembersPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.queryByTestId("header-action")).toBeNull();
     expect(screen.getByTestId("member-ceiling")).toHaveTextContent("Hobby holds one member.");
   });
@@ -357,7 +357,7 @@ describe("MembersPage", () => {
   describe("project mode", () => {
     it("renders the project role definitions for Owner, Admin, and Member", async () => {
       render(
-        await MembersPage({ params: PARAMS }),
+        await MembersPage({ params: PARAMS, searchParams: Promise.resolve({}) }),
       );
       expect(screen.getByText("Full access")).toBeInTheDocument();
       expect(screen.getByText("Can manage")).toBeInTheDocument();
@@ -367,7 +367,7 @@ describe("MembersPage", () => {
     it("renders project members roster", async () => {
       mockProject = projectAs(Role.Owner);
       render(
-        await MembersPage({ params: PARAMS }),
+        await MembersPage({ params: PARAMS, searchParams: Promise.resolve({}) }),
       );
       expect(screen.getByTestId("page-header")).toHaveTextContent("Members");
       expect(screen.getByText("Owner User")).toBeInTheDocument();
@@ -381,7 +381,7 @@ describe("MembersPage", () => {
     it("shows invite action and manage controls when caller is project admin", async () => {
       mockProject = projectAs(Role.Admin);
       render(
-        await MembersPage({ params: PARAMS }),
+        await MembersPage({ params: PARAMS, searchParams: Promise.resolve({}) }),
       );
       expect(screen.getByTestId("page-header")).toHaveTextContent("Members");
       expect(screen.getByTestId("header-action")).toBeInTheDocument();
@@ -399,7 +399,7 @@ describe("MembersPage", () => {
         ...(mockMembers as object),
         ceiling: { limit: 1, held: 1, detail: "Hobby holds one member." },
       };
-      render(await MembersPage({ params: PARAMS }));
+      render(await MembersPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
       expect(screen.queryByTestId("header-action")).toBeNull();
       expect(screen.getByTestId("member-ceiling")).toHaveTextContent("Hobby holds one member.");
     });
@@ -410,14 +410,14 @@ describe("MembersPage", () => {
         ...(mockMembers as object),
         ceiling: { limit: 1, held: 1, detail: "Hobby holds one member." },
       };
-      render(await MembersPage({ params: PARAMS }));
+      render(await MembersPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
       expect(screen.queryByTestId("member-ceiling")).toBeNull();
     });
 
     it("hides invite action and manage controls when caller is member", async () => {
       mockProject = projectAs(Role.Member);
       render(
-        await MembersPage({ params: PARAMS }),
+        await MembersPage({ params: PARAMS, searchParams: Promise.resolve({}) }),
       );
       expect(screen.getByTestId("page-header")).toHaveTextContent("Members");
       expect(screen.getByText("admin@example.com")).toBeInTheDocument();
@@ -427,14 +427,14 @@ describe("MembersPage", () => {
     });
 
     it("reads the roster and the invitations by the project's id, not its slug", async () => {
-      render(await MembersPage({ params: PARAMS }));
+      render(await MembersPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
       expect(fetchMembers).toHaveBeenCalledWith(PROJECT);
       expect(fetchInvites).toHaveBeenCalledWith(PROJECT);
     });
 
     it("says so when the project cannot be read, rather than a roster of nothing", async () => {
       mockProject = null;
-      render(await MembersPage({ params: PARAMS }));
+      render(await MembersPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
       expect(screen.getByTestId("outage")).toBeInTheDocument();
       expect(fetchMembers).not.toHaveBeenCalled();
     });
@@ -454,7 +454,7 @@ describe("MembersPage", () => {
         },
       ]);
       render(
-        await MembersPage({ params: PARAMS }),
+        await MembersPage({ params: PARAMS, searchParams: Promise.resolve({}) }),
       );
       expect(screen.queryByTestId("pending-invitations")).toBeNull();
     });
@@ -464,7 +464,7 @@ describe("MembersPage", () => {
 // Only the owner hands the project over, and only to one of its admins — a
 // member would take its keys with no say over its members to go with them.
 describe("MembersPage: handing the project over", () => {
-  const page = async () => MembersPage({ params: PARAMS });
+  const page = async () => MembersPage({ params: PARAMS, searchParams: Promise.resolve({}) });
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -570,7 +570,7 @@ describe("MembersPage: handing the project over", () => {
 // place of Remove, whatever their role and however the seat came, and the
 // owner's row carries neither — the project is theirs to delete.
 describe("MembersPage: leaving", () => {
-  const page = async () => MembersPage({ params: PARAMS });
+  const page = async () => MembersPage({ params: PARAMS, searchParams: Promise.resolve({}) });
   // Who is reading the page, as `/me` names them.
   const asPerson = (userId: string) => {
     mockContext = {

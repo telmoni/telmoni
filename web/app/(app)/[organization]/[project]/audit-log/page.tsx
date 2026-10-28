@@ -12,9 +12,7 @@ export const metadata = { title: "Audit log" };
 
 export default async function AuditPage({
   params,
-}: {
-  params: Promise<{ organization: string; project: string }>;
-}) {
+}: PageProps<"/[organization]/[project]/audit-log">) {
   const { organization, project: slug } = await params;
   const resolved = await projectPage(slug);
   if (resolved.kind === "unavailable") return <ServiceUnavailable />;

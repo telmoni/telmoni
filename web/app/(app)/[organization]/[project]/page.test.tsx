@@ -88,7 +88,7 @@ const OPENED: FeedItem = {
 };
 
 async function renderAt(project: string) {
-  render(await OverviewPage({ params: Promise.resolve({ organization: "acme", project }) }));
+  render(await OverviewPage({ params: Promise.resolve({ organization: "acme", project }), searchParams: Promise.resolve({}) }));
 }
 
 beforeEach(() => {
@@ -181,7 +181,10 @@ describe("OverviewPage", () => {
   });
 
   it("titles the tab by the project", async () => {
-    expect(await generateMetadata({ params: Promise.resolve({ project: SLUG }) })).toEqual({
+    expect(await generateMetadata({
+        params: Promise.resolve({ organization: "acme", project: SLUG }),
+        searchParams: Promise.resolve({}),
+      })).toEqual({
       title: "Platform",
     });
   });

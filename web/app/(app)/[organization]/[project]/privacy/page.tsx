@@ -18,9 +18,7 @@ export const metadata = { title: "Privacy" };
 // door does not do. The posture page grows from here.
 export default async function PrivacyPage({
   params,
-}: {
-  params: Promise<{ organization: string; project: string }>;
-}) {
+}: PageProps<"/[organization]/[project]/privacy">) {
   const { organization, project: slug } = await params;
   const resolved = await projectPage(slug);
   if (resolved.kind === "unavailable") return <ServiceUnavailable />;

@@ -123,7 +123,7 @@ beforeEach(() => {
 describe("SettingsPage", () => {
   describe("project mode", () => {
     it("renders the project settings and rename form", async () => {
-      render(await SettingsPage({ params: PARAMS }));
+      render(await SettingsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
       expect(screen.getByTestId("page-header")).toHaveTextContent("Settings");
       expect(screen.getByTestId("rename-form")).toHaveTextContent("My Project");
       expect(screen.getByTestId("rename-form")).toHaveTextContent("editable");
@@ -132,7 +132,7 @@ describe("SettingsPage", () => {
     // The id is what an API request and an SDK are configured with; the slug
     // in the path follows the name and is nothing to copy.
     it("shows the project's id, and hands the rename the id and the path's slug", async () => {
-      render(await SettingsPage({ params: PARAMS }));
+      render(await SettingsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
       expect(screen.getByText("project_7bQx2mNv9BcK4dLp")).toBeInTheDocument();
       const form = screen.getByTestId("rename-form");
       expect(form).toHaveAttribute("data-project-id", "project_7bQx2mNv9BcK4dLp");
@@ -140,7 +140,7 @@ describe("SettingsPage", () => {
     });
 
     it("offers the owner a danger zone for this project, named", async () => {
-      render(await SettingsPage({ params: PARAMS }));
+      render(await SettingsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
       const form = screen.getByTestId("delete-form");
       expect(form).toHaveAttribute("data-project-id", "project_7bQx2mNv9BcK4dLp");
       expect(form).toHaveTextContent("My Project");
@@ -156,7 +156,7 @@ describe("SettingsPage", () => {
         name: "My Project",
         role: Role.Admin,
       };
-      render(await SettingsPage({ params: PARAMS }));
+      render(await SettingsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
       expect(screen.queryByTestId("delete-form")).toBeNull();
       expect(screen.queryByText(/danger zone/i)).toBeNull();
       expect(screen.getByTestId("rename-form")).toHaveTextContent("editable");
@@ -168,7 +168,7 @@ describe("SettingsPage", () => {
         name: "My Project",
         role: Role.Member,
       };
-      render(await SettingsPage({ params: PARAMS }));
+      render(await SettingsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
       expect(screen.queryByTestId("delete-form")).toBeNull();
       expect(screen.queryByText(/danger zone/i)).toBeNull();
       expect(screen.getByTestId("rename-form")).toHaveTextContent("readonly");
@@ -176,7 +176,7 @@ describe("SettingsPage", () => {
 
     it("shows outage when context is unavailable", async () => {
       mockContext = null;
-      render(await SettingsPage({ params: PARAMS }));
+      render(await SettingsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
       expect(screen.getByTestId("outage")).toBeInTheDocument();
     });
   });
@@ -185,7 +185,7 @@ describe("SettingsPage", () => {
   // organization's owner sets it and nobody below, and every role sees it.
   describe("content mode", () => {
     it("lets the owner change it, with the mode and the modes the server offers", async () => {
-      render(await SettingsPage({ params: PARAMS }));
+      render(await SettingsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
       const form = screen.getByTestId("content-mode-form");
       expect(form).toHaveAttribute("data-project-id", "project_7bQx2mNv9BcK4dLp");
       expect(form).toHaveAttribute("data-mode", "off");
@@ -196,7 +196,7 @@ describe("SettingsPage", () => {
     it("shows an admin and a member the mode, and lets neither change it", async () => {
       for (const role of [Role.Admin, Role.Member]) {
         mockProject = { id: "project_7bQx2mNv9BcK4dLp", slug: "my-project", name: "My Project", role };
-        const { unmount } = render(await SettingsPage({ params: PARAMS }));
+        const { unmount } = render(await SettingsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
         expect(screen.getByTestId("content-mode-form")).toHaveTextContent("readonly");
         unmount();
       }
@@ -206,7 +206,7 @@ describe("SettingsPage", () => {
     // settings still render.
     it("says the mode could not be read, and still draws the rest", async () => {
       mockContentMode = null;
-      render(await SettingsPage({ params: PARAMS }));
+      render(await SettingsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
       expect(screen.queryByTestId("content-mode-form")).toBeNull();
       expect(screen.getByText(/content mode could not be read/i)).toBeInTheDocument();
       expect(screen.getByTestId("rename-form")).toBeInTheDocument();

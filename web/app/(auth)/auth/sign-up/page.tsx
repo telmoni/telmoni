@@ -1,7 +1,8 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getSignInConfig } from "@/lib/auth/oidc";
 
-import { one, pendingSignIn } from "../_accounts/pending";
+import { pendingSignIn } from "../_accounts/pending";
+import { sole } from "@/lib/list-query";
 import { SignUpForm } from "./_form";
 
 export const metadata = { title: "Create an account" };
@@ -11,11 +12,9 @@ export const metadata = { title: "Create an account" };
 // and auth admits the address the invitation was sent to.
 export default async function SignUpPage({
   searchParams,
-}: {
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
-}) {
+}: PageProps<"/auth/sign-up">) {
   const params = await searchParams;
-  const pending = await pendingSignIn(one(params.state));
+  const pending = await pendingSignIn(sole(params.state));
   const config = await getSignInConfig();
   const verifyEmail = config?.verifyEmail ?? false;
   const byInvitation = config ? !config.allowSignUp : false;
@@ -35,7 +34,7 @@ export default async function SignUpPage({
       <CardContent className="grid gap-3">
         <SignUpForm
           state={pending.state}
-          email={one(params.email) ?? ""}
+          email={sole(params.email) ?? ""}
           verifyEmail={verifyEmail}
         />
         <p className="text-sm text-muted-foreground">

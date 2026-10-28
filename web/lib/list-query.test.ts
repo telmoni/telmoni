@@ -14,6 +14,7 @@ import {
   sortAfterClick,
   sortInForce,
   whole,
+  sole,
   windowReaching,
 } from "./list-query";
 
@@ -130,5 +131,14 @@ describe("sorting by a heading", () => {
       sort: "tokens",
       dir: "desc",
     });
+  });
+});
+
+describe("sole", () => {
+  it("takes one string and nothing else, a repeated parameter among the nothing", () => {
+    expect(sole("x")).toBe("x");
+    expect(sole("")).toBeUndefined();
+    expect(sole(["x", "y"])).toBeUndefined();
+    expect(sole(undefined)).toBeUndefined();
   });
 });

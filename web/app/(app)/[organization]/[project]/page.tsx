@@ -11,9 +11,7 @@ import { markProjectReadAction } from "./notice-actions";
 // The tab is titled as the page is, by the project's name.
 export async function generateMetadata({
   params,
-}: {
-  params: Promise<{ project: string }>;
-}): Promise<Metadata> {
+}: PageProps<"/[organization]/[project]">): Promise<Metadata> {
   const { project: slug } = await params;
   const project = await fetchProjectBySlug(slug);
   return { title: project ? project.name : "Overview" };
@@ -25,9 +23,7 @@ export async function generateMetadata({
 // project reads them, as the service answers a project's feed at any role.
 export default async function OverviewPage({
   params,
-}: {
-  params: Promise<{ organization: string; project: string }>;
-}) {
+}: PageProps<"/[organization]/[project]">) {
   const { organization, project: slug } = await params;
   const project = await fetchProjectBySlug(slug);
   if (!project) return <ServiceUnavailable />;

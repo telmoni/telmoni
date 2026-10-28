@@ -4,7 +4,8 @@ import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getSignInConfig, type SignInConfig } from "@/lib/auth/oidc";
 
-import { one, pendingSignIn } from "../_accounts/pending";
+import { pendingSignIn } from "../_accounts/pending";
+import { sole } from "@/lib/list-query";
 import { SignInForm } from "./_form";
 
 export const metadata = { title: "Sign in" };
@@ -24,11 +25,9 @@ const FORM_ALONE: SignInConfig = {
 // the door back to it.
 export default async function SignInPage({
   searchParams,
-}: {
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
-}) {
+}: PageProps<"/auth/sign-in">) {
   const params = await searchParams;
-  const pending = await pendingSignIn(one(params.state));
+  const pending = await pendingSignIn(sole(params.state));
   const config = (await getSignInConfig()) ?? FORM_ALONE;
 
   return (
@@ -45,7 +44,7 @@ export default async function SignInPage({
         {config.passwordSignIn ? (
           <SignInForm
             state={pending.state}
-            email={one(params.email) ?? ""}
+            email={sole(params.email) ?? ""}
             provider={config.external?.name ?? null}
           />
         ) : (

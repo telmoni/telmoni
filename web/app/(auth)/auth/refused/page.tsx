@@ -2,7 +2,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { refusalNamed, type Refusal } from "@/lib/auth/refusal";
 
-import { one } from "../_accounts/pending";
+import { sole } from "@/lib/list-query";
 
 export const metadata = { title: "Not signed in" };
 
@@ -22,10 +22,8 @@ const WORDS: Record<Refusal, string> = {
 // sentence, and the way back in, which waits for the person to press it.
 export default async function RefusedPage({
   searchParams,
-}: {
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
-}) {
-  const reason = refusalNamed(one((await searchParams).reason));
+}: PageProps<"/auth/refused">) {
+  const reason = refusalNamed(sole((await searchParams).reason));
   return (
     <Card className="gap-3">
       <CardHeader>

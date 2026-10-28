@@ -14,9 +14,7 @@ export const metadata = { title: "Invitation", robots: { index: false, follow: f
 
 export default async function InvitePage({
   params,
-}: {
-  params: Promise<{ token: string }>;
-}) {
+}: PageProps<"/invite/[token]">) {
   const { token } = await params;
   const [invite, session] = await Promise.all([
     lookUpInvite(token),

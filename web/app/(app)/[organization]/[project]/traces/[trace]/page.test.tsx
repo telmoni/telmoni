@@ -230,7 +230,7 @@ describe("TracePage", () => {
   const chosen = () => screen.getByRole("region", { name: "The span chosen" });
 
   it("names the run, sums it on one line, and opens on the run's own span", async () => {
-    render(await TracePage({ params: PARAMS }));
+    render(await TracePage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(fetchTrace).toHaveBeenCalledWith("project_7bQx2mNv9BcK4dLp", RUN);
     const header = screen.getByTestId("page-header");
     expect(header).toHaveTextContent("nightly-report");
@@ -276,7 +276,7 @@ describe("TracePage", () => {
   it("links the incidents whose notices showed the run, each at its row of the alerts page", async () => {
     const INCIDENT = "7a1c0e52-0000-4000-8000-000000000002";
     mockIncidents = [{ id: INCIDENT, rule_name: "Failing trips" }];
-    render(await TracePage({ params: PARAMS }));
+    render(await TracePage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(fetchRunIncidents).toHaveBeenCalledWith("project_7bQx2mNv9BcK4dLp", RUN);
     expect(screen.getByRole("link", { name: "incident: Failing trips" })).toHaveAttribute(
       "href",
@@ -285,7 +285,7 @@ describe("TracePage", () => {
   });
 
   it("reads the span chosen in the tree: its model and tokens, and how it failed", async () => {
-    render(await TracePage({ params: PARAMS }));
+    render(await TracePage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     const tree = screen.getByRole("tree", { name: "Spans" });
 
     fireEvent.click(within(tree).getByText("search_docs"));
@@ -308,7 +308,7 @@ describe("TracePage", () => {
       step(0);
       return 0;
     });
-    render(await TracePage({ params: PARAMS }));
+    render(await TracePage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     const tree = screen.getByRole("tree", { name: "Spans" });
     const row = (name: string) =>
       within(tree)
@@ -331,7 +331,7 @@ describe("TracePage", () => {
   });
 
   it("chooses the branch it shuts when the span chosen was inside it", async () => {
-    render(await TracePage({ params: PARAMS }));
+    render(await TracePage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     const tree = screen.getByRole("tree", { name: "Spans" });
     fireEvent.click(within(tree).getByText("search_docs"));
     const step = within(tree)
@@ -344,7 +344,7 @@ describe("TracePage", () => {
   });
 
   it("finds spans by a search, and draws the timeline a toggle away, every span a bar", async () => {
-    render(await TracePage({ params: PARAMS }));
+    render(await TracePage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     fireEvent.change(screen.getByRole("searchbox", { name: "Search spans" }), {
       target: { value: "search_docs" },
     });
@@ -363,7 +363,7 @@ describe("TracePage", () => {
 
   it("opens on the run's own row alone by default, and names the layout as changed once customized", async () => {
     mockSetting = { view_id: null };
-    render(await TracePage({ params: PARAMS }));
+    render(await TracePage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByRole("button", { name: "Customize the layout" })).toBeInTheDocument();
     const tree = screen.getByRole("tree", { name: "Spans" });
     expect(within(tree).getAllByRole("treeitem")).toHaveLength(1);
@@ -382,7 +382,7 @@ describe("TracePage", () => {
 
   it("describes each option of the layout's menu by what it means, for a screen reader as for a pointer", async () => {
     mockSetting = { view_id: null };
-    render(await TracePage({ params: PARAMS }));
+    render(await TracePage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     fireEvent.keyDown(screen.getByRole("button", { name: "Customize the layout" }), { key: "Enter" });
     const timeline = await screen.findByRole("menuitemcheckbox", { name: "Timeline" });
     expect(timeline).toHaveAccessibleDescription("Each span's bar on the trace's own line of time.");
@@ -390,7 +390,7 @@ describe("TracePage", () => {
 
   it("opens a saved layout from a link, its pinned spans above the tree, chosen at a press", async () => {
     mockSearch = `view=${LAYOUT_ID}`;
-    render(await TracePage({ params: PARAMS }));
+    render(await TracePage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByRole("button", { name: "Saved layout: Pinned tools" })).toBeInTheDocument();
     const tree = screen.getByRole("tree", { name: "Spans" });
     expect(within(tree).getAllByRole("treeitem")).toHaveLength(2);
@@ -405,7 +405,7 @@ describe("TracePage", () => {
       kind: "ok",
       trace: { run_id: RUN, spans: SPANS.slice(2, 3), truncated: true, spend: null },
     };
-    render(await TracePage({ params: PARAMS }));
+    render(await TracePage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByText("Running")).toBeInTheDocument();
     expect(within(screen.getByRole("tree")).getByText("chat claude-sonnet-5-5")).toBeInTheDocument();
     expect(screen.getByText(/more spans than the server sends at once/)).toBeInTheDocument();
@@ -413,7 +413,7 @@ describe("TracePage", () => {
 
   it("says when there is no such trace here, and leads back to the list", async () => {
     mockTrace = { kind: "missing" };
-    render(await TracePage({ params: PARAMS }));
+    render(await TracePage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByText("No trace with this id in this project.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Back to the traces" })).toHaveAttribute(
       "href",
@@ -423,13 +423,13 @@ describe("TracePage", () => {
 
   it("sends a refused role back to the overview, and says so on an outage", async () => {
     mockTrace = { kind: "forbidden" };
-    render(await TracePage({ params: PARAMS }));
+    render(await TracePage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByRole("link", { name: "Back to overview" })).toHaveAttribute(
       "href",
       "/acme/web",
     );
     mockTrace = { kind: "unavailable" };
-    render(await TracePage({ params: PARAMS }));
+    render(await TracePage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByTestId("outage")).toBeInTheDocument();
   });
 });

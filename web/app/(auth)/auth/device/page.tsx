@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getServerSession } from "@/lib/server/session";
 
-import { one } from "../_accounts/pending";
+import { sole } from "@/lib/list-query";
 import { DeviceForm } from "./_form";
 
 export const metadata = { title: "Sign in a device" };
@@ -14,11 +14,9 @@ export const metadata = { title: "Sign in a device" };
 // in first and comes back with the code intact.
 export default async function DevicePage({
   searchParams,
-}: {
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
-}) {
+}: PageProps<"/auth/device">) {
   const params = await searchParams;
-  const code = one(params.code) ?? "";
+  const code = sole(params.code) ?? "";
 
   const session = await getServerSession();
   if (!session) {

@@ -75,13 +75,13 @@ beforeEach(() => {
 
 describe("ApiKeysPage", () => {
   it("renders the API keys page for a project", async () => {
-    render(await ApiKeysPage({ params: PARAMS }));
+    render(await ApiKeysPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByTestId("page-header")).toHaveTextContent("API keys");
     expect(screen.getByTestId("keys-actions")).toBeInTheDocument();
   });
 
   it("finds the project by the path's slug, and lists and mints by its id", async () => {
-    render(await ApiKeysPage({ params: PARAMS }));
+    render(await ApiKeysPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(fetchProjectBySlug).toHaveBeenCalledWith("my-project");
     expect(fetchTokens).toHaveBeenCalledWith("project_7bQx2mNv9BcK4dLp");
     expect(screen.getByTestId("keys-actions")).toHaveAttribute(
@@ -92,7 +92,7 @@ describe("ApiKeysPage", () => {
 
   it("sends a refused role back to the project's overview", async () => {
     mockTokens = { kind: "forbidden" };
-    render(await ApiKeysPage({ params: PARAMS }));
+    render(await ApiKeysPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByRole("link", { name: "Back to overview" })).toHaveAttribute(
       "href",
       "/acme/my-project",
@@ -120,7 +120,7 @@ describe("ApiKeysPage", () => {
       ],
     };
 
-    render(await ApiKeysPage({ params: PARAMS }));
+    render(await ApiKeysPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByTestId("page-header")).toHaveTextContent("API keys");
     expect(screen.getByTestId("keys-actions")).toBeInTheDocument();
     expect(screen.getByText("Admin key")).toBeInTheDocument();
@@ -152,7 +152,7 @@ describe("ApiKeysPage", () => {
       ],
     };
 
-    render(await ApiKeysPage({ params: PARAMS }));
+    render(await ApiKeysPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByTestId("page-header")).toHaveTextContent("API keys");
     expect(screen.queryByTestId("keys-actions")).toBeNull();
     expect(screen.getByText("Read only key")).toBeInTheDocument();
@@ -162,7 +162,7 @@ describe("ApiKeysPage", () => {
 
   it("renders ServiceUnavailable when context fails", async () => {
     mockContext = null;
-    render(await ApiKeysPage({ params: PARAMS }));
+    render(await ApiKeysPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByTestId("outage")).toBeInTheDocument();
   });
 });

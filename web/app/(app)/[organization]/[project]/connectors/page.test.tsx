@@ -74,7 +74,7 @@ function webhook(overrides: Partial<Record<string, unknown>> = {}) {
 async function renderPage(search: { connected?: string; error?: string } = {}) {
   render(
     await ConnectorsPage({
-      params: Promise.resolve({ project: "project" }),
+      params: Promise.resolve({ organization: "acme", project: "project" }),
       searchParams: Promise.resolve(search),
     }),
   );

@@ -20,9 +20,7 @@ export const metadata = { title: "API keys" };
 
 export default async function ApiKeysPage({
   params,
-}: {
-  params: Promise<{ organization: string; project: string }>;
-}) {
+}: PageProps<"/[organization]/[project]/api-keys">) {
   const { organization, project: slug } = await params;
   const resolved = await projectPage(slug);
   if (resolved.kind === "unavailable") return <ServiceUnavailable />;

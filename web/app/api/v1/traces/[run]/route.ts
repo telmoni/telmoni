@@ -16,7 +16,7 @@ const READS: Ceiling = { call: "traces:read", limit: 120 };
 // same fetcher as it renders. A read, so a Route Handler, and the project
 // named by its id as every read here names it; telemetry decides whether the
 // person may read the project's traces.
-export async function GET(request: NextRequest, { params }: { params: Promise<{ run: string }> }) {
+export async function GET(request: NextRequest, { params }: RouteContext<"/api/v1/traces/[run]">) {
   const gate = await admit(READS);
   if (!gate.ok) return privateProblem(gate.status, gate.error, gate.retryAfter);
 
