@@ -466,7 +466,7 @@ async fn save(
     tx: &mut Scoped<'_, ProjectAndOrganization>,
     view: &Checked,
 ) -> Result<ViewRow, TelmoniError> {
-    let now = chain::hold(auth, acting, project_id, tx).await?;
+    let now = chain::hold(auth, acting, tx).await?;
     now.require_project(Verb::Create, Resource::View)?;
     db::ensure_settings(tx, project_id, &acting.organization_id).await?;
     if db::view_count(tx, project_id, view.kind).await? >= VIEWS_MAX {

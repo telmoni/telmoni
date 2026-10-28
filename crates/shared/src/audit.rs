@@ -10,6 +10,8 @@
 //! failed audit = failed business operation. [`emit_audit`] is the only
 //! sanctioned writer; `tests/append_only_audit.rs` fails CI on any other.
 
+use std::time::Duration;
+
 use chrono::Utc;
 use serde_json::Value;
 use sqlx::PgConnection;
@@ -115,6 +117,27 @@ pub async fn lock_chain(
         .execute(conn)
         .await?;
     Ok(())
+}
+
+/// How long any writer waits for an organization's chain lock: the role's own
+/// `lock_timeout` on a tier, and every module's on a role with none.
+pub const CHAIN_LOCK_WAIT: Duration = Duration::from_secs(2);
+
+/// [`lock_chain`] within [`CHAIN_LOCK_WAIT`], and every later lock wait in
+/// the transaction with it; a wait past it is the 409 to try again.
+pub async fn lock_chain_in_time(
+    conn: &mut PgConnection,
+    organization_id: &OrganizationId,
+) -> sqlx::Result<()> {
+    crate::db::set_lock_timeout(&mut *conn, CHAIN_LOCK_WAIT).await?;
+    lock_chain(conn, organization_id).await.inspect_err(|e| {
+        if crate::error::lock_timed_out(e) {
+            tracing::warn!(
+                organization_id = %organization_id,
+                "a writer gave up waiting for its organization's chain lock"
+            );
+        }
+    })
 }
 
 /// Write one row to `audit.events`, linked into the organization's

@@ -7,38 +7,20 @@
 //! so auth's answer under the lock is the one that stands, and a write
 //! resolved before the change committed is refused.
 
-use std::time::Duration;
-
 use axum::http::HeaderMap;
 use serde_json::Value;
 use sqlx::PgPool;
 use uuid::Uuid;
 
 use telmoni_shared::acting::Acting;
-use telmoni_shared::audit::{Actor, AuditEvent, emit_audit, lock_chain};
+use telmoni_shared::audit::{Actor, AuditEvent, emit_audit, lock_chain_in_time};
 use telmoni_shared::db::tenant_session::{ProjectAndOrganization, Scoped, project_scope};
 use telmoni_shared::extract::correlation_id;
-use telmoni_shared::seam::Auth;
+use telmoni_shared::seam::{ANSWER_BUDGET, Auth, resolve_again_in_time};
 use telmoni_shared::{
     AuditAction, AuthError, OrganizationId, OrganizationStatus, ProjectId, TelmoniError,
     TelmoniResourceKind,
 };
-
-/// The longest a change waits for the organization's chain lock: the
-/// role's own `lock_timeout` on a tier, set on the transaction too, so that a
-/// deployment whose roles carry none — the Compose quickstart connects as the
-/// superuser — never holds a connection on it for as long as another holds
-/// the lock.
-const CHAIN_LOCK_WAIT: Duration = Duration::from_secs(2);
-
-/// How long a change waits for an answer from across a seam: auth's second
-/// answer while it holds the organization's chain lock, well inside the two
-/// seconds every other writer in the organization waits for that lock before
-/// giving up.
-const ANSWER_BUDGET: Duration = Duration::from_secs(1);
-
-/// Postgres's `lock_not_available`: a `lock_timeout` ran out.
-const LOCK_NOT_AVAILABLE: &str = "55P03";
 
 /// A transaction bound to the project and to the organization `acting` acts
 /// in, as the row policies on a lane's writes need.
@@ -75,27 +57,10 @@ pub(crate) fn rolled_back(rollback: sqlx::Result<()>, project_id: &ProjectId, wr
 pub(crate) async fn hold(
     auth: &dyn Auth,
     acting: &Acting,
-    project_id: &ProjectId,
     tx: &mut Scoped<'_, ProjectAndOrganization>,
 ) -> Result<Acting, TelmoniError> {
-    let organization_id = &acting.organization_id;
-    lock(project_id, organization_id, tx).await?;
-    let Ok(now) = tokio::time::timeout(ANSWER_BUDGET, auth.resolve_again(acting)).await else {
-        tracing::warn!(
-            project_id = %project_id,
-            organization_id = %organization_id,
-            "telemetry: auth did not answer a change to a project again in time"
-        );
-        return Err(AuthError::IdentityUnavailable.into());
-    };
-    let now = now?;
-    if now.organization_id != *organization_id {
-        return Err(AuthError::Conflict(
-            "the project has moved to another organization; reload and try again".into(),
-        )
-        .into());
-    }
-    Ok(now)
+    lock_chain_in_time(tx.conn(), &acting.organization_id).await?;
+    resolve_again_in_time(auth, acting).await
 }
 
 /// A member's change to the project's alerting, as its audit row names it.
@@ -133,52 +98,6 @@ pub(crate) async fn file(
     )
     .await?;
     Ok(())
-}
-
-/// The organization's chain lock alone, taken in `tx` and let go with it.
-/// Refused where the lock is not had in time, so a change waits on no
-/// transfer for longer than any other writer would.
-pub(crate) async fn lock(
-    project_id: &ProjectId,
-    organization_id: &OrganizationId,
-    tx: &mut Scoped<'_, ProjectAndOrganization>,
-) -> Result<(), TelmoniError> {
-    if lock_in_time(organization_id, tx).await? {
-        return Ok(());
-    }
-    tracing::warn!(
-        project_id = %project_id,
-        organization_id = %organization_id,
-        "telemetry: a change to a project gave up on the organization's chain lock"
-    );
-    Err(AuthError::Conflict(
-        "another change to this project's organization is under way; try again".into(),
-    )
-    .into())
-}
-
-/// The organization's chain lock, taken in `tx` and let go with it, where it
-/// is had within [`CHAIN_LOCK_WAIT`]; `false` where it is not, `tx` then
-/// aborted for the caller to roll back.
-pub(crate) async fn lock_in_time(
-    organization_id: &OrganizationId,
-    tx: &mut Scoped<'_, ProjectAndOrganization>,
-) -> sqlx::Result<bool> {
-    sqlx::query("SELECT set_config('lock_timeout', $1, true)")
-        .bind(format!("{}ms", CHAIN_LOCK_WAIT.as_millis()))
-        .execute(tx.conn())
-        .await?;
-    match lock_chain(tx.conn(), organization_id).await {
-        Ok(()) => Ok(true),
-        Err(e)
-            if e.as_database_error()
-                .and_then(|db| db.code())
-                .is_some_and(|code| code == LOCK_NOT_AVAILABLE) =>
-        {
-            Ok(false)
-        }
-        Err(e) => Err(e),
-    }
 }
 
 /// The organization holding `project_id` now, or `None` where the project

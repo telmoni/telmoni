@@ -133,12 +133,25 @@ impl ModelFailure {
 /// Postgres's `lock_not_available`: a `lock_timeout` ran out.
 const LOCK_NOT_AVAILABLE: &str = "55P03";
 
+/// Postgres's `deadlock_detected`.
+const DEADLOCK_DETECTED: &str = "40P01";
+
+fn sqlstate_is(e: &sqlx::Error, state: &str) -> bool {
+    e.as_database_error()
+        .and_then(|db| db.code())
+        .is_some_and(|code| code == state)
+}
+
 /// Whether `e` is a lock wait the role's `lock_timeout` ended.
 #[must_use]
 pub fn lock_timed_out(e: &sqlx::Error) -> bool {
-    e.as_database_error()
-        .and_then(|db| db.code())
-        .is_some_and(|code| code == LOCK_NOT_AVAILABLE)
+    sqlstate_is(e, LOCK_NOT_AVAILABLE)
+}
+
+/// Whether `e` is the side of a deadlock Postgres broke.
+#[must_use]
+pub fn deadlocked(e: &sqlx::Error) -> bool {
+    sqlstate_is(e, DEADLOCK_DETECTED)
 }
 
 impl TelmoniError {
@@ -726,6 +739,12 @@ mod tests {
         );
         for code in ["57014", "40P01", "23505", "57P01"] {
             assert!(!said(code).is_lock_timeout(), "{code}");
+        }
+
+        let raw = |code| sqlx::Error::Database(Box::new(Said(code)));
+        assert!(deadlocked(&raw("40P01")));
+        for code in ["55P03", "57014", "23505"] {
+            assert!(!deadlocked(&raw(code)), "{code}");
         }
     }
 

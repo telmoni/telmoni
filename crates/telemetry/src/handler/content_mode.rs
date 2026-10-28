@@ -152,7 +152,7 @@ async fn switch_content_mode(
 
     // ⚠ The organization's chain lock before anything is read, and the role
     // checked again on auth's second answer, the one that stands.
-    let now = chain::hold(auth, acting, project_id, tx).await?;
+    let now = chain::hold(auth, acting, tx).await?;
     now.require_project_owner()?;
 
     let (filed_under, held) = db::settings_for_update(tx, project_id).await?.unzip();

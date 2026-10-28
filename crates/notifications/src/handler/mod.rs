@@ -6,7 +6,6 @@ pub mod connectors;
 pub mod slack_events;
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use axum::{extract::State, http::HeaderMap, response::IntoResponse};
 use chrono::{DateTime, Utc};
@@ -18,7 +17,7 @@ use telmoni_shared::db::tenant_session::{
 };
 use telmoni_shared::extract::Json;
 use telmoni_shared::rbac::{Resource, Verb};
-use telmoni_shared::seam::{Emitted, Notice, Route, Routed};
+use telmoni_shared::seam::{Emitted, Notice, Route, Routed, resolve_again_in_time};
 use telmoni_shared::{AuthError, OrganizationId, ProjectId, TelmoniError, UserId};
 use uuid::Uuid;
 
@@ -29,45 +28,13 @@ use crate::{delivery, retention, uninstall};
 /// Most feed rows a read returns (newest first; a dropdown, not an export).
 const FEED_LIMIT: i64 = 50;
 
-/// The longest a lane waits for its organization's chain lock, and for any lock
-/// after it: the role's own `lock_timeout` on a tier, set for roles with none.
-const CHAIN_LOCK_WAIT: &str = "2000ms";
-
-/// Postgres's `lock_not_available`: a `lock_timeout` ran out.
-const LOCK_NOT_AVAILABLE: &str = "55P03";
-
-/// How long a lane under the chain lock waits for auth's second answer: well
-/// inside the two seconds the organization's other writers wait for that lock.
-const ANSWER_BUDGET: Duration = Duration::from_secs(1);
-
 /// The organization's audit chain lock, before any row: a transfer holds it
 /// while it awaits the purge, which must never wait on a lane waiting on it.
 pub(crate) async fn lock_audit_chain<B: Binding>(
     tx: &mut Scoped<'_, B>,
     organization_id: &OrganizationId,
 ) -> Result<(), TelmoniError> {
-    sqlx::query("SELECT set_config('lock_timeout', $1, true)")
-        .bind(CHAIN_LOCK_WAIT)
-        .execute(tx.conn())
-        .await?;
-    match telmoni_shared::audit::lock_chain(tx.conn(), organization_id).await {
-        Ok(()) => Ok(()),
-        Err(e)
-            if e.as_database_error()
-                .and_then(|db| db.code())
-                .is_some_and(|code| code == LOCK_NOT_AVAILABLE) =>
-        {
-            tracing::warn!(
-                organization_id = %organization_id,
-                "notifications: a change gave up on the organization's chain lock"
-            );
-            Err(AuthError::Conflict(
-                "another change to this organization is under way; try again".into(),
-            )
-            .into())
-        }
-        Err(e) => Err(e.into()),
-    }
+    Ok(telmoni_shared::audit::lock_chain_in_time(tx.conn(), organization_id).await?)
 }
 
 /// The chain lock, then auth's answer again, which stands to the commit as a transfer
@@ -80,24 +47,9 @@ pub(crate) async fn hold_chain<B: Binding>(
     resource: Resource,
 ) -> Result<(), TelmoniError> {
     lock_audit_chain(tx, &identity.organization_id).await?;
-    let Ok(now) =
-        tokio::time::timeout(ANSWER_BUDGET, state.auth.resolve_again(&identity.acting)).await
-    else {
-        tracing::warn!(
-            project_id = %identity.project_id,
-            organization_id = %identity.organization_id,
-            "notifications: auth did not answer a change to a project again in time"
-        );
-        return Err(AuthError::IdentityUnavailable.into());
-    };
-    let now = now?;
-    if now.organization_id != identity.organization_id {
-        return Err(AuthError::Conflict(
-            "the project has moved to another organization; reload and try again".into(),
-        )
-        .into());
-    }
-    now.require_project(verb, resource)?;
+    resolve_again_in_time(state.auth.as_ref(), &identity.acting)
+        .await?
+        .require_project(verb, resource)?;
     Ok(())
 }
 

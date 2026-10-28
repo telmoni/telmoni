@@ -16,6 +16,7 @@ use std::time::Duration;
 
 use telmoni_shared::db::tenant_session::maintenance_scope;
 use telmoni_shared::envelope::KekError;
+use telmoni_shared::error::deadlocked;
 use telmoni_shared::{Redacted, TelmoniError};
 use tokio::sync::Semaphore;
 use uuid::Uuid;
@@ -746,13 +747,6 @@ async fn record(state: &Arc<AppState>, outcomes: Vec<Outcome>) -> Result<(), Tel
 /// How many times a batch's bookkeeping is written before a deadlock is the
 /// tick's error.
 const BOOKKEEPING_TRIES: u32 = 3;
-
-/// Postgres's `deadlock_detected`.
-const DEADLOCK_DETECTED: &str = "40P01";
-
-fn deadlocked(error: &sqlx::Error) -> bool {
-    matches!(error, sqlx::Error::Database(e) if e.code().as_deref() == Some(DEADLOCK_DETECTED))
-}
 
 /// A batch's bookkeeping: the connections first, then their deliveries, the
 /// order a purge's cascade, a retirement and a workspace's revocation take.

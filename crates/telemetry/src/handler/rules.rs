@@ -290,7 +290,7 @@ async fn held(
         .require_project(verb, Resource::Alert)?
         .project_id
         .clone();
-    let now = chain::hold(state.auth.as_ref(), acting, &project_id, tx).await?;
+    let now = chain::hold(state.auth.as_ref(), acting, tx).await?;
     now.require_project(verb, Resource::Alert)?;
     Ok(project_id)
 }

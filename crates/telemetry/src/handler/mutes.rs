@@ -161,7 +161,7 @@ async fn open(
     let project_id = &acting
         .require_project(Verb::Create, Resource::Alert)?
         .project_id;
-    let now = chain::hold(state.auth.as_ref(), acting, project_id, tx).await?;
+    let now = chain::hold(state.auth.as_ref(), acting, tx).await?;
     now.require_project(Verb::Create, Resource::Alert)?;
     // The settings row, by which the organization's erasure finds the window.
     db::ensure_settings(tx, project_id, &acting.organization_id).await?;
@@ -238,7 +238,7 @@ async fn ended(
     let project_id = &acting
         .require_project(Verb::Update, Resource::Alert)?
         .project_id;
-    let now = chain::hold(state.auth.as_ref(), acting, project_id, tx).await?;
+    let now = chain::hold(state.auth.as_ref(), acting, tx).await?;
     now.require_project(Verb::Update, Resource::Alert)?;
     let (row, ended) = mutes::end(tx, project_id, id, &acting.user_id).await?;
     let row = row.ok_or_else(not_found)?;

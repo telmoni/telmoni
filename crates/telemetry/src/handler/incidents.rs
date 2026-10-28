@@ -182,7 +182,7 @@ async fn moved(
     let project_id = &acting
         .require_project(Verb::Update, Resource::Alert)?
         .project_id;
-    let now = chain::hold(state.auth.as_ref(), acting, project_id, tx).await?;
+    let now = chain::hold(state.auth.as_ref(), acting, tx).await?;
     now.require_project(Verb::Update, Resource::Alert)?;
     let (row, moved) = if to == IncidentStatus::Resolved {
         incidents::resolve(tx, project_id, id, &acting.user_id).await?

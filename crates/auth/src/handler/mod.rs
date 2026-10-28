@@ -97,10 +97,6 @@ pub(crate) async fn acting_organization<'a>(
 /// been requested.
 pub(crate) const BEING_DELETED: &str = "this organization is being deleted";
 
-/// The refusal of a lane whose project moved to another organization since it read it.
-pub(crate) const MOVED: &str =
-    "the project has moved to another organization; reload and try again";
-
 /// The organization's membership lock, under which its roster changes, its projects move and
 /// its deletion runs; a wait its `lock_timeout` ends answers 409, named here in the log.
 pub(crate) async fn lock_membership(
@@ -129,7 +125,10 @@ pub(crate) async fn refuse_unless_still_in<B: Binding>(
 ) -> Result<(), telmoni_shared::TelmoniError> {
     match crate::db::projects::organization_of(tx, project_id).await? {
         Some(now) if now == *organization => Ok(()),
-        Some(_) => Err(telmoni_shared::AuthError::Conflict(MOVED.to_string()).into()),
+        Some(_) => Err(telmoni_shared::AuthError::Conflict(
+            telmoni_shared::seam::PROJECT_MOVED.to_string(),
+        )
+        .into()),
         None => Err(telmoni_shared::AuthError::NotFound("project not found".to_string()).into()),
     }
 }

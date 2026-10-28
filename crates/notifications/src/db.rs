@@ -472,20 +472,16 @@ pub async fn projects_after(
     .await
 }
 
-/// Set per transaction because the Compose superuser has no role-level
-/// `lock_timeout`, and a stuck purge would hold up the sweep that retries it.
-const PURGE_LOCK_WAIT: &str = "2000ms";
+/// How long a purge waits for any lock: a stuck purge would hold up the sweep
+/// that retries it.
+const PURGE_LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// Caps every later lock wait in a purge's transaction at `PURGE_LOCK_WAIT`;
 /// one past it fails the purge, for its caller to try again.
 pub async fn wait_no_longer(
     tx: &mut Scoped<'_, Maintenance<NotificationsLane>>,
 ) -> sqlx::Result<()> {
-    sqlx::query("SELECT set_config('lock_timeout', $1, true)")
-        .bind(PURGE_LOCK_WAIT)
-        .execute(tx.conn())
-        .await?;
-    Ok(())
+    telmoni_shared::db::set_lock_timeout(tx.conn(), PURGE_LOCK_WAIT).await
 }
 
 /// Holds one vendor workspace's lock to the end of the transaction, so that an

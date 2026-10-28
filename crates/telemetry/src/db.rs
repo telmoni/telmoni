@@ -148,10 +148,9 @@ pub async fn purge_organization(
     Ok(rules + mutes + views + settings)
 }
 
-/// How long a purge waits for any lock. Set on the transaction because the
-/// Compose superuser has no role-level `lock_timeout`, and a purge left
-/// queued for a project's lock turns its exports away meanwhile.
-const PURGE_LOCK_WAIT: &str = "2s";
+/// How long a purge waits for any lock: one left queued for a project's lock
+/// turns its exports away meanwhile.
+const PURGE_LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// Holds each project alone, in the order given, as a move does, so no
 /// export files a settings row of the project beside the purge.
@@ -159,10 +158,7 @@ async fn hold_alone(
     tx: &mut Scoped<'_, Maintenance<TelemetryLane>>,
     project_ids: &[ProjectId],
 ) -> sqlx::Result<()> {
-    sqlx::query("SELECT set_config('lock_timeout', $1, true)")
-        .bind(PURGE_LOCK_WAIT)
-        .execute(tx.conn())
-        .await?;
+    telmoni_shared::db::set_lock_timeout(tx.conn(), PURGE_LOCK_WAIT).await?;
     for project_id in project_ids {
         project_move::lock_for_move(tx.conn(), project_id).await?;
     }

@@ -6,10 +6,23 @@ pub mod project_move;
 pub mod retention;
 pub mod tenant_session;
 
+use std::time::Duration;
+
 use sqlx::{
-    Executor as _, PgPool,
+    Executor as _, PgConnection, PgPool,
     postgres::{PgConnectOptions, PgPoolOptions, PgSslMode},
 };
+
+/// Caps every later lock wait in the caller's transaction at `wait`, for a
+/// role that carries no `lock_timeout` of its own: the Compose quickstart
+/// connects as the superuser.
+pub async fn set_lock_timeout(conn: &mut PgConnection, wait: Duration) -> sqlx::Result<()> {
+    sqlx::query("SELECT set_config('lock_timeout', $1, true)")
+        .bind(format!("{}ms", wait.as_millis()))
+        .execute(conn)
+        .await?;
+    Ok(())
+}
 
 /// The env var carrying the database's own server CA, PEM.
 pub const DATABASE_CA_ENV: &str = "DATABASE_CA_CERT";

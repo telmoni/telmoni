@@ -16,8 +16,8 @@ use uuid::Uuid;
 
 use crate::acting::{Acting, ActingKey};
 use crate::{
-    AlertCeilings, AuditAction, FlagSet, Grants, LaneCeilings, MemberCeiling, NotificationKind,
-    OrganizationId, OrganizationStatus, ProjectId, Role, TelmoniError, UserId,
+    AlertCeilings, AuditAction, AuthError, FlagSet, Grants, LaneCeilings, MemberCeiling,
+    NotificationKind, OrganizationId, OrganizationStatus, ProjectId, Role, TelmoniError, UserId,
 };
 
 /// Who may read a document the agent indexes, beyond the tenant its keys
@@ -101,6 +101,37 @@ pub struct AuditEventsQuery {
 /// it: the agent's reads refuse rather than answer empty.
 fn not_linked(what: &str) -> TelmoniError {
     TelmoniError::Internal(format!("{what} is not answered by this module"))
+}
+
+/// How long a writer holding the chain lock waits for auth's second answer:
+/// well inside [`crate::audit::CHAIN_LOCK_WAIT`], which every other writer in
+/// the organization waits for that lock.
+pub const ANSWER_BUDGET: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// The refusal of a write whose project moved to another organization since
+/// it read it.
+pub const PROJECT_MOVED: &str =
+    "the project has moved to another organization; reload and try again";
+
+/// `acting` read again within [`ANSWER_BUDGET`]: the answer that stands to
+/// the commit, refused where auth does not give it in time or the project has
+/// moved.
+pub async fn resolve_again_in_time(
+    auth: &dyn Auth,
+    acting: &Acting,
+) -> Result<Acting, TelmoniError> {
+    let Ok(now) = tokio::time::timeout(ANSWER_BUDGET, auth.resolve_again(acting)).await else {
+        tracing::warn!(
+            organization_id = %acting.organization_id,
+            "auth did not answer a change again in time"
+        );
+        return Err(AuthError::IdentityUnavailable.into());
+    };
+    let now = now?;
+    if now.organization_id != acting.organization_id {
+        return Err(AuthError::Conflict(PROJECT_MOVED.into()).into());
+    }
+    Ok(now)
 }
 
 /// Where a project is held, and how the console's paths spell it there:
