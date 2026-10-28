@@ -11,7 +11,6 @@ import {
   SpanGuides,
   TruncatedNote,
   indentStyle,
-  toggled,
 } from "@/components/traces/span-parts";
 import {
   openingFor,
@@ -21,7 +20,7 @@ import {
   type LayoutOptions,
 } from "@/lib/layout";
 import type { TraceDetail } from "@/lib/server/entities/traces";
-import { spanTree, treeRows, type SpanNode } from "@/lib/trace-tree";
+import { spanTree, toggled, treeRows, type SpanNode } from "@/lib/trace-tree";
 import { barsById, type TimelineBar } from "@/lib/traces";
 import { SpanStatus } from "@/lib/types/enums";
 import { cn } from "@/lib/utils";

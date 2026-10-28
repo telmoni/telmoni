@@ -10,7 +10,10 @@ import {
   parentRow,
   spanTree,
   summarizeTrace,
+  toggled,
+  treeReducer,
   treeRows,
+  type TreeState,
 } from "./trace-tree";
 
 function span(over: Partial<TraceSpan> & Pick<TraceSpan, "span_id">): TraceSpan {
@@ -174,5 +177,42 @@ describe("a trace summed", () => {
     const summary = summarizeTrace(SPANS.slice(1));
     expect(summary.run).toBeNull();
     expect(summary.root.span_id).toBe("step-2");
+  });
+});
+
+describe("the tree's one transition", () => {
+  const parentOf = new Map(SPANS.map((s) => [s.span_id, s.parent_span_id]));
+  const open: TreeState = { chosen: "tool", shut: new Set(), parentOf };
+
+  it("chooses a span, and holds its state for the one chosen already", () => {
+    expect(treeReducer(open, { type: "choose", id: "model" }).chosen).toBe("model");
+    expect(treeReducer(open, { type: "choose", id: "tool" })).toBe(open);
+  });
+
+  it("shutting the branch the chosen span is under chooses the branch", () => {
+    const shut = treeReducer(open, { type: "toggle", id: "step-1" });
+    expect([...shut.shut]).toEqual(["step-1"]);
+    expect(shut.chosen).toBe("step-1");
+    const reopened = treeReducer(shut, { type: "toggle", id: "step-1" });
+    expect(reopened.shut.size).toBe(0);
+    expect(reopened.chosen).toBe("step-1");
+    expect(treeReducer(open, { type: "toggle", id: "step-2" }).chosen).toBe("tool");
+  });
+
+  it("reads the parents of the spans drawn now, as a run still going is read again", () => {
+    const late = { ...open, chosen: "late" };
+    expect(treeReducer(late, { type: "toggle", id: "step-2" }).chosen).toBe("late");
+    const grown = treeReducer(late, {
+      type: "spans",
+      parentOf: new Map(parentOf).set("late", "step-2"),
+    });
+    expect(treeReducer(grown, { type: "toggle", id: "step-2" }).chosen).toBe("step-2");
+  });
+
+  it("toggles an id in and out of a set, leaving the set it was given", () => {
+    const set = new Set(["a"]);
+    expect([...toggled(set, "b")]).toEqual(["a", "b"]);
+    expect([...toggled(set, "a")]).toEqual([]);
+    expect([...set]).toEqual(["a"]);
   });
 });

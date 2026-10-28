@@ -142,6 +142,44 @@ export function isUnder(
   return false;
 }
 
+/** `set` with `id` taken out where it is in, else put in. */
+export function toggled(set: ReadonlySet<string>, id: string): Set<string> {
+  const next = new Set(set);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
+  return next;
+}
+
+/** The tree as the view holds it: the span chosen, the branches shut, and
+ *  each span's parent, by which a branch shutting moves the chosen span out
+ *  of it. */
+export type TreeState = {
+  chosen: string;
+  shut: ReadonlySet<string>;
+  parentOf: ReadonlyMap<string, string>;
+};
+
+export type TreeAction =
+  | { type: "choose"; id: string }
+  | { type: "toggle"; id: string }
+  /** The spans drawn moved on, as a run still going is read again. */
+  | { type: "spans"; parentOf: ReadonlyMap<string, string> };
+
+/** One transition for the one `dispatch` every row is handed. Shutting the
+ *  branch the chosen span sits in chooses the branch, as a file tree does, so
+ *  what stands chosen stays in sight. */
+export function treeReducer(state: TreeState, action: TreeAction): TreeState {
+  if (action.type === "choose") {
+    return state.chosen === action.id ? state : { ...state, chosen: action.id };
+  }
+  if (action.type === "spans") return { ...state, parentOf: action.parentOf };
+  const shut = toggled(state.shut, action.id);
+  const shutting = shut.has(action.id);
+  const chosen =
+    shutting && isUnder(state.parentOf, state.chosen, action.id) ? action.id : state.chosen;
+  return { ...state, chosen, shut };
+}
+
 /** The node above `node` in `rows`, the way ← walks up a tree: the nearest
  *  row before it one level up. */
 export function parentRow(rows: readonly SpanNode[], node: SpanNode): SpanNode | null {

@@ -156,11 +156,3 @@ export function TruncatedNote({
     </p>
   );
 }
-
-/** `set` with `id` taken out where it is in, else put in. */
-export function toggled(set: ReadonlySet<string>, id: string): Set<string> {
-  const next = new Set(set);
-  if (next.has(id)) next.delete(id);
-  else next.add(id);
-  return next;
-}

@@ -2,12 +2,12 @@
 
 import {
   memo,
-  useCallback,
-  useEffect,
   useMemo,
+  useReducer,
   useRef,
   useState,
   useSyncExternalStore,
+  type Dispatch,
   type KeyboardEvent,
   type ReactNode,
   type Ref,
@@ -26,7 +26,6 @@ import {
   SpanGuides,
   TruncatedNote,
   indentStyle,
-  toggled,
 } from "@/components/traces/span-parts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -49,14 +48,15 @@ import type { RunSpend, TraceDetail, TraceSpan } from "@/lib/server/entities/tra
 import { sessionHref } from "@/lib/sessions";
 import {
   branchesFrom,
-  isUnder,
   matchingRows,
   parentRow,
   spanTree,
   summarizeTrace,
+  treeReducer,
   treeRows,
   type SpanNode,
   type TraceSummary,
+  type TreeAction,
 } from "@/lib/trace-tree";
 import {
   KIND_LABEL,
@@ -266,14 +266,20 @@ export const TraceBody = memo(function TraceBody({
         : [],
     [trace.spans, layout],
   );
-  const [chosen, setChosen] = useState(summary.root.span_id);
   // Past OPEN_ALL_UP_TO spans a trace opens with its branches shut but the
   // run's own, whatever the layout says, so its first rows draw at once; a
   // search, or a branch opened, finds the rest.
-  const [shut, setShut] = useState<ReadonlySet<string>>(() => {
-    if (layout) return shutBranches(nodes, openingFor(trace.spans.length, layout.open));
-    return trace.spans.length > OPEN_ALL_UP_TO ? branchesFrom(nodes, 1) : new Set();
-  });
+  const [{ chosen, shut, parentOf: followed }, dispatch] = useReducer(treeReducer, null, () => ({
+    chosen: summary.root.span_id,
+    shut: layout
+      ? shutBranches(nodes, openingFor(trace.spans.length, layout.open))
+      : trace.spans.length > OPEN_ALL_UP_TO
+        ? branchesFrom(nodes, 1)
+        : new Set<string>(),
+    parentOf,
+  }));
+  // A run still going is read again as its spans land: the tree follows them.
+  if (followed !== parentOf) dispatch({ type: "spans", parentOf });
   const [search, setSearch] = useState("");
   const [timeline, setTimeline] = useState(layout?.timeline ?? false);
   const [spansShown, setSpansShown] = useState(true);
@@ -290,29 +296,10 @@ export const TraceBody = memo(function TraceBody({
     ? span.span_id
     : rows[0]?.span.span_id;
 
-  // The branches shut as last drawn, for the one `toggle` every row is handed.
-  const shutNow = useRef(shut);
-  useEffect(() => {
-    shutNow.current = shut;
-  });
-
-  // One function for every row, so a row whose own state holds is not drawn
-  // again as another is chosen: a run's thousands of spans would be.
-  // Shutting the branch the chosen span sits in chooses the branch, as a file
-  // tree does, so what stands chosen stays in sight.
-  const toggle = useCallback(
-    (id: string) => {
-      const shutting = !shutNow.current.has(id);
-      setShut((was) => toggled(was, id));
-      if (shutting) setChosen((current) => (isUnder(parentOf, current, id) ? id : current));
-    },
-    [parentOf],
-  );
-
   // Chosen from the keyboard, the row takes the focus too, once it is drawn:
   // a row a shut branch hid is not in the tree until then.
   const chooseAndFocus = (id: string) => {
-    setChosen(id);
+    dispatch({ type: "choose", id });
     requestAnimationFrame(() =>
       [...(tree.current?.querySelectorAll<HTMLElement>('[role="treeitem"]') ?? [])]
         .find((row) => row.dataset.span === id)
@@ -350,7 +337,7 @@ export const TraceBody = memo(function TraceBody({
       case "ArrowRight":
         if (branch && shut.has(id)) {
           e.preventDefault();
-          toggle(id);
+          dispatch({ type: "toggle", id });
           return;
         }
         to = branch ? node.children[0] : undefined;
@@ -358,7 +345,7 @@ export const TraceBody = memo(function TraceBody({
       case "ArrowLeft":
         if (branch && !shut.has(id)) {
           e.preventDefault();
-          toggle(id);
+          dispatch({ type: "toggle", id });
           return;
         }
         to = parentRow(rows, node);
@@ -458,8 +445,7 @@ export const TraceBody = memo(function TraceBody({
                     branch={!searching && node.children.length > 0}
                     open={!shut.has(id)}
                     bar={timeline && bar ? bar : null}
-                    onChoose={setChosen}
-                    onToggle={toggle}
+                    dispatch={dispatch}
                   />
                 );
               })}
@@ -488,7 +474,8 @@ export const TraceBody = memo(function TraceBody({
 
 /** One span's row: its kind, its name, how long it ran — and its tokens, for a
  *  model call — under the spans it ran inside, a guide standing for each.
- *  Drawn again only when its own state moves (`memo`). */
+ *  Drawn again only when its own state moves (`memo`): the one `dispatch`
+ *  never does, so a run's thousands of rows hold as another is chosen. */
 const SpanRow = memo(function SpanRow({
   node,
   chosen,
@@ -496,8 +483,7 @@ const SpanRow = memo(function SpanRow({
   branch,
   open,
   bar,
-  onChoose,
-  onToggle,
+  dispatch,
 }: {
   node: SpanNode;
   chosen: boolean;
@@ -505,8 +491,7 @@ const SpanRow = memo(function SpanRow({
   branch: boolean;
   open: boolean;
   bar: { offset: number; width: number } | null;
-  onChoose: (id: string) => void;
-  onToggle: (id: string) => void;
+  dispatch: Dispatch<TreeAction>;
 }) {
   const { span } = node;
   const depth = Math.min(node.depth, INDENT_MAX);
@@ -521,7 +506,7 @@ const SpanRow = memo(function SpanRow({
       aria-expanded={branch ? open : undefined}
       tabIndex={tabStop ? 0 : -1}
       data-span={span.span_id}
-      onClick={() => onChoose(span.span_id)}
+      onClick={() => dispatch({ type: "choose", id: span.span_id })}
       className={cn(
         "relative flex cursor-pointer items-start gap-1.5 rounded-md py-1.5 pr-2 outline-none",
         bar && "pb-5",
@@ -539,7 +524,7 @@ const SpanRow = memo(function SpanRow({
           branch
             ? (event) => {
                 event.stopPropagation();
-                onToggle(span.span_id);
+                dispatch({ type: "toggle", id: span.span_id });
               }
             : undefined
         }
