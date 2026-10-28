@@ -348,7 +348,7 @@ async fn run_of(state: &AppState, rule: &RuleRow, told: &[Told]) -> Option<Examp
         Err(Unread::Store(error)) => {
             tracing::warn!(
                 rule_id = %rule.id,
-                kind = crate::store::error_kind(&error),
+                kind = crate::store::Fault::of(&error).as_str(),
                 "telemetry: the run an alert's notice shows could not be read; it goes without"
             );
             None

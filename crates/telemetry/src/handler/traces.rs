@@ -22,9 +22,7 @@ use uuid::Uuid;
 use telmoni_shared::csv;
 use telmoni_shared::extract::{Json, Query};
 use telmoni_shared::rbac::{Resource, Verb};
-use telmoni_shared::{
-    AuthError, SortDirection, SpanKind, SpanStatus, TelemetryError, TelmoniError, TraceSort,
-};
+use telmoni_shared::{AuthError, SortDirection, SpanKind, SpanStatus, TelmoniError, TraceSort};
 
 use crate::AppState;
 use crate::contract::{
@@ -1035,7 +1033,7 @@ async fn spend_of(state: &AppState, projects: &Projects, run_id: Uuid) -> Option
         Err(Unread::Store(error)) => {
             tracing::warn!(
                 run_id = %run_id,
-                kind = store::error_kind(&error),
+                kind = store::Fault::of(&error).as_str(),
                 "traces: what a run spent could not be read; its trace goes without"
             );
             None
@@ -1055,13 +1053,11 @@ async fn spend_of(state: &AppState, projects: &Projects, run_id: Uuid) -> Option
 /// a shape of ours it refused, which retrying will not mend. The users and
 /// sessions lanes answer the same way.
 pub(crate) fn read_failed(error: clickhouse::error::Error) -> TelmoniError {
-    let kind = store::error_kind(&error);
-    if kind == "ours" {
-        tracing::error!(kind, "traces: ClickHouse refused a read");
-        return TelmoniError::Internal("traces: ClickHouse refused a read".into());
-    }
-    tracing::warn!(kind, "traces: ClickHouse did not answer a read");
-    TelemetryError::StoreUnavailable("the span store did not answer; try again".into()).into()
+    store::failed(
+        &error,
+        "traces: a read",
+        "the span store did not answer; try again",
+    )
 }
 
 #[cfg(test)]

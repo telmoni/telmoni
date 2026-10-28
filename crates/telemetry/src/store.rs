@@ -29,7 +29,7 @@ use clickhouse::{Row, RowOwned, RowRead};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use telmoni_shared::{ProjectId, Redacted, SpanKind, SpanStatus};
+use telmoni_shared::{ProjectId, Redacted, SpanKind, SpanStatus, TelemetryError, TelmoniError};
 
 /// The ClickHouse database telemetry's tables live in.
 pub const DATABASE: &str = "telemetry";
@@ -528,20 +528,68 @@ impl Read {
     }
 }
 
-/// What kind of failure a ClickHouse error is, for a log line. ⚠ The error's
+/// What kind of failure a ClickHouse error is, logged by name. ⚠ The error's
 /// text can carry ClickHouse's own message, which may quote a row or a bound
-/// value: a caller logs the kind and never the text. `bad response` is an
-/// answer the server gave, a refusal or its own state, and `ours` a failure
+/// value: a caller logs the kind and never the text. `BadResponse` is an
+/// answer the server gave, a refusal or its own state, and `Ours` a failure
 /// on this side of the wire — a row that would not encode, an answer the
 /// client could not read — which retrying will not mend.
-pub(crate) fn error_kind(error: &clickhouse::error::Error) -> &'static str {
-    use clickhouse::error::Error;
-    match error {
-        Error::Network(_) => "network",
-        Error::TimedOut => "timed out",
-        Error::BadResponse(_) => "bad response",
-        Error::Other(_) => "other",
-        _ => "ours",
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Fault {
+    Network,
+    TimedOut,
+    BadResponse,
+    Other,
+    Ours,
+}
+
+impl Fault {
+    pub(crate) fn of(error: &clickhouse::error::Error) -> Self {
+        use clickhouse::error::Error;
+        match error {
+            Error::Network(_) => Self::Network,
+            Error::TimedOut => Self::TimedOut,
+            Error::BadResponse(_) => Self::BadResponse,
+            Error::Other(_) => Self::Other,
+            _ => Self::Ours,
+        }
+    }
+
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Network => "network",
+            Self::TimedOut => "timed out",
+            Self::BadResponse => "bad response",
+            Self::Other => "other",
+            Self::Ours => "ours",
+        }
+    }
+}
+
+/// A failed call as a lane answers it: ours a 500 nobody should retry, the
+/// store's a 503 that callers and the sweeps retry.
+pub(crate) fn failed(
+    error: &clickhouse::error::Error,
+    what: &'static str,
+    retry: &'static str,
+) -> TelmoniError {
+    match Fault::of(error) {
+        Fault::Ours => {
+            tracing::error!(
+                kind = Fault::Ours.as_str(),
+                what,
+                "telemetry: ClickHouse refused"
+            );
+            TelmoniError::Internal(format!("{what}: ClickHouse refused"))
+        }
+        fault => {
+            tracing::warn!(
+                kind = fault.as_str(),
+                what,
+                "telemetry: ClickHouse did not answer"
+            );
+            TelemetryError::StoreUnavailable(retry.into()).into()
+        }
     }
 }
 
@@ -560,6 +608,25 @@ pub(crate) async fn within<T>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A failure of ours is no outage to retry; the store's own is.
+    #[test]
+    fn a_failure_of_ours_is_a_500_and_the_stores_a_503() {
+        use clickhouse::error::Error;
+        let ours = Error::InvalidParams("a row".into());
+        assert_eq!(Fault::of(&ours), Fault::Ours);
+        assert_eq!(
+            failed(&ours, "a test", "retry").to_problem_details().status,
+            500
+        );
+        assert_eq!(Fault::of(&Error::TimedOut), Fault::TimedOut);
+        assert_eq!(
+            failed(&Error::TimedOut, "a test", "retry")
+                .to_problem_details()
+                .status,
+            503
+        );
+    }
 
     /// The user and password are a DSN's, percent-encoded in the URL, and
     /// leave it decoded.

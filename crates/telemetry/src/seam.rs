@@ -31,13 +31,13 @@ pub struct TelemetrySeam(pub Arc<AppState>);
 async fn mark_deleted(state: &AppState, project: &ProjectId) -> Result<(), TelmoniError> {
     state.store.delete_project(project).await.map_err(|error| {
         // ⚠ The error's text can carry ClickHouse's own message: its kind
-        // alone is logged.
-        let kind = store::error_kind(&error);
-        if kind == "ours" {
-            tracing::error!(project_id = %project, kind, "telemetry purge: ClickHouse refused the project's delete");
+        // alone is logged, beside the project.
+        let fault = store::Fault::of(&error);
+        if fault == store::Fault::Ours {
+            tracing::error!(project_id = %project, kind = fault.as_str(), "telemetry purge: ClickHouse refused the project's delete");
             return TelmoniError::Internal("telemetry purge: ClickHouse refused the delete".into());
         }
-        tracing::warn!(project_id = %project, kind, "telemetry purge: ClickHouse did not take the project's delete");
+        tracing::warn!(project_id = %project, kind = fault.as_str(), "telemetry purge: ClickHouse did not take the project's delete");
         TelemetryError::StoreUnavailable("the span store did not answer; the purge is retried".into())
             .into()
     })

@@ -335,7 +335,7 @@ async fn settle_written(state: &AppState, project_id: &ProjectId) -> bool {
         // The error's text can carry ClickHouse's message: log its kind alone.
         Err(error) => tracing::warn!(
             project_id = %project_id,
-            kind = crate::store::error_kind(&error),
+            kind = crate::store::Fault::of(&error).as_str(),
             "ingest: an export's project was deleted as it landed, and ClickHouse did not mark \
              its spans deleted again; they stay until the retention line"
         ),
@@ -546,15 +546,11 @@ fn batch_error(error: BatchError) -> TelmoniError {
 /// exporter retries, a shape of ours it refused, which retrying will not
 /// mend, or no answer in time, after which a retry is written once.
 fn store_failed(error: clickhouse::error::Error) -> TelmoniError {
-    // ⚠ The error's text can carry ClickHouse's own message, which may quote
-    // a row: its kind is logged, never the text.
-    let kind = crate::store::error_kind(&error);
-    if kind == "ours" {
-        tracing::error!(kind, "ingest: ClickHouse refused the rows");
-        return TelmoniError::Internal("ingest: ClickHouse refused the rows".into());
-    }
-    tracing::warn!(kind, "ingest: ClickHouse did not take the rows");
-    TelemetryError::StoreUnavailable("the span store did not take the rows; retry".into()).into()
+    crate::store::failed(
+        &error,
+        "ingest",
+        "the span store did not take the rows; retry",
+    )
 }
 
 /// The sender's clock as its export left, by its [`contract::SENT_AT`], beside

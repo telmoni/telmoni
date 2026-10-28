@@ -467,7 +467,7 @@ async fn evaluate(state: &AppState, rule: &RuleRow, lease_id: Uuid) -> Result<bo
             tracing::warn!(
                 rule_id = %rule.id,
                 project_id = %rule.project_id,
-                kind = crate::store::error_kind(&error),
+                kind = crate::store::Fault::of(&error).as_str(),
                 "telemetry: an alert's window could not be read; it is evaluated again in a \
                  minute"
             );
