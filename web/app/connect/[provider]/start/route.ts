@@ -4,7 +4,7 @@ import { z } from "zod";
 import { tryFetchWithTimeout } from "@/lib/api/fetch";
 import { clientKey, rateLimitRetryAfter } from "@/lib/api/rate-limit";
 import { CONNECT_COOKIE, cookieOpts, getSession, sealConnect } from "@/lib/auth/session";
-import { connectorsPath, isOAuthProvider, isProjectId } from "@/lib/connect";
+import { type ConnectRefusal, connectorsPath, isOAuthProvider, isProjectId } from "@/lib/connect";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import { fetchProjectAnywhere, identityContext, projectHeaders } from "@/lib/server/data";
@@ -67,7 +67,7 @@ export async function GET(
   const [ctx, project] = await Promise.all([identityContext(), fetchProjectAnywhere(projectId)]);
   if (!ctx || !project) return NextResponse.redirect(new URL("/console", env.AUTH_URL));
 
-  const back = (error: string) =>
+  const back = (error: ConnectRefusal) =>
     NextResponse.redirect(
       new URL(connectorsPath(project.organizationSlug, project.slug, { error }), env.AUTH_URL),
     );

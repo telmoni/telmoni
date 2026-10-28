@@ -9,15 +9,17 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
+  type ConnectRefusal,
   PROVIDERS,
   PROVIDER_LABEL,
+  connectOutcome,
   connectStartPath,
   connectionName,
   isOAuthProvider,
-  isProvider,
   type Provider,
 } from "@/lib/connect";
 import { Flag, FlagOffDetail } from "@/lib/flags";
+import type { SearchParams } from "@/lib/list-query";
 import { eventKindLabel } from "@/lib/notification-kinds";
 import {
   fetchConnectors,
@@ -50,7 +52,7 @@ const ICON: Record<Provider, (props: { className?: string }) => ReactNode> = {
 };
 
 // What the handshake routes send the browser back with, in a sentence.
-const NOTICES: Record<string, string> = {
+const NOTICES: Record<ConnectRefusal, string> = {
   denied: "Nothing was connected — the request was cancelled at the vendor's page.",
   vendor: "The vendor refused the connection. Try again.",
   callback: "That connection attempt expired or was already used. Start again.",
@@ -66,10 +68,10 @@ export default async function ConnectorsPage({
   searchParams,
 }: {
   params: Promise<{ project: string }>;
-  searchParams?: Promise<{ connected?: string; error?: string }>;
+  searchParams?: Promise<SearchParams>;
 }) {
   const { project: slug } = await params;
-  const { connected, error } = (await searchParams) ?? {};
+  const outcome = connectOutcome((await searchParams) ?? {});
 
   const resolved = await projectPage(slug);
   if (resolved.kind === "unavailable") return <ServiceUnavailable />;
@@ -79,11 +81,11 @@ export default async function ConnectorsPage({
 
   const canManage = administersProject(project.role);
   const notice =
-    connected && isProvider(connected)
-      ? `${PROVIDER_LABEL[connected]} is connected. A first message is on its way to the channel.`
-      : error
-        ? (NOTICES[error] ?? NOTICES.authorize)
-        : null;
+    outcome === null
+      ? null
+      : "connected" in outcome
+        ? `${PROVIDER_LABEL[outcome.connected]} is connected. A first message is on its way to the channel.`
+        : NOTICES[outcome.error];
 
   return (
     <>
@@ -102,7 +104,7 @@ export default async function ConnectorsPage({
             <p
               role="status"
               className={
-                connected
+                outcome && "connected" in outcome
                   ? "text-sm text-brand-positive"
                   : "text-sm text-destructive"
               }

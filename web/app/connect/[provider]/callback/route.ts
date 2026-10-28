@@ -2,7 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 
 import { tryFetchWithTimeout } from "@/lib/api/fetch";
 import { CONNECT_COOKIE, getSession, unsealConnect } from "@/lib/auth/session";
-import { connectorsPath, isOAuthProvider } from "@/lib/connect";
+import { type ConnectOutcome, connectorsPath, isOAuthProvider } from "@/lib/connect";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import { fetchProjectAnywhere, identityContext, projectHeaders } from "@/lib/server/data";
@@ -32,7 +32,7 @@ export async function GET(
   // Back to the project's Connectors page, by id: the cookie was sealed up to
   // ten minutes ago, and a project rename or an organization URL change since
   // may have moved the slugs.
-  const done = (query: Record<string, string>) => {
+  const done = (query: ConnectOutcome) => {
     const response = NextResponse.redirect(
       new URL(connectorsPath(pending.organizationId, pending.projectId, query), env.AUTH_URL),
     );
