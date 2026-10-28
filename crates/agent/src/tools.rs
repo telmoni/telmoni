@@ -337,7 +337,7 @@ fn answer(call: &ToolCall, outcome: Outcome) -> ToolResult {
     };
     ToolResult {
         id: call.id.clone(),
-        content: bounded(&content),
+        content: bounded(content),
         is_error,
     }
 }
@@ -357,9 +357,9 @@ impl From<TelmoniError> for ToolError {
 
 type Outcome = Result<String, ToolError>;
 
-fn bounded(text: &str) -> String {
+fn bounded(text: String) -> String {
     if text.chars().count() <= MAX_RESULT_CHARS {
-        return text.to_owned();
+        return text;
     }
     let mut out: String = text.chars().take(MAX_RESULT_CHARS).collect();
     // Cut inside a fence, the rest of the result would read as outside it.
@@ -549,7 +549,7 @@ mod tests {
     #[test]
     fn a_result_cut_inside_a_fence_closes_it() {
         let long = format!("[1] t\n{OPEN}{}{CLOSE}", "a".repeat(MAX_RESULT_CHARS * 2));
-        let cut = bounded(&long);
+        let cut = bounded(long);
         assert_eq!(cut.matches(OPEN).count(), cut.matches(CLOSE).count());
     }
 
@@ -633,7 +633,7 @@ mod tests {
     #[test]
     fn a_long_result_is_cut_and_says_so() {
         let text = "x".repeat(MAX_RESULT_CHARS + 10);
-        let out = bounded(&text);
+        let out = bounded(text);
         assert!(out.ends_with("longer than this]"));
     }
 }

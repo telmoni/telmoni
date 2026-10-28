@@ -55,7 +55,7 @@ pub async fn search(
     let live = state.live()?;
     let embedder = live.embedder.as_ref();
     let vector = embedder
-        .embed(&[query.to_owned()])
+        .embed(&[query])
         .await?
         .into_iter()
         .next()

@@ -116,7 +116,7 @@ async fn probe_width_within(
     embedder: &dyn Embedder,
     timeout: std::time::Duration,
 ) -> anyhow::Result<Probe> {
-    let text = ["telmoni width probe".to_owned()];
+    let text = ["telmoni width probe"];
     let vectors = match tokio::time::timeout(timeout, embedder.embed(&text)).await {
         Ok(Ok(vectors)) => vectors,
         Err(_) => {
@@ -163,7 +163,7 @@ mod tests {
             "probe-model"
         }
 
-        async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, TelmoniError> {
+        async fn embed(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, TelmoniError> {
             Ok(texts.iter().map(|_| vec![0.5; self.0]).collect())
         }
     }
@@ -176,7 +176,7 @@ mod tests {
             "probe-model"
         }
 
-        async fn embed(&self, _texts: &[String]) -> Result<Vec<Vec<f32>>, TelmoniError> {
+        async fn embed(&self, _texts: &[&str]) -> Result<Vec<Vec<f32>>, TelmoniError> {
             Err(TelmoniError::Internal("connection refused".into()))
         }
     }
@@ -205,7 +205,7 @@ mod tests {
             "probe-model"
         }
 
-        async fn embed(&self, _texts: &[String]) -> Result<Vec<Vec<f32>>, TelmoniError> {
+        async fn embed(&self, _texts: &[&str]) -> Result<Vec<Vec<f32>>, TelmoniError> {
             std::future::pending().await
         }
     }

@@ -525,9 +525,9 @@ pub async fn prepare(
         }
     }
 
-    let texts: Vec<String> = pending
+    let texts: Vec<&str> = pending
         .iter()
-        .map(|(_, _, _, text, _)| text.clone())
+        .map(|(_, _, _, text, _)| text.as_str())
         .collect();
     // A changed passage of a row this model already indexed: the endpoint has
     // taken this source's real text, so one it now takes at no length is the
@@ -591,7 +591,7 @@ pub async fn prepare(
 ///   failure like any other, the probe's included.
 async fn embed_each(
     embedder: &dyn Embedder,
-    texts: &[String],
+    texts: &[&str],
     proven: bool,
 ) -> Result<Vec<Option<String>>, TelmoniError> {
     let mut out: Vec<Option<String>> = vec![None; texts.len()];
@@ -699,7 +699,7 @@ async fn cut_down(embedder: &dyn Embedder, text: &str) -> Result<Option<String>,
         } else if failures >= TRIES {
             return Ok(None);
         }
-        match embed_paced(embedder, &[text.to_owned()]).await {
+        match embed_paced(embedder, &[text]).await {
             Ok(vectors) => return Ok(vectors.into_iter().next()),
             Err(e) => {
                 if !endpoint_works(embedder, &e, Sent::Alone).await {
@@ -727,10 +727,7 @@ const RATE_WAITS: usize = 2;
 
 /// [`embed_usable`], waiting out a rate limit as often as [`RATE_WAITS`]
 /// allows.
-async fn embed_paced(
-    embedder: &dyn Embedder,
-    texts: &[String],
-) -> Result<Vec<String>, TelmoniError> {
+async fn embed_paced(embedder: &dyn Embedder, texts: &[&str]) -> Result<Vec<String>, TelmoniError> {
     let mut waited = 0;
     loop {
         match embed_usable(embedder, texts).await {
@@ -747,7 +744,7 @@ async fn embed_paced(
 /// no column takes fails the request, as an error status does.
 async fn embed_usable(
     embedder: &dyn Embedder,
-    texts: &[String],
+    texts: &[&str],
 ) -> Result<Vec<String>, TelmoniError> {
     embedder
         .embed(texts)
@@ -806,7 +803,7 @@ async fn embeds_probe(embedder: &dyn Embedder) -> bool {
         "Telmoni\n\nOrganizations, projects, and the people in them. {}",
         Uuid::new_v4()
     );
-    embed_paced(embedder, &[probe]).await.is_ok()
+    embed_paced(embedder, &[&probe]).await.is_ok()
 }
 
 /// Write a prepared page in the lane, then drop whatever a row shrank away
@@ -889,10 +886,11 @@ pub async fn reindex(state: &AppState) -> Result<u64, TelmoniError> {
             return Ok(redone);
         };
         after = last.id;
-        let texts: Vec<String> = stale
+        let owned: Vec<String> = stale
             .iter()
             .map(|s| embedding_text(&s.title, &s.body))
             .collect();
+        let texts: Vec<&str> = owned.iter().map(String::as_str).collect();
         // A passage passed over here keeps its old vector, and the next
         // reindex reads it again.
         let vectors = embed_each(embedder, &texts, proven).await?;
@@ -1102,6 +1100,10 @@ mod tests {
         all.iter().map(|s| (*s).to_owned()).collect()
     }
 
+    fn lent(owned: &[String]) -> Vec<&str> {
+        owned.iter().map(String::as_str).collect()
+    }
+
     fn embedded(out: &[Option<String>]) -> Vec<bool> {
         out.iter().map(Option::is_some).collect()
     }
@@ -1116,7 +1118,7 @@ mod tests {
             let (_server, embedder) = serving(TooLong { max: 300, status }).await;
             let long = "x".repeat(1_000);
             let page = texts(&["one", long.as_str(), "two"]);
-            let out = embed_each(&embedder, &page, false).await.unwrap();
+            let out = embed_each(&embedder, &lent(&page), false).await.unwrap();
             assert_eq!(embedded(&out), [true, true, true], "{status}");
             let cut = length(out[1].as_deref().unwrap());
             assert!(
@@ -1132,9 +1134,7 @@ mod tests {
     #[tokio::test]
     async fn a_text_the_endpoint_fails_once_embeds_whole() {
         let (_server, embedder) = serving(Outage::new(0..1)).await;
-        let out = embed_each(&embedder, &texts(&["one alone"]), false)
-            .await
-            .unwrap();
+        let out = embed_each(&embedder, &["one alone"], false).await.unwrap();
         assert_eq!(length(out[0].as_deref().unwrap()), 9, "cut for a blip");
     }
 
@@ -1151,7 +1151,7 @@ mod tests {
             .await;
             let long = format!("poison {}", "x".repeat(1_000));
             let page = texts(&["one", "poison pill", long.as_str(), "two"]);
-            let out = embed_each(&embedder, &page, false).await.unwrap();
+            let out = embed_each(&embedder, &lent(&page), false).await.unwrap();
             assert_eq!(embedded(&out), [true, false, false, true], "{status}");
         }
     }
@@ -1167,7 +1167,7 @@ mod tests {
         })
         .await;
         assert!(
-            embed_each(&embedder, &texts(&["poison pill"]), false)
+            embed_each(&embedder, &["poison pill"], false)
                 .await
                 .is_err()
         );
@@ -1180,9 +1180,7 @@ mod tests {
         for status in [400, 413, 500, 503] {
             let (_server, embedder) = embedder(Fails { poison: "", status }).await;
             assert!(
-                embed_each(&embedder, &texts(&["one", "two"]), false)
-                    .await
-                    .is_err(),
+                embed_each(&embedder, &["one", "two"], false).await.is_err(),
                 "{status}"
             );
         }
@@ -1200,7 +1198,7 @@ mod tests {
         .await;
         let long = format!("poison {}", "x".repeat(1_000));
         assert!(
-            embed_each(&embedder, &texts(&["one", long.as_str()]), true)
+            embed_each(&embedder, &["one", long.as_str()], true)
                 .await
                 .is_err()
         );
@@ -1212,9 +1210,7 @@ mod tests {
     async fn a_rate_limit_is_waited_out() {
         // One request's three tries are limited, then the window lifts.
         let (server, embedder) = serving(Outage::answering(0..3, 429)).await;
-        let out = embed_each(&embedder, &texts(&["one", "two"]), false)
-            .await
-            .unwrap();
+        let out = embed_each(&embedder, &["one", "two"], false).await.unwrap();
         assert_eq!(embedded(&out), [true, true]);
         assert_eq!(server.received_requests().await.unwrap().len(), 4);
     }
@@ -1225,7 +1221,7 @@ mod tests {
     #[tokio::test]
     async fn a_batch_the_endpoint_has_no_time_for_is_split() {
         let (_server, embedder) = serving(Crowded { max: 2 }).await;
-        let out = embed_each(&embedder, &texts(&["a", "b", "c", "d", "e"]), false)
+        let out = embed_each(&embedder, &["a", "b", "c", "d", "e"], false)
             .await
             .unwrap();
         assert!(out.iter().all(Option::is_some));
@@ -1237,7 +1233,7 @@ mod tests {
     #[tokio::test]
     async fn a_body_that_does_not_parse_is_an_answer() {
         let (_server, embedder) = serving(Blocks { word: "blocked" }).await;
-        let out = embed_each(&embedder, &texts(&["one", "blocked text", "two"]), false)
+        let out = embed_each(&embedder, &["one", "blocked text", "two"], false)
             .await
             .unwrap();
         assert_eq!(embedded(&out), [true, false, true]);
@@ -1253,9 +1249,7 @@ mod tests {
             status: 500,
         })
         .await;
-        let out = embed_each(&embedder, &texts(&["poison pill"]), true)
-            .await
-            .unwrap();
+        let out = embed_each(&embedder, &["poison pill"], true).await.unwrap();
         assert_eq!(embedded(&out), [false]);
     }
 
@@ -1266,8 +1260,8 @@ mod tests {
         // The first batch lands; the second and the probe after it do not.
         let (_server, embedder) = serving(Outage::new(1..3)).await;
         let page: Vec<String> = (0..40).map(|i| format!("text {i}")).collect();
-        assert!(embed_each(&embedder, &page, false).await.is_err());
-        let out = embed_each(&embedder, &page, false).await.unwrap();
+        assert!(embed_each(&embedder, &lent(&page), false).await.is_err());
+        let out = embed_each(&embedder, &lent(&page), false).await.unwrap();
         assert!(out.iter().all(Option::is_some));
     }
 
@@ -1276,11 +1270,7 @@ mod tests {
     #[tokio::test]
     async fn a_vector_no_column_takes_fails_the_page() {
         let (_server, embedder) = serving(Narrow).await;
-        assert!(
-            embed_each(&embedder, &texts(&["one", "two"]), false)
-                .await
-                .is_err()
-        );
+        assert!(embed_each(&embedder, &["one", "two"], false).await.is_err());
     }
 
     /// An endpoint that embeds the probe and fails every real text is an
@@ -1293,7 +1283,7 @@ mod tests {
         })
         .await;
         assert!(
-            embed_each(&embedder, &texts(&["page one", "page two"]), false)
+            embed_each(&embedder, &["page one", "page two"], false)
                 .await
                 .is_err()
         );

@@ -49,7 +49,7 @@ impl Embedder for SameVector {
         "same-vector"
     }
 
-    async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, TelmoniError> {
+    async fn embed(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, TelmoniError> {
         self.0.fetch_add(texts.len(), Ordering::SeqCst);
         Ok(texts.iter().map(|_| unit()).collect())
     }

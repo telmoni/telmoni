@@ -159,6 +159,7 @@ pub async fn converse(
         on_text(delta);
     };
     let text = || written.lock().map(|w| w.clone()).unwrap_or_default();
+    let written_len = || written.lock().map_or(0, |w| w.len());
     let mut round = 0;
     loop {
         let ended = |ending| Outcome {
@@ -179,7 +180,7 @@ pub async fn converse(
                 return Ok(ended(Ending::Cancelled));
             }
         }
-        let before = text().len();
+        let before = written_len();
         // ⚠ **Watched while it streams.** One call can write for a minute
         // and more; an asker gone meanwhile — signed out everywhere, taken
         // off the project, the panel closed — has it dropped within
@@ -216,7 +217,7 @@ pub async fn converse(
         // preamble is no answer to save.
         let turn = match turn {
             Ok(turn) => turn,
-            Err(e) if text().len() > before => {
+            Err(e) if written_len() > before => {
                 tracing::warn!(error = %e, "the model broke off mid-answer; keeping what it wrote");
                 return Ok(ended(Ending::Short(StoppedShort::Interrupted)));
             }
@@ -233,7 +234,7 @@ pub async fn converse(
         // Its tool calls may be half-written, so none of them run. As with a
         // broken stream, only words this call wrote make it an answer.
         if turn.stop_reason == StopReason::Unfinished {
-            if text().len() > before {
+            if written_len() > before {
                 return Ok(ended(Ending::Short(StoppedShort::Interrupted)));
             }
             return Err(unavailable("the model's stream ended without an answer"));

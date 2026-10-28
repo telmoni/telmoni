@@ -52,8 +52,9 @@ pub async fn remember(
         .chars()
         .take(MAX_CHARS)
         .collect();
+    let text = embedding_text(&title, &body);
     let vector = embedder
-        .embed(&[embedding_text(&title, &body)])
+        .embed(&[&text])
         .await?
         .into_iter()
         .next()

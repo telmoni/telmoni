@@ -25,7 +25,7 @@ pub trait Embedder: Send + Sync {
     fn model(&self) -> &str;
 
     /// One vector per text, in order.
-    async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, TelmoniError>;
+    async fn embed(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, TelmoniError>;
 }
 
 pub struct OpenAiEmbedder {
@@ -41,7 +41,7 @@ impl OpenAiEmbedder {
         })
     }
 
-    async fn batch(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, TelmoniError> {
+    async fn batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, TelmoniError> {
         let body = if self.config.request_dimensions {
             json!({ "model": self.config.model, "input": texts, "dimensions": EMBEDDING_DIMENSIONS })
         } else {
@@ -105,7 +105,7 @@ impl Embedder for OpenAiEmbedder {
         &self.config.model
     }
 
-    async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, TelmoniError> {
+    async fn embed(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, TelmoniError> {
         let mut out = Vec::with_capacity(texts.len());
         for batch in texts.chunks(BATCH) {
             out.extend(self.batch(batch).await?);
