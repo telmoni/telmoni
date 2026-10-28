@@ -11,7 +11,7 @@ use chrono::{Duration, Utc};
 use serde::Deserialize;
 use serde_json::json;
 
-use telmoni_shared::audit::{Actor, AuditEvent};
+use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
 use telmoni_shared::db::tenant_session::maintenance_scope;
 use telmoni_shared::extract::Json;
 use telmoni_shared::person_token::Principal;
@@ -28,8 +28,8 @@ use crate::{
         projects,
     },
     handler::{
-        ActingProject, acting_project, authorize, emit_audit, hold_project,
-        invite::INVITE_DAILY_MAX, parse_project_id, parse_user_id, timed_out,
+        ActingProject, acting_project, authorize, hold_project, invite::INVITE_DAILY_MAX,
+        parse_project_id, parse_user_id,
     },
     model::AuditKind,
 };
@@ -308,17 +308,9 @@ pub async fn mark_seat_seen(
 ) -> Result<impl IntoResponse, TelmoniError> {
     let project_id = parse_project_id(&project_id)?;
     let mut tx = maintenance_scope(&state.db, AuthLane).await?;
-    // A move marks its project's seats under its own locks: a wait the role's
-    // `lock_timeout` ends is a 409 to try again, as the lanes' lock waits are.
-    let organization = match members::mark_seen(&mut tx, &project_id, &principal.user_id).await {
-        Ok(organization) => organization,
-        Err(e) if timed_out(&e) => {
-            return Err(
-                AuthError::Conflict("the project is busy — try again in a moment".into()).into(),
-            );
-        }
-        Err(e) => return Err(e.into()),
-    };
+    // A move marks its project's seats under its own locks: a wait past the
+    // role's `lock_timeout` answers 409, as every lock wait does.
+    let organization = members::mark_seen(&mut tx, &project_id, &principal.user_id).await?;
     tx.commit().await?;
     Ok(Json(json!({ "organizationId": organization })))
 }

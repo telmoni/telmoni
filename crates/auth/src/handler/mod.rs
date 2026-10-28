@@ -101,61 +101,23 @@ pub(crate) const BEING_DELETED: &str = "this organization is being deleted";
 pub(crate) const MOVED: &str =
     "the project has moved to another organization; reload and try again";
 
-/// Postgres's `lock_not_available`: a `lock_timeout` ran out.
-const LOCK_NOT_AVAILABLE: &str = "55P03";
-
-/// Whether `e` is a lock wait the role's `lock_timeout` ended: a 409 to try again, not a 500.
-pub(crate) fn timed_out(e: &sqlx::Error) -> bool {
-    e.as_database_error()
-        .and_then(|db| db.code())
-        .is_some_and(|code| code == LOCK_NOT_AVAILABLE)
-}
-
 /// The organization's membership lock, under which its roster changes, its projects move and
-/// its deletion runs. A wait the role's `lock_timeout` ends is a 409 to try again, as the
-/// transfer's own waits are.
+/// its deletion runs; a wait its `lock_timeout` ends answers 409, named here in the log.
 pub(crate) async fn lock_membership(
     conn: &mut sqlx::PgConnection,
     organization: &telmoni_shared::OrganizationId,
 ) -> Result<(), telmoni_shared::TelmoniError> {
-    match crate::db::locks::lock_organization(conn, organization).await {
-        Ok(()) => Ok(()),
-        Err(e) if timed_out(&e) => {
-            tracing::warn!(
-                organization_id = %organization,
-                "a lane gave up waiting for its organization's lock"
-            );
-            Err(telmoni_shared::AuthError::Conflict(
-                "the organization is busy — try again in a moment".to_string(),
-            )
-            .into())
-        }
-        Err(e) => Err(e.into()),
-    }
-}
-
-/// An audit row on the organization's chain, whose lock the shared `emit_audit` takes.
-/// A wait the role's `lock_timeout` ends there is a 409 to try again, as the membership
-/// lock's is ([`lock_membership`]), not a 500.
-pub(crate) async fn emit_audit(
-    conn: &mut sqlx::PgConnection,
-    evt: telmoni_shared::audit::AuditEvent<'_>,
-) -> Result<(), telmoni_shared::TelmoniError> {
-    let organization = evt.organization_id;
-    match telmoni_shared::audit::emit_audit(conn, evt).await {
-        Ok(()) => Ok(()),
-        Err(e) if timed_out(&e) => {
-            tracing::warn!(
-                organization_id = %organization,
-                "a writer gave up waiting for its organization's chain lock"
-            );
-            Err(telmoni_shared::AuthError::Conflict(
-                "the organization is busy — try again in a moment".to_string(),
-            )
-            .into())
-        }
-        Err(e) => Err(e.into()),
-    }
+    crate::db::locks::lock_organization(conn, organization)
+        .await
+        .inspect_err(|e| {
+            if telmoni_shared::error::lock_timed_out(e) {
+                tracing::warn!(
+                    organization_id = %organization,
+                    "a lane gave up waiting for its organization's lock"
+                );
+            }
+        })?;
+    Ok(())
 }
 
 /// Where the project is, read again under its organization's lock: moved since the lane

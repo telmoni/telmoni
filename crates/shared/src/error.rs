@@ -130,6 +130,17 @@ impl ModelFailure {
     }
 }
 
+/// Postgres's `lock_not_available`: a `lock_timeout` ran out.
+const LOCK_NOT_AVAILABLE: &str = "55P03";
+
+/// Whether `e` is a lock wait the role's `lock_timeout` ended.
+#[must_use]
+pub fn lock_timed_out(e: &sqlx::Error) -> bool {
+    e.as_database_error()
+        .and_then(|db| db.code())
+        .is_some_and(|code| code == LOCK_NOT_AVAILABLE)
+}
+
 impl TelmoniError {
     /// Wrap an arbitrary error as an internal 500 while preserving its source
     /// chain for the logs. Neither `context` nor `source` reaches the customer.
@@ -182,6 +193,12 @@ impl TelmoniError {
         }
     }
 
+    /// Whether a lock wait the role's `lock_timeout` ended: a 409 to try again.
+    #[must_use]
+    pub fn is_lock_timeout(&self) -> bool {
+        matches!(self, Self::Database(e) if lock_timed_out(e))
+    }
+
     /// Render this error as an RFC 9457 problem-details payload.
     #[must_use]
     pub fn to_problem_details(&self) -> ProblemDetails {
@@ -193,6 +210,12 @@ impl TelmoniError {
             Self::Plan(e) => e.to_problem_details(),
             Self::Database(sqlx::Error::Database(e)) if e.is_unique_violation() => {
                 AuthError::Conflict("That already exists. Refresh and try again.".into())
+                    .to_problem_details()
+            }
+            // Something else holds what the statement needs, past the role's
+            // `lock_timeout`: busy, not broken.
+            Self::Database(e) if lock_timed_out(e) => {
+                AuthError::Conflict("this is busy — try again in a moment".into())
                     .to_problem_details()
             }
             Self::Database(_) => {
@@ -653,7 +676,8 @@ mod tests {
         assert_eq!(pd.detail.as_deref(), Some("required admin, have member"));
     }
 
-    /// A server going away is unanswered; a refusal, a wait ended or a deadlock is not.
+    /// A server going away is unanswered; a refusal, a wait ended or a deadlock
+    /// is not, and a wait ended alone is busy: a 409 to try again.
     #[test]
     fn a_server_going_away_is_unanswered_and_a_refusal_is_not() {
         #[derive(Debug)]
@@ -693,6 +717,16 @@ mod tests {
         }
         assert!(TelmoniError::Database(sqlx::Error::PoolTimedOut).is_database_unanswered());
         assert!(!TelmoniError::Database(sqlx::Error::RowNotFound).is_database_unanswered());
+
+        assert!(said("55P03").is_lock_timeout());
+        let busy = said("55P03").to_problem_details();
+        assert_eq!(
+            (busy.type_uri.as_str(), busy.status),
+            ("/errors/auth/conflict", 409)
+        );
+        for code in ["57014", "40P01", "23505", "57P01"] {
+            assert!(!said(code).is_lock_timeout(), "{code}");
+        }
     }
 
     #[test]

@@ -37,11 +37,11 @@ use crate::{
         account::wrong_code,
         acting_organization,
         deletion::{deletion_metadata, request_deletion},
-        emit_audit, organization_of, organization_role_or_forbidden,
+        organization_of, organization_role_or_forbidden,
     },
     model::{AuditKind, DeletionKind},
 };
-use telmoni_shared::audit::{Actor, AuditEvent};
+use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
 use telmoni_shared::db::tenant_session::{self, Scoped, maintenance_scope, person_scope};
 use telmoni_shared::{AuditAction, TelmoniResourceKind};
 use telmoni_shared::{AuthzError, slug};

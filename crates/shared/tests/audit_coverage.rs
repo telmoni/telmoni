@@ -547,10 +547,6 @@ fn every_listed_mutation_emits_expected_tuple() {
 /// Crates whose `src/handler` tree this gate scans.
 const SCANNED_SERVICES: &[&str] = &["auth", "notifications", "telemetry"];
 
-/// Functions that wrap the shared `emit_audit` under its own name and hand its
-/// error back changed: their callers are the emitters, held to `?` as any is.
-const EMIT_WRAPPERS: &[(&str, &str)] = &[("crates/auth/src/handler/mod.rs", "emit_audit")];
-
 /// Emitters handed their tuple as a `Change { action, kind, .. }` literal, as
 /// (file, fn, call): a call is an emit, its actor the one the emitter files as.
 const CHANGE_EMITTERS: &[(&str, &str, &str)] = &[(
@@ -649,10 +645,9 @@ fn handler_emit_set_matches_manifest() {
             .replace('\\', "/");
 
         for fn_name in handler_fn_names(contents) {
-            if EMIT_WRAPPERS.contains(&(rel.as_str(), fn_name.as_str()))
-                || CHANGE_EMITTERS
-                    .iter()
-                    .any(|(file, name, _)| *file == rel && *name == fn_name)
+            if CHANGE_EMITTERS
+                .iter()
+                .any(|(file, name, _)| *file == rel && *name == fn_name)
             {
                 continue;
             }
@@ -706,13 +701,6 @@ struct EmitCall {
     action: String,
     resource_kind: String,
     actor_id: String,
-}
-
-/// Where the body of `async fn <fn_name>` sits in `contents`.
-fn body_span(contents: &str, fn_name: &str) -> Option<std::ops::Range<usize>> {
-    let body = slurp_fn_body(contents, fn_name)?;
-    let start = contents.find(&body)?;
-    Some(start..start + body.len())
 }
 
 /// The body of `async fn <fn_name>` in `contents`, between matching braces.
@@ -958,20 +946,12 @@ fn every_emit_propagates_its_error() {
                 .to_string_lossy()
                 .replace('\\', "/");
 
-            let wrapped: Vec<_> = EMIT_WRAPPERS
-                .iter()
-                .filter(|(file, _)| *file == rel)
-                .filter_map(|(_, fn_name)| body_span(contents, fn_name))
-                .collect();
             let calls = std::iter::once("emit_audit(")
                 .chain(CHANGE_EMITTERS.iter().map(|(_, _, call)| *call));
             for (idx, call) in calls.flat_map(|call| contents.match_indices(call)) {
                 let name = call.trim_end_matches('(');
                 let before = &contents[..idx];
                 if before.ends_with("fn ") || before.ends_with("async fn ") {
-                    continue;
-                }
-                if wrapped.iter().any(|body| body.contains(&idx)) {
                     continue;
                 }
                 let line = before.matches('\n').count() + 1;

@@ -34,7 +34,7 @@ use chrono::{Duration, Utc};
 use serde::Deserialize;
 use serde_json::json;
 
-use telmoni_shared::audit::{Actor, AuditEvent};
+use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
 use telmoni_shared::db::tenant_session::{Organization, Scoped, organization_scope};
 use telmoni_shared::extract::Json;
 use telmoni_shared::person_token::Principal;
@@ -47,7 +47,7 @@ use telmoni_shared::{
 use crate::{
     AppState,
     db::{identities, locks, members, organization_members, organizations},
-    handler::{emit_audit, organization_of, organization_role_or_forbidden, parse_user_id},
+    handler::{organization_of, organization_role_or_forbidden, parse_user_id},
     model::AuditKind,
 };
 

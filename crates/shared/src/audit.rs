@@ -153,7 +153,16 @@ pub async fn emit_audit(conn: &mut PgConnection, evt: AuditEvent<'_>) -> sqlx::R
     // two projects take the same `MAX(seq) + 1` and fork the chain this lock
     // keeps linear. Released at the caller's commit or rollback; a caller
     // already holding it takes it again without waiting.
-    lock_chain(&mut *conn, evt.organization_id).await?;
+    lock_chain(&mut *conn, evt.organization_id)
+        .await
+        .inspect_err(|e| {
+            if crate::error::lock_timed_out(e) {
+                tracing::warn!(
+                    organization_id = %evt.organization_id,
+                    "a writer gave up waiting for its organization's chain lock"
+                );
+            }
+        })?;
 
     // Sampled from the app clock, not `now()` in SQL: `created_at` is a hash
     // input and must be the exact value the verifier recomputes. The chain

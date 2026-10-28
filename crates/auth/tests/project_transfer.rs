@@ -1954,7 +1954,7 @@ async fn a_transfer_kept_waiting_by_an_export_is_a_conflict(pool: PgPool) {
     assert!(
         body["detail"]
             .as_str()
-            .is_some_and(|detail| detail.contains("the project is busy")),
+            .is_some_and(|detail| detail.contains("busy")),
         "{body}"
     );
     assert_eq!(organization_of_project(&pool, &h.project).await, h.source);

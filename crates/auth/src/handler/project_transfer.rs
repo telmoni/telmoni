@@ -45,11 +45,12 @@ use chrono::{Duration, Utc};
 use serde::Deserialize;
 use serde_json::json;
 
-use telmoni_shared::audit::{Actor, AuditEvent, lock_chain};
+use telmoni_shared::audit::{Actor, AuditEvent, emit_audit, lock_chain};
 use telmoni_shared::db::project_move;
 use telmoni_shared::db::tenant_session::{
     Maintenance, ProjectAndOrganization, Scoped, maintenance_scope,
 };
+use telmoni_shared::error::lock_timed_out;
 use telmoni_shared::extract::Json;
 use telmoni_shared::person_token::Principal;
 use telmoni_shared::{
@@ -61,9 +62,8 @@ use crate::{
     AppState,
     db::{AuthLane, identities, locks, members, organization_members, organizations, projects},
     handler::{
-        ActingProject, BEING_DELETED, acting_project, emit_audit, hold_project,
-        parse_organization_id, parse_project_id, parse_user_id, projects::MAX_PROJECT_NAME,
-        refuse_unless_active, timed_out,
+        ActingProject, BEING_DELETED, acting_project, hold_project, parse_organization_id,
+        parse_project_id, parse_user_id, projects::MAX_PROJECT_NAME, refuse_unless_active,
     },
     model::AuditKind,
 };
@@ -679,20 +679,16 @@ async fn lock_transfer_organizations(
     destination: &OrganizationId,
 ) -> Result<(), TelmoniError> {
     for organization in by_id(source, destination) {
-        let Err(e) = locks::lock_organization(conn, organization).await else {
-            continue;
-        };
-        if !timed_out(&e) {
-            return Err(e.into());
-        }
-        tracing::warn!(
-            organization_id = %organization,
-            "a move of a project gave up waiting for an organization's lock"
-        );
-        return Err(AuthError::Conflict(
-            "an organization in this move is busy — try again in a moment".into(),
-        )
-        .into());
+        locks::lock_organization(conn, organization)
+            .await
+            .inspect_err(|e| {
+                if lock_timed_out(e) {
+                    tracing::warn!(
+                        organization_id = %organization,
+                        "a move of a project gave up waiting for an organization's lock"
+                    );
+                }
+            })?;
     }
     Ok(())
 }
@@ -705,43 +701,36 @@ async fn lock_transfer_chains(
     destination: &OrganizationId,
 ) -> Result<(), TelmoniError> {
     for organization in by_id(source, destination) {
-        let Err(e) = lock_chain(conn, organization).await else {
-            continue;
-        };
-        if !timed_out(&e) {
-            return Err(e.into());
-        }
-        tracing::warn!(
-            organization_id = %organization,
-            "a move of a project gave up waiting for an organization's chain lock"
-        );
-        return Err(AuthError::Conflict(
-            "an organization in this move is busy — try again in a moment".into(),
-        )
-        .into());
+        lock_chain(conn, organization).await.inspect_err(|e| {
+            if lock_timed_out(e) {
+                tracing::warn!(
+                    organization_id = %organization,
+                    "a move of a project gave up waiting for an organization's chain lock"
+                );
+            }
+        })?;
     }
     Ok(())
 }
 
-/// The project's move lock, alone, for a move of its rows. A wait the role's
-/// `lock_timeout` ends — an export holding the project while it files the
-/// project's settings row — is a 409 to try again, not the 500 a database
-/// that failed would be.
+/// The project's move lock, alone, for a move of its rows: a wait past the
+/// `lock_timeout` — an export holding the project while it files the
+/// project's settings row — answers 409, named here in the log.
 async fn lock_project_for_move(
     conn: &mut sqlx::PgConnection,
     project_id: &ProjectId,
 ) -> Result<(), TelmoniError> {
-    let Err(e) = project_move::lock_for_move(conn, project_id).await else {
-        return Ok(());
-    };
-    if !timed_out(&e) {
-        return Err(e.into());
-    }
-    tracing::warn!(
-        project_id = %project_id,
-        "a move of a project gave up waiting for the writes holding it in place"
-    );
-    Err(AuthError::Conflict("the project is busy — try again in a moment".into()).into())
+    project_move::lock_for_move(conn, project_id)
+        .await
+        .inspect_err(|e| {
+            if lock_timed_out(e) {
+                tracing::warn!(
+                    project_id = %project_id,
+                    "a move of a project gave up waiting for the writes holding it in place"
+                );
+            }
+        })?;
+    Ok(())
 }
 
 /// `POST /internal/v1/projects/{project_id}/transfer/accept` — the admin holding

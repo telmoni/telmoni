@@ -16,7 +16,7 @@ use axum::{
 use serde_json::json;
 use uuid::Uuid;
 
-use telmoni_shared::audit::{Actor, AuditEvent};
+use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
 use telmoni_shared::db::tenant_session::person_scope;
 use telmoni_shared::extract::Json;
 use telmoni_shared::person_token::Principal;
@@ -24,9 +24,7 @@ use telmoni_shared::{AuditAction, AuthError, TelmoniError, TelmoniResourceKind};
 
 use crate::AppState;
 
-use super::{
-    acting_person_in, emit_audit, log_act_outside_every_organization, recording_organization_of,
-};
+use super::{acting_person_in, log_act_outside_every_organization, recording_organization_of};
 
 /// `GET /internal/v1/auth/sessions` — the caller's live sessions, newest first.
 pub async fn list(
