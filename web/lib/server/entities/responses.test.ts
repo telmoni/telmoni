@@ -6,8 +6,17 @@ import { z } from "zod";
 
 vi.mock("@/lib/env", () => ({ env: { SERVER_URL: "http://server" } }));
 import { AlertListSchema, IncidentListSchema, MuteListSchema } from "./alerts";
+import {
+  AuthorizeSchema,
+  ConnectionAnswerSchema,
+  ConnectorListingSchema,
+  DeliveryLogPageSchema,
+  SendAnswerSchema,
+  SigningSecretSchema,
+} from "./connectors";
 import { ContentModeSettingSchema } from "./content-mode";
 import { FieldInventorySchema } from "./field-inventory";
+import { FeedSchema } from "./notification-feed";
 import { OrganizationHealthSchema } from "./organization-health";
 import { SessionLayoutSettingSchema } from "./session-layout";
 import { SessionDetailSchema, SessionListSchema } from "./sessions";
@@ -25,6 +34,13 @@ import { UserListSchema } from "./users";
 // Every answer the server's suites pin under `contract/responses`, written
 // from its struct (`make contract`), by the schema the console reads it with.
 const READERS: Record<string, z.ZodType> = {
+  "notifications/authorize.json": AuthorizeSchema,
+  "notifications/connection.json": ConnectionAnswerSchema,
+  "notifications/connectors.json": ConnectorListingSchema,
+  "notifications/deliveries.json": DeliveryLogPageSchema,
+  "notifications/feed.json": FeedSchema,
+  "notifications/sent.json": SendAnswerSchema,
+  "notifications/signing-secret.json": SigningSecretSchema,
   "telemetry/alerts.json": AlertListSchema,
   "telemetry/content-mode.json": ContentModeSettingSchema,
   "telemetry/facets.json": FacetsSchema,

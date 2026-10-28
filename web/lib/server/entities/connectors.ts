@@ -40,7 +40,7 @@ export {
   type DeliveryLogPage,
 } from "@/lib/types/connectors";
 
-const ConnectorListingSchema = z.object({
+export const ConnectorListingSchema = z.object({
   // Which connectors this deployment can connect: the vendors it holds
   // credentials for, and the webhook whenever it holds a key. A tile for one
   // it cannot renders as unavailable.
@@ -48,6 +48,26 @@ const ConnectorListingSchema = z.object({
   connections: z.array(ConnectionSchema),
 });
 export type ConnectorListing = z.infer<typeof ConnectorListingSchema>;
+
+/** A connection as a change to the kinds it receives answers it. */
+export const ConnectionAnswerSchema = z.object({ connection: ConnectionSchema });
+
+// What the service answers when it mints a signing secret: the row, and the
+// secret this one time. The host is the one thing the page will show of the
+// endpoint, so it rides along to title the dialog.
+export const SigningSecretSchema = z.object({
+  connection: z.object({ id: z.string(), channel_name: z.string() }),
+  signing_secret: z.string().min(1),
+});
+
+/** What a send now answers, a test or a resend: the vendor's refusal, if any. */
+export const SendAnswerSchema = z.object({
+  delivered: z.boolean(),
+  error: z.string().nullable(),
+});
+
+/** Where a connect sends the browser, and the state its callback is checked by. */
+export const AuthorizeSchema = z.object({ url: z.url(), state: z.string().min(1) });
 
 // `null` is the outage posture and the not-configured posture alike: the page
 // renders the tiles as it did before the lane existed.

@@ -35,7 +35,7 @@ const FeedItemSchema = z
   });
 export type FeedItem = z.infer<typeof FeedItemSchema>;
 
-const FeedSchema = z.object({
+export const FeedSchema = z.object({
   items: z.array(FeedItemSchema),
   unread: z.number(),
 });

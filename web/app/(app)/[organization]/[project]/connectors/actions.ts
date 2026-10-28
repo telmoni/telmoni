@@ -11,19 +11,17 @@ import {
   CONNECTORS_UNEXPECTED,
   admitConnectorsCall,
 } from "@/lib/server/connectors-admit";
-import { ConnectionSchema } from "@/lib/server/entities/connectors";
+import {
+  ConnectionAnswerSchema,
+  SendAnswerSchema,
+  SigningSecretSchema,
+} from "@/lib/server/entities/connectors";
 import type { NotificationKind } from "@/lib/types/enums";
 
 // How long a test send or a resend is waited for. The service gives the far
 // end 10 seconds and the key service 5, around two transactions; waiting only
 // the default 10 here reported "unavailable" for a send that went out.
 const SEND_WAIT_MS = 20_000;
-
-/** What a send now answers, a test or a resend: the vendor's refusal, if any. */
-const SendAnswer = z.object({
-  delivered: z.boolean(),
-  error: z.string().nullable(),
-});
 
 // A server action's arguments are whatever the browser posted, not what its
 // type says, so the kinds are checked against the generated vocabulary before
@@ -71,26 +69,18 @@ export async function sendTestMessageAction(
   if (!res) return refused(CONNECTORS_UNAVAILABLE);
   revalidatePath("/(app)/[organization]/[project]/connectors", "page");
   if (!res.ok) return refused((await extractProblem(res)).message);
-  const sent = SendAnswer.safeParse(await res.json().catch(() => null));
+  const sent = SendAnswerSchema.safeParse(await res.json().catch(() => null));
   if (!sent.success) return refused(CONNECTORS_UNEXPECTED);
   if (sent.data.delivered) return { ok: true };
   return refused(sent.data.error || "The message was not delivered.");
 }
-
-// What the service answers when it mints a signing secret: the row, and the
-// secret this one time. The host is the one thing the page will show of the
-// endpoint, so it rides along to title the dialog.
-const MintedSecret = z.object({
-  connection: z.object({ id: z.string(), channel_name: z.string() }),
-  signing_secret: z.string().min(1),
-});
 
 /** A signing secret, shown this once, and the host that titles its dialog. */
 export type SigningSecret = { signingSecret: string; host: string };
 export type SecretResult = ActionResult<SigningSecret>;
 
 async function readSecret(res: Response): Promise<SecretResult> {
-  const parsed = MintedSecret.safeParse(await res.json().catch(() => null));
+  const parsed = SigningSecretSchema.safeParse(await res.json().catch(() => null));
   if (!parsed.success) return refused(CONNECTORS_UNEXPECTED);
   revalidatePath("/(app)/[organization]/[project]/connectors", "page");
   return {
@@ -127,8 +117,6 @@ export async function createWebhookConnectorAction(
   return readSecret(res);
 }
 
-const UpdatedConnection = z.object({ connection: ConnectionSchema });
-
 // Which notices an endpoint receives. A webhook's alone: Slack takes every
 // kind, and the service refuses the change for it.
 export async function updateWebhookEventsAction(
@@ -150,7 +138,7 @@ export async function updateWebhookEventsAction(
   );
   if (!res) return refused(CONNECTORS_UNAVAILABLE);
   if (!res.ok) return refused((await extractProblem(res)).message);
-  const parsed = UpdatedConnection.safeParse(await res.json().catch(() => null));
+  const parsed = ConnectionAnswerSchema.safeParse(await res.json().catch(() => null));
   if (!parsed.success) return refused(CONNECTORS_UNEXPECTED);
   revalidatePath("/(app)/[organization]/[project]/connectors", "page");
   return { ok: true };
@@ -211,7 +199,7 @@ export async function redeliverAction(
   if (!res) return refused(CONNECTORS_UNAVAILABLE);
   revalidatePath("/(app)/[organization]/[project]/connectors", "page");
   if (!res.ok) return refused((await extractProblem(res)).message);
-  const parsed = SendAnswer.safeParse(await res.json().catch(() => null));
+  const parsed = SendAnswerSchema.safeParse(await res.json().catch(() => null));
   if (!parsed.success) return refused(CONNECTORS_UNEXPECTED);
   if (parsed.data.delivered) return { ok: true };
   return refused(parsed.data.error || "The delivery failed again.");

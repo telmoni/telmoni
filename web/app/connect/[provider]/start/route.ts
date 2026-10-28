@@ -1,5 +1,4 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
 
 import { tryFetchWithTimeout } from "@/lib/api/fetch";
 import { clientKey, rateLimitRetryAfter } from "@/lib/api/rate-limit";
@@ -9,10 +8,9 @@ import { isProjectId } from "@/lib/ids";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import { fetchProjectAnywhere, identityContext, projectHeaders } from "@/lib/server/data";
+import { AuthorizeSchema } from "@/lib/server/entities/connectors";
 import { FeatureOffProblemSchema } from "@/lib/server/flags";
 import { tooManyAttempts } from "@/lib/auth/start";
-
-const Authorized = z.object({ url: z.string().url(), state: z.string().min(1) });
 
 // Every press past the session check mints a state row in the service and a
 // round trip to it, so the same per-source ceiling the sign-in door carries.
@@ -83,7 +81,7 @@ export async function GET(
     logger.warn({ provider, status: res.status }, "connector authorize refused");
     return back("authorize");
   }
-  const parsed = Authorized.safeParse(await res.json().catch(() => null));
+  const parsed = AuthorizeSchema.safeParse(await res.json().catch(() => null));
   if (!parsed.success) return back("authorize");
 
   const sealed = await sealConnect({

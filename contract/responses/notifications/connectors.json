@@ -1,0 +1,39 @@
+{
+  "connections": [
+    {
+      "channel_id": "C024BE91L",
+      "channel_name": "#alerts",
+      "created_at": "2027-01-15T08:00:00Z",
+      "event_kinds": null,
+      "external_workspace_id": "T024BE7LD",
+      "external_workspace_name": "Acme",
+      "id": "0192f3a1-7c2e-7b4d-9a61-3c5e8f0d2c01",
+      "last_delivery_at": "2027-01-15T08:01:00Z",
+      "last_error": null,
+      "previous_secret_expires_at": null,
+      "provider": "slack",
+      "status": "active"
+    },
+    {
+      "channel_id": "",
+      "channel_name": "hooks.example.com",
+      "created_at": "2027-01-15T08:00:00Z",
+      "event_kinds": [
+        "incident_opened",
+        "incident_resolved"
+      ],
+      "external_workspace_id": "hooks.example.com",
+      "external_workspace_name": null,
+      "id": "0192f3a1-7c2e-7b4d-9a61-3c5e8f0d2c02",
+      "last_delivery_at": null,
+      "last_error": "the endpoint answered 410",
+      "previous_secret_expires_at": "2027-01-16T08:00:00Z",
+      "provider": "webhook",
+      "status": "errored"
+    }
+  ],
+  "enabled": {
+    "slack": true,
+    "webhook": true
+  }
+}

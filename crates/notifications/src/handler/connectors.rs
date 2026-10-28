@@ -4,6 +4,7 @@
 //! PERSON under `Resource::Connector`: a connection is a credential like a
 //! token, so every role reads and only an owner or admin writes.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use axum::{
@@ -12,7 +13,7 @@ use axum::{
     response::IntoResponse,
 };
 use ring::rand::SecureRandom as _;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
 use telmoni_shared::db::tenant_session::{maintenance_scope, project_scope};
@@ -129,12 +130,21 @@ fn mint_state() -> Result<String, TelmoniError> {
     Ok(telmoni_shared::digest::hex_lower(&bytes))
 }
 
+/// What a handshake's start answers: the vendor's consent page, and the
+/// `state` its callback brings back. No `Debug`: the state is a secret until
+/// the callback spends it.
+#[derive(Serialize)]
+pub struct Authorize {
+    pub url: String,
+    pub state: String,
+}
+
 /// `POST /internal/v1/connectors/{provider}/authorize` — start a handshake.
 pub async fn authorize_connector(
     State(state): State<Arc<AppState>>,
     Path(provider): Path<String>,
     headers: HeaderMap,
-) -> Result<impl IntoResponse, TelmoniError> {
+) -> Result<Json<Authorize>, TelmoniError> {
     let identity = authorize(&state, &headers, Verb::Create, Resource::Connector).await?;
     let provider = provider_of(&provider)?;
     let grant = grant_for(&state, provider)?;
@@ -155,7 +165,10 @@ pub async fn authorize_connector(
     tx.commit().await?;
 
     let url = grant.authorize_url(&raw_state, &redirect_uri(&state, provider));
-    Ok(Json(json!({ "url": url, "state": raw_state })))
+    Ok(Json(Authorize {
+        url,
+        state: raw_state,
+    }))
 }
 
 #[derive(Deserialize)]
@@ -234,6 +247,12 @@ async fn consume_verified_oauth_state(
         .into());
     }
     Ok(())
+}
+
+/// A connection, as a finished handshake or a change to its kinds answers it.
+#[derive(Debug, Serialize)]
+pub struct ConnectionAnswer {
+    pub connection: db::ConnectionSummary,
 }
 
 /// `POST /internal/v1/connectors/{provider}/callback` — finish a handshake.
@@ -315,7 +334,12 @@ pub async fn callback(
         "connector connected"
     );
     delivery::spawn_first_attempts(&state, notices);
-    Ok((StatusCode::CREATED, Json(json!({ "connection": summary }))))
+    Ok((
+        StatusCode::CREATED,
+        Json(ConnectionAnswer {
+            connection: summary,
+        }),
+    ))
 }
 
 /// What a refused install leaves to file: the exchange's answer, and the
@@ -516,6 +540,20 @@ fn event_kinds_column(
     ))
 }
 
+/// A webhook's connection and the secret it signs with, which no read
+/// returns again.
+#[derive(Debug, Serialize)]
+pub struct SigningSecret {
+    pub connection: db::ConnectionSummary,
+    #[serde(serialize_with = "exposed")]
+    pub signing_secret: Redacted,
+}
+
+/// The secret, written into the one answer that shows it.
+fn exposed<S: serde::Serializer>(secret: &Redacted, serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.serialize_str(secret.expose())
+}
+
 /// `POST /internal/v1/connectors/webhook` — connect a customer's own endpoint.
 pub async fn create_webhook(
     State(state): State<Arc<AppState>>,
@@ -639,7 +677,10 @@ pub async fn create_webhook(
     delivery::spawn_first_attempts(&state, notices);
     Ok((
         StatusCode::CREATED,
-        Json(json!({ "connection": summary, "signing_secret": secret.expose() })),
+        Json(SigningSecret {
+            connection: summary,
+            signing_secret: secret,
+        }),
     ))
 }
 
@@ -755,9 +796,18 @@ pub async fn rotate_webhook_secret(
         previous_kept_for_hours = req.keep_previous_for_hours,
         "webhook signing secret rotated"
     );
-    Ok(Json(
-        json!({ "connection": summary, "signing_secret": secret.expose() }),
-    ))
+    Ok(Json(SigningSecret {
+        connection: summary,
+        signing_secret: secret,
+    }))
+}
+
+/// What the list answers: every provider, and whether this deployment can
+/// connect it; and the project's connections.
+#[derive(Debug, Serialize)]
+pub struct ConnectorListing {
+    pub enabled: HashMap<Provider, bool>,
+    pub connections: Vec<db::ConnectionSummary>,
 }
 
 /// `GET /internal/v1/connectors` — the project's connections, and which providers
@@ -765,24 +815,18 @@ pub async fn rotate_webhook_secret(
 pub async fn list_connectors(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-) -> Result<impl IntoResponse, TelmoniError> {
+) -> Result<Json<ConnectorListing>, TelmoniError> {
     let identity = authorize(&state, &headers, Verb::Read, Resource::Connector).await?;
     let mut tx = project_scope(&state.db, &identity.project_id).await?;
     let connections = db::list_connections(&mut tx, &identity.project_id).await?;
     tx.commit().await?;
-    let enabled: serde_json::Map<String, serde_json::Value> = Provider::all()
-        .into_iter()
-        .map(|provider| {
-            (
-                provider.as_str().to_owned(),
-                state.connectors.enabled(provider).into(),
-            )
-        })
-        .collect();
-    Ok(Json(json!({
-        "enabled": enabled,
-        "connections": connections,
-    })))
+    Ok(Json(ConnectorListing {
+        enabled: Provider::all()
+            .into_iter()
+            .map(|provider| (provider, state.connectors.enabled(provider)))
+            .collect(),
+        connections,
+    }))
 }
 
 /// `DELETE /internal/v1/connectors/{id}` — disconnect.
@@ -821,6 +865,23 @@ pub async fn delete_connector(
 
     uninstall::settle_soon(&state, filed);
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// What a send made now answers, a test or a resend: the far end's refusal,
+/// if any.
+#[derive(Debug, Serialize)]
+pub struct SendAnswer {
+    pub delivered: bool,
+    pub error: Option<String>,
+}
+
+impl SendAnswer {
+    fn of(error: Option<String>) -> Self {
+        Self {
+            delivered: error.is_none(),
+            error,
+        }
+    }
 }
 
 /// `POST /internal/v1/connectors/{id}/test` — send one message now and report
@@ -888,9 +949,7 @@ pub async fn test_connector(
         delivered = error.is_none(),
         "connector test send"
     );
-    Ok(Json(
-        json!({ "delivered": error.is_none(), "error": error }),
-    ))
+    Ok(Json(SendAnswer::of(error)))
 }
 
 #[derive(Debug, Deserialize)]
@@ -961,7 +1020,9 @@ pub async fn update_webhook_events(
         project_id = %identity.project_id,
         "webhook events changed"
     );
-    Ok(Json(json!({ "connection": summary })))
+    Ok(Json(ConnectionAnswer {
+        connection: summary,
+    }))
 }
 
 /// The delivery log's page size when the console asks for none, and the most
@@ -977,6 +1038,14 @@ pub struct DeliveryLogQuery {
     pub limit: Option<i64>,
 }
 
+/// A page of one connection's delivery log, newest first, and the cursor to
+/// the older page after it while there is one.
+#[derive(Debug, Serialize)]
+pub struct DeliveryLogPage {
+    pub deliveries: Vec<db::DeliveryLogEntry>,
+    pub next_before: Option<Uuid>,
+}
+
 /// `GET /internal/v1/connectors/{id}/deliveries` — one connection's deliveries,
 /// newest first, each with every send it took. Every role reads it: it is the
 /// record of what the project told the outside world.
@@ -985,7 +1054,7 @@ pub async fn list_deliveries(
     Path(id): Path<Uuid>,
     headers: HeaderMap,
     telmoni_shared::extract::Query(query): telmoni_shared::extract::Query<DeliveryLogQuery>,
-) -> Result<impl IntoResponse, TelmoniError> {
+) -> Result<Json<DeliveryLogPage>, TelmoniError> {
     let identity = authorize(&state, &headers, Verb::Read, Resource::Connector).await?;
     let limit = query
         .limit
@@ -1003,10 +1072,10 @@ pub async fn list_deliveries(
     let more = i64::try_from(deliveries.len()).unwrap_or(i64::MAX) > limit;
     deliveries.truncate(usize::try_from(limit).unwrap_or(usize::MAX));
     let next_before = more.then(|| deliveries.last().map(|d| d.id)).flatten();
-    Ok(Json(json!({
-        "deliveries": deliveries,
-        "next_before": next_before,
-    })))
+    Ok(Json(DeliveryLogPage {
+        deliveries,
+        next_before,
+    }))
 }
 
 /// How long a manual resend holds its row: the test send's budget and then
@@ -1196,16 +1265,12 @@ pub async fn redeliver(
 
     let sent = match dispatch_redelivery(&state, &identity.project_id, &sealed, &claim).await? {
         Ok(sent) => sent,
-        Err(open_error) => {
-            return Ok(Json(json!({ "delivered": false, "error": open_error })));
-        }
+        Err(open_error) => return Ok(Json(SendAnswer::of(Some(open_error)))),
     };
 
     let error = record_redelivery_outcome(&state, &identity, id, &claim, &sealed, &sent).await?;
 
-    Ok(Json(
-        json!({ "delivered": error.is_none(), "error": error }),
-    ))
+    Ok(Json(SendAnswer::of(error)))
 }
 
 /// Hand a resend's claim back without having sent anything.

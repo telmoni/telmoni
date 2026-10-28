@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use axum::{extract::State, http::HeaderMap, response::IntoResponse};
 use chrono::{DateTime, Utc};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use telmoni_shared::acting::Acting;
 use telmoni_shared::db::tenant_session::{
@@ -408,11 +408,18 @@ async fn feed_scope(state: &AppState, headers: &HeaderMap) -> Result<FeedScope, 
     }
 }
 
+/// What the feed answers: its newest notices, and how many of all are unread.
+#[derive(Debug, Serialize)]
+pub struct Feed {
+    pub items: Vec<db::FeedItem>,
+    pub unread: i64,
+}
+
 /// `GET /internal/v1/notifications/feed` — the recent feed, in ONE scope.
 pub async fn get_feed(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-) -> Result<impl IntoResponse, TelmoniError> {
+) -> Result<Json<Feed>, TelmoniError> {
     let (items, unread) = match feed_scope(&state, &headers).await? {
         FeedScope::Project(project_id) => {
             read_feed(project_scope(&state.db, &project_id).await?, &project_id).await?
@@ -425,7 +432,7 @@ pub async fn get_feed(
             .await?
         }
     };
-    Ok(Json(json!({ "items": items, "unread": unread })))
+    Ok(Json(Feed { items, unread }))
 }
 
 /// The feed and its unread count, read together.

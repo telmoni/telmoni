@@ -320,6 +320,7 @@ contract:
 	UPDATE_CONTRACT=1 cargo test -p telmoni-shared --test openapi_contract -- --exact openapi_contract_is_in_sync
 	rm -rf contract/responses
 	UPDATE_CONTRACT=1 cargo test -p telmoni-telemetry --test wire_responses
+	UPDATE_CONTRACT=1 cargo test -p telmoni-notifications --test wire_responses
 	@echo "wrote contract/wire-contract.json, contract/openapi.json and contract/responses/"
 
 # The price file, converted from LiteLLM's at the commit it names, or at
