@@ -44,7 +44,7 @@ export function ResetForm({ userId, token }: { userId: string; token: string }) 
         start(async () => {
           try {
             const res = await resetPasswordAction({ userId, token, password });
-            if (res.error) setError(res.error);
+            if (!res.ok) setError(res.error);
             else setDone(true);
           } catch (err) {
             unstable_rethrow(err);

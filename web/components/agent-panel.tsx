@@ -23,6 +23,7 @@ import {
   initialAgentState,
   isAgentDisabled,
 } from "@/lib/agent/stream";
+import { type ActionResult, refused } from "@/lib/action-result";
 import { agentSuggestions } from "@/lib/agent/suggestions";
 import { projectAt } from "@/lib/console-nav";
 import { AGENT_MODIFIER_KEY, MODAL_SELECTOR, pressedKey } from "@/lib/keys";
@@ -246,7 +247,7 @@ export function AgentPanel() {
   const deleteConversation = useCallback(
     async (conversationId: string) => {
       if (!projectId) return;
-      let res: { error: string | null };
+      let res: ActionResult;
       try {
         res = await deleteAgentConversationAction(projectId, conversationId);
       } catch (err) {
@@ -254,10 +255,10 @@ export function AgentPanel() {
         // not Next's own would otherwise go unhandled, with the confirm closed
         // and nothing said.
         unstable_rethrow(err);
-        res = { error: "Couldn't delete that conversation — try again shortly." };
+        res = refused("Couldn't delete that conversation — try again shortly.");
       }
       if (shown.current.projectId !== projectId) return;
-      if (res.error) {
+      if (!res.ok) {
         setNotice(res.error);
         return;
       }

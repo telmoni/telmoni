@@ -34,7 +34,7 @@ export function ForgotForm() {
         start(async () => {
           try {
             const res = await forgotPasswordAction({ email: email.trim() });
-            if (res.error) setError(res.error);
+            if (!res.ok) setError(res.error);
             else setSent(true);
           } catch (err) {
             unstable_rethrow(err);

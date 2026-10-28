@@ -3,6 +3,7 @@
 import { refresh } from "next/cache";
 import { z } from "zod";
 
+import { type ActionResult, refused } from "@/lib/action-result";
 import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
 import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
 import { blacklistSession, isSessionBlacklisted } from "@/lib/auth/session-blacklist";
@@ -29,12 +30,10 @@ const NOT_ELIGIBLE =
 
 const UNRESOLVED = "Couldn't resolve your account right now. Try again in a moment.";
 
-export async function requestPasswordResetAction(): Promise<{
-  error: string | null;
-}> {
+export async function requestPasswordResetAction(): Promise<ActionResult> {
   const session = await getServerSession();
   if (!session || (await isSessionBlacklisted(sessionEndKey(session)))) {
-    return { error: "Your session expired — sign in again." };
+    return refused("Your session expired — sign in again.");
   }
 
   const limited = await rateLimit(sessionKey(session, "password:reset"), {
@@ -42,22 +41,22 @@ export async function requestPasswordResetAction(): Promise<{
     windowMs: 60 * 60_000,
   });
   if (limited) {
-    return { error: "Too many requests — try again in an hour." };
+    return refused("Too many requests — try again in an hour.");
   }
 
   const headers = await accountHeaders();
-  if (!headers) return { error: UNRESOLVED };
+  if (!headers) return refused(UNRESOLVED);
 
   const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/v1/me/password-reset`, {
     method: "POST",
     headers,
   });
-  if (!res) return { error: "The organization service is unreachable. Try again." };
+  if (!res) return refused("The organization service is unreachable. Try again.");
   if (!res.ok) {
     const { message } = await extractProblem(res);
-    return { error: message };
+    return refused(message);
   }
-  return { error: null };
+  return { ok: true };
 }
 
 // Step one: ask auth to open a pending change. The identity provider mails a
@@ -67,19 +66,19 @@ export async function requestPasswordResetAction(): Promise<{
 // destination and post the address the codes were actually minted for.
 export async function requestEmailChangeAction(
   email: string,
-): Promise<{ error: string | null; email?: string }> {
+): Promise<ActionResult<{ email?: string }>> {
   const session = await getServerSession();
   if (!session || (await isSessionBlacklisted(sessionEndKey(session)))) {
-    return { error: "Your session expired — sign in again." };
+    return refused("Your session expired — sign in again.");
   }
-  if (!canChangeEmail(session.authMethod)) return { error: NOT_ELIGIBLE };
+  if (!canChangeEmail(session.authMethod)) return refused(NOT_ELIGIBLE);
 
   const next = email.trim().toLowerCase();
   if (!emailShape.safeParse({ email: next }).success) {
-    return { error: "Enter a valid email address." };
+    return refused("Enter a valid email address.");
   }
   if (next === session.email.trim().toLowerCase()) {
-    return { error: "That is already the address on this account." };
+    return refused("That is already the address on this account.");
   }
 
   // ⚠ **Tighter in effect than its siblings, and it must stay that way.** The
@@ -92,10 +91,10 @@ export async function requestEmailChangeAction(
     limit: 3,
     windowMs: 60 * 60_000,
   });
-  if (limited) return { error: "Too many requests — try again in an hour." };
+  if (limited) return refused("Too many requests — try again in an hour.");
 
   const headers = await accountHeaders();
-  if (!headers) return { error: UNRESOLVED };
+  if (!headers) return refused(UNRESOLVED);
 
   // The new address travels in the body precisely because it has not earned
   // anything yet; the address auth mails its own code to is the one it holds.
@@ -104,12 +103,12 @@ export async function requestEmailChangeAction(
     headers: { ...headers, "content-type": "application/json" },
     body: JSON.stringify({ newEmail: next }),
   });
-  if (!res) return { error: "The organization service is unreachable. Try again." };
+  if (!res) return refused("The organization service is unreachable. Try again.");
   if (!res.ok) {
     const { message } = await extractProblem(res);
-    return { error: message };
+    return refused(message);
   }
-  return { error: null, email: next };
+  return { ok: true, email: next };
 }
 
 // Step two: spend both codes. On success the address has moved at the identity
@@ -118,25 +117,25 @@ export async function requestEmailChangeAction(
 export async function confirmEmailChangeAction(
   currentCode: string,
   newCode: string,
-): Promise<{ error: string | null; email?: string }> {
+): Promise<ActionResult<{ email?: string }>> {
   const session = await getServerSession();
   if (!session || (await isSessionBlacklisted(sessionEndKey(session)))) {
-    return { error: "Your session expired — sign in again." };
+    return refused("Your session expired — sign in again.");
   }
-  if (!canChangeEmail(session.authMethod)) return { error: NOT_ELIGIBLE };
+  if (!canChangeEmail(session.authMethod)) return refused(NOT_ELIGIBLE);
 
   if (!/^\d{6}$/.test(currentCode) || !/^\d{6}$/.test(newCode)) {
-    return { error: "Enter both 6-digit codes from your email." };
+    return refused("Enter both 6-digit codes from your email.");
   }
 
   const limited = await rateLimit(sessionKey(session, "email:change-confirm"), {
     limit: 10,
     windowMs: 60 * 60_000,
   });
-  if (limited) return { error: "Too many attempts. Try again in an hour." };
+  if (limited) return refused("Too many attempts. Try again in an hour.");
 
   const headers = await accountHeaders();
-  if (!headers) return { error: UNRESOLVED };
+  if (!headers) return refused(UNRESOLVED);
 
   // The organization it is sent with is where auth records the change, and
   // auth checks the person is in it before the identity provider is asked.
@@ -149,10 +148,10 @@ export async function confirmEmailChangeAction(
       body: JSON.stringify({ currentCode, newCode }),
     },
   );
-  if (!res) return { error: "The organization service is unreachable. Try again." };
+  if (!res) return refused("The organization service is unreachable. Try again.");
   if (!res.ok) {
     const { message } = await extractProblem(res);
-    return { error: message };
+    return refused(message);
   }
 
   // ⚠ **The session is already over; this ends the console's half of it.**
@@ -171,7 +170,7 @@ export async function confirmEmailChangeAction(
   const body = z
     .object({ email: z.email() })
     .safeParse(await res.json().catch(() => null));
-  return body.success ? { error: null, email: body.data.email } : { error: null };
+  return body.success ? { ok: true, email: body.data.email } : { ok: true };
 }
 
 // The organization a sign-in opens in. The body names it, so no organization
@@ -180,29 +179,29 @@ export async function confirmEmailChangeAction(
 // chosen organization's chain.
 export async function setDefaultOrganizationAction(
   organizationId: string,
-): Promise<{ error: string | null }> {
+): Promise<ActionResult> {
   const session = await getServerSession();
   if (!session || (await isSessionBlacklisted(sessionEndKey(session)))) {
-    return { error: "Your session expired — sign in again." };
+    return refused("Your session expired — sign in again.");
   }
 
   const limited = await rateLimit(sessionKey(session, "account:default-organization"), {
     limit: 20,
     windowMs: 60_000,
   });
-  if (limited) return { error: "Too many requests — slow down a moment." };
+  if (limited) return refused("Too many requests — slow down a moment.");
 
   const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/v1/me/default-organization`, {
     method: "PUT",
     headers: { ...personHeaders(session), "content-type": "application/json" },
     body: JSON.stringify({ organizationId }),
   });
-  if (!res) return { error: "The organization service is unreachable. Try again." };
+  if (!res) return refused("The organization service is unreachable. Try again.");
   if (!res.ok) {
     const { message } = await extractProblem(res);
-    return { error: message };
+    return refused(message);
   }
   // The page names the default auth answers, which this has just moved.
   refresh();
-  return { error: null };
+  return { ok: true };
 }

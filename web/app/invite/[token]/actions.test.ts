@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { errorOf } from "@/lib/action-result";
+
 const mockRedirect = vi.fn();
 vi.mock("next/navigation", () => ({
   redirect: (...args: unknown[]) => mockRedirect(...args),
@@ -91,6 +93,7 @@ describe("acceptInviteAction", () => {
   it("tells a session that ran out since the page to sign in again, and accepts nothing", async () => {
     vi.mocked(getServerSession).mockResolvedValue(null);
     expect(await acceptInviteAction("token_abc")).toEqual({
+      ok: false,
       error: "Your session expired — sign in again.",
     });
     expect(mockRedirect).not.toHaveBeenCalled();
@@ -100,7 +103,7 @@ describe("acceptInviteAction", () => {
   it("returns rate limit error when limited", async () => {
     vi.mocked(rateLimit).mockResolvedValue(new NextResponse(null, { status: 429 }));
     const res = await acceptInviteAction("token_abc");
-    expect(res.error).toMatch(/too many requests/i);
+    expect(errorOf(res)).toMatch(/too many requests/i);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -165,7 +168,7 @@ describe("acceptInviteAction", () => {
       new Response(JSON.stringify({ error: "conflict" }), { status: 409 }),
     );
     const res = await acceptInviteAction("token_abc");
-    expect(res.error).toBe("invitation already used");
+    expect(errorOf(res)).toBe("invitation already used");
     expect(mockRedirect).not.toHaveBeenCalled();
   });
 

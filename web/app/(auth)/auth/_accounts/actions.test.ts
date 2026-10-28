@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { errorOf } from "@/lib/action-result";
+
 // The pending sign-in the door sealed, its state `st8` and its verifier the RFC 7636 example's.
 const pending = { value: "sealed-pkce" as string | undefined };
 vi.mock("next/headers", () => ({
@@ -74,7 +76,7 @@ describe("signInAction", () => {
   it("posts the credentials with the service secret and answers the callback URL", async () => {
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ code: "code_1" }), { status: 200 }));
     const res = await signInAction({ email: "ada@example.com", password: "hunter22", state: "st8" });
-    expect(res).toEqual({ error: null, next: "/auth/callback?code=code_1&state=st8" });
+    expect(res).toEqual({ ok: true, next: "/auth/callback?code=code_1&state=st8" });
     const { url, init } = sent();
     expect(url).toBe("http://auth.test/internal/v1/auth/password/sign-in");
     expect(init.headers["x-service-secret"]).toBe("svc");
@@ -90,11 +92,11 @@ describe("signInAction", () => {
   it("refuses a sign-in no door started, before any call", async () => {
     pending.value = undefined;
     const res = await signInAction({ email: "ada@example.com", password: "hunter22", state: "st8" });
-    expect(res.error).toMatch(/expired/);
+    expect(errorOf(res)).toMatch(/expired/);
     expect(fetchMock).not.toHaveBeenCalled();
     pending.value = "sealed-pkce";
     const other = await signInAction({ email: "ada@example.com", password: "hunter22", state: "other" });
-    expect(other.error).toMatch(/expired/);
+    expect(errorOf(other)).toMatch(/expired/);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -108,7 +110,7 @@ describe("signInAction", () => {
       provider: "external",
     });
     const res = await signInAction({ email: "ada@example.com", password: "hunter22", state: "st8" });
-    expect(res.error).toMatch(/expired/);
+    expect(errorOf(res)).toMatch(/expired/);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -116,14 +118,14 @@ describe("signInAction", () => {
   it("says only that the pair was wrong on a 401", async () => {
     fetchMock.mockResolvedValue(problem(401, "unauthenticated"));
     const res = await signInAction({ email: "ada@example.com", password: "nope", state: "st8" });
-    expect(res.error).toBe("Wrong email address or password.");
+    expect(errorOf(res)).toBe("Wrong email address or password.");
     expect(res).not.toHaveProperty("next");
   });
 
   it("relays auth's own explanation for any other refusal", async () => {
     fetchMock.mockResolvedValue(problem(403, "verify your email address first"));
     const res = await signInAction({ email: "ada@example.com", password: "hunter22", state: "st8" });
-    expect(res.error).toBe("verify your email address first");
+    expect(errorOf(res)).toBe("verify your email address first");
   });
 
   // A domain held to single sign-on is told so, and the form gives way to the provider.
@@ -135,22 +137,22 @@ describe("signInAction", () => {
       ),
     );
     const res = await signInAction({ email: "ada@corp.example", password: "hunter22", state: "st8" });
-    expect(res.sso).toBe(true);
-    expect(res.error).toMatch(/identity provider/);
+    expect(res).toMatchObject({ ok: false, sso: true });
+    expect(errorOf(res)).toMatch(/identity provider/);
     expect(res).not.toHaveProperty("next");
   });
 
   it("is unavailable, not broken, when the lane is absent or auth is down", async () => {
     fetchMock.mockResolvedValue(problem(404, "no such lane"));
-    expect((await signInAction({ email: "a@b.co", password: "x", state: "st8" })).error).toMatch(/unavailable/);
+    expect(errorOf(await signInAction({ email: "a@b.co", password: "x", state: "st8" }))).toMatch(/unavailable/);
     fetchMock.mockResolvedValue(null);
-    expect((await signInAction({ email: "a@b.co", password: "x", state: "st8" })).error).toMatch(/unavailable/);
+    expect(errorOf(await signInAction({ email: "a@b.co", password: "x", state: "st8" }))).toMatch(/unavailable/);
   });
 
   it("refuses an empty form and a metered caller before any call", async () => {
-    expect((await signInAction({ email: "not-an-address", password: "x", state: "s" })).error).toMatch(/email address and password/);
+    expect(errorOf(await signInAction({ email: "not-an-address", password: "x", state: "s" }))).toMatch(/email address and password/);
     limiter.mockResolvedValue(new NextResponse(null, { status: 429 }));
-    expect((await signInAction({ email: "a@b.co", password: "x", state: "s" })).error).toMatch(/too many/i);
+    expect(errorOf(await signInAction({ email: "a@b.co", password: "x", state: "s" }))).toMatch(/too many/i);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
@@ -165,7 +167,7 @@ describe("signUpAction", () => {
       familyName: "",
       state: "st8",
     });
-    expect(res).toEqual({ error: null });
+    expect(res).toEqual({ ok: true });
     const { url, init } = sent();
     expect(url).toBe("http://auth.test/internal/v1/auth/password/sign-up");
     expect(JSON.parse(init.body)).toEqual({
@@ -185,21 +187,21 @@ describe("signUpAction", () => {
       password: "correct horse battery staple",
       state: "st8",
     });
-    expect(res).toEqual({ error: null, next: "/auth/callback?code=code_9&state=st8" });
+    expect(res).toEqual({ ok: true, next: "/auth/callback?code=code_9&state=st8" });
   });
 
   it("relays auth's refusal of an address that has an account, or of an uninvited one", async () => {
     fetchMock.mockResolvedValue(problem(409, "that address already has an account; sign in instead"));
     let res = await signUpAction({ email: "ada@example.com", password: "correct horse battery staple", state: "st8" });
-    expect(res.error).toMatch(/already has an account/);
+    expect(errorOf(res)).toMatch(/already has an account/);
     fetchMock.mockResolvedValue(problem(403, "sign-ups are closed; ask somebody to invite you"));
     res = await signUpAction({ email: "ada@example.com", password: "correct horse battery staple", state: "st8" });
-    expect(res.error).toMatch(/sign-ups are closed/);
+    expect(errorOf(res)).toMatch(/sign-ups are closed/);
   });
 
   it("holds the password to the floor auth holds it to, before any call", async () => {
     const res = await signUpAction({ email: "ada@example.com", password: "short", state: "st8" });
-    expect(res.error).toBe("Use at least 8 characters.");
+    expect(errorOf(res)).toBe("Use at least 8 characters.");
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
@@ -207,7 +209,7 @@ describe("signUpAction", () => {
 describe("the link actions", () => {
   it("verifyEmailAction spends the link's two halves", async () => {
     fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
-    expect(await verifyEmailAction({ userId: "user_1", token: "tok" })).toEqual({ error: null });
+    expect(await verifyEmailAction({ userId: "user_1", token: "tok" })).toEqual({ ok: true });
     const { url, init } = sent();
     expect(url).toBe("http://auth.test/internal/v1/auth/password/verify");
     expect(JSON.parse(init.body)).toEqual({ userId: "user_1", token: "tok" });
@@ -215,12 +217,12 @@ describe("the link actions", () => {
 
   it("verifyEmailAction relays a stale link's refusal", async () => {
     fetchMock.mockResolvedValue(problem(400, "that link is invalid or has expired"));
-    expect((await verifyEmailAction({ userId: "user_1", token: "tok" })).error).toMatch(/expired/);
+    expect(errorOf(await verifyEmailAction({ userId: "user_1", token: "tok" }))).toMatch(/expired/);
   });
 
   it("forgotPasswordAction says nothing about whether the address has an account", async () => {
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ sent: true }), { status: 202 }));
-    expect(await forgotPasswordAction({ email: "ada@example.com" })).toEqual({ error: null });
+    expect(await forgotPasswordAction({ email: "ada@example.com" })).toEqual({ ok: true });
     expect(sent().url).toBe("http://auth.test/internal/v1/auth/password/forgot");
   });
 
@@ -228,7 +230,7 @@ describe("the link actions", () => {
     fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
     expect(
       await resetPasswordAction({ userId: "user_1", token: "tok", password: "correct horse battery staple" }),
-    ).toEqual({ error: null });
+    ).toEqual({ ok: true });
     const { url, init } = sent();
     expect(url).toBe("http://auth.test/internal/v1/auth/password/reset");
     expect(JSON.parse(init.body)).toEqual({
@@ -250,7 +252,7 @@ describe("deviceDecisionAction", () => {
 
   it("approves as the signed-in person, under their bearer", async () => {
     fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
-    expect(await deviceDecisionAction({ userCode: "wdjb-mjht", decision: "approve" })).toEqual({ error: null });
+    expect(await deviceDecisionAction({ userCode: "wdjb-mjht", decision: "approve" })).toEqual({ ok: true });
     const { url, init } = sent();
     expect(url).toBe("http://auth.test/internal/v1/auth/device/approve");
     expect(init.headers.authorization).toBe("Bearer at_1");
@@ -265,9 +267,9 @@ describe("deviceDecisionAction", () => {
 
   it("needs a session, and names a code nobody is waiting on", async () => {
     vi.mocked(getServerSession).mockResolvedValue(null);
-    expect((await deviceDecisionAction({ userCode: "x", decision: "approve" })).error).toMatch(/sign in/);
+    expect(errorOf(await deviceDecisionAction({ userCode: "x", decision: "approve" }))).toMatch(/sign in/);
     vi.mocked(getServerSession).mockResolvedValue({ userId: "user_1", accessToken: "at_1" } as never);
     fetchMock.mockResolvedValue(problem(404, "no device is waiting for that code"));
-    expect((await deviceDecisionAction({ userCode: "x", decision: "approve" })).error).toMatch(/no device/);
+    expect(errorOf(await deviceDecisionAction({ userCode: "x", decision: "approve" }))).toMatch(/no device/);
   });
 });

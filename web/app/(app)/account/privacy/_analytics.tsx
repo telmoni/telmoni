@@ -17,7 +17,7 @@ export function AnalyticsPreference({ optIn }: { optIn: boolean }) {
     startTransition(async () => {
       try {
         const res = await setAnalyticsPreferenceAction(next);
-        if (res.error) {
+        if (!res.ok) {
           setChecked(!next);
           toast.error(res.error);
         }

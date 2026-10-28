@@ -2,6 +2,8 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { ActionResult } from "@/lib/action-result";
+
 const refresh = vi.hoisted(() => vi.fn());
 // Next's own `unstable_rethrow`; only the router is a stand-in.
 vi.mock("next/navigation", async (importOriginal) => ({
@@ -17,16 +19,16 @@ vi.mock("sonner", () => ({ toast: { error: toastError, success: vi.fn() } }));
 
 const requestEmailChangeAction = vi.hoisted(() =>
   vi.fn<
-    (email: string) => Promise<{ error: string | null; email?: string }>
-  >(async (email: string) => ({ error: null, email })),
+    (email: string) => Promise<ActionResult<{ email?: string }>>
+  >(async (email: string) => ({ ok: true, email })),
 );
 const confirmEmailChangeAction = vi.hoisted(() =>
   vi.fn<
     (
       a: string,
       b: string,
-    ) => Promise<{ error: string | null; email?: string }>
-  >(async () => ({ error: null, email: "new@example.test" })),
+    ) => Promise<ActionResult<{ email?: string }>>
+  >(async () => ({ ok: true, email: "new@example.test" })),
 );
 vi.mock("./actions", () => ({
   requestEmailChangeAction,
@@ -40,11 +42,11 @@ const CURRENT = "k@example.test";
 beforeEach(() => {
   vi.clearAllMocks();
   requestEmailChangeAction.mockImplementation(async (email: string) => ({
-    error: null,
+    ok: true,
     email,
   }));
   confirmEmailChangeAction.mockResolvedValue({
-    error: null,
+    ok: true,
     email: "new@example.test",
   });
 });
@@ -143,7 +145,7 @@ describe("ChangeEmail — asking for the codes", () => {
   // destination and confirm against an address the codes were not minted for.
   it("asks for one code per inbox, naming the address the server echoed", async () => {
     requestEmailChangeAction.mockResolvedValue({
-      error: null,
+      ok: true,
       email: "new@example.test",
     });
     mount("password");
@@ -161,6 +163,7 @@ describe("ChangeEmail — asking for the codes", () => {
 
   it("reports a refusal inline, beside the field, and never as a toast", async () => {
     requestEmailChangeAction.mockResolvedValue({
+      ok: false,
       error: "That address is already in use.",
     });
     mount("password");
@@ -253,6 +256,7 @@ describe("ChangeEmail — spending the codes", () => {
 
   it("leaves a wrong code on the code step, with the field still editable", async () => {
     confirmEmailChangeAction.mockResolvedValue({
+      ok: false,
       error: "invalid or expired confirmation code",
     });
     mount("password");
@@ -306,7 +310,7 @@ describe("ChangeEmail — spending the codes", () => {
   // The change committed even when auth's answer does not say where it landed;
   // the address the codes were minted for is the one to name then.
   it("names the address the codes were sent to when auth's answer does not", async () => {
-    confirmEmailChangeAction.mockResolvedValue({ error: null });
+    confirmEmailChangeAction.mockResolvedValue({ ok: true });
     mount("password");
     await reachCodeStep();
     await type("email-code-new", "222222");

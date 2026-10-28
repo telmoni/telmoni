@@ -33,14 +33,14 @@ export function SignInForm({
     start(async () => {
       try {
         const res = await signInAction({ email: email.trim(), password, state });
-        if (res.error) {
+        if (!res.ok) {
           setError(res.error);
-          if (res.sso) setSso(true);
+          if ("sso" in res) setSso(true);
           return;
         }
         // The callback, with the code and the state the door sealed: the
         // same hop an external provider's page makes, from here.
-        if (res.next) window.location.replace(res.next);
+        window.location.replace(res.next);
       } catch (err) {
         unstable_rethrow(err);
         setError("Network error. Try again.");

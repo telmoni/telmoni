@@ -38,7 +38,7 @@ export function ConfirmEmail({ userId, token }: { userId: string; token: string 
               setError(null);
               try {
                 const res = await verifyEmailAction({ userId, token });
-                if (res.error) setError(res.error);
+                if (!res.ok) setError(res.error);
                 else setDone(true);
               } catch (err) {
                 unstable_rethrow(err);

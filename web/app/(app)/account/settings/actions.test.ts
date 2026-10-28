@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { errorOf } from "@/lib/action-result";
+
 vi.mock("@/lib/server/session", () => ({
   getServerSession: vi.fn(),
 }));
@@ -97,7 +99,7 @@ describe("requestPasswordResetAction", () => {
       new Response(null, { status: 202 }),
     );
 
-    expect(await requestPasswordResetAction()).toEqual({ error: null });
+    expect(await requestPasswordResetAction()).toEqual({ ok: true });
 
     const [url, init] = vi.mocked(tryFetchWithTimeout).mock.calls[0]!;
     expect(url).toBe("http://auth.test/internal/v1/me/password-reset");
@@ -136,7 +138,7 @@ describe("requestPasswordResetAction", () => {
 
   it("refuses without calling auth when it cannot tell where the caller stands", async () => {
     vi.mocked(getServerContext).mockResolvedValue(null);
-    expect(await requestPasswordResetAction()).toEqual({ error: UNRESOLVED });
+    expect(await requestPasswordResetAction()).toEqual({ ok: false, error: UNRESOLVED });
     expect(tryFetchWithTimeout).not.toHaveBeenCalled();
   });
 
@@ -145,7 +147,7 @@ describe("requestPasswordResetAction", () => {
   it("reaches somebody in no organization, and names none", async () => {
     standIn(null);
     vi.mocked(tryFetchWithTimeout).mockResolvedValue(new Response(null, { status: 202 }));
-    expect(await requestPasswordResetAction()).toEqual({ error: null });
+    expect(await requestPasswordResetAction()).toEqual({ ok: true });
     expect(sentHeaders()).not.toHaveProperty("x-organization-id");
     expect(sentHeaders().authorization).toBe("Bearer at_1");
   });
@@ -153,6 +155,7 @@ describe("requestPasswordResetAction", () => {
   it("refuses a caller over the limit without calling auth", async () => {
     vi.mocked(rateLimit).mockResolvedValue("limited" as never);
     expect(await requestPasswordResetAction()).toEqual({
+      ok: false,
       error: "Too many requests — try again in an hour.",
     });
     expect(tryFetchWithTimeout).not.toHaveBeenCalled();
@@ -161,6 +164,7 @@ describe("requestPasswordResetAction", () => {
   it("refuses a caller with no session without calling auth", async () => {
     vi.mocked(getServerSession).mockResolvedValue(null as never);
     expect(await requestPasswordResetAction()).toEqual({
+      ok: false,
       error: "Your session expired — sign in again.",
     });
     expect(tryFetchWithTimeout).not.toHaveBeenCalled();
@@ -169,6 +173,7 @@ describe("requestPasswordResetAction", () => {
   it("refuses a session that was ended from another device", async () => {
     vi.mocked(isSessionBlacklisted).mockResolvedValue(true);
     expect(await requestPasswordResetAction()).toEqual({
+      ok: false,
       error: "Your session expired — sign in again.",
     });
     expect(isSessionBlacklisted).toHaveBeenCalledWith("sess_1");
@@ -179,13 +184,14 @@ describe("requestPasswordResetAction", () => {
   it("reports an unreachable service and a refusal distinctly", async () => {
     vi.mocked(tryFetchWithTimeout).mockResolvedValue(null as never);
     expect(await requestPasswordResetAction()).toEqual({
+      ok: false,
       error: "The organization service is unreachable. Try again.",
     });
 
     vi.mocked(tryFetchWithTimeout).mockResolvedValue(
       new Response(null, { status: 502 }),
     );
-    expect(await requestPasswordResetAction()).toEqual({ error: "problem" });
+    expect(await requestPasswordResetAction()).toEqual({ ok: false, error: "problem" });
   });
 });
 
@@ -196,7 +202,7 @@ describe("requestEmailChangeAction", () => {
     );
 
     expect(await requestEmailChangeAction("new@example.test")).toEqual({
-      error: null,
+      ok: true,
       email: "new@example.test",
     });
 
@@ -249,6 +255,7 @@ describe("requestEmailChangeAction", () => {
   it("refuses without calling auth when it cannot tell where the caller stands", async () => {
     vi.mocked(getServerContext).mockResolvedValue(null);
     expect(await requestEmailChangeAction("new@example.test")).toEqual({
+      ok: false,
       error: UNRESOLVED,
     });
     expect(tryFetchWithTimeout).not.toHaveBeenCalled();
@@ -260,7 +267,7 @@ describe("requestEmailChangeAction", () => {
     );
 
     expect(await requestEmailChangeAction("  New@Example.TEST  ")).toEqual({
-      error: null,
+      ok: true,
       email: "new@example.test",
     });
     expect(
@@ -275,6 +282,7 @@ describe("requestEmailChangeAction", () => {
   it("refuses a malformed address without calling auth", async () => {
     for (const bad of ["", "nope", "a@b", "two @spaces.test"]) {
       expect(await requestEmailChangeAction(bad), bad).toEqual({
+        ok: false,
         error: "Enter a valid email address.",
       });
     }
@@ -286,6 +294,7 @@ describe("requestEmailChangeAction", () => {
   it("refuses the address the account already has", async () => {
     for (const same of ["k@example.test", "K@Example.TEST"]) {
       expect(await requestEmailChangeAction(same), same).toEqual({
+        ok: false,
         error: "That is already the address on this account.",
       });
     }
@@ -305,7 +314,7 @@ describe("requestEmailChangeAction", () => {
         authMethod: method,
       } as never);
       const res = await requestEmailChangeAction("new@example.test");
-      expect(res.error, String(method)).toMatch(/held by your identity provider/);
+      expect(errorOf(res), String(method)).toMatch(/held by your identity provider/);
     }
     expect(tryFetchWithTimeout).not.toHaveBeenCalled();
   });
@@ -329,6 +338,7 @@ describe("requestEmailChangeAction", () => {
 
     vi.mocked(rateLimit).mockResolvedValue("limited" as never);
     expect(await requestEmailChangeAction("new@example.test")).toEqual({
+      ok: false,
       error: "Too many requests — try again in an hour.",
     });
   });
@@ -336,6 +346,7 @@ describe("requestEmailChangeAction", () => {
   it("refuses a dead session before spending a rate-limit slot", async () => {
     vi.mocked(isSessionBlacklisted).mockResolvedValue(true);
     expect(await requestEmailChangeAction("new@example.test")).toEqual({
+      ok: false,
       error: "Your session expired — sign in again.",
     });
     expect(tryFetchWithTimeout).not.toHaveBeenCalled();
@@ -345,6 +356,7 @@ describe("requestEmailChangeAction", () => {
   it("reports an unreachable service and a refusal distinctly", async () => {
     vi.mocked(tryFetchWithTimeout).mockResolvedValue(null as never);
     expect(await requestEmailChangeAction("new@example.test")).toEqual({
+      ok: false,
       error: "The organization service is unreachable. Try again.",
     });
 
@@ -352,6 +364,7 @@ describe("requestEmailChangeAction", () => {
       new Response(null, { status: 409 }),
     );
     expect(await requestEmailChangeAction("new@example.test")).toEqual({
+      ok: false,
       error: "problem",
     });
   });
@@ -362,7 +375,7 @@ describe("confirmEmailChangeAction", () => {
     vi.mocked(tryFetchWithTimeout).mockResolvedValue(confirmed());
 
     expect(await confirmEmailChangeAction("111111", "222222")).toEqual({
-      error: null,
+      ok: true,
       email: "new@example.test",
     });
 
@@ -384,6 +397,7 @@ describe("confirmEmailChangeAction", () => {
   it("refuses without calling auth when it cannot tell where the caller stands", async () => {
     vi.mocked(getServerContext).mockResolvedValue(null);
     expect(await confirmEmailChangeAction("111111", "222222")).toEqual({
+      ok: false,
       error: UNRESOLVED,
     });
     expect(tryFetchWithTimeout).not.toHaveBeenCalled();
@@ -396,7 +410,7 @@ describe("confirmEmailChangeAction", () => {
     standIn(null);
     vi.mocked(tryFetchWithTimeout).mockResolvedValue(confirmed());
     expect(await confirmEmailChangeAction("111111", "222222")).toEqual({
-      error: null,
+      ok: true,
       email: "new@example.test",
     });
     expect(sentHeaders()).not.toHaveProperty("x-organization-id");
@@ -412,6 +426,7 @@ describe("confirmEmailChangeAction", () => {
       ["", ""],
     ]) {
       expect(await confirmEmailChangeAction(a!, b!), `${a}/${b}`).toEqual({
+        ok: false,
         error: "Enter both 6-digit codes from your email.",
       });
     }
@@ -438,7 +453,7 @@ describe("confirmEmailChangeAction", () => {
       authMethod: "google",
     } as never);
     const res = await confirmEmailChangeAction("111111", "222222");
-    expect(res.error).toMatch(/held by your identity provider/);
+    expect(errorOf(res)).toMatch(/held by your identity provider/);
     expect(tryFetchWithTimeout).not.toHaveBeenCalled();
   });
 
@@ -459,6 +474,7 @@ describe("confirmEmailChangeAction", () => {
   it("ends nothing when nothing changed", async () => {
     vi.mocked(tryFetchWithTimeout).mockResolvedValue(null as never);
     expect(await confirmEmailChangeAction("111111", "222222")).toEqual({
+      ok: false,
       error: "The organization service is unreachable. Try again.",
     });
 
@@ -466,6 +482,7 @@ describe("confirmEmailChangeAction", () => {
       new Response(null, { status: 400 }),
     );
     expect(await confirmEmailChangeAction("111111", "222222")).toEqual({
+      ok: false,
       error: "problem",
     });
 
@@ -480,7 +497,7 @@ describe("confirmEmailChangeAction", () => {
     );
 
     expect(await confirmEmailChangeAction("111111", "222222")).toEqual({
-      error: null,
+      ok: true,
     });
     expect(blacklistSession).toHaveBeenCalledWith("sess_1");
   });
@@ -494,7 +511,7 @@ describe("setDefaultOrganizationAction", () => {
       new Response(JSON.stringify({ defaultOrganizationId: "org_2" }), { status: 200 }),
     );
 
-    expect(await setDefaultOrganizationAction("org_2")).toEqual({ error: null });
+    expect(await setDefaultOrganizationAction("org_2")).toEqual({ ok: true });
 
     const [url, init] = vi.mocked(tryFetchWithTimeout).mock.calls[0]!;
     expect(url).toBe("http://auth.test/internal/v1/me/default-organization");
@@ -517,13 +534,14 @@ describe("setDefaultOrganizationAction", () => {
 
   it("hands back auth's refusal in its own words", async () => {
     vi.mocked(tryFetchWithTimeout).mockResolvedValue(new Response(null, { status: 403 }));
-    expect(await setDefaultOrganizationAction("org_stranger")).toEqual({ error: "problem" });
+    expect(await setDefaultOrganizationAction("org_stranger")).toEqual({ ok: false, error: "problem" });
     expect(refresh).not.toHaveBeenCalled();
   });
 
   it("says so when auth cannot be reached", async () => {
     vi.mocked(tryFetchWithTimeout).mockResolvedValue(null as never);
     expect(await setDefaultOrganizationAction("org_2")).toEqual({
+      ok: false,
       error: "The organization service is unreachable. Try again.",
     });
   });
@@ -531,12 +549,14 @@ describe("setDefaultOrganizationAction", () => {
   it("sends nothing for a session that has ended, or past the limit", async () => {
     vi.mocked(isSessionBlacklisted).mockResolvedValue(true);
     expect(await setDefaultOrganizationAction("org_2")).toEqual({
+      ok: false,
       error: "Your session expired — sign in again.",
     });
 
     vi.mocked(isSessionBlacklisted).mockResolvedValue(false);
     vi.mocked(rateLimit).mockResolvedValue({ retryAfterMs: 1_000 } as never);
     expect(await setDefaultOrganizationAction("org_2")).toEqual({
+      ok: false,
       error: "Too many requests — slow down a moment.",
     });
     expect(sessionKey).toHaveBeenCalledWith(

@@ -27,7 +27,7 @@ export function DeviceForm({ code: initialCode }: { code: string }) {
     start(async () => {
       try {
         const res = await deviceDecisionAction({ userCode: code.trim(), decision });
-        if (res.error) setError(res.error);
+        if (!res.ok) setError(res.error);
         else setDecided(decision);
       } catch (err) {
         unstable_rethrow(err);

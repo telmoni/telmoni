@@ -37,7 +37,7 @@ export function DefaultOrganization({
     startTransition(async () => {
       try {
         const res = await setDefaultOrganizationAction(chosen);
-        if (res.error) {
+        if (!res.ok) {
           toast.error(res.error);
           return;
         }

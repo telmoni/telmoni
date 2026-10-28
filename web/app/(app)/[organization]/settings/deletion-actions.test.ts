@@ -153,6 +153,7 @@ describe("requestOrganizationDeletionCodeAction", () => {
     async (role) => {
       standingAs(role, "org_elsewhere");
       expect(await requestOrganizationDeletionCodeAction(ORGANIZATION)).toEqual({
+        ok: false,
         error: SWITCHED,
       });
       expect(fetchMock).not.toHaveBeenCalled();
@@ -167,6 +168,7 @@ describe("requestOrganizationDeletionCodeAction", () => {
     async (role) => {
       standingAs(role);
       expect(await requestOrganizationDeletionCodeAction(ORGANIZATION)).toEqual({
+        ok: false,
         error: OWNER_ONLY,
       });
       expect(fetchMock).not.toHaveBeenCalled();
@@ -176,6 +178,7 @@ describe("requestOrganizationDeletionCodeAction", () => {
   it("refuses without asking auth when it cannot tell where the caller stands", async () => {
     vi.mocked(identityContext).mockResolvedValue(null);
     expect(await requestOrganizationDeletionCodeAction(ORGANIZATION)).toEqual({
+      ok: false,
       error: UNRESOLVED,
     });
     expect(fetchMock).not.toHaveBeenCalled();
@@ -184,11 +187,13 @@ describe("requestOrganizationDeletionCodeAction", () => {
   it("reports an unreachable service and a refusal distinctly", async () => {
     fetchMock.mockResolvedValue(null);
     expect(await requestOrganizationDeletionCodeAction(ORGANIZATION)).toEqual({
+      ok: false,
       error: UNREACHABLE,
     });
 
     fetchMock.mockResolvedValue(new Response(null, { status: 403 }));
     expect(await requestOrganizationDeletionCodeAction(ORGANIZATION)).toEqual({
+      ok: false,
       error: "problem",
     });
   });
@@ -198,6 +203,7 @@ describe("deleteOrganizationAction", () => {
   it("rejects a code that is not six digits, asking auth nothing", async () => {
     for (const bad of ["abc", "12345", "1234567", "12345a", ""]) {
       expect(await deleteOrganizationAction(ORGANIZATION, bad), bad).toEqual({
+        ok: false,
         error: "Enter the 6-digit code from your email.",
       });
     }
@@ -208,7 +214,7 @@ describe("deleteOrganizationAction", () => {
     "refuses when the request resolves another organization, standing as %s, asking auth nothing",
     async (role) => {
       standingAs(role, "org_elsewhere");
-      expect(await deleteOrganizationAction(ORGANIZATION, "123456")).toEqual({ error: SWITCHED });
+      expect(await deleteOrganizationAction(ORGANIZATION, "123456")).toEqual({ ok: false, error: SWITCHED });
       expect(fetchMock).not.toHaveBeenCalled();
     },
   );
@@ -218,6 +224,7 @@ describe("deleteOrganizationAction", () => {
     async (role) => {
       standingAs(role);
       expect(await deleteOrganizationAction(ORGANIZATION, "123456")).toEqual({
+        ok: false,
         error: OWNER_ONLY,
       });
       expect(fetchMock).not.toHaveBeenCalled();
@@ -227,6 +234,7 @@ describe("deleteOrganizationAction", () => {
   it("refuses without asking auth when it cannot tell where the caller stands", async () => {
     vi.mocked(identityContext).mockResolvedValue(null);
     expect(await deleteOrganizationAction(ORGANIZATION, "123456")).toEqual({
+      ok: false,
       error: UNRESOLVED,
     });
     expect(fetchMock).not.toHaveBeenCalled();
@@ -276,7 +284,7 @@ describe("deleteOrganizationAction", () => {
 
   it("tells nobody when auth refuses the deletion", async () => {
     fetchMock.mockResolvedValue(new Response(null, { status: 403 }));
-    expect(await deleteOrganizationAction(ORGANIZATION, "123456")).toEqual({ error: "problem" });
+    expect(await deleteOrganizationAction(ORGANIZATION, "123456")).toEqual({ ok: false, error: "problem" });
     expect(mockPublishEvent).not.toHaveBeenCalled();
   });
 
@@ -312,11 +320,12 @@ describe("deleteOrganizationAction", () => {
 
   it("surfaces auth's refusal and leaves everything as it was", async () => {
     fetchMock.mockResolvedValue(new Response(null, { status: 403 }));
-    expect(await deleteOrganizationAction(ORGANIZATION, "123456")).toEqual({ error: "problem" });
+    expect(await deleteOrganizationAction(ORGANIZATION, "123456")).toEqual({ ok: false, error: "problem" });
     expect(mockRevalidate).not.toHaveBeenCalled();
 
     fetchMock.mockResolvedValue(null);
     expect(await deleteOrganizationAction(ORGANIZATION, "123456")).toEqual({
+      ok: false,
       error: UNREACHABLE,
     });
   });
@@ -326,6 +335,7 @@ describe("deleteOrganizationAction", () => {
   it("tells a session ended elsewhere to sign in again, and deletes nothing", async () => {
     vi.mocked(isSessionBlacklisted).mockResolvedValue(true);
     expect(await deleteOrganizationAction(ORGANIZATION, "123456")).toEqual({
+      ok: false,
       error: "Your session expired — sign in again.",
     });
     expect(isSessionBlacklisted).toHaveBeenCalledWith("sess_1");

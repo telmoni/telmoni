@@ -1,10 +1,7 @@
 "use client";
 
-import { unstable_rethrow } from "next/navigation";
-import { useTransition } from "react";
-import { toast } from "sonner";
-
 import { Button } from "@/components/ui/button";
+import { useToastAction } from "@/lib/use-action";
 
 import { markProjectReadAction } from "./notice-actions";
 
@@ -19,7 +16,7 @@ export function MarkProjectRead({
   /// The newest notice drawn, by its `created_at`; nothing newer is marked.
   before: string;
 }) {
-  const [pending, start] = useTransition();
+  const { pending, run } = useToastAction();
 
   return (
     <Button
@@ -27,17 +24,7 @@ export function MarkProjectRead({
       size="sm"
       className="h-9 text-xs"
       disabled={pending}
-      onClick={() =>
-        start(async () => {
-          try {
-            const { error } = await markProjectReadAction(projectId, before);
-            if (error) toast.error(error);
-          } catch (err) {
-            unstable_rethrow(err);
-            toast.error("Something went wrong. Please try again.");
-          }
-        })
-      }
+      onClick={() => run(() => markProjectReadAction(projectId, before))}
     >
       {pending ? "Marking…" : `Mark read (${unread})`}
     </Button>

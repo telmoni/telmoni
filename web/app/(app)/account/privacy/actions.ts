@@ -2,6 +2,7 @@
 
 import { refresh } from "next/cache";
 
+import { type ActionResult, refused } from "@/lib/action-result";
 import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
 import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
 import { blacklistSession, isSessionBlacklisted } from "@/lib/auth/session-blacklist";
@@ -20,27 +21,24 @@ import { getServerSession } from "@/lib/server/session";
 const UNRESOLVED = "Couldn't resolve your account right now. Try again in a moment.";
 const UNREACHABLE = "The organization service is unreachable. Try again.";
 
-export async function requestAccountDeletionCodeAction(): Promise<{
-  error?: string;
-  ok?: boolean;
-}> {
+export async function requestAccountDeletionCodeAction(): Promise<ActionResult> {
   const session = await getServerSession();
   if (!session || (await isSessionBlacklisted(sessionEndKey(session)))) {
-    return { error: "Your session expired — sign in again." };
+    return refused("Your session expired — sign in again.");
   }
 
   const limited = await rateLimit(sessionKey(session, "auth:delete-code"), {
     limit: 3,
     windowMs: 60 * 60 * 1000,
   });
-  if (limited) return { error: "Too many requests. Try again in an hour." };
+  if (limited) return refused("Too many requests. Try again in an hour.");
 
   const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/v1/me/deletion-code`, {
     method: "POST",
     headers: personHeaders(session),
   });
-  if (!res) return { error: UNREACHABLE };
-  if (!res.ok) return { error: (await extractProblem(res)).message };
+  if (!res) return refused(UNREACHABLE);
+  if (!res.ok) return refused((await extractProblem(res)).message);
   return { ok: true };
 }
 
@@ -49,29 +47,29 @@ export async function requestAccountDeletionCodeAction(): Promise<{
 /// with them.
 export async function deleteAccountAction(
   code: string,
-): Promise<{ error?: string; ok?: boolean; deleted?: boolean }> {
+): Promise<ActionResult<{ deleted: boolean }>> {
   const session = await getServerSession();
   if (!session || (await isSessionBlacklisted(sessionEndKey(session)))) {
-    return { error: "Your session expired — sign in again." };
+    return refused("Your session expired — sign in again.");
   }
 
   if (!/^\d{6}$/.test(code)) {
-    return { error: "Enter the 6-digit code from your email." };
+    return refused("Enter the 6-digit code from your email.");
   }
 
   const limited = await rateLimit(sessionKey(session, "auth:delete-confirm"), {
     limit: 10,
     windowMs: 60 * 60 * 1000,
   });
-  if (limited) return { error: "Too many attempts. Try again in an hour." };
+  if (limited) return refused("Too many attempts. Try again in an hour.");
 
   const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/v1/me`, {
     method: "DELETE",
     headers: { ...personHeaders(session), "content-type": "application/json" },
     body: JSON.stringify({ code }),
   });
-  if (!res) return { error: UNREACHABLE };
-  if (!res.ok) return { error: (await extractProblem(res)).message };
+  if (!res) return refused(UNREACHABLE);
+  if (!res.ok) return refused((await extractProblem(res)).message);
 
   const deleted = await res
     .json()
@@ -96,20 +94,20 @@ export async function deleteAccountAction(
 
 export async function revokeSessionAction(
   sessionId: string,
-): Promise<{ error: string | null }> {
+): Promise<ActionResult> {
   const session = await getServerSession();
   if (!session || (await isSessionBlacklisted(sessionEndKey(session)))) {
-    return { error: "Your session expired — sign in again." };
+    return refused("Your session expired — sign in again.");
   }
 
   const limited = await rateLimit(sessionKey(session, "sessions:revoke"), {
     limit: 10,
     windowMs: 60_000,
   });
-  if (limited) return { error: "Too many requests — slow down a moment." };
+  if (limited) return refused("Too many requests — slow down a moment.");
 
   const headers = await accountHeaders();
-  if (!headers) return { error: UNRESOLVED };
+  if (!headers) return refused(UNRESOLVED);
 
   const res = await tryFetchWithTimeout(
     `${env.SERVER_URL}/internal/v1/auth/sessions/${encodeURIComponent(
@@ -120,30 +118,30 @@ export async function revokeSessionAction(
       headers,
     },
   );
-  if (!res) return { error: UNREACHABLE };
+  if (!res) return refused(UNREACHABLE);
   if (!res.ok) {
     const { message } = await extractProblem(res);
-    return { error: message };
+    return refused(message);
   }
   await blacklistSession(sessionId);
   refresh();
-  return { error: null };
+  return { ok: true };
 }
 
 export async function setAnalyticsPreferenceAction(
   optIn: boolean,
-): Promise<{ error: string | null }> {
+): Promise<ActionResult> {
   const session = await getServerSession();
-  if (!session) return { error: "Your session expired — sign in again." };
+  if (!session) return refused("Your session expired — sign in again.");
 
   const limited = await rateLimit(sessionKey(session, "privacy:analytics"), {
     limit: 20,
     windowMs: 60_000,
   });
-  if (limited) return { error: "Too many requests — slow down a moment." };
+  if (limited) return refused("Too many requests — slow down a moment.");
 
   const headers = await accountHeaders();
-  if (!headers) return { error: UNRESOLVED };
+  if (!headers) return refused(UNRESOLVED);
 
   const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/v1/me/analytics`, {
     method: "PUT",
@@ -153,11 +151,11 @@ export async function setAnalyticsPreferenceAction(
     },
     body: JSON.stringify({ opt_in: optIn }),
   });
-  if (!res) return { error: UNREACHABLE };
+  if (!res) return refused(UNREACHABLE);
   if (!res.ok) {
     const { message } = await extractProblem(res);
-    return { error: message };
+    return refused(message);
   }
   refresh();
-  return { error: null };
+  return { ok: true };
 }

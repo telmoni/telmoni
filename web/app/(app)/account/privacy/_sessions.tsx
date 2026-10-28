@@ -62,12 +62,12 @@ export function ActiveSessions({
   const revoke = (id: string) => {
     setBusyId(id);
     start(async () => {
-      const { error } = await revokeSessionAction(id);
+      const r = await revokeSessionAction(id);
       // In the transition, with the list the action drew again: the row goes
       // as it stops being busy, rather than a frame after.
       startTransition(() => setBusyId(null));
-      if (error) {
-        toast.error(error);
+      if (!r.ok) {
+        toast.error(r.error);
         return;
       }
       toast.success("Session ended. That device signs out within a few minutes.");

@@ -1,5 +1,6 @@
 "use server";
 
+import { type ActionResult, refused } from "@/lib/action-result";
 import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
 import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
 import { isSessionBlacklisted } from "@/lib/auth/session-blacklist";
@@ -21,37 +22,34 @@ const UNREACHABLE = "The organization service is unreachable. Try again.";
 
 export async function requestOrganizationDeletionCodeAction(
   organizationId: string,
-): Promise<{
-  error?: string;
-  ok?: boolean;
-}> {
+): Promise<ActionResult> {
   const session = await getServerSession();
   if (!session || (await isSessionBlacklisted(sessionEndKey(session)))) {
-    return { error: "Your session expired — sign in again." };
+    return refused("Your session expired — sign in again.");
   }
 
   const limited = await rateLimit(sessionKey(session, "organization:delete-code"), {
     limit: 3,
     windowMs: 60 * 60 * 1000,
   });
-  if (limited) return { error: "Too many requests. Try again in an hour." };
+  if (limited) return refused("Too many requests. Try again in an hour.");
 
   const ctx = await identityContext();
-  if (!ctx) return { error: await unplacedOrganization() };
+  if (!ctx) return refused(await unplacedOrganization());
   // The code is bound to the organization it is minted for, so minting it for
   // one the page is not showing is how typing it deletes the wrong one.
-  if (ctx.organizationId !== organizationId) return { error: SWITCHED_ORGANIZATION };
+  if (ctx.organizationId !== organizationId) return refused(SWITCHED_ORGANIZATION);
   // Presentation only: auth refuses anybody but the owner, and says so.
   if (ctx.role !== "owner") {
-    return { error: "Only this organization's owner can delete it." };
+    return refused("Only this organization's owner can delete it.");
   }
 
   const res = await tryFetchWithTimeout(
     `${env.SERVER_URL}/internal/v1/organization/deletion-code`,
     { method: "POST", headers: organizationHeaders(ctx) },
   );
-  if (!res) return { error: UNREACHABLE };
-  if (!res.ok) return { error: (await extractProblem(res)).message };
+  if (!res) return refused(UNREACHABLE);
+  if (!res.ok) return refused((await extractProblem(res)).message);
   return { ok: true };
 }
 
@@ -61,27 +59,27 @@ export async function requestOrganizationDeletionCodeAction(
 export async function deleteOrganizationAction(
   organizationId: string,
   code: string,
-): Promise<{ error?: string; ok?: boolean; purged?: boolean }> {
+): Promise<ActionResult<{ purged: boolean | null }>> {
   const session = await getServerSession();
   if (!session || (await isSessionBlacklisted(sessionEndKey(session)))) {
-    return { error: "Your session expired — sign in again." };
+    return refused("Your session expired — sign in again.");
   }
 
   if (!/^\d{6}$/.test(code)) {
-    return { error: "Enter the 6-digit code from your email." };
+    return refused("Enter the 6-digit code from your email.");
   }
 
   const limited = await rateLimit(sessionKey(session, "organization:delete-confirm"), {
     limit: 10,
     windowMs: 60 * 60 * 1000,
   });
-  if (limited) return { error: "Too many attempts. Try again in an hour." };
+  if (limited) return refused("Too many attempts. Try again in an hour.");
 
   const ctx = await identityContext();
-  if (!ctx) return { error: await unplacedOrganization() };
-  if (ctx.organizationId !== organizationId) return { error: SWITCHED_ORGANIZATION };
+  if (!ctx) return refused(await unplacedOrganization());
+  if (ctx.organizationId !== organizationId) return refused(SWITCHED_ORGANIZATION);
   if (ctx.role !== "owner") {
-    return { error: "Only this organization's owner can delete it." };
+    return refused("Only this organization's owner can delete it.");
   }
 
   // Everybody else's open console is told, each by their own channel: the
@@ -97,8 +95,8 @@ export async function deleteOrganizationAction(
     headers: { ...organizationHeaders(ctx), "content-type": "application/json" },
     body: JSON.stringify({ code }),
   });
-  if (!res) return { error: UNREACHABLE };
-  if (!res.ok) return { error: (await extractProblem(res)).message };
+  if (!res) return refused(UNREACHABLE);
+  if (!res.ok) return refused((await extractProblem(res)).message);
 
   await publishToAll(
     others.map((m) => userChannel(m.email)),
@@ -112,7 +110,7 @@ export async function deleteOrganizationAction(
   // Whether the request's purge hook landed. It is retried every ten minutes
   // when it did not, and the success screen says so rather than announcing a
   // cleanup that has not happened yet.
-  const purged = typeof answer?.purged === "boolean" ? answer.purged : undefined;
+  const purged = typeof answer?.purged === "boolean" ? answer.purged : null;
 
   // ⚠ **Nothing is revalidated and no cookie is written, on purpose.** Either
   // makes Next re-render this page inside the action's own response, and by

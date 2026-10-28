@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { errorOf } from "@/lib/action-result";
+
 vi.mock("next/cache", () => ({
   refresh: vi.fn(),
 }));
@@ -119,10 +121,10 @@ describe("requestAccountDeletionCodeAction", () => {
 
   it("reports an unreachable service and a refusal distinctly", async () => {
     fetchMock.mockResolvedValue(null as never);
-    expect(await requestAccountDeletionCodeAction()).toEqual({ error: UNREACHABLE });
+    expect(await requestAccountDeletionCodeAction()).toEqual({ ok: false, error: UNREACHABLE });
 
     fetchMock.mockResolvedValue(new Response(null, { status: 403 }));
-    expect(await requestAccountDeletionCodeAction()).toEqual({ error: "problem" });
+    expect(await requestAccountDeletionCodeAction()).toEqual({ ok: false, error: "problem" });
   });
 });
 
@@ -130,6 +132,7 @@ describe("deleteAccountAction", () => {
   it("rejects a code that is not six digits, without calling auth", async () => {
     for (const bad of ["abc", "12345", "1234567", "12345a", ""]) {
       expect(await deleteAccountAction(bad), bad).toEqual({
+        ok: false,
         error: "Enter the 6-digit code from your email.",
       });
     }
@@ -219,8 +222,8 @@ describe("deleteAccountAction", () => {
     );
 
     const res = await deleteAccountAction("123456");
-    expect(res.ok).toBeUndefined();
-    expect(res.error).toMatch(/other people are in: Acme\. Transfer ownership/);
+    expect(res.ok).toBe(false);
+    expect(errorOf(res)).toMatch(/other people are in: Acme\. Transfer ownership/);
     expect(blacklistSession).not.toHaveBeenCalled();
     expect(destroySession).not.toHaveBeenCalled();
   });
@@ -250,7 +253,7 @@ describe("deleteAccountAction", () => {
 
   it("reports an unreachable service rather than ending the session", async () => {
     fetchMock.mockResolvedValue(null as never);
-    expect(await deleteAccountAction("123456")).toEqual({ error: UNREACHABLE });
+    expect(await deleteAccountAction("123456")).toEqual({ ok: false, error: UNREACHABLE });
     expect(blacklistSession).not.toHaveBeenCalled();
     expect(destroySession).not.toHaveBeenCalled();
   });
@@ -262,7 +265,7 @@ describe("revokeSessionAction", () => {
 
     const res = await revokeSessionAction("sess_abc");
 
-    expect(res).toEqual({ error: null });
+    expect(res).toEqual({ ok: true });
     expect(fetchMock).toHaveBeenCalledWith(
       "http://auth.test/internal/v1/auth/sessions/sess_abc/revoke",
       expect.objectContaining({
@@ -295,20 +298,20 @@ describe("revokeSessionAction", () => {
 
     vi.clearAllMocks();
     fetchMock.mockResolvedValue(new Response(null, { status: 500 }));
-    expect(await revokeSessionAction("sess_abc")).toEqual({ error: "problem" });
+    expect(await revokeSessionAction("sess_abc")).toEqual({ ok: false, error: "problem" });
     expect(blacklistSession).not.toHaveBeenCalled();
   });
 
   it("reports an unreachable service rather than claiming success", async () => {
     fetchMock.mockResolvedValue(null as never);
-    expect(await revokeSessionAction("sess_abc")).toEqual({ error: UNREACHABLE });
+    expect(await revokeSessionAction("sess_abc")).toEqual({ ok: false, error: UNREACHABLE });
     expect(blacklistSession).not.toHaveBeenCalled();
     expect(refresh).not.toHaveBeenCalled();
   });
 
   it("refuses without calling auth when it cannot tell where the caller stands", async () => {
     vi.mocked(getServerContext).mockResolvedValue(null);
-    expect(await revokeSessionAction("sess_abc")).toEqual({ error: UNRESOLVED });
+    expect(await revokeSessionAction("sess_abc")).toEqual({ ok: false, error: UNRESOLVED });
     expect(fetchMock).not.toHaveBeenCalled();
     expect(blacklistSession).not.toHaveBeenCalled();
   });
@@ -318,7 +321,7 @@ describe("revokeSessionAction", () => {
   it("revokes a session for somebody in no organization, naming none", async () => {
     standIn(null);
     fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
-    expect(await revokeSessionAction("sess_abc")).toEqual({ error: null });
+    expect(await revokeSessionAction("sess_abc")).toEqual({ ok: true });
     expect(sentHeaders()).not.toHaveProperty("x-organization-id");
     expect(blacklistSession).toHaveBeenCalledWith("sess_abc");
   });
@@ -326,6 +329,7 @@ describe("revokeSessionAction", () => {
   it("refuses a session that is not live, and a caller over the limit", async () => {
     vi.mocked(isSessionBlacklisted).mockResolvedValue(true as never);
     expect(await revokeSessionAction("sess_abc")).toEqual({
+      ok: false,
       error: "Your session expired — sign in again.",
     });
     expect(isSessionBlacklisted).toHaveBeenCalledWith("sess_1");
@@ -334,6 +338,7 @@ describe("revokeSessionAction", () => {
     vi.mocked(isSessionBlacklisted).mockResolvedValue(false as never);
     vi.mocked(rateLimit).mockResolvedValue("limited" as never);
     expect(await revokeSessionAction("sess_abc")).toEqual({
+      ok: false,
       error: "Too many requests — slow down a moment.",
     });
     expect(fetchMock).not.toHaveBeenCalled();
@@ -344,7 +349,7 @@ describe("revokeSessionAction", () => {
 describe("setAnalyticsPreferenceAction", () => {
   it("records the consent on the account, under the session's bearer", async () => {
     fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
-    expect(await setAnalyticsPreferenceAction(true)).toEqual({ error: null });
+    expect(await setAnalyticsPreferenceAction(true)).toEqual({ ok: true });
     expect(fetchMock).toHaveBeenCalledWith(
       "http://auth.test/internal/v1/me/analytics",
       expect.objectContaining({
@@ -362,14 +367,14 @@ describe("setAnalyticsPreferenceAction", () => {
 
   it("refuses without calling auth when it cannot tell where the caller stands", async () => {
     vi.mocked(getServerContext).mockResolvedValue(null);
-    expect(await setAnalyticsPreferenceAction(false)).toEqual({ error: UNRESOLVED });
+    expect(await setAnalyticsPreferenceAction(false)).toEqual({ ok: false, error: UNRESOLVED });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("records the consent of somebody in no organization, naming none", async () => {
     standIn(null);
     fetchMock.mockResolvedValue(new Response(null, { status: 200 }));
-    expect(await setAnalyticsPreferenceAction(true)).toEqual({ error: null });
+    expect(await setAnalyticsPreferenceAction(true)).toEqual({ ok: true });
     expect(sentHeaders()).not.toHaveProperty("x-organization-id");
   });
 });

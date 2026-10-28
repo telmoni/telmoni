@@ -46,7 +46,7 @@ export function DeleteAccountForm({
     startSending(async () => {
       try {
         const r = await requestAccountDeletionCodeAction();
-        if (r.error) {
+        if (!r.ok) {
           setError(r.error);
           return;
         }
@@ -63,7 +63,7 @@ export function DeleteAccountForm({
     startDeleting(async () => {
       try {
         const r = await deleteAccountAction(code);
-        if (r.error) {
+        if (!r.ok) {
           setError(r.error);
           return;
         }

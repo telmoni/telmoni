@@ -2,6 +2,8 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { ActionResult } from "@/lib/action-result";
+
 const refresh = vi.hoisted(() => vi.fn());
 // Next's own `unstable_rethrow`; only the router is a stand-in.
 vi.mock("next/navigation", async (importOriginal) => ({
@@ -13,9 +15,7 @@ const toastError = vi.hoisted(() => vi.fn());
 vi.mock("sonner", () => ({ toast: { error: toastError, success: vi.fn() } }));
 
 const setAnalyticsPreferenceAction = vi.hoisted(() =>
-  vi.fn<(optIn: boolean) => Promise<{ error: string | null }>>(async () => ({
-    error: null,
-  })),
+  vi.fn<(optIn: boolean) => Promise<ActionResult>>(async () => ({ ok: true })),
 );
 vi.mock("./actions", () => ({ setAnalyticsPreferenceAction }));
 
@@ -23,7 +23,7 @@ import { AnalyticsPreference } from "./_analytics";
 
 beforeEach(() => {
   vi.clearAllMocks();
-  setAnalyticsPreferenceAction.mockResolvedValue({ error: null });
+  setAnalyticsPreferenceAction.mockResolvedValue({ ok: true });
 });
 
 const toggle = () => screen.getByRole("switch");
@@ -64,6 +64,7 @@ describe("AnalyticsPreference", () => {
 
   it("puts the switch back when the service refuses", async () => {
     setAnalyticsPreferenceAction.mockResolvedValue({
+      ok: false,
       error: "this preference is your own",
     });
     render(<AnalyticsPreference optIn={false} />);

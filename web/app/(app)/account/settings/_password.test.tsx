@@ -2,6 +2,8 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { ActionResult } from "@/lib/action-result";
+
 const toastError = vi.hoisted(() => vi.fn());
 const toastSuccess = vi.hoisted(() => vi.fn());
 vi.mock("sonner", () => ({
@@ -9,7 +11,7 @@ vi.mock("sonner", () => ({
 }));
 
 const requestPasswordResetAction = vi.hoisted(() =>
-  vi.fn<() => Promise<{ error: string | null }>>(async () => ({ error: null })),
+  vi.fn<() => Promise<ActionResult>>(async () => ({ ok: true })),
 );
 vi.mock("./actions", () => ({ requestPasswordResetAction }));
 
@@ -17,7 +19,7 @@ import { PasswordReset } from "./_password";
 
 beforeEach(() => {
   vi.clearAllMocks();
-  requestPasswordResetAction.mockResolvedValue({ error: null });
+  requestPasswordResetAction.mockResolvedValue({ ok: true });
 });
 
 const button = () => screen.getByRole("button");
@@ -60,6 +62,7 @@ describe("PasswordReset", () => {
 
   it("reports a refusal and lets them try again", async () => {
     requestPasswordResetAction.mockResolvedValue({
+      ok: false,
       error: "Too many requests — try again in an hour.",
     });
     render(<PasswordReset method="password" />);

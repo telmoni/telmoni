@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { errorOf } from "@/lib/action-result";
+
 vi.mock("next/cache", () => ({
   refresh: vi.fn(),
 }));
@@ -64,7 +66,7 @@ beforeEach(() => {
 describe("markProjectReadAction", () => {
   it("marks the feed of the project the page rendered read, and draws the page again", async () => {
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ marked: 2 }), { status: 200 }));
-    expect(await markProjectReadAction(PROJECT, DRAWN)).toEqual({ error: null });
+    expect(await markProjectReadAction(PROJECT, DRAWN)).toEqual({ ok: true });
     expect(fetchMock).toHaveBeenCalledWith(
       "http://auth.test/internal/v1/notifications/read",
       expect.objectContaining({
@@ -85,7 +87,7 @@ describe("markProjectReadAction", () => {
   it.each(["yesterday", "", "2026-10-17", "2026-10-17T12:00:00"])(
     "refuses %j as the newest notice drawn, asking the server nothing",
     async (before) => {
-      expect((await markProjectReadAction(PROJECT, before)).error).toMatch(/what the page showed/);
+      expect(errorOf(await markProjectReadAction(PROJECT, before))).toMatch(/what the page showed/);
       expect(fetchMock).not.toHaveBeenCalled();
     },
   );
@@ -97,7 +99,7 @@ describe("markProjectReadAction", () => {
     "refuses %j, asking the server nothing",
     async (posted) => {
       const res = await markProjectReadAction(posted as string, DRAWN);
-      expect(res.error).toMatch(/Couldn't tell which project this is/);
+      expect(errorOf(res)).toMatch(/Couldn't tell which project this is/);
       expect(fetchMock).not.toHaveBeenCalled();
       expect(refresh).not.toHaveBeenCalled();
     },
@@ -109,24 +111,24 @@ describe("markProjectReadAction", () => {
       organizationNotFound: true,
     } as Awaited<ReturnType<typeof getServerContext>>);
     const res = await markProjectReadAction(PROJECT, DRAWN);
-    expect(res.error).toMatch(/URL was changed, or you're no longer in it/);
+    expect(errorOf(res)).toMatch(/URL was changed, or you're no longer in it/);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("asks nothing for an expired session, or past the minute's marks", async () => {
     vi.mocked(getServerSession).mockResolvedValueOnce(null);
-    expect((await markProjectReadAction(PROJECT, DRAWN)).error).toMatch(/session expired/);
+    expect(errorOf(await markProjectReadAction(PROJECT, DRAWN))).toMatch(/session expired/);
     vi.mocked(rateLimit).mockResolvedValueOnce({ retryAfter: 30 } as never);
-    expect((await markProjectReadAction(PROJECT, DRAWN)).error).toMatch(/Too many requests/);
+    expect(errorOf(await markProjectReadAction(PROJECT, DRAWN))).toMatch(/Too many requests/);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   // The service decides who is on the project: its refusal is the answer.
   it("says what the service refused, or that it could not be reached, and draws nothing again", async () => {
     fetchMock.mockResolvedValueOnce(new Response(null, { status: 403 }));
-    expect((await markProjectReadAction(PROJECT, DRAWN)).error).toBe("You are not on this project.");
+    expect(errorOf(await markProjectReadAction(PROJECT, DRAWN))).toBe("You are not on this project.");
     fetchMock.mockResolvedValueOnce(null);
-    expect((await markProjectReadAction(PROJECT, DRAWN)).error).toMatch(/Notifications are unavailable/);
+    expect(errorOf(await markProjectReadAction(PROJECT, DRAWN))).toMatch(/Notifications are unavailable/);
     expect(refresh).not.toHaveBeenCalled();
   });
 });

@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
+import { type ActionResult, refused } from "@/lib/action-result";
 import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
 import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
 import { env } from "@/lib/env";
@@ -17,17 +18,17 @@ import {
 
 export async function acceptInviteAction(
   token: string,
-): Promise<{ error: string | null }> {
+): Promise<ActionResult> {
   // The page offers the signed-out its own links to sign in, back to it: a
   // session that ran out since it was drawn is told so.
   const session = await getServerSession();
-  if (!session) return { error: "Your session expired — sign in again." };
+  if (!session) return refused("Your session expired — sign in again.");
 
   const limited = await rateLimit(sessionKey(session, "invites:accept"), {
     limit: 10,
     windowMs: 60_000,
   });
-  if (limited) return { error: "Too many requests — slow down a moment." };
+  if (limited) return refused("Too many requests — slow down a moment.");
 
   // Sent in no organization: whoever holds this link may belong to none yet,
   // and joining one is what it is for.
@@ -40,9 +41,9 @@ export async function acceptInviteAction(
     },
   );
   if (!res) {
-    return { error: "Organizations are unavailable right now — try again shortly." };
+    return refused("Organizations are unavailable right now — try again shortly.");
   }
-  if (!res.ok) return { error: (await extractProblem(res)).message };
+  if (!res.ok) return refused((await extractProblem(res)).message);
 
   const body: unknown = await res.json().catch(() => null);
   const data = body as {

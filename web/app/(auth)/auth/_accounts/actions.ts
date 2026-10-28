@@ -3,6 +3,7 @@
 import { cookies, headers } from "next/headers";
 import { z } from "zod";
 
+import { type ActionResult, type Refused, refused } from "@/lib/action-result";
 import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
 import { ProblemType } from "@/lib/api/problem";
 import { challengeOf } from "@/lib/auth/pkce";
@@ -20,7 +21,6 @@ import { getServerSession } from "@/lib/server/session";
 // pages there. Every action is a public endpoint reached before any session
 // exists, so each is metered by the caller's address.
 
-type Result = { error: string | null };
 
 const UNAVAILABLE = "Sign-in is unavailable right now. Try again in a minute.";
 
@@ -82,44 +82,44 @@ export async function signInAction(input: {
   email: string;
   password: string;
   state: string;
-}): Promise<Result & { next?: string; sso?: true }> {
+}): Promise<ActionResult<{ next: string }> | (Refused & { sso: true })> {
   const parsed = z
     .object({ email, password: z.string().min(1).max(256), state: z.string().min(1).max(200) })
     .safeParse(input);
-  if (!parsed.success) return { error: "Enter your email address and password." };
+  if (!parsed.success) return refused("Enter your email address and password.");
 
   if (await limitedByAddress("accounts:sign-in", { limit: 10, windowMs: 60_000 })) {
-    return { error: "Too many attempts. Try again in a minute." };
+    return refused("Too many attempts. Try again in a minute.");
   }
   const codeChallenge = await pendingChallenge(parsed.data.state);
-  if (!codeChallenge) return { error: EXPIRED };
+  if (!codeChallenge) return refused(EXPIRED);
 
   const res = await post("/internal/v1/auth/password/sign-in", {
     email: parsed.data.email,
     password: parsed.data.password,
     codeChallenge,
   });
-  if (!res) return { error: UNAVAILABLE };
-  if (res.status === 401) return { error: "Wrong email address or password." };
-  if (res.status === 404) return { error: UNAVAILABLE };
+  if (!res) return refused(UNAVAILABLE);
+  if (res.status === 401) return refused("Wrong email address or password.");
+  if (res.status === 404) return refused(UNAVAILABLE);
   // Auth locks the account after repeated wrong passwords; its problem says
   // how long in seconds, which is not a sentence.
   if (res.status === 429) {
-    return { error: "Too many wrong passwords. Try again in a few minutes." };
+    return refused("Too many wrong passwords. Try again in a few minutes.");
   }
   if (!res.ok) {
     // The form gives way to the provider's button for a domain held to it.
     const { message, problem } = await extractProblem(res);
     if (problem?.type === ProblemType.SsoRequired) {
-      return { error: "Your organization signs you in through its identity provider.", sso: true };
+      return { ...refused("Your organization signs you in through its identity provider."), sso: true };
     }
-    return { error: problem?.detail || message };
+    return refused(problem?.detail || message);
   }
 
   const body = z.object({ code: z.string().min(1) }).safeParse(await res.json().catch(() => null));
-  if (!body.success) return { error: UNAVAILABLE };
+  if (!body.success) return refused(UNAVAILABLE);
   const next = new URLSearchParams({ code: body.data.code, state: parsed.data.state });
-  return { error: null, next: `/auth/callback?${next.toString()}` };
+  return { ok: true, next: `/auth/callback?${next.toString()}` };
 }
 
 // Create an account. A 202 is an address to confirm from its mail; a 200
@@ -133,7 +133,7 @@ export async function signUpAction(input: {
   givenName?: string;
   familyName?: string;
   state: string;
-}): Promise<Result & { next?: string }> {
+}): Promise<ActionResult<{ next?: string }>> {
   const parsed = z
     .object({
       email,
@@ -144,64 +144,64 @@ export async function signUpAction(input: {
     })
     .safeParse(input);
   if (!parsed.success) {
-    return { error: parsed.error.issues[0]?.message ?? "Check the form and try again." };
+    return refused(parsed.error.issues[0]?.message ?? "Check the form and try again.");
   }
 
   if (await limitedByAddress("accounts:sign-up", { limit: 5, windowMs: 60 * 60_000 })) {
-    return { error: "Too many sign-ups from here. Try again in an hour." };
+    return refused("Too many sign-ups from here. Try again in an hour.");
   }
 
   const { givenName, familyName, state, ...rest } = parsed.data;
   const codeChallenge = await pendingChallenge(state);
-  if (!codeChallenge) return { error: EXPIRED };
+  if (!codeChallenge) return refused(EXPIRED);
   const res = await post("/internal/v1/auth/password/sign-up", {
     ...rest,
     codeChallenge,
     ...(givenName ? { givenName } : {}),
     ...(familyName ? { familyName } : {}),
   });
-  if (!res) return { error: UNAVAILABLE };
-  if (res.status === 404) return { error: UNAVAILABLE };
-  if (!res.ok) return { error: await refusal(res) };
-  if (res.status === 202) return { error: null };
+  if (!res) return refused(UNAVAILABLE);
+  if (res.status === 404) return refused(UNAVAILABLE);
+  if (!res.ok) return refused(await refusal(res));
+  if (res.status === 202) return { ok: true };
 
   const body = z.object({ code: z.string().min(1) }).safeParse(await res.json().catch(() => null));
-  if (!body.success) return { error: UNAVAILABLE };
+  if (!body.success) return refused(UNAVAILABLE);
   const next = new URLSearchParams({ code: body.data.code, state });
-  return { error: null, next: `/auth/callback?${next.toString()}` };
+  return { ok: true, next: `/auth/callback?${next.toString()}` };
 }
 
 // Spend the verification link.
-export async function verifyEmailAction(input: { userId: string; token: string }): Promise<Result> {
+export async function verifyEmailAction(input: { userId: string; token: string }): Promise<ActionResult> {
   const parsed = z.object({ userId, token }).safeParse(input);
-  if (!parsed.success) return { error: "This link is incomplete. Open it from the email again." };
+  if (!parsed.success) return refused("This link is incomplete. Open it from the email again.");
 
   if (await limitedByAddress("accounts:verify", { limit: 10, windowMs: 60 * 60_000 })) {
-    return { error: "Too many attempts. Try again in an hour." };
+    return refused("Too many attempts. Try again in an hour.");
   }
 
   const res = await post("/internal/v1/auth/password/verify", parsed.data);
-  if (!res) return { error: UNAVAILABLE };
-  if (res.status === 404) return { error: UNAVAILABLE };
-  if (!res.ok) return { error: await refusal(res) };
-  return { error: null };
+  if (!res) return refused(UNAVAILABLE);
+  if (res.status === 404) return refused(UNAVAILABLE);
+  if (!res.ok) return refused(await refusal(res));
+  return { ok: true };
 }
 
 // Ask for a reset link. Auth mails one if the address has an account and
 // says nothing either way, so neither does this.
-export async function forgotPasswordAction(input: { email: string }): Promise<Result> {
+export async function forgotPasswordAction(input: { email: string }): Promise<ActionResult> {
   const parsed = z.object({ email }).safeParse(input);
-  if (!parsed.success) return { error: "Enter a valid email address." };
+  if (!parsed.success) return refused("Enter a valid email address.");
 
   if (await limitedByAddress("accounts:forgot", { limit: 5, windowMs: 60 * 60_000 })) {
-    return { error: "Too many requests. Try again in an hour." };
+    return refused("Too many requests. Try again in an hour.");
   }
 
   const res = await post("/internal/v1/auth/password/forgot", parsed.data);
-  if (!res) return { error: UNAVAILABLE };
-  if (res.status === 404) return { error: UNAVAILABLE };
-  if (!res.ok) return { error: await refusal(res) };
-  return { error: null };
+  if (!res) return refused(UNAVAILABLE);
+  if (res.status === 404) return refused(UNAVAILABLE);
+  if (!res.ok) return refused(await refusal(res));
+  return { ok: true };
 }
 
 // Spend the reset link and set the password. Every session ends with it.
@@ -209,41 +209,41 @@ export async function resetPasswordAction(input: {
   userId: string;
   token: string;
   password: string;
-}): Promise<Result> {
+}): Promise<ActionResult> {
   const parsed = z.object({ userId, token, password: newPassword }).safeParse(input);
   if (!parsed.success) {
-    return { error: parsed.error.issues[0]?.message ?? "Check the form and try again." };
+    return refused(parsed.error.issues[0]?.message ?? "Check the form and try again.");
   }
 
   if (await limitedByAddress("accounts:reset", { limit: 10, windowMs: 60 * 60_000 })) {
-    return { error: "Too many attempts. Try again in an hour." };
+    return refused("Too many attempts. Try again in an hour.");
   }
 
   const res = await post("/internal/v1/auth/password/reset", parsed.data);
-  if (!res) return { error: UNAVAILABLE };
-  if (res.status === 404) return { error: UNAVAILABLE };
-  if (!res.ok) return { error: await refusal(res) };
-  return { error: null };
+  if (!res) return refused(UNAVAILABLE);
+  if (res.status === 404) return refused(UNAVAILABLE);
+  if (!res.ok) return refused(await refusal(res));
+  return { ok: true };
 }
 
 // The signed-in person approves or refuses the device showing the code.
 export async function deviceDecisionAction(input: {
   userCode: string;
   decision: "approve" | "deny";
-}): Promise<Result> {
+}): Promise<ActionResult> {
   const parsed = z
     .object({ userCode: z.string().trim().min(1).max(20), decision: z.enum(["approve", "deny"]) })
     .safeParse(input);
-  if (!parsed.success) return { error: "Enter the code the device shows." };
+  if (!parsed.success) return refused("Enter the code the device shows.");
 
   const session = await getServerSession();
-  if (!session) return { error: "Your session expired — sign in again." };
+  if (!session) return refused("Your session expired — sign in again.");
 
   const limited = await rateLimit(sessionKey(session, "device:decide"), {
     limit: 10,
     windowMs: 60_000,
   });
-  if (limited) return { error: "Too many attempts. Try again in a minute." };
+  if (limited) return refused("Too many attempts. Try again in a minute.");
 
   const res = await tryFetchWithTimeout(
     `${env.SERVER_URL}/internal/v1/auth/device/${parsed.data.decision}`,
@@ -253,9 +253,9 @@ export async function deviceDecisionAction(input: {
       body: JSON.stringify({ userCode: parsed.data.userCode }),
     },
   );
-  if (!res) return { error: UNAVAILABLE };
+  if (!res) return refused(UNAVAILABLE);
   if (!res.ok) {
-    return { error: await refusal(res, "No device is waiting for that code.") };
+    return refused(await refusal(res, "No device is waiting for that code."));
   }
-  return { error: null };
+  return { ok: true };
 }

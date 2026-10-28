@@ -24,7 +24,7 @@ export function AcceptInvite({ token }: { token: string }) {
                 // itself (its `redirect`), which rejects this call: what
                 // comes back is a refusal.
                 const r = await acceptInviteAction(token);
-                if (r.error) setError(r.error);
+                if (!r.ok) setError(r.error);
               } catch (err) {
                 unstable_rethrow(err);
                 setError("Network error. Try again.");

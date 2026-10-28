@@ -143,6 +143,7 @@ describe("DeleteOrganizationForm", () => {
 
   it("shows the refusal and keeps the form", async () => {
     deleteOrganizationAction.mockResolvedValue({
+      ok: false,
       error: "Only this organization's owner can delete it.",
     });
     mount();

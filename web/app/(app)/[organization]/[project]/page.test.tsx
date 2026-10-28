@@ -2,6 +2,8 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { ActionResult } from "@/lib/action-result";
+
 vi.mock("@/components/page-header", () => ({
   PageHeader: ({ title, action }: { title?: string; action?: React.ReactNode }) => (
     <div data-testid="page-header">
@@ -18,7 +20,7 @@ vi.mock("@/components/service-unavailable", () => ({
 // The action, not its effects: which project the page hands it is the
 // assertion, and the service answers whether the person is on it.
 const markProjectReadAction = vi.hoisted(() =>
-  vi.fn<(projectId: string) => Promise<{ error: string | null }>>(async () => ({ error: null })),
+  vi.fn<(projectId: string) => Promise<ActionResult>>(async () => ({ ok: true })),
 );
 vi.mock("./notice-actions", () => ({ markProjectReadAction }));
 

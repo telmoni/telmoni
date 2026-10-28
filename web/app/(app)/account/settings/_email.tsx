@@ -58,7 +58,7 @@ export function ChangeEmail({
     startSending(async () => {
       try {
         const res = await requestEmailChangeAction(trimmed);
-        if (res.error) {
+        if (!res.ok) {
           setError(res.error);
           return;
         }
@@ -77,7 +77,7 @@ export function ChangeEmail({
     startConfirming(async () => {
       try {
         const res = await confirmEmailChangeAction(currentCode, newCode);
-        if (res.error) {
+        if (!res.ok) {
           setError(res.error);
           return;
         }

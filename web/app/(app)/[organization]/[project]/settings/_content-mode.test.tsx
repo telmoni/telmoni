@@ -3,7 +3,6 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ActionResult } from "@/lib/action-result";
-
 import { ContentMode } from "@/lib/types/enums";
 
 const refresh = vi.hoisted(() => vi.fn());

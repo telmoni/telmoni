@@ -2,7 +2,7 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const revoke = vi.hoisted(() => vi.fn(async () => ({ error: null })));
+const revoke = vi.hoisted(() => vi.fn(async () => ({ ok: true })));
 vi.mock("./actions", () => ({ revokeSessionAction: revoke }));
 const refresh = vi.hoisted(() => vi.fn());
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }) }));

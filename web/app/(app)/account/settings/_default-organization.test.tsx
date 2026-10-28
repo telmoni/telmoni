@@ -2,6 +2,8 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { ActionResult } from "@/lib/action-result";
+
 const refresh = vi.hoisted(() => vi.fn());
 // Next's own `unstable_rethrow`; only the router is a stand-in.
 vi.mock("next/navigation", async (importOriginal) => ({
@@ -16,9 +18,7 @@ vi.mock("sonner", () => ({
 }));
 
 const setDefaultOrganizationAction = vi.hoisted(() =>
-  vi.fn<(organizationId: string) => Promise<{ error: string | null }>>(async () => ({
-    error: null,
-  })),
+  vi.fn<(organizationId: string) => Promise<ActionResult>>(async () => ({ ok: true })),
 );
 vi.mock("./actions", () => ({ setDefaultOrganizationAction }));
 
@@ -62,7 +62,7 @@ const ORGANIZATIONS = [
 
 beforeEach(() => {
   vi.clearAllMocks();
-  setDefaultOrganizationAction.mockResolvedValue({ error: null });
+  setDefaultOrganizationAction.mockResolvedValue({ ok: true });
 });
 
 function choose(organizationId: string) {
@@ -94,6 +94,7 @@ describe("DefaultOrganization", () => {
 
   it("says what auth refused, and claims nothing was saved", async () => {
     setDefaultOrganizationAction.mockResolvedValue({
+      ok: false,
       error: "you are not a member of this organization",
     });
     render(<DefaultOrganization organizations={ORGANIZATIONS} current="org_1" />);

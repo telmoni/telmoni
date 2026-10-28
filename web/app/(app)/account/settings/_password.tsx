@@ -19,7 +19,7 @@ export function PasswordReset({ method }: { method: string | null }) {
     startTransition(async () => {
       try {
         const res = await requestPasswordResetAction();
-        if (res.error) {
+        if (!res.ok) {
           toast.error(res.error);
           return;
         }

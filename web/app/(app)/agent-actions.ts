@@ -2,6 +2,7 @@
 
 import { z } from "zod";
 
+import { type ActionResult, refused } from "@/lib/action-result";
 import { admitAgentCall } from "@/lib/server/agent-admit";
 import { deleteAgentConversation } from "@/lib/server/entities/agent";
 
@@ -12,11 +13,11 @@ import { deleteAgentConversation } from "@/lib/server/entities/agent";
 export async function deleteAgentConversationAction(
   projectId: string,
   id: string,
-): Promise<{ error: string | null }> {
-  const refused = await admitAgentCall("agent:delete", 30, projectId);
-  if (refused) return { error: refused.error };
-  if (!z.guid().safeParse(id).success) return { error: "Unknown conversation." };
+): Promise<ActionResult> {
+  const turned = await admitAgentCall("agent:delete", 30, projectId);
+  if (turned) return refused(turned.error);
+  if (!z.guid().safeParse(id).success) return refused("Unknown conversation.");
   return (await deleteAgentConversation(projectId, id))
-    ? { error: null }
-    : { error: "Couldn't delete that conversation — try again shortly." };
+    ? { ok: true }
+    : refused("Couldn't delete that conversation — try again shortly.");
 }

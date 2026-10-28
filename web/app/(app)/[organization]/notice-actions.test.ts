@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { errorOf } from "@/lib/action-result";
+
 vi.mock("next/cache", () => ({
   refresh: vi.fn(),
 }));
@@ -71,7 +73,7 @@ describe("markOrganizationReadAction", () => {
   it("marks the feed of the organization the page rendered read", async () => {
     standingIn(ORGANIZATION);
     fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
-    expect(await markOrganizationReadAction(ORGANIZATION, DRAWN)).toEqual({ error: null });
+    expect(await markOrganizationReadAction(ORGANIZATION, DRAWN)).toEqual({ ok: true });
     expect(fetchMock).toHaveBeenCalledWith(
       "http://auth.test/internal/v1/notifications/read",
       expect.objectContaining({
@@ -93,7 +95,7 @@ describe("markOrganizationReadAction", () => {
     async (before) => {
       standingIn(ORGANIZATION);
       const res = await markOrganizationReadAction(ORGANIZATION, before);
-      expect(res.error).toMatch(/what the page showed/);
+      expect(errorOf(res)).toMatch(/what the page showed/);
       expect(fetchMock).not.toHaveBeenCalled();
     },
   );
@@ -103,7 +105,7 @@ describe("markOrganizationReadAction", () => {
   it("refuses, asking the server nothing, when the request resolves another organization", async () => {
     standingIn("org_elsewhere");
     const res = await markOrganizationReadAction(ORGANIZATION, DRAWN);
-    expect(res.error).toMatch(/out of date/);
+    expect(errorOf(res)).toMatch(/out of date/);
     expect(fetchMock).not.toHaveBeenCalled();
     expect(refresh).not.toHaveBeenCalled();
   });
@@ -116,7 +118,7 @@ describe("markOrganizationReadAction", () => {
       organizationNotFound: true,
     } as Awaited<ReturnType<typeof getServerContext>>);
     const res = await markOrganizationReadAction(ORGANIZATION, DRAWN);
-    expect(res.error).toMatch(/URL was changed, or you're no longer in it/);
+    expect(errorOf(res)).toMatch(/URL was changed, or you're no longer in it/);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

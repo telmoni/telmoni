@@ -41,7 +41,7 @@ export function SignUpForm({
           familyName: familyName.trim(),
           state,
         });
-        if (res.error) {
+        if (!res.ok) {
           setError(res.error);
           return;
         }

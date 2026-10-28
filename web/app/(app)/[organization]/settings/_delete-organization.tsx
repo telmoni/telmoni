@@ -31,7 +31,7 @@ export function DeleteOrganizationForm({
   // The name is kept with the outcome rather than read from props: anything
   // that refreshes the page from here on renders whichever organization the
   // console fell back to, and the heading must still name the deleted one.
-  const [done, setDone] = useState<{ organization: string; purged?: boolean } | null>(null);
+  const [done, setDone] = useState<{ organization: string; purged: boolean | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sending, startSending] = useTransition();
   const [deleting, startDeleting] = useTransition();
@@ -41,7 +41,7 @@ export function DeleteOrganizationForm({
     startSending(async () => {
       try {
         const r = await requestOrganizationDeletionCodeAction(organizationId);
-        if (r.error) {
+        if (!r.ok) {
           setError(r.error);
           return;
         }
@@ -58,7 +58,7 @@ export function DeleteOrganizationForm({
     startDeleting(async () => {
       try {
         const r = await deleteOrganizationAction(organizationId, code);
-        if (r.error) {
+        if (!r.ok) {
           setError(r.error);
           return;
         }

@@ -2,6 +2,8 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { ActionResult } from "@/lib/action-result";
+
 import { incidentHref } from "@/lib/alerts";
 import type { OrganizationEntry } from "@/lib/server/entities/organization";
 import type {
@@ -12,9 +14,7 @@ import type {
 // The action, not its effects: which organization the page hands it is the
 // assertion, and the action refuses any other.
 const leaveOrganizationAction = vi.hoisted(() =>
-  vi.fn<(organizationId: string) => Promise<{ error: string | null }>>(async () => ({
-    error: null,
-  })),
+  vi.fn<(organizationId: string) => Promise<ActionResult>>(async () => ({ ok: true })),
 );
 vi.mock("../members/actions", () => ({ leaveOrganizationAction }));
 
@@ -33,7 +33,7 @@ vi.mock("@/components/service-unavailable", () => ({
 }));
 
 vi.mock("../notice-actions", () => ({
-  markOrganizationReadAction: vi.fn(async () => ({ error: null })),
+  markOrganizationReadAction: vi.fn(async () => ({ ok: true })),
 }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: () => {} }) }));
 
