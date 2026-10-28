@@ -24,6 +24,9 @@ tokio       = { workspace = true }
 tracing     = { workspace = true }
 serde       = { workspace = true }
 serde_json  = { workspace = true }
+# Each tool's input is one type: the schema the model is told and the parser
+# that reads its arguments come from it together.
+schemars    = { workspace = true }
 anyhow      = { workspace = true }
 sqlx        = { workspace = true }
 chrono      = { workspace = true }

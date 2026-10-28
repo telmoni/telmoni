@@ -10,7 +10,9 @@ use std::collections::HashMap;
 use std::fmt::Write as _;
 
 use chrono::{DateTime, Utc};
-use serde::Serialize;
+use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use telmoni_shared::acting::Acting;
 use telmoni_shared::rbac::{Resource, Verb};
@@ -27,6 +29,115 @@ const MAX_RESULT_CHARS: usize = 12_000;
 
 /// The most characters of one passage a search result carries.
 const PASSAGE_CHARS: usize = 1_500;
+
+/// How many rows a tool answers: what it gives unasked, and the most the
+/// model may ask for.
+#[derive(Clone, Copy)]
+struct Limit {
+    default: i64,
+    max: i64,
+}
+
+impl Limit {
+    /// The `limit` the model is told it may give.
+    fn schema(self) -> Schema {
+        json_schema!({ "type": "integer", "minimum": 1, "maximum": self.max })
+    }
+
+    /// The limit asked for, within bounds; the default when none was.
+    fn of(self, given: Option<i64>) -> i64 {
+        given.unwrap_or(self.default).clamp(1, self.max)
+    }
+}
+
+const SEARCH_LIMIT: Limit = Limit {
+    default: 6,
+    max: 10,
+};
+const DELIVERIES_LIMIT: Limit = Limit {
+    default: 10,
+    max: 20,
+};
+const AUDIT_LIMIT: Limit = Limit {
+    default: 20,
+    max: 50,
+};
+
+fn search_limit(_: &mut SchemaGenerator) -> Schema {
+    SEARCH_LIMIT.schema()
+}
+
+fn deliveries_limit(_: &mut SchemaGenerator) -> Schema {
+    DELIVERIES_LIMIT.schema()
+}
+
+fn audit_limit(_: &mut SchemaGenerator) -> Schema {
+    AUDIT_LIMIT.schema()
+}
+
+/// The actions, in the audit log's own words and order.
+fn action_names(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({ "type": "string", "enum": AuditAction::all() })
+}
+
+/// What `search` takes.
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct SearchInput {
+    /// What to look for.
+    query: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "search_limit")]
+    limit: Option<i64>,
+}
+
+/// What `connector_deliveries` takes.
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct DeliveriesInput {
+    connector_id: Uuid,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "deliveries_limit")]
+    limit: Option<i64>,
+}
+
+/// What `audit_events` takes.
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct AuditEventsInput {
+    /// An actor id.
+    actor: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "action_names")]
+    action: Option<String>,
+    since: Option<DateTime<Utc>>,
+    until: Option<DateTime<Utc>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "audit_limit")]
+    limit: Option<i64>,
+}
+
+/// A tool's input as the model is told it: its type's schema, less the title
+/// and the draft the model has no use for.
+fn schema_of<T: JsonSchema>() -> Value {
+    let mut schema = schemars::schema_for!(T).to_value();
+    if let Some(fields) = schema.as_object_mut() {
+        fields.remove("$schema");
+        fields.remove("title");
+    }
+    schema
+}
+
+/// A tool that takes nothing.
+fn no_input() -> Value {
+    json!({ "type": "object", "properties": {}, "additionalProperties": false })
+}
+
+/// The model's arguments as the tool takes them: a key it was not told of,
+/// or a value of the wrong shape, is an input error it can see and correct.
+fn input<T: DeserializeOwned>(tool: Tool, raw: &Value) -> Result<T, ToolError> {
+    T::deserialize(raw).map_err(|e| ToolError::Input(format!("{}: {e}", tool.name())))
+}
 
 /// A source the reply may cite as `[n]`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -133,51 +244,22 @@ impl Tool {
                  deliveries and the person's own earlier questions. Answers numbered passages to \
                  cite as [n]. Use exact terms (ids, error codes, connector names) as well as plain \
                  questions.",
-                json!({
-                    "type": "object",
-                    "properties": {
-                        "query": { "type": "string", "description": "What to look for." },
-                        "limit": { "type": "integer", "minimum": 1, "maximum": 10 }
-                    },
-                    "required": ["query"],
-                    "additionalProperties": false
-                }),
+                schema_of::<SearchInput>(),
             ),
-            Self::ListMembers => (
-                "The project's members and their roles.",
-                json!({ "type": "object", "properties": {}, "additionalProperties": false }),
-            ),
+            Self::ListMembers => ("The project's members and their roles.", no_input()),
             Self::ListConnectors => (
                 "The project's Slack and webhook connectors, with their status and last error.",
-                json!({ "type": "object", "properties": {}, "additionalProperties": false }),
+                no_input(),
             ),
             Self::ConnectorDeliveries => (
                 "One connector's latest deliveries, newest first, each with its send attempts, \
                  status codes and errors. Take the id from list_connectors.",
-                json!({
-                    "type": "object",
-                    "properties": {
-                        "connector_id": { "type": "string", "format": "uuid" },
-                        "limit": { "type": "integer", "minimum": 1, "maximum": 20 }
-                    },
-                    "required": ["connector_id"],
-                    "additionalProperties": false
-                }),
+                schema_of::<DeliveriesInput>(),
             ),
             Self::AuditEvents => (
                 "Audit log events, newest first, filtered by actor, action and time. Only for a \
                  role that may read the audit log.",
-                json!({
-                    "type": "object",
-                    "properties": {
-                        "actor": { "type": "string", "description": "An actor id." },
-                        "action": { "type": "string", "enum": AuditAction::all() },
-                        "since": { "type": "string", "format": "date-time" },
-                        "until": { "type": "string", "format": "date-time" },
-                        "limit": { "type": "integer", "minimum": 1, "maximum": 50 }
-                    },
-                    "additionalProperties": false
-                }),
+                schema_of::<AuditEventsInput>(),
             ),
         };
         ToolSpec {
@@ -305,14 +387,6 @@ fn inert(text: &str) -> String {
         .collect()
 }
 
-fn limit(input: &Value, default: i64, max: i64) -> i64 {
-    input
-        .get("limit")
-        .and_then(Value::as_i64)
-        .unwrap_or(default)
-        .clamp(1, max)
-}
-
 /// Data from the organization, fenced so the prompt can say what is data.
 fn fenced(citation: usize, label: &str, data: &Value) -> String {
     format!(
@@ -325,16 +399,15 @@ fn fenced(citation: usize, label: &str, data: &Value) -> String {
 async fn search(
     state: &AppState,
     acting: &Acting,
-    input: &Value,
+    raw: &Value,
     citations: &mut Citations,
 ) -> Outcome {
-    let query = input
-        .get("query")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|q| !q.is_empty())
-        .ok_or_else(|| ToolError::Input("search needs a `query`".into()))?;
-    let found = retrieve::search(state, acting, query, limit(input, 6, 10)).await?;
+    let SearchInput { query, limit } = input(Tool::Search, raw)?;
+    let query = query.trim();
+    if query.is_empty() {
+        return Err(ToolError::Input("search needs a `query`".into()));
+    }
+    let found = retrieve::search(state, acting, query, SEARCH_LIMIT.of(limit)).await?;
     if found.is_empty() {
         return Ok("no passages matched".to_owned());
     }
@@ -394,68 +467,55 @@ async fn list_connectors(state: &AppState, acting: &Acting, citations: &mut Cita
 async fn connector_deliveries(
     state: &AppState,
     acting: &Acting,
-    input: &Value,
+    raw: &Value,
     citations: &mut Citations,
 ) -> Outcome {
     acting.require_project(Verb::Read, Resource::Connector)?;
-    let id = input
-        .get("connector_id")
-        .and_then(Value::as_str)
-        .and_then(|s| Uuid::parse_str(s.trim()).ok())
-        .ok_or_else(|| {
-            ToolError::Input(
-                "connector_deliveries needs a `connector_id` from list_connectors".into(),
-            )
-        })?;
+    let DeliveriesInput {
+        connector_id,
+        limit,
+    } = input(Tool::ConnectorDeliveries, raw)?;
     let deliveries = state
         .notifications
-        .connector_deliveries(acting, id, limit(input, 10, 20))
+        .connector_deliveries(acting, connector_id, DELIVERIES_LIMIT.of(limit))
         .await?;
     let url = project_path(state, acting, "connectors").await;
     let index = citations.cite(
-        &format!("tool:deliveries:{id}"),
+        &format!("tool:deliveries:{connector_id}"),
         "Connector delivery log",
         url.as_deref(),
     );
     Ok(fenced(index, "Connector delivery log", &deliveries))
 }
 
-fn time(input: &Value, key: &str) -> Result<Option<DateTime<Utc>>, ToolError> {
-    match input.get(key).and_then(Value::as_str) {
-        None => Ok(None),
-        Some(raw) => DateTime::parse_from_rfc3339(raw.trim())
-            .map(|t| Some(t.with_timezone(&Utc)))
-            .map_err(|_| ToolError::Input(format!("`{key}` must be an RFC 3339 time"))),
-    }
-}
-
-fn action(input: &Value) -> Result<Option<AuditAction>, ToolError> {
-    match input.get("action").and_then(Value::as_str) {
-        None => Ok(None),
-        Some(raw) => raw.trim().parse::<AuditAction>().map(Some).map_err(|_| {
-            let actions = AuditAction::all().map(|a| a.to_string()).join(", ");
-            ToolError::Input(format!("`action` is one of {actions}"))
-        }),
-    }
+/// The action named, in the audit log's own words.
+fn action(raw: &str) -> Result<AuditAction, ToolError> {
+    raw.trim().parse::<AuditAction>().map_err(|_| {
+        let actions = AuditAction::all().map(|a| a.to_string()).join(", ");
+        ToolError::Input(format!("`action` is one of {actions}"))
+    })
 }
 
 async fn audit_events(
     state: &AppState,
     acting: &Acting,
-    input: &Value,
+    raw: &Value,
     citations: &mut Citations,
 ) -> Outcome {
     acting.require_project(Verb::Read, Resource::Audit)?;
+    let AuditEventsInput {
+        actor,
+        action: named,
+        since,
+        until,
+        limit,
+    } = input(Tool::AuditEvents, raw)?;
     let query = AuditEventsQuery {
-        actor: input
-            .get("actor")
-            .and_then(Value::as_str)
-            .map(|s| s.trim().to_owned())
-            .filter(|s| !s.is_empty()),
-        action: action(input)?,
-        from: time(input, "since")?,
-        to: time(input, "until")?,
-        limit: limit(input, 20, 50),
+        actor: actor.map(|s| s.trim().to_owned()).filter(|s| !s.is_empty()),
+        action: named.as_deref().map(action).transpose()?,
+        from: since,
+        to: until,
+        limit: AUDIT_LIMIT.of(limit),
     };
     let events = state.auth.audit_events(acting, &query).await?;
     let url = project_path(state, acting, "audit-log").await;
@@ -536,17 +596,38 @@ mod tests {
             Tool::AuditEvents.spec().parameters["properties"]["action"],
             json!({ "type": "string", "enum": ["created", "updated", "deleted", "exported"] })
         );
-        assert_eq!(
-            action(&json!({ "action": " deleted " })).ok(),
-            Some(Some(AuditAction::Deleted))
-        );
-        let Err(ToolError::Input(said)) = action(&json!({ "action": "read" })) else {
+        assert_eq!(action(" deleted ").ok(), Some(AuditAction::Deleted));
+        let Err(ToolError::Input(said)) = action("read") else {
             panic!("an action there is none of is refused");
         };
         assert_eq!(
             said,
             "`action` is one of created, updated, deleted, exported"
         );
+    }
+
+    /// The schema promises `additionalProperties: false`, and the parser keeps it: a key
+    /// the model was not told of is an input error, as arguments that did not parse are.
+    #[test]
+    fn an_input_is_read_as_its_schema_promised() {
+        let search = Tool::Search.spec().parameters;
+        assert_eq!(search["additionalProperties"], json!(false));
+        assert_eq!(search["required"], json!(["query"]));
+        assert_eq!(
+            search["properties"]["limit"]["maximum"],
+            json!(SEARCH_LIMIT.max)
+        );
+        let Err(ToolError::Input(said)) =
+            input::<SearchInput>(Tool::Search, &json!({ "query": "x", "since": "now" }))
+        else {
+            panic!("an unknown key is refused");
+        };
+        assert!(said.contains("unknown field"), "{said}");
+        assert!(input::<SearchInput>(Tool::Search, &Value::Null).is_err());
+        let Ok(read) = input::<SearchInput>(Tool::Search, &json!({ "query": "x" })) else {
+            panic!("what the schema asks for is read");
+        };
+        assert_eq!(SEARCH_LIMIT.of(read.limit), SEARCH_LIMIT.default);
     }
 
     #[test]
