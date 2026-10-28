@@ -29,7 +29,7 @@ use telmoni_telemetry::handler::traces::{FILTER_VALUE_MAX, UTC_OFFSET_RANGE};
 use telmoni_telemetry::live;
 use telmoni_telemetry::rules::db::PausedBy;
 use telmoni_telemetry::rules::mutes::MUTE_DAYS_MAX;
-use telmoni_telemetry::rules::{LINKS_MAX, RENOTIFY_MAX_MINUTES, RULE_NAME_MAX, folds};
+use telmoni_telemetry::rules::{LINKS_MAX, RENOTIFY_MAX_MINUTES, RULE_NAME_MAX};
 use telmoni_telemetry::traces::{
     DEFAULT_DAYS, EXPORT_MAX, FILTER_VALUES_MAX, MAX_DAYS, MAX_LIMIT, MAX_PAGE, PINNED_MAX,
     PINNED_PER_RUN, RUNS_MAX,
@@ -48,10 +48,26 @@ fn rule_folds() -> serde_json::Map<String, Value> {
         .map(|&measure| {
             let aggregations: Vec<&str> = RuleAggregation::all()
                 .iter()
-                .filter(|&&aggregation| folds(measure, aggregation))
+                .filter(|&&aggregation| measure.folds(aggregation))
                 .map(|aggregation| aggregation.as_str())
                 .collect();
             (measure.as_str().to_owned(), json!(aggregations))
+        })
+        .collect()
+}
+
+/// Each kind an alert watches, with the measures the lane counts on it.
+fn rule_measures() -> serde_json::Map<String, Value> {
+    SpanKind::all()
+        .iter()
+        .filter(|kind| kind.alertable())
+        .map(|&kind| {
+            let measures: Vec<&str> = RuleMeasure::all()
+                .iter()
+                .filter(|&&measure| measure.measured_on(kind))
+                .map(|measure| measure.as_str())
+                .collect();
+            (kind.as_str().to_owned(), json!(measures))
         })
         .collect()
 }
@@ -146,7 +162,7 @@ fn generated_contract() -> Value {
             "agent_stream_max_secs": STREAM_MAX.as_secs(),
             "audit_export_kept_days": KEEP_FOR_SECS / 86_400,
         },
-        "rules": { "folds": rule_folds() },
+        "rules": { "folds": rule_folds(), "measures": rule_measures() },
     })
 }
 

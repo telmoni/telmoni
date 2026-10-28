@@ -340,6 +340,30 @@
         "avg",
         "sum"
       ]
+    },
+    "measures": {
+      "model_call": [
+        "count",
+        "failures",
+        "duration",
+        "tokens"
+      ],
+      "run": [
+        "count",
+        "failures",
+        "duration",
+        "cost"
+      ],
+      "step": [
+        "count",
+        "failures",
+        "duration"
+      ],
+      "tool_call": [
+        "count",
+        "failures",
+        "duration"
+      ]
     }
   },
   "slugs": {

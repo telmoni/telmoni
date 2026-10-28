@@ -34,6 +34,15 @@ crate::wire_enum!(SpanKind {
     Span => "span",
 });
 
+impl SpanKind {
+    /// Whether an alert watches spans of this kind: the run and its parts;
+    /// a plain span is none of an agent's doings.
+    #[must_use]
+    pub const fn alertable(self) -> bool {
+        !matches!(self, Self::Span)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

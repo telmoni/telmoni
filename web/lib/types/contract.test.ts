@@ -49,12 +49,14 @@ import {
 import { AGENT_MESSAGE_MAX, AGENT_STREAM_TIMEOUT_MS } from "./agent";
 import { AUDIT_EXPORT_KEPT_DAYS } from "./audit-export";
 import {
+  ALERT_KINDS,
   ALERT_NAME_MAX,
   INCIDENTS_MAX,
   LINKS_MAX,
   MUTE_MINUTES_MAX,
   RENOTIFY_MAX_MINUTES,
   aggregationsFor,
+  measuresFor,
 } from "../alerts";
 import { PINNED_MAX, PINNED_PER_TRACE } from "../layout";
 import { FILTER_VALUES_MAX, MAX_DAYS, MAX_LIMIT, OPENING_DAYS } from "../list-query";
@@ -80,7 +82,7 @@ const contract = JSON.parse(
   slugs: { max_length: number; reserved: { organization: string[]; project: string[] } };
   live: { organization_channel: string; spans_ingested: string };
   limits: { agent_stream_max_secs: number; [limit: string]: unknown };
-  rules: { folds: Record<string, string[]> };
+  rules: { folds: Record<string, string[]>; measures: Record<string, string[]> };
 };
 
 // The one limit the console exceeds rather than copies.
@@ -194,6 +196,14 @@ describe("wire contract", () => {
   it("the alert form folds each measure as the server does", () => {
     for (const measure of Object.values(RuleMeasure)) {
       expect([...aggregationsFor(measure)].sort()).toEqual([...contract.rules.folds[measure]!].sort());
+    }
+  });
+
+  // The kinds an alert watches, and what the server counts on each.
+  it("the alert form measures each kind as the server does", () => {
+    expect(Object.keys(contract.rules.measures).sort()).toEqual([...ALERT_KINDS].sort());
+    for (const kind of ALERT_KINDS) {
+      expect([...measuresFor(kind)].sort()).toEqual([...contract.rules.measures[kind]!].sort());
     }
   });
 

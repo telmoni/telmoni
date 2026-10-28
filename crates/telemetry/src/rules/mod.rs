@@ -290,23 +290,23 @@ impl RuleInput {
                 "an alert's name is 1 to {RULE_NAME_MAX} characters"
             )));
         }
-        if self.kind == SpanKind::Span {
+        if !self.kind.alertable() {
             return Err(bad("an alert reads runs, steps, model calls or tool calls"));
         }
-        if !folds(self.measure, self.aggregation) {
+        if !self.measure.folds(self.aggregation) {
             return Err(bad(&format!(
                 "{} is not folded by {}: count takes count; failures count or avg; duration \
                  avg, sum or a percentile; tokens avg or sum; cost avg, sum or max",
                 self.measure, self.aggregation
             )));
         }
-        if self.measure == RuleMeasure::Tokens && self.kind != SpanKind::ModelCall {
-            return Err(bad("tokens are counted on model calls alone"));
+        if !self.measure.measured_on(self.kind) {
+            return Err(bad(match self.measure {
+                RuleMeasure::Tokens => "tokens are counted on model calls alone",
+                _ => "cost is counted per run, from its model calls",
+            }));
         }
         if self.measure == RuleMeasure::Cost {
-            if self.kind != SpanKind::Run {
-                return Err(bad("cost is counted per run, from its model calls"));
-            }
             // Read from the calls as they land, before the run's own status is known.
             if !(self.filters.status.is_empty() && self.filters.tool.is_empty()) {
                 return Err(bad(
@@ -366,22 +366,6 @@ impl RuleInput {
             missing_data: self.missing_data,
             renotify_minutes: self.renotify_minutes,
         })
-    }
-}
-
-/// Whether `aggregation` folds `measure`: a count of spans; failures counted
-/// or as a share; durations averaged, summed or at a percentile; tokens
-/// averaged or summed, since the hourly totals keep their sum alone; and a
-/// run's cost averaged, summed or the largest, the cost cap.
-#[must_use]
-pub const fn folds(measure: RuleMeasure, aggregation: RuleAggregation) -> bool {
-    use RuleAggregation as A;
-    match measure {
-        RuleMeasure::Count => matches!(aggregation, A::Count),
-        RuleMeasure::Failures => matches!(aggregation, A::Count | A::Avg),
-        RuleMeasure::Duration => !matches!(aggregation, A::Count | A::Max),
-        RuleMeasure::Tokens => matches!(aggregation, A::Avg | A::Sum),
-        RuleMeasure::Cost => matches!(aggregation, A::Avg | A::Sum | A::Max),
     }
 }
 
@@ -445,19 +429,19 @@ mod tests {
     fn a_measure_is_folded_only_as_the_totals_can_answer() {
         for aggregation in RuleAggregation::all() {
             assert_eq!(
-                folds(RuleMeasure::Count, aggregation),
+                RuleMeasure::Count.folds(aggregation),
                 aggregation == RuleAggregation::Count
             );
             assert_eq!(
-                folds(RuleMeasure::Duration, aggregation),
+                RuleMeasure::Duration.folds(aggregation),
                 !matches!(aggregation, RuleAggregation::Count | RuleAggregation::Max)
             );
             assert_eq!(
-                folds(RuleMeasure::Tokens, aggregation),
+                RuleMeasure::Tokens.folds(aggregation),
                 matches!(aggregation, RuleAggregation::Avg | RuleAggregation::Sum)
             );
             assert_eq!(
-                folds(RuleMeasure::Cost, aggregation),
+                RuleMeasure::Cost.folds(aggregation),
                 matches!(
                     aggregation,
                     RuleAggregation::Avg | RuleAggregation::Sum | RuleAggregation::Max
