@@ -14,8 +14,8 @@ use telmoni_shared::RuleAggregation;
 use crate::AppState;
 use crate::prices::PriceBook;
 use crate::rules::RuleFilters;
-use crate::rules::evaluate::{Window, micros};
-use crate::store::{Projects, Read};
+use crate::rules::evaluate::Window;
+use crate::store::{Projects, Read, micros};
 
 /// Each call's spend, priced by the parameters' row for its provider and
 /// model that took effect last by its day, as [`PriceBook::price`] picks one,
@@ -50,11 +50,7 @@ macro_rules! window_calls {
             "AND received_at >= {from:DateTime64(6, 'UTC')} ",
             "AND received_at < {to:DateTime64(6, 'UTC')} ",
             "AND kind = 'model_call' ",
-            "AND (empty({agents:Array(String)}) OR agent IN {agents:Array(String)}) ",
-            "AND (empty({models:Array(String)}) OR model IN {models:Array(String)}) ",
-            "AND (empty({providers:Array(String)}) OR provider IN {providers:Array(String)}) ",
-            "AND (empty({environments:Array(String)}) OR environment IN {environments:Array(String)}) ",
-            "AND (empty({releases:Array(String)}) OR release IN {releases:Array(String)})"
+            $crate::rules::calls_admitted!(),
         )
     };
 }
@@ -237,13 +233,10 @@ fn pairs(names: Vec<Name>) -> Vec<(String, String)> {
 
 /// `read` bound to `window` and to the filters a run's cost takes.
 fn windowed(read: Read, window: Window, filters: &RuleFilters) -> Read {
-    read.param("from", micros(window.from))
-        .param("to", micros(window.to))
-        .param("agents", &filters.agent)
-        .param("models", &filters.model)
-        .param("providers", &filters.provider)
-        .param("environments", &filters.environment)
-        .param("releases", &filters.release)
+    filters.bind_calls(
+        read.param("from", micros(window.from))
+            .param("to", micros(window.to)),
+    )
 }
 
 /// `read` handed `book`'s prices: each name's rows in the order they take

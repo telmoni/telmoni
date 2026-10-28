@@ -9,13 +9,13 @@ use clickhouse::Row;
 use serde::Deserialize;
 use uuid::Uuid;
 
-use telmoni_shared::{RuleMeasure, SpanStatus};
+use telmoni_shared::RuleMeasure;
 
 use crate::AppState;
 use crate::rules::db::RuleRow;
-use crate::rules::evaluate::{Window, micros};
+use crate::rules::evaluate::Window;
 use crate::spend::{self, Unread};
-use crate::store::Projects;
+use crate::store::{Projects, micros};
 
 /// Which of the window's spans a notice shows the run of.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -79,13 +79,7 @@ const PICK_SQL: &str = concat!(
     "WHERE project_id IN {projects:Array(String)} ",
     "AND received_at >= {from:DateTime64(6, 'UTC')} AND received_at < {to:DateTime64(6, 'UTC')} ",
     "AND kind = {kind:String} ",
-    "AND (empty({agents:Array(String)}) OR agent IN {agents:Array(String)}) ",
-    "AND (empty({models:Array(String)}) OR model IN {models:Array(String)}) ",
-    "AND (empty({providers:Array(String)}) OR provider IN {providers:Array(String)}) ",
-    "AND (empty({tools:Array(String)}) OR (kind = 'tool_call' AND name IN {tools:Array(String)})) ",
-    "AND (empty({statuses:Array(String)}) OR status IN {statuses:Array(String)}) ",
-    "AND (empty({environments:Array(String)}) OR environment IN {environments:Array(String)}) ",
-    "AND (empty({releases:Array(String)}) OR release IN {releases:Array(String)}) ",
+    crate::rules::spans_admitted!(),
     "AND ({pick:String} != 'latest_failed' OR status = 'error') ",
     "ORDER BY multiIf(",
     "{pick:String} = 'slowest', dateDiff('microsecond', started_at, ended_at), ",
@@ -141,23 +135,14 @@ pub async fn example(
         let spent = spend::runs(state, &projects, window, filters).await?;
         (spent.runs > 0).then_some(spent.costliest)
     } else {
-        let statuses: Vec<String> = filters.status.iter().map(SpanStatus::to_string).collect();
-        let picked: Option<Picked> = state
+        let read = state
             .store
             .read(&projects, PICK_SQL)
             .param("from", micros(window.from))
             .param("to", micros(window.to))
             .param("kind", rule.kind.to_string())
-            .param("agents", &filters.agent)
-            .param("models", &filters.model)
-            .param("providers", &filters.provider)
-            .param("tools", &filters.tool)
-            .param("statuses", statuses)
-            .param("environments", &filters.environment)
-            .param("releases", &filters.release)
-            .param("pick", pick.as_str())
-            .fetch_optional()
-            .await?;
+            .param("pick", pick.as_str());
+        let picked: Option<Picked> = filters.bind(read).fetch_optional().await?;
         picked.map(|Picked { run_id }| run_id)
     };
     let Some(run_id) = run_id else {

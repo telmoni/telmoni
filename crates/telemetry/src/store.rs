@@ -457,6 +457,16 @@ fn carries_settings(sql: &str) -> bool {
         .any(|word| word.eq_ignore_ascii_case("settings"))
 }
 
+/// An instant as a `DateTime64(6, 'UTC')` parameter reads it.
+pub(crate) fn micros(at: DateTime<Utc>) -> String {
+    at.format("%Y-%m-%d %H:%M:%S%.6f").to_string()
+}
+
+/// An instant as a `DateTime('UTC')` parameter reads it.
+pub(crate) fn seconds(at: DateTime<Utc>) -> String {
+    at.format("%Y-%m-%d %H:%M:%S").to_string()
+}
+
 /// One read, its projects fixed when it was made: values go in through
 /// [`Read::param`] alone, so nothing a caller adds can widen what it sees or
 /// lift its limits. ⚠ A read built against that — SQL that does not name its

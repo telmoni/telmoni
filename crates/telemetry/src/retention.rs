@@ -12,7 +12,7 @@ use anyhow::Context;
 use chrono::{DateTime, Datelike, Duration, Months, NaiveDate, TimeZone, Utc};
 
 use crate::schema::STATEMENT_TIMEOUT;
-use crate::store::within;
+use crate::store::{micros, seconds, within};
 
 /// The longest retention sold, in days: a span's day goes whole once every
 /// row in it is older than this.
@@ -96,7 +96,7 @@ pub async fn purge(client: &clickhouse::Client, now: DateTime<Utc>) -> anyhow::R
         "spans",
         EXPIRED_SPAN_DAYS,
         DROP_SPAN_DAY,
-        &span_cutoff(now).format("%Y-%m-%d %H:%M:%S%.6f").to_string(),
+        &micros(span_cutoff(now)),
     )
     .await
     .context("dropping days of spans past retention");
@@ -105,7 +105,7 @@ pub async fn purge(client: &clickhouse::Client, now: DateTime<Utc>) -> anyhow::R
         "spans_hourly",
         EXPIRED_ROLLUP_MONTHS,
         DROP_ROLLUP_MONTH,
-        &rollup_cutoff(now).format("%Y-%m-%d %H:%M:%S").to_string(),
+        &seconds(rollup_cutoff(now)),
     )
     .await
     .context("dropping months of hourly totals past retention");

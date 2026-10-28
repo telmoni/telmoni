@@ -22,7 +22,7 @@ use uuid::Uuid;
 use telmoni_shared::AlertCeilings;
 use telmoni_shared::db::tenant_session::maintenance_scope;
 use telmoni_shared::{
-    MissingData, OrganizationId, RuleAggregation, RuleMeasure, Severity, SpanStatus, TelmoniError,
+    MissingData, OrganizationId, RuleAggregation, RuleMeasure, Severity, TelmoniError,
 };
 
 use crate::AppState;
@@ -31,7 +31,7 @@ use crate::handler::chain;
 use crate::rules::db::{self, RuleRow};
 use crate::rules::incidents;
 use crate::spend::{self, Unread};
-use crate::store::Projects;
+use crate::store::{Projects, micros, seconds};
 
 /// How often each alert is evaluated.
 pub const EVERY: Duration = Duration::from_secs(60);
@@ -74,13 +74,10 @@ const TOTALS_SQL: &str = concat!(
     "WHERE project_id IN {projects:Array(String)} ",
     "AND hour >= {full_from:DateTime('UTC')} AND hour < {full_to:DateTime('UTC')} ",
     "AND kind = {kind:String} ",
-    "AND (empty({agents:Array(String)}) OR agent IN {agents:Array(String)}) ",
-    "AND (empty({models:Array(String)}) OR model IN {models:Array(String)}) ",
-    "AND (empty({providers:Array(String)}) OR provider IN {providers:Array(String)}) ",
+    crate::rules::calls_admitted!(),
+    // The rollup keeps a tool call's name as its own column.
     "AND (empty({tools:Array(String)}) OR tool IN {tools:Array(String)}) ",
     "AND (empty({statuses:Array(String)}) OR status IN {statuses:Array(String)}) ",
-    "AND (empty({environments:Array(String)}) OR environment IN {environments:Array(String)}) ",
-    "AND (empty({releases:Array(String)}) OR release IN {releases:Array(String)}) ",
     "UNION ALL ",
     "SELECT count() AS n, countIf(status = 'error') AS f, sum(duration) AS d, ",
     "sum(input_tokens + output_tokens) AS t, quantilesTDigestState(0.5, 0.9, 0.99)(duration) AS q ",
@@ -91,13 +88,7 @@ const TOTALS_SQL: &str = concat!(
     "AND received_at >= {from:DateTime64(6, 'UTC')} AND received_at < {to:DateTime64(6, 'UTC')} ",
     "AND (received_at < {full_from:DateTime('UTC')} OR received_at >= {full_to:DateTime('UTC')}) ",
     "AND kind = {kind:String} ",
-    "AND (empty({agents:Array(String)}) OR agent IN {agents:Array(String)}) ",
-    "AND (empty({models:Array(String)}) OR model IN {models:Array(String)}) ",
-    "AND (empty({providers:Array(String)}) OR provider IN {providers:Array(String)}) ",
-    "AND (empty({tools:Array(String)}) OR (kind = 'tool_call' AND name IN {tools:Array(String)})) ",
-    "AND (empty({statuses:Array(String)}) OR status IN {statuses:Array(String)}) ",
-    "AND (empty({environments:Array(String)}) OR environment IN {environments:Array(String)}) ",
-    "AND (empty({releases:Array(String)}) OR release IN {releases:Array(String)})",
+    crate::rules::spans_admitted!(),
     "))"
 );
 
@@ -188,35 +179,15 @@ pub async fn totals(
     now: DateTime<Utc>,
 ) -> clickhouse::error::Result<Totals> {
     let window = Window::ending(now, rule.lookback.duration());
-    let filters = &rule.filters.0;
-    let statuses: Vec<String> = filters.status.iter().map(SpanStatus::to_string).collect();
-    state
+    let read = state
         .store
         .read(&Projects::one(rule.project_id.clone()), TOTALS_SQL)
         .param("from", micros(window.from))
         .param("to", micros(window.to))
         .param("full_from", seconds(window.full_from))
         .param("full_to", seconds(window.full_to))
-        .param("kind", rule.kind.to_string())
-        .param("agents", &filters.agent)
-        .param("models", &filters.model)
-        .param("providers", &filters.provider)
-        .param("tools", &filters.tool)
-        .param("statuses", statuses)
-        .param("environments", &filters.environment)
-        .param("releases", &filters.release)
-        .fetch_one()
-        .await
-}
-
-/// An instant as a `DateTime64(6, 'UTC')` parameter reads it.
-pub(crate) fn micros(at: DateTime<Utc>) -> String {
-    at.format("%Y-%m-%d %H:%M:%S%.6f").to_string()
-}
-
-/// An instant as a `DateTime('UTC')` parameter reads it.
-fn seconds(at: DateTime<Utc>) -> String {
-    at.format("%Y-%m-%d %H:%M:%S").to_string()
+        .param("kind", rule.kind.to_string());
+    rule.filters.0.bind(read).fetch_one().await
 }
 
 /// What one replica holds of the organizations' plans: when it last held

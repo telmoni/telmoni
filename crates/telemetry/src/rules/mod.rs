@@ -26,6 +26,7 @@ use telmoni_shared::{
 
 use crate::contract::{AGENT_MAX, ENVIRONMENT_MAX, MODEL_MAX, NAME_MAX, PROVIDER_MAX, RELEASE_MAX};
 use crate::handler::traces::values;
+use crate::store::Read;
 
 /// The longest an alert's name is, in characters, as the table's CHECK has it.
 pub const RULE_NAME_MAX: usize = 60;
@@ -165,7 +166,52 @@ pub struct RuleFilters {
     pub release: Vec<String>,
 }
 
+/// The filters on `telemetry.spans` a run's cost takes too: all but its
+/// tools and statuses. Bound by [`RuleFilters::bind_calls`].
+macro_rules! calls_admitted {
+    () => {
+        concat!(
+            "AND (empty({agents:Array(String)}) OR agent IN {agents:Array(String)}) ",
+            "AND (empty({models:Array(String)}) OR model IN {models:Array(String)}) ",
+            "AND (empty({providers:Array(String)}) OR provider IN {providers:Array(String)}) ",
+            "AND (empty({environments:Array(String)}) OR environment IN {environments:Array(String)}) ",
+            "AND (empty({releases:Array(String)}) OR release IN {releases:Array(String)}) ",
+        )
+    };
+}
+
+/// Every filter an alert takes, on `telemetry.spans`. Bound by
+/// [`RuleFilters::bind`].
+macro_rules! spans_admitted {
+    () => {
+        concat!(
+            $crate::rules::calls_admitted!(),
+            "AND (empty({tools:Array(String)}) OR (kind = 'tool_call' AND name IN {tools:Array(String)})) ",
+            "AND (empty({statuses:Array(String)}) OR status IN {statuses:Array(String)}) ",
+        )
+    };
+}
+
+pub(crate) use {calls_admitted, spans_admitted};
+
 impl RuleFilters {
+    /// `read` bound to the filters [`calls_admitted!`] names.
+    pub(crate) fn bind_calls(&self, read: Read) -> Read {
+        read.param("agents", &self.agent)
+            .param("models", &self.model)
+            .param("providers", &self.provider)
+            .param("environments", &self.environment)
+            .param("releases", &self.release)
+    }
+
+    /// `read` bound to every filter [`spans_admitted!`] names.
+    pub(crate) fn bind(&self, read: Read) -> Read {
+        let statuses: Vec<String> = self.status.iter().map(SpanStatus::to_string).collect();
+        self.bind_calls(read)
+            .param("tools", &self.tool)
+            .param("statuses", statuses)
+    }
+
     /// The filters as the trace list's checks leave them: each value
     /// trimmed, given once and under its field's cap.
     fn checked(self) -> Result<Self, TelmoniError> {
