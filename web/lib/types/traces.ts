@@ -5,6 +5,36 @@ import { SpanKind, SpanStatus } from "@/lib/types/enums";
 // A trace as the server answers it, parsed on the server by its entity
 // (`lib/server/entities/traces.ts`) and in the browser by the peeks.
 
+const Values = z.array(z.string()).optional();
+
+/** What narrows a list as the URL carries it, in the sidebar's order: a
+ *  filter is the values any of which admits a run, a key left out narrowing
+ *  nothing; a session or a user is admitted by a run of theirs. The one list
+ *  of the keys: the facets, a saved view and every lane's query take them
+ *  from here. */
+export const ListFiltersSchema = z.object({
+  agent: Values,
+  status: z.array(z.enum(SpanStatus)).optional(),
+  model: Values,
+  tool: Values,
+  user: Values,
+  session: Values,
+  environment: Values,
+  release: Values,
+  /** Each `key:value`. */
+  tag: Values,
+  prompt: Values,
+});
+export type ListFilters = z.infer<typeof ListFiltersSchema>;
+export type FilterKey = keyof ListFilters;
+/** The filters' keys, in the sidebar's order. */
+export const FILTER_KEYS = ListFiltersSchema.keyof().options;
+
+/** `query`'s filters alone, every key present. */
+export function filtersIn(query: ListFilters): ListFilters {
+  return Object.fromEntries(FILTER_KEYS.map((key) => [key, query[key]])) as ListFilters;
+}
+
 // One trace of the list: a run's spans summed by the server, which reads the
 // project's spans and no other's. `user_id` is as stored — hashed, unless
 // the project keeps it plain — and `ended` says whether the run's own span has

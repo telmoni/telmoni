@@ -16,14 +16,28 @@ import {
   ViewKind,
 } from "@/lib/types/enums";
 
-import { TraceDetailSchema, TraceSchema, type TraceDetail } from "@/lib/types/traces";
+import {
+  FILTER_KEYS,
+  ListFiltersSchema,
+  TraceDetailSchema,
+  TraceSchema,
+  filtersIn,
+  type FilterKey,
+  type ListFilters,
+  type TraceDetail,
+} from "@/lib/types/traces";
 
 import { identityContext, projectHeaders } from "./identity-context";
 import { type Read, readFailed, readJson } from "./read";
 
 export {
+  FILTER_KEYS,
+  ListFiltersSchema,
   TraceDetailSchema,
   TraceSchema,
+  filtersIn,
+  type FilterKey,
+  type ListFilters,
   type RunSpend,
   type Trace,
   type TraceDetail,
@@ -50,36 +64,6 @@ const FacetSchema = z.object({
   more: z.boolean(),
 });
 export type Facet = z.infer<typeof FacetSchema>;
-
-const Values = z.array(z.string()).optional();
-
-/** What narrows a list as the URL carries it, in the sidebar's order: a
- *  filter is the values any of which admits a run, a key left out narrowing
- *  nothing; a session or a user is admitted by a run of theirs. The one list
- *  of the keys: the facets, a saved view and every lane's query take them
- *  from here. */
-export const ListFiltersSchema = z.object({
-  agent: Values,
-  status: z.array(z.enum(SpanStatus)).optional(),
-  model: Values,
-  tool: Values,
-  user: Values,
-  session: Values,
-  environment: Values,
-  release: Values,
-  /** Each `key:value`. */
-  tag: Values,
-  prompt: Values,
-});
-export type ListFilters = z.infer<typeof ListFiltersSchema>;
-export type FilterKey = keyof ListFilters;
-/** The filters' keys, in the sidebar's order. */
-export const FILTER_KEYS = ListFiltersSchema.keyof().options;
-
-/** `query`'s filters alone, every key present. */
-export function filtersIn(query: ListFilters): ListFilters {
-  return Object.fromEntries(FILTER_KEYS.map((key) => [key, query[key]])) as ListFilters;
-}
 
 const facetShape = Object.fromEntries(FILTER_KEYS.map((key) => [key, FacetSchema])) as Record<
   FilterKey,

@@ -7,7 +7,6 @@ import type {
   TraceView,
   ViewQuery,
 } from "@/lib/server/entities/traces";
-import { FILTER_KEYS, filtersIn } from "@/lib/server/entities/traces";
 import { isOneOf } from "@/lib/one-of";
 import { projectPath } from "@/lib/slug";
 import {
@@ -17,6 +16,7 @@ import {
   TraceColumn,
   TraceSort,
 } from "@/lib/types/enums";
+import { FILTER_KEYS, filtersIn } from "@/lib/types/traces";
 
 import {
   MAX_DAYS,
