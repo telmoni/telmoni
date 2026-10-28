@@ -20,15 +20,12 @@ use uuid::Uuid;
 
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
 use telmoni_shared::csv;
-use telmoni_shared::db::tenant_session::{
-    PersonAndOrganization, Scoped, maintenance_scope, organization_scope,
-};
+use telmoni_shared::db::tenant_session::{PersonAndOrganization, Scoped, organization_scope};
 use telmoni_shared::{
     AuditAction, OrganizationAction, OrganizationId, TelmoniError, TelmoniResourceKind, UserId,
 };
 
 use crate::AppState;
-use crate::db::AuthLane;
 use crate::db::audit::{self, ExportRow};
 use crate::db::audit_exports::{self, Claimed};
 use crate::db::organization_members;
@@ -202,9 +199,10 @@ pub async fn sweep(state: &AppState) -> Result<ExportsSwept, TelmoniError> {
     // limit freed, and the failure answered once they are.
     let expired = expire(state).await;
 
-    let mut tx = maintenance_scope(&state.db, AuthLane).await?;
-    let due = audit_exports::unfinished_past_due(&mut tx, SETTLE_SECS, RETRY_BATCH).await?;
-    tx.commit().await?;
+    let due = crate::db::lane(&state.db, async |tx| {
+        audit_exports::unfinished_past_due(tx, SETTLE_SECS, RETRY_BATCH).await
+    })
+    .await?;
 
     let mut finished = 0u64;
     for due in due {
@@ -227,9 +225,10 @@ pub async fn sweep(state: &AppState) -> Result<ExportsSwept, TelmoniError> {
 
 /// Every export past its keep deleted, file and all.
 async fn expire(state: &AppState) -> Result<u64, TelmoniError> {
-    let mut tx = maintenance_scope(&state.db, AuthLane).await?;
-    let expired = audit_exports::delete_expired(&mut tx).await?;
-    tx.commit().await?;
+    let expired = crate::db::lane(&state.db, async |tx| {
+        audit_exports::delete_expired(tx).await
+    })
+    .await?;
     Ok(expired)
 }
 

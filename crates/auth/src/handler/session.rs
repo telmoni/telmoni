@@ -14,13 +14,11 @@ use axum::{extract::State, response::IntoResponse};
 use serde::{Deserialize, Serialize};
 
 use telmoni_shared::SessionId;
-use telmoni_shared::db::tenant_session::maintenance_scope;
 use telmoni_shared::extract::Json;
 use telmoni_shared::person_token::Principal;
 use telmoni_shared::{AuthError, Redacted, TelmoniError};
 
 use crate::AppState;
-use crate::db::AuthLane;
 use crate::provider::{Binding, DevicePoll, Proof, TokenResponse};
 
 /// The one provider a caller may name beside the accounts held here. Any
@@ -539,9 +537,10 @@ pub(crate) async fn refresh_session(
     // Maintenance scope: a row id is the only handle this pre-session lane
     // carries, and the person is not known until the grant.
     if let Some(row) = session_row_id {
-        let mut tx = maintenance_scope(&state.db, AuthLane).await?;
-        let revoked = crate::db::sessions::is_revoked(&mut tx, row).await?;
-        tx.commit().await?;
+        let revoked = crate::db::lane(&state.db, async |tx| {
+            crate::db::sessions::is_revoked(tx, row).await
+        })
+        .await?;
         if revoked == Some(true) {
             tracing::info!(session = %row, "refresh refused: the session was revoked here");
             return Err(AuthError::Unauthenticated.into());
@@ -551,9 +550,10 @@ pub(crate) async fn refresh_session(
     let tokens = state.issuer.refresh(refresh_token).await?;
 
     if let Some(row) = session_row_id {
-        let mut tx = maintenance_scope(&state.db, AuthLane).await?;
-        let live = crate::db::sessions::touch_by_id(&mut tx, row).await?;
-        tx.commit().await?;
+        let live = crate::db::lane(&state.db, async |tx| {
+            crate::db::sessions::touch_by_id(tx, row).await
+        })
+        .await?;
         if !live {
             // Revoked between the pre-check and the grant; the token is spent,
             // and the device signs out now rather than at its next refresh.
@@ -570,9 +570,10 @@ pub async fn logout(
     State(state): State<Arc<AppState>>,
     Json(req): Json<LogoutRequest>,
 ) -> Result<impl IntoResponse, TelmoniError> {
-    let mut tx = maintenance_scope(&state.db, AuthLane).await?;
-    let row = crate::db::sessions::revoke_by_sid(&mut tx, &req.session_id).await?;
-    tx.commit().await?;
+    let row = crate::db::lane(&state.db, async |tx| {
+        crate::db::sessions::revoke_by_sid(tx, &req.session_id).await
+    })
+    .await?;
     if row.is_none() {
         tracing::debug!("logout for a session with no row here");
     }

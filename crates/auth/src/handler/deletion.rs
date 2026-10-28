@@ -255,9 +255,19 @@ pub(crate) async fn purge_project_connectors(
             Teardown::ForMove => notifications.purge_project_for_move(project_id).await,
         }
     };
-    match tokio::time::timeout(PROJECT_PURGE_BUDGET, purge).await {
-        Ok(done) => done.map(|_| ()),
-        Err(_) => Err(TelmoniError::Internal("the project purge timed out".into())),
+    within(PROJECT_PURGE_BUDGET, "the project purge", purge).await
+}
+
+/// `call` held to `budget`, what it answered dropped; past the budget, an
+/// `Err` naming `what`.
+async fn within<T>(
+    budget: std::time::Duration,
+    what: &str,
+    call: impl Future<Output = Result<T, TelmoniError>>,
+) -> Result<(), TelmoniError> {
+    match tokio::time::timeout(budget, call).await {
+        Ok(done) => done.map(drop),
+        Err(_) => Err(TelmoniError::Internal(format!("{what} timed out"))),
     }
 }
 
@@ -272,17 +282,12 @@ pub(crate) async fn purge_project_telemetry(
     let Some(telemetry) = state.siblings.telemetry.as_ref() else {
         return Ok(());
     };
-    match tokio::time::timeout(
+    within(
         TELEMETRY_PROJECT_BUDGET,
+        "telemetry's project purge",
         telemetry.purge_project(project_id),
     )
     .await
-    {
-        Ok(done) => done.map(|_| ()),
-        Err(_) => Err(TelmoniError::Internal(
-            "telemetry's project purge timed out".into(),
-        )),
-    }
 }
 
 /// Telemetry's half of a transfer: the project's settings move to the
@@ -308,17 +313,12 @@ pub(crate) async fn move_telemetry(
     project_id: &ProjectId,
     organization_id: &OrganizationId,
 ) -> Result<(), TelmoniError> {
-    match tokio::time::timeout(
+    within(
         TELEMETRY_PROJECT_BUDGET,
+        "telemetry's project move",
         telemetry.move_project(project_id, organization_id),
     )
     .await
-    {
-        Ok(done) => done,
-        Err(_) => Err(TelmoniError::Internal(
-            "telemetry's project move timed out".into(),
-        )),
-    }
 }
 
 /// The purge hook, for what the deployment holds of the organization outside
@@ -721,9 +721,10 @@ pub async fn pending_people(
     state: &AppState,
     limit: i64,
 ) -> Result<Vec<(UserId, DateTime<Utc>)>, TelmoniError> {
-    let mut tx = maintenance_scope(&state.db, AuthLane).await?;
-    let rows = identities::list_pending_deletion(&mut tx, limit.clamp(1, 500)).await?;
-    tx.commit().await?;
+    let rows = crate::db::lane(&state.db, async |tx| {
+        identities::list_pending_deletion(tx, limit.clamp(1, 500)).await
+    })
+    .await?;
     Ok(rows)
 }
 

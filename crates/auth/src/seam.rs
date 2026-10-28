@@ -100,9 +100,10 @@ impl Auth for AppState {
         // The session too, as the bearer's lookup would have it: a sign-out
         // everywhere, or a deletion asked for, ends the request's reach now.
         if let Some(sid) = acting.session_id.as_ref() {
-            let mut tx = maintenance_scope(&self.db, AuthLane).await?;
-            let refused = access_tokens::session_refused(&mut tx, &acting.user_id, sid).await?;
-            tx.commit().await?;
+            let refused = crate::db::lane(&self.db, async |tx| {
+                access_tokens::session_refused(tx, &acting.user_id, sid).await
+            })
+            .await?;
             if refused {
                 return Err(AuthError::Unauthenticated.into());
             }
@@ -120,9 +121,8 @@ impl Auth for AppState {
         &self,
         projects: &[ProjectId],
     ) -> Result<Vec<ProjectHome>, TelmoniError> {
-        let mut tx = maintenance_scope(&self.db, AuthLane).await?;
-        let homes = projects::homes(&mut tx, projects).await?;
-        tx.commit().await?;
+        let homes =
+            crate::db::lane(&self.db, async |tx| projects::homes(tx, projects).await).await?;
         Ok(homes)
     }
 
@@ -130,9 +130,10 @@ impl Auth for AppState {
         &self,
         organizations: &[OrganizationId],
     ) -> Result<Vec<(OrganizationId, Slug)>, TelmoniError> {
-        let mut tx = maintenance_scope(&self.db, AuthLane).await?;
-        let slugs = organizations::slugs(&mut tx, organizations).await?;
-        tx.commit().await?;
+        let slugs = crate::db::lane(&self.db, async |tx| {
+            organizations::slugs(tx, organizations).await
+        })
+        .await?;
         Ok(slugs)
     }
 
@@ -157,9 +158,7 @@ impl Auth for AppState {
     }
 
     async fn global_flags(&self) -> Result<FlagSet, TelmoniError> {
-        let mut tx = maintenance_scope(&self.db, AuthLane).await?;
-        let set = flags::resolve_global(&mut tx).await?;
-        tx.commit().await?;
+        let set = crate::db::lane(&self.db, async |tx| flags::resolve_global(tx).await).await?;
         Ok(set)
     }
 
@@ -177,9 +176,10 @@ impl Auth for AppState {
         &self,
         user_id: &UserId,
     ) -> Result<Vec<OwnedOrganization>, TelmoniError> {
-        let mut tx = maintenance_scope(&self.db, AuthLane).await?;
-        let owned = organization_members::active_owned_with_founding(&mut tx, user_id).await?;
-        tx.commit().await?;
+        let owned = crate::db::lane(&self.db, async |tx| {
+            organization_members::active_owned_with_founding(tx, user_id).await
+        })
+        .await?;
         Ok(owned
             .into_iter()
             .map(|(organization_id, created_at)| OwnedOrganization {
@@ -193,16 +193,18 @@ impl Auth for AppState {
         &self,
         organization_id: &OrganizationId,
     ) -> Result<Option<UserId>, TelmoniError> {
-        let mut tx = maintenance_scope(&self.db, AuthLane).await?;
-        let owner = organization_members::owner_of(&mut tx, organization_id).await?;
-        tx.commit().await?;
+        let owner = crate::db::lane(&self.db, async |tx| {
+            organization_members::owner_of(tx, organization_id).await
+        })
+        .await?;
         Ok(owner)
     }
 
     async fn owners_of_several(&self) -> Result<Vec<UserId>, TelmoniError> {
-        let mut tx = maintenance_scope(&self.db, AuthLane).await?;
-        let owners = organization_members::owners_of_several(&mut tx).await?;
-        tx.commit().await?;
+        let owners = crate::db::lane(&self.db, async |tx| {
+            organization_members::owners_of_several(tx).await
+        })
+        .await?;
         Ok(owners)
     }
 
@@ -253,9 +255,10 @@ impl Auth for AppState {
         limit: i64,
     ) -> Result<Vec<SourceDocument>, TelmoniError> {
         let after = after.map(|cursor| (cursor.at, cursor.id));
-        let mut tx = maintenance_scope(&self.db, AuthLane).await?;
-        let events = audit::after_cursor(&mut tx, after, limit).await?;
-        tx.commit().await?;
+        let events = crate::db::lane(&self.db, async |tx| {
+            audit::after_cursor(tx, after, limit).await
+        })
+        .await?;
         Ok(events.into_iter().map(audit_document).collect())
     }
 

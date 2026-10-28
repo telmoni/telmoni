@@ -236,10 +236,9 @@ pub async fn give_seat(
         crate::notify::emit_member_seated(&state, &project_id, &organization, &member, &name, role)
             .await;
         // By id, which outlasts a slug: the console takes either segment as one.
-        let link = format!(
-            "{}/{organization}/{project_id}",
-            state.config.app_url.trim_end_matches('/')
-        );
+        let link = state
+            .issuer
+            .page(&format!("/{organization}/{project_id}"), &[]);
         if let Err(e) = state
             .mailer
             .send_project_seat(
@@ -305,9 +304,8 @@ fn not_on_the_roster() -> TelmoniError {
 /// Whether the person's account deletion is confirmed, or no account is
 /// recorded. Their account's own row is the lane's alone to read.
 async fn leaving(state: &AppState, member: &UserId) -> Result<bool, TelmoniError> {
-    let mut lane = maintenance_scope(&state.db, AuthLane).await?;
-    let person = identities::get(&mut lane, member).await?;
-    lane.commit().await?;
+    let person =
+        crate::db::lane(&state.db, async |lane| identities::get(lane, member).await).await?;
     Ok(person.is_none_or(|p| p.deletion_requested_at.is_some()))
 }
 

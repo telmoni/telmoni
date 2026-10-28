@@ -190,9 +190,10 @@ pub async fn deletion(state: &AppState) -> Result<DeletionSwept, TelmoniError> {
 pub async fn due_organizations(
     state: &AppState,
 ) -> Result<Vec<organizations::DueOrganization>, TelmoniError> {
-    let mut tx = maintenance_scope(&state.db, AuthLane).await?;
-    let rows = organizations::list_due_for_sweep(&mut tx, SWEEP_BATCH).await?;
-    tx.commit().await?;
+    let rows = crate::db::lane(&state.db, async |tx| {
+        organizations::list_due_for_sweep(tx, SWEEP_BATCH).await
+    })
+    .await?;
     Ok(rows)
 }
 
@@ -328,9 +329,10 @@ pub async fn audit_verify(state: &AppState) -> Result<(), TelmoniError> {
     };
 
     let (verified, broken, unreadable) = as_leader(leader, AUDIT_VERIFY_BUDGET, async {
-        let mut tx = maintenance_scope(&state.db, AuthLane).await?;
-        let organization_ids = audit::distinct_organizations(&mut tx).await?;
-        tx.commit().await?;
+        let organization_ids = crate::db::lane(&state.db, async |tx| {
+            audit::distinct_organizations(tx).await
+        })
+        .await?;
 
         let (mut verified, mut broken, mut unreadable) = (0u64, 0u64, 0u64);
         for organization_id in &organization_ids {

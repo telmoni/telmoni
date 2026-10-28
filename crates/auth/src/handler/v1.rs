@@ -298,9 +298,10 @@ pub async fn get_organization(
     State(state): State<Arc<AppState>>,
     key: ActingKey,
 ) -> Result<impl IntoResponse, TelmoniError> {
-    let mut tx = maintenance_scope(&state.db, AuthLane).await?;
-    let summary = organizations::summary_with_owner(&mut tx, &key.organization_id).await?;
-    tx.commit().await?;
+    let summary = crate::db::lane(&state.db, async |tx| {
+        organizations::summary_with_owner(tx, &key.organization_id).await
+    })
+    .await?;
     let Some(summary) = summary else {
         return Err(AuthError::InvalidToken.into());
     };

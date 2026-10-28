@@ -67,10 +67,7 @@ impl Offered<'_> {
         to: Option<&str>,
         withdrawn_from: Option<&str>,
     ) {
-        let link = format!(
-            "{}/account/notifications",
-            state.config.app_url.trim_end_matches('/')
-        );
+        let link = state.issuer.page("/account/notifications", &[]);
         let (offered, withdrawn) = tokio::join!(
             async {
                 match to {

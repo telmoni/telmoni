@@ -29,7 +29,6 @@ use super::authorize_organization;
 use crate::{
     AppState,
     db::{
-        AuthLane,
         confirmation_codes::{self, Act, Purpose},
         flags, identities, locks, organization_members, organizations, projects,
     },
@@ -46,9 +45,7 @@ use crate::{
 };
 use telmoni_shared::AuthzError;
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
-use telmoni_shared::db::tenant_session::{
-    self, PersonAndOrganization, Scoped, maintenance_scope, person_scope,
-};
+use telmoni_shared::db::tenant_session::{self, PersonAndOrganization, Scoped, person_scope};
 use telmoni_shared::slug::{self, Slug};
 use telmoni_shared::{AuditAction, TelmoniResourceKind};
 
@@ -374,9 +371,10 @@ pub(crate) async fn found_for_deployment(
     founding: &OrganizationFounding,
 ) -> Result<FoundedOrganization, TelmoniError> {
     let organization = &founding.organization_id;
-    let mut lane = maintenance_scope(&state.db, AuthLane).await?;
-    let standing = organizations::slug_of(&mut lane, organization).await?;
-    lane.commit().await?;
+    let standing = crate::db::lane(&state.db, async |lane| {
+        organizations::slug_of(lane, organization).await
+    })
+    .await?;
     if let Some(slug) = standing {
         return Ok(FoundedOrganization {
             organization_id: organization.clone(),
@@ -430,9 +428,7 @@ pub(crate) async fn found_for_deployment(
 /// the lane before anything is written, since there is no organization yet to
 /// override it on.
 pub(crate) async fn signups_open(state: &AppState) -> Result<bool, TelmoniError> {
-    let mut tx = maintenance_scope(&state.db, AuthLane).await?;
-    let global = flags::resolve_global(&mut tx).await?;
-    tx.commit().await?;
+    let global = crate::db::lane(&state.db, async |tx| flags::resolve_global(tx).await).await?;
     Ok(global.is_on(Flag::Signup))
 }
 
@@ -452,9 +448,10 @@ pub(crate) async fn free_url(
     if candidates.is_empty() {
         return Ok(None);
     }
-    let mut lane = maintenance_scope(&state.db, AuthLane).await?;
-    let free = organizations::first_free_slug(&mut lane, organization, candidates).await?;
-    lane.commit().await?;
+    let free = crate::db::lane(&state.db, async |lane| {
+        organizations::first_free_slug(lane, organization, candidates).await
+    })
+    .await?;
     Ok(free)
 }
 

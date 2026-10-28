@@ -265,9 +265,10 @@ impl Issuer {
         code: &str,
         code_verifier: &str,
     ) -> Result<TokenResponse, TelmoniError> {
-        let mut mtx = maintenance_scope(&self.db, AuthLane).await?;
-        let spent = authorization_codes::spend(&mut mtx, &hash(code)).await?;
-        mtx.commit().await?;
+        let spent = crate::db::lane(&self.db, async |mtx| {
+            authorization_codes::spend(mtx, &hash(code)).await
+        })
+        .await?;
         let Some(SpentCode {
             user_id,
             sid,
@@ -420,9 +421,10 @@ impl Issuer {
         user_code: &str,
     ) -> Result<(), TelmoniError> {
         let code = normalize_user_code(user_code);
-        let mut tx = maintenance_scope(&self.db, AuthLane).await?;
-        let approved = device_codes::approve(&mut tx, &code, user_id, &SessionId::new()).await?;
-        tx.commit().await?;
+        let approved = crate::db::lane(&self.db, async |tx| {
+            device_codes::approve(tx, &code, user_id, &SessionId::new()).await
+        })
+        .await?;
         if !approved {
             return Err(no_such_device());
         }
@@ -433,9 +435,8 @@ impl Issuer {
     /// The signed-in person refuses the device showing `user_code`.
     pub async fn deny_device(&self, user_id: &UserId, user_code: &str) -> Result<(), TelmoniError> {
         let code = normalize_user_code(user_code);
-        let mut tx = maintenance_scope(&self.db, AuthLane).await?;
-        let denied = device_codes::deny(&mut tx, &code).await?;
-        tx.commit().await?;
+        let denied =
+            crate::db::lane(&self.db, async |tx| device_codes::deny(tx, &code).await).await?;
         if !denied {
             return Err(no_such_device());
         }

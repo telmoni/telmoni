@@ -22,13 +22,12 @@ use axum::{
     response::Response,
 };
 
-use telmoni_shared::db::tenant_session::maintenance_scope;
 use telmoni_shared::person_token::Principal;
 use telmoni_shared::types::API_TOKEN_PREFIX;
 use telmoni_shared::{AuthError, TelmoniError};
 
 use crate::AppState;
-use crate::db::{AuthLane, access_tokens};
+use crate::db::access_tokens;
 
 /// How far past its expiry a bearer is still taken: slack for a request
 /// already in flight when it ran out, never a second lifetime. The console
@@ -63,9 +62,10 @@ pub async fn principal_of(
     authorization: Option<&str>,
 ) -> Result<Principal, TelmoniError> {
     let token = bearer_of(authorization)?;
-    let mut tx = maintenance_scope(&state.db, AuthLane).await?;
-    let found = access_tokens::resolve(&mut tx, &crate::issuer::hash(token)).await?;
-    tx.commit().await?;
+    let found = crate::db::lane(&state.db, async |tx| {
+        access_tokens::resolve(tx, &crate::issuer::hash(token)).await
+    })
+    .await?;
     let Some(found) = found else {
         return Err(refuse("unknown bearer", AuthError::InvalidToken));
     };

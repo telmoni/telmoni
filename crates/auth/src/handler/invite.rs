@@ -104,9 +104,10 @@ pub(crate) async fn admit_invitation(
     let Some(ceiling) = ceiling else {
         return Ok(());
     };
-    let mut lane = maintenance_scope(&state.db, AuthLane).await?;
-    let held = organization_members::held(&mut lane, organization, Some(email)).await?;
-    lane.commit().await?;
+    let held = crate::db::lane(&state.db, async |lane| {
+        organization_members::held(lane, organization, Some(email)).await
+    })
+    .await?;
     if held.names_email {
         return Ok(());
     }
@@ -157,9 +158,10 @@ pub(crate) async fn roster_ceiling(
     else {
         return Ok(None);
     };
-    let mut lane = maintenance_scope(&state.db, AuthLane).await?;
-    let held = organization_members::held(&mut lane, organization, None).await?;
-    lane.commit().await?;
+    let held = crate::db::lane(&state.db, async |lane| {
+        organization_members::held(lane, organization, None).await
+    })
+    .await?;
     let held = count(held.people);
     Ok(Some(RosterCeiling {
         limit: ceiling.limit,
@@ -786,10 +788,7 @@ pub struct Seated {
 
 /// The URL that opens an invitation, on the console this service belongs to.
 fn invite_link(state: &AppState, secret: &str) -> String {
-    format!(
-        "{}/invite/{secret}",
-        state.config.app_url.trim_end_matches('/')
-    )
+    state.issuer.page(&format!("/invite/{secret}"), &[])
 }
 
 /// `GET /internal/v1/me/invites` — list pending invitations addressed to the caller.

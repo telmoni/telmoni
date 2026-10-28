@@ -354,11 +354,7 @@ pub async fn create_organization_invite(
     let inviter = identities::contact(&mut tx, &actor).await?;
     tx.commit().await?;
 
-    let link = format!(
-        "{}/invite/{}",
-        state.config.app_url.trim_end_matches('/'),
-        raw_token
-    );
+    let link = state.issuer.page(&format!("/invite/{raw_token}"), &[]);
 
     let label = name;
     let inviter = inviter.map_or_else(|| label.clone(), |c| c.display());

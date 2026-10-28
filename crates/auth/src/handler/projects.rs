@@ -77,9 +77,10 @@ pub async fn list_projects_everywhere(
     principal: Principal,
 ) -> Result<impl IntoResponse, TelmoniError> {
     let user_id = principal.user_id;
-    let mut tx = maintenance_scope(&state.db, AuthLane).await?;
-    let project_list = projects::list_everywhere_for_user(&mut tx, &user_id).await?;
-    tx.commit().await?;
+    let project_list = crate::db::lane(&state.db, async |tx| {
+        projects::list_everywhere_for_user(tx, &user_id).await
+    })
+    .await?;
     Ok(Json(Projects {
         projects: project_list,
     }))

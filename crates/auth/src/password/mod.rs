@@ -30,11 +30,11 @@ use chrono::{Duration, Utc};
 use sqlx::PgPool;
 
 use telmoni_shared::Email;
-use telmoni_shared::db::tenant_session::{maintenance_scope, person_scope};
+use telmoni_shared::db::tenant_session::person_scope;
 use telmoni_shared::{AuthError, AuthzError, Redacted, TelmoniError, TenantError, UserId};
 
 use crate::db::{
-    AuthLane, access_tokens,
+    access_tokens,
     confirmation_codes::{self, Act, Purpose},
     credentials, identities, invites, locks, refresh_tokens, sessions,
 };
@@ -123,18 +123,20 @@ impl PasswordProvider {
 
     /// Who holds `email`, if anybody. The one read keyed on an address.
     async fn holder_of(&self, email: &Email) -> Result<Option<UserId>, TelmoniError> {
-        let mut tx = maintenance_scope(&self.db, AuthLane).await?;
-        let holder = identities::find_by_email(&mut tx, email).await?;
-        tx.commit().await?;
+        let holder = crate::db::lane(&self.db, async |tx| {
+            identities::find_by_email(tx, email).await
+        })
+        .await?;
         Ok(holder)
     }
 
     /// Whether a live invitation names `email`: what lets the invited in
     /// while sign-ups are closed.
     async fn invited(&self, email: &Email) -> Result<bool, TelmoniError> {
-        let mut tx = maintenance_scope(&self.db, AuthLane).await?;
-        let invited = invites::any_live_for_email(&mut tx, email).await?;
-        tx.commit().await?;
+        let invited = crate::db::lane(&self.db, async |tx| {
+            invites::any_live_for_email(tx, email).await
+        })
+        .await?;
         Ok(invited)
     }
 

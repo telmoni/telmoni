@@ -19,7 +19,10 @@ pub mod refresh_tokens;
 pub mod sessions;
 pub mod tokens;
 
-use telmoni_shared::db::tenant_session::{Lane, MaintenanceLane};
+use telmoni_shared::TelmoniError;
+use telmoni_shared::db::tenant_session::{
+    Lane, Maintenance, MaintenanceLane, Scoped, maintenance_scope,
+};
 
 /// This service's cross-tenant lane: the one declaration, so a sibling's
 /// lane is unnameable here. See `tenant_session::Lane`.
@@ -27,4 +30,16 @@ use telmoni_shared::db::tenant_session::{Lane, MaintenanceLane};
 pub struct AuthLane;
 impl Lane for AuthLane {
     const SET_ROLE: &'static str = MaintenanceLane::Auth.set_role();
+}
+
+/// Open the maintenance lane, run `read` in it, and commit: what a lane
+/// needing one statement of another person's rows, or no one's, writes.
+pub(crate) async fn lane<T>(
+    db: &sqlx::PgPool,
+    read: impl AsyncFnOnce(&mut Scoped<'_, Maintenance<AuthLane>>) -> sqlx::Result<T>,
+) -> Result<T, TelmoniError> {
+    let mut tx = maintenance_scope(db, AuthLane).await?;
+    let value = read(&mut tx).await?;
+    tx.commit().await?;
+    Ok(value)
 }
