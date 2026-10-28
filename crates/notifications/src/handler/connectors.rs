@@ -128,7 +128,7 @@ fn mint_state() -> Result<String, TelmoniError> {
     ring::rand::SystemRandom::new()
         .fill(&mut bytes)
         .map_err(|_| TelmoniError::Internal("no randomness for an oauth state".into()))?;
-    Ok(hex::encode(bytes))
+    Ok(telmoni_shared::digest::hex_lower(&bytes))
 }
 
 /// `POST /internal/v1/connectors/{provider}/authorize` — start a handshake.

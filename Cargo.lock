@@ -2598,8 +2598,6 @@ dependencies = [
  "async-trait",
  "axum",
  "chrono",
- "hex",
- "hmac",
  "http-body-util",
  "reqwest",
  "ring",

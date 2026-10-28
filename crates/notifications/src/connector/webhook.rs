@@ -19,11 +19,10 @@
 //! is `410 Gone`; every other dead endpoint is ended by the breaker.
 
 use async_trait::async_trait;
-use hmac::{Hmac, KeyInit, Mac};
 use reqwest::Url;
 use ring::rand::SecureRandom as _;
 use serde_json::{Value, json};
-use sha2::Sha256;
+use telmoni_shared::digest::sign_timestamped;
 use telmoni_shared::net_guard::{Egress, HostRejection, host_is_dialable};
 use telmoni_shared::{Redacted, TelmoniError};
 
@@ -31,8 +30,6 @@ use super::{
     Connector, DeliveryError, Event, Provider, TearDownError, Terminal, parse_retry_after, refused,
     short_body,
 };
-
-type HmacSha256 = Hmac<Sha256>;
 
 /// The header a receiver reads for the signature.
 pub const SIGNATURE_HEADER: &str = "telmoni-signature";
@@ -53,11 +50,6 @@ pub const MAX_URL_LEN: usize = 2048;
 /// The prefix a signing secret carries, so one is recognisable in config and
 /// greppable in a leak.
 const SECRET_PREFIX: &str = "whsec_";
-
-/// How far a receiver should let `t=` stray before refusing a replay: five
-/// minutes, Stripe's number. Every attempt is signed when SENT, so a retry
-/// after a long backoff still lands inside the window.
-pub const REPLAY_TOLERANCE_SECS: i64 = 300;
 
 /// Parse and check a customer-supplied endpoint, or say in a sentence why not;
 /// the dialog renders that sentence as it is.
@@ -111,32 +103,23 @@ pub fn mint_signing_secret() -> Result<Redacted, TelmoniError> {
         .map_err(|_| TelmoniError::Internal("no randomness for a signing secret".into()))?;
     Ok(Redacted::from(format!(
         "{SECRET_PREFIX}{}",
-        hex::encode(bytes)
+        telmoni_shared::digest::hex_lower(&bytes)
     )))
 }
 
-/// The `t=<unix>,v1=<hex>` signature for `body` at `timestamp`.
+/// The `t=<unix>,v1=<hex>` signature for `body` at `timestamp`: every
+/// attempt is signed when sent, so a retry after a long backoff still lands
+/// inside the receiver's window.
 #[must_use]
 pub fn sign(secret: &str, body: &[u8], timestamp: i64) -> String {
-    sign_all(&[secret], body, timestamp)
+    sign_timestamped(&[secret], body, timestamp)
 }
 
 /// One `v1` per secret, in the order given, behind one `t=`: the header a
 /// rotation's overlap sends.
 #[must_use]
 pub fn sign_all(secrets: &[&str], body: &[u8], timestamp: i64) -> String {
-    let mut header = format!("t={timestamp}");
-    for secret in secrets {
-        let Ok(mut mac) = <HmacSha256 as KeyInit>::new_from_slice(secret.as_bytes()) else {
-            continue;
-        };
-        mac.update(timestamp.to_string().as_bytes());
-        mac.update(b".");
-        mac.update(body);
-        header.push_str(",v1=");
-        header.push_str(&hex::encode(mac.finalize().into_bytes()));
-    }
-    header
+    sign_timestamped(secrets, body, timestamp)
 }
 
 /// The body a receiver gets: the notice as emitted, plus the delivery id and
@@ -246,29 +229,11 @@ impl Connector for WebhookConnector {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use telmoni_shared::digest::verify_timestamped;
 
-    /// Reference verifier: what a receiver writes, proving it can validate
-    /// what we sign. Any `v1` that verifies is enough.
+    /// What a receiver does with the header, its clock at the signing time.
     fn verify(secret: &str, header: &str, body: &[u8]) -> bool {
-        let mut t: Option<i64> = None;
-        let mut candidates: Vec<Vec<u8>> = Vec::new();
-        for part in header.split(',') {
-            match part.split_once('=') {
-                Some(("t", v)) => t = v.parse().ok(),
-                Some(("v1", v)) => candidates.extend(hex::decode(v).ok()),
-                _ => {}
-            }
-        }
-        let Some(t) = t else {
-            return false;
-        };
-        candidates.iter().any(|candidate| {
-            let mut mac = <HmacSha256 as KeyInit>::new_from_slice(secret.as_bytes()).unwrap();
-            mac.update(t.to_string().as_bytes());
-            mac.update(b".");
-            mac.update(body);
-            mac.verify_slice(candidate).is_ok()
-        })
+        verify_timestamped(secret, header, body, 1_800_000_000).is_ok()
     }
 
     /// ⚠ **The published golden vector.** The same inputs appear on the docs

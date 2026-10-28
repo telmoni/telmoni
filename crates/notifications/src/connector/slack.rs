@@ -7,10 +7,9 @@
 //! its token is per WORKSPACE. The bot token is kept only for `apps.uninstall`.
 
 use async_trait::async_trait;
-use hmac::{Hmac, KeyInit, Mac};
 use serde::Deserialize;
 use serde_json::{Value, json};
-use sha2::Sha256;
+use telmoni_shared::digest::{HmacKey, SignatureError, hex_decode, in_replay_window};
 use telmoni_shared::net_guard::Egress;
 use telmoni_shared::{AuthError, Redacted, TelmoniError};
 
@@ -26,10 +25,6 @@ const MAX_SECTION: usize = 3_000;
 
 /// The one scope the app asks for. See the module header.
 pub const SCOPE: &str = "incoming-webhook";
-
-/// Reject event timestamps outside this window: Slack's recommended replay
-/// bound.
-pub const SIGNATURE_TOLERANCE_SECS: i64 = 300;
 
 /// The installation is gone or the token is dead: nothing on our side can make
 /// the next post succeed.
@@ -138,20 +133,6 @@ pub fn render(event: &Event<'_>) -> Value {
     })
 }
 
-type HmacSha256 = Hmac<Sha256>;
-
-/// Why an event's signature was refused: one 401 on the wire so a probe learns
-/// nothing, and named in the log.
-#[derive(Debug, PartialEq, Eq)]
-pub enum SignatureError {
-    /// A header missing or unparseable.
-    Malformed,
-    /// The timestamp is outside the replay window.
-    Stale,
-    /// The HMAC does not match.
-    Mismatch,
-}
-
 /// Verify `X-Slack-Signature` against the raw body: HMAC-SHA256 over
 /// `v0:{timestamp}:{body}`, constant-time, with the timestamp bounded.
 pub fn verify_signature(
@@ -161,27 +142,20 @@ pub fn verify_signature(
     body: &[u8],
     now_unix: i64,
 ) -> Result<(), SignatureError> {
-    let t: i64 = timestamp
-        .trim()
-        .parse()
-        .map_err(|_| SignatureError::Malformed)?;
-    let age = now_unix.saturating_sub(t);
-    if !(-SIGNATURE_TOLERANCE_SECS..=SIGNATURE_TOLERANCE_SECS).contains(&age) {
-        return Err(SignatureError::Stale);
-    }
+    let timestamp = timestamp.trim();
+    let t: i64 = timestamp.parse().map_err(|_| SignatureError::Malformed)?;
+    in_replay_window(t, now_unix)?;
     let candidate = signature
         .trim()
         .strip_prefix("v0=")
-        .and_then(|hex_sig| hex::decode(hex_sig).ok())
+        .and_then(hex_decode)
         .ok_or(SignatureError::Malformed)?;
-    let mut mac = HmacSha256::new_from_slice(signing_secret.as_bytes())
-        .map_err(|_| SignatureError::Malformed)?;
-    mac.update(b"v0:");
-    mac.update(timestamp.trim().as_bytes());
-    mac.update(b":");
-    mac.update(body);
-    mac.verify_slice(&candidate)
-        .map_err(|_| SignatureError::Mismatch)
+    let signed = [b"v0:", timestamp.as_bytes(), b":", body].concat();
+    if HmacKey::new(signing_secret.as_bytes()).verify(&signed, &candidate) {
+        Ok(())
+    } else {
+        Err(SignatureError::Mismatch)
+    }
 }
 
 /// The Slack app, as registered, and the API origin (a mock in tests).
@@ -523,10 +497,8 @@ mod tests {
     }
 
     fn sign(secret: &str, ts: &str, body: &[u8]) -> String {
-        let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).unwrap();
-        mac.update(format!("v0:{ts}:").as_bytes());
-        mac.update(body);
-        format!("v0={}", hex::encode(mac.finalize().into_bytes()))
+        let signed = [format!("v0:{ts}:").as_bytes(), body].concat();
+        format!("v0={}", HmacKey::new(secret.as_bytes()).hex(&signed))
     }
 
     /// A vector computed by an independent implementation (Python's `hmac`
