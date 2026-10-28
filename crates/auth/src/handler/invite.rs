@@ -31,6 +31,7 @@ use telmoni_shared::{
     OrganizationStatus, ProjectId, Role, TelmoniError, TelmoniResourceKind, UserId,
 };
 
+use crate::db::invites::InviteTarget;
 use crate::{
     AppState,
     db::{AuthLane, identities, invites, locks, members, organization_members, organizations},
@@ -383,46 +384,77 @@ pub async fn look_up_invite(
 ) -> Result<impl IntoResponse, TelmoniError> {
     let mut tx = maintenance_scope(&state.db, AuthLane).await?;
     let token_hash = hash_invite_token(&req.token);
-    let found = invites::find_live(&mut tx, &token_hash).await?;
-
-    if let Some(invite) = found {
-        tx.commit().await?;
-        let organization = invite.organization_name;
-        // ⚠ `scope` says which roster the link seats somebody on. The two
-        // ladders spell their roles the same, so the role alone cannot.
-        return Ok(Json(json!({
-            "scope": InviteScope::Project,
-            "inviter": inviter_label(
-                invite.inviter_email.as_deref(),
-                invite.inviter_display_name.as_deref(),
-                &organization,
-            ),
-            "organization": organization,
-            "email": invite.email,
-            "role": invite.role,
-        })));
-    }
-
-    let found_organization =
-        organization_members::find_live_organization_invite(&mut tx, &token_hash).await?;
+    let found = invites::find_live_by_token(&mut tx, &token_hash).await?;
     tx.commit().await?;
+    let Some(invite) = found else {
+        return Err(
+            AuthError::NotFound("this invitation has expired or been withdrawn".into()).into(),
+        );
+    };
+    // ⚠ `scope` says which roster the link seats somebody on. The two
+    // ladders spell their roles the same, so the role alone cannot.
+    Ok(Json(json!({
+        "scope": invite.target.scope(),
+        "inviter": inviter_label(
+            invite.inviter_email.as_deref(),
+            invite.inviter_display_name.as_deref(),
+            &invite.organization_name,
+        ),
+        "organization": invite.organization_name,
+        "email": invite.email,
+        "role": invite.target.role_word(),
+    })))
+}
 
-    if let Some(invite) = found_organization {
-        let organization = invite.organization_name;
-        return Ok(Json(json!({
-            "scope": InviteScope::Organization,
-            "inviter": inviter_label(
-                invite.inviter_email.as_deref(),
-                invite.inviter_display_name.as_deref(),
-                &organization,
-            ),
-            "organization": organization,
-            "email": invite.email,
-            "role": invite.role,
-        })));
+/// An invitation both lanes have already decided to honour.
+struct Accepted<'a> {
+    id: Uuid,
+    /// The organization it is recorded on.
+    organization_id: &'a OrganizationId,
+    target: &'a InviteTarget,
+}
+
+/// Seat an accepted invitation on the roster it names, **commit**, and
+/// announce a project's.
+async fn seat(
+    state: &AppState,
+    tx: Scoped<'_, Maintenance<AuthLane>>,
+    invite: Accepted<'_>,
+    ceiling: Option<MemberCeiling>,
+    actor: &UserId,
+    accepter: &str,
+) -> Result<(), TelmoniError> {
+    match invite.target {
+        InviteTarget::Project { project_id, role } => {
+            seat_project_member(
+                state,
+                tx,
+                AcceptedProjectInvite {
+                    id: invite.id,
+                    project_id,
+                    organization_id: invite.organization_id,
+                    role: *role,
+                },
+                ceiling,
+                actor,
+                accepter,
+            )
+            .await
+        }
+        InviteTarget::Organization { role } => {
+            seat_organization_member(
+                tx,
+                AcceptedOrganizationInvite {
+                    id: invite.id,
+                    organization_id: invite.organization_id,
+                    role: *role,
+                },
+                ceiling,
+                actor,
+            )
+            .await
+        }
     }
-
-    Err(AuthError::NotFound("this invitation has expired or been withdrawn".into()).into())
 }
 
 /// A PROJECT invitation both lanes have already decided to honour.
@@ -688,83 +720,51 @@ pub async fn accept_invite(
 
     let mut tx = maintenance_scope(&state.db, AuthLane).await?;
     let token_hash = hash_invite_token(&req.token);
-
-    if let Some(invite) = invites::find_live(&mut tx, &token_hash).await? {
-        let ceiling = ceiling_of(&state, &invite.organization_id).await?;
-        let me = accepter(&mut tx, &actor).await?;
-        if me.email != invite.email {
-            return Err(not_yours());
-        }
-        seat_project_member(
-            &state,
-            tx,
-            AcceptedProjectInvite {
-                id: invite.id,
-                project_id: &invite.project_id,
-                organization_id: &invite.organization_id,
-                role: invite.role,
-            },
-            ceiling,
-            &actor,
-            &crate::identity::display_for(me.display_name.as_deref(), &me.email),
-        )
-        .await?;
-
-        tracing::info!(
-            project_id = %invite.project_id,
-            member = %actor,
-            role = %invite.role,
-            "invitation accepted"
+    let Some(invite) = invites::find_live_by_token(&mut tx, &token_hash).await? else {
+        return Err(
+            AuthError::NotFound("this invitation has expired or been withdrawn".into()).into(),
         );
-        return Ok((
-            StatusCode::CREATED,
-            Json(json!({
-                "projectId": invite.project_id,
-                "inviteId": invite.id,
-                "inviterEmail": invite.inviter_email,
-                "ownerOrganizationId": invite.organization_id,
-            })),
-        ));
+    };
+    let ceiling = ceiling_of(&state, &invite.organization_id).await?;
+    let me = accepter(&mut tx, &actor).await?;
+    if me.email != invite.email {
+        return Err(not_yours());
     }
+    seat(
+        &state,
+        tx,
+        Accepted {
+            id: invite.id,
+            organization_id: &invite.organization_id,
+            target: &invite.target,
+        },
+        ceiling,
+        &actor,
+        &crate::identity::display_for(me.display_name.as_deref(), &me.email),
+    )
+    .await?;
 
-    if let Some(invite) =
-        organization_members::find_live_organization_invite(&mut tx, &token_hash).await?
-    {
-        let ceiling = ceiling_of(&state, &invite.organization_id).await?;
-        let me = accepter(&mut tx, &actor).await?;
-        if me.email != invite.email {
-            return Err(not_yours());
-        }
-        seat_organization_member(
-            tx,
-            AcceptedOrganizationInvite {
-                id: invite.id,
-                organization_id: &invite.organization_id,
-                role: invite.role,
-            },
-            ceiling,
-            &actor,
-        )
-        .await?;
-
-        tracing::info!(
-            organization_id = %invite.organization_id,
-            member = %actor,
-            role = %invite.role,
-            "organization invitation accepted"
-        );
-        return Ok((
-            StatusCode::CREATED,
-            Json(json!({
-                "organizationId": invite.organization_id,
-                "inviteId": invite.id,
-                "inviterEmail": invite.inviter_email,
-                "ownerOrganizationId": invite.organization_id,
-            })),
-        ));
-    }
-
-    Err(AuthError::NotFound("this invitation has expired or been withdrawn".into()).into())
+    tracing::info!(
+        organization_id = %invite.organization_id,
+        scope = %invite.target.scope(),
+        member = %actor,
+        role = invite.target.role_word(),
+        "invitation accepted"
+    );
+    // The roster seated, under its own key.
+    let seated = match &invite.target {
+        InviteTarget::Project { project_id, .. } => ("projectId", project_id.to_string()),
+        InviteTarget::Organization { .. } => ("organizationId", invite.organization_id.to_string()),
+    };
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({
+            seated.0: seated.1,
+            "inviteId": invite.id,
+            "inviterEmail": invite.inviter_email,
+            "ownerOrganizationId": invite.organization_id,
+        })),
+    ))
 }
 
 /// The URL that opens an invitation, on the console this service belongs to.
@@ -800,81 +800,54 @@ pub async fn accept_my_incoming_invite(
 
     let mut tx = maintenance_scope(&state.db, AuthLane).await?;
     let me = verified_accepter(&mut tx, &actor).await?;
+    let Some(invite) = invites::find_incoming(&mut tx, invite_id, &me.email).await? else {
+        return Err(AuthError::NotFound("invitation not found or no longer active".into()).into());
+    };
+    let ceiling = ceiling_of(&state, &invite.owner_organization_id).await?;
+    seat(
+        &state,
+        tx,
+        Accepted {
+            id: invite.id,
+            organization_id: &invite.owner_organization_id,
+            target: &invite.target,
+        },
+        ceiling,
+        &actor,
+        &crate::identity::display_for(me.display_name.as_deref(), &me.email),
+    )
+    .await?;
 
-    if let Some(invite) =
-        invites::find_incoming_member_invite(&mut tx, invite_id, &me.email).await?
-    {
-        let ceiling = ceiling_of(&state, &invite.owner_organization_id).await?;
-        seat_project_member(
-            &state,
-            tx,
-            AcceptedProjectInvite {
-                id: invite.id,
-                project_id: &invite.project_id,
-                organization_id: &invite.owner_organization_id,
-                role: invite.role,
-            },
-            ceiling,
-            &actor,
-            &crate::identity::display_for(me.display_name.as_deref(), &me.email),
-        )
-        .await?;
+    tracing::info!(
+        organization_id = %invite.owner_organization_id,
+        scope = %invite.target.scope(),
+        member = %actor,
+        role = invite.target.role_word(),
+        "incoming invitation accepted"
+    );
+    Ok((StatusCode::OK, Json(settled("accepted", &invite))))
+}
 
-        tracing::info!(
-            project_id = %invite.project_id,
-            member = %actor,
-            role = %invite.role,
-            "incoming project invitation accepted"
-        );
-        return Ok((
-            StatusCode::OK,
-            Json(json!({
-                "status": "accepted",
-                "scope": InviteScope::Project,
-                "targetId": invite.project_id,
-                "inviteId": invite.id,
-                "inviterEmail": invite.inviter_email,
-                "ownerOrganizationId": invite.owner_organization_id,
-            })),
-        ));
+/// What the console is answered once an incoming invitation is settled: who
+/// to tell, and which organization's console.
+fn settled(status: &str, invite: &invites::Pending) -> serde_json::Value {
+    json!({
+        "status": status,
+        "scope": invite.target.scope(),
+        "targetId": target_id(invite),
+        "inviteId": invite.id,
+        "inviterEmail": invite.inviter_email,
+        "ownerOrganizationId": invite.owner_organization_id,
+    })
+}
+
+/// What the invitation seats somebody on, by id: the project, or the
+/// organization it is recorded on.
+fn target_id(invite: &invites::Pending) -> String {
+    match &invite.target {
+        InviteTarget::Project { project_id, .. } => project_id.to_string(),
+        InviteTarget::Organization { .. } => invite.owner_organization_id.to_string(),
     }
-
-    if let Some(invite) =
-        invites::find_incoming_organization_invite(&mut tx, invite_id, &me.email).await?
-    {
-        let ceiling = ceiling_of(&state, &invite.organization_id).await?;
-        seat_organization_member(
-            tx,
-            AcceptedOrganizationInvite {
-                id: invite.id,
-                organization_id: &invite.organization_id,
-                role: invite.role,
-            },
-            ceiling,
-            &actor,
-        )
-        .await?;
-
-        tracing::info!(
-            organization_id = %invite.organization_id,
-            member = %actor,
-            role = %invite.role,
-            "incoming organization invitation accepted"
-        );
-        return Ok((
-            StatusCode::OK,
-            Json(json!({
-                "status": "accepted",
-                "scope": InviteScope::Organization,
-                "targetId": invite.organization_id,
-                "inviteId": invite.id,
-                "inviterEmail": invite.inviter_email,
-                "ownerOrganizationId": invite.owner_organization_id,
-            })),
-        ));
-    }
-
-    Err(AuthError::NotFound("invitation not found or no longer active".into()).into())
 }
 
 /// `POST /internal/v1/me/invites/{invite_id}/decline` — decline an incoming invitation.
@@ -887,87 +860,58 @@ pub async fn decline_my_incoming_invite(
 
     let mut tx = maintenance_scope(&state.db, AuthLane).await?;
     let me = verified_accepter(&mut tx, &actor).await?;
-
-    if let Some(invite) =
-        invites::find_incoming_member_invite(&mut tx, invite_id, &me.email).await?
-    {
-        // The organization it is recorded on, held, and the project's place in it read again
-        // under the lock, after the person's as the accepts take them.
-        let owner = invite.owner_organization_id;
-        lock_membership(tx.conn(), &owner).await?;
-        refuse_unless_still_in(&mut tx, &owner, &invite.project_id).await?;
-        if !invites::decline_incoming_member_invite(&mut tx, invite_id, &me.email).await? {
-            return Err(AuthError::Conflict("this invitation was already resolved".into()).into());
-        }
-        emit_audit(
-            &mut tx,
-            AuditEvent::new(
-                &owner,
-                Actor::User(actor.as_str()),
-                AuditAction::Deleted,
-                TelmoniResourceKind::Member,
-            )
-            .in_project(&invite.project_id)
-            .on(invite_id.to_string().as_str())
-            .details(json!({ "kind": AuditKind::InviteDeclined })),
-        )
-        .await?;
-        tx.commit().await?;
-        tracing::info!(
-            project_id = %invite.project_id,
-            invite = %invite_id,
-            member = %actor,
-            "project invitation declined"
-        );
-        return Ok(Json(json!({
-            "status": "declined",
-            "scope": InviteScope::Project,
-            "targetId": invite.project_id,
-            "inviteId": invite.id,
-            "inviterEmail": invite.inviter_email,
-            "ownerOrganizationId": owner,
-        })));
+    let Some(invite) = invites::find_incoming(&mut tx, invite_id, &me.email).await? else {
+        return Err(AuthError::NotFound("invitation not found or no longer active".into()).into());
+    };
+    let owner = &invite.owner_organization_id;
+    // A project's: the organization it is recorded on held, and the project's
+    // place in it read again under the lock, after the person's as the
+    // accepts take them.
+    if let InviteTarget::Project { project_id, .. } = &invite.target {
+        lock_membership(tx.conn(), owner).await?;
+        refuse_unless_still_in(&mut tx, owner, project_id).await?;
     }
-
-    if let Some(invite) =
-        invites::find_incoming_organization_invite(&mut tx, invite_id, &me.email).await?
-    {
-        if !invites::decline_incoming_organization_invite(&mut tx, invite_id, &me.email).await? {
-            return Err(AuthError::Conflict("this invitation was already resolved".into()).into());
-        }
-        emit_audit(
-            &mut tx,
-            AuditEvent::new(
-                &invite.organization_id,
-                Actor::User(actor.as_str()),
-                AuditAction::Deleted,
-                TelmoniResourceKind::Member,
-            )
-            .on(invite_id.to_string().as_str())
-            .details(json!({
+    if !invites::decline_incoming(&mut tx, &invite).await? {
+        return Err(AuthError::Conflict("this invitation was already resolved".into()).into());
+    }
+    let (in_project, details) = match &invite.target {
+        InviteTarget::Project { project_id, .. } => (
+            Some(project_id),
+            json!({ "kind": AuditKind::InviteDeclined }),
+        ),
+        InviteTarget::Organization { .. } => (
+            None,
+            json!({
                 "kind": AuditKind::OrganizationInviteDeclined,
                 "scope": InviteScope::Organization,
-            })),
-        )
-        .await?;
-        tx.commit().await?;
-        tracing::info!(
-            organization_id = %invite.organization_id,
-            invite = %invite_id,
-            member = %actor,
-            "organization invitation declined"
-        );
-        return Ok(Json(json!({
-            "status": "declined",
-            "scope": InviteScope::Organization,
-            "targetId": invite.organization_id,
-            "inviteId": invite.id,
-            "inviterEmail": invite.inviter_email,
-            "ownerOrganizationId": invite.owner_organization_id,
-        })));
-    }
-
-    Err(AuthError::NotFound("invitation not found or no longer active".into()).into())
+            }),
+        ),
+    };
+    let resource = invite_id.to_string();
+    emit_audit(
+        &mut tx,
+        AuditEvent {
+            in_project,
+            ..AuditEvent::new(
+                owner,
+                Actor::User(actor.as_str()),
+                AuditAction::Deleted,
+                TelmoniResourceKind::Member,
+            )
+            .on(&resource)
+            .details(details)
+        },
+    )
+    .await?;
+    tx.commit().await?;
+    tracing::info!(
+        organization_id = %owner,
+        scope = %invite.target.scope(),
+        invite = %invite_id,
+        member = %actor,
+        "invitation declined"
+    );
+    Ok(Json(settled("declined", &invite)))
 }
 
 #[cfg(test)]

@@ -4,9 +4,11 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use telmoni_shared::db::tenant_session::{Maintenance, Project, ProjectAndOrganization, Scoped};
-use telmoni_shared::{OrganizationId, ProjectId, Role, UserId, derive_shard_key};
+use telmoni_shared::{OrganizationId, OrganizationRole, ProjectId, Role, UserId, derive_shard_key};
 
 use crate::db::AuthLane;
+use crate::db::organization_members::{self, LiveOrganizationInvite};
+use crate::model::InviteScope;
 
 /// One live invitation, as the roster shows it to owners and admins.
 #[derive(Debug, serde::Serialize, sqlx::FromRow)]
@@ -248,6 +250,155 @@ pub struct IncomingInvite {
     pub inviter_display_name: Option<String>,
     pub expires_at: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
+}
+
+/// What an invitation seats somebody on, at which role there. The two
+/// ladders spell their roles the same, so the role alone cannot say what an
+/// admin may do; the target can.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InviteTarget {
+    /// A seat on one project.
+    Project { project_id: ProjectId, role: Role },
+    /// A row on the organization's roster.
+    Organization { role: OrganizationRole },
+}
+
+impl InviteTarget {
+    /// Which roster, as the wire says it.
+    #[must_use]
+    pub const fn scope(&self) -> InviteScope {
+        match self {
+            Self::Project { .. } => InviteScope::Project,
+            Self::Organization { .. } => InviteScope::Organization,
+        }
+    }
+
+    /// The role, as either ladder spells it.
+    #[must_use]
+    pub fn role_word(&self) -> &'static str {
+        match self {
+            Self::Project { role, .. } => role.as_str(),
+            Self::Organization { role } => role.as_str(),
+        }
+    }
+}
+
+/// A live invitation the link's token names, from either table: what the
+/// accept page says, and what an accept seats.
+#[derive(Debug, Clone)]
+pub struct Invitation {
+    pub id: Uuid,
+    /// The organization it is recorded on: the project's owner, or the one
+    /// invited to.
+    pub organization_id: OrganizationId,
+    pub organization_name: String,
+    /// The address it was sent to; the acceptor must hold it.
+    pub email: String,
+    /// Who sent it; `None` once they have been erased.
+    pub inviter_email: Option<String>,
+    pub inviter_display_name: Option<String>,
+    pub target: InviteTarget,
+}
+
+impl Invitation {
+    fn of_project(live: LiveInvite) -> Self {
+        Self {
+            id: live.id,
+            organization_id: live.organization_id,
+            organization_name: live.organization_name,
+            email: live.email,
+            inviter_email: live.inviter_email,
+            inviter_display_name: live.inviter_display_name,
+            target: InviteTarget::Project {
+                project_id: live.project_id,
+                role: live.role,
+            },
+        }
+    }
+
+    fn of_organization(live: LiveOrganizationInvite) -> Self {
+        Self {
+            id: live.id,
+            organization_id: live.organization_id,
+            organization_name: live.organization_name,
+            email: live.email,
+            inviter_email: live.inviter_email,
+            inviter_display_name: live.inviter_display_name,
+            target: InviteTarget::Organization { role: live.role },
+        }
+    }
+}
+
+/// The live invitation a link's token names, in whichever table holds it.
+pub async fn find_live_by_token(
+    tx: &mut Scoped<'_, Maintenance<AuthLane>>,
+    token_hash: &str,
+) -> sqlx::Result<Option<Invitation>> {
+    if let Some(live) = find_live(tx, token_hash).await? {
+        return Ok(Some(Invitation::of_project(live)));
+    }
+    Ok(
+        organization_members::find_live_organization_invite(tx, token_hash)
+            .await?
+            .map(Invitation::of_organization),
+    )
+}
+
+/// A live invitation addressed to the person, by its id, from either table:
+/// what the console's accept and decline act on.
+#[derive(Debug, Clone)]
+pub struct Pending {
+    pub id: Uuid,
+    pub email: String,
+    pub inviter_email: Option<String>,
+    /// The organization it is recorded on.
+    pub owner_organization_id: OrganizationId,
+    pub target: InviteTarget,
+}
+
+/// The live invitation `invite_id` names, addressed to `email`, in
+/// whichever table holds it.
+pub async fn find_incoming(
+    tx: &mut Scoped<'_, Maintenance<AuthLane>>,
+    invite_id: Uuid,
+    email: &str,
+) -> sqlx::Result<Option<Pending>> {
+    if let Some(invite) = find_incoming_member_invite(tx, invite_id, email).await? {
+        return Ok(Some(Pending {
+            id: invite.id,
+            email: invite.email,
+            inviter_email: invite.inviter_email,
+            owner_organization_id: invite.owner_organization_id,
+            target: InviteTarget::Project {
+                project_id: invite.project_id,
+                role: invite.role,
+            },
+        }));
+    }
+    Ok(find_incoming_organization_invite(tx, invite_id, email)
+        .await?
+        .map(|invite| Pending {
+            id: invite.id,
+            email: invite.email,
+            inviter_email: invite.inviter_email,
+            owner_organization_id: invite.owner_organization_id,
+            target: InviteTarget::Organization { role: invite.role },
+        }))
+}
+
+/// Decline a pending invitation, in the table that holds it.
+pub async fn decline_incoming(
+    tx: &mut Scoped<'_, Maintenance<AuthLane>>,
+    pending: &Pending,
+) -> sqlx::Result<bool> {
+    match pending.target {
+        InviteTarget::Project { .. } => {
+            decline_incoming_member_invite(tx, pending.id, &pending.email).await
+        }
+        InviteTarget::Organization { .. } => {
+            decline_incoming_organization_invite(tx, pending.id, &pending.email).await
+        }
+    }
 }
 
 /// A pending PROJECT invite found by id and recipient email.
