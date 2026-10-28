@@ -366,15 +366,14 @@ export class Opener {
     // On every span of the run from its start, for the processor to drop: a
     // sampler's drop would clear the flag the application's spans inherit.
     if (sampledOut) inherited[contract.SAMPLED_OUT] = true;
-    const attributes: Attributes = {
-      [contract.OPERATION]: 'invoke_agent',
-      [contract.AGENT_NAME]: agent,
-      ...inherited,
-      [contract.SAMPLE_RATE]: rate,
-      ...tagsOf(Object.entries(options.tags ?? {}), this.#warnOnce),
-    };
+    const attributes = runAttributes(
+      agent,
+      inherited,
+      rate,
+      tagsOf(Object.entries(options.tags ?? {}), this.#warnOnce),
+    );
     const parent = context.active();
-    const span = this.#start(`invoke_agent ${agent}`, parent, attributes, SpanKind.INTERNAL);
+    const span = this.#start(runSpanName(agent), parent, attributes, SpanKind.INTERNAL);
     return new Run(this, span, parent, runId, agent, inherited, sampledOut, guard);
   }
 
@@ -405,10 +404,7 @@ export class Opener {
   modelCall(run: Run, parent: Context, given: string, options: ModelCallOptions): ModelCall {
     run[GUARD].opens(false);
     const asked = asText(given, 'model', this.#warnOnce);
-    // Sent blank, the span would be named ` <model>` and ingest would read it
-    // as a step.
-    const operation =
-      typeof options.operation === 'string' && options.operation.trim() !== '' ? options.operation : 'chat';
+    const operation = operationOf(options.operation);
     const attributes: Attributes = { ...run.inherited, [contract.OPERATION]: operation };
     // Ingest refuses a call over an empty model, but keeps one with none.
     const model = asked === '' ? undefined : cut(asked, contract.MODEL_MAX, 'model', this.#warnOnce);
@@ -442,15 +438,11 @@ export class Opener {
   toolCall(run: Run, parent: Context, given: string, options: ToolCallOptions): ToolCall {
     run[GUARD].opens(false);
     const name = cut(asText(given, "tool's name", this.#warnOnce), contract.NAME_MAX, "tool's name", this.#warnOnce);
-    const attributes: Attributes = {
-      ...run.inherited,
-      [contract.OPERATION]: contract.TOOL_OPERATION,
-      [contract.TOOL_NAME]: name,
-    };
+    const attributes = toolAttributes(run.inherited, name);
     if (isSet(options.arguments)) {
       attributes[contract.TOOL_CALL_ARGUMENTS] = asJson(options.arguments);
     }
-    const span = this.#start(`execute_tool ${name}`, parent, attributes, SpanKind.INTERNAL);
+    const span = this.#start(toolSpanName(name), parent, attributes, SpanKind.INTERNAL);
     return new ToolCall(span, parent, run, this.#warnOnce);
   }
 
@@ -503,13 +495,7 @@ export class Opener {
     const inherited: Attributes = { [contract.RUN_ID]: runId, [contract.AGENT]: record.agent };
     if (record.userId) inherited[contract.USER_ID] = record.userId;
     if (record.sessionId) inherited[contract.SESSION_ID] = record.sessionId;
-    const attributes: Attributes = {
-      [contract.OPERATION]: 'invoke_agent',
-      [contract.AGENT_NAME]: record.agent,
-      ...inherited,
-      [contract.SAMPLE_RATE]: rate,
-    };
-    Object.assign(attributes, tagsOf(tagged, this.#warnOnce));
+    const attributes = runAttributes(record.agent, inherited, rate, tagsOf(tagged, this.#warnOnce));
     // Sampled out, no span is built: none of a record's ends after it, and
     // the same record sent again draws again.
     if (rate < 1 && Math.random() >= rate) return;
@@ -528,7 +514,7 @@ export class Opener {
       );
     const call = (item: CallRecord, parent: Context): void => {
       if (item.type === 'model_call') {
-        const operation = typeof item.operation === 'string' && item.operation.trim() !== '' ? item.operation : 'chat';
+        const operation = operationOf(item.operation);
         const callAttributes: Attributes = {
           ...inherited,
           [contract.OPERATION]: operation,
@@ -538,18 +524,14 @@ export class Opener {
         Object.assign(callAttributes, usages.get(item));
         close(open(`${operation} ${item.model}`, parent, callAttributes, SpanKind.CLIENT, item.start), item);
       } else {
-        const callAttributes: Attributes = {
-          ...inherited,
-          [contract.OPERATION]: contract.TOOL_OPERATION,
-          [contract.TOOL_NAME]: item.name,
-        };
-        close(open(`execute_tool ${item.name}`, parent, callAttributes, SpanKind.INTERNAL, item.start), item);
+        const callAttributes = toolAttributes(inherited, item.name);
+        close(open(toolSpanName(item.name), parent, callAttributes, SpanKind.INTERNAL, item.start), item);
       }
     };
     // Queued whole or not at all: a record that outgrows the queue's room
     // would lose its tail, the run's own span first.
     this.#processor.record(runHex, spansIn(items), () => {
-      const span = open(`invoke_agent ${record.agent}`, ROOT_CONTEXT, attributes, SpanKind.INTERNAL, record.start);
+      const span = open(runSpanName(record.agent), ROOT_CONTEXT, attributes, SpanKind.INTERNAL, record.start);
       const ctx = trace.setSpan(ROOT_CONTEXT, span);
       for (const [item, calls] of items) {
         if (item.type === 'step') {
@@ -700,7 +682,7 @@ function check(item: RunRecord | Item, kind: keyof typeof FIELDS): void {
   }
   // Its span is named `<operation> <model>`, a name ingest caps too.
   if (kind === 'model_call') {
-    const operation = typeof read.operation === 'string' && read.operation.trim() !== '' ? read.operation : 'chat';
+    const operation = operationOf(read.operation);
     if ([...operation].length + [...String(read.model)].length > contract.NAME_MAX - 1) {
       throw new RangeError(
         `a recorded model call's operation and model must be up to ${contract.NAME_MAX - 1} characters together`,
@@ -804,6 +786,36 @@ function numberOf(value: unknown): number {
  * A run's tags as its span's attributes: the first `TAGS_MAX` of those
  * ingest keeps, since past them they would crowd out the run's own.
  */
+/** A run's own span's attributes, live or recorded: its tags last. */
+function runAttributes(agent: string, inherited: Attributes, rate: number, tags: Attributes): Attributes {
+  return {
+    [contract.OPERATION]: contract.RUN_OPERATION,
+    [contract.AGENT_NAME]: agent,
+    ...inherited,
+    [contract.SAMPLE_RATE]: rate,
+    ...tags,
+  };
+}
+
+/** A tool call's attributes, live or recorded, before its arguments. */
+function toolAttributes(inherited: Attributes, name: string): Attributes {
+  return { ...inherited, [contract.OPERATION]: contract.TOOL_OPERATION, [contract.TOOL_NAME]: name };
+}
+
+function runSpanName(agent: string): string {
+  return `${contract.RUN_OPERATION} ${agent}`;
+}
+
+function toolSpanName(name: string): string {
+  return `${contract.TOOL_OPERATION} ${name}`;
+}
+
+/** A model call's operation as sent: blank reads as the default, since a call
+ *  named ` <model>` would be read by ingest as a step. */
+function operationOf(given: unknown): string {
+  return typeof given === 'string' && given.trim() !== '' ? given : contract.DEFAULT_MODEL_OPERATION;
+}
+
 function tagsOf(given: ReadonlyArray<readonly [string, unknown]>, warnOnce: WarnOnce): Attributes {
   const kept: Attributes = {};
   let count = 0;

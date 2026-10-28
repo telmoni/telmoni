@@ -98,7 +98,10 @@ export const MODEL_OPERATIONS: ReadonlySet<string> = new Set([
   'text_completion',
   'embeddings',
 ]);
+/** A model call's operation when it names none. */
+export const DEFAULT_MODEL_OPERATION = 'chat';
 export const TOOL_OPERATION = 'execute_tool';
+export const RUN_OPERATION = 'invoke_agent';
 
 /** The answer's header naming the project's content mode: off, on or sealed. */
 export const CONTENT_MODE_HEADER = 'Telmoni-Content-Mode';
