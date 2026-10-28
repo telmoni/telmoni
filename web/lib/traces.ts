@@ -773,6 +773,14 @@ export function spanMillis(span: Pick<TraceSpan, "started_at" | "ended_at">): nu
   return Math.max(0, new Date(span.ended_at).getTime() - new Date(span.started_at).getTime());
 }
 
+/** A span's bar on the trace's timeline, as `timelineBars` draws them. */
+export type TimelineBar = ReturnType<typeof timelineBars>[number];
+
+/** A trace's bars by their span, for the rows to find theirs. */
+export function barsById(spans: TraceSpan[]): Map<string, TimelineBar> {
+  return new Map(timelineBars(spans).map((bar) => [bar.span.span_id, bar]));
+}
+
 /** Where a span sits on the trace's timeline, as shares of its whole: what
  *  the timeline view draws, every pixel from the spans' own times. */
 export function timelineBars(

@@ -9,29 +9,22 @@ import { cellClass, cellOf, titleOf } from "@/components/traces/cells";
 import { rowClickTaken } from "@/components/traces/list-table";
 import { SignInAgain, readSession, readTrace, startRead } from "@/components/traces/peek-read";
 import { TraceOutline } from "@/components/traces/trace-outline";
-import { KindIcon } from "@/components/traces/trace-view";
+import { PinnedChip } from "@/components/traces/span-parts";
 import { useLayout, type LayoutPage } from "@/components/traces/use-layout";
-import {
-  spanTitle,
-  tracesOpenedFirst,
-  type LayoutOptions,
-} from "@/lib/layout";
+import { tracesOpenedFirst, type LayoutOptions } from "@/lib/layout";
 import type { WindowQuery } from "@/lib/list-query";
 import type { TraceRead } from "@/lib/peek";
 import type { PinnedSpan, SessionTrace, TraceDetail } from "@/lib/server/data";
 import {
-  STATUS_LABEL,
   TRACE_COLUMNS,
-  formatDuration,
   shortId,
-  spanMillis,
   traceHref,
   traceReadHref,
   tracesHref,
   type FilterKey,
 } from "@/lib/traces";
 import { sessionReadHref } from "@/lib/sessions";
-import { LayoutDepth, SpanStatus } from "@/lib/types/enums";
+import { LayoutDepth } from "@/lib/types/enums";
 import { offerPageSteps } from "@/lib/use-page-steps";
 import { cn } from "@/lib/utils";
 
@@ -273,12 +266,7 @@ function PinnedStrip({ spans }: { spans: readonly PinnedSpan[] }) {
           className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-border bg-background px-2 py-0.5 text-xs"
           title={span.name}
         >
-          <KindIcon span={span} className="size-3.5" />
-          <span className="truncate">{spanTitle(span)}</span>
-          <span className="tabular-nums text-muted-foreground">{formatDuration(spanMillis(span))}</span>
-          {span.status === SpanStatus.Error && (
-            <span className="text-destructive">{span.error_type || STATUS_LABEL[span.status]}</span>
-          )}
+          <PinnedChip span={span} />
         </li>
       ))}
     </ul>

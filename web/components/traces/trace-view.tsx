@@ -12,22 +12,22 @@ import {
   type ReactNode,
   type Ref,
 } from "react";
-import {
-  ArrowUpRight,
-  ChevronRight,
-  Footprints,
-  ListTree,
-  MoveHorizontal,
-  PanelLeft,
-  SearchIcon,
-  Sparkles,
-  Wrench,
-  type LucideIcon,
-} from "lucide-react";
+import { ArrowUpRight, ChevronRight, PanelLeft, SearchIcon } from "lucide-react";
 import Link from "next/link";
 
 import { LocalTime } from "@/components/local-time";
 import { StatusBadge } from "@/components/status-badge";
+import {
+  INDENT_MAX,
+  KindIcon,
+  PinnedChip,
+  SpanBar,
+  SpanFacts,
+  SpanGuides,
+  TruncatedNote,
+  indentStyle,
+  toggled,
+} from "@/components/traces/span-parts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -39,7 +39,6 @@ import {
   PINNED_PER_TRACE,
   openingFor,
   shutBranches,
-  spanTitle,
   visibleTree,
   type LayoutOptions,
 } from "@/lib/layout";
@@ -61,13 +60,12 @@ import {
 } from "@/lib/trace-tree";
 import {
   KIND_LABEL,
-  STATUS_LABEL,
   formatCost,
   formatCount,
   formatDuration,
+  barsById,
   shortId,
   spanMillis,
-  timelineBars,
   tracesHref,
 } from "@/lib/traces";
 import { SpanKind, SpanStatus } from "@/lib/types/enums";
@@ -78,45 +76,6 @@ import { cn } from "@/lib/utils";
 // full, beside it. Every pixel is metadata: no prompt, completion or tool
 // payload reaches the console, in any content mode, and a span's attributes
 // are what ingest kept as metadata under their own names.
-
-/** A span's kind as a glyph: the run as the Traces row draws it, a model
- *  call as the sparkle every AI surface uses, a tool as its wrench. */
-const KIND_ICON: Record<SpanKind, LucideIcon> = {
-  [SpanKind.Run]: ListTree,
-  [SpanKind.Step]: Footprints,
-  [SpanKind.ModelCall]: Sparkles,
-  [SpanKind.ToolCall]: Wrench,
-  [SpanKind.Span]: MoveHorizontal,
-};
-
-/** How many levels a row steps in before it holds its place: a deeper span
- *  reads by its guides rather than running off the pane. */
-const INDENT_MAX = 8;
-
-/** How far each level steps in, in rem; the guides stand on the same
- *  measure. */
-const INDENT_REM = 1.25;
-
-/** A span's kind, in the error's colour where it failed. */
-export function KindIcon({
-  span,
-  className,
-}: {
-  span: Pick<TraceSpan, "kind" | "status">;
-  className?: string;
-}) {
-  const Icon = KIND_ICON[span.kind];
-  return (
-    <Icon
-      aria-hidden="true"
-      className={cn(
-        "size-4 shrink-0",
-        span.status === SpanStatus.Error ? "text-destructive" : "text-muted-foreground",
-        className,
-      )}
-    />
-  );
-}
 
 /** How a span ended, the error's class beside it where it failed. */
 function SpanStatusBadge({ span }: { span: Pick<TraceSpan, "status" | "error_type"> }) {
@@ -295,10 +254,7 @@ export const TraceBody = memo(function TraceBody({
     [trace.spans, layout],
   );
   const summary = useMemo(() => summarizeTrace(trace.spans), [trace.spans]);
-  const bars = useMemo(
-    () => new Map(timelineBars(trace.spans).map((bar) => [bar.span.span_id, bar])),
-    [trace.spans],
-  );
+  const bars = useMemo(() => barsById(trace.spans), [trace.spans]);
   const parentOf = useMemo(
     () => new Map(trace.spans.map((s) => [s.span_id, s.parent_span_id])),
     [trace.spans],
@@ -347,12 +303,7 @@ export const TraceBody = memo(function TraceBody({
   const toggle = useCallback(
     (id: string) => {
       const shutting = !shutNow.current.has(id);
-      setShut((was) => {
-        const next = new Set(was);
-        if (next.has(id)) next.delete(id);
-        else next.add(id);
-        return next;
-      });
+      setShut((was) => toggled(was, id));
       if (shutting) setChosen((current) => (isUnder(parentOf, current, id) ? id : current));
     },
     [parentOf],
@@ -458,11 +409,7 @@ export const TraceBody = memo(function TraceBody({
                     span.span_id === chosen && "bg-muted",
                   )}
                 >
-                  <KindIcon span={span} className="size-3.5" />
-                  <span className="truncate">{spanTitle(span)}</span>
-                  <span className="tabular-nums text-muted-foreground">
-                    {formatDuration(spanMillis(span))}
-                  </span>
+                  <PinnedChip span={span} />
                 </button>
               ))}
             </div>
@@ -518,12 +465,7 @@ export const TraceBody = memo(function TraceBody({
               })}
             </div>
           )}
-          {trace.truncated && (
-            <p className="shrink-0 border-t border-border px-3.5 py-2 text-xs text-muted-foreground">
-              This run holds more spans than the server sends at once; the first{" "}
-              {formatCount(trace.spans.length)} are here.
-            </p>
-          )}
+          <TruncatedNote trace={trace} className="shrink-0 border-t border-border px-3.5 py-2" />
         </div>
       )}
       <SpanDetail
@@ -568,7 +510,6 @@ const SpanRow = memo(function SpanRow({
 }) {
   const { span } = node;
   const depth = Math.min(node.depth, INDENT_MAX);
-  const tokens = span.input_tokens + span.output_tokens;
   const failed = span.status === SpanStatus.Error;
   return (
     <div
@@ -586,16 +527,9 @@ const SpanRow = memo(function SpanRow({
         bar && "pb-5",
         chosen ? "bg-muted" : "hover:bg-muted/50",
       )}
-      style={{ paddingLeft: `${depth * INDENT_REM}rem` }}
+      style={indentStyle(depth)}
     >
-      {Array.from({ length: depth }, (_, level) => (
-        <span
-          key={level}
-          aria-hidden="true"
-          className="absolute inset-y-0 border-l border-border"
-          style={{ left: `${level * INDENT_REM + 0.5}rem` }}
-        />
-      ))}
+      <SpanGuides depth={depth} />
       {/* The chevron is the mouse's way to open a branch; the keyboard's is
           the tree's own arrows, so it is not a control of its own. */}
       <span
@@ -621,23 +555,11 @@ const SpanRow = memo(function SpanRow({
         <span className="truncate text-sm" title={span.name}>
           {span.name}
         </span>
-        <span className="flex flex-wrap gap-x-2 text-xs tabular-nums text-muted-foreground">
-          <span>{formatDuration(spanMillis(span))}</span>
-          {span.kind === SpanKind.ModelCall && <span>{formatCount(tokens)} tokens</span>}
-          {failed && <span className="text-destructive">{span.error_type || STATUS_LABEL[span.status]}</span>}
+        <span className="flex flex-wrap gap-x-2">
+          <SpanFacts span={span} />
         </span>
       </span>
-      {/* Every row's bar on one line of time: from where the run's own name
-          starts to the pane's edge, whatever the row's depth, so bars read
-          against each other as a timeline's must. */}
-      {bar && (
-        <span aria-hidden="true" className="absolute right-2 bottom-2 left-11 h-1.5 rounded-full bg-border">
-          <span
-            className={cn("absolute inset-y-0 rounded-full", failed ? "bg-destructive" : "bg-foreground/60")}
-            style={{ left: `${bar.offset}%`, width: `${bar.width}%` }}
-          />
-        </span>
-      )}
+      {bar && <SpanBar bar={bar} failed={failed} className="bottom-2" />}
     </div>
   );
 });
@@ -650,6 +572,17 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
       <dt className="min-w-0 wrap-break-word text-muted-foreground">{label}</dt>
       <dd className="min-w-0 wrap-break-word">{children}</dd>
     </div>
+  );
+}
+
+/** A field whose value narrows a list to it. */
+function FilterField({ label, href, children }: { label: string; href: string; children: ReactNode }) {
+  return (
+    <Field label={label}>
+      <Link href={href} className="underline-offset-4 hover:underline">
+        {children}
+      </Link>
+    </Field>
   );
 }
 
@@ -779,45 +712,37 @@ function SpanDetail({
                   </Field>
                 )}
                 {span.model && (
-                  <Field label="Model">
-                    <Link
-                      href={tracesHref(organization, slug, { model: [span.model], days: reaching })}
-                      className="underline-offset-4 hover:underline"
-                    >
-                      {span.model}
-                    </Link>
-                  </Field>
+                  <FilterField
+                    label="Model"
+                    href={tracesHref(organization, slug, { model: [span.model], days: reaching })}
+                  >
+                    {span.model}
+                  </FilterField>
                 )}
                 {span.provider && <Field label="Provider">{span.provider}</Field>}
                 {span.environment && (
-                  <Field label="Environment">
-                    <Link
-                      href={tracesHref(organization, slug, { environment: [span.environment], days: reaching })}
-                      className="underline-offset-4 hover:underline"
-                    >
-                      {span.environment}
-                    </Link>
-                  </Field>
+                  <FilterField
+                    label="Environment"
+                    href={tracesHref(organization, slug, { environment: [span.environment], days: reaching })}
+                  >
+                    {span.environment}
+                  </FilterField>
                 )}
                 {span.release && (
-                  <Field label="Release">
-                    <Link
-                      href={tracesHref(organization, slug, { release: [span.release], days: reaching })}
-                      className="underline-offset-4 hover:underline"
-                    >
-                      {span.release}
-                    </Link>
-                  </Field>
+                  <FilterField
+                    label="Release"
+                    href={tracesHref(organization, slug, { release: [span.release], days: reaching })}
+                  >
+                    {span.release}
+                  </FilterField>
                 )}
                 {span.kind === SpanKind.ToolCall && (
-                  <Field label="Tool">
-                    <Link
-                      href={tracesHref(organization, slug, { tool: [span.name], days: reaching })}
-                      className="underline-offset-4 hover:underline"
-                    >
-                      {span.name}
-                    </Link>
-                  </Field>
+                  <FilterField
+                    label="Tool"
+                    href={tracesHref(organization, slug, { tool: [span.name], days: reaching })}
+                  >
+                    {span.name}
+                  </FilterField>
                 )}
                 {(span.kind === SpanKind.ModelCall || tokens > 0) && (
                   <>
@@ -836,24 +761,20 @@ function SpanDetail({
                 </Field>
                 <Field label="Duration">{formatDuration(spanMillis(span))}</Field>
                 {run && span.user_id && (
-                  <Field label="User">
-                    <Link
-                      href={tracesHref(organization, slug, { user: [span.user_id], days: reaching })}
-                      className="underline-offset-4 hover:underline"
-                    >
-                      {span.user_id}
-                    </Link>
-                  </Field>
+                  <FilterField
+                    label="User"
+                    href={tracesHref(organization, slug, { user: [span.user_id], days: reaching })}
+                  >
+                    {span.user_id}
+                  </FilterField>
                 )}
                 {run && span.session_id && (
-                  <Field label="Session">
-                    <Link
-                      href={sessionHref(organization, slug, span.session_id, { days: reaching })}
-                      className="underline-offset-4 hover:underline"
-                    >
-                      {span.session_id}
-                    </Link>
-                  </Field>
+                  <FilterField
+                    label="Session"
+                    href={sessionHref(organization, slug, span.session_id, { days: reaching })}
+                  >
+                    {span.session_id}
+                  </FilterField>
                 )}
                 {tags.length > 0 && (
                   <Field label="Tags">

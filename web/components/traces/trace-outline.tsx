@@ -1,9 +1,18 @@
 "use client";
 
-import { memo, useMemo, useState, type ReactNode } from "react";
+import { memo, useMemo, useState } from "react";
 import { ChevronRight } from "lucide-react";
 
-import { KindIcon } from "@/components/traces/trace-view";
+import {
+  INDENT_MAX,
+  KindIcon,
+  SpanBar,
+  SpanFacts,
+  SpanGuides,
+  TruncatedNote,
+  indentStyle,
+  toggled,
+} from "@/components/traces/span-parts";
 import {
   openingFor,
   shutBranches,
@@ -13,8 +22,8 @@ import {
 } from "@/lib/layout";
 import type { TraceDetail } from "@/lib/server/entities/traces";
 import { spanTree, treeRows, type SpanNode } from "@/lib/trace-tree";
-import { STATUS_LABEL, formatCount, formatDuration, spanMillis, timelineBars } from "@/lib/traces";
-import { SpanKind, SpanStatus } from "@/lib/types/enums";
+import { barsById, type TimelineBar } from "@/lib/traces";
+import { SpanStatus } from "@/lib/types/enums";
 import { cn } from "@/lib/utils";
 
 // A trace opened under a session's page, as far as the layout opens it: its
@@ -23,10 +32,6 @@ import { cn } from "@/lib/utils";
 // (`trace-view.tsx`), a list to read rather than a tree to walk — the
 // chevrons are its only controls — and each span's bar on the trace's own
 // line of time where the layout draws one. Metadata alone, as every page is.
-
-/** How far each level steps in, in rem, as the trace page's tree steps. */
-const INDENT_REM = 1.25;
-const INDENT_MAX = 8;
 
 export const TraceOutline = memo(function TraceOutline({
   trace,
@@ -41,22 +46,13 @@ export const TraceOutline = memo(function TraceOutline({
     () => visibleTree(spanTree(trace.spans), options),
     [trace.spans, options],
   );
-  const bars = useMemo(
-    () => new Map(timelineBars(trace.spans).map((bar) => [bar.span.span_id, bar])),
-    [trace.spans],
-  );
+  const bars = useMemo(() => barsById(trace.spans), [trace.spans]);
   const [shut, setShut] = useState<ReadonlySet<string>>(() =>
     shutBranches(nodes, openingFor(trace.spans.length, options.open)),
   );
   // The run's own row is the trace's, drawn above: its spans start the list.
   const rows = treeRows(nodes, shut).filter((node) => node.depth > 0);
-  const toggle = (id: string) =>
-    setShut((was) => {
-      const next = new Set(was);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+  const toggle = (id: string) => setShut((was) => toggled(was, id));
 
   if (rows.length === 0) {
     return (
@@ -78,12 +74,7 @@ export const TraceOutline = memo(function TraceOutline({
           onToggle={toggle}
         />
       ))}
-      {trace.truncated && (
-        <p className="px-2 py-1.5 text-xs text-muted-foreground">
-          This run holds more spans than the server sends at once; the first{" "}
-          {formatCount(trace.spans.length)} are here.
-        </p>
-      )}
+      <TruncatedNote trace={trace} className="px-2 py-1.5" />
     </div>
   );
 });
@@ -98,14 +89,12 @@ function OutlineRow({
 }: {
   node: SpanNode;
   open: boolean;
-  bar: { offset: number; width: number } | null;
+  bar: TimelineBar | null;
   onToggle: (id: string) => void;
 }) {
   const { span } = node;
   const depth = Math.min(node.depth, INDENT_MAX) - 1;
   const branch = node.children.length > 0;
-  const failed = span.status === SpanStatus.Error;
-  const tokens = span.input_tokens + span.output_tokens;
   return (
     <div
       role="listitem"
@@ -114,16 +103,9 @@ function OutlineRow({
       aria-posinset={node.position}
       data-span={span.span_id}
       className={cn("relative flex items-start gap-1.5 rounded-md py-1 pr-2", bar && "pb-4")}
-      style={{ paddingLeft: `${depth * INDENT_REM}rem` }}
+      style={indentStyle(depth)}
     >
-      {Array.from({ length: depth }, (_, level) => (
-        <span
-          key={level}
-          aria-hidden="true"
-          className="absolute inset-y-0 border-l border-border"
-          style={{ left: `${level * INDENT_REM + 0.5}rem` }}
-        />
-      ))}
+      <SpanGuides depth={depth} />
       {branch ? (
         <button
           type="button"
@@ -142,24 +124,11 @@ function OutlineRow({
         <span className="truncate text-sm" title={span.name}>
           {spanTitle(span)}
         </span>
-        <Detail>{formatDuration(spanMillis(span))}</Detail>
-        {span.kind === SpanKind.ModelCall && <Detail>{formatCount(tokens)} tokens</Detail>}
-        {failed && (
-          <span className="text-xs text-destructive">{span.error_type || STATUS_LABEL[span.status]}</span>
-        )}
+        <SpanFacts span={span} />
       </span>
       {bar && (
-        <span aria-hidden="true" className="absolute right-2 bottom-1.5 left-11 h-1.5 rounded-full bg-border">
-          <span
-            className={cn("absolute inset-y-0 rounded-full", failed ? "bg-destructive" : "bg-foreground/60")}
-            style={{ left: `${bar.offset}%`, width: `${bar.width}%` }}
-          />
-        </span>
+        <SpanBar bar={bar} failed={span.status === SpanStatus.Error} className="bottom-1.5" />
       )}
     </div>
   );
-}
-
-function Detail({ children }: { children: ReactNode }) {
-  return <span className="text-xs tabular-nums text-muted-foreground">{children}</span>;
 }
