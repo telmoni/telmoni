@@ -57,9 +57,14 @@ const LEASE_WORK: Duration = Duration::from_secs(90);
 /// How long an organization's plan is held to before it is read again.
 const HOLD_EVERY: Duration = Duration::from_secs(5 * 60);
 
-/// The levels a percentile is read at, in the order [`Totals::quantiles`]
-/// answers them.
-const LEVELS: [f64; 4] = [0.5, 0.9, 0.95, 0.99];
+/// The percentiles [`Totals::quantiles`] answers, in the order `TOTALS_SQL`
+/// lists their levels.
+const LEVELS: [RuleAggregation; 4] = [
+    RuleAggregation::P50,
+    RuleAggregation::P90,
+    RuleAggregation::P95,
+    RuleAggregation::P99,
+];
 
 /// An alert's window, as two sources read it: the full hours from the
 /// totals, and the rest from the spans, each ignoring what the other reads.
@@ -116,10 +121,10 @@ impl Totals {
             reason = "a count past 2^53 spans is no alert's"
         )]
         let (spans, failed, tokens) = (self.spans as f64, self.failed as f64, self.tokens as f64);
-        let at = |level: f64| {
+        let at = |percentile: RuleAggregation| {
             LEVELS
                 .iter()
-                .position(|l| (*l - level).abs() < f64::EPSILON)
+                .position(|level| *level == percentile)
                 .and_then(|n| self.quantiles.get(n).copied())
                 .filter(|q| q.is_finite())
         };
@@ -129,7 +134,7 @@ impl Totals {
             (RuleMeasure::Failures, _) => Some(failed),
             (RuleMeasure::Duration, RuleAggregation::Avg) => Some(self.duration_sum / spans),
             (RuleMeasure::Duration, RuleAggregation::Sum) => Some(self.duration_sum),
-            (RuleMeasure::Duration, percentile) => percentile.level().and_then(at),
+            (RuleMeasure::Duration, percentile) => at(percentile),
             (RuleMeasure::Tokens, RuleAggregation::Avg) => Some(tokens / spans),
             (RuleMeasure::Tokens, _) => Some(tokens),
             // Read run by run ([`crate::spend`]), which the totals cannot.
@@ -482,6 +487,20 @@ async fn evaluate(state: &AppState, rule: &RuleRow, lease_id: Uuid) -> Result<bo
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The answer's quantiles are read by position: the SQL must list the
+    /// levels in `LEVELS`'s order.
+    #[test]
+    fn the_totals_read_answers_the_levels_in_order() {
+        let listed: Vec<String> = LEVELS
+            .iter()
+            .filter_map(|percentile| percentile.level())
+            .map(|level| level.to_string())
+            .collect();
+        assert_eq!(listed.len(), LEVELS.len());
+        let merge = format!("quantilesTDigestMerge({})", listed.join(", "));
+        assert!(TOTALS_SQL.contains(&merge), "{merge} not in {TOTALS_SQL}");
+    }
 
     fn at(text: &str) -> DateTime<Utc> {
         DateTime::parse_from_rfc3339(text)
