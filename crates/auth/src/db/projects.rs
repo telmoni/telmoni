@@ -6,6 +6,7 @@ use sqlx::prelude::FromRow;
 use telmoni_shared::db::tenant_session::{
     Binding, Maintenance, Organization, ProjectAndOrganization, ProjectAndPerson, Scoped,
 };
+use telmoni_shared::rbac;
 use telmoni_shared::seam::ProjectHome;
 use telmoni_shared::{
     OrganizationId, OrganizationRole, OrganizationStatus, ProjectId, Role, UserId,
@@ -77,14 +78,28 @@ pub struct ProjectSummary {
     pub role: Role,
 }
 
-/// `telmoni_shared::rbac::project_role` in SQL, for the two list reads below:
-/// the organization's owner and admins hold that role on every project, a
-/// seat cannot lower it, and below it the seat alone decides. Expects `tm`
-/// (the seat) and `om` (the person's organization row) joined.
-const ROLE_ON_PROJECT: &str = "CASE WHEN om.role = 'owner' THEN 'owner'
-                                    WHEN om.role = 'admin' THEN 'admin'
-                                    ELSE tm.role::text
-                               END";
+/// A project a list read, beside the two rows the caller's role on it comes
+/// from: `rbac::project_role` decides, as every lane does.
+#[derive(FromRow)]
+struct Reached {
+    id: ProjectId,
+    slug: String,
+    name: String,
+    organization_role: Option<OrganizationRole>,
+    seat: Option<Role>,
+}
+
+impl Reached {
+    fn summary(self) -> Option<ProjectSummary> {
+        let role = rbac::project_role(self.organization_role, self.seat)?;
+        Some(ProjectSummary {
+            id: self.id,
+            slug: self.slug,
+            name: self.name,
+            role,
+        })
+    }
+}
 
 /// Every project this person can open inside one organization, by name, with
 /// the role they hold on each — none in an organization being deleted, which
@@ -95,8 +110,11 @@ pub async fn list_for_organization_user(
     organization_id: &OrganizationId,
     user_id: &UserId,
 ) -> sqlx::Result<Vec<ProjectSummary>> {
-    sqlx::query_as::<_, ProjectSummary>(sqlx::AssertSqlSafe(format!(
-        "SELECT t.external_id AS id, t.slug, t.name, {ROLE_ON_PROJECT} AS role
+    // The admission narrows the read to the person's projects; the role is
+    // decided in Rust.
+    let rows = sqlx::query_as::<_, Reached>(
+        "SELECT t.external_id AS id, t.slug, t.name,
+                om.role AS organization_role, tm.role AS seat
            FROM auth.projects t
            JOIN auth.organizations o
              ON o.external_id = t.organization_id AND o.status = 'active'
@@ -106,12 +124,13 @@ pub async fn list_for_organization_user(
                   ON om.organization_id = t.organization_id AND om.user_id = $2
           WHERE t.organization_id = $1
             AND (om.role IN ('owner', 'admin') OR tm.user_id IS NOT NULL)
-          ORDER BY t.name"
-    )))
+          ORDER BY t.name",
+    )
     .bind(organization_id)
     .bind(user_id)
     .fetch_all(tx.conn())
-    .await
+    .await?;
+    Ok(rows.into_iter().filter_map(Reached::summary).collect())
 }
 
 /// The organization a project belongs to — the audit chain's root for anything
@@ -379,7 +398,7 @@ pub async fn list_everywhere_for_user(
     // Starts from the person's two membership indexes, not from every project:
     // an OR across two LEFT JOINs cannot be driven by either and walked every
     // tenant's projects on every page.
-    sqlx::query_as::<_, ProjectEverywhere>(sqlx::AssertSqlSafe(format!(
+    let rows = sqlx::query_as::<_, ReachedEverywhere>(
         "WITH reachable AS (
             SELECT t.external_id
               FROM auth.organization_members om
@@ -388,7 +407,8 @@ pub async fn list_everywhere_for_user(
              UNION
             SELECT tm.project_id FROM auth.project_members tm WHERE tm.user_id = $1
          )
-         SELECT t.external_id AS id, t.slug, t.name, {ROLE_ON_PROJECT} AS role,
+         SELECT t.external_id AS id, t.slug, t.name,
+                om.role AS organization_role, tm.role AS seat,
                 t.organization_id,
                 a.slug AS organization_slug,
                 a.name AS organization_name
@@ -400,9 +420,34 @@ pub async fn list_everywhere_for_user(
                   ON tm.project_id = t.external_id AND tm.user_id = $1
            LEFT JOIN auth.organization_members om
                   ON om.organization_id = t.organization_id AND om.user_id = $1
-          ORDER BY a.name, t.organization_id, t.name"
-    )))
+          ORDER BY a.name, t.organization_id, t.name",
+    )
     .bind(user_id)
     .fetch_all(tx.conn())
-    .await
+    .await?;
+    Ok(rows
+        .into_iter()
+        .filter_map(|row| {
+            let project = row.project.summary()?;
+            Some(ProjectEverywhere {
+                id: project.id,
+                slug: project.slug,
+                name: project.name,
+                role: project.role,
+                organization_id: row.organization_id,
+                organization_slug: row.organization_slug,
+                organization_name: row.organization_name,
+            })
+        })
+        .collect())
+}
+
+/// [`Reached`], in whichever organization it is.
+#[derive(FromRow)]
+struct ReachedEverywhere {
+    #[sqlx(flatten)]
+    project: Reached,
+    organization_id: OrganizationId,
+    organization_slug: String,
+    organization_name: String,
 }
