@@ -405,25 +405,6 @@ pub async fn owners_of_several(
     .await
 }
 
-/// What labels an organization: the name it was given.
-#[derive(Debug, Clone, sqlx::FromRow)]
-pub struct LabelParts {
-    pub name: String,
-}
-
-/// An organization's label parts, under any binding that sees its row: its
-/// own, a project's with it, or the lane. `None` when the binding sees no
-/// such organization.
-pub async fn label_parts<B: RosterRead>(
-    tx: &mut Scoped<'_, B>,
-    organization_id: &OrganizationId,
-) -> sqlx::Result<Option<LabelParts>> {
-    sqlx::query_as::<_, LabelParts>("SELECT name FROM auth.organizations WHERE external_id = $1")
-        .bind(organization_id)
-        .fetch_optional(tx.conn())
-        .await
-}
-
 /// Every organization this person holds a row in, with the role — the
 /// erasure's read, in id order by byte, the order its locks are taken in.
 pub async fn memberships_of_person(

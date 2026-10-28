@@ -296,8 +296,8 @@ mod tests {
             &telmoni_shared::slug::Slug::from_trusted("acme"),
         )
         .await
-        .unwrap()
-        .expect("the slug is free");
+        .map(|written| assert!(written, "the slug is free"))
+        .unwrap();
         crate::db::projects::create(&mut tx, &project, &organization, "Default project")
             .await
             .unwrap();

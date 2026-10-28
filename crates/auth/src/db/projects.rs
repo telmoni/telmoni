@@ -148,14 +148,14 @@ pub async fn organization_of<B: Binding>(
     .await
 }
 
-/// The organization holding an active project; `None` for one being deleted,
-/// or one the binding does not see.
-pub async fn home_of_active<B: Binding>(
+/// The organization holding a project; `None` for one gone, or one the
+/// binding does not see. A project's delete removes its row at once.
+pub async fn home_of<B: Binding>(
     tx: &mut Scoped<'_, B>,
     project_id: &ProjectId,
 ) -> sqlx::Result<Option<OrganizationId>> {
     sqlx::query_scalar::<_, OrganizationId>(
-        "SELECT organization_id FROM auth.projects WHERE external_id = $1 AND status = 'active'",
+        "SELECT organization_id FROM auth.projects WHERE external_id = $1",
     )
     .bind(project_id)
     .fetch_optional(tx.conn())

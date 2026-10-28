@@ -12,14 +12,11 @@ pub enum OrganizationStatus {
     /// Deletion requested; locked and inaccessible while the tail runs. This
     /// mark is the deletion saga's durable queue.
     PendingDeletion,
-    /// Fully deleted — retained only as a terminal marker.
-    Deleted,
 }
 
 crate::wire_enum!(OrganizationStatus {
     Active => "active",
     PendingDeletion => "pending_deletion",
-    Deleted => "deleted",
 });
 
 #[cfg(test)]

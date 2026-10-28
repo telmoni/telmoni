@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use telmoni_shared::Redacted;
-use telmoni_shared::{ApiKeyScope, OrganizationId, OrganizationStatus, ProjectId, Role, UserId};
+use telmoni_shared::{ApiKeyScope, OrganizationId};
 
 /// Which level an invitation is to — a project inside an organization, or the
 /// organization itself. The two live in separate tables with separate role
@@ -222,59 +222,6 @@ impl AuditKind {
     }
 }
 
-/// Organization — the tenant, the payer and the container of projects. It is
-/// nobody: the owner is a row in its roster.
-#[derive(Debug, Serialize, sqlx::FromRow)]
-pub struct Organization {
-    pub id: Uuid,
-    #[serde(rename = "organization_id")]
-    pub external_id: OrganizationId,
-    /// The organization's segment in console paths.
-    pub slug: telmoni_shared::slug::Slug,
-    /// What the organization is called: the name it was created under, or its
-    /// owner's when it was provisioned ("Ada's organization"), whatever an
-    /// owner or admin renames it to after.
-    pub name: String,
-    /// Lifecycle state. See the schema comment on `auth.organizations.status`.
-    pub status: OrganizationStatus,
-    /// When deletion was requested; NULL outside `pending_deletion`.
-    pub deletion_requested_at: Option<DateTime<Utc>>,
-    /// When the sweep may hard-delete the row; NULL outside `pending_deletion`.
-    pub erase_after: Option<DateTime<Utc>>,
-    /// Who asked; NULL outside `pending_deletion`.
-    pub deletion_kind: Option<DeletionKind>,
-    /// When the purge hook answered for the organization; NULL until that
-    /// lands, and outside `pending_deletion`.
-    pub hook_purged_at: Option<DateTime<Utc>>,
-    pub created_at: DateTime<Utc>,
-}
-
-/// Project — encapsulates api keys and runs.
-#[derive(Debug, Serialize, sqlx::FromRow)]
-pub struct Project {
-    pub id: Uuid,
-    #[serde(rename = "project_id")]
-    pub external_id: ProjectId,
-    pub organization_id: OrganizationId,
-    pub name: String,
-    pub status: OrganizationStatus,
-    pub deletion_requested_at: Option<DateTime<Utc>>,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-}
-
-/// ProjectMember — a person holding a role in a project.
-#[derive(Debug, Serialize, sqlx::FromRow)]
-pub struct ProjectMember {
-    pub id: Uuid,
-    pub project_id: ProjectId,
-    /// The person's own id.
-    pub user_id: UserId,
-    pub role: Role,
-    pub added_by: String,
-    pub created_at: DateTime<Utc>,
-}
-
 #[derive(Debug, Serialize, sqlx::FromRow)]
 #[serde(rename_all = "camelCase")]
 pub struct ApiToken {
@@ -367,6 +314,7 @@ pub struct ValidateTokenResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use telmoni_shared::Role;
 
     #[test]
     fn the_invite_scope_words_are_the_wire_words() {

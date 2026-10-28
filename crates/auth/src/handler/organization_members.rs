@@ -303,10 +303,7 @@ pub async fn create_organization_invite(
     admit_invitation(&state, &organization, ceiling, &email).await?;
 
     // The invitation's mail calls the organization by its name.
-    let Some(name) = organizations::get(&mut tx, &organization)
-        .await?
-        .map(|o| o.name)
-    else {
+    let Some(name) = organizations::name_of(&mut tx, &organization).await? else {
         tx.commit().await?;
         return Err(AuthError::NotFound("organization not found".into()).into());
     };

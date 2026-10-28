@@ -70,10 +70,10 @@ pub async fn request_organization_deletion_code(
     // `acting_organization` has already refused an organization being deleted.
     let ActingOrganization { mut tx, role } =
         acting_organization(&state, &organization, &user_id).await?;
-    let row = organizations::get(&mut tx, &organization).await?;
+    let name = organizations::name_of(&mut tx, &organization).await?;
     tx.commit().await?;
     authorize_organization(role, OrganizationAction::Delete)?;
-    let Some(row) = row else {
+    let Some(name) = name else {
         return Err(AuthError::NotFound("no such organization".into()).into());
     };
 
@@ -95,7 +95,7 @@ pub async fn request_organization_deletion_code(
 
     if let Err(e) = state
         .mailer
-        .send_organization_deletion_code(person.email.as_str(), &code, &row.name)
+        .send_organization_deletion_code(person.email.as_str(), &code, &name)
         .await
     {
         tracing::error!(organization_id = %organization, error = %e,
@@ -532,29 +532,20 @@ pub(crate) async fn found_organization(
     let mut tx = tx.bind_organization(&organization).await?;
     let slug = match url {
         NewUrl::Chosen(asked) => {
-            if organizations::create(&mut tx, &organization, name, &asked)
-                .await?
-                .is_none()
-            {
+            if !organizations::create(&mut tx, &organization, name, &asked).await? {
                 return Err(url_taken());
             }
             asked
         }
         NewUrl::Derived(free) => {
             let slug = free.unwrap_or_else(|| slug::placeholder(slug::Scope::Organization));
-            if organizations::create(&mut tx, &organization, name, &slug)
-                .await?
-                .is_some()
-            {
+            if organizations::create(&mut tx, &organization, name, &slug).await? {
                 slug
             } else {
                 // Another organization took the slug since the lane read it.
                 // A placeholder is drawn at random, until the owner picks a URL.
                 let placeholder = slug::placeholder(slug::Scope::Organization);
-                if organizations::create(&mut tx, &organization, name, &placeholder)
-                    .await?
-                    .is_none()
-                {
+                if !organizations::create(&mut tx, &organization, name, &placeholder).await? {
                     return Err(TelmoniError::Internal(
                         "a fresh placeholder slug was taken".into(),
                     ));

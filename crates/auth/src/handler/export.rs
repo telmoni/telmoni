@@ -93,7 +93,7 @@ pub async fn export_organization(
 
     let projects = rows(
         &mut tx,
-        "SELECT external_id AS project_id, slug, name, status::text, created_at, updated_at \
+        "SELECT external_id AS project_id, slug, name, created_at, updated_at \
            FROM auth.projects WHERE organization_id = $1 ORDER BY created_at",
         organization.as_str(),
     )

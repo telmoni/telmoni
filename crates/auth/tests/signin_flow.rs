@@ -1364,13 +1364,10 @@ async fn boot_refuses_a_default_it_cannot_land_anybody_in(pool: PgPool) {
     .await
     .expect("an organization alone");
 
-    sqlx::query(
-        "UPDATE auth.projects SET status = 'pending_deletion', deletion_requested_at = now()
-          WHERE external_id = 'project_default_1'",
-    )
-    .execute(&pool)
-    .await
-    .unwrap();
+    sqlx::query("DELETE FROM auth.projects WHERE external_id = 'project_default_1'")
+        .execute(&pool)
+        .await
+        .unwrap();
     for (default, variable) in [
         (
             landing("org_gone_1", "project_default_1"),

@@ -111,7 +111,7 @@ impl DefaultOrganization {
         let mut tx = maintenance_scope(pool, AuthLane).await?;
         let status = organizations::status(&mut tx, &self.organization_id).await?;
         let home = match &self.project {
-            Some((project_id, _)) => projects::home_of_active(&mut tx, project_id).await?,
+            Some((project_id, _)) => projects::home_of(&mut tx, project_id).await?,
             None => None,
         };
         tx.commit().await?;
@@ -210,11 +210,7 @@ pub(crate) async fn join<'c>(
         return Ok(tx.clear_organization().await?);
     };
     let mut tx = tx.bind_project(project_id).await?;
-    if projects::home_of_active(&mut tx, project_id)
-        .await?
-        .as_ref()
-        != Some(organization_id)
-    {
+    if projects::home_of(&mut tx, project_id).await?.as_ref() != Some(organization_id) {
         tracing::error!(organization_id = %organization_id, project_id = %project_id,
             user_id = %user_id,
             "TELMONI_DEFAULT_PROJECT_ID names no active project of the default organization any \

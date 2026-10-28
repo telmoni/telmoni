@@ -181,7 +181,7 @@ pub async fn give_seat(
         ))
         .into());
     }
-    let Some(home) = organizations::get(&mut acting.tx, &organization).await? else {
+    let Some(home) = organizations::name_of(&mut acting.tx, &organization).await? else {
         return Err(AuthError::NotFound("organization not found".into()).into());
     };
     let Some(project) = projects::standing(&mut acting.tx, &project_id).await? else {
@@ -189,7 +189,7 @@ pub async fn give_seat(
     };
     let giver = identities::contact(&mut acting.tx, &actor)
         .await?
-        .map_or_else(|| home.name.clone(), |c| c.display());
+        .map_or_else(|| home.clone(), |c| c.display());
     let mut acting = acting.leave_owner_scope().await?;
 
     // An invitation of theirs to this project is spent by the seat: accepted
@@ -246,7 +246,7 @@ pub async fn give_seat(
                 person.email.as_str(),
                 &giver,
                 &project.name,
-                &home.name,
+                &home,
                 role,
                 &link,
             )

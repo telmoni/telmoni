@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use crate::db::AuthLane;
-use crate::model::{DeletionKind, Organization};
+use crate::model::DeletionKind;
 use telmoni_shared::Email;
 use telmoni_shared::db::tenant_session::{
     self, Binding, HasOrganization, Maintenance, PersonAndOrganization, Scoped,
@@ -14,22 +14,16 @@ use telmoni_shared::db::tenant_session::{
 use telmoni_shared::slug::Slug;
 use telmoni_shared::{OrganizationId, OrganizationStatus, derive_shard_key};
 
-/// Every column `Organization` reads, in `FromRow` order. Written once because a
-/// hand-copied list is how one query starts selecting something else.
-const ORGANIZATION_COLUMNS: &str = "id, external_id, slug, name, status, deletion_requested_at, \
-     erase_after, deletion_kind, hook_purged_at, created_at";
-
-/// One organization by its id.
-pub async fn get<B: Binding>(
+/// What an organization is called, under any binding that sees its row:
+/// `None` when it sees none.
+pub async fn name_of<B: Binding>(
     tx: &mut Scoped<'_, B>,
     external_id: &OrganizationId,
-) -> sqlx::Result<Option<Organization>> {
-    sqlx::query_as::<_, Organization>(sqlx::AssertSqlSafe(format!(
-        "SELECT {ORGANIZATION_COLUMNS} FROM auth.organizations WHERE external_id = $1"
-    )))
-    .bind(external_id)
-    .fetch_optional(tx.conn())
-    .await
+) -> sqlx::Result<Option<String>> {
+    sqlx::query_scalar("SELECT name FROM auth.organizations WHERE external_id = $1")
+        .bind(external_id)
+        .fetch_optional(tx.conn())
+        .await
 }
 
 /// What `/v1/organization` answers of an organization: its slug and name,
@@ -70,7 +64,7 @@ pub async fn summary_with_owner(
 pub const MAX_ORGANIZATION_NAME: usize = 80;
 
 /// Write a new organization called `name`, going by `slug`. `external_id` is
-/// freshly minted by the caller. `None` when another organization goes by the
+/// freshly minted by the caller. `false` when another organization goes by the
 /// slug, which `organizations_slug_key` judges: one that took it since the
 /// caller's read of it ([`first_free_slug`]), when the caller writes again
 /// under another, or one that held a URL its founder asked for, which the
@@ -80,21 +74,22 @@ pub async fn create<B: HasOrganization>(
     external_id: &OrganizationId,
     name: &str,
     slug: &Slug,
-) -> sqlx::Result<Option<Organization>> {
-    sqlx::query_as::<_, Organization>(sqlx::AssertSqlSafe(format!(
+) -> sqlx::Result<bool> {
+    let written: Option<Uuid> = sqlx::query_scalar(
         "INSERT INTO auth.organizations
              (id, external_id, slug, name, shard_key, created_at, updated_at)
          VALUES ($1, $2, $3, $4, $5, now(), now())
          ON CONFLICT ON CONSTRAINT organizations_slug_key DO NOTHING
-         RETURNING {ORGANIZATION_COLUMNS}"
-    )))
+         RETURNING id",
+    )
     .bind(Uuid::now_v7())
     .bind(external_id)
     .bind(slug)
     .bind(name)
     .bind(derive_shard_key(external_id))
     .fetch_optional(tx.conn())
-    .await
+    .await?;
+    Ok(written.is_some())
 }
 
 /// The first of `candidates` no OTHER organization goes by, in any status.
@@ -301,7 +296,7 @@ impl FinalizeStanding {
         match (status, ripe) {
             (OrganizationStatus::PendingDeletion, false) => Self::Waiting,
             (OrganizationStatus::PendingDeletion, true) => Self::Ripe { hook_purged },
-            (OrganizationStatus::Active | OrganizationStatus::Deleted, _) => Self::NotPending,
+            (OrganizationStatus::Active, _) => Self::NotPending,
         }
     }
 }
@@ -365,13 +360,11 @@ mod tests {
     fn a_standing_turns_on_the_status_then_the_wait_then_the_hook() {
         for ripe in [false, true] {
             for hook_purged in [false, true] {
-                for status in [OrganizationStatus::Active, OrganizationStatus::Deleted] {
-                    assert_eq!(
-                        FinalizeStanding::of(status, ripe, hook_purged),
-                        FinalizeStanding::NotPending,
-                        "{status:?}, ripe {ripe}, hook purged {hook_purged}"
-                    );
-                }
+                assert_eq!(
+                    FinalizeStanding::of(OrganizationStatus::Active, ripe, hook_purged),
+                    FinalizeStanding::NotPending,
+                    "ripe {ripe}, hook purged {hook_purged}"
+                );
                 let pending =
                     FinalizeStanding::of(OrganizationStatus::PendingDeletion, ripe, hook_purged);
                 let expected = if ripe {

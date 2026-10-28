@@ -43,7 +43,6 @@ export type NotificationKind = typeof NotificationKind[keyof typeof Notification
 export const OrganizationStatus = {
   Active:          "active",
   PendingDeletion: "pending_deletion",
-  Deleted:         "deleted",
 } as const;
 export type OrganizationStatus = typeof OrganizationStatus[keyof typeof OrganizationStatus];
 

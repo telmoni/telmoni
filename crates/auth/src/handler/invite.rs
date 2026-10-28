@@ -215,10 +215,7 @@ pub async fn create_invite(
         return Err(AuthError::Conflict("that address is already a member".into()).into());
     }
     // The invitation's mail calls the organization by its name.
-    let Some(name) = organizations::get(&mut acting.tx, &organization)
-        .await?
-        .map(|o| o.name)
-    else {
+    let Some(name) = organizations::name_of(&mut acting.tx, &organization).await? else {
         return Err(AuthError::NotFound("organization not found".into()).into());
     };
     let mut acting = acting.leave_owner_scope().await?;

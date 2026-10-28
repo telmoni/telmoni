@@ -574,21 +574,17 @@ pub async fn delete_account(
     for organization in &owned {
         locks::lock_organization(&mut tx, organization).await?;
         let mut otx = tx.bind_organization(organization).await?;
-        let row = organizations::get(&mut otx, organization).await?;
         // One already being deleted goes anyway, and the erasure waits for its
         // tail; telling the person to hand it over would name something the
         // transfer lane refuses.
-        let shared = match &row {
-            Some(row) if row.status == OrganizationStatus::Active => {
-                organization_members::has_others(&mut otx, organization, &user_id).await?
-            }
-            _ => false,
-        };
+        let shared = organizations::status(&mut otx, organization).await?
+            == Some(OrganizationStatus::Active)
+            && organization_members::has_others(&mut otx, organization, &user_id).await?;
+        let name = organizations::name_of(&mut otx, organization).await?;
         tx = otx.clear_organization().await?;
-        let Some(row) = row.filter(|_| shared) else {
+        let Some(label) = name.filter(|_| shared) else {
             continue;
         };
-        let label = row.name;
         match blockers.iter_mut().find(|(seen, _)| *seen == label) {
             Some((_, count)) => *count += 1,
             None => blockers.push((label, 1)),

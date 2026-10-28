@@ -113,8 +113,7 @@
     ],
     "OrganizationStatus": [
       "active",
-      "pending_deletion",
-      "deleted"
+      "pending_deletion"
     ],
     "PausedBy": [
       "person",

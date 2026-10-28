@@ -242,9 +242,7 @@ pub async fn offer(
             .map(|c| c.email),
         None => None,
     };
-    let Some(organization_label) = organization_members::label_parts(&mut acting.tx, &organization)
-        .await?
-        .map(|parts| parts.name)
+    let Some(organization_label) = organizations::name_of(&mut acting.tx, &organization).await?
     else {
         return Err(AuthError::NotFound("organization not found".into()).into());
     };
@@ -861,10 +859,7 @@ pub async fn accept(
         .into());
     };
     // What the mails call the destination by.
-    let Some(destination_label) = organization_members::label_parts(&mut tx, &destination)
-        .await?
-        .map(|parts| parts.name)
-    else {
+    let Some(destination_label) = organizations::name_of(&mut tx, &destination).await? else {
         return Err(AuthError::NotFound("organization not found".into()).into());
     };
 

@@ -198,7 +198,7 @@ async fn offerable(
     target: &UserId,
 ) -> Result<String, TelmoniError> {
     authorize_organization(role, OrganizationAction::HandOver)?;
-    let Some(name) = organizations::get(tx, organization).await?.map(|o| o.name) else {
+    let Some(name) = organizations::name_of(tx, organization).await? else {
         return Err(AuthError::NotFound("organization not found".into()).into());
     };
     match organization_members::role_on_organization(tx, organization, target).await? {
@@ -358,9 +358,7 @@ pub async fn cancel(
         .await?
         .map(|c| c.email);
     let owner = identities::contact(&mut tx, &user_id).await?;
-    let name = organizations::get(&mut tx, &organization)
-        .await?
-        .map(|o| o.name);
+    let name = organizations::name_of(&mut tx, &organization).await?;
     tx.commit().await?;
 
     if let (Some(to), Some(owner), Some(name)) = (&holder_email, owner, name)
@@ -414,9 +412,7 @@ pub async fn decline(
         None => None,
     };
     let admin = identities::contact(&mut tx, &user_id).await?;
-    let name = organizations::get(&mut tx, &organization)
-        .await?
-        .map(|o| o.name);
+    let name = organizations::name_of(&mut tx, &organization).await?;
     tx.commit().await?;
 
     if let (Some(owner), Some(admin), Some(name)) = (owner, admin, name)
@@ -554,9 +550,7 @@ pub async fn accept(
         None => None,
     };
     let new_owner = identities::contact(&mut tx, &user_id).await?;
-    let name = organizations::get(&mut tx, &organization)
-        .await?
-        .map(|o| o.name);
+    let name = organizations::name_of(&mut tx, &organization).await?;
     tx.commit().await?;
 
     tell_ownership_hook(

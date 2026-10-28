@@ -561,15 +561,12 @@ async fn seed_organization(pool: &PgPool, id: &str, owner: &str, status: &str) {
     .unwrap();
 
     sqlx::query(
-        "INSERT INTO auth.projects
-             (external_id, organization_id, name, slug, status, deletion_requested_at)
-         VALUES ($1, $2, $3, 'project-' || md5($1), $4,
-                 CASE WHEN $4 = 'pending_deletion' THEN now() END)",
+        "INSERT INTO auth.projects (external_id, organization_id, name, slug)
+         VALUES ($1, $2, $3, 'project-' || md5($1))",
     )
     .bind(project_of(id))
     .bind(id)
     .bind(format!("Project {id}"))
-    .bind(status)
     .execute(pool)
     .await
     .unwrap();

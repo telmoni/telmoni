@@ -125,7 +125,7 @@ CREATE TABLE auth.organizations (
     CONSTRAINT organizations_slug_key UNIQUE (slug),
     CONSTRAINT organizations_slug_check
         CHECK (slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$' AND length(slug) <= 48),
-    CONSTRAINT organizations_status_check CHECK (status IN ('active', 'pending_deletion', 'deleted')),
+    CONSTRAINT organizations_status_check CHECK (status IN ('active', 'pending_deletion')),
     CONSTRAINT organizations_deletion_kind_check
         CHECK (deletion_kind IS NULL OR deletion_kind IN ('owner', 'account', 'operator')),
     CONSTRAINT organizations_pending_deletion_shape_check CHECK (
@@ -263,12 +263,9 @@ CREATE TABLE auth.projects (
     slug                  TEXT        NOT NULL,
     organization_id       TEXT        NOT NULL REFERENCES auth.organizations (external_id) ON DELETE CASCADE,
     name                  TEXT        NOT NULL,
-    status                TEXT        NOT NULL DEFAULT 'active',
-    deletion_requested_at TIMESTAMPTZ,
     shard_key             UUID        NOT NULL DEFAULT gen_random_uuid(),
     created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT projects_status_check CHECK (status IN ('active', 'pending_deletion', 'deleted')),
     CONSTRAINT projects_organization_project_key UNIQUE (organization_id, external_id),
     CONSTRAINT projects_organization_slug_key UNIQUE (organization_id, slug),
     CONSTRAINT projects_slug_check
