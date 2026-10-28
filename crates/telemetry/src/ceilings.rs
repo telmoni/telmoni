@@ -16,8 +16,8 @@ use chrono::{DateTime, NaiveDate, Utc};
 use redis::AsyncCommands;
 use serde_json::json;
 
-use telmoni_shared::seam::{self, Entitlements, Notice};
-use telmoni_shared::{LaneCeilings, NotificationKind, OrganizationId, TelmoniError, TenantError};
+use telmoni_shared::seam::{self, Entitlements, OrganizationAlert};
+use telmoni_shared::{LaneCeilings, OrganizationId, TelmoniError, TenantError};
 
 use crate::AppState;
 use crate::handler::chain;
@@ -367,9 +367,7 @@ pub async fn tell(state: &AppState) {
             }
             let (title, body) = notice_text(&refused);
             let dedup_key = format!("telemetry:refused:{organization_id}:{LANE}:{day}");
-            let notice = Notice {
-                kind: NotificationKind::OrganizationAlert,
-                subject_user_id: None,
+            let alert = OrganizationAlert {
                 title: &title,
                 body: &body,
                 metadata: json!({
@@ -382,7 +380,7 @@ pub async fn tell(state: &AppState) {
             };
             match state
                 .notifications
-                .emit(&organization_id, None, notice)
+                .alert_organization(&organization_id, alert)
                 .await
             {
                 Ok(_) => {

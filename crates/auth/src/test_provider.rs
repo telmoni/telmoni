@@ -268,20 +268,38 @@ impl Notifications for RecordingNotifications {
     async fn emit(
         &self,
         organization_id: &OrganizationId,
-        project_id: Option<&ProjectId>,
+        project_id: &ProjectId,
         notice: Notice<'_>,
     ) -> Result<Emitted, TelmoniError> {
         self.record(SiblingCall::Emit {
             organization_id: organization_id.to_string(),
-            project_id: project_id.map(ToString::to_string),
+            project_id: Some(project_id.to_string()),
             kind: notice.kind,
             subject_user_id: notice.subject_user_id.map(ToString::to_string),
             title: notice.title.to_owned(),
         })
         .await;
-        Ok(Emitted {
+        Ok(Emitted::Fresh {
             feed_id: uuid::Uuid::now_v7(),
-            deduplicated: false,
+        })
+    }
+
+    async fn alert_organization(
+        &self,
+        organization_id: &OrganizationId,
+        alert: telmoni_shared::seam::OrganizationAlert<'_>,
+    ) -> Result<Emitted, TelmoniError> {
+        let notice = alert.into_notice();
+        self.record(SiblingCall::Emit {
+            organization_id: organization_id.to_string(),
+            project_id: None,
+            kind: notice.kind,
+            subject_user_id: None,
+            title: notice.title.to_owned(),
+        })
+        .await;
+        Ok(Emitted::Fresh {
+            feed_id: uuid::Uuid::now_v7(),
         })
     }
 

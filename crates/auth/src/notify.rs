@@ -47,10 +47,7 @@ pub async fn emit_member_joined(
         metadata: json!({ "project_id": project, "role": role }),
         dedup_key: None,
     };
-    match notifications
-        .emit(organization, Some(project), notice)
-        .await
-    {
+    match notifications.emit(organization, project, notice).await {
         Ok(_) => {
             tracing::info!(project = %project, "member-joined notification emitted");
             true
@@ -88,10 +85,7 @@ pub async fn emit_member_seated(
         metadata: json!({ "project_id": project, "role": role, "given": true }),
         dedup_key: None,
     };
-    match notifications
-        .emit(organization, Some(project), notice)
-        .await
-    {
+    match notifications.emit(organization, project, notice).await {
         Ok(_) => {
             tracing::info!(project = %project, "member-seated notification emitted");
             true
@@ -126,10 +120,7 @@ pub async fn emit_member_left(
         metadata: json!({ "project_id": project }),
         dedup_key: None,
     };
-    match notifications
-        .emit(organization, Some(project), notice)
-        .await
-    {
+    match notifications.emit(organization, project, notice).await {
         Ok(_) => {
             tracing::info!(project = %project, "member-left notification emitted");
             true

@@ -247,7 +247,7 @@ async fn tell<'a>(
         .emit_routed(organization_id, project_id, notice(Some(key)), route)
         .await?;
     Ok(Reached {
-        anyone: !routed.emitted.deduplicated,
+        anyone: !routed.emitted.replayed(),
         connections: routed.connections,
     })
 }

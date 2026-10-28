@@ -10,8 +10,8 @@ use std::sync::LazyLock;
 use chrono::{NaiveDate, Utc};
 use serde_json::json;
 
-use telmoni_shared::seam::{self, Notice};
-use telmoni_shared::{AlertCeilings, NotificationKind, OrganizationId};
+use telmoni_shared::seam::{self, OrganizationAlert};
+use telmoni_shared::{AlertCeilings, OrganizationId};
 
 use crate::AppState;
 
@@ -162,9 +162,7 @@ async fn tell_owner(
         "This organization's alerts have made the {deliveries_per_day} deliveries its plan holds \
          a UTC day, so until midnight UTC their incidents reach the feed alone."
     );
-    let notice = Notice {
-        kind: NotificationKind::OrganizationAlert,
-        subject_user_id: None,
+    let alert = OrganizationAlert {
         title: "Alert deliveries held until midnight UTC",
         body: &body,
         metadata: json!({ "lane": "alert_deliveries", "ceiling": deliveries_per_day }),
@@ -172,7 +170,7 @@ async fn tell_owner(
     };
     if let Err(error) = state
         .notifications
-        .emit(organization_id, None, notice)
+        .alert_organization(organization_id, alert)
         .await
     {
         tracing::warn!(

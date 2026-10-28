@@ -84,8 +84,15 @@ impl Notifications for Absent {
     async fn emit(
         &self,
         _: &OrganizationId,
-        _: Option<&ProjectId>,
+        _: &ProjectId,
         _: Notice<'_>,
+    ) -> Result<Emitted, TelmoniError> {
+        Err(TelmoniError::Internal("not here".into()))
+    }
+    async fn alert_organization(
+        &self,
+        _: &OrganizationId,
+        _: telmoni_shared::seam::OrganizationAlert<'_>,
     ) -> Result<Emitted, TelmoniError> {
         Err(TelmoniError::Internal("not here".into()))
     }

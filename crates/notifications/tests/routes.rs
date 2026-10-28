@@ -282,7 +282,7 @@ async fn a_routed_notice_answers_the_connections_it_was_queued_to(pool: PgPool) 
         )
         .await
         .expect("emitted");
-    assert!(!routed.emitted.deduplicated);
+    assert!(!routed.emitted.replayed());
     assert_eq!(routed.connections, [named], "not the errored one");
 
     let replayed = notifier
@@ -294,8 +294,8 @@ async fn a_routed_notice_answers_the_connections_it_was_queued_to(pool: PgPool) 
         )
         .await
         .expect("replayed");
-    assert_eq!(replayed.emitted.feed_id, routed.emitted.feed_id);
-    assert!(replayed.emitted.deduplicated);
+    assert_eq!(replayed.emitted.feed_id(), routed.emitted.feed_id());
+    assert!(replayed.emitted.replayed());
     assert!(replayed.connections.is_empty(), "a replay queues nothing");
 
     let reminded = notifier

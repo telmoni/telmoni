@@ -21,6 +21,7 @@ use telmoni_shared::acting::{Acting, ActingKey, ActingProject};
 use telmoni_shared::extract::header;
 use telmoni_shared::middleware::service_auth::ServiceSecrets;
 use telmoni_shared::rbac::project_role;
+use telmoni_shared::seam::OrganizationAlert;
 use telmoni_shared::seam::{
     Auth, Emitted, Entitlements, NoLimits, Notice, Notifications, ProjectHome, ReadableProject,
     Route, Routed,
@@ -638,14 +639,14 @@ fn bounded(notice: &Notice<'_>) {
     assert!(metadata <= 4_096, "a notice's metadata is {metadata} bytes");
 }
 
-#[async_trait]
-impl Notifications for NoticeLog {
-    async fn emit(
+impl NoticeLog {
+    /// A notice logged under its feed: a key logged before answers its row.
+    fn log(
         &self,
         organization_id: &OrganizationId,
         project_id: Option<&ProjectId>,
         notice: Notice<'_>,
-    ) -> Result<Emitted, TelmoniError> {
+    ) -> Emitted {
         bounded(&notice);
         let mut notices = self
             .notices
@@ -658,10 +659,9 @@ impl Notifications for NoticeLog {
                     && logged.project_id.as_ref() == project_id
             })
         {
-            return Ok(Emitted {
+            return Emitted::Replayed {
                 feed_id: first.feed_id,
-                deduplicated: true,
-            });
+            };
         }
         let feed_id = Uuid::new_v4();
         notices.push(LoggedNotice {
@@ -676,10 +676,27 @@ impl Notifications for NoticeLog {
             reminded: false,
             connections: Vec::new(),
         });
-        Ok(Emitted {
-            feed_id,
-            deduplicated: false,
-        })
+        Emitted::Fresh { feed_id }
+    }
+}
+
+#[async_trait]
+impl Notifications for NoticeLog {
+    async fn emit(
+        &self,
+        organization_id: &OrganizationId,
+        project_id: &ProjectId,
+        notice: Notice<'_>,
+    ) -> Result<Emitted, TelmoniError> {
+        Ok(self.log(organization_id, Some(project_id), notice))
+    }
+
+    async fn alert_organization(
+        &self,
+        organization_id: &OrganizationId,
+        alert: OrganizationAlert<'_>,
+    ) -> Result<Emitted, TelmoniError> {
+        Ok(self.log(organization_id, None, alert.into_notice()))
     }
 
     async fn emit_routed(
@@ -689,8 +706,8 @@ impl Notifications for NoticeLog {
         notice: Notice<'_>,
         route: Route<'_>,
     ) -> Result<Routed, TelmoniError> {
-        let emitted = self.emit(organization_id, Some(project_id), notice).await?;
-        if emitted.deduplicated {
+        let emitted = self.log(organization_id, Some(project_id), notice);
+        if emitted.replayed() {
             return Ok(Routed {
                 emitted,
                 connections: Vec::new(),

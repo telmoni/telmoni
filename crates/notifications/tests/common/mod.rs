@@ -409,16 +409,16 @@ async fn emit_lane(
         },
     )
     .await?;
-    if emitted.deduplicated {
+    if emitted.replayed() {
         return Ok((
             StatusCode::OK,
-            axum::Json(json!({ "feed_id": emitted.feed_id, "deduplicated": true })),
+            axum::Json(json!({ "feed_id": emitted.feed_id(), "deduplicated": true })),
         )
             .into_response());
     }
     Ok((
         StatusCode::ACCEPTED,
-        axum::Json(json!({ "feed_id": emitted.feed_id })),
+        axum::Json(json!({ "feed_id": emitted.feed_id() })),
     )
         .into_response())
 }

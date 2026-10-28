@@ -384,6 +384,35 @@ pub struct Notice<'a> {
     pub dedup_key: Option<&'a str>,
 }
 
+/// A word to an organization's owner and admins on its own feed, never a
+/// project's: a plan's, or a ceiling's. Its kind is `organization_alert`.
+#[derive(Debug, Clone)]
+pub struct OrganizationAlert<'a> {
+    /// One line, 1–200 characters.
+    pub title: &'a str,
+    /// The longer text, 1–4000 characters.
+    pub body: &'a str,
+    /// A JSON object served to the console verbatim, at most 4 KiB.
+    pub metadata: serde_json::Value,
+    /// The emit-idempotency key, minted by the producer as `<producer>:<id>`.
+    pub dedup_key: Option<&'a str>,
+}
+
+impl<'a> OrganizationAlert<'a> {
+    /// The notice it is written as.
+    #[must_use]
+    pub fn into_notice(self) -> Notice<'a> {
+        Notice {
+            kind: NotificationKind::OrganizationAlert,
+            subject_user_id: None,
+            title: self.title,
+            body: self.body,
+            metadata: self.metadata,
+            dedup_key: self.dedup_key,
+        }
+    }
+}
+
 /// Where an alert's notice goes: the connections its alert links, under a
 /// key of the producer's own (`telemetry:rule:<id>`) by which each one's
 /// failed deliveries are counted, five in a row muting it for that key alone.
@@ -400,11 +429,34 @@ pub struct Route<'a> {
 
 /// What a notice's write came to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Emitted {
-    /// The feed row: a new one, or the one the key was first written under.
-    pub feed_id: Uuid,
-    /// The key had been written before, and nothing was queued this time.
-    pub deduplicated: bool,
+pub enum Emitted {
+    /// A new row, queued to its connections.
+    Fresh {
+        /// The feed row.
+        feed_id: Uuid,
+    },
+    /// The key had been written before: the row the first emit minted, and
+    /// nothing queued this time.
+    Replayed {
+        /// The feed row.
+        feed_id: Uuid,
+    },
+}
+
+impl Emitted {
+    /// The feed row, new or first written.
+    #[must_use]
+    pub fn feed_id(self) -> Uuid {
+        match self {
+            Self::Fresh { feed_id } | Self::Replayed { feed_id } => feed_id,
+        }
+    }
+
+    /// Whether the key had been written before.
+    #[must_use]
+    pub fn replayed(self) -> bool {
+        matches!(self, Self::Replayed { .. })
+    }
 }
 
 /// What a routed notice's write came to.
@@ -420,13 +472,21 @@ pub struct Routed {
 /// What notifications does for the modules beside it.
 #[async_trait]
 pub trait Notifications: Send + Sync {
-    /// Write a notice to the feed and queue it to the connectors: the
-    /// project's when one is named, else the organization's.
+    /// Write a notice to the project's feed and queue it to the project's
+    /// connectors.
     async fn emit(
         &self,
         organization_id: &OrganizationId,
-        project_id: Option<&ProjectId>,
+        project_id: &ProjectId,
         notice: Notice<'_>,
+    ) -> Result<Emitted, TelmoniError>;
+
+    /// Write an alert to the organization's own feed and queue it to the
+    /// organization's connectors.
+    async fn alert_organization(
+        &self,
+        organization_id: &OrganizationId,
+        alert: OrganizationAlert<'_>,
     ) -> Result<Emitted, TelmoniError>;
 
     /// Write a notice to the project's feed and queue it to the connections
@@ -442,7 +502,7 @@ pub trait Notifications: Send + Sync {
     ) -> Result<Routed, TelmoniError> {
         let _ = route;
         Ok(Routed {
-            emitted: self.emit(organization_id, Some(project_id), notice).await?,
+            emitted: self.emit(organization_id, project_id, notice).await?,
             connections: Vec::new(),
         })
     }
