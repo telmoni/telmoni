@@ -31,11 +31,26 @@ export interface LiveRefresher {
 }
 
 /** Turns nudges into refreshes. The first after a quiet spell refreshes at
- *  once; the ones within the hold are drawn once, when it ends. */
-export function liveRefresher<Handle = ReturnType<typeof setTimeout>>(
+ *  once; the ones within the hold are drawn once, when it ends. By the
+ *  browser's clock, unless a test hands in its own. */
+export function liveRefresher(refresh: () => void, holdMs?: number): LiveRefresher;
+export function liveRefresher<Handle>(
+  refresh: () => void,
+  holdMs: number,
+  clock: LiveClock<Handle>,
+): LiveRefresher;
+export function liveRefresher<Handle>(
   refresh: () => void,
   holdMs: number = LIVE_HOLD_MS,
-  clock: LiveClock<Handle> = BROWSER_CLOCK as unknown as LiveClock<Handle>,
+  clock?: LiveClock<Handle>,
+): LiveRefresher {
+  return clock ? refresherOn(refresh, holdMs, clock) : refresherOn(refresh, holdMs, BROWSER_CLOCK);
+}
+
+function refresherOn<Handle>(
+  refresh: () => void,
+  holdMs: number,
+  clock: LiveClock<Handle>,
 ): LiveRefresher {
   let drawnAt: number | null = null;
   let waiting: Handle | null = null;
