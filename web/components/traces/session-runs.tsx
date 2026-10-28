@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useEffectEvent, useState, type ReactNode } from "react";
 import { ChevronRight, SquareArrowOutUpRight } from "lucide-react";
 import Link from "next/link";
 
@@ -138,37 +138,30 @@ function Runs({
   // `j` and `k` step the trace stood on, from the first; `o` opens it. Each
   // press reads where the page stands then, so two in quick succession step
   // twice.
-  const standing = useRef({ current, runs: traces.map((t) => t.run_id) });
-  useEffect(() => {
-    standing.current = { current, runs: traces.map((t) => t.run_id) };
+  const step = useEffectEvent((by: number) => {
+    const runs = traces.map((t) => t.run_id);
+    const at = current ? runs.indexOf(current) : -1;
+    const to = runs[at === -1 ? (by > 0 ? 0 : runs.length - 1) : at + by];
+    if (!to) return;
+    setCurrent(to);
+    document
+      .querySelector<HTMLElement>(`[data-run="${CSS.escape(to)}"]`)
+      ?.scrollIntoView?.({ block: "nearest" });
   });
-  useEffect(() => {
-    const move = (by: number) => () => {
-      const { current: at, runs } = standing.current;
-      const i = at ? runs.indexOf(at) : -1;
-      const to = runs[i === -1 ? (by > 0 ? 0 : runs.length - 1) : i + by];
-      if (!to) return;
-      setCurrent(to);
-      document
-        .querySelector<HTMLElement>(`[data-run="${CSS.escape(to)}"]`)
-        ?.scrollIntoView?.({ block: "nearest" });
-    };
-    return offerPageSteps({
-      noun: "trace",
-      next: move(1),
-      previous: move(-1),
-      // Offered only where a trace opens at all: the sheet lists what works.
-      open: openable
-        ? () => {
-            const { current: at } = standing.current;
-            if (at) toggle(at);
-          }
-        : undefined,
-    });
-    // The depth is fixed for this mount (the rows are keyed on it), so
-    // offering once is enough.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const openStood = useEffectEvent(() => {
+    if (current) toggle(current);
+  });
+  useEffect(
+    () =>
+      offerPageSteps({
+        noun: "trace",
+        next: () => step(1),
+        previous: () => step(-1),
+        // Offered only where a trace opens at all: the sheet lists what works.
+        open: openable ? () => openStood() : undefined,
+      }),
+    [openable],
+  );
 
   return (
     <DataTable>

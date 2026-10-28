@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useEffectEvent, useRef } from "react";
 import { z } from "zod";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -71,16 +71,14 @@ export function RealtimeListener({
   const projectId = projectAt(pathname, organization, projects)?.id ?? null;
   const esRef = useRef<EventSource | null>(null);
 
-  const pathnameRef = useRef(pathname);
-  const invitesRef = useRef(incomingInvites);
-  const activeOrgIdRef = useRef(activeOrganizationId);
-  const projectIdRef = useRef(projectId);
-  useEffect(() => {
-    pathnameRef.current = pathname;
-    invitesRef.current = incomingInvites;
-    activeOrgIdRef.current = activeOrganizationId;
-    projectIdRef.current = projectId;
-  });
+  // Where the console stands as an event lands, not as the stream opened:
+  // through an Effect Event, so the stream binds to the memberships alone.
+  const standing = useEffectEvent(() => ({
+    pathname,
+    invites: incomingInvites,
+    organizationId: activeOrganizationId,
+    projectId,
+  }));
 
   const membershipKey = memberships
     .map((m) => m.organizationId)
@@ -111,13 +109,13 @@ export function RealtimeListener({
     function settled(inviteId: string | undefined) {
       if (
         inviteId !== undefined &&
-        invitesRef.current.some((invite) => invite.id === inviteId)
+        standing().invites.some((invite) => invite.id === inviteId)
       ) {
         removeInvite(inviteId);
         router.refresh();
         return;
       }
-      if (ROSTER_PAGES.test(pathnameRef.current)) router.refresh();
+      if (ROSTER_PAGES.test(standing().pathname)) router.refresh();
     }
 
     function connect() {
@@ -155,7 +153,7 @@ export function RealtimeListener({
       });
 
       es.addEventListener("invite:sent", () => {
-        if (ROSTER_PAGES.test(pathnameRef.current)) router.refresh();
+        if (ROSTER_PAGES.test(standing().pathname)) router.refresh();
       });
 
       // An offer made to you, withdrawn, declined, an organization you are in
@@ -169,8 +167,8 @@ export function RealtimeListener({
         // refresh answers "not found" here, which is the truth of this path.
         if (
           data?.projectId &&
-          data.projectId === projectIdRef.current &&
-          data.organizationId !== activeOrgIdRef.current &&
+          data.projectId === standing().projectId &&
+          data.organizationId !== standing().organizationId &&
           data.organizationSlug &&
           data.projectSlug
         ) {
@@ -188,7 +186,7 @@ export function RealtimeListener({
       es.addEventListener("slug:moved", (e: MessageEvent) => {
         const moved = payload(e, "slug:moved");
         if (!moved) return;
-        const path = movedPath(pathnameRef.current, moved);
+        const path = movedPath(standing().pathname, moved);
         if (path) router.replace(path + window.location.search);
         router.refresh();
       });
@@ -199,13 +197,13 @@ export function RealtimeListener({
         const data = payload(e, "membership:removed");
         if (!data) return;
 
-        const isAccountPage = pathnameRef.current.startsWith("/account");
+        const isAccountPage = standing().pathname.startsWith("/account");
         const isCurrentProject = Boolean(
-          data.projectId && data.projectId === projectIdRef.current,
+          data.projectId && data.projectId === standing().projectId,
         );
         const isCurrentOrg = Boolean(
           !data.projectId &&
-            data.organizationId === activeOrgIdRef.current &&
+            data.organizationId === standing().organizationId &&
             !isAccountPage,
         );
 
@@ -230,8 +228,8 @@ export function RealtimeListener({
       // and a trace's page is drawn for its own run alone.
       es.addEventListener("spans:ingested", (e: MessageEvent) => {
         const data = payload(e, "spans:ingested");
-        if (!data || data.projectId !== projectIdRef.current) return;
-        const page = SPAN_PAGES.exec(pathnameRef.current);
+        if (!data || data.projectId !== standing().projectId) return;
+        const page = SPAN_PAGES.exec(standing().pathname);
         if (!page) return;
         const [, section, one] = page;
         // A download's route, not a page; a session's id may be `export`.

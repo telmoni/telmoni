@@ -2,7 +2,7 @@
 
 import { useConsoleUi } from "@/components/console-ui-context";
 
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useEffectEvent, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 
@@ -69,18 +69,14 @@ export function KeyboardShortcuts() {
   }, []);
 
   // The keydown handler needs the page's primary action, which changes as you
-  // navigate. Reading it from a ref lets the listener below bind once; naming
-  // it as a dependency would re-add a document-level listener on every render.
-  // Ref-sync effect with no dependency array, as in realtime-listener.tsx.
-  const pageActionRef = useRef(pageAction);
-  // Where you ARE decides where `g k` goes, since every sequence but `g O`
-  // and `g n` is a row of the rail you stand in. Through a ref, as the page
-  // action: the path as a dependency would re-bind the listener each move.
-  const placeRef = useRef({ pathname, organization, flags });
-  useEffect(() => {
-    pageActionRef.current = pageAction;
-    placeRef.current = { pathname, organization, flags };
-  });
+  // navigate, and where you ARE, which decides where `g k` goes, since every
+  // sequence but `g O` and `g n` is a row of the rail you stand in. Both are
+  // read through Effect Events, so the document-level listener below binds
+  // once rather than at every render or move.
+  const pageActionNow = useEffectEvent(() => pageAction);
+  const sequenceHref = useEffectEvent((k: string) =>
+    resolveSequence(k, pathname, organization, flags),
+  );
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -100,12 +96,7 @@ export function KeyboardShortcuts() {
         // A panel over the page whole holds the rail's sequences off, as it
         // does the page's action: the key after `g` goes nowhere.
         if (pageCovered()) return;
-        const href = resolveSequence(
-          k,
-          placeRef.current.pathname,
-          placeRef.current.organization,
-          placeRef.current.flags,
-        );
+        const href = sequenceHref(k);
         if (href) {
           e.preventDefault();
           router.push(href);
@@ -118,7 +109,7 @@ export function KeyboardShortcuts() {
         pendingTimer.current = setTimeout(clearPending, SEQUENCE_TIMEOUT_MS);
         return;
       }
-      const action = pageActionRef.current;
+      const action = pageActionNow();
       if (k === PAGE_ACTION_KEY && action) {
         e.preventDefault();
         action.run();

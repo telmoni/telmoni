@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useRef } from "react";
+import { Suspense, useEffect, useEffectEvent } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 /** Hands the router a traversal onto an entry a fragment made — a hash typed into the address bar,
@@ -19,17 +19,15 @@ function Follower() {
   const router = useRouter();
   const pathname = usePathname();
   const search = useSearchParams().toString();
-  const shown = useRef({ pathname, search });
-  useEffect(() => {
-    shown.current = { pathname, search };
-  }, [pathname, search]);
+  const shown = useEffectEvent(() => ({ pathname, search }));
   useEffect(() => {
     const landed = (event: PopStateEvent) => {
       if (event.state !== null) return;
       const { pathname, search, hash } = window.location;
       const here = `${pathname}${search}${hash}`;
+      const page = shown();
       // The page on show: Next's own `replaceState` follows it, where `replace` reads it again.
-      if (pathname === shown.current.pathname && new URLSearchParams(search).toString() === shown.current.search) {
+      if (pathname === page.pathname && new URLSearchParams(search).toString() === page.search) {
         window.history.replaceState({}, "", here);
       } else {
         router.replace(here, { scroll: false });

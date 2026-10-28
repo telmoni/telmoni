@@ -127,14 +127,11 @@ function SessionPanel({
     return () => void setTimeout(() => window.removeEventListener("popstate", landed));
   }, []);
 
-  // The session open as the panel shuts, for the focus to go back to its row.
-  const openId = useRef(sessionId);
-  useEffect(() => {
-    openId.current = sessionId;
-  }, [sessionId]);
+  // The session open as the panel shuts, for the focus to go back to its row;
+  // the panel calls the latest of these as it shuts.
   const openRow = () =>
     [...document.querySelectorAll<HTMLElement>("[data-peek-session]")].find(
-      (link) => link.dataset.peekSession === openId.current,
+      (link) => link.dataset.peekSession === sessionId,
     );
 
   // Another session on show takes the place of the last, and the panel takes

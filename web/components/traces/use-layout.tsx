@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useEffectEvent, useState, type ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
 
 import {
@@ -105,17 +105,13 @@ export function useLayoutState({ layouts, project }: LayoutPage): Layout {
 
   // A link's layout becomes the person's last choice, as a saved view's
   // columns become the browser's on any click: once per link, as the URL
-  // changes, read through a ref so the effect binds to the URL alone.
-  const latest = useRef({ stale, source, choice, kept: prefs.layout });
-  useEffect(() => {
-    latest.current = { stale, source, choice, kept: prefs.layout };
+  // changes, through an Effect Event so the effect binds to the URL alone.
+  const followLink = useEffectEvent(() => {
+    if (stale || source !== "link") return;
+    if (prefs.layout && sameChoice(prefs.layout, choice)) return;
+    setTracePrefs({ layout: choice });
   });
-  useEffect(() => {
-    const now = latest.current;
-    if (now.stale || now.source !== "link") return;
-    if (now.kept && sameChoice(now.kept, now.choice)) return;
-    setTracePrefs({ layout: now.choice });
-  }, [urlView]);
+  useEffect(() => followLink(), [urlView]);
 
   const apply = (next: LayoutChoice) => {
     const wrote = rewrite(next, edited(next, known));

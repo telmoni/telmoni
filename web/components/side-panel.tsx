@@ -2,6 +2,7 @@
 
 import {
   useEffect,
+  useEffectEvent,
   useLayoutEffect,
   useRef,
   useState,
@@ -134,12 +135,13 @@ export function SidePanel({
   // so a panel shutting uncovers the page before handing the focus back.
   useLayoutEffect(() => (covering ? cover() : undefined), [covering, cover]);
 
+  // Read as the panel shuts, in the layout effect's cleanup, which an Effect
+  // Event may not serve.
   const back = useRef(returnFocus);
-  const close = useRef(onClose);
   useEffect(() => {
     back.current = returnFocus;
-    close.current = onClose;
   });
+  const shut = useEffectEvent(() => onClose());
 
   // A layout effect, so the panel is still in the document when its cleanup
   // asks where the focus is: shut by a click on the page beside it, the
@@ -161,7 +163,7 @@ export function SidePanel({
       if (e.key !== "Escape" || e.defaultPrevented) return;
       if (!panel.current?.contains(document.activeElement)) return;
       e.preventDefault();
-      close.current();
+      shut();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);

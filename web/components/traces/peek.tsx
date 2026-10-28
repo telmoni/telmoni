@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useLayoutEffect, useMemo, useRef } from "react";
+import { useEffect, useEffectEvent, useId, useLayoutEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import { ListTree } from "lucide-react";
 import { useSearchParams } from "next/navigation";
@@ -75,31 +75,25 @@ function PeekPanel({ organization, slug, projectId, run, runs }: Props & { run: 
   const close = usePeekEntry();
 
   // The run open as the panel shuts, for the focus to go back to its row, as
-  // the agent's window hands it back (`agent-panel.tsx`).
-  const openRun = useRef(run);
-  useEffect(() => {
-    openRun.current = run;
-  }, [run]);
+  // the agent's window hands it back (`agent-panel.tsx`); the panel calls
+  // the latest of these as it shuts.
   const openRow = () =>
     [...document.querySelectorAll<HTMLElement>("[data-peek-run]")].find(
-      (link) => link.dataset.peekRun === openRun.current,
+      (link) => link.dataset.peekRun === run,
     );
 
   // `j` and `k` step as the ↓ and ↑ buttons do, while the panel is open. Each
   // press reads where the peek stands then, from the URL, so two in quick
   // succession step twice rather than both from where the panel was drawn.
-  const listed = useRef(runs);
-  useEffect(() => {
-    listed.current = runs;
-  }, [runs]);
-  useEffect(() => {
-    const step = (by: number) => () => {
-      const now = new URLSearchParams(window.location.search).get(PEEK_PARAM) ?? "";
-      const to = listed.current[listed.current.indexOf(now) + by];
-      if (listed.current.includes(now) && to) openPeek(to);
-    };
-    return offerPageSteps({ noun: "trace", next: step(1), previous: step(-1) });
-  }, []);
+  const step = useEffectEvent((by: number) => {
+    const now = new URLSearchParams(window.location.search).get(PEEK_PARAM) ?? "";
+    const to = runs[runs.indexOf(now) + by];
+    if (runs.includes(now) && to) openPeek(to);
+  });
+  useEffect(
+    () => offerPageSteps({ noun: "trace", next: () => step(1), previous: () => step(-1) }),
+    [],
+  );
 
   // Another trace on show takes the place of the last, and with it whatever
   // in it had the focus: the panel takes it back, so Escape, `j` and `k`
