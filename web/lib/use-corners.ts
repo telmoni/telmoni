@@ -9,17 +9,13 @@ import {
   isCorners,
   type Corners,
 } from "@/lib/corners";
+import { listeners } from "@/lib/listeners";
 
 // ⚠ **The class on `<html>` IS the state — there is no second copy.** The boot
 // script sets it before first paint, so a React state seeded from storage
 // would be a duplicate that can disagree with what is on screen. Reading the
 // DOM through `useSyncExternalStore` leaves one source of truth and needs no
 // provider, no context and no effect.
-let listeners: Array<() => void> = [];
-
-function emit() {
-  for (const l of listeners) l();
-}
 
 // ⚠ **Another tab's choice has to land here too.** `next-themes` syncs light
 // and dark across tabs on this same event, and a corner switch that did not
@@ -35,18 +31,10 @@ function onStorage(event: StorageEvent) {
 
 // Bound only while something is reading, so a page with no switch on it does
 // not keep a listener alive.
-function subscribe(onChange: () => void) {
-  if (listeners.length === 0) {
-    window.addEventListener("storage", onStorage);
-  }
-  listeners = [...listeners, onChange];
-  return () => {
-    listeners = listeners.filter((l) => l !== onChange);
-    if (listeners.length === 0) {
-      window.removeEventListener("storage", onStorage);
-    }
-  };
-}
+const { subscribe, emit } = listeners({
+  first: () => window.addEventListener("storage", onStorage),
+  last: () => window.removeEventListener("storage", onStorage),
+});
 
 function getSnapshot(): Corners {
   return document.documentElement.classList.contains(SHARP_CLASS)

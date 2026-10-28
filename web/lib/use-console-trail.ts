@@ -10,6 +10,7 @@ import {
   pushPath,
   type ConsoleTrail,
 } from "@/lib/console-trail";
+import { listeners } from "@/lib/listeners";
 import { projectPath } from "@/lib/slug";
 import {
   useActiveOrganization,
@@ -35,18 +36,7 @@ let cache: ConsoleTrail | null = null;
 
 // Nothing outside this tab can change `sessionStorage`, so our own write is the
 // only thing to announce — no `storage` listener.
-let listeners: Array<() => void> = [];
-
-function emit() {
-  for (const l of listeners) l();
-}
-
-function subscribe(onChange: () => void) {
-  listeners = [...listeners, onChange];
-  return () => {
-    listeners = listeners.filter((l) => l !== onChange);
-  };
-}
+const { subscribe, emit } = listeners();
 
 function load(): ConsoleTrail {
   let raw: string | null;

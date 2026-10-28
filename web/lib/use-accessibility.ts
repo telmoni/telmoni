@@ -18,17 +18,12 @@ import {
   type ContrastChoice,
   type MotionChoice,
 } from "@/lib/accessibility";
+import { listeners } from "@/lib/listeners";
 
 // ⚠ **The classes on `<html>` ARE the state — there is no second copy**, as
 // with corners (`lib/use-corners.ts`): the boot script sets them before first
 // paint, so state seeded from storage would be a duplicate that can disagree
 // with the screen. Storage is only how a choice outlives the tab.
-let listeners: Array<() => void> = [];
-
-function emit() {
-  for (const l of listeners) l();
-}
-
 const root = () => document.documentElement.classList;
 
 function applyMotion(choice: MotionChoice) {
@@ -61,14 +56,10 @@ function onStorage(event: StorageEvent) {
 
 // Bound only while something is reading, so a page with no setting on it
 // keeps no listener alive.
-function subscribe(onChange: () => void) {
-  if (listeners.length === 0) window.addEventListener("storage", onStorage);
-  listeners = [...listeners, onChange];
-  return () => {
-    listeners = listeners.filter((l) => l !== onChange);
-    if (listeners.length === 0) window.removeEventListener("storage", onStorage);
-  };
-}
+const { subscribe, emit } = listeners({
+  first: () => window.addEventListener("storage", onStorage),
+  last: () => window.removeEventListener("storage", onStorage),
+});
 
 // Storage disabled or full: the class is already on, so the choice holds for
 // this tab and is forgotten on the next load.

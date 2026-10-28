@@ -2,6 +2,8 @@
 
 import { useSyncExternalStore } from "react";
 
+import { listeners } from "@/lib/listeners";
+
 // ⚠ **The listener writes, the list reads, and there is no second copy.**
 // Ingest's nudges name the runs that landed (`spans:ingested`); the Traces
 // list, rather than drawing itself under the reader's hand, counts them in a
@@ -42,18 +44,7 @@ const empties = new Set<string>();
  *  tells a change by identity. */
 const snapshots = new Map<string, NewTraces>();
 
-let listeners: Array<() => void> = [];
-
-function emit() {
-  for (const l of listeners) l();
-}
-
-function subscribe(onChange: () => void) {
-  listeners = [...listeners, onChange];
-  return () => {
-    listeners = listeners.filter((l) => l !== onChange);
-  };
-}
+const { subscribe, emit } = listeners();
 
 function changed(projectId: string) {
   const count = landed.get(projectId)?.size ?? 0;

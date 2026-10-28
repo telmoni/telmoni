@@ -2,6 +2,8 @@
 
 import { useSyncExternalStore } from "react";
 
+import { listeners } from "@/lib/listeners";
+
 // What a page lets `j` and `k` step through — the trace list's peek, through
 // the runs of the page; a session's page, through its traces — offered while
 // it is open and taken back as it goes. The console's one key handler reads
@@ -21,18 +23,7 @@ export interface PageSteps {
 }
 
 let current: PageSteps | null = null;
-let listeners: Array<() => void> = [];
-
-function emit() {
-  for (const l of listeners) l();
-}
-
-function subscribe(onChange: () => void) {
-  listeners = [...listeners, onChange];
-  return () => {
-    listeners = listeners.filter((l) => l !== onChange);
-  };
-}
+const { subscribe, emit } = listeners();
 
 /** Offers `steps` to the keys; the function it returns takes them back,
  *  unless another offer has replaced them since. */

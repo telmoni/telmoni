@@ -2,6 +2,7 @@
 
 import { useSyncExternalStore } from "react";
 
+import { listeners } from "@/lib/listeners";
 import {
   DEFAULT_PREFS,
   TRACE_PREFS_KEY,
@@ -14,7 +15,6 @@ import {
 // through `useSyncExternalStore`, so they cannot disagree and need no
 // provider between them. Another tab's choice lands here too, on the
 // `storage` event, as the corners and the theme do.
-let listeners: Array<() => void> = [];
 
 /** The last value read, so a snapshot is the same object until storage
  *  changes: `useSyncExternalStore` re-renders on every new one. */
@@ -24,22 +24,14 @@ let cached: { stored: string | null; prefs: TracePrefs } | null = null;
  *  holds until the page is left. */
 let unstored: TracePrefs | null = null;
 
-function emit() {
-  for (const l of listeners) l();
-}
-
 function onStorage(event: StorageEvent) {
   if (event.key === TRACE_PREFS_KEY) emit();
 }
 
-function subscribe(onChange: () => void) {
-  if (listeners.length === 0) window.addEventListener("storage", onStorage);
-  listeners = [...listeners, onChange];
-  return () => {
-    listeners = listeners.filter((l) => l !== onChange);
-    if (listeners.length === 0) window.removeEventListener("storage", onStorage);
-  };
-}
+const { subscribe, emit } = listeners({
+  first: () => window.addEventListener("storage", onStorage),
+  last: () => window.removeEventListener("storage", onStorage),
+});
 
 function getSnapshot(): TracePrefs {
   if (unstored) return unstored;
