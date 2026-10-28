@@ -1,6 +1,7 @@
 //! The exporter: OTLP's JSON over the transport, content off unless asked and allowed,
 //! each attempt stamped with this clock, each answer's content mode and drops read.
 
+use std::borrow::Cow;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, UNIX_EPOCH};
 
@@ -8,7 +9,8 @@ use opentelemetry::trace::{SpanId, SpanKind, Status};
 use opentelemetry::{Array, Key, Value};
 use opentelemetry_sdk::resource::{ResourceDetector as _, TelemetryResourceDetector};
 use opentelemetry_sdk::trace::SpanData;
-use serde_json::{Map, json};
+use serde::Serialize;
+use serde_json::json;
 
 use crate::config::Config;
 use crate::contract;
@@ -169,22 +171,29 @@ impl Exporter {
 
     /// OTLP's `ExportTraceServiceRequest`, in its JSON encoding; `trimmed`, without
     /// the attributes ingest drops for their length.
-    fn encode(&self, spans: &[SpanData], trimmed: bool) -> serde_json::Value {
-        let spans: Vec<serde_json::Value> =
-            spans.iter().map(|span| self.span(span, trimmed)).collect();
-        json!({
-            "resourceSpans": [{
-                "resource": { "attributes": self.resource },
-                "scopeSpans": [{
-                    "scope": { "name": contract::SCOPE, "version": VERSION },
-                    "spans": spans,
+    fn encode<'a>(&'a self, spans: &'a [SpanData], trimmed: bool) -> Request<'a> {
+        // Only an export's answer moves the mode, on this thread: once a batch.
+        let keep_content = self.capture_content && self.content_mode().as_deref() == Some("on");
+        Request {
+            resource_spans: [ResourceSpans {
+                resource: Resource {
+                    attributes: &self.resource,
+                },
+                scope_spans: [ScopeSpans {
+                    scope: Scope {
+                        name: contract::SCOPE,
+                        version: VERSION,
+                    },
+                    spans: spans
+                        .iter()
+                        .map(|span| self.span(span, trimmed, keep_content))
+                        .collect(),
                 }],
             }],
-        })
+        }
     }
 
-    fn span(&self, span: &SpanData, trimmed: bool) -> serde_json::Value {
-        let keep_content = self.capture_content && self.content_mode().as_deref() == Some("on");
+    fn span<'a>(&self, span: &'a SpanData, trimmed: bool, keep_content: bool) -> OtlpSpan<'a> {
         // The last value set under a key is the one that stands, as a map
         // would have it: OpenTelemetry's span keeps every set in a list.
         let mut attributes: Vec<(&str, &Value)> = Vec::new();
@@ -198,41 +207,28 @@ impl Exporter {
                 None => attributes.push((key, &attribute.value)),
             }
         }
-        let attributes: Vec<serde_json::Value> = attributes
+        let attributes = attributes
             .into_iter()
             .filter(|(key, value)| !(trimmed && past_caps(key, value)))
-            .map(|(key, value)| attribute(key, value))
+            .map(|(key, value)| OtlpAttribute {
+                key,
+                value: any_value(value),
+            })
             .collect();
-
-        let mut encoded = Map::new();
-        encoded.insert(
-            "traceId".to_owned(),
-            json!(span.span_context.trace_id().to_string()),
-        );
-        encoded.insert(
-            "spanId".to_owned(),
-            json!(span.span_context.span_id().to_string()),
-        );
-        if span.parent_span_id != SpanId::INVALID {
-            encoded.insert(
-                "parentSpanId".to_owned(),
-                json!(span.parent_span_id.to_string()),
-            );
+        OtlpSpan {
+            trace_id: span.span_context.trace_id().to_string(),
+            span_id: span.span_context.span_id().to_string(),
+            parent_span_id: (span.parent_span_id != SpanId::INVALID)
+                .then(|| span.parent_span_id.to_string()),
+            name: &span.name,
+            kind: kind(&span.span_kind),
+            start_time_unix_nano: nanos(span.start_time),
+            end_time_unix_nano: nanos(span.end_time),
+            attributes,
+            // Events and the status message are where an exception writes its
+            // message and stack trace: never sent.
+            status: matches!(span.status, Status::Error { .. }).then_some(ErrorStatus { code: 2 }),
         }
-        encoded.insert("name".to_owned(), json!(span.name));
-        encoded.insert("kind".to_owned(), json!(kind(&span.span_kind)));
-        encoded.insert(
-            "startTimeUnixNano".to_owned(),
-            json!(nanos(span.start_time)),
-        );
-        encoded.insert("endTimeUnixNano".to_owned(), json!(nanos(span.end_time)));
-        encoded.insert("attributes".to_owned(), json!(attributes));
-        // Events and the status message are where an exception writes its
-        // message and stack trace: never sent.
-        if matches!(span.status, Status::Error { .. }) {
-            encoded.insert("status".to_owned(), json!({ "code": 2 }));
-        }
-        serde_json::Value::Object(encoded)
     }
 
     fn read(&self, answer: &Answer) {
@@ -392,8 +388,92 @@ fn resource(config: &Config) -> Vec<serde_json::Value> {
     }
     attributes
         .into_iter()
-        .map(|(key, value)| attribute(key, &Value::from(value)))
+        .map(|(key, value)| {
+            let value = Value::from(value);
+            serde_json::to_value(OtlpAttribute {
+                key,
+                value: any_value(&value),
+            })
+            .unwrap_or_default()
+        })
         .collect()
+}
+
+/// OTLP's `ExportTraceServiceRequest`, written straight to bytes: one
+/// resource, one scope, the batch's spans.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Request<'a> {
+    resource_spans: [ResourceSpans<'a>; 1],
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ResourceSpans<'a> {
+    resource: Resource<'a>,
+    scope_spans: [ScopeSpans<'a>; 1],
+}
+
+#[derive(Serialize)]
+struct Resource<'a> {
+    attributes: &'a [serde_json::Value],
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ScopeSpans<'a> {
+    scope: Scope,
+    spans: Vec<OtlpSpan<'a>>,
+}
+
+#[derive(Serialize)]
+struct Scope {
+    name: &'static str,
+    version: &'static str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OtlpSpan<'a> {
+    trace_id: String,
+    span_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parent_span_id: Option<String>,
+    name: &'a str,
+    kind: u8,
+    start_time_unix_nano: String,
+    end_time_unix_nano: String,
+    attributes: Vec<OtlpAttribute<'a>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    status: Option<ErrorStatus>,
+}
+
+#[derive(Serialize)]
+struct ErrorStatus {
+    code: u8,
+}
+
+/// One OTLP `KeyValue`.
+#[derive(Serialize)]
+struct OtlpAttribute<'a> {
+    key: &'a str,
+    value: AnyValue<'a>,
+}
+
+/// One OTLP `AnyValue`: 64-bit integers travel as decimal strings, and a
+/// float that is not a number as `null`, as `serde_json` writes one.
+#[derive(Serialize)]
+enum AnyValue<'a> {
+    #[serde(rename = "boolValue")]
+    Bool(bool),
+    #[serde(rename = "intValue")]
+    Int(String),
+    #[serde(rename = "doubleValue")]
+    Double(f64),
+    #[serde(rename = "stringValue")]
+    String(Cow<'a, str>),
+    #[serde(rename = "arrayValue")]
+    Array { values: Vec<Self> },
 }
 
 /// The OpenTelemetry SDK's version, as its own detector reports it.
@@ -424,41 +504,35 @@ fn nanos(time: std::time::SystemTime) -> String {
         .to_string()
 }
 
-/// One OTLP `KeyValue`: 64-bit integers travel as decimal strings.
-fn attribute(key: &str, value: &Value) -> serde_json::Value {
-    json!({ "key": key, "value": any_value(value) })
-}
-
-fn any_value(value: &Value) -> serde_json::Value {
+fn any_value(value: &Value) -> AnyValue<'_> {
     match value {
-        Value::Bool(flag) => json!({ "boolValue": flag }),
-        Value::I64(int) => json!({ "intValue": int.to_string() }),
-        Value::F64(float) => json!({ "doubleValue": float }),
-        Value::String(text) => json!({ "stringValue": text.as_str() }),
-        Value::Array(array) => json!({ "arrayValue": { "values": array_values(array) } }),
-        other => json!({ "stringValue": other.to_string() }),
+        Value::Bool(flag) => AnyValue::Bool(*flag),
+        Value::I64(int) => AnyValue::Int(int.to_string()),
+        Value::F64(float) => AnyValue::Double(*float),
+        Value::String(text) => AnyValue::String(Cow::Borrowed(text.as_str())),
+        Value::Array(array) => AnyValue::Array {
+            values: array_values(array),
+        },
+        other => AnyValue::String(Cow::Owned(other.to_string())),
     }
 }
 
-fn array_values(array: &Array) -> Vec<serde_json::Value> {
+fn array_values(array: &Array) -> Vec<AnyValue<'_>> {
     match array {
-        Array::Bool(flags) => flags
-            .iter()
-            .map(|flag| json!({ "boolValue": flag }))
-            .collect(),
+        Array::Bool(flags) => flags.iter().map(|flag| AnyValue::Bool(*flag)).collect(),
         Array::I64(ints) => ints
             .iter()
-            .map(|int| json!({ "intValue": int.to_string() }))
+            .map(|int| AnyValue::Int(int.to_string()))
             .collect(),
         Array::F64(floats) => floats
             .iter()
-            .map(|float| json!({ "doubleValue": float }))
+            .map(|float| AnyValue::Double(*float))
             .collect(),
         Array::String(texts) => texts
             .iter()
-            .map(|text| json!({ "stringValue": text.as_str() }))
+            .map(|text| AnyValue::String(Cow::Borrowed(text.as_str())))
             .collect(),
-        other => vec![json!({ "stringValue": format!("{other:?}") })],
+        other => vec![AnyValue::String(Cow::Owned(format!("{other:?}")))],
     }
 }
 

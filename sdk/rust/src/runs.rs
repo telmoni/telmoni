@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use opentelemetry::trace::{SpanKind, SpanRef, Status, TraceContextExt as _, Tracer as _};
-use opentelemetry::{Context, ContextGuard, KeyValue};
+use opentelemetry::{Context, ContextGuard, KeyValue, Value};
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -168,8 +168,8 @@ struct Handle {
     /// The parent's context with this span set: what children are opened
     /// under, and what [`context`](Run::context) hands out.
     cx: Context,
-    /// What every span inside the run carries.
-    inherited: Vec<KeyValue>,
+    /// What every span inside the run carries, shared by every span's handle.
+    inherited: Arc<[KeyValue]>,
     /// The run's caps, and what it has used of them.
     guard: Arc<Guard>,
     failed: AtomicBool,
@@ -178,7 +178,8 @@ struct Handle {
 
 impl Handle {
     fn child(&self, name: String, kind: SpanKind, own: Vec<KeyValue>) -> Self {
-        let mut attributes = self.inherited.clone();
+        let mut attributes = Vec::with_capacity(self.inherited.len() + own.len());
+        attributes.extend_from_slice(&self.inherited);
         attributes.extend(own);
         let span = self
             .client
@@ -190,7 +191,7 @@ impl Handle {
         Self {
             client: Arc::clone(&self.client),
             cx: self.cx.with_span(span),
-            inherited: self.inherited.clone(),
+            inherited: Arc::clone(&self.inherited),
             guard: Arc::clone(&self.guard),
             failed: AtomicBool::new(false),
             ended: false,
@@ -746,7 +747,7 @@ pub(crate) fn open(inner: &Arc<Inner>, agent: &str, options: RunOptions) -> Resu
         handle: Handle {
             client: Arc::clone(inner),
             cx,
-            inherited,
+            inherited: Arc::from(inherited),
             guard: Arc::new(Guard::new(options.max_steps, options.max_spend)),
             failed: AtomicBool::new(false),
             ended: false,
@@ -779,7 +780,7 @@ pub(crate) fn continued(inner: &Arc<Inner>, read: Continued) -> Run {
         handle: Handle {
             client: Arc::clone(inner),
             cx,
-            inherited,
+            inherited: Arc::from(inherited),
             guard: Arc::new(Guard::default()),
             failed: AtomicBool::new(false),
             ended: false,
@@ -797,15 +798,17 @@ pub(crate) fn inherited(
     user_id: Option<String>,
     session_id: Option<String>,
 ) -> Vec<KeyValue> {
+    // Shared, so each span's copy of them is a count rather than a string.
+    let shared = |text: &str| Value::from(Arc::<str>::from(text));
     let mut inherited = vec![
-        KeyValue::new(contract::RUN_ID, run_id.to_owned()),
-        KeyValue::new(contract::AGENT, agent.to_owned()),
+        KeyValue::new(contract::RUN_ID, shared(run_id)),
+        KeyValue::new(contract::AGENT, shared(agent)),
     ];
     if let Some(user) = user_id.filter(|id| !id.is_empty()) {
-        inherited.push(KeyValue::new(contract::USER_ID, user));
+        inherited.push(KeyValue::new(contract::USER_ID, shared(&user)));
     }
     if let Some(session) = session_id.filter(|id| !id.is_empty()) {
-        inherited.push(KeyValue::new(contract::SESSION_ID, session));
+        inherited.push(KeyValue::new(contract::SESSION_ID, shared(&session)));
     }
     inherited
 }
