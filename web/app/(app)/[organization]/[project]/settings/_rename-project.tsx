@@ -1,13 +1,13 @@
 "use client";
 
-import { unstable_rethrow } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MAX_PROJECT_NAME, typedBound } from "@/lib/names";
 import { useRenameProject } from "@/lib/store";
+import { useAction } from "@/lib/use-action";
 
 import { updateProjectNameAction } from "./actions";
 
@@ -25,8 +25,7 @@ export function RenameProjectForm({
 }) {
   const renameProject = useRenameProject();
   const [name, setName] = useState(initialName);
-  const [error, setError] = useState<string | null>(null);
-  const [pending, startTransition] = useTransition();
+  const { pending, error, run } = useAction();
 
   // A rename elsewhere — another tab, or a router.refresh() from the realtime
   // listener — sends a new initialName down. Without this the input keeps the
@@ -43,29 +42,16 @@ export function RenameProjectForm({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!canEdit || !isChanged || pending) return;
-
-    setError(null);
     const trimmed = name.trim();
-    startTransition(async () => {
-      try {
-        const res = await updateProjectNameAction(projectId, trimmed);
-        if (!res.ok) {
-          setError(res.error);
-          toast.error(res.error);
-        } else {
-          // Only a rename that kept the slug answers here: one that moved it
-          // takes the page on to the new path in the action itself, and its
-          // redirect goes on to the router from the catch below.
-          toast.success("Project name updated.");
-          renameProject(projectId, trimmed, slug);
-        }
-      } catch (err) {
-        unstable_rethrow(err);
-        const msg = "Network error. Please try again.";
-        setError(msg);
-        toast.error(msg);
-      }
-    });
+    // Only a rename that kept the slug answers here: one that moved it takes
+    // the page on to the new path in the action itself.
+    run(
+      () => updateProjectNameAction(projectId, trimmed),
+      () => {
+        toast.success("Project name updated.");
+        renameProject(projectId, trimmed, slug);
+      },
+    );
   };
 
   return (

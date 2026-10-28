@@ -143,7 +143,7 @@ describe("DeleteProjectForm", () => {
       fireEvent.click(confirmButton());
     });
 
-    expect(toastError).toHaveBeenCalledWith("Network error. Please try again.");
+    expect(toastError).toHaveBeenCalledWith("Network error. Try again.");
     expect(replace).not.toHaveBeenCalled();
   });
 

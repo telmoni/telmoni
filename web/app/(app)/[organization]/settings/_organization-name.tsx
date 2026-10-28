@@ -1,13 +1,12 @@
 "use client";
 
-import { unstable_rethrow } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-
 import { MAX_ORGANIZATION_NAME, typedBound } from "@/lib/names";
+import { useAction } from "@/lib/use-action";
 
 import { renameOrganizationAction } from "./settings-actions";
 
@@ -20,8 +19,7 @@ export function OrganizationNameForm({
   initialName: string;
 }) {
   const [name, setName] = useState(initialName);
-  const [error, setError] = useState<string | null>(null);
-  const [pending, start] = useTransition();
+  const { pending, error, run } = useAction();
 
   // A rename elsewhere — another tab, or a router.refresh() from the realtime
   // listener — sends a new initialName down. Without this the input keeps the
@@ -39,25 +37,12 @@ export function OrganizationNameForm({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!isChanged || pending) return;
-    setError(null);
-    start(async () => {
-      try {
-        const res = await renameOrganizationAction(organizationId, trimmed);
-        if (!res.ok) {
-          setError(res.error);
-          toast.error(res.error);
-          return;
-        }
-        // A name moves no URL: the page stays where it is, redrawn by the
-        // action's revalidation.
-        toast.success("Organization renamed.");
-      } catch (err) {
-        unstable_rethrow(err);
-        const msg = "Network error. Please try again.";
-        setError(msg);
-        toast.error(msg);
-      }
-    });
+    // A name moves no URL: the page stays where it is, redrawn by the
+    // action's revalidation.
+    run(
+      () => renameOrganizationAction(organizationId, trimmed),
+      () => toast.success("Organization renamed."),
+    );
   };
 
   return (

@@ -1,13 +1,11 @@
 "use client";
 
-import { unstable_rethrow } from "next/navigation";
-import { useState, useTransition } from "react";
-import { toast } from "sonner";
+import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-
 import { SLUG_MAX_LENGTH } from "@/lib/slug";
+import { useAction } from "@/lib/use-action";
 
 import { changeOrganizationUrlAction } from "./settings-actions";
 
@@ -24,8 +22,7 @@ export function OrganizationUrlForm({
   host: string;
 }) {
   const [value, setValue] = useState(slug);
-  const [error, setError] = useState<string | null>(null);
-  const [pending, start] = useTransition();
+  const { pending, error, run } = useAction();
 
   // A change elsewhere — another tab, or a router.refresh() from the realtime
   // listener — sends a new slug down; only a genuine change resets the field.
@@ -41,25 +38,10 @@ export function OrganizationUrlForm({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!isChanged || pending) return;
-    setError(null);
-    start(async () => {
-      try {
-        // A change that moved the URL never answers here: the action takes the
-        // page on to the new address itself, and its redirect goes on to the
-        // router from the catch below. One that moved nothing is drawn again
-        // by the action's revalidation.
-        const res = await changeOrganizationUrlAction(organizationId, trimmed);
-        if (!res.ok) {
-          setError(res.error);
-          toast.error(res.error);
-        }
-      } catch (err) {
-        unstable_rethrow(err);
-        const msg = "Network error. Please try again.";
-        setError(msg);
-        toast.error(msg);
-      }
-    });
+    // A change that moved the URL never answers here: the action takes the
+    // page on to the new address itself. One that moved nothing is drawn again
+    // by the action's revalidation.
+    run(() => changeOrganizationUrlAction(organizationId, trimmed));
   };
 
   return (

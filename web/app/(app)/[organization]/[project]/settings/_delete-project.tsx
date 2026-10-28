@@ -1,11 +1,10 @@
 "use client";
 
-import { unstable_rethrow } from "next/navigation";
-import { useState, useTransition } from "react";
-import { toast } from "sonner";
+import { useState } from "react";
 
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { Button } from "@/components/ui/button";
+import { useToastAction } from "@/lib/use-action";
 
 import { deleteProjectAction } from "./actions";
 
@@ -16,23 +15,12 @@ export function DeleteProjectForm({
   projectId: string;
   projectName: string;
 }) {
-  const [pending, startTransition] = useTransition();
+  const { pending, run } = useToastAction();
   const [open, setOpen] = useState(false);
 
-  const onConfirm = () => {
-    startTransition(async () => {
-      try {
-        // A deletion that landed leaves for the console in the action itself
-        // (its `redirect`), which rejects this call: what comes back is a
-        // refusal.
-        const res = await deleteProjectAction(projectId);
-        if (!res.ok) toast.error(res.error);
-      } catch (err) {
-        unstable_rethrow(err);
-        toast.error("Network error. Please try again.");
-      }
-    });
-  };
+  // A deletion that landed leaves for the console in the action itself (its
+  // `redirect`): what comes back here is a refusal.
+  const onConfirm = () => run(() => deleteProjectAction(projectId));
 
   return (
     <div className="grid gap-3">

@@ -1,13 +1,13 @@
 "use client";
 
-import { unstable_rethrow } from "next/navigation";
-import { useId, useState, useTransition } from "react";
+import { useId, useState } from "react";
 import { toast } from "sonner";
 
 import { ChoiceGroup, type Choice } from "@/components/choice-group";
 import { Button } from "@/components/ui/button";
 import { CONTENT_MODE_LABEL as LABELS } from "@/lib/content-mode";
 import { ContentMode } from "@/lib/types/enums";
+import { useAction } from "@/lib/use-action";
 import { cn } from "@/lib/utils";
 
 import { updateContentModeAction } from "./actions";
@@ -36,8 +36,7 @@ export function ContentModeForm({
   const labelId = useId();
   const noteId = useId();
   const [choice, setChoice] = useState<ContentMode>(mode);
-  const [error, setError] = useState<string | null>(null);
-  const [pending, startTransition] = useTransition();
+  const { pending, error, run } = useAction();
 
   // A change from another tab arrives as a new `mode` on refresh: the choice
   // follows it, and an unsaved choice is not kept against a mode that moved,
@@ -81,27 +80,13 @@ export function ContentModeForm({
   const handleSubmit = (e: React.SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (held) return;
-
-    setError(null);
-    startTransition(async () => {
-      try {
-        const res = await updateContentModeAction(projectId, choice);
-        if (!res.ok) {
-          // A refusal the server gave also redraws the page (the action's
-          // `refresh()`): it can mean the page is out of date.
-          setError(res.error);
-          toast.error(res.error);
-        } else {
-          // The action's revalidation sends the page back with the new mode.
-          toast.success(`Content mode set to ${LABELS[choice]}.`);
-        }
-      } catch (err) {
-        unstable_rethrow(err);
-        const msg = "Network error. Please try again.";
-        setError(msg);
-        toast.error(msg);
-      }
-    });
+    // A refusal the server gave also redraws the page (the action's
+    // `refresh()`), since it can mean the page is out of date; a change, the
+    // action's revalidation sends back with the new mode.
+    run(
+      () => updateContentModeAction(projectId, choice),
+      () => toast.success(`Content mode set to ${LABELS[choice]}.`),
+    );
   };
 
   return (

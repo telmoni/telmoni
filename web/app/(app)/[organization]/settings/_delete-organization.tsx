@@ -1,11 +1,11 @@
 "use client";
 
-import { unstable_rethrow } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useAction } from "@/lib/use-action";
 
 import {
   deleteOrganizationAction,
@@ -32,42 +32,31 @@ export function DeleteOrganizationForm({
   // that refreshes the page from here on renders whichever organization the
   // console fell back to, and the heading must still name the deleted one.
   const [done, setDone] = useState<{ organization: string; purged: boolean | null } | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [sending, startSending] = useTransition();
-  const [deleting, startDeleting] = useTransition();
+  // One line under both steps: either clears what the other said.
+  const send = useAction();
+  const remove = useAction();
+  const error = remove.error ?? send.error;
+  const sending = send.pending;
+  const deleting = remove.pending;
+  const clearError = () => {
+    send.setError(null);
+    remove.setError(null);
+  };
 
   function handleSendCode() {
-    setError(null);
-    startSending(async () => {
-      try {
-        const r = await requestOrganizationDeletionCodeAction(organizationId);
-        if (!r.ok) {
-          setError(r.error);
-          return;
-        }
-        setCodeSent(true);
-      } catch (err) {
-        unstable_rethrow(err);
-        setError("Network error. Try again.");
-      }
-    });
+    clearError();
+    send.run(
+      () => requestOrganizationDeletionCodeAction(organizationId),
+      () => setCodeSent(true),
+    );
   }
 
   function handleDelete() {
-    setError(null);
-    startDeleting(async () => {
-      try {
-        const r = await deleteOrganizationAction(organizationId, code);
-        if (!r.ok) {
-          setError(r.error);
-          return;
-        }
-        setDone({ organization, purged: r.purged });
-      } catch (err) {
-        unstable_rethrow(err);
-        setError("Network error. Try again.");
-      }
-    });
+    clearError();
+    remove.run(
+      () => deleteOrganizationAction(organizationId, code),
+      (r) => setDone({ organization, purged: r.purged }),
+    );
   }
 
   const canDelete = /^\d{6}$/.test(code) && !deleting;
@@ -128,7 +117,7 @@ export function DeleteOrganizationForm({
               value={code}
               onChange={(e) => {
                 setCode(e.target.value.replace(/\D/g, "").slice(0, 6));
-                setError(null);
+                clearError();
               }}
               placeholder="000000"
               disabled={deleting}
