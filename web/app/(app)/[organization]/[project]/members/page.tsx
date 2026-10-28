@@ -3,8 +3,8 @@ import { MemberCeilingNotice } from "@/components/member-ceiling";
 import { Invited, RoleCards, RosterTable, type RoleCard } from "@/components/members/roster";
 import { MemberRow } from "@/components/members/rows";
 import { PageHeader } from "@/components/page-header";
+import { NoticeCard } from "@/components/notice-card";
 import { ServiceUnavailable } from "@/components/service-unavailable";
-import { Card } from "@/components/ui/card";
 import { ownerContact } from "@/lib/identity";
 import { administers, owns } from "@/lib/roles";
 import {
@@ -125,18 +125,14 @@ export default async function MembersPage({
 
         <section className="grid gap-3">
           {listing.members.length === 0 ? (
-            <Card className="overflow-hidden p-0 gap-0">
-              <div className="grid gap-1 p-4">
-                <p className="text-sm font-medium">
-                  Nobody else has access to this project.
-                </p>
-                <p className="text-sm text-muted-foreground">
-                  {candidates.length > 0
-                    ? "Add somebody from the organization, or invite somebody by email."
-                    : "Invite somebody by email. They get a link, and nothing changes here until they accept it."}
-                </p>
-              </div>
-            </Card>
+            <NoticeCard
+              title="Nobody else has access to this project."
+              body={
+                candidates.length > 0
+                  ? "Add somebody from the organization, or invite somebody by email."
+                  : "Invite somebody by email. They get a link, and nothing changes here until they accept it."
+              }
+            />
           ) : (
             <RosterTable>
               {listing.members.map((m) => (

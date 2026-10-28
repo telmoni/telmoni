@@ -1,6 +1,6 @@
 import { PageHeader } from "@/components/page-header";
+import { NoticeCard } from "@/components/notice-card";
 import { ServiceUnavailable } from "@/components/service-unavailable";
-import { Card } from "@/components/ui/card";
 import { projectPage } from "@/lib/server/project-page";
 
 export const metadata = { title: "Dashboards" };
@@ -22,15 +22,15 @@ export default async function DashboardsPage({
         info="Charts over this project's telemetry, still to come: spend, tokens, latency and volume by model, agent, user, session and tag over any window, in dashboards you compose and keep."
       />
       <div className="grid gap-6">
-        <Card className="overflow-hidden p-0 gap-0">
-          <div className="grid gap-1 p-4">
-            <p className="text-sm font-medium">Nothing to show yet.</p>
-            <p className="text-sm text-muted-foreground">
+        <NoticeCard
+          title="Nothing to show yet."
+          body={
+            <>
               Dashboards are still to come. Until then, Chart on the Traces page charts a
               window&rsquo;s runs, tokens and durations.
-            </p>
-          </div>
-        </Card>
+            </>
+          }
+        />
       </div>
     </>
   );

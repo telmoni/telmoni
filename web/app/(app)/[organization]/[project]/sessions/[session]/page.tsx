@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { AccessDenied } from "@/components/access-denied";
 import { LocalTime } from "@/components/local-time";
+import { NoticeCard } from "@/components/notice-card";
 import { PageHeader } from "@/components/page-header";
 import { Row, Rows } from "@/components/rows";
 import { Section } from "@/components/section";
@@ -9,7 +10,6 @@ import { ServiceUnavailable } from "@/components/service-unavailable";
 import { LayoutControls } from "@/components/traces/layout-controls";
 import { SessionRuns } from "@/components/traces/session-runs";
 import { LayoutProvider } from "@/components/traces/use-layout";
-import { Card } from "@/components/ui/card";
 import { WindowPicker } from "@/components/window-picker";
 import { ownerContact } from "@/lib/identity";
 import { parseLayoutUi } from "@/lib/layout";
@@ -74,17 +74,19 @@ export default async function SessionPage({
     return (
       <>
         <PageHeader title="Session" backHref={list} backLabel="Sessions" />
-        <Card className="grid gap-1 text-sm">
-          <p className="font-medium">No session with this id in this project&rsquo;s window.</p>
-          <p className="text-muted-foreground">
-            Its runs may lie outside the window or have passed their retention, or the session
-            belongs to another project.{" "}
-            <Link href={list} className="underline underline-offset-4">
-              Back to the sessions
-            </Link>
-            .
-          </p>
-        </Card>
+        <NoticeCard
+          title="No session with this id in this project’s window."
+          body={
+            <>
+              Its runs may lie outside the window or have passed their retention, or the session
+              belongs to another project.{" "}
+              <Link href={list} className="underline underline-offset-4">
+                Back to the sessions
+              </Link>
+              .
+            </>
+          }
+        />
       </>
     );
   }

@@ -6,7 +6,7 @@ import { ServiceUnavailable } from "@/components/service-unavailable";
 import { PageHeader } from "@/components/page-header";
 import { AccessDenied } from "@/components/access-denied";
 import { Badge } from "@/components/ui/badge";
-import { Card } from "@/components/ui/card";
+import { NoticeCard } from "@/components/notice-card";
 import { ownerContact } from "@/lib/identity";
 import { activeOrganization, fetchTokens } from "@/lib/server/data";
 import { projectPage } from "@/lib/server/project-page";
@@ -61,16 +61,12 @@ export default async function ApiKeysPage({
             plaintext is shown only when minted.
           </p>
           {tokens.length === 0 ? (
-            <Card className="overflow-hidden p-0 gap-0">
-              <div className="grid gap-1 p-4">
-                <p className="text-sm font-medium">No API keys yet.</p>
-                <p className="text-sm text-muted-foreground">
-                  {canManage
-                    ? "Mint one to call the API."
-                    : "API keys will appear here once minted."}
-                </p>
-              </div>
-            </Card>
+            <NoticeCard
+              title="No API keys yet."
+              body={
+                canManage ? "Mint one to call the API." : "API keys will appear here once minted."
+              }
+            />
           ) : (
             <DataTable>
               <THead>

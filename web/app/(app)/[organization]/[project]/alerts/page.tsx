@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { AccessDenied } from "@/components/access-denied";
 import { LocalTime } from "@/components/local-time";
+import { NoticeCard } from "@/components/notice-card";
 import { PageHeader } from "@/components/page-header";
 import { Row, Rows } from "@/components/rows";
 import { ServiceUnavailable } from "@/components/service-unavailable";
@@ -163,9 +164,9 @@ export default async function AlertsPage({
             </Rows>
           )}
           {access.alerts.length === 0 ? (
-            <Empty
+            <NoticeCard
               title="No alerts yet."
-              detail="Make one with New alert: the share of runs that fail, the p95 duration of model calls, the tokens they use, or what a run spends, over the last hour, day or week."
+              body="Make one with New alert: the share of runs that fail, the p95 duration of model calls, the tokens they use, or what a run spends, over the last hour, day or week."
             />
           ) : (
             access.alerts.map((alert) => (
@@ -206,17 +207,6 @@ function WindowWords({ mute, who, now }: { mute: Mute; who: (id: string) => stri
       )}
       , set by {who(mute.created_by)}.
     </>
-  );
-}
-
-function Empty({ title, detail }: { title: string; detail: string }) {
-  return (
-    <Card className="gap-0 overflow-hidden p-0">
-      <div className="grid gap-1 p-4">
-        <p className="text-sm font-medium">{title}</p>
-        <p className="text-sm text-muted-foreground">{detail}</p>
-      </div>
-    </Card>
   );
 }
 

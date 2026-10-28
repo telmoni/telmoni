@@ -3,11 +3,11 @@ import type { ReactNode } from "react";
 
 import { AccessDenied } from "@/components/access-denied";
 import { LinkPending } from "@/components/link-pending";
+import { NoticeCard } from "@/components/notice-card";
 import { PageHeader } from "@/components/page-header";
 import { ServiceUnavailable } from "@/components/service-unavailable";
 import { FacetsPanel } from "@/components/traces/facets";
 import { FilterBar } from "@/components/traces/filter-bar";
-import { ListNotice } from "@/components/traces/list-notice";
 import { ListPagination } from "@/components/traces/pagination";
 import { ListHeaderControls } from "@/components/traces/toolbar";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -101,7 +101,7 @@ export function ListPage<L extends ListWindow>({
   // the filters admit.
   const none =
     listed.total > 0 ? null : filtered ? (
-      <ListNotice
+      <NoticeCard
         title={`No ${list} match these filters.`}
         body={
           <>
@@ -117,7 +117,7 @@ export function ListPage<L extends ListWindow>({
         }
       />
     ) : (
-      <ListNotice title="Nothing to show yet." body={nothingYet(days)} />
+      <NoticeCard title="Nothing to show yet." body={nothingYet(days)} />
     );
 
   // `group/list`: the header's window and every control and link below it mark
@@ -148,7 +148,7 @@ export function ListPage<L extends ListWindow>({
                       {rows(listed) > 0 ? (
                         table(listed)
                       ) : (
-                        <ListNotice
+                        <NoticeCard
                           title="This page is past the last one."
                           body={
                             <Link

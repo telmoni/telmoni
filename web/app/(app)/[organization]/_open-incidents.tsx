@@ -1,9 +1,9 @@
 import Link from "next/link";
 
 import { LocalTime } from "@/components/local-time";
+import { NoticeCard } from "@/components/notice-card";
 import { Row, Rows } from "@/components/rows";
 import { Badge } from "@/components/ui/badge";
-import { Card } from "@/components/ui/card";
 import { SEVERITY_LABEL, incidentHref, severityVariant } from "@/lib/alerts";
 import type { OrganizationHealth } from "@/lib/server/data";
 import { IncidentStatus } from "@/lib/types/enums";
@@ -25,12 +25,10 @@ export function OpenIncidents({
       </div>
       {/* Saying nothing here would read as all being well. */}
       {health.kind === "unavailable" ? (
-        <Card className="grid gap-1 text-sm">
-          <p className="font-medium">The open incidents could not be read.</p>
-          <p className="text-muted-foreground">
-            Reload to try again. Each project&rsquo;s Alerts page lists its own.
-          </p>
-        </Card>
+        <NoticeCard
+          title="The open incidents could not be read."
+          body="Reload to try again. Each project’s Alerts page lists its own."
+        />
       ) : (
         <Rows>
           {health.incidents.map((incident) => (

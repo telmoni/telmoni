@@ -4,8 +4,8 @@ import { AccessDenied } from "@/components/access-denied";
 import { CreateProjectAction } from "@/components/create-project";
 import { ProjectTiles } from "@/components/project-tiles";
 import { PageHeader } from "@/components/page-header";
+import { NoticeCard } from "@/components/notice-card";
 import { ServiceUnavailable } from "@/components/service-unavailable";
-import { Card } from "@/components/ui/card";
 import { ownerContact } from "@/lib/identity";
 import { administers, organizationRoleOf, owns } from "@/lib/roles";
 import {
@@ -62,21 +62,12 @@ export default async function OrganizationProjectsPage() {
             whose leave the lane refuses. */}
         <section className="grid gap-3" aria-label="Projects">
           {projects === null ? (
-            <Card className="overflow-hidden p-0 gap-0">
-              <div className="grid gap-1 p-4">
-                <p className="text-sm font-medium">The projects could not be loaded.</p>
-                <p className="text-sm text-muted-foreground">Try again in a moment.</p>
-              </div>
-            </Card>
+            <NoticeCard title="The projects could not be loaded." body="Try again in a moment." />
           ) : projects.length === 0 ? (
-            <Card className="overflow-hidden p-0 gap-0">
-              <div className="grid gap-1 p-4">
-                <p className="text-sm font-medium">No projects yet.</p>
-                <p className="text-sm text-muted-foreground">
-                  Create the first one with New project, above.
-                </p>
-              </div>
-            </Card>
+            <NoticeCard
+              title="No projects yet."
+              body="Create the first one with New project, above."
+            />
           ) : (
             <ProjectTiles
               organization={organization.slug}

@@ -1,6 +1,6 @@
 import { PageHeader } from "@/components/page-header";
+import { NoticeCard } from "@/components/notice-card";
 import { ServiceUnavailable } from "@/components/service-unavailable";
-import { Card } from "@/components/ui/card";
 import { owns } from "@/lib/roles";
 import { getServerContext } from "@/lib/server/data";
 
@@ -33,15 +33,11 @@ export default async function AccountNotificationsPage() {
         <GivenSeatsSection seats={seats} />
         {invites.length > 0 && <IncomingInvitesSection invites={invites} />}
         {nothing && (
-          <Card className="overflow-hidden p-0 gap-0" data-testid="notifications-empty">
-            <div className="grid gap-1 p-4">
-              <p className="text-sm font-medium">No notifications</p>
-              <p className="text-sm text-muted-foreground">
-                Invitations to join an organization or a project, offers to
-                take one over, and projects you were added to show up here.
-              </p>
-            </div>
-          </Card>
+          <NoticeCard
+            data-testid="notifications-empty"
+            title="No notifications"
+            body="Invitations to join an organization or a project, offers to take one over, and projects you were added to show up here."
+          />
         )}
       </div>
     </>

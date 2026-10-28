@@ -3,8 +3,8 @@ import type { ReactNode } from "react";
 import { AccessDenied } from "@/components/access-denied";
 import { AuditTable } from "@/components/audit-table";
 import { PageHeader } from "@/components/page-header";
+import { NoticeCard } from "@/components/notice-card";
 import { ServiceUnavailable } from "@/components/service-unavailable";
-import { Card } from "@/components/ui/card";
 import type { AuditAccess } from "@/lib/server/entities/audit";
 
 export function AuditLog({
@@ -54,12 +54,7 @@ export function AuditLog({
           </div>
 
           {events.length === 0 ? (
-            <Card className="overflow-hidden p-0 gap-0">
-              <div className="grid gap-1 p-4">
-                <p className="text-sm font-medium">No events yet.</p>
-                <p className="text-sm text-muted-foreground">{empty}</p>
-              </div>
-            </Card>
+            <NoticeCard title="No events yet." body={empty} />
           ) : (
             <AuditTable events={events} />
           )}

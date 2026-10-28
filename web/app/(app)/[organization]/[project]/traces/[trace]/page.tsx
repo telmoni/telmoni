@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { AccessDenied } from "@/components/access-denied";
+import { NoticeCard } from "@/components/notice-card";
 import { PageHeader } from "@/components/page-header";
 import { ServiceUnavailable } from "@/components/service-unavailable";
 import { LayoutControls } from "@/components/traces/layout-controls";
@@ -60,16 +61,18 @@ export default async function TracePage({
     return (
       <>
         <PageHeader title="Trace" backHref={list} backLabel="Traces" />
-        <Card className="grid gap-1 text-sm">
-          <p className="font-medium">No trace with this id in this project.</p>
-          <p className="text-muted-foreground">
-            Its spans may have passed their retention, or the run belongs to another project.{" "}
-            <Link href={list} className="underline underline-offset-4">
-              Back to the traces
-            </Link>
-            .
-          </p>
-        </Card>
+        <NoticeCard
+          title="No trace with this id in this project."
+          body={
+            <>
+              Its spans may have passed their retention, or the run belongs to another project.{" "}
+              <Link href={list} className="underline underline-offset-4">
+                Back to the traces
+              </Link>
+              .
+            </>
+          }
+        />
       </>
     );
   }

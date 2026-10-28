@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { cookies } from "next/headers";
 
+import { NoticeCard } from "@/components/notice-card";
 import { ServiceUnavailable } from "@/components/service-unavailable";
 import { TraceCharts, TraceHistogramStrip } from "@/components/traces/charts";
-import { ListNotice } from "@/components/traces/list-notice";
 import { ListPage } from "@/components/traces/list-page";
 import { NewTraces } from "@/components/traces/new-traces";
 import { TracePeek } from "@/components/traces/peek";
@@ -113,7 +113,7 @@ export default async function TracesPage({
             histogram.kind === "ok" ? (
               <TraceCharts histogram={histogram.histogram} />
             ) : (
-              <ListNotice title="The charts could not be read." body="Try again in a moment." />
+              <NoticeCard title="The charts could not be read." body="Try again in a moment." />
             )
           ) : undefined
         }
