@@ -41,7 +41,7 @@ describe("GET /api/v1/agent/conversations/[id]", () => {
   });
 
   it("says a conversation that is gone is gone, and one that cannot be read is unavailable", async () => {
-    vi.mocked(openAgentConversation).mockResolvedValueOnce({ kind: "not-found" } as never);
+    vi.mocked(openAgentConversation).mockResolvedValueOnce({ kind: "missing" });
     const gone = await get();
     expect(gone.status).toBe(404);
     expect(await gone.json()).toEqual({

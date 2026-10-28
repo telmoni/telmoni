@@ -1,11 +1,10 @@
 import { cache } from "react";
 import { z } from "zod";
 
-import { fetchWithTimeout } from "@/lib/api/fetch";
 import { env } from "@/lib/env";
-import { logger } from "@/lib/logger";
 
 import { accountHeaders } from "./identity-context";
+import { readJson } from "./read";
 
 // A sign-in of the person's own, as Account › Privacy lists it — not a
 // session of a project's runs, which `sessions.ts` reads.
@@ -22,32 +21,12 @@ export const fetchActiveSessions = cache(
     // The person's own sessions, whichever organization the console is in.
     const headers = await accountHeaders();
     if (!headers) return null;
-    try {
-      const res = await fetchWithTimeout(
-        `${env.SERVER_URL}/internal/v1/auth/sessions`,
-        { headers },
-      );
-      if (!res.ok) {
-        logger.warn(
-          { fetcher: "fetchActiveSessions", status: res.status },
-          "entities: upstream refused",
-        );
-        return null;
-      }
-      const parsed = z
-        .object({ sessions: z.array(ActiveSessionSchema) })
-        .safeParse(await res.json());
-      if (!parsed.success) {
-        logger.warn(
-          { fetcher: "fetchActiveSessions", issues: parsed.error.issues },
-          "entities: upstream shape mismatch",
-        );
-        return null;
-      }
-      return parsed.data.sessions;
-    } catch {
-      logger.warn({ fetcher: "fetchActiveSessions" }, "entities: upstream error");
-      return null;
-    }
+    const read = await readJson(
+      "fetchActiveSessions",
+      `${env.SERVER_URL}/internal/v1/auth/sessions`,
+      { headers },
+      z.object({ sessions: z.array(ActiveSessionSchema) }),
+    );
+    return read.kind === "ok" ? read.value.sessions : null;
   },
 );

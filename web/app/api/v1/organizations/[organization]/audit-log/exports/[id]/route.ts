@@ -49,7 +49,7 @@ export async function GET(
   if (result.kind === "forbidden") {
     return problem(403, "forbidden");
   }
-  if (result.kind === "gone") {
+  if (result.kind === "missing") {
     return problem(404, "gone");
   }
   // Auth's own refusal, typed as it answered it, so the bell tells the

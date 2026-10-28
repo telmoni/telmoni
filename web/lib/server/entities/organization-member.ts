@@ -1,13 +1,12 @@
 import { cache } from "react";
 import { z } from "zod";
 
-import { fetchWithTimeout } from "@/lib/api/fetch";
 import { env } from "@/lib/env";
-import { logger } from "@/lib/logger";
 import type { OrganizationRole } from "@/lib/types/enums";
 import { asOrganizationRole } from "@/lib/types/organization-role";
 
 import { organizationHeaders, identityContext } from "./identity-context";
+import { readJson } from "./read";
 
 const OrganizationMemberSchema = z.object({
   id: z.string(),
@@ -45,44 +44,24 @@ export const fetchOrganizationMembers = cache(
   async (): Promise<OrganizationMemberAccess> => {
     const ctx = await identityContext();
     if (!ctx) return { kind: "unavailable" };
-    try {
-      const res = await fetchWithTimeout(
-        `${env.SERVER_URL}/internal/v1/organization/members`,
-        { headers: organizationHeaders(ctx), cache: "no-store" },
-      );
-      if (res.status === 403) return { kind: "forbidden" };
-      if (!res.ok) return { kind: "unavailable" };
-      const parsed = z
-        .object({
-          members: z.array(OrganizationMemberSchema),
-          ceiling: RosterCeilingSchema.nullable().optional(),
-        })
-        .safeParse(await res.json());
-      if (!parsed.success) {
-        logger.warn(
-          { fetcher: "fetchOrganizationMembers", issues: parsed.error.issues },
-          "entities: upstream shape mismatch",
-        );
-        return { kind: "unavailable" };
-      }
-      return {
-        kind: "ok",
-        members: parsed.data.members.map((m) => ({
-          ...m,
-          role: asOrganizationRole(m.role),
-        })),
-        ceiling: parsed.data.ceiling ?? null,
-      };
-    } catch (err) {
-      logger.warn(
-        {
-          fetcher: "fetchOrganizationMembers",
-          error: err instanceof Error ? err.message : String(err),
-        },
-        "entities: fetch failed",
-      );
-      return { kind: "unavailable" };
-    }
+    const read = await readJson(
+      "fetchOrganizationMembers",
+      `${env.SERVER_URL}/internal/v1/organization/members`,
+      { headers: organizationHeaders(ctx), cache: "no-store" },
+      z.object({
+        members: z.array(OrganizationMemberSchema),
+        ceiling: RosterCeilingSchema.nullable().optional(),
+      }),
+    );
+    if (read.kind !== "ok") return read;
+    return {
+      kind: "ok",
+      members: read.value.members.map((m) => ({
+        ...m,
+        role: asOrganizationRole(m.role),
+      })),
+      ceiling: read.value.ceiling ?? null,
+    };
   },
 );
 
@@ -107,39 +86,19 @@ export const fetchOrganizationInvites = cache(
   async (): Promise<OrganizationInviteAccess> => {
     const ctx = await identityContext();
     if (!ctx) return { kind: "unavailable" };
-    try {
-      const res = await fetchWithTimeout(
-        `${env.SERVER_URL}/internal/v1/organization/invites`,
-        { headers: organizationHeaders(ctx), cache: "no-store" },
-      );
-      if (res.status === 403) return { kind: "forbidden" };
-      if (!res.ok) return { kind: "unavailable" };
-      const parsed = z
-        .object({ invites: z.array(OrganizationInviteSchema) })
-        .safeParse(await res.json());
-      if (!parsed.success) {
-        logger.warn(
-          { fetcher: "fetchOrganizationInvites", issues: parsed.error.issues },
-          "entities: upstream shape mismatch",
-        );
-        return { kind: "unavailable" };
-      }
-      return {
-        kind: "ok",
-        invites: parsed.data.invites.map((i) => ({
-          ...i,
-          role: asOrganizationRole(i.role),
-        })),
-      };
-    } catch (err) {
-      logger.warn(
-        {
-          fetcher: "fetchOrganizationInvites",
-          error: err instanceof Error ? err.message : String(err),
-        },
-        "entities: fetch failed",
-      );
-      return { kind: "unavailable" };
-    }
+    const read = await readJson(
+      "fetchOrganizationInvites",
+      `${env.SERVER_URL}/internal/v1/organization/invites`,
+      { headers: organizationHeaders(ctx), cache: "no-store" },
+      z.object({ invites: z.array(OrganizationInviteSchema) }),
+    );
+    if (read.kind !== "ok") return read;
+    return {
+      kind: "ok",
+      invites: read.value.invites.map((i) => ({
+        ...i,
+        role: asOrganizationRole(i.role),
+      })),
+    };
   },
 );

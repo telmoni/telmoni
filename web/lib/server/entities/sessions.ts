@@ -1,15 +1,12 @@
 import { cache } from "react";
 import { z } from "zod";
 
-import { fetchWithTimeout } from "@/lib/api/fetch";
-import { env } from "@/lib/env";
 import { queryString } from "@/lib/list-query";
-import { logger } from "@/lib/logger";
 import { SessionSort, SortDirection, SpanKind, SpanStatus } from "@/lib/types/enums";
 
-import { identityContext, projectHeaders } from "./identity-context";
 import {
   FacetsSchema,
+  MISSING,
   TraceSchema,
   filtersOf,
   readDownload,
@@ -102,45 +99,16 @@ export type SessionAccess =
   | { kind: "forbidden" }
   | { kind: "unavailable" };
 
-function fetchFailed(fetcher: string, err: unknown): void {
-  logger.warn(
-    { fetcher, error: err instanceof Error ? err.message : String(err) },
-    "entities: fetch failed",
-  );
-}
-
 /** The project's sessions in the window, as the server lists them. */
 export const fetchSessions = cache(
   async (projectId: string, query: SessionQuery): Promise<SessionsAccess> => {
-    if (!projectId) return { kind: "unavailable" };
-    const ctx = await identityContext();
-    if (!ctx) return { kind: "unavailable" };
-    try {
-      const res = await fetchWithTimeout(
-        `${env.SERVER_URL}/internal/v1/telemetry/sessions${queryString(query)}`,
-        { headers: projectHeaders(ctx, projectId), cache: "no-store" },
-      );
-      if (res.status === 403) return { kind: "forbidden" };
-      if (!res.ok) {
-        logger.warn(
-          { fetcher: "fetchSessions", status: res.status },
-          "entities: upstream refused",
-        );
-        return { kind: "unavailable" };
-      }
-      const parsed = SessionListSchema.safeParse(await res.json());
-      if (!parsed.success) {
-        logger.warn(
-          { fetcher: "fetchSessions", issues: parsed.error.issues },
-          "entities: upstream shape mismatch",
-        );
-        return { kind: "unavailable" };
-      }
-      return { kind: "ok", list: parsed.data };
-    } catch (err) {
-      fetchFailed("fetchSessions", err);
-      return { kind: "unavailable" };
-    }
+    const read = await readLane(
+      "fetchSessions",
+      projectId,
+      `/sessions${queryString(query)}`,
+      SessionListSchema,
+    );
+    return read.kind === "ok" ? { kind: "ok", list: read.value } : read;
   },
 );
 
@@ -180,35 +148,13 @@ export const fetchSession = cache(
     query: Pick<SessionQuery, "days" | "limit">,
     pinned: readonly string[] = [],
   ): Promise<SessionAccess> => {
-    if (!projectId) return { kind: "unavailable" };
-    const ctx = await identityContext();
-    if (!ctx) return { kind: "unavailable" };
-    try {
-      const res = await fetchWithTimeout(
-        `${env.SERVER_URL}/internal/v1/telemetry/sessions/${encodeURIComponent(sessionId)}${queryString({ ...query, pinned })}`,
-        { headers: projectHeaders(ctx, projectId), cache: "no-store" },
-      );
-      if (res.status === 403) return { kind: "forbidden" };
-      if (res.status === 404 || res.status === 400) return { kind: "missing" };
-      if (!res.ok) {
-        logger.warn(
-          { fetcher: "fetchSession", status: res.status },
-          "entities: upstream refused",
-        );
-        return { kind: "unavailable" };
-      }
-      const parsed = SessionDetailSchema.safeParse(await res.json());
-      if (!parsed.success) {
-        logger.warn(
-          { fetcher: "fetchSession", issues: parsed.error.issues },
-          "entities: upstream shape mismatch",
-        );
-        return { kind: "unavailable" };
-      }
-      return { kind: "ok", session: parsed.data };
-    } catch (err) {
-      fetchFailed("fetchSession", err);
-      return { kind: "unavailable" };
-    }
+    const read = await readLane(
+      "fetchSession",
+      projectId,
+      `/sessions/${encodeURIComponent(sessionId)}${queryString({ ...query, pinned })}`,
+      SessionDetailSchema,
+      MISSING,
+    );
+    return read.kind === "ok" ? { kind: "ok", session: read.value } : read;
   },
 );

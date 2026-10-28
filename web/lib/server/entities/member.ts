@@ -1,13 +1,12 @@
 import { cache } from "react";
 import { z } from "zod";
 
-import { fetchWithTimeout } from "@/lib/api/fetch";
 import { env } from "@/lib/env";
-import { logger } from "@/lib/logger";
 import { InviteScope, Role, asRole } from "@/lib/types/enums";
 
 import { identityContext, projectHeaders } from "./identity-context";
 import { type RosterCeiling, RosterCeilingSchema } from "./organization-member";
+import { readJson, valueOf } from "./read";
 
 const MemberSchema = z.object({
   id: z.string(),
@@ -35,49 +34,29 @@ export type MemberAccess =
 export const fetchMembers = cache(async (projectId: string): Promise<MemberAccess> => {
   const ctx = await identityContext();
   if (!ctx) return { kind: "unavailable" };
-  try {
-    const res = await fetchWithTimeout(
-      `${env.SERVER_URL}/internal/v1/projects/${encodeURIComponent(projectId)}/members`,
-      { headers: projectHeaders(ctx, projectId), cache: "no-store" },
-    );
-    if (res.status === 403) return { kind: "forbidden" };
-    if (!res.ok) return { kind: "unavailable" };
-    const parsed = z
-      .object({
-        members: z.array(MemberSchema),
-        // The owning organization's, which a seat here counts against.
-        ceiling: RosterCeilingSchema.nullable().optional(),
-      })
-      .safeParse(await res.json());
-    if (!parsed.success) {
-      logger.warn(
-        { fetcher: "fetchMembers", issues: parsed.error.issues },
-        "entities: upstream shape mismatch",
-      );
-      return { kind: "unavailable" };
-    }
-    return {
-      kind: "ok",
-      members: parsed.data.members.map((m) => {
-        const role = asRole(m.role);
-        return {
-          ...m,
-          role,
-          is_owner: m.is_owner ?? (role === Role.Owner || m.role === "owner"),
-        };
-      }),
-      ceiling: parsed.data.ceiling ?? null,
-    };
-  } catch (err) {
-    logger.warn(
-      {
-        fetcher: "fetchMembers",
-        error: err instanceof Error ? err.message : String(err),
-      },
-      "entities: fetch failed",
-    );
-    return { kind: "unavailable" };
-  }
+  const read = await readJson(
+    "fetchMembers",
+    `${env.SERVER_URL}/internal/v1/projects/${encodeURIComponent(projectId)}/members`,
+    { headers: projectHeaders(ctx, projectId), cache: "no-store" },
+    z.object({
+      members: z.array(MemberSchema),
+      // The owning organization's, which a seat here counts against.
+      ceiling: RosterCeilingSchema.nullable().optional(),
+    }),
+  );
+  if (read.kind !== "ok") return read;
+  return {
+    kind: "ok",
+    members: read.value.members.map((m) => {
+      const role = asRole(m.role);
+      return {
+        ...m,
+        role,
+        is_owner: m.is_owner ?? (role === Role.Owner || m.role === "owner"),
+      };
+    }),
+    ceiling: read.value.ceiling ?? null,
+  };
 });
 
 const InviteSchema = z.object({
@@ -100,37 +79,17 @@ export type InviteAccess =
 export const fetchInvites = cache(async (projectId: string): Promise<InviteAccess> => {
   const ctx = await identityContext();
   if (!ctx) return { kind: "unavailable" };
-  try {
-    const res = await fetchWithTimeout(
-      `${env.SERVER_URL}/internal/v1/projects/${encodeURIComponent(projectId)}/invites`,
-      { headers: projectHeaders(ctx, projectId), cache: "no-store" },
-    );
-    if (res.status === 403) return { kind: "forbidden" };
-    if (!res.ok) return { kind: "unavailable" };
-    const parsed = z
-      .object({ invites: z.array(InviteSchema) })
-      .safeParse(await res.json());
-    if (!parsed.success) {
-      logger.warn(
-        { fetcher: "fetchInvites", issues: parsed.error.issues },
-        "entities: upstream shape mismatch",
-      );
-      return { kind: "unavailable" };
-    }
-    return {
-      kind: "ok",
-      invites: parsed.data.invites.map((i) => ({ ...i, role: asRole(i.role) })),
-    };
-  } catch (err) {
-    logger.warn(
-      {
-        fetcher: "fetchInvites",
-        error: err instanceof Error ? err.message : String(err),
-      },
-      "entities: fetch failed",
-    );
-    return { kind: "unavailable" };
-  }
+  const read = await readJson(
+    "fetchInvites",
+    `${env.SERVER_URL}/internal/v1/projects/${encodeURIComponent(projectId)}/invites`,
+    { headers: projectHeaders(ctx, projectId), cache: "no-store" },
+    z.object({ invites: z.array(InviteSchema) }),
+  );
+  if (read.kind !== "ok") return read;
+  return {
+    kind: "ok",
+    invites: read.value.invites.map((i) => ({ ...i, role: asRole(i.role) })),
+  };
 });
 
 const InviteLookSchema = z.object({
@@ -147,9 +106,11 @@ const InviteLookSchema = z.object({
 
 export type InviteLook = z.infer<typeof InviteLookSchema>;
 
+// A link expired or withdrawn is auth's 404: an answer, not an outage.
 export async function lookUpInvite(token: string): Promise<InviteLook | null> {
-  try {
-    const res = await fetchWithTimeout(
+  return valueOf(
+    await readJson(
+      "lookUpInvite",
       `${env.SERVER_URL}/internal/v1/invites/look`,
       {
         method: "POST",
@@ -160,18 +121,8 @@ export async function lookUpInvite(token: string): Promise<InviteLook | null> {
         body: JSON.stringify({ token }),
         cache: "no-store",
       },
-    );
-    if (!res.ok) return null;
-    const parsed = InviteLookSchema.safeParse(await res.json());
-    return parsed.success ? parsed.data : null;
-  } catch (err) {
-    logger.warn(
-      {
-        fetcher: "lookUpInvite",
-        error: err instanceof Error ? err.message : String(err),
-      },
-      "entities: fetch failed",
-    );
-    return null;
-  }
+      InviteLookSchema,
+      { 404: "missing" },
+    ),
+  );
 }

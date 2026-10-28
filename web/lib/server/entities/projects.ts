@@ -2,14 +2,13 @@ import { cache } from "react";
 import { notFound } from "next/navigation";
 import { z } from "zod";
 
-import { fetchWithTimeout } from "@/lib/api/fetch";
 import { env } from "@/lib/env";
-import { logger } from "@/lib/logger";
 import { compareProjects, compareProjectsByOrganization } from "@/lib/projects";
 import { asRole, type Role } from "@/lib/types/enums";
 
 import { organizationHeaders, identityContext } from "./identity-context";
 import { getServerContext } from "./organization";
+import { readJson } from "./read";
 
 const ProjectSchema = z.object({
   id: z.string(),
@@ -25,37 +24,24 @@ export type ProjectListing =
   | { kind: "ok"; projects: Project[] }
   | { kind: "unavailable" };
 
+// The envelope is the schema's: an answer without its list is unreadable,
+// never an organization with no projects.
 export const fetchProjectListing = cache(async (): Promise<ProjectListing> => {
   const ctx = await identityContext();
   if (!ctx) return { kind: "unavailable" };
-  try {
-    const res = await fetchWithTimeout(`${env.SERVER_URL}/internal/v1/projects`, {
-      headers: organizationHeaders(ctx),
-    });
-    if (!res.ok) {
-      logger.warn({ fetcher: "fetchProjects", status: res.status }, "entities: upstream refused");
-      return { kind: "unavailable" };
-    }
-    const json = (await res.json()) as Record<string, unknown>;
-    const rawList = Array.isArray(json?.projects) ? json.projects : [];
-    const parsed = z.array(ProjectSchema).safeParse(rawList);
-    if (!parsed.success) {
-      logger.warn(
-        { fetcher: "fetchProjects", issues: parsed.error.issues },
-        "entities: upstream shape mismatch",
-      );
-      return { kind: "unavailable" };
-    }
-    return {
-      kind: "ok",
-      projects: parsed.data
-        .map((t) => ({ ...t, role: asRole(t.role) }))
-        .sort(compareProjects),
-    };
-  } catch {
-    logger.warn({ fetcher: "fetchProjects" }, "entities: upstream error");
-    return { kind: "unavailable" };
-  }
+  const read = await readJson(
+    "fetchProjects",
+    `${env.SERVER_URL}/internal/v1/projects`,
+    { headers: organizationHeaders(ctx) },
+    z.object({ projects: z.array(ProjectSchema) }),
+  );
+  if (read.kind !== "ok") return { kind: "unavailable" };
+  return {
+    kind: "ok",
+    projects: read.value.projects
+      .map((t) => ({ ...t, role: asRole(t.role) }))
+      .sort(compareProjects),
+  };
 });
 
 export const fetchProjects = cache(async (): Promise<Project[]> => {
@@ -111,38 +97,19 @@ export type ProjectEverywhereListing =
 export const fetchProjectsEverywhere = cache(async (): Promise<ProjectEverywhereListing> => {
   const ctx = await identityContext();
   if (!ctx) return { kind: "unavailable" };
-  try {
-    const res = await fetchWithTimeout(`${env.SERVER_URL}/internal/v1/projects/everywhere`, {
-      headers: organizationHeaders(ctx),
-    });
-    if (!res.ok) {
-      logger.warn(
-        { fetcher: "fetchProjectsEverywhere", status: res.status },
-        "entities: upstream refused",
-      );
-      return { kind: "unavailable" };
-    }
-    const json = (await res.json()) as Record<string, unknown>;
-    const parsed = z
-      .array(ProjectEverywhereSchema)
-      .safeParse(Array.isArray(json?.projects) ? json.projects : []);
-    if (!parsed.success) {
-      logger.warn(
-        { fetcher: "fetchProjectsEverywhere", issues: parsed.error.issues },
-        "entities: upstream shape mismatch",
-      );
-      return { kind: "unavailable" };
-    }
-    return {
-      kind: "ok",
-      projects: parsed.data
-        .map((t) => ({ ...t, role: asRole(t.role) }))
-        .sort(compareProjectsByOrganization),
-    };
-  } catch {
-    logger.warn({ fetcher: "fetchProjectsEverywhere" }, "entities: upstream error");
-    return { kind: "unavailable" };
-  }
+  const read = await readJson(
+    "fetchProjectsEverywhere",
+    `${env.SERVER_URL}/internal/v1/projects/everywhere`,
+    { headers: organizationHeaders(ctx) },
+    z.object({ projects: z.array(ProjectEverywhereSchema) }),
+  );
+  if (read.kind !== "ok") return { kind: "unavailable" };
+  return {
+    kind: "ok",
+    projects: read.value.projects
+      .map((t) => ({ ...t, role: asRole(t.role) }))
+      .sort(compareProjectsByOrganization),
+  };
 });
 
 /// A project the person can open, in whichever organization holds it, by id:

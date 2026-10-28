@@ -3,10 +3,8 @@ import { cookies, headers } from "next/headers";
 import { unstable_rethrow } from "next/navigation";
 import { z } from "zod";
 
-import { fetchWithTimeout } from "@/lib/api/fetch";
 import { env } from "@/lib/env";
 import { type FlagSet, FlagSetSchema } from "@/lib/flags";
-import { logger } from "@/lib/logger";
 import { ACTIVE_ORGANIZATION_COOKIE, ORGANIZATION_HEADER } from "@/lib/proxy/organization";
 import {
   IncomingInviteSchema,
@@ -16,6 +14,7 @@ import { OrganizationRole, type Role, asRole } from "@/lib/types/enums";
 import { type GivenSeat, GivenSeatSchema } from "@/lib/types/given-seat";
 
 import { getServerSession } from "../session";
+import { readJson } from "./read";
 
 /// The person behind the session, as auth recorded them from the identity
 /// provider. Theirs alone, whichever organization they are standing in.
@@ -75,6 +74,18 @@ export type Membership = {
   organizationId: string;
   role: Role | null;
 };
+
+const MeSchema = z.object({
+  person:                PersonSchema,
+  organizations:         z.array(OrganizationEntrySchema),
+  activeOrganizationId:  z.string().nullable(),
+  defaultOrganizationId: z.string().nullable(),
+  memberships:           z.array(MembershipSchema).optional(),
+  incomingInvites:       z.array(IncomingInviteSchema).optional(),
+  givenSeats:            z.array(GivenSeatSchema).optional(),
+  projectOffers:         z.array(ProjectOfferSchema).optional(),
+  flags:                 FlagSetSchema.optional(),
+});
 
 export {
   IncomingInviteSchema,
@@ -171,14 +182,16 @@ export const getServerContext = cache(
     const session = await getServerSession();
     if (!session) return null;
 
-    try {
-      // A bearer lane: the token names the person, and auth describes them
-      // from what the provider told it at the exchange — it refuses an email or a
-      // name here. The body carries only the browser behind this session,
-      // for the sessions table; the header only which organization to act in.
-      const requested = await requestedOrganization();
-      const named = requested && "slug" in requested ? requested.slug : null;
-      const res = await fetchWithTimeout(`${env.SERVER_URL}/internal/v1/me`, {
+    // A bearer lane: the token names the person, and auth describes them
+    // from what the provider told it at the exchange — it refuses an email or a
+    // name here. The body carries only the browser behind this session,
+    // for the sessions table; the header only which organization to act in.
+    const requested = await requestedOrganization();
+    const named = requested && "slug" in requested ? requested.slug : null;
+    const read = await readJson(
+      "getServerContext",
+      `${env.SERVER_URL}/internal/v1/me`,
+      {
         method: "POST",
         headers: {
           authorization: `Bearer ${session.accessToken}`,
@@ -189,51 +202,23 @@ export const getServerContext = cache(
           ...(requested && "id" in requested ? { "x-organization-id": requested.id } : {}),
         },
         body: JSON.stringify({ userAgent: await userAgent() }),
-      });
-      if (!res.ok) {
-        logger.warn(
-          { fetcher: "getServerContext", status: res.status },
-          "entities: upstream refused",
-        );
-        return null;
-      }
-      const parsed = z
-        .object({
-          person:                PersonSchema,
-          organizations:         z.array(OrganizationEntrySchema),
-          activeOrganizationId:  z.string().nullable(),
-          defaultOrganizationId: z.string().nullable(),
-          memberships:           z.array(MembershipSchema).optional(),
-          incomingInvites:       z.array(IncomingInviteSchema).optional(),
-          givenSeats:            z.array(GivenSeatSchema).optional(),
-          projectOffers:         z.array(ProjectOfferSchema).optional(),
-          flags:                 FlagSetSchema.optional(),
-        })
-        .safeParse(await res.json());
-      if (!parsed.success) {
-        logger.warn(
-          { fetcher: "getServerContext", issues: parsed.error.issues },
-          "entities: upstream shape mismatch",
-        );
-        return null;
-      }
-      const d = parsed.data;
-      const active = d.organizations.find((o) => o.organizationId === d.activeOrganizationId);
-      return {
-        person:                d.person,
-        organizations:         d.organizations,
-        activeOrganizationId:  d.activeOrganizationId,
-        defaultOrganizationId: d.defaultOrganizationId,
-        organizationNotFound:  named !== null && active?.slug !== named,
-        memberships:           (d.memberships ?? []).map((m) => ({ ...m, role: asRole(m.role) })),
-        incomingInvites:       d.incomingInvites ?? [],
-        givenSeats:            d.givenSeats ?? [],
-        projectOffers:         d.projectOffers ?? [],
-        flags:                 d.flags ?? {},
-      };
-    } catch {
-      logger.warn({ fetcher: "getServerContext" }, "entities: upstream error");
-      return null;
-    }
+      },
+      MeSchema,
+    );
+    if (read.kind !== "ok") return null;
+    const d = read.value;
+    const active = d.organizations.find((o) => o.organizationId === d.activeOrganizationId);
+    return {
+      person:                d.person,
+      organizations:         d.organizations,
+      activeOrganizationId:  d.activeOrganizationId,
+      defaultOrganizationId: d.defaultOrganizationId,
+      organizationNotFound:  named !== null && active?.slug !== named,
+      memberships:           (d.memberships ?? []).map((m) => ({ ...m, role: asRole(m.role) })),
+      incomingInvites:       d.incomingInvites ?? [],
+      givenSeats:            d.givenSeats ?? [],
+      projectOffers:         d.projectOffers ?? [],
+      flags:                 d.flags ?? {},
+    };
   },
 );

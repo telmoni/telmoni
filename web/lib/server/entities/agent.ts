@@ -13,6 +13,7 @@ import { AgentMessageRole } from "@/lib/types/enums";
 
 import { identityContext, projectHeaders } from "./identity-context";
 import { fetchProjectAnywhere } from "./projects";
+import { readFailed, readJson } from "./read";
 
 const StatusSchema = z.object({ enabled: z.boolean() });
 
@@ -57,25 +58,14 @@ export async function agentHeaders(projectId: string): Promise<Record<string, st
 export async function agentStatus(projectId: string): Promise<AgentStatus> {
   const headers = await agentHeaders(projectId);
   if (!headers) return "unavailable";
-  try {
-    const res = await fetchWithTimeout(`${env.SERVER_URL}/internal/v1/agent/status`, { headers });
-    if (!res.ok) {
-      logger.warn({ fetcher: "agentStatus", status: res.status }, "entities: upstream refused");
-      return "unavailable";
-    }
-    const parsed = StatusSchema.safeParse(await res.json());
-    if (!parsed.success) {
-      logger.warn(
-        { fetcher: "agentStatus", issues: parsed.error.issues },
-        "entities: upstream shape mismatch",
-      );
-      return "unavailable";
-    }
-    return parsed.data.enabled ? "enabled" : "disabled";
-  } catch {
-    logger.warn({ fetcher: "agentStatus" }, "entities: upstream error");
-    return "unavailable";
-  }
+  const read = await readJson(
+    "agentStatus",
+    `${env.SERVER_URL}/internal/v1/agent/status`,
+    { headers },
+    StatusSchema,
+  );
+  if (read.kind !== "ok") return "unavailable";
+  return read.value.enabled ? "enabled" : "disabled";
 }
 
 export async function listAgentConversations(
@@ -83,40 +73,24 @@ export async function listAgentConversations(
 ): Promise<AgentConversationSummary[] | null> {
   const headers = await agentHeaders(projectId);
   if (!headers) return null;
-  try {
-    const res = await fetchWithTimeout(`${env.SERVER_URL}/internal/v1/agent/conversations`, {
-      headers,
-    });
-    if (!res.ok) {
-      logger.warn(
-        { fetcher: "listAgentConversations", status: res.status },
-        "entities: upstream refused",
-      );
-      return null;
-    }
-    const parsed = ConversationListSchema.safeParse(await res.json());
-    if (!parsed.success) {
-      logger.warn(
-        { fetcher: "listAgentConversations", issues: parsed.error.issues },
-        "entities: upstream shape mismatch",
-      );
-      return null;
-    }
-    return parsed.data.conversations.map((c) => ({
-      id: c.id,
-      title: c.title,
-      createdAt: c.created_at,
-      updatedAt: c.updated_at,
-    }));
-  } catch {
-    logger.warn({ fetcher: "listAgentConversations" }, "entities: upstream error");
-    return null;
-  }
+  const read = await readJson(
+    "listAgentConversations",
+    `${env.SERVER_URL}/internal/v1/agent/conversations`,
+    { headers },
+    ConversationListSchema,
+  );
+  if (read.kind !== "ok") return null;
+  return read.value.conversations.map((c) => ({
+    id: c.id,
+    title: c.title,
+    createdAt: c.created_at,
+    updatedAt: c.updated_at,
+  }));
 }
 
 export type OpenedConversation =
   | { kind: "ok"; conversation: AgentConversation }
-  | { kind: "not-found" }
+  | { kind: "missing" }
   | { kind: "unavailable" };
 
 export async function openAgentConversation(
@@ -125,44 +99,29 @@ export async function openAgentConversation(
 ): Promise<OpenedConversation> {
   const headers = await agentHeaders(projectId);
   if (!headers) return { kind: "unavailable" };
-  try {
-    const res = await fetchWithTimeout(
-      `${env.SERVER_URL}/internal/v1/agent/conversations/${encodeURIComponent(id)}`,
-      { headers },
-    );
-    if (res.status === 404) return { kind: "not-found" };
-    if (!res.ok) {
-      logger.warn(
-        { fetcher: "openAgentConversation", status: res.status },
-        "entities: upstream refused",
-      );
-      return { kind: "unavailable" };
-    }
-    const parsed = ConversationSchema.safeParse(await res.json());
-    if (!parsed.success) {
-      logger.warn(
-        { fetcher: "openAgentConversation", issues: parsed.error.issues },
-        "entities: upstream shape mismatch",
-      );
-      return { kind: "unavailable" };
-    }
-    return {
-      kind: "ok",
-      conversation: {
-        id: parsed.data.id,
-        title: parsed.data.title,
-        messages: parsed.data.messages.map((m) => ({
-          id: m.id,
-          role: m.role,
-          content: m.content,
-          citations: m.citations,
-        })),
-      },
-    };
-  } catch {
-    logger.warn({ fetcher: "openAgentConversation" }, "entities: upstream error");
-    return { kind: "unavailable" };
-  }
+  const read = await readJson(
+    "openAgentConversation",
+    `${env.SERVER_URL}/internal/v1/agent/conversations/${encodeURIComponent(id)}`,
+    { headers },
+    ConversationSchema,
+    { 404: "missing" },
+  );
+  if (read.kind === "missing") return { kind: "missing" };
+  // The project was admitted before the read, so a refusal is the agent's outage.
+  if (read.kind !== "ok") return { kind: "unavailable" };
+  return {
+    kind: "ok",
+    conversation: {
+      id: read.value.id,
+      title: read.value.title,
+      messages: read.value.messages.map((m) => ({
+        id: m.id,
+        role: m.role,
+        content: m.content,
+        citations: m.citations,
+      })),
+    },
+  };
 }
 
 export async function deleteAgentConversation(projectId: string, id: string): Promise<boolean> {
@@ -180,8 +139,8 @@ export async function deleteAgentConversation(projectId: string, id: string): Pr
       "entities: upstream refused",
     );
     return false;
-  } catch {
-    logger.warn({ fetcher: "deleteAgentConversation" }, "entities: upstream error");
+  } catch (err) {
+    readFailed("deleteAgentConversation", err);
     return false;
   }
 }

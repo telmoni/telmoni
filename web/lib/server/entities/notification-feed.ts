@@ -1,13 +1,12 @@
 import { cache } from "react";
 import { z } from "zod";
 
-import { fetchWithTimeout } from "@/lib/api/fetch";
 import { env } from "@/lib/env";
-import { logger } from "@/lib/logger";
 import { NotificationKind } from "@/lib/types/enums";
 
 import { identityContext, organizationHeaders, projectHeaders } from "./identity-context";
 import { fetchProject } from "./projects";
+import { readJson, valueOf } from "./read";
 
 // What an incident's notice carries besides its words: its incident and its
 // alert (`crates/telemetry/src/notify.rs`), the incident its row links to.
@@ -70,23 +69,12 @@ async function read(
   fetcher: string,
   headers: Record<string, string>,
 ): Promise<NotificationFeed | null> {
-  try {
-    const res = await fetchWithTimeout(`${env.SERVER_URL}/internal/v1/notifications/feed`, {
-      headers,
-      cache: "no-store",
-    });
-    if (!res.ok) {
-      logger.warn({ fetcher, status: res.status }, "entities: upstream refused");
-      return null;
-    }
-    const parsed = FeedSchema.safeParse(await res.json());
-    if (!parsed.success) {
-      logger.warn({ fetcher, issues: parsed.error.issues }, "entities: upstream shape mismatch");
-      return null;
-    }
-    return parsed.data;
-  } catch {
-    logger.warn({ fetcher }, "entities: upstream error");
-    return null;
-  }
+  return valueOf(
+    await readJson(
+      fetcher,
+      `${env.SERVER_URL}/internal/v1/notifications/feed`,
+      { headers, cache: "no-store" },
+      FeedSchema,
+    ),
+  );
 }

@@ -1,12 +1,11 @@
 import { cache } from "react";
 import { z } from "zod";
 
-import { fetchWithTimeout } from "@/lib/api/fetch";
 import { env } from "@/lib/env";
-import { logger } from "@/lib/logger";
 import { ApiKeyScope } from "@/lib/types/enums";
 
 import { identityContext, projectHeaders } from "./identity-context";
+import { readJson } from "./read";
 
 const ApiTokenSchema = z.object({
   id: z.string(),
@@ -29,34 +28,12 @@ export const fetchTokens = cache(
     if (!projectId || projectId === "organization" || projectId === "org") return { kind: "unavailable" };
     const ctx = await identityContext();
     if (!ctx) return { kind: "unavailable" };
-    try {
-      const res = await fetchWithTimeout(
-        `${env.SERVER_URL}/internal/v1/tokens`,
-        {
-          headers: projectHeaders(ctx, projectId),
-          cache: "no-store",
-        },
-      );
-      if (res.status === 403) return { kind: "forbidden" };
-      if (!res.ok) return { kind: "unavailable" };
-      const parsed = z.array(ApiTokenSchema).safeParse(await res.json());
-      if (!parsed.success) {
-        logger.warn(
-          { fetcher: "fetchTokens", issues: parsed.error.issues },
-          "entities: upstream shape mismatch",
-        );
-        return { kind: "unavailable" };
-      }
-      return { kind: "ok", tokens: parsed.data };
-    } catch (err) {
-      logger.warn(
-        {
-          fetcher: "fetchTokens",
-          error: err instanceof Error ? err.message : String(err),
-        },
-        "entities: fetch failed",
-      );
-      return { kind: "unavailable" };
-    }
+    const read = await readJson(
+      "fetchTokens",
+      `${env.SERVER_URL}/internal/v1/tokens`,
+      { headers: projectHeaders(ctx, projectId), cache: "no-store" },
+      z.array(ApiTokenSchema),
+    );
+    return read.kind === "ok" ? { kind: "ok", tokens: read.value } : read;
   },
 );

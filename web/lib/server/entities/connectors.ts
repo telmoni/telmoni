@@ -1,9 +1,7 @@
 import { cache } from "react";
 import { z } from "zod";
 
-import { fetchWithTimeout } from "@/lib/api/fetch";
 import { env } from "@/lib/env";
-import { logger } from "@/lib/logger";
 import {
   AttemptOutcome,
   AttemptTrigger,
@@ -15,6 +13,7 @@ import {
 
 import { identityContext, projectHeaders } from "./identity-context";
 import { fetchProject } from "./projects";
+import { readJson, valueOf } from "./read";
 
 const NotificationKindSchema = z.enum(NotificationKind);
 
@@ -88,34 +87,16 @@ export type ConnectorListing = z.infer<typeof ConnectorListingSchema>;
 // renders the tiles as it did before the lane existed.
 export const fetchConnectors = cache(
   async (projectId: string): Promise<ConnectorListing | null> => {
-    const base = env.SERVER_URL;
     if (!projectId) return null;
     const [ctx, project] = await Promise.all([identityContext(), fetchProject(projectId)]);
     if (!ctx || !project) return null;
-    try {
-      const res = await fetchWithTimeout(`${base}/internal/v1/connectors`, {
-        headers: projectHeaders(ctx, projectId),
-        cache: "no-store",
-      });
-      if (!res.ok) {
-        logger.warn(
-          { fetcher: "fetchConnectors", status: res.status },
-          "entities: upstream refused",
-        );
-        return null;
-      }
-      const parsed = ConnectorListingSchema.safeParse(await res.json());
-      if (!parsed.success) {
-        logger.warn(
-          { fetcher: "fetchConnectors", issues: parsed.error.issues },
-          "entities: upstream shape mismatch",
-        );
-        return null;
-      }
-      return parsed.data;
-    } catch {
-      logger.warn({ fetcher: "fetchConnectors" }, "entities: upstream error");
-      return null;
-    }
+    return valueOf(
+      await readJson(
+        "fetchConnectors",
+        `${env.SERVER_URL}/internal/v1/connectors`,
+        { headers: projectHeaders(ctx, projectId), cache: "no-store" },
+        ConnectorListingSchema,
+      ),
+    );
   },
 );

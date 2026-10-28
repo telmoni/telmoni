@@ -1,13 +1,9 @@
 import { cache } from "react";
 import { z } from "zod";
 
-import { fetchWithTimeout } from "@/lib/api/fetch";
-import { env } from "@/lib/env";
 import { queryString } from "@/lib/list-query";
-import { logger } from "@/lib/logger";
 import { SortDirection, UserSort } from "@/lib/types/enums";
 
-import { identityContext, projectHeaders } from "./identity-context";
 import {
   FacetsSchema,
   filtersOf,
@@ -60,35 +56,8 @@ export type UsersAccess =
 /** The project's users in the window, as the server lists them. */
 export const fetchUsers = cache(
   async (projectId: string, query: UserQuery): Promise<UsersAccess> => {
-    if (!projectId) return { kind: "unavailable" };
-    const ctx = await identityContext();
-    if (!ctx) return { kind: "unavailable" };
-    try {
-      const res = await fetchWithTimeout(
-        `${env.SERVER_URL}/internal/v1/telemetry/users${queryString(query)}`,
-        { headers: projectHeaders(ctx, projectId), cache: "no-store" },
-      );
-      if (res.status === 403) return { kind: "forbidden" };
-      if (!res.ok) {
-        logger.warn({ fetcher: "fetchUsers", status: res.status }, "entities: upstream refused");
-        return { kind: "unavailable" };
-      }
-      const parsed = UserListSchema.safeParse(await res.json());
-      if (!parsed.success) {
-        logger.warn(
-          { fetcher: "fetchUsers", issues: parsed.error.issues },
-          "entities: upstream shape mismatch",
-        );
-        return { kind: "unavailable" };
-      }
-      return { kind: "ok", list: parsed.data };
-    } catch (err) {
-      logger.warn(
-        { fetcher: "fetchUsers", error: err instanceof Error ? err.message : String(err) },
-        "entities: fetch failed",
-      );
-      return { kind: "unavailable" };
-    }
+    const read = await readLane("fetchUsers", projectId, `/users${queryString(query)}`, UserListSchema);
+    return read.kind === "ok" ? { kind: "ok", list: read.value } : read;
   },
 );
 

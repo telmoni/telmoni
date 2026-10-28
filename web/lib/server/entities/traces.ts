@@ -17,6 +17,7 @@ import {
 } from "@/lib/types/enums";
 
 import { identityContext, projectHeaders } from "./identity-context";
+import { type Read, readFailed, readJson } from "./read";
 
 // One trace of the list: a run's spans summed by the server, which reads the
 // project's spans and no other's. `user_id` is as stored — hashed, unless
@@ -331,45 +332,29 @@ export type TraceAccess =
  *  a page's ordinary deadline would cut short. */
 const DOWNLOAD_TIMEOUT_MS = 30_000;
 
-function fetchFailed(fetcher: string, err: unknown): void {
-  logger.warn(
-    { fetcher, error: err instanceof Error ? err.message : String(err) },
-    "entities: fetch failed",
-  );
-}
-
 /** One of telemetry's lanes as the project reads it, its answer held to
- *  `schema`: forbidden on a 403, unavailable on anything else it cannot read. */
-export async function readLane<T>(
+ *  `schema`. */
+export async function readLane<T, E extends string = never>(
   fetcher: string,
   projectId: string,
   path: string,
   schema: z.ZodType<T>,
-): Promise<{ kind: "ok"; value: T } | { kind: "forbidden" } | { kind: "unavailable" }> {
-  if (!projectId) return { kind: "unavailable" };
-  const ctx = await identityContext();
+  statuses?: Readonly<Partial<Record<number, E>>>,
+): Promise<Read<T, E>> {
+  const ctx = projectId ? await identityContext() : null;
   if (!ctx) return { kind: "unavailable" };
-  try {
-    const res = await fetchWithTimeout(`${env.SERVER_URL}/internal/v1/telemetry${path}`, {
-      headers: projectHeaders(ctx, projectId),
-      cache: "no-store",
-    });
-    if (res.status === 403) return { kind: "forbidden" };
-    if (!res.ok) {
-      logger.warn({ fetcher, status: res.status }, "entities: upstream refused");
-      return { kind: "unavailable" };
-    }
-    const parsed = schema.safeParse(await res.json());
-    if (!parsed.success) {
-      logger.warn({ fetcher, issues: parsed.error.issues }, "entities: upstream shape mismatch");
-      return { kind: "unavailable" };
-    }
-    return { kind: "ok", value: parsed.data };
-  } catch (err) {
-    fetchFailed(fetcher, err);
-    return { kind: "unavailable" };
-  }
+  return readJson(
+    fetcher,
+    `${env.SERVER_URL}/internal/v1/telemetry${path}`,
+    { headers: projectHeaders(ctx, projectId), cache: "no-store" },
+    schema,
+    statuses,
+  );
 }
+
+/** A path the server cannot read as a run or a session, or one it has none
+ *  of: the page says it is not there. */
+export const MISSING = { 400: "missing", 404: "missing" } as const;
 
 /** A page of the project's traces in the window, as the server lists them. */
 export const fetchTraces = cache(
@@ -458,7 +443,7 @@ export async function readDownload(
       contentType: res.headers.get("content-type") ?? "application/octet-stream",
     };
   } catch (err) {
-    fetchFailed(fetcher, err);
+    readFailed(fetcher, err);
     return { kind: "unavailable" };
   }
 }
@@ -486,32 +471,13 @@ export async function traceDownload(
  *  the project's. */
 export const fetchTrace = cache(
   async (projectId: string, runId: string): Promise<TraceAccess> => {
-    if (!projectId) return { kind: "unavailable" };
-    const ctx = await identityContext();
-    if (!ctx) return { kind: "unavailable" };
-    try {
-      const res = await fetchWithTimeout(
-        `${env.SERVER_URL}/internal/v1/telemetry/traces/${encodeURIComponent(runId)}`,
-        { headers: projectHeaders(ctx, projectId), cache: "no-store" },
-      );
-      if (res.status === 403) return { kind: "forbidden" };
-      if (res.status === 404 || res.status === 400) return { kind: "missing" };
-      if (!res.ok) {
-        logger.warn({ fetcher: "fetchTrace", status: res.status }, "entities: upstream refused");
-        return { kind: "unavailable" };
-      }
-      const parsed = TraceDetailSchema.safeParse(await res.json());
-      if (!parsed.success) {
-        logger.warn(
-          { fetcher: "fetchTrace", issues: parsed.error.issues },
-          "entities: upstream shape mismatch",
-        );
-        return { kind: "unavailable" };
-      }
-      return { kind: "ok", trace: parsed.data };
-    } catch (err) {
-      fetchFailed("fetchTrace", err);
-      return { kind: "unavailable" };
-    }
+    const read = await readLane(
+      "fetchTrace",
+      projectId,
+      `/traces/${encodeURIComponent(runId)}`,
+      TraceDetailSchema,
+      MISSING,
+    );
+    return read.kind === "ok" ? { kind: "ok", trace: read.value } : read;
   },
 );

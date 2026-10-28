@@ -1,9 +1,6 @@
 import { cache } from "react";
 import { z } from "zod";
 
-import { fetchWithTimeout } from "@/lib/api/fetch";
-import { env } from "@/lib/env";
-import { logger } from "@/lib/logger";
 import {
   IncidentStatus,
   MissingData,
@@ -18,8 +15,7 @@ import {
   SpanStatus,
 } from "@/lib/types/enums";
 
-import { identityContext, projectHeaders } from "./identity-context";
-import { readLane } from "./traces";
+import { MISSING, readLane } from "./traces";
 
 // The hours a linked connector hears an alert in: days 1 (Monday) to 7, from
 // and to as HH:MM, at a fixed offset from UTC in minutes.
@@ -180,38 +176,13 @@ export const fetchRunIncidents = cache(
  *  as missing, as the server would answer one that is not the project's. */
 export const fetchIncident = cache(
   async (projectId: string, incidentId: string): Promise<IncidentAccess> => {
-    if (!projectId) return { kind: "unavailable" };
-    const ctx = await identityContext();
-    if (!ctx) return { kind: "unavailable" };
-    try {
-      const res = await fetchWithTimeout(
-        `${env.SERVER_URL}/internal/v1/telemetry/incidents/${encodeURIComponent(incidentId)}`,
-        { headers: projectHeaders(ctx, projectId), cache: "no-store" },
-      );
-      if (res.status === 403) return { kind: "forbidden" };
-      if (res.status === 404 || res.status === 400) return { kind: "missing" };
-      if (!res.ok) {
-        logger.warn({ fetcher: "fetchIncident", status: res.status }, "entities: upstream refused");
-        return { kind: "unavailable" };
-      }
-      const parsed = IncidentSchema.safeParse(await res.json());
-      if (!parsed.success) {
-        logger.warn(
-          { fetcher: "fetchIncident", issues: parsed.error.issues },
-          "entities: upstream shape mismatch",
-        );
-        return { kind: "unavailable" };
-      }
-      return { kind: "ok", incident: parsed.data };
-    } catch (err) {
-      logger.warn(
-        {
-          fetcher: "fetchIncident",
-          error: err instanceof Error ? err.message : String(err),
-        },
-        "entities: fetch failed",
-      );
-      return { kind: "unavailable" };
-    }
+    const read = await readLane(
+      "fetchIncident",
+      projectId,
+      `/incidents/${encodeURIComponent(incidentId)}`,
+      IncidentSchema,
+      MISSING,
+    );
+    return read.kind === "ok" ? { kind: "ok", incident: read.value } : read;
   },
 );

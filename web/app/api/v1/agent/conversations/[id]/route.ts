@@ -24,7 +24,7 @@ export async function GET(
   }
   const opened = await openAgentConversation(projectId, id);
   if (opened.kind === "ok") return agentReply({ conversation: opened.conversation });
-  if (opened.kind === "not-found") {
+  if (opened.kind === "missing") {
     return agentRefusal("That conversation no longer exists.", 404);
   }
   return agentRefusal(AGENT_UNAVAILABLE, 503);

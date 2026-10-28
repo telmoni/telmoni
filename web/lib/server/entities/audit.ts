@@ -14,6 +14,7 @@ import {
 import { ResourceKind } from "@/lib/types/enums";
 
 import { identityContext, organizationHeaders, projectHeaders } from "./identity-context";
+import { readFailed, readJson } from "./read";
 
 const AuditEventSchema = z.object({
   id: z.string(),
@@ -44,6 +45,7 @@ export const fetchAuditEvents = cache(
     const ctx = await identityContext();
     if (!ctx) return { kind: "unavailable" };
     return listAudit(
+      "fetchAuditEvents",
       `${env.SERVER_URL}/internal/v1/audit/projects/${encodeURIComponent(
         projectId,
       )}?limit=${limit}`,
@@ -57,6 +59,7 @@ export const fetchOrganizationAudit = cache(
     const ctx = await identityContext();
     if (!ctx) return { kind: "unavailable" };
     return listAudit(
+      "fetchOrganizationAudit",
       `${env.SERVER_URL}/internal/v1/audit/organizations/${encodeURIComponent(
         ctx.organizationId,
       )}?limit=${limit}`,
@@ -83,7 +86,7 @@ export type AuditExportFile =
   | { kind: "ok"; body: ArrayBuffer; contentType: string }
   | { kind: "forbidden" }
   /** Not the caller's, never finished, or past its week. */
-  | { kind: "gone" }
+  | { kind: "missing" }
   /** The organization's data out for the day is spent: until `retryAfter`. */
   | { kind: "spent"; retryAfter: string | null }
   | { kind: "unavailable" };
@@ -99,38 +102,20 @@ function exportsUrl(organizationId: string, id?: string): string {
   return id ? `${base}/${encodeURIComponent(id)}` : base;
 }
 
-function fetchFailed(fetcher: string, err: unknown): void {
-  logger.warn(
-    { fetcher, error: err instanceof Error ? err.message : String(err) },
-    "entities: fetch failed",
-  );
-}
-
 /** The caller's latest exports of the active organization's audit log, newest
  *  first, as the bell and the export dialog show them. */
 export async function listAuditExports(): Promise<AuditExportsAccess> {
   const ctx = await identityContext();
   if (!ctx) return { kind: "unavailable" };
-  try {
-    const res = await fetchWithTimeout(exportsUrl(ctx.organizationId), {
-      headers: organizationHeaders(ctx),
-    });
-    if (res.status === 403) return { kind: "forbidden" };
-    if (!res.ok) return { kind: "unavailable" };
-    const parsed = AuditExportListSchema.safeParse(await res.json());
-    if (!parsed.success) {
-      logger.warn(
-        { fetcher: "listAuditExports", issues: parsed.error.issues },
-        "entities: upstream shape mismatch",
-      );
-      return { kind: "unavailable" };
-    }
-    const { exports, max_rows, max_bytes } = parsed.data;
-    return { kind: "ok", exports, limits: { max_rows, max_bytes } };
-  } catch (err) {
-    fetchFailed("listAuditExports", err);
-    return { kind: "unavailable" };
-  }
+  const read = await readJson(
+    "listAuditExports",
+    exportsUrl(ctx.organizationId),
+    { headers: organizationHeaders(ctx) },
+    AuditExportListSchema,
+  );
+  if (read.kind !== "ok") return read;
+  const { exports, max_rows, max_bytes } = read.value;
+  return { kind: "ok", exports, limits: { max_rows, max_bytes } };
 }
 
 /** Queue an export of the active organization's audit log; auth builds it in
@@ -142,8 +127,10 @@ export async function startAuditExport(input: {
 }): Promise<StartedAuditExport> {
   const ctx = await identityContext();
   if (!ctx) return { kind: "unavailable" };
-  try {
-    const res = await fetchWithTimeout(exportsUrl(ctx.organizationId), {
+  const read = await readJson(
+    "startAuditExport",
+    exportsUrl(ctx.organizationId),
+    {
       method: "POST",
       headers: { ...organizationHeaders(ctx), "content-type": "application/json" },
       body: JSON.stringify({
@@ -151,24 +138,11 @@ export async function startAuditExport(input: {
         ...(input.from ? { from: input.from } : {}),
         ...(input.to ? { to: input.to } : {}),
       }),
-    });
-    if (res.status === 403) return { kind: "forbidden" };
-    if (res.status === 409) return { kind: "busy" };
-    if (res.status === 400) return { kind: "invalid" };
-    if (!res.ok) return { kind: "unavailable" };
-    const parsed = AuditExportSchema.safeParse(await res.json());
-    if (!parsed.success) {
-      logger.warn(
-        { fetcher: "startAuditExport", issues: parsed.error.issues },
-        "entities: upstream shape mismatch",
-      );
-      return { kind: "unavailable" };
-    }
-    return { kind: "ok", export: parsed.data };
-  } catch (err) {
-    fetchFailed("startAuditExport", err);
-    return { kind: "unavailable" };
-  }
+    },
+    AuditExportSchema,
+    { 409: "busy", 400: "invalid" },
+  );
+  return read.kind === "ok" ? { kind: "ok", export: read.value } : read;
 }
 
 /**
@@ -187,42 +161,28 @@ export async function auditExportFile(id: string): Promise<AuditExportFile> {
       FILE_TIMEOUT_MS,
     );
     if (res.status === 403) return { kind: "forbidden" };
-    if (res.status === 404 || res.status === 400) return { kind: "gone" };
+    if (res.status === 404 || res.status === 400) return { kind: "missing" };
     if (res.status === 429) return { kind: "spent", retryAfter: res.headers.get("retry-after") };
-    if (!res.ok) return { kind: "unavailable" };
+    if (!res.ok) {
+      logger.warn({ fetcher: "auditExportFile", status: res.status }, "entities: upstream refused");
+      return { kind: "unavailable" };
+    }
     return {
       kind: "ok",
       body: await res.arrayBuffer(),
       contentType: res.headers.get("content-type") ?? "application/octet-stream",
     };
   } catch (err) {
-    fetchFailed("auditExportFile", err);
+    readFailed("auditExportFile", err);
     return { kind: "unavailable" };
   }
 }
 
 async function listAudit(
+  fetcher: string,
   url: string,
   headers: Record<string, string>,
 ): Promise<AuditAccess> {
-  try {
-    const res = await fetchWithTimeout(url, { headers });
-    if (res.status === 403) return { kind: "forbidden" };
-    if (!res.ok) return { kind: "unavailable" };
-    const parsed = ListSchema.safeParse(await res.json());
-    if (!parsed.success) {
-      logger.warn(
-        { fetcher: "audit", issues: parsed.error.issues },
-        "entities: upstream shape mismatch",
-      );
-      return { kind: "unavailable" };
-    }
-    return { kind: "ok", events: parsed.data.events };
-  } catch (err) {
-    logger.warn(
-      { fetcher: "audit", error: err instanceof Error ? err.message : String(err) },
-      "entities: fetch failed",
-    );
-    return { kind: "unavailable" };
-  }
+  const read = await readJson(fetcher, url, { headers }, ListSchema);
+  return read.kind === "ok" ? { kind: "ok", events: read.value.events } : read;
 }
