@@ -56,6 +56,7 @@ export function AgentPanel() {
 
   const [view, setView] = useState<View>("conversation");
   const [state, dispatch] = useReducer(agentReducer, initialAgentState);
+  const streaming = state.turn.phase === "streaming";
   const [history, setHistory] = useState<HistoryState>({ kind: "loading" });
   const [draft, setDraft] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
@@ -300,7 +301,7 @@ export function AgentPanel() {
   const send = useCallback(
     async (raw: string) => {
       const text = raw.trim();
-      if (!text || !projectId || state.streaming) return;
+      if (!text || !projectId || streaming) return;
       openAsk.current++;
       setNotice(null);
       setView("conversation");
@@ -383,11 +384,11 @@ export function AgentPanel() {
         if (turnRef.current === turn) turnRef.current = null;
       }
     },
-    [projectId, state.conversationId, state.streaming, cancelTurn],
+    [projectId, state.conversationId, streaming, cancelTurn],
   );
 
   const submit = () => {
-    if (state.streaming || draft.trim() === "") return;
+    if (streaming || draft.trim() === "") return;
     void send(draft);
     setDraft("");
   };
@@ -510,24 +511,18 @@ export function AgentPanel() {
         onDelete={(id) => void deleteConversation(id)}
       />
     );
-  } else if (state.messages.length === 0 && !state.error) {
+  } else if (state.messages.length === 0 && state.turn.phase !== "failed") {
     content = (
       <Welcome
         project={project?.name ?? "this project"}
         suggestions={agentSuggestions(project?.role ?? null)}
-        disabled={!canAsk || state.streaming}
+        disabled={!canAsk || streaming}
         onAsk={(question) => void send(question)}
       />
     );
   } else {
     content = (
-      <Conversation
-        messages={state.messages}
-        streaming={state.streaming}
-        tool={state.tool}
-        error={state.error}
-        stopped={state.stopped}
-      />
+      <Conversation messages={state.messages} turn={state.turn} />
     );
   }
 
@@ -617,21 +612,21 @@ export function AgentPanel() {
                   become a submit while its own press is still landing. */}
               <button
                 type="button"
-                aria-label={state.streaming ? "Stop the reply" : "Send"}
-                title={state.streaming ? "Stop" : "Send"}
+                aria-label={streaming ? "Stop the reply" : "Send"}
+                title={streaming ? "Stop" : "Send"}
                 disabled={!canAsk}
-                aria-disabled={!state.streaming && draft.trim() === "" ? true : undefined}
-                onClick={state.streaming ? stop : submit}
+                aria-disabled={!streaming && draft.trim() === "" ? true : undefined}
+                onClick={streaming ? stop : submit}
                 className={cn(
                   "flex size-8 shrink-0 items-center justify-center rounded-md",
-                  state.streaming
+                  streaming
                     ? "cursor-pointer bg-foreground text-background hover:bg-foreground/80"
                     : canAsk && draft.trim() !== ""
                       ? "cursor-pointer bg-primary text-primary-foreground hover:bg-primary/90"
                       : "cursor-not-allowed bg-muted text-muted-foreground",
                 )}
               >
-                {state.streaming ? (
+                {streaming ? (
                   <Square className="size-3 fill-current" />
                 ) : (
                   <ArrowUp className="size-4" />

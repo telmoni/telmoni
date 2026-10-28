@@ -187,24 +187,27 @@ export interface AgentProblem {
   detail: string | null;
 }
 
+/** Where the last reply stands, one phase at a time: `stopped` where the
+ *  person stopped it or closed the window on it, what it wrote kept on
+ *  screen, marked as stopped, and not saved. */
+export type Turn =
+  | { phase: "idle" }
+  | { phase: "streaming"; tool: string | null }
+  | { phase: "stopped" }
+  | { phase: "failed"; problem: AgentProblem };
+
 export interface AgentState {
   conversationId: string | null;
   messages: AgentMessage[];
-  streaming: boolean;
-  tool: string | null;
-  error: AgentProblem | null;
-  /** The person stopped the last reply, or closed the window on it: what it
-   *  had written stays on screen, marked as stopped, and is not saved. */
-  stopped: boolean;
+  turn: Turn;
 }
+
+const IDLE: Turn = { phase: "idle" };
 
 export const initialAgentState: AgentState = {
   conversationId: null,
   messages: [],
-  streaming: false,
-  tool: null,
-  error: null,
-  stopped: false,
+  turn: IDLE,
 };
 
 export type AgentAction =
@@ -244,31 +247,24 @@ export function agentReducer(state: AgentState, action: AgentAction): AgentState
           { id: action.userId, role: "user", content: action.message, citations: [] },
           { id: action.assistantId, role: "assistant", content: "", citations: [] },
         ],
-        streaming: true,
-        tool: null,
-        error: null,
-        stopped: false,
+        turn: { phase: "streaming", tool: null },
       };
     case "fail":
       // Only a turn in progress can fail. One already reset away (another
       // project, a new conversation) can still fail on its way out, and that
       // must not land on what replaced it.
-      if (!state.streaming) return state;
+      if (state.turn.phase !== "streaming") return state;
       return {
         ...state,
         messages: dropEmptyReply(state.messages),
-        streaming: false,
-        tool: null,
-        error: action.problem,
+        turn: { phase: "failed", problem: action.problem },
       };
     case "stop":
-      if (!state.streaming) return state;
+      if (state.turn.phase !== "streaming") return state;
       return {
         ...state,
         messages: dropEmptyReply(state.messages),
-        streaming: false,
-        tool: null,
-        stopped: true,
+        turn: { phase: "stopped" },
       };
     case "load":
       return {
@@ -284,7 +280,7 @@ export function agentReducer(state: AgentState, action: AgentAction): AgentState
 }
 
 function applyEvent(state: AgentState, event: AgentEvent): AgentState {
-  if (!state.streaming) return state;
+  if (state.turn.phase !== "streaming") return state;
   switch (event.type) {
     // ⚠ **The turn's conversation is known from its first event, not its
     // last.** A first question stopped, or cut off, before `done` left the
@@ -295,14 +291,14 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
     case "text":
       return {
         ...state,
-        tool: null,
+        turn: { phase: "streaming", tool: null },
         messages: withLastAssistant(state.messages, (m) => ({
           ...m,
           content: m.content + event.delta,
         })),
       };
     case "tool":
-      return { ...state, tool: event.name };
+      return { ...state, turn: { phase: "streaming", tool: event.name } };
     case "citation":
       return {
         ...state,
@@ -316,8 +312,7 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
       return {
         ...state,
         conversationId: event.conversationId,
-        streaming: false,
-        tool: null,
+        turn: IDLE,
         messages: withLastAssistant(state.messages, (m) => ({
           ...m,
           id: event.messageId,
@@ -328,9 +323,7 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
         ...state,
         conversationId: event.conversationId ?? state.conversationId,
         messages: dropEmptyReply(state.messages),
-        streaming: false,
-        tool: null,
-        error: { title: event.title, detail: event.detail },
+        turn: { phase: "failed", problem: { title: event.title, detail: event.detail } },
       };
   }
 }

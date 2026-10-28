@@ -2,22 +2,14 @@
 
 import { Reply, Sources } from "@/components/agent/agent-reply";
 import { AgentThinking } from "@/components/agent/agent-thinking";
-import { toolStatus, type AgentProblem } from "@/lib/agent/stream";
+import { toolStatus, type Turn } from "@/lib/agent/stream";
 import type { AgentMessage } from "@/lib/types/agent";
 
-export function Conversation({
-  messages,
-  streaming,
-  tool,
-  error,
-  stopped,
-}: {
-  messages: AgentMessage[];
-  streaming: boolean;
-  tool: string | null;
-  error: AgentProblem | null;
-  stopped: boolean;
-}) {
+export function Conversation({ messages, turn }: { messages: AgentMessage[]; turn: Turn }) {
+  const streaming = turn.phase === "streaming";
+  const tool = turn.phase === "streaming" ? turn.tool : null;
+  const stopped = turn.phase === "stopped";
+  const error = turn.phase === "failed" ? turn.problem : null;
   const partial = stopped && messages[messages.length - 1]?.role === "assistant";
   return (
     <div role="log" aria-live="polite" aria-busy={streaming} className="grid gap-4">

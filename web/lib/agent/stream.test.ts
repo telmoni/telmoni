@@ -147,7 +147,7 @@ function sent(): AgentState {
 describe("agentReducer", () => {
   it("adds the question and an empty reply, and starts streaming", () => {
     const s = sent();
-    expect(s.streaming).toBe(true);
+    expect(s.turn).toEqual({ phase: "streaming", tool: null });
     expect(s.messages.map((m) => [m.role, m.content])).toEqual([
       ["user", "Who are the members?"],
       ["assistant", ""],
@@ -157,9 +157,9 @@ describe("agentReducer", () => {
   it("appends text, shows a tool until text resumes, and collects citations once", () => {
     let s = sent();
     s = agentReducer(s, { type: "event", event: { type: "tool", name: "list_members" } });
-    expect(s.tool).toBe("list_members");
+    expect(s.turn).toEqual({ phase: "streaming", tool: "list_members" });
     s = agentReducer(s, { type: "event", event: { type: "text", delta: "Two " } });
-    expect(s.tool).toBeNull();
+    expect(s.turn).toEqual({ phase: "streaming", tool: null });
     s = agentReducer(s, { type: "event", event: { type: "text", delta: "members [1]." } });
     const citation = { index: 1, title: "Members", url: "/p/members" };
     s = agentReducer(s, { type: "event", event: { type: "citation", citation } });
@@ -176,7 +176,7 @@ describe("agentReducer", () => {
       type: "event",
       event: { type: "done", conversationId: "c1", messageId: "m1" },
     });
-    expect(s.streaming).toBe(false);
+    expect(s.turn).toEqual({ phase: "idle" });
     expect(s.conversationId).toBe("c1");
     expect(s.messages[1]!.id).toBe("m1");
   });
@@ -193,17 +193,19 @@ describe("agentReducer", () => {
         detail: null,
       },
     });
-    expect(s.streaming).toBe(false);
+    expect(s.turn).toEqual({
+      phase: "failed",
+      problem: { title: "model unavailable", detail: null },
+    });
     expect(s.conversationId).toBe("c1");
     expect(s.messages.map((m) => m.role)).toEqual(["user"]);
-    expect(s.error).toEqual({ title: "model unavailable", detail: null });
   });
 
   it("learns its conversation from the turn's first event", () => {
     let s = sent();
     s = agentReducer(s, { type: "event", event: { type: "conversation", conversationId: "c1" } });
     expect(s.conversationId).toBe("c1");
-    expect(s.streaming).toBe(true);
+    expect(s.turn.phase).toBe("streaming");
   });
 
   // A first question stopped before `done` still belongs to the conversation
@@ -214,14 +216,11 @@ describe("agentReducer", () => {
     s = agentReducer(s, { type: "event", event: { type: "tool", name: "search" } });
     s = agentReducer(s, { type: "event", event: { type: "text", delta: "So far" } });
     s = agentReducer(s, { type: "stop" });
-    expect(s.streaming).toBe(false);
-    expect(s.stopped).toBe(true);
-    expect(s.tool).toBeNull();
-    expect(s.error).toBeNull();
+    expect(s.turn).toEqual({ phase: "stopped" });
     expect(s.conversationId).toBe("c1");
     expect(s.messages[1]!.content).toBe("So far");
     const next = agentReducer(s, { type: "send", userId: "u2", assistantId: "a2", message: "And?" });
-    expect(next.stopped).toBe(false);
+    expect(next.turn).toEqual({ phase: "streaming", tool: null });
   });
 
   it("drops an empty reply when stopped before it began, and ignores a stop when idle", () => {
@@ -235,7 +234,7 @@ describe("agentReducer", () => {
     s = agentReducer(s, { type: "event", event: { type: "text", delta: "Partial" } });
     s = agentReducer(s, { type: "fail", problem: { title: "cut off", detail: null } });
     expect(s.messages[1]!.content).toBe("Partial");
-    expect(s.error?.title).toBe("cut off");
+    expect(s.turn).toEqual({ phase: "failed", problem: { title: "cut off", detail: null } });
   });
 
   it("ignores events once the turn has settled", () => {
@@ -266,7 +265,7 @@ describe("agentReducer", () => {
       },
     });
     expect(loaded.conversationId).toBe("c9");
-    expect(loaded.streaming).toBe(false);
+    expect(loaded.turn).toEqual({ phase: "idle" });
     expect(loaded.messages).toHaveLength(1);
     expect(agentReducer(loaded, { type: "reset" })).toEqual(initialAgentState);
   });
