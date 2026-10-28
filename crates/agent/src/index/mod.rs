@@ -149,58 +149,90 @@ impl From<SourceDocument> for Entry {
 /// The loop's name in `agent.heartbeats`.
 pub const HEARTBEAT: &str = "index";
 
-/// The loop, forever. A failed tick is logged and the next one retries from
-/// the cursor, which only moves when a page's passages are written; every
-/// tick that ends beats, one waiting on an endpoint that does not answer too.
+/// What one tick hands the next: when the docs are next refreshed, and
+/// whether the embedder's width has been checked.
+#[derive(Clone, Copy)]
+struct Progress {
+    docs_due: Instant,
+    width_checked: bool,
+}
+
+/// How a tick ended: beating, with what the next carries on from, or
+/// stopping the indexer for good.
+enum Tick {
+    Beat(Progress),
+    Stop,
+}
+
+/// The loop, forever. Each tick runs on its own task, so one that panics
+/// ends itself alone and the next retries from the cursor, which only moves
+/// when a page's passages are written; every tick that ends beats, one
+/// waiting on an endpoint that does not answer too.
 pub async fn run(state: Arc<AppState>) {
     state.heartbeats.runs(HEARTBEAT, EVERY);
     tokio::time::sleep(START_DELAY).await;
     let mut ticker = tokio::time::interval(EVERY);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    let mut docs_due = Instant::now();
-    let mut width_checked = false;
+    let mut progress = Progress {
+        docs_due: Instant::now(),
+        width_checked: false,
+    };
     loop {
         ticker.tick().await;
-        // Boot gives up on an endpoint that does not answer, so the width it
-        // could not check is checked here, once the endpoint answers and
-        // before anything is written with it. A wrong one stops the indexer
-        // rather than warning on every write forever.
-        if !width_checked && let Ok(embedder) = state.embedder() {
-            match crate::boot::probe_width(embedder).await {
-                Ok(crate::boot::Probe::Fits) => width_checked = true,
-                Ok(crate::boot::Probe::Unanswered) => {
-                    state.heartbeats.beat(&state.db, HEARTBEAT).await;
-                    continue;
-                }
-                Err(e) => {
-                    tracing::error!(error = %e, "agent indexing stopped");
-                    return;
-                }
+        match tokio::spawn(tick(state.clone(), progress)).await {
+            Ok(Tick::Beat(next)) => {
+                progress = next;
+                state.heartbeats.beat(&state.db, HEARTBEAT).await;
+            }
+            Ok(Tick::Stop) => return,
+            Err(error) => {
+                tracing::error!(error = %error, "agent indexing tick died; the next one runs");
             }
         }
-        for paged in Paged::ALL {
-            let source = paged.source().as_str();
-            match index_source(&state, paged).await {
-                Ok(0) => {}
-                Ok(n) => tracing::info!(source, rows = n, "agent index updated"),
-                Err(e) => tracing::warn!(
-                    source,
-                    error = %e,
-                    "agent indexing failed; the next tick retries from the cursor"
-                ),
-            }
-        }
-        if Instant::now() >= docs_due {
-            match docs::refresh(&state).await {
-                Ok(()) => docs_due = Instant::now() + DOCS_EVERY,
-                Err(e) => {
-                    docs_due = Instant::now() + DOCS_RETRY;
-                    tracing::warn!(error = %e, "agent docs refresh failed; retrying in an hour");
-                }
-            }
-        }
-        state.heartbeats.beat(&state.db, HEARTBEAT).await;
     }
+}
+
+/// One tick: the width checked once the endpoint answers, every source paged
+/// forward, and the docs refreshed when due.
+async fn tick(state: Arc<AppState>, mut progress: Progress) -> Tick {
+    // Boot gives up on an endpoint that does not answer, so the width it
+    // could not check is checked here, once the endpoint answers and
+    // before anything is written with it. A wrong one stops the indexer
+    // rather than warning on every write forever.
+    if !progress.width_checked
+        && let Ok(embedder) = state.embedder()
+    {
+        match crate::boot::probe_width(embedder).await {
+            Ok(crate::boot::Probe::Fits) => progress.width_checked = true,
+            Ok(crate::boot::Probe::Unanswered) => return Tick::Beat(progress),
+            Err(e) => {
+                tracing::error!(error = %e, "agent indexing stopped");
+                return Tick::Stop;
+            }
+        }
+    }
+    for paged in Paged::ALL {
+        let source = paged.source().as_str();
+        match index_source(&state, paged).await {
+            Ok(0) => {}
+            Ok(n) => tracing::info!(source, rows = n, "agent index updated"),
+            Err(e) => tracing::warn!(
+                source,
+                error = %e,
+                "agent indexing failed; the next tick retries from the cursor"
+            ),
+        }
+    }
+    if Instant::now() >= progress.docs_due {
+        match docs::refresh(&state).await {
+            Ok(()) => progress.docs_due = Instant::now() + DOCS_EVERY,
+            Err(e) => {
+                progress.docs_due = Instant::now() + DOCS_RETRY;
+                tracing::warn!(error = %e, "agent docs refresh failed; retrying in an hour");
+            }
+        }
+    }
+    Tick::Beat(progress)
 }
 
 /// Page one source forward from its cursor. Answers how many rows it took.
