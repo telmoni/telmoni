@@ -13,7 +13,7 @@
 //! request.
 
 use chrono::{DateTime, Utc};
-use clickhouse::Row;
+use clickhouse::{Row, RowOwned, RowRead};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -702,57 +702,107 @@ pub(crate) fn filtered(read: Read, filter: &TraceFilter) -> Read {
         .param("runs", &filter.runs)
 }
 
-/// The traces of `projects` the filter admits, sorted as asked: up to
-/// `limit` of them, past the first `offset`.
+/// One list over a window's runs — the traces, the sessions or the users —
+/// by what it lists: its rows, its sorts, and the SQL of its three reads.
+pub(crate) trait Listing {
+    type Row: RowOwned + RowRead + serde::de::DeserializeOwned;
+    type Sort: Copy + std::str::FromStr + std::fmt::Display + 'static;
+    /// Every sort, in the refusal's order.
+    const SORTS: &'static [Self::Sort];
+    /// The sort when the query names none.
+    const FALLBACK: Self::Sort;
+    const COUNT_SQL: &'static str;
+    const FACETS_SQL: &'static str;
+    /// The page's SQL for one sort: a literal per column and direction.
+    fn list_sql(sort: Self::Sort, direction: SortDirection) -> &'static str;
+    /// The way a column sorts when the URL names none.
+    fn first_direction(sort: Self::Sort) -> SortDirection;
+}
+
+/// The trace list: a run a row.
+pub(crate) struct Traces;
+
+impl Listing for Traces {
+    type Row = TraceRow;
+    type Sort = TraceSort;
+    const SORTS: &'static [TraceSort] = &TraceSort::all();
+    const FALLBACK: TraceSort = TraceSort::Started;
+    const COUNT_SQL: &'static str = COUNT_SQL;
+    const FACETS_SQL: &'static str = FACETS_SQL;
+
+    fn list_sql(sort: TraceSort, direction: SortDirection) -> &'static str {
+        list_sql(sort, direction)
+    }
+
+    /// The newest, the longest and the most first; names in the alphabet's
+    /// order.
+    fn first_direction(sort: TraceSort) -> SortDirection {
+        match sort {
+            TraceSort::Started
+            | TraceSort::Steps
+            | TraceSort::ModelCalls
+            | TraceSort::ToolCalls
+            | TraceSort::Errors
+            | TraceSort::InputTokens
+            | TraceSort::OutputTokens
+            | TraceSort::Tokens
+            | TraceSort::Duration => SortDirection::Desc,
+            TraceSort::Agent | TraceSort::User | TraceSort::Session | TraceSort::Status => {
+                SortDirection::Asc
+            }
+        }
+    }
+}
+
+/// The rows of `projects` the filter admits, sorted as asked: up to `limit`
+/// of them, past the first `offset`.
 ///
 /// # Errors
 ///
 /// ClickHouse did not answer, or refused the read.
-pub async fn list(
+pub(crate) async fn list<L: Listing>(
     store: &Store,
     projects: &Projects,
     filter: &TraceFilter,
-    sort: TraceSort,
-    direction: SortDirection,
+    (sort, direction): (L::Sort, SortDirection),
     limit: u32,
     offset: u64,
-) -> clickhouse::error::Result<Vec<TraceRow>> {
-    filtered(store.read(projects, list_sql(sort, direction)), filter)
+) -> clickhouse::error::Result<Vec<L::Row>> {
+    filtered(store.read(projects, L::list_sql(sort, direction)), filter)
         .param("limit", limit)
         .param("offset", offset)
         .fetch_all()
         .await
 }
 
-/// How many traces of `projects` the filter admits.
+/// How many rows of `projects` the filter admits.
 ///
 /// # Errors
 ///
 /// ClickHouse did not answer, or refused the read.
-pub async fn count(
+pub(crate) async fn count<L: Listing>(
     store: &Store,
     projects: &Projects,
     filter: &TraceFilter,
 ) -> clickhouse::error::Result<u64> {
-    let row: CountRow = filtered(store.read(projects, COUNT_SQL), filter)
+    let row: CountRow = filtered(store.read(projects, L::COUNT_SQL), filter)
         .fetch_one()
         .await?;
     Ok(row.total)
 }
 
-/// The values of each facet among the traces of `projects`, each counted
-/// under every filter but its own: up to one more than [`FACET_VALUES_MAX`]
-/// of each, the ticked ones first, then the most runs.
+/// The values of each facet among the rows of `projects`, each counted
+/// under every filter but its own.
 ///
 /// # Errors
 ///
 /// ClickHouse did not answer, or refused the read.
-pub async fn facets(
+pub(crate) async fn facets<L: Listing>(
     store: &Store,
     projects: &Projects,
     filter: &TraceFilter,
 ) -> clickhouse::error::Result<Vec<FacetRow>> {
-    filtered(store.read(projects, FACETS_SQL), filter)
+    filtered(store.read(projects, L::FACETS_SQL), filter)
         .fetch_all()
         .await
 }

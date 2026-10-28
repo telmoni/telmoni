@@ -16,40 +16,8 @@ use telmoni_shared::extract::{Json, Query};
 use telmoni_shared::{SortDirection, TelmoniError, UserSort};
 
 use crate::AppState;
-use crate::handler::traces::{
-    Facets, Reading, TraceQuery, download, parse_format, read_failed, readable,
-};
-use crate::traces::EXPORT_MAX;
-use crate::users::{self, UserRow};
-
-/// What a sort the page does not take is refused with.
-const SORTS: &str = "sort is one of user, traces, errors, steps, input_tokens, output_tokens, \
-                     tokens, first_seen, last_seen";
-
-/// The way a column sorts when the URL names none: the most and the latest
-/// first; ids in the alphabet's order, and the earliest seen first.
-#[must_use]
-pub const fn default_direction(sort: UserSort) -> SortDirection {
-    match sort {
-        UserSort::User | UserSort::FirstSeen => SortDirection::Asc,
-        UserSort::Traces
-        | UserSort::Errors
-        | UserSort::Steps
-        | UserSort::InputTokens
-        | UserSort::OutputTokens
-        | UserSort::Tokens
-        | UserSort::LastSeen => SortDirection::Desc,
-    }
-}
-
-/// The page's sort: the most tokens first, unless the query names another.
-///
-/// # Errors
-///
-/// A column or a direction there is none of, never echoed.
-pub fn sort(query: &TraceQuery) -> Result<(UserSort, SortDirection), TelmoniError> {
-    query.sort_among(UserSort::Tokens, default_direction, SORTS)
-}
+use crate::handler::traces::{Facets, Reading, download, export_rows, facets_page, list_page};
+use crate::users::{UserRow, Users};
 
 /// What the page's lane answers.
 #[derive(Debug, Serialize)]
@@ -138,33 +106,16 @@ pub async fn list_users(
     headers: HeaderMap,
     Query(pairs): Query<Vec<(String, String)>>,
 ) -> Result<Json<UserList>, TelmoniError> {
-    let projects = readable(&state, &headers).await?;
-    let query = TraceQuery::read(pairs, Reading::List)?;
-    let filter = query.filter()?;
-    let (sort, dir) = sort(&query)?;
-    let paging = query.paging()?;
-    let (rows, total) = tokio::try_join!(
-        users::list(
-            &state.store,
-            &projects,
-            &filter,
-            sort,
-            dir,
-            paging.limit,
-            paging.skipped
-        ),
-        users::count(&state.store, &projects, &filter),
-    )
-    .map_err(read_failed)?;
+    let listed = list_page::<Users>(&state, &headers, pairs).await?;
     Ok(Json(UserList {
-        more: paging.more(rows.len(), total),
-        users: rows.into_iter().map(User::from).collect(),
-        days: filter.days,
-        limit: paging.limit,
-        page: paging.page,
-        total,
-        sort,
-        dir,
+        more: listed.more(),
+        users: listed.rows.into_iter().map(User::from).collect(),
+        days: listed.days,
+        limit: listed.paging.limit,
+        page: listed.paging.page,
+        total: listed.total,
+        sort: listed.sort,
+        dir: listed.dir,
     }))
 }
 
@@ -176,29 +127,18 @@ pub async fn get_user_facets(
     headers: HeaderMap,
     Query(pairs): Query<Vec<(String, String)>>,
 ) -> Result<Json<Facets>, TelmoniError> {
-    let projects = readable(&state, &headers).await?;
-    let filter = TraceQuery::read(pairs, Reading::Facets)?.filter()?;
-    let rows = users::facets(&state.store, &projects, &filter)
-        .await
-        .map_err(read_failed)?;
-    Ok(Json(Facets::of(filter.days, rows)))
+    Ok(Json(facets_page::<Users>(&state, &headers, pairs).await?))
 }
 
 /// `GET /internal/v1/telemetry/users/export` — the project's users the filter
-/// admits, sorted as asked, as a file: up to [`EXPORT_MAX`] of them.
+/// admits, sorted as asked, as a file: up to [`EXPORT_MAX`](crate::traces::EXPORT_MAX)
+/// of them.
 pub async fn export_users(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Query(pairs): Query<Vec<(String, String)>>,
 ) -> Result<Response, TelmoniError> {
-    let projects = readable(&state, &headers).await?;
-    let query = TraceQuery::read(pairs, Reading::Export)?;
-    let filter = query.filter()?;
-    let (sort, dir) = sort(&query)?;
-    let format = parse_format(query.format.as_deref().unwrap_or_default())?;
-    let rows = users::list(&state.store, &projects, &filter, sort, dir, EXPORT_MAX, 0)
-        .await
-        .map_err(read_failed)?;
+    let (rows, format) = export_rows::<Users>(&state, &headers, pairs, Reading::Export).await?;
     let users: Vec<User> = rows.into_iter().map(User::from).collect();
     download(format, &users, &CSV_HEADER, User::cells, "user")
 }
@@ -206,6 +146,8 @@ pub async fn export_users(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::handler::traces::TraceQuery;
+    use crate::traces::Listing;
     use crate::traces::{DEFAULT_DAYS, DEFAULT_LIMIT};
 
     fn pairs(query: &[(&str, &str)]) -> Vec<(String, String)> {
@@ -221,7 +163,7 @@ mod tests {
         assert_eq!(query.filter().expect("the default").days, DEFAULT_DAYS);
         assert_eq!(query.paging().expect("the default").limit, DEFAULT_LIMIT);
         assert_eq!(
-            sort(&query).expect("the default"),
+            query.sort_for::<Users>().expect("the default"),
             (UserSort::Tokens, SortDirection::Desc)
         );
     }
@@ -232,13 +174,19 @@ mod tests {
             let query = TraceQuery::read(pairs(&[("sort", &column.to_string())]), Reading::List)
                 .expect("read");
             assert_eq!(
-                sort(&query).expect("a column"),
-                (column, default_direction(column))
+                query.sort_for::<Users>().expect("a column"),
+                (column, Users::first_direction(column))
             );
         }
-        assert_eq!(default_direction(UserSort::User), SortDirection::Asc);
-        assert_eq!(default_direction(UserSort::FirstSeen), SortDirection::Asc);
-        assert_eq!(default_direction(UserSort::LastSeen), SortDirection::Desc);
+        assert_eq!(Users::first_direction(UserSort::User), SortDirection::Asc);
+        assert_eq!(
+            Users::first_direction(UserSort::FirstSeen),
+            SortDirection::Asc
+        );
+        assert_eq!(
+            Users::first_direction(UserSort::LastSeen),
+            SortDirection::Desc
+        );
     }
 
     /// A value a parameter does not take is refused by the parameter's name,
@@ -256,7 +204,7 @@ mod tests {
             let query = TraceQuery::read(pairs(&[given]), Reading::List).expect("read");
             let refused = query
                 .filter()
-                .and_then(|_| sort(&query))
+                .and_then(|_| query.sort_for::<Users>())
                 .and_then(|_| {
                     query
                         .paging()

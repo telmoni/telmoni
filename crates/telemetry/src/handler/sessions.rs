@@ -25,41 +25,11 @@ use telmoni_shared::{
 use crate::AppState;
 use crate::contract::{NAME_MAX, SESSION_ID_MAX};
 use crate::handler::traces::{
-    Facets, Reading, Trace, TraceQuery, download, parse_days, parse_format, parse_limit,
+    Facets, Reading, Trace, download, export_rows, facets_page, list_page, parse_days, parse_limit,
     read_failed, readable, values,
 };
-use crate::sessions::{self, SessionRow};
-use crate::traces::{self, EXPORT_MAX, PINNED_MAX, PinnedRow, TraceFilter, Window};
-
-/// What a sort the page does not take is refused with.
-const SORTS: &str = "sort is one of session, user, traces, errors, steps, input_tokens, \
-                     output_tokens, tokens, first_seen, last_seen";
-
-/// The way a column sorts when the URL names none: the most and the latest
-/// first; ids in the alphabet's order, and the earliest seen first.
-#[must_use]
-pub const fn default_direction(sort: SessionSort) -> SortDirection {
-    match sort {
-        SessionSort::Session | SessionSort::User | SessionSort::FirstSeen => SortDirection::Asc,
-        SessionSort::Traces
-        | SessionSort::Errors
-        | SessionSort::Steps
-        | SessionSort::InputTokens
-        | SessionSort::OutputTokens
-        | SessionSort::Tokens
-        | SessionSort::LastSeen => SortDirection::Desc,
-    }
-}
-
-/// The page's sort: the session last heard from first, unless the query
-/// names another.
-///
-/// # Errors
-///
-/// A column or a direction there is none of, never echoed.
-pub fn sort(query: &TraceQuery) -> Result<(SessionSort, SortDirection), TelmoniError> {
-    query.sort_among(SessionSort::LastSeen, default_direction, SORTS)
-}
+use crate::sessions::{SessionRow, Sessions};
+use crate::traces::{self, PINNED_MAX, PinnedRow, TraceFilter, Traces, Window};
 
 /// A session's own page's query string, every value text until it is
 /// checked: the window its traces are read in, and the span names a layout
@@ -281,33 +251,16 @@ pub async fn list_sessions(
     headers: HeaderMap,
     Query(pairs): Query<Vec<(String, String)>>,
 ) -> Result<Json<SessionList>, TelmoniError> {
-    let projects = readable(&state, &headers).await?;
-    let query = TraceQuery::read(pairs, Reading::List)?;
-    let filter = query.filter()?;
-    let (sort, dir) = sort(&query)?;
-    let paging = query.paging()?;
-    let (rows, total) = tokio::try_join!(
-        sessions::list(
-            &state.store,
-            &projects,
-            &filter,
-            sort,
-            dir,
-            paging.limit,
-            paging.skipped
-        ),
-        sessions::count(&state.store, &projects, &filter),
-    )
-    .map_err(read_failed)?;
+    let listed = list_page::<Sessions>(&state, &headers, pairs).await?;
     Ok(Json(SessionList {
-        more: paging.more(rows.len(), total),
-        sessions: rows.into_iter().map(Session::from).collect(),
-        days: filter.days,
-        limit: paging.limit,
-        page: paging.page,
-        total,
-        sort,
-        dir,
+        more: listed.more(),
+        sessions: listed.rows.into_iter().map(Session::from).collect(),
+        days: listed.days,
+        limit: listed.paging.limit,
+        page: listed.paging.page,
+        total: listed.total,
+        sort: listed.sort,
+        dir: listed.dir,
     }))
 }
 
@@ -319,29 +272,20 @@ pub async fn get_session_facets(
     headers: HeaderMap,
     Query(pairs): Query<Vec<(String, String)>>,
 ) -> Result<Json<Facets>, TelmoniError> {
-    let projects = readable(&state, &headers).await?;
-    let filter = TraceQuery::read(pairs, Reading::Facets)?.filter()?;
-    let rows = sessions::facets(&state.store, &projects, &filter)
-        .await
-        .map_err(read_failed)?;
-    Ok(Json(Facets::of(filter.days, rows)))
+    Ok(Json(
+        facets_page::<Sessions>(&state, &headers, pairs).await?,
+    ))
 }
 
 /// `GET /internal/v1/telemetry/session-export` — the project's sessions the
-/// filter admits, sorted as asked, as a file: up to [`EXPORT_MAX`] of them.
+/// filter admits, sorted as asked, as a file: up to
+/// [`EXPORT_MAX`](crate::traces::EXPORT_MAX) of them.
 pub async fn export_sessions(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Query(pairs): Query<Vec<(String, String)>>,
 ) -> Result<Response, TelmoniError> {
-    let projects = readable(&state, &headers).await?;
-    let query = TraceQuery::read(pairs, Reading::Export)?;
-    let filter = query.filter()?;
-    let (sort, dir) = sort(&query)?;
-    let format = parse_format(query.format.as_deref().unwrap_or_default())?;
-    let rows = sessions::list(&state.store, &projects, &filter, sort, dir, EXPORT_MAX, 0)
-        .await
-        .map_err(read_failed)?;
+    let (rows, format) = export_rows::<Sessions>(&state, &headers, pairs, Reading::Export).await?;
     let sessions: Vec<Session> = rows.into_iter().map(Session::from).collect();
     download(format, &sessions, &CSV_HEADER, Session::cells, "session")
 }
@@ -370,12 +314,11 @@ pub async fn get_session(
         ..TraceFilter::default()
     };
     // One past the limit, so the answer can say whether there were more.
-    let mut rows = traces::list(
+    let mut rows = traces::list::<Traces>(
         &state.store,
         &projects,
         &filter,
-        TraceSort::Started,
-        SortDirection::Asc,
+        (TraceSort::Started, SortDirection::Asc),
         window.limit + 1,
         0,
     )
@@ -419,6 +362,8 @@ pub async fn get_session(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::handler::traces::TraceQuery;
+    use crate::traces::Listing;
     use crate::traces::{DEFAULT_DAYS, DEFAULT_LIMIT};
 
     fn pairs(query: &[(&str, &str)]) -> Vec<(String, String)> {
@@ -434,7 +379,7 @@ mod tests {
         assert_eq!(query.filter().expect("the default").days, DEFAULT_DAYS);
         assert_eq!(query.paging().expect("the default").limit, DEFAULT_LIMIT);
         assert_eq!(
-            sort(&query).expect("the default"),
+            query.sort_for::<Sessions>().expect("the default"),
             (SessionSort::LastSeen, SortDirection::Desc)
         );
     }
@@ -445,13 +390,16 @@ mod tests {
             let query = TraceQuery::read(pairs(&[("sort", &column.to_string())]), Reading::List)
                 .expect("read");
             assert_eq!(
-                sort(&query).expect("a column"),
-                (column, default_direction(column))
+                query.sort_for::<Sessions>().expect("a column"),
+                (column, Sessions::first_direction(column))
             );
         }
-        assert_eq!(default_direction(SessionSort::Session), SortDirection::Asc);
         assert_eq!(
-            default_direction(SessionSort::LastSeen),
+            Sessions::first_direction(SessionSort::Session),
+            SortDirection::Asc
+        );
+        assert_eq!(
+            Sessions::first_direction(SessionSort::LastSeen),
             SortDirection::Desc
         );
     }
@@ -462,7 +410,8 @@ mod tests {
     fn a_sort_the_page_does_not_take_is_refused_without_an_echo() {
         for given in ["started", "spend<script>"] {
             let query = TraceQuery::read(pairs(&[("sort", given)]), Reading::List).expect("read");
-            let detail = sort(&query)
+            let detail = query
+                .sort_for::<Sessions>()
                 .expect_err(given)
                 .to_problem_details()
                 .detail

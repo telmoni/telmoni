@@ -12,8 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use telmoni_shared::{SortDirection, UserSort};
 
-use crate::store::{Projects, Store};
-use crate::traces::{CountRow, FacetRow, TraceFilter, facets_sql, filtered, run_rows};
+use crate::traces::{Listing, facets_sql, run_rows};
 
 /// One user as the page reads it: a user id's runs, summed.
 #[derive(Debug, Clone, PartialEq, Eq, Row, Serialize, Deserialize)]
@@ -112,58 +111,36 @@ const COUNT_SQL: &str = concat!("SELECT count() AS total FROM (", users!(), ")")
 /// value.
 const FACETS_SQL: &str = facets_sql!("uniqExact(run_user_id)", "AND run_user_id != '' ");
 
-/// The users of `projects` the filter admits, sorted as asked: up to `limit`
-/// of them, past the first `offset`.
-///
-/// # Errors
-///
-/// ClickHouse did not answer, or refused the read.
-pub async fn list(
-    store: &Store,
-    projects: &Projects,
-    filter: &TraceFilter,
-    sort: UserSort,
-    direction: SortDirection,
-    limit: u32,
-    offset: u64,
-) -> clickhouse::error::Result<Vec<UserRow>> {
-    filtered(store.read(projects, list_sql(sort, direction)), filter)
-        .param("limit", limit)
-        .param("offset", offset)
-        .fetch_all()
-        .await
-}
+/// The users page: a user a row, summed over their runs; the most tokens
+/// first.
+pub(crate) struct Users;
 
-/// How many users of `projects` the filter admits.
-///
-/// # Errors
-///
-/// ClickHouse did not answer, or refused the read.
-pub async fn count(
-    store: &Store,
-    projects: &Projects,
-    filter: &TraceFilter,
-) -> clickhouse::error::Result<u64> {
-    let row: CountRow = filtered(store.read(projects, COUNT_SQL), filter)
-        .fetch_one()
-        .await?;
-    Ok(row.total)
-}
+impl Listing for Users {
+    type Row = UserRow;
+    type Sort = UserSort;
+    const SORTS: &'static [UserSort] = &UserSort::all();
+    const FALLBACK: UserSort = UserSort::Tokens;
+    const COUNT_SQL: &'static str = COUNT_SQL;
+    const FACETS_SQL: &'static str = FACETS_SQL;
 
-/// The values of each facet among the users of `projects`, each counted
-/// under every filter but its own, as the trace list's are.
-///
-/// # Errors
-///
-/// ClickHouse did not answer, or refused the read.
-pub async fn facets(
-    store: &Store,
-    projects: &Projects,
-    filter: &TraceFilter,
-) -> clickhouse::error::Result<Vec<FacetRow>> {
-    filtered(store.read(projects, FACETS_SQL), filter)
-        .fetch_all()
-        .await
+    fn list_sql(sort: UserSort, direction: SortDirection) -> &'static str {
+        list_sql(sort, direction)
+    }
+
+    /// The most and the latest first; ids in the alphabet's order, and the
+    /// earliest seen first.
+    fn first_direction(sort: UserSort) -> SortDirection {
+        match sort {
+            UserSort::User | UserSort::FirstSeen => SortDirection::Asc,
+            UserSort::Traces
+            | UserSort::Errors
+            | UserSort::Steps
+            | UserSort::InputTokens
+            | UserSort::OutputTokens
+            | UserSort::Tokens
+            | UserSort::LastSeen => SortDirection::Desc,
+        }
+    }
 }
 
 #[cfg(test)]

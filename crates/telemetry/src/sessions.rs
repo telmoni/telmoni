@@ -4,7 +4,7 @@
 //! `gen_ai.conversation.id`), each summed over all of its runs — admitted by
 //! any run the trace list's filters admit — with its page, total, facets and
 //! download. A run with no session id belongs to none. A session's own page
-//! is the trace list read for it ([`crate::traces::list`]).
+//! is the trace list's read for it (`crate::traces::list`).
 
 use chrono::{DateTime, Utc};
 use clickhouse::Row;
@@ -12,8 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use telmoni_shared::{SessionSort, SortDirection};
 
-use crate::store::{Projects, Store};
-use crate::traces::{CountRow, FacetRow, TraceFilter, facets_sql, filtered, run_rows};
+use crate::traces::{Listing, facets_sql, run_rows};
 
 /// One session as the page reads it: its runs, summed.
 #[derive(Debug, Clone, PartialEq, Eq, Row, Serialize, Deserialize)]
@@ -120,58 +119,36 @@ const COUNT_SQL: &str = concat!("SELECT count() AS total FROM (", sessions!(), "
 /// value.
 const FACETS_SQL: &str = facets_sql!("uniqExact(run_session_id)", "AND run_session_id != '' ");
 
-/// The sessions of `projects` the filter admits, sorted as asked: up to
-/// `limit` of them, past the first `offset`.
-///
-/// # Errors
-///
-/// ClickHouse did not answer, or refused the read.
-pub async fn list(
-    store: &Store,
-    projects: &Projects,
-    filter: &TraceFilter,
-    sort: SessionSort,
-    direction: SortDirection,
-    limit: u32,
-    offset: u64,
-) -> clickhouse::error::Result<Vec<SessionRow>> {
-    filtered(store.read(projects, list_sql(sort, direction)), filter)
-        .param("limit", limit)
-        .param("offset", offset)
-        .fetch_all()
-        .await
-}
+/// The sessions page: a session a row, summed over its runs; the one last
+/// heard from first.
+pub(crate) struct Sessions;
 
-/// How many sessions of `projects` the filter admits.
-///
-/// # Errors
-///
-/// ClickHouse did not answer, or refused the read.
-pub async fn count(
-    store: &Store,
-    projects: &Projects,
-    filter: &TraceFilter,
-) -> clickhouse::error::Result<u64> {
-    let row: CountRow = filtered(store.read(projects, COUNT_SQL), filter)
-        .fetch_one()
-        .await?;
-    Ok(row.total)
-}
+impl Listing for Sessions {
+    type Row = SessionRow;
+    type Sort = SessionSort;
+    const SORTS: &'static [SessionSort] = &SessionSort::all();
+    const FALLBACK: SessionSort = SessionSort::LastSeen;
+    const COUNT_SQL: &'static str = COUNT_SQL;
+    const FACETS_SQL: &'static str = FACETS_SQL;
 
-/// The values of each facet among the sessions of `projects`, each counted
-/// under every filter but its own, as the trace list's are.
-///
-/// # Errors
-///
-/// ClickHouse did not answer, or refused the read.
-pub async fn facets(
-    store: &Store,
-    projects: &Projects,
-    filter: &TraceFilter,
-) -> clickhouse::error::Result<Vec<FacetRow>> {
-    filtered(store.read(projects, FACETS_SQL), filter)
-        .fetch_all()
-        .await
+    fn list_sql(sort: SessionSort, direction: SortDirection) -> &'static str {
+        list_sql(sort, direction)
+    }
+
+    /// The most and the latest first; ids in the alphabet's order, and the
+    /// earliest seen first.
+    fn first_direction(sort: SessionSort) -> SortDirection {
+        match sort {
+            SessionSort::Session | SessionSort::User | SessionSort::FirstSeen => SortDirection::Asc,
+            SessionSort::Traces
+            | SessionSort::Errors
+            | SessionSort::Steps
+            | SessionSort::InputTokens
+            | SessionSort::OutputTokens
+            | SessionSort::Tokens
+            | SessionSort::LastSeen => SortDirection::Desc,
+        }
+    }
 }
 
 #[cfg(test)]

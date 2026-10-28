@@ -9,7 +9,6 @@
 //! every read, twice.
 
 use std::collections::BTreeMap;
-use std::str::FromStr;
 use std::sync::Arc;
 
 use axum::extract::{Path, State};
@@ -33,7 +32,8 @@ use crate::spend::{self, Unread};
 use crate::store::{self, Projects, SpanRow};
 use crate::traces::{
     self, Bar, DEFAULT_LIMIT, EXPORT_MAX, FACET_VALUES_MAX, FILTER_VALUES_MAX, Facet, FacetRow,
-    MAX_DAYS, MAX_LIMIT, MAX_PAGE, RUNS_MAX, SPANS_MAX, TRACE_UNITS_MAX, TraceFilter, TraceRow,
+    Listing, MAX_DAYS, MAX_LIMIT, MAX_PAGE, RUNS_MAX, SPANS_MAX, TRACE_UNITS_MAX, TraceFilter,
+    TraceRow, Traces,
 };
 
 /// The longest value each filter takes, in characters, by its name in a URL:
@@ -232,35 +232,25 @@ impl TraceQuery {
     ///
     /// A column or a direction there is none of, never echoed.
     pub fn sort(&self) -> Result<(TraceSort, SortDirection), TelmoniError> {
-        self.sort_among(
-            TraceSort::Started,
-            default_direction,
-            "sort is one of started, agent, user, session, status, steps, model_calls, \
-             tool_calls, errors, input_tokens, output_tokens, tokens, duration",
-        )
+        self.sort_for::<Traces>()
     }
 
-    /// The sort the query asks for among a list's columns: `fallback` when
-    /// it names none, each column `first`'s way unless it says which.
-    /// `columns` is the refusal, naming them.
+    /// The sort the query asks for among a list's columns: the list's own
+    /// when it names none, each column its own way unless it says which.
     ///
     /// # Errors
     ///
-    /// A column or a direction there is none of, never echoed.
-    pub(crate) fn sort_among<S: FromStr + Copy>(
-        &self,
-        fallback: S,
-        first: fn(S) -> SortDirection,
-        columns: &str,
-    ) -> Result<(S, SortDirection), TelmoniError> {
+    /// A column or a direction there is none of, the refusal naming every
+    /// column the list has and never the value.
+    pub(crate) fn sort_for<L: Listing>(&self) -> Result<(L::Sort, SortDirection), TelmoniError> {
         let sort = match self.sort.as_deref().unwrap_or_default().trim() {
-            "" => fallback,
+            "" => L::FALLBACK,
             given => given
-                .parse::<S>()
-                .map_err(|_| TelmoniError::BadRequest(columns.to_owned()))?,
+                .parse::<L::Sort>()
+                .map_err(|_| sorts_refused(L::SORTS))?,
         };
         let direction = match self.dir.as_deref().unwrap_or_default().trim() {
-            "" => first(sort),
+            "" => L::first_direction(sort),
             given => given
                 .parse::<SortDirection>()
                 .map_err(|_| TelmoniError::BadRequest("dir is asc or desc".into()))?,
@@ -361,24 +351,10 @@ fn tag_values(given: &[String]) -> Result<Vec<String>, TelmoniError> {
     Ok(pairs)
 }
 
-/// The way a column sorts when the URL names none: the newest, the longest
-/// and the most first; names in the alphabet's order.
-#[must_use]
-pub const fn default_direction(sort: TraceSort) -> SortDirection {
-    match sort {
-        TraceSort::Started
-        | TraceSort::Steps
-        | TraceSort::ModelCalls
-        | TraceSort::ToolCalls
-        | TraceSort::Errors
-        | TraceSort::InputTokens
-        | TraceSort::OutputTokens
-        | TraceSort::Tokens
-        | TraceSort::Duration => SortDirection::Desc,
-        TraceSort::Agent | TraceSort::User | TraceSort::Session | TraceSort::Status => {
-            SortDirection::Asc
-        }
-    }
+/// What a sort the list does not take is refused with: every column it has.
+fn sorts_refused<S: std::fmt::Display>(all: &[S]) -> TelmoniError {
+    let words: Vec<String> = all.iter().map(ToString::to_string).collect();
+    TelmoniError::BadRequest(format!("sort is one of {}", words.join(", ")))
 }
 
 /// `days` as a URL carries it: a whole number from 1 to [`MAX_DAYS`], and
@@ -862,42 +838,112 @@ pub(crate) async fn readable(
     Ok(Projects::one(project_id))
 }
 
+/// A list's page as its lane read it: the rows and the total, read at once
+/// since a page past the last has no row to carry the count, and what the
+/// query asked.
+pub(crate) struct Listed<L: Listing> {
+    pub(crate) rows: Vec<L::Row>,
+    pub(crate) total: u64,
+    pub(crate) paging: Paging,
+    pub(crate) sort: L::Sort,
+    pub(crate) dir: SortDirection,
+    pub(crate) days: u16,
+}
+
+impl<L: Listing> Listed<L> {
+    /// Whether a page after this one holds more.
+    pub(crate) fn more(&self) -> bool {
+        self.paging.more(self.rows.len(), self.total)
+    }
+}
+
+/// A page of one list of the project's runs in the window, filtered and
+/// sorted as the query says, with how many the filter admits.
+pub(crate) async fn list_page<L: Listing>(
+    state: &AppState,
+    headers: &HeaderMap,
+    pairs: Vec<(String, String)>,
+) -> Result<Listed<L>, TelmoniError> {
+    let projects = readable(state, headers).await?;
+    let query = TraceQuery::read(pairs, Reading::List)?;
+    let filter = query.filter()?;
+    let (sort, dir) = query.sort_for::<L>()?;
+    let paging = query.paging()?;
+    let (rows, total) = tokio::try_join!(
+        traces::list::<L>(
+            &state.store,
+            &projects,
+            &filter,
+            (sort, dir),
+            paging.limit,
+            paging.skipped
+        ),
+        traces::count::<L>(&state.store, &projects, &filter),
+    )
+    .map_err(read_failed)?;
+    Ok(Listed {
+        rows,
+        total,
+        paging,
+        sort,
+        dir,
+        days: filter.days,
+    })
+}
+
+/// One list's facets: each filter's values among the project's runs in the
+/// window, and how many of the list's rows carry each under every other
+/// filter.
+pub(crate) async fn facets_page<L: Listing>(
+    state: &AppState,
+    headers: &HeaderMap,
+    pairs: Vec<(String, String)>,
+) -> Result<Facets, TelmoniError> {
+    let projects = readable(state, headers).await?;
+    let filter = TraceQuery::read(pairs, Reading::Facets)?.filter()?;
+    let rows = traces::facets::<L>(&state.store, &projects, &filter)
+        .await
+        .map_err(read_failed)?;
+    Ok(Facets::of(filter.days, rows))
+}
+
+/// One list's rows for a download, sorted as asked, up to [`EXPORT_MAX`] of
+/// them, and the format asked for.
+pub(crate) async fn export_rows<L: Listing>(
+    state: &AppState,
+    headers: &HeaderMap,
+    pairs: Vec<(String, String)>,
+    reading: Reading,
+) -> Result<(Vec<L::Row>, Format), TelmoniError> {
+    let projects = readable(state, headers).await?;
+    let query = TraceQuery::read(pairs, reading)?;
+    let filter = query.filter()?;
+    let (sort, dir) = query.sort_for::<L>()?;
+    let format = parse_format(query.format.as_deref().unwrap_or_default())?;
+    let rows = traces::list::<L>(&state.store, &projects, &filter, (sort, dir), EXPORT_MAX, 0)
+        .await
+        .map_err(read_failed)?;
+    Ok((rows, format))
+}
+
 /// `GET /internal/v1/telemetry/traces` — a page of the project's traces in the
 /// window, filtered and sorted as the query says, and how many the filter
-/// admits: two reads at once, since a page past the last has no row to
-/// carry the count.
+/// admits.
 pub async fn list_traces(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Query(pairs): Query<Vec<(String, String)>>,
 ) -> Result<Json<TraceList>, TelmoniError> {
-    let projects = readable(&state, &headers).await?;
-    let query = TraceQuery::read(pairs, Reading::List)?;
-    let filter = query.filter()?;
-    let (sort, dir) = query.sort()?;
-    let paging = query.paging()?;
-    let (rows, total) = tokio::try_join!(
-        traces::list(
-            &state.store,
-            &projects,
-            &filter,
-            sort,
-            dir,
-            paging.limit,
-            paging.skipped
-        ),
-        traces::count(&state.store, &projects, &filter),
-    )
-    .map_err(read_failed)?;
+    let listed = list_page::<Traces>(&state, &headers, pairs).await?;
     Ok(Json(TraceList {
-        more: paging.more(rows.len(), total),
-        traces: rows.into_iter().map(Trace::from).collect(),
-        days: filter.days,
-        limit: paging.limit,
-        page: paging.page,
-        total,
-        sort,
-        dir,
+        more: listed.more(),
+        traces: listed.rows.into_iter().map(Trace::from).collect(),
+        days: listed.days,
+        limit: listed.paging.limit,
+        page: listed.paging.page,
+        total: listed.total,
+        sort: listed.sort,
+        dir: listed.dir,
     }))
 }
 
@@ -909,12 +955,7 @@ pub async fn get_facets(
     headers: HeaderMap,
     Query(pairs): Query<Vec<(String, String)>>,
 ) -> Result<Json<Facets>, TelmoniError> {
-    let projects = readable(&state, &headers).await?;
-    let filter = TraceQuery::read(pairs, Reading::Facets)?.filter()?;
-    let rows = traces::facets(&state.store, &projects, &filter)
-        .await
-        .map_err(read_failed)?;
-    Ok(Json(Facets::of(filter.days, rows)))
+    Ok(Json(facets_page::<Traces>(&state, &headers, pairs).await?))
 }
 
 /// `GET /internal/v1/telemetry/traces/histogram` — the project's traces the
@@ -956,14 +997,8 @@ pub async fn export_traces(
     headers: HeaderMap,
     Query(pairs): Query<Vec<(String, String)>>,
 ) -> Result<Response, TelmoniError> {
-    let projects = readable(&state, &headers).await?;
-    let query = TraceQuery::read(pairs, Reading::TraceExport)?;
-    let filter = query.filter()?;
-    let (sort, dir) = query.sort()?;
-    let format = parse_format(query.format.as_deref().unwrap_or_default())?;
-    let rows = traces::list(&state.store, &projects, &filter, sort, dir, EXPORT_MAX, 0)
-        .await
-        .map_err(read_failed)?;
+    let (rows, format) =
+        export_rows::<Traces>(&state, &headers, pairs, Reading::TraceExport).await?;
     let traces: Vec<Trace> = rows.into_iter().map(Trace::from).collect();
     download(format, &traces, &CSV_HEADER, Trace::cells, "trace")
 }
@@ -1141,7 +1176,7 @@ mod tests {
                 }
                 _ => SortDirection::Desc,
             };
-            assert_eq!(default_direction(sort), expected, "{sort}");
+            assert_eq!(Traces::first_direction(sort), expected, "{sort}");
         }
     }
 
