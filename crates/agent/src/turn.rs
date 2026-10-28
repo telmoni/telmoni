@@ -83,50 +83,17 @@ pub trait Runner: Send {
 pub enum Ending {
     /// The model answered without calling anything more.
     Answered,
-    /// [`MAX_TOOL_ROUNDS`] ran out first.
-    Capped,
-    /// The answer ran past the token ceiling.
-    Truncated,
-    /// The deadline passed first.
-    TimedOut,
-    /// The model's stream broke off after it had written something.
-    Interrupted,
+    /// The answer stopped short, and the person is told why after the text.
+    Short(StoppedShort),
     /// The asker left, or is no longer who began the turn; nothing is saved.
     Cancelled,
-}
-
-impl Ending {
-    /// What the person is told after the text, when the ending needs saying.
-    #[must_use]
-    pub const fn note(self) -> Option<&'static str> {
-        match self {
-            Self::Capped => Some(CAPPED_NOTE),
-            Self::Truncated => Some(TRUNCATED_NOTE),
-            Self::TimedOut => Some(TIMED_OUT_NOTE),
-            Self::Interrupted => Some(INTERRUPTED_NOTE),
-            Self::Answered | Self::Cancelled => None,
-        }
-    }
-
-    /// Why the answer stopped short, as the run's record tags it: each
-    /// ending that [`Ending::note`] says, and no other.
-    #[must_use]
-    pub const fn stopped_short(self) -> Option<StoppedShort> {
-        match self {
-            Self::Capped => Some(StoppedShort::Capped),
-            Self::Truncated => Some(StoppedShort::Truncated),
-            Self::TimedOut => Some(StoppedShort::TimedOut),
-            Self::Interrupted => Some(StoppedShort::Interrupted),
-            Self::Answered | Self::Cancelled => None,
-        }
-    }
 }
 
 /// Why an answer ends early, as the person was told in a note and the run's
 /// record tags it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StoppedShort {
-    /// The tool loop ran out of rounds first.
+    /// [`MAX_TOOL_ROUNDS`] ran out first.
     Capped,
     /// The answer ran past the token ceiling.
     Truncated,
@@ -137,6 +104,17 @@ pub enum StoppedShort {
 }
 
 impl StoppedShort {
+    /// What the person is told after the text.
+    #[must_use]
+    pub const fn note(self) -> &'static str {
+        match self {
+            Self::Capped => CAPPED_NOTE,
+            Self::Truncated => TRUNCATED_NOTE,
+            Self::TimedOut => TIMED_OUT_NOTE,
+            Self::Interrupted => INTERRUPTED_NOTE,
+        }
+    }
+
     /// The word the run's tag gives it.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
@@ -189,13 +167,13 @@ pub async fn converse(
             ending,
         };
         if Instant::now() >= deadline {
-            return Ok(ended(Ending::TimedOut));
+            return Ok(ended(Ending::Short(StoppedShort::TimedOut)));
         }
         // Before every call after the first: a round that calls no tool
         // would otherwise write to an asker who has gone since the last.
         if round > 0 {
             let Ok(()) = tokio::time::timeout_at(deadline, runner.recheck()).await else {
-                return Ok(ended(Ending::TimedOut));
+                return Ok(ended(Ending::Short(StoppedShort::TimedOut)));
             };
             if runner.cancelled() {
                 return Ok(ended(Ending::Cancelled));
@@ -229,7 +207,7 @@ pub async fn converse(
             () = watching => return Ok(ended(Ending::Cancelled)),
         };
         let Ok(turn) = streamed else {
-            return Ok(ended(Ending::TimedOut));
+            return Ok(ended(Ending::Short(StoppedShort::TimedOut)));
         };
         // A model that breaks off mid-answer leaves words the person has
         // already read; they are kept, with a note, not thrown away with
@@ -240,7 +218,7 @@ pub async fn converse(
             Ok(turn) => turn,
             Err(e) if text().len() > before => {
                 tracing::warn!(error = %e, "the model broke off mid-answer; keeping what it wrote");
-                return Ok(ended(Ending::Interrupted));
+                return Ok(ended(Ending::Short(StoppedShort::Interrupted)));
             }
             Err(e) => return Err(e),
         };
@@ -256,25 +234,25 @@ pub async fn converse(
         // broken stream, only words this call wrote make it an answer.
         if turn.stop_reason == StopReason::Unfinished {
             if text().len() > before {
-                return Ok(ended(Ending::Interrupted));
+                return Ok(ended(Ending::Short(StoppedShort::Interrupted)));
             }
             return Err(unavailable("the model's stream ended without an answer"));
         }
         if turn.tool_calls.is_empty() {
             let ending = match turn.stop_reason {
-                StopReason::MaxTokens => Ending::Truncated,
+                StopReason::MaxTokens => Ending::Short(StoppedShort::Truncated),
                 // A refusal with text is the model saying why it would not;
                 // that is its answer.
                 StopReason::Finished
                 | StopReason::ToolUse
                 | StopReason::Refused
                 | StopReason::Other => Ending::Answered,
-                StopReason::Unfinished => Ending::Interrupted,
+                StopReason::Unfinished => Ending::Short(StoppedShort::Interrupted),
             };
             return Ok(ended(ending));
         }
         if round == MAX_TOOL_ROUNDS {
-            return Ok(ended(Ending::Capped));
+            return Ok(ended(Ending::Short(StoppedShort::Capped)));
         }
         let mut results = Vec::with_capacity(turn.tool_calls.len());
         for call in &turn.tool_calls {
@@ -283,7 +261,7 @@ pub async fn converse(
             // budget outlives the console's cut-off and the erasure fence's
             // reckoning of how long a turn can still be writing.
             let Ok(result) = tokio::time::timeout_at(deadline, runner.run(call)).await else {
-                return Ok(ended(Ending::TimedOut));
+                return Ok(ended(Ending::Short(StoppedShort::TimedOut)));
             };
             // A lookup that found the asker gone ends the turn here, before
             // the model writes another word to them.
@@ -410,7 +388,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(outcome.ending, Ending::Capped);
+        assert_eq!(outcome.ending, Ending::Short(StoppedShort::Capped));
         assert_eq!(runner.0, MAX_TOOL_ROUNDS, "tools ran past the cap");
         assert_eq!(model.0.load(Ordering::SeqCst), MAX_TOOL_ROUNDS + 1);
         assert_eq!(outcome.text.len(), MAX_TOOL_ROUNDS + 1);
@@ -498,9 +476,8 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(outcome.ending, Ending::TimedOut);
+        assert_eq!(outcome.ending, Ending::Short(StoppedShort::TimedOut));
         assert_eq!(outcome.text, "So far");
-        assert!(outcome.ending.note().is_some());
     }
 
     #[tokio::test]
@@ -517,9 +494,8 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(cut.ending, Ending::Truncated);
+        assert_eq!(cut.ending, Ending::Short(StoppedShort::Truncated));
         assert_eq!(cut.text, "half");
-        assert!(cut.ending.note().is_some());
 
         let refused = converse(
             &Stops(StopReason::Refused, ""),
@@ -569,9 +545,8 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(broke.ending, Ending::Interrupted);
+        assert_eq!(broke.ending, Ending::Short(StoppedShort::Interrupted));
         assert_eq!(broke.text, "Partly");
-        assert!(broke.ending.note().is_some());
 
         let short = converse(
             &Stops(StopReason::Unfinished, "half an answer"),
@@ -586,7 +561,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             short.ending,
-            Ending::Interrupted,
+            Ending::Short(StoppedShort::Interrupted),
             "saved as if it were whole"
         );
 
@@ -631,7 +606,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(outcome.ending, Ending::TimedOut);
+        assert_eq!(outcome.ending, Ending::Short(StoppedShort::TimedOut));
         assert_eq!(outcome.text, ".");
     }
 

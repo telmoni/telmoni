@@ -120,35 +120,46 @@ pub(crate) struct TurnRecord {
 /// turn takes — unless it was withheld.
 pub(crate) struct Recorder {
     telmoni: Option<Telmoni>,
+    trace_id: Uuid,
+    conversation_id: Uuid,
+    organization_id: OrganizationId,
+    project_id: Option<ProjectId>,
+    started_at: DateTime<Utc>,
     trace: Mutex<Trace>,
 }
 
+/// What the question has done so far, and where it stands.
+#[derive(Default)]
 struct Trace {
-    record: TurnRecord,
-    ended: bool,
-    withheld: bool,
+    steps: Vec<Step>,
+    fate: Fate,
+}
+
+/// Where a question stands: running; ended, as its outcome says and when;
+/// or withheld for an erasure in its organization (`db::erased_during`),
+/// nothing of it going anywhere, the report included.
+#[derive(Default)]
+enum Fate {
+    #[default]
+    Open,
+    Ended {
+        ending: TurnEnding,
+        at: DateTime<Utc>,
+    },
+    Withheld,
 }
 
 impl Recorder {
     /// Begin a question's record; with no SDK, nothing is kept.
     pub(crate) fn start(telmoni: Option<Telmoni>, acting: &Acting, conversation_id: Uuid) -> Self {
-        let now = Utc::now();
         Self {
             telmoni,
-            trace: Mutex::new(Trace {
-                record: TurnRecord {
-                    trace_id: Uuid::new_v4(),
-                    conversation_id,
-                    organization_id: acting.organization_id.clone(),
-                    project_id: acting.project.as_ref().map(|p| p.project_id.clone()),
-                    started_at: now,
-                    ended_at: now,
-                    ending: TurnEnding::Cancelled,
-                    steps: Vec::new(),
-                },
-                ended: false,
-                withheld: false,
-            }),
+            trace_id: Uuid::new_v4(),
+            conversation_id,
+            organization_id: acting.organization_id.clone(),
+            project_id: acting.project.as_ref().map(|p| p.project_id.clone()),
+            started_at: Utc::now(),
+            trace: Mutex::new(Trace::default()),
         }
     }
 
@@ -174,40 +185,64 @@ impl Recorder {
     }
 
     pub(crate) fn answered(&self, ending: Ending) {
-        let stopped_short = ending.stopped_short();
-        self.end(|record| record.ending = TurnEnding::Answered { stopped_short });
+        let stopped_short = match ending {
+            Ending::Short(why) => Some(why),
+            Ending::Answered | Ending::Cancelled => None,
+        };
+        self.end(TurnEnding::Answered { stopped_short });
     }
 
     pub(crate) fn failed(&self, e: &TelmoniError) {
         let problem_type = e.to_problem_details().type_uri;
-        self.end(|record| record.ending = TurnEnding::Failed { problem_type });
+        self.end(TurnEnding::Failed { problem_type });
     }
 
     pub(crate) fn cancelled(&self) {
-        self.end(|record| record.ending = TurnEnding::Cancelled);
+        self.end(TurnEnding::Cancelled);
     }
 
-    /// The answer is withheld for an erasure in its organization
-    /// (`db::erased_during`): nothing of the question goes anywhere, the
-    /// report included.
+    /// The answer is withheld for an erasure in its organization: nothing
+    /// of the question goes anywhere, the report included.
     pub(crate) fn withhold(&self) {
-        self.trace().withheld = true;
+        self.trace().fate = Fate::Withheld;
     }
 
-    /// The question's record as it stands, for the tests to read before the
-    /// recorder drops and reports it.
+    /// The question's record as it would be reported now, for the tests to
+    /// read before the recorder drops and reports it.
     #[cfg(test)]
     pub(crate) fn record(&self) -> TurnRecord {
-        self.trace().record.clone()
+        self.recorded(&self.trace(), Utc::now())
+            .expect("the record is not withheld")
     }
 
     /// The question's end is when its outcome is known, not when the record
     /// is reported, which can come after the exchange is indexed.
-    fn end(&self, how: impl FnOnce(&mut TurnRecord)) {
-        let mut trace = self.trace();
-        how(&mut trace.record);
-        trace.record.ended_at = Utc::now();
-        trace.ended = true;
+    fn end(&self, ending: TurnEnding) {
+        self.trace().fate = Fate::Ended {
+            ending,
+            at: Utc::now(),
+        };
+    }
+
+    /// The record as it stands at `now`: none while it is withheld.
+    fn recorded(&self, trace: &Trace, now: DateTime<Utc>) -> Option<TurnRecord> {
+        let (ending, ended_at) = match &trace.fate {
+            Fate::Withheld => return None,
+            // Every return of the turn names its ending; one that did not
+            // left by a path nobody wrote, and is not an answer.
+            Fate::Open => (TurnEnding::Unfinished, now),
+            Fate::Ended { ending, at } => (ending.clone(), *at),
+        };
+        Some(TurnRecord {
+            trace_id: self.trace_id,
+            conversation_id: self.conversation_id,
+            organization_id: self.organization_id.clone(),
+            project_id: self.project_id.clone(),
+            started_at: self.started_at,
+            ended_at,
+            ending,
+            steps: trace.steps.clone(),
+        })
     }
 
     fn trace(&self) -> std::sync::MutexGuard<'_, Trace> {
@@ -216,7 +251,7 @@ impl Recorder {
 
     fn push(&self, step: Step) {
         if self.telmoni.is_some() {
-            self.trace().record.steps.push(step);
+            self.trace().steps.push(step);
         }
     }
 }
@@ -226,18 +261,10 @@ impl Drop for Recorder {
         let Some(telmoni) = self.telmoni.take() else {
             return;
         };
-        let trace = self.trace.get_mut().unwrap_or_else(PoisonError::into_inner);
-        if trace.withheld {
-            return;
+        let trace = std::mem::take(self.trace.get_mut().unwrap_or_else(PoisonError::into_inner));
+        if let Some(record) = self.recorded(&trace, Utc::now()) {
+            report::send(&telmoni, &record);
         }
-        let mut record = trace.record.clone();
-        if !trace.ended {
-            // Every return of the turn names its ending; one that did not
-            // left by a path nobody wrote, and is not an answer.
-            record.ended_at = Utc::now();
-            record.ending = TurnEnding::Unfinished;
-        }
-        report::send(&telmoni, &record);
     }
 }
 

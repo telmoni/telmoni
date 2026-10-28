@@ -427,7 +427,8 @@ async fn run_turn(
         }
     };
     let mut answer = outcome.text;
-    if let Some(note) = outcome.ending.note() {
+    if let Ending::Short(why) = outcome.ending {
+        let note = why.note();
         sink(note);
         answer.push_str(note);
     }
