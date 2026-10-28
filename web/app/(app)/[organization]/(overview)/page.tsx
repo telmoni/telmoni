@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
+import { MarkRead } from "@/components/mark-read";
 import { ServiceUnavailable } from "@/components/service-unavailable";
 import { organizationLabel } from "@/lib/identity";
 import { administers, owns } from "@/lib/roles";
@@ -15,7 +16,7 @@ import { Notices } from "../../_notices";
 import { Overview } from "../../_overview";
 import { LeaveOrganization } from "../_leave-organization";
 import { OpenIncidents } from "../_open-incidents";
-import { MarkOrganizationRead } from "../_organization-notices";
+import { markOrganizationReadAction } from "../notice-actions";
 
 // In a route group of its own so that whatever stands in for a page while it
 // loads can wrap the overview alone: beside the organization's layout it
@@ -61,10 +62,9 @@ export default async function OrganizationOverviewPage() {
   const newest = notices?.items[0];
   const markRead =
     notices && newest && notices.unread > 0 ? (
-      <MarkOrganizationRead
-        organizationId={organization.organizationId}
+      <MarkRead
         unread={notices.unread}
-        before={newest.created_at}
+        mark={markOrganizationReadAction.bind(null, organization.organizationId, newest.created_at)}
       />
     ) : null;
 

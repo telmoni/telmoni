@@ -1,13 +1,12 @@
-import { DataTable, THead, Th } from "@/components/data-table";
-import { PageHeader } from "@/components/page-header";
 import { AccessDenied } from "@/components/access-denied";
-import { ServiceUnavailable } from "@/components/service-unavailable";
-import { Badge } from "@/components/ui/badge";
-import { Card } from "@/components/ui/card";
 import { MemberCeilingNotice, atCeiling } from "@/components/member-ceiling";
+import { Invited, RoleCards, RosterTable, type RoleCard } from "@/components/members/roster";
+import { MemberRow } from "@/components/members/rows";
+import { PageHeader } from "@/components/page-header";
+import { ServiceUnavailable } from "@/components/service-unavailable";
+import { Card } from "@/components/ui/card";
 import { ownerContact } from "@/lib/identity";
 import { administers, owns } from "@/lib/roles";
-import { OrganizationRole } from "@/lib/types/enums";
 import {
   activeOrganization,
   fetchInvites,
@@ -16,10 +15,34 @@ import {
 } from "@/lib/server/data";
 import { projectPage } from "@/lib/server/project-page";
 import { projectPath } from "@/lib/slug";
+import { OrganizationRole, type Role } from "@/lib/types/enums";
 
-import { AddMember, type Candidate, InviteRow, MemberRow } from "./_manage";
+import { AddMember, type Candidate } from "./_manage";
+import {
+  cancelProjectOfferAction,
+  leaveProjectAction,
+  offerProjectAction,
+  removeMemberAction,
+  revokeInviteAction,
+  updateMemberRoleAction,
+} from "./actions";
 
 export const metadata = { title: "Members" };
+
+const ROLES = {
+  owner: {
+    badge: "Full access",
+    body: "Members and invitations, API keys, connectors, the audit log and this project's settings. The organization's owner, on every project it holds.",
+  },
+  admin: {
+    badge: "Can manage",
+    body: "Manages members, API keys, connectors and views the audit log. Every organization admin is one here.",
+  },
+  member: {
+    badge: "Read-only",
+    body: "Sees members, API keys and connectors; not the audit log.",
+  },
+} satisfies Record<Role, RoleCard>;
 
 export default async function MembersPage({
   params,
@@ -73,6 +96,14 @@ export default async function MembersPage({
   // seat from the roster adds nobody, so it stays while there is one to give.
   const full = atCeiling(listing.ceiling);
   const offered = canManage && (!full || candidates.length > 0);
+  // Every action bound to the project the page rendered, by id.
+  const act = {
+    setRole: updateMemberRoleAction.bind(null, project.id),
+    remove: removeMemberAction.bind(null, project.id),
+    offer: offerProjectAction.bind(null, project.id),
+    withdraw: cancelProjectOfferAction.bind(null, project.id),
+  };
+  const self = { name: project.name, leave: leaveProjectAction.bind(null, project.id, "project") };
 
   return (
     <>
@@ -92,44 +123,7 @@ export default async function MembersPage({
 
       <div className="grid gap-6">
         {canManage && <MemberCeilingNotice ceiling={listing.ceiling} />}
-        <section className="grid gap-3 lg:grid-cols-3">
-          <Card className="gap-1.5">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="font-medium text-sm">Owner</span>
-              <Badge variant="secondary" className="text-xs shrink-0">
-                Full access
-              </Badge>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Members and invitations, API keys, connectors, the audit log and
-              this project&apos;s settings. The organization&apos;s owner, on
-              every project it holds.
-            </p>
-          </Card>
-          <Card className="gap-1.5">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="font-medium text-sm">Admin</span>
-              <Badge variant="secondary" className="text-xs shrink-0">
-                Can manage
-              </Badge>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Manages members, API keys, connectors and views the audit log.
-              Every organization admin is one here.
-            </p>
-          </Card>
-          <Card className="gap-1.5">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="font-medium text-sm">Member</span>
-              <Badge variant="secondary" className="text-xs shrink-0">
-                Read-only
-              </Badge>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Sees members, API keys and connectors; not the audit log.
-            </p>
-          </Card>
-        </section>
+        <RoleCards cards={ROLES} />
 
         <section className="grid gap-3">
           {listing.members.length === 0 ? (
@@ -146,31 +140,19 @@ export default async function MembersPage({
               </div>
             </Card>
           ) : (
-            // Fixed columns: an admin's row grows a Transfer button, and with
-            // the widths left to the content, changing a role slid the Role
-            // and Added columns under the cursor. The last column fits the
-            // widest pair of buttons a row can carry.
-            <DataTable className="table-fixed min-w-3xl">
-              <THead>
-                <Th>Member</Th>
-                <Th className="w-40">Role</Th>
-                <Th className="w-32">Added</Th>
-                <Th className="w-72" />
-              </THead>
-              <tbody>
-                {listing.members.map((m) => (
-                  <MemberRow
-                    key={m.id}
-                    projectId={project.id}
-                    projectName={project.name}
-                    member={m}
-                    canManage={canManage}
-                    isOwnerCaller={isOwner}
-                    isSelf={m.member_id === me}
-                  />
-                ))}
-              </tbody>
-            </DataTable>
+            <RosterTable>
+              {listing.members.map((m) => (
+                <MemberRow
+                  key={m.id}
+                  of="project"
+                  member={m}
+                  act={act}
+                  canManage={canManage}
+                  isOwnerCaller={isOwner}
+                  self={m.member_id === me ? self : undefined}
+                />
+              ))}
+            </RosterTable>
           )}
           <p className="text-xs text-muted-foreground">
             A member has read-only access. An admin also manages members, keys,
@@ -178,33 +160,13 @@ export default async function MembersPage({
           </p>
         </section>
 
-        {invited.kind === "ok" && invited.invites.length > 0 && (
-          <section className="grid gap-3">
-            <h2 className="text-sm font-medium">Invited</h2>
-            <DataTable>
-              <THead>
-                <Th>Email address</Th>
-                <Th>Role</Th>
-                <Th>Invitation</Th>
-                <Th />
-              </THead>
-              <tbody>
-                {invited.invites.map((i) => (
-                  <InviteRow
-                    key={i.id}
-                    projectId={project.id}
-                    invite={i}
-                    canManage={canManage}
-                  />
-                ))}
-              </tbody>
-            </DataTable>
-            <p className="text-xs text-muted-foreground">
-              An invitation is an offer, not access — nobody on this list has
-              access to your project. Each link works once, only for the address it
-              was sent to, and expires on its own.
-            </p>
-          </section>
+        {invited.kind === "ok" && (
+          <Invited
+            of="project"
+            invites={invited.invites}
+            canManage={canManage}
+            revoke={revokeInviteAction.bind(null, project.id)}
+          />
         )}
       </div>
     </>

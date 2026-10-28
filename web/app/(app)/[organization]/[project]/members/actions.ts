@@ -3,127 +3,73 @@
 import { refresh, revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
-import { extractProblem, readBody, tryFetchWithTimeout } from "@/lib/api/fetch";
-import type { SessionData } from "@/lib/auth/session";
+import { type ActionResult, refused } from "@/lib/action-result";
+import { readBody, tryFetchWithTimeout } from "@/lib/api/fetch";
 import { env } from "@/lib/env";
+import { publishEvent, userChannel } from "@/lib/events/publisher";
 import { Flag } from "@/lib/flags";
-import { featureOff } from "@/lib/server/flags";
-import { admitProject } from "@/lib/server/admit";
-import { activeOrganization, fetchProjects, getServerContext } from "@/lib/server/data";
-import { fetchMembers } from "@/lib/server/entities/member";
-import { organizationPath } from "@/lib/slug";
-import {
-  organizationChannel,
-  publishEvent,
-  publishToAll,
-  userChannel,
-} from "@/lib/events/publisher";
-import { displayName } from "@/lib/user-display";
-import {
-  InviteSentSchema,
-  OfferChangeSchema,
-  RosterChangeSchema,
-  answerMemberAction,
-} from "@/lib/members/shared";
 import { type GivenRole, NOT_A_GIVEN_ROLE, isGivenRole } from "@/lib/roles";
-import { InviteScope } from "@/lib/types/enums";
-import { type ActionResult, type Refused, refused } from "@/lib/action-result";
+import { activeOrganization, getServerContext } from "@/lib/server/data";
+import { featureOff } from "@/lib/server/flags";
+import {
+  type Roster,
+  RosterChangeSchema,
+  admitRoster,
+  answerMemberAction,
+  inviteMember,
+  laneUrl,
+  offer,
+  removeMember,
+  revokeInvite,
+  updateMemberRole,
+  withdrawOffer,
+} from "@/lib/server/roster";
+import { organizationPath } from "@/lib/slug";
+
+// The project's roster (`lib/server/roster.ts`): every action takes the
+// project its page rendered, by id, and acts on that one or on nothing.
+
+const roster = (projectId: string): Roster => ({ kind: "project", projectId });
 
 export async function inviteMemberAction(
   projectId: string,
   email: string,
   role: GivenRole,
 ): Promise<ActionResult<{ link?: string }>> {
-  if (!isGivenRole(role)) return refused(NOT_A_GIVEN_ROLE);
-  const gate = await open("members:invite", 10, projectId);
-  if (!gate.ok) return gate;
-  const off = await featureOff(Flag.Members);
-  if (off) return refused(off);
-
-  const trimmed = email.trim();
-  if (!trimmed) return refused("Enter the email address of the person to invite.");
-
-  const res = await tryFetchWithTimeout(
-    `${gate.base}/internal/v1/projects/${encodeURIComponent(gate.projectId)}/invites`,
-    {
-      method: "POST",
-      headers: { ...gate.headers, "content-type": "application/json" },
-      body: JSON.stringify({ email: trimmed, role }),
-    },
-  );
-  if (!res) {
-    return refused("Organizations are unavailable right now — try again shortly.");
-  }
-  if (!res.ok) return refused((await extractProblem(res)).message);
-  const data = await readBody(res, InviteSentSchema);
-  const link = data?.link;
-
-  if (data?.id && data.expiresAt) {
-    const projects = await fetchProjects();
-    const project = projects.find((p) => p.id === gate.projectId);
-    await publishEvent(userChannel(trimmed), {
-      type: "invite:created",
-      data: {
-        id: String(data.id),
-        scope: InviteScope.Project,
-        targetId: gate.projectId,
-        targetName: project?.name || "Project",
-        role,
-        inviterEmail: gate.session.email,
-        inviterDisplayName: displayName(gate.session),
-        expiresAt: data.expiresAt,
-        createdAt: new Date().toISOString(),
-      },
-    });
-  }
-
-  if (data?.id && data.ownerOrganizationId) {
-    await publishEvent(organizationChannel(data.ownerOrganizationId), {
-      type: "invite:sent",
-      data: { inviteId: String(data.id) },
-    });
-  }
-
-  refresh();
-  return { ok: true, link };
+  return inviteMember(roster(projectId), email, role);
 }
 
-// A seat for a member of the organization, given with nothing to accept: the
-// lane refuses anyone off its roster, and anyone but the organization's owner
-// and admins. Their console learns of the project at the address auth
-// answered, never one the browser supplied.
+/** A seat for a member of the organization, given with nothing to accept: the
+ *  lane refuses anyone off its roster, and anyone but the organization's owner
+ *  and admins. Their console learns of the project at the address auth
+ *  answered, never one the browser supplied. */
 export async function addMemberAction(
   projectId: string,
   memberId: string,
   role: GivenRole,
 ): Promise<ActionResult> {
   if (!isGivenRole(role)) return refused(NOT_A_GIVEN_ROLE);
-  const gate = await open("members:add", 30, projectId);
+  const of = roster(projectId);
+  const gate = await admitRoster(of, { call: "members:add", limit: 30 });
   if (!gate.ok) return gate;
   const off = await featureOff(Flag.Members);
   if (off) return refused(off);
 
-  const res = await tryFetchWithTimeout(
-    `${gate.base}/internal/v1/projects/${encodeURIComponent(gate.projectId)}/members`,
-    {
-      method: "POST",
-      headers: { ...gate.headers, "content-type": "application/json" },
-      body: JSON.stringify({ memberId, role }),
-    },
-  );
+  const res = await tryFetchWithTimeout(laneUrl(of, "/members"), {
+    method: "POST",
+    headers: { ...gate.headers, "content-type": "application/json" },
+    body: JSON.stringify({ memberId, role }),
+  });
   if (!res?.ok) {
     // Refused off a roster drawn before somebody seated or removed the person:
     // the page is drawn again with what stands.
     if (res?.status === 404 || res?.status === 409) refresh();
-    return answer(res);
+    return answerMemberAction(res);
   }
 
   const email = (await readBody(res, RosterChangeSchema))?.email;
   if (email) {
-    await publishEvent(userChannel(email), {
-      type: "membership:changed",
-      data: { organizationId: gate.organizationId, projectId: gate.projectId },
-    });
+    await publishEvent(userChannel(email), { type: "membership:changed", data: gate.about });
   }
   refresh();
   return { ok: true };
@@ -133,25 +79,7 @@ export async function revokeInviteAction(
   projectId: string,
   inviteId: string,
 ): Promise<ActionResult> {
-  const gate = await open("members:invite-revoke", 30, projectId);
-  if (!gate.ok) return gate;
-  const res = await tryFetchWithTimeout(
-    `${gate.base}/internal/v1/projects/${encodeURIComponent(gate.projectId)}/invites/${encodeURIComponent(inviteId)}`,
-    { method: "DELETE", headers: gate.headers },
-  );
-  const ans = await answer(res);
-  if (!ans.ok || !res) return ans;
-
-  const data = await readBody(res, RosterChangeSchema);
-  await publishToAll(
-    [
-      data?.email ? userChannel(data.email) : null,
-      data?.ownerOrganizationId ? organizationChannel(data.ownerOrganizationId) : null,
-    ],
-    { type: "invite:revoked", data: { inviteId } },
-  );
-  refresh();
-  return ans;
+  return revokeInvite(roster(projectId), inviteId);
 }
 
 export async function updateMemberRoleAction(
@@ -159,130 +87,43 @@ export async function updateMemberRoleAction(
   memberId: string,
   role: GivenRole,
 ): Promise<ActionResult> {
-  if (!isGivenRole(role)) return refused(NOT_A_GIVEN_ROLE);
-  const gate = await open("members:role", 30, projectId);
-  if (!gate.ok) return gate;
-  // The channel told is the member's own console, so their address comes
-  // from the roster auth answers for this project, never from the caller,
-  // who could otherwise name anybody's.
-  const roster = await fetchMembers(gate.projectId);
-  const changed =
-    roster.kind === "ok" ? roster.members.find((m) => m.member_id === memberId) : undefined;
-  const res = await tryFetchWithTimeout(
-    `${gate.base}/internal/v1/projects/${encodeURIComponent(gate.projectId)}/members/${encodeURIComponent(memberId)}/role`,
-    {
-      method: "PUT",
-      headers: { ...gate.headers, "content-type": "application/json" },
-      body: JSON.stringify({ role }),
-    },
-  );
-  if (!res?.ok) return answer(res);
-
-  if (changed) {
-    await publishEvent(userChannel(changed.email), {
-      type: "membership:changed",
-      data: { organizationId: gate.organizationId, projectId: gate.projectId },
-    });
-  }
-  refresh();
-  return answer(res);
+  return updateMemberRole(roster(projectId), memberId, role);
 }
 
 export async function removeMemberAction(
   projectId: string,
   memberId: string,
 ): Promise<ActionResult> {
-  const gate = await open("members:remove", 30, projectId);
-  if (!gate.ok) return gate;
-  // The channel told is the removed person's own console, so their address
-  // comes from the roster auth answers for this project, never from the
-  // caller, who could otherwise name anybody's.
-  const roster = await fetchMembers(gate.projectId);
-  const removed =
-    roster.kind === "ok" ? roster.members.find((m) => m.member_id === memberId) : undefined;
-  const res = await tryFetchWithTimeout(
-    `${gate.base}/internal/v1/projects/${encodeURIComponent(gate.projectId)}/members/${encodeURIComponent(memberId)}`,
-    { method: "DELETE", headers: gate.headers },
-  );
-  if (!res?.ok) return answer(res);
-
-  if (removed) {
-    await publishEvent(userChannel(removed.email), {
-      type: "membership:removed",
-      data: { organizationId: gate.organizationId, projectId: gate.projectId },
-    });
-  }
-  refresh();
-  return answer(res);
+  return removeMember(roster(projectId), memberId);
 }
 
-/// Offer the project to one of its admins. Nothing moves until they accept.
+/** The project offered to one of its admins. Nothing moves until they accept. */
 export async function offerProjectAction(
   projectId: string,
   memberId: string,
 ): Promise<ActionResult> {
-  const gate = await open("members:transfer", 10, projectId);
-  if (!gate.ok) return gate;
-  const res = await tryFetchWithTimeout(
-    `${gate.base}/internal/v1/projects/${encodeURIComponent(gate.projectId)}/transfer`,
-    {
-      method: "POST",
-      headers: { ...gate.headers, "content-type": "application/json" },
-      body: JSON.stringify({ memberId }),
-    },
-  );
-  if (!res?.ok) return answer(res);
-
-  await tellOfferRecipients(res, gate.organizationId, gate.projectId);
-  revalidatePath("/(app)/[organization]/[project]/members", "page");
-  return { ok: true };
+  return offer(roster(projectId), memberId);
 }
 
-/// Withdraw the project's live offer.
+/** The project's live offer withdrawn. */
 export async function cancelProjectOfferAction(projectId: string): Promise<ActionResult> {
-  const gate = await open("members:transfer", 10, projectId);
-  if (!gate.ok) return gate;
-  const res = await tryFetchWithTimeout(
-    `${gate.base}/internal/v1/projects/${encodeURIComponent(gate.projectId)}/transfer`,
-    { method: "DELETE", headers: gate.headers },
-  );
-  if (!res?.ok) return answer(res);
-
-  await tellOfferRecipients(res, gate.organizationId, gate.projectId);
-  revalidatePath("/(app)/[organization]/[project]/members", "page");
-  return { ok: true };
+  return withdrawOffer(roster(projectId));
 }
 
-/// The live notice to everybody whose offer just changed, at the addresses
-/// auth read off the roster — never ones the browser supplied. That is the
-/// offer's holder, on a new offer also the admin whose live one it replaced,
-/// and the organization the project is in, whose roster pages show the offer.
-async function tellOfferRecipients(
-  res: Response,
-  organizationId: string,
-  projectId: string,
-): Promise<void> {
-  const body = await readBody(res, OfferChangeSchema);
-  const at = (email: string | undefined) => (email ? userChannel(email) : null);
-  await publishToAll(
-    [at(body?.offeredToEmail), at(body?.withdrawnFromEmail), organizationChannel(organizationId)],
-    { type: "ownership:changed", data: { organizationId, projectId } },
-  );
-}
-
-/// Give up the caller's own seat. From the project's own Members page the seat
-/// was all that let them in, so `from: "project"` leads them to the organization.
+/** The caller's own seat given up. From the project's own Members page the
+ *  seat was all that let them in, so `from: "project"` leads them to the
+ *  organization. */
 export async function leaveProjectAction(
   projectId: string,
   from: "organization" | "project" = "organization",
 ): Promise<ActionResult> {
-  const gate = await open("members:leave", 20, projectId);
+  const gate = await admitRoster(roster(projectId), { call: "members:leave", limit: 20 });
   if (!gate.ok) return gate;
   const res = await tryFetchWithTimeout(
-    `${gate.base}/internal/v1/memberships/${encodeURIComponent(projectId)}`,
+    `${env.SERVER_URL}/internal/v1/memberships/${encodeURIComponent(projectId)}`,
     { method: "DELETE", headers: gate.headers },
   );
-  if (!res?.ok) return answer(res);
+  if (!res?.ok) return answerMemberAction(res);
   if (from === "project") {
     const ctx = await getServerContext();
     const home = ctx ? activeOrganization(ctx) : null;
@@ -290,31 +131,5 @@ export async function leaveProjectAction(
     redirect(home ? organizationPath(home.slug) : "/console");
   }
   refresh();
-  return answer(res);
-}
-
-async function open(
-  call: string,
-  limit: number,
-  projectId: string,
-): Promise<
-  | {
-      ok: true;
-      base: string;
-      projectId: string;
-      /// The organization the session stands in, which holds the project:
-      /// a project page renders only inside the active organization's listing.
-      organizationId: string;
-      headers: Record<string, string>;
-      session: SessionData;
-    }
-  | Refused
-> {
-  const gate = await admitProject({ call, limit }, projectId);
-  if (!gate.ok) return refused(gate.error);
-  return { ...gate, base: env.SERVER_URL };
-}
-
-async function answer(res: Response | null): Promise<ActionResult> {
   return answerMemberAction(res);
 }

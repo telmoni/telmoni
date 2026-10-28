@@ -1,12 +1,11 @@
 import { notFound } from "next/navigation";
 
 import { AccessDenied } from "@/components/access-denied";
-import { DataTable, THead, Th } from "@/components/data-table";
+import { MemberCeilingNotice, atCeiling } from "@/components/member-ceiling";
+import { Invited, RoleCards, RosterTable, type RoleCard } from "@/components/members/roster";
+import { MemberRow } from "@/components/members/rows";
 import { PageHeader } from "@/components/page-header";
 import { ServiceUnavailable } from "@/components/service-unavailable";
-import { Badge } from "@/components/ui/badge";
-import { Card } from "@/components/ui/card";
-import { MemberCeilingNotice, atCeiling } from "@/components/member-ceiling";
 import { ownerContact } from "@/lib/identity";
 import { administers, owns } from "@/lib/roles";
 import {
@@ -18,14 +17,33 @@ import {
 } from "@/lib/server/data";
 import { getServerSession } from "@/lib/server/session";
 import { organizationPath } from "@/lib/slug";
+import type { Role } from "@/lib/types/enums";
 
+import { AddOrganizationMember } from "./_manage";
 import {
-  AddOrganizationMember,
-  OrganizationInviteRow,
-  OrganizationMemberRow,
-} from "./_manage";
+  cancelOwnershipOfferAction,
+  offerOwnershipAction,
+  removeOrganizationMemberAction,
+  revokeOrganizationInviteAction,
+  updateOrganizationMemberRoleAction,
+} from "./actions";
 
 export const metadata = { title: "Members" };
+
+const ROLES = {
+  owner: {
+    badge: "Full access",
+    body: "Create and delete projects, organization-wide settings, and rolled-up audit logs.",
+  },
+  admin: {
+    badge: "Can manage",
+    body: "Create projects, manage the organization's members and settings, and work as an admin in every project.",
+  },
+  member: {
+    badge: "Project scoped",
+    body: "No organization-wide powers by default; access comes entirely from project-level roles.",
+  },
+} satisfies Record<Role, RoleCard>;
 
 export default async function OrganizationMembersPage() {
   const session = await getServerSession();
@@ -33,7 +51,7 @@ export default async function OrganizationMembersPage() {
 
   // One source for both what the page shows and what its actions send:
   // `identityContext` is `/me`'s active organization — the one the path names
-  // — and every action is handed its id and acts on that one or on nothing:
+  // — and every action is bound to its id and acts on that one or on nothing:
   // not on whichever one its request resolves once the page has gone stale.
   // Reading one organization and writing another is how this page once showed
   // one roster in a box that invited into a different organization.
@@ -85,6 +103,12 @@ export default async function OrganizationMembersPage() {
   // and the deployment's sentence stands in its place: a refusal here is a
   // stale page, never a button that cannot work.
   const full = atCeiling(listing.ceiling);
+  const act = {
+    setRole: updateOrganizationMemberRoleAction.bind(null, organizationId),
+    remove: removeOrganizationMemberAction.bind(null, organizationId),
+    offer: offerOwnershipAction.bind(null, organizationId),
+    withdraw: cancelOwnershipOfferAction.bind(null, organizationId),
+  };
 
   return (
     <>
@@ -95,67 +119,20 @@ export default async function OrganizationMembersPage() {
 
       <div className="grid gap-6">
         <MemberCeilingNotice ceiling={listing.ceiling} />
-        <section className="grid gap-3 lg:grid-cols-3">
-          <Card className="gap-1.5">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="font-medium text-sm">Owner</span>
-              <Badge variant="secondary" className="text-xs shrink-0">
-                Full access
-              </Badge>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Create and delete projects, organization-wide settings, and rolled-up
-              audit logs.
-            </p>
-          </Card>
-          <Card className="gap-1.5">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="font-medium text-sm">Admin</span>
-              <Badge variant="secondary" className="text-xs shrink-0">
-                Can manage
-              </Badge>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Create projects, manage the organization&apos;s members and settings, and
-              work as an admin in every project.
-            </p>
-          </Card>
-          <Card className="gap-1.5">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="font-medium text-sm">Member</span>
-              <Badge variant="secondary" className="text-xs shrink-0">
-                Project scoped
-              </Badge>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              No organization-wide powers by default; access comes entirely from
-              project-level roles.
-            </p>
-          </Card>
-        </section>
+        <RoleCards cards={ROLES} />
 
         <section className="grid gap-3">
-          {/* Fixed columns, as on the project roster: an admin's row grows a
-              Transfer button, which re-flowed every column when a role
-              changed. */}
-          <DataTable className="table-fixed min-w-3xl">
-            <THead>
-              <Th>Member</Th>
-              <Th className="w-40">Role</Th>
-              <Th className="w-32">Added</Th>
-              <Th className="w-72" />
-            </THead>
-            <tbody>
-              {listing.members.map((m) => (
-                <OrganizationMemberRow
-                  key={m.id}
-                  organizationId={organizationId}
-                  member={m}
-                  isOwnerCaller={isOwner}
-                />
-              ))}
-            </tbody>
-          </DataTable>
+          <RosterTable>
+            {listing.members.map((m) => (
+              <MemberRow
+                key={m.id}
+                of="organization"
+                member={m}
+                act={act}
+                isOwnerCaller={isOwner}
+              />
+            ))}
+          </RosterTable>
           <p className="text-xs text-muted-foreground">
             Organization roles grant organization-wide capabilities. Owners manage members,
             settings, and projects. Admins create projects, manage settings and members, and
@@ -163,32 +140,12 @@ export default async function OrganizationMembersPage() {
           </p>
         </section>
 
-        {invited.kind === "ok" && invited.invites.length > 0 && (
-          <section className="grid gap-3">
-            <h2 className="text-sm font-medium">Invited</h2>
-            <DataTable>
-              <THead>
-                <Th>Email address</Th>
-                <Th>Role</Th>
-                <Th>Invitation</Th>
-                <Th />
-              </THead>
-              <tbody>
-                {invited.invites.map((i) => (
-                  <OrganizationInviteRow
-                    key={i.id}
-                    organizationId={organizationId}
-                    invite={i}
-                  />
-                ))}
-              </tbody>
-            </DataTable>
-            <p className="text-xs text-muted-foreground">
-              An invitation is an offer, not access — nobody on this list has
-              access to your organization. Each link works once, only for the
-              address it was sent to, and expires on its own.
-            </p>
-          </section>
+        {invited.kind === "ok" && (
+          <Invited
+            of="organization"
+            invites={invited.invites}
+            revoke={revokeOrganizationInviteAction.bind(null, organizationId)}
+          />
         )}
       </div>
     </>

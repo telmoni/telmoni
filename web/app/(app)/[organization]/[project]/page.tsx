@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
 
+import { MarkRead } from "@/components/mark-read";
 import { ServiceUnavailable } from "@/components/service-unavailable";
 import { fetchProjectBySlug, fetchProjectNotifications } from "@/lib/server/data";
 
 import { Notices } from "../../_notices";
 import { Overview } from "../../_overview";
-import { MarkProjectRead } from "./_project-notices";
+import { markProjectReadAction } from "./notice-actions";
 
 // The tab is titled as the page is, by the project's name.
 export async function generateMetadata({
@@ -45,10 +46,9 @@ export default async function OverviewPage({
             project={{ organization, slug }}
             action={
               newest && notices.unread > 0 ? (
-                <MarkProjectRead
-                  projectId={project.id}
+                <MarkRead
                   unread={notices.unread}
-                  before={newest.created_at}
+                  mark={markProjectReadAction.bind(null, project.id, newest.created_at)}
                 />
               ) : undefined
             }

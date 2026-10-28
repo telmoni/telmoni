@@ -1,16 +1,11 @@
 "use client";
 
-import { InviteSentDialog } from "@/components/members/invite-sent-dialog";
-
 import { UserPlus } from "lucide-react";
 import { startTransition, useState } from "react";
 import { toast } from "sonner";
 
-import { ConfirmDialog } from "@/components/confirm-dialog";
-import { Td } from "@/components/data-table";
-import { LocalTime } from "@/components/local-time";
+import { InviteSentDialog } from "@/components/members/invite-sent-dialog";
 import { PageAction } from "@/components/page-action";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -30,31 +25,24 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { personDetail, personName } from "@/lib/identity";
-import type { OrganizationInvite, OrganizationMember } from "@/lib/server/data";
-import { roleLabel } from "@/lib/role-label";
-import { type GivenRole, owns } from "@/lib/roles";
+import type { GivenRole } from "@/lib/roles";
 import { OrganizationRole } from "@/lib/types/enums";
 import { useAction } from "@/lib/use-action";
 
-import {
-  cancelOwnershipOfferAction,
-  inviteOrganizationMemberAction,
-  offerOwnershipAction,
-  revokeOrganizationInviteAction,
-  removeOrganizationMemberAction,
-  updateOrganizationMemberRoleAction,
-} from "./actions";
+import { inviteOrganizationMemberAction } from "./actions";
 
-// Every control here takes `organizationId`, the organization the page
-// rendered, and hands it to its action, which refuses when its request
-// resolves another one: the page has gone stale since.
+// The invitation takes `organizationId`, the organization the page rendered,
+// and hands it to its action, which refuses when its request resolves another
+// one: the page has gone stale since.
 
 export function AddOrganizationMember({ organizationId }: { organizationId: string }) {
   const [open, setOpen] = useState(false);
   return (
     <>
-      <PageAction primary="Invite member" onClick={() => setOpen(true)}><UserPlus className="size-4" />Invite member</PageAction>
+      <PageAction primary="Invite member" onClick={() => setOpen(true)}>
+        <UserPlus className="size-4" />
+        Invite member
+      </PageAction>
       <AddOrganizationMemberDialog
         key={`add-organization-member-${open}`}
         organizationId={organizationId}
@@ -156,196 +144,4 @@ function AddOrganizationMemberDialog({
       </DialogContent>
     </Dialog>
   );
-}
-
-export function OrganizationMemberRow({
-  organizationId,
-  member,
-  isOwnerCaller = false,
-}: {
-  organizationId: string;
-  member: OrganizationMember;
-  isOwnerCaller?: boolean;
-}) {
-  const { pending, error, run: act } = useAction();
-
-  const isOwner = owns(member.role);
-  // Only an admin can be handed the organization, and only the owner hands it.
-  const canOffer = isOwnerCaller && member.role === OrganizationRole.Admin;
-  const offered = Boolean(member.offer_expires_at);
-  const transferTrigger = (
-    <Button
-      variant="outline"
-      size="sm"
-      className="h-9 text-xs"
-      disabled={pending}
-      aria-label={`Transfer ownership to ${member.email}`}
-    >
-      Transfer ownership
-    </Button>
-  );
-
-  return (
-    <tr>
-      <Td className="font-medium">
-        <div className="flex items-center gap-2">
-          <span>{personName(who(member))}</span>
-          {isOwner && (
-            <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
-              Organization Owner
-            </Badge>
-          )}
-          {offered && member.offer_expires_at && (
-            <Badge variant="outline" className="text-[10px] px-1.5 py-0">
-              Ownership offered · lapses{" "}
-              <LocalTime iso={member.offer_expires_at} mode="date" />
-            </Badge>
-          )}
-        </div>
-        {personDetail(who(member)) && (
-          <span className="block text-xs font-normal text-muted-foreground wrap-anywhere">
-            {personDetail(who(member))}
-          </span>
-        )}
-      </Td>
-      <Td>
-        {isOwner ? (
-          <span className="text-xs font-medium text-muted-foreground">Owner</span>
-        ) : (
-          <Select
-            value={member.role}
-            disabled={pending}
-            onValueChange={(v) =>
-              act(() =>
-                updateOrganizationMemberRoleAction(
-                  organizationId,
-                  member.member_id,
-                  v as GivenRole,
-                ),
-              )
-            }
-          >
-            <SelectTrigger
-              className="h-9 w-32 text-xs"
-              aria-label={`Role for ${member.email}`}
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={OrganizationRole.Admin}>Admin</SelectItem>
-              <SelectItem value={OrganizationRole.Member}>Member</SelectItem>
-            </SelectContent>
-          </Select>
-        )}
-        {error && <span className="ml-2 text-xs text-destructive">{error}</span>}
-      </Td>
-      <Td className="text-xs text-muted-foreground whitespace-nowrap">
-        <LocalTime iso={member.created_at} mode="date" />
-      </Td>
-      <Td className="text-right whitespace-nowrap">
-        <div className="flex items-center justify-end gap-3">
-          {canOffer && !offered && (
-            <ConfirmDialog
-              trigger={transferTrigger}
-              title={`Hand this organization to ${personName(who(member))}?`}
-              description="They become the owner when they accept: deleting the organization, handing it on, and deleting its projects or handing them to other organizations become theirs alone. You stay on as an admin of the organization and of every project, managing members, keys and connectors as before. The offer lapses in 7 days if they do nothing."
-              confirmLabel="Send offer"
-              onConfirm={() =>
-                act(() => offerOwnershipAction(organizationId, member.member_id))
-              }
-            />
-          )}
-          {canOffer && offered && (
-            <ConfirmDialog
-              trigger={
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-9 text-xs"
-                  disabled={pending}
-                  aria-label={`Withdraw the ownership offer to ${member.email}`}
-                >
-                  Withdraw offer
-                </Button>
-              }
-              title="Withdraw the ownership offer?"
-              description="The organization stays yours, and they can no longer accept it."
-              confirmLabel="Withdraw"
-              onConfirm={() => act(() => cancelOwnershipOfferAction(organizationId))}
-            />
-          )}
-          {!isOwner && (
-            <ConfirmDialog
-              trigger={
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-9 text-xs"
-                  disabled={pending}
-                  aria-label={`Remove ${member.email}`}
-                >
-                  Remove
-                </Button>
-              }
-              title={`Remove ${personName(who(member))} from organization?`}
-              description="They will immediately lose access to all projects and resources in this organization."
-              confirmLabel="Remove"
-              onConfirm={() =>
-                act(() => removeOrganizationMemberAction(organizationId, member.member_id))
-              }
-            />
-          )}
-        </div>
-      </Td>
-    </tr>
-  );
-}
-
-export function OrganizationInviteRow({
-  organizationId,
-  invite,
-}: {
-  organizationId: string;
-  invite: OrganizationInvite;
-}) {
-  const { pending, error, run } = useAction();
-
-  return (
-    <tr>
-      <Td className="font-medium">{invite.email}</Td>
-      <Td className="text-xs text-muted-foreground">
-        {roleLabel(invite.role)}
-      </Td>
-      <Td className="text-xs text-muted-foreground whitespace-nowrap">
-        Expires <LocalTime iso={invite.expires_at} mode="date" />
-      </Td>
-      <Td className="text-right whitespace-nowrap">
-        {error && <span className="mr-2 text-xs text-destructive">{error}</span>}
-        <ConfirmDialog
-          trigger={
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-9 text-xs"
-              disabled={pending}
-              aria-label={`Withdraw the invitation to ${invite.email}`}
-            >
-              Withdraw
-            </Button>
-          }
-          title={`Withdraw the invitation to ${invite.email}?`}
-          description="Their link stops working straight away. You can invite them again later."
-          confirmLabel="Withdraw"
-          onConfirm={() => run(() => revokeOrganizationInviteAction(organizationId, invite.id))}
-        />
-      </Td>
-    </tr>
-  );
-}
-
-function who(member: OrganizationMember): {
-  displayName?: string | null;
-  email: string;
-} {
-  return { displayName: member.display_name, email: member.email };
 }
