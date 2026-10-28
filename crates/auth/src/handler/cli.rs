@@ -36,7 +36,7 @@ pub async fn refresh(
     State(state): State<Arc<AppState>>,
     Json(req): Json<session::RefreshRequest>,
 ) -> Result<impl IntoResponse, TelmoniError> {
-    session::refresh_session(&state, &req.refresh_token, req.session_row_id)
+    session::refresh_session(&state, req.refresh_token.expose(), req.session_row_id)
         .await
         .map(Json)
 }

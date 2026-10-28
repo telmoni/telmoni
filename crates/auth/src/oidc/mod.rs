@@ -383,7 +383,7 @@ impl OidcProvider {
                 given_name,
                 family_name,
             },
-            id_token: Some(id_token),
+            id_token: Some(id_token.into()),
             auth_method: None,
         })
     }
@@ -1024,7 +1024,10 @@ mod tests {
         assert_eq!(authn.subject.email.as_deref(), Some("ada@example.com"));
         assert!(authn.subject.email_verified);
         assert_eq!(authn.subject.given_name.as_deref(), Some("Ada"));
-        assert_eq!(authn.id_token.as_deref(), Some(token.as_str()));
+        assert_eq!(
+            authn.id_token.as_ref().map(Redacted::expose),
+            Some(token.as_str())
+        );
         assert_eq!(authn.auth_method, None);
     }
 

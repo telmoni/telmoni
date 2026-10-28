@@ -545,13 +545,8 @@ fn event_kinds_column(
 #[derive(Debug, Serialize)]
 pub struct SigningSecret {
     pub connection: db::ConnectionSummary,
-    #[serde(serialize_with = "exposed")]
+    #[serde(serialize_with = "telmoni_shared::types::redacted::exposed")]
     pub signing_secret: Redacted,
-}
-
-/// The secret, written into the one answer that shows it.
-fn exposed<S: serde::Serializer>(secret: &Redacted, serializer: S) -> Result<S::Ok, S::Error> {
-    serializer.serialize_str(secret.expose())
 }
 
 /// `POST /internal/v1/connectors/webhook` — connect a customer's own endpoint.

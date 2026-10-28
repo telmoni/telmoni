@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use uuid::Uuid;
 
+use telmoni_shared::Redacted;
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
 use telmoni_shared::db::tenant_session::{Maintenance, Scoped, maintenance_scope};
 use telmoni_shared::extract::{Json, Path};
@@ -59,18 +60,10 @@ pub struct CreateInviteRequest {
 }
 
 /// The secret from the link, as the invited person's browser presents it.
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct InviteTokenRequest {
-    pub token: String,
-}
-
-impl std::fmt::Debug for InviteTokenRequest {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("InviteTokenRequest")
-            .field("token", &"***")
-            .finish()
-    }
+    pub token: Redacted,
 }
 
 /// What the deployment says before a seat is promised or taken: a paused
@@ -389,7 +382,7 @@ pub async fn look_up_invite(
     Json(req): Json<InviteTokenRequest>,
 ) -> Result<Json<InviteLook>, TelmoniError> {
     let mut tx = maintenance_scope(&state.db, AuthLane).await?;
-    let token_hash = crate::issuer::hash(&req.token);
+    let token_hash = crate::issuer::hash(req.token.expose());
     let found = invites::find_live_by_token(&mut tx, &token_hash).await?;
     tx.commit().await?;
     let Some(invite) = found else {
@@ -724,7 +717,7 @@ pub async fn accept_invite(
     let actor = principal.user_id;
 
     let mut tx = maintenance_scope(&state.db, AuthLane).await?;
-    let token_hash = crate::issuer::hash(&req.token);
+    let token_hash = crate::issuer::hash(req.token.expose());
     let Some(invite) = invites::find_live_by_token(&mut tx, &token_hash).await? else {
         return Err(
             AuthError::NotFound("this invitation has expired or been withdrawn".into()).into(),

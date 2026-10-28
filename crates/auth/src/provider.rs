@@ -14,7 +14,7 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-use telmoni_shared::{AuthzError, TelmoniError};
+use telmoni_shared::{AuthzError, Redacted, TelmoniError};
 
 /// The identity a provider's code exchange names.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -34,14 +34,14 @@ pub struct Subject {
 
 /// What a provider's code exchange answers: who the person is, and what the
 /// sign-out will need to name the provider's own session.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Authenticated {
     /// The person, as the provider asserts them.
     pub subject: Subject,
     /// The provider's id token, verified, when the exchange produced one.
     /// Sealed into the console's session for RP-initiated logout
     /// (`id_token_hint`); nothing here reads it again.
-    pub id_token: Option<String>,
+    pub id_token: Option<Redacted>,
     /// How this sign-in was proved: `password`, `passkey`, `email_code`, `sso`,
     /// or an OAuth connection's name. ⚠ `None` means the provider said nothing
     /// this answers for — never "no method" — so every reader needs a branch
@@ -49,32 +49,14 @@ pub struct Authenticated {
     pub auth_method: Option<String>,
 }
 
-impl std::fmt::Debug for Authenticated {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Authenticated")
-            .field("subject", &self.subject)
-            .field("id_token", &self.id_token.as_ref().map(|_| "***"))
-            .field("auth_method", &self.auth_method)
-            .finish()
-    }
-}
-
 /// A minted password-reset link, and when it stops working.
+#[derive(Debug)]
 pub struct PasswordResetLink {
     /// The hosted page that spends the token. Email content only.
-    pub url: String,
+    pub url: Redacted,
     /// When the token expires, as the provider stated it. For the LOG LINE,
     /// never the mail: an absolute UTC timestamp is nothing a reader can act on.
     pub expires_at: String,
-}
-
-impl std::fmt::Debug for PasswordResetLink {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("PasswordResetLink")
-            .field("url", &"https://***")
-            .field("expires_at", &self.expires_at)
-            .finish()
-    }
 }
 
 /// A pending email change the provider has mailed a one-time code for.
@@ -101,20 +83,20 @@ pub struct ConfirmedEmail {
 
 /// What [`crate::issuer::Issuer`] answers a grant with: the session's
 /// tokens, and who they are for.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct TokenResponse {
     /// The bearer the console relays on every person request: an opaque
     /// secret this service stores as its hash and resolves to the person and
     /// the session ([`crate::person`]).
-    pub access_token: String,
+    pub access_token: Redacted,
     /// The session the tokens belong to: what the sessions page lists and a
     /// sign-out names.
     pub session_id: String,
     /// The external provider's id token, when the session began at one:
     /// sealed by the console for the sign-out that names it, never relayed.
-    pub id_token: Option<String>,
+    pub id_token: Option<Redacted>,
     /// The refresh token, rotated on every use.
-    pub refresh_token: Option<String>,
+    pub refresh_token: Option<Redacted>,
     /// Seconds the access token remains valid from issue time.
     pub expires_in: u64,
     /// The person, with our own id as `sub`.
@@ -123,25 +105,11 @@ pub struct TokenResponse {
     pub auth_method: Option<String>,
 }
 
-impl std::fmt::Debug for TokenResponse {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("TokenResponse")
-            .field("access_token", &"***")
-            .field("session_id", &self.session_id)
-            .field("id_token", &self.id_token.as_ref().map(|_| "***"))
-            .field("refresh_token", &self.refresh_token.as_ref().map(|_| "***"))
-            .field("expires_in", &self.expires_in)
-            .field("subject", &self.subject)
-            .field("auth_method", &self.auth_method)
-            .finish()
-    }
-}
-
 /// What the issuer hands a device that asked to sign in (RFC 8628 § 3.2).
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct DeviceAuthorization {
     /// The secret the device polls with. Never shown to the person.
-    pub device_code: String,
+    pub device_code: Redacted,
     /// The short code the person types on the console's device page.
     pub user_code: String,
     /// Where the person goes to type it.
@@ -152,18 +120,6 @@ pub struct DeviceAuthorization {
     pub expires_in: u64,
     /// The fewest seconds the device may leave between polls.
     pub interval: u64,
-}
-
-impl std::fmt::Debug for DeviceAuthorization {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("DeviceAuthorization")
-            .field("device_code", &"***")
-            .field("user_code", &self.user_code)
-            .field("verification_uri", &self.verification_uri)
-            .field("expires_in", &self.expires_in)
-            .field("interval", &self.interval)
-            .finish()
-    }
 }
 
 /// What one poll of the device-code grant answered. The four refusals are

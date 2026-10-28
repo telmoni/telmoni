@@ -692,7 +692,7 @@ mod tests {
                         email_verified: true,
                         first_name: None,
                         last_name: None,
-                        access_token: String::new(),
+                        access_token: String::new().into(),
                         session_id: String::new(),
                         refresh_token: None,
                         expires_in: 0,

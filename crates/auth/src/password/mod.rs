@@ -30,7 +30,7 @@ use chrono::{Duration, Utc};
 use sqlx::PgPool;
 
 use telmoni_shared::db::tenant_session::{maintenance_scope, person_scope};
-use telmoni_shared::{AuthError, AuthzError, TelmoniError, TenantError, UserId};
+use telmoni_shared::{AuthError, AuthzError, Redacted, TelmoniError, TenantError, UserId};
 
 use crate::db::{
     AuthLane, access_tokens,
@@ -53,21 +53,12 @@ pub const RESET_TTL_MINUTES: i64 = 60;
 const LINKS_PER_DAY: i64 = 5;
 
 /// What a sign-up earned.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum SignedUp {
     /// The address must be confirmed first: a link went to it.
     LinkSent,
     /// The account is usable now, and this code opens its first session.
-    Code(String),
-}
-
-impl std::fmt::Debug for SignedUp {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::LinkSent => f.write_str("LinkSent"),
-            Self::Code(_) => f.write_str("Code(***)"),
-        }
-    }
+    Code(Redacted),
 }
 
 /// The accounts held here. One per process, when the login form is on.
@@ -214,7 +205,7 @@ impl PasswordProvider {
                 .await?;
             tx.commit().await?;
             tracing::info!(user_id = %user_id, "account created and signed in");
-            return Ok(SignedUp::Code(code));
+            return Ok(SignedUp::Code(code.into()));
         }
         let token = secret();
         confirmation_codes::create(
@@ -694,7 +685,7 @@ impl ResetSender {
             })?;
         tracing::info!(user_id = %user_id, "password-reset link issued");
         Ok(PasswordResetLink {
-            url,
+            url: url.into(),
             expires_at: expires_at.to_rfc3339(),
         })
     }

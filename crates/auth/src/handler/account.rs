@@ -24,6 +24,7 @@ use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
+use telmoni_shared::Redacted;
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
 use telmoni_shared::db::tenant_session::person_scope;
 use telmoni_shared::extract::Json;
@@ -61,24 +62,15 @@ pub struct RequestEmailChangeRequest {
 
 /// Body for `POST /internal/v1/me/email-change/confirm` — one code from each
 /// inbox. Both are required; each proves half of what this lane needs.
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ConfirmEmailChangeRequest {
     /// OURS, mailed to the address on the account. Proves the asker holds the
     /// account, which a session cookie does not.
-    pub current_code: String,
+    pub current_code: Redacted,
     /// The identity provider's, mailed to the new address. Proves that address
     /// is reachable; never minted, stored or seen by this service.
-    pub new_code: String,
-}
-
-impl std::fmt::Debug for ConfirmEmailChangeRequest {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ConfirmEmailChangeRequest")
-            .field("current_code", &"******")
-            .field("new_code", &"******")
-            .finish()
-    }
+    pub new_code: Redacted,
 }
 
 /// Body of `PUT /internal/v1/me/analytics`.
@@ -97,18 +89,10 @@ pub struct DefaultOrganizationRequest {
 
 /// Body for `DELETE /internal/v1/me` and `DELETE /internal/v1/organization` — the
 /// emailed confirmation code that gates the irreversible cascade.
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DeletionRequest {
-    pub code: String,
-}
-
-impl std::fmt::Debug for DeletionRequest {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("DeletionRequest")
-            .field("code", &"******")
-            .finish()
-    }
+    pub code: Redacted,
 }
 
 /// The refusal every code lane gives a wrong or spent code.
@@ -279,7 +263,7 @@ pub async fn confirm_email_change(
         &mut tx,
         &user_id,
         Act::EmailChange,
-        &crate::issuer::hash(req.current_code.trim()),
+        &crate::issuer::hash(req.current_code.expose().trim()),
     )
     .await?;
     if live.is_none() {
@@ -296,7 +280,7 @@ pub async fn confirm_email_change(
     let confirmed = state
         .account_holder(&user_id)
         .await?
-        .confirm_email_change(&user_id, req.new_code.trim())
+        .confirm_email_change(&user_id, req.new_code.expose().trim())
         .await?;
     let new_email = identities::normalize_email(&confirmed.email);
     if !confirmed.email_verified {
@@ -567,7 +551,7 @@ pub async fn delete_account(
         &mut tx,
         &user_id,
         Act::AccountDeletion,
-        &crate::issuer::hash(req.code.trim()),
+        &crate::issuer::hash(req.code.expose().trim()),
     )
     .await?
     else {

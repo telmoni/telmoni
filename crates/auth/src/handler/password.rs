@@ -65,18 +65,11 @@ fn challenge(sent: &str) -> Result<&str, TelmoniError> {
 /// `POST /internal/v1/auth/password/sign-in` answer, and a sign-up's when the
 /// account is usable at once: the one-time code the console's callback
 /// spends at the exchange lane.
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SignInResponse {
-    pub code: String,
-}
-
-impl std::fmt::Debug for SignInResponse {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SignInResponse")
-            .field("code", &"***")
-            .finish()
-    }
+    #[serde(serialize_with = "telmoni_shared::types::redacted::exposed")]
+    pub code: Redacted,
 }
 
 /// `POST /internal/v1/auth/password/verify`: the two halves of the link.
@@ -136,7 +129,7 @@ pub async fn sign_in(
     let code = provider(&state)?
         .sign_in(&req.email, req.password.expose(), code_challenge)
         .await?;
-    Ok(Json(SignInResponse { code }))
+    Ok(Json(SignInResponse { code: code.into() }))
 }
 
 /// `POST /internal/v1/auth/password/verify` — spend the verification link.

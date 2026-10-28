@@ -132,7 +132,7 @@ pub async fn delete_organization(
 ) -> Result<impl IntoResponse, TelmoniError> {
     let organization = organization_of(&headers)?;
     let tx = open_deletion(&state, &principal.user_id, &organization).await?;
-    let erase_after = spend_code(tx, &principal.user_id, &organization, &req.code).await?;
+    let erase_after = spend_code(tx, &principal.user_id, &organization, req.code.expose()).await?;
     Ok(crate::handler::deletion::deletion_response(&state, &organization, erase_after).await)
 }
 

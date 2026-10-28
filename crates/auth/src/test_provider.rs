@@ -784,7 +784,7 @@ pub fn authenticated(sub: &str) -> Authenticated {
             given_name: Some("Ada".into()),
             family_name: Some("Lovelace".into()),
         },
-        id_token: Some(format!("id_token_for_{sub}")),
+        id_token: Some(format!("id_token_for_{sub}").into()),
         auth_method: None,
     }
 }
@@ -943,7 +943,7 @@ impl AuthProvider for ScriptedProvider {
         self.script(|s| s.password_reset.pop_front())
             .unwrap_or_else(|| {
                 Ok(PasswordResetLink {
-                    url: format!("{}/password-reset/tok_test", self.base),
+                    url: format!("{}/password-reset/tok_test", self.base).into(),
                     expires_at: "2026-12-31T00:00:00.000Z".into(),
                 })
             })

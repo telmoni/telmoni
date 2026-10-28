@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use telmoni_shared::types::API_TOKEN_PREFIX;
+use telmoni_shared::Redacted;
 use telmoni_shared::{ApiKeyScope, OrganizationId, OrganizationStatus, ProjectId, Role, UserId};
 
 /// Which level an invitation is to — a project inside an organization, or the
@@ -322,22 +322,13 @@ where
     serde::Deserialize::deserialize(de).map(Some)
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct CreateTokenResponse {
     pub id: Uuid,
     pub name: String,
     /// Raw token — returned only once, never stored.
-    pub token: String,
-}
-
-impl std::fmt::Debug for CreateTokenResponse {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CreateTokenResponse")
-            .field("id", &self.id)
-            .field("name", &self.name)
-            .field("token", &format_args!("{API_TOKEN_PREFIX}***"))
-            .finish()
-    }
+    #[serde(serialize_with = "telmoni_shared::types::redacted::exposed")]
+    pub token: Redacted,
 }
 
 /// Request body for `POST /internal/v1/tokens/{token_id}/rotate`.
@@ -348,18 +339,10 @@ pub struct RotateTokenRequest {
     pub grace_seconds: Option<i64>,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ValidateTokenRequest {
-    pub token: String,
-}
-
-impl std::fmt::Debug for ValidateTokenRequest {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ValidateTokenRequest")
-            .field("token", &format_args!("{API_TOKEN_PREFIX}***"))
-            .finish()
-    }
+    pub token: Redacted,
 }
 
 /// What `/internal/v1/tokens/validate` answers. A token acts for the project it
@@ -390,8 +373,7 @@ mod tests {
         telmoni_shared::test_util::assert_wire_words::<InviteScope>();
     }
 
-    /// The redaction is mechanical: no raw token survives a Debug render, and a
-    /// refactor that re-derives Debug fails here.
+    /// No raw token survives a Debug render, and the answer still hands it over.
     #[test]
     fn create_token_response_debug_masks_the_raw_token() {
         let resp = CreateTokenResponse {
@@ -404,18 +386,20 @@ mod tests {
             !rendered.contains("super_secret_value"),
             "leaked: {rendered}"
         );
-        assert!(rendered.contains("tm_***"));
         assert!(rendered.contains("ci-pipeline"));
+        assert_eq!(
+            serde_json::to_value(&resp).unwrap()["token"],
+            "tm_super_secret_value_1234567890"
+        );
     }
 
     #[test]
     fn validate_token_request_debug_masks_the_raw_token() {
-        let req = ValidateTokenRequest {
-            token: "tm_inbound_secret_9876".into(),
-        };
+        let req: ValidateTokenRequest =
+            serde_json::from_str(r#"{"token":"tm_inbound_secret_9876"}"#).unwrap();
         let rendered = format!("{req:?}");
         assert!(!rendered.contains("inbound_secret"), "leaked: {rendered}");
-        assert!(rendered.contains("tm_***"));
+        assert_eq!(req.token.expose(), "tm_inbound_secret_9876");
     }
 
     /// The two words are read by the console (the notifications bell prints

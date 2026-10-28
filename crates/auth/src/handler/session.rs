@@ -17,7 +17,7 @@ use telmoni_shared::SessionId;
 use telmoni_shared::db::tenant_session::maintenance_scope;
 use telmoni_shared::extract::Json;
 use telmoni_shared::person_token::Principal;
-use telmoni_shared::{AuthError, TelmoniError};
+use telmoni_shared::{AuthError, Redacted, TelmoniError};
 
 use crate::AppState;
 use crate::db::AuthLane;
@@ -70,13 +70,13 @@ pub struct StartResponse {
 
 /// `POST /internal/v1/auth/exchange` request — the `?code=...` the sign-in
 /// redirected back to the BFF's callback with.
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ExchangeRequest {
     /// Authorization code from the redirect.
-    pub code: String,
+    pub code: Redacted,
     /// The verifier the code's challenge was made from.
-    pub code_verifier: String,
+    pub code_verifier: Redacted,
     /// The nonce the sign-in sent.
     pub nonce: String,
     /// `external` when the code is the external provider's; absent, it is
@@ -85,24 +85,14 @@ pub struct ExchangeRequest {
     pub provider: Option<SignInProvider>,
 }
 
-impl std::fmt::Debug for ExchangeRequest {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ExchangeRequest")
-            .field("code", &"***")
-            .field("code_verifier", &"***")
-            .field("nonce", &self.nonce)
-            .field("provider", &self.provider)
-            .finish()
-    }
-}
-
 /// `POST /cli/v1/auth/device` response — what the CLI shows the
 /// person and what it polls with (RFC 8628 § 3.2).
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceStartResponse {
     /// The secret the CLI polls with. Shown to nobody.
-    pub device_code: String,
+    #[serde(serialize_with = "telmoni_shared::types::redacted::exposed")]
+    pub device_code: Redacted,
     /// The short code the person types on the console's device page.
     pub user_code: String,
     /// Where they type it.
@@ -115,32 +105,12 @@ pub struct DeviceStartResponse {
     pub interval: u64,
 }
 
-impl std::fmt::Debug for DeviceStartResponse {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("DeviceStartResponse")
-            .field("device_code", &"***")
-            .field("user_code", &self.user_code)
-            .field("verification_uri", &self.verification_uri)
-            .field("expires_in", &self.expires_in)
-            .field("interval", &self.interval)
-            .finish()
-    }
-}
-
 /// `POST /cli/v1/auth/device/poll` request.
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DevicePollRequest {
     /// The device code the start answered.
-    pub device_code: String,
-}
-
-impl std::fmt::Debug for DevicePollRequest {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("DevicePollRequest")
-            .field("device_code", &"***")
-            .finish()
-    }
+    pub device_code: Redacted,
 }
 
 /// `POST /internal/v1/auth/device/{approve,deny}`: the code the device shows.
@@ -169,24 +139,16 @@ enum PendingStatus {
 }
 
 /// `POST /internal/v1/auth/refresh` request.
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RefreshRequest {
     /// The refresh token the BFF stored in the prior session.
-    pub refresh_token: String,
+    pub refresh_token: Redacted,
     /// The `auth.sessions` row the cookie names. A revoked row refuses the
     /// refresh BEFORE the single-use token is spent, and a successful grant
     /// touches it.
     #[serde(default)]
     pub session_row_id: Option<uuid::Uuid>,
-}
-
-impl std::fmt::Debug for RefreshRequest {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RefreshRequest")
-            .field("refresh_token", &"***")
-            .finish()
-    }
 }
 
 /// `POST /internal/v1/auth/logout` request — the session to end.
@@ -199,7 +161,7 @@ pub struct LogoutRequest {
 
 /// `POST /internal/v1/auth/logout-url` request — mint the external provider's
 /// **browser** logout URL, for a session that began there.
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct LogoutUrlRequest {
     /// The session id the exchange answered with.
@@ -208,20 +170,10 @@ pub struct LogoutUrlRequest {
     /// console sealed, for a logout page that names the session by it.
     /// Absent for a session that began here: nothing to end elsewhere.
     #[serde(default)]
-    pub id_token: Option<String>,
+    pub id_token: Option<Redacted>,
     /// Where the browser lands after the sign-out; must be allowlisted at
     /// an external provider.
     pub return_to: String,
-}
-
-impl std::fmt::Debug for LogoutUrlRequest {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LogoutUrlRequest")
-            .field("session_id", &self.session_id)
-            .field("id_token", &self.id_token.as_ref().map(|_| "***"))
-            .field("return_to", &self.return_to)
-            .finish()
-    }
 }
 
 /// `POST /internal/v1/auth/logout-url` response.
@@ -256,7 +208,7 @@ pub struct ExternalSummary {
 
 /// Authenticated identity + tokens the BFF seals into `telmoni_session`, for
 /// both `exchange` and `refresh`.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AuthnResult {
     /// The person's id — the BFF's `userId`, and their key in
@@ -273,17 +225,20 @@ pub struct AuthnResult {
     pub last_name: Option<String>,
     /// The bearer, stored in the session and relayed on every request. An
     /// opaque secret: nothing is read out of it.
-    pub access_token: String,
+    #[serde(serialize_with = "telmoni_shared::types::redacted::exposed")]
+    pub access_token: Redacted,
     /// The session the tokens belong to, which the sign-out names.
     pub session_id: String,
     /// The refresh token, rotated on every use.
-    pub refresh_token: Option<String>,
+    #[serde(serialize_with = "telmoni_shared::types::redacted::exposed_option")]
+    pub refresh_token: Option<Redacted>,
     /// Seconds until the access token expires (drives the BFF's `expiresAt`).
     pub expires_in: u64,
     /// The external provider's id token, when the session began at one and
     /// this is the exchange; a refresh carries none, and the BFF keeps the
     /// one it sealed.
-    pub id_token: Option<String>,
+    #[serde(serialize_with = "telmoni_shared::types::redacted::exposed_option")]
+    pub id_token: Option<Redacted>,
     /// How this sign-in was proved, or `None`. ⚠ Sealed into the session and
     /// never stored here: a column would outlive the sign-in it describes and
     /// answer for a person who has since signed in another way. A refresh
@@ -306,24 +261,6 @@ impl From<TokenResponse> for AuthnResult {
             id_token: t.id_token,
             auth_method: t.auth_method,
         }
-    }
-}
-
-impl std::fmt::Debug for AuthnResult {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AuthnResult")
-            .field("user_id", &self.user_id)
-            .field("email", &self.email)
-            .field("email_verified", &self.email_verified)
-            .field("first_name", &self.first_name)
-            .field("last_name", &self.last_name)
-            .field("access_token", &"***")
-            .field("session_id", &self.session_id)
-            .field("refresh_token", &self.refresh_token.as_ref().map(|_| "***"))
-            .field("expires_in", &self.expires_in)
-            .field("id_token", &self.id_token.as_ref().map(|_| "***"))
-            .field("auth_method", &self.auth_method)
-            .finish()
     }
 }
 
@@ -417,10 +354,14 @@ pub async fn device_poll(
     State(state): State<Arc<AppState>>,
     Json(req): Json<DevicePollRequest>,
 ) -> Result<axum::response::Response, TelmoniError> {
-    if req.device_code.trim().is_empty() {
+    if req.device_code.expose().trim().is_empty() {
         return Err(TelmoniError::BadRequest("deviceCode is required".into()));
     }
-    match state.issuer.device_token_grant(&req.device_code).await? {
+    match state
+        .issuer
+        .device_token_grant(req.device_code.expose())
+        .await?
+    {
         DevicePoll::Granted(tokens) => Ok(Json(AuthnResult::from(*tokens)).into_response()),
         DevicePoll::Pending => Ok((
             axum::http::StatusCode::ACCEPTED,
@@ -479,14 +420,14 @@ pub async fn exchange(
     State(state): State<Arc<AppState>>,
     Json(req): Json<ExchangeRequest>,
 ) -> Result<impl IntoResponse, TelmoniError> {
-    if !telmoni_shared::pkce::is_verifier(&req.code_verifier) || !is_nonce(&req.nonce) {
+    if !telmoni_shared::pkce::is_verifier(req.code_verifier.expose()) || !is_nonce(&req.nonce) {
         return Err(TelmoniError::BadRequest(
             "codeVerifier is an RFC 7636 verifier, and nonce 16 to 128 URL-safe characters".into(),
         ));
     }
     // A retry is answered from the cache only with the verifier the first
     // presentation spent the code with: a stolen code is no key to it.
-    let code = format!("{}\n{}", req.code, req.code_verifier);
+    let code = format!("{}\n{}", req.code.expose(), req.code_verifier.expose());
     // As `start` decides: with the login form off the browser went to the
     // external provider unasked, and the console's cookie names no provider.
     // Only the form mints codes here, so without it every code is the
@@ -499,10 +440,10 @@ pub async fn exchange(
             let authenticated = external
                 .provider
                 .exchange_code(
-                    &req.code,
+                    req.code.expose(),
                     &state.config.redirect_uri,
                     Proof {
-                        code_verifier: &req.code_verifier,
+                        code_verifier: req.code_verifier.expose(),
                         nonce: &req.nonce,
                     },
                 )
@@ -525,7 +466,9 @@ pub async fn exchange(
         };
         return exchange_once(&state, code, grant).await.map(Json);
     }
-    let grant = state.issuer.exchange_code(&req.code, &req.code_verifier);
+    let grant = state
+        .issuer
+        .exchange_code(req.code.expose(), req.code_verifier.expose());
     exchange_once(&state, code, grant).await.map(Json)
 }
 
@@ -581,7 +524,7 @@ pub async fn refresh(
     State(state): State<Arc<AppState>>,
     Json(req): Json<RefreshRequest>,
 ) -> Result<impl IntoResponse, TelmoniError> {
-    refresh_session(&state, &req.refresh_token, req.session_row_id)
+    refresh_session(&state, req.refresh_token.expose(), req.session_row_id)
         .await
         .map(Json)
 }
@@ -644,7 +587,7 @@ pub async fn logout_url(
     State(state): State<Arc<AppState>>,
     Json(req): Json<LogoutUrlRequest>,
 ) -> impl IntoResponse {
-    let logout_url = match (&state.external, req.id_token.as_deref()) {
+    let logout_url = match (&state.external, req.id_token.as_ref().map(Redacted::expose)) {
         (Some(external), Some(id_token)) => {
             external
                 .provider

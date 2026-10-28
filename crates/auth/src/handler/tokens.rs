@@ -215,7 +215,7 @@ pub async fn create_token(
         Json(CreateTokenResponse {
             id: record.id,
             name: record.name,
-            token: raw_token,
+            token: raw_token.into(),
         }),
     ))
 }
@@ -333,7 +333,7 @@ pub async fn rotate_token(
         Json(CreateTokenResponse {
             id: new_record.id,
             name: new_record.name,
-            token: raw_token,
+            token: raw_token.into(),
         }),
     ))
 }
@@ -342,11 +342,11 @@ pub async fn validate_token(
     State(state): State<Arc<AppState>>,
     Json(req): Json<ValidateTokenRequest>,
 ) -> Result<impl IntoResponse, TelmoniError> {
-    if !req.token.starts_with(API_TOKEN_PREFIX) {
+    if !req.token.expose().starts_with(API_TOKEN_PREFIX) {
         return Err(AuthError::Unauthenticated.into());
     }
 
-    let token_hash = crate::issuer::hash(&req.token);
+    let token_hash = crate::issuer::hash(req.token.expose());
 
     let mut tx = maintenance_scope(&state.db, AuthLane).await?;
     let result = tokens::validate(&mut tx, &token_hash).await?;

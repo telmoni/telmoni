@@ -23,7 +23,7 @@ use uuid::Uuid;
 
 use telmoni_shared::SessionId;
 use telmoni_shared::db::tenant_session::{Person, Scoped, maintenance_scope, person_scope};
-use telmoni_shared::{AuthError, TelmoniError, UserId};
+use telmoni_shared::{AuthError, Redacted, TelmoniError, UserId};
 
 use crate::db::authorization_codes::SpentCode;
 use crate::db::{
@@ -192,7 +192,7 @@ impl Issuer {
         user_id: &UserId,
         sid: &SessionId,
         auth_method: Option<&str>,
-        id_token: Option<String>,
+        id_token: Option<Redacted>,
     ) -> Result<TokenResponse, TelmoniError> {
         let Some(identity) = identities::identity(tx, user_id).await? else {
             tracing::error!(user_id = %user_id, "a grant for a person with no identity row");
@@ -225,10 +225,10 @@ impl Issuer {
                 given_name: identity.first_name,
                 family_name: identity.last_name,
             },
-            access_token,
+            access_token: access_token.into(),
             session_id: sid.to_string(),
             id_token,
-            refresh_token: Some(refresh_token),
+            refresh_token: Some(refresh_token.into()),
             expires_in: u64::try_from(BEARER_TTL_SECS).unwrap_or(0),
             auth_method: auth_method.map(str::to_owned),
         })
@@ -298,7 +298,7 @@ impl Issuer {
         &self,
         user_id: &UserId,
         auth_method: Option<&str>,
-        id_token: Option<String>,
+        id_token: Option<Redacted>,
     ) -> Result<TokenResponse, TelmoniError> {
         let mut tx = person_scope(&self.db, user_id).await?;
         let tokens = self
@@ -364,7 +364,7 @@ impl Issuer {
         tx.commit().await?;
         let shown = display_user_code(&user_code);
         Ok(DeviceAuthorization {
-            device_code,
+            device_code: device_code.into(),
             verification_uri: self.page("/auth/device", &[]),
             verification_uri_complete: Some(self.page("/auth/device", &[("code", &shown)])),
             user_code: shown,

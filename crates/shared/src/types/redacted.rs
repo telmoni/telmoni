@@ -61,6 +61,32 @@ impl From<Redacted> for Arc<str> {
     }
 }
 
+/// The secret written out, for the one answer that hands it over:
+/// `#[serde(serialize_with = "telmoni_shared::types::redacted::exposed")]`.
+/// There is no `Serialize`, so no other answer carries one by accident.
+///
+/// # Errors
+///
+/// The serializer's own.
+pub fn exposed<S: serde::Serializer>(secret: &Redacted, serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.serialize_str(secret.expose())
+}
+
+/// [`exposed`], for a secret an answer carries when there is one.
+///
+/// # Errors
+///
+/// The serializer's own.
+pub fn exposed_option<S: serde::Serializer>(
+    secret: &Option<Redacted>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    match secret {
+        Some(secret) => serializer.serialize_some(secret.expose()),
+        None => serializer.serialize_none(),
+    }
+}
+
 impl<'de> Deserialize<'de> for Redacted {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -92,6 +118,22 @@ mod tests {
         let body: Body = serde_json::from_str(r#"{"value":"sk-live-abc"}"#).unwrap();
         assert_eq!(body.value.expose(), "sk-live-abc");
         assert!(!format!("{:?}", body.value).contains("sk-live-abc"));
+    }
+
+    #[test]
+    fn exposed_writes_the_plaintext_where_it_is_asked_for() {
+        #[derive(serde::Serialize)]
+        struct Answer {
+            #[serde(serialize_with = "exposed")]
+            secret: Redacted,
+        }
+        let answer = Answer {
+            secret: "whsec_abc".into(),
+        };
+        assert_eq!(
+            serde_json::to_value(&answer).unwrap(),
+            serde_json::json!({ "secret": "whsec_abc" })
+        );
     }
 
     #[test]
