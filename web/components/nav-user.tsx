@@ -36,7 +36,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { signOut } from "@/lib/auth/sign-out";
-import { CORNERS_DEFAULT, type Corners } from "@/lib/corners";
+import { CORNERS_DEFAULT, isCorners, type Corners } from "@/lib/corners";
 import { setCorners, useCorners } from "@/lib/use-corners";
 import { SEARCH_MODIFIER_KEY, inFront, isChord } from "@/lib/keys";
 import { useIsMac } from "@/lib/use-platform";
@@ -217,7 +217,9 @@ export function NavUser() {
               </span>
               <DropdownMenuRadioGroup
                 value={corners ?? CORNERS_DEFAULT}
-                onValueChange={(v) => setCorners(v as Corners)}
+                onValueChange={(v) => {
+                  if (isCorners(v)) setCorners(v);
+                }}
                 aria-label="Corners"
                 className="flex items-center overflow-hidden rounded-md border border-border"
               >

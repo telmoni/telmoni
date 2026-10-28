@@ -40,9 +40,12 @@ import {
   type ListName,
   type TraceUi,
 } from "@/lib/traces";
-import type { SpanStatus } from "@/lib/types/enums";
+import { isOneOf } from "@/lib/one-of";
+import { SpanStatus } from "@/lib/types/enums";
 import { setTracePrefs, useTracePrefs } from "@/lib/use-trace-prefs";
 import { cn } from "@/lib/utils";
+
+const STATUSES = Object.values(SpanStatus);
 
 /** How many of a facet's values it lists before a search box above them
  *  earns its place. */
@@ -230,7 +233,8 @@ function FacetSection({
       .filter((value) => !facet.values.some((v) => v.value === value))
       .map((value) => ({ value, count: 0 })),
   ];
-  const text = (value: string) => (filter === "status" ? STATUS_LABEL[value as SpanStatus] : value);
+  const text = (value: string) =>
+    filter === "status" && isOneOf(STATUSES, value) ? STATUS_LABEL[value] : value;
 
   return (
     <Collapsible open={open} onOpenChange={setChosen} className="border-b border-border py-1">
@@ -276,7 +280,9 @@ function FacetSection({
             variant="outline"
             size="sm"
             value={mode}
-            onValueChange={(next) => next && setMode(next as "select" | "text")}
+            onValueChange={(next) => {
+              if (next === "select" || next === "text") setMode(next);
+            }}
             className="w-full"
             aria-label={`Pick or type a ${label.toLowerCase()}`}
           >

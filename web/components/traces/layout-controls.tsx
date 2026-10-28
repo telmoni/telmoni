@@ -54,6 +54,7 @@ import {
   withLayoutParams,
   type LayoutFilter,
 } from "@/lib/layout";
+import { isOneOf } from "@/lib/one-of";
 import { KIND_LABEL, STATUS_LABEL, TRACE_COLUMNS, TRACE_ID_COLUMN, orderedColumns } from "@/lib/traces";
 import {
   LayoutDepth,
@@ -269,7 +270,12 @@ function ChoiceSub<T extends string>({
         <span className="shrink-0 pl-2 text-xs text-muted-foreground">{labels[value]}</span>
       </DropdownMenuSubTrigger>
       <DropdownMenuSubContent className="w-56">
-        <DropdownMenuRadioGroup value={value} onValueChange={(option) => onChange(option as T)}>
+        <DropdownMenuRadioGroup
+          value={value}
+          onValueChange={(option) => {
+            if (isOneOf(Object.keys(labels) as T[], option)) onChange(option);
+          }}
+        >
           {(Object.keys(labels) as T[]).map((option) => (
             <DropdownMenuRadioItem key={option} value={option} onSelect={onSelect}>
               {labels[option]}
@@ -468,7 +474,7 @@ function CallsDialog({
             </fieldset>
             <fieldset className="grid gap-2">
               <legend className="text-sm font-medium">Status</legend>
-              {(Object.values(SpanStatus) as SpanStatus[]).map((s) => (
+              {Object.values(SpanStatus).map((s) => (
                 <label key={s} className="flex items-center gap-2 text-sm">
                   <Checkbox
                     checked={status.includes(s)}

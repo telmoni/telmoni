@@ -20,10 +20,12 @@ import {
 } from "@/components/ui/select";
 import type { TraceHistogram } from "@/lib/server/entities/traces";
 import { formatCount, formatDuration } from "@/lib/traces";
+import { isOneOf } from "@/lib/one-of";
 import { cn } from "@/lib/utils";
 
 /** What a chart of the list draws. */
-type Metric = "runs" | "tokens" | "duration";
+const METRICS = ["runs", "tokens", "duration"] as const;
+type Metric = (typeof METRICS)[number];
 
 const METRIC_LABEL: Record<Metric, string> = {
   runs: "Runs",
@@ -216,13 +218,18 @@ export function TraceHistogramStrip({ histogram }: { histogram: TraceHistogram }
   return (
     <div role="region" className="grid gap-1" aria-label="Over the window">
       <div className="flex items-center gap-2">
-        <Select value={metric} onValueChange={(next) => setMetric(next as Metric)}>
+        <Select
+          value={metric}
+          onValueChange={(next) => {
+            if (isOneOf(METRICS, next)) setMetric(next);
+          }}
+        >
           {/* The console's control height, so its row centers on the Filters heading beside it. */}
           <SelectTrigger size="sm" className="border-none px-2 shadow-none" aria-label="What the chart shows">
             <SelectValue />
           </SelectTrigger>
           <SelectContent position="popper" align="start">
-            {(Object.keys(METRIC_LABEL) as Metric[]).map((m) => (
+            {METRICS.map((m) => (
               <SelectItem key={m} value={m}>
                 {METRIC_LABEL[m]}
               </SelectItem>
@@ -244,7 +251,7 @@ export function TraceHistogramStrip({ histogram }: { histogram: TraceHistogram }
 export function TraceCharts({ histogram }: { histogram: TraceHistogram }) {
   return (
     <div className="grid gap-4 lg:grid-cols-2">
-      {(["runs", "tokens", "duration"] as const).map((metric) => (
+      {METRICS.map((metric) => (
         <div
           key={metric}
           role="region"

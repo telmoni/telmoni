@@ -50,7 +50,6 @@ import {
   REFRESH_INTERVALS,
   refreshLabel,
   type Density,
-  type RefreshSeconds,
   type TracePrefs,
 } from "@/lib/trace-prefs";
 import {
@@ -74,6 +73,7 @@ import {
 } from "@/lib/traces";
 import { setTracePrefs, useTracePrefs } from "@/lib/use-trace-prefs";
 import { USER_COLUMN_MENU, USER_TABLE } from "@/lib/users";
+import { isOneOf } from "@/lib/one-of";
 import { cn } from "@/lib/utils";
 
 type Props = {
@@ -257,7 +257,10 @@ function RefreshControl() {
           <DropdownMenuLabel>Refresh every</DropdownMenuLabel>
           <DropdownMenuRadioGroup
             value={String(refresh)}
-            onValueChange={(value) => setTracePrefs({ refresh: Number(value) as RefreshSeconds })}
+            onValueChange={(value) => {
+              const refresh = Number(value);
+              if (isOneOf(REFRESH_INTERVALS, refresh)) setTracePrefs({ refresh });
+            }}
           >
             {REFRESH_INTERVALS.map((seconds) => (
               <DropdownMenuRadioItem key={seconds} value={String(seconds)}>
@@ -430,7 +433,9 @@ function DensityMenu() {
         <DropdownMenuLabel>Rows</DropdownMenuLabel>
         <DropdownMenuRadioGroup
           value={density}
-          onValueChange={(value) => setTracePrefs({ density: value as Density })}
+          onValueChange={(value) => {
+            if (isOneOf(DENSITIES, value)) setTracePrefs({ density: value });
+          }}
         >
           {DENSITIES.map((d) => (
             <DropdownMenuRadioItem key={d} value={d}>

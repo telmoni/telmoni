@@ -10,18 +10,14 @@ export type { ProjectNotification } from "@/lib/types/announcement";
 export function ProjectBanner({
   notification,
 }: {
-  notification?: ProjectNotification | string | null;
+  notification?: ProjectNotification | null;
 }) {
   const [dismissed, setDismissed] = useState(false);
 
   // The server's alone (`fetchProjectAnnouncement`: Redis, then
   // `TELMONI_ANNOUNCEMENT`), read per request: a `NEXT_PUBLIC_` variable read
   // here would be the build's, frozen into the one image every deployment runs.
-  const activeNotification: ProjectNotification | null = notification
-    ? typeof notification === "string"
-      ? { message: notification }
-      : notification
-    : null;
+  const activeNotification = notification ?? null;
 
   const contentKey = activeNotification
     ? `${activeNotification.id ?? ""}:${activeNotification.message}`
