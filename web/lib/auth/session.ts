@@ -11,22 +11,30 @@ import { sessionEndKey } from "@/lib/auth/session-end-key";
 import { OAUTH_PROVIDERS } from "@/lib/connect";
 import { ACTIVE_ORGANIZATION_COOKIE } from "@/lib/proxy/organization";
 
-export interface SessionData {
-  userId: string;
-  email: string;
-  firstName: string | null;
-  lastName: string | null;
+/// What the session cookie holds, read through the one schema: a cookie an
+/// older build sealed, or one partly written, is no session rather than one
+/// with an empty bearer.
+const SessionDataSchema = z.object({
+  userId: z.string().min(1),
+  email: z.string(),
+  firstName: z.string().nullable().default(null),
+  lastName: z.string().nullable().default(null),
   // Opaque: auth resolves it, and nothing here reads anything out of it.
-  accessToken: string;
-  refreshToken: string | null;
+  accessToken: z.string().min(1),
+  refreshToken: z.string().nullable().default(null),
   // The session the tokens belong to, as the exchange answered it: what the
   // sign-out names at auth.
-  sessionId: string | null;
-  sessionRowId: string | null;
-  expiresAt: number;
-  idToken: string | null;
-  authMethod: string | null;
-}
+  sessionId: z.string().nullable().default(null),
+  sessionRowId: z.string().nullable().default(null),
+  expiresAt: z.number(),
+  idToken: z.string().nullable().default(null),
+  authMethod: z.string().nullable().default(null),
+});
+export type SessionData = z.infer<typeof SessionDataSchema>;
+
+/// The cookie's session ids alone, for ending one: what a cookie of any
+/// shape still names.
+const SessionIdsSchema = SessionDataSchema.pick({ sessionId: true, sessionRowId: true, idToken: true });
 
 export const SESSION_COOKIE = "telmoni_session";
 export const PKCE_COOKIE = "telmoni_pkce";
@@ -76,10 +84,19 @@ export async function getSession(): Promise<SessionData | null> {
 export async function unsealSession(value: string | undefined): Promise<SessionData | null> {
   if (!value) return null;
   try {
-    const unsealed = await unsealData<Partial<SessionData>>(value, {
-      password: pw(),
-    });
-    return unsealed?.userId ? normalize(unsealed) : null;
+    const parsed = SessionDataSchema.safeParse(await unsealData<unknown>(value, { password: pw() }));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
+/// The ids a sealed cookie names, whatever else it holds; `null` for one
+/// that does not unseal.
+async function unsealSessionIds(sealed: string): Promise<z.infer<typeof SessionIdsSchema> | null> {
+  try {
+    const parsed = SessionIdsSchema.safeParse(await unsealData<unknown>(sealed, { password: pw() }));
+    return parsed.success ? parsed.data : null;
   } catch {
     return null;
   }
@@ -93,13 +110,9 @@ export async function sessionEndedAlready(): Promise<boolean> {
   const jar = await cookies();
   const sealed = jar.get(SESSION_COOKIE)?.value;
   if (!sealed) return false;
-  const data = await unsealData<{ sessionRowId?: string; sessionId?: string }>(sealed, {
-    password: pw(),
-  }).catch(() => null);
+  const data = await unsealSessionIds(sealed);
   if (!data) return false;
-  return isSessionBlacklisted(
-    sessionEndKey({ sessionRowId: data.sessionRowId ?? null, sessionId: data.sessionId ?? null }),
-  );
+  return isSessionBlacklisted(sessionEndKey(data));
 }
 
 export async function destroySession(
@@ -109,13 +122,7 @@ export async function destroySession(
   const sealed = jar.get(SESSION_COOKIE)?.value;
   let providerLogoutUrl: string | null = null;
   if (sealed) {
-    const data = await unsealData<{
-      sessionId?: string;
-      sessionRowId?: string;
-      idToken?: string | null;
-    }>(sealed, {
-      password: pw(),
-    }).catch(() => null);
+    const data = await unsealSessionIds(sealed);
     // ⚠ **A session the console has already ended never goes through the
     // provider's page.** A row is on the blacklist before sign-out after an
     // account deletion, a confirmed email change, or this very device being
@@ -125,12 +132,7 @@ export async function destroySession(
     // the farewell after an account deletion ended on the provider's page
     // instead of the home page. Ended already, the sign-out is local and the
     // route lands on `/` itself.
-    const endKey = data
-      ? sessionEndKey({
-          sessionRowId: data.sessionRowId ?? null,
-          sessionId: data.sessionId ?? null,
-        })
-      : null;
+    const endKey = data ? sessionEndKey(data) : null;
     const endedAlready = await isSessionBlacklisted(endKey);
     await blacklistSession(endKey);
     const sid = data?.sessionId ?? null;
@@ -253,22 +255,6 @@ export async function unsealConnect(value: string): Promise<ConnectData | null> 
   } catch {
     return null;
   }
-}
-
-function normalize(partial: Partial<SessionData>): SessionData {
-  return {
-    userId: partial.userId ?? "",
-    email: partial.email ?? "",
-    firstName: partial.firstName ?? null,
-    lastName: partial.lastName ?? null,
-    accessToken: partial.accessToken ?? "",
-    refreshToken: partial.refreshToken ?? null,
-    sessionId: partial.sessionId ?? null,
-    sessionRowId: partial.sessionRowId ?? null,
-    expiresAt: partial.expiresAt ?? 0,
-    idToken: partial.idToken ?? null,
-    authMethod: partial.authMethod ?? null,
-  };
 }
 
 /// A session renewed, the renewal refused, or auth not answering it

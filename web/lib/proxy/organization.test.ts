@@ -81,7 +81,13 @@ async function run(request: NextRequest): Promise<NextResponse> {
  *  renew it, so a bare id would be signed out before the path was read. */
 async function visit(path: string, init: { cookie?: string; headers?: Record<string, string> } = {}) {
   const session = await sealData(
-    { userId: "user_1", refreshToken: "rt_1", expiresAt: Date.now() + 60 * 60 * 1000 },
+    {
+      userId: "user_1",
+      email: "ada@example.com",
+      accessToken: "at_1",
+      refreshToken: "rt_1",
+      expiresAt: Date.now() + 60 * 60 * 1000,
+    },
     { password: SECRET },
   );
   const cookies = [`telmoni_session=${session}`, ...(init.cookie ? [init.cookie] : [])];
