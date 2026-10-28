@@ -82,9 +82,4 @@ describe("KeysActions", () => {
     expect(await within(panel).findByRole("alert")).toHaveTextContent("a key by that name exists");
     expect(within(panel).getByRole("heading", { name: "New API key" })).toBeInTheDocument();
   });
-
-  it("draws nothing for a role that may not mint", () => {
-    const { container } = render(<KeysActions projectId={PROJECT} canManage={false} />);
-    expect(container).toBeEmptyDOMElement();
-  });
 });

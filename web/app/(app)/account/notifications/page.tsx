@@ -15,10 +15,10 @@ export default async function AccountNotificationsPage() {
   const gate = await getServerContext();
   if (!gate) return <ServiceUnavailable />;
 
-  const invites = gate.incomingInvites ?? [];
+  const invites = gate.incomingInvites;
   const offers = gate.organizations.filter((o) => o.ownershipOfferExpiresAt);
-  const projectOffers = gate.projectOffers ?? [];
-  const seats = gate.givenSeats ?? [];
+  const projectOffers = gate.projectOffers;
+  const seats = gate.givenSeats;
   // Where an accepted project may land: the organizations the person owns.
   const owned = gate.organizations.filter((o) => owns(o.role));
   const nothing =

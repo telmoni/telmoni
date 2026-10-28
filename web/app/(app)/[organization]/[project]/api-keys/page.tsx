@@ -47,7 +47,7 @@ export default async function ApiKeysPage({
       <PageHeader
         title="API keys"
         action={
-          canManage ? <KeysActions projectId={project.id} canManage={canManage} /> : undefined
+          canManage ? <KeysActions projectId={project.id} /> : undefined
         }
       />
       <div className="grid gap-6">
@@ -107,12 +107,7 @@ export default async function ApiKeysPage({
                     </Td>
                     <Td className="text-right whitespace-nowrap">
                       {canManage && (
-                        <TokenRowActions
-                          projectId={project.id}
-                          tokenId={t.id}
-                          name={t.name}
-                          canManage={canManage}
-                        />
+                        <TokenRowActions projectId={project.id} tokenId={t.id} name={t.name} />
                       )}
                     </Td>
                   </tr>

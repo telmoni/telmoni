@@ -46,7 +46,7 @@ export default async function OrganizationProjectsPage() {
   }
 
   const membershipByProject = new Map(
-    (gate.memberships ?? []).map((m) => [m.projectId, m]),
+    gate.memberships.map((m) => [m.projectId, m]),
   );
   // An unread listing is not an empty one: counting it as none, or saying
   // "no projects yet", would invite somebody to make a second of one they have.

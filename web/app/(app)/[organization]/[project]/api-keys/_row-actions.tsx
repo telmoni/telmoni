@@ -13,18 +13,15 @@ export function TokenRowActions({
   projectId,
   tokenId,
   name,
-  canManage = true,
 }: {
   /// The project this page rendered; the actions act on it or on nothing.
   projectId: string;
   tokenId: string;
   name: string;
-  canManage?: boolean;
 }) {
   const { pending, error, run } = useAction();
   const [rotated, setRotated] = useState<MintedKey | null>(null);
 
-  if (!canManage) return null;
 
   function revoke() {
     run(() => revokeTokenAction(projectId, tokenId));

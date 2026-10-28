@@ -43,18 +43,15 @@ type Opening = { at: number; returnTo: HTMLElement | null };
 
 export function KeysActions({
   projectId,
-  canManage = true,
 }: {
   /// The project this page rendered; a key is minted on it or on nothing.
   projectId: string;
-  canManage?: boolean;
 }) {
   const [opening, setOpening] = useState<Opening | null>(null);
   const [minted, setMinted] = useState<MintedKey | null>(null);
   const openings = useRef(0);
   const { element } = useConsoleShell();
 
-  if (!canManage) return null;
 
   const panel = opening && (
     <MintKeyPanel
