@@ -2,12 +2,12 @@ import { cache } from "react";
 import { z } from "zod";
 
 import { queryString } from "@/lib/list-query";
-import { SessionSort, SortDirection, SpanKind, SpanStatus } from "@/lib/types/enums";
+import { SessionSort, SortDirection } from "@/lib/types/enums";
+import { SessionDetailSchema, type SessionDetail } from "@/lib/types/sessions";
 
 import {
   FacetsSchema,
   MISSING,
-  TraceSchema,
   filtersOf,
   readDownload,
   readLane,
@@ -48,40 +48,14 @@ const SessionListSchema = z.object({
 });
 export type SessionList = z.infer<typeof SessionListSchema>;
 
-// One span a layout pinned by name, shown under a trace while it is shut:
-// enough to read without opening the trace.
-export const PinnedSpanSchema = z.object({
-  span_id: z.string(),
-  parent_span_id: z.string(),
-  kind: z.enum(SpanKind),
-  name: z.string(),
-  started_at: z.string(),
-  ended_at: z.string(),
-  status: z.enum(SpanStatus),
-  error_type: z.string(),
-  model: z.string(),
-  input_tokens: z.number(),
-  output_tokens: z.number(),
-});
-export type PinnedSpan = z.infer<typeof PinnedSpanSchema>;
-
-// One trace of a session's page: the list's sums, and the spans the layout
-// pinned under it.
-export const SessionTraceSchema = TraceSchema.extend({ pinned: z.array(PinnedSpanSchema) });
-export type SessionTrace = z.infer<typeof SessionTraceSchema>;
-
-// A session's own page: its traces in the order they ran, each summed as the
-// trace list sums it — a replay in metadata, never a message — and the span
-// names their pinned spans were read by.
-export const SessionDetailSchema = z.object({
-  session_id: z.string(),
-  traces: z.array(SessionTraceSchema),
-  pinned: z.array(z.string()),
-  days: z.number(),
-  limit: z.number(),
-  more: z.boolean(),
-});
-export type SessionDetail = z.infer<typeof SessionDetailSchema>;
+export {
+  PinnedSpanSchema,
+  SessionDetailSchema,
+  SessionTraceSchema,
+  type PinnedSpan,
+  type SessionDetail,
+  type SessionTrace,
+} from "@/lib/types/sessions";
 
 /** What narrows and orders the list, and which page of it shows, as the URL
  *  carries it (`lib/sessions.ts`). */

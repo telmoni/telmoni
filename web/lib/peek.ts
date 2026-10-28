@@ -110,26 +110,21 @@ export function draggedWidth(start: number, startX: number, x: number, area: num
   return draggedPanelWidth(start, startX, x, { grows: "left", min: Math.min(PEEK_WIDTH_MIN, area), max: area });
 }
 
-/** What a read of a trace's spans came to. */
-export type TraceRead<T> =
-  | { kind: "ok"; trace: T }
-  | { kind: "missing" }
-  | { kind: "forbidden" }
-  | { kind: "unavailable" }
-  | { kind: "signed-out" };
+/** What a read came to, by its kind: `ok`, or how it was not. */
+type Read = { kind: string };
 
 /** The last read kept: which URL, at which version, and what it came to. */
-export type KeptRead<T> = { url: string; version: number; read: TraceRead<T> };
+export type KeptRead<R extends Read> = { url: string; version: number; read: R };
 
 /** The read a new answer leaves: the answer, except where the same trace was
  *  read before and read well, and is now read again for its spans landing
  *  and fails — the trace already on show stands rather than an error in its
  *  place. A retry the person asked for after a failure takes the new answer,
  *  whatever it is. */
-export function keepRead<T>(
-  last: KeptRead<T> | null,
-  next: KeptRead<T>,
-): KeptRead<T> {
+export function keepRead<R extends Read>(
+  last: KeptRead<R> | null,
+  next: KeptRead<R>,
+): KeptRead<R> {
   if (last && last.url === next.url && last.read.kind === "ok" && next.read.kind !== "ok") {
     return { ...last, version: next.version };
   }
@@ -142,11 +137,11 @@ export function keepRead<T>(
  *  not blank the panel between two traces; the same run read again stands
  *  until the new answer comes, unless it was a failure, which says it is
  *  trying again. `null` while there is nothing to show. */
-export function shownRead<T>(
-  last: KeptRead<T> | null,
+export function shownRead<R extends Read>(
+  last: KeptRead<R> | null,
   url: string,
   version: number,
-): { read: TraceRead<T> | null; stale: boolean } {
+): { read: R | null; stale: boolean } {
   if (!last) return { read: null, stale: false };
   if (last.url !== url) {
     return last.read.kind === "ok" ? { read: last.read, stale: true } : { read: null, stale: false };

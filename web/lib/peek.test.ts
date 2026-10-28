@@ -193,7 +193,8 @@ describe("the panel's edge dragged", () => {
 describe("what the panel shows of a trace's reads", () => {
   const A = "/api/v1/traces/a?project=p";
   const B = "/api/v1/traces/b?project=p";
-  const kept = (url: string, version: number, read: KeptRead<string>["read"]): KeptRead<string> => ({
+  type Read = { kind: "ok"; trace: string } | { kind: "missing" | "forbidden" | "unavailable" };
+  const kept = (url: string, version: number, read: Read): KeptRead<Read> => ({
     url,
     version,
     read,

@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { z } from "zod";
 
 import { downloadExport } from "@/components/audit-exports";
+import { routeReadOf, signedOut } from "@/lib/route-read";
 import { ChoiceGroup, type Choice } from "@/components/choice-group";
 import { PageAction } from "@/components/page-action";
 import { Button } from "@/components/ui/button";
@@ -143,7 +144,7 @@ function ExportDialog({
           redirect: "manual",
           signal: AbortSignal.timeout(START_TIMEOUT_MS),
         });
-        if (res.type === "opaqueredirect" || res.status === 401) {
+        if (signedOut(res)) {
           setError("Your session has ended. Sign in again to export the audit log.");
           return;
         }
@@ -164,14 +165,14 @@ function ExportDialog({
           setError("Pick a range that starts before it ends, and no later than today.");
           return;
         }
-        const parsed = res.ok ? StartedSchema.safeParse(await res.json()) : null;
-        if (!parsed?.success) {
+        const read = await routeReadOf(res, StartedSchema);
+        if (read.kind !== "ok") {
           setError(FAILED_TO_START);
           return;
         }
         // Into the store before the bell's next read, so the bell shows it
         // building at once and announces it when it is done.
-        if (active) addAuditExport(active.organizationId, parsed.data.export);
+        if (active) addAuditExport(active.organizationId, read.value.export);
         onOpenChange(false);
         toast("Preparing your export.", {
           description: "The bell will hold it when it’s ready.",

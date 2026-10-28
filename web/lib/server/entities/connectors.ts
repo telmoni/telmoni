@@ -2,14 +2,7 @@ import { cache } from "react";
 import { z } from "zod";
 
 import { env } from "@/lib/env";
-import {
-  AttemptOutcome,
-  AttemptTrigger,
-  ConnectionStatus,
-  ConnectorProvider,
-  DeliveryStatus,
-  NotificationKind,
-} from "@/lib/types/enums";
+import { ConnectionStatus, ConnectorProvider, NotificationKind } from "@/lib/types/enums";
 
 import { identityContext, projectHeaders } from "./identity-context";
 import { fetchProject } from "./projects";
@@ -40,39 +33,12 @@ export const ConnectionSchema = z.object({
 });
 export type Connection = z.infer<typeof ConnectionSchema>;
 
-const DeliveryAttemptSchema = z.object({
-  id: z.string(),
-  trigger: z.enum(AttemptTrigger),
-  outcome: z.enum(AttemptOutcome),
-  status_code: z.number().int().nullable(),
-  duration_ms: z.number(),
-  error: z.string().nullable(),
-  created_at: z.string(),
-});
-export type DeliveryAttempt = z.infer<typeof DeliveryAttemptSchema>;
-
-// One notice as it was queued for one connection. `pending` covers both the
-// first try not yet made and a retry waiting on `next_attempt_at`.
-const DeliveryLogEntrySchema = z.object({
-  id: z.string(),
-  kind: NotificationKindSchema,
-  subject: z.string(),
-  body: z.string(),
-  status: z.enum(DeliveryStatus),
-  next_attempt_at: z.string(),
-  last_error: z.string().nullable(),
-  created_at: z.string(),
-  updated_at: z.string(),
-  attempts: z.array(DeliveryAttemptSchema),
-});
-export type DeliveryLogEntry = z.infer<typeof DeliveryLogEntrySchema>;
-
-// Newest first; `next_before` is the cursor for the next, older page.
-export const DeliveryLogPageSchema = z.object({
-  deliveries: z.array(DeliveryLogEntrySchema),
-  next_before: z.string().nullable(),
-});
-export type DeliveryLogPage = z.infer<typeof DeliveryLogPageSchema>;
+export {
+  DeliveryLogPageSchema,
+  type DeliveryAttempt,
+  type DeliveryLogEntry,
+  type DeliveryLogPage,
+} from "@/lib/types/connectors";
 
 const ConnectorListingSchema = z.object({
   // Which connectors this deployment can connect: the vendors it holds

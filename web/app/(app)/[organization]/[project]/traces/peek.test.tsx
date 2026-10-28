@@ -27,6 +27,7 @@ function trace(run: string) {
   return {
     run_id: run,
     truncated: false,
+    spend: null,
     spans: [
       {
         span_id: "0000000000000001",

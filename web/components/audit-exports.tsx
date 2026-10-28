@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { ProblemType, problemType } from "@/lib/api/problem";
 import { exportHref, exportSummary, exportsHref, failureText } from "@/lib/audit-exports";
 import { administers } from "@/lib/roles";
+import { routeReadOf, signedOut } from "@/lib/route-read";
 import {
   useActiveOrganization,
   useAuditExports,
@@ -51,12 +52,6 @@ const SLOW_DOWNLOAD_MS = 1_000;
 /// The downloads under way, by export: a second press waits for the first
 /// rather than fetching the file again and saving it twice.
 const downloading = new Set<string>();
-
-/// Whether a response says the session has ended: the proxy's 401, or a
-/// redirect to sign in, never followed, since followed it is the sign-in page.
-function signedOut(res: Response): boolean {
-  return res.type === "opaqueredirect" || res.status === 401;
-}
 
 /**
  * Fetch a finished file and hand it to the browser, saying what went wrong
@@ -189,20 +184,19 @@ export function useAuditExportsWatcher(): void {
         redirect: "manual",
         signal: AbortSignal.timeout(READ_TIMEOUT_MS),
       });
+      const read = await routeReadOf(res, AuditExportListSchema);
       // No longer theirs to read: the session ended, the role went, or the
       // organization did. Nothing of it is building for them any more, so
       // nothing to poll.
-      if (signedOut(res) || res.status === 403 || res.status === 404) {
+      if (read.kind === "signed-out" || read.kind === "forbidden" || read.kind === "missing") {
         if (ticket >= answered.current) {
           replaceAuditExports(organizationId, [], startedBefore);
         }
         return;
       }
-      if (!res.ok) throw new Error(`exports answered ${res.status}`);
-      const parsed = AuditExportListSchema.safeParse(await res.json());
-      if (!parsed.success) throw new Error("exports answered another shape");
-      fresh = parsed.data.exports;
-      limits = parsed.data;
+      if (read.kind !== "ok") throw new Error(`exports answered ${read.status}`);
+      fresh = read.value.exports;
+      limits = read.value;
     } catch {
       // The list stays as it was; enough of these in a row stop the polling.
       failures.current += 1;

@@ -1,9 +1,11 @@
-import { SESSION_EXPIRED } from "@/lib/action-result";
-import { problemWords } from "@/lib/api/problem";
-import type {
-  AgentConversation,
-  AgentConversationSummary,
-  AgentStatus,
+import { z } from "zod";
+
+import { readRoute } from "@/components/route-read";
+import { refusalWords } from "@/lib/route-read";
+import {
+  AgentConversationSchema,
+  AgentConversationSummarySchema,
+  AgentStatusSchema,
 } from "@/lib/types/agent";
 
 // The agent panel's reads, from the agent's Route Handlers (`app/api/v1/agent`),
@@ -14,32 +16,30 @@ import type {
 
 const UNREACHABLE = "The agent is unavailable right now — try again shortly.";
 
-async function read<T extends object>(path: string): Promise<T | { error: string }> {
-  try {
-    const res = await fetch(path);
-    const body: unknown = await res.json().catch(() => null);
-    if (res.ok && body && typeof body === "object") return body as T;
-    if (res.status === 401) return { error: SESSION_EXPIRED };
-    return { error: problemWords(body) || UNREACHABLE };
-  } catch {
-    return { error: UNREACHABLE };
-  }
+async function read<T extends object>(
+  path: string,
+  schema: z.ZodType<T>,
+): Promise<T | { error: string }> {
+  const answer = await readRoute(path, schema);
+  return answer.kind === "ok" ? answer.value : { error: refusalWords(answer, UNREACHABLE) };
 }
 
 const query = (projectId: string) => `project=${encodeURIComponent(projectId)}`;
 
 export function readAgentStatus(projectId: string) {
-  return read<{ status: AgentStatus }>(`/api/v1/agent/status?${query(projectId)}`);
+  return read(`/api/v1/agent/status?${query(projectId)}`, z.object({ status: AgentStatusSchema }));
 }
 
 export function readAgentConversations(projectId: string) {
-  return read<{ conversations: AgentConversationSummary[] }>(
+  return read(
     `/api/v1/agent/conversations?${query(projectId)}`,
+    z.object({ conversations: z.array(AgentConversationSummarySchema) }),
   );
 }
 
 export function readAgentConversation(projectId: string, id: string) {
-  return read<{ conversation: AgentConversation }>(
+  return read(
     `/api/v1/agent/conversations/${encodeURIComponent(id)}?${query(projectId)}`,
+    z.object({ conversation: AgentConversationSchema }),
   );
 }

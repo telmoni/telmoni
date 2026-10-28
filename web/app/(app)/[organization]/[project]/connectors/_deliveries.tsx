@@ -55,17 +55,13 @@ export function DeliveriesButton({
     const mine = ++seq.current;
     setLoad({ state: "loading" });
     setOlderError(null);
-    try {
-      const r = await readDeliveries(projectId, connectionId, null);
-      if (mine !== seq.current) return;
-      if (r.error !== undefined) {
-        setLoad({ state: "error", message: r.error });
-        return;
-      }
-      setLoad({ state: "ready", entries: r.page.deliveries, nextBefore: r.page.next_before });
-    } catch {
-      if (mine === seq.current) setLoad({ state: "error", message: "Network error. Try again." });
+    const r = await readDeliveries(projectId, connectionId, null);
+    if (mine !== seq.current) return;
+    if (r.error !== undefined) {
+      setLoad({ state: "error", message: r.error });
+      return;
     }
+    setLoad({ state: "ready", entries: r.page.deliveries, nextBefore: r.page.next_before });
   }
 
   function loadOlder() {
@@ -74,21 +70,17 @@ export function DeliveriesButton({
     const mine = seq.current;
     setOlderError(null);
     startOlder(async () => {
-      try {
-        const r = await readDeliveries(projectId, connectionId, nextBefore);
-        if (mine !== seq.current) return;
-        if (r.error !== undefined) {
-          setOlderError(r.error);
-          return;
-        }
-        setLoad({
-          state: "ready",
-          entries: [...entries, ...r.page.deliveries],
-          nextBefore: r.page.next_before,
-        });
-      } catch {
-        if (mine === seq.current) setOlderError("Network error. Try again.");
+      const r = await readDeliveries(projectId, connectionId, nextBefore);
+      if (mine !== seq.current) return;
+      if (r.error !== undefined) {
+        setOlderError(r.error);
+        return;
       }
+      setLoad({
+        state: "ready",
+        entries: [...entries, ...r.page.deliveries],
+        nextBefore: r.page.next_before,
+      });
     });
   }
 

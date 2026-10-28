@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { z } from "zod";
 
 import { afterRefusedHeartbeat } from "@/lib/auth/heartbeat";
 import { signOut } from "@/lib/auth/sign-out";
@@ -26,6 +27,9 @@ const REQUEST_TIMEOUT_MS = 15_000;
 interface SessionHeartbeatProps {
   expiresAt: number;
 }
+
+/** What a heartbeat answers: when the session now expires. */
+const Heartbeat = z.object({ expiresAt: z.number().optional() });
 
 export function SessionHeartbeat({ expiresAt: initialExpiresAt }: SessionHeartbeatProps) {
   const expiresAtRef = useRef(initialExpiresAt);
@@ -79,12 +83,9 @@ export function SessionHeartbeat({ expiresAt: initialExpiresAt }: SessionHeartbe
           return;
         }
         if (res.ok) {
-          const data = (await res.json().catch(() => null)) as {
-            ok?: boolean;
-            expiresAt?: number;
-          } | null;
-          if (data?.expiresAt) {
-            expiresAtRef.current = data.expiresAt;
+          const answer = Heartbeat.safeParse(await res.json().catch(() => null));
+          if (answer.success && answer.data.expiresAt) {
+            expiresAtRef.current = answer.data.expiresAt;
             unansweredInRow = 0;
             scheduleNext();
             return;

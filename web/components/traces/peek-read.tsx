@@ -2,9 +2,11 @@
 
 import { ArrowDown, ArrowUp, Maximize2, Minimize2, SquareArrowOutUpRight } from "lucide-react";
 import Link from "next/link";
+import type { z } from "zod";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
+import { readRoute } from "@/components/route-read";
 import { PanelAction } from "@/components/side-panel";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -16,11 +18,11 @@ import {
   pushedEntry,
   shownRead,
   type KeptRead,
-  type TraceRead,
 } from "@/lib/peek";
-import type { SessionDetail } from "@/lib/server/data";
-import type { TraceDetail } from "@/lib/server/entities/traces";
+import type { RouteRead } from "@/lib/route-read";
 import { PEEK_NUDGED } from "@/lib/traces";
+import { SessionDetailSchema } from "@/lib/types/sessions";
+import { TraceDetailSchema } from "@/lib/types/traces";
 
 // What the trace peek, the session peek and a session's opened trace share:
 // the read of a lane, its entry in the history, the rows beside the one open,
@@ -29,46 +31,33 @@ import { PEEK_NUDGED } from "@/lib/traces";
 /** How long a read may take before the panel says it failed. */
 const READ_TIMEOUT_MS = 15_000;
 
-/** The lane's answer as a read, its status the read's kind; a body `holds`
- *  rejects is missing. */
-async function readJsonAs<T>(
+/** The route's answer as a read, which `holds` must admit, else it is missing. */
+async function readHolding<T>(
   url: string,
+  schema: z.ZodType<T>,
   signal: AbortSignal,
-  holds: (body: T) => boolean,
-): Promise<TraceRead<T>> {
-  try {
-    const res = await fetch(url, { signal, cache: "no-store", headers: { accept: "application/json" } });
-    if (res.status === 401) return { kind: "signed-out" };
-    if (res.status === 404) return { kind: "missing" };
-    if (res.status === 403) return { kind: "forbidden" };
-    if (!res.ok) return { kind: "unavailable" };
-    const body = (await res.json()) as T;
-    return holds(body) ? { kind: "ok", trace: body } : { kind: "missing" };
-  } catch {
-    return { kind: "unavailable" };
-  }
+  holds: (value: T) => boolean,
+): Promise<RouteRead<T>> {
+  const read = await readRoute(url, schema, { signal });
+  return read.kind === "ok" && !holds(read.value) ? { kind: "missing", error: null } : read;
 }
 
 /** A run's spans, through the trace list's own route: none is a run missing. */
 export const readTrace = (url: string, signal: AbortSignal) =>
-  readJsonAs<TraceDetail>(url, signal, (trace) => trace.spans.length > 0);
+  readHolding(url, TraceDetailSchema, signal, (trace) => trace.spans.length > 0);
 
 /** A session's traces in a window, through its own route: none is a session
- *  missing. `TraceRead` names what it holds a trace; here it is the session. */
+ *  missing. */
 export const readSession = (url: string, signal: AbortSignal) =>
-  readJsonAs<SessionDetail>(
-    url,
-    signal,
-    (session) => Array.isArray(session.traces) && session.traces.length > 0,
-  );
+  readHolding(url, SessionDetailSchema, signal, (session) => session.traces.length > 0);
 
 /** `read` of `url` started, and the cleanup that ends it, after which `settle`
  *  is not called. One controller, aborted by its timer or the cleanup: joining
  *  two signals (`AbortSignal.any`) is newer than browsers Next supports. */
 export function startRead<T>(
   url: string,
-  read: (url: string, signal: AbortSignal) => Promise<TraceRead<T>>,
-  settle: (read: TraceRead<T>) => void,
+  read: (url: string, signal: AbortSignal) => Promise<RouteRead<T>>,
+  settle: (read: RouteRead<T>) => void,
 ): () => void {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), READ_TIMEOUT_MS);
@@ -89,10 +78,10 @@ export function startRead<T>(
  *  keeps a read. */
 export function usePeekRead<T>(
   url: string,
-  read: (url: string, signal: AbortSignal) => Promise<TraceRead<T>>,
+  read: (url: string, signal: AbortSignal) => Promise<RouteRead<T>>,
 ) {
   const [version, setVersion] = useState(0);
-  const [last, setLast] = useState<KeptRead<T> | null>(null);
+  const [last, setLast] = useState<KeptRead<RouteRead<T>> | null>(null);
   useEffect(
     () =>
       startRead(url, read, (answer) =>
@@ -166,7 +155,7 @@ export function ReadFailure({
   missing,
   retry,
 }: {
-  read: Exclude<TraceRead<unknown>, { kind: "ok" }>;
+  read: Exclude<RouteRead<unknown>, { kind: "ok" }>;
   noun: "trace" | "session";
   missing: { title: string; body: ReactNode };
   retry: () => void;

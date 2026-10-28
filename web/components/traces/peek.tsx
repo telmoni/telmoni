@@ -65,7 +65,7 @@ function PeekPanel({ organization, slug, projectId, run, runs }: Props & { run: 
   // A run still going is read again as its spans land.
   const { read, stale, again } = usePeekRead(traceReadHref(run, projectId), readTrace);
   const { previous, next } = neighbours(runs, run);
-  const trace = read?.kind === "ok" ? read.trace : null;
+  const trace = read?.kind === "ok" ? read.value : null;
   // Summed once a trace, not at each draw: a drag of the panel's edge draws
   // it at every move of the pointer.
   const summary = useMemo(() => (trace ? summarizeTrace(trace.spans) : null), [trace]);
@@ -156,8 +156,8 @@ function PeekPanel({ organization, slug, projectId, run, runs }: Props & { run: 
           <PeekNote>Reading the trace&hellip;</PeekNote>
         ) : read.kind === "ok" ? (
           <TraceBody
-            key={read.trace.run_id}
-            trace={read.trace}
+            key={read.value.run_id}
+            trace={read.value}
             organization={organization}
             slug={slug}
             className="min-h-0 flex-1"

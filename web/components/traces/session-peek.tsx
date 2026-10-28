@@ -98,7 +98,7 @@ function SessionPanel({
     readSession,
   );
   const { previous, next } = neighbours(sessions, sessionId);
-  const session = read?.kind === "ok" ? read.trace : null;
+  const session = read?.kind === "ok" ? read.value : null;
   // The session on show: the one read while the next is on its way.
   const shown = session?.session_id ?? sessionId;
 
@@ -222,16 +222,16 @@ function SessionPanel({
               <LayoutControls {...page} canSave={canSave} />
             </div>
             <SessionRuns
-              key={read.trace.session_id}
+              key={read.value.session_id}
               {...page}
-              sessionId={read.trace.session_id}
-              traces={read.trace.traces}
+              sessionId={read.value.session_id}
+              traces={read.value.traces}
               readWith={options.pinned}
               window={query}
             />
-            {read.trace.more && (
+            {read.value.more && (
               <p className="text-sm text-muted-foreground">
-                The first {formatCount(read.trace.limit)} of more in this window.{" "}
+                The first {formatCount(read.value.limit)} of more in this window.{" "}
                 <Link
                   href={sessionHref(organization, slug, sessionId, { ...query, limit: MAX_LIMIT })}
                   className="underline underline-offset-4"

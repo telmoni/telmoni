@@ -13,7 +13,7 @@ import { PinnedChip } from "@/components/traces/span-parts";
 import { useLayout, type LayoutPage } from "@/components/traces/use-layout";
 import { tracesOpenedFirst, type LayoutOptions } from "@/lib/layout";
 import type { WindowQuery } from "@/lib/list-query";
-import type { TraceRead } from "@/lib/peek";
+import type { RouteRead } from "@/lib/route-read";
 import type { PinnedSpan, SessionTrace, TraceDetail } from "@/lib/server/data";
 import {
   TRACE_COLUMNS,
@@ -93,7 +93,7 @@ function usePinnedSpans(
     // did not land is left as nothing pinned.
     return startRead(url, readSession, (read) => {
       if (read.kind !== "ok") return;
-      setRead({ key, spans: new Map(read.trace.traces.map((t) => [t.run_id, t.pinned ?? []])) });
+      setRead({ key, spans: new Map(read.value.traces.map((t) => [t.run_id, t.pinned ?? []])) });
     });
   }, [same, names, key, projectId, sessionId, query.days, query.limit]);
 
@@ -273,7 +273,7 @@ function PinnedStrip({ spans }: { spans: readonly PinnedSpan[] }) {
   );
 }
 
-type Read = TraceRead<TraceDetail>;
+type Read = RouteRead<TraceDetail>;
 
 /** A trace opened: its spans read once, through the trace list's own route,
  *  and drawn as far as the layout opens them. A run still going is read
@@ -292,13 +292,13 @@ function OpenedTrace({
   page: string;
 }) {
   const kept = reads.get(run);
-  const [read, setRead] = useState<Read | null>(kept ? { kind: "ok", trace: kept } : null);
+  const [read, setRead] = useState<Read | null>(kept ? { kind: "ok", value: kept } : null);
   const [tries, setTries] = useState(0);
   useEffect(() => {
     if (reads.has(run) && tries === 0) return;
     return startRead(traceReadHref(run, projectId), readTrace, (result) => {
-      if (result.kind === "ok" && result.trace.spans.some((s) => s.kind === "run")) {
-        reads.set(run, result.trace);
+      if (result.kind === "ok" && result.value.spans.some((s) => s.kind === "run")) {
+        reads.set(run, result.value);
       }
       setRead(result);
     });
@@ -318,7 +318,7 @@ function OpenedTrace({
       {read === null ? (
         <Note>Reading the trace&hellip;</Note>
       ) : read.kind === "ok" ? (
-        <TraceOutline trace={read.trace} options={options} />
+        <TraceOutline trace={read.value} options={options} />
       ) : read.kind === "missing" ? (
         <Note>Its spans have passed their retention, or the run belongs to another project.</Note>
       ) : read.kind === "forbidden" ? (

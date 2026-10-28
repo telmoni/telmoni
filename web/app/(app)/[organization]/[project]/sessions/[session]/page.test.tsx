@@ -218,6 +218,7 @@ function spans(run: string) {
   return {
     run_id: run,
     truncated: false,
+    spend: null,
     spans: [
       { ...base, span_id: "1", kind: "run", name: "support-bot" },
       { ...base, span_id: "2", kind: "step", name: "answer", parent_span_id: "1", started_at: "2026-10-11T03:00:00.010Z" },

@@ -1,34 +1,35 @@
 
-export type SearchKind =
-  | "recent"
-  | "project"
-  | "key"
-  | "member"
-  | "docs";
+import { z } from "zod";
 
-export interface SearchItem {
-  id: string;
-  kind: SearchKind;
-  label: string;
-  hint?: string;
-  href: string;
-  external?: boolean;
-}
+export const SEARCH_KINDS = ["recent", "project", "key", "member", "docs"] as const;
+export type SearchKind = (typeof SEARCH_KINDS)[number];
+
+export const SearchItemSchema = z.object({
+  id: z.string(),
+  kind: z.enum(SEARCH_KINDS),
+  label: z.string(),
+  hint: z.string().optional(),
+  href: z.string(),
+  external: z.boolean().optional(),
+});
+export type SearchItem = z.infer<typeof SearchItemSchema>;
 
 /** One of a project's sections in the palette: its items, or why there are
  *  none — the reader may not see them, or they could not be read. */
-export interface SearchSection {
-  items: SearchItem[];
-  forbidden: boolean;
-  unavailable: boolean;
-}
+export const SearchSectionSchema = z.object({
+  items: z.array(SearchItemSchema),
+  forbidden: z.boolean(),
+  unavailable: z.boolean(),
+});
+export type SearchSection = z.infer<typeof SearchSectionSchema>;
 
 /** What the palette lists of the project it is opened on, as
  *  `/api/v1/search/index` answers it. */
-export interface SearchIndex {
-  keys: SearchSection;
-  members: SearchSection;
-}
+export const SearchIndexSchema = z.object({
+  keys: SearchSectionSchema,
+  members: SearchSectionSchema,
+});
+export type SearchIndex = z.infer<typeof SearchIndexSchema>;
 
 export const GROUP_ORDER: readonly SearchKind[] = [
   "recent",
