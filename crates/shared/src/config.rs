@@ -19,6 +19,18 @@ pub fn optional_base_url(key: &str) -> Option<String> {
     optional(key).map(|s| s.trim_end_matches('/').to_owned())
 }
 
+/// The console's origin (`APP_URL`), a URL, its trailing `/` removed: every
+/// module's links start there, so every module reads it here.
+///
+/// # Errors
+///
+/// `APP_URL` unset, or not a URL.
+pub fn app_url() -> anyhow::Result<String> {
+    let url = require("APP_URL")?.trim_end_matches('/').to_owned();
+    reqwest::Url::parse(&url).map_err(|e| anyhow::anyhow!("APP_URL is not a valid URL: {e}"))?;
+    Ok(url)
+}
+
 /// `url`, as `key` gave it: one a URL parser takes, and https in a Kubernetes
 /// pod, since what it carries would travel in the clear.
 pub fn https_on_a_tier(key: &str, url: String) -> anyhow::Result<String> {

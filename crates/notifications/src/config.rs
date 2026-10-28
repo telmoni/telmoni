@@ -77,7 +77,7 @@ impl Config {
             database_url: require("NOTIFICATIONS_DATABASE_URL")?,
             service_secret: require("SERVICE_SECRET")?.into(),
             service_secret_next: optional("SERVICE_SECRET_NEXT").map(Into::into),
-            app_url: require("APP_URL")?.trim_end_matches('/').to_owned(),
+            app_url: telmoni_shared::config::app_url()?,
             slack: oauth_app("SLACK_CLIENT_ID", "SLACK_CLIENT_SECRET")?,
             slack_signing_secret: optional("SLACK_SIGNING_SECRET").map(Into::into),
             slack_api_base: optional_base_url("SLACK_API_BASE")

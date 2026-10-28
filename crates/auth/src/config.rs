@@ -45,7 +45,7 @@ impl Config {
             allow_test_session: env_parse("ALLOW_TEST_SESSION", false)?,
             redirect_uri: optional("AUTH_REDIRECT_URI")
                 .unwrap_or_else(|| "http://localhost:3000/auth/callback".to_owned()),
-            app_url: optional("APP_URL").unwrap_or_else(|| "http://localhost:3000".to_owned()),
+            app_url: telmoni_shared::config::app_url()?,
             mail_from: optional("MAIL_FROM").unwrap_or_else(telmoni_shared::mail::default_from),
             support_email: optional("SUPPORT_EMAIL"),
             deletion_tail_budget_ms: env_parse("DELETION_TAIL_BUDGET_MS", 8_000)?,

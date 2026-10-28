@@ -47,10 +47,11 @@ fn reporting(
 /// `/llms-full.txt` under `APP_URL`, every page of the docs at the version
 /// this deployment runs. The compose file and the chart name the console
 /// service directly instead, so the fetch stays inside the deployment.
-fn default_docs_corpus_url() -> String {
-    let app_url =
-        optional_base_url("APP_URL").unwrap_or_else(|| "http://localhost:3000".to_owned());
-    format!("{app_url}/llms-full.txt")
+fn default_docs_corpus_url() -> anyhow::Result<String> {
+    Ok(format!(
+        "{}/llms-full.txt",
+        telmoni_shared::config::app_url()?
+    ))
 }
 
 /// Which wire protocol the model endpoint speaks.
@@ -173,7 +174,7 @@ impl Config {
         let docs_corpus_url = match optional_base_url("DOCS_CORPUS_URL") {
             Some(off) if off == "off" => None,
             Some(url) => Some(url),
-            None => Some(default_docs_corpus_url()),
+            None => Some(default_docs_corpus_url()?),
         };
         let telmoni = match optional("TELMONI_API_KEY") {
             None => None,
