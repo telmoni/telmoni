@@ -18,10 +18,6 @@ pub struct Config {
     /// Postgres URL (`NOTIFICATIONS_DATABASE_URL`) — the feed + delivery
     /// queue, opened as this module's own role.
     pub database_url: String,
-    /// Primary service secret for `x-service-secret` (gates `/internal/v1/*`).
-    pub service_secret: Redacted,
-    /// Optional rotation secondary, accepted during a rotation window.
-    pub service_secret_next: Option<Redacted>,
     /// The console's public origin (`APP_URL`), which the OAuth redirect URIs
     /// are built from; a wrong value is a handshake that never comes back.
     pub app_url: String,
@@ -75,8 +71,6 @@ impl Config {
     pub fn from_env() -> anyhow::Result<Self> {
         let config = Self {
             database_url: require("NOTIFICATIONS_DATABASE_URL")?,
-            service_secret: require("SERVICE_SECRET")?.into(),
-            service_secret_next: optional("SERVICE_SECRET_NEXT").map(Into::into),
             app_url: telmoni_shared::config::app_url()?,
             slack: oauth_app("SLACK_CLIENT_ID", "SLACK_CLIENT_SECRET")?,
             slack_signing_secret: optional("SLACK_SIGNING_SECRET").map(Into::into),

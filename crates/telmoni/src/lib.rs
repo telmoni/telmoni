@@ -115,6 +115,64 @@ pub struct Parts {
     pub trusted_proxy_hops: u8,
 }
 
+impl Parts {
+    /// Every part as the environment describes it, with a deployment's own
+    /// mail transport, built from auth's configuration, and its own external
+    /// provider when it brings one in place of the one
+    /// `AUTH_CUSTOM_*` would name. No hook: a deployment sets its own.
+    ///
+    /// # Errors
+    ///
+    /// A variable missing or malformed, a pool that will not open, or the
+    /// transport's own refusal.
+    pub async fn from_env_with(
+        mail: impl FnOnce(
+            &telmoni_auth::Config,
+        ) -> anyhow::Result<Arc<dyn telmoni_shared::mail::MailSender>>,
+        external: Option<telmoni_auth::external::External>,
+    ) -> anyhow::Result<Self> {
+        let auth_config = telmoni_auth::Config::from_env()?;
+        let notifications_config = telmoni_notifications::Config::from_env()?;
+        let telemetry_config = telmoni_telemetry::Config::from_env()?;
+        let http = telmoni_auth::http_client()?;
+        let mail = mail(&auth_config)?;
+        let auth_pool = telmoni_auth::open_pool(&auth_config).await?;
+        let notifications_pool =
+            telmoni_notifications::boot::open_pool(&notifications_config).await?;
+        let telemetry_pool = telmoni_telemetry::boot::open_pool(&telemetry_config).await?;
+        let agent = AgentParts::from_env().await?;
+        let providers = match external {
+            Some(external) => {
+                telmoni_auth::boot::providers_with(
+                    &auth_config,
+                    auth_pool.clone(),
+                    mail,
+                    Some(external),
+                )
+                .await?
+            }
+            None => {
+                telmoni_auth::boot::providers_from_env(&auth_config, &http, auth_pool.clone(), mail)
+                    .await?
+            }
+        };
+        Ok(Self {
+            auth_config,
+            auth_pool,
+            providers,
+            notifications_config,
+            notifications_pool,
+            telemetry_config,
+            telemetry_pool,
+            agent,
+            purge_hook: None,
+            ownership_hook: None,
+            entitlements: None,
+            trusted_proxy_hops: env_parse("TRUSTED_PROXY_HOPS", 2_u8)?,
+        })
+    }
+}
+
 /// The process: every module's state, wired to the others.
 pub struct App {
     /// Auth.
@@ -268,6 +326,7 @@ impl App {
         let notifications = Arc::new(telmoni_notifications::boot::state_from_env(
             parts.notifications_config,
             parts.notifications_pool,
+            secrets.clone(),
             late_auth.clone(),
         )?);
         let notifier: Arc<dyn telmoni_shared::seam::Notifications> =
@@ -345,33 +404,14 @@ impl App {
     /// purged beside the core's modules, nothing asked of a handover, and no
     /// limits.
     pub async fn from_env() -> anyhow::Result<Self> {
-        let auth_config = telmoni_auth::Config::from_env()?;
-        let notifications_config = telmoni_notifications::Config::from_env()?;
-        let telemetry_config = telmoni_telemetry::Config::from_env()?;
-        let http = telmoni_auth::http_client()?;
-        let mail = telmoni_auth::smtp::transport_from_env(&auth_config)?;
-        let auth_pool = telmoni_auth::open_pool(&auth_config).await?;
-        let notifications_pool =
-            telmoni_notifications::boot::open_pool(&notifications_config).await?;
-        let telemetry_pool = telmoni_telemetry::boot::open_pool(&telemetry_config).await?;
-        let agent = AgentParts::from_env().await?;
-        let providers =
-            telmoni_auth::boot::providers_from_env(&auth_config, &http, auth_pool.clone(), mail)
-                .await?;
-        Self::assemble(Parts {
-            auth_config,
-            auth_pool,
-            providers,
-            notifications_config,
-            notifications_pool,
-            telemetry_config,
-            telemetry_pool,
-            agent,
-            purge_hook: None,
-            ownership_hook: None,
-            entitlements: None,
-            trusted_proxy_hops: env_parse("TRUSTED_PROXY_HOPS", 2_u8)?,
-        })
+        Self::assemble(Parts::from_env_with(telmoni_auth::smtp::transport_from_env, None).await?)
+    }
+
+    /// The service secrets every module's internal lanes are gated by, for a
+    /// deployment's own module mounted beside them.
+    #[must_use]
+    pub fn service_secrets(&self) -> &ServiceSecrets {
+        &self.secrets
     }
 
     /// Every module's routes under one router, with the health probes and

@@ -44,8 +44,6 @@ fn assemble() -> App {
     };
     let notifications_config = telmoni_notifications::Config {
         database_url: String::new(),
-        service_secret: SECRET.into(),
-        service_secret_next: None,
         app_url: "http://localhost:3000".into(),
         slack: None,
         slack_signing_secret: None,

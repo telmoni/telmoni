@@ -30,13 +30,9 @@ pub async fn open_pool(config: &Config) -> anyhow::Result<sqlx::PgPool> {
 pub fn state_from_env(
     config: Config,
     db: sqlx::PgPool,
+    service_secrets: ServiceSecrets,
     auth: Arc<dyn Auth>,
 ) -> anyhow::Result<AppState> {
-    let service_secrets = ServiceSecrets::new(
-        config.service_secret.clone(),
-        config.service_secret_next.clone(),
-    );
-
     let http = telmoni_shared::http::client("telmoni-notifications", Duration::from_secs(15))?;
     let egress = Egress::guarded(Duration::from_secs(10), "telmoni-notifications")?;
 
