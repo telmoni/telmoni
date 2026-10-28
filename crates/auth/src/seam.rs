@@ -10,7 +10,6 @@
 use async_trait::async_trait;
 use axum::http::HeaderMap;
 use serde_json::json;
-use uuid::Uuid;
 
 use telmoni_shared::SessionId;
 use telmoni_shared::acting::{Acting, ActingKey, ActingProject};
@@ -225,15 +224,7 @@ impl Auth for AppState {
         after: Option<&DocumentCursor>,
         limit: i64,
     ) -> Result<Vec<SourceDocument>, TelmoniError> {
-        let after = match after {
-            Some(cursor) => Some((
-                cursor.at,
-                Uuid::parse_str(&cursor.id).map_err(|e| {
-                    TelmoniError::internal("the audit cursor is not an event id", e)
-                })?,
-            )),
-            None => None,
-        };
+        let after = after.map(|cursor| (cursor.at, cursor.id));
         let mut tx = maintenance_scope(&self.db, AuthLane).await?;
         let events = audit::after_cursor(&mut tx, after, limit).await?;
         tx.commit().await?;
@@ -400,7 +391,6 @@ fn audit_document(e: audit::IndexedEvent) -> SourceDocument {
         ),
     };
     SourceDocument {
-        source_id: e.id.to_string(),
         organization_id: e.organization_id,
         project_id: e.in_project,
         subject_user_id: None,
@@ -411,7 +401,7 @@ fn audit_document(e: audit::IndexedEvent) -> SourceDocument {
         created_at: e.created_at,
         cursor: DocumentCursor {
             at: e.created_at,
-            id: e.id.to_string(),
+            id: e.id,
         },
     }
 }

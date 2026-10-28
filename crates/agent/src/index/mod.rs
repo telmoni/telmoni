@@ -133,7 +133,8 @@ impl From<SourceDocument> for Entry {
             })
             .collect();
         Self {
-            source_id: doc.source_id,
+            // The row's id in its source, which keys its chunks.
+            source_id: doc.cursor.id.to_string(),
             organization_id: Some(doc.organization_id),
             project_id: doc.project_id,
             user_id: None,
@@ -252,7 +253,7 @@ async fn index_page(
     lease: &Lease,
 ) -> Result<Page, TelmoniError> {
     let source = paged.source();
-    let after = match (lease.after_at, lease.after_id.clone()) {
+    let after = match (lease.after_at, lease.after_id) {
         (Some(at), Some(id)) => Some(DocumentCursor { at, id }),
         _ => None,
     };
@@ -283,7 +284,7 @@ async fn index_page(
             );
             return Ok(Page::Done);
         }
-        db::advance_cursor(&mut tx, source, last.at, &last.id).await?;
+        db::advance_cursor(&mut tx, source, last.at, last.id).await?;
         tx.commit().await?;
         Ok(Page::Took { rows, full })
     })

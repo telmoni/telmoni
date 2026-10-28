@@ -42,7 +42,7 @@ pub struct DocumentCursor {
     /// The row's time in the order the source pages by.
     pub at: DateTime<Utc>,
     /// Its id, which breaks a tie between rows of the same instant.
-    pub id: String,
+    pub id: Uuid,
 }
 
 /// One row of a module's own, as text the agent can embed and cite. What
@@ -50,8 +50,6 @@ pub struct DocumentCursor {
 /// and user agent never reach it.
 #[derive(Debug, Clone)]
 pub struct SourceDocument {
-    /// The row's id in its source, stable across re-reads.
-    pub source_id: String,
     /// The organization it belongs to.
     pub organization_id: OrganizationId,
     /// The project it happened inside, if any.

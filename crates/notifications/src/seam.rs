@@ -106,14 +106,7 @@ impl Notifications for Notifier {
         after: Option<&DocumentCursor>,
         limit: i64,
     ) -> Result<Vec<SourceDocument>, TelmoniError> {
-        let after = match after {
-            Some(cursor) => Some((
-                cursor.at,
-                Uuid::parse_str(&cursor.id)
-                    .map_err(|e| TelmoniError::internal("an activity cursor is not a row id", e))?,
-            )),
-            None => None,
-        };
+        let after = after.map(|cursor| (cursor.at, cursor.id));
         let mut tx = maintenance_scope(&self.0.db, NotificationsLane).await?;
         let documents = match source {
             ActivitySource::Feed => {
@@ -271,7 +264,6 @@ fn feed_document(item: db::IndexedFeedItem, addresses: &Addresses) -> SourceDocu
         None => Audience::OrganizationAdmin,
     };
     SourceDocument {
-        source_id: item.id.to_string(),
         body: format!(
             "Notice ({kind}) at {at}: {title}\n{body}",
             kind = item.kind,
@@ -288,7 +280,7 @@ fn feed_document(item: db::IndexedFeedItem, addresses: &Addresses) -> SourceDocu
         created_at: item.created_at,
         cursor: DocumentCursor {
             at: item.created_at,
-            id: item.id.to_string(),
+            id: item.id,
         },
     }
 }
@@ -301,7 +293,6 @@ fn delivery_document(d: db::IndexedDelivery, addresses: &Addresses) -> SourceDoc
         .as_deref()
         .map_or_else(|| "none".to_owned(), ToOwned::to_owned);
     SourceDocument {
-        source_id: d.id.to_string(),
         title: format!(
             "Delivery to {} #{}: {}",
             d.provider, d.channel_name, d.status
@@ -329,7 +320,7 @@ fn delivery_document(d: db::IndexedDelivery, addresses: &Addresses) -> SourceDoc
         created_at: d.updated_at,
         cursor: DocumentCursor {
             at: d.updated_at,
-            id: d.id.to_string(),
+            id: d.id,
         },
     }
 }

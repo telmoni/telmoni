@@ -262,7 +262,7 @@ GRANT SELECT (id, organization_id, content, citations), UPDATE (content, citatio
 CREATE TABLE agent.cursors (
     source        TEXT        PRIMARY KEY,
     after_at      TIMESTAMPTZ,
-    after_id      TEXT,
+    after_id      UUID,
     digest        TEXT,
     lease_id      UUID,
     leased_until  TIMESTAMPTZ,

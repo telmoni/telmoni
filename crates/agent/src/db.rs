@@ -505,7 +505,7 @@ pub async fn search(
 pub struct Lease {
     pub lease_id: Uuid,
     pub after_at: Option<DateTime<Utc>>,
-    pub after_id: Option<String>,
+    pub after_id: Option<Uuid>,
     pub digest: Option<String>,
 }
 
@@ -581,7 +581,7 @@ pub async fn advance_cursor(
     tx: &mut Scoped<'_, Maintenance<AgentLane>>,
     source: Source,
     at: DateTime<Utc>,
-    id: &str,
+    id: Uuid,
 ) -> sqlx::Result<()> {
     sqlx::query(
         "UPDATE agent.cursors SET after_at = $2, after_id = $3, updated_at = now()
