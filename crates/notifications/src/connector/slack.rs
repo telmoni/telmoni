@@ -11,7 +11,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use telmoni_shared::digest::{HmacKey, SignatureError, hex_decode, in_replay_window};
 use telmoni_shared::net_guard::Egress;
-use telmoni_shared::{AuthError, Redacted, TelmoniError};
+use telmoni_shared::{AuthError, OrInternal, Redacted, TelmoniError};
 
 use super::{
     Connector, DeliveryError, Event, Grant, Installed, Provider, Retirement, TearDownError,
@@ -263,7 +263,7 @@ impl Grant for SlackConnector {
             ])
             .send()
             .await
-            .map_err(|e| TelmoniError::internal("slack oauth exchange unreachable", e))?;
+            .or_internal("slack oauth exchange unreachable")?;
         if !resp.status().is_success() {
             return Err(TelmoniError::Internal(format!(
                 "slack oauth exchange returned {}",
@@ -273,7 +273,7 @@ impl Grant for SlackConnector {
         let body: AccessResponse = resp
             .json()
             .await
-            .map_err(|e| TelmoniError::internal("slack oauth exchange body unreadable", e))?;
+            .or_internal("slack oauth exchange body unreadable")?;
         if !body.ok {
             let word = body.error.unwrap_or_else(|| "unknown_error".into());
             return Err(AuthError::BadRequest(format!("slack refused the code: {word}")).into());

@@ -31,7 +31,9 @@ use serde_json::json;
 use telmoni_shared::acting::ActingKey;
 use telmoni_shared::db::tenant_session::project_scope;
 use telmoni_shared::middleware::problem;
-use telmoni_shared::{ContentMode, ProblemDetails, ProjectId, TelemetryError, TelmoniError};
+use telmoni_shared::{
+    ContentMode, OrInternal, ProblemDetails, ProjectId, TelemetryError, TelmoniError,
+};
 
 use crate::contract::{self, BATCH_MAX_BYTES, BATCH_SPANS_MAX};
 use crate::ingest::batch::{self, BatchError, SenderClock};
@@ -282,8 +284,9 @@ fn response_body(
         partial_success: report.partial_success(content_mode),
     };
     match encoding {
-        Encoding::Json => serde_json::to_vec(&response)
-            .map_err(|e| TelmoniError::Internal(format!("ingest: the answer did not encode: {e}"))),
+        Encoding::Json => {
+            serde_json::to_vec(&response).or_internal("ingest: the answer did not encode")
+        }
         Encoding::Protobuf => Ok(response.encode_to_vec()),
     }
 }

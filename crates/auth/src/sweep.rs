@@ -37,8 +37,8 @@ use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
 use telmoni_shared::db::audit_verify::verify_audit_chain;
 use telmoni_shared::db::tenant_session::{maintenance_scope, organization_scope};
 use telmoni_shared::{
-    AuditAction, AuthError, OrganizationId, OrganizationStatus, TelmoniError, TelmoniResourceKind,
-    UserId,
+    AuditAction, AuthError, OrInternal, OrganizationId, OrganizationStatus, TelmoniError,
+    TelmoniResourceKind, UserId,
 };
 
 use crate::AppState;
@@ -135,7 +135,7 @@ async fn as_leader<T>(
                 sqlx::query("SELECT 1")
                     .execute(&mut *leader)
                     .await
-                    .map_err(|e| TelmoniError::internal("the sweep's leader lock was lost", e))?;
+                    .or_internal("the sweep's leader lock was lost")?;
             }
         }
     };
@@ -379,9 +379,8 @@ async fn verify_one_chain(
     state: &AppState,
     organization_id: &str,
 ) -> Result<telmoni_shared::db::audit_verify::VerifyReport, TelmoniError> {
-    let organization_id = OrganizationId::try_new(organization_id).map_err(|e| {
-        TelmoniError::Internal(format!("audit chain names a bad organization id: {e}"))
-    })?;
+    let organization_id = OrganizationId::try_new(organization_id)
+        .or_internal("audit chain names a bad organization id")?;
     let mut tx = organization_scope(&state.db, &organization_id).await?;
     sqlx::query("SET LOCAL statement_timeout = '30s'")
         .execute(&mut *tx)

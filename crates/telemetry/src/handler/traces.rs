@@ -449,7 +449,7 @@ pub(crate) fn download<T: Serialize, const N: usize>(
     Ok(match format {
         Format::Json => {
             let body = serde_json::to_vec(rows).map_err(|e| {
-                TelmoniError::Internal(format!("a {what} download could not be written: {e}"))
+                TelmoniError::internal(format!("a {what} download could not be written"), e)
             })?;
             ([(header::CONTENT_TYPE, "application/json")], body).into_response()
         }

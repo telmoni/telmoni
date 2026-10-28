@@ -11,9 +11,9 @@ use std::collections::HashSet;
 use std::time::Duration;
 
 use chrono::Utc;
-use telmoni_shared::TelmoniError;
 use telmoni_shared::db::tenant_session::maintenance_scope;
 use telmoni_shared::digest::sha256_hex;
+use telmoni_shared::{OrInternal, TelmoniError};
 
 use super::{Entry, Passage, chunk, holding, lease, prepare, release, store};
 use crate::AppState;
@@ -93,7 +93,7 @@ async fn fetch(url: &str) -> Result<String, TelmoniError> {
         .timeout(Duration::from_secs(30))
         .user_agent("telmoni-agent")
         .build()
-        .map_err(|e| TelmoniError::internal("docs client", e))?;
+        .or_internal("docs client")?;
     let mut response = http
         .get(url)
         .send()

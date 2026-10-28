@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use telmoni_shared::seam::Agent;
-use telmoni_shared::{OrganizationId, TelmoniError, UserId};
+use telmoni_shared::{OrInternal, OrganizationId, TelmoniError, UserId};
 
 use crate::AppState;
 use futures_util::future::BoxFuture;
@@ -187,7 +187,7 @@ impl Agent for AgentSeam {
             erased
         })
         .await
-        .map_err(|e| TelmoniError::internal("the agent's erasure stopped", e))?
+        .or_internal("the agent's erasure stopped")?
     }
 
     async fn purge_organization(

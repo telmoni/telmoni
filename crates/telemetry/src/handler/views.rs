@@ -23,7 +23,7 @@ use telmoni_shared::extract::{Json, Query};
 use telmoni_shared::rbac::{Resource, Verb};
 use telmoni_shared::seam::Auth;
 use telmoni_shared::{
-    AuthError, LayoutDepth, LayoutOpen, ProjectId, SortDirection, SpanKind, SpanStatus,
+    AuthError, LayoutDepth, LayoutOpen, OrInternal, ProjectId, SortDirection, SpanKind, SpanStatus,
     TelmoniError, TraceColumn, TraceSort, ViewKind,
 };
 
@@ -239,8 +239,7 @@ struct Checked {
 
 /// `value` as JSON, which these shapes always are.
 fn written<T: Serialize>(value: &T) -> Result<Value, TelmoniError> {
-    serde_json::to_value(value)
-        .map_err(|e| TelmoniError::Internal(format!("a view's query could not be written: {e}")))
+    serde_json::to_value(value).or_internal("a view's query could not be written")
 }
 
 impl ViewInput {

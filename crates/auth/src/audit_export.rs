@@ -581,7 +581,7 @@ impl FileWriter {
 
 /// Writing into memory has no I/O to fail; this is serde's own refusal.
 fn unwritable(e: serde_json::Error) -> TelmoniError {
-    TelmoniError::Internal(format!("an audit export could not be written: {e}"))
+    TelmoniError::internal("an audit export could not be written", e)
 }
 
 #[cfg(test)]

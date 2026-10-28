@@ -6,7 +6,7 @@ use std::sync::OnceLock;
 
 use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
 
-use telmoni_shared::{AuthError, TelmoniError};
+use telmoni_shared::{AuthError, OrInternal, TelmoniError};
 
 /// The floor NIST SP 800-63B sets, and no composition rule: length is what
 /// resists guessing, and a rule about digits mostly decides which digit.
@@ -40,7 +40,7 @@ pub async fn hash(password: String) -> Result<String, TelmoniError> {
             .map(|h| h.to_string())
     })
     .await
-    .map_err(|e| TelmoniError::internal("password hashing task", e))?
+    .or_internal("password hashing task")?
     .map_err(|_| TelmoniError::Internal("password hashing failed".into()))
 }
 
@@ -50,7 +50,7 @@ pub async fn hash(password: String) -> Result<String, TelmoniError> {
 pub async fn verify(password: String, phc: String) -> Result<bool, TelmoniError> {
     tokio::task::spawn_blocking(move || verify_now(&password, &phc))
         .await
-        .map_err(|e| TelmoniError::internal("password check task", e))?
+        .or_internal("password check task")?
 }
 
 fn verify_now(password: &str, phc: &str) -> Result<bool, TelmoniError> {

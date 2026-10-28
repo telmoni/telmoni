@@ -40,7 +40,8 @@ pub mod types;
 pub use sharding::derive_shard_key;
 
 pub use error::{
-    AuthError, AuthzError, ModelFailure, PlanError, TelemetryError, TelmoniError, TenantError,
+    AuthError, AuthzError, ModelFailure, OrInternal, PlanError, TelemetryError, TelmoniError,
+    TenantError,
 };
 pub use error_schema::ProblemDetails;
 pub use extract::correlation_id;

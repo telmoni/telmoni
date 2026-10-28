@@ -154,6 +154,22 @@ pub fn deadlocked(e: &sqlx::Error) -> bool {
     sqlstate_is(e, DEADLOCK_DETECTED)
 }
 
+/// A failure of ours, in a word: a 500 that keeps `context` and its cause for
+/// the log and shows the caller neither.
+pub trait OrInternal<T> {
+    /// The error as [`TelmoniError::InternalSource`] under `context`.
+    fn or_internal(self, context: &'static str) -> Result<T, TelmoniError>;
+}
+
+impl<T, E> OrInternal<T> for Result<T, E>
+where
+    E: std::error::Error + Send + Sync + 'static,
+{
+    fn or_internal(self, context: &'static str) -> Result<T, TelmoniError> {
+        self.map_err(|e| TelmoniError::internal(context, e))
+    }
+}
+
 impl TelmoniError {
     /// Wrap an arbitrary error as an internal 500 while preserving its source
     /// chain for the logs. Neither `context` nor `source` reaches the customer.
