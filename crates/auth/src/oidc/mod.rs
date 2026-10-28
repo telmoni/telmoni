@@ -401,7 +401,10 @@ impl OidcProvider {
         };
         let endpoint = match self.endpoints().await {
             Ok(endpoints) => endpoints.userinfo_endpoint.clone(),
-            Err(_) => None,
+            Err(e) => {
+                tracing::warn!(op, error = %e, "the provider's discovery failed; the userinfo endpoint is not read");
+                return None;
+            }
         };
         let Some(endpoint) = endpoint else {
             tracing::warn!(op, "the provider's document names no userinfo endpoint");
@@ -540,7 +543,11 @@ impl AuthProvider for OidcProvider {
     async fn logout_url(&self, id_token: Option<&str>, return_to: &str) -> String {
         let end_session = match self.endpoints().await {
             Ok(endpoints) => endpoints.end_session_endpoint.clone(),
-            Err(_) => None,
+            Err(e) => {
+                tracing::warn!(error = %e,
+                    "logout_url: the provider's discovery failed; signing out locally, its session left open");
+                None
+            }
         };
         match end_session {
             Some(endpoint) => {

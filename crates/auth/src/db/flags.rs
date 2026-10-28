@@ -65,10 +65,15 @@ async fn layered_rows<B: FlagRead>(
     .await
 }
 
+/// The rows over `set`. A key no flag spells is a row put in by hand that
+/// switches nothing, so it is said, by name, rather than passed over.
 fn apply(set: &mut FlagSet, rows: Vec<FlagRow>) {
     for row in rows {
-        if let Ok(flag) = row.key.parse::<Flag>() {
-            set.set(flag, row.enabled);
+        match row.key.parse::<Flag>() {
+            Ok(flag) => set.set(flag, row.enabled),
+            Err(_) => {
+                tracing::warn!(key = %row.key, "a flag row names no flag; it switches nothing");
+            }
         }
     }
 }

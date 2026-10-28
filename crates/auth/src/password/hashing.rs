@@ -65,7 +65,12 @@ fn verify_now(password: &str, phc: &str) -> Result<bool, TelmoniError> {
 /// with the wrong password, so the answer's timing says nothing about which.
 /// The decoy is made on the first call, on the same blocking thread.
 pub async fn burn(password: String) {
-    let _ = tokio::task::spawn_blocking(move || verify_now(&password, decoy())).await;
+    match tokio::task::spawn_blocking(move || verify_now(&password, decoy())).await {
+        Ok(Ok(_)) => {}
+        Ok(Err(e)) => tracing::error!(error = %e,
+            "the sign-in decoy is unreadable; an unknown address now answers faster than a wrong password"),
+        Err(e) => tracing::error!(error = %e, "the sign-in decoy's check did not run"),
+    }
 }
 
 fn decoy() -> &'static str {
