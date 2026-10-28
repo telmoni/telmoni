@@ -5,7 +5,7 @@ import type { AuditExport } from "@/lib/types/audit-export";
 import { createStore } from "../index";
 
 function store() {
-  return createStore({ user: null, flags: { members: true }, roles: {}, projects: [] });
+  return createStore({ user: null, flags: { members: true }, projects: [] });
 }
 
 function entry(id: string, overrides: Partial<AuditExport> = {}): AuditExport {

@@ -33,7 +33,6 @@ export function StoreSeed({
   projectOffers,
   activeOrganizationId,
   flags,
-  roles,
   projects,
   projectsElsewhere,
 }: StoreInitial) {
@@ -65,7 +64,6 @@ export function StoreSeed({
       projectOffers,
       activeOrganizationId,
       flags,
-      roles,
       projects,
       projectsElsewhere,
     });
@@ -76,7 +74,6 @@ export function StoreSeed({
     incomingInvites,
     givenSeats,
     projectOffers,
-    roles,
     organizations,
     flags,
     user,

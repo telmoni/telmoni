@@ -24,7 +24,6 @@ function payload(over: Partial<StoreInitial> = {}): StoreInitial {
     organizations: [organization("alpha")],
     activeOrganizationId: "org_alpha",
     flags: { members: true },
-    roles: { "t-1": "owner" } as StoreInitial["roles"],
     projects: [project("t-1", "Alpha")],
     ...over,
   };
@@ -77,7 +76,9 @@ describe("setSeed", () => {
     const after = store.getState();
     expect(after.flags, "the field that moved").toEqual({ members: false });
     expect(after.projects, "projects was replaced by an equal array").toBe(before.projects);
-    expect(after.roles, "roles was replaced by an equal object").toBe(before.roles);
+    expect(after.organizations, "organizations was replaced by an equal array").toBe(
+      before.organizations,
+    );
     expect(writes, "one write, not one per field").toHaveBeenCalledTimes(1);
   });
 

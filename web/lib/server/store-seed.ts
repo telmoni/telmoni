@@ -1,7 +1,6 @@
 import { cache } from "react";
 
 import type { StoreInitial } from "@/lib/store/types";
-import { Role } from "@/lib/types/enums";
 
 import { identityContext } from "./entities/identity-context";
 import { getServerContext } from "./entities/organization";
@@ -25,20 +24,6 @@ export const storeSeed = cache(async (): Promise<StoreInitial | null> => {
   ]);
   if (!session) return null;
 
-  const roles: Record<string, Role> = Object.fromEntries(
-    projects
-      .filter((p): p is typeof p & { role: Role } => p.role !== null)
-      .map((p) => [p.id, p.role]),
-  );
-  const organizationRole = ident?.role ?? null;
-  if (organizationRole) {
-    roles.organization = {
-      owner: Role.Owner,
-      admin: Role.Admin,
-      member: Role.Member,
-    }[organizationRole];
-  }
-
   const activeOrganizationId = ident?.organizationId ?? null;
   return {
     user: {
@@ -53,7 +38,6 @@ export const storeSeed = cache(async (): Promise<StoreInitial | null> => {
     projectOffers: ctx?.projectOffers ?? [],
     activeOrganizationId,
     flags: ctx?.flags ?? {},
-    roles,
     projects,
     projectsElsewhere:
       everywhere.kind === "ok" && activeOrganizationId

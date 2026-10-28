@@ -76,7 +76,6 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           projectOffers={ctx.projectOffers}
           activeOrganizationId={null}
           flags={ctx.flags}
-          roles={{}}
           projects={[]}
           projectsElsewhere={[]}
         >

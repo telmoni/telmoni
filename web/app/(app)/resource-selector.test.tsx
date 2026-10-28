@@ -54,7 +54,6 @@ function renderSelector(
       projectOffers={[]}
       activeOrganizationId="org_acme"
       flags={{ [Flag.Signup]: true }}
-      roles={{}}
       projects={projects}
       projectsElsewhere={[elsewhere]}
     >

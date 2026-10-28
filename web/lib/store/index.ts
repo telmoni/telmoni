@@ -49,7 +49,6 @@ export const useActiveOrganization = () =>
     (s) => s.organizations.find((o) => o.organizationId === s.activeOrganizationId) ?? null,
   );
 export const useFlags = () => useStore((s) => s.flags);
-export const useRoles = () => useStore((s) => s.roles);
 export const useProjects = () => useStore((s) => s.projects);
 export const useProjectsElsewhere = () => useStore((s) => s.projectsElsewhere);
 

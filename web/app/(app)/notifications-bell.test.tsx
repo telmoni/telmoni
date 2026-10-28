@@ -49,7 +49,7 @@ const BILLING = seat("project_billing", "Billing agent");
 /** The bell over a store holding `seats`, opened from the keyboard. */
 function openBell(seats: GivenSeat[]): HTMLElement {
   render(
-    <StoreProvider user={null} flags={{}} roles={{}} projects={[]} givenSeats={seats}>
+    <StoreProvider user={null} flags={{}} projects={[]} givenSeats={seats}>
       <NotificationsBell />
     </StoreProvider>,
   );
@@ -122,7 +122,7 @@ describe("NotificationsBell: its key", () => {
   // ⚠ A hint names no key a panel over the page holds off.
   it("names its g sequence, unless a panel covers the page", () => {
     render(
-      <StoreProvider user={null} flags={{}} roles={{}} projects={[]} givenSeats={[]}>
+      <StoreProvider user={null} flags={{}} projects={[]} givenSeats={[]}>
         <NotificationsBell />
       </StoreProvider>,
     );

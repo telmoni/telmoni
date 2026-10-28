@@ -18,7 +18,6 @@ export function normalizeSeed(initial: StoreInitial): Seed {
     projectOffers: initial.projectOffers ?? NONE,
     activeOrganizationId: initial.activeOrganizationId ?? null,
     flags: initial.flags,
-    roles: initial.roles,
     projects: initial.projects,
     projectsElsewhere: initial.projectsElsewhere ?? NONE,
   };
@@ -120,7 +119,6 @@ export const createIdentitySlice = (
             patch.activeOrganizationId = seed.activeOrganizationId;
           }
           if (!same(was.flags, seed.flags)) patch.flags = seed.flags;
-          if (!same(was.roles, seed.roles)) patch.roles = seed.roles;
           if (!same(was.projects, seed.projects)) patch.projects = seed.projects;
           if (!same(was.projectsElsewhere, seed.projectsElsewhere)) {
             patch.projectsElsewhere = seed.projectsElsewhere;

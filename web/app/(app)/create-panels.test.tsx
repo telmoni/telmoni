@@ -25,7 +25,6 @@ const addProject = vi.fn();
 vi.mock("@/lib/store", () => ({
   useActiveOrganization: () => ({ organizationId: "org_acme", slug: "acme", name: "Acme", role }),
   useAddProject: () => addProject,
-  useRoles: () => ({ organization: role }),
 }));
 
 const createProjectAction = vi.fn();

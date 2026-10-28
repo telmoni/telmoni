@@ -38,7 +38,7 @@ function Waiting() {
 async function openProject(projectId: string, seats: GivenSeat[]) {
   await act(async () => {
     render(
-      <StoreProvider user={null} flags={{}} roles={{}} projects={[]} givenSeats={seats}>
+      <StoreProvider user={null} flags={{}} projects={[]} givenSeats={seats}>
         <GivenSeatSeen projectId={projectId} />
         <Waiting />
       </StoreProvider>,

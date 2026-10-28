@@ -18,7 +18,7 @@ import { Input } from "@/components/ui/input";
 import { createProjectAction } from "@/app/(app)/actions";
 import { organizationLabel } from "@/lib/identity";
 import { projectPath } from "@/lib/slug";
-import { useActiveOrganization, useAddProject, useRoles } from "@/lib/store";
+import { useActiveOrganization, useAddProject } from "@/lib/store";
 import { MAX_PROJECT_NAME, typedBound } from "@/lib/names";
 import { administers } from "@/lib/roles";
 
@@ -26,7 +26,7 @@ import { administers } from "@/lib/roles";
 /// IN: every entry point's question, since the panel creates there and asks
 /// about no other.
 export function useCanCreateProjects(): boolean {
-  return administers(useRoles().organization);
+  return administers(useActiveOrganization()?.role);
 }
 
 /** New project, in the console's side panel (`create-panels.tsx`). */

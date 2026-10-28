@@ -1,7 +1,6 @@
 import type { FlagSet } from "@/lib/flags";
 import type { AuditExport } from "@/lib/types/audit-export";
 import type { AuthUser } from "@/lib/types/domain";
-import type { Role } from "@/lib/types/enums";
 import type { GivenSeat } from "@/lib/types/given-seat";
 import type { Project, ProjectEverywhere } from "@/lib/server/entities/projects";
 import type {
@@ -30,7 +29,6 @@ export interface Seed {
   projectOffers: readonly ProjectOffer[];
   activeOrganizationId: string | null;
   flags: FlagSet;
-  roles: Readonly<Record<string, Role>>;
   projects: readonly Project[];
   projectsElsewhere: readonly ProjectEverywhere[];
 }
@@ -104,7 +102,6 @@ export interface StoreInitial {
   projectOffers?: readonly ProjectOffer[];
   activeOrganizationId?: string | null;
   flags: FlagSet;
-  roles: Readonly<Record<string, Role>>;
   projects: readonly Project[];
   projectsElsewhere?: readonly ProjectEverywhere[];
 }

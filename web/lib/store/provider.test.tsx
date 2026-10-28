@@ -70,7 +70,6 @@ describe("StoreProvider", () => {
         activeOrganizationId="org_alpha"
         user={null}
         flags={{}}
-        roles={{}}
         projects={[]}
       >
         <ActiveOrganization />
@@ -86,7 +85,6 @@ describe("StoreProvider", () => {
         activeOrganizationId={id}
         user={null}
         flags={{}}
-        roles={{}}
         projects={[]}
       >
         <ActiveOrganization />
@@ -112,7 +110,6 @@ describe("StoreProvider", () => {
         activeOrganizationId="org_alpha"
         user={null}
         flags={{}}
-        roles={{}}
         projects={[]}
       >
         <ActiveOrganization />
@@ -124,7 +121,6 @@ describe("StoreProvider", () => {
         activeOrganizationId="org_alpha"
         user={null}
         flags={{}}
-        roles={{}}
         projects={[]}
       >
         <ActiveOrganization />
@@ -141,7 +137,6 @@ describe("the project list, which is the one slice that changes", () => {
         organizations={[organization("alpha")]}
         user={null}
         flags={{}}
-        roles={{}}
         projects={[project("p1", "Personal project")]}
       >
         <ProjectNames />
@@ -154,7 +149,6 @@ describe("the project list, which is the one slice that changes", () => {
         organizations={[organization("alpha")]}
         user={null}
         flags={{}}
-        roles={{}}
         projects={[project("p1", "New Project")]}
       >
         <ProjectNames />
@@ -169,7 +163,6 @@ describe("the project list, which is the one slice that changes", () => {
         organizations={[organization("alpha")]}
         user={null}
         flags={{}}
-        roles={{}}
         projects={[project("p1", "Personal project"), project("p2", "Other")]}
       >
         <ProjectNames />
@@ -191,7 +184,6 @@ describe("the project list, which is the one slice that changes", () => {
         organizations={[organization("alpha")]}
         user={null}
         flags={{}}
-        roles={{}}
         projects={[project("p1", "Personal project")]}
       >
         <ProjectNames />
@@ -241,7 +233,6 @@ describe("the incoming invites slice", () => {
         organizations={[organization("alpha")]}
         user={null}
         flags={{}}
-        roles={{}}
         projects={[]}
         incomingInvites={[sampleInvite("inv_1")]}
       >
@@ -255,7 +246,6 @@ describe("the incoming invites slice", () => {
         organizations={[organization("alpha")]}
         user={null}
         flags={{}}
-        roles={{}}
         projects={[]}
         incomingInvites={[]}
       >
@@ -271,7 +261,6 @@ describe("the incoming invites slice", () => {
         organizations={[organization("alpha")]}
         user={null}
         flags={{}}
-        roles={{}}
         projects={[]}
         incomingInvites={[sampleInvite("inv_1"), sampleInvite("inv_2")]}
       >
@@ -322,7 +311,6 @@ describe("the seats given slice", () => {
       organizations={[organization("alpha")]}
       user={null}
       flags={{}}
-      roles={{}}
       projects={[]}
       givenSeats={seats}
     >
@@ -349,7 +337,6 @@ describe("the seats given slice", () => {
           organizations={[organization("alpha")]}
           user={null}
           flags={{}}
-          roles={{}}
           projects={[]}
           givenSeats={[]}
         />,
@@ -393,7 +380,6 @@ describe("StoreProvider: projects elsewhere", () => {
         organizations={[organization("alpha")]}
         user={null}
         flags={{}}
-        roles={{}}
         projects={[]}
       >
         <ElsewhereNames />
@@ -409,7 +395,6 @@ describe("StoreProvider: projects elsewhere", () => {
         organizations={[organization("alpha")]}
         user={null}
         flags={{}}
-        roles={{}}
         projects={[]}
         projectsElsewhere={first}
       >
@@ -423,7 +408,6 @@ describe("StoreProvider: projects elsewhere", () => {
         organizations={[organization("alpha")]}
         user={null}
         flags={{}}
-        roles={{}}
         projects={[]}
         projectsElsewhere={[...first, elsewhere("project_b", "Data", "org_y")]}
       >
@@ -455,7 +439,6 @@ describe("StoreProvider: the organization you are standing in", () => {
         organizations={[organization("alpha"), organization("acme")]}
         user={null}
         flags={{}}
-        roles={{}}
         projects={projects}
         activeOrganizationId={id}
       >
@@ -489,7 +472,6 @@ describe("StoreProvider: the organization you are standing in", () => {
         organizations={[organization("alpha")]}
         user={{ id: "user_alpha", email, firstName: null, lastName: null }}
         flags={{}}
-        roles={{}}
         projects={[]}
       >
         <Email />
@@ -513,7 +495,6 @@ describe("StoreProvider: the organization you are standing in", () => {
         organizations={[organization("alpha"), organization("acme")]}
         user={null}
         flags={{}}
-        roles={{}}
         projects={[project("project_a", "Mine")]}
         activeOrganizationId="org_alpha"
       >
@@ -530,7 +511,6 @@ describe("StoreProvider: the organization you are standing in", () => {
           organizations={[organization("alpha"), organization("acme")]}
           user={null}
           flags={{}}
-          roles={{}}
           projects={[project("project_b", "Theirs")]}
           activeOrganizationId="org_acme"
         />,
@@ -572,7 +552,6 @@ describe("refreshed props that say nothing new", () => {
         organizations={[organization("alpha")]}
         user={null}
         flags={{}}
-        roles={{}}
         projects={[project("p1", "Personal project")]}
       >
         <CountingProjectNames />
@@ -587,7 +566,6 @@ describe("refreshed props that say nothing new", () => {
         organizations={[organization("alpha")]}
         user={null}
         flags={{}}
-        roles={{}}
         projects={[project("p1", "Personal project")]}
       >
         <CountingProjectNames />
@@ -630,7 +608,6 @@ describe("the actions the hooks hand out", () => {
         organizations={[organization("alpha")]}
         user={null}
         flags={{}}
-        roles={{}}
         projects={[project("a", "Alpha")]}
       >
         <Captures />
@@ -646,7 +623,6 @@ describe("the actions the hooks hand out", () => {
         organizations={[organization("alpha")]}
         user={null}
         flags={{}}
-        roles={{}}
         projects={[project("a", "Alpha"), project("b", "Beta")]}
       >
         <Captures />

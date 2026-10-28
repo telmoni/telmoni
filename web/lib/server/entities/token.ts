@@ -25,7 +25,6 @@ export type TokenAccess =
 
 export const fetchTokens = cache(
   async (projectId: string): Promise<TokenAccess> => {
-    if (!projectId || projectId === "organization" || projectId === "org") return { kind: "unavailable" };
     const ctx = await identityContext();
     if (!ctx) return { kind: "unavailable" };
     const read = await readJson(
