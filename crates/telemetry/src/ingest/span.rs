@@ -63,11 +63,62 @@ pub enum DropReason {
     Content,
     /// Text, or an array, the field inventory does not name.
     Unlisted,
-    /// Past a cap: which, in words.
-    OverCap(&'static str),
+    /// Past a cap: which.
+    OverCap(Cap),
     /// A tag past its project's cap for the day ([`crate::ingest::cardinality`]):
-    /// which, in words.
-    Cardinality(&'static str),
+    /// which.
+    Cardinality(Cap),
+}
+
+/// A cap an attribute or a tag was dropped past, worded from its constant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Cap {
+    TagKey,
+    TagValue,
+    Tags,
+    AttributeKey,
+    AttributeValue,
+    Attributes,
+    TagValuesPerDay,
+    TagKeysPerDay,
+}
+
+impl std::fmt::Display for Cap {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use contract::{
+            ATTRIBUTE_KEY_MAX, ATTRIBUTE_VALUE_MAX, TAG_KEY_MAX, TAG_KEYS_PER_DAY, TAG_VALUE_MAX,
+            TAG_VALUES_PER_DAY, TAGS_MAX,
+        };
+        match self {
+            Self::TagKey => write!(f, "a tag's key is 1 to {TAG_KEY_MAX} characters"),
+            Self::TagValue => write!(f, "a tag's value is up to {TAG_VALUE_MAX} characters"),
+            Self::Tags => write!(f, "a span carries up to {TAGS_MAX} tags"),
+            Self::AttributeKey => {
+                write!(
+                    f,
+                    "an attribute's key is up to {ATTRIBUTE_KEY_MAX} characters"
+                )
+            }
+            Self::AttributeValue => write!(
+                f,
+                "an attribute's value is up to {} characters",
+                contract::grouped(ATTRIBUTE_VALUE_MAX)
+            ),
+            Self::Attributes => write!(f, "a span keeps up to {ATTRIBUTES_MAX} attributes"),
+            Self::TagValuesPerDay => {
+                write!(
+                    f,
+                    "a project's tag takes up to {TAG_VALUES_PER_DAY} values a UTC day"
+                )
+            }
+            Self::TagKeysPerDay => {
+                write!(
+                    f,
+                    "a project takes up to {TAG_KEYS_PER_DAY} tag keys a UTC day"
+                )
+            }
+        }
+    }
 }
 
 /// An attribute dropped from a span that was kept.
@@ -468,22 +519,16 @@ impl Fields {
         drop: &mut impl FnMut(&str, DropReason),
     ) {
         if tag.is_empty() || tag.chars().count() > contract::TAG_KEY_MAX {
-            return drop(
-                key,
-                DropReason::OverCap("a tag's key is 1 to 64 characters"),
-            );
+            return drop(key, DropReason::OverCap(Cap::TagKey));
         }
         let Some(rendered) = scalar(value) else {
             return drop(key, DropReason::Unlisted);
         };
         if rendered.chars().count() > contract::TAG_VALUE_MAX {
-            return drop(
-                key,
-                DropReason::OverCap("a tag's value is up to 256 characters"),
-            );
+            return drop(key, DropReason::OverCap(Cap::TagValue));
         }
         if self.tags.len() >= contract::TAGS_MAX {
-            return drop(key, DropReason::OverCap("a span carries up to 32 tags"));
+            return drop(key, DropReason::OverCap(Cap::Tags));
         }
         self.tags.push((tag.to_owned(), rendered));
     }
@@ -495,19 +540,13 @@ impl Fields {
         drop: &mut impl FnMut(&str, DropReason),
     ) {
         if key.chars().count() > contract::ATTRIBUTE_KEY_MAX {
-            return drop(
-                key,
-                DropReason::OverCap("an attribute's key is up to 128 characters"),
-            );
+            return drop(key, DropReason::OverCap(Cap::AttributeKey));
         }
         if rendered.chars().count() > contract::ATTRIBUTE_VALUE_MAX {
-            return drop(
-                key,
-                DropReason::OverCap("an attribute's value is up to 1,024 characters"),
-            );
+            return drop(key, DropReason::OverCap(Cap::AttributeValue));
         }
         if self.attributes.len() >= ATTRIBUTES_MAX {
-            return drop(key, DropReason::OverCap("a span keeps up to 64 attributes"));
+            return drop(key, DropReason::OverCap(Cap::Attributes));
         }
         self.attributes.push((key.to_owned(), rendered));
     }
@@ -612,6 +651,20 @@ mod tests {
     use super::*;
     use opentelemetry_proto::tonic::common::v1::AnyValue;
     use opentelemetry_proto::tonic::trace::v1::Status;
+
+    /// An exporter reads these in the answer: worded from the caps, as they were.
+    #[test]
+    fn each_cap_reads_as_the_answer_words_it() {
+        assert_eq!(Cap::TagKey.to_string(), "a tag's key is 1 to 64 characters");
+        assert_eq!(
+            Cap::AttributeValue.to_string(),
+            "an attribute's value is up to 1,024 characters"
+        );
+        assert_eq!(
+            Cap::TagValuesPerDay.to_string(),
+            "a project's tag takes up to 500 values a UTC day"
+        );
+    }
 
     fn kv(key: &str, value: Value) -> KeyValue {
         KeyValue {

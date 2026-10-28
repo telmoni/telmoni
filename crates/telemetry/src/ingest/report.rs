@@ -280,7 +280,7 @@ mod tests {
             drops.push(
                 "00f067aa0ba902b7",
                 "",
-                DropReason::OverCap("a span keeps up to 64 attributes"),
+                DropReason::OverCap(crate::ingest::span::Cap::Attributes),
             );
         }
         let message = Report {

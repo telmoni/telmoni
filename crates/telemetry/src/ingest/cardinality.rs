@@ -15,7 +15,7 @@ use telmoni_shared::ProjectId;
 
 use crate::contract::{TAG_KEYS_PER_DAY, TAG_PREFIX, TAG_VALUES_PER_DAY};
 use crate::ingest::report::Drops;
-use crate::ingest::span::{self, DropReason};
+use crate::ingest::span::{self, Cap, DropReason};
 use crate::replica::Redis;
 use crate::store::SpanRow;
 
@@ -60,10 +60,6 @@ end
 return verdicts
 ";
 
-/// Why the answer says a tag was dropped, beside `cardinality`.
-const PAST_VALUES: &str = "a project's tag takes up to 500 values a UTC day";
-const PAST_KEYS: &str = "a project takes up to 64 tag keys a UTC day";
-
 /// How long a day's sets outlive its midnight, for a replica whose clock is
 /// a little behind.
 const KEPT_PAST_MIDNIGHT_S: i64 = 5 * 60;
@@ -88,8 +84,8 @@ impl Verdict {
     fn reason(self) -> Option<DropReason> {
         match self {
             Self::Kept => None,
-            Self::PastValues => Some(DropReason::Cardinality(PAST_VALUES)),
-            Self::PastKeys => Some(DropReason::Cardinality(PAST_KEYS)),
+            Self::PastValues => Some(DropReason::Cardinality(Cap::TagValuesPerDay)),
+            Self::PastKeys => Some(DropReason::Cardinality(Cap::TagKeysPerDay)),
         }
     }
 }
@@ -221,13 +217,6 @@ fn expire_at(day: NaiveDate) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// The words the answer gives are the caps the code holds to.
-    #[test]
-    fn the_answer_names_the_caps_held() {
-        assert!(PAST_VALUES.contains(&format!(" {TAG_VALUES_PER_DAY} ")));
-        assert!(PAST_KEYS.contains(&format!(" {TAG_KEYS_PER_DAY} ")));
-    }
 
     /// ⚠ Past Redis's 512 an intset becomes a hash table of ten times the
     /// bytes, and Redis holds 64 MB on a tier.

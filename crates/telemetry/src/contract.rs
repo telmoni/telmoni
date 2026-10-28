@@ -444,6 +444,19 @@ pub struct InventoryRow {
 pub const TAG_FAMILY: &str = "telmoni.tag.<key>";
 
 const KEPT_ATTRIBUTE: &str = "attributes, under its own name";
+/// `1024` as the contract's sentences print it: `1,024`.
+pub(crate) fn grouped(n: usize) -> String {
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (i, digit) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(digit);
+    }
+    out
+}
+
 const RULE_ATTRIBUTE: &str = "a key up to 128 characters and a value up to 1,024, an array as its JSON; \
                               up to 64 attributes a span, its resource's among them, which keep \
                               2 KiB together";
@@ -909,6 +922,59 @@ pub const INVENTORY: &[InventoryRow] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The caps the inventory prints are those ingest holds: a const table
+    /// cannot format!, so this reads its numbers against the constants.
+    #[test]
+    fn the_inventory_prints_the_caps_ingest_holds() {
+        let rule = |attribute: &str| {
+            INVENTORY
+                .iter()
+                .find(|row| row.attribute == attribute)
+                .map_or("", |row| row.rule)
+        };
+        assert!(rule(AGENT).starts_with(&format!("1 to {AGENT_MAX} characters")));
+        assert_eq!(RULE_NAME, format!("1 to {NAME_MAX} characters"));
+        assert_eq!(RULE_UP_TO_128, format!("up to {USER_ID_MAX} characters"));
+        for (attribute, max) in [
+            (ERROR_TYPE, ERROR_TYPE_MAX),
+            (RESPONSE_MODEL, MODEL_MAX),
+            (REQUEST_MODEL, MODEL_MAX),
+            (PROVIDER, PROVIDER_MAX),
+            (SESSION_ID, SESSION_ID_MAX),
+            (ENVIRONMENT, ENVIRONMENT_MAX),
+            (RELEASE, RELEASE_MAX),
+        ] {
+            assert!(
+                rule(attribute).starts_with(&format!("up to {max} characters")),
+                "{attribute}"
+            );
+        }
+        for needle in [
+            format!("up to {TAGS_MAX} tags"),
+            format!("a key up to {TAG_KEY_MAX} characters"),
+            format!("a value up to {TAG_VALUE_MAX};"),
+            format!("up to {TAG_KEYS_PER_DAY} keys a UTC day"),
+            format!("up to {TAG_VALUES_PER_DAY} values"),
+        ] {
+            assert!(rule(TAG_FAMILY).contains(&needle), "{needle}");
+        }
+        for needle in [
+            format!("a key up to {ATTRIBUTE_KEY_MAX} characters"),
+            format!("a value up to {},", grouped(ATTRIBUTE_VALUE_MAX)),
+            format!("up to {ATTRIBUTES_MAX} attributes a span"),
+            format!("{} KiB together", RESOURCE_ATTRIBUTES_BYTES_MAX / 1024),
+        ] {
+            assert!(RULE_ATTRIBUTE.contains(&needle), "{needle}");
+        }
+    }
+
+    #[test]
+    fn a_number_is_grouped_by_thousands() {
+        assert_eq!(grouped(128), "128");
+        assert_eq!(grouped(1_024), "1,024");
+        assert_eq!(grouped(1_000_000), "1,000,000");
+    }
 
     /// A name in two lists would be read twice, once as a column and once
     /// as something to keep or drop.
