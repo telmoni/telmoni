@@ -310,7 +310,6 @@ pub struct Bar {
     pub duration_p95_ms: Option<f64>,
 }
 
-/// What a run carries where any of its spans does, each value once and
 /// A run's status: its own span's once that has arrived, else `error` where
 /// any span failed and `ok` otherwise.
 macro_rules! run_status {
@@ -353,6 +352,7 @@ macro_rules! admits {
     };
 }
 
+/// What a run carries where any of its spans does, each value once and
 /// sorted: the deployments and releases its spans were sent from, its tags
 /// as `key:value`, and the prompt names among its attributes. Named apart
 /// from the columns, as the sums below are.
