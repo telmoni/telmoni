@@ -9,6 +9,8 @@
 //! In process there is no hop to secure and nothing to cache: an answer is
 //! the current row.
 
+use std::collections::HashMap;
+
 use async_trait::async_trait;
 use axum::http::HeaderMap;
 use chrono::{DateTime, Utc};
@@ -468,6 +470,24 @@ pub trait Notifications: Send + Sync {
     ) -> Result<Vec<Uuid>, TelmoniError> {
         let _ = (project_id, route_key);
         Ok(Vec::new())
+    }
+
+    /// The project's muted connections under each of `route_keys`, read at
+    /// once: a key with none is left out. One read for a page of alerts,
+    /// where [`muted`](Self::muted) is one a route.
+    async fn muted_routes(
+        &self,
+        project_id: &ProjectId,
+        route_keys: &[String],
+    ) -> Result<HashMap<String, Vec<Uuid>>, TelmoniError> {
+        let mut muted = HashMap::with_capacity(route_keys.len());
+        for key in route_keys {
+            let connections = self.muted(project_id, key).await?;
+            if !connections.is_empty() {
+                muted.insert(key.clone(), connections);
+            }
+        }
+        Ok(muted)
     }
 
     /// One of the project's connections heard again under `route_key`, its

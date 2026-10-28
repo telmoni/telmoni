@@ -69,6 +69,21 @@ impl Notifications for Notifier {
         Ok(muted)
     }
 
+    async fn muted_routes(
+        &self,
+        project_id: &ProjectId,
+        route_keys: &[String],
+    ) -> Result<HashMap<String, Vec<Uuid>>, TelmoniError> {
+        let mut tx = project_scope(&self.0.db, project_id).await?;
+        let rows = db::muted_for_routes(&mut tx, project_id, route_keys).await?;
+        tx.commit().await?;
+        let mut muted: HashMap<String, Vec<Uuid>> = HashMap::new();
+        for (route, connection) in rows {
+            muted.entry(route).or_default().push(connection);
+        }
+        Ok(muted)
+    }
+
     async fn unmute(
         &self,
         project_id: &ProjectId,

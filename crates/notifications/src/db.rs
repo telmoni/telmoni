@@ -1374,6 +1374,24 @@ pub async fn count_routes(
 pub const ROUTE_FAILURES_MUTE: i32 = 5;
 
 /// The project's connections muted for `route`.
+/// The project's muted connections under each of `routes`, as (route,
+/// connection) pairs, by route and connection.
+pub async fn muted_for_routes<B: HasProject>(
+    tx: &mut Scoped<'_, B>,
+    project_id: &ProjectId,
+    routes: &[String],
+) -> sqlx::Result<Vec<(String, Uuid)>> {
+    sqlx::query_as(
+        "SELECT route, connection_id FROM notifications.routes
+          WHERE project_id = $1 AND route = ANY($2) AND muted_at IS NOT NULL
+          ORDER BY route, connection_id",
+    )
+    .bind(project_id)
+    .bind(routes)
+    .fetch_all(tx.conn())
+    .await
+}
+
 pub async fn muted_for<B: HasProject>(
     tx: &mut Scoped<'_, B>,
     project_id: &ProjectId,

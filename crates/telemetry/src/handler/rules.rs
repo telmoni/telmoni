@@ -9,6 +9,7 @@
 //! audit chain (`chain::file`): an alert decides what the project's
 //! connectors hear, and a member's change can silence the owner's.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use axum::extract::{Path, State};
@@ -166,19 +167,34 @@ pub async fn list_rules(
     let mut tx = project_scope(&state.db, project_id).await?;
     let rows = rules::rules(&mut tx, project_id).await?;
     let ids: Vec<Uuid> = rows.iter().map(|row| row.id).collect();
-    let mut links = rules::links(&mut tx, project_id, &ids).await?;
+    let links = rules::links(&mut tx, project_id, &ids).await?;
     tx.commit().await?;
-    let mut alerts = Vec::with_capacity(rows.len());
-    for row in rows {
-        let (own, rest): (Vec<_>, Vec<_>) = links.into_iter().partition(|l| l.rule_id == row.id);
-        links = rest;
-        let muted = muted(&state, project_id, row.id).await;
-        alerts.push(Alert::of(
-            row,
-            own.into_iter().map(LinkRow::link).collect(),
-            &muted,
-        ));
+    let mut linked: HashMap<Uuid, Vec<Link>> = HashMap::with_capacity(rows.len());
+    for link in links {
+        linked.entry(link.rule_id).or_default().push(link.link());
     }
+    // One read of every alert's muted connectors, not one a row.
+    let keys: Vec<String> = rows.iter().map(|row| rules::route_key(row.id)).collect();
+    let mut muted = match state.notifications.muted_routes(project_id, &keys).await {
+        Ok(muted) => muted,
+        Err(error) => {
+            tracing::warn!(
+                project_id = %project_id,
+                error = %error,
+                "telemetry: which of the alerts' connectors are muted could not be read"
+            );
+            HashMap::new()
+        }
+    };
+    let alerts = rows
+        .into_iter()
+        .zip(&keys)
+        .map(|(row, key)| {
+            let own = linked.remove(&row.id).unwrap_or_default();
+            let muted = muted.remove(key).unwrap_or_default();
+            Alert::of(row, own, &muted)
+        })
+        .collect();
     Ok(Json(AlertList { rules: alerts }))
 }
 
