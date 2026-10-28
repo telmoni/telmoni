@@ -23,7 +23,7 @@ use crate::AppState;
 use crate::db::TelemetryLane;
 use crate::rules::db::{self, RuleRow};
 use crate::rules::example::{self, ExampleRun, Pick};
-use crate::rules::incidents::{self, IncidentRow, Told};
+use crate::rules::incidents::{self, IncidentRow, Move, Telling, Told};
 use crate::rules::{Link, deliveries, mutes};
 use crate::spend::Unread;
 
@@ -39,7 +39,7 @@ pub async fn tell_incidents(
     told: &[Told],
     at: DateTime<Utc>,
 ) {
-    if told.iter().all(|one| one.silent) {
+    if told.iter().all(|one| one.telling == Telling::Silent) {
         return;
     }
     let links = match links_of(state, rule).await {
@@ -55,7 +55,7 @@ pub async fn tell_incidents(
     };
     let muted = muted_at(state, &rule.project_id, rule.id, at).await;
     let run = run_of(state, rule, told).await;
-    for one in told.iter().filter(|one| !one.silent) {
+    for one in told.iter().filter(|one| one.telling != Telling::Silent) {
         // A resolution's `told_to` names who heard its incident; any other's is empty.
         let hearers: Vec<Uuid> = links
             .iter()
@@ -121,12 +121,10 @@ pub async fn tell_held(state: &AppState, rule: &RuleRow, value: Option<f64>) {
     };
     let one = Told {
         incident_id: incident.id,
-        kind: NotificationKind::IncidentOpened,
+        change: Move::Opened,
         severity: incident.severity,
         heard_at: incident.severity,
-        again: true,
-        reminder: true,
-        silent: false,
+        telling: Telling::Reminder,
         told_to: Vec::new(),
     };
     tell_one(state, rule, value, &one, &hearers, None).await;
@@ -166,21 +164,13 @@ async fn tell_one(
         "value": value,
         "alert_threshold": rule.alert_threshold,
         "warning_threshold": rule.warning_threshold,
-        "reminder": one.reminder,
+        "reminder": one.telling == Telling::Reminder,
         "run": shown.map(|run| run_json(state, rule, run)),
         "traces_url": traces_url,
     });
-    let key = format!(
-        "telemetry:incident:{}:{}",
-        one.incident_id,
-        if one.kind == NotificationKind::IncidentResolved {
-            "resolved"
-        } else {
-            "opened"
-        }
-    );
+    let key = incident_key(one.incident_id, one.change);
     let notice = |dedup_key| Notice {
-        kind: one.kind,
+        kind: one.change.kind(),
         subject_user_id: None,
         title: &title,
         body: &body,
@@ -194,7 +184,7 @@ async fn tell_one(
         notice,
         &key,
         route,
-        one.again,
+        one.telling.again(),
     )
     .await;
     let made = reached
@@ -221,6 +211,12 @@ async fn tell_one(
             "telemetry: an incident's notice could not be told"
         ),
     }
+}
+
+/// The feed's key for an incident's opening or end: one row of each, so a
+/// member's resolution and the loop's recovery are one.
+fn incident_key(incident_id: Uuid, change: Move) -> String {
+    format!("telemetry:incident:{incident_id}:{}", change.word())
 }
 
 /// Where a notice reached: the connections it was queued to, and whether
@@ -332,15 +328,18 @@ fn carrying<const N: usize>(body: String, lines: [Option<String>; N]) -> String 
 /// a window with no span cannot show; a recovery need not, nor a reminder,
 /// which may come every minute and whose opening named one.
 fn shows_run(one: &Told) -> bool {
-    one.kind == NotificationKind::IncidentOpened
+    one.change == Move::Opened
         && one.severity != Severity::NoData
-        && !one.reminder
+        && one.telling != Telling::Reminder
 }
 
 /// The run an evaluation's breaches show, read once; none, logged by the
 /// error's kind, where a store does not answer, and the notice goes on.
 async fn run_of(state: &AppState, rule: &RuleRow, told: &[Told]) -> Option<ExampleRun> {
-    if !told.iter().any(|one| !one.silent && shows_run(one)) {
+    if !told
+        .iter()
+        .any(|one| one.telling != Telling::Silent && shows_run(one))
+    {
         return None;
     }
     match example::example(state, rule, Utc::now()).await {
@@ -560,25 +559,29 @@ fn words(rule: &RuleRow, value: Option<f64>, told: &Told) -> (String, String) {
             "{what} has no value now; its incident stands past the {level} threshold of {at}."
         ),
     };
-    let (state, body) = match (told.kind, told.severity) {
-        (NotificationKind::IncidentResolved, _) => (
+    let (state, body) = match (told.change, told.severity) {
+        (Move::Resolved, _) => (
             "resolved",
             format!("{what} is {shown}, inside its thresholds again."),
         ),
-        (NotificationKind::IncidentOpened, Severity::NoData) => (
+        (Move::Opened, Severity::NoData) => (
             "no data",
             format!("{what} has had no span to read for as long as its window."),
         ),
-        (NotificationKind::IncidentOpened, Severity::Warning) => (
+        (Move::Opened, Severity::Warning) => (
             "warning",
             past(
                 "warning",
                 rule.warning_threshold.map_or_else(String::new, threshold),
             ),
         ),
-        (_, _) => ("alert", past("alert", threshold(rule.alert_threshold))),
+        (Move::Opened, _) => ("alert", past("alert", threshold(rule.alert_threshold))),
     };
-    let lead = if told.reminder { "Still: " } else { "" };
+    let lead = if told.telling == Telling::Reminder {
+        "Still: "
+    } else {
+        ""
+    };
     (format!("{}: {state}", rule.name), format!("{lead}{body}"))
 }
 
@@ -692,7 +695,7 @@ async fn tell_resolved(state: &AppState, incident: &IncidentRow, links: &[Link],
     let (organization_id, project_id) = (&incident.organization_id, &incident.project_id);
     let (incident_id, rule_id, severity) = (incident.id, incident.rule_id, incident.severity);
     let title = format!("{}: resolved", incident.rule_name);
-    let key = format!("telemetry:incident:{incident_id}:resolved");
+    let key = incident_key(incident.id, Move::Resolved);
     let mut metadata = json!({
         "incident_id": incident_id,
         "rule_id": rule_id,

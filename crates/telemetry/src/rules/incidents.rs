@@ -97,21 +97,65 @@ pub fn next_severity(rule: &RuleRow, value: Option<f64>) -> Severity {
     }
 }
 
+/// What a move does to its incident.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Move {
+    /// Opened, reopened, risen or fallen: a breach.
+    Opened,
+    /// Recovered.
+    Resolved,
+}
+
+impl Move {
+    /// The kind of notice it is told as.
+    #[must_use]
+    pub const fn kind(self) -> NotificationKind {
+        match self {
+            Self::Opened => NotificationKind::IncidentOpened,
+            Self::Resolved => NotificationKind::IncidentResolved,
+        }
+    }
+
+    /// Its word in the feed's key: one row of each an incident.
+    #[must_use]
+    pub const fn word(self) -> &'static str {
+        match self {
+            Self::Opened => "opened",
+            Self::Resolved => "resolved",
+        }
+    }
+}
+
+/// How a move is told: to the feed and the connectors; to the connectors
+/// alone, said again, whatever the feed holds; to them as a reminder of a
+/// severity held; or to nobody, written in silence, as an alert falling
+/// from `alert` to `warning` follows its incident down.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Telling {
+    First,
+    Again,
+    Reminder,
+    Silent,
+}
+
+impl Telling {
+    /// Said to the connectors alone.
+    #[must_use]
+    pub const fn again(self) -> bool {
+        matches!(self, Self::Again | Self::Reminder)
+    }
+}
+
 /// What one evaluation moves, and tells after its commit.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Told {
     pub incident_id: Uuid,
-    pub kind: NotificationKind,
+    pub change: Move,
     pub severity: Severity,
     /// The severity whose connectors hear it: its own, or for a resolution
     /// the incident's last.
     pub heard_at: Severity,
-    /// Said again, to the connectors alone, whatever the feed holds.
-    pub again: bool,
-    pub reminder: bool,
-    /// Written, and told to nobody: an alert falling from `alert` to
-    /// `warning` follows its incident down in silence.
-    pub silent: bool,
+    pub telling: Telling,
     /// For a resolution, the connectors its incident's notices reached,
     /// which hear its end whatever severity it ended at.
     pub told_to: Vec<Uuid>,
@@ -137,7 +181,7 @@ pub async fn settle(
     let mut tx = maintenance_scope(&state.db, TelemetryLane).await?;
     let open = open_of(&mut tx, rule.id).await?;
     let moved = moves(rule, next, since, open.as_ref(), now);
-    let told_at = if moved.iter().any(|m| !m.silent) {
+    let told_at = if moved.iter().any(|m| m.telling != Telling::Silent) {
         Some(now)
     } else {
         rule.told_at
@@ -188,27 +232,25 @@ fn moves(
     open: Option<&IncidentRow>,
     now: DateTime<Utc>,
 ) -> Vec<Told> {
-    let move_to = |kind, severity| Told {
+    let move_to = |change, severity| Told {
         incident_id: open.map_or_else(Uuid::new_v4, |incident| incident.id),
-        kind,
+        change,
         severity,
         heard_at: severity,
-        again: false,
-        reminder: false,
-        silent: false,
+        telling: Telling::First,
         told_to: Vec::new(),
     };
     let Some(incident) = open else {
         // A breach a member resolved is theirs at its severity, not past it.
         let risen = next == Severity::Alert && rule.severity == Severity::Warning;
         if next.is_breach() && (!rule.severity.is_breach() || risen) {
-            return vec![move_to(NotificationKind::IncidentOpened, next)];
+            return vec![move_to(Move::Opened, next)];
         }
         // A reading of no data found its whole window empty already: told
         // then, once a spell.
         let untold = rule.told_at.is_none_or(|at| at < since);
         if next == Severity::NoData && rule.missing_data == MissingData::NotifyNoData && untold {
-            return vec![move_to(NotificationKind::IncidentOpened, Severity::NoData)];
+            return vec![move_to(Move::Opened, Severity::NoData)];
         }
         return Vec::new();
     };
@@ -216,7 +258,7 @@ fn moves(
         return vec![Told {
             heard_at: incident.severity,
             told_to: incident.told_to.clone(),
-            ..move_to(NotificationKind::IncidentResolved, Severity::Ok)
+            ..move_to(Move::Resolved, Severity::Ok)
         }];
     }
     // A reading of no data leaves an open incident standing, reminded as
@@ -225,8 +267,8 @@ fn moves(
         Severity::NoData if incident.severity != Severity::NoData => {
             if rule.missing_data == MissingData::NotifyNoData {
                 return vec![Told {
-                    again: true,
-                    ..move_to(NotificationKind::IncidentOpened, Severity::NoData)
+                    telling: Telling::Again,
+                    ..move_to(Move::Opened, Severity::NoData)
                 }];
             }
             incident.severity
@@ -236,9 +278,12 @@ fn moves(
     if next.is_breach() && next != incident.severity {
         let risen = next == Severity::Alert || incident.severity == Severity::NoData;
         return vec![Told {
-            again: risen,
-            silent: !risen,
-            ..move_to(NotificationKind::IncidentOpened, next)
+            telling: if risen {
+                Telling::Again
+            } else {
+                Telling::Silent
+            },
+            ..move_to(Move::Opened, next)
         }];
     }
     let due = rule.renotify_minutes.is_some_and(|minutes| {
@@ -247,9 +292,8 @@ fn moves(
     });
     if next == incident.severity && incident.status == IncidentStatus::Open && due {
         return vec![Told {
-            again: true,
-            reminder: true,
-            ..move_to(NotificationKind::IncidentOpened, next)
+            telling: Telling::Reminder,
+            ..move_to(Move::Opened, next)
         }];
     }
     Vec::new()
@@ -266,11 +310,11 @@ async fn write(
     told: Told,
 ) -> Result<Told, TelmoniError> {
     let unmoved = |told: Told| Told {
-        silent: true,
+        telling: Telling::Silent,
         ..told
     };
-    match (told.kind, open) {
-        (NotificationKind::IncidentResolved, Some(incident)) => {
+    match (told.change, open) {
+        (Move::Resolved, Some(incident)) => {
             let moved = sqlx::query(
                 "UPDATE telemetry.incidents
                     SET status = 'resolved', resolved_at = $2, value = $3, updated_at = $2
@@ -283,13 +327,19 @@ async fn write(
             .await?
             .rows_affected()
                 > 0;
+            // The end of a reopened incident is said to the connectors
+            // alone: its feed row stands from its first.
             let told = Told {
-                again: incident.reopened > 0,
+                telling: if incident.reopened > 0 {
+                    Telling::Again
+                } else {
+                    Telling::First
+                },
                 ..told
             };
             Ok(if moved { told } else { unmoved(told) })
         }
-        (_, Some(incident)) => {
+        (Move::Opened, Some(incident)) => {
             let moved = sqlx::query(
                 "UPDATE telemetry.incidents SET severity = $2, value = $3, updated_at = $4
                   WHERE id = $1 AND status <> 'resolved'",
@@ -325,7 +375,7 @@ async fn write(
             if let Some(id) = reopened {
                 return Ok(Told {
                     incident_id: id,
-                    again: true,
+                    telling: Telling::Again,
                     ..told
                 });
             }

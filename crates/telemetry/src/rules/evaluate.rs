@@ -468,7 +468,12 @@ async fn evaluate(state: &AppState, rule: &RuleRow, lease_id: Uuid) -> Result<bo
     crate::notify::tell_incidents(state, rule, value, &told, now).await;
     // An incident left standing reaches the connectors a hold kept it from.
     let standing = rule.severity.is_breach() || rule.severity == Severity::NoData;
-    if settled && standing && told.iter().all(|one| one.silent) {
+    if settled
+        && standing
+        && told
+            .iter()
+            .all(|one| one.telling == incidents::Telling::Silent)
+    {
         crate::notify::tell_held(state, rule, value).await;
     }
     Ok(settled)

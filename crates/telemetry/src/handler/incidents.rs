@@ -147,11 +147,28 @@ pub async fn acknowledge_incident(
         .project_id;
     let id = incident_id(&id)?;
     let (row, _) = chain::write(&state.db, &acting, project_id, "incident", async |tx| {
-        moved(&state, &acting, tx, id, IncidentStatus::Acknowledged).await
+        moved(&state, &acting, tx, id, Take::Acknowledge).await
     })
     .await?;
     tracing::info!(project_id = %project_id, incident_id = %id, "telemetry: an incident acknowledged");
     Ok(Json(Incident::from(row)))
+}
+
+/// What a member does to an incident.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Take {
+    Acknowledge,
+    Resolve,
+}
+
+impl Take {
+    /// The status it leaves the incident at.
+    const fn status(self) -> IncidentStatus {
+        match self {
+            Self::Acknowledge => IncidentStatus::Acknowledged,
+            Self::Resolve => IncidentStatus::Resolved,
+        }
+    }
 }
 
 /// An incident taken or resolved by the member, under the organization's
@@ -162,7 +179,7 @@ async fn moved(
     acting: &Acting,
     tx: &mut Scoped<'_, ProjectAndOrganization>,
     id: Uuid,
-    to: IncidentStatus,
+    take: Take,
 ) -> Result<(IncidentRow, bool), TelmoniError> {
     let project_id = &acting
         .require_project(Verb::Update, Resource::Alert)?
@@ -175,10 +192,9 @@ async fn moved(
         Resource::Alert,
     )
     .await?;
-    let (row, moved) = if to == IncidentStatus::Resolved {
-        incidents::resolve(tx, project_id, id, &acting.user_id).await?
-    } else {
-        incidents::acknowledge(tx, project_id, id, &acting.user_id).await?
+    let (row, moved) = match take {
+        Take::Resolve => incidents::resolve(tx, project_id, id, &acting.user_id).await?,
+        Take::Acknowledge => incidents::acknowledge(tx, project_id, id, &acting.user_id).await?,
     };
     let row = row.ok_or_else(not_found)?;
     if moved {
@@ -186,7 +202,11 @@ async fn moved(
             action: AuditAction::Updated,
             kind: TelmoniResourceKind::Incident,
             id,
-            metadata: json!({ "alert": row.rule_name, "rule_id": row.rule_id, "status": to }),
+            metadata: json!({
+                "alert": row.rule_name,
+                "rule_id": row.rule_id,
+                "status": take.status(),
+            }),
         };
         chain::file(tx, acting, project_id, change).await?;
     }
@@ -207,7 +227,7 @@ pub async fn resolve_incident(
         .project_id;
     let id = incident_id(&id)?;
     let (row, resolved) = chain::write(&state.db, &acting, project_id, "incident", async |tx| {
-        moved(&state, &acting, tx, id, IncidentStatus::Resolved).await
+        moved(&state, &acting, tx, id, Take::Resolve).await
     })
     .await?;
     if resolved {
