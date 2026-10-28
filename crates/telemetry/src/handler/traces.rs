@@ -26,7 +26,7 @@ use telmoni_shared::{AuthError, SortDirection, SpanKind, SpanStatus, TelmoniErro
 use crate::AppState;
 use crate::contract::{
     AGENT_MAX, ATTRIBUTE_VALUE_MAX, ENVIRONMENT_MAX, MODEL_MAX, NAME_MAX, RELEASE_MAX,
-    SESSION_ID_MAX, TAG_KEY_MAX, TAG_VALUE_MAX, USER_ID_MAX,
+    SESSION_ID_MAX, TAG_KEY_MAX, TAG_VALUE_MAX, USER_ID_MAX, UTC_OFFSET_RANGE,
 };
 use crate::spend::{self, Unread};
 use crate::store::{self, Projects, SpanRow};
@@ -401,10 +401,6 @@ fn parse_page(text: &str) -> Result<u32, TelmoniError> {
             }),
     }
 }
-
-/// The furthest west and east a clock is set from UTC, in minutes: UTC−12
-/// and UTC+14.
-pub const UTC_OFFSET_RANGE: std::ops::RangeInclusive<i16> = -720..=840;
 
 /// `utc_offset` as a URL carries it: the reader's clock in whole minutes
 /// east of UTC, and UTC itself when empty.

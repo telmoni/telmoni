@@ -43,6 +43,10 @@ pub const CLOCK_DRIFT_MAX_SECS: i64 = 55 * 60;
 /// since the Unix epoch, as a span's times are written.
 pub const SENT_AT: &str = "telmoni-sent-at";
 
+/// A clock's offset from UTC, in whole minutes east, as a histogram's reader
+/// and an alert's hours name one: UTC−12:00 to UTC+14:00.
+pub const UTC_OFFSET_RANGE: std::ops::RangeInclusive<i16> = -720..=840;
+
 // ── Caps, each named after its field ─────────────────────────────────────────
 
 /// A span's `name`, a run's and a tool's among them: room for a model call's

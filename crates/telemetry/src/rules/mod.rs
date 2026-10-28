@@ -15,6 +15,9 @@ pub mod example;
 pub mod incidents;
 pub mod mutes;
 
+use std::fmt;
+use std::str::FromStr;
+
 use chrono::{DateTime, Datelike as _, TimeDelta, Timelike as _, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -24,7 +27,9 @@ use telmoni_shared::{
     SpanStatus, TelmoniError,
 };
 
-use crate::contract::{AGENT_MAX, ENVIRONMENT_MAX, MODEL_MAX, NAME_MAX, PROVIDER_MAX, RELEASE_MAX};
+use crate::contract::{
+    AGENT_MAX, ENVIRONMENT_MAX, MODEL_MAX, NAME_MAX, PROVIDER_MAX, RELEASE_MAX, UTC_OFFSET_RANGE,
+};
 use crate::handler::traces::values;
 use crate::store::Read;
 
@@ -46,15 +51,15 @@ pub const LINKS_MAX: usize = 20;
 #[serde(deny_unknown_fields)]
 pub struct Hours {
     pub days: Vec<u8>,
-    pub from: String,
-    pub to: String,
+    pub from: TimeOfDay,
+    pub to: TimeOfDay,
     #[serde(default)]
     pub utc_offset: i16,
 }
 
 impl Hours {
     /// The hours as the lane keeps them: days 1 to 7, each once and in
-    /// order, times as `HH:MM`, and an offset UTC's own range holds.
+    /// order, and an offset UTC's own range holds; a time is one by its type.
     fn checked(mut self) -> Result<Self, TelmoniError> {
         let bad = |why: &str| TelmoniError::BadRequest(why.to_owned());
         self.days.sort_unstable();
@@ -64,10 +69,7 @@ impl Hours {
                 "hours name days 1 (Monday) to 7 (Sunday), one at least",
             ));
         }
-        if minute_of(&self.from).is_none() || minute_of(&self.to).is_none() {
-            return Err(bad("hours run from and to a time of day, HH:MM"));
-        }
-        if !(-720..=840).contains(&self.utc_offset) {
+        if !UTC_OFFSET_RANGE.contains(&self.utc_offset) {
             return Err(bad("an offset from UTC is -720 to 840 minutes"));
         }
         Ok(self)
@@ -76,9 +78,7 @@ impl Hours {
     /// Whether `at` falls in these hours.
     #[must_use]
     pub fn hold(&self, at: DateTime<Utc>) -> bool {
-        let (Some(from), Some(to)) = (minute_of(&self.from), minute_of(&self.to)) else {
-            return true;
-        };
+        let (from, to) = (u32::from(self.from.0), u32::from(self.to.0));
         let local = at + TimeDelta::minutes(i64::from(self.utc_offset));
         let day = u8::try_from(local.weekday().number_from_monday()).unwrap_or(0);
         let yesterday = if day == 1 { 7 } else { day.saturating_sub(1) };
@@ -94,14 +94,47 @@ impl Hours {
     }
 }
 
-/// `HH:MM` as minutes into the day.
-fn minute_of(text: &str) -> Option<u32> {
-    let (hour, minute) = text.split_once(':')?;
-    if hour.len() != 2 || minute.len() != 2 {
-        return None;
+/// Minutes into a day, read and written as `HH:MM`: a time that does not
+/// parse never reaches the hours, so none is held open to every hour.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct TimeOfDay(u16);
+
+impl FromStr for TimeOfDay {
+    type Err = &'static str;
+
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        let (hour, minute) = text.split_once(':').ok_or("a time of day, HH:MM")?;
+        if hour.len() != 2 || minute.len() != 2 {
+            return Err("a time of day, HH:MM");
+        }
+        let (hour, minute): (u16, u16) = (
+            hour.parse().map_err(|_| "a time of day, HH:MM")?,
+            minute.parse().map_err(|_| "a time of day, HH:MM")?,
+        );
+        (hour < 24 && minute < 60)
+            .then_some(Self(hour * 60 + minute))
+            .ok_or("a time of day, HH:MM")
     }
-    let (hour, minute): (u32, u32) = (hour.parse().ok()?, minute.parse().ok()?);
-    (hour < 24 && minute < 60).then_some(hour * 60 + minute)
+}
+
+impl fmt::Display for TimeOfDay {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:02}:{:02}", self.0 / 60, self.0 % 60)
+    }
+}
+
+impl Serialize for TimeOfDay {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(self)
+    }
+}
+
+impl<'de> Deserialize<'de> for TimeOfDay {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        String::deserialize(deserializer)?
+            .parse()
+            .map_err(serde::de::Error::custom)
+    }
 }
 
 /// A connector an alert links: which of its notices it hears, and when.
@@ -464,10 +497,15 @@ mod tests {
                 .expect("an instant")
                 .with_timezone(&Utc)
         };
+        let time = |text: &str| text.parse::<TimeOfDay>().expect("a time of day");
+        for refused in ["24:00", "9:00", "09:60", "0900", ""] {
+            assert!(refused.parse::<TimeOfDay>().is_err(), "{refused}");
+        }
+        assert_eq!(time("09:05").to_string(), "09:05");
         let office = Hours {
             days: vec![1, 2, 3, 4, 5],
-            from: "09:00".into(),
-            to: "18:00".into(),
+            from: time("09:00"),
+            to: time("18:00"),
             utc_offset: 60,
         }
         .checked()
@@ -478,8 +516,8 @@ mod tests {
         assert!(!office.hold(at("2026-10-25T08:30:00Z")), "a Sunday");
         let night = Hours {
             days: vec![5],
-            from: "22:00".into(),
-            to: "06:00".into(),
+            from: time("22:00"),
+            to: time("06:00"),
             utc_offset: 0,
         };
         assert!(night.hold(at("2026-10-30T23:00:00Z")), "Friday night");
@@ -495,14 +533,6 @@ mod tests {
             },
             Hours {
                 days: vec![8],
-                ..night.clone()
-            },
-            Hours {
-                from: "24:00".into(),
-                ..night.clone()
-            },
-            Hours {
-                to: "9:00".into(),
                 ..night.clone()
             },
             Hours {
