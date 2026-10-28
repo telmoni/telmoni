@@ -61,6 +61,23 @@ const downloading = new Set<string>();
  * `gone` when it is no longer kept, `busy` when a download of it is already
  * under way, or `failed`.
  */
+/** Takes an export: downloaded, then no longer offered — marked taken once
+ *  the browser has the file, forgotten once it is gone. One function for the
+ *  bell, the export dialog and the ready toast. */
+export function useTakeExport(): (organization: string, id: string) => void {
+  const markDownloaded = useMarkAuditExportDownloaded();
+  const forget = useForgetAuditExport();
+  return useCallback(
+    (organization: string, id: string) => {
+      void downloadExport(organization, id).then((result) => {
+        if (result === "taken") markDownloaded(id);
+        if (result === "gone") forget(id);
+      });
+    },
+    [markDownloaded, forget],
+  );
+}
+
 export async function downloadExport(
   organizationSlug: string,
   id: string,
@@ -140,8 +157,7 @@ export function useAuditExportsWatcher(): void {
   const exports = useAuditExports();
   const started = useAuditExportsStarted();
   const replaceAuditExports = useReplaceAuditExports();
-  const markDownloaded = useMarkAuditExportDownloaded();
-  const forget = useForgetAuditExport();
+  const take = useTakeExport();
 
   const watched =
     organization && administers(organization.role) ? organization : null;
@@ -219,19 +235,14 @@ export function useAuditExportsWatcher(): void {
           description: exportSummary(entry, new Date()),
           action: {
             label: "Download",
-            onClick: () => {
-              void downloadExport(slug, entry.id).then((result) => {
-                if (result === "taken") markDownloaded(entry.id);
-                if (result === "gone") forget(entry.id);
-              });
-            },
+            onClick: () => take(slug, entry.id),
           },
         });
       } else {
         toast.error(failureText(entry, limits));
       }
     }
-  }, [slug, organizationId, replaceAuditExports, markDownloaded, forget]);
+  }, [slug, organizationId, replaceAuditExports, take]);
 
   useEffect(() => {
     if (!slug) return;

@@ -1,11 +1,11 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
+import { subscribeNever } from "@/lib/in-browser";
 
 // Nothing to subscribe to: the platform does not change under a running tab.
 // `useSyncExternalStore` is here for its OTHER half — `getServerSnapshot` —
 // which is what keeps the server and the first client render agreeing.
-const noop = () => () => {};
 
 function readIsMac(): boolean {
   return /Mac|iPhone|iPad|iPod/.test(navigator.platform ?? navigator.userAgent);
@@ -20,5 +20,5 @@ function readIsMac(): boolean {
  * every Windows user for one frame, and it is the larger population.
  */
 export function useIsMac(): boolean {
-  return useSyncExternalStore(noop, readIsMac, () => false);
+  return useSyncExternalStore(subscribeNever, readIsMac, () => false);
 }

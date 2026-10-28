@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useSyncExternalStore } from "react";
+import { useState } from "react";
 import { Bar, BarChart, CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
 
 import {
@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/select";
 import type { TraceHistogram } from "@/lib/server/entities/traces";
 import { formatCount, formatDuration } from "@/lib/traces";
+import { useInBrowser } from "@/lib/in-browser";
 import { isOneOf } from "@/lib/one-of";
 import { cn } from "@/lib/utils";
 
@@ -49,18 +50,6 @@ const DURATION: ChartConfig = {
   p95: { label: "95th percentile", color: "var(--foreground)" },
 };
 
-const subscribeNever = () => () => {};
-
-/** Whether the page is in the browser yet: a bar's time is written in the
- *  reader's own clock and words, which the server does not know, so a chart
- *  draws once there and a box of its height stands in before. */
-function useInBrowser(): boolean {
-  return useSyncExternalStore(
-    subscribeNever,
-    () => true,
-    () => false,
-  );
-}
 
 /** A bar's width in words: "an hour a bar", "3 hours a bar", "a day a bar". */
 function perBar(seconds: number): string {

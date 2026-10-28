@@ -71,6 +71,7 @@ import {
   type Preset,
   type TraceUi,
 } from "@/lib/traces";
+import { toggled } from "@/lib/trace-tree";
 import { setTracePrefs, useTracePrefs } from "@/lib/use-trace-prefs";
 import { USER_COLUMN_MENU, USER_TABLE } from "@/lib/users";
 import { isOneOf } from "@/lib/one-of";
@@ -288,13 +289,7 @@ function ColumnsMenu({ list }: { list: ListName }) {
   const keep = (keys: readonly string[]) =>
     setTracePrefs({ [pref]: ordered(table.columns, keys) } as Partial<TracePrefs>);
   const flip = (key: string) => keep(toggledColumn(columns, key));
-  const toggleGroup = (group: ColumnGroup) =>
-    setOpened((was) => {
-      const next = new Set(was);
-      if (next.has(group)) next.delete(group);
-      else next.add(group);
-      return next;
-    });
+  const toggleGroup = (group: ColumnGroup) => setOpened((was) => toggled(was, group));
 
   return (
     <DropdownMenu>

@@ -3,11 +3,8 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 
+import { writeCookie } from "@/lib/cookie";
 import { UTC_OFFSET_COOKIE, browserUtcOffset } from "@/lib/utc-offset";
-
-/** A year: the cookie outlives a session, and is written again whenever the
- *  reader's clock moves, at a change of season or of country. */
-const YEAR_SECONDS = 365 * 24 * 60 * 60;
 
 /** Whether this page load has written the cookie already: a browser that
  *  keeps no cookies would otherwise be asked to draw the page again and
@@ -24,8 +21,7 @@ export function UtcOffsetCookie({ drawnWith }: { drawnWith: number }) {
     const offset = browserUtcOffset();
     if (offset === drawnWith || written) return;
     written = true;
-    const secure = window.location.protocol === "https:" ? "; secure" : "";
-    document.cookie = `${UTC_OFFSET_COOKIE}=${offset}; path=/; max-age=${YEAR_SECONDS}; samesite=lax${secure}`;
+    writeCookie(UTC_OFFSET_COOKIE, String(offset));
     router.refresh();
   }, [drawnWith, router]);
   return null;

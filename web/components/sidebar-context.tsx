@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import { NAV_COLLAPSED_COOKIE } from "@/lib/console-nav";
+import { writeCookie } from "@/lib/cookie";
 import { inFront } from "@/lib/keys";
 
 const useIsomorphicLayoutEffect =
@@ -45,8 +46,7 @@ function useIsMobile(): boolean | null {
 const SidebarContext = createContext<SidebarContextValue | null>(null);
 
 function persistCollapsed(collapsed: boolean) {
-  const secure = window.location.protocol === "https:" ? "; secure" : "";
-  document.cookie = `${NAV_COLLAPSED_COOKIE}=${collapsed ? "1" : "0"}; path=/; max-age=31536000; samesite=lax${secure}`;
+  writeCookie(NAV_COLLAPSED_COOKIE, collapsed ? "1" : "0");
 }
 
 export function SidebarProvider({

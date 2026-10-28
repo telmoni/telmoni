@@ -4,7 +4,7 @@ import Link from "next/link";
 import { Bell, Check, ChevronRight, Download, Loader2, X } from "lucide-react";
 import { useId, useRef, useState } from "react";
 
-import { downloadExport, useAuditExportsWatcher } from "@/components/audit-exports";
+import { useAuditExportsWatcher, useTakeExport } from "@/components/audit-exports";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -35,10 +35,8 @@ import type { OrganizationEntry, ProjectOffer } from "@/lib/server/entities/orga
 import {
   useActiveOrganization,
   useAuditExports,
-  useForgetAuditExport,
   useGivenSeats,
   useIncomingInvites,
-  useMarkAuditExportDownloaded,
   useOrganizations,
   useProjectOffers,
   useRemoveIncomingInvite,
@@ -189,19 +187,13 @@ export function NotificationsBell() {
 // as it does at once for one no longer kept. A taken file stays for the rest
 // of its week, in the export dialog's list.
 function ExportReadyRow({ entry, organization }: { entry: AuditExport; organization: string }) {
-  const markDownloaded = useMarkAuditExportDownloaded();
-  const forget = useForgetAuditExport();
+  const take = useTakeExport();
   const [now] = useState(() => new Date());
   return (
     <DropdownMenuItem
       className="h-auto cursor-pointer rounded-none border-b border-border px-3 py-3 last:border-b-0"
       data-testid="notifications-menu-export"
-      onSelect={() => {
-        void downloadExport(organization, entry.id).then((result) => {
-          if (result === "taken") markDownloaded(entry.id);
-          if (result === "gone") forget(entry.id);
-        });
-      }}
+      onSelect={() => take(organization, entry.id)}
     >
       <span className="grid flex-1 gap-0.5">
         <span className="truncate text-sm font-medium">Audit log export ready</span>

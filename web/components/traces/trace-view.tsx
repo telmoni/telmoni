@@ -42,6 +42,7 @@ import {
   type LayoutOptions,
 } from "@/lib/layout";
 import { incidentHref } from "@/lib/alerts";
+import { subscribeNever } from "@/lib/in-browser";
 import { windowReaching } from "@/lib/list-query";
 import type { Incident } from "@/lib/server/entities/alerts";
 import type { RunSpend, TraceDetail, TraceSpan } from "@/lib/server/entities/traces";
@@ -97,7 +98,6 @@ function MetaLink({ href, title, children }: { href: string; title?: string; chi
   );
 }
 
-const subscribeNever = () => () => {};
 
 /** The window of days a link to the list, a user's traces or a session's
  *  page needs to hold a run that started at `iso`: the pages open on a week.

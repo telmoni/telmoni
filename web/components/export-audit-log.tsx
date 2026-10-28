@@ -5,7 +5,7 @@ import { useId, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
 
-import { downloadExport } from "@/components/audit-exports";
+import { useTakeExport } from "@/components/audit-exports";
 import { routeReadOf, signedOut } from "@/lib/route-read";
 import { ChoiceGroup, type Choice } from "@/components/choice-group";
 import { PageAction } from "@/components/page-action";
@@ -28,13 +28,7 @@ import {
   exportsHref,
   type ExportRange,
 } from "@/lib/audit-exports";
-import {
-  useActiveOrganization,
-  useAddAuditExport,
-  useAuditExports,
-  useForgetAuditExport,
-  useMarkAuditExportDownloaded,
-} from "@/lib/store";
+import { useActiveOrganization, useAddAuditExport, useAuditExports } from "@/lib/store";
 import {
   AUDIT_EXPORT_KEPT_DAYS,
   AuditExportSchema,
@@ -304,8 +298,7 @@ function ExportDialog({
 function RecentExports({ organization }: { organization: string }) {
   const active = useActiveOrganization();
   const exports = useAuditExports();
-  const markDownloaded = useMarkAuditExportDownloaded();
-  const forget = useForgetAuditExport();
+  const take = useTakeExport();
   const [now] = useState(() => new Date());
 
   const recent = active ? (exports[active.organizationId] ?? []).slice(0, RECENT) : [];
@@ -326,12 +319,7 @@ function RecentExports({ organization }: { organization: string }) {
                 variant="outline"
                 size="sm"
                 aria-label={`Download ${exportSummary(entry, now)}`}
-                onClick={() => {
-                  void downloadExport(organization, entry.id).then((result) => {
-                    if (result === "taken") markDownloaded(entry.id);
-                    if (result === "gone") forget(entry.id);
-                  });
-                }}
+                onClick={() => take(organization, entry.id)}
               >
                 <Download className="size-4" />
                 Download

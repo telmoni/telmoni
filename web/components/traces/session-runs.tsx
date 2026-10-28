@@ -24,6 +24,7 @@ import {
   type FilterKey,
 } from "@/lib/traces";
 import { sessionReadHref } from "@/lib/sessions";
+import { toggled } from "@/lib/trace-tree";
 import { LayoutDepth } from "@/lib/types/enums";
 import { offerPageSteps } from "@/lib/use-page-steps";
 import { cn } from "@/lib/utils";
@@ -126,13 +127,7 @@ function Runs({
     tracesHref(organization, slug, { days: query.days }, { [filter]: [value] });
 
   const toggle = (run: string) => {
-    if (!openable) return;
-    setOpened((was) => {
-      const next = new Set(was);
-      if (next.has(run)) next.delete(run);
-      else next.add(run);
-      return next;
-    });
+    if (openable) setOpened((was) => toggled(was, run));
   };
 
   // `j` and `k` step the trace stood on, from the first; `o` opens it. Each
