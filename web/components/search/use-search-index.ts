@@ -2,11 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { SESSION_EXPIRED } from "@/lib/action-result";
 import { problemWords } from "@/lib/api/problem";
 import type { SearchIndex } from "@/lib/search";
 
 const UNREAD = "We couldn't read this project's resources just now.";
-const EXPIRED = "Your session expired — sign in again.";
 
 export function useSearchIndex(open: boolean, projectId?: string) {
   const [index, setIndex] = useState<SearchIndex | null>(null);
@@ -38,7 +38,7 @@ export function useSearchIndex(open: boolean, projectId?: string) {
           // A lapsed session is turned away by the console's proxy before
           // the handler runs, in a word meant for code; say it as the
           // handler would have.
-          setIndexError(res.status === 401 ? EXPIRED : problemWords(answer) || UNREAD);
+          setIndexError(res.status === 401 ? SESSION_EXPIRED : problemWords(answer) || UNREAD);
           indexedProject.current = null;
           return;
         }

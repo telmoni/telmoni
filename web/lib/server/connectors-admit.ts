@@ -2,24 +2,12 @@ import "server-only";
 
 import { z } from "zod";
 
-import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
 import { env } from "@/lib/env";
+import { type Turned, admit } from "@/lib/server/admit";
 import { fetchProjectAnywhere, identityContext, projectHeaders } from "@/lib/server/data";
-import { getServerSession } from "@/lib/server/session";
-
-/** Why the connectors' lanes turn a call away, in the sentence the page shows,
- *  with the status a Route Handler answers it under. */
-export interface ConnectorsRefusal {
-  error: string;
-  status: 401 | 404 | 429;
-}
 
 /** Where an admitted call goes, and under which headers. */
-export interface ConnectorsLane {
-  base: string;
-  headers: Record<string, string>;
-  error?: undefined;
-}
+export type ConnectorsLane = { ok: true; base: string; headers: Record<string, string> };
 
 export const CONNECTORS_UNAVAILABLE = "Connectors are unavailable right now — try again shortly.";
 export const CONNECTORS_UNEXPECTED = "Unexpected response from the connector service.";
@@ -37,21 +25,20 @@ export async function admitConnectorsCall(
   limit: number,
   projectId: string,
   connectionId: string | null,
-): Promise<ConnectorsLane | ConnectorsRefusal> {
-  const session = await getServerSession();
-  if (!session) return { error: "Your session expired — sign in again.", status: 401 };
-  const limited = await rateLimit(sessionKey(session, call), { limit, windowMs: 60_000 });
-  if (limited) return { error: "Too many requests — slow down a moment.", status: 429 };
+): Promise<ConnectorsLane | Turned> {
+  const admitted = await admit({ call, limit });
+  if (!admitted.ok) return admitted;
   if (connectionId !== null && !z.guid().safeParse(connectionId).success) {
-    return { error: "Invalid connection.", status: 404 };
+    return { ok: false, error: "Invalid connection.", status: 404 };
   }
   // The project's own organization: the Route Handler's path names none, and
   // the cookie follows whichever tab opened a page last.
   const [ctx, project] = await Promise.all([identityContext(), fetchProjectAnywhere(projectId)]);
   if (!ctx || !project) {
-    return { error: "Couldn't resolve this project. Reload and try again.", status: 404 };
+    return { ok: false, error: "Couldn't resolve this project. Reload and try again.", status: 404 };
   }
   return {
+    ok: true,
     base: env.SERVER_URL,
     headers: projectHeaders({ ...ctx, organizationId: project.organizationId }, projectId),
   };

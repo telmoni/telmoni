@@ -14,8 +14,8 @@ export async function deleteAgentConversationAction(
   projectId: string,
   id: string,
 ): Promise<ActionResult> {
-  const turned = await admitAgentCall("agent:delete", 30, projectId);
-  if (turned) return refused(turned.error);
+  const gate = await admitAgentCall("agent:delete", 30, projectId);
+  if (!gate.ok) return refused(gate.error);
   if (!z.guid().safeParse(id).success) return refused("Unknown conversation.");
   return (await deleteAgentConversation(projectId, id))
     ? { ok: true }

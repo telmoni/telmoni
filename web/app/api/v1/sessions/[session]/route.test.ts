@@ -2,14 +2,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/server/session", () => ({ getServerSession: vi.fn() }));
 vi.mock("@/lib/api/rate-limit", () => ({
-  rateLimit: vi.fn(async () => null),
+  rateLimitRetryAfter: vi.fn(async () => null),
   sessionKey: vi.fn(() => "k"),
 }));
 vi.mock("@/lib/server/data", () => ({ fetchSession: vi.fn() }));
 
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 
-import { rateLimit } from "@/lib/api/rate-limit";
+import { rateLimitRetryAfter } from "@/lib/api/rate-limit";
 import { fetchSession } from "@/lib/server/data";
 import { getServerSession } from "@/lib/server/session";
 
@@ -48,7 +48,7 @@ describe("GET /api/v1/sessions/[session]", () => {
   });
 
   it("holds a reader to their pace", async () => {
-    vi.mocked(rateLimit).mockResolvedValueOnce(NextResponse.json({}, { status: 429 }));
+    vi.mocked(rateLimitRetryAfter).mockResolvedValueOnce(30);
     expect((await read()).status).toBe(429);
     expect(fetchSession).not.toHaveBeenCalled();
   });

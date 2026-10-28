@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/server/session", () => ({ getServerSession: vi.fn() }));
 vi.mock("@/lib/api/rate-limit", () => ({
-  rateLimit: vi.fn(async () => null),
+  rateLimitRetryAfter: vi.fn(async () => null),
   sessionKey: vi.fn(() => "k"),
 }));
 vi.mock("@/lib/server/data", () => ({
@@ -13,7 +13,7 @@ vi.mock("@/lib/server/data", () => ({
 
 import { NextRequest } from "next/server";
 
-import { rateLimit } from "@/lib/api/rate-limit";
+import { rateLimitRetryAfter } from "@/lib/api/rate-limit";
 import { fetchMembers, fetchProjectAnywhere, fetchTokens } from "@/lib/server/data";
 import { getServerSession } from "@/lib/server/session";
 
@@ -30,7 +30,7 @@ describe("GET /api/v1/search/index", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(getServerSession).mockResolvedValue({ accessToken: "at_1" } as never);
-    vi.mocked(rateLimit).mockResolvedValue(null as never);
+    vi.mocked(rateLimitRetryAfter).mockResolvedValue(null);
     vi.mocked(fetchProjectAnywhere).mockResolvedValue({
       id: PROJECT,
       slug: "web",
@@ -89,7 +89,7 @@ describe("GET /api/v1/search/index", () => {
   });
 
   it("refuses past the limit, reading nothing", async () => {
-    vi.mocked(rateLimit).mockResolvedValue(30 as never);
+    vi.mocked(rateLimitRetryAfter).mockResolvedValue(30);
     const res = await get();
     expect(res.status).toBe(429);
     expect(fetchProjectAnywhere).not.toHaveBeenCalled();

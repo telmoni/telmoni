@@ -44,7 +44,7 @@ export async function disconnectConnectorAction(
   connectionId: string,
 ): Promise<ActionResult> {
   const gate = await admitConnectorsCall("connectors:disconnect", 10, projectId, connectionId);
-  if (gate.error !== undefined) return refused(gate.error);
+  if (!gate.ok) return refused(gate.error);
   const res = await tryFetchWithTimeout(
     `${gate.base}/internal/v1/connectors/${encodeURIComponent(connectionId)}`,
     { method: "DELETE", headers: gate.headers },
@@ -62,7 +62,7 @@ export async function sendTestMessageAction(
   connectionId: string,
 ): Promise<ActionResult> {
   const gate = await admitConnectorsCall("connectors:test", 10, projectId, connectionId);
-  if (gate.error !== undefined) return refused(gate.error);
+  if (!gate.ok) return refused(gate.error);
   const res = await tryFetchWithTimeout(
     `${gate.base}/internal/v1/connectors/${encodeURIComponent(connectionId)}/test`,
     { method: "POST", headers: gate.headers },
@@ -111,7 +111,7 @@ export async function createWebhookConnectorAction(
   eventKinds: NotificationKind[] | null,
 ): Promise<SecretResult> {
   const gate = await admitConnectorsCall("connectors:webhook", 10, projectId, null);
-  if (gate.error !== undefined) return refused(gate.error);
+  if (!gate.ok) return refused(gate.error);
   const trimmed = url.trim();
   if (trimmed.length === 0) return refused("Enter the endpoint URL.");
   if (trimmed.length > 2048) return refused("That URL is too long.");
@@ -137,7 +137,7 @@ export async function updateWebhookEventsAction(
   eventKinds: NotificationKind[] | null,
 ): Promise<ActionResult> {
   const gate = await admitConnectorsCall("connectors:events", 20, projectId, connectionId);
-  if (gate.error !== undefined) return refused(gate.error);
+  if (!gate.ok) return refused(gate.error);
   const checked = checkKinds(eventKinds);
   if (!checked.ok) return checked;
   const res = await tryFetchWithTimeout(
@@ -168,7 +168,7 @@ export async function rotateWebhookSecretAction(
   keepPreviousForHours: number,
 ): Promise<SecretResult> {
   const gate = await admitConnectorsCall("connectors:rotate", 10, projectId, connectionId);
-  if (gate.error !== undefined) return refused(gate.error);
+  if (!gate.ok) return refused(gate.error);
   if (
     !Number.isInteger(keepPreviousForHours) ||
     keepPreviousForHours < 0 ||
@@ -199,7 +199,7 @@ export async function redeliverAction(
   deliveryId: string,
 ): Promise<ActionResult> {
   const gate = await admitConnectorsCall("connectors:redeliver", 10, projectId, connectionId);
-  if (gate.error !== undefined) return refused(gate.error);
+  if (!gate.ok) return refused(gate.error);
   if (!z.guid().safeParse(deliveryId).success) {
     return refused("Invalid delivery.");
   }

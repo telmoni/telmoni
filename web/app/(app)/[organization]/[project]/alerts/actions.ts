@@ -6,11 +6,8 @@ import { z } from "zod";
 import { refused } from "@/lib/action-result";
 import { MUTE_MINUTES_MAX } from "@/lib/alerts";
 import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
-import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
 import { env } from "@/lib/env";
-import { sessionHeaders } from "@/lib/server/entities/identity-context";
-import { activeProjectForMutation } from "@/lib/server/identity";
-import { getServerSession } from "@/lib/server/session";
+import { admitProject } from "@/lib/server/admit";
 import {
   MissingData,
   RuleAggregation,
@@ -90,16 +87,12 @@ async function send(
   path: string,
   init: { method: "POST" | "PUT" | "DELETE"; body?: unknown; goneIsDone?: boolean },
 ): Promise<Result> {
-  const session = await getServerSession();
-  if (!session) return refused("Your session expired — sign in again.");
-  const limited = await rateLimit(sessionKey(session, bucket), { limit: 30, windowMs: 60_000 });
-  if (limited) return refused("Too many requests — slow down a moment.");
-  const resolved = await activeProjectForMutation(projectId);
-  if (resolved.error !== null) return refused(resolved.error);
+  const gate = await admitProject({ call: bucket, limit: 30 }, projectId);
+  if (!gate.ok) return refused(gate.error);
   const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/v1/telemetry${path}`, {
     method: init.method,
     headers: {
-      ...sessionHeaders(session, resolved.organizationId, resolved.projectId),
+      ...gate.headers,
       ...(init.body === undefined ? {} : { "content-type": "application/json" }),
     },
     ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),

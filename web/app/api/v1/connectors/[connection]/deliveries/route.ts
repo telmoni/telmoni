@@ -1,8 +1,8 @@
-import { type NextRequest, NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 import { z } from "zod";
 
 import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
-import { problem } from "@/lib/api/respond";
+import { privateJson, privateProblem } from "@/lib/api/respond";
 import {
   CONNECTORS_UNAVAILABLE,
   CONNECTORS_UNEXPECTED,
@@ -19,18 +19,6 @@ import { DeliveryLogPageSchema } from "@/lib/server/entities/connectors";
 
 const PAGE_SIZE = 25;
 
-const PRIVATE = { "cache-control": "private, no-store" };
-
-/** The session's own answer, so nothing in between keeps a copy. */
-function reply(body: unknown) {
-  return NextResponse.json(body, { headers: PRIVATE });
-}
-
-/** A read turned away, in the sentence the dialog shows. */
-function refuse(sentence: string, status: number) {
-  return problem(status, sentence, { headers: PRIVATE });
-}
-
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ connection: string }> },
@@ -43,10 +31,10 @@ export async function GET(
     search.get("project") ?? "",
     connection,
   );
-  if (gate.error !== undefined) return refuse(gate.error, gate.status);
+  if (!gate.ok) return privateProblem(gate.status, gate.error, gate.retryAfter);
   const before = search.get("before");
   if (before !== null && !z.guid().safeParse(before).success) {
-    return refuse("Invalid delivery.", 400);
+    return privateProblem(400, "Invalid delivery.");
   }
   const query = new URLSearchParams({ limit: String(PAGE_SIZE) });
   if (before !== null) query.set("before", before);
@@ -54,14 +42,14 @@ export async function GET(
     `${gate.base}/internal/v1/connectors/${encodeURIComponent(connection)}/deliveries?${query}`,
     { method: "GET", headers: gate.headers },
   );
-  if (!res) return refuse(CONNECTORS_UNAVAILABLE, 503);
+  if (!res) return privateProblem(503, CONNECTORS_UNAVAILABLE);
   // The service's refusal keeps its status, so a bearer it no longer takes
   // reads as the ended session it is; its own failure is a bad gateway here.
   if (!res.ok) {
     const { message } = await extractProblem(res);
-    return refuse(message, res.status >= 500 ? 502 : res.status);
+    return privateProblem(res.status >= 500 ? 502 : res.status, message);
   }
   const parsed = DeliveryLogPageSchema.safeParse(await res.json().catch(() => null));
-  if (!parsed.success) return refuse(CONNECTORS_UNEXPECTED, 502);
-  return reply(parsed.data);
+  if (!parsed.success) return privateProblem(502, CONNECTORS_UNEXPECTED);
+  return privateJson(parsed.data);
 }

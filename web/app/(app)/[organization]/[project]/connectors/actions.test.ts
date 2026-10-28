@@ -9,7 +9,7 @@ vi.mock("@/lib/server/session", () => ({
   getServerSession: vi.fn(),
 }));
 vi.mock("@/lib/api/rate-limit", () => ({
-  rateLimit: vi.fn(async () => null),
+  rateLimitRetryAfter: vi.fn(async () => null),
   sessionKey: vi.fn((_s: unknown, action: string) => `k:${action}`),
 }));
 vi.mock("@/lib/server/data", () => ({
@@ -32,10 +32,9 @@ vi.mock("@/lib/env", () => ({
 }));
 
 import { revalidatePath } from "next/cache";
-import { NextResponse } from "next/server";
 
 import { tryFetchWithTimeout } from "@/lib/api/fetch";
-import { rateLimit } from "@/lib/api/rate-limit";
+import { rateLimitRetryAfter } from "@/lib/api/rate-limit";
 import { fetchProjectAnywhere, identityContext, projectHeaders } from "@/lib/server/data";
 import { getServerSession } from "@/lib/server/session";
 
@@ -83,7 +82,7 @@ beforeEach(() => {
     userId: "user_1",
     email: "user@example.test",
   } as never);
-  vi.mocked(rateLimit).mockResolvedValue(null);
+  vi.mocked(rateLimitRetryAfter).mockResolvedValue(null);
   vi.mocked(identityContext).mockResolvedValue({
     userId: "user_1",
     organizationId: "org_1",
@@ -142,7 +141,7 @@ describe("disconnectConnectorAction", () => {
   });
 
   it("stops at the ceiling", async () => {
-    vi.mocked(rateLimit).mockResolvedValue(new NextResponse(null, { status: 429 }));
+    vi.mocked(rateLimitRetryAfter).mockResolvedValue(30);
     const res = await disconnectConnectorAction(PROJECT, ID);
     expect(errorOf(res)).toMatch(/too many requests/i);
     expect(fetchMock).not.toHaveBeenCalled();
@@ -313,7 +312,7 @@ describe("createWebhookConnectorAction", () => {
   });
 
   it("stops at the ceiling", async () => {
-    vi.mocked(rateLimit).mockResolvedValue(new NextResponse(null, { status: 429 }));
+    vi.mocked(rateLimitRetryAfter).mockResolvedValue(30);
     const res = await createWebhookConnectorAction(PROJECT, "https://hooks.example.com/x", null);
     expect(errorOf(res)).toMatch(/too many requests/i);
     expect(fetchMock).not.toHaveBeenCalled();

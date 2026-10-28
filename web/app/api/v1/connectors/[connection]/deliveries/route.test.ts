@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/server/session", () => ({ getServerSession: vi.fn() }));
 vi.mock("@/lib/api/rate-limit", () => ({
-  rateLimit: vi.fn(async () => null),
+  rateLimitRetryAfter: vi.fn(async () => null),
   sessionKey: vi.fn((_s: unknown, call: string) => `k:${call}`),
 }));
 vi.mock("@/lib/server/data", () => ({
@@ -23,7 +23,7 @@ vi.mock("@/lib/env", () => ({ env: { SERVER_URL: "http://notifications.test" } }
 import { NextRequest } from "next/server";
 
 import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
-import { rateLimit } from "@/lib/api/rate-limit";
+import { rateLimitRetryAfter } from "@/lib/api/rate-limit";
 import { fetchProjectAnywhere, identityContext } from "@/lib/server/data";
 import { getServerSession } from "@/lib/server/session";
 
@@ -85,7 +85,7 @@ beforeEach(() => {
     userId: "user_1",
     email: "user@example.test",
   } as never);
-  vi.mocked(rateLimit).mockResolvedValue(null);
+  vi.mocked(rateLimitRetryAfter).mockResolvedValue(null);
   vi.mocked(identityContext).mockResolvedValue({
     userId: "user_1",
     organizationId: "org_1",
@@ -117,7 +117,7 @@ describe("GET /api/v1/connectors/[connection]/deliveries", () => {
         headers: expect.objectContaining({ authorization: "Bearer at_1" }),
       }),
     );
-    expect(rateLimit).toHaveBeenCalledWith("k:connectors:deliveries", {
+    expect(rateLimitRetryAfter).toHaveBeenCalledWith("k:connectors:deliveries", {
       limit: 60,
       windowMs: 60_000,
     });
@@ -186,7 +186,7 @@ describe("GET /api/v1/connectors/[connection]/deliveries", () => {
     vi.mocked(getServerSession).mockResolvedValueOnce(null as never);
     expect((await get()).status).toBe(401);
 
-    vi.mocked(rateLimit).mockResolvedValueOnce(30 as never);
+    vi.mocked(rateLimitRetryAfter).mockResolvedValueOnce(30);
     expect((await get()).status).toBe(429);
 
     vi.mocked(fetchProjectAnywhere).mockResolvedValueOnce(null);

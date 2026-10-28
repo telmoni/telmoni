@@ -2,14 +2,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/server/session", () => ({ getServerSession: vi.fn() }));
 vi.mock("@/lib/api/rate-limit", () => ({
-  rateLimit: vi.fn(async () => null),
+  rateLimitRetryAfter: vi.fn(async () => null),
   sessionKey: vi.fn(() => "k"),
 }));
 vi.mock("@/lib/server/entities/agent", () => ({ agentStatus: vi.fn() }));
 
 import { NextRequest } from "next/server";
 
-import { rateLimit } from "@/lib/api/rate-limit";
+import { rateLimitRetryAfter } from "@/lib/api/rate-limit";
 import { agentStatus } from "@/lib/server/entities/agent";
 import { getServerSession } from "@/lib/server/session";
 
@@ -27,7 +27,7 @@ describe("GET /api/v1/agent/status", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(getServerSession).mockResolvedValue({ accessToken: "at_1" } as never);
-    vi.mocked(rateLimit).mockResolvedValue(null as never);
+    vi.mocked(rateLimitRetryAfter).mockResolvedValue(null);
     vi.mocked(agentStatus).mockResolvedValue("ready" as never);
   });
 
@@ -43,7 +43,7 @@ describe("GET /api/v1/agent/status", () => {
     vi.mocked(getServerSession).mockResolvedValueOnce(null as never);
     expect((await get()).status).toBe(401);
 
-    vi.mocked(rateLimit).mockResolvedValueOnce(30 as never);
+    vi.mocked(rateLimitRetryAfter).mockResolvedValueOnce(30);
     expect((await get()).status).toBe(429);
 
     const res = await get("../members");

@@ -6,9 +6,8 @@ import { z } from "zod";
 
 import { type ActionResult, refused } from "@/lib/action-result";
 import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
-import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
 import { env } from "@/lib/env";
-import { sessionHeaders } from "@/lib/server/entities/identity-context";
+import { type Ceiling, admitProject } from "@/lib/server/admit";
 import {
   SessionLayoutSettingSchema,
   type SessionLayoutSetting,
@@ -20,9 +19,7 @@ import {
   type TraceLayout,
   type TraceView,
 } from "@/lib/server/entities/traces";
-import { activeProjectForMutation } from "@/lib/server/identity";
 import { pathAndQuery, requestUrl } from "@/lib/server/path";
-import { getServerSession } from "@/lib/server/session";
 import { TraceColumn, ViewKind } from "@/lib/types/enums";
 
 // A project's saved views of its trace list and saved layouts of a session's
@@ -50,7 +47,7 @@ const SessionLayoutInputSchema = z.strictObject({ view_id: z.guid().nullable() }
 
 /** Saves a person makes in a minute: far more than a hand makes, few enough
  *  that a loop cannot fill a project's hundred views in one. */
-const SAVES_A_MINUTE = { limit: 20, windowMs: 60_000 };
+const SAVES: Ceiling = { call: "traces:views", limit: 20 };
 
 /** One of telemetry's lanes under `/internal/v1/telemetry`, called as the
  *  person: the answer, or why it was not sent or was refused. */
@@ -60,17 +57,13 @@ async function call(
   projectId: string,
   body?: unknown,
 ): Promise<ActionResult<{ res: Response }>> {
-  const session = await getServerSession();
-  if (!session) return refused("Your session expired — sign in again.");
-  const limited = await rateLimit(sessionKey(session, "traces:views"), SAVES_A_MINUTE);
-  if (limited) return refused("Too many saves at once. Try again in a minute.");
-  const resolved = await activeProjectForMutation(projectId);
-  if (resolved.error !== null) return refused(resolved.error);
+  const gate = await admitProject(SAVES, projectId);
+  if (!gate.ok) return refused(gate.error);
 
   const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/v1/telemetry${lane}`, {
     method,
     headers: {
-      ...sessionHeaders(session, resolved.organizationId, resolved.projectId),
+      ...gate.headers,
       ...(body ? { "content-type": "application/json" } : {}),
     },
     body: body ? JSON.stringify(body) : undefined,

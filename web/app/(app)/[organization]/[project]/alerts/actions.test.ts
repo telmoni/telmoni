@@ -9,7 +9,7 @@ vi.mock("@/lib/server/session", () => ({
   getServerSession: vi.fn(),
 }));
 vi.mock("@/lib/api/rate-limit", () => ({
-  rateLimit: vi.fn(async () => null),
+  rateLimitRetryAfter: vi.fn(async () => null),
   sessionKey: vi.fn(() => "k"),
 }));
 vi.mock("@/lib/api/fetch", () => ({
@@ -33,7 +33,7 @@ vi.mock("@/lib/server/entities/organization", () => ({
 
 import { refresh } from "next/cache";
 
-import { rateLimit } from "@/lib/api/rate-limit";
+import { rateLimitRetryAfter } from "@/lib/api/rate-limit";
 import { tryFetchWithTimeout } from "@/lib/api/fetch";
 import { identityContext } from "@/lib/server/entities/identity-context";
 import { getServerSession } from "@/lib/server/session";
@@ -152,7 +152,7 @@ describe("saveAlertAction", () => {
   it("asks nothing for an expired session, past the minute's room, or for another header", async () => {
     vi.mocked(getServerSession).mockResolvedValueOnce(null);
     expect(errorOf(await saveAlertAction(PROJECT, null, INPUT))).toMatch(/session expired/);
-    vi.mocked(rateLimit).mockResolvedValueOnce({ retryAfter: 30 } as never);
+    vi.mocked(rateLimitRetryAfter).mockResolvedValueOnce(30);
     expect(errorOf(await saveAlertAction(PROJECT, null, INPUT))).toMatch(/Too many requests/);
     expect(errorOf(await saveAlertAction("p\r\nx-project-id: q", null, INPUT))).toMatch(
       /Couldn't tell which project/,

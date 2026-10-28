@@ -1,5 +1,3 @@
-import { isProjectId } from "@/lib/ids";
-import { identityContext } from "@/lib/server/entities/identity-context";
 import { getServerContext } from "@/lib/server/entities/organization";
 
 /// What an action answers when `identityContext` could place the person in no
@@ -31,21 +29,3 @@ export async function unplacedOrganization(): Promise<string> {
 /// and refuses before it asks any service anything when the two differ.
 export const SWITCHED_ORGANIZATION =
   "This page is out of date. Reload it to act on the organization you're viewing.";
-
-/// The project a key lane acts on, with the organization the session stands
-/// in. The project is the one its page rendered, by id, and auth takes its
-/// organization from the project itself, so a stale page cannot aim a key at
-/// a project it is not showing.
-export async function activeProjectForMutation(projectId: string): Promise<
-  | { organizationId: string; projectId: string; error: null }
-  | { organizationId?: undefined; projectId?: undefined; error: string }
-> {
-  // The id becomes a header of the lane's request: anything but a project id
-  // is refused here, as a Server Action takes whatever is posted to it.
-  if (!isProjectId(projectId)) {
-    return { error: "Couldn't tell which project this is. Reload and try again." };
-  }
-  const ident = await identityContext();
-  if (!ident) return { error: await unplacedOrganization() };
-  return { organizationId: ident.organizationId, projectId, error: null };
-}

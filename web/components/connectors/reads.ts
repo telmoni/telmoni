@@ -1,3 +1,4 @@
+import { SESSION_EXPIRED } from "@/lib/action-result";
 import { problemWords } from "@/lib/api/problem";
 import type { DeliveryLogPage } from "@/lib/server/data";
 
@@ -20,7 +21,7 @@ export async function readDeliveries(
   );
   const body: unknown = await res.json().catch(() => null);
   if (res.ok && body && typeof body === "object") return { page: body as DeliveryLogPage };
-  if (res.status === 401) return { error: "Your session expired — sign in again." };
+  if (res.status === 401) return { error: SESSION_EXPIRED };
   return {
     error:
       problemWords(body) ||

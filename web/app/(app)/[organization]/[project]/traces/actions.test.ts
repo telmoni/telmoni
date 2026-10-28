@@ -4,7 +4,7 @@ vi.mock("@/lib/server/session", () => ({
   getServerSession: vi.fn(),
 }));
 vi.mock("@/lib/api/rate-limit", () => ({
-  rateLimit: vi.fn(async () => null),
+  rateLimitRetryAfter: vi.fn(async () => null),
   sessionKey: vi.fn(() => "k"),
 }));
 vi.mock("@/lib/api/fetch", () => ({
@@ -15,13 +15,16 @@ vi.mock("@/lib/env", () => ({
   env: { SERVER_URL: "http://telemetry.test" },
 }));
 vi.mock("@/lib/server/identity", () => ({
-  activeProjectForMutation: vi.fn(async (projectId: string) => ({
-    organizationId: "org_1",
-    projectId,
-    error: null,
-  })),
+  SWITCHED_ORGANIZATION: "switched",
+  unplacedOrganization: async () => "unplaced",
 }));
 vi.mock("@/lib/server/entities/identity-context", () => ({
+  identityContext: async () => ({
+    userId: "user_1",
+    organizationId: "org_1",
+    role: "admin",
+    accessToken: "at_1",
+  }),
   sessionHeaders: () => ({ authorization: "Bearer at_1" }),
 }));
 const mockRefresh = vi.fn();

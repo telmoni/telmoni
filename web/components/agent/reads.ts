@@ -1,3 +1,4 @@
+import { SESSION_EXPIRED } from "@/lib/action-result";
 import { problemWords } from "@/lib/api/problem";
 import type {
   AgentConversation,
@@ -11,7 +12,6 @@ import type {
 // handler's own, or — for a lapsed session the console's proxy turned away
 // on `/api/*` before any handler ran — the one the handler would have given.
 
-const EXPIRED = "Your session expired — sign in again.";
 const UNREACHABLE = "The agent is unavailable right now — try again shortly.";
 
 async function read<T extends object>(path: string): Promise<T | { error: string }> {
@@ -19,7 +19,7 @@ async function read<T extends object>(path: string): Promise<T | { error: string
     const res = await fetch(path);
     const body: unknown = await res.json().catch(() => null);
     if (res.ok && body && typeof body === "object") return body as T;
-    if (res.status === 401) return { error: EXPIRED };
+    if (res.status === 401) return { error: SESSION_EXPIRED };
     return { error: problemWords(body) || UNREACHABLE };
   } catch {
     return { error: UNREACHABLE };
