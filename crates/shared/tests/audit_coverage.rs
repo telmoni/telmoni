@@ -181,9 +181,10 @@ const MUTATIONS: &[Mutation] = &[
         resource_kind: "Incident",
         actor_id: ActorPattern::Variable,
     },
+    // The owner's deletion, and a deployment's close of an emptied one.
     Mutation {
         file: "crates/auth/src/handler/organization.rs",
-        fn_name: "delete_organization",
+        fn_name: "spend_code",
         action: "Updated",
         resource_kind: "Organization",
         actor_id: ActorPattern::Variable,
