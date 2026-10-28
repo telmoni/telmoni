@@ -64,7 +64,7 @@ describe("the two URLs that become redirects", () => {
     await expect(getLogoutUrl("sid_1", "id.token.x", "https://app.test/")).resolves.toBe(
       "https://idp.example/logout?session=1",
     );
-    const [, init] = fetchWithTimeout.mock.calls[0];
+    const [, init] = fetchWithTimeout.mock.calls[0]!;
     expect(JSON.parse(String(init?.body))).toEqual({
       session_id: "sid_1",
       id_token: "id.token.x",

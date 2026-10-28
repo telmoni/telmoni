@@ -99,14 +99,14 @@ describe("RealtimeListener - membership:removed edge cases", () => {
     mockPathname = "/acme/web";
     render(<RealtimeListener />);
 
-    expect(MockEventSource.instances[0].url).toBe("/api/v1/events");
+    expect(MockEventSource.instances[0]!.url).toBe("/api/v1/events");
   });
 
   it("ejects the user to /console when removed from their active project subpath", () => {
     mockPathname = "/acme/web/members";
     render(<RealtimeListener />);
 
-    const es = MockEventSource.instances[0];
+    const es = MockEventSource.instances[0]!;
     es.emit("membership:removed", {
       organizationId: "org_1",
       projectId: "project_1",
@@ -120,7 +120,7 @@ describe("RealtimeListener - membership:removed edge cases", () => {
     mockPathname = "/acme/web";
     render(<RealtimeListener />);
 
-    const es = MockEventSource.instances[0];
+    const es = MockEventSource.instances[0]!;
     es.emit("membership:removed", {
       organizationId: "org_1",
       projectId: "project_1",
@@ -134,7 +134,7 @@ describe("RealtimeListener - membership:removed edge cases", () => {
     mockPathname = "/acme/web-2/members";
     render(<RealtimeListener />);
 
-    const es = MockEventSource.instances[0];
+    const es = MockEventSource.instances[0]!;
     es.emit("membership:removed", {
       organizationId: "org_1",
       projectId: "project_1",
@@ -152,7 +152,7 @@ describe("RealtimeListener - membership:removed edge cases", () => {
     mockProjects = [{ id: "project_9", slug: "web" }];
     render(<RealtimeListener />);
 
-    const es = MockEventSource.instances[0];
+    const es = MockEventSource.instances[0]!;
     es.emit("membership:removed", {
       organizationId: "org_1",
       projectId: "project_1",
@@ -166,7 +166,7 @@ describe("RealtimeListener - membership:removed edge cases", () => {
     mockPathname = "/acme/projects";
     render(<RealtimeListener />);
 
-    const es = MockEventSource.instances[0];
+    const es = MockEventSource.instances[0]!;
     es.emit("membership:removed", {
       organizationId: "org_1",
       projectId: "project_1",
@@ -180,7 +180,7 @@ describe("RealtimeListener - membership:removed edge cases", () => {
     mockPathname = "/acme/members";
     render(<RealtimeListener />);
 
-    const es = MockEventSource.instances[0];
+    const es = MockEventSource.instances[0]!;
     es.emit("membership:removed", {
       organizationId: "org_1",
     });
@@ -193,7 +193,7 @@ describe("RealtimeListener - membership:removed edge cases", () => {
     mockPathname = "/account/settings";
     render(<RealtimeListener />);
 
-    const es = MockEventSource.instances[0];
+    const es = MockEventSource.instances[0]!;
     es.emit("membership:removed", {
       organizationId: "org_1",
     });
@@ -207,7 +207,7 @@ describe("RealtimeListener - membership:removed edge cases", () => {
     mockActiveOrgId = "org_2";
     render(<RealtimeListener />);
 
-    const es = MockEventSource.instances[0];
+    const es = MockEventSource.instances[0]!;
     es.emit("membership:removed", {
       organizationId: "org_1",
     });
@@ -220,7 +220,7 @@ describe("RealtimeListener - membership:removed edge cases", () => {
     mockPathname = "/acme/web/members";
     render(<RealtimeListener />);
 
-    const es = MockEventSource.instances[0];
+    const es = MockEventSource.instances[0]!;
     es.emitRaw("membership:removed", "not-a-json");
 
     expect(mockReplace).not.toHaveBeenCalled();
@@ -246,7 +246,7 @@ describe("RealtimeListener - ownership:changed", () => {
     mockPathname = "/acme/web/members";
     render(<RealtimeListener />);
 
-    MockEventSource.instances[0].emit("ownership:changed", {
+    MockEventSource.instances[0]!.emit("ownership:changed", {
       organizationId: "org_2",
       projectId: "project_1",
       organizationSlug: "globex",
@@ -264,7 +264,7 @@ describe("RealtimeListener - ownership:changed", () => {
     mockPathname = "/acme/web/members";
     render(<RealtimeListener />);
 
-    MockEventSource.instances[0].emit("ownership:changed", {
+    MockEventSource.instances[0]!.emit("ownership:changed", {
       organizationId: "org_2",
       projectId: "project_1",
     });
@@ -279,7 +279,7 @@ describe("RealtimeListener - ownership:changed", () => {
     mockPathname = "/acme/web/members";
     render(<RealtimeListener />);
 
-    MockEventSource.instances[0].emit("ownership:changed", {
+    MockEventSource.instances[0]!.emit("ownership:changed", {
       organizationId: "org_1",
       projectId: "project_1",
     });
@@ -292,7 +292,7 @@ describe("RealtimeListener - ownership:changed", () => {
     mockPathname = "/acme/web-2";
     render(<RealtimeListener />);
 
-    const es = MockEventSource.instances[0];
+    const es = MockEventSource.instances[0]!;
     es.emit("ownership:changed", { organizationId: "org_2", projectId: "project_1" });
     es.emit("ownership:changed", { organizationId: "org_2" });
 
@@ -315,7 +315,7 @@ describe("RealtimeListener - rosters", () => {
     (pathname) => {
       mockPathname = pathname;
       render(<RealtimeListener />);
-      MockEventSource.instances[0].emit("invite:sent", {});
+      MockEventSource.instances[0]!.emit("invite:sent", {});
       expect(mockRefresh).toHaveBeenCalledTimes(1);
     },
   );
@@ -325,7 +325,7 @@ describe("RealtimeListener - rosters", () => {
     (pathname) => {
       mockPathname = pathname;
       render(<RealtimeListener />);
-      MockEventSource.instances[0].emit("invite:sent", {});
+      MockEventSource.instances[0]!.emit("invite:sent", {});
       expect(mockRefresh).not.toHaveBeenCalled();
     },
   );
@@ -345,7 +345,7 @@ describe("RealtimeListener - membership:changed", () => {
     (pathname) => {
       mockPathname = pathname;
       render(<RealtimeListener />);
-      MockEventSource.instances[0].emit("membership:changed", {
+      MockEventSource.instances[0]!.emit("membership:changed", {
         organizationId: "org_1",
         projectId: "project_1",
       });
@@ -360,7 +360,7 @@ describe("RealtimeListener - membership:changed", () => {
 // it is empty — and nothing else moves.
 describe("RealtimeListener - spans:ingested", () => {
   const nudge = (projectId: string, runs: string[] = ["run_1"], more = false) =>
-    MockEventSource.instances[0].emit("spans:ingested", {
+    MockEventSource.instances[0]!.emit("spans:ingested", {
       organizationId: "org_1",
       projectId,
       runs,
@@ -426,7 +426,7 @@ describe("RealtimeListener - spans:ingested", () => {
 
     mockPathname = "/acme/web/members";
     render(<RealtimeListener />);
-    MockEventSource.instances[1].emit("spans:ingested", {
+    MockEventSource.instances[1]!.emit("spans:ingested", {
       organizationId: "org_1",
       projectId: "project_1",
       runs: ["run_1"],
@@ -575,6 +575,6 @@ describe("RealtimeListener - what the person reads", () => {
 
     rerender(<RealtimeListener readingKey={"org_1/project_1\norg_1:member"} />);
     expect(MockEventSource.instances).toHaveLength(2);
-    expect(MockEventSource.instances[0].readyState).toBe(2);
+    expect(MockEventSource.instances[0]!.readyState).toBe(2);
   });
 });

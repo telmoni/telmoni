@@ -75,7 +75,7 @@ const INPUT = {
 /** The one request the action made: its URL, method and body. */
 function sent() {
   expect(fetchMock).toHaveBeenCalledOnce();
-  const [url, init] = fetchMock.mock.calls[0];
+  const [url, init] = fetchMock.mock.calls[0]!;
   return { url, method: init?.method, body: init?.body ? JSON.parse(String(init.body)) : undefined, init };
 }
 

@@ -449,8 +449,8 @@ describe("maintenance windows", () => {
   });
 
   it("tells one in force from one still to start", () => {
-    expect(inForce(mutes[2], now)).toBe(true);
-    expect(inForce(mutes[1], now)).toBe(false);
-    expect(inForce(mutes[0], now)).toBe(false);
+    expect(inForce(mutes[2]!, now)).toBe(true);
+    expect(inForce(mutes[1]!, now)).toBe(false);
+    expect(inForce(mutes[0]!, now)).toBe(false);
   });
 });

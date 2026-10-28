@@ -240,7 +240,7 @@ describe("the reads beside the list", () => {
 
     answer(200, { views: [LAYOUT] });
     expect(await fetchTraceLayouts(PROJECT)).toEqual({ kind: "ok", layouts: [LAYOUT] });
-    expect(fetchWithTimeout.mock.calls[1][0]).toBe(
+    expect(fetchWithTimeout.mock.calls[1]![0]).toBe(
       "http://server/internal/v1/telemetry/views?kind=layout",
     );
     // A layout among the list's views, or a view among the layouts, is an

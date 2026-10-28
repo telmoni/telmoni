@@ -137,7 +137,7 @@ describe("fetchRunIncidents", () => {
   it("asks for the incidents whose notices showed the run", async () => {
     answer(200, { incidents: [INCIDENT_ROW] });
     expect(await fetchRunIncidents(PROJECT, RUN)).toMatchObject([{ id: INCIDENT }]);
-    expect(fetchWithTimeout.mock.calls[0][0]).toBe(
+    expect(fetchWithTimeout.mock.calls[0]![0]).toBe(
       `http://server/internal/v1/telemetry/incidents?run=${RUN}`,
     );
   });
@@ -162,7 +162,7 @@ describe("fetchIncident", () => {
       kind: "ok",
       incident: { id: INCIDENT, rule_name: "Slow calls", runs: [RUN] },
     });
-    const [url, init] = fetchWithTimeout.mock.calls[0];
+    const [url, init] = fetchWithTimeout.mock.calls[0]!;
     expect(url).toBe(`http://server/internal/v1/telemetry/incidents/${INCIDENT}`);
     expect(init.headers).toMatchObject({ "x-project-id": PROJECT });
   });
@@ -173,7 +173,7 @@ describe("fetchIncident", () => {
     expect(await fetchIncident(PROJECT, INCIDENT)).toEqual({ kind: "missing" });
     answer(400, {});
     expect(await fetchIncident(PROJECT, "../rules")).toEqual({ kind: "missing" });
-    expect(fetchWithTimeout.mock.calls[1][0]).toBe(
+    expect(fetchWithTimeout.mock.calls[1]![0]).toBe(
       "http://server/internal/v1/telemetry/incidents/..%2Frules",
     );
     answer(403, {});

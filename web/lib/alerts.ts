@@ -74,7 +74,7 @@ export function measuresFor(kind: AlertKind): RuleMeasure[] {
 
 /** How `measure` is folded over the window, as the server's `folds` admits:
  *  what the hourly totals can answer. */
-export function aggregationsFor(measure: RuleMeasure): RuleAggregation[] {
+export function aggregationsFor(measure: RuleMeasure): readonly [RuleAggregation, ...RuleAggregation[]] {
   switch (measure) {
     case RuleMeasure.Count:
       return [RuleAggregation.Count];
@@ -372,10 +372,21 @@ export function joinValues(values: readonly string[]): string {
 
 // ── Hours ────────────────────────────────────────────────────────────────────
 
-const DAY_SHORT = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
+/** A day of the week as the hours name it, Monday first. */
+type Day = 1 | 2 | 3 | 4 | 5 | 6 | 7;
+const DAY_SHORT: Record<Day, string> = {
+  1: "Mon",
+  2: "Tue",
+  3: "Wed",
+  4: "Thu",
+  5: "Fri",
+  6: "Sat",
+  7: "Sun",
+};
+const isDay = (d: number): d is Day => Number.isInteger(d) && d >= 1 && d <= 7;
 
 /** Days 1 (Monday) to 7, as the form's toggles name them. */
-export const DAYS = DAY_SHORT.map((label, i) => ({ day: i + 1, label }));
+export const DAYS = ([1, 2, 3, 4, 5, 6, 7] as const).map((day) => ({ day, label: DAY_SHORT[day] }));
 
 /** An offset from UTC in minutes east, as a clock reads it: `UTC+01:00`,
  *  `UTC−05:30`, and `UTC` at none. */
@@ -397,17 +408,26 @@ export const OFFSETS: number[] = Array.from(
 /** Hours in words: `Mon–Fri 09:00–18:00 UTC+01:00`, a day's whole span as
  *  `all day`, and a run of days joined by a dash. */
 export function hoursWords(hours: Hours): string {
-  const days = [...new Set(hours.days)].filter((d) => d >= 1 && d <= 7).sort((a, b) => a - b);
-  const runs: string[] = [];
-  for (let i = 0; i < days.length; ) {
-    let j = i;
-    while (j + 1 < days.length && days[j + 1] === days[j] + 1) j++;
-    const [first, last] = [DAY_SHORT[days[i] - 1], DAY_SHORT[days[j] - 1]];
-    if (j - i >= 2) runs.push(`${first}–${last}`);
-    else runs.push(...days.slice(i, j + 1).map((d) => DAY_SHORT[d - 1]));
-    i = j + 1;
+  const days = [...new Set(hours.days)].filter(isDay).sort((a, b) => a - b);
+  // Each run of consecutive days: three or more read first–last, fewer by name.
+  const runs: { first: Day; last: Day; count: number }[] = [];
+  for (const day of days) {
+    const run = runs.at(-1);
+    if (run && run.last === day - 1) {
+      run.last = day;
+      run.count += 1;
+    } else {
+      runs.push({ first: day, last: day, count: 1 });
+    }
   }
-  const when = days.length === 7 ? "Every day" : runs.join(", ");
+  const words = runs.map(({ first, last, count }) =>
+    count >= 3
+      ? `${DAY_SHORT[first]}–${DAY_SHORT[last]}`
+      : count === 2
+        ? `${DAY_SHORT[first]}, ${DAY_SHORT[last]}`
+        : DAY_SHORT[first],
+  );
+  const when = days.length === 7 ? "Every day" : words.join(", ");
   const span = hours.from === hours.to ? "all day" : `${hours.from}–${hours.to}`;
   return `${when} ${span} ${offsetWords(hours.utc_offset)}`;
 }
@@ -449,13 +469,14 @@ export function incidentKindsLabel(eventKinds: ConnectionChoice["eventKinds"]): 
  *  webhook on a host another shares, with the start of its fingerprint, as
  *  the Connectors page tells them apart. */
 export function connectionChoices(connections: readonly Connection[]): ConnectionChoice[] {
-  const names = connections.map(connectionName);
-  return connections.map((connection, i) => ({
+  const named = connections.map((connection) => ({ connection, name: connectionName(connection) }));
+  const shared = (name: string) => named.filter((other) => other.name === name).length > 1;
+  return named.map(({ connection, name }) => ({
     id: connection.id,
     name:
-      connection.provider === "webhook" && names.filter((name) => name === names[i]).length > 1
-        ? `${names[i]} (${connection.channel_id.slice(0, 8)})`
-        : names[i],
+      connection.provider === "webhook" && shared(name)
+        ? `${name} (${connection.channel_id.slice(0, 8)})`
+        : name,
     status: connection.status,
     eventKinds: connection.event_kinds,
   }));

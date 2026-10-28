@@ -143,7 +143,7 @@ describe("settleSession", () => {
     mockedRefresh.mockReturnValue(new Promise((resolve) => (answer = resolve)));
     const sent = await cookie({ expiresAt: Date.now() + 30_000, refreshToken: "rt_shared" });
 
-    const settling = [settleSession(sent), settleSession(sent), settleSession(sent)];
+    const settling = [settleSession(sent), settleSession(sent), settleSession(sent)] as const;
     await vi.waitFor(() => expect(mockedRefresh).toHaveBeenCalled());
     answer(granted());
     const [first, second, third] = await Promise.all(settling);

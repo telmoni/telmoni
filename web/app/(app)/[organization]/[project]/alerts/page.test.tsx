@@ -277,6 +277,13 @@ function incidentItems(ruleId: string) {
   return Array.from(card.querySelectorAll<HTMLElement>('li[id^="incident-"]'));
 }
 
+/** The nth incident under an alert, which the test fails outright without. */
+function incidentItem(ruleId: string, n: number): HTMLElement {
+  const item = incidentItems(ruleId)[n];
+  if (!item) throw new Error(`no incident ${n} under ${ruleId}`);
+  return item;
+}
+
 /** What an alert's card says beside `label`. */
 function detail(ruleId: string, label: string) {
   const card = document.getElementById(`alert-${ruleId}`)!;
@@ -285,8 +292,10 @@ function detail(ruleId: string, label: string) {
 
 const CSS = readFileSync(path.join(__dirname, "../../../../globals.css"), "utf8");
 
+type Rgb = [number, number, number];
+
 /** A colour token of a console palette, as `globals.css` sets it in oklch. */
-function oklch(theme: string, name: string): [number, number, number] | null {
+function oklch(theme: string, name: string): Rgb | null {
   const at = CSS.indexOf(`\n${theme} {`);
   const block = CSS.slice(at, CSS.indexOf("\n}", at));
   const value = new RegExp(`--${name}:\\s*oklch\\(\\s*([\\d.]+)\\s+([\\d.]+)\\s+([\\d.]+)\\s*\\)`).exec(block);
@@ -294,30 +303,35 @@ function oklch(theme: string, name: string): [number, number, number] | null {
 }
 
 /** An oklch colour in gamma-encoded sRGB, where a browser lays one over another. */
-function srgb([l, c, h]: [number, number, number]): number[] {
-  const [a, b] = [c * Math.cos((h * Math.PI) / 180), c * Math.sin((h * Math.PI) / 180)];
-  const [long, medium, short] = [
-    l + 0.3963377774 * a + 0.2158037573 * b,
-    l - 0.1055613458 * a - 0.0638541728 * b,
-    l - 0.0894841775 * a - 1.291485548 * b,
-  ].map((v) => v ** 3);
-  return [
-    4.0767416621 * long - 3.3077115913 * medium + 0.2309699292 * short,
-    -1.2684380046 * long + 2.6097574011 * medium - 0.3413193965 * short,
-    -0.0041960863 * long - 0.7034186147 * medium + 1.707614701 * short,
-  ].map((v) => {
+function srgb([l, c, h]: Rgb): Rgb {
+  const a = c * Math.cos((h * Math.PI) / 180);
+  const b = c * Math.sin((h * Math.PI) / 180);
+  const long = (l + 0.3963377774 * a + 0.2158037573 * b) ** 3;
+  const medium = (l - 0.1055613458 * a - 0.0638541728 * b) ** 3;
+  const short = (l - 0.0894841775 * a - 1.291485548 * b) ** 3;
+  const gamma = (v: number) => {
     const x = Math.min(Math.max(v, 0), 1);
     return x <= 0.0031308 ? 12.92 * x : 1.055 * x ** (1 / 2.4) - 0.055;
-  });
+  };
+  return [
+    gamma(4.0767416621 * long - 3.3077115913 * medium + 0.2309699292 * short),
+    gamma(-1.2684380046 * long + 2.6097574011 * medium - 0.3413193965 * short),
+    gamma(-0.0041960863 * long - 0.7034186147 * medium + 1.707614701 * short),
+  ];
+}
+
+/** `one` laid over `other` at `alpha`, as a browser blends them. */
+function over([r, g, b]: Rgb, [pr, pg, pb]: Rgb, alpha: number): Rgb {
+  const mix = (top: number, under: number) => alpha * top + (1 - alpha) * under;
+  return [mix(r, pr), mix(g, pg), mix(b, pb)];
 }
 
 /** WCAG's contrast between two sRGB colours. */
-function contrast(one: number[], other: number[]): number {
-  const luminance = (rgb: number[]) => {
-    const [r, g, b] = rgb.map((x) => (x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4));
-    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-  };
-  const [high, low] = [luminance(one), luminance(other)].sort((x, y) => y - x);
+function contrast(one: Rgb, other: Rgb): number {
+  const linear = (x: number) => (x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4);
+  const luminance = ([r, g, b]: Rgb) => 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b);
+  const high = Math.max(luminance(one), luminance(other));
+  const low = Math.min(luminance(one), luminance(other));
   return (high + 0.05) / (low + 0.05);
 }
 
@@ -448,7 +462,7 @@ describe("AlertsPage", () => {
   // ⚠ Under the alert that opened them, open ones first, each with where its notices went.
   it("lists each alert's incidents under it as the server ordered them", async () => {
     render(await AlertsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
-    const [open, taken, done] = incidentItems(RULE);
+    const [open, taken, done] = [incidentItem(RULE, 0), incidentItem(RULE, 1), incidentItem(RULE, 2)];
     expect(incidentItems(RULE).map((item) => item.id)).toEqual([
       "incident-i-open",
       "incident-i-taken",
@@ -494,15 +508,15 @@ describe("AlertsPage", () => {
     const alerts = mockAlerts as { incidents: ReturnType<typeof incident>[] };
     alerts.incidents = [incident(held), ...alerts.incidents.slice(1)];
     render(await AlertsPage({ params: PARAMS, searchParams: Promise.resolve({ incident: held }) }));
-    const followed = incidentItems(RULE)[0]!;
+    const followed = incidentItem(RULE, 0);
     for (const theme of [".theme-console", ".dark .theme-console"]) {
       const page = srgb(oklch(theme, "background")!);
       const marks = [...followed.classList].flatMap((name) => {
-        const drawn = /^(?:bg|border(?:-[trblxy])?)-([a-z-]+?)(?:\/(\d+))?$/.exec(name);
-        const color = drawn && oklch(theme, drawn[1]);
-        if (!drawn || !color) return [];
-        const alpha = drawn[2] ? Number(drawn[2]) / 100 : 1;
-        return [contrast(srgb(color).map((v, i) => alpha * v + (1 - alpha) * page[i]), page)];
+        const [, token, opacity] = /^(?:bg|border(?:-[trblxy])?)-([a-z-]+?)(?:\/(\d+))?$/.exec(name) ?? [];
+        const color = token === undefined ? null : oklch(theme, token);
+        if (!color) return [];
+        const alpha = opacity ? Number(opacity) / 100 : 1;
+        return [contrast(over(srgb(color), page, alpha), page)];
       });
       expect(Math.max(0, ...marks), theme).toBeGreaterThanOrEqual(3);
     }
@@ -548,7 +562,7 @@ describe("AlertsPage", () => {
     render(await AlertsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     const row = screen.getByText("Every alert is muted").closest("div")!.parentElement!;
     expect(row).toHaveTextContent("set by someone");
-    expect(within(incidentItems(RULE)[1]).getByText("Acknowledged by someone")).toBeInTheDocument();
+    expect(within(incidentItem(RULE, 1)).getByText("Acknowledged by someone")).toBeInTheDocument();
     expect(fetchOrganizationMembers).not.toHaveBeenCalled();
   });
 
@@ -559,7 +573,7 @@ describe("AlertsPage", () => {
     mockAlerts = { ...(mockAlerts as object), incidents: [taken("i-admin", "user_admin"), taken("i-gone", "user_gone")] };
     render(await AlertsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(fetchOrganizationMembers).not.toHaveBeenCalled();
-    expect(within(incidentItems(RULE)[0]).getByText("Acknowledged by an organization admin or a former member")).toBeInTheDocument();
+    expect(within(incidentItem(RULE, 0)).getByText("Acknowledged by an organization admin or a former member")).toBeInTheDocument();
 
     cleanup();
     mockOrganization = { organizationId: "org_1", slug: "acme", name: "Acme", role: "admin" };
@@ -569,7 +583,7 @@ describe("AlertsPage", () => {
       members: [{ id: "o1", member_id: "user_admin", email: "grace@example.test", display_name: "Grace", role: "admin", created_at: "" }],
     };
     render(await AlertsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
-    const [admin, gone] = incidentItems(RULE);
+    const [admin, gone] = [incidentItem(RULE, 0), incidentItem(RULE, 1)];
     expect(within(admin).getByText("Acknowledged by Grace")).toBeInTheDocument();
     expect(within(gone).getByText("Acknowledged by a former member")).toBeInTheDocument();
   });

@@ -29,7 +29,7 @@ function catchAll(dir: string): string | undefined {
 }
 
 function routeExists(href: string): boolean {
-  const clean = href.split(/[?#]/)[0].replace(/\/+$/, "");
+  const clean = href.replace(/[?#].*/, "").replace(/\/+$/, "");
   const segments = clean === "" ? [] : clean.slice(1).split("/");
   let dir = APP;
   for (const segment of segments) {

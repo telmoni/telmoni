@@ -72,11 +72,11 @@ function me(over: Record<string, unknown> = {}) {
 }
 
 function sentBody() {
-  return JSON.parse(fetchWithTimeout.mock.calls[0][1].body as string);
+  return JSON.parse(fetchWithTimeout.mock.calls[0]![1].body as string);
 }
 
 function sentHeaders(): Record<string, string> {
-  return fetchWithTimeout.mock.calls[0][1].headers;
+  return fetchWithTimeout.mock.calls[0]![1].headers;
 }
 
 beforeEach(() => {

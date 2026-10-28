@@ -10,6 +10,9 @@
     "allowJs": true,
     "skipLibCheck": true,
     "strict": true,
+    // An index read may miss: the code was written as if the compiler said
+    // so, and now it does.
+    "noUncheckedIndexedAccess": true,
     // An unused local or parameter is the cheapest dead code there is, and
     // `strict` does not cover either. Both were already clean when this
     // landed, so the cost is zero and the gate is what keeps it zero — the
