@@ -60,11 +60,7 @@ pub fn state(
     }
     // Bounded, so an export that keys its project ends inside an
     // organization's deletion grace.
-    let http = reqwest::Client::builder()
-        .timeout(KEY_SERVICE_WAIT)
-        .redirect(reqwest::redirect::Policy::none())
-        .user_agent("telmoni-telemetry")
-        .build()?;
+    let http = telmoni_shared::http::client("telmoni-telemetry", KEY_SERVICE_WAIT)?;
     let redis =
         Redis::connect(config.redis_url.expose()).context("REDIS_URL is not a Redis URL")?;
     tracing::info!(kek = kek.kind(), "telemetry: hashing keys are sealed");

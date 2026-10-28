@@ -37,11 +37,7 @@ pub fn state_from_env(
         config.service_secret_next.clone(),
     );
 
-    let http = reqwest::Client::builder()
-        .timeout(Duration::from_secs(15))
-        .redirect(reqwest::redirect::Policy::none())
-        .user_agent("telmoni-notifications")
-        .build()?;
+    let http = telmoni_shared::http::client("telmoni-notifications", Duration::from_secs(15))?;
     let egress = Egress::guarded(Duration::from_secs(10), "telmoni-notifications")?;
 
     let kek = config

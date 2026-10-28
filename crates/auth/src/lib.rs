@@ -45,17 +45,14 @@ use telmoni_shared::middleware::service_auth::{ServiceSecrets, require_service_s
 pub use config::Config;
 pub use provider::{AuthProvider, Authenticated, Subject, TokenResponse};
 
-/// The outbound HTTP client the module's provider hops share: a bounded
-/// timeout, and a user agent naming this crate.
+/// The outbound HTTP client the module's provider hops share, bounded, and
+/// never redirected: the token request posts the client secret, which a
+/// redirect would carry to whatever host it named.
 pub fn http_client() -> reqwest::Result<reqwest::Client> {
-    reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(5))
-        .user_agent(concat!(
-            env!("CARGO_PKG_NAME"),
-            "/",
-            env!("CARGO_PKG_VERSION")
-        ))
-        .build()
+    telmoni_shared::http::client(
+        concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION")),
+        std::time::Duration::from_secs(5),
+    )
 }
 
 /// What a binary supplies that this library does not decide: the issuer

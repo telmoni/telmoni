@@ -188,15 +188,10 @@ pub trait Model: Send + Sync {
 }
 
 /// A client for one of the operator's endpoints. `timeout` bounds a whole
-/// call, the streamed body included. Redirects are refused: an endpoint
-/// that moves is a configuration to fix, and a redirect would carry the key
-/// to wherever it pointed.
+/// call, the streamed body included; an endpoint that moves is a
+/// configuration to fix.
 pub(crate) fn http_client(timeout: std::time::Duration) -> reqwest::Result<reqwest::Client> {
-    reqwest::Client::builder()
-        .timeout(timeout)
-        .redirect(reqwest::redirect::Policy::none())
-        .user_agent("telmoni-agent")
-        .build()
+    telmoni_shared::http::client("telmoni-agent", timeout)
 }
 
 /// A client for a streaming model call. `stall` bounds the wait for the
@@ -204,11 +199,9 @@ pub(crate) fn http_client(timeout: std::time::Duration) -> reqwest::Result<reqwe
 /// steadily is not a hung one, and cutting it at a fixed total threw away
 /// what the person had already read. The turn's budget bounds the whole.
 fn stream_client(stall: std::time::Duration) -> reqwest::Result<reqwest::Client> {
-    reqwest::Client::builder()
+    telmoni_shared::http::builder("telmoni-agent")
         .connect_timeout(CONNECT_TIMEOUT)
         .read_timeout(stall)
-        .redirect(reqwest::redirect::Policy::none())
-        .user_agent("telmoni-agent")
         .build()
 }
 

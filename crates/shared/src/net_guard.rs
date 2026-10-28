@@ -78,10 +78,8 @@ pub struct Egress {
 impl Egress {
     /// The guarded client: the resolver, the literal check, no redirects.
     pub fn guarded(timeout: Duration, user_agent: &str) -> reqwest::Result<Self> {
-        let client = reqwest::Client::builder()
+        let client = crate::http::builder(user_agent)
             .timeout(timeout)
-            .redirect(reqwest::redirect::Policy::none())
-            .user_agent(user_agent)
             .dns_resolver(Arc::new(GuardedResolver))
             .build()?;
         Ok(Self {

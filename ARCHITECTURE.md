@@ -302,6 +302,7 @@ sequenceDiagram
 - **A lane takes its organization's chain lock before changing a row** (after only the workspace lock an install holds) and gives up with `409` after 2 s, avoiding a deadlock with a project transfer that holds the chain lock while awaiting notifications' purge. Slack's revocation locks every organization its workspace serves, by id, and revokes only theirs. A connect re-checks auth within a second under that lock and refuses if the project moved or the caller's role was lost.
 - **Every grant is sealed at rest.** A data key per row, AES-256-GCM per field with the row's id as associated data, the data key wrapped by the key-encryption key: a library, never a lane.
 - **The egress guard** checks a customer's URL when it is registered, when it is dialled and when it connects, and follows no redirect, because a network policy cannot tell a customer's address from the database's.
+- **No outbound client that carries a credential follows a redirect** (`crates/shared/src/http.rs`): auth's token request posts the client secret, telemetry's and notifications' key hops carry theirs, and the agent's calls carry the model's key, so an identity provider or an endpoint whose address redirects is a configuration to fix, told at the first call.
 
 ## The console agent
 

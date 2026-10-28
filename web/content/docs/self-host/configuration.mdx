@@ -99,7 +99,7 @@ Telmoni signs in through an OpenID Connect provider that publishes its discovery
 | Variable | Default | Description |
 | :--- | :--- | :--- |
 | `AUTH_CUSTOM_CLIENT_ID` | *Optional* | The registered OAuth2 client identifier. Setting it turns the provider on; `AUTH_CUSTOM_ISSUER` or `AUTH_CUSTOM_CLIENT_SECRET` set without it is refused at boot. |
-| `AUTH_CUSTOM_ISSUER` | *Required with `AUTH_CUSTOM_CLIENT_ID`* | The base discovery URL of your OIDC provider (must serve `/.well-known/openid-configuration`). In a Kubernetes pod it must be `https://`. |
+| `AUTH_CUSTOM_ISSUER` | *Required with `AUTH_CUSTOM_CLIENT_ID`* | The base discovery URL of your OIDC provider (must serve `/.well-known/openid-configuration`). In a Kubernetes pod it must be `https://`. The server follows no redirect from the provider's endpoints, since the token request carries the client secret: give the address each answers at. |
 | `AUTH_CUSTOM_CLIENT_SECRET` | *Required with `AUTH_CUSTOM_CLIENT_ID`* | The registered OAuth2 client secret. |
 | `AUTH_REDIRECT_URI` | `http://localhost:3000/auth/callback` | The callback URL registered with your identity provider. |
 | `AUTH_CUSTOM_NAME` | `"single sign-on"` | The provider's name on the login button (`"Continue with Okta"`). |
