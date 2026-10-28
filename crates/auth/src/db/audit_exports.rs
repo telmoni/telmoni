@@ -25,22 +25,109 @@ const ENTRY: &str = "id, format, range_from, range_to, status, failure, row_coun
                      downloaded_at";
 
 /// One export as its requester's list shows it: never the file itself.
-#[derive(Debug, Serialize, sqlx::FromRow)]
+#[derive(Debug, Serialize)]
 pub struct ExportEntry {
     pub id: Uuid,
     pub format: ExportFormat,
     pub range_from: Option<DateTime<Utc>>,
     pub range_to: DateTime<Utc>,
-    pub status: ExportStatus,
-    /// Why a failed one failed; `None` for any other.
-    pub failure: Option<ExportFailure>,
-    pub row_count: Option<i64>,
-    /// The file's size, once there is one.
-    pub bytes: Option<i64>,
     pub created_at: DateTime<Utc>,
-    pub finished_at: Option<DateTime<Utc>>,
-    pub expires_at: Option<DateTime<Utc>>,
-    pub downloaded_at: Option<DateTime<Utc>>,
+    #[serde(flatten)]
+    pub state: ExportState,
+}
+
+/// Where an export stands, each state with what it carries: the table's
+/// CHECKs pair a status with its columns, and this is their reading.
+#[derive(Debug, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum ExportState {
+    Queued,
+    Running,
+    Ready {
+        row_count: i64,
+        /// The file's size.
+        bytes: i64,
+        finished_at: DateTime<Utc>,
+        /// Until when the file is kept.
+        expires_at: DateTime<Utc>,
+        downloaded_at: Option<DateTime<Utc>>,
+    },
+    Failed {
+        failure: ExportFailure,
+        finished_at: DateTime<Utc>,
+        /// Until when the failure is listed.
+        expires_at: DateTime<Utc>,
+    },
+}
+
+/// An export's row as the table holds it, read into an [`ExportEntry`].
+#[derive(sqlx::FromRow)]
+struct Row {
+    id: Uuid,
+    format: ExportFormat,
+    range_from: Option<DateTime<Utc>>,
+    range_to: DateTime<Utc>,
+    status: ExportStatus,
+    failure: Option<ExportFailure>,
+    row_count: Option<i64>,
+    bytes: Option<i64>,
+    created_at: DateTime<Utc>,
+    finished_at: Option<DateTime<Utc>>,
+    expires_at: Option<DateTime<Utc>>,
+    downloaded_at: Option<DateTime<Utc>>,
+}
+
+impl Row {
+    fn into_entry(self) -> sqlx::Result<ExportEntry> {
+        let state = match (
+            self.status,
+            self.row_count,
+            self.bytes,
+            self.failure,
+            self.finished_at,
+            self.expires_at,
+        ) {
+            (ExportStatus::Queued, ..) => ExportState::Queued,
+            (ExportStatus::Running, ..) => ExportState::Running,
+            (
+                ExportStatus::Ready,
+                Some(row_count),
+                Some(bytes),
+                _,
+                Some(finished_at),
+                Some(expires_at),
+            ) => ExportState::Ready {
+                row_count,
+                bytes,
+                finished_at,
+                expires_at,
+                downloaded_at: self.downloaded_at,
+            },
+            (ExportStatus::Failed, _, _, Some(failure), Some(finished_at), Some(expires_at)) => {
+                ExportState::Failed {
+                    failure,
+                    finished_at,
+                    expires_at,
+                }
+            }
+            // The CHECKs pair a finished export with its file or its failure
+            // and its expiry, so a row without them is one nothing here
+            // wrote: an error to answer, never an export shown half-made.
+            (ExportStatus::Ready | ExportStatus::Failed, ..) => {
+                return Err(sqlx::Error::Decode(
+                    "a finished audit export lacks what its status promises".into(),
+                ));
+            }
+        };
+        Ok(ExportEntry {
+            id: self.id,
+            format: self.format,
+            range_from: self.range_from,
+            range_to: self.range_to,
+            created_at: self.created_at,
+            state,
+        })
+    }
 }
 
 /// What a build needs of the export it claimed.
@@ -79,7 +166,7 @@ pub async fn create(
     range_from: Option<DateTime<Utc>>,
     range_to: DateTime<Utc>,
 ) -> sqlx::Result<ExportEntry> {
-    sqlx::query_as::<_, ExportEntry>(sqlx::AssertSqlSafe(format!(
+    sqlx::query_as::<_, Row>(sqlx::AssertSqlSafe(format!(
         "INSERT INTO auth.audit_exports
                 (id, organization_id, user_id, format, range_from, range_to)
          VALUES ($1, $2, $3, $4, $5, $6)
@@ -92,7 +179,8 @@ pub async fn create(
     .bind(range_from)
     .bind(range_to)
     .fetch_one(tx.conn())
-    .await
+    .await?
+    .into_entry()
 }
 
 /// How many of the person's exports in the organization are still being
@@ -147,7 +235,7 @@ pub async fn list(
     user_id: &UserId,
     limit: i64,
 ) -> sqlx::Result<Vec<ExportEntry>> {
-    sqlx::query_as::<_, ExportEntry>(sqlx::AssertSqlSafe(format!(
+    sqlx::query_as::<_, Row>(sqlx::AssertSqlSafe(format!(
         "SELECT {ENTRY} FROM auth.audit_exports
           WHERE organization_id = $1 AND user_id = $2
             AND (expires_at IS NULL OR expires_at > now())
@@ -158,7 +246,10 @@ pub async fn list(
     .bind(user_id)
     .bind(limit)
     .fetch_all(tx.conn())
-    .await
+    .await?
+    .into_iter()
+    .map(Row::into_entry)
+    .collect()
 }
 
 /// Take an export to build: one still queued, or one whose last build's lease

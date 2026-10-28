@@ -1294,11 +1294,9 @@ async fn an_invitation_accepted_seats_a_member_and_both_sides_see_it(pool: PgPoo
     assert_eq!(members[0]["member_id"], json!(owner));
     assert_eq!(members[0]["email"], json!(address_of(&owner)));
     assert_eq!(members[0]["role"], json!("owner"));
-    assert_eq!(members[0]["is_owner"], json!(true));
     assert_eq!(members[1]["member_id"], json!(member));
     assert_eq!(members[1]["email"], json!(address_of(&member)));
     assert_eq!(members[1]["role"], json!("admin"));
-    assert_eq!(members[1]["is_owner"], json!(false));
 
     let (status, body) = call(
         &pool,
@@ -2369,7 +2367,6 @@ async fn project_members_list_includes_project_owner(pool: PgPool) {
     assert_eq!(members.len(), 1);
     assert_eq!(members[0]["member_id"], json!(owner));
     assert_eq!(members[0]["role"], json!("owner"));
-    assert_eq!(members[0]["is_owner"], json!(true));
 }
 
 #[sqlx::test]

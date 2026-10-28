@@ -347,7 +347,7 @@ async fn a_token_lists_its_projects_roster_and_not_the_organizations(pool: PgPoo
         .filter_map(|m| m["member_id"].as_str())
         .collect();
     assert_eq!(members, [USER, "user_seated"], "{body}");
-    assert_eq!(body["members"][0]["is_owner"], true, "{body}");
+    assert_eq!(body["members"][0]["role"], "owner", "{body}");
     assert_eq!(body["members"][1]["role"], "member", "{body}");
 }
 

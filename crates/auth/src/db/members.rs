@@ -79,10 +79,9 @@ pub struct Member {
     pub display_name: Option<String>,
     pub role: Role,
     pub created_at: DateTime<Utc>,
-    pub is_owner: bool,
     /// When the owner's live offer of the project to this admin lapses;
     /// `None` when there is no live offer, and always for the owner's row.
-    pub transfer_offer_expires_at: Option<DateTime<Utc>>,
+    pub offer_expires_at: Option<DateTime<Utc>>,
 }
 
 /// A project offered to the caller, as `/me` lists it: enough to say what is
@@ -133,9 +132,10 @@ pub async fn list_for_project(
     project_id: &ProjectId,
 ) -> sqlx::Result<Vec<Member>> {
     sqlx::query_as::<_, Member>(sqlx::AssertSqlSafe(format!(
-        "SELECT o.id, o.user_id AS member_id, i.email, i.display_name,
-                'owner'::text AS role, p.created_at, true AS is_owner,
-                NULL::timestamptz AS transfer_offer_expires_at
+        "SELECT * FROM (
+         SELECT o.id, o.user_id AS member_id, i.email, i.display_name,
+                'owner'::text AS role, p.created_at,
+                NULL::timestamptz AS offer_expires_at
            FROM auth.projects p
            JOIN auth.organization_members o
              ON o.organization_id = p.organization_id AND o.role = 'owner'
@@ -143,8 +143,8 @@ pub async fn list_for_project(
           WHERE p.external_id = $1
           UNION ALL
          SELECT m.id, m.user_id, i.email, i.display_name,
-                m.role, m.created_at, false AS is_owner,
-                {OFFER_EXPIRES_AT} AS transfer_offer_expires_at
+                m.role, m.created_at,
+                {OFFER_EXPIRES_AT} AS offer_expires_at
            FROM auth.project_members m
            JOIN auth.projects p ON p.external_id = m.project_id
            JOIN auth.identities i ON i.user_id = m.user_id
@@ -153,7 +153,8 @@ pub async fn list_for_project(
                 SELECT 1 FROM auth.organization_members o
                  WHERE o.organization_id = p.organization_id
                    AND o.user_id = m.user_id AND o.role = 'owner')
-          ORDER BY is_owner DESC, created_at DESC, id DESC"
+         ) AS roster
+          ORDER BY (role = 'owner') DESC, created_at DESC, id DESC"
     )))
     .bind(project_id)
     .bind(OFFER_TTL_DAYS)

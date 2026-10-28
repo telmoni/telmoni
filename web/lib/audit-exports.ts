@@ -1,4 +1,8 @@
-import type { AuditExport, AuditExportLimits } from "@/lib/types/audit-export";
+import type {
+  AuditExport,
+  AuditExportLimits,
+  FailedAuditExport,
+} from "@/lib/types/audit-export";
 
 /// The ranges the export dialog offers: the last week, month or quarter up to
 /// now, the whole chain, or two days the person picks.
@@ -79,7 +83,7 @@ export function eventsLabel(count: number): string {
 /// how many events it holds.
 export function exportSummary(entry: AuditExport, now: Date): string {
   const parts = [entry.format.toUpperCase(), rangeLabel(entry, now)];
-  if (entry.status === "ready" && entry.row_count !== null) {
+  if (entry.status === "ready") {
     parts.push(eventsLabel(entry.row_count));
   }
   return parts.join(" · ");
@@ -89,7 +93,7 @@ export function exportSummary(entry: AuditExport, now: Date): string {
 /// events or the bytes their details come to, as auth sets them for the
 /// organization — and a shorter range is the answer to both.
 export function failureText(
-  entry: Pick<AuditExport, "failure">,
+  entry: Pick<FailedAuditExport, "failure">,
   limits: AuditExportLimits,
 ): string {
   return entry.failure === "too_large"

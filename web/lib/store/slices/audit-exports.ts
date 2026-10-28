@@ -41,7 +41,7 @@ export const createAuditExportsSlice = (): StateCreator<
         Object.entries(s.auditExports).map(([organizationId, exports]) => [
           organizationId,
           exports.map((e) =>
-            e.id === id && e.downloaded_at === null
+            e.id === id && e.status === "ready" && e.downloaded_at === null
               ? { ...e, downloaded_at: new Date().toISOString() }
               : e,
           ),

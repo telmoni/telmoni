@@ -14,9 +14,8 @@ const OrganizationMemberSchema = z.object({
   display_name: z.string().nullable().optional(),
   role: z.enum(OrganizationRole),
   created_at: z.string(),
-  is_owner: z.boolean(),
   /// When the owner's live offer of the organization to this admin lapses.
-  ownership_offer_expires_at: z.string().nullable().optional(),
+  offer_expires_at: z.string().nullable().optional(),
 });
 
 export type OrganizationMember = z.infer<typeof OrganizationMemberSchema>;

@@ -261,8 +261,8 @@ beforeEach(() => {
     kind: "ok",
     ceiling: null,
     members: [
-      { id: "m1", member_id: "user_1", email: "ada@example.test", display_name: "Ada", role: "member", created_at: "", is_owner: false },
-      { id: "m2", member_id: "user_2", email: "sam@example.test", display_name: null, role: "member", created_at: "", is_owner: false },
+      { id: "m1", member_id: "user_1", email: "ada@example.test", display_name: "Ada", role: "member", created_at: "" },
+      { id: "m2", member_id: "user_2", email: "sam@example.test", display_name: null, role: "member", created_at: "" },
     ],
   };
   mockIncident = { kind: "missing" };

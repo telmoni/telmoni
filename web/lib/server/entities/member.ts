@@ -15,10 +15,9 @@ const MemberSchema = z.object({
   display_name: z.string().nullable().optional(),
   role: z.enum(Role),
   created_at: z.string(),
-  is_owner: z.boolean(),
   /// When the owner's live offer of the project to this admin lapses; absent
   /// when there is no live offer, and always for the owner's row.
-  transfer_offer_expires_at: z.string().nullable().optional(),
+  offer_expires_at: z.string().nullable().optional(),
 });
 
 export type Member = z.infer<typeof MemberSchema>;

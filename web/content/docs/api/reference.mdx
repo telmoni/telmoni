@@ -114,8 +114,7 @@ roster, which a project Admin cannot see in the console either.
       "display_name": "Sam Rivera",
       "role": "owner",
       "created_at": "2026-08-28T12:00:00Z",
-      "is_owner": true,
-      "transfer_offer_expires_at": null
+      "offer_expires_at": null
     },
     {
       "id": "019a3d52-7b10-7c9e-a4f1-2d8e6b0c9a13",
@@ -124,8 +123,7 @@ roster, which a project Admin cannot see in the console either.
       "display_name": null,
       "role": "admin",
       "created_at": "2026-09-01T09:30:00Z",
-      "is_owner": false,
-      "transfer_offer_expires_at": null
+      "offer_expires_at": null
     }
   ]
 }
@@ -142,8 +140,7 @@ roster, which a project Admin cannot see in the console either.
   only with a seat of their own, under that seat's role.
 - `created_at`: ISO-8601 UTC timestamp of when the member took their seat; on
   the Owner's row, when the project was created.
-- `is_owner`: Boolean flag indicating if this member is the organization Owner.
-- `transfer_offer_expires_at`: UTC timestamp indicating when an open offer to
+- `offer_expires_at`: UTC timestamp indicating when an open offer to
   hand the project to this admin expires, or `null` if none is pending.
 
 ## Errors

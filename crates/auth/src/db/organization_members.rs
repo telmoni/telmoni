@@ -51,11 +51,9 @@ pub struct OrganizationMember {
     pub display_name: Option<String>,
     pub role: OrganizationRole,
     pub created_at: DateTime<Utc>,
-    /// Whether this row is the owner's.
-    pub is_owner: bool,
-    /// When the live ownership offer to this admin lapses; `None` when there
-    /// is no live offer.
-    pub ownership_offer_expires_at: Option<DateTime<Utc>>,
+    /// When the owner's live offer of the organization to this admin lapses;
+    /// `None` when there is no live offer.
+    pub offer_expires_at: Option<DateTime<Utc>>,
 }
 
 /// One live organization invitation.
@@ -119,8 +117,7 @@ pub async fn list_for_organization(
 ) -> sqlx::Result<Vec<OrganizationMember>> {
     sqlx::query_as::<_, OrganizationMember>(sqlx::AssertSqlSafe(format!(
         "SELECT m.id, m.user_id AS member_id, i.email, i.display_name, m.role,
-                m.created_at, m.role = 'owner' AS is_owner,
-                {OFFER_EXPIRES_AT} AS ownership_offer_expires_at
+                m.created_at, {OFFER_EXPIRES_AT} AS offer_expires_at
            FROM auth.organization_members m
            JOIN auth.identities i ON i.user_id = m.user_id
           WHERE m.organization_id = $1

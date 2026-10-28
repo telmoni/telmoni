@@ -116,7 +116,6 @@ const ADMIN = {
   display_name: "Admin User",
   role: OrganizationRole.Admin,
   created_at: "2026-08-15T00:00:00Z",
-  is_owner: false,
 };
 
 beforeEach(() => {
@@ -134,7 +133,6 @@ beforeEach(() => {
         display_name: "Owner User",
         role: OrganizationRole.Owner,
         created_at: "2026-08-01T00:00:00Z",
-        is_owner: true,
       },
       ADMIN,
       {
@@ -144,7 +142,6 @@ beforeEach(() => {
         display_name: null,
         role: OrganizationRole.Member,
         created_at: "2026-09-01T00:00:00Z",
-        is_owner: false,
       },
     ],
   };
@@ -345,7 +342,7 @@ describe("OrganizationMembersPage: handing the organization over", () => {
   it("shows a live offer, and a way to withdraw it rather than make a second", async () => {
     mockOrganizationMembers = {
       kind: "ok",
-      members: [{ ...ADMIN, ownership_offer_expires_at: "2026-09-30T00:00:00Z" }],
+      members: [{ ...ADMIN, offer_expires_at: "2026-09-30T00:00:00Z" }],
     };
     render(await OrganizationMembersPage());
     expect(document.body.textContent).toMatch(/ownership offered/i);

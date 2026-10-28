@@ -354,10 +354,10 @@ export function MemberRow({
 }: MemberRowProps) {
   const { pending, error, run: act } = useAction();
 
-  const isOwner = member.is_owner || owns(member.role);
+  const isOwner = owns(member.role);
   // Only an admin can be handed the project, and only the owner hands it.
   const canOffer = canManage && isOwnerCaller && !isOwner && member.role === Role.Admin;
-  const offered = Boolean(member.transfer_offer_expires_at);
+  const offered = Boolean(member.offer_expires_at);
 
   return (
     <tr>
@@ -369,10 +369,10 @@ export function MemberRow({
               Project Owner
             </Badge>
           )}
-          {offered && member.transfer_offer_expires_at && (
+          {offered && member.offer_expires_at && (
             <Badge variant="outline" className="text-[10px] px-1.5 py-0">
               Project offered · lapses{" "}
-              <LocalTime iso={member.transfer_offer_expires_at} mode="date" />
+              <LocalTime iso={member.offer_expires_at} mode="date" />
             </Badge>
           )}
         </div>

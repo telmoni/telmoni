@@ -153,7 +153,6 @@ beforeEach(() => {
         display_name: "Owner User",
         role: Role.Owner,
         created_at: "2026-08-01T00:00:00Z",
-        is_owner: true,
       },
       {
         id: "m_1",
@@ -162,7 +161,6 @@ beforeEach(() => {
         display_name: "Admin User",
         role: Role.Admin,
         created_at: "2026-09-01T00:00:00Z",
-        is_owner: false,
       },
     ],
   };
@@ -178,10 +176,10 @@ beforeEach(() => {
 const ROSTER = {
   kind: "ok",
   members: [
-    { id: "om_owner", member_id: "user_owner", email: "owner@example.com", display_name: "Owner User", role: "owner", created_at: "2026-08-01T00:00:00Z", is_owner: true },
-    { id: "om_2", member_id: "user_2", email: "admin@example.com", display_name: "Admin User", role: "member", created_at: "2026-09-01T00:00:00Z", is_owner: false },
-    { id: "om_ada", member_id: "user_ada", email: "ada@example.com", display_name: "Ada", role: "admin", created_at: "2026-09-01T00:00:00Z", is_owner: false },
-    { id: "om_3", member_id: "user_dana", email: "dana@example.com", display_name: "Dana", role: "member", created_at: "2026-09-02T00:00:00Z", is_owner: false },
+    { id: "om_owner", member_id: "user_owner", email: "owner@example.com", display_name: "Owner User", role: "owner", created_at: "2026-08-01T00:00:00Z" },
+    { id: "om_2", member_id: "user_2", email: "admin@example.com", display_name: "Admin User", role: "member", created_at: "2026-09-01T00:00:00Z" },
+    { id: "om_ada", member_id: "user_ada", email: "ada@example.com", display_name: "Ada", role: "admin", created_at: "2026-09-01T00:00:00Z" },
+    { id: "om_3", member_id: "user_dana", email: "dana@example.com", display_name: "Dana", role: "member", created_at: "2026-09-02T00:00:00Z" },
   ],
 };
 
@@ -481,7 +479,6 @@ describe("MembersPage: handing the project over", () => {
           display_name: "Owner User",
           role: Role.Owner,
           created_at: "2026-08-01T00:00:00Z",
-          is_owner: true,
         },
         {
           id: "m_1",
@@ -490,7 +487,6 @@ describe("MembersPage: handing the project over", () => {
           display_name: "Admin User",
           role: Role.Admin,
           created_at: "2026-09-01T00:00:00Z",
-          is_owner: false,
         },
         {
           id: "m_2",
@@ -499,7 +495,6 @@ describe("MembersPage: handing the project over", () => {
           display_name: null,
           role: Role.Member,
           created_at: "2026-09-02T00:00:00Z",
-          is_owner: false,
         },
       ],
     };
@@ -542,8 +537,7 @@ describe("MembersPage: handing the project over", () => {
           display_name: "Admin User",
           role: Role.Admin,
           created_at: "2026-09-01T00:00:00Z",
-          is_owner: false,
-          transfer_offer_expires_at: "2026-10-05T00:00:00Z",
+          offer_expires_at: "2026-10-05T00:00:00Z",
         },
       ],
     };
@@ -592,7 +586,6 @@ describe("MembersPage: leaving", () => {
       display_name: "Owner User",
       role: Role.Owner,
       created_at: "2026-08-01T00:00:00Z",
-      is_owner: true,
     },
     {
       id: "m_1",
@@ -601,7 +594,6 @@ describe("MembersPage: leaving", () => {
       display_name: "Admin User",
       role: Role.Admin,
       created_at: "2026-09-01T00:00:00Z",
-      is_owner: false,
     },
     {
       id: "m_2",
@@ -610,7 +602,6 @@ describe("MembersPage: leaving", () => {
       display_name: "Member User",
       role: Role.Member,
       created_at: "2026-09-02T00:00:00Z",
-      is_owner: false,
     },
   ];
 

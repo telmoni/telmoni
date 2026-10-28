@@ -196,7 +196,6 @@ async fn owner_lists_roster_and_starts_with_owner_row(pool: PgPool) {
         "the owner is a row naming the person, not the organization"
     );
     assert_eq!(members[0]["role"], "owner");
-    assert_eq!(members[0]["is_owner"], true);
     assert_eq!(members[0]["email"], "owner@example.test");
 }
 

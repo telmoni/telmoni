@@ -8,22 +8,24 @@ function store() {
   return createStore({ user: null, flags: { members: true }, projects: [] });
 }
 
-function entry(id: string, overrides: Partial<AuditExport> = {}): AuditExport {
-  return {
+// One export in the state asked for, carrying what that state carries.
+function entry(id: string, status: AuditExport["status"] = "queued"): AuditExport {
+  const asked = {
     id,
-    format: "json",
+    format: "json" as const,
     range_from: null,
     range_to: "2026-10-08T12:00:00Z",
-    status: "queued",
-    failure: null,
-    row_count: null,
-    bytes: null,
     created_at: "2026-10-08T12:00:00Z",
-    finished_at: null,
-    expires_at: null,
-    downloaded_at: null,
-    ...overrides,
   };
+  const finished = { finished_at: "2026-10-08T12:05:00Z", expires_at: "2026-10-15T12:05:00Z" };
+  switch (status) {
+    case "ready":
+      return { ...asked, status, row_count: 3, bytes: 1024, ...finished, downloaded_at: null };
+    case "failed":
+      return { ...asked, status, failure: "error", ...finished };
+    default:
+      return { ...asked, status };
+  }
 }
 
 describe("the audit exports slice", () => {
@@ -35,7 +37,7 @@ describe("the audit exports slice", () => {
     const s = store();
     expect(s.getState().replaceAuditExports("org_a", [entry("one")], 0)).toEqual([]);
     expect(
-      s.getState().replaceAuditExports("org_a", [entry("one", { status: "ready" })], 0),
+      s.getState().replaceAuditExports("org_a", [entry("one", "ready")], 0),
     ).toEqual([entry("one")]);
     expect(s.getState().auditExports.org_a?.[0]?.status).toBe("ready");
   });
@@ -51,7 +53,7 @@ describe("the audit exports slice", () => {
     expect(
       s.getState().replaceAuditExports(
         "org_a",
-        [entry("just started", { status: "running" })],
+        [entry("just started", "running")],
         s.getState().auditExportsStarted,
       ),
     ).not.toBeNull();
@@ -75,7 +77,7 @@ describe("the audit exports slice", () => {
       org_b: [entry("ours")],
     });
     expect(
-      s.getState().replaceAuditExports("org_a", [entry("theirs", { status: "ready" })], 1),
+      s.getState().replaceAuditExports("org_a", [entry("theirs", "ready")], 1),
     ).toEqual([entry("theirs")]);
   });
 
@@ -83,13 +85,13 @@ describe("the audit exports slice", () => {
     const s = store();
     s.getState().replaceAuditExports(
       "org_a",
-      [entry("taken", { status: "ready" }), entry("left", { status: "ready" })],
+      [entry("taken", "ready"), entry("left", "ready")],
       0,
     );
     s.getState().markAuditExportDownloaded("taken");
     const [taken, left] = s.getState().auditExports.org_a!;
-    expect(taken!.downloaded_at).not.toBeNull();
-    expect(left!.downloaded_at).toBeNull();
+    expect(taken).toMatchObject({ status: "ready", downloaded_at: expect.any(String) });
+    expect(left).toMatchObject({ status: "ready", downloaded_at: null });
   });
 
   // A download that finds the file gone takes it off the bell at once,
@@ -98,7 +100,7 @@ describe("the audit exports slice", () => {
     const s = store();
     s.getState().replaceAuditExports(
       "org_a",
-      [entry("gone", { status: "ready" }), entry("kept", { status: "ready" })],
+      [entry("gone", "ready"), entry("kept", "ready")],
       0,
     );
     s.getState().forgetAuditExport("gone");

@@ -169,10 +169,10 @@ export function OrganizationMemberRow({
 }) {
   const { pending, error, run: act } = useAction();
 
-  const isOwner = member.is_owner || owns(member.role);
+  const isOwner = owns(member.role);
   // Only an admin can be handed the organization, and only the owner hands it.
   const canOffer = isOwnerCaller && member.role === OrganizationRole.Admin;
-  const offered = Boolean(member.ownership_offer_expires_at);
+  const offered = Boolean(member.offer_expires_at);
   const transferTrigger = (
     <Button
       variant="outline"
@@ -195,10 +195,10 @@ export function OrganizationMemberRow({
               Organization Owner
             </Badge>
           )}
-          {offered && member.ownership_offer_expires_at && (
+          {offered && member.offer_expires_at && (
             <Badge variant="outline" className="text-[10px] px-1.5 py-0">
               Ownership offered · lapses{" "}
-              <LocalTime iso={member.ownership_offer_expires_at} mode="date" />
+              <LocalTime iso={member.offer_expires_at} mode="date" />
             </Badge>
           )}
         </div>

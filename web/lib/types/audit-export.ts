@@ -2,25 +2,45 @@ import { z } from "zod";
 
 import { ExportFailure, ExportFormat, ExportStatus } from "@/lib/types/enums";
 
+/// What every export carries, whatever state it is in.
+const Asked = {
+  id:         z.string(),
+  format:     z.enum(ExportFormat),
+  /// `null` from the chain's first row.
+  range_from: z.string().nullable(),
+  range_to:   z.string(),
+  created_at: z.string(),
+};
+
 /// One export of the organization's audit log, as auth lists it for the
 /// person who asked for it: never the file itself, which is fetched alone.
-export const AuditExportSchema = z.object({
-  id:            z.string(),
-  format:        z.enum(ExportFormat),
-  /// `null` from the chain's first row.
-  range_from:    z.string().nullable(),
-  range_to:      z.string(),
-  status:        z.enum(ExportStatus),
-  /// Why a failed one failed: more rows than one file holds, or an error.
-  failure:       z.enum(ExportFailure).nullable(),
-  row_count:     z.number().nullable(),
-  bytes:         z.number().nullable(),
-  created_at:    z.string(),
-  finished_at:   z.string().nullable(),
-  expires_at:    z.string().nullable(),
-  downloaded_at: z.string().nullable(),
-});
+/// Each state carries what it has, as auth's `ExportState` does: a finished
+/// one when it finished and until when it is kept, a ready one its file's
+/// rows and bytes and whether it was taken, a failed one why.
+export const AuditExportSchema = z.discriminatedUnion("status", [
+  z.object({ ...Asked, status: z.literal(ExportStatus.Queued) }),
+  z.object({ ...Asked, status: z.literal(ExportStatus.Running) }),
+  z.object({
+    ...Asked,
+    status:        z.literal(ExportStatus.Ready),
+    row_count:     z.number(),
+    bytes:         z.number(),
+    finished_at:   z.string(),
+    expires_at:    z.string(),
+    downloaded_at: z.string().nullable(),
+  }),
+  z.object({
+    ...Asked,
+    status:      z.literal(ExportStatus.Failed),
+    /// More rows than one file holds, or an error.
+    failure:     z.enum(ExportFailure),
+    finished_at: z.string(),
+    expires_at:  z.string(),
+  }),
+]);
 export type AuditExport = z.infer<typeof AuditExportSchema>;
+export type ReadyAuditExport = Extract<AuditExport, { status: "ready" }>;
+export type FailedAuditExport = Extract<AuditExport, { status: "failed" }>;
 
 export type AuditExportFormat = AuditExport["format"];
 
@@ -43,11 +63,13 @@ export const AuditExportListSchema = AuditExportLimitsSchema.extend({
 export const AUDIT_EXPORT_KEPT_DAYS = 7;
 
 /// Still being built: queued, or a build holds it.
-export function isBuilding(entry: Pick<AuditExport, "status">): boolean {
+export function isBuilding(
+  entry: AuditExport,
+): entry is Extract<AuditExport, { status: "queued" | "running" }> {
   return entry.status === "queued" || entry.status === "running";
 }
 
 /// Ready and not yet taken: what the bell offers.
-export function isWaiting(entry: Pick<AuditExport, "status" | "downloaded_at">): boolean {
+export function isWaiting(entry: AuditExport): entry is ReadyAuditExport {
   return entry.status === "ready" && entry.downloaded_at === null;
 }
