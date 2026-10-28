@@ -296,9 +296,11 @@ const MUTATIONS: &[Mutation] = &[
         resource_kind: "Project",
         actor_id: ActorPattern::Variable,
     },
+    // The seat holders' enrolment on the destination's chain, an accept's and
+    // a move's alike.
     Mutation {
         file: "crates/auth/src/handler/project_transfer.rs",
-        fn_name: "emit_project_move_audits",
+        fn_name: "emit_holders_enrolled",
         action: "Created",
         resource_kind: "Member",
         actor_id: ActorPattern::Variable,

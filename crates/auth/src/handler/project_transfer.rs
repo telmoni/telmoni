@@ -66,8 +66,9 @@ use crate::{
         organization_members, organizations, projects,
     },
     handler::{
-        ActingProject, BEING_DELETED, acting_project, hold_project, parse_organization_id,
-        parse_project_id, parse_user_id, projects::MAX_PROJECT_NAME, refuse_unless_active,
+        ActingProject, BEING_DELETED, acting_project, deletion, hold_project,
+        parse_organization_id, parse_project_id, parse_user_id, projects::MAX_PROJECT_NAME,
+        refuse_unless_active,
     },
     model::AuditKind,
 };
@@ -397,6 +398,110 @@ pub async fn decline(
     Ok(Json(json!({ "ownerOrganizationId": organization })))
 }
 
+/// Where a project landed, and the seats that came with it.
+struct Landed {
+    name: String,
+    slug: String,
+    organization_slug: Option<String>,
+    staying: Vec<members::Seat>,
+}
+
+impl Landed {
+    /// The name it had, when a clash in the destination renamed it on the way in.
+    fn renamed_from<'a>(&self, standing: &'a projects::Standing) -> Option<&'a str> {
+        (self.name != standing.name).then_some(standing.name.as_str())
+    }
+}
+
+/// The steps an accept and a move share once their own checks pass, under
+/// both organizations' locks: a free name in the destination, the move, the
+/// seats marked seen, and the seats that stay, read before an accept seats
+/// the previous owner so theirs is recorded under its own kind.
+async fn land(
+    tx: &mut Scoped<'_, Maintenance<AuthLane>>,
+    project_id: &ProjectId,
+    standing: &projects::Standing,
+    destination: &OrganizationId,
+) -> Result<Landed, TelmoniError> {
+    let held = usize::try_from(projects::count_in(tx, destination).await?).unwrap_or(0);
+    let family = match numbered(&standing.name) {
+        Some((base, n)) => projects::holds_name(tx, destination, base)
+            .await?
+            .then_some((base, n)),
+        None => None,
+    };
+    let candidates = landing_names(&standing.name, held, family);
+    // `None` cannot happen (see `landing_names`); the move's own refusal
+    // covers it if it ever does.
+    let name = projects::first_free_name(tx, destination, &candidates)
+        .await?
+        .unwrap_or_else(|| standing.name.clone());
+    let source = &standing.organization_id;
+    let Some(slug) = projects::move_to_organization(tx, project_id, source, destination, &name)
+        .await
+        .map_err(|e| name_taken_in(e, &name))?
+    else {
+        return Err(AuthError::Conflict("the project is no longer where it was".into()).into());
+    };
+    members::mark_seen_on_project(tx, project_id).await?;
+    let organization_slug = organizations::slug_of(tx, destination).await?;
+    let staying = members::seats_on(tx, project_id).await?;
+    Ok(Landed {
+        name,
+        slug,
+        organization_slug,
+        staying,
+    })
+}
+
+/// Every seat holder on the destination's roster, as a project invitation
+/// would enrol them: `/me` lists a seat only in an organization its holder
+/// can open. Answers the seats whose holders were not on it already.
+async fn enrol<'a>(
+    tx: &mut Scoped<'_, Maintenance<AuthLane>>,
+    destination: &OrganizationId,
+    seats: &'a [members::Seat],
+    by: &UserId,
+) -> Result<Vec<&'a members::Seat>, TelmoniError> {
+    let mut enrolled = Vec::new();
+    for seat in seats {
+        if organization_members::add_member(
+            tx,
+            destination,
+            &seat.user_id,
+            OrganizationRole::Member,
+            by,
+        )
+        .await?
+        {
+            enrolled.push(seat);
+        }
+    }
+    Ok(enrolled)
+}
+
+/// The project's move lock once every check has passed, so a lane a check
+/// refuses never waits on an export, and the chain locks after it, so none
+/// is held while it does.
+async fn lock_for_audits(
+    tx: &mut Scoped<'_, Maintenance<AuthLane>>,
+    project_id: &ProjectId,
+    source: &OrganizationId,
+    destination: &OrganizationId,
+) -> Result<(), TelmoniError> {
+    lock_project_for_move(tx, project_id).await?;
+    lock_transfer_chains(tx, source, destination).await
+}
+
+/// `details` with `renamed_from`, only when it happened: the console's audit
+/// table prints metadata whole, and a `null` on every handover is noise.
+fn renamed(mut details: serde_json::Value, renamed_from: Option<&str>) -> serde_json::Value {
+    if let (Some(from), Some(fields)) = (renamed_from, details.as_object_mut()) {
+        fields.insert("renamed_from".into(), json!(from));
+    }
+    details
+}
+
 struct TransferAudits<'a> {
     source: &'a OrganizationId,
     destination: &'a OrganizationId,
@@ -445,23 +550,16 @@ async fn emit_project_transfer_audits(
         )
         .in_project(audits.project_id)
         .on(audits.project_id.as_str())
-        .details({
-            let mut received = json!({
+        .details(renamed(
+            json!({
                 "kind": AuditKind::ProjectReceived,
                 "from_organization": audits.source.as_str(),
                 "from": audits.previous.as_str(),
                 "to": audits.user_id.as_str(),
                 "name": audits.project_name,
-            });
-            // Only when it happened: the console's audit table prints
-            // metadata whole, and a `null` on every handover is noise.
-            if let (Some(renamed_from), Some(fields)) =
-                (audits.renamed_from, received.as_object_mut())
-            {
-                fields.insert("renamed_from".into(), json!(renamed_from));
-            }
-            received
-        }),
+            }),
+            audits.renamed_from,
+        )),
     )
     .await?;
     // The seat the new owner held is folded into the ownership.
@@ -516,12 +614,28 @@ async fn emit_project_transfer_audits(
         )
         .await?;
     }
-    for seat in audits.holders_enrolled {
+    emit_holders_enrolled(
+        conn,
+        audits.destination,
+        audits.user_id,
+        audits.holders_enrolled,
+    )
+    .await
+}
+
+/// Each seat holder's enrolment on the destination's roster, on its chain.
+async fn emit_holders_enrolled(
+    conn: &mut sqlx::PgConnection,
+    destination: &OrganizationId,
+    user_id: &UserId,
+    holders: &[&members::Seat],
+) -> Result<(), TelmoniError> {
+    for seat in holders {
         emit_audit(
             conn,
             AuditEvent::new(
-                audits.destination,
-                Actor::User(audits.user_id.as_str()),
+                destination,
+                Actor::User(user_id.as_str()),
                 AuditAction::Created,
                 TelmoniResourceKind::Member,
             )
@@ -767,34 +881,7 @@ pub async fn accept(
         )
         .into());
     }
-    let held = usize::try_from(projects::count_in(&mut tx, &destination).await?).unwrap_or(0);
-    let family = match numbered(&standing.name) {
-        Some((base, n)) => projects::holds_name(&mut tx, &destination, base)
-            .await?
-            .then_some((base, n)),
-        None => None,
-    };
-    let candidates = landing_names(&standing.name, held, family);
-    // `None` cannot happen (see `landing_names`); the move's own refusal
-    // covers it if it ever does.
-    let name = projects::first_free_name(&mut tx, &destination, &candidates)
-        .await?
-        .unwrap_or_else(|| standing.name.clone());
-    let Some(slug) =
-        projects::move_to_organization(&mut tx, &project_id, &source, &destination, &name)
-            .await
-            .map_err(|e| name_taken_in(e, &name))?
-    else {
-        return Err(AuthError::Conflict(
-            "the project is no longer where it was offered from".into(),
-        )
-        .into());
-    };
-    members::mark_seen_on_project(&mut tx, &project_id).await?;
-    let organization_slug = organizations::slug_of(&mut tx, &destination).await?;
-    // The seats that stay, read before the previous owner's is added so
-    // theirs is recorded under its own kind: the new owner's is folded already.
-    let staying = members::seats_on(&mut tx, &project_id).await?;
+    let landed = land(&mut tx, &project_id, &standing, &destination).await?;
     // The previous owner keeps a seat, and with it a row on the destination's
     // roster, as a project invitation would give them: every seat holder is
     // on the owning organization's roster, or `/me` would list a seat in an
@@ -809,27 +896,9 @@ pub async fn accept(
         &user_id,
     )
     .await?;
-    // Every other seat holder is enrolled the same way.
-    let mut holders_enrolled = Vec::new();
-    for seat in &staying {
-        if organization_members::add_member(
-            &mut tx,
-            &destination,
-            &seat.user_id,
-            OrganizationRole::Member,
-            &user_id,
-        )
-        .await?
-        {
-            holders_enrolled.push(seat);
-        }
-    }
+    let holders_enrolled = enrol(&mut tx, &destination, &landed.staying, &user_id).await?;
 
-    // The project's move lock once every check has passed, so an accept a
-    // check refuses never waits on an export, and before the chain locks, so
-    // that none is held while it does.
-    lock_project_for_move(&mut tx, &project_id).await?;
-    lock_transfer_chains(&mut tx, &source, &destination).await?;
+    lock_for_audits(&mut tx, &project_id, &source, &destination).await?;
     emit_project_transfer_audits(
         &mut tx,
         TransferAudits {
@@ -838,8 +907,8 @@ pub async fn accept(
             project_id: &project_id,
             user_id: &user_id,
             previous: &previous,
-            project_name: &name,
-            renamed_from: (name != standing.name).then_some(standing.name.as_str()),
+            project_name: &landed.name,
+            renamed_from: landed.renamed_from(&standing),
             seated,
             enrolled,
             holders_enrolled: &holders_enrolled,
@@ -851,12 +920,7 @@ pub async fn accept(
     let previous_contact = identities::get(&mut tx, &previous).await?;
     let new_owner = crate::identity::display_for(person.display_name.as_deref(), &person.email);
 
-    let settle = SettleTelemetry::arm(&state, &project_id, &source, &destination);
-    if let Err(e) = move_purge_and_commit(&state, tx, &project_id, &destination).await {
-        settle.settle().await;
-        return Err(e);
-    }
-    settle.disarm();
+    move_purge_and_commit(&state, tx, &project_id, &source, &destination).await?;
 
     if let Some(previous_contact) = previous_contact
         && let Err(e) = state
@@ -882,12 +946,12 @@ pub async fn accept(
     );
     Ok(Json(json!({
         "projectId": project_id,
-        "slug": slug,
+        "slug": landed.slug,
         "organizationId": destination,
-        "organizationSlug": organization_slug,
+        "organizationSlug": landed.organization_slug,
         "previousOrganizationId": source,
         "previousOwner": previous,
-        "name": name,
+        "name": landed.name,
     })))
 }
 
@@ -981,48 +1045,10 @@ pub async fn move_project(
     // An offer of the project to one of its admins was an offer to take it
     // out of the organization it is leaving.
     offers::clear(&mut tx, Roster::Project(&project_id)).await?;
-    let held = usize::try_from(projects::count_in(&mut tx, &destination).await?).unwrap_or(0);
-    let family = match numbered(&standing.name) {
-        Some((base, n)) => projects::holds_name(&mut tx, &destination, base)
-            .await?
-            .then_some((base, n)),
-        None => None,
-    };
-    let candidates = landing_names(&standing.name, held, family);
-    let name = projects::first_free_name(&mut tx, &destination, &candidates)
-        .await?
-        .unwrap_or_else(|| standing.name.clone());
-    let Some(slug) =
-        projects::move_to_organization(&mut tx, &project_id, &source, &destination, &name)
-            .await
-            .map_err(|e| name_taken_in(e, &name))?
-    else {
-        return Err(AuthError::Conflict("the project is no longer where it was".into()).into());
-    };
-    members::mark_seen_on_project(&mut tx, &project_id).await?;
-    let organization_slug = organizations::slug_of(&mut tx, &destination).await?;
-    // Every seat holder on the destination's roster, as the accept enrols
-    // them: `/me` lists a seat only in an organization its holder can open.
-    let staying = members::seats_on(&mut tx, &project_id).await?;
-    let mut holders_enrolled = Vec::new();
-    for seat in &staying {
-        if organization_members::add_member(
-            &mut tx,
-            &destination,
-            &seat.user_id,
-            OrganizationRole::Member,
-            &user_id,
-        )
-        .await?
-        {
-            holders_enrolled.push(seat);
-        }
-    }
+    let landed = land(&mut tx, &project_id, &standing, &destination).await?;
+    let holders_enrolled = enrol(&mut tx, &destination, &landed.staying, &user_id).await?;
 
-    // Where the accept takes it, for the accept's reasons: no refused move
-    // waits on an export, and no chain lock is held while one does.
-    lock_project_for_move(&mut tx, &project_id).await?;
-    lock_transfer_chains(&mut tx, &source, &destination).await?;
+    lock_for_audits(&mut tx, &project_id, &source, &destination).await?;
     emit_project_move_audits(
         &mut tx,
         MoveAudits {
@@ -1030,19 +1056,14 @@ pub async fn move_project(
             destination: &destination,
             project_id: &project_id,
             user_id: &user_id,
-            project_name: &name,
-            renamed_from: (name != standing.name).then_some(standing.name.as_str()),
+            project_name: &landed.name,
+            renamed_from: landed.renamed_from(&standing),
             holders_enrolled: &holders_enrolled,
         },
     )
     .await?;
 
-    let settle = SettleTelemetry::arm(&state, &project_id, &source, &destination);
-    if let Err(e) = move_purge_and_commit(&state, tx, &project_id, &destination).await {
-        settle.settle().await;
-        return Err(e);
-    }
-    settle.disarm();
+    move_purge_and_commit(&state, tx, &project_id, &source, &destination).await?;
 
     tracing::info!(
         project_id = %project_id,
@@ -1052,11 +1073,11 @@ pub async fn move_project(
     );
     Ok(Json(json!({
         "projectId": project_id,
-        "slug": slug,
+        "slug": landed.slug,
         "organizationId": destination,
-        "organizationSlug": organization_slug,
+        "organizationSlug": landed.organization_slug,
         "previousOrganizationId": source,
-        "name": name,
+        "name": landed.name,
     })))
 }
 
@@ -1102,71 +1123,44 @@ async fn emit_project_move_audits(
         )
         .in_project(audits.project_id)
         .on(audits.project_id.as_str())
-        .details({
-            let mut arrived = json!({
+        .details(renamed(
+            json!({
                 "kind": AuditKind::ProjectMoved,
                 "from_organization": audits.source.as_str(),
                 "name": audits.project_name,
-            });
-            // Only when it happened, as the transfer records it.
-            if let (Some(renamed_from), Some(fields)) =
-                (audits.renamed_from, arrived.as_object_mut())
-            {
-                fields.insert("renamed_from".into(), json!(renamed_from));
-            }
-            arrived
-        }),
+            }),
+            audits.renamed_from,
+        )),
     )
     .await?;
-    for seat in audits.holders_enrolled {
-        emit_audit(
-            conn,
-            AuditEvent::new(
-                audits.destination,
-                Actor::User(audits.user_id.as_str()),
-                AuditAction::Created,
-                TelmoniResourceKind::Member,
-            )
-            .on(seat.user_id.as_str())
-            .details(json!({
-                "kind": AuditKind::SeatHolderEnrolled,
-                "role": OrganizationRole::Member,
-                "seat": seat.role,
-            })),
-        )
-        .await?;
-    }
-    Ok(())
-}
-
-/// The accept's last steps, in order: telemetry's move, the one that can be
-/// undone, then notifications' purge, which cannot, then the commit. The
-/// transaction ends here whatever happens, rolled back before a refusal is
-/// answered rather than when its connection goes back to the pool, so the
-/// settling after finds its locks free.
-async fn move_purge_and_commit(
-    state: &AppState,
-    tx: Scoped<'_, Maintenance<AuthLane>>,
-    project_id: &ProjectId,
-    destination: &OrganizationId,
-) -> Result<(), TelmoniError> {
-    let ready = match crate::handler::deletion::move_project_telemetry(
-        state,
-        project_id,
-        destination,
+    emit_holders_enrolled(
+        conn,
+        audits.destination,
+        audits.user_id,
+        audits.holders_enrolled,
     )
     .await
-    {
-        Ok(()) => {
-            crate::handler::deletion::purge_project_connectors(
-                state,
-                project_id,
-                crate::handler::deletion::Teardown::ForMove,
-            )
-            .await
-        }
-        Err(e) => Err(e),
-    };
+}
+
+/// The last steps of an accept and a move, in order: telemetry's move, the
+/// one that can be undone, then notifications' purge, which cannot, then the
+/// commit. The transaction ends here whatever happens, rolled back before a
+/// refusal is answered rather than when its connection goes back to the pool,
+/// so the settling after finds its locks free; telemetry's settings are
+/// settled ([`SettleTelemetry`]) when any step fails.
+async fn move_purge_and_commit(
+    state: &Arc<AppState>,
+    tx: Scoped<'_, Maintenance<AuthLane>>,
+    project_id: &ProjectId,
+    source: &OrganizationId,
+    destination: &OrganizationId,
+) -> Result<(), TelmoniError> {
+    let settle = SettleTelemetry::arm(state, project_id, source, destination);
+    let ready = async {
+        deletion::move_project_telemetry(state, project_id, destination).await?;
+        deletion::purge_project_connectors(state, project_id, deletion::Teardown::ForMove).await
+    }
+    .await;
     if let Err(e) = ready {
         // A rollback that fails is a connection gone, whose close undoes it.
         if tx.rollback().await.is_err() {
@@ -1175,9 +1169,14 @@ async fn move_purge_and_commit(
                 "a refused transfer's rollback failed; its connection's close undoes it"
             );
         }
+        settle.settle().await;
         return Err(e);
     }
-    tx.commit().await?;
+    if let Err(e) = tx.commit().await {
+        settle.settle().await;
+        return Err(e.into());
+    }
+    settle.disarm();
     Ok(())
 }
 
