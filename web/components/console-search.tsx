@@ -29,7 +29,7 @@ import {
 import { consolePlace, projectAt } from "@/lib/console-nav";
 import { projectPath } from "@/lib/slug";
 import { useActiveOrganization, useProjects, useUser } from "@/lib/store";
-import { SEARCH_MODIFIER_KEY, pressedKey } from "@/lib/keys";
+import { SEARCH_MODIFIER_KEY, isChord } from "@/lib/keys";
 import {
   GROUP_LABELS,
   groupItems,
@@ -90,9 +90,7 @@ export function ConsoleSearch() {
   // Shift and that one requires it.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (pressedKey(e).toLowerCase() !== SEARCH_MODIFIER_KEY) return;
-      if (!(e.ctrlKey || e.metaKey)) return;
-      if (e.defaultPrevented || e.altKey || e.shiftKey) return;
+      if (!isChord(e, SEARCH_MODIFIER_KEY)) return;
       e.preventDefault();
       // A second press closes it, which is what every palette with this chord
       // does and what a person expects from a toggle.

@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import { NAV_COLLAPSED_COOKIE } from "@/lib/console-nav";
-import { MODAL_SELECTOR } from "@/lib/keys";
+import { inFront } from "@/lib/keys";
 
 const useIsomorphicLayoutEffect =
   typeof window === "undefined" ? useEffect : useLayoutEffect;
@@ -100,7 +100,7 @@ export function SidebarProvider({
       if (e.key !== "Escape") return;
       if (e.defaultPrevented) return;
       // Something in front opened on top of the drawer, and Escape is its.
-      if (document.querySelector(MODAL_SELECTOR)) return;
+      if (inFront()) return;
       move(false);
       // Focus in the drawer goes back to the control that opened it, rather
       // than staying on a row that slides away and is hidden.
@@ -136,7 +136,7 @@ export function SidebarProvider({
       // names the relationship, so nothing new has to be marked up for this.
       if (target.closest('[aria-controls="console-sidebar"]')) return;
       // The same yield Escape makes: whatever is in front gets the press.
-      if (document.querySelector(MODAL_SELECTOR)) return;
+      if (inFront()) return;
       move(false);
     };
     document.addEventListener("pointerdown", onPointerDown);

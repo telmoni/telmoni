@@ -43,6 +43,32 @@ export function pressedKey(e: KeyboardEvent): string {
   return typeof e.key === "string" ? e.key : "";
 }
 
+// What types its own keys: a field, a list, and a form in a panel, whose
+// switches and draft are its own.
+const TYPING_SELECTOR =
+  'input, textarea, select, [contenteditable="true"], [role="combobox"], [role="listbox"], [role="dialog"] form';
+
+/** Whether a key went to something that types, or to an input method still composing. */
+export function typedInto(e: KeyboardEvent): boolean {
+  return e.isComposing || (e.target instanceof Element && e.target.closest(TYPING_SELECTOR) !== null);
+}
+
+/** Whether a modal dialog, an alert or a menu stands in front of the page. */
+export function inFront(): boolean {
+  return document.querySelector(MODAL_SELECTOR) !== null;
+}
+
+/** Whether `e` is ⌘ or Ctrl with `key`, Shift as asked, and no page answered it first. */
+export function isChord(e: KeyboardEvent, key: string, shift = false): boolean {
+  return (
+    !e.defaultPrevented &&
+    !e.altKey &&
+    (e.ctrlKey || e.metaKey) &&
+    e.shiftKey === shift &&
+    pressedKey(e).toLowerCase() === key
+  );
+}
+
 export const ACCOUNT_MENU_EVENT = "telmoni:account-menu";
 
 export const SEQUENCE_TIMEOUT_MS = 1000;

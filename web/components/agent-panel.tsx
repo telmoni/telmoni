@@ -26,7 +26,7 @@ import {
 import { type ActionResult, refused } from "@/lib/action-result";
 import { agentSuggestions } from "@/lib/agent/suggestions";
 import { projectAt } from "@/lib/console-nav";
-import { AGENT_MODIFIER_KEY, MODAL_SELECTOR, pressedKey } from "@/lib/keys";
+import { AGENT_MODIFIER_KEY, inFront, isChord } from "@/lib/keys";
 import { useActiveOrganization, useProjects } from "@/lib/store";
 import { AGENT_MESSAGE_MAX, type AgentStatus } from "@/lib/types/agent";
 import { cn } from "@/lib/utils";
@@ -131,16 +131,14 @@ export function AgentPanel() {
   // it, its field out of reach.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (pressedKey(e).toLowerCase() !== AGENT_MODIFIER_KEY) return;
-      if (!(e.ctrlKey || e.metaKey)) return;
-      if (e.defaultPrevented || e.altKey || e.shiftKey) return;
+      if (!isChord(e, AGENT_MODIFIER_KEY)) return;
       if (searchOpen) {
         e.preventDefault();
         closeSearch();
         openAgent();
         return;
       }
-      if (document.querySelector(MODAL_SELECTOR)) return;
+      if (inFront()) return;
       e.preventDefault();
       toggleAgent();
     };

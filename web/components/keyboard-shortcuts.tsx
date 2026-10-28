@@ -26,7 +26,7 @@ import { useIsMac } from "@/lib/use-platform";
 import {
   AGENT_MODIFIER_KEY,
   goSequences,
-  MODAL_SELECTOR,
+  inFront,
   NEXT_KEY,
   OPEN_KEY,
   PAGE_ACTION_KEY,
@@ -35,6 +35,7 @@ import {
   resolveSequence,
   SEQUENCE_TIMEOUT_MS,
   SEARCH_KEY,
+  typedInto,
 } from "@/lib/keys";
 
 export function KeyboardShortcuts() {
@@ -83,17 +84,8 @@ export function KeyboardShortcuts() {
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey) return;
-      const target = e.target instanceof HTMLElement ? e.target : null;
-      // A form in a panel owns its keys too: a letter pressed on its switches
-      // is its own, and its draft stays where it is.
-      if (
-        target?.closest(
-          'input, textarea, select, [contenteditable="true"], [role="combobox"], [role="listbox"], [role="dialog"] form',
-        )
-      )
-        return;
-      if (document.querySelector(MODAL_SELECTOR)) {
+      if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || typedInto(e)) return;
+      if (inFront()) {
         clearPending();
         return;
       }

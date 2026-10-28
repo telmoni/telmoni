@@ -38,7 +38,7 @@ import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { signOut } from "@/lib/auth/sign-out";
 import { CORNERS_DEFAULT, type Corners } from "@/lib/corners";
 import { setCorners, useCorners } from "@/lib/use-corners";
-import { ACCOUNT_MENU_EVENT, pressedKey } from "@/lib/keys";
+import { ACCOUNT_MENU_EVENT, SEARCH_MODIFIER_KEY, inFront, isChord } from "@/lib/keys";
 import { useIsMac } from "@/lib/use-platform";
 import { DOCS_URL, REPO_URL, STATUS_URL } from "@/lib/site";
 import { useUser } from "@/lib/store";
@@ -88,15 +88,7 @@ export function NavUser() {
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (pressedKey(e).toLowerCase() !== "k" || !(e.ctrlKey || e.metaKey)) return;
-      if (e.defaultPrevented || e.altKey || !e.shiftKey) return;
-      if (
-        document.querySelector(
-          '[data-slot="dialog-content"], [data-slot="alert-dialog-content"], [data-slot="sheet-content"]',
-        )
-      ) {
-        return;
-      }
+      if (!isChord(e, SEARCH_MODIFIER_KEY, true) || inFront()) return;
       e.preventDefault();
       setOpen((v) => !v);
     };
