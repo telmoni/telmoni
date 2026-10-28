@@ -170,7 +170,7 @@ async fn tell_one(
     });
     let key = incident_key(one.incident_id, one.change);
     let notice = |dedup_key| Notice {
-        kind: one.change.kind(),
+        kind: kind_of(one.change),
         subject_user_id: None,
         title: &title,
         body: &body,
@@ -210,6 +210,14 @@ async fn tell_one(
             error = %error,
             "telemetry: an incident's notice could not be told"
         ),
+    }
+}
+
+/// The kind of notice a move is told as.
+const fn kind_of(change: Move) -> NotificationKind {
+    match change {
+        Move::Opened => NotificationKind::IncidentOpened,
+        Move::Resolved => NotificationKind::IncidentResolved,
     }
 }
 

@@ -18,8 +18,8 @@ use telmoni_shared::db::tenant_session::{
     Binding, HasOrganization, HasProject, Maintenance, Scoped, maintenance_scope,
 };
 use telmoni_shared::{
-    IncidentStatus, MissingData, NotificationKind, OrganizationId, ProjectId, RuleOperator,
-    Severity, TelmoniError, UserId,
+    IncidentStatus, MissingData, OrganizationId, ProjectId, RuleOperator, Severity, TelmoniError,
+    UserId,
 };
 
 use crate::AppState;
@@ -107,15 +107,6 @@ pub enum Move {
 }
 
 impl Move {
-    /// The kind of notice it is told as.
-    #[must_use]
-    pub const fn kind(self) -> NotificationKind {
-        match self {
-            Self::Opened => NotificationKind::IncidentOpened,
-            Self::Resolved => NotificationKind::IncidentResolved,
-        }
-    }
-
     /// Its word in the feed's key: one row of each an incident.
     #[must_use]
     pub const fn word(self) -> &'static str {
