@@ -99,17 +99,17 @@ export class Handle {
 /** A handle steps and calls open under: a run, or a step. */
 export abstract class Parent extends Handle {
   readonly #opener: Opener;
-  readonly #run: Run;
 
   constructor(opener: Opener, span: Span, parent: Context, run: Run | undefined) {
     super(span, parent, run, opener.warnOnce);
     this.#opener = opener;
-    // Only a Run passes no run: it is its own.
-    this.#run = run ?? (this as unknown as Run);
   }
 
+  /** The run its steps and calls open in: a run's own self. */
+  protected abstract get owner(): Run;
+
   step<R>(name: string, fn: (step: Step) => R): R {
-    return within(this.#opener.step(this.#run, this.context, name), fn);
+    return within(this.#opener.step(this.owner, this.context, name), fn);
   }
 
   modelCall<R>(model: string, fn: (call: ModelCall) => R): R;
@@ -120,14 +120,14 @@ export abstract class Parent extends Handle {
     b?: (call: ModelCall) => R,
   ): R {
     const [options, fn] = split<ModelCallOptions, (call: ModelCall) => R>(a, b);
-    return within(this.#opener.modelCall(this.#run, this.context, model, options ?? {}), fn);
+    return within(this.#opener.modelCall(this.owner, this.context, model, options ?? {}), fn);
   }
 
   toolCall<R>(name: string, fn: (tool: ToolCall) => R): R;
   toolCall<R>(name: string, options: ToolCallOptions, fn: (tool: ToolCall) => R): R;
   toolCall<R>(name: string, a: ToolCallOptions | ((tool: ToolCall) => R), b?: (tool: ToolCall) => R): R {
     const [options, fn] = split<ToolCallOptions, (tool: ToolCall) => R>(a, b);
-    return within(this.#opener.toolCall(this.#run, this.context, name, options ?? {}), fn);
+    return within(this.#opener.toolCall(this.owner, this.context, name, options ?? {}), fn);
   }
 }
 
@@ -157,6 +157,10 @@ export class Run extends Parent {
     this[GUARD] = guard;
   }
 
+  protected get owner(): Run {
+    return this;
+  }
+
   /** What every span inside the run carries. */
   get inherited(): Attributes {
     return { ...this.#inherited };
@@ -168,7 +172,18 @@ export class Run extends Parent {
   }
 }
 
-export class Step extends Parent {}
+export class Step extends Parent {
+  readonly #run: Run;
+
+  constructor(opener: Opener, span: Span, parent: Context, run: Run) {
+    super(opener, span, parent, run);
+    this.#run = run;
+  }
+
+  protected get owner(): Run {
+    return this.#run;
+  }
+}
 
 /** What a model call is priced by: its name as sent, and the project's own prices. */
 interface Priced {
@@ -667,7 +682,7 @@ function check(item: RunRecord | Item, kind: keyof typeof FIELDS): void {
   const caps: Readonly<Record<string, number>> = { ...CAPS[kind], errorType: contract.ERROR_TYPE_MAX };
   const read: Record<string, unknown> = {};
   for (const [field, type, optional] of [...FIELDS[kind], ...OUTCOME]) {
-    const value: unknown = (item as unknown as Record<string, unknown>)[field];
+    const value: unknown = Reflect.get(item, field);
     read[field] = value;
     if (optional && (value === undefined || value === null)) continue;
     if (!(type === 'object' ? isObject(value) : typeof value === type)) {

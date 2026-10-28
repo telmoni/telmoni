@@ -14,14 +14,6 @@ import { CapExceededError } from './errors.js';
 import file from './model_prices.json';
 import type { Price, RunOptions } from './types.js';
 
-/** One name's price, each in US dollars a token. */
-interface Rate {
-  readonly input: number;
-  readonly output: number;
-  readonly cacheRead: number;
-  readonly cacheWrite: number;
-}
-
 /** A call's counts as sent, one left off counting 0. */
 export interface Tokens {
   readonly input: number;
@@ -30,12 +22,19 @@ export interface Tokens {
   readonly cacheWrite: number;
 }
 
+/** One name's price, each in US dollars a token: a count's shape, priced. */
+type Rate = Tokens;
+
+/** A rate under the name it is sold by. */
+type Named = Rate & { readonly provider: string; readonly model: string };
+
 /** Prices by provider, then model. */
 type Rates<T> = ReadonlyMap<string, ReadonlyMap<string, T>>;
 
 /** A project's own prices, as the client holds them. */
 export type OwnRates = Rates<Rate>;
 
+/** A row of the bundled table, as the compiler reads the file. */
 interface FileRow {
   provider: string;
   model: string;
@@ -56,41 +55,49 @@ function costOf(rate: Rate, tokens: Tokens): number {
   );
 }
 
-let table: Map<string, Map<string, Rate>> | undefined;
+/** Rates by provider, then model, a name given twice its last. */
+function byName(rows: readonly Named[]): Rates<Rate> {
+  const rates = new Map<string, Map<string, Rate>>();
+  for (const { provider, model, ...rate } of rows) {
+    let models = rates.get(provider);
+    if (models === undefined) rates.set(provider, (models = new Map()));
+    models.set(model, rate);
+  }
+  return rates;
+}
+
+let table: Rates<Rate> | undefined;
 
 /** The price table this release carries, indexed once. */
 function tableRates(): Rates<Rate> {
   if (table === undefined) {
-    const rows = new Map<string, Map<string, Rate>>();
-    for (const row of (file as unknown as { prices: FileRow[] }).prices) {
-      let models = rows.get(row.provider);
-      if (models === undefined) rows.set(row.provider, (models = new Map()));
-      models.set(row.model, {
+    const rows: readonly FileRow[] = file.prices;
+    table = byName(
+      rows.map((row) => ({
+        provider: row.provider,
+        model: row.model,
         input: row.input,
         output: row.output,
         cacheRead: row.cache_read,
         cacheWrite: row.cache_write,
-      });
-    }
-    table = rows;
+      })),
+    );
   }
   return table;
 }
 
-/** A project's own prices by name, a name given twice its last. */
+/** A project's own prices by name. */
 export function ownRates(prices: readonly Price[]): OwnRates {
-  const rates = new Map<string, Map<string, Rate>>();
-  for (const price of prices) {
-    let models = rates.get(price.provider);
-    if (models === undefined) rates.set(price.provider, (models = new Map()));
-    models.set(price.model, {
+  return byName(
+    prices.map((price) => ({
+      provider: price.provider,
+      model: price.model,
       input: price.input,
       output: price.output,
       cacheRead: price.cacheRead ?? price.input,
       cacheWrite: price.cacheWrite ?? price.input,
-    });
-  }
-  return rates;
+    })),
+  );
 }
 
 /**

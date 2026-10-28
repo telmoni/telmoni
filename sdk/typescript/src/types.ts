@@ -90,9 +90,13 @@ export interface ResolvedConfig {
  * Node's `IncomingHttpHeaders` or a plain object, or anything with `get` and
  * `set`, as the Fetch `Headers` is. Names are matched whatever their case.
  */
-export type HeaderCarrier =
-  | Record<string, string | readonly string[] | undefined>
-  | { get(name: string): string | null | undefined; set(name: string, value: string): void };
+export type HeaderCarrier = Record<string, string | readonly string[] | undefined> | HeaderMethods;
+
+/** Headers read and written by method, as the Fetch `Headers` is. */
+export interface HeaderMethods {
+  get(name: string): string | null | undefined;
+  set(name: string, value: string): void;
+}
 
 /**
  * A model call's tokens, as the conventions count them: input includes the

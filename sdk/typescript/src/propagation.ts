@@ -10,7 +10,7 @@ import { TraceFlags } from '@opentelemetry/api';
 import type { SpanContext } from '@opentelemetry/api';
 
 import * as contract from './contract.js';
-import type { HeaderCarrier } from './types.js';
+import type { HeaderCarrier, HeaderMethods } from './types.js';
 
 /** What headers name: the span to continue under, and the run. */
 export interface Continued {
@@ -135,10 +135,8 @@ function allowedInBaggage(byte: number): boolean {
   );
 }
 
-type Methods = { get(name: string): string | null | undefined; set(name: string, value: string): void };
-
-function hasGet(headers: HeaderCarrier): headers is Methods {
-  return typeof (headers as Partial<Methods>).get === 'function';
+function hasGet(headers: HeaderCarrier): headers is HeaderMethods {
+  return typeof (headers as Partial<HeaderMethods>).get === 'function';
 }
 
 /** The header named `name`, however its key is cased; several lines joined, as HTTP joins them. */
@@ -161,9 +159,8 @@ function setHeader(headers: HeaderCarrier, name: string, value: string): void {
     headers.set(name, value);
     return;
   }
-  const record = headers as Record<string, string | readonly string[] | undefined>;
-  for (const key of Object.keys(record)) {
-    if (key.toLowerCase() === name) delete record[key];
+  for (const key of Object.keys(headers)) {
+    if (key.toLowerCase() === name) delete headers[key];
   }
-  record[name] = value;
+  headers[name] = value;
 }

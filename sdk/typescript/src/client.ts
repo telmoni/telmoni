@@ -160,8 +160,9 @@ function resolve(config: Config | undefined): ResolvedConfig {
   }
   const prices: unknown = config?.prices ?? [];
   if (!Array.isArray(prices)) throw new TypeError('prices must be an array of prices');
-  const resolved = {
+  const resolved: ResolvedConfig = {
     endpoint,
+    apiKey: unsetIfBlank(config?.apiKey),
     organizationId: unsetIfBlank(config?.organizationId),
     captureContent: config?.captureContent ?? false,
     sampleRate,
@@ -172,9 +173,9 @@ function resolve(config: Config | undefined): ResolvedConfig {
   };
   // Not enumerable: console.log, util.inspect and JSON.stringify skip it, so
   // a client or a configuration logged or serialized whole leaves the key out.
-  Object.defineProperty(resolved, 'apiKey', { value: unsetIfBlank(config?.apiKey), enumerable: false });
+  Object.defineProperty(resolved, 'apiKey', { enumerable: false });
   // Frozen, so plain JavaScript cannot set what was checked here to what was not.
-  return Object.freeze(resolved) as ResolvedConfig;
+  return Object.freeze(resolved);
 }
 
 /**
