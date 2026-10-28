@@ -4,12 +4,13 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { type ActionResult, refused } from "@/lib/action-result";
-import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
+import { extractProblem, readBody, tryFetchWithTimeout } from "@/lib/api/fetch";
 import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
 import { env } from "@/lib/env";
 import { setActiveOrganizationCookie } from "@/lib/server/cookies";
 import { personHeaders } from "@/lib/server/entities/identity-context";
 import { getServerSession } from "@/lib/server/session";
+import { SettledInviteSchema } from "@/lib/types/settled-invite";
 import {
   organizationChannel,
   publishToAll,
@@ -45,12 +46,7 @@ export async function acceptInviteAction(
   }
   if (!res.ok) return refused((await extractProblem(res)).message);
 
-  const body: unknown = await res.json().catch(() => null);
-  const data = body as {
-    inviteId?: string;
-    inviterEmail?: string;
-    ownerOrganizationId?: string;
-  } | null;
+  const data = await readBody(res, SettledInviteSchema);
 
   await publishToAll(
     [

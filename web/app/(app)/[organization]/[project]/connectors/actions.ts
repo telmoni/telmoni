@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
+import { type ActionResult, refused } from "@/lib/action-result";
 import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
 import { isNotificationKind } from "@/lib/notification-kinds";
 import {
@@ -11,13 +12,18 @@ import {
   admitConnectorsCall,
 } from "@/lib/server/connectors-admit";
 import { ConnectionSchema } from "@/lib/server/entities/connectors";
-import { type ActionResult, refused } from "@/lib/action-result";
 import type { NotificationKind } from "@/lib/types/enums";
 
 // How long a test send or a resend is waited for. The service gives the far
 // end 10 seconds and the key service 5, around two transactions; waiting only
 // the default 10 here reported "unavailable" for a send that went out.
 const SEND_WAIT_MS = 20_000;
+
+/** What a send now answers, a test or a resend: the vendor's refusal, if any. */
+const SendAnswer = z.object({
+  delivered: z.boolean(),
+  error: z.string().nullable(),
+});
 
 // A server action's arguments are whatever the browser posted, not what its
 // type says, so the kinds are checked against the generated vocabulary before
@@ -65,11 +71,10 @@ export async function sendTestMessageAction(
   if (!res) return refused(CONNECTORS_UNAVAILABLE);
   revalidatePath("/(app)/[organization]/[project]/connectors", "page");
   if (!res.ok) return refused((await extractProblem(res)).message);
-  const body = (await res.json().catch(() => null)) as
-    | { delivered?: boolean; error?: string | null }
-    | null;
-  if (body?.delivered === true) return { ok: true };
-  return refused(body?.error || "The message was not delivered.");
+  const sent = SendAnswer.safeParse(await res.json().catch(() => null));
+  if (!sent.success) return refused(CONNECTORS_UNEXPECTED);
+  if (sent.data.delivered) return { ok: true };
+  return refused(sent.data.error || "The message was not delivered.");
 }
 
 // What the service answers when it mints a signing secret: the row, and the
@@ -184,11 +189,6 @@ export async function rotateWebhookSecretAction(
   return readSecret(res);
 }
 
-const Redelivered = z.object({
-  delivered: z.boolean(),
-  error: z.string().nullable(),
-});
-
 // Sends the same delivery once more, now, under the same id — the receiver's
 // dedup on `Telmoni-Delivery-Id` is what makes a resend of a notice it did
 // get harmless. Like a test, a refusal that names the connection retires it
@@ -211,7 +211,7 @@ export async function redeliverAction(
   if (!res) return refused(CONNECTORS_UNAVAILABLE);
   revalidatePath("/(app)/[organization]/[project]/connectors", "page");
   if (!res.ok) return refused((await extractProblem(res)).message);
-  const parsed = Redelivered.safeParse(await res.json().catch(() => null));
+  const parsed = SendAnswer.safeParse(await res.json().catch(() => null));
   if (!parsed.success) return refused(CONNECTORS_UNEXPECTED);
   if (parsed.data.delivered) return { ok: true };
   return refused(parsed.data.error || "The delivery failed again.");

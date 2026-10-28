@@ -11,7 +11,9 @@ vi.mock("@/lib/api/rate-limit", () => ({
 vi.mock("@/lib/server/entities/identity-context", () => ({
   personHeaders: vi.fn(() => ({ authorization: "Bearer at_1" })),
 }));
-vi.mock("@/lib/api/fetch", () => ({
+// The answer read as the action reads it: no fetch in it to stand in for.
+vi.mock("@/lib/api/fetch", async (importOriginal) => ({
+  readBody: (await importOriginal<typeof import("@/lib/api/fetch")>()).readBody,
   tryFetchWithTimeout: vi.fn(),
   extractProblem: vi.fn(async () => ({ message: "not found" })),
 }));

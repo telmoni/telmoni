@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { refresh, revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
-import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
+import { extractProblem, readBody, tryFetchWithTimeout } from "@/lib/api/fetch";
 import type { SessionData } from "@/lib/auth/session";
 import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
 import { env } from "@/lib/env";
@@ -28,9 +28,11 @@ import {
 import { displayName } from "@/lib/user-display";
 import { organizationLabel } from "@/lib/identity";
 import {
+  InviteSentSchema,
   NOT_A_GIVEN_ROLE,
+  OfferChangeSchema,
+  RosterChangeSchema,
   answerMemberAction,
-  extractInviteLink,
   isGivenRole,
 } from "@/lib/members/shared";
 import { type ActionResult, type Refused, refused } from "@/lib/action-result";
@@ -62,15 +64,8 @@ export async function inviteOrganizationMemberAction(
   }
   if (!res.ok) return refused((await extractProblem(res)).message);
 
-  const body: unknown = await res.json().catch(() => null);
-  const data = body as {
-    id?: string;
-    link?: string;
-    expiresAt?: string;
-    ownerOrganizationId?: string;
-  } | null;
-  // Guard against nullish link fields being converted to string "null".
-  const link = extractInviteLink(data);
+  const data = await readBody(res, InviteSentSchema);
+  const link = data?.link;
 
   if (data?.id && data.expiresAt) {
     await publishEvent(userChannel(trimmed), {
@@ -115,8 +110,7 @@ export async function revokeOrganizationInviteAction(
   const ans = await answer(res);
   if (!ans.ok || !res) return ans;
 
-  const body: unknown = await res.json().catch(() => null);
-  const data = body as { email?: string; ownerOrganizationId?: string } | null;
+  const data = await readBody(res, RosterChangeSchema);
   await publishToAll(
     [
       data?.email ? userChannel(data.email) : null,
@@ -232,11 +226,8 @@ export async function cancelOwnershipOfferAction(organizationId: string): Promis
 /// offer's holder, on a new offer also the member whose live one it replaced,
 /// and the organization itself.
 async function tellOfferRecipients(res: Response, organizationId: string): Promise<void> {
-  const body = (await res.json().catch(() => null)) as {
-    offeredToEmail?: unknown;
-    withdrawnFromEmail?: unknown;
-  } | null;
-  const at = (email: unknown) => (typeof email === "string" ? userChannel(email) : null);
+  const body = await readBody(res, OfferChangeSchema);
+  const at = (email: string | undefined) => (email ? userChannel(email) : null);
   await publishToAll(
     [at(body?.offeredToEmail), at(body?.withdrawnFromEmail)],
     { type: "ownership:changed", data: { organizationId } },

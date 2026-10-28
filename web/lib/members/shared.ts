@@ -1,21 +1,25 @@
+import { z } from "zod";
+
 import { type ActionResult, refused } from "@/lib/action-result";
 import { extractProblem } from "@/lib/api/fetch";
 
-/**
- * Safely extracts a shareable invite link from the upstream response.
- * Guard against `data.link` being null (which `String(null)` would turn into `"null"`).
- */
-export function extractInviteLink(data: unknown): string | undefined {
-  if (
-    data &&
-    typeof data === "object" &&
-    "link" in data &&
-    typeof (data as { link: unknown }).link === "string"
-  ) {
-    return (data as { link: string }).link;
-  }
-  return undefined;
-}
+// Each field read alone: one auth spells otherwise leaves the rest.
+const text = z.string().optional().catch(undefined);
+
+/** What auth answers an invitation sent: what the live notices need, and the
+ *  link when it hands one back. */
+export const InviteSentSchema = z.object({
+  id: text,
+  link: text,
+  expiresAt: text,
+  ownerOrganizationId: text,
+});
+
+/** A roster's change: whose console to tell, and the organization's. */
+export const RosterChangeSchema = z.object({ email: text, ownerOrganizationId: text });
+
+/** An offer's change: who holds it now, and whose it replaced. */
+export const OfferChangeSchema = z.object({ offeredToEmail: text, withdrawnFromEmail: text });
 
 /**
  * The roles an invitation or a role change may hand out. A Server Action takes

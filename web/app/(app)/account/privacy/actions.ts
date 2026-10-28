@@ -1,9 +1,10 @@
 "use server";
 
 import { refresh } from "next/cache";
+import { z } from "zod";
 
 import { type ActionResult, refused } from "@/lib/action-result";
-import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
+import { extractProblem, readBody, tryFetchWithTimeout } from "@/lib/api/fetch";
 import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
 import { blacklistSession, isSessionBlacklisted } from "@/lib/auth/session-blacklist";
 import { sessionEndKey } from "@/lib/auth/session-end-key";
@@ -71,10 +72,7 @@ export async function deleteAccountAction(
   if (!res) return refused(UNREACHABLE);
   if (!res.ok) return refused((await extractProblem(res)).message);
 
-  const deleted = await res
-    .json()
-    .then((b: unknown) => (b as { deleted?: unknown } | null)?.deleted === true)
-    .catch(() => false);
+  const deleted = (await readBody(res, z.object({ deleted: z.boolean() })))?.deleted === true;
 
   // ⚠ **The session is already over; this ends the console's half of it.**
   // Auth revoked every session the person had along with the account, so any

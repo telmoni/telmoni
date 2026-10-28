@@ -2,15 +2,16 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { z } from "zod";
 
-import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
+import { type ActionResult, refused } from "@/lib/action-result";
+import { extractProblem, readBody, tryFetchWithTimeout } from "@/lib/api/fetch";
 import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
 import { env } from "@/lib/env";
 import { organizationChannel, publishEvent, publishToAll } from "@/lib/events/publisher";
 import { personHeaders, sessionHeaders } from "@/lib/server/entities/identity-context";
 import { getServerSession } from "@/lib/server/session";
 import { projectPath } from "@/lib/slug";
-import { type ActionResult, refused } from "@/lib/action-result";
 
 // Answering an ownership offer. The organization is the OFFER's, named
 // explicitly, not the one the console is standing in: an offer is answered
@@ -67,6 +68,19 @@ export async function declineOwnershipAction(
   return answerOffer(organizationId, "decline");
 }
 
+// Each field read alone: one auth spells otherwise leaves the rest.
+const text = z.string().optional().catch(undefined);
+
+/** Where an answered offer left the project: its new organization and slug,
+ *  the one it left, and the owner whose offer it was. */
+const ProjectMoved = z.object({
+  slug: text,
+  organizationId: text,
+  organizationSlug: text,
+  previousOrganizationId: text,
+  ownerOrganizationId: text,
+});
+
 const PROJECT_ID = /^project_[A-Za-z0-9]+$/;
 const ORGANIZATION_ID = /^org_[A-Za-z0-9]+$/;
 
@@ -113,17 +127,10 @@ async function answerProjectOffer(
   }
   if (!res.ok) return refused((await extractProblem(res)).message);
 
-  const body = (await res.json().catch(() => null)) as {
-    slug?: unknown;
-    organizationId?: unknown;
-    organizationSlug?: unknown;
-    previousOrganizationId?: unknown;
-    ownerOrganizationId?: unknown;
-  } | null;
-  const id = (value: unknown) => (typeof value === "string" ? value : null);
+  const body = await readBody(res, ProjectMoved);
 
   if (verb === "decline") {
-    const owner = id(body?.ownerOrganizationId);
+    const owner = body?.ownerOrganizationId;
     if (owner) {
       await publishEvent(organizationChannel(owner), {
         type: "ownership:changed",
@@ -139,10 +146,10 @@ async function answerProjectOffer(
   // destination now, under the slug it landed with: the event carries both
   // slugs, so a tab showing the project can follow it there, by slug as every
   // link is.
-  const destination = id(body?.organizationId);
-  const source = id(body?.previousOrganizationId);
-  const organization = id(body?.organizationSlug);
-  const project = id(body?.slug);
+  const destination = body?.organizationId;
+  const source = body?.previousOrganizationId;
+  const organization = body?.organizationSlug;
+  const project = body?.slug;
   await publishToAll(
     [
       destination ? organizationChannel(destination) : null,

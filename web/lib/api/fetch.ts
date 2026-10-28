@@ -1,3 +1,5 @@
+import type { z } from "zod";
+
 import { Problem } from "./problem";
 import { logger } from "@/lib/logger";
 
@@ -77,6 +79,12 @@ export function safeReturnTo(raw: string | undefined, base: URL): string {
   } catch {
     return "/";
   }
+}
+
+/** An answer's body as `schema` reads it, else `null`: never cast. */
+export async function readBody<T>(res: Response, schema: z.ZodType<T>): Promise<T | null> {
+  const parsed = schema.safeParse(await res.json().catch(() => null));
+  return parsed.success ? parsed.data : null;
 }
 
 export async function extractProblem(

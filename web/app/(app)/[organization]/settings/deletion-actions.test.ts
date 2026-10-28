@@ -7,7 +7,9 @@ vi.mock("@/lib/api/rate-limit", () => ({
   rateLimit: vi.fn(async () => null),
   sessionKey: vi.fn(() => "k"),
 }));
-vi.mock("@/lib/api/fetch", () => ({
+// The answer read as the action reads it: no fetch in it to stand in for.
+vi.mock("@/lib/api/fetch", async (importOriginal) => ({
+  readBody: (await importOriginal<typeof import("@/lib/api/fetch")>()).readBody,
   tryFetchWithTimeout: vi.fn(),
   extractProblem: vi.fn(async () => ({ message: "problem" })),
 }));

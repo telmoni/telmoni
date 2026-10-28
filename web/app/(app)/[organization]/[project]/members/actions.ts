@@ -3,7 +3,7 @@
 import { refresh, revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
-import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
+import { extractProblem, readBody, tryFetchWithTimeout } from "@/lib/api/fetch";
 import type { SessionData } from "@/lib/auth/session";
 import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
 import { isProjectId } from "@/lib/connect";
@@ -27,9 +27,11 @@ import {
 } from "@/lib/events/publisher";
 import { displayName } from "@/lib/user-display";
 import {
+  InviteSentSchema,
   NOT_A_GIVEN_ROLE,
+  OfferChangeSchema,
+  RosterChangeSchema,
   answerMemberAction,
-  extractInviteLink,
   isGivenRole,
 } from "@/lib/members/shared";
 import { type ActionResult, type Refused, refused } from "@/lib/action-result";
@@ -60,15 +62,8 @@ export async function inviteMemberAction(
     return refused("Organizations are unavailable right now — try again shortly.");
   }
   if (!res.ok) return refused((await extractProblem(res)).message);
-  const body: unknown = await res.json().catch(() => null);
-  const data = body as {
-    id?: string;
-    link?: string;
-    expiresAt?: string;
-    ownerOrganizationId?: string;
-  } | null;
-  // Guard against nullish link fields being converted to string "null".
-  const link = extractInviteLink(data);
+  const data = await readBody(res, InviteSentSchema);
+  const link = data?.link;
 
   if (data?.id && data.expiresAt) {
     const projects = await fetchProjects();
@@ -130,9 +125,8 @@ export async function addMemberAction(
     return answer(res);
   }
 
-  const body: unknown = await res.json().catch(() => null);
-  const email = (body as { email?: unknown } | null)?.email;
-  if (typeof email === "string") {
+  const email = (await readBody(res, RosterChangeSchema))?.email;
+  if (email) {
     await publishEvent(userChannel(email), {
       type: "membership:changed",
       data: { organizationId: gate.organizationId, projectId: gate.projectId },
@@ -155,8 +149,7 @@ export async function revokeInviteAction(
   const ans = await answer(res);
   if (!ans.ok || !res) return ans;
 
-  const body: unknown = await res.json().catch(() => null);
-  const data = body as { email?: string; ownerOrganizationId?: string } | null;
+  const data = await readBody(res, RosterChangeSchema);
   await publishToAll(
     [
       data?.email ? userChannel(data.email) : null,
@@ -276,11 +269,8 @@ async function tellOfferRecipients(
   organizationId: string,
   projectId: string,
 ): Promise<void> {
-  const body = (await res.json().catch(() => null)) as {
-    offeredToEmail?: unknown;
-    withdrawnFromEmail?: unknown;
-  } | null;
-  const at = (email: unknown) => (typeof email === "string" ? userChannel(email) : null);
+  const body = await readBody(res, OfferChangeSchema);
+  const at = (email: string | undefined) => (email ? userChannel(email) : null);
   await publishToAll(
     [at(body?.offeredToEmail), at(body?.withdrawnFromEmail), organizationChannel(organizationId)],
     { type: "ownership:changed", data: { organizationId, projectId } },

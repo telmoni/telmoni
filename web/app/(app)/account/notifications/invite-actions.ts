@@ -1,9 +1,9 @@
 "use server";
 
 import { refresh, revalidatePath } from "next/cache";
-import { z } from "zod";
 
-import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
+import { type ActionResult, refused } from "@/lib/action-result";
+import { extractProblem, readBody, tryFetchWithTimeout } from "@/lib/api/fetch";
 import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
 import { env } from "@/lib/env";
 import {
@@ -13,18 +13,7 @@ import {
 } from "@/lib/events/publisher";
 import { personHeaders } from "@/lib/server/entities/identity-context";
 import { getServerSession } from "@/lib/server/session";
-import { type ActionResult, refused } from "@/lib/action-result";
-
-const SettledInvite = z
-  .object({
-    inviteId: z.string().optional(),
-    inviterEmail: z.email().nullish(),
-    ownerOrganizationId: z.string().optional(),
-  })
-  .partial()
-  .passthrough();
-
-type SettledInvite = z.infer<typeof SettledInvite>;
+import { type SettledInvite, SettledInviteSchema } from "@/lib/types/settled-invite";
 
 function settledChannels(
   sessionEmail: string | undefined,
@@ -70,8 +59,7 @@ export async function acceptIncomingInviteAction(
   }
   if (!res.ok) return refused((await extractProblem(res)).message);
 
-  const body: unknown = await res.json().catch(() => null);
-  const data = SettledInvite.safeParse(body).data ?? null;
+  const data = await readBody(res, SettledInviteSchema);
   await publishToAll(settledChannels(session.email, data), {
     type: "invite:resolved",
     data: { inviteId: data?.inviteId || inviteId },
@@ -105,8 +93,7 @@ export async function declineIncomingInviteAction(
   const ans = await answer(res);
   if (!ans.ok || !res) return ans;
 
-  const body: unknown = await res.json().catch(() => null);
-  const data = SettledInvite.safeParse(body).data ?? null;
+  const data = await readBody(res, SettledInviteSchema);
   await publishToAll(settledChannels(session.email, data), {
     type: "invite:resolved",
     data: { inviteId: data?.inviteId || inviteId },

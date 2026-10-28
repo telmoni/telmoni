@@ -1,7 +1,9 @@
 "use server";
 
+import { z } from "zod";
+
 import { type ActionResult, refused } from "@/lib/action-result";
-import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
+import { extractProblem, readBody, tryFetchWithTimeout } from "@/lib/api/fetch";
 import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
 import { isSessionBlacklisted } from "@/lib/auth/session-blacklist";
 import { sessionEndKey } from "@/lib/auth/session-end-key";
@@ -103,14 +105,11 @@ export async function deleteOrganizationAction(
     { type: "membership:removed", data: { organizationId: ctx.organizationId } },
   );
 
-  const answer = await res
-    .json()
-    .then((b: unknown) => b as { purged?: unknown } | null)
-    .catch(() => null);
+  const answer = await readBody(res, z.object({ purged: z.boolean() }));
   // Whether the request's purge hook landed. It is retried every ten minutes
   // when it did not, and the success screen says so rather than announcing a
   // cleanup that has not happened yet.
-  const purged = typeof answer?.purged === "boolean" ? answer.purged : null;
+  const purged = answer?.purged ?? null;
 
   // ⚠ **Nothing is revalidated and no cookie is written, on purpose.** Either
   // makes Next re-render this page inside the action's own response, and by

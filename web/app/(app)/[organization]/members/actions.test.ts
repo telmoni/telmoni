@@ -32,7 +32,9 @@ vi.mock("@/lib/server/entities/organization-member", () => ({
     members: [{ member_id: "user_2", email: "removed@example.test" }],
   })),
 }));
-vi.mock("@/lib/api/fetch", () => ({
+// The answer read as the action reads it: no fetch in it to stand in for.
+vi.mock("@/lib/api/fetch", async (importOriginal) => ({
+  readBody: (await importOriginal<typeof import("@/lib/api/fetch")>()).readBody,
   tryFetchWithTimeout: vi.fn(),
   extractProblem: vi.fn(async () => ({ message: "problem" })),
 }));
