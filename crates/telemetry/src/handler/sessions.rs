@@ -138,8 +138,8 @@ impl SessionQuery {
         };
         Ok((
             Window {
-                days: parse_days(self.days.as_deref().unwrap_or_default())?,
-                limit: parse_limit(self.limit.as_deref().unwrap_or_default())?,
+                days: parse_days(self.days.as_deref())?,
+                limit: parse_limit(self.limit.as_deref())?,
             },
             pinning,
         ))

@@ -31,7 +31,7 @@ use crate::AppState;
 use crate::contract::NAME_MAX;
 use crate::db::{self, ViewRow, ViewWrite};
 use crate::handler::chain;
-use crate::handler::traces::{TraceQuery, parse_limit, values};
+use crate::handler::traces::{TraceQuery, check_days, check_limit, values};
 use crate::traces::PINNED_MAX;
 
 /// The most views of one kind a project keeps: more than a menu shows at a
@@ -104,25 +104,26 @@ impl ViewQuery {
             agent: self.agent,
             user: self.user,
             session: self.session,
-            status: self.status.iter().map(ToString::to_string).collect(),
             model: self.model,
             tool: self.tool,
             environment: self.environment,
             release: self.release,
             tag: self.tag,
             prompt: self.prompt,
-            days: self.days.map(|days| days.to_string()),
             ..TraceQuery::default()
         };
         let filter = query.filter()?;
-        if let Some(limit) = self.limit {
-            parse_limit(&limit.to_string())?;
+        let mut status: Vec<SpanStatus> = Vec::with_capacity(self.status.len());
+        for given in self.status {
+            if !status.contains(&given) {
+                status.push(given);
+            }
         }
         Ok(Self {
             agent: filter.agents,
             user: filter.user_ids,
             session: filter.session_ids,
-            status: filter.statuses,
+            status,
             model: filter.models,
             tool: filter.tools,
             environment: filter.environments,
@@ -131,8 +132,8 @@ impl ViewQuery {
             prompt: filter.prompts,
             sort: self.sort,
             dir: self.dir,
-            days: self.days,
-            limit: self.limit,
+            days: self.days.map(check_days).transpose()?,
+            limit: self.limit.map(check_limit).transpose()?,
         })
     }
 }

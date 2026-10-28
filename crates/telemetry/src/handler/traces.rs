@@ -221,7 +221,7 @@ impl TraceQuery {
             tags: tag_values(&self.tag)?,
             prompts: values("prompt", &self.prompt, FILTER_VALUE_MAX.prompt)?,
             runs,
-            days: parse_days(self.days.as_deref().unwrap_or_default())?,
+            days: parse_days(self.days.as_deref())?,
         })
     }
 
@@ -243,15 +243,15 @@ impl TraceQuery {
     /// A column or a direction there is none of, the refusal naming every
     /// column the list has and never the value.
     pub(crate) fn sort_for<L: Listing>(&self) -> Result<(L::Sort, SortDirection), TelmoniError> {
-        let sort = match self.sort.as_deref().unwrap_or_default().trim() {
-            "" => L::FALLBACK,
-            given => given
+        let sort = match given(self.sort.as_deref()) {
+            None => L::FALLBACK,
+            Some(given) => given
                 .parse::<L::Sort>()
                 .map_err(|_| sorts_refused(L::SORTS))?,
         };
-        let direction = match self.dir.as_deref().unwrap_or_default().trim() {
-            "" => L::first_direction(sort),
-            given => given
+        let direction = match given(self.dir.as_deref()) {
+            None => L::first_direction(sort),
+            Some(given) => given
                 .parse::<SortDirection>()
                 .map_err(|_| TelmoniError::BadRequest("dir is asc or desc".into()))?,
         };
@@ -264,8 +264,8 @@ impl TraceQuery {
     ///
     /// A limit or a page out of range, never echoed.
     pub(crate) fn paging(&self) -> Result<Paging, TelmoniError> {
-        let limit = parse_limit(self.limit.as_deref().unwrap_or_default())?;
-        let page = parse_page(self.page.as_deref().unwrap_or_default())?;
+        let limit = parse_limit(self.limit.as_deref())?;
+        let page = parse_page(self.page.as_deref())?;
         Ok(Paging {
             limit,
             page,
@@ -357,42 +357,55 @@ fn sorts_refused<S: std::fmt::Display>(all: &[S]) -> TelmoniError {
     TelmoniError::BadRequest(format!("sort is one of {}", words.join(", ")))
 }
 
-/// `days` as a URL carries it: a whole number from 1 to [`MAX_DAYS`], and
-/// the default when empty; every page over the spans reads its window so.
-pub(crate) fn parse_days(text: &str) -> Result<u16, TelmoniError> {
-    match text.trim() {
-        "" => Ok(traces::DEFAULT_DAYS),
-        given => given
-            .parse::<u16>()
-            .ok()
-            .filter(|days| (1..=MAX_DAYS).contains(days))
-            .ok_or_else(|| {
-                TelmoniError::BadRequest(format!("days is a whole number from 1 to {MAX_DAYS}"))
-            }),
+/// A parameter's text, trimmed; `None` when absent or blank, which every
+/// reader below takes as its default.
+fn given(text: Option<&str>) -> Option<&str> {
+    text.map(str::trim).filter(|given| !given.is_empty())
+}
+
+/// A window of whole days from 1 to [`MAX_DAYS`].
+pub(crate) fn check_days(days: u16) -> Result<u16, TelmoniError> {
+    (1..=MAX_DAYS)
+        .contains(&days)
+        .then_some(days)
+        .ok_or_else(|| {
+            TelmoniError::BadRequest(format!("days is a whole number from 1 to {MAX_DAYS}"))
+        })
+}
+
+/// `days` as a URL carries it, the default when absent; every page over the
+/// spans reads its window so.
+pub(crate) fn parse_days(text: Option<&str>) -> Result<u16, TelmoniError> {
+    match given(text) {
+        None => Ok(traces::DEFAULT_DAYS),
+        Some(given) => check_days(given.parse().unwrap_or(0)),
     }
 }
 
-/// `limit` as a URL carries it: a whole number from 1 to [`MAX_LIMIT`], and
-/// the default when empty.
-pub(crate) fn parse_limit(text: &str) -> Result<u32, TelmoniError> {
-    match text.trim() {
-        "" => Ok(DEFAULT_LIMIT),
-        given => given
-            .parse::<u32>()
-            .ok()
-            .filter(|limit| (1..=MAX_LIMIT).contains(limit))
-            .ok_or_else(|| {
-                TelmoniError::BadRequest(format!("limit is a whole number from 1 to {MAX_LIMIT}"))
-            }),
+/// A page of rows from 1 to [`MAX_LIMIT`].
+pub(crate) fn check_limit(limit: u32) -> Result<u32, TelmoniError> {
+    (1..=MAX_LIMIT)
+        .contains(&limit)
+        .then_some(limit)
+        .ok_or_else(|| {
+            TelmoniError::BadRequest(format!("limit is a whole number from 1 to {MAX_LIMIT}"))
+        })
+}
+
+/// `limit` as a URL carries it, the default when absent.
+pub(crate) fn parse_limit(text: Option<&str>) -> Result<u32, TelmoniError> {
+    match given(text) {
+        None => Ok(DEFAULT_LIMIT),
+        Some(given) => check_limit(given.parse().unwrap_or(0)),
     }
 }
 
 /// `page` as a URL carries it: a whole number from 1 to [`MAX_PAGE`], and the
-/// first when empty.
-fn parse_page(text: &str) -> Result<u32, TelmoniError> {
-    match text.trim() {
-        "" => Ok(1),
-        given => given
+/// first when absent.
+fn parse_page(text: Option<&str>) -> Result<u32, TelmoniError> {
+    match given(text) {
+        None => Ok(1),
+        Some(given) => given
             .parse::<u32>()
             .ok()
             .filter(|page| (1..=MAX_PAGE).contains(page))
@@ -403,11 +416,11 @@ fn parse_page(text: &str) -> Result<u32, TelmoniError> {
 }
 
 /// `utc_offset` as a URL carries it: the reader's clock in whole minutes
-/// east of UTC, and UTC itself when empty.
-fn parse_utc_offset(text: &str) -> Result<i16, TelmoniError> {
-    match text.trim() {
-        "" => Ok(0),
-        given => given
+/// east of UTC, and UTC itself when absent.
+fn parse_utc_offset(text: Option<&str>) -> Result<i16, TelmoniError> {
+    match given(text) {
+        None => Ok(0),
+        Some(given) => given
             .parse::<i16>()
             .ok()
             .filter(|minutes| UTC_OFFSET_RANGE.contains(minutes))
@@ -428,10 +441,10 @@ pub(crate) enum Format {
 }
 
 /// `format` as a URL carries it: `csv` when empty.
-pub(crate) fn parse_format(text: &str) -> Result<Format, TelmoniError> {
-    match text.trim() {
-        "" | "csv" => Ok(Format::Csv),
-        "json" => Ok(Format::Json),
+pub(crate) fn parse_format(text: Option<&str>) -> Result<Format, TelmoniError> {
+    match given(text) {
+        None | Some("csv") => Ok(Format::Csv),
+        Some("json") => Ok(Format::Json),
         _ => Err(TelmoniError::BadRequest("format is csv or json".into())),
     }
 }
@@ -830,7 +843,7 @@ pub(crate) async fn export_rows<L: Listing>(
     let query = TraceQuery::read(pairs, reading)?;
     let filter = query.filter()?;
     let (sort, dir) = query.sort_for::<L>()?;
-    let format = parse_format(query.format.as_deref().unwrap_or_default())?;
+    let format = parse_format(query.format.as_deref())?;
     let rows = traces::list::<L>(&state.store, &projects, &filter, (sort, dir), EXPORT_MAX, 0)
         .await
         .map_err(read_failed)?;
@@ -880,7 +893,7 @@ pub async fn get_histogram(
     let projects = readable(&state, &headers).await?;
     let query = TraceQuery::read(pairs, Reading::Histogram)?;
     let filter = query.filter()?;
-    let utc_offset = parse_utc_offset(query.utc_offset.as_deref().unwrap_or_default())?;
+    let utc_offset = parse_utc_offset(query.utc_offset.as_deref())?;
     let bucket_seconds = traces::bucket_seconds(filter.days);
     let rows = traces::histogram(&state.store, &projects, &filter, bucket_seconds, utc_offset)
         .await
@@ -1062,14 +1075,8 @@ mod tests {
             query.sort().expect("a sort"),
             (TraceSort::User, SortDirection::Asc)
         );
-        assert_eq!(
-            parse_limit(query.limit.as_deref().unwrap_or_default()).ok(),
-            Some(50)
-        );
-        assert_eq!(
-            parse_page(query.page.as_deref().unwrap_or_default()).ok(),
-            Some(3)
-        );
+        assert_eq!(parse_limit(query.limit.as_deref()).ok(), Some(50));
+        assert_eq!(parse_page(query.page.as_deref()).ok(), Some(3));
     }
 
     #[test]
@@ -1128,10 +1135,10 @@ mod tests {
         .expect("a download's query");
         assert_eq!(download.filter().expect("a filter").runs.len(), 1);
         assert_eq!(
-            parse_format(download.format.as_deref().unwrap_or_default()).ok(),
+            parse_format(download.format.as_deref()).ok(),
             Some(Format::Json)
         );
-        assert_eq!(parse_format("").ok(), Some(Format::Csv));
+        assert_eq!(parse_format(None).ok(), Some(Format::Csv));
     }
 
     /// ⚠ A value the parameter does not take is a 400 naming the parameter,
@@ -1155,10 +1162,9 @@ mod tests {
             read(Reading::TraceExport, &[("run", "not-a-run<script>")])
                 .and_then(|q| q.filter().map(|_| ())),
             read(Reading::Export, &[("format", "xlsx<script>")])
-                .and_then(|q| parse_format(q.format.as_deref().unwrap_or_default()).map(|_| ())),
-            read(Reading::Histogram, &[("utc_offset", "841")]).and_then(|q| {
-                parse_utc_offset(q.utc_offset.as_deref().unwrap_or_default()).map(|_| ())
-            }),
+                .and_then(|q| parse_format(q.format.as_deref()).map(|_| ())),
+            read(Reading::Histogram, &[("utc_offset", "841")])
+                .and_then(|q| parse_utc_offset(q.utc_offset.as_deref()).map(|_| ())),
             read(Reading::List, &[("agent", &"a".repeat(AGENT_MAX + 1))])
                 .and_then(|q| q.filter().map(|_| ())),
             read(Reading::List, &[("tool", &"t".repeat(NAME_MAX + 1))])
@@ -1216,7 +1222,7 @@ mod tests {
             );
         }
         for (limit, page) in [("0", ""), ("501", ""), ("", "0"), ("", "1001")] {
-            assert!(parse_limit(limit).is_err() || parse_page(page).is_err());
+            assert!(parse_limit(Some(limit)).is_err() || parse_page(Some(page)).is_err());
         }
     }
 
