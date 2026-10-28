@@ -1,13 +1,10 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { getAuthorizeUrl } from "@/lib/auth/oidc";
 import { newProof } from "@/lib/auth/pkce";
-import { PKCE_COOKIE, cookieOpts, sealPkce, unsealPkce } from "@/lib/auth/session";
-import { clientKey, rateLimitRetryAfter } from "@/lib/api/rate-limit";
+import { PKCE_COOKIE, sealPkce, unsealPkce } from "@/lib/auth/session";
+import { pastStartCeiling, signInUnavailable, toProvider } from "@/lib/auth/start";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
-
-// The same bucket as the two doors: this is the same call to auth.
-const AUTH_START_CEILING = { limit: 60, windowMs: 60_000 };
 
 // The sign-in page's "Continue with…". The door already sealed the state
 // and where to land, so this carries the same sign-in on to the external
@@ -21,20 +18,9 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(new URL("/auth/login", env.AUTH_URL));
   }
 
-  const retryAfter = await rateLimitRetryAfter(
-    clientKey(request, "auth:start"),
-    AUTH_START_CEILING,
-  );
-  if (retryAfter !== null) {
-    return new NextResponse("Too many sign-in attempts. Try again in a minute.", {
-      status: 429,
-      headers: {
-        "content-type": "text/plain; charset=utf-8",
-        "retry-after": String(retryAfter),
-        "cache-control": "no-store, max-age=0",
-      },
-    });
-  }
+  // The doors' own bucket: this is the same call to auth.
+  const refused = await pastStartCeiling(request);
+  if (refused) return refused;
 
   const proof = await newProof();
   let authUrl: string;
@@ -46,23 +32,14 @@ export async function GET(request: NextRequest) {
     });
   } catch (err) {
     logger.error({ err }, "auth start failed");
-    return new NextResponse("Sign-in is unavailable right now. Try again in a minute.", {
-      status: 503,
-      headers: { "content-type": "text/plain; charset=utf-8", "retry-after": "60" },
-    });
+    return signInUnavailable();
   }
 
-  const response = NextResponse.redirect(authUrl);
-  response.headers.set("cache-control", "no-store, max-age=0");
-  response.cookies.set({
-    name: PKCE_COOKIE,
-    value: await sealPkce({
-      ...pkce,
-      verifier: proof.verifier,
-      nonce: proof.nonce,
-      provider: "external",
-    }),
-    ...cookieOpts(600),
+  const resealed = await sealPkce({
+    ...pkce,
+    verifier: proof.verifier,
+    nonce: proof.nonce,
+    provider: "external",
   });
-  return response;
+  return toProvider(authUrl, resealed);
 }

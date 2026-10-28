@@ -9,6 +9,7 @@ import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import { fetchProjectAnywhere, identityContext, projectHeaders } from "@/lib/server/data";
 import { FeatureOffProblemSchema } from "@/lib/server/flags";
+import { tooManyAttempts } from "@/lib/auth/start";
 
 const Authorized = z.object({ url: z.string().url(), state: z.string().min(1) });
 
@@ -49,16 +50,7 @@ export async function GET(
     clientKey(request, "connect:start"),
     CONNECT_START_CEILING,
   );
-  if (retryAfter !== null) {
-    return new NextResponse("Too many connection attempts. Try again in a minute.", {
-      status: 429,
-      headers: {
-        "content-type": "text/plain; charset=utf-8",
-        "retry-after": String(retryAfter),
-        "cache-control": "no-store, max-age=0",
-      },
-    });
-  }
+  if (retryAfter !== null) return tooManyAttempts(retryAfter, "connection");
 
   const base = env.SERVER_URL;
 

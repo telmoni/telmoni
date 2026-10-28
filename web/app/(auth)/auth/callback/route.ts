@@ -18,6 +18,7 @@ import {
   unsealPkce,
   type SessionData,
 } from "@/lib/auth/session";
+import { tooManyAttempts } from "@/lib/auth/start";
 
 const CALLBACK_CEILING = { limit: 30, windowMs: 60_000 };
 
@@ -77,16 +78,7 @@ export async function GET(request: NextRequest) {
     clientKey(request, "auth:callback"),
     CALLBACK_CEILING,
   );
-  if (retryAfter !== null) {
-    return new NextResponse("Too many sign-in attempts. Try again in a minute.", {
-      status: 429,
-      headers: {
-        "content-type": "text/plain; charset=utf-8",
-        "retry-after": String(retryAfter),
-        "cache-control": "no-store, max-age=0",
-      },
-    });
-  }
+  if (retryAfter !== null) return tooManyAttempts(retryAfter);
 
   // Whose code this is — the external provider's, or one auth's own sign-in
   // minted — is what the pending sign-in recorded when the browser left.
