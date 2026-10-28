@@ -80,3 +80,24 @@ describe("LIVE_REFRESH_HOLD_SECS", () => {
     }
   });
 });
+
+describe("the deployment's optional settings", () => {
+  const saved = { ...process.env };
+  afterEach(() => {
+    process.env = { ...saved };
+  });
+
+  it("lists the sign-in providers' origins as the tokens given, however spaced", () => {
+    process.env.AUTH_PROVIDER_ORIGINS = "  https://a.example.com\nhttps://b.example.com  ";
+    expect(env.AUTH_PROVIDER_ORIGINS).toEqual(["https://a.example.com", "https://b.example.com"]);
+    delete process.env.AUTH_PROVIDER_ORIGINS;
+    expect(env.AUTH_PROVIDER_ORIGINS).toEqual([]);
+  });
+
+  it("reads the announcement trimmed, and a blank one as none", () => {
+    process.env.TELMONI_ANNOUNCEMENT = "  Maintenance at 02:00 UTC ";
+    expect(env.TELMONI_ANNOUNCEMENT).toBe("Maintenance at 02:00 UTC");
+    process.env.TELMONI_ANNOUNCEMENT = "   ";
+    expect(env.TELMONI_ANNOUNCEMENT).toBeUndefined();
+  });
+});

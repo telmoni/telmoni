@@ -2,6 +2,7 @@ import { type NextProxy, NextResponse } from 'next/server';
 
 import { problem } from '@/lib/api/respond';
 import { SESSION_COOKIE, SESSION_TTL_SECONDS, cookieOpts } from '@/lib/auth/session';
+import { env } from '@/lib/env';
 import { ORGANIZATION_HEADER, PATH_HEADER, namedOrganization } from '@/lib/proxy/organization';
 import { isPublic } from '@/lib/proxy/public-paths';
 import { type SettledSession, settleSession } from '@/lib/proxy/session';
@@ -40,10 +41,7 @@ function carry(settled: SettledSession | null, response: NextResponse): NextResp
 // separated, and the console has no other opinion about who the provider is:
 // auth mints the URLs, and this only lets the browser follow them.
 function authProviderOrigins(): string[] {
-  return (process.env.AUTH_PROVIDER_ORIGINS ?? '')
-    .split(/\s+/)
-    .map(asOrigin)
-    .filter((origin): origin is string => origin !== null);
+  return env.AUTH_PROVIDER_ORIGINS.map(asOrigin).filter((origin): origin is string => origin !== null);
 }
 
 // Only an origin enters the directive, spelled as the browser spells one. A
@@ -96,7 +94,7 @@ const LEGAL_ALIASES: Record<string, string> = {
 // then the path falls through to the router, which has no page for it and
 // answers 404, rather than to a policy this operator never wrote.
 export function legalRedirect(pathname: string): string | null {
-  const base = process.env.LEGAL_URL?.trim().replace(/\/$/, '');
+  const base = env.LEGAL_URL;
   if (!base) return null;
   const name = pathname.replace(/^\/legal\/?/, '').replace(/\/+$/, '');
   if (!name) return `${base}/`;

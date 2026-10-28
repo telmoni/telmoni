@@ -174,6 +174,20 @@ export const env = {
     return v && v.trim() ? v.trim().replace(/\/$/, "") : undefined;
   },
 
+  // The origins the sign-in forms post to, space separated: what the content
+  // security policy lets the browser follow (`proxy.ts`), as the tokens given.
+  get AUTH_PROVIDER_ORIGINS(): readonly string[] {
+    return (process.env.AUTH_PROVIDER_ORIGINS ?? "").split(/\s+/).filter(Boolean);
+  },
+
+  // The banner's announcement where none is broadcast through Redis. Read at
+  // runtime: a `NEXT_PUBLIC_` name would be inlined at build time, and the
+  // published image is built with none.
+  get TELMONI_ANNOUNCEMENT(): string | undefined {
+    const v = process.env.TELMONI_ANNOUNCEMENT;
+    return v && v.trim() ? v.trim() : undefined;
+  },
+
   get ANALYTICS_INGEST_URL(): string | undefined {
     const v = process.env.ANALYTICS_INGEST_URL;
     return v && v.trim() ? v.trim() : undefined;
