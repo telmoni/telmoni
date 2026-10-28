@@ -915,6 +915,23 @@ pub async fn admit_new(
     }
 }
 
+/// A ceiling `read` answers, or none when the answer cannot be had: logged
+/// as `what`, and nothing held, as [`admit_new`] lets in what it cannot decide.
+async fn or_none<T>(
+    organization_id: &OrganizationId,
+    what: &str,
+    read: impl Future<Output = Result<Option<T>, TelmoniError>>,
+) -> Option<T> {
+    match read.await {
+        Ok(ceiling) => ceiling,
+        Err(e) => {
+            tracing::warn!(organization_id = %organization_id, error = %e, what,
+                "a ceiling could not be read; none is held");
+            None
+        }
+    }
+}
+
 /// What the roster's doors ask before a seat is promised or taken: the
 /// organization's member ceiling, which the door then holds its count to
 /// ([`MemberCeiling::admit`]) once that count is read under its own lock.
@@ -924,14 +941,12 @@ pub async fn member_ceiling(
     entitlements: &dyn Entitlements,
     organization_id: &OrganizationId,
 ) -> Option<MemberCeiling> {
-    match entitlements.member_ceiling(organization_id).await {
-        Ok(ceiling) => ceiling,
-        Err(e) => {
-            tracing::warn!(organization_id = %organization_id, error = %e,
-                "the member ceiling could not be read; none is held");
-            None
-        }
-    }
+    or_none(
+        organization_id,
+        "the member ceiling",
+        entitlements.member_ceiling(organization_id),
+    )
+    .await
 }
 
 /// What an alert is held to, made or evaluated: the organization's alert
@@ -941,14 +956,12 @@ pub async fn alert_ceilings(
     entitlements: &dyn Entitlements,
     organization_id: &OrganizationId,
 ) -> Option<AlertCeilings> {
-    match entitlements.alert_ceilings(organization_id).await {
-        Ok(ceilings) => ceilings,
-        Err(e) => {
-            tracing::warn!(organization_id = %organization_id, error = %e,
-                "the alert ceilings could not be read; none is held");
-            None
-        }
-    }
+    or_none(
+        organization_id,
+        "the alert ceilings",
+        entitlements.alert_ceilings(organization_id),
+    )
+    .await
 }
 
 /// What a machine lane asks before it lets an answer or an export through:
@@ -958,12 +971,10 @@ pub async fn lane_ceilings(
     entitlements: &dyn Entitlements,
     organization_id: &OrganizationId,
 ) -> Option<LaneCeilings> {
-    match entitlements.lane_ceilings(organization_id).await {
-        Ok(ceilings) => ceilings,
-        Err(e) => {
-            tracing::warn!(organization_id = %organization_id, error = %e,
-                "the lane ceilings could not be read; none is held");
-            None
-        }
-    }
+    or_none(
+        organization_id,
+        "the lane ceilings",
+        entitlements.lane_ceilings(organization_id),
+    )
+    .await
 }

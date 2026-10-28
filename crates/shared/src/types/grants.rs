@@ -38,14 +38,19 @@ impl Grants {
     /// question, an invitation. Refused, as a 402, while it is paused.
     pub fn admit_new(&self) -> Result<(), TelmoniError> {
         match &self.paused {
-            Some(paused) => Err(PlanError::LimitReached {
-                entitlement: paused.entitlement.clone(),
-                detail: paused.detail.clone(),
-            }
-            .into()),
+            Some(paused) => Err(limit_reached(&paused.entitlement, &paused.detail)),
             None => Ok(()),
         }
     }
+}
+
+/// The 402 a plan's refusal answers: what lifts it, and the sentence read.
+fn limit_reached(entitlement: &str, detail: &str) -> TelmoniError {
+    PlanError::LimitReached {
+        entitlement: entitlement.to_owned(),
+        detail: detail.to_owned(),
+    }
+    .into()
 }
 
 /// How many people an organization may hold, as the deployment that sells
@@ -78,11 +83,7 @@ impl MemberCeiling {
         if !self.reached(held) {
             return Ok(());
         }
-        Err(PlanError::LimitReached {
-            entitlement: self.entitlement.clone(),
-            detail: self.detail.clone(),
-        }
-        .into())
+        Err(limit_reached(&self.entitlement, &self.detail))
     }
 }
 
@@ -110,11 +111,7 @@ impl AlertCeilings {
         if held < u64::from(self.alerts) {
             return Ok(());
         }
-        Err(PlanError::LimitReached {
-            entitlement: self.entitlement.clone(),
-            detail: self.detail.clone(),
-        }
-        .into())
+        Err(limit_reached(&self.entitlement, &self.detail))
     }
 }
 
