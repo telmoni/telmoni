@@ -60,8 +60,14 @@ fn count(n: u64) -> f64 {
     n as f64
 }
 
-/// Prices by provider and model: a project's own, or the table's.
-pub(crate) type OwnRates = HashMap<(String, String), Rate>;
+/// Prices by provider, then model: a project's own, or the table's. Nested,
+/// so a lookup borrows the names a call carries rather than owning a key.
+pub(crate) type OwnRates = HashMap<String, HashMap<String, Rate>>;
+
+/// The rate `rates` holds for `model` of `provider`.
+fn rate<'a>(rates: &'a OwnRates, provider: &str, model: &str) -> Option<&'a Rate> {
+    rates.get(provider)?.get(model)
+}
 
 #[derive(Default, Deserialize)]
 struct File {
@@ -85,18 +91,20 @@ fn table() -> &'static OwnRates {
         // A test holds the file to the core's, so this never fails; were it
         // to, nothing would be priced.
         let file: File = serde_json::from_str(PRICE_FILE).unwrap_or_default();
-        file.prices
-            .into_iter()
-            .map(|row| {
-                let rate = Rate {
-                    input: row.input,
-                    output: row.output,
-                    cache_read: row.cache_read,
-                    cache_write: row.cache_write,
-                };
-                ((row.provider, row.model), rate)
-            })
-            .collect()
+        let mut rates = OwnRates::new();
+        for row in file.prices {
+            let rate = Rate {
+                input: row.input,
+                output: row.output,
+                cache_read: row.cache_read,
+                cache_write: row.cache_write,
+            };
+            rates
+                .entry(row.provider)
+                .or_default()
+                .insert(row.model, rate);
+        }
+        rates
     })
 }
 
@@ -120,8 +128,8 @@ pub(crate) fn own_rates(prices: &[Price], warner: &Warner) -> OwnRates {
             );
             continue;
         }
-        rates.insert(
-            (price.provider.clone(), price.model.clone()),
+        rates.entry(price.provider.clone()).or_default().insert(
+            price.model.clone(),
             Rate {
                 input: price.input,
                 output: price.output,
@@ -137,9 +145,8 @@ pub(crate) fn own_rates(prices: &[Price], warner: &Warner) -> OwnRates {
 /// table's, by its provider and model as sent, whole; `None` for a name
 /// neither holds.
 pub(crate) fn priced(own: &OwnRates, provider: &str, model: &str, tokens: Tokens) -> Option<f64> {
-    let key = (provider.to_owned(), model.to_owned());
-    own.get(&key)
-        .or_else(|| table().get(&key))
+    rate(own, provider, model)
+        .or_else(|| rate(table(), provider, model))
         .map(|rate| rate.cost(tokens))
 }
 
