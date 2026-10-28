@@ -1,7 +1,6 @@
 "use server";
 
 import { refresh } from "next/cache";
-import { z } from "zod";
 
 import { type ActionResult, refused } from "@/lib/action-result";
 import { extractProblem, readBody, tryFetchWithTimeout } from "@/lib/api/fetch";
@@ -10,6 +9,7 @@ import { sessionEndKey } from "@/lib/auth/session-end-key";
 import { env } from "@/lib/env";
 import { admit } from "@/lib/server/admit";
 import { accountHeaders, personHeaders } from "@/lib/server/entities/identity-context";
+import { AccountDeletedSchema } from "@/lib/server/entities/organization";
 
 // The person's own lanes: they act on the account, whichever organization the
 // console is standing in. The ones that change something send that
@@ -55,7 +55,7 @@ export async function deleteAccountAction(
   if (!res) return refused(UNREACHABLE);
   if (!res.ok) return refused((await extractProblem(res)).message);
 
-  const deleted = (await readBody(res, z.object({ deleted: z.boolean() })))?.deleted === true;
+  const deleted = (await readBody(res, AccountDeletedSchema))?.deleted === true;
 
   // ⚠ **The session is already over; this ends the console's half of it.**
   // Auth revoked every session the person had along with the account, so any

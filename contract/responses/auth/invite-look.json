@@ -1,0 +1,7 @@
+{
+  "email": "sam@example.com",
+  "inviter": "Alex",
+  "organization": "Acme",
+  "role": "admin",
+  "scope": "organization"
+}

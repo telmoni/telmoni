@@ -23,6 +23,11 @@ export type TokenAccess =
   | { kind: "forbidden" }
   | { kind: "unavailable" };
 
+export const ApiTokenListSchema = z.array(ApiTokenSchema);
+
+// A key minted: its id, and the key itself, shown this once.
+export const MintedTokenSchema = z.object({ id: z.string(), token: z.string() });
+
 export const fetchTokens = cache(
   async (projectId: string): Promise<TokenAccess> => {
     const ctx = await identityContext();
@@ -31,7 +36,7 @@ export const fetchTokens = cache(
       "fetchTokens",
       `${env.SERVER_URL}/internal/v1/tokens`,
       { headers: projectHeaders(ctx, projectId), cache: "no-store" },
-      z.array(ApiTokenSchema),
+      ApiTokenListSchema,
     );
     return read.kind === "ok" ? { kind: "ok", tokens: read.value } : read;
   },

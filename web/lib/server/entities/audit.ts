@@ -31,7 +31,7 @@ const AuditEventSchema = z.object({
 });
 export type AuditEvent = z.infer<typeof AuditEventSchema>;
 
-const ListSchema = z.object({ events: z.array(AuditEventSchema) });
+export const AuditPageSchema = z.object({ events: z.array(AuditEventSchema) });
 
 const LIST_LIMIT = 100;
 
@@ -183,6 +183,6 @@ async function listAudit(
   url: string,
   headers: Record<string, string>,
 ): Promise<AuditAccess> {
-  const read = await readJson(fetcher, url, { headers }, ListSchema);
+  const read = await readJson(fetcher, url, { headers }, AuditPageSchema);
   return read.kind === "ok" ? { kind: "ok", events: read.value.events } : read;
 }

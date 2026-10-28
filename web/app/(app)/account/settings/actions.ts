@@ -11,6 +11,7 @@ import { env } from "@/lib/env";
 import { MAX_EMAIL } from "@/lib/names";
 import { admit } from "@/lib/server/admit";
 import { accountHeaders, personHeaders } from "@/lib/server/entities/identity-context";
+import { EmailChangedSchema } from "@/lib/server/entities/organization";
 import { getServerSession } from "@/lib/server/session";
 import { canChangeEmail } from "@/lib/sign-in-method";
 
@@ -146,9 +147,7 @@ export async function confirmEmailChangeAction(
   // Auth answers with the address the identity provider reported, which is
   // authoritative. Unreadable, the page names the address the codes were sent
   // to instead.
-  const body = z
-    .object({ email: z.email() })
-    .safeParse(await res.json().catch(() => null));
+  const body = EmailChangedSchema.safeParse(await res.json().catch(() => null));
   return body.success ? { ok: true, email: body.data.email } : { ok: true };
 }
 

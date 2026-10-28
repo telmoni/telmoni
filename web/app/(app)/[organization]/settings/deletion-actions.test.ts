@@ -33,7 +33,8 @@ vi.mock("@/lib/server/entities/identity-context", async (importOriginal) => ({
   identityContext: vi.fn(),
 }));
 // `/me` did not answer: the refusal for an unplaced caller is the generic one.
-vi.mock("@/lib/server/entities/organization", () => ({
+vi.mock("@/lib/server/entities/organization", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/server/entities/organization")>()),
   getServerContext: vi.fn(async () => null),
 }));
 // The roster auth answers before the organization closes: whose open console

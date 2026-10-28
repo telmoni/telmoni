@@ -10,7 +10,7 @@ import { organizationHeaders, identityContext } from "./identity-context";
 import { getServerContext } from "./organization";
 import { readJson } from "./read";
 
-const ProjectSchema = z.object({
+export const ProjectSchema = z.object({
   id: z.string(),
   /// Its segment under the organization's: `/{organization}/{slug}`.
   slug: z.string(),
@@ -20,12 +20,17 @@ const ProjectSchema = z.object({
 
 export type Project = z.infer<typeof ProjectSchema>;
 
+// A project renamed: the slug its pages go by now.
+export const ProjectRenamedSchema = z.object({ slug: z.string() });
+
 export type ProjectListing =
   | { kind: "ok"; projects: Project[] }
   | { kind: "unavailable" };
 
 // The envelope is the schema's: an answer without its list is unreadable,
 // never an organization with no projects.
+export const ProjectListSchema = z.object({ projects: z.array(ProjectSchema) });
+
 export const fetchProjectListing = cache(async (): Promise<ProjectListing> => {
   const ctx = await identityContext();
   if (!ctx) return { kind: "unavailable" };
@@ -33,7 +38,7 @@ export const fetchProjectListing = cache(async (): Promise<ProjectListing> => {
     "fetchProjects",
     `${env.SERVER_URL}/internal/v1/projects`,
     { headers: organizationHeaders(ctx) },
-    z.object({ projects: z.array(ProjectSchema) }),
+    ProjectListSchema,
   );
   if (read.kind !== "ok") return { kind: "unavailable" };
   return { kind: "ok", projects: read.value.projects.sort(compareProjects) };
@@ -89,6 +94,10 @@ export type ProjectEverywhereListing =
   | { kind: "ok"; projects: ProjectEverywhere[] }
   | { kind: "unavailable" };
 
+export const ProjectEverywhereListSchema = z.object({
+  projects: z.array(ProjectEverywhereSchema),
+});
+
 export const fetchProjectsEverywhere = cache(async (): Promise<ProjectEverywhereListing> => {
   const ctx = await identityContext();
   if (!ctx) return { kind: "unavailable" };
@@ -96,7 +105,7 @@ export const fetchProjectsEverywhere = cache(async (): Promise<ProjectEverywhere
     "fetchProjectsEverywhere",
     `${env.SERVER_URL}/internal/v1/projects/everywhere`,
     { headers: organizationHeaders(ctx) },
-    z.object({ projects: z.array(ProjectEverywhereSchema) }),
+    ProjectEverywhereListSchema,
   );
   if (read.kind !== "ok") return { kind: "unavailable" };
   return { kind: "ok", projects: read.value.projects.sort(compareProjectsByOrganization) };

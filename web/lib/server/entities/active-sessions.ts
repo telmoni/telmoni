@@ -16,6 +16,8 @@ const ActiveSessionSchema = z.object({
 });
 export type ActiveSession = z.infer<typeof ActiveSessionSchema>;
 
+export const ActiveSessionListSchema = z.object({ sessions: z.array(ActiveSessionSchema) });
+
 export const fetchActiveSessions = cache(
   async (): Promise<ActiveSession[] | null> => {
     // The person's own sessions, whichever organization the console is in.
@@ -25,7 +27,7 @@ export const fetchActiveSessions = cache(
       "fetchActiveSessions",
       `${env.SERVER_URL}/internal/v1/auth/sessions`,
       { headers },
-      z.object({ sessions: z.array(ActiveSessionSchema) }),
+      ActiveSessionListSchema,
     );
     return read.kind === "ok" ? read.value.sessions : null;
   },

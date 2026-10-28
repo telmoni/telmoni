@@ -27,6 +27,12 @@ export type MemberAccess =
   | { kind: "forbidden" }
   | { kind: "unavailable" };
 
+export const MemberListSchema = z.object({
+  members: z.array(MemberSchema),
+  // The owning organization's, which a seat here counts against.
+  ceiling: RosterCeilingSchema.nullable().optional(),
+});
+
 export const fetchMembers = cache(async (projectId: string): Promise<MemberAccess> => {
   const ctx = await identityContext();
   if (!ctx) return { kind: "unavailable" };
@@ -34,11 +40,7 @@ export const fetchMembers = cache(async (projectId: string): Promise<MemberAcces
     "fetchMembers",
     `${env.SERVER_URL}/internal/v1/projects/${encodeURIComponent(projectId)}/members`,
     { headers: projectHeaders(ctx, projectId), cache: "no-store" },
-    z.object({
-      members: z.array(MemberSchema),
-      // The owning organization's, which a seat here counts against.
-      ceiling: RosterCeilingSchema.nullable().optional(),
-    }),
+    MemberListSchema,
   );
   if (read.kind !== "ok") return read;
   return { kind: "ok", members: read.value.members, ceiling: read.value.ceiling ?? null };
@@ -59,6 +61,8 @@ export type InviteAccess =
   | { kind: "forbidden" }
   | { kind: "unavailable" };
 
+export const InviteListSchema = z.object({ invites: z.array(InviteSchema) });
+
 export const fetchInvites = cache(async (projectId: string): Promise<InviteAccess> => {
   const ctx = await identityContext();
   if (!ctx) return { kind: "unavailable" };
@@ -66,13 +70,13 @@ export const fetchInvites = cache(async (projectId: string): Promise<InviteAcces
     "fetchInvites",
     `${env.SERVER_URL}/internal/v1/projects/${encodeURIComponent(projectId)}/invites`,
     { headers: projectHeaders(ctx, projectId), cache: "no-store" },
-    z.object({ invites: z.array(InviteSchema) }),
+    InviteListSchema,
   );
   if (read.kind !== "ok") return read;
   return { kind: "ok", invites: read.value.invites };
 });
 
-const InviteLookSchema = z.object({
+export const InviteLookSchema = z.object({
   /// Which roster the link seats somebody on. The two ladders spell their
   /// roles the same, so the role alone cannot say.
   scope: z.enum(InviteScope),

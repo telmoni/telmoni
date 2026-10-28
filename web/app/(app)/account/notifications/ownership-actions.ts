@@ -2,7 +2,6 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { z } from "zod";
 
 import { type ActionResult, refused } from "@/lib/action-result";
 import { extractProblem, readBody, tryFetchWithTimeout } from "@/lib/api/fetch";
@@ -11,6 +10,7 @@ import { isOrganizationId, isProjectId } from "@/lib/ids";
 import { organizationChannel, publishEvent, publishToAll } from "@/lib/events/publisher";
 import { admit } from "@/lib/server/admit";
 import { personHeaders, sessionHeaders } from "@/lib/server/entities/identity-context";
+import { ProjectMovedSchema } from "@/lib/server/roster";
 import { projectPath } from "@/lib/slug";
 
 // Answering an ownership offer. The organization is the OFFER's, named
@@ -59,19 +59,6 @@ export async function declineOwnershipAction(
   return answerOffer(organizationId, "decline");
 }
 
-// Each field read alone: one auth spells otherwise leaves the rest.
-const text = z.string().optional().catch(undefined);
-
-/** Where an answered offer left the project: its new organization and slug,
- *  the one it left, and the owner whose offer it was. */
-const ProjectMoved = z.object({
-  slug: text,
-  organizationId: text,
-  organizationSlug: text,
-  previousOrganizationId: text,
-  ownerOrganizationId: text,
-});
-
 /// What answering a project offer comes back with. An accept that landed
 /// answers with the project's page instead, in the caller's organization now.
 export type ProjectOfferAnswer = ActionResult;
@@ -109,7 +96,7 @@ async function answerProjectOffer(
   }
   if (!res.ok) return refused((await extractProblem(res)).message);
 
-  const body = await readBody(res, ProjectMoved);
+  const body = await readBody(res, ProjectMovedSchema);
 
   if (verb === "decline") {
     const owner = body?.ownerOrganizationId;

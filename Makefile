@@ -319,6 +319,7 @@ contract:
 	UPDATE_CONTRACT=1 cargo test -p telmoni-server --test wire_contract -- --exact wire_contract_is_in_sync
 	UPDATE_CONTRACT=1 cargo test -p telmoni-shared --test openapi_contract -- --exact openapi_contract_is_in_sync
 	rm -rf contract/responses
+	UPDATE_CONTRACT=1 cargo test -p telmoni-auth --test wire_responses
 	UPDATE_CONTRACT=1 cargo test -p telmoni-telemetry --test wire_responses
 	UPDATE_CONTRACT=1 cargo test -p telmoni-notifications --test wire_responses
 	UPDATE_CONTRACT=1 cargo test -p telmoni-agent --test wire_responses

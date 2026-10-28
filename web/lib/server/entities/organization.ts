@@ -6,6 +6,7 @@ import { z } from "zod";
 import { env } from "@/lib/env";
 import { type FlagSet, FlagSetSchema } from "@/lib/flags";
 import { ACTIVE_ORGANIZATION_COOKIE, ORGANIZATION_HEADER } from "@/lib/proxy/organization";
+import { isSlug } from "@/lib/slug";
 import {
   IncomingInviteSchema,
   type IncomingInvite,
@@ -71,7 +72,7 @@ const MembershipSchema = z.object({
 });
 export type Membership = z.infer<typeof MembershipSchema>;
 
-const MeSchema = z.object({
+export const MeSchema = z.object({
   person:                PersonSchema,
   organizations:         z.array(OrganizationEntrySchema),
   activeOrganizationId:  z.string().nullable(),
@@ -87,6 +88,24 @@ export {
   IncomingInviteSchema,
   type IncomingInvite,
 } from "@/lib/types/incoming-invite";
+
+// The person's own lanes' answers, as their actions read them: an account
+// deleted, now or by the sweeps; the address auth recorded, authoritative;
+// and a seat seen, whose organization's consoles are told.
+export const AccountDeletedSchema = z.object({ deleted: z.boolean() });
+export const EmailChangedSchema = z.object({ email: z.email() });
+export const SeatSeenSchema = z.object({ organizationId: z.string() });
+
+// An organization's lanes' answers: founded, its path spelled with its slug,
+// so held to a slug's shape; renamed, the slug it goes by now; and deleted,
+// whether its data is purged already.
+export const CreatedOrganizationSchema = z.object({
+  id: z.string(),
+  slug: z.string().refine(isSlug),
+  name: z.string(),
+});
+export const OrganizationNamedSchema = z.object({ slug: z.string() });
+export const OrganizationDeletedSchema = z.object({ purged: z.boolean() });
 
 export interface ServerContext {
   person: Person;

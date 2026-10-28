@@ -6,9 +6,44 @@ import { z } from "zod";
 
 vi.mock("@/lib/env", () => ({ env: { SERVER_URL: "http://server" } }));
 import { parseAgentEvent } from "@/lib/agent/stream";
+import {
+  AuthnResultSchema,
+  AuthorizeUrlSchema,
+  LogoutUrlSchema,
+  SignInCodeSchema,
+  SignInConfigSchema,
+} from "@/lib/auth/oidc";
+import {
+  InviteSentSchema,
+  OfferChangeSchema,
+  ProjectMovedSchema,
+  RosterChangeSchema,
+} from "@/lib/server/roster";
+import { AuditExportListSchema, AuditExportSchema } from "@/lib/types/audit-export";
+import { SettledInviteSchema } from "@/lib/types/settled-invite";
 
+import { ActiveSessionListSchema } from "./active-sessions";
 import { ConversationListSchema, ConversationSchema, StatusSchema } from "./agent";
 import { AlertListSchema, IncidentListSchema, MuteListSchema } from "./alerts";
+import { AuditPageSchema } from "./audit";
+import { InviteListSchema, InviteLookSchema, MemberListSchema } from "./member";
+import {
+  AccountDeletedSchema,
+  CreatedOrganizationSchema,
+  EmailChangedSchema,
+  MeSchema,
+  OrganizationDeletedSchema,
+  OrganizationNamedSchema,
+  SeatSeenSchema,
+} from "./organization";
+import { OrganizationInviteListSchema, OrganizationMemberListSchema } from "./organization-member";
+import {
+  ProjectEverywhereListSchema,
+  ProjectListSchema,
+  ProjectRenamedSchema,
+  ProjectSchema,
+} from "./projects";
+import { ApiTokenListSchema, MintedTokenSchema } from "./token";
 import {
   AuthorizeSchema,
   ConnectionAnswerSchema,
@@ -48,6 +83,41 @@ const READERS: Record<string, z.ZodType> = {
   "agent/conversations.json": ConversationListSchema,
   "agent/status.json": StatusSchema,
   "agent/turn.json": TurnFramesSchema,
+  "auth/account-deleted.json": AccountDeletedSchema,
+  "auth/audit-export.json": AuditExportSchema,
+  "auth/audit-exports.json": AuditExportListSchema,
+  "auth/audit.json": AuditPageSchema,
+  "auth/authn.json": AuthnResultSchema,
+  "auth/config.json": SignInConfigSchema,
+  "auth/declined.json": ProjectMovedSchema,
+  "auth/email-changed.json": EmailChangedSchema,
+  "auth/invite-created.json": InviteSentSchema,
+  "auth/invite-look.json": InviteLookSchema,
+  "auth/invite-revoked.json": RosterChangeSchema,
+  "auth/invites.json": InviteListSchema,
+  "auth/logout-url.json": LogoutUrlSchema,
+  "auth/me.json": MeSchema,
+  "auth/members.json": MemberListSchema,
+  "auth/offer.json": OfferChangeSchema,
+  "auth/organization-created.json": CreatedOrganizationSchema,
+  "auth/organization-deleted.json": OrganizationDeletedSchema,
+  "auth/organization-invites.json": OrganizationInviteListSchema,
+  "auth/organization-members.json": OrganizationMemberListSchema,
+  "auth/organization-named.json": OrganizationNamedSchema,
+  "auth/project-accepted.json": ProjectMovedSchema,
+  "auth/project-renamed.json": ProjectRenamedSchema,
+  "auth/project.json": ProjectSchema,
+  "auth/projects-everywhere.json": ProjectEverywhereListSchema,
+  "auth/projects.json": ProjectListSchema,
+  "auth/seat-given.json": RosterChangeSchema,
+  "auth/seat-seen.json": SeatSeenSchema,
+  "auth/seated.json": SettledInviteSchema,
+  "auth/sessions.json": ActiveSessionListSchema,
+  "auth/settled-invite.json": SettledInviteSchema,
+  "auth/sign-in.json": SignInCodeSchema,
+  "auth/start.json": AuthorizeUrlSchema,
+  "auth/token-minted.json": MintedTokenSchema,
+  "auth/tokens.json": ApiTokenListSchema,
   "notifications/authorize.json": AuthorizeSchema,
   "notifications/connection.json": ConnectionAnswerSchema,
   "notifications/connectors.json": ConnectorListingSchema,
@@ -73,6 +143,19 @@ const READERS: Record<string, z.ZodType> = {
   "telemetry/views.json": TraceViewListSchema,
 };
 
+// Readers that take every field as optional, so a key renamed would read as
+// absent: each key they read is looked for by name.
+const READ_BY_NAME: Record<string, readonly string[]> = {
+  "auth/declined.json": ["ownerOrganizationId"],
+  "auth/invite-created.json": ["id", "link", "expiresAt", "ownerOrganizationId"],
+  "auth/invite-revoked.json": ["email", "ownerOrganizationId"],
+  "auth/offer.json": ["offeredToEmail", "withdrawnFromEmail"],
+  "auth/project-accepted.json": ["slug", "organizationId", "organizationSlug", "previousOrganizationId"],
+  "auth/seat-given.json": ["email", "ownerOrganizationId"],
+  "auth/seated.json": ["inviteId", "inviterEmail", "ownerOrganizationId"],
+  "auth/settled-invite.json": ["inviteId", "inviterEmail", "ownerOrganizationId"],
+};
+
 const PINNED = fileURLToPath(new URL("../../../../contract/responses/", import.meta.url));
 
 function pinned(name: string): unknown {
@@ -82,6 +165,10 @@ function pinned(name: string): unknown {
 describe("the server's answers", () => {
   it.each(Object.entries(READERS))("%s reads", (name, schema) => {
     expect(schema.safeParse(pinned(name)).error).toBeUndefined();
+  });
+
+  it.each(Object.entries(READ_BY_NAME))("%s carries each key its reader takes", (name, keys) => {
+    expect(Object.keys(pinned(name) as object)).toEqual(expect.arrayContaining([...keys]));
   });
 
   it("each has a reader", () => {

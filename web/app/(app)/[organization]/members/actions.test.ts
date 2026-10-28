@@ -26,7 +26,8 @@ vi.mock("@/lib/server/flags", () => ({
 }));
 // The roster auth answers: where a removal reads the address it tells, since
 // the caller's argument could name anybody's.
-vi.mock("@/lib/server/entities/organization-member", () => ({
+vi.mock("@/lib/server/entities/organization-member", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/server/entities/organization-member")>()),
   fetchOrganizationMembers: vi.fn(async () => ({
     kind: "ok",
     members: [{ member_id: "user_2", email: "removed@example.test" }],

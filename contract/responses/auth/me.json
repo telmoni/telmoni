@@ -1,0 +1,76 @@
+{
+  "activeOrganizationId": "org_9TzQ1wXe5RkN8bVc",
+  "defaultOrganizationId": "org_9TzQ1wXe5RkN8bVc",
+  "firstLogin": false,
+  "flags": {
+    "api_tokens": true,
+    "connectors": true,
+    "members": true,
+    "public_api": true,
+    "signup": true
+  },
+  "givenSeats": [
+    {
+      "createdAt": "2027-01-15T08:00:00Z",
+      "giverDisplayName": "Alex",
+      "giverEmail": "alex@example.com",
+      "organizationId": "org_9TzQ1wXe5RkN8bVc",
+      "organizationName": "Acme",
+      "organizationSlug": "acme",
+      "projectId": "project_4kRrX0bQhYd2LmZp",
+      "projectName": "Support bot",
+      "projectSlug": "support-bot",
+      "role": "member"
+    }
+  ],
+  "incomingInvites": [
+    {
+      "createdAt": "2027-01-15T08:00:00Z",
+      "expiresAt": "2027-01-22T08:00:00Z",
+      "id": "0192f3a1-7c2e-7b4d-9a61-3c5e8f0d2f01",
+      "inviterDisplayName": null,
+      "inviterEmail": "alex@example.com",
+      "role": "member",
+      "scope": "project",
+      "targetId": "project_4kRrX0bQhYd2LmZp",
+      "targetName": "Support bot"
+    }
+  ],
+  "memberships": [
+    {
+      "organizationId": "org_9TzQ1wXe5RkN8bVc",
+      "projectId": "project_4kRrX0bQhYd2LmZp",
+      "role": "admin"
+    }
+  ],
+  "organizations": [
+    {
+      "name": "Acme",
+      "organizationId": "org_9TzQ1wXe5RkN8bVc",
+      "ownerDisplayName": "Sam Rivera",
+      "ownerEmail": "sam@example.com",
+      "ownershipOfferExpiresAt": "2027-01-22T08:00:00Z",
+      "role": "owner",
+      "slug": "acme"
+    }
+  ],
+  "person": {
+    "analyticsOptIn": true,
+    "displayName": "Sam Rivera",
+    "email": "sam@example.com",
+    "emailVerified": true,
+    "userId": "user_7Hq2mK9xVb4LpR3s"
+  },
+  "projectOffers": [
+    {
+      "expiresAt": "2027-01-22T08:00:00Z",
+      "name": "Support bot",
+      "organizationId": "org_3LmP8sQd2VwK7xNa",
+      "organizationName": "Elsewhere",
+      "ownerDisplayName": null,
+      "ownerEmail": "alex@example.com",
+      "projectId": "project_4kRrX0bQhYd2LmZp"
+    }
+  ],
+  "sessionRowId": "0192f3a1-7c2e-7b4d-9a61-3c5e8f0d2f04"
+}

@@ -1,6 +1,5 @@
 "use server";
 
-import { z } from "zod";
 
 import { type ActionResult, refused } from "@/lib/action-result";
 import { extractProblem, readBody, tryFetchWithTimeout } from "@/lib/api/fetch";
@@ -8,6 +7,7 @@ import { env } from "@/lib/env";
 import { publishToAll, userChannel } from "@/lib/events/publisher";
 import { admitOrganization } from "@/lib/server/admit";
 import { organizationHeaders } from "@/lib/server/entities/identity-context";
+import { OrganizationDeletedSchema } from "@/lib/server/entities/organization";
 import { fetchOrganizationMembers } from "@/lib/server/entities/organization-member";
 
 // Deleting an ORGANIZATION — the one the settings page rendered, which must
@@ -81,7 +81,7 @@ export async function deleteOrganizationAction(
     { type: "membership:removed", data: { organizationId: ctx.organizationId } },
   );
 
-  const answer = await readBody(res, z.object({ purged: z.boolean() }));
+  const answer = await readBody(res, OrganizationDeletedSchema);
   // Whether the request's purge hook landed. It is retried every ten minutes
   // when it did not, and the success screen says so rather than announcing a
   // cleanup that has not happened yet.

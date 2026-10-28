@@ -3,7 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { errorOf } from "@/lib/action-result";
 
 vi.mock("@/lib/server/session", () => ({ getServerSession: vi.fn() }));
-vi.mock("@/lib/server/entities/organization", () => ({ getServerContext: vi.fn() }));
+vi.mock("@/lib/server/entities/organization", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/server/entities/organization")>()),
+  getServerContext: vi.fn(),
+}));
 // `createProjectAction` now chooses which organization to NAME, so the rest of
 // its collaborators have to be here too.
 const mockFetch = vi.fn();

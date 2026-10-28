@@ -38,6 +38,11 @@ export type OrganizationMemberAccess =
   | { kind: "forbidden" }
   | { kind: "unavailable" };
 
+export const OrganizationMemberListSchema = z.object({
+  members: z.array(OrganizationMemberSchema),
+  ceiling: RosterCeilingSchema.nullable().optional(),
+});
+
 export const fetchOrganizationMembers = cache(
   async (): Promise<OrganizationMemberAccess> => {
     const ctx = await identityContext();
@@ -46,10 +51,7 @@ export const fetchOrganizationMembers = cache(
       "fetchOrganizationMembers",
       `${env.SERVER_URL}/internal/v1/organization/members`,
       { headers: organizationHeaders(ctx), cache: "no-store" },
-      z.object({
-        members: z.array(OrganizationMemberSchema),
-        ceiling: RosterCeilingSchema.nullable().optional(),
-      }),
+      OrganizationMemberListSchema,
     );
     if (read.kind !== "ok") return read;
     return { kind: "ok", members: read.value.members, ceiling: read.value.ceiling ?? null };
@@ -71,6 +73,10 @@ export type OrganizationInviteAccess =
   | { kind: "forbidden" }
   | { kind: "unavailable" };
 
+export const OrganizationInviteListSchema = z.object({
+  invites: z.array(OrganizationInviteSchema),
+});
+
 export const fetchOrganizationInvites = cache(
   async (): Promise<OrganizationInviteAccess> => {
     const ctx = await identityContext();
@@ -79,7 +85,7 @@ export const fetchOrganizationInvites = cache(
       "fetchOrganizationInvites",
       `${env.SERVER_URL}/internal/v1/organization/invites`,
       { headers: organizationHeaders(ctx), cache: "no-store" },
-      z.object({ invites: z.array(OrganizationInviteSchema) }),
+      OrganizationInviteListSchema,
     );
     if (read.kind !== "ok") return read;
     return { kind: "ok", invites: read.value.invites };

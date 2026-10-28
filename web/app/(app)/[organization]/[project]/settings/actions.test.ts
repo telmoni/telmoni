@@ -26,7 +26,8 @@ vi.mock("@/lib/server/entities/identity-context", async (importOriginal) => ({
 }));
 // `/me`'s answer for the request: the organization the path names, whose slug
 // the announcement of a moved project is spelled with.
-vi.mock("@/lib/server/entities/organization", () => ({
+vi.mock("@/lib/server/entities/organization", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/server/entities/organization")>()),
   getServerContext: vi.fn(),
   activeOrganization: (ctx: {
     activeOrganizationId: string;
@@ -35,7 +36,8 @@ vi.mock("@/lib/server/entities/organization", () => ({
 }));
 // The organization's listing, which is where the action reads the slug the
 // project went by before the rename.
-vi.mock("@/lib/server/entities/projects", () => ({
+vi.mock("@/lib/server/entities/projects", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/server/entities/projects")>()),
   fetchProject: vi.fn(),
 }));
 const mockRevalidate = vi.fn();

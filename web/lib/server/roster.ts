@@ -62,7 +62,7 @@ const text = z.string().optional().catch(undefined);
 
 /** What auth answers an invitation sent: what the live notices need, and the
  *  link when it hands one back. */
-const InviteSentSchema = z.object({
+export const InviteSentSchema = z.object({
   id: text,
   link: text,
   expiresAt: text,
@@ -73,7 +73,17 @@ const InviteSentSchema = z.object({
 export const RosterChangeSchema = z.object({ email: text, ownerOrganizationId: text });
 
 /** An offer's change: who holds it now, and whose it replaced. */
-const OfferChangeSchema = z.object({ offeredToEmail: text, withdrawnFromEmail: text });
+export const OfferChangeSchema = z.object({ offeredToEmail: text, withdrawnFromEmail: text });
+
+/** Where an answered project offer left the project: its new organization
+ *  and slug, the one it left, and the owner whose offer it was. */
+export const ProjectMovedSchema = z.object({
+  slug: text,
+  organizationId: text,
+  organizationSlug: text,
+  previousOrganizationId: text,
+  ownerOrganizationId: text,
+});
 
 /** The lane's answer as an action's: a refusal in the lane's words, an
  *  outage in ours. */

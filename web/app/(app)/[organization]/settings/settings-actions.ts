@@ -2,7 +2,6 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect, RedirectType } from "next/navigation";
-import { z } from "zod";
 
 import { type ActionResult, refused } from "@/lib/action-result";
 import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
@@ -11,10 +10,13 @@ import { organizationChannel, publishEvent } from "@/lib/events/publisher";
 import { checkOrganizationName, checkOrganizationUrl } from "@/lib/names";
 import { admitOrganization } from "@/lib/server/admit";
 import { organizationHeaders } from "@/lib/server/entities/identity-context";
-import { activeOrganization, getServerContext } from "@/lib/server/entities/organization";
+import {
+  OrganizationNamedSchema,
+  activeOrganization,
+  getServerContext,
+} from "@/lib/server/entities/organization";
 import { canonicalPath } from "@/lib/server/path";
 
-const Updated = z.object({ slug: z.string() });
 
 /// What the organization's two settings answer. A write that moved the
 /// organization's slug — a URL changed on purpose — answers with the same page
@@ -46,7 +48,7 @@ async function patchOrganization(
   }
   if (!res.ok) return refused((await extractProblem(res)).message);
 
-  const updated = Updated.safeParse(await res.json().catch(() => null));
+  const updated = OrganizationNamedSchema.safeParse(await res.json().catch(() => null));
   if (updated.success && was !== undefined && updated.data.slug !== was) {
     await publishEvent(organizationChannel(organizationId), {
       type: "slug:moved",

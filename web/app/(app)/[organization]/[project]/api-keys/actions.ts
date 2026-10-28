@@ -10,6 +10,7 @@ import { env } from "@/lib/env";
 import { Flag } from "@/lib/flags";
 import { checkApiKeyDescription, checkApiKeyName } from "@/lib/names";
 import { admitProject } from "@/lib/server/admit";
+import { MintedTokenSchema } from "@/lib/server/entities/token";
 import { featureOff } from "@/lib/server/flags";
 
 const ONE_DAY = 24 * 60 * 60;
@@ -27,7 +28,6 @@ function isTtl(s: unknown): s is TtlOption {
   return typeof s === "string" && Object.hasOwn(TTL_OPTIONS, s);
 }
 
-const MintedToken = z.object({ id: z.string(), token: z.string() });
 
 /** A key, shown this once, and its id. */
 export type MintedKey = { token: string; id: string };
@@ -83,7 +83,7 @@ export async function mintTokenAction(projectId: string, input: unknown): Promis
   // The key exists from here on, whatever its answer reads as: the list is
   // drawn again with it.
   refresh();
-  const parsed = MintedToken.safeParse(await res.json().catch(() => null));
+  const parsed = MintedTokenSchema.safeParse(await res.json().catch(() => null));
   if (!parsed.success) {
     return refused("Unexpected response from the key service.");
   }
@@ -115,7 +115,7 @@ export async function rotateTokenAction(
     return refused(message);
   }
   refresh();
-  const parsed = MintedToken.safeParse(await res.json().catch(() => null));
+  const parsed = MintedTokenSchema.safeParse(await res.json().catch(() => null));
   if (!parsed.success) {
     return refused("Unexpected response from the key service.");
   }

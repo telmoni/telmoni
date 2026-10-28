@@ -1,0 +1,13 @@
+{
+  "accessToken": "at_not_a_real_token",
+  "authMethod": "magic_auth",
+  "email": "sam@example.com",
+  "emailVerified": true,
+  "expiresIn": 900,
+  "firstName": "Sam",
+  "idToken": "not.a.jwt",
+  "lastName": "Rivera",
+  "refreshToken": "rt_not_a_real_token",
+  "sessionId": "ses_Qw3rTy7uI9oP1aSd",
+  "userId": "user_7Hq2mK9xVb4LpR3s"
+}

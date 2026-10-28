@@ -6,6 +6,7 @@ import { z } from "zod";
 import { type ActionResult, type Refused, refused } from "@/lib/action-result";
 import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
 import { ProblemType } from "@/lib/api/problem";
+import { SignInCodeSchema } from "@/lib/auth/oidc";
 import { challengeOf } from "@/lib/auth/pkce";
 import { PKCE_COOKIE, unsealPkce } from "@/lib/auth/session";
 import { clientKeyFromHeaders, rateLimit } from "@/lib/api/rate-limit";
@@ -116,7 +117,7 @@ export async function signInAction(input: {
     return refused(problem?.detail || message);
   }
 
-  const body = z.object({ code: z.string().min(1) }).safeParse(await res.json().catch(() => null));
+  const body = SignInCodeSchema.safeParse(await res.json().catch(() => null));
   if (!body.success) return refused(UNAVAILABLE);
   const next = new URLSearchParams({ code: body.data.code, state: parsed.data.state });
   return { ok: true, next: `/auth/callback?${next.toString()}` };
@@ -165,7 +166,7 @@ export async function signUpAction(input: {
   if (!res.ok) return refused(await refusal(res));
   if (res.status === 202) return { ok: true };
 
-  const body = z.object({ code: z.string().min(1) }).safeParse(await res.json().catch(() => null));
+  const body = SignInCodeSchema.safeParse(await res.json().catch(() => null));
   if (!body.success) return refused(UNAVAILABLE);
   const next = new URLSearchParams({ code: body.data.code, state });
   return { ok: true, next: `/auth/callback?${next.toString()}` };

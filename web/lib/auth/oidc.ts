@@ -6,7 +6,7 @@ import { Problem } from "@/lib/api/problem";
 import { ExchangeRefused } from "@/lib/auth/refusal";
 import { logger } from "@/lib/logger";
 
-const AuthnResultSchema = z.object({
+export const AuthnResultSchema = z.object({
   userId: z.string(),
   email: z.string().nullable(),
   emailVerified: z.boolean(),
@@ -37,10 +37,10 @@ export type SignInProvider = "external";
 // the sign-in path. Parseability is the bar, not an origin allowlist — the
 // value is minted by our own auth service and the host is the identity
 // provider's to change.
-const AuthorizeUrlSchema = z.object({ authorizeUrl: z.url() });
+export const AuthorizeUrlSchema = z.object({ authorizeUrl: z.url() });
 
 // What auth's sign-in pages offer, as the deployment is configured.
-const SignInConfigSchema = z.object({
+export const SignInConfigSchema = z.object({
   passwordSignIn: z.boolean(),
   allowSignUp: z.boolean(),
   verifyEmail: z.boolean(),
@@ -158,7 +158,11 @@ export async function revokeSession(sessionId: string): Promise<void> {
 // Same reason as `AuthorizeUrlSchema`. This one already has a null fallback
 // the caller honours, so validating here turns a 500 on sign-out into the
 // plain "/" redirect that was always the intended degraded path.
-const LogoutUrlSchema = z.object({ logoutUrl: z.url() });
+export const LogoutUrlSchema = z.object({ logoutUrl: z.url() });
+
+/** What the built-in form's sign-in and sign-up answer: a code, exchanged as
+ *  a provider's would be. */
+export const SignInCodeSchema = z.object({ code: z.string().min(1) });
 
 // Where the browser finishes the sign-out. `idToken` is the external
 // provider's, sealed at sign-in, for a session that began there; auth

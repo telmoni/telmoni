@@ -26,7 +26,8 @@ vi.mock("@/lib/server/entities/identity-context", async (importOriginal) => ({
 }));
 // `/me`'s answer for the request, which is where the action reads the slug the
 // organization went by before the rename.
-vi.mock("@/lib/server/entities/organization", () => ({
+vi.mock("@/lib/server/entities/organization", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/server/entities/organization")>()),
   getServerContext: vi.fn(),
   activeOrganization: (ctx: {
     activeOrganizationId: string;

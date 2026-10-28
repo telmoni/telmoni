@@ -1,0 +1,8 @@
+{
+  "allowSignUp": true,
+  "external": {
+    "name": "Okta"
+  },
+  "passwordSignIn": false,
+  "verifyEmail": true
+}

@@ -1,7 +1,6 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { z } from "zod";
 
 import { type ActionResult, type Refused, SESSION_EXPIRED, refused } from "@/lib/action-result";
 import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
@@ -20,19 +19,11 @@ import {
   organizationHeaders,
   personHeaders,
 } from "@/lib/server/entities/identity-context";
-import { getServerContext } from "@/lib/server/entities/organization";
-import type { Project } from "@/lib/server/entities/projects";
+import { CreatedOrganizationSchema, getServerContext } from "@/lib/server/entities/organization";
+import { type Project, ProjectSchema } from "@/lib/server/entities/projects";
 import { FeatureOffProblemSchema } from "@/lib/server/flags";
 import { unplacedOrganization } from "@/lib/server/identity";
-import { isSlug, organizationPath } from "@/lib/slug";
-import { Role } from "@/lib/types/enums";
-
-const CreatedProjectSchema = z.object({
-  id: z.string(),
-  slug: z.string(),
-  name: z.string(),
-  role: z.enum(Role),
-});
+import { organizationPath } from "@/lib/slug";
 
 /** Done with the project as listed, or with none where its answer could not
  *  be read: it was still made. */
@@ -94,7 +85,7 @@ export async function createProjectAction(
 
   revalidatePath("/", "layout");
 
-  const parsed = CreatedProjectSchema.safeParse(await res.json().catch(() => null));
+  const parsed = ProjectSchema.safeParse(await res.json().catch(() => null));
   if (!parsed.success) {
     logger.warn(
       { fetcher: "createProjectAction", issues: parsed.error.issues },
@@ -105,14 +96,6 @@ export async function createProjectAction(
 
   return { ok: true, project: parsed.data };
 }
-
-// The new organization's path is spelled with its slug, so it is held to a
-// slug's shape before anything is redirected to it.
-const CreatedOrganizationSchema = z.object({
-  id: z.string(),
-  slug: z.string().refine(isSlug),
-  name: z.string(),
-});
 
 /// The panel's field a refusal belongs under; none for one about neither.
 export type CreateOrganizationField = "name" | "slug";

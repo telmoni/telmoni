@@ -11,11 +11,10 @@ import { organizationChannel, publishEvent } from "@/lib/events/publisher";
 import { checkProjectName } from "@/lib/names";
 import { admitProject } from "@/lib/server/admit";
 import { activeOrganization, getServerContext } from "@/lib/server/entities/organization";
-import { fetchProject } from "@/lib/server/entities/projects";
+import { ProjectRenamedSchema, fetchProject } from "@/lib/server/entities/projects";
 import { canonicalPath } from "@/lib/server/path";
 import { ContentMode } from "@/lib/types/enums";
 
-const Renamed = z.object({ slug: z.string() });
 const Mode = z.enum(ContentMode);
 
 
@@ -54,7 +53,7 @@ export async function updateProjectNameAction(
     return refused(error);
   }
 
-  const renamed = Renamed.safeParse(await res.json().catch(() => null));
+  const renamed = ProjectRenamedSchema.safeParse(await res.json().catch(() => null));
   if (renamed.success && was !== undefined && renamed.data.slug !== was) {
     if (organization !== undefined) {
       await publishEvent(organizationChannel(gate.organizationId), {
