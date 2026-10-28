@@ -401,7 +401,7 @@ GRANT SELECT, UPDATE, DELETE ON auth.member_invites TO auth_maintenance;
 CREATE TABLE auth.sessions (
     id           UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id      TEXT        NOT NULL REFERENCES auth.identities (user_id) ON DELETE CASCADE,
-    provider_sid TEXT,
+    sid          TEXT        NOT NULL,
     user_agent   TEXT,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
     last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -411,8 +411,7 @@ CREATE TABLE auth.sessions (
 
 -- Not partial: erasing a person cascades here on user_id alone.
 CREATE INDEX sessions_user_idx ON auth.sessions (user_id, created_at DESC);
-CREATE UNIQUE INDEX sessions_provider_sid_key ON auth.sessions (provider_sid)
-    WHERE provider_sid IS NOT NULL;
+CREATE UNIQUE INDEX sessions_sid_key ON auth.sessions (sid);
 CREATE INDEX sessions_revoked_idx ON auth.sessions (revoked_at)
     WHERE revoked_at IS NOT NULL;
 CREATE INDEX sessions_shard_key_idx ON auth.sessions (shard_key);

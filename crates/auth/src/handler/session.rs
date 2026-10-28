@@ -13,6 +13,7 @@ use std::sync::Arc;
 use axum::{extract::State, response::IntoResponse};
 use serde::{Deserialize, Serialize};
 
+use telmoni_shared::SessionId;
 use telmoni_shared::db::tenant_session::maintenance_scope;
 use telmoni_shared::extract::Json;
 use telmoni_shared::person_token::Principal;
@@ -193,7 +194,7 @@ impl std::fmt::Debug for RefreshRequest {
 #[serde(deny_unknown_fields)]
 pub struct LogoutRequest {
     /// The session id the exchange answered with.
-    pub session_id: String,
+    pub session_id: SessionId,
 }
 
 /// `POST /internal/v1/auth/logout-url` request — mint the external provider's

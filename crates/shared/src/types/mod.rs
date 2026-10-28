@@ -60,8 +60,8 @@ pub use sort_direction::SortDirection;
 pub use span_kind::SpanKind;
 pub use span_status::SpanStatus;
 pub use tenant_id::{
-    API_TOKEN_PREFIX, OrganizationId, OrganizationIdError, ProjectId, ProjectIdError, UserId,
-    UserIdError,
+    API_TOKEN_PREFIX, OrganizationId, OrganizationIdError, ProjectId, ProjectIdError,
+    SESSION_ID_PREFIX, SessionId, SessionIdError, UserId, UserIdError,
 };
 pub use trace_column::TraceColumn;
 pub use trace_sort::TraceSort;

@@ -911,13 +911,14 @@ async fn every_session_is_revoked_and_nothing_of_it_reaches_the_provider(pool: P
     let mut tx = telmoni_shared::db::tenant_session::person_scope(&pool, &uid(USER))
         .await
         .unwrap();
-    for sid in [Some("sess_a"), Some("sess_b"), None] {
-        telmoni_auth::db::sessions::create(&mut tx, &uid(USER), sid, Some("agent"))
+    for sid in ["ses_a", "ses_b"] {
+        let sid = telmoni_shared::SessionId::from_trusted(sid);
+        telmoni_auth::db::sessions::create(&mut tx, &uid(USER), &sid, Some("agent"))
             .await
             .unwrap();
     }
     tx.commit().await.unwrap();
-    // The three above, and the session the sign-in's own `/me` recorded.
+    // The two above, and the session the sign-in's own `/me` recorded.
     let live_before = sqlx::query_scalar::<_, i64>(
         "SELECT count(*) FROM auth.sessions WHERE user_id = $1 AND revoked_at IS NULL",
     )
@@ -925,7 +926,7 @@ async fn every_session_is_revoked_and_nothing_of_it_reaches_the_provider(pool: P
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert_eq!(live_before, 4);
+    assert_eq!(live_before, 3);
 
     let (app, provider) = app(pool.clone(), Arc::new(Recorder::default()));
     provider.on_confirm_email_change(Ok(confirmed(NEW_EMAIL, true)));
@@ -937,7 +938,7 @@ async fn every_session_is_revoked_and_nothing_of_it_reaches_the_provider(pool: P
 
     assert_eq!(resp.status(), StatusCode::OK);
     let body = body_of(resp).await;
-    assert!(body.contains("\"sessionsRevoked\":4"), "{body}");
+    assert!(body.contains("\"sessionsRevoked\":3"), "{body}");
 
     let live = sqlx::query_scalar::<_, i64>(
         "SELECT count(*) FROM auth.sessions WHERE user_id = $1 AND revoked_at IS NULL",

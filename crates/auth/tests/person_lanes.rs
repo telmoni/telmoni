@@ -301,7 +301,7 @@ async fn me_records_the_bearers_session_once(pool: PgPool) {
     seed_identity(&pool, USER, EMAIL).await;
     let bearer = format!(
         "Bearer {}",
-        bearer_in(&pool, USER, "sid_person_lanes").await
+        bearer_in(&pool, USER, "ses_person_lanes").await
     );
 
     let (status, first) = me(&pool, Some(&bearer), json!({})).await;
@@ -319,14 +319,13 @@ async fn me_records_the_bearers_session_once(pool: PgPool) {
         "the same session came back as a different row"
     );
 
-    let rows: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM auth.sessions WHERE user_id = $1 AND provider_sid = $2",
-    )
-    .bind(USER)
-    .bind("sid_person_lanes")
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let rows: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM auth.sessions WHERE user_id = $1 AND sid = $2")
+            .bind(USER)
+            .bind("ses_person_lanes")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(rows, 1, "one session, one row");
 }
 
@@ -395,7 +394,7 @@ async fn only_a_bearer_auth_minted_and_still_holds_resolves(pool: PgPool) {
     let (status, body) = me(&pool, Some("Bearer never_minted_here"), json!({})).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
 
-    let bearer = format!("Bearer {}", bearer_in(&pool, USER, "sid_signed_out").await);
+    let bearer = format!("Bearer {}", bearer_in(&pool, USER, "ses_signed_out").await);
     let (status, body) = me(&pool, Some(&bearer), json!({})).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let resp = app(pool.clone())
@@ -404,7 +403,7 @@ async fn only_a_bearer_auth_minted_and_still_holds_resolves(pool: PgPool) {
                 .header("x-service-secret", SERVICE_SECRET)
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    json!({ "session_id": "sid_signed_out" }).to_string(),
+                    json!({ "session_id": "ses_signed_out" }).to_string(),
                 ))
                 .unwrap(),
         )
@@ -414,7 +413,7 @@ async fn only_a_bearer_auth_minted_and_still_holds_resolves(pool: PgPool) {
     let (status, body) = me(&pool, Some(&bearer), json!({})).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
     let left: i64 = sqlx::query_scalar("SELECT count(*) FROM auth.access_tokens WHERE sid = $1")
-        .bind("sid_signed_out")
+        .bind("ses_signed_out")
         .fetch_one(&pool)
         .await
         .unwrap();
@@ -480,12 +479,11 @@ async fn the_test_door_opens_only_when_asked_and_mints_a_real_session(pool: PgPo
     assert_eq!(status, StatusCode::OK, "{me_body}");
     assert_eq!(me_body["person"]["userId"], USER);
     assert_eq!(me_body["person"]["email"], EMAIL);
-    let recorded: String =
-        sqlx::query_scalar("SELECT provider_sid FROM auth.sessions WHERE id = $1::uuid")
-            .bind(me_body["sessionRowId"].as_str().unwrap())
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let recorded: String = sqlx::query_scalar("SELECT sid FROM auth.sessions WHERE id = $1::uuid")
+        .bind(me_body["sessionRowId"].as_str().unwrap())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
     assert_eq!(
         recorded, session,
         "the door's session is the one `/me` recorded"

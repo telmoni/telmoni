@@ -427,9 +427,9 @@ async fn the_retention_sweep_counts_what_it_removed(pool: PgPool) {
     apply_audit_migrations(&pool).await;
     seed_identity(&pool, "user_a", "a@example.test").await;
     sqlx::query(
-        "INSERT INTO auth.sessions (user_id, provider_sid, user_agent, revoked_at)
-         VALUES ($1, 'sid_old', 'agent', now() - interval '91 days'),
-                ($1, 'sid_recent', 'agent', now() - interval '1 day')",
+        "INSERT INTO auth.sessions (user_id, sid, user_agent, revoked_at)
+         VALUES ($1, 'ses_old', 'agent', now() - interval '91 days'),
+                ($1, 'ses_recent', 'agent', now() - interval '1 day')",
     )
     .bind("user_a")
     .execute(&pool)

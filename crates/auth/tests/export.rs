@@ -25,7 +25,7 @@ const SERVICE_SECRET: &str = "test-service-secret";
 const OWNER: &str = "user_export_owner";
 /// The session the owner's sign-in belongs to; its id must never leave in
 /// the export.
-const PROVIDER_SID: &str = "session_abc123";
+const PROVIDER_SID: &str = "ses_abc123";
 
 fn app(pool: PgPool) -> Router {
     let config = Config {
@@ -326,7 +326,7 @@ async fn export_redacts_every_secret(pool: PgPool) {
 
     let mut found = Vec::new();
     strings(&body, &mut found);
-    for secret in ["token_hash", "provider_sid", "shard_key", PROVIDER_SID] {
+    for secret in ["token_hash", "sid", "shard_key", PROVIDER_SID] {
         assert!(
             !found.iter().any(|s| s == secret),
             "the export carries {secret}"

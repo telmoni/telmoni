@@ -3,6 +3,7 @@
 //! the one it is handed here on every request.
 
 use chrono::{DateTime, Utc};
+use telmoni_shared::SessionId;
 use telmoni_shared::UserId;
 use telmoni_shared::db::tenant_session::{Binding, Maintenance, Person, Scoped};
 use uuid::Uuid;
@@ -14,7 +15,7 @@ use crate::db::AuthLane;
 pub async fn create<B: Binding>(
     tx: &mut Scoped<'_, B>,
     user_id: &UserId,
-    sid: &str,
+    sid: &SessionId,
     token_hash: &str,
     expires_at: DateTime<Utc>,
 ) -> sqlx::Result<()> {
@@ -39,7 +40,7 @@ pub struct Resolved {
     /// The person it names.
     pub user_id: UserId,
     /// The session it belongs to.
-    pub sid: String,
+    pub sid: SessionId,
     /// When it stops being taken.
     pub expires_at: DateTime<Utc>,
     /// Its session was ended here, or its person has asked to be deleted.
@@ -58,7 +59,7 @@ pub async fn resolve(
     sqlx::query_as::<_, Resolved>(
         "SELECT t.user_id, t.sid, t.expires_at,
                 EXISTS (SELECT 1 FROM auth.sessions s
-                         WHERE s.provider_sid = t.sid AND s.user_id = t.user_id
+                         WHERE s.sid = t.sid AND s.user_id = t.user_id
                            AND s.revoked_at IS NOT NULL)
              OR EXISTS (SELECT 1 FROM auth.accounts a
                          WHERE a.user_id = t.user_id AND a.deletion_requested_at IS NOT NULL)
@@ -77,11 +78,11 @@ pub async fn resolve(
 pub async fn session_refused(
     tx: &mut Scoped<'_, Maintenance<AuthLane>>,
     user_id: &UserId,
-    sid: &str,
+    sid: &SessionId,
 ) -> sqlx::Result<bool> {
     sqlx::query_scalar(
         "SELECT EXISTS (SELECT 1 FROM auth.sessions s
-                         WHERE s.provider_sid = $2 AND s.user_id = $1
+                         WHERE s.sid = $2 AND s.user_id = $1
                            AND s.revoked_at IS NOT NULL)
              OR EXISTS (SELECT 1 FROM auth.accounts a
                          WHERE a.user_id = $1 AND a.deletion_requested_at IS NOT NULL)",
@@ -96,7 +97,7 @@ pub async fn session_refused(
 /// a refresh token presented twice.
 pub async fn delete_for_sid(
     tx: &mut Scoped<'_, Maintenance<AuthLane>>,
-    sid: &str,
+    sid: &SessionId,
 ) -> sqlx::Result<u64> {
     let done = sqlx::query("DELETE FROM auth.access_tokens WHERE sid = $1")
         .bind(sid)

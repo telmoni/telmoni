@@ -51,14 +51,13 @@ pub async fn revoke(
         .map_err(|_| AuthError::BadRequest("session id is not a uuid".into()))?;
 
     let mut tx = acting_person_in(&state, &principal.user_id, organization.as_ref()).await?;
-    let Some(provider_sid) = crate::db::sessions::revoke(&mut tx, &principal.user_id, id).await?
-    else {
+    let Some(sid) = crate::db::sessions::revoke(&mut tx, &principal.user_id, id).await? else {
         tx.commit().await?;
         return Err(AuthError::NotFound("session not found".into()).into());
     };
 
     let resource_id = id.to_string();
-    let metadata = json!({ "revoked_at_provider": provider_sid.is_some() });
+    let metadata = json!({});
     match &organization {
         Some(organization) => {
             emit_audit(
@@ -82,9 +81,7 @@ pub async fn revoke(
     }
     tx.commit().await?;
 
-    if let Some(sid) = provider_sid.as_deref()
-        && let Err(e) = state.issuer.revoke_sid(sid).await
-    {
+    if let Err(e) = state.issuer.revoke_sid(&sid).await {
         tracing::warn!(error = %e, session = %id,
                 "the session's tokens survive its revoke; the row is revoked, which refuses \
                  the device on its next request here");

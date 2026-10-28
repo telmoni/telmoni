@@ -18,6 +18,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use sqlx::PgPool;
 
+use telmoni_shared::SessionId;
 use telmoni_shared::db::tenant_session::person_scope;
 use telmoni_shared::seam::{Emitted, Notice, Notifications, PurgeHook, Telemetry};
 use telmoni_shared::{NotificationKind, OrganizationId, ProjectId, TelmoniError, UserId};
@@ -605,6 +606,8 @@ pub fn test_issuer_verifying(db: PgPool, verify_email: bool) -> Arc<Issuer> {
 pub async fn bearer_in(pool: &PgPool, user_id: &str, sid: &str) -> String {
     let user =
         UserId::try_new(user_id).unwrap_or_else(|e| panic!("{user_id:?} is not a user id: {e:?}"));
+    let sid =
+        SessionId::try_new(sid).unwrap_or_else(|e| panic!("{sid:?} is not a session id: {e:?}"));
     let token = secret();
     let mut tx = person_scope(pool, &user)
         .await
@@ -612,7 +615,7 @@ pub async fn bearer_in(pool: &PgPool, user_id: &str, sid: &str) -> String {
     access_tokens::create(
         &mut tx,
         &user,
-        sid,
+        &sid,
         &hash(&token),
         chrono::Utc::now() + chrono::Duration::seconds(BEARER_TTL_SECS),
     )

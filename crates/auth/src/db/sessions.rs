@@ -1,6 +1,6 @@
 //! `auth.sessions` — one row per browser sign-in, and the PERSON's, whichever
-//! organization the person then acts in. `provider_sid` is the session id the
-//! issuer minted, which every token of the session carries. Three lanes carry
+//! organization the person then acts in. `sid` is the session id the issuer
+//! minted, which every token of the session carries. Three lanes carry
 //! no person: the refresh and logout lanes hold a row id or that `sid`, the
 //! nightly prune nobody's.
 
@@ -9,7 +9,7 @@ use sqlx::prelude::FromRow;
 use uuid::Uuid;
 
 use telmoni_shared::db::tenant_session::{Maintenance, Person, Scoped};
-use telmoni_shared::{UserId, derive_shard_key, text::truncate_on_char_boundary};
+use telmoni_shared::{SessionId, UserId, derive_shard_key, text::truncate_on_char_boundary};
 
 use crate::db::AuthLane;
 
@@ -29,19 +29,19 @@ const USER_AGENT_MAX: usize = 400;
 pub async fn create(
     tx: &mut Scoped<'_, Person>,
     user_id: &UserId,
-    provider_sid: Option<&str>,
+    sid: &SessionId,
     user_agent: Option<&str>,
 ) -> sqlx::Result<Uuid> {
     let ua = user_agent.map(|value| truncate_on_char_boundary(value, USER_AGENT_MAX));
     sqlx::query_scalar(
         "INSERT INTO auth.sessions
-             (id, user_id, provider_sid, user_agent, shard_key)
+             (id, user_id, sid, user_agent, shard_key)
          VALUES ($1, $2, $3, $4, $5)
          RETURNING id",
     )
     .bind(Uuid::now_v7())
     .bind(user_id)
-    .bind(provider_sid)
+    .bind(sid)
     .bind(ua)
     .bind(derive_shard_key(user_id))
     .fetch_one(tx.conn())
@@ -63,47 +63,45 @@ pub async fn list(tx: &mut Scoped<'_, Person>, user_id: &UserId) -> sqlx::Result
 
 /// The row for a session, or a new one. `/me` calls this on every render
 /// with the session the bearer belongs to, so it must be idempotent under a race:
-/// the partial unique index on `provider_sid` makes the second insert a
-/// no-op, and the re-read after it returns the winner.
+/// the unique index on `sid` makes the second insert a no-op, and the
+/// re-read after it returns the winner.
 pub async fn find_or_create_for_sid(
     tx: &mut Scoped<'_, Person>,
     user_id: &UserId,
-    provider_sid: &str,
+    sid: &SessionId,
     user_agent: Option<&str>,
 ) -> sqlx::Result<Uuid> {
-    if let Some(id) = find_by_sid(tx, provider_sid).await? {
+    if let Some(id) = find_by_sid(tx, sid).await? {
         return Ok(id);
     }
     let ua = user_agent.map(|value| truncate_on_char_boundary(value, USER_AGENT_MAX));
     let inserted: Option<Uuid> = sqlx::query_scalar(
         "INSERT INTO auth.sessions
-             (id, user_id, provider_sid, user_agent, shard_key)
+             (id, user_id, sid, user_agent, shard_key)
          VALUES ($1, $2, $3, $4, $5)
-         ON CONFLICT (provider_sid) WHERE provider_sid IS NOT NULL DO NOTHING
+         ON CONFLICT (sid) DO NOTHING
          RETURNING id",
     )
     .bind(Uuid::now_v7())
     .bind(user_id)
-    .bind(provider_sid)
+    .bind(sid)
     .bind(ua)
     .bind(derive_shard_key(user_id))
     .fetch_optional(tx.conn())
     .await?;
     match inserted {
         Some(id) => Ok(id),
-        None => find_by_sid(tx, provider_sid)
-            .await?
-            .ok_or(sqlx::Error::RowNotFound),
+        None => find_by_sid(tx, sid).await?.ok_or(sqlx::Error::RowNotFound),
     }
 }
 
 /// The row id for a session, revoked or not.
 pub async fn find_by_sid(
     tx: &mut Scoped<'_, Person>,
-    provider_sid: &str,
+    sid: &SessionId,
 ) -> sqlx::Result<Option<Uuid>> {
-    sqlx::query_scalar("SELECT id FROM auth.sessions WHERE provider_sid = $1")
-        .bind(provider_sid)
+    sqlx::query_scalar("SELECT id FROM auth.sessions WHERE sid = $1")
+        .bind(sid)
         .fetch_optional(tx.conn())
         .await
 }
@@ -154,14 +152,14 @@ pub async fn touch_by_id(
 /// alone.
 pub async fn revoke_by_sid(
     tx: &mut Scoped<'_, Maintenance<AuthLane>>,
-    provider_sid: &str,
+    sid: &SessionId,
 ) -> sqlx::Result<Option<Uuid>> {
     sqlx::query_scalar(
         "UPDATE auth.sessions SET revoked_at = now()
-          WHERE provider_sid = $1 AND revoked_at IS NULL
+          WHERE sid = $1 AND revoked_at IS NULL
       RETURNING id",
     )
-    .bind(provider_sid)
+    .bind(sid)
     .fetch_optional(tx.conn())
     .await
 }
@@ -174,11 +172,11 @@ pub async fn revoke(
     tx: &mut Scoped<'_, Person>,
     user_id: &UserId,
     id: Uuid,
-) -> sqlx::Result<Option<Option<String>>> {
-    sqlx::query_scalar::<_, Option<String>>(
+) -> sqlx::Result<Option<SessionId>> {
+    sqlx::query_scalar(
         "UPDATE auth.sessions SET revoked_at = now()
           WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL
-      RETURNING provider_sid",
+      RETURNING sid",
     )
     .bind(id)
     .bind(user_id)
@@ -191,11 +189,11 @@ pub async fn revoke(
 pub async fn revoke_all_for_person(
     tx: &mut Scoped<'_, Person>,
     user_id: &UserId,
-) -> sqlx::Result<Vec<Option<String>>> {
-    sqlx::query_scalar::<_, Option<String>>(
+) -> sqlx::Result<Vec<SessionId>> {
+    sqlx::query_scalar(
         "UPDATE auth.sessions SET revoked_at = now()
           WHERE user_id = $1 AND revoked_at IS NULL
-      RETURNING provider_sid",
+      RETURNING sid",
     )
     .bind(user_id)
     .fetch_all(tx.conn())

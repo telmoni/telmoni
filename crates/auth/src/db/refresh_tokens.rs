@@ -4,6 +4,7 @@
 //! that session.
 
 use chrono::{DateTime, Utc};
+use telmoni_shared::SessionId;
 use telmoni_shared::UserId;
 use telmoni_shared::db::tenant_session::{Binding, Maintenance, Person, Scoped};
 use uuid::Uuid;
@@ -27,7 +28,7 @@ const REUSE_GRACE_SECS: i64 = 30;
 pub async fn create<B: Binding>(
     tx: &mut Scoped<'_, B>,
     user_id: &UserId,
-    sid: &str,
+    sid: &SessionId,
     token_hash: &str,
     expires_at: DateTime<Utc>,
 ) -> sqlx::Result<()> {
@@ -51,7 +52,7 @@ pub async fn create<B: Binding>(
 pub enum Spent {
     /// A live token, now spent, or one spent within the last few seconds:
     /// the session goes on with a new one.
-    Live { user_id: UserId, sid: String },
+    Live { user_id: UserId, sid: SessionId },
     /// A token spent longer ago than that. Every token of its session, its
     /// bearers included, is gone now.
     Reused,
@@ -63,7 +64,7 @@ pub enum Spent {
 struct Row {
     id: Uuid,
     user_id: UserId,
-    sid: String,
+    sid: SessionId,
     used_at: Option<DateTime<Utc>>,
     expires_at: DateTime<Utc>,
 }
@@ -121,7 +122,7 @@ pub async fn spend(
 /// End a session's tokens: sign-out, and a reuse.
 pub async fn revoke_sid(
     tx: &mut Scoped<'_, Maintenance<AuthLane>>,
-    sid: &str,
+    sid: &SessionId,
 ) -> sqlx::Result<u64> {
     let done = sqlx::query("DELETE FROM auth.refresh_tokens WHERE sid = $1")
         .bind(sid)

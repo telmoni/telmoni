@@ -21,6 +21,7 @@ use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
 
 use crate::error::{AuthError, TelmoniError};
+use crate::types::SessionId;
 use crate::types::UserId;
 
 /// Who a bearer names. Inserted into the request by the lane's middleware;
@@ -31,7 +32,7 @@ pub struct Principal {
     pub user_id: UserId,
     /// The session the bearer belongs to (`sid`): what `auth.sessions`
     /// records, and what a sign-out ends.
-    pub session_id: String,
+    pub session_id: SessionId,
     /// When the bearer stops being taken, unix seconds. A cache built on
     /// this answer must not outlive it.
     pub expires_at: i64,

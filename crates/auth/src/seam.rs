@@ -12,6 +12,7 @@ use axum::http::HeaderMap;
 use serde_json::json;
 use uuid::Uuid;
 
+use telmoni_shared::SessionId;
 use telmoni_shared::acting::{Acting, ActingKey, ActingProject};
 use telmoni_shared::db::tenant_session::{maintenance_scope, organization_scope};
 use telmoni_shared::extract::header;
@@ -98,7 +99,7 @@ impl Auth for AppState {
         let project_id = acting.project_or_bad_request()?.project_id.clone();
         // The session too, as the bearer's lookup would have it: a sign-out
         // everywhere, or a deletion asked for, ends the request's reach now.
-        if let Some(sid) = acting.session_id.as_deref() {
+        if let Some(sid) = acting.session_id.as_ref() {
             let mut tx = maintenance_scope(&self.db, AuthLane).await?;
             let refused = access_tokens::session_refused(&mut tx, &acting.user_id, sid).await?;
             tx.commit().await?;
@@ -318,7 +319,7 @@ impl AppState {
         &self,
         user_id: UserId,
         project_id: ProjectId,
-        session_id: Option<String>,
+        session_id: Option<SessionId>,
         expires_at: i64,
     ) -> Result<Acting, TelmoniError> {
         let acting = acting_project(self, &project_id, &user_id).await?;

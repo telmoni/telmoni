@@ -662,7 +662,7 @@ async fn a_sign_in_with_sign_ups_closed_records_its_session(pool: PgPool) {
     let (app, _provider) = app(pool.clone());
 
     let resp = app
-        .oneshot(post_me_with_session(&pool, "user_unprovisioned_123", "sid_123").await)
+        .oneshot(post_me_with_session(&pool, "user_unprovisioned_123", "ses_123").await)
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -671,7 +671,7 @@ async fn a_sign_in_with_sign_ups_closed_records_its_session(pool: PgPool) {
 
     let row: String = sqlx::query_scalar(
         "SELECT id::text FROM auth.sessions
-          WHERE user_id = 'user_unprovisioned_123' AND provider_sid = 'sid_123'",
+          WHERE user_id = 'user_unprovisioned_123' AND sid = 'ses_123'",
     )
     .fetch_one(&pool)
     .await
@@ -698,7 +698,7 @@ async fn a_sign_in_records_the_session_its_bearer_names(pool: PgPool) {
     let (app, _provider) = app(pool.clone());
 
     let resp = app
-        .oneshot(post_me_with_session(&pool, "user_provisioned_456", "sid_456").await)
+        .oneshot(post_me_with_session(&pool, "user_provisioned_456", "ses_456").await)
         .await
         .unwrap();
     let status = resp.status();
@@ -710,14 +710,14 @@ async fn a_sign_in_records_the_session_its_bearer_names(pool: PgPool) {
         .parse::<uuid::Uuid>()
         .expect("the row id is a uuid");
 
-    let (person, provider_sid): (String, Option<String>) =
-        sqlx::query_as("SELECT user_id, provider_sid FROM auth.sessions WHERE id = $1")
+    let (person, sid): (String, String) =
+        sqlx::query_as("SELECT user_id, sid FROM auth.sessions WHERE id = $1")
             .bind(row_id)
             .fetch_one(&pool)
             .await
             .expect("the session row");
     assert_eq!(person, "user_provisioned_456");
-    assert_eq!(provider_sid.as_deref(), Some("sid_456"));
+    assert_eq!(sid, "ses_456");
 }
 
 /// ⚠ AN ORGANIZATION IS BORN NAMED AFTER ITS HOLDER, at the slug that name

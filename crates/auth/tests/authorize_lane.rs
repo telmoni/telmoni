@@ -488,7 +488,7 @@ async fn refresh_touches_the_row_and_a_sign_out_ends_it(pool: PgPool) {
     let row = me["sessionRowId"].clone();
     assert!(row.is_string(), "{me}");
     let before: chrono::DateTime<chrono::Utc> =
-        sqlx::query_scalar("SELECT last_seen_at FROM auth.sessions WHERE provider_sid = $1")
+        sqlx::query_scalar("SELECT last_seen_at FROM auth.sessions WHERE sid = $1")
             .bind(&sid)
             .fetch_one(&pool)
             .await
@@ -506,13 +506,13 @@ async fn refresh_touches_the_row_and_a_sign_out_ends_it(pool: PgPool) {
         Some(sid.as_str()),
         "the session is the same one"
     );
-    let (row_sid, after): (Option<String>, chrono::DateTime<chrono::Utc>) =
-        sqlx::query_as("SELECT provider_sid, last_seen_at FROM auth.sessions WHERE id = $1::uuid")
+    let (row_sid, after): (String, chrono::DateTime<chrono::Utc>) =
+        sqlx::query_as("SELECT sid, last_seen_at FROM auth.sessions WHERE id = $1::uuid")
             .bind(row.as_str().unwrap())
             .fetch_one(&pool)
             .await
             .unwrap();
-    assert_eq!(row_sid.as_deref(), Some(sid.as_str()));
+    assert_eq!(row_sid, sid);
     assert!(after >= before);
 
     // Sign out ends the row by the sid the cookie holds, and every bearer
@@ -559,7 +559,7 @@ async fn logout_revokes_the_row_and_asks_nothing_of_the_provider(pool: PgPool) {
     apply_audit_migrations(&pool).await;
     let (app, _state, provider) = app(pool.clone());
 
-    sign_in(&app, &pool, "user_logout", Some("sid_logout")).await;
+    sign_in(&app, &pool, "user_logout", Some("ses_logout")).await;
     let resp = app
         .clone()
         .oneshot(
@@ -567,7 +567,7 @@ async fn logout_revokes_the_row_and_asks_nothing_of_the_provider(pool: PgPool) {
                 .header("x-service-secret", SERVICE_SECRET)
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    json!({ "session_id": "sid_logout" }).to_string(),
+                    json!({ "session_id": "ses_logout" }).to_string(),
                 ))
                 .unwrap(),
         )
@@ -575,13 +575,12 @@ async fn logout_revokes_the_row_and_asks_nothing_of_the_provider(pool: PgPool) {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::NO_CONTENT);
 
-    let revoked: bool = sqlx::query_scalar(
-        "SELECT revoked_at IS NOT NULL FROM auth.sessions WHERE provider_sid = $1",
-    )
-    .bind("sid_logout")
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let revoked: bool =
+        sqlx::query_scalar("SELECT revoked_at IS NOT NULL FROM auth.sessions WHERE sid = $1")
+            .bind("ses_logout")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert!(revoked, "the row outlived the sign-out");
     assert!(provider.calls().is_empty(), "{:?}", provider.calls());
 }

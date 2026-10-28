@@ -4,6 +4,7 @@
 //! callback cannot tell which it is talking to.
 
 use chrono::{DateTime, Utc};
+use telmoni_shared::SessionId;
 use telmoni_shared::UserId;
 use telmoni_shared::db::tenant_session::{Maintenance, Person, Scoped};
 use uuid::Uuid;
@@ -15,7 +16,7 @@ use crate::db::AuthLane;
 pub async fn create(
     tx: &mut Scoped<'_, Person>,
     user_id: &UserId,
-    sid: &str,
+    sid: &SessionId,
     code_hash: &str,
     code_challenge: &str,
     expires_at: DateTime<Utc>,
@@ -37,15 +38,23 @@ pub async fn create(
     Ok(())
 }
 
-/// Spend a code: the person and session it was minted for, and the
-/// challenge its verifier must answer, or `None` for a code that is unknown,
-/// spent or expired. Spent by deletion, so a second presentation finds
-/// nothing, and a wrong verifier burns the code all the same.
+/// What a code was minted for: the person and their session, and the
+/// challenge its verifier must answer.
+#[derive(Debug, sqlx::FromRow)]
+pub struct SpentCode {
+    pub user_id: UserId,
+    pub sid: SessionId,
+    pub code_challenge: String,
+}
+
+/// Spend a code, or `None` for one that is unknown, spent or expired. Spent
+/// by deletion, so a second presentation finds nothing, and a wrong verifier
+/// burns the code all the same.
 pub async fn spend(
     tx: &mut Scoped<'_, Maintenance<AuthLane>>,
     code_hash: &str,
-) -> sqlx::Result<Option<(UserId, String, String)>> {
-    sqlx::query_as(
+) -> sqlx::Result<Option<SpentCode>> {
+    sqlx::query_as::<_, SpentCode>(
         "DELETE FROM auth.authorization_codes
           WHERE code_hash = $1 AND expires_at > now()
       RETURNING user_id, sid, code_challenge",

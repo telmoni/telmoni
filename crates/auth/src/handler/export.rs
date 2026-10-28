@@ -11,7 +11,7 @@
 //! audit chain are the owner's and admins' to take away — they read all of
 //! it in the console already — and a member, who reads none of it there, is
 //! refused. And the queries use explicit column lists, never `SELECT *`:
-//! token and invite hashes and `provider_sid` must never land in a file a
+//! token and invite hashes and a session's `sid` must never land in a file a
 //! customer forwards, and a `*` would leak each the day a column is added.
 //!
 //! ⚠ **EVERY QUERY NAMES ITS TENANT, NOT JUST RLS.** The policies are

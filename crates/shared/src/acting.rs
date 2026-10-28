@@ -8,6 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::rbac::{Resource, Verb};
+use crate::types::SessionId;
 use crate::types::{ApiKeyScope, OrganizationId, OrganizationRole, ProjectId, Role, UserId};
 use crate::{AuthError, AuthzError, TelmoniError};
 
@@ -28,7 +29,7 @@ pub struct Acting {
     pub project: Option<ActingProject>,
     /// The session the bearer belongs to. Optional on the wire so a module's
     /// own double can answer without inventing one; auth always names it.
-    pub session_id: Option<String>,
+    pub session_id: Option<SessionId>,
     /// When the bearer stops being taken, unix seconds. Nothing built on
     /// this answer outlives it.
     pub expires_at: i64,
@@ -167,7 +168,7 @@ mod tests {
             "organization_id": "org_1",
             "organization_role": "owner",
             "project": { "project_id": "proj_1", "role": "owner" },
-            "session_id": "sid_1",
+            "session_id": "ses_1",
             "expires_at": exp,
         })
     }

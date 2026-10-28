@@ -21,9 +21,11 @@ use chrono::{Duration, Utc};
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use telmoni_shared::SessionId;
 use telmoni_shared::db::tenant_session::{Person, Scoped, maintenance_scope, person_scope};
 use telmoni_shared::{AuthError, TelmoniError, UserId};
 
+use crate::db::authorization_codes::SpentCode;
 use crate::db::{
     AuthLane, access_tokens, authorization_codes, device_codes,
     identities::{self, IdentityRead},
@@ -84,11 +86,6 @@ pub(crate) fn secret() -> String {
 /// The stored form of any secret this service mints.
 pub(crate) fn hash(secret: &str) -> String {
     telmoni_shared::digest::sha256_hex(secret.as_bytes())
-}
-
-/// A session id, the `sid` every token of one session is filed under.
-fn mint_sid() -> String {
-    format!("ses_{}", Uuid::new_v4().simple())
 }
 
 /// Eight letters of [`USER_CODE_ALPHABET`], drawn from random bytes.
@@ -191,7 +188,7 @@ impl Issuer {
         &self,
         tx: &mut Scoped<'_, B>,
         user_id: &UserId,
-        sid: &str,
+        sid: &SessionId,
         auth_method: Option<&str>,
         id_token: Option<String>,
     ) -> Result<TokenResponse, TelmoniError> {
@@ -227,7 +224,7 @@ impl Issuer {
                 family_name: identity.last_name,
             },
             access_token,
-            session_id: sid.to_owned(),
+            session_id: sid.to_string(),
             id_token,
             refresh_token: Some(refresh_token),
             expires_in: u64::try_from(BEARER_TTL_SECS).unwrap_or(0),
@@ -249,7 +246,7 @@ impl Issuer {
         authorization_codes::create(
             tx,
             user_id,
-            &mint_sid(),
+            &SessionId::new(),
             &hash(&code),
             code_challenge,
             Utc::now() + Duration::seconds(CODE_TTL_SECS),
@@ -269,7 +266,12 @@ impl Issuer {
         let mut mtx = maintenance_scope(&self.db, AuthLane).await?;
         let spent = authorization_codes::spend(&mut mtx, &hash(code)).await?;
         mtx.commit().await?;
-        let Some((user_id, sid, challenge)) = spent else {
+        let Some(SpentCode {
+            user_id,
+            sid,
+            code_challenge: challenge,
+        }) = spent
+        else {
             tracing::warn!("exchange of a code that is unknown, spent or expired");
             return Err(AuthError::InvalidToken.into());
         };
@@ -298,7 +300,7 @@ impl Issuer {
     ) -> Result<TokenResponse, TelmoniError> {
         let mut tx = person_scope(&self.db, user_id).await?;
         let tokens = self
-            .issue_tokens(&mut tx, user_id, &mint_sid(), auth_method, id_token)
+            .issue_tokens(&mut tx, user_id, &SessionId::new(), auth_method, id_token)
             .await?;
         tx.commit().await?;
         Ok(tokens)
@@ -335,7 +337,7 @@ impl Issuer {
     /// and its refresh tokens, so nothing can mint another. The
     /// `auth.sessions` row, revoked by the caller, refuses the bearers too,
     /// should this fail after it. Idempotent.
-    pub async fn revoke_sid(&self, sid: &str) -> Result<(), TelmoniError> {
+    pub async fn revoke_sid(&self, sid: &SessionId) -> Result<(), TelmoniError> {
         let mut tx = maintenance_scope(&self.db, AuthLane).await?;
         access_tokens::delete_for_sid(&mut tx, sid).await?;
         refresh_tokens::revoke_sid(&mut tx, sid).await?;
@@ -417,7 +419,7 @@ impl Issuer {
     ) -> Result<(), TelmoniError> {
         let code = normalize_user_code(user_code);
         let mut tx = maintenance_scope(&self.db, AuthLane).await?;
-        let approved = device_codes::approve(&mut tx, &code, user_id, &mint_sid()).await?;
+        let approved = device_codes::approve(&mut tx, &code, user_id, &SessionId::new()).await?;
         tx.commit().await?;
         if !approved {
             return Err(no_such_device());
@@ -464,6 +466,6 @@ mod tests {
         let b = secret();
         assert_eq!(URL_SAFE_NO_PAD.decode(&a).unwrap().len(), 32);
         assert_ne!(a, b);
-        assert!(mint_sid().starts_with("ses_"));
+        assert!(SessionId::new().as_str().starts_with("ses_"));
     }
 }

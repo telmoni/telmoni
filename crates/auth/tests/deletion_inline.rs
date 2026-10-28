@@ -2240,14 +2240,12 @@ async fn an_owned_organization_already_being_deleted_does_not_block_the_account(
 async fn a_failed_provider_erasure_leaves_the_person_and_their_memberships(pool: PgPool) {
     seed_account_deletion_owning_nothing(&pool).await;
     seed_survivor_with(&pool, USER, "admin").await;
-    sqlx::query(
-        "INSERT INTO auth.sessions (user_id, provider_sid, user_agent) VALUES ($1, $2, 'agent')",
-    )
-    .bind(USER)
-    .bind("sess_inline_del")
-    .execute(&pool)
-    .await
-    .unwrap();
+    sqlx::query("INSERT INTO auth.sessions (user_id, sid, user_agent) VALUES ($1, $2, 'agent')")
+        .bind(USER)
+        .bind("ses_inline_del")
+        .execute(&pool)
+        .await
+        .unwrap();
     let (app, provider) = app(pool.clone(), None, 8_000);
     provider.on_delete_user(provider_down());
 

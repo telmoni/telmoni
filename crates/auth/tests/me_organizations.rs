@@ -831,7 +831,8 @@ async fn somebody_in_no_organization_manages_their_account_without_naming_one(po
     assert_eq!(body["activeOrganizationId"], Value::Null, "{body}");
     // A browser they are signed in on elsewhere, and want to cut off.
     let session: String = sqlx::query_scalar(
-        "INSERT INTO auth.sessions (user_id, user_agent) VALUES ('user_me_alone', 'stolen')
+        "INSERT INTO auth.sessions (user_id, sid, user_agent)
+         VALUES ('user_me_alone', 'ses_stolen', 'stolen')
          RETURNING id::text",
     )
     .fetch_one(&pool)

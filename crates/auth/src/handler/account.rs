@@ -319,8 +319,8 @@ pub async fn confirm_email_change(
     // all go.
     identities::set_email(&mut tx, &user_id, &new_email, confirmed.email_verified).await?;
     confirmation_codes::delete_all_for_person(&mut tx, &user_id).await?;
-    let provider_sids = sessions::revoke_all_for_person(&mut tx, &user_id).await?;
-    let revoked = provider_sids.len();
+    let sids = sessions::revoke_all_for_person(&mut tx, &user_id).await?;
+    let revoked = sids.len();
 
     let metadata = json!({
         "kind": AuditKind::EmailChange,
@@ -346,8 +346,8 @@ pub async fn confirm_email_change(
     }
     tx.commit().await?;
 
-    for sid in provider_sids.into_iter().flatten() {
-        if let Err(e) = state.issuer.revoke_sid(&sid).await {
+    for sid in &sids {
+        if let Err(e) = state.issuer.revoke_sid(sid).await {
             tracing::warn!(error = %e,
                 "a session's tokens survive the email change; the row is revoked, which \
                  refuses its bearers and its next refresh");
@@ -632,11 +632,11 @@ pub async fn delete_account(
         tx = otx.clear_organization().await?;
     }
     identities::mark_pending_deletion(&mut tx, &user_id).await?;
-    let provider_sids = sessions::revoke_all_for_person(&mut tx, &user_id).await?;
+    let sids = sessions::revoke_all_for_person(&mut tx, &user_id).await?;
     tx.commit().await?;
 
-    for sid in provider_sids.into_iter().flatten() {
-        if let Err(e) = state.issuer.revoke_sid(&sid).await {
+    for sid in &sids {
+        if let Err(e) = state.issuer.revoke_sid(sid).await {
             tracing::warn!(error = %e,
                 "a session's tokens survive the account deletion; the row is revoked, which \
                  refuses them");

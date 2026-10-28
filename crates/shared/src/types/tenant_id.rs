@@ -296,6 +296,39 @@ impl Default for OrganizationId {
     }
 }
 
+/// The prefix of a session id, which this platform mints.
+pub const SESSION_ID_PREFIX: &str = "ses_";
+
+tenant_id_newtype!(
+    /// The session every token of one sign-in is filed under: minted at the
+    /// sign-in, ended by its sign-out, `ses_` and sixteen characters.
+    SessionId,
+    /// Reasons [`SessionId::try_new`] can reject input.
+    SessionIdError,
+    "session id",
+    is_minted_session,
+    "must start with `ses_`"
+);
+
+impl SessionId {
+    /// A fresh id, minted here.
+    #[must_use]
+    pub fn new() -> Self {
+        Self(mint(SESSION_ID_PREFIX))
+    }
+}
+
+impl Default for SessionId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// A session id is one this platform minted.
+fn is_minted_session(s: &str) -> bool {
+    s.starts_with(SESSION_ID_PREFIX)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

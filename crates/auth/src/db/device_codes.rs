@@ -3,6 +3,7 @@
 //! its code in the console, so every lane on it is the maintenance lane.
 
 use chrono::{DateTime, Utc};
+use telmoni_shared::SessionId;
 use telmoni_shared::UserId;
 use telmoni_shared::db::tenant_session::{Maintenance, Scoped};
 use uuid::Uuid;
@@ -30,7 +31,7 @@ pub enum DeviceState {
         /// The person who approved it.
         user_id: UserId,
         /// The session minted for the device.
-        sid: String,
+        sid: SessionId,
     },
 }
 
@@ -47,7 +48,7 @@ struct Row {
     id: Uuid,
     status: Status,
     approved_by: Option<UserId>,
-    sid: Option<String>,
+    sid: Option<SessionId>,
     expires_at: DateTime<Utc>,
 }
 
@@ -151,7 +152,7 @@ pub async fn approve(
     tx: &mut Scoped<'_, Maintenance<AuthLane>>,
     user_code: &str,
     user_id: &UserId,
-    sid: &str,
+    sid: &SessionId,
 ) -> sqlx::Result<bool> {
     let done = sqlx::query(
         "UPDATE auth.device_codes
@@ -198,7 +199,7 @@ mod tests {
             id: Uuid::nil(),
             status,
             approved_by,
-            sid: sid.map(str::to_owned),
+            sid: sid.map(SessionId::from_trusted),
             expires_at: Utc::now(),
         }
     }
@@ -213,7 +214,7 @@ mod tests {
             panic!("read as {:?}", device.state);
         };
         assert_eq!(user_id, person);
-        assert_eq!(sid, "ses_a");
+        assert_eq!(sid.as_str(), "ses_a");
     }
 
     /// ⚠ Never read as pending: its poll would wait out the code, and nothing
