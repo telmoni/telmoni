@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 
 import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
 import { problem } from "@/lib/api/respond";
-import { isProjectId } from "@/lib/connect";
+import { isProjectId } from "@/lib/ids";
 import { getServerSession } from "@/lib/server/session";
 
 /** Why the agent's lanes turn a call away, in the sentence the panel shows,

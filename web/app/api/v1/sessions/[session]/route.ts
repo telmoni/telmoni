@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
 import { problem } from "@/lib/api/respond";
-import { isProjectId } from "@/lib/connect";
+import { isProjectId } from "@/lib/ids";
 import { PINNED_MAX } from "@/lib/layout";
 import { parseWindow } from "@/lib/list-query";
 import { fetchSession } from "@/lib/server/data";

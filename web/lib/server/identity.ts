@@ -1,4 +1,4 @@
-import { isProjectId } from "@/lib/connect";
+import { isProjectId } from "@/lib/ids";
 import { identityContext } from "@/lib/server/entities/identity-context";
 import { getServerContext } from "@/lib/server/entities/organization";
 

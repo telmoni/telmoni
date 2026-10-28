@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
 import { problem } from "@/lib/api/respond";
-import { isProjectId } from "@/lib/connect";
+import { isProjectId } from "@/lib/ids";
 import { fetchTrace } from "@/lib/server/data";
 import { getServerSession } from "@/lib/server/session";
 

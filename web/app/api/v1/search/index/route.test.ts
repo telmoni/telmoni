@@ -110,7 +110,7 @@ describe("GET /api/v1/search/index", () => {
   });
 
   it("refuses anything but a project id, and a project the session cannot place", async () => {
-    for (const project of [null, "", "../members", "project_short"]) {
+    for (const project of [null, "", "../members", "org_1"]) {
       expect((await get(project)).status).toBe(404);
     }
     expect(fetchProjectAnywhere).not.toHaveBeenCalled();

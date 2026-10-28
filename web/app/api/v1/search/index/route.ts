@@ -2,6 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 
 import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
 import { problem } from "@/lib/api/respond";
+import { isProjectId } from "@/lib/ids";
 import type { SearchIndex, SearchItem, SearchSection } from "@/lib/search";
 import { fetchMembers, fetchProjectAnywhere, fetchTokens } from "@/lib/server/data";
 import { getServerSession } from "@/lib/server/session";
@@ -23,8 +24,6 @@ const ok = (items: SearchItem[]): SearchSection => ({
   unavailable: false,
 });
 
-const PROJECT_ID_RE = /^project_[0-9A-Za-z]{16}$/;
-
 function refuse(sentence: string, status: number) {
   return problem(status, sentence, { headers: NO_STORE });
 }
@@ -40,7 +39,7 @@ export async function GET(request: NextRequest) {
   if (limited) return refuse("Too many requests — slow down a moment.", 429);
 
   const projectId = request.nextUrl.searchParams.get("project") ?? "";
-  if (!PROJECT_ID_RE.test(projectId)) return refuse("Unknown project.", 404);
+  if (!isProjectId(projectId)) return refuse("Unknown project.", 404);
 
   // In the project's own organization: the path names none, and the cookie
   // follows whichever tab opened a page last.

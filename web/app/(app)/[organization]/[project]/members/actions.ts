@@ -6,7 +6,7 @@ import { redirect } from "next/navigation";
 import { extractProblem, readBody, tryFetchWithTimeout } from "@/lib/api/fetch";
 import type { SessionData } from "@/lib/auth/session";
 import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
-import { isProjectId } from "@/lib/connect";
+import { isProjectId } from "@/lib/ids";
 import { env } from "@/lib/env";
 import { Flag } from "@/lib/flags";
 import { featureOff } from "@/lib/server/flags";

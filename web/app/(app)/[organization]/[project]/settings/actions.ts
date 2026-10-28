@@ -7,7 +7,7 @@ import { z } from "zod";
 import { type ActionResult, refused } from "@/lib/action-result";
 import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
 import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
-import { isProjectId } from "@/lib/connect";
+import { isProjectId } from "@/lib/ids";
 import { env } from "@/lib/env";
 import { organizationChannel, publishEvent } from "@/lib/events/publisher";
 import { checkProjectName } from "@/lib/names";

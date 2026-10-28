@@ -8,6 +8,7 @@ import { type ActionResult, refused } from "@/lib/action-result";
 import { extractProblem, readBody, tryFetchWithTimeout } from "@/lib/api/fetch";
 import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
 import { env } from "@/lib/env";
+import { isOrganizationId, isProjectId } from "@/lib/ids";
 import { organizationChannel, publishEvent, publishToAll } from "@/lib/events/publisher";
 import { personHeaders, sessionHeaders } from "@/lib/server/entities/identity-context";
 import { getServerSession } from "@/lib/server/session";
@@ -81,9 +82,6 @@ const ProjectMoved = z.object({
   ownerOrganizationId: text,
 });
 
-const PROJECT_ID = /^project_[A-Za-z0-9]+$/;
-const ORGANIZATION_ID = /^org_[A-Za-z0-9]+$/;
-
 /// What answering a project offer comes back with. An accept that landed
 /// answers with the project's page instead, in the caller's organization now.
 export type ProjectOfferAnswer = ActionResult;
@@ -103,8 +101,8 @@ async function answerProjectOffer(
 
   // Both ids reach auth in the URL or the body; anything but the shape each
   // has is refused here rather than making `fetch` throw on a stray character.
-  if (!PROJECT_ID.test(projectId)) return refused("That is not a project.");
-  if (organizationId !== undefined && !ORGANIZATION_ID.test(organizationId)) {
+  if (!isProjectId(projectId)) return refused("That is not a project.");
+  if (organizationId !== undefined && !isOrganizationId(organizationId)) {
     return refused("That is not an organization.");
   }
 

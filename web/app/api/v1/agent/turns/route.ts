@@ -8,7 +8,7 @@ import { problem } from "@/lib/api/respond";
 import { getSession } from "@/lib/auth/session";
 import { sessionEndKey } from "@/lib/auth/session-end-key";
 import { isSessionBlacklisted } from "@/lib/auth/session-blacklist";
-import { isProjectId } from "@/lib/connect";
+import { isProjectId } from "@/lib/ids";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import { agentHeaders } from "@/lib/server/entities/agent";
