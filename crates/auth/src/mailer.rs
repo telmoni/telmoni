@@ -215,9 +215,6 @@ impl ComposingMailer {
                 to: to.to_owned(),
                 subject,
                 text,
-                html: None,
-                from: None,
-                list_unsubscribe: None,
             })
             .await
     }

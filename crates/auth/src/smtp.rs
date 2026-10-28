@@ -17,8 +17,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use lettre::message::header::{ContentType, HeaderName, HeaderValue};
-use lettre::message::{Mailbox, MultiPart};
+use lettre::message::Mailbox;
+use lettre::message::header::ContentType;
 use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
 
 use telmoni_shared::Redacted;
@@ -31,9 +31,6 @@ use crate::Config;
 /// How long one step of the conversation may take. The lanes that mail send
 /// inline, and the console gives up on them at ten seconds.
 const STEP_TIMEOUT: Duration = Duration::from_secs(5);
-
-const LIST_UNSUBSCRIBE: HeaderName = HeaderName::new_from_ascii_str("List-Unsubscribe");
-const LIST_UNSUBSCRIBE_POST: HeaderName = HeaderName::new_from_ascii_str("List-Unsubscribe-Post");
 
 /// Mail over SMTP, with a pool of connections kept open between sends.
 pub struct SmtpSender {
@@ -122,41 +119,20 @@ impl MailSender for SmtpSender {
     }
 }
 
-/// The message a transport sends for `mail`. Plain text alone, or the text
-/// and the HTML as alternatives of one another.
-fn compose(mail: &Mail, default_from: &Mailbox) -> Result<Message, MailError> {
-    let from = match mail.from.as_deref() {
-        Some(from) => from
-            .parse::<Mailbox>()
-            .map_err(|_| MailError::Compose("the sender address"))?,
-        None => default_from.clone(),
-    };
+/// The message a transport sends for `mail`: plain text, from the
+/// transport's sender.
+fn compose(mail: &Mail, from: &Mailbox) -> Result<Message, MailError> {
     let to = mail
         .to
         .parse::<Mailbox>()
         .map_err(|_| MailError::Compose("the recipient address"))?;
-    let mut builder = Message::builder()
-        .from(from)
+    Message::builder()
+        .from(from.clone())
         .to(to)
-        .subject(mail.subject.clone());
-    if let Some(url) = &mail.list_unsubscribe {
-        builder = builder
-            .raw_header(HeaderValue::new(LIST_UNSUBSCRIBE, format!("<{url}>")))
-            .raw_header(HeaderValue::new(
-                LIST_UNSUBSCRIBE_POST,
-                "List-Unsubscribe=One-Click".to_owned(),
-            ));
-    }
-    let message = match &mail.html {
-        Some(html) => builder.multipart(MultiPart::alternative_plain_html(
-            mail.text.clone(),
-            html.clone(),
-        )),
-        None => builder
-            .header(ContentType::TEXT_PLAIN)
-            .body(mail.text.clone()),
-    };
-    message.map_err(|_| MailError::Compose("the message"))
+        .subject(mail.subject.clone())
+        .header(ContentType::TEXT_PLAIN)
+        .body(mail.text.clone())
+        .map_err(|_| MailError::Compose("the message"))
 }
 
 /// What went wrong, in words that carry nothing the server said.
@@ -189,9 +165,6 @@ mod tests {
             to: "ada@example.com".to_owned(),
             subject: "Confirm your email address".to_owned(),
             text: "Your code is 802610.".to_owned(),
-            html: None,
-            from: None,
-            list_unsubscribe: None,
         }
     }
 
@@ -213,27 +186,6 @@ mod tests {
         assert!(out.contains("Your code is 802610."), "{out}");
         assert!(!out.contains("multipart"), "{out}");
         assert!(!out.contains("List-Unsubscribe"), "{out}");
-    }
-
-    #[test]
-    fn a_mail_with_html_carries_both_parts_and_may_name_its_own_sender() {
-        let out = formatted(&Mail {
-            html: Some("<p>Your code is 802610.</p>".to_owned()),
-            from: Some("\"Acme Status\" <status@example.com>".to_owned()),
-            list_unsubscribe: Some("https://example.com/unsubscribe?t=abc".to_owned()),
-            ..mail()
-        });
-        assert!(out.contains("multipart/alternative"), "{out}");
-        assert!(out.contains("<p>Your code is 802610.</p>"), "{out}");
-        assert!(out.contains("status@example.com"), "{out}");
-        assert!(
-            out.contains("List-Unsubscribe: <https://example.com/unsubscribe?t=abc>"),
-            "{out}"
-        );
-        assert!(
-            out.contains("List-Unsubscribe-Post: List-Unsubscribe=One-Click"),
-            "{out}"
-        );
     }
 
     /// An address that could smuggle a header in is not an address.
