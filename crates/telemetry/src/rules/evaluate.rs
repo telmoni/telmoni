@@ -245,35 +245,22 @@ impl Held {
     }
 }
 
-/// [`pass`], every [`TICK`] until the replica stops; a pass that ends beats,
-/// and one that panics ends itself alone.
+/// [`pass`], every [`TICK`] until the replica stops.
 pub async fn run(state: Arc<AppState>) {
-    state.heartbeats.runs(HEARTBEAT, EVERY);
-    let mut ticker = tokio::time::interval(TICK);
-    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    loop {
-        ticker.tick().await;
-        if state.alerts_stopping.asked() {
-            // Never ends: the process is ending, and a loop that ended would
-            // read to it as one that died.
-            std::future::pending::<()>().await;
-        }
-        let evaluated = tokio::spawn({
+    state
+        .heartbeats
+        .every(&state.db, HEARTBEAT, Duration::ZERO, TICK, || {
             let state = state.clone();
-            async move { pass(&state).await }
-        });
-        match evaluated.await {
-            Ok(Ok(_)) => state.heartbeats.beat(&state.db, HEARTBEAT).await,
-            Ok(Err(e)) => tracing::warn!(
-                error = %e,
-                "telemetry: the alerts' evaluation failed; the next pass retries"
-            ),
-            Err(e) => tracing::error!(
-                error = %e,
-                "telemetry: the alerts' evaluation died; the next pass retries"
-            ),
-        }
-    }
+            async move {
+                if state.alerts_stopping.asked() {
+                    // Never ends: the process is ending, and a loop that ended
+                    // would read to it as one that died.
+                    std::future::pending::<()>().await;
+                }
+                pass(&state).await.map(drop)
+            }
+        })
+        .await;
 }
 
 /// Every alert due, a batch at a time: each organization held to its plan

@@ -78,24 +78,22 @@ fn windows() -> impl Iterator<Item = (Source, i32)> {
 /// The loop's name in `agent.heartbeats`.
 pub const HEARTBEAT: &str = "retention";
 
-/// The sweep loop. A failed sweep is rows kept too long, and is retried; one
-/// that ends beats.
+/// The sweep loop, the first a period after boot. A failed sweep is rows kept
+/// too long, and is retried.
 pub async fn run(state: Arc<AppState>) {
-    state.heartbeats.runs(HEARTBEAT, SWEEP_EVERY);
-    let mut ticker = tokio::time::interval(SWEEP_EVERY);
-    ticker.tick().await;
-    loop {
-        ticker.tick().await;
-        match sweep_once(&state).await {
-            Ok(n) => {
-                if n > 0 {
-                    tracing::info!(removed = n, "agent retention sweep");
+    state
+        .heartbeats
+        .every(&state.db, HEARTBEAT, SWEEP_EVERY, SWEEP_EVERY, || {
+            let state = state.clone();
+            async move {
+                let removed = sweep_once(&state).await?;
+                if removed > 0 {
+                    tracing::info!(removed, "agent retention sweep");
                 }
-                state.heartbeats.beat(&state.db, HEARTBEAT).await;
+                Ok::<(), TelmoniError>(())
             }
-            Err(e) => tracing::warn!(error = %e, "agent retention sweep failed; will retry"),
-        }
-    }
+        })
+        .await;
 }
 
 /// One sweep, in bounded chunks with a transaction each: what projects left

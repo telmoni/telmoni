@@ -105,8 +105,7 @@ pub fn spawn(auth: Arc<AppState>, heartbeats: &Arc<Heartbeats<AuthLane>>) {
     ));
 }
 
-/// One sweep on its timer, forever. The first tick waits [`START_DELAY`];
-/// a tick that overruns delays the next rather than stacking.
+/// One sweep on its timer, forever, the first tick after [`START_DELAY`].
 async fn every<F, Fut>(
     auth: Arc<AppState>,
     heartbeats: Arc<Heartbeats<AuthLane>>,
@@ -116,24 +115,17 @@ async fn every<F, Fut>(
     tick: F,
 ) where
     F: Fn(Arc<AppState>) -> Fut,
-    Fut: Future<Output = Result<(), telmoni_shared::TelmoniError>>,
+    Fut: Future<Output = Result<(), telmoni_shared::TelmoniError>> + Send + 'static,
 {
-    heartbeats.runs(sweep.as_str(), period);
-    tokio::time::sleep(START_DELAY).await;
-    let mut ticker = tokio::time::interval(period);
-    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    loop {
-        ticker.tick().await;
-        if start == Start::Logged {
-            tracing::info!(sweep = sweep.as_str(), "sweep starting");
-        }
-        match tick(auth.clone()).await {
-            Ok(()) => heartbeats.beat(&auth.db, sweep.as_str()).await,
-            Err(e) => tracing::warn!(
-                sweep = sweep.as_str(),
-                error = %e,
-                "sweep failed; the next tick retries"
-            ),
-        }
-    }
+    heartbeats
+        .every(&auth.db, sweep.as_str(), START_DELAY, period, || {
+            let pass = tick(auth.clone());
+            async move {
+                if start == Start::Logged {
+                    tracing::info!(sweep = sweep.as_str(), "sweep starting");
+                }
+                pass.await
+            }
+        })
+        .await;
 }

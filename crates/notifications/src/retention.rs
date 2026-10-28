@@ -45,28 +45,19 @@ pub struct Purged {
     pub left: u64,
 }
 
-/// The sweep loop: a minute after boot, then hourly, each sweep its own task
-/// so that a panic ends that sweep alone. Errors are logged and the loop
-/// continues: a failed sweep is rows kept too long, not rows lost.
+/// The sweep loop: a minute after boot, then hourly. Errors are logged and the
+/// loop continues: a failed sweep is rows kept too long, not rows lost.
 pub async fn run(state: Arc<AppState>) {
-    state.heartbeats.runs(HEARTBEAT, SWEEP_EVERY);
-    let mut ticker =
-        tokio::time::interval_at(tokio::time::Instant::now() + START_DELAY, SWEEP_EVERY);
-    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    loop {
-        ticker.tick().await;
-        let sweep = tokio::spawn({
+    state
+        .heartbeats
+        .every(&state.db, HEARTBEAT, START_DELAY, SWEEP_EVERY, || {
             let state = state.clone();
-            async move { tick(&state).await }
-        });
-        match sweep.await {
-            Ok(()) => state.heartbeats.beat(&state.db, HEARTBEAT).await,
-            Err(e) => tracing::error!(
-                error = %e,
-                "notifications: the retention sweep died; the next sweep retries"
-            ),
-        }
-    }
+            async move {
+                tick(&state).await;
+                Ok::<(), std::convert::Infallible>(())
+            }
+        })
+        .await;
 }
 
 /// One sweep: deleted projects, the windows, then the uninstalls, which a

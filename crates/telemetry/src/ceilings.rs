@@ -405,26 +405,18 @@ pub async fn tell(state: &AppState) {
     }
 }
 
-/// [`tell`], every five minutes, forever; a pass that panics ends itself
-/// alone.
+/// [`tell`], every five minutes, forever.
 pub async fn run(state: Arc<AppState>) {
-    state.heartbeats.runs(HEARTBEAT, TELL_EVERY);
-    let mut ticker = tokio::time::interval(TELL_EVERY);
-    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    loop {
-        ticker.tick().await;
-        let pass = tokio::spawn({
+    state
+        .heartbeats
+        .every(&state.db, HEARTBEAT, Duration::ZERO, TELL_EVERY, || {
             let state = state.clone();
-            async move { tell(&state).await }
-        });
-        match pass.await {
-            Ok(()) => state.heartbeats.beat(&state.db, HEARTBEAT).await,
-            Err(error) => tracing::error!(
-                error = %error,
-                "telemetry: a pass telling refusals died; the next one runs"
-            ),
-        }
-    }
+            async move {
+                tell(&state).await;
+                Ok::<(), std::convert::Infallible>(())
+            }
+        })
+        .await;
 }
 
 #[cfg(test)]

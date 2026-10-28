@@ -35,20 +35,14 @@ pub struct Swept {
     pub left: u64,
 }
 
-/// A pass a minute after boot, then every ten minutes, each its own task so
-/// that a panic ends that pass alone.
+/// A pass a minute after boot, then every ten minutes.
 pub async fn run(state: Arc<AppState>) {
-    state.heartbeats.runs(HEARTBEAT, EVERY);
-    let mut ticker = tokio::time::interval_at(tokio::time::Instant::now() + START_DELAY, EVERY);
-    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    loop {
-        ticker.tick().await;
-        let pass = tokio::spawn({
+    state
+        .heartbeats
+        .every(&state.db, HEARTBEAT, START_DELAY, EVERY, || {
             let state = state.clone();
-            async move { sweep(&state).await }
-        });
-        match pass.await {
-            Ok(Ok(swept)) => {
+            async move {
+                let swept = sweep(&state).await?;
                 if swept != Swept::default() {
                     tracing::info!(
                         purged = swept.purged,
@@ -57,18 +51,10 @@ pub async fn run(state: Arc<AppState>) {
                          short; any left wait for the next"
                     );
                 }
-                state.heartbeats.beat(&state.db, HEARTBEAT).await;
+                Ok::<(), TelmoniError>(())
             }
-            Ok(Err(e)) => tracing::warn!(
-                error = %e,
-                "telemetry: the purge sweep failed; the next pass retries"
-            ),
-            Err(e) => tracing::error!(
-                error = %e,
-                "telemetry: the purge sweep died; the next pass retries"
-            ),
-        }
-    }
+        })
+        .await;
 }
 
 /// One pass over every settings row, a page at a time. Ends early when auth

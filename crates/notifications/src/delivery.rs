@@ -11,7 +11,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::time::Duration;
 
 use telmoni_shared::db::tenant_session::maintenance_scope;
@@ -79,40 +79,39 @@ fn note_rows_held(message: &str) {
 /// The loop's name in `notifications.heartbeats`.
 pub const HEARTBEAT: &str = "delivery";
 
-/// The delivery loop. A failed tick is logged and the next one runs; one that
-/// ends beats.
+/// The delivery loop, the first tick a poll after boot, with the queue's depth
+/// logged once a minute beside it. A failed tick is logged and the next one
+/// runs.
 pub async fn run(state: Arc<AppState>) {
     let poll = state.config.delivery_poll_secs.max(1);
-    state.heartbeats.runs(HEARTBEAT, Duration::from_secs(poll));
-    let mut ticker = tokio::time::interval(Duration::from_secs(poll));
-    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    ticker.tick().await; // skip the immediate first tick
-    let mut ticks = 0;
-    loop {
-        ticker.tick().await;
-        match tick_once(&state).await {
-            Ok(n) => {
-                if n > 0 {
-                    tracing::debug!(attempted = n, "connector delivery tick");
+    let a_minute = (60 / poll).max(1);
+    let ticks = Arc::new(AtomicU64::new(0));
+    let every = Duration::from_secs(poll);
+    state
+        .heartbeats
+        .every(&state.db, HEARTBEAT, every, every, || {
+            let state = state.clone();
+            let ticks = ticks.clone();
+            async move {
+                let attempted = tick_once(&state).await;
+                if (ticks.fetch_add(1, Ordering::Relaxed) + 1).is_multiple_of(a_minute) {
+                    match queue_depth(&state).await {
+                        Ok((pending, oldest_age_secs)) => tracing::info!(
+                            pending,
+                            oldest_age_secs = oldest_age_secs.unwrap_or(0),
+                            "connector queue depth"
+                        ),
+                        Err(e) => tracing::warn!(error = %e, "connector queue depth read failed"),
+                    }
                 }
-                state.heartbeats.beat(&state.db, HEARTBEAT).await;
+                let attempted = attempted?;
+                if attempted > 0 {
+                    tracing::debug!(attempted, "connector delivery tick");
+                }
+                Ok::<(), TelmoniError>(())
             }
-            Err(e) => tracing::warn!(error = %e, "connector delivery tick failed; will retry"),
-        }
-
-        ticks += 1;
-        if ticks >= (60 / poll).max(1) {
-            ticks = 0;
-            match queue_depth(&state).await {
-                Ok((pending, oldest_age_secs)) => tracing::info!(
-                    pending,
-                    oldest_age_secs = oldest_age_secs.unwrap_or(0),
-                    "connector queue depth"
-                ),
-                Err(e) => tracing::warn!(error = %e, "connector queue depth read failed"),
-            }
-        }
-    }
+        })
+        .await;
 }
 
 /// What the loop logs once a minute as `connector queue depth`. A

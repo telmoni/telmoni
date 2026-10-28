@@ -59,6 +59,47 @@ impl<L: Lane + Copy> Heartbeats<L> {
         });
     }
 
+    /// `tick` every `period`, the first after `first`, each on its own task so
+    /// a panic ends that tick alone; one that ends `Ok` beats `name`.
+    ///
+    /// # Panics
+    ///
+    /// When `period` is zero, which its caller refuses first.
+    pub async fn every<F, Fut, E>(
+        &self,
+        pool: &PgPool,
+        name: &'static str,
+        first: Duration,
+        period: Duration,
+        tick: F,
+    ) where
+        F: Fn() -> Fut,
+        Fut: std::future::Future<Output = Result<(), E>> + Send + 'static,
+        E: std::fmt::Display + Send + 'static,
+    {
+        self.runs(name, period);
+        let mut ticker = tokio::time::interval_at(tokio::time::Instant::now() + first, period);
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            ticker.tick().await;
+            match tokio::spawn(tick()).await {
+                Ok(Ok(())) => self.beat(pool, name).await,
+                Ok(Err(error)) => tracing::warn!(
+                    schema = self.schema,
+                    loop_name = name,
+                    error = %error,
+                    "a loop's tick failed; the next one retries"
+                ),
+                Err(error) => tracing::error!(
+                    schema = self.schema,
+                    loop_name = name,
+                    error = %error,
+                    "a loop's tick died; the next one runs"
+                ),
+            }
+        }
+    }
+
     /// `name` finished a tick: its beat written, unless this replica wrote one
     /// within half a [`PERIOD_FLOOR`]. A beat that does not land is logged,
     /// and the loop reads as stale until one does.
@@ -168,5 +209,59 @@ impl<L: Lane + Copy> Heartbeats<L> {
 
     fn with_loops<T>(&self, f: impl FnOnce(&mut HashMap<&'static str, Loop>) -> T) -> T {
         f(&mut self.loops.lock().unwrap_or_else(PoisonError::into_inner))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    use super::*;
+
+    #[derive(Clone, Copy)]
+    struct Nowhere;
+
+    impl Lane for Nowhere {
+        const SET_ROLE: &'static str = "SET LOCAL ROLE nobody";
+    }
+
+    // A tick that panics ends itself alone; one that fails beats nothing, so
+    // no database is reached.
+    #[tokio::test]
+    async fn a_tick_that_panics_ends_itself_and_the_loop_runs_on() {
+        let pool = PgPool::connect_lazy("postgres://localhost/nowhere").expect("a lazy pool");
+        let heartbeats = Arc::new(Heartbeats::new("nowhere", Nowhere));
+        let calls = Arc::new(AtomicU32::new(0));
+        let looping = tokio::spawn({
+            let (heartbeats, calls) = (heartbeats.clone(), calls.clone());
+            async move {
+                heartbeats
+                    .every(
+                        &pool,
+                        "test",
+                        Duration::ZERO,
+                        Duration::from_millis(10),
+                        || {
+                            let n = calls.fetch_add(1, Ordering::SeqCst);
+                            async move {
+                                assert_ne!(n, 1, "the second tick panics");
+                                Err::<(), &str>("refused")
+                            }
+                        },
+                    )
+                    .await;
+            }
+        });
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while calls.load(Ordering::SeqCst) < 3 && Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        assert!(
+            calls.load(Ordering::SeqCst) >= 3,
+            "the loop stopped at the panic"
+        );
+        assert!(!looping.is_finished());
+        looping.abort();
     }
 }
