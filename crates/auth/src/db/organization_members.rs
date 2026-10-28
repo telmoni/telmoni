@@ -10,12 +10,13 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use telmoni_shared::db::tenant_session::{
-    Binding, HasOrganization, Maintenance, Organization, Person, PersonAndOrganization,
-    PersonOrganizationProject, ProjectAndOrganization, Scoped,
+    Binding, Maintenance, Organization, Person, PersonAndOrganization, PersonOrganizationProject,
+    ProjectAndOrganization, Scoped,
 };
 use telmoni_shared::{OrganizationId, OrganizationRole, UserId, derive_shard_key};
 
 use crate::db::AuthLane;
+use crate::db::offers::{LIVE, OFFER_EXPIRES_AT, OFFER_TTL_DAYS};
 
 /// Bindings a roster row is read under: the organization's own, the person's
 /// (their own row, through `member_read`), the two lanes that carry the
@@ -34,10 +35,6 @@ pub trait RosterInsert: Binding {}
 impl RosterInsert for Organization {}
 impl RosterInsert for PersonAndOrganization {}
 impl RosterInsert for Maintenance<AuthLane> {}
-
-/// How long an ownership offer stands. After this it is dead: nothing lists it
-/// and nothing accepts it, and the next offer clears it.
-pub const OFFER_TTL_DAYS: i32 = 7;
 
 /// One row of an organization's roster, the owner included, with the person's
 /// address and name joined in.
@@ -102,11 +99,6 @@ pub struct OrganizationMembership {
     #[serde(skip)]
     pub created_at: DateTime<Utc>,
 }
-
-/// The SQL spelling of "this row holds a live offer", and when it lapses.
-const OFFER_EXPIRES_AT: &str = "CASE WHEN m.transfer_offered_at > now() - make_interval(days => $2)
-                                     THEN m.transfer_offered_at + make_interval(days => $2)
-                                 END";
 
 /// The organization's roster: the owner first, then everyone else newest
 /// first. The identities join is what `identities.organization_member_read`
@@ -444,55 +436,6 @@ pub async fn memberships_of_person(
     .await
 }
 
-/// Withdraw every ownership offer the organization has out. Offering to
-/// somebody new, and every transfer, starts here: there is at most one.
-pub async fn clear_offers<B: HasOrganization>(
-    tx: &mut Scoped<'_, B>,
-    organization_id: &OrganizationId,
-) -> sqlx::Result<u64> {
-    let result = sqlx::query(
-        "UPDATE auth.organization_members SET transfer_offered_at = NULL
-          WHERE organization_id = $1 AND transfer_offered_at IS NOT NULL",
-    )
-    .bind(organization_id)
-    .execute(tx.conn())
-    .await?;
-    Ok(result.rows_affected())
-}
-
-/// Offer the organization to this member. `false` unless they are an admin.
-pub async fn offer_to(
-    tx: &mut Scoped<'_, Organization>,
-    organization_id: &OrganizationId,
-    member: &UserId,
-) -> sqlx::Result<bool> {
-    let result = sqlx::query(
-        "UPDATE auth.organization_members SET transfer_offered_at = now()
-          WHERE organization_id = $1 AND user_id = $2 AND role = 'admin'",
-    )
-    .bind(organization_id)
-    .bind(member)
-    .execute(tx.conn())
-    .await?;
-    Ok(result.rows_affected() == 1)
-}
-
-/// Who holds the organization's live offer, if anybody.
-pub async fn live_offer_holder(
-    tx: &mut Scoped<'_, Organization>,
-    organization_id: &OrganizationId,
-) -> sqlx::Result<Option<UserId>> {
-    sqlx::query_scalar(
-        "SELECT user_id FROM auth.organization_members
-          WHERE organization_id = $1
-            AND transfer_offered_at > now() - make_interval(days => $2)",
-    )
-    .bind(organization_id)
-    .bind(OFFER_TTL_DAYS)
-    .fetch_optional(tx.conn())
-    .await
-}
-
 /// The first half of a transfer: whoever owns the organization now becomes an
 /// admin. Returns who that was, or `None` when the only owner is `keep` (or
 /// there is none). Never touches `keep`'s row.
@@ -522,38 +465,17 @@ pub async fn promote_offer_holder(
     organization_id: &OrganizationId,
     member: &UserId,
 ) -> sqlx::Result<bool> {
-    let result = sqlx::query(
+    let result = sqlx::query(sqlx::AssertSqlSafe(format!(
         "UPDATE auth.organization_members m
             SET role = 'owner', transfer_offered_at = NULL
-          WHERE m.organization_id = $1 AND m.user_id = $2 AND m.role = 'admin'
-            AND m.transfer_offered_at > now() - make_interval(days => $3)
+          WHERE m.organization_id = $1 AND m.user_id = $3 AND m.role = 'admin'
+            AND m.{LIVE}
             AND EXISTS (SELECT 1 FROM auth.organizations o
-                         WHERE o.external_id = m.organization_id AND o.status = 'active')",
-    )
+                         WHERE o.external_id = m.organization_id AND o.status = 'active')"
+    )))
     .bind(organization_id)
-    .bind(member)
     .bind(OFFER_TTL_DAYS)
-    .execute(tx.conn())
-    .await?;
-    Ok(result.rows_affected() == 1)
-}
-
-/// The offer holder turns it down. `false` when they held no LIVE offer — the
-/// same window accept and withdraw use, so a lapsed offer is declined by
-/// nobody and recorded as declined nowhere.
-pub async fn decline_offer(
-    tx: &mut Scoped<'_, Organization>,
-    organization_id: &OrganizationId,
-    member: &UserId,
-) -> sqlx::Result<bool> {
-    let result = sqlx::query(
-        "UPDATE auth.organization_members SET transfer_offered_at = NULL
-          WHERE organization_id = $1 AND user_id = $2
-            AND transfer_offered_at > now() - make_interval(days => $3)",
-    )
-    .bind(organization_id)
     .bind(member)
-    .bind(OFFER_TTL_DAYS)
     .execute(tx.conn())
     .await?;
     Ok(result.rows_affected() == 1)

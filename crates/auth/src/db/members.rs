@@ -11,6 +11,7 @@ use telmoni_shared::db::tenant_session::{
 use telmoni_shared::{OrganizationId, ProjectId, Role, UserId, derive_shard_key};
 
 use crate::db::AuthLane;
+use crate::db::offers::{LIVE, OFFER_EXPIRES_AT, OFFER_TTL_DAYS};
 
 /// Bindings a person's own seats are read under: theirs (`member_read`), and
 /// the erasure's lane.
@@ -49,25 +50,6 @@ pub trait SeatRead: Binding {}
 impl SeatRead for Project {}
 impl SeatRead for ProjectAndOrganization {}
 impl SeatRead for Maintenance<AuthLane> {}
-
-/// Bindings an offer on a seat is written under: the project's own, and the
-/// project's with its organization, which the transfer lanes hold once they
-/// have the organization's lock.
-pub trait OfferWrite: Binding {}
-impl OfferWrite for Project {}
-impl OfferWrite for ProjectAndOrganization {}
-/// The lane a project's move runs in, which ends a live offer of the project
-/// as it moves.
-impl OfferWrite for Maintenance<AuthLane> {}
-
-/// How long an offer of a project stands — the organization's window, so a
-/// person holding one of each is not asked to remember two.
-pub const OFFER_TTL_DAYS: i32 = crate::db::organization_members::OFFER_TTL_DAYS;
-
-/// The SQL spelling of "this seat holds a live offer", and when it lapses.
-const OFFER_EXPIRES_AT: &str = "CASE WHEN m.transfer_offered_at > now() - make_interval(days => $2)
-                                     THEN m.transfer_offered_at + make_interval(days => $2)
-                                 END";
 
 /// One row of a project's roster, with the person's address and name joined in.
 #[derive(Debug, Clone, serde::Serialize, sqlx::FromRow)]
@@ -170,7 +152,7 @@ pub async fn project_offers_to(
     tx: &mut Scoped<'_, Maintenance<AuthLane>>,
     user_id: &UserId,
 ) -> sqlx::Result<Vec<ProjectOffer>> {
-    sqlx::query_as::<_, ProjectOffer>(
+    sqlx::query_as::<_, ProjectOffer>(sqlx::AssertSqlSafe(format!(
         "SELECT m.project_id, p.name, p.organization_id,
                 o.name AS organization_name,
                 owner_identity.email AS owner_email,
@@ -185,9 +167,9 @@ pub async fn project_offers_to(
            LEFT JOIN auth.identities owner_identity
                   ON owner_identity.user_id = owner_row.user_id
           WHERE m.user_id = $1 AND m.role = 'admin'
-            AND m.transfer_offered_at > now() - make_interval(days => $2)
-          ORDER BY m.transfer_offered_at DESC, m.id DESC",
-    )
+            AND m.{LIVE}
+          ORDER BY m.transfer_offered_at DESC, m.id DESC"
+    )))
     .bind(user_id)
     .bind(OFFER_TTL_DAYS)
     .fetch_all(tx.conn())
@@ -478,76 +460,6 @@ pub async fn update_role(
     Ok(result.rows_affected() > 0)
 }
 
-/// Withdraw every offer the project has out. Offering to somebody new starts
-/// here: there is at most one.
-pub async fn clear_project_offers<B: OfferWrite>(
-    tx: &mut Scoped<'_, B>,
-    project_id: &ProjectId,
-) -> sqlx::Result<u64> {
-    let result = sqlx::query(
-        "UPDATE auth.project_members SET transfer_offered_at = NULL
-          WHERE project_id = $1 AND transfer_offered_at IS NOT NULL",
-    )
-    .bind(project_id)
-    .execute(tx.conn())
-    .await?;
-    Ok(result.rows_affected())
-}
-
-/// Offer the project to this seat holder. `false` unless they are an admin.
-pub async fn offer_project_to<B: OfferWrite>(
-    tx: &mut Scoped<'_, B>,
-    project_id: &ProjectId,
-    member: &UserId,
-) -> sqlx::Result<bool> {
-    let result = sqlx::query(
-        "UPDATE auth.project_members SET transfer_offered_at = now()
-          WHERE project_id = $1 AND user_id = $2 AND role = 'admin'",
-    )
-    .bind(project_id)
-    .bind(member)
-    .execute(tx.conn())
-    .await?;
-    Ok(result.rows_affected() == 1)
-}
-
-/// Who holds the project's live offer, if anybody.
-pub async fn live_project_offer_holder<B: OfferWrite>(
-    tx: &mut Scoped<'_, B>,
-    project_id: &ProjectId,
-) -> sqlx::Result<Option<UserId>> {
-    sqlx::query_scalar(
-        "SELECT user_id FROM auth.project_members
-          WHERE project_id = $1
-            AND transfer_offered_at > now() - make_interval(days => $2)",
-    )
-    .bind(project_id)
-    .bind(OFFER_TTL_DAYS)
-    .fetch_optional(tx.conn())
-    .await
-}
-
-/// The offer holder turns it down. `false` when they held no LIVE offer — the
-/// same window accept and withdraw use, so a lapsed offer is declined by
-/// nobody and recorded as declined nowhere.
-pub async fn decline_project_offer<B: OfferWrite>(
-    tx: &mut Scoped<'_, B>,
-    project_id: &ProjectId,
-    member: &UserId,
-) -> sqlx::Result<bool> {
-    let result = sqlx::query(
-        "UPDATE auth.project_members SET transfer_offered_at = NULL
-          WHERE project_id = $1 AND user_id = $2
-            AND transfer_offered_at > now() - make_interval(days => $3)",
-    )
-    .bind(project_id)
-    .bind(member)
-    .bind(OFFER_TTL_DAYS)
-    .execute(tx.conn())
-    .await?;
-    Ok(result.rows_affected() == 1)
-}
-
 /// Spend the offer and fold the seat into the ownership it becomes, in ONE
 /// statement whose `WHERE` re-checks everything: the caller is still an admin
 /// and the offer still live. The project's new owner holds no seat, as no
@@ -558,14 +470,14 @@ pub async fn fold_offered_seat(
     project_id: &ProjectId,
     member: &UserId,
 ) -> sqlx::Result<bool> {
-    let result = sqlx::query(
+    let result = sqlx::query(sqlx::AssertSqlSafe(format!(
         "DELETE FROM auth.project_members
-          WHERE project_id = $1 AND user_id = $2 AND role = 'admin'
-            AND transfer_offered_at > now() - make_interval(days => $3)",
-    )
+          WHERE project_id = $1 AND user_id = $3 AND role = 'admin'
+            AND {LIVE}"
+    )))
     .bind(project_id)
-    .bind(member)
     .bind(OFFER_TTL_DAYS)
+    .bind(member)
     .execute(tx.conn())
     .await?;
     Ok(result.rows_affected() == 1)

@@ -3,6 +3,7 @@ pub mod audit;
 pub mod cli;
 pub mod deletion;
 pub mod export;
+pub mod handover;
 pub mod invite;
 pub mod me;
 pub mod member;

@@ -414,7 +414,7 @@ impl Mailer for ComposingMailer {
                  The offer lapses in {days} days. If you did not expect it, do \
                  nothing, or decline it. To tell us it was unwanted, write to \
                  {contact}.",
-                days = crate::db::organization_members::OFFER_TTL_DAYS,
+                days = crate::db::offers::OFFER_TTL_DAYS,
                 contact = self.contact(),
             ),
         )
@@ -514,7 +514,7 @@ impl Mailer for ComposingMailer {
                  The offer lapses in {days} days. If you did not expect it, do \
                  nothing, or decline it. To tell us it was unwanted, write to \
                  {contact}.",
-                days = crate::db::members::OFFER_TTL_DAYS,
+                days = crate::db::offers::OFFER_TTL_DAYS,
                 contact = self.contact(),
             ),
         )

@@ -61,7 +61,9 @@ use telmoni_shared::{
 use crate::{
     AppState,
     db::{
-        AuthLane, audit_exports, identities, invites, locks, members, organization_members,
+        AuthLane, audit_exports, identities, invites, locks, members,
+        offers::{self, OfferWrite, Roster},
+        organization_members,
         organizations::{self, FinalizeStanding},
     },
     model::{AuditKind, DeletionKind},
@@ -84,7 +86,7 @@ pub const FINALIZE_GRACE_SECONDS: u32 = 900;
 /// operator's and its owner's account's alike, each filing its own audit row
 /// ([`deletion_metadata`]). `None` when it was not active, for the caller to
 /// say why.
-pub(crate) async fn request_deletion<B: HasOrganization>(
+pub(crate) async fn request_deletion<B: HasOrganization + OfferWrite>(
     tx: &mut Scoped<'_, B>,
     organization: &OrganizationId,
     by: DeletionKind,
@@ -94,7 +96,7 @@ pub(crate) async fn request_deletion<B: HasOrganization>(
     else {
         return Ok(None);
     };
-    organization_members::clear_offers(tx, organization).await?;
+    offers::clear(tx, Roster::Organization(organization)).await?;
     Ok(Some(erase_after))
 }
 

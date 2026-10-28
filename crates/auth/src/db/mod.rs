@@ -11,6 +11,7 @@ pub mod identities;
 pub mod invites;
 pub mod locks;
 pub mod members;
+pub mod offers;
 pub mod organization_members;
 pub mod organizations;
 pub mod projects;

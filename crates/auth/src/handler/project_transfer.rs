@@ -41,7 +41,6 @@ use axum::{
     http::StatusCode,
     response::IntoResponse,
 };
-use chrono::{Duration, Utc};
 use serde::Deserialize;
 use serde_json::json;
 
@@ -58,24 +57,20 @@ use telmoni_shared::{
     ProjectId, Role, TelmoniError, TelmoniResourceKind, UserId,
 };
 
+use super::handover::{OfferAnswer, OfferRequest, Offered, offer_expires_at};
 use crate::{
     AppState,
-    db::{AuthLane, identities, locks, members, organization_members, organizations, projects},
+    db::{
+        AuthLane, identities, locks, members,
+        offers::{self, Roster},
+        organization_members, organizations, projects,
+    },
     handler::{
         ActingProject, BEING_DELETED, acting_project, hold_project, parse_organization_id,
         parse_project_id, parse_user_id, projects::MAX_PROJECT_NAME, refuse_unless_active,
     },
     model::AuditKind,
 };
-
-/// Body of `POST /internal/v1/projects/{project_id}/transfer`.
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct OfferRequest {
-    /// The admin to offer the project to — their user id, as the roster
-    /// lists it.
-    pub member_id: String,
-}
 
 /// Body of `POST /internal/v1/projects/{project_id}/transfer/accept`.
 #[derive(Debug, Default, Deserialize)]
@@ -165,61 +160,6 @@ fn name_taken_in(e: sqlx::Error, name: &str) -> TelmoniError {
     }
 }
 
-async fn notify_project_offer(
-    state: &AppState,
-    project_id: &ProjectId,
-    project_name: &str,
-    organization_label: &str,
-    owner_display: &str,
-    recipient_email: Option<&str>,
-    withdrawn_from_email: Option<&str>,
-) {
-    let link = format!(
-        "{}/account/notifications",
-        state.config.app_url.trim_end_matches('/')
-    );
-    // Side by side: each can wait out the mail client's timeout, and the
-    // console abandons the whole request at ten seconds.
-    let (offered, withdrawn) = tokio::join!(
-        async {
-            match recipient_email {
-                Some(to) => {
-                    state
-                        .mailer
-                        .send_project_offer(
-                            to,
-                            owner_display,
-                            project_name,
-                            organization_label,
-                            &link,
-                        )
-                        .await
-                }
-                None => Ok(()),
-            }
-        },
-        async {
-            match withdrawn_from_email {
-                Some(to) => {
-                    state
-                        .mailer
-                        .send_project_offer_withdrawn(to, owner_display, project_name)
-                        .await
-                }
-                None => Ok(()),
-            }
-        },
-    );
-    // Either stands without its mail: the recipient's console lists the
-    // offer, and the replaced holder's no longer does.
-    if let Err(e) = offered {
-        tracing::warn!(project_id = %project_id, error = %e, "project offer mail failed");
-    }
-    if let Err(e) = withdrawn {
-        tracing::warn!(project_id = %project_id, error = %e, "project offer withdrawal mail failed");
-    }
-}
-
 /// `POST /internal/v1/projects/{project_id}/transfer` — the owner offers the
 /// project to one of its admins. Withdraws any offer already out, because
 /// there is only ever one, and mails the admin who held it.
@@ -266,11 +206,12 @@ pub async fn offer(
     // Somebody else's live offer is withdrawn by this one, and they are told:
     // the chain names them, the console refreshes their notifications, and
     // they are mailed.
-    let replaced = members::live_project_offer_holder(&mut acting.tx, &project_id)
+    let roster = Roster::Project(&project_id);
+    let replaced = offers::live_holder(&mut acting.tx, roster)
         .await?
         .filter(|holder| *holder != target);
-    members::clear_project_offers(&mut acting.tx, &project_id).await?;
-    if !members::offer_project_to(&mut acting.tx, &project_id, &target).await? {
+    offers::clear(&mut acting.tx, roster).await?;
+    if !offers::offer_to(&mut acting.tx, roster, &target).await? {
         return Err(AuthError::Conflict("that member is no longer an admin".into()).into());
     }
     emit_audit(
@@ -309,16 +250,17 @@ pub async fn offer(
     };
     acting.tx.commit().await?;
 
-    let expires_at = Utc::now() + Duration::days(i64::from(members::OFFER_TTL_DAYS));
     // For the console's live notices and the mail: from the roster, never from
     // the browser that asked.
     let recipient_email = recipient.map(|r| r.email);
     if let Some(owner) = owner.map(|o| o.display()) {
-        notify_project_offer(
+        Offered::Project {
+            id: &project_id,
+            name: &standing.name,
+            organization: &organization_label,
+        }
+        .mail(
             &state,
-            &project_id,
-            &standing.name,
-            &organization_label,
             &owner,
             recipient_email.as_deref(),
             withdrawn_from_email.as_deref(),
@@ -329,13 +271,13 @@ pub async fn offer(
     tracing::info!(project_id = %project_id, to = %target, "project offered");
     Ok((
         StatusCode::OK,
-        Json(json!({
-            "offeredTo": target,
-            "offeredToEmail": recipient_email,
-            "withdrawnFromEmail": withdrawn_from_email,
-            "expiresAt": expires_at,
-            "ownerOrganizationId": organization,
-        })),
+        Json(OfferAnswer {
+            offered_to: target,
+            offered_to_email: recipient_email,
+            withdrawn_from_email,
+            expires_at: Some(offer_expires_at()),
+            owner_organization_id: organization,
+        }),
     ))
 }
 
@@ -356,12 +298,12 @@ pub async fn cancel(
         )
         .into());
     }
-    let Some(holder) = members::live_project_offer_holder(&mut acting.tx, &project_id).await?
-    else {
+    let roster = Roster::Project(&project_id);
+    let Some(holder) = offers::live_holder(&mut acting.tx, roster).await? else {
         return Err(AuthError::NotFound("there is no offer to withdraw".into()).into());
     };
     let organization = acting.organization.clone();
-    members::clear_project_offers(&mut acting.tx, &project_id).await?;
+    offers::clear(&mut acting.tx, roster).await?;
     emit_audit(
         &mut acting.tx,
         AuditEvent::new(
@@ -396,11 +338,13 @@ pub async fn cancel(
         tracing::warn!(project_id = %project_id, error = %e, "project offer withdrawal mail failed");
     }
 
-    Ok(Json(json!({
-        "offeredTo": holder,
-        "offeredToEmail": holder_email,
-        "ownerOrganizationId": organization,
-    })))
+    Ok(Json(OfferAnswer {
+        offered_to: holder,
+        offered_to_email: holder_email,
+        withdrawn_from_email: None,
+        expires_at: None,
+        owner_organization_id: organization,
+    }))
 }
 
 /// `POST /internal/v1/projects/{project_id}/transfer/decline` — the admin
@@ -414,7 +358,7 @@ pub async fn decline(
     let user_id = principal.user_id;
 
     let mut acting = locked(&state, &project_id, &user_id).await?;
-    if !members::decline_project_offer(&mut acting.tx, &project_id, &user_id).await? {
+    if !offers::decline(&mut acting.tx, Roster::Project(&project_id), &user_id).await? {
         return Err(AuthError::NotFound("you hold no offer for this project".into()).into());
     }
     let organization = acting.organization.clone();
@@ -1036,7 +980,7 @@ pub async fn move_project(
 
     // An offer of the project to one of its admins was an offer to take it
     // out of the organization it is leaving.
-    members::clear_project_offers(&mut tx, &project_id).await?;
+    offers::clear(&mut tx, Roster::Project(&project_id)).await?;
     let held = usize::try_from(projects::count_in(&mut tx, &destination).await?).unwrap_or(0);
     let family = match numbered(&standing.name) {
         Some((base, n)) => projects::holds_name(&mut tx, &destination, base)

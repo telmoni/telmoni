@@ -30,8 +30,6 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
 };
-use chrono::{Duration, Utc};
-use serde::Deserialize;
 use serde_json::json;
 
 use telmoni_shared::OrganizationAction;
@@ -46,21 +44,17 @@ use telmoni_shared::{
 };
 
 use super::authorize_organization;
+use super::handover::{OfferAnswer, OfferRequest, Offered, offer_expires_at};
 use crate::{
     AppState,
-    db::{identities, locks, members, organization_members, organizations},
+    db::{
+        identities, locks, members,
+        offers::{self, Roster},
+        organization_members, organizations,
+    },
     handler::{organization_of, organization_role_or_forbidden, parse_user_id},
     model::AuditKind,
 };
-
-/// Body of `POST /internal/v1/organization/owner-transfer`.
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct OfferRequest {
-    /// The admin to offer the organization to — their user id, as the roster
-    /// lists it.
-    pub member_id: String,
-}
 
 /// The longest auth waits on the deployment's ownership hook, asked or told.
 /// The console abandons the whole request at ten seconds.
@@ -153,7 +147,7 @@ async fn holds_the_offer(
 ) -> Result<bool, TelmoniError> {
     let mut tx = organization_scope(&state.db, organization).await?;
     organization_role_or_forbidden(&mut tx, organization, user_id).await?;
-    let holder = organization_members::live_offer_holder(&mut tx, organization).await?;
+    let holder = offers::live_holder(&mut tx, Roster::Organization(organization)).await?;
     tx.commit().await?;
     Ok(holder.as_ref() == Some(user_id))
 }
@@ -258,11 +252,12 @@ pub async fn offer(
     // Somebody else's live offer is withdrawn by this one, and they are told:
     // the chain names them, the console refreshes their notifications, and
     // they are mailed.
-    let replaced = organization_members::live_offer_holder(&mut tx, &organization)
+    let roster = Roster::Organization(&organization);
+    let replaced = offers::live_holder(&mut tx, roster)
         .await?
         .filter(|holder| *holder != target);
-    organization_members::clear_offers(&mut tx, &organization).await?;
-    if !organization_members::offer_to(&mut tx, &organization, &target).await? {
+    offers::clear(&mut tx, roster).await?;
+    if !offers::offer_to(&mut tx, roster, &target).await? {
         return Err(AuthError::Conflict("that member is no longer an admin".into()).into());
     }
     emit_audit(
@@ -292,61 +287,33 @@ pub async fn offer(
     };
     tx.commit().await?;
 
-    let expires_at = Utc::now() + Duration::days(i64::from(organization_members::OFFER_TTL_DAYS));
     // For the console's live notices and the mail: from the roster, never from
     // the browser that asked.
     let recipient_email = recipient.map(|r| r.email);
     if let Some(owner) = owner.map(|o| o.display()) {
-        let link = format!(
-            "{}/account/notifications",
-            state.config.app_url.trim_end_matches('/')
-        );
-        // Side by side: each can wait out the mail client's timeout, and the
-        // console abandons the whole request at ten seconds.
-        let (offered, withdrawn) = tokio::join!(
-            async {
-                match &recipient_email {
-                    Some(to) => {
-                        state
-                            .mailer
-                            .send_ownership_offer(to, &owner, &name, &link)
-                            .await
-                    }
-                    None => Ok(()),
-                }
-            },
-            async {
-                match &withdrawn_from_email {
-                    Some(to) => {
-                        state
-                            .mailer
-                            .send_ownership_offer_withdrawn(to, &owner, &name)
-                            .await
-                    }
-                    None => Ok(()),
-                }
-            },
-        );
-        // Either stands without its mail: the recipient's console lists the
-        // offer, and the replaced holder's no longer does.
-        if let Err(e) = offered {
-            tracing::warn!(organization_id = %organization, error = %e, "ownership offer mail failed");
+        Offered::Organization {
+            id: &organization,
+            name: &name,
         }
-        if let Err(e) = withdrawn {
-            tracing::warn!(organization_id = %organization, error = %e, "ownership withdrawal mail failed");
-        }
+        .mail(
+            &state,
+            &owner,
+            recipient_email.as_deref(),
+            withdrawn_from_email.as_deref(),
+        )
+        .await;
     }
 
     tracing::info!(organization_id = %organization, to = %target, "ownership offered");
     Ok((
         StatusCode::OK,
-        Json(json!({
-            "offeredTo": target,
-            "offeredToEmail": recipient_email,
-            "withdrawnFromEmail": withdrawn_from_email,
-            "expiresAt": expires_at,
-            "ownerOrganizationId": organization,
-        })),
+        Json(OfferAnswer {
+            offered_to: target,
+            offered_to_email: recipient_email,
+            withdrawn_from_email,
+            expires_at: Some(offer_expires_at()),
+            owner_organization_id: organization,
+        }),
     ))
 }
 
@@ -362,11 +329,11 @@ pub async fn cancel(
 
     let (mut tx, role) = locked(&state, &organization, &user_id, Lock::Organization).await?;
     authorize_organization(role, OrganizationAction::HandOver)?;
-    let Some(holder) = organization_members::live_offer_holder(&mut tx, &organization).await?
-    else {
+    let roster = Roster::Organization(&organization);
+    let Some(holder) = offers::live_holder(&mut tx, roster).await? else {
         return Err(AuthError::NotFound("there is no offer to withdraw".into()).into());
     };
-    organization_members::clear_offers(&mut tx, &organization).await?;
+    offers::clear(&mut tx, roster).await?;
     emit_audit(
         &mut tx,
         AuditEvent::new(
@@ -402,11 +369,13 @@ pub async fn cancel(
         tracing::warn!(organization_id = %organization, error = %e, "ownership withdrawal mail failed");
     }
 
-    Ok(Json(json!({
-        "offeredTo": holder,
-        "offeredToEmail": holder_email,
-        "ownerOrganizationId": organization,
-    })))
+    Ok(Json(OfferAnswer {
+        offered_to: holder,
+        offered_to_email: holder_email,
+        withdrawn_from_email: None,
+        expires_at: None,
+        owner_organization_id: organization,
+    }))
 }
 
 /// `POST /internal/v1/organization/owner-transfer/decline` — the admin holding
@@ -420,7 +389,7 @@ pub async fn decline(
     let user_id = principal.user_id;
 
     let (mut tx, _) = locked(&state, &organization, &user_id, Lock::Organization).await?;
-    if !organization_members::decline_offer(&mut tx, &organization, &user_id).await? {
+    if !offers::decline(&mut tx, Roster::Organization(&organization), &user_id).await? {
         return Err(AuthError::NotFound("you hold no offer for this organization".into()).into());
     }
     emit_audit(
