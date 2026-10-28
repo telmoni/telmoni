@@ -16,8 +16,9 @@ use telmoni_shared::seam::ReadableProject;
 use telmoni_shared::{AuthzError, ProjectId, TelmoniError};
 
 use crate::AppState;
-use crate::handler::incidents::{INCIDENTS_MAX, Incident};
+use crate::handler::incidents::INCIDENTS_MAX;
 use crate::rules::incidents;
+use crate::rules::incidents::IncidentRow;
 
 /// The project an open incident is on, as the Overview names and links it.
 #[derive(Debug, Serialize)]
@@ -32,7 +33,7 @@ pub struct HealthProject {
 pub struct HealthIncident {
     pub project: HealthProject,
     #[serde(flatten)]
-    pub incident: Incident,
+    pub incident: IncidentRow,
 }
 
 /// What the Overview reads: no incident at all when all is well.
@@ -81,7 +82,7 @@ pub async fn organization_health(
                         slug: project.slug.clone(),
                         name: project.name.clone(),
                     },
-                    incident: Incident::from(row),
+                    incident: row,
                 })
             })
             .collect(),

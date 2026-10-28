@@ -23,7 +23,7 @@ use crate::users::{UserRow, Users};
 #[derive(Debug, Serialize)]
 pub struct UserList {
     /// The page's users, in the order asked.
-    pub users: Vec<User>,
+    pub users: Vec<UserRow>,
     /// How many days back the page read.
     pub days: u16,
     /// The most a page holds.
@@ -40,34 +40,6 @@ pub struct UserList {
     pub dir: SortDirection,
 }
 
-/// One user of the page: a user id's runs, summed ([`UserRow`]).
-#[derive(Debug, Serialize)]
-pub struct User {
-    pub user_id: String,
-    pub traces: u64,
-    pub errors: u64,
-    pub steps: u64,
-    pub input_tokens: u64,
-    pub output_tokens: u64,
-    pub first_seen: DateTime<Utc>,
-    pub last_seen: DateTime<Utc>,
-}
-
-impl From<UserRow> for User {
-    fn from(row: UserRow) -> Self {
-        Self {
-            user_id: row.user_id,
-            traces: row.traces,
-            errors: row.errors,
-            steps: row.steps,
-            input_tokens: row.input_tokens,
-            output_tokens: row.output_tokens,
-            first_seen: row.first_seen,
-            last_seen: row.last_seen,
-        }
-    }
-}
-
 /// A download's header row: the page's fields, in its order.
 const CSV_HEADER: [&str; 8] = [
     "user_id",
@@ -80,7 +52,7 @@ const CSV_HEADER: [&str; 8] = [
     "last_seen",
 ];
 
-impl User {
+impl UserRow {
     /// The row a download writes for them, under [`CSV_HEADER`], the times as
     /// RFC 3339.
     fn cells(&self) -> [String; 8] {
@@ -109,7 +81,7 @@ pub async fn list_users(
     let listed = list_page::<Users>(&state, &headers, pairs).await?;
     Ok(Json(UserList {
         more: listed.more(),
-        users: listed.rows.into_iter().map(User::from).collect(),
+        users: listed.rows,
         days: listed.days,
         limit: listed.paging.limit,
         page: listed.paging.page,
@@ -139,8 +111,7 @@ pub async fn export_users(
     Query(pairs): Query<Vec<(String, String)>>,
 ) -> Result<Response, TelmoniError> {
     let (rows, format) = export_rows::<Users>(&state, &headers, pairs, Reading::Export).await?;
-    let users: Vec<User> = rows.into_iter().map(User::from).collect();
-    download(format, &users, &CSV_HEADER, User::cells, "user")
+    download(format, &rows, &CSV_HEADER, UserRow::cells, "user")
 }
 
 #[cfg(test)]
@@ -223,7 +194,7 @@ mod tests {
     #[test]
     fn a_downloads_row_is_the_pages_fields_under_the_headers_names() {
         let at = DateTime::from_timestamp_millis(1_791_721_800_000).expect("a time");
-        let user = User {
+        let user = UserRow {
             user_id: "user-a".into(),
             traces: 2,
             errors: 1,

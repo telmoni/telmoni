@@ -52,38 +52,10 @@ pub struct MuteInput {
     pub ends_at: DateTime<Utc>,
 }
 
-/// A window, as the lanes answer it.
-#[derive(Debug, Serialize)]
-pub struct Mute {
-    pub id: Uuid,
-    pub rule_id: Option<Uuid>,
-    pub starts_at: DateTime<Utc>,
-    pub ends_at: DateTime<Utc>,
-    /// Who muted it, by id.
-    pub created_by: String,
-    pub created_at: DateTime<Utc>,
-    /// Who ended it early, by id.
-    pub ended_by: Option<String>,
-}
-
-impl From<MuteRow> for Mute {
-    fn from(row: MuteRow) -> Self {
-        Self {
-            id: row.id,
-            rule_id: row.rule_id,
-            starts_at: row.starts_at,
-            ends_at: row.ends_at,
-            created_by: row.created_by,
-            created_at: row.created_at,
-            ended_by: row.ended_by,
-        }
-    }
-}
-
 /// What the list of windows answers.
 #[derive(Debug, Serialize)]
 pub struct MuteList {
-    pub mutes: Vec<Mute>,
+    pub mutes: Vec<MuteRow>,
 }
 
 fn not_found() -> TelmoniError {
@@ -103,9 +75,7 @@ pub async fn list_mutes(
     let mut tx = project_scope(&state.db, project_id).await?;
     let rows = mutes::mutes(&mut tx, project_id, MUTES_MAX).await?;
     tx.commit().await?;
-    Ok(Json(MuteList {
-        mutes: rows.into_iter().map(Mute::from).collect(),
-    }))
+    Ok(Json(MuteList { mutes: rows }))
 }
 
 /// `POST /internal/v1/telemetry/mutes` — a window muting one of the
@@ -115,7 +85,7 @@ pub async fn create_mute(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Json(input): Json<MuteInput>,
-) -> Result<(StatusCode, Json<Mute>), TelmoniError> {
+) -> Result<(StatusCode, Json<MuteRow>), TelmoniError> {
     let acting = state.auth.resolve(&headers).await?;
     let project_id = &acting
         .require_project(Verb::Create, Resource::Alert)?
@@ -142,7 +112,7 @@ pub async fn create_mute(
     )
     .await?;
     tracing::info!(project_id = %project_id, mute_id = %row.id, "telemetry: a maintenance window made");
-    Ok((StatusCode::CREATED, Json(Mute::from(row))))
+    Ok((StatusCode::CREATED, Json(row)))
 }
 
 /// The window itself, under the organization's chain lock: the role checked
@@ -212,7 +182,7 @@ pub async fn end_mute(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Path(id): Path<String>,
-) -> Result<Json<Mute>, TelmoniError> {
+) -> Result<Json<MuteRow>, TelmoniError> {
     let acting = state.auth.resolve(&headers).await?;
     let project_id = &acting
         .require_project(Verb::Update, Resource::Alert)?
@@ -226,7 +196,7 @@ pub async fn end_mute(
         async |tx| ended(&state, &acting, tx, id).await,
     )
     .await?;
-    Ok(Json(Mute::from(row)))
+    Ok(Json(row))
 }
 
 /// The end itself, under the organization's chain lock: the role checked on

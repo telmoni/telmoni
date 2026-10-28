@@ -135,7 +135,7 @@ impl Default for TraceFilter {
 #[derive(Debug, Clone, PartialEq, Row, Serialize, Deserialize)]
 pub struct TraceRow {
     /// The run.
-    #[serde(with = "clickhouse::serde::uuid")]
+    #[serde(deserialize_with = "clickhouse::serde::uuid::deserialize")]
     pub run_id: Uuid,
     /// Its agent, the same on every span of it.
     pub agent: String,
@@ -143,19 +143,19 @@ pub struct TraceRow {
     pub user_id: String,
     /// The session's id; empty when none was sent.
     pub session_id: String,
-    /// 1 once the run's own span has arrived, 0 while it has not.
-    pub ended: u8,
+    /// Whether the run's own span has arrived.
+    pub ended: bool,
     /// How it ended.
-    #[serde(with = "text")]
+    #[serde(deserialize_with = "text::deserialize")]
     pub status: SpanStatus,
     /// The class of the error its own span ended on, never its message;
     /// empty otherwise, and until that span arrives.
     pub error_type: String,
     /// Its first span's start.
-    #[serde(with = "clickhouse::serde::chrono::datetime64::micros")]
+    #[serde(deserialize_with = "clickhouse::serde::chrono::datetime64::micros::deserialize")]
     pub started_at: DateTime<Utc>,
     /// Its last span's end.
-    #[serde(with = "clickhouse::serde::chrono::datetime64::micros")]
+    #[serde(deserialize_with = "clickhouse::serde::chrono::datetime64::micros::deserialize")]
     pub ended_at: DateTime<Utc>,
     /// From the first start to the last end, in milliseconds.
     pub duration_ms: i64,
@@ -177,8 +177,6 @@ pub struct TraceRow {
     pub cache_read_input_tokens: u64,
     /// Its model calls' cache writes, summed.
     pub cache_write_input_tokens: u64,
-    /// Input and output, summed: what the list sorts by.
-    pub tokens: u64,
     /// The models its calls answered with, each once, sorted.
     pub models: Vec<String>,
     /// The tools its calls ran, each once, sorted.
@@ -251,19 +249,19 @@ pub struct FacetRow {
 /// trace: enough to read without opening the trace.
 #[derive(Debug, Clone, PartialEq, Eq, Row, Serialize, Deserialize)]
 pub struct PinnedRow {
-    /// The run it belongs to.
-    #[serde(with = "clickhouse::serde::uuid")]
+    /// The run it belongs to, which the page keys it under.
+    #[serde(deserialize_with = "clickhouse::serde::uuid::deserialize")]
     pub run_id: Uuid,
     pub span_id: String,
     pub parent_span_id: String,
-    #[serde(with = "text")]
+    #[serde(deserialize_with = "text::deserialize")]
     pub kind: SpanKind,
     pub name: String,
-    #[serde(with = "clickhouse::serde::chrono::datetime64::micros")]
+    #[serde(deserialize_with = "clickhouse::serde::chrono::datetime64::micros::deserialize")]
     pub started_at: DateTime<Utc>,
-    #[serde(with = "clickhouse::serde::chrono::datetime64::micros")]
+    #[serde(deserialize_with = "clickhouse::serde::chrono::datetime64::micros::deserialize")]
     pub ended_at: DateTime<Utc>,
-    #[serde(with = "text")]
+    #[serde(deserialize_with = "text::deserialize")]
     pub status: SpanStatus,
     pub error_type: String,
     pub model: String,
@@ -294,10 +292,10 @@ pub struct BucketRow {
 
 /// One bar of the histogram as the console draws it: a [`BucketRow`], or a
 /// bar no run started in, whose durations are none.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Bar {
-    /// Where the bar starts, in milliseconds since the epoch.
-    pub at_ms: i64,
+    /// Where the bar starts.
+    pub at: DateTime<Utc>,
     /// Its runs that ended well.
     pub ok: u64,
     /// That failed.
@@ -381,7 +379,7 @@ macro_rules! run_sums {
             "run_id, any(agent) AS run_agent, ",
             "anyIf(user_id, user_id != '') AS run_user_id, ",
             "anyIf(session_id, session_id != '') AS run_session_id, ",
-            "toUInt8(countIf(kind = 'run') > 0) AS run_ended, ",
+            "CAST(countIf(kind = 'run') > 0 AS Bool) AS run_ended, ",
             run_status!(),
             " AS run_status, ",
             "anyIf(error_type, kind = 'run') AS run_error_type, ",
@@ -507,7 +505,7 @@ macro_rules! list_sql {
             "spans, steps, model_calls, tool_calls, errors, ",
             "input_total AS input_tokens, output_total AS output_tokens, ",
             "cache_read_total AS cache_read_input_tokens, ",
-            "cache_write_total AS cache_write_input_tokens, tokens, models, tools, ",
+            "cache_write_total AS cache_write_input_tokens, models, tools, ",
             "environments, releases ",
             "FROM (",
             runs!(),
@@ -872,25 +870,28 @@ pub fn bars(
     let mut drawn = Vec::new();
     let mut at = first;
     while at <= last {
-        match rows.next_if(|row| row.at_ms <= at) {
-            Some(row) => drawn.push(Bar {
-                at_ms: at,
-                ok: row.ok,
-                error: row.error,
-                cancelled: row.cancelled,
-                tokens: row.token_total,
-                duration_p50_ms: Some(row.duration_p50_ms),
-                duration_p95_ms: Some(row.duration_p95_ms),
-            }),
-            None => drawn.push(Bar {
-                at_ms: at,
-                ok: 0,
-                error: 0,
-                cancelled: 0,
-                tokens: 0,
-                duration_p50_ms: None,
-                duration_p95_ms: None,
-            }),
+        // A bar whose start no time can name is not drawn.
+        if let Some(start) = DateTime::from_timestamp_millis(at) {
+            drawn.push(match rows.next_if(|row| row.at_ms <= at) {
+                Some(row) => Bar {
+                    at: start,
+                    ok: row.ok,
+                    error: row.error,
+                    cancelled: row.cancelled,
+                    tokens: row.token_total,
+                    duration_p50_ms: Some(row.duration_p50_ms),
+                    duration_p95_ms: Some(row.duration_p95_ms),
+                },
+                None => Bar {
+                    at: start,
+                    ok: 0,
+                    error: 0,
+                    cancelled: 0,
+                    tokens: 0,
+                    duration_p50_ms: None,
+                    duration_p95_ms: None,
+                },
+            });
         }
         at += bucket_ms;
     }
@@ -1192,12 +1193,16 @@ mod tests {
             shift_minutes,
         );
         assert_eq!(drawn.len(), 25, "the day's hour bars and the one now is in");
-        assert_eq!(drawn.last().map(|b| b.at_ms), Some(start));
+        assert_eq!(drawn.last().map(|b| b.at.timestamp_millis()), Some(start));
         assert_eq!(drawn.last().map(|b| b.ok), Some(1));
         assert_eq!(drawn[drawn.len() - 2].ok, 2);
         assert_eq!(drawn[0].ok, 0);
         assert_eq!(drawn[0].duration_p50_ms, None);
-        assert!(drawn.windows(2).all(|w| w[1].at_ms - w[0].at_ms == hour));
+        assert!(
+            drawn
+                .windows(2)
+                .all(|w| w[1].at.timestamp_millis() - w[0].at.timestamp_millis() == hour)
+        );
     }
 
     /// A bar the read answered past either end, the store's clock and ours
@@ -1209,7 +1214,7 @@ mod tests {
         let last = bar_start(now, hour, 0);
         let drawn = bars(vec![row(last + hour, 3)], now, 1, 3_600, 0);
         assert_eq!(
-            drawn.last().map(|b| (b.at_ms, b.ok)),
+            drawn.last().map(|b| (b.at.timestamp_millis(), b.ok)),
             Some((last + hour, 3))
         );
     }

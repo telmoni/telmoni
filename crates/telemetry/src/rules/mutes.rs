@@ -7,6 +7,8 @@
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
+use serde::Serialize;
+
 use telmoni_shared::db::tenant_session::{HasProject, Maintenance, Scoped};
 use telmoni_shared::{ProjectId, UserId};
 
@@ -16,9 +18,10 @@ use crate::db::TelemetryLane;
 pub const MUTE_DAYS_MAX: i64 = 30;
 
 /// A window as its row keeps it.
-#[derive(Debug, Clone, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, sqlx::FromRow)]
 pub struct MuteRow {
     pub id: Uuid,
+    #[serde(skip)]
     pub project_id: ProjectId,
     /// The alert muted; none, every alert of the project.
     pub rule_id: Option<Uuid>,

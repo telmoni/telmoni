@@ -31,13 +31,11 @@ pub struct SessionRow {
     pub input_tokens: u64,
     /// Its model calls' output tokens, summed.
     pub output_tokens: u64,
-    /// Input and output, summed.
-    pub tokens: u64,
     /// When its first run in the window started.
-    #[serde(with = "clickhouse::serde::chrono::datetime64::micros")]
+    #[serde(deserialize_with = "clickhouse::serde::chrono::datetime64::micros::deserialize")]
     pub first_seen: DateTime<Utc>,
     /// When its last run in the window ended: what the page sorts by first.
-    #[serde(with = "clickhouse::serde::chrono::datetime64::micros")]
+    #[serde(deserialize_with = "clickhouse::serde::chrono::datetime64::micros::deserialize")]
     pub last_seen: DateTime<Utc>,
 }
 
@@ -72,7 +70,7 @@ macro_rules! list_sql {
             "SELECT session_id, session_user AS user_id, session_traces AS traces, ",
             "session_errors AS errors, session_steps AS steps, ",
             "session_input AS input_tokens, session_output AS output_tokens, ",
-            "session_tokens AS tokens, session_first AS first_seen, ",
+            "session_first AS first_seen, ",
             "session_last AS last_seen ",
             "FROM (",
             sessions!(),
@@ -102,8 +100,8 @@ const fn list_sql(sort: SessionSort, direction: SortDirection) -> &'static str {
         (SessionSort::InputTokens, Desc) => list_sql!("input_tokens DESC"),
         (SessionSort::OutputTokens, Asc) => list_sql!("output_tokens ASC"),
         (SessionSort::OutputTokens, Desc) => list_sql!("output_tokens DESC"),
-        (SessionSort::Tokens, Asc) => list_sql!("tokens ASC"),
-        (SessionSort::Tokens, Desc) => list_sql!("tokens DESC"),
+        (SessionSort::Tokens, Asc) => list_sql!("session_tokens ASC"),
+        (SessionSort::Tokens, Desc) => list_sql!("session_tokens DESC"),
         (SessionSort::FirstSeen, Asc) => list_sql!("first_seen ASC"),
         (SessionSort::FirstSeen, Desc) => list_sql!("first_seen DESC"),
         (SessionSort::LastSeen, Asc) => list_sql!("last_seen ASC"),
@@ -174,7 +172,7 @@ mod tests {
                     SessionSort::Steps => "steps",
                     SessionSort::InputTokens => "input_tokens",
                     SessionSort::OutputTokens => "output_tokens",
-                    SessionSort::Tokens => "tokens",
+                    SessionSort::Tokens => "session_tokens",
                     SessionSort::FirstSeen => "first_seen",
                     SessionSort::LastSeen => "last_seen",
                 };

@@ -20,19 +20,18 @@ use uuid::Uuid;
 use telmoni_shared::db::tenant_session::project_scope;
 use telmoni_shared::extract::{Json, Query};
 use telmoni_shared::{
-    AuthError, ProjectId, SessionSort, SortDirection, SpanKind, SpanStatus, TelmoniError,
-    TraceSort, ViewKind,
+    AuthError, ProjectId, SessionSort, SortDirection, TelmoniError, TraceSort, ViewKind,
 };
 
 use crate::contract::{NAME_MAX, SESSION_ID_MAX};
 use crate::handler::traces::{
-    Facets, Reading, Trace, download, export_rows, facets_page, list_page, parse_days, parse_limit,
+    Facets, Reading, download, export_rows, facets_page, list_page, parse_days, parse_limit,
     read_failed, reading, values,
 };
 use crate::handler::views::LayoutOptions;
 use crate::sessions::{SessionRow, Sessions};
 use crate::store::Projects;
-use crate::traces::{self, PINNED_MAX, PinnedRow, TraceFilter, Traces, Window};
+use crate::traces::{self, PINNED_MAX, PinnedRow, TraceFilter, TraceRow, Traces, Window};
 use crate::{AppState, db};
 
 /// A session's own page's query string, every value text until it is
@@ -151,7 +150,7 @@ impl SessionQuery {
 #[derive(Debug, Serialize)]
 pub struct SessionList {
     /// The page's sessions, in the order asked.
-    pub sessions: Vec<Session>,
+    pub sessions: Vec<SessionRow>,
     /// How many days back the page read.
     pub days: u16,
     /// The most a page holds.
@@ -168,20 +167,6 @@ pub struct SessionList {
     pub dir: SortDirection,
 }
 
-/// One session of the page: its runs, summed ([`SessionRow`]).
-#[derive(Debug, Serialize)]
-pub struct Session {
-    pub session_id: String,
-    pub user_id: String,
-    pub traces: u64,
-    pub errors: u64,
-    pub steps: u64,
-    pub input_tokens: u64,
-    pub output_tokens: u64,
-    pub first_seen: DateTime<Utc>,
-    pub last_seen: DateTime<Utc>,
-}
-
 /// A download's header row: the page's fields, in its order.
 const CSV_HEADER: [&str; 9] = [
     "session_id",
@@ -195,7 +180,7 @@ const CSV_HEADER: [&str; 9] = [
     "last_seen",
 ];
 
-impl Session {
+impl SessionRow {
     /// The row a download writes for it, under [`CSV_HEADER`], its times as
     /// RFC 3339.
     fn cells(&self) -> [String; 9] {
@@ -211,22 +196,6 @@ impl Session {
             time(&self.first_seen),
             time(&self.last_seen),
         ]
-    }
-}
-
-impl From<SessionRow> for Session {
-    fn from(row: SessionRow) -> Self {
-        Self {
-            session_id: row.session_id,
-            user_id: row.user_id,
-            traces: row.traces,
-            errors: row.errors,
-            steps: row.steps,
-            input_tokens: row.input_tokens,
-            output_tokens: row.output_tokens,
-            first_seen: row.first_seen,
-            last_seen: row.last_seen,
-        }
     }
 }
 
@@ -252,42 +221,8 @@ pub struct SessionDetail {
 #[derive(Debug, Serialize)]
 pub struct SessionTrace {
     #[serde(flatten)]
-    pub trace: Trace,
-    pub pinned: Vec<PinnedSpan>,
-}
-
-/// One pinned span, as the page shows it under a trace that is shut.
-#[derive(Debug, Serialize)]
-pub struct PinnedSpan {
-    pub span_id: String,
-    pub parent_span_id: String,
-    pub kind: SpanKind,
-    pub name: String,
-    pub started_at: DateTime<Utc>,
-    pub ended_at: DateTime<Utc>,
-    pub status: SpanStatus,
-    pub error_type: String,
-    pub model: String,
-    pub input_tokens: u64,
-    pub output_tokens: u64,
-}
-
-impl From<PinnedRow> for PinnedSpan {
-    fn from(row: PinnedRow) -> Self {
-        Self {
-            span_id: row.span_id,
-            parent_span_id: row.parent_span_id,
-            kind: row.kind,
-            name: row.name,
-            started_at: row.started_at,
-            ended_at: row.ended_at,
-            status: row.status,
-            error_type: row.error_type,
-            model: row.model,
-            input_tokens: row.input_tokens,
-            output_tokens: row.output_tokens,
-        }
-    }
+    pub trace: TraceRow,
+    pub pinned: Vec<PinnedRow>,
 }
 
 /// `GET /internal/v1/telemetry/sessions` — a page of the project's sessions
@@ -301,7 +236,7 @@ pub async fn list_sessions(
     let listed = list_page::<Sessions>(&state, &headers, pairs).await?;
     Ok(Json(SessionList {
         more: listed.more(),
-        sessions: listed.rows.into_iter().map(Session::from).collect(),
+        sessions: listed.rows,
         days: listed.days,
         limit: listed.paging.limit,
         page: listed.paging.page,
@@ -333,8 +268,7 @@ pub async fn export_sessions(
     Query(pairs): Query<Vec<(String, String)>>,
 ) -> Result<Response, TelmoniError> {
     let (rows, format) = export_rows::<Sessions>(&state, &headers, pairs, Reading::Export).await?;
-    let sessions: Vec<Session> = rows.into_iter().map(Session::from).collect();
-    download(format, &sessions, &CSV_HEADER, Session::cells, "session")
+    download(format, &rows, &CSV_HEADER, SessionRow::cells, "session")
 }
 
 /// The names a layout pins: the saved layout a link names, where it is one
@@ -409,15 +343,12 @@ pub async fn get_session(
     let more = rows.len() > window.limit as usize;
     rows.truncate(window.limit as usize);
     let runs: Vec<Uuid> = rows.iter().map(|row| row.run_id).collect();
-    let mut spans: HashMap<Uuid, Vec<PinnedSpan>> = HashMap::new();
+    let mut spans: HashMap<Uuid, Vec<PinnedRow>> = HashMap::new();
     for row in traces::pinned(&state.store, &projects, &runs, &pinned, window.days)
         .await
         .map_err(read_failed)?
     {
-        spans
-            .entry(row.run_id)
-            .or_default()
-            .push(PinnedSpan::from(row));
+        spans.entry(row.run_id).or_default().push(row);
     }
     Ok(Json(SessionDetail {
         session_id,
@@ -425,7 +356,7 @@ pub async fn get_session(
             .into_iter()
             .map(|row| SessionTrace {
                 pinned: spans.remove(&row.run_id).unwrap_or_default(),
-                trace: Trace::from(row),
+                trace: row,
             })
             .collect(),
         pinned,
@@ -501,7 +432,7 @@ mod tests {
     #[test]
     fn a_downloads_row_is_the_pages_fields_under_the_headers_names() {
         let at = DateTime::from_timestamp_millis(1_791_721_800_000).expect("a time");
-        let session = Session {
+        let session = SessionRow {
             session_id: "thread, 42".into(),
             user_id: "user-a".into(),
             traces: 3,

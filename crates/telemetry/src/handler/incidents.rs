@@ -12,7 +12,6 @@ use std::sync::Arc;
 
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use uuid::Uuid;
@@ -21,9 +20,7 @@ use telmoni_shared::acting::Acting;
 use telmoni_shared::db::tenant_session::{ProjectAndOrganization, Scoped, project_scope};
 use telmoni_shared::extract::{Json, Query};
 use telmoni_shared::rbac::{Resource, Verb};
-use telmoni_shared::{
-    AuditAction, AuthError, IncidentStatus, Severity, TelmoniError, TelmoniResourceKind,
-};
+use telmoni_shared::{AuditAction, AuthError, IncidentStatus, TelmoniError, TelmoniResourceKind};
 
 use crate::AppState;
 use crate::handler::chain::{self, Change};
@@ -32,58 +29,10 @@ use crate::rules::incidents::{self, IncidentRow};
 /// The most incidents the list answers.
 pub const INCIDENTS_MAX: i64 = 200;
 
-/// One incident, as the lanes answer it.
-#[derive(Debug, Serialize)]
-pub struct Incident {
-    pub id: Uuid,
-    pub rule_id: Uuid,
-    /// Its alert's name.
-    pub rule_name: String,
-    pub status: IncidentStatus,
-    pub severity: Severity,
-    /// The value it last breached, or recovered, at.
-    pub value: Option<f64>,
-    pub opened_at: DateTime<Utc>,
-    pub acknowledged_at: Option<DateTime<Utc>>,
-    /// Who took it, by id.
-    pub acknowledged_by: Option<String>,
-    pub resolved_at: Option<DateTime<Utc>>,
-    /// Who resolved it, by id; none where its alert recovered.
-    pub resolved_by: Option<String>,
-    /// How often it breached again within an hour of a recovery.
-    pub reopened: i32,
-    /// The connections its notices were queued to; every incident is in
-    /// the project's feed besides.
-    pub told_to: Vec<Uuid>,
-    /// The runs its notices showed, oldest first.
-    pub runs: Vec<Uuid>,
-}
-
-impl From<IncidentRow> for Incident {
-    fn from(row: IncidentRow) -> Self {
-        Self {
-            id: row.id,
-            rule_id: row.rule_id,
-            rule_name: row.rule_name,
-            status: row.status,
-            severity: row.severity,
-            value: row.value,
-            opened_at: row.opened_at,
-            acknowledged_at: row.acknowledged_at,
-            acknowledged_by: row.acknowledged_by,
-            resolved_at: row.resolved_at,
-            resolved_by: row.resolved_by,
-            reopened: row.reopened,
-            told_to: row.told_to,
-            runs: row.runs,
-        }
-    }
-}
-
 /// What the list of incidents answers.
 #[derive(Debug, Serialize)]
 pub struct IncidentList {
-    pub incidents: Vec<Incident>,
+    pub incidents: Vec<IncidentRow>,
 }
 
 /// The list's query: none, or the run whose incidents a trace's page links.
@@ -128,9 +77,7 @@ pub async fn list_incidents(
         None => incidents::incidents(&mut tx, project_id, INCIDENTS_MAX).await?,
     };
     tx.commit().await?;
-    Ok(Json(IncidentList {
-        incidents: rows.into_iter().map(Incident::from).collect(),
-    }))
+    Ok(Json(IncidentList { incidents: rows }))
 }
 
 /// `POST /internal/v1/telemetry/incidents/{id}/acknowledge` — one of the
@@ -140,7 +87,7 @@ pub async fn acknowledge_incident(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Path(id): Path<String>,
-) -> Result<Json<Incident>, TelmoniError> {
+) -> Result<Json<IncidentRow>, TelmoniError> {
     let acting = state.auth.resolve(&headers).await?;
     let project_id = &acting
         .require_project(Verb::Update, Resource::Alert)?
@@ -151,7 +98,7 @@ pub async fn acknowledge_incident(
     })
     .await?;
     tracing::info!(project_id = %project_id, incident_id = %id, "telemetry: an incident acknowledged");
-    Ok(Json(Incident::from(row)))
+    Ok(Json(row))
 }
 
 /// What a member does to an incident.
@@ -220,7 +167,7 @@ pub async fn resolve_incident(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Path(id): Path<String>,
-) -> Result<Json<Incident>, TelmoniError> {
+) -> Result<Json<IncidentRow>, TelmoniError> {
     let acting = state.auth.resolve(&headers).await?;
     let project_id = &acting
         .require_project(Verb::Update, Resource::Alert)?
@@ -234,7 +181,7 @@ pub async fn resolve_incident(
         tracing::info!(project_id = %project_id, incident_id = %id, "telemetry: an incident resolved by hand");
         crate::notify::resolved_by_hand(&state, &row).await;
     }
-    Ok(Json(Incident::from(row)))
+    Ok(Json(row))
 }
 
 /// `GET /internal/v1/telemetry/incidents/{id}` — one of the project's
@@ -243,7 +190,7 @@ pub async fn get_incident(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Path(id): Path<String>,
-) -> Result<Json<Incident>, TelmoniError> {
+) -> Result<Json<IncidentRow>, TelmoniError> {
     let acting = state.auth.resolve(&headers).await?;
     let project_id = &acting
         .require_project(Verb::Read, Resource::Alert)?
@@ -254,5 +201,5 @@ pub async fn get_incident(
         .await?
         .ok_or_else(not_found)?;
     tx.commit().await?;
-    Ok(Json(Incident::from(row)))
+    Ok(Json(row))
 }

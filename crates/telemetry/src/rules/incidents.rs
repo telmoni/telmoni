@@ -14,6 +14,8 @@
 use chrono::{DateTime, TimeDelta, Utc};
 use uuid::Uuid;
 
+use serde::Serialize;
+
 use telmoni_shared::db::tenant_session::{
     Binding, HasOrganization, HasProject, Maintenance, Scoped, maintenance_scope,
 };
@@ -35,12 +37,14 @@ pub const REOPEN_WITHIN: TimeDelta = TimeDelta::hours(1);
 pub const RUNS_KEPT: i32 = 20;
 
 /// An incident as its row keeps it, with its alert's name.
-#[derive(Debug, Clone, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, sqlx::FromRow)]
 pub struct IncidentRow {
     pub id: Uuid,
     pub rule_id: Uuid,
     pub rule_name: String,
+    #[serde(skip)]
     pub project_id: ProjectId,
+    #[serde(skip)]
     pub organization_id: OrganizationId,
     pub status: IncidentStatus,
     pub severity: Severity,

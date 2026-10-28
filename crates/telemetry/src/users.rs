@@ -29,13 +29,11 @@ pub struct UserRow {
     pub input_tokens: u64,
     /// Their model calls' output tokens, summed.
     pub output_tokens: u64,
-    /// Input and output, summed: what the page sorts by first.
-    pub tokens: u64,
     /// When their first run in the window started.
-    #[serde(with = "clickhouse::serde::chrono::datetime64::micros")]
+    #[serde(deserialize_with = "clickhouse::serde::chrono::datetime64::micros::deserialize")]
     pub first_seen: DateTime<Utc>,
     /// When their last run in the window ended.
-    #[serde(with = "clickhouse::serde::chrono::datetime64::micros")]
+    #[serde(deserialize_with = "clickhouse::serde::chrono::datetime64::micros::deserialize")]
     pub last_seen: DateTime<Utc>,
 }
 
@@ -67,7 +65,7 @@ macro_rules! list_sql {
         concat!(
             "SELECT user_id, user_traces AS traces, user_errors AS errors, ",
             "user_steps AS steps, user_input AS input_tokens, user_output AS output_tokens, ",
-            "user_tokens AS tokens, user_first AS first_seen, user_last AS last_seen ",
+            "user_first AS first_seen, user_last AS last_seen ",
             "FROM (",
             users!(),
             ") ORDER BY ",
@@ -94,8 +92,8 @@ const fn list_sql(sort: UserSort, direction: SortDirection) -> &'static str {
         (UserSort::InputTokens, Desc) => list_sql!("input_tokens DESC"),
         (UserSort::OutputTokens, Asc) => list_sql!("output_tokens ASC"),
         (UserSort::OutputTokens, Desc) => list_sql!("output_tokens DESC"),
-        (UserSort::Tokens, Asc) => list_sql!("tokens ASC"),
-        (UserSort::Tokens, Desc) => list_sql!("tokens DESC"),
+        (UserSort::Tokens, Asc) => list_sql!("user_tokens ASC"),
+        (UserSort::Tokens, Desc) => list_sql!("user_tokens DESC"),
         (UserSort::FirstSeen, Asc) => list_sql!("first_seen ASC"),
         (UserSort::FirstSeen, Desc) => list_sql!("first_seen DESC"),
         (UserSort::LastSeen, Asc) => list_sql!("last_seen ASC"),
@@ -165,7 +163,7 @@ mod tests {
                     UserSort::Steps => "steps",
                     UserSort::InputTokens => "input_tokens",
                     UserSort::OutputTokens => "output_tokens",
-                    UserSort::Tokens => "tokens",
+                    UserSort::Tokens => "user_tokens",
                     UserSort::FirstSeen => "first_seen",
                     UserSort::LastSeen => "last_seen",
                 };

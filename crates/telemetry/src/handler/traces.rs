@@ -468,7 +468,7 @@ pub(crate) fn download<T: Serialize, const N: usize>(
 #[derive(Debug, Serialize)]
 pub struct TraceList {
     /// The page's traces, in the order asked.
-    pub traces: Vec<Trace>,
+    pub traces: Vec<TraceRow>,
     /// How many days back the list read.
     pub days: u16,
     /// The most a page holds.
@@ -483,70 +483,6 @@ pub struct TraceList {
     pub sort: TraceSort,
     /// And its direction.
     pub dir: SortDirection,
-}
-
-/// One trace of the list: a run's spans, summed ([`TraceRow`]).
-#[derive(Debug, Serialize)]
-pub struct Trace {
-    pub run_id: Uuid,
-    pub agent: String,
-    pub user_id: String,
-    pub session_id: String,
-    /// Whether the run's own span has arrived.
-    pub ended: bool,
-    pub status: SpanStatus,
-    /// The class of the error the run's own span ended on, never its
-    /// message; empty otherwise.
-    pub error_type: String,
-    pub started_at: DateTime<Utc>,
-    pub ended_at: DateTime<Utc>,
-    pub duration_ms: i64,
-    pub spans: u64,
-    pub steps: u64,
-    pub model_calls: u64,
-    pub tool_calls: u64,
-    pub errors: u64,
-    pub input_tokens: u64,
-    pub output_tokens: u64,
-    pub cache_read_input_tokens: u64,
-    pub cache_write_input_tokens: u64,
-    pub models: Vec<String>,
-    pub tools: Vec<String>,
-    /// The deployments its spans were sent from, each once: one, unless the
-    /// run crossed services deployed apart.
-    pub environments: Vec<String>,
-    /// The releases its spans were sent from, each once.
-    pub releases: Vec<String>,
-}
-
-impl From<TraceRow> for Trace {
-    fn from(row: TraceRow) -> Self {
-        Self {
-            run_id: row.run_id,
-            agent: row.agent,
-            user_id: row.user_id,
-            session_id: row.session_id,
-            ended: row.ended != 0,
-            status: row.status,
-            error_type: row.error_type,
-            started_at: row.started_at,
-            ended_at: row.ended_at,
-            duration_ms: row.duration_ms,
-            spans: row.spans,
-            steps: row.steps,
-            model_calls: row.model_calls,
-            tool_calls: row.tool_calls,
-            errors: row.errors,
-            input_tokens: row.input_tokens,
-            output_tokens: row.output_tokens,
-            cache_read_input_tokens: row.cache_read_input_tokens,
-            cache_write_input_tokens: row.cache_write_input_tokens,
-            models: row.models,
-            tools: row.tools,
-            environments: row.environments,
-            releases: row.releases,
-        }
-    }
 }
 
 /// A download's header row: the list's fields, in its order.
@@ -576,7 +512,7 @@ const CSV_HEADER: [&str; 23] = [
     "releases",
 ];
 
-impl Trace {
+impl TraceRow {
     /// The row a download writes for it, under [`CSV_HEADER`]: its times as
     /// RFC 3339, and its models, tools, environments and releases each one
     /// cell, `; ` between them.
@@ -693,35 +629,7 @@ pub struct TraceHistogram {
     pub bucket_seconds: u32,
     /// The reader's clock the bars start on, in minutes east of UTC.
     pub utc_offset: i16,
-    pub bars: Vec<HistogramBar>,
-}
-
-/// One bar: the runs that started in it, by how they ended, their tokens,
-/// and the median and 95th percentile of their durations, none where no run
-/// started.
-#[derive(Debug, Serialize)]
-pub struct HistogramBar {
-    pub at: DateTime<Utc>,
-    pub ok: u64,
-    pub error: u64,
-    pub cancelled: u64,
-    pub tokens: u64,
-    pub duration_p50_ms: Option<f64>,
-    pub duration_p95_ms: Option<f64>,
-}
-
-impl HistogramBar {
-    fn of(bar: Bar) -> Option<Self> {
-        Some(Self {
-            at: DateTime::from_timestamp_millis(bar.at_ms)?,
-            ok: bar.ok,
-            error: bar.error,
-            cancelled: bar.cancelled,
-            tokens: bar.tokens,
-            duration_p50_ms: bar.duration_p50_ms,
-            duration_p95_ms: bar.duration_p95_ms,
-        })
-    }
+    pub bars: Vec<Bar>,
 }
 
 /// What one trace's lane answers.
@@ -940,7 +848,7 @@ pub async fn list_traces(
     let listed = list_page::<Traces>(&state, &headers, pairs).await?;
     Ok(Json(TraceList {
         more: listed.more(),
-        traces: listed.rows.into_iter().map(Trace::from).collect(),
+        traces: listed.rows,
         days: listed.days,
         limit: listed.paging.limit,
         page: listed.paging.page,
@@ -988,7 +896,7 @@ pub async fn get_histogram(
         days: filter.days,
         bucket_seconds,
         utc_offset,
-        bars: bars.into_iter().filter_map(HistogramBar::of).collect(),
+        bars,
     }))
 }
 
@@ -1002,8 +910,7 @@ pub async fn export_traces(
 ) -> Result<Response, TelmoniError> {
     let (rows, format) =
         export_rows::<Traces>(&state, &headers, pairs, Reading::TraceExport).await?;
-    let traces: Vec<Trace> = rows.into_iter().map(Trace::from).collect();
-    download(format, &traces, &CSV_HEADER, Trace::cells, "trace")
+    download(format, &rows, &CSV_HEADER, TraceRow::cells, "trace")
 }
 
 /// `GET /internal/v1/telemetry/traces/{run_id}` — one trace's spans, the run's
@@ -1364,7 +1271,7 @@ mod tests {
     /// cell as a spreadsheet should read it.
     #[test]
     fn a_downloads_row_is_the_lists_fields_under_the_headers_names() {
-        let trace = Trace {
+        let trace = TraceRow {
             run_id: Uuid::nil(),
             agent: "=cmd".into(),
             user_id: String::new(),
