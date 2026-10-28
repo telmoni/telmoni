@@ -14,15 +14,17 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::time::Duration;
 
+use telmoni_shared::TelmoniError;
 use telmoni_shared::db::tenant_session::maintenance_scope;
 use telmoni_shared::envelope::KekError;
 use telmoni_shared::error::deadlocked;
-use telmoni_shared::{Redacted, TelmoniError};
 use tokio::sync::Semaphore;
 use uuid::Uuid;
 
 use crate::AppState;
-use crate::connector::{ConnectionStatus, Connector, DeliveryError, Event, Retirement, Terminal};
+use crate::connector::{
+    ConnectionStatus, DeliveryError, Event, Opened, Provider, Retirement, Terminal,
+};
 use crate::db::{
     self, AttemptTrigger, FailedAttempt, Failure, LeasedDelivery, NewAttempt, NotificationsLane,
     SealedConnection,
@@ -237,26 +239,6 @@ pub async fn first_attempt(state: &Arc<AppState>, id: Uuid) -> Result<(), Telmon
     Ok(())
 }
 
-/// One connection's target and, for a connector that signs, its token, opened
-/// once for every send the batch holds for it.
-pub struct Opened {
-    /// The vendor's incoming-webhook URL, or the customer's endpoint.
-    pub url: Redacted,
-    /// Slack's bot token or the webhook's signing secret.
-    pub token: Option<Redacted>,
-    /// A webhook's rotated secret while its overlap lasts.
-    pub prior: Option<Redacted>,
-}
-
-impl std::fmt::Debug for Opened {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Opened")
-            .field("token", &self.token.is_some())
-            .field("prior", &self.prior.is_some())
-            .finish()
-    }
-}
-
 /// Open every ACTIVE connection in the batch, once each, concurrently.
 async fn open_batch(
     state: &Arc<AppState>,
@@ -291,18 +273,16 @@ async fn open_batch(
     opened
 }
 
-/// The connector a connection's `provider` column names.
-fn connector_for(
-    state: &AppState,
-    connection: &SealedConnection,
-) -> Result<Arc<dyn Connector>, DeliveryError> {
+/// Refuses a connection whose `provider` this deployment has not configured.
+fn configured(state: &AppState, connection: &SealedConnection) -> Result<(), DeliveryError> {
     let provider = connection.provider;
-    state.connectors.get(provider).ok_or_else(|| {
-        DeliveryError::terminal(
-            Terminal::Spent { listed: true },
-            format!("{provider} is not configured on this deployment"),
-        )
-    })
+    if state.connectors.enabled(provider) {
+        return Ok(());
+    }
+    Err(DeliveryError::terminal(
+        Terminal::Spent { listed: true },
+        format!("{provider} is not configured on this deployment"),
+    ))
 }
 
 /// Unwrap a connection's data key and open its sealed fields. A connection
@@ -312,7 +292,7 @@ pub async fn open(
     state: &AppState,
     connection: &SealedConnection,
 ) -> Result<Opened, DeliveryError> {
-    let connector = connector_for(state, connection)?;
+    configured(state, connection)?;
     let Some(kek) = state.kek.as_ref() else {
         return Err(DeliveryError::terminal(
             Terminal::Spent { listed: true },
@@ -340,42 +320,26 @@ pub async fn open(
     let spent =
         |e: TelmoniError| DeliveryError::terminal(Terminal::Spent { listed: true }, e.to_string());
     let url = row.open(connection.target()).map_err(spent)?;
-    let (token, prior) = if connector.delivers_with_token() {
-        (
-            connection
-                .token()
-                .map(|sealed| row.open(sealed))
-                .transpose()
-                .map_err(spent)?,
-            connection
-                .prior_token(chrono::Utc::now())
-                .map(|sealed| row.open(sealed))
-                .transpose()
-                .map_err(spent)?,
-        )
-    } else {
-        (None, None)
-    };
-    Ok(Opened { url, token, prior })
-}
-
-/// POST one notice through an already-opened connection, over the guarded
-/// client, answering the success status.
-pub async fn dispatch(
-    state: &AppState,
-    connection: &SealedConnection,
-    opened: &Opened,
-    event: &Event<'_>,
-) -> Result<u16, DeliveryError> {
-    connector_for(state, connection)?
-        .deliver(
-            &state.egress,
-            &opened.url,
-            opened.token.as_ref(),
-            opened.prior.as_ref(),
-            event,
-        )
-        .await
+    match connection.provider {
+        Provider::Slack => Ok(Opened::Slack { url }),
+        Provider::Webhook => {
+            let Some(secret) = connection.token() else {
+                return Err(DeliveryError::terminal(
+                    Terminal::Spent { listed: true },
+                    "the webhook row holds no signing secret",
+                ));
+            };
+            Ok(Opened::Webhook {
+                url,
+                secret: row.open(secret).map_err(spent)?,
+                prior: connection
+                    .prior_token(chrono::Utc::now())
+                    .map(|sealed| row.open(sealed))
+                    .transpose()
+                    .map_err(spent)?,
+            })
+        }
+    }
 }
 
 /// One send and how long it took, from the moment it left.
@@ -384,15 +348,11 @@ pub struct Sent {
     pub duration_ms: i32,
 }
 
-/// [`dispatch`], timed, for the delivery log.
-pub async fn dispatch_timed(
-    state: &AppState,
-    connection: &SealedConnection,
-    opened: &Opened,
-    event: &Event<'_>,
-) -> Sent {
+/// POST one notice through an already-opened connection, timed for the
+/// delivery log.
+pub async fn dispatch_timed(state: &AppState, opened: &Opened, event: &Event<'_>) -> Sent {
     let started = std::time::Instant::now();
-    let result = dispatch(state, connection, opened, event).await;
+    let result = opened.deliver(&state.egress, event).await;
     Sent {
         result,
         duration_ms: i32::try_from(started.elapsed().as_millis()).unwrap_or(i32::MAX),
@@ -422,8 +382,10 @@ pub async fn send(
     connection: &SealedConnection,
     event: &Event<'_>,
 ) -> Result<u16, DeliveryError> {
-    let opened = open(state, connection).await?;
-    dispatch(state, connection, &opened, event).await
+    open(state, connection)
+        .await?
+        .deliver(&state.egress, event)
+        .await
 }
 
 /// What one attempt did, carried out of the concurrent phase so the batch's
@@ -543,7 +505,7 @@ async fn attempt_one(
                 title: &delivery.subject,
                 body: &delivery.body,
             };
-            let sent = dispatch_timed(state, connection, opened, &event).await;
+            let sent = dispatch_timed(state, opened, &event).await;
             let attempt = sent.attempt(delivery.id, AttemptTrigger::Scheduled);
             (sent.result, Some(attempt))
         }
@@ -568,7 +530,7 @@ async fn attempt_one(
                 retry_after,
             ),
             message,
-            breaker_limit: breaker_limit(state, connection),
+            breaker_limit: connection.provider.breaker_after(),
             attempt,
         },
         Err(DeliveryError::Held { message }) => Outcome::Held {
@@ -605,15 +567,6 @@ async fn attempt_one(
             }
         },
     }
-}
-
-/// How many consecutive failed sends retire this connection, if its
-/// connector keeps a breaker.
-fn breaker_limit(state: &AppState, connection: &SealedConnection) -> Option<i32> {
-    state
-        .connectors
-        .get(connection.provider)?
-        .consecutive_failure_limit()
 }
 
 /// Write the whole batch's bookkeeping, again where a deadlock ended it, then

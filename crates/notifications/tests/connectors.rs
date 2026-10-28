@@ -157,7 +157,7 @@ fn both_connectors(mocks: &MockServer) -> Connectors {
             Redacted::from("slack_client_secret"),
             &mocks.uri(),
         ))),
-        webhook: Some(Arc::new(webhook::WebhookConnector)),
+        webhook: true,
     }
 }
 
@@ -4838,7 +4838,7 @@ async fn a_deployment_without_the_webhook_lists_it_disabled_and_refuses_it(pool:
     apply_audit_migrations(&pool).await;
     let mocks = MockServer::start().await;
     let no_webhook = Connectors {
-        webhook: None,
+        webhook: false,
         ..both_connectors(&mocks)
     };
     let st = state_with(pool.clone(), &mocks, None, no_webhook);

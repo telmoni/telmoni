@@ -62,7 +62,7 @@ pub fn state_from_env(
     let connectors = Connectors::from_config(&config);
     tracing::info!(
         slack = connectors.slack.is_some(),
-        webhook = connectors.webhook.is_some(),
+        webhook = connectors.webhook,
         kek = kek.as_ref().map_or("none", Kek::kind),
         "connectors configured"
     );

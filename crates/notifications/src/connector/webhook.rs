@@ -18,7 +18,6 @@
 //! **Almost no answer is terminal**: a 404 mid-deploy comes back. The exception
 //! is `410 Gone`; every other dead endpoint is ended by the breaker.
 
-use async_trait::async_trait;
 use reqwest::Url;
 use ring::rand::SecureRandom as _;
 use serde_json::{Value, json};
@@ -26,10 +25,7 @@ use telmoni_shared::digest::sign_timestamped;
 use telmoni_shared::net_guard::{Egress, HostRejection, host_is_dialable};
 use telmoni_shared::{Redacted, TelmoniError};
 
-use super::{
-    Connector, DeliveryError, Event, Provider, Retirement, TearDownError, Terminal,
-    parse_retry_after, refused, short_body,
-};
+use super::{DeliveryError, Event, Retirement, Terminal, parse_retry_after, refused, short_body};
 
 /// The header a receiver reads for the signature.
 pub const SIGNATURE_HEADER: &str = "telmoni-signature";
@@ -153,77 +149,45 @@ pub fn classify(
     DeliveryError::transient_after(message, retry_after)
 }
 
-/// The connector. It holds nothing; the only credential is the row's own.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct WebhookConnector;
-
-#[async_trait]
-impl Connector for WebhookConnector {
-    fn provider(&self) -> Provider {
-        Provider::Webhook
-    }
-
-    fn delivers_with_token(&self) -> bool {
-        true
-    }
-
-    fn consecutive_failure_limit(&self) -> Option<i32> {
-        Some(BREAKER_AFTER)
-    }
-
-    async fn deliver(
-        &self,
-        http: &Egress,
-        target: &Redacted,
-        token: Option<&Redacted>,
-        prior: Option<&Redacted>,
-        event: &Event<'_>,
-    ) -> Result<u16, DeliveryError> {
-        let Some(secret) = token else {
-            return Err(DeliveryError::terminal(
-                Terminal::Spent { listed: true },
-                "the webhook row holds no signing secret",
-            ));
-        };
-        let now = chrono::Utc::now();
-        let body = serde_json::to_vec(&render(event, now)).map_err(|e| {
-            DeliveryError::terminal(
-                Terminal::Spent { listed: true },
-                format!("payload would not serialise: {e}"),
-            )
+/// POST one notice to the customer's endpoint `url`, signed with `secret` and,
+/// while a rotation's overlap lasts, `prior` too; answers the success status.
+pub async fn deliver(
+    http: &Egress,
+    url: &Redacted,
+    secret: &Redacted,
+    prior: Option<&Redacted>,
+    event: &Event<'_>,
+) -> Result<u16, DeliveryError> {
+    let now = chrono::Utc::now();
+    let body = serde_json::to_vec(&render(event, now)).map_err(|e| {
+        DeliveryError::terminal(
+            Terminal::Spent { listed: true },
+            format!("payload would not serialise: {e}"),
+        )
+    })?;
+    let signature = match prior {
+        Some(prior) => sign_all(&[secret.expose(), prior.expose()], &body, now.timestamp()),
+        None => sign(secret.expose(), &body, now.timestamp()),
+    };
+    let resp = http
+        .post(url.expose())
+        .map_err(refused)?
+        .header(SIGNATURE_HEADER, signature)
+        .header(DELIVERY_ID_HEADER, event.id.to_string())
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .body(body)
+        .send()
+        .await
+        .map_err(|e| {
+            DeliveryError::transient(format!("endpoint POST failed: {}", e.without_url()))
         })?;
-        let signature = match prior {
-            Some(prior) => sign_all(&[secret.expose(), prior.expose()], &body, now.timestamp()),
-            None => sign(secret.expose(), &body, now.timestamp()),
-        };
-        let resp = http
-            .post(target.expose())
-            .map_err(refused)?
-            .header(SIGNATURE_HEADER, signature)
-            .header(DELIVERY_ID_HEADER, event.id.to_string())
-            .header(reqwest::header::CONTENT_TYPE, "application/json")
-            .body(body)
-            .send()
-            .await
-            .map_err(|e| {
-                DeliveryError::transient(format!("endpoint POST failed: {}", e.without_url()))
-            })?;
-        let status = resp.status();
-        if status.is_success() {
-            return Ok(status.as_u16());
-        }
-        let retry_after = parse_retry_after(resp.headers());
-        let body = short_body(resp).await;
-        Err(classify(status, &body, retry_after).answered(status))
+    let status = resp.status();
+    if status.is_success() {
+        return Ok(status.as_u16());
     }
-
-    async fn tear_down(
-        &self,
-        _http: &Egress,
-        _token: Option<&Redacted>,
-    ) -> Result<(), TearDownError> {
-        Ok(())
-    }
+    let retry_after = parse_retry_after(resp.headers());
+    let body = short_body(resp).await;
+    Err(classify(status, &body, retry_after).answered(status))
 }
 
 #[cfg(test)]

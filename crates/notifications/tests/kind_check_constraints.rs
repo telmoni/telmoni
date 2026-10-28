@@ -15,7 +15,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use telmoni_notifications::connector::{ConnectionStatus, Connectors, Provider, slack, webhook};
+use telmoni_notifications::connector::{ConnectionStatus, Connectors, Provider, slack};
 use telmoni_notifications::db::{AttemptOutcome, AttemptTrigger, DeliveryStatus};
 use telmoni_shared::{NotificationKind, Redacted};
 
@@ -234,7 +234,7 @@ fn the_handshake_check_admits_exactly_the_providers_with_a_grant() {
             Redacted::from("secret"),
             "http://localhost",
         ))),
-        webhook: Some(Arc::new(webhook::WebhookConnector)),
+        webhook: true,
     };
     let with_a_grant = spelled(
         Provider::all()

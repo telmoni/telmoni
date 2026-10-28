@@ -16,7 +16,8 @@ use telmoni_shared::envelope::KekError;
 use telmoni_shared::{Redacted, TelmoniError};
 
 use crate::AppState;
-use crate::connector::{ConnectionStatus, Connector, TearDownError};
+use crate::connector::slack::SlackConnector;
+use crate::connector::{ConnectionStatus, TearDownError};
 use crate::db::{self, NotificationsLane, SealedConnection, Uninstall};
 
 /// How long an uninstall is tried, an hour apart, before it is given up on.
@@ -123,7 +124,7 @@ pub async fn settle(state: &AppState, uninstall: &Uninstall) -> Result<Settled, 
     tx.commit().await?;
 
     let sent = match opened {
-        Ok((connector, token)) => connector.tear_down(&state.egress, Some(&token)).await,
+        Ok((slack, token)) => slack.tear_down(&state.egress, &token).await,
         Err(why) => Err(why),
     };
     let mut tx = maintenance_scope(&state.db, NotificationsLane).await?;
@@ -151,15 +152,16 @@ pub async fn settle(state: &AppState, uninstall: &Uninstall) -> Result<Settled, 
     Ok(settled)
 }
 
-/// The connector and the opened token an uninstall is sent with.
+/// Slack's app, the one installed per workspace (the table's CHECK holds an
+/// uninstall to it), and the opened token an uninstall is sent with.
 async fn open(
     state: &AppState,
     uninstall: &Uninstall,
-) -> Result<(Arc<dyn Connector>, Redacted), TearDownError> {
-    let provider = uninstall.provider;
-    let Some(connector) = state.connectors.get(provider) else {
+) -> Result<(Arc<SlackConnector>, Redacted), TearDownError> {
+    let Some(slack) = state.connectors.slack.clone() else {
         return Err(TearDownError::Unanswered(format!(
-            "{provider} is not configured on this replica"
+            "{} is not configured on this replica",
+            uninstall.provider
         )));
     };
     let Some(kek) = state.kek.as_ref() else {
@@ -187,7 +189,7 @@ async fn open(
     let token = row
         .open(uninstall.token())
         .map_err(|e| TearDownError::Refused(format!("the token would not open: {e}")))?;
-    Ok((connector, token))
+    Ok((slack, token))
 }
 
 /// What one sweep's pass over the filed uninstalls came to.

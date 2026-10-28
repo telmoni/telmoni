@@ -28,8 +28,7 @@ use uuid::Uuid;
 
 use crate::AppState;
 use crate::connector::{
-    ConnectionStatus, Connector, DeliveryError, Event, Grant, Installed, Provider, Terminal,
-    webhook,
+    ConnectionStatus, DeliveryError, Event, Grant, Installed, Provider, Terminal, webhook,
 };
 use crate::db::{self, NotificationsLane};
 use crate::handler::{ProjectIdentity, authorize};
@@ -53,21 +52,22 @@ fn provider_of(raw: &str) -> Result<Provider, TelmoniError> {
         .map_err(|e: ParseEnumError| TelmoniError::BadRequest(format!("the provider {e}")))
 }
 
-/// The connector for a provider, or a 400 for a deployment that has not
-/// configured it — the console never offers a Connect it was told is off.
-fn connector_for(state: &AppState, provider: Provider) -> Result<Arc<dyn Connector>, TelmoniError> {
-    state.connectors.get(provider).ok_or_else(|| {
-        TelmoniError::BadRequest(format!(
-            "{} is not configured on this deployment",
-            provider.label()
-        ))
-    })
+/// A 400 for a provider this deployment has not configured — the console
+/// never offers a Connect it was told is off.
+fn configured(state: &AppState, provider: Provider) -> Result<(), TelmoniError> {
+    if state.connectors.enabled(provider) {
+        return Ok(());
+    }
+    Err(TelmoniError::BadRequest(format!(
+        "{} is not configured on this deployment",
+        provider.label()
+    )))
 }
 
 /// The OAuth half of a provider. The webhook has none, and is refused before
 /// a state row is minted for a handshake that cannot finish.
 fn grant_for(state: &AppState, provider: Provider) -> Result<Arc<dyn Grant>, TelmoniError> {
-    connector_for(state, provider)?;
+    configured(state, provider)?;
     state.connectors.grant(provider).ok_or_else(|| {
         TelmoniError::BadRequest(format!(
             "{} has no install dialog; connect it with an endpoint URL",
@@ -561,7 +561,7 @@ pub async fn create_webhook(
     Json(req): Json<CreateWebhookRequest>,
 ) -> Result<impl IntoResponse, TelmoniError> {
     let identity = authorize(&state, &headers, Verb::Create, Resource::Connector).await?;
-    connector_for(&state, Provider::Webhook)?;
+    configured(&state, Provider::Webhook)?;
     let kek = kek_for(&state)?;
     require_flag(&state).await?;
 
@@ -1178,7 +1178,7 @@ async fn dispatch_redelivery(
     };
     let sent = tokio::time::timeout(
         TEST_SEND_TIMEOUT,
-        delivery::dispatch_timed(state, sealed, &opened, &event),
+        delivery::dispatch_timed(state, &opened, &event),
     )
     .await
     .unwrap_or_else(|_| delivery::Sent {

@@ -1,8 +1,7 @@
-//! The two connectors, behind one trait — and Slack's OAuth grant behind
-//! another. Slack hands back a webhook URL bound to a channel the person
-//! picked; the signed webhook is an endpoint they typed and a secret we
-//! minted. From here both are a target to seal, a body to render and an
-//! error vocabulary to classify.
+//! The two connectors, and Slack's OAuth grant behind a trait. Slack hands
+//! back a webhook URL bound to a channel the person picked; the signed webhook
+//! is an endpoint they typed and a secret we minted. From here both are a
+//! target to seal, a body to render and an error vocabulary to classify.
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -50,6 +49,16 @@ impl Provider {
         match self {
             Self::Slack => true,
             Self::Webhook => false,
+        }
+    }
+
+    /// Consecutive failed sends that retire a connection whose far end never
+    /// answers terminally; `None` leaves it to the classifier.
+    #[must_use]
+    pub const fn breaker_after(self) -> Option<i32> {
+        match self {
+            Self::Slack => None,
+            Self::Webhook => Some(webhook::BREAKER_AFTER),
         }
     }
 }
@@ -251,39 +260,32 @@ pub(crate) fn undialable(what: &str, why: HostRejection) -> TelmoniError {
     TelmoniError::Internal(format!("{what}: refusing a host that {why}"))
 }
 
-/// One kind of connection. Every method takes the shared [`Egress`], so the
-/// guard and the no-redirect posture live in exactly one place.
-#[async_trait]
-pub trait Connector: Send + Sync {
-    fn provider(&self) -> Provider;
+/// What a connection sends with, opened once per batch: Slack's bot token is
+/// for uninstalling alone, and a webhook always has its signing secret.
+#[derive(Debug)]
+pub enum Opened {
+    /// Slack's incoming-webhook URL.
+    Slack { url: Redacted },
+    /// The customer's endpoint, its signing secret, and the rotated one while
+    /// its overlap lasts.
+    Webhook {
+        url: Redacted,
+        secret: Redacted,
+        prior: Option<Redacted>,
+    },
+}
 
-    /// Whether a send needs the sealed token: Slack's is for uninstall only,
-    /// the webhook's is its signing secret.
-    fn delivers_with_token(&self) -> bool {
-        false
+impl Opened {
+    /// POST one notice over the shared [`Egress`], so the guard and the
+    /// no-redirect posture live in one place; answers the success status.
+    pub async fn deliver(&self, http: &Egress, event: &Event<'_>) -> Result<u16, DeliveryError> {
+        match self {
+            Self::Slack { url } => slack::deliver(http, url, event).await,
+            Self::Webhook { url, secret, prior } => {
+                webhook::deliver(http, url, secret, prior.as_ref(), event).await
+            }
+        }
     }
-
-    /// How many consecutive failures retire a connection whose far end never
-    /// answers terminally; `None` leaves it to the classifier.
-    fn consecutive_failure_limit(&self) -> Option<i32> {
-        None
-    }
-
-    /// POST one notice to `target`, answering the success status. `prior` is
-    /// a webhook's rotated secret while it still signs; the vendors have none.
-    async fn deliver(
-        &self,
-        http: &Egress,
-        target: &Redacted,
-        token: Option<&Redacted>,
-        prior: Option<&Redacted>,
-        event: &Event<'_>,
-    ) -> Result<u16, DeliveryError>;
-
-    /// Undo the install upstream. The row is the customer's decision, and the
-    /// vendor's answer never rolls it back.
-    async fn tear_down(&self, http: &Egress, token: Option<&Redacted>)
-    -> Result<(), TearDownError>;
 }
 
 /// Why an uninstall did not go through.
@@ -319,19 +321,20 @@ pub trait Grant: Send + Sync {
     ) -> Result<Installed, TelmoniError>;
 }
 
-/// The connectors this deployment can connect; `None` renders the tile as
-/// unavailable.
+/// The connectors this deployment can connect; one off renders its tile as
+/// unavailable. Slack's app is held for its OAuth and `apps.uninstall`; the
+/// webhook needs nothing but the key its secrets are sealed with.
 #[derive(Clone, Default)]
 pub struct Connectors {
     pub slack: Option<std::sync::Arc<slack::SlackConnector>>,
-    pub webhook: Option<std::sync::Arc<webhook::WebhookConnector>>,
+    pub webhook: bool,
 }
 
 impl std::fmt::Debug for Connectors {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Connectors")
             .field("slack", &self.slack.is_some())
-            .field("webhook", &self.webhook.is_some())
+            .field("webhook", &self.webhook)
             .finish()
     }
 }
@@ -349,25 +352,7 @@ impl Connectors {
                     &config.slack_api_base,
                 ))
             }),
-            webhook: config
-                .connector_kek
-                .is_some()
-                .then(|| std::sync::Arc::new(webhook::WebhookConnector)),
-        }
-    }
-
-    /// The connector for a provider, as the loop and the handlers use it.
-    #[must_use]
-    pub fn get(&self, provider: Provider) -> Option<std::sync::Arc<dyn Connector>> {
-        match provider {
-            Provider::Slack => self
-                .slack
-                .clone()
-                .map(|c| c as std::sync::Arc<dyn Connector>),
-            Provider::Webhook => self
-                .webhook
-                .clone()
-                .map(|c| c as std::sync::Arc<dyn Connector>),
+            webhook: config.connector_kek.is_some(),
         }
     }
 
@@ -381,9 +366,13 @@ impl Connectors {
         }
     }
 
+    /// Whether this deployment can connect `provider`, and send through it.
     #[must_use]
     pub fn enabled(&self, provider: Provider) -> bool {
-        self.get(provider).is_some()
+        match provider {
+            Provider::Slack => self.slack.is_some(),
+            Provider::Webhook => self.webhook,
+        }
     }
 }
 
@@ -458,7 +447,7 @@ mod tests {
     #[test]
     fn the_webhook_is_a_connector_and_never_a_grant() {
         let connectors = Connectors {
-            webhook: Some(std::sync::Arc::new(webhook::WebhookConnector)),
+            webhook: true,
             ..Connectors::default()
         };
         assert!(connectors.enabled(Provider::Webhook));

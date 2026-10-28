@@ -14,8 +14,8 @@ use telmoni_shared::net_guard::Egress;
 use telmoni_shared::{OrInternal, Redacted, TelmoniError};
 
 use super::{
-    Connector, DeliveryError, Event, Grant, Installed, Provider, Retirement, TearDownError,
-    Terminal, parse_retry_after, refused, short_body, truncate, undialable,
+    DeliveryError, Event, Grant, Installed, Retirement, TearDownError, Terminal, parse_retry_after,
+    refused, short_body, truncate, undialable,
 };
 
 /// Slack's header block limit.
@@ -298,48 +298,35 @@ impl Grant for SlackConnector {
     }
 }
 
-#[async_trait]
-impl Connector for SlackConnector {
-    fn provider(&self) -> Provider {
-        Provider::Slack
+/// POST one notice to a channel's incoming-webhook `url`, answering the
+/// success status.
+pub async fn deliver(
+    http: &Egress,
+    url: &Redacted,
+    event: &Event<'_>,
+) -> Result<u16, DeliveryError> {
+    let resp = http
+        .post(url.expose())
+        .map_err(refused)?
+        .json(&render(event))
+        .send()
+        .await
+        .map_err(|e| {
+            DeliveryError::transient(format!("slack webhook POST failed: {}", e.without_url()))
+        })?;
+    let status = resp.status();
+    if status.is_success() {
+        return Ok(status.as_u16());
     }
+    let retry_after = parse_retry_after(resp.headers());
+    let body = short_body(resp).await;
+    Err(classify(status, &body, retry_after).answered(status))
+}
 
-    async fn deliver(
-        &self,
-        http: &Egress,
-        url: &Redacted,
-        _token: Option<&Redacted>,
-        _prior: Option<&Redacted>,
-        event: &Event<'_>,
-    ) -> Result<u16, DeliveryError> {
-        let resp = http
-            .post(url.expose())
-            .map_err(refused)?
-            .json(&render(event))
-            .send()
-            .await
-            .map_err(|e| {
-                DeliveryError::transient(format!("slack webhook POST failed: {}", e.without_url()))
-            })?;
-        let status = resp.status();
-        if status.is_success() {
-            return Ok(status.as_u16());
-        }
-        let retry_after = parse_retry_after(resp.headers());
-        let body = short_body(resp).await;
-        Err(classify(status, &body, retry_after).answered(status))
-    }
-
-    async fn tear_down(
-        &self,
-        http: &Egress,
-        token: Option<&Redacted>,
-    ) -> Result<(), TearDownError> {
-        let Some(token) = token else {
-            return Err(TearDownError::Refused(
-                "slack teardown has no bot token to uninstall with".into(),
-            ));
-        };
+impl SlackConnector {
+    /// Uninstall the app from the workspace `token` was granted in. The row is
+    /// the customer's decision, and Slack's answer never rolls it back.
+    pub async fn tear_down(&self, http: &Egress, token: &Redacted) -> Result<(), TearDownError> {
         let resp = http
             .post(&format!("{}/api/apps.uninstall", self.api_base))
             .map_err(|why| {
