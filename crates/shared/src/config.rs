@@ -19,6 +19,18 @@ pub fn optional_base_url(key: &str) -> Option<String> {
     optional(key).map(|s| s.trim_end_matches('/').to_owned())
 }
 
+/// `url`, as `key` gave it: one a URL parser takes, and https in a Kubernetes
+/// pod, since what it carries would travel in the clear.
+pub fn https_on_a_tier(key: &str, url: String) -> anyhow::Result<String> {
+    let parsed =
+        reqwest::Url::parse(&url).map_err(|e| anyhow::anyhow!("{key} is not a valid URL: {e}"))?;
+    anyhow::ensure!(
+        parsed.scheme() == "https" || !crate::envelope::on_deployed_tier(),
+        "{key} is not https in a Kubernetes pod; what it carries would travel in the clear"
+    );
+    Ok(url)
+}
+
 /// `key` parsed into `T`, or `default` when the var is unset or blank.
 pub fn env_parse<T>(key: &str, default: T) -> anyhow::Result<T>
 where
@@ -57,7 +69,19 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{parsed, present, required};
+    use super::{https_on_a_tier, parsed, present, required};
+
+    #[test]
+    fn a_base_url_is_a_url_whatever_the_tier() {
+        assert_eq!(
+            https_on_a_tier("K", "https://api.example".into()).unwrap(),
+            "https://api.example"
+        );
+        let refused = https_on_a_tier("K", "not a url".into())
+            .unwrap_err()
+            .to_string();
+        assert!(refused.starts_with("K is not a valid URL"), "{refused}");
+    }
 
     #[test]
     fn a_required_var_that_is_set_but_blank_is_refused() {

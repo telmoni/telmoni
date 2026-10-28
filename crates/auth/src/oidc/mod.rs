@@ -28,27 +28,10 @@ use async_trait::async_trait;
 use serde::Deserialize;
 
 use telmoni_shared::oidc::{Discovery, Endpoints, IdTokenVerifier};
-use telmoni_shared::{AuthError, Redacted, TelmoniError, digest::hex_digit};
+use telmoni_shared::text::urlencoding;
+use telmoni_shared::{AuthError, Redacted, TelmoniError};
 
 use crate::provider::{AuthProvider, Authenticated, Binding, Proof, Subject};
-
-/// Percent-encode a query-string value: a space is `%20`, never `+`.
-pub(crate) fn urlencoding(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(char::from(b));
-            }
-            other => {
-                out.push('%');
-                out.push(hex_digit(other >> 4).to_ascii_uppercase());
-                out.push(hex_digit(other).to_ascii_uppercase());
-            }
-        }
-    }
-    out
-}
 
 /// `endpoint?a=b&c=d`, or `endpoint&a=b…` when the provider's endpoint
 /// already carries a query string.

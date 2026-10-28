@@ -27,8 +27,7 @@
 use std::sync::Arc;
 
 use telmoni_shared::Redacted;
-use telmoni_shared::config::{env_parse, optional, require};
-use telmoni_shared::envelope::on_deployed_tier;
+use telmoni_shared::config::{env_parse, https_on_a_tier, optional, require};
 use telmoni_shared::mail::MailSender;
 use telmoni_shared::oidc::{Discovery, IdTokenVerifier, KeySetUrl, SigningAlg};
 
@@ -195,7 +194,7 @@ async fn seed_admin_from_env(password: &PasswordProvider) -> anyhow::Result<()> 
 /// The `CUSTOM` block's OpenID Connect provider, beside the accounts held
 /// here, as a confidential client.
 fn external_from_env(http: &reqwest::Client, client_id: String) -> anyhow::Result<External> {
-    let issuer_url = require("AUTH_CUSTOM_ISSUER")?;
+    let issuer_url = https_on_a_tier("AUTH_CUSTOM_ISSUER", require("AUTH_CUSTOM_ISSUER")?)?;
     let client_secret: Redacted = require("AUTH_CUSTOM_CLIENT_SECRET")?.into();
     let name = optional("AUTH_CUSTOM_NAME").unwrap_or_else(|| "single sign-on".to_owned());
     let scope = optional("AUTH_CUSTOM_SCOPE").unwrap_or_else(|| "openid email profile".to_owned());
@@ -203,13 +202,6 @@ fn external_from_env(http: &reqwest::Client, client_id: String) -> anyhow::Resul
         anyhow::bail!(
             "AUTH_CUSTOM_SCOPE leaves out openid: the provider would answer with no id token, \
              and nobody could be named"
-        );
-    }
-
-    if on_deployed_tier() && !issuer_url.starts_with("https://") {
-        anyhow::bail!(
-            "AUTH_CUSTOM_ISSUER is not https in a Kubernetes pod; the provider's key set and \
-             every grant would travel in the clear"
         );
     }
 
