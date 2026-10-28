@@ -55,6 +55,27 @@ pub struct Usage {
     pub cost: Option<f64>,
 }
 
+impl Usage {
+    /// What this reply's usage says, and what `earlier` held where it says
+    /// nothing. Each field named, so a new one cannot be skipped.
+    pub(crate) fn or(self, earlier: Self) -> Self {
+        let Self {
+            input_tokens,
+            output_tokens,
+            cache_read_input_tokens,
+            cache_write_input_tokens,
+            cost,
+        } = self;
+        Self {
+            input_tokens: input_tokens.or(earlier.input_tokens),
+            output_tokens: output_tokens.or(earlier.output_tokens),
+            cache_read_input_tokens: cache_read_input_tokens.or(earlier.cache_read_input_tokens),
+            cache_write_input_tokens: cache_write_input_tokens.or(earlier.cache_write_input_tokens),
+            cost: cost.or(earlier.cost),
+        }
+    }
+}
+
 /// What a run is opened with, each part optional: `RunOptions::default()` is
 /// a run of the agent alone.
 #[derive(Debug, Clone, Default)]
@@ -636,26 +657,23 @@ impl ModelCall {
         }
         if let Some(sent) = usage {
             span.set_attributes(usage_attributes(sent));
-            let held = &mut priced.held;
-            held.input_tokens = sent.input_tokens.or(held.input_tokens);
-            held.output_tokens = sent.output_tokens.or(held.output_tokens);
-            held.cache_read_input_tokens = sent
-                .cache_read_input_tokens
-                .or(held.cache_read_input_tokens);
-            held.cache_write_input_tokens = sent
-                .cache_write_input_tokens
-                .or(held.cache_write_input_tokens);
-            held.cost = sent.cost.or(held.cost);
+            priced.held = sent.or(priced.held);
         }
-        let held = priced.held;
+        let Usage {
+            input_tokens,
+            output_tokens,
+            cache_read_input_tokens,
+            cache_write_input_tokens,
+            cost,
+        } = priced.held;
         let whole = |count: Option<i64>| count.and_then(|n| u64::try_from(n).ok()).unwrap_or(0);
         let tokens = Tokens {
-            input: whole(held.input_tokens),
-            output: whole(held.output_tokens),
-            cache_read: whole(held.cache_read_input_tokens),
-            cache_write: whole(held.cache_write_input_tokens),
+            input: whole(input_tokens),
+            output: whole(output_tokens),
+            cache_read: whole(cache_read_input_tokens),
+            cache_write: whole(cache_write_input_tokens),
         };
-        let cost = held.cost.or_else(|| {
+        let cost = cost.or_else(|| {
             guard::priced(
                 &self.handle.client.prices,
                 &priced.provider,
@@ -912,21 +930,22 @@ pub(crate) fn tool_call_opening(name: &str) -> (String, Vec<KeyValue>) {
 /// The counts and the cost `usage` holds, as the conventions and Langfuse
 /// name them.
 pub(crate) fn usage_attributes(usage: Usage) -> impl Iterator<Item = KeyValue> {
+    let Usage {
+        input_tokens,
+        output_tokens,
+        cache_read_input_tokens,
+        cache_write_input_tokens,
+        cost,
+    } = usage;
     [
-        (contract::INPUT_TOKENS, usage.input_tokens),
-        (contract::OUTPUT_TOKENS, usage.output_tokens),
-        (
-            contract::CACHE_READ_INPUT_TOKENS,
-            usage.cache_read_input_tokens,
-        ),
-        (
-            contract::CACHE_WRITE_INPUT_TOKENS,
-            usage.cache_write_input_tokens,
-        ),
+        (contract::INPUT_TOKENS, input_tokens),
+        (contract::OUTPUT_TOKENS, output_tokens),
+        (contract::CACHE_READ_INPUT_TOKENS, cache_read_input_tokens),
+        (contract::CACHE_WRITE_INPUT_TOKENS, cache_write_input_tokens),
     ]
     .into_iter()
     .filter_map(|(key, count)| count.map(|count| KeyValue::new(key, count)))
-    .chain(usage.cost.map(|cost| KeyValue::new(contract::COST, cost)))
+    .chain(cost.map(|cost| KeyValue::new(contract::COST, cost)))
 }
 
 /// `usage` without what ingest refuses the call for, a negative count and a
