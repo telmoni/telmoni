@@ -45,7 +45,7 @@ export async function GET(
     limit: search.get("limit") ?? undefined,
   });
 
-  const access = await fetchSession(projectId, sessionId, query, pinned);
+  const access = await fetchSession(projectId, sessionId, query, { pinned });
   switch (access.kind) {
     case "ok":
       return privateJson(access.session);

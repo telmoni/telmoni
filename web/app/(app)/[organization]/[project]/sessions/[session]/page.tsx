@@ -12,7 +12,7 @@ import { LayoutProvider } from "@/components/traces/use-layout";
 import { Card } from "@/components/ui/card";
 import { WindowPicker } from "@/components/window-picker";
 import { ownerContact } from "@/lib/identity";
-import { parseLayoutUi, resolveLayout } from "@/lib/layout";
+import { parseLayoutUi } from "@/lib/layout";
 import { MAX_LIMIT, parseWindow } from "@/lib/list-query";
 import { administers } from "@/lib/roles";
 import {
@@ -49,18 +49,17 @@ export default async function SessionPage({
   if (resolved.kind === "unavailable") return <ServiceUnavailable />;
   const { gate, project } = resolved;
 
-  // The layout the server can know — a link's, or the project's — names the
-  // spans to read with the session; the browser's own last choice is read
-  // again in the page (`components/traces/session-runs.tsx`).
-  const [setting, layouts] = await Promise.all([
+  // The session is read with the layout the server can know — a link's,
+  // else the project's — which the lane resolves itself, so the three reads
+  // go out at once; the browser's own last choice is read again in the page
+  // (`components/traces/session-runs.tsx`).
+  const [setting, layouts, access] = await Promise.all([
     fetchSessionLayout(project.id),
     fetchTraceLayouts(project.id),
+    fetchSession(project.id, sessionId, query, { view: ui.view ?? "project" }),
   ]);
-  const known = layouts.kind === "ok" ? layouts.layouts : [];
-  const { pinned } = resolveLayout(ui, null, setting, known).choice.options;
 
   const list = sessionsHref(organization, slug, { days: query.days });
-  const access = await fetchSession(project.id, sessionId, query, pinned);
   if (access.kind === "unavailable") return <ServiceUnavailable />;
   if (access.kind === "forbidden") {
     return (

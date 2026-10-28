@@ -38,7 +38,9 @@ describe("GET /api/v1/sessions/[session]", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("cache-control")).toBe("private, no-store");
     expect(await res.json()).toEqual(DETAIL);
-    expect(fetchSession).toHaveBeenCalledWith(PROJECT, SESSION, { days: 30, limit: 500 }, ["plan", "answer"]);
+    expect(fetchSession).toHaveBeenCalledWith(PROJECT, SESSION, { days: 30, limit: 500 }, {
+      pinned: ["plan", "answer"],
+    });
   });
 
   it("refuses a request with no sign-in before reading anything", async () => {
@@ -67,7 +69,7 @@ describe("GET /api/v1/sessions/[session]", () => {
   it("counts a session's id and a pinned name in characters, as the server does", async () => {
     const wide = "😀".repeat(200);
     expect((await read(`?project=${PROJECT}&pinned=${"😀".repeat(145)}`, wide)).status).toBe(200);
-    expect(fetchSession).toHaveBeenCalledWith(PROJECT, wide, {}, ["😀".repeat(145)]);
+    expect(fetchSession).toHaveBeenCalledWith(PROJECT, wide, {}, { pinned: ["😀".repeat(145)] });
     expect((await read(`?project=${PROJECT}`, `${wide}😀`)).status).toBe(404);
     expect((await read(`?project=${PROJECT}&pinned=${"😀".repeat(146)}`)).status).toBe(400);
     expect(fetchSession).toHaveBeenCalledTimes(1);
@@ -75,7 +77,7 @@ describe("GET /api/v1/sessions/[session]", () => {
 
   it("drops a window the server would refuse rather than refusing", async () => {
     expect((await read(`?project=${PROJECT}&days=0&limit=x`)).status).toBe(200);
-    expect(fetchSession).toHaveBeenCalledWith(PROJECT, SESSION, {}, []);
+    expect(fetchSession).toHaveBeenCalledWith(PROJECT, SESSION, {}, { pinned: [] });
   });
 
   it("answers each way the read can end", async () => {

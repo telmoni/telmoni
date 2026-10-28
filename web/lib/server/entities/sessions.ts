@@ -111,21 +111,27 @@ export async function sessionDownload(
   return readDownload("sessionDownload", projectId, `/session-export${lane}`);
 }
 
+/** Which spans a session's traces are read with under them: the names the
+ *  browser's own layout pins, or the layout the server resolves itself — a
+ *  saved one by its id, falling back to the project's, or the project's own
+ *  as `"project"`. */
+export type SessionLayoutRead = { pinned: readonly string[] } | { view: string };
+
 /** One session's traces in the window, by its id, which the path carries
  *  URL-encoded since it is the application's own text, each with the spans
- *  `pinned` names under it. An id the server refuses — empty, or past its
+ *  `layout` pins under it. An id the server refuses — empty, or past its
  *  length — is read as missing. */
 export const fetchSession = cache(
   async (
     projectId: string,
     sessionId: string,
     query: Pick<SessionQuery, "days" | "limit">,
-    pinned: readonly string[] = [],
+    layout: SessionLayoutRead,
   ): Promise<SessionAccess> => {
     const read = await readLane(
       "fetchSession",
       projectId,
-      `/sessions/${encodeURIComponent(sessionId)}${queryString({ ...query, pinned })}`,
+      `/sessions/${encodeURIComponent(sessionId)}${queryString({ ...query, ...layout })}`,
       SessionDetailSchema,
       MISSING,
     );

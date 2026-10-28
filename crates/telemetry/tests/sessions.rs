@@ -27,6 +27,7 @@ use telmoni_telemetry::router;
 
 const LANE: &str = "/internal/v1/telemetry/sessions";
 const MEMBER: &str = "user_member";
+const OWNER: &str = "user_owner";
 const STRANGER: &str = "user_stranger";
 
 /// Two projects: ours, with a member seated, and another's.
@@ -47,6 +48,7 @@ fn projects(pool: &PgPool) -> Projects {
         OrganizationRole::Member,
         Some(Role::Member),
     );
+    auth.seat(OWNER, &organization, &ours, OrganizationRole::Owner, None);
     auth.seat(
         "user_other",
         &OrganizationId::new(),
@@ -72,6 +74,20 @@ impl Projects {
             .header("x-organization-id", self.organization.as_str())
             .header("x-project-id", project.as_str())
             .body(Body::empty())
+            .expect("a request")
+    }
+
+    /// A request with a body, as the console sends one on ours.
+    fn on(&self, method: &str, user: &str, path: &str, body: Value) -> Request<Body> {
+        Request::builder()
+            .method(method)
+            .uri(path)
+            .header(SERVICE_SECRET_HEADER, SECRET)
+            .header("authorization", format!("Bearer tok_{user}"))
+            .header("x-organization-id", self.organization.as_str())
+            .header("x-project-id", self.ours.as_str())
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
             .expect("a request")
     }
 
@@ -111,6 +127,29 @@ impl Projects {
     async fn detail(&self, path: &str) -> (StatusCode, Value) {
         self.send(self.request(MEMBER, &self.ours, &format!("{LANE}/{path}")))
             .await
+    }
+
+    /// A layout saved on ours by its owner, pinning `pinned`, by its id.
+    async fn save_layout(&self, name: &str, pinned: Value) -> String {
+        let body = json!({ "name": name, "kind": "layout", "query": { "pinned": pinned } });
+        let (status, saved) = self
+            .send(self.on("POST", OWNER, "/internal/v1/telemetry/views", body))
+            .await;
+        assert_eq!(status, StatusCode::CREATED, "{saved}");
+        saved
+            .get("id")
+            .and_then(Value::as_str)
+            .expect("an id")
+            .to_owned()
+    }
+
+    /// The layout ours opens its sessions in, set by its owner.
+    async fn set_layout(&self, view_id: &str) {
+        let path = "/internal/v1/telemetry/session-layout";
+        let (status, body) = self
+            .send(self.on("PUT", OWNER, path, json!({ "view_id": view_id })))
+            .await;
+        assert!(status.is_success(), "{status}: {body}");
     }
 
     /// The page's facets as the member reads them, with `query`.
@@ -648,6 +687,50 @@ async fn the_download_holds_every_session_the_filters_admit(pool: PgPool) {
         "?format=xlsx",
     ] {
         let (status, _, body) = p.export(refused).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{refused}: {body}");
+    }
+}
+
+/// A session read by a layout rather than by names: the project's own pins
+/// what its saved layout pins, a link's layout its own where it is the
+/// project's, one the project lacks the project's, and nothing where no
+/// layout is set; a layout is never read beside names.
+#[sqlx::test]
+async fn a_session_is_read_with_the_layout_a_link_names_else_the_projects_own(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let p = projects(&pool);
+    let seeded = seed(&ch, &p).await;
+
+    let (status, bare) = p.detail("conv-1?view=project").await;
+    assert_eq!(status, StatusCode::OK, "{bare}");
+    assert_eq!(bare["pinned"], json!([]), "no layout set: nothing pinned");
+    assert_eq!(runs(&bare), [seeded.a, seeded.b]);
+
+    let review = p.save_layout("Review", json!(["answer"])).await;
+    let plain = p.save_layout("Plain", json!([])).await;
+    p.set_layout(&review).await;
+    let (status, own) = p.detail("conv-1?view=project").await;
+    assert_eq!(status, StatusCode::OK, "{own}");
+    assert_eq!(own["pinned"], json!(["answer"]));
+    assert_eq!(own["traces"][0]["pinned"][0]["name"], "answer");
+    let (status, linked) = p.detail(&format!("conv-1?view={plain}")).await;
+    assert_eq!(status, StatusCode::OK, "{linked}");
+    assert_eq!(
+        linked["pinned"],
+        json!([]),
+        "the link's layout over the project's"
+    );
+    let (status, unknown) = p.detail(&format!("conv-1?view={}", Uuid::new_v4())).await;
+    assert_eq!(status, StatusCode::OK, "{unknown}");
+    assert_eq!(
+        unknown["pinned"],
+        json!(["answer"]),
+        "a layout the project lacks: its own"
+    );
+    for refused in ["conv-1?view=nope", "conv-1?view=project&pinned=answer"] {
+        let (status, body) = p.detail(refused).await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{refused}: {body}");
     }
 }

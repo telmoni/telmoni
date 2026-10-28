@@ -49,15 +49,15 @@ let mockSetting: unknown;
 let mockLayouts: unknown;
 const fetchProjectBySlug = vi.fn<(slug: string) => Promise<unknown>>(async () => mockProject);
 const fetchSession = vi.fn<
-  (projectId: string, sessionId: string, query: unknown, pinned: unknown) => Promise<unknown>
+  (projectId: string, sessionId: string, query: unknown, layout: unknown) => Promise<unknown>
 >(async () => mockSession);
 
 vi.mock("@/lib/server/data", () => ({
   activeOrganization: () => null,
   getServerContext: async () => mockContext,
   fetchProjectBySlug: (slug: string) => fetchProjectBySlug(slug),
-  fetchSession: (projectId: string, sessionId: string, query: unknown, pinned: unknown) =>
-    fetchSession(projectId, sessionId, query, pinned),
+  fetchSession: (projectId: string, sessionId: string, query: unknown, layout: unknown) =>
+    fetchSession(projectId, sessionId, query, layout),
   fetchSessionLayout: async () => mockSetting,
   fetchTraceLayouts: async () => mockLayouts,
 }));
@@ -269,7 +269,7 @@ describe("SessionPage", () => {
     render(await SessionPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByTestId("page-header")).toHaveTextContent("Session");
     expect(screen.getByTestId("page-header")).toHaveAttribute("data-back", "/acme/web/sessions");
-    expect(fetchSession).toHaveBeenCalledWith("project_7bQx2mNv9BcK4dLp", SESSION, {}, []);
+    expect(fetchSession).toHaveBeenCalledWith("project_7bQx2mNv9BcK4dLp", SESSION, {}, { view: "project" });
 
     expect(screen.getByText(SESSION)).toBeInTheDocument();
     expect(screen.getAllByRole("link", { name: HASHED })[0]).toHaveAttribute(
@@ -359,7 +359,7 @@ describe("SessionPage", () => {
     mockSearch = `view=${LAYOUT_ID}`;
     mockSession = detail({ pinned: ["answer"], traces: [{ ...TRACE_A, pinned: [PINNED] }, TRACE_B] });
     render(await SessionPage({ params: PARAMS, searchParams: Promise.resolve({ view: LAYOUT_ID }) }));
-    expect(fetchSession).toHaveBeenCalledWith("project_7bQx2mNv9BcK4dLp", SESSION, {}, ["answer"]);
+    expect(fetchSession).toHaveBeenCalledWith("project_7bQx2mNv9BcK4dLp", SESSION, {}, { view: LAYOUT_ID });
     expect(screen.getByRole("button", { name: "Saved layout: Review" })).toBeInTheDocument();
     const table = screen.getByRole("table");
     expect(within(table).getAllByRole("columnheader").map((h) => h.textContent)).toEqual([
@@ -384,7 +384,7 @@ describe("SessionPage", () => {
     cleanup();
     mockSetting = { view_id: LAYOUT_ID };
     render(await SessionPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
-    expect(fetchSession).toHaveBeenLastCalledWith("project_7bQx2mNv9BcK4dLp", SESSION, {}, ["answer"]);
+    expect(fetchSession).toHaveBeenLastCalledWith("project_7bQx2mNv9BcK4dLp", SESSION, {}, { view: "project" });
     expect(screen.getByRole("button", { name: "Saved layout: Review" })).toBeInTheDocument();
   });
 
@@ -396,7 +396,7 @@ describe("SessionPage", () => {
         searchParams: Promise.resolve({ days: "30", limit: "x" }),
       }),
     );
-    expect(fetchSession).toHaveBeenCalledWith("project_7bQx2mNv9BcK4dLp", SESSION, { days: 30 }, []);
+    expect(fetchSession).toHaveBeenCalledWith("project_7bQx2mNv9BcK4dLp", SESSION, { days: 30 }, { view: "project" });
     expect(screen.getByText("1 shown", { exact: false })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Show up to 500" })).toHaveAttribute(
       "href",

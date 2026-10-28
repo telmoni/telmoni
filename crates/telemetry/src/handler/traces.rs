@@ -826,16 +826,23 @@ impl From<SpanRow> for TraceSpan {
 }
 
 /// The project a list lane reads, once the caller may read its traces.
+pub(crate) async fn reading(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<telmoni_shared::ProjectId, TelmoniError> {
+    let acting = state.auth.resolve(headers).await?;
+    Ok(acting
+        .require_project(Verb::Read, Resource::Trace)?
+        .project_id
+        .clone())
+}
+
+/// That project's rows in the store.
 pub(crate) async fn readable(
     state: &AppState,
     headers: &HeaderMap,
 ) -> Result<Projects, TelmoniError> {
-    let acting = state.auth.resolve(headers).await?;
-    let project_id = acting
-        .require_project(Verb::Read, Resource::Trace)?
-        .project_id
-        .clone();
-    Ok(Projects::one(project_id))
+    Ok(Projects::one(reading(state, headers).await?))
 }
 
 /// A list's page as its lane read it: the rows and the total, read at once

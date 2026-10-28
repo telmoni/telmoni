@@ -17,23 +17,28 @@ use chrono::{DateTime, SecondsFormat, Utc};
 use serde::Serialize;
 use uuid::Uuid;
 
+use telmoni_shared::db::tenant_session::project_scope;
 use telmoni_shared::extract::{Json, Query};
 use telmoni_shared::{
-    AuthError, SessionSort, SortDirection, SpanKind, SpanStatus, TelmoniError, TraceSort,
+    AuthError, ProjectId, SessionSort, SortDirection, SpanKind, SpanStatus, TelmoniError,
+    TraceSort, ViewKind,
 };
 
-use crate::AppState;
 use crate::contract::{NAME_MAX, SESSION_ID_MAX};
 use crate::handler::traces::{
     Facets, Reading, Trace, download, export_rows, facets_page, list_page, parse_days, parse_limit,
-    read_failed, readable, values,
+    read_failed, reading, values,
 };
+use crate::handler::views::LayoutOptions;
 use crate::sessions::{SessionRow, Sessions};
+use crate::store::Projects;
 use crate::traces::{self, PINNED_MAX, PinnedRow, TraceFilter, Traces, Window};
+use crate::{AppState, db};
 
 /// A session's own page's query string, every value text until it is
-/// checked: the window its traces are read in, and the span names a layout
-/// pinned, `pinned` given again for each.
+/// checked: the window its traces are read in, and which spans each trace
+/// answers under it — the span names a layout pinned, `pinned` given again
+/// for each, or `view`, the layout to read them from.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct SessionQuery {
     /// How many days back.
@@ -42,6 +47,25 @@ pub struct SessionQuery {
     pub limit: Option<String>,
     /// The span names whose spans each trace answers beside its sums.
     pub pinned: Vec<String>,
+    /// The layout whose pinned names to read with: a saved layout's id, or
+    /// `project` for the project's own.
+    pub view: Option<String>,
+}
+
+/// Which spans a session's traces answer under them: the names given, or
+/// the names a layout pins.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Pinning {
+    Named(Vec<String>),
+    Layout(Layout),
+}
+
+/// The layout a session is read with: the saved one a link names, where it
+/// is one of the project's, else the project's own; or the project's own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Layout {
+    Saved(Uuid),
+    Project,
 }
 
 impl SessionQuery {
@@ -61,6 +85,7 @@ impl SessionQuery {
                 }
                 "days" => &mut query.days,
                 "limit" => &mut query.limit,
+                "view" => &mut query.view,
                 _ => {
                     return Err(TelmoniError::BadRequest(
                         "the lane takes no parameter by that name".into(),
@@ -76,26 +101,48 @@ impl SessionQuery {
         Ok(query)
     }
 
-    /// The window and the pinned names, each value checked: a name trimmed
-    /// and once, and at most [`PINNED_MAX`] of them.
+    /// The window and the pinning, each value checked: a name trimmed and
+    /// once, and at most [`PINNED_MAX`] of them; a layout named by its id,
+    /// or as the project's own, and never beside names.
     ///
     /// # Errors
     ///
     /// A value that is not what its parameter takes, named by the parameter
     /// and never echoed.
-    pub fn into_parts(self) -> Result<(Window, Vec<String>), TelmoniError> {
-        let pinned = values("pinned", &self.pinned, NAME_MAX)?;
-        if pinned.len() > PINNED_MAX {
-            return Err(TelmoniError::BadRequest(format!(
-                "pinned names at most {PINNED_MAX} spans"
-            )));
-        }
+    pub fn into_parts(self) -> Result<(Window, Pinning), TelmoniError> {
+        let pinning = match self.view {
+            Some(view) => {
+                if !self.pinned.is_empty() {
+                    return Err(TelmoniError::BadRequest(
+                        "a session is read with a layout or with pinned names, not both".into(),
+                    ));
+                }
+                Pinning::Layout(match view.as_str() {
+                    "project" => Layout::Project,
+                    id => Layout::Saved(id.parse().map_err(|_| {
+                        TelmoniError::BadRequest(
+                            "view names a saved layout by its id, or the project's own as project"
+                                .into(),
+                        )
+                    })?),
+                })
+            }
+            None => {
+                let pinned = values("pinned", &self.pinned, NAME_MAX)?;
+                if pinned.len() > PINNED_MAX {
+                    return Err(TelmoniError::BadRequest(format!(
+                        "pinned names at most {PINNED_MAX} spans"
+                    )));
+                }
+                Pinning::Named(pinned)
+            }
+        };
         Ok((
             Window {
                 days: parse_days(self.days.as_deref().unwrap_or_default())?,
                 limit: parse_limit(self.limit.as_deref().unwrap_or_default())?,
             },
-            pinned,
+            pinning,
         ))
     }
 }
@@ -290,24 +337,53 @@ pub async fn export_sessions(
     download(format, &sessions, &CSV_HEADER, Session::cells, "session")
 }
 
+/// The names a layout pins: the saved layout a link names, where it is one
+/// of the project's; else the project's own; else none. A layout saved by
+/// an older console that no longer reads pins none, as its page draws it.
+async fn layout_pins(
+    state: &AppState,
+    project_id: &ProjectId,
+    layout: Layout,
+) -> Result<Vec<String>, TelmoniError> {
+    let mut tx = project_scope(&state.db, project_id).await?;
+    let layouts = db::views(&mut tx, project_id, ViewKind::Layout).await?;
+    let own = db::session_layout(&mut tx, project_id).await?;
+    tx.commit().await?;
+    let saved = |id: Uuid| layouts.iter().find(|row| row.id == id);
+    let chosen = match layout {
+        Layout::Saved(id) => saved(id).or_else(|| own.and_then(saved)),
+        Layout::Project => own.and_then(saved),
+    };
+    Ok(chosen
+        .and_then(|row| serde_json::from_value::<LayoutOptions>(row.query.clone()).ok())
+        .map(|options| options.pinned)
+        .unwrap_or_default())
+}
+
 /// `GET /internal/v1/telemetry/sessions/{session_id}` — one session's traces in
-/// the window, earliest first, each with the spans `pinned` names under it;
-/// `404` for a session the project's runs in the window did not belong to,
-/// which is also what another project's session id gets.
+/// the window, earliest first, each with the spans `pinned` names under it,
+/// or those the layout `view` names pins; `404` for a session the project's
+/// runs in the window did not belong to, which is also what another
+/// project's session id gets.
 pub async fn get_session(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Path(session_id): Path<String>,
     Query(pairs): Query<Vec<(String, String)>>,
 ) -> Result<Json<SessionDetail>, TelmoniError> {
-    let projects = readable(&state, &headers).await?;
+    let project_id = reading(&state, &headers).await?;
+    let projects = Projects::one(project_id.clone());
     let session_id = session_id.trim().to_owned();
     if session_id.is_empty() || session_id.chars().count() > SESSION_ID_MAX {
         return Err(TelmoniError::BadRequest(format!(
             "a session is named by its id, up to {SESSION_ID_MAX} characters"
         )));
     }
-    let (window, pinned) = SessionQuery::read(pairs)?.into_parts()?;
+    let (window, pinning) = SessionQuery::read(pairs)?.into_parts()?;
+    let pinned = match pinning {
+        Pinning::Named(names) => names,
+        Pinning::Layout(layout) => layout_pins(&state, &project_id, layout).await?,
+    };
     let filter = TraceFilter {
         session_ids: vec![session_id.clone()],
         days: window.days,
@@ -444,12 +520,12 @@ mod tests {
     }
 
     /// A session's page reads its window and the names pinned, each trimmed
-    /// and once, and refuses a parameter it does not take, one given twice,
-    /// or more names than a trace shows — naming the parameter, never the
-    /// value.
+    /// and once, or the layout to pin by, and refuses a parameter it does
+    /// not take, one given twice, a layout beside names, or more names than
+    /// a trace shows — naming the parameter, never the value.
     #[test]
     fn a_sessions_page_reads_its_window_and_the_names_pinned() {
-        let (window, pinned) = SessionQuery::read(pairs(&[
+        let (window, pinning) = SessionQuery::read(pairs(&[
             ("days", "30"),
             ("pinned", " plan "),
             ("pinned", "plan"),
@@ -461,13 +537,27 @@ mod tests {
         .expect("checked");
         assert_eq!(window.days, 30);
         assert_eq!(window.limit, DEFAULT_LIMIT);
-        assert_eq!(pinned, ["plan", "search_docs"]);
-        let (window, pinned) = SessionQuery::read(Vec::new())
+        assert_eq!(
+            pinning,
+            Pinning::Named(vec!["plan".into(), "search_docs".into()])
+        );
+        let (window, pinning) = SessionQuery::read(Vec::new())
             .expect("read")
             .into_parts()
             .expect("the default");
         assert_eq!(window, Window::default());
-        assert!(pinned.is_empty());
+        assert_eq!(pinning, Pinning::Named(Vec::new()));
+        let (_, pinning) = SessionQuery::read(pairs(&[("view", "project")]))
+            .expect("read")
+            .into_parts()
+            .expect("the project's own");
+        assert_eq!(pinning, Pinning::Layout(Layout::Project));
+        let id = Uuid::new_v4();
+        let (_, pinning) = SessionQuery::read(pairs(&[("view", &id.to_string())]))
+            .expect("read")
+            .into_parts()
+            .expect("a saved layout");
+        assert_eq!(pinning, Pinning::Layout(Layout::Saved(id)));
 
         let names: Vec<String> = (0..=PINNED_MAX)
             .map(|i| format!("step-{i}<script>"))
@@ -479,6 +569,8 @@ mod tests {
             vec![("days", "7"), ("days", "30")],
             vec![("days", "0<script>")],
             vec![("pinned", long.as_str())],
+            vec![("view", "nope<script>")],
+            vec![("view", "project"), ("pinned", "plan")],
             nine,
         ] {
             let refused = SessionQuery::read(pairs(&query))
