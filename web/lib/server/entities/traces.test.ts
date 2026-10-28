@@ -185,7 +185,7 @@ describe("fetchTraces", () => {
       kind: "ok",
       list: LIST,
     });
-    const [url, init] = fetchWithTimeout.mock.calls[0];
+    const [url, init] = fetchWithTimeout.mock.calls[0]!;
     expect(url).toBe(
       "http://server/internal/v1/telemetry/traces?agent=nightly-report&agent=zeta&sort=user&limit=50&page=2",
     );
@@ -219,14 +219,14 @@ describe("the reads beside the list", () => {
   it("reads each filter's values with the filters and the window alone", async () => {
     answer(200, FACETS);
     expect(await fetchTraceFacets(PROJECT, QUERY)).toEqual({ kind: "ok", facets: FACETS });
-    const [url] = fetchWithTimeout.mock.calls[0];
+    const [url] = fetchWithTimeout.mock.calls[0]!;
     expect(url).toBe("http://server/internal/v1/telemetry/traces/facets?agent=zeta&status=error&days=30");
   });
 
   it("reads the histogram on the reader's clock, its empty bars with no durations", async () => {
     answer(200, HISTOGRAM);
     expect(await fetchTraceHistogram(PROJECT, QUERY, 330)).toEqual({ kind: "ok", histogram: HISTOGRAM });
-    const [url] = fetchWithTimeout.mock.calls[0];
+    const [url] = fetchWithTimeout.mock.calls[0]!;
     expect(url).toBe(
       "http://server/internal/v1/telemetry/traces/histogram?agent=zeta&status=error&days=30&utc_offset=330",
     );
@@ -235,7 +235,7 @@ describe("the reads beside the list", () => {
   it("reads the project's saved views of the list, and its layouts apart from them", async () => {
     answer(200, { views: [VIEW] });
     expect(await fetchTraceViews(PROJECT)).toEqual({ kind: "ok", views: [VIEW] });
-    const [url] = fetchWithTimeout.mock.calls[0];
+    const [url] = fetchWithTimeout.mock.calls[0]!;
     expect(url).toBe("http://server/internal/v1/telemetry/views?kind=list");
 
     answer(200, { views: [LAYOUT] });
@@ -280,7 +280,7 @@ describe("traceDownload", () => {
       [RUN],
     );
     expect(result).toMatchObject({ kind: "ok", contentType: "text/csv; charset=utf-8" });
-    const [url, , timeout] = fetchWithTimeout.mock.calls[0];
+    const [url, , timeout] = fetchWithTimeout.mock.calls[0]!;
     expect(url).toBe(
       `http://server/internal/v1/telemetry/traces/export?agent=zeta&sort=tokens&format=csv&run=${RUN}`,
     );
@@ -301,7 +301,7 @@ describe("fetchTrace", () => {
   it("reads one trace's spans by the run's id", async () => {
     answer(200, DETAIL);
     expect(await fetchTrace(PROJECT, RUN)).toEqual({ kind: "ok", trace: DETAIL });
-    const [url] = fetchWithTimeout.mock.calls[0];
+    const [url] = fetchWithTimeout.mock.calls[0]!;
     expect(url).toBe(`http://server/internal/v1/telemetry/traces/${RUN}`);
   });
 

@@ -31,7 +31,7 @@ beforeEach(() => {
 describe("fetchContentMode", () => {
   it("reads the project's mode, and the modes its switch offers, from telemetry's lane", async () => {
     expect(await fetchContentMode(PROJECT)).toEqual({ content_mode: "off", offered: ["off"] });
-    const [url, init] = fetchWithTimeout.mock.calls[0];
+    const [url, init] = fetchWithTimeout.mock.calls[0]!;
     expect(url).toBe("http://server/internal/v1/telemetry/content-mode");
     expect(init.headers).toMatchObject({ "x-project-id": PROJECT });
   });
