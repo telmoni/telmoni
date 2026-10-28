@@ -354,7 +354,7 @@ impl PasswordProvider {
         let email = crate::identity::validate_email(email)?;
         self.refuse_if_held_to_sso(&email)?;
         if password.is_empty() {
-            return Err(AuthError::BadRequest("enter your password".into()).into());
+            return Err(TelmoniError::BadRequest("enter your password".into()));
         }
 
         let Some(user_id) = self.holder_of(&email).await? else {
@@ -598,7 +598,9 @@ impl PasswordProvider {
         let mut tx = person_scope(&self.db, user_id).await?;
         let Some(pending) = credentials::pending_email(&mut tx, user_id).await? else {
             tx.commit().await?;
-            return Err(AuthError::BadRequest("no email change is pending".into()).into());
+            return Err(TelmoniError::BadRequest(
+                "no email change is pending".into(),
+            ));
         };
         if pending.expires_at <= Utc::now() {
             credentials::clear_pending_email(&mut tx, user_id).await?;
@@ -700,5 +702,5 @@ impl ResetSender {
 
 /// A link that is not live: unknown, spent, expired, or guessed too often.
 fn stale_link() -> TelmoniError {
-    AuthError::BadRequest("that link is invalid or has expired — ask for a new one".into()).into()
+    TelmoniError::BadRequest("that link is invalid or has expired — ask for a new one".into())
 }

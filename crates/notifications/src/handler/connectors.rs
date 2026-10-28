@@ -49,18 +49,17 @@ const KEY_UNWRAP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5
 /// The vendor named in the path, or a 400.
 fn provider_of(raw: &str) -> Result<Provider, TelmoniError> {
     raw.parse()
-        .map_err(|e: ParseEnumError| AuthError::BadRequest(format!("the provider {e}")).into())
+        .map_err(|e: ParseEnumError| TelmoniError::BadRequest(format!("the provider {e}")))
 }
 
 /// The connector for a provider, or a 400 for a deployment that has not
 /// configured it — the console never offers a Connect it was told is off.
 fn connector_for(state: &AppState, provider: Provider) -> Result<Arc<dyn Connector>, TelmoniError> {
     state.connectors.get(provider).ok_or_else(|| {
-        AuthError::BadRequest(format!(
+        TelmoniError::BadRequest(format!(
             "{} is not configured on this deployment",
             provider.label()
         ))
-        .into()
     })
 }
 
@@ -69,11 +68,10 @@ fn connector_for(state: &AppState, provider: Provider) -> Result<Arc<dyn Connect
 fn grant_for(state: &AppState, provider: Provider) -> Result<Arc<dyn Grant>, TelmoniError> {
     connector_for(state, provider)?;
     state.connectors.grant(provider).ok_or_else(|| {
-        AuthError::BadRequest(format!(
+        TelmoniError::BadRequest(format!(
             "{} has no install dialog; connect it with an endpoint URL",
             provider.label()
         ))
-        .into()
     })
 }
 
@@ -221,10 +219,9 @@ async fn consume_verified_oauth_state(
     )
     .await?
     else {
-        return Err(AuthError::BadRequest(
+        return Err(TelmoniError::BadRequest(
             "this connection attempt has expired or was already used; start again".into(),
-        )
-        .into());
+        ));
     };
     tx.commit().await?;
     if begun.user_id != identity.user_id
@@ -505,12 +502,11 @@ fn event_kinds_column(
         return Ok(None);
     };
     if chosen.is_empty() {
-        return Err(AuthError::BadRequest(
+        return Err(TelmoniError::BadRequest(
             "choose at least one event, or every event; to stop receiving notices, disconnect \
              the endpoint"
                 .into(),
-        )
-        .into());
+        ));
     }
     Ok(Some(
         NotificationKind::all()
@@ -531,7 +527,7 @@ pub async fn create_webhook(
     let kek = kek_for(&state)?;
     require_flag(&state).await?;
 
-    let url = webhook::validate_endpoint_url(&req.url).map_err(AuthError::BadRequest)?;
+    let url = webhook::validate_endpoint_url(&req.url).map_err(TelmoniError::BadRequest)?;
     let event_kinds = event_kinds_column(req.event_kinds)?;
     let host = webhook::host_label(&url);
     let fingerprint = webhook::fingerprint(&url);
@@ -673,10 +669,9 @@ pub async fn rotate_webhook_secret(
     let identity = authorize(&state, &headers, Verb::Update, Resource::Connector).await?;
     let kek = kek_for(&state)?;
     if req.keep_previous_for_hours > MAX_OVERLAP_HOURS {
-        return Err(AuthError::BadRequest(format!(
+        return Err(TelmoniError::BadRequest(format!(
             "the previous secret can keep working for at most {MAX_OVERLAP_HOURS} hours"
-        ))
-        .into());
+        )));
     }
 
     let mut tx = project_scope(&state.db, &identity.project_id).await?;
@@ -685,10 +680,9 @@ pub async fn rotate_webhook_secret(
         .ok_or_else(|| AuthError::NotFound(format!("connection not found: {id}")))?;
     tx.commit().await?;
     if sealed.provider != Provider::Webhook {
-        return Err(AuthError::BadRequest(
+        return Err(TelmoniError::BadRequest(
             "only a webhook has a signing secret to rotate; reconnect a channel instead".into(),
-        )
-        .into());
+        ));
     }
     let Some(replacing) = sealed.token() else {
         return Err(TelmoniError::Internal(
@@ -1051,10 +1045,9 @@ async fn claim_webhook_for_redelivery(
     // would simply show the message twice.
     if sealed.provider != Provider::Webhook {
         tx.commit().await?;
-        return Err(AuthError::BadRequest(
+        return Err(TelmoniError::BadRequest(
             "only a webhook delivery can be resent; a chat channel would show it twice".into(),
-        )
-        .into());
+        ));
     }
     if sealed.status != ConnectionStatus::Active {
         tx.commit().await?;

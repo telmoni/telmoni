@@ -66,7 +66,7 @@ impl Auth for AppState {
         let principal = crate::person::principal_of(self, header(headers, "authorization")).await?;
         let user_id = principal.user_id;
         let organization_id = header(headers, "x-organization-id")
-            .ok_or_else(|| AuthError::BadRequest("missing x-organization-id header".into()))?;
+            .ok_or_else(|| TelmoniError::BadRequest("missing x-organization-id header".into()))?;
 
         if let Some(project_id) = header(headers, "x-project-id") {
             let project_id = parse_project_id(project_id)?;

@@ -102,7 +102,7 @@ impl Acting {
     pub fn project_or_bad_request(&self) -> Result<&ActingProject, TelmoniError> {
         self.project
             .as_ref()
-            .ok_or_else(|| AuthError::BadRequest("missing x-project-id header".into()).into())
+            .ok_or_else(|| TelmoniError::BadRequest("missing x-project-id header".into()))
     }
 }
 

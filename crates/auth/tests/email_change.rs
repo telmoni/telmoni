@@ -242,7 +242,9 @@ fn confirmed(email: &str, verified: bool) -> ConfirmedEmail {
 
 /// The provider's "wrong code" refusal.
 fn wrong_provider_code() -> Result<ConfirmedEmail, TelmoniError> {
-    Err(AuthError::BadRequest("invalid or expired confirmation code".into()).into())
+    Err(TelmoniError::BadRequest(
+        "invalid or expired confirmation code".into(),
+    ))
 }
 
 async fn body_of(resp: axum::response::Response) -> String {

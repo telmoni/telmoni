@@ -450,7 +450,7 @@ async fn a_bad_name_or_url_is_refused_and_makes_nothing(pool: PgPool) {
         json!({ "name": "\u{200B}\u{202E}", "slug": "acme-labs" }),
     )
     .await;
-    assert_eq!(body["type"], "/errors/auth/bad-request", "{body}");
+    assert_eq!(body["type"], "/errors/bad-request", "{body}");
     assert_eq!(owned_by(&pool, "user_careless").await, vec![own]);
     let after: i64 = sqlx::query_scalar("SELECT count(*) FROM auth.organizations")
         .fetch_one(&pool)

@@ -18,9 +18,7 @@ use telmoni_shared::db::tenant_session::{
 use telmoni_shared::extract::Json;
 use telmoni_shared::rbac::{Resource, Verb};
 use telmoni_shared::seam::{Emitted, Notice, Route, Routed, resolve_again_in_time};
-use telmoni_shared::{
-    AuthError, NotificationKind, OrganizationId, ProjectId, TelmoniError, UserId,
-};
+use telmoni_shared::{NotificationKind, OrganizationId, ProjectId, TelmoniError, UserId};
 use uuid::Uuid;
 
 use crate::AppState;
@@ -103,7 +101,7 @@ fn project_from_header(headers: &HeaderMap) -> Result<Option<ProjectId>, Telmoni
     };
     ProjectId::try_new(raw)
         .map(Some)
-        .map_err(|e| AuthError::BadRequest(format!("invalid x-project-id: {e}")).into())
+        .map_err(|e| TelmoniError::BadRequest(format!("invalid x-project-id: {e}")))
 }
 
 /// The bounds a notice's text fields carry.
@@ -121,7 +119,9 @@ const METADATA_MAX_BYTES: u64 = 4_096;
 fn bounded<'a>(value: &'a str, field: &str, max: usize) -> Result<&'a str, TelmoniError> {
     let trimmed = value.trim();
     if trimmed.is_empty() || trimmed.chars().count() > max {
-        return Err(AuthError::BadRequest(format!("{field} is 1-{max} characters")).into());
+        return Err(TelmoniError::BadRequest(format!(
+            "{field} is 1-{max} characters"
+        )));
     }
     Ok(trimmed)
 }
@@ -144,7 +144,9 @@ impl<'a> Checked<'a> {
             notice.metadata
         };
         if !metadata.is_object() {
-            return Err(AuthError::BadRequest("metadata must be a JSON object".into()).into());
+            return Err(TelmoniError::BadRequest(
+                "metadata must be a JSON object".into(),
+            ));
         }
         if serde_json::to_string(&metadata).map_or(0, |s| s.len()) as u64 > METADATA_MAX_BYTES {
             return Err(TelmoniError::PayloadTooLarge {

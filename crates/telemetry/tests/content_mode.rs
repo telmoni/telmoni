@@ -24,7 +24,7 @@ use telmoni_shared::audit::lock_chain;
 use telmoni_shared::middleware::service_auth::SERVICE_SECRET_HEADER;
 use telmoni_shared::test_util::{apply_audit_migrations, chain_lock_held};
 use telmoni_shared::{
-    AuthError, ContentMode, OrganizationId, OrganizationRole, ProjectId, Role, UserId,
+    ContentMode, OrganizationId, OrganizationRole, ProjectId, Role, TelmoniError, UserId,
 };
 use telmoni_telemetry::router;
 
@@ -428,7 +428,7 @@ async fn a_change_auth_refuses_when_asked_again_writes_nothing(pool: PgPool) {
     let p = project(&pool).await;
     seed(&pool, &p.project, &p.organization, ContentMode::Sealed).await;
     p.auth
-        .answer_again(Err(AuthError::BadRequest("project not found".into()).into()));
+        .answer_again(Err(TelmoniError::BadRequest("project not found".into())));
 
     assert_eq!(p.set(OWNER, "off").await.0, StatusCode::BAD_REQUEST);
     assert_eq!(

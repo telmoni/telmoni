@@ -50,10 +50,9 @@ const MAX_DURATION_SECS: u32 = 10 * 365 * 24 * 60 * 60;
 /// `now + secs` as a concrete expiry, refusing anything past the cap.
 fn bounded_expiry(secs: u32) -> Result<chrono::DateTime<Utc>, TelmoniError> {
     if secs > MAX_DURATION_SECS {
-        return Err(AuthError::BadRequest(format!(
+        return Err(TelmoniError::BadRequest(format!(
             "expires_in_seconds must be at most {MAX_DURATION_SECS} (10 years); send null for no expiry"
-        ))
-        .into());
+        )));
     }
     ChronoDuration::try_seconds(i64::from(secs))
         .and_then(|d| Utc::now().checked_add_signed(d))
@@ -147,7 +146,7 @@ pub async fn create_token(
 ) -> Result<impl IntoResponse, TelmoniError> {
     let project_id = project_of(&headers)?;
     if req.created_by.is_empty() {
-        return Err(AuthError::BadRequest("created_by is required".into()).into());
+        return Err(TelmoniError::BadRequest("created_by is required".into()));
     }
     let name = crate::identity::name(&req.name, "key", MAX_KEY_NAME)?;
     let description = crate::identity::note(
@@ -156,10 +155,9 @@ pub async fn create_token(
         MAX_KEY_DESCRIPTION,
     )?;
     if matches!(req.expires_in_seconds, Some(Some(0))) {
-        return Err(AuthError::BadRequest(
+        return Err(TelmoniError::BadRequest(
             "expires_in_seconds must be positive; send null for no expiry, or omit it for the 90-day default".into(),
-        )
-        .into());
+        ));
     }
     let expires_at = match req.expires_in_seconds {
         None => default_ttl_expiry(),
@@ -172,7 +170,9 @@ pub async fn create_token(
 
     let actor = principal.user_id;
     if req.created_by != actor.as_str() {
-        return Err(AuthError::BadRequest("created_by must be the acting user".into()).into());
+        return Err(TelmoniError::BadRequest(
+            "created_by must be the acting user".into(),
+        ));
     }
     let access = acting_project(&state, &project_id, &actor).await?;
     let access = held(access, &project_id, &actor, Verb::Create).await?;
@@ -242,7 +242,9 @@ fn minted_scopes(asked: &[ApiKeyScope]) -> Result<Vec<ApiKeyScope>, TelmoniError
         .filter(|scope| asked.contains(scope))
         .collect();
     if scopes.is_empty() {
-        return Err(AuthError::BadRequest("scopes must name read, ingest or both".into()).into());
+        return Err(TelmoniError::BadRequest(
+            "scopes must name read, ingest or both".into(),
+        ));
     }
     Ok(scopes)
 }
@@ -264,10 +266,9 @@ pub async fn rotate_token(
     if let Some(n) = req.grace_seconds
         && !(0..=i64::from(MAX_DURATION_SECS)).contains(&n)
     {
-        return Err(AuthError::BadRequest(format!(
+        return Err(TelmoniError::BadRequest(format!(
             "grace_seconds must be between 0 and {MAX_DURATION_SECS} (10 years)"
-        ))
-        .into());
+        )));
     }
     let grace = req.grace_seconds.unwrap_or(DEFAULT_ROTATE_GRACE_SECS);
 

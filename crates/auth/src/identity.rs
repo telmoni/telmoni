@@ -1,6 +1,6 @@
 //! What an organization is called, and the address an owner shares with.
 
-use telmoni_shared::{AuthError, TelmoniError, slug};
+use telmoni_shared::{TelmoniError, slug};
 
 /// The display cap. A name rides a table cell and the foot of the sidebar.
 const MAX_DISPLAY_NAME_LEN: usize = 120;
@@ -29,19 +29,20 @@ pub fn validate_email(candidate: &str) -> Result<String, TelmoniError> {
     let email = candidate.trim().to_lowercase();
 
     if email.is_empty() {
-        return Err(AuthError::BadRequest("enter an email address".into()).into());
+        return Err(TelmoniError::BadRequest("enter an email address".into()));
     }
     if email.chars().count() > MAX_EMAIL_LEN {
-        return Err(AuthError::BadRequest(format!(
+        return Err(TelmoniError::BadRequest(format!(
             "an email address is at most {MAX_EMAIL_LEN} characters"
-        ))
-        .into());
+        )));
     }
     if email
         .chars()
         .any(|c| c.is_whitespace() || c.is_control() || is_invisible_formatting(c))
     {
-        return Err(AuthError::BadRequest("an email address cannot contain spaces".into()).into());
+        return Err(TelmoniError::BadRequest(
+            "an email address cannot contain spaces".into(),
+        ));
     }
 
     let mut parts = email.split('@');
@@ -57,7 +58,9 @@ pub fn validate_email(candidate: &str) -> Result<String, TelmoniError> {
         _ => false,
     };
     if !ok {
-        return Err(AuthError::BadRequest("that is not an email address".into()).into());
+        return Err(TelmoniError::BadRequest(
+            "that is not an email address".into(),
+        ));
     }
     Ok(email)
 }
@@ -88,13 +91,12 @@ pub fn sanitize_display_name(raw: Option<&str>) -> Option<String> {
 pub fn name(raw: &str, what: &str, max: usize) -> Result<String, TelmoniError> {
     let name = printable(raw);
     if name.is_empty() {
-        return Err(AuthError::BadRequest(format!("give the {what} a name")).into());
+        return Err(TelmoniError::BadRequest(format!("give the {what} a name")));
     }
     if name.chars().count() > max {
-        return Err(AuthError::BadRequest(format!(
+        return Err(TelmoniError::BadRequest(format!(
             "the {what}'s name is at most {max} characters"
-        ))
-        .into());
+        )));
     }
     Ok(name)
 }
@@ -106,9 +108,9 @@ pub fn note(raw: Option<&str>, what: &str, max: usize) -> Result<Option<String>,
         return Ok(None);
     };
     if note.chars().count() > max {
-        return Err(
-            AuthError::BadRequest(format!("the {what} is at most {max} characters")).into(),
-        );
+        return Err(TelmoniError::BadRequest(format!(
+            "the {what} is at most {max} characters"
+        )));
     }
     Ok(Some(note))
 }

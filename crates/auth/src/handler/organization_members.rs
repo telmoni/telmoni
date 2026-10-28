@@ -51,12 +51,11 @@ pub struct CreateOrganizationInviteRequest {
 fn ensure_grantable(role: OrganizationRole) -> Result<OrganizationRole, TelmoniError> {
     match role {
         OrganizationRole::Admin | OrganizationRole::Member => Ok(role),
-        OrganizationRole::Owner => Err(AuthError::BadRequest(
+        OrganizationRole::Owner => Err(TelmoniError::BadRequest(
             "an organization changes owner by a transfer the new owner accepts — a member can be \
              made an admin or a member"
                 .into(),
-        )
-        .into()),
+        )),
     }
 }
 
@@ -111,10 +110,9 @@ pub async fn update_organization_member_role(
     if organization_members::role_on_organization(&mut tx, &organization, &member_id).await?
         == Some(OrganizationRole::Owner)
     {
-        return Err(AuthError::BadRequest(
+        return Err(TelmoniError::BadRequest(
             "the owner's role changes only by handing the organization over".into(),
-        )
-        .into());
+        ));
     }
 
     if !organization_members::update_role(&mut tx, &organization, &member_id, role).await? {
@@ -167,12 +165,11 @@ pub async fn remove_organization_member(
     if organization_members::role_on_organization(&mut tx, &organization, &member_id).await?
         == Some(OrganizationRole::Owner)
     {
-        return Err(AuthError::BadRequest(if leaving {
+        return Err(TelmoniError::BadRequest(if leaving {
             "you own this organization — hand it to an admin before you leave".into()
         } else {
             "the owner cannot be removed".into()
-        })
-        .into());
+        }));
     }
 
     if !leaving

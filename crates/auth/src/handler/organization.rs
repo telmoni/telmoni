@@ -562,7 +562,9 @@ pub async fn update_organization(
     let actor = principal.user_id;
 
     if req.name.is_none() && req.slug.is_none() {
-        return Err(AuthError::BadRequest("give a name, a slug, or both".into()).into());
+        return Err(TelmoniError::BadRequest(
+            "give a name, a slug, or both".into(),
+        ));
     }
     let name = req.name.as_deref().map(organization_name).transpose()?;
     let asked_slug = req.slug.as_deref().map(asked_url).transpose()?;

@@ -49,10 +49,9 @@ pub struct GiveSeatRequest {
 pub(crate) fn grantable(role: Role) -> Result<Role, TelmoniError> {
     match role {
         Role::Admin | Role::Member => Ok(role),
-        Role::Owner => Err(AuthError::BadRequest(
+        Role::Owner => Err(TelmoniError::BadRequest(
             "a seat is admin or member — the project's owner is its organization's owner".into(),
-        )
-        .into()),
+        )),
     }
 }
 
@@ -149,10 +148,9 @@ pub async fn give_seat(
     {
         Some(OrganizationRole::Member) => {}
         Some(_) => {
-            return Err(AuthError::BadRequest(
+            return Err(TelmoniError::BadRequest(
                 "the organization's owner and admins are on every project already".into(),
-            )
-            .into());
+            ));
         }
         None => return Err(not_on_the_roster()),
     }
@@ -321,7 +319,9 @@ pub async fn update_role(
     let (mut acting, owner, _) = is_organization_owner(acting, &member_id).await?;
     if owner {
         acting.tx.rollback().await?;
-        return Err(AuthError::BadRequest("cannot modify the project owner's role".into()).into());
+        return Err(TelmoniError::BadRequest(
+            "cannot modify the project owner's role".into(),
+        ));
     }
 
     if !members::update_role(&mut acting.tx, &project_id, &member_id, role).await? {
@@ -364,7 +364,9 @@ pub async fn remove_member(
     let (mut acting, owner, leaver_name) = is_organization_owner(acting, &member_id).await?;
     if owner {
         acting.tx.rollback().await?;
-        return Err(AuthError::BadRequest("cannot remove the project owner".into()).into());
+        return Err(TelmoniError::BadRequest(
+            "cannot remove the project owner".into(),
+        ));
     }
 
     if !members::remove(&mut acting.tx, &project_id, &member_id).await? {

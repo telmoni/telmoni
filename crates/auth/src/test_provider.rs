@@ -989,10 +989,9 @@ impl AuthProvider for ScriptedProvider {
                         email,
                         email_verified: true,
                     }),
-                    None => Err(telmoni_shared::AuthError::BadRequest(
+                    None => Err(telmoni_shared::TelmoniError::BadRequest(
                         "invalid or expired confirmation code".into(),
-                    )
-                    .into()),
+                    )),
                 }
             })
     }

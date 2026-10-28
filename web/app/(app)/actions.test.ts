@@ -398,7 +398,7 @@ describe("createOrganizationAction", () => {
     mockFetch.mockResolvedValue({ ok: false, status: 400 });
     mockExtractProblem.mockResolvedValueOnce({
       message: "bad request: give the organization a name",
-      problem: { type: "/errors/auth/bad-request", title: "bad request", status: 400 },
+      problem: { type: "/errors/bad-request", title: "bad request", status: 400 },
     });
     const r = await createOrganizationAction("\u200B", "");
     expect(r).toEqual({ ok: false, error: "bad request: give the organization a name", field: "name" });

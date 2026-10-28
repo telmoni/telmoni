@@ -220,10 +220,9 @@ pub async fn start_audit_export(
     let now = Utc::now();
     let to = body.to.map_or(now, |to| to.min(now));
     if body.from.is_some_and(|from| from >= to) {
-        return Err(AuthError::BadRequest(
+        return Err(TelmoniError::BadRequest(
             "an export's range must start before it ends, and before now".into(),
-        )
-        .into());
+        ));
     }
     if audit_exports::unfinished_count(&mut tx, &organization_id, &principal.user_id).await?
         >= MAX_UNFINISHED

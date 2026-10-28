@@ -64,7 +64,7 @@ pub async fn slack_events(
     }
 
     let payload: serde_json::Value = serde_json::from_slice(&body)
-        .map_err(|e| AuthError::BadRequest(format!("unparseable slack event: {e}")))?;
+        .map_err(|e| TelmoniError::BadRequest(format!("unparseable slack event: {e}")))?;
     let kind = payload
         .get("type")
         .and_then(|t| t.as_str())

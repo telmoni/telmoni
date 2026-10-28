@@ -56,7 +56,9 @@ fn challenge(sent: &str) -> Result<&str, TelmoniError> {
     if telmoni_shared::pkce::is_challenge(sent) {
         Ok(sent)
     } else {
-        Err(AuthError::BadRequest("codeChallenge is not an S256 challenge".into()).into())
+        Err(TelmoniError::BadRequest(
+            "codeChallenge is not an S256 challenge".into(),
+        ))
     }
 }
 

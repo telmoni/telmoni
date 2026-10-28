@@ -29,9 +29,8 @@ use crate::db::organization_members::RosterRead;
 pub(crate) fn parse_project_id(
     s: &str,
 ) -> Result<telmoni_shared::ProjectId, telmoni_shared::TelmoniError> {
-    telmoni_shared::ProjectId::try_new(s).map_err(|e| {
-        telmoni_shared::AuthError::BadRequest(format!("invalid project id: {e}")).into()
-    })
+    telmoni_shared::ProjectId::try_new(s)
+        .map_err(|e| telmoni_shared::TelmoniError::BadRequest(format!("invalid project id: {e}")))
 }
 
 /// Validate an organization id at the HTTP boundary.
@@ -39,7 +38,7 @@ pub(crate) fn parse_organization_id(
     s: &str,
 ) -> Result<telmoni_shared::OrganizationId, telmoni_shared::TelmoniError> {
     telmoni_shared::OrganizationId::try_new(s).map_err(|e| {
-        telmoni_shared::AuthError::BadRequest(format!("invalid organization id: {e}")).into()
+        telmoni_shared::TelmoniError::BadRequest(format!("invalid organization id: {e}"))
     })
 }
 
@@ -50,7 +49,7 @@ pub(crate) fn parse_user_id(
     s: &str,
 ) -> Result<telmoni_shared::UserId, telmoni_shared::TelmoniError> {
     telmoni_shared::UserId::try_new(s)
-        .map_err(|e| telmoni_shared::AuthError::BadRequest(format!("invalid user id: {e}")).into())
+        .map_err(|e| telmoni_shared::TelmoniError::BadRequest(format!("invalid user id: {e}")))
 }
 
 /// The organization a request ACTS ON, from the console's `x-organization-id`
@@ -61,7 +60,7 @@ pub(crate) fn organization_of(
     headers: &axum::http::HeaderMap,
 ) -> Result<telmoni_shared::OrganizationId, telmoni_shared::TelmoniError> {
     let raw = telmoni_shared::extract::header(headers, "x-organization-id").ok_or_else(|| {
-        telmoni_shared::AuthError::BadRequest("missing x-organization-id header".to_string())
+        telmoni_shared::TelmoniError::BadRequest("missing x-organization-id header".to_string())
     })?;
     parse_organization_id(raw)
 }
@@ -246,12 +245,11 @@ pub(crate) async fn acting_person_in<'a>(
         None => {
             crate::db::locks::lock_person(&mut tx, user_id).await?;
             if crate::db::organization_members::belongs_anywhere(&mut tx, user_id).await? {
-                return Err(telmoni_shared::AuthError::BadRequest(
+                return Err(telmoni_shared::TelmoniError::BadRequest(
                     "missing x-organization-id header: name the organization this is \
                      recorded on"
                         .to_string(),
-                )
-                .into());
+                ));
             }
         }
     }
@@ -288,10 +286,10 @@ pub(crate) fn project_of(
     headers: &axum::http::HeaderMap,
 ) -> Result<telmoni_shared::types::ProjectId, telmoni_shared::TelmoniError> {
     let raw = telmoni_shared::extract::header(headers, "x-project-id").ok_or_else(|| {
-        telmoni_shared::AuthError::BadRequest("missing x-project-id header".to_string())
+        telmoni_shared::TelmoniError::BadRequest("missing x-project-id header".to_string())
     })?;
     telmoni_shared::types::ProjectId::try_new(raw).map_err(|e| {
-        telmoni_shared::error::AuthError::BadRequest(format!("invalid x-project-id: {e}")).into()
+        telmoni_shared::error::TelmoniError::BadRequest(format!("invalid x-project-id: {e}"))
     })
 }
 
@@ -386,7 +384,9 @@ pub(crate) async fn acting_project<'a>(
 
     let Some(context) = context else {
         tx.rollback().await?;
-        return Err(telmoni_shared::AuthError::BadRequest("project not found".into()).into());
+        return Err(telmoni_shared::TelmoniError::BadRequest(
+            "project not found".into(),
+        ));
     };
 
     let Some(role) = telmoni_shared::rbac::project_role(context.organization_role, context.seat)

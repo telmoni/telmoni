@@ -353,10 +353,9 @@ pub async fn start(
     Json(req): Json<StartRequest>,
 ) -> Result<impl IntoResponse, TelmoniError> {
     if !telmoni_shared::pkce::is_challenge(&req.code_challenge) || !is_nonce(&req.nonce) {
-        return Err(AuthError::BadRequest(
+        return Err(TelmoniError::BadRequest(
             "codeChallenge is an S256 challenge, and nonce 16 to 128 URL-safe characters".into(),
-        )
-        .into());
+        ));
     }
     let external = req.provider == Some(SignInProvider::External);
     let url = match (&state.password, &state.external) {
@@ -419,7 +418,7 @@ pub async fn device_poll(
     Json(req): Json<DevicePollRequest>,
 ) -> Result<axum::response::Response, TelmoniError> {
     if req.device_code.trim().is_empty() {
-        return Err(AuthError::BadRequest("deviceCode is required".into()).into());
+        return Err(TelmoniError::BadRequest("deviceCode is required".into()));
     }
     match state.issuer.device_token_grant(&req.device_code).await? {
         DevicePoll::Granted(tokens) => Ok(Json(AuthnResult::from(*tokens)).into_response()),
@@ -441,10 +440,9 @@ pub async fn device_poll(
             "the sign-in was denied from the console".into(),
         )
         .into()),
-        DevicePoll::Expired => Err(AuthError::BadRequest(
+        DevicePoll::Expired => Err(TelmoniError::BadRequest(
             "the device code expired before it was approved; start again".into(),
-        )
-        .into()),
+        )),
     }
 }
 
@@ -482,10 +480,9 @@ pub async fn exchange(
     Json(req): Json<ExchangeRequest>,
 ) -> Result<impl IntoResponse, TelmoniError> {
     if !telmoni_shared::pkce::is_verifier(&req.code_verifier) || !is_nonce(&req.nonce) {
-        return Err(AuthError::BadRequest(
+        return Err(TelmoniError::BadRequest(
             "codeVerifier is an RFC 7636 verifier, and nonce 16 to 128 URL-safe characters".into(),
-        )
-        .into());
+        ));
     }
     // A retry is answered from the cache only with the verifier the first
     // presentation spent the code with: a stolen code is no key to it.
@@ -558,9 +555,9 @@ async fn exchange_once(
                 };
             }
             if rx.changed().await.is_err() {
-                return Err(
-                    AuthError::BadRequest("concurrent code exchange canceled".into()).into(),
-                );
+                return Err(TelmoniError::BadRequest(
+                    "concurrent code exchange canceled".into(),
+                ));
             }
         },
         crate::CacheDecision::Leader(tx) => match grant.await {

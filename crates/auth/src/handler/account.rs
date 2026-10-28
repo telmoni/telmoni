@@ -112,12 +112,11 @@ impl std::fmt::Debug for DeletionRequest {
 
 /// The refusal every code lane gives a wrong or spent code.
 pub(crate) fn wrong_code(burned: bool) -> TelmoniError {
-    AuthError::BadRequest(if burned {
+    TelmoniError::BadRequest(if burned {
         "too many incorrect attempts — that code is no longer valid, ask for a new one".to_owned()
     } else {
         "invalid or expired confirmation code".to_owned()
     })
-    .into()
 }
 
 /// The caller's identity, or a 401 when auth never recorded one.
@@ -184,9 +183,9 @@ pub async fn request_email_change(
         return Err(AuthzError::Forbidden("account deletion in progress".into()).into());
     }
     if new_email == person.email {
-        return Err(
-            AuthError::BadRequest("that is already the address on this account".into()).into(),
-        );
+        return Err(TelmoniError::BadRequest(
+            "that is already the address on this account".into(),
+        ));
     }
 
     let since = Utc::now() - Duration::days(1);

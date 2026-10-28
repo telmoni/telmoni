@@ -371,7 +371,7 @@ pub async fn put_level(
     crate::extract::Json(req): crate::extract::Json<SetLevelRequest>,
 ) -> Result<axum::Json<serde_json::Value>, crate::TelmoniError> {
     let ttl = set_filter(&req.filter, req.ttl_secs)
-        .map_err(|e| crate::AuthError::BadRequest(format!("not a log filter: {e}")))?;
+        .map_err(|e| crate::TelmoniError::BadRequest(format!("not a log filter: {e}")))?;
     Ok(axum::Json(serde_json::json!({
         "current": current(),
         "boot": boot(),

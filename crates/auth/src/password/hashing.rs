@@ -6,7 +6,7 @@ use std::sync::OnceLock;
 
 use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
 
-use telmoni_shared::{AuthError, OrInternal, TelmoniError};
+use telmoni_shared::{OrInternal, TelmoniError};
 
 /// The floor NIST SP 800-63B sets, and no composition rule: length is what
 /// resists guessing, and a rule about digits mostly decides which digit.
@@ -19,15 +19,14 @@ pub const MAX_PASSWORD_BYTES: usize = 256;
 /// The shape check every new password passes.
 pub fn validate(password: &str) -> Result<(), TelmoniError> {
     if password.chars().count() < MIN_PASSWORD_CHARS {
-        return Err(
-            AuthError::BadRequest(format!("use at least {MIN_PASSWORD_CHARS} characters")).into(),
-        );
+        return Err(TelmoniError::BadRequest(format!(
+            "use at least {MIN_PASSWORD_CHARS} characters"
+        )));
     }
     if password.len() > MAX_PASSWORD_BYTES {
-        return Err(AuthError::BadRequest(format!(
+        return Err(TelmoniError::BadRequest(format!(
             "a password is at most {MAX_PASSWORD_BYTES} characters"
-        ))
-        .into());
+        )));
     }
     Ok(())
 }

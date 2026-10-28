@@ -109,7 +109,7 @@ fn sweep_lanes(state: Arc<AppState>) -> Router {
 
 fn organization_id_of(raw: &str) -> Result<OrganizationId, TelmoniError> {
     OrganizationId::try_new(raw)
-        .map_err(|e| AuthError::BadRequest(format!("invalid organization id: {e}")).into())
+        .map_err(|e| TelmoniError::BadRequest(format!("invalid organization id: {e}")))
 }
 
 async fn due_organizations_lane(
@@ -201,7 +201,7 @@ async fn erase_lane(
     Path(user_id): Path<String>,
 ) -> Result<StatusCode, TelmoniError> {
     let user_id = UserId::try_new(&user_id)
-        .map_err(|e| AuthError::BadRequest(format!("invalid user id: {e}")))?;
+        .map_err(|e| TelmoniError::BadRequest(format!("invalid user id: {e}")))?;
     deletion::erase_person(&state, &user_id).await?;
     Ok(StatusCode::NO_CONTENT)
 }

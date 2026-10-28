@@ -228,7 +228,9 @@ pub async fn offer(
     let user_id = principal.user_id;
     let target = req.member_id;
     if target == user_id {
-        return Err(AuthError::BadRequest("you already own this organization".into()).into());
+        return Err(TelmoniError::BadRequest(
+            "you already own this organization".into(),
+        ));
     }
 
     // The deployment's say on the admin coming to own it, before any lock,
@@ -467,7 +469,9 @@ pub async fn accept(
     )
     .await?;
     if role == OrganizationRole::Owner {
-        return Err(AuthError::BadRequest("you already own this organization".into()).into());
+        return Err(TelmoniError::BadRequest(
+            "you already own this organization".into(),
+        ));
     }
     // ⚠ The acceptor's own scope as well as the organization's: whether they
     // are deleting their account is in `auth.accounts`, which no

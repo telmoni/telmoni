@@ -170,7 +170,7 @@ impl Auth for AuthStub {
             .and_then(|bearer| bearer.strip_prefix("Bearer tok_"))
             .ok_or(AuthError::Unauthenticated)?;
         let organization = header(headers, "x-organization-id")
-            .ok_or_else(|| AuthError::BadRequest("missing x-organization-id header".into()))?;
+            .ok_or_else(|| TelmoniError::BadRequest("missing x-organization-id header".into()))?;
         let project = header(headers, "x-project-id");
 
         let seat = self
@@ -194,17 +194,18 @@ impl Auth for AuthStub {
                     .into());
                 };
                 Some(ActingProject {
-                    project_id: ProjectId::try_new(project)
-                        .map_err(|e| AuthError::BadRequest(format!("invalid x-project-id: {e}")))?,
+                    project_id: ProjectId::try_new(project).map_err(|e| {
+                        TelmoniError::BadRequest(format!("invalid x-project-id: {e}"))
+                    })?,
                     role,
                 })
             }
         };
         Ok(Acting {
             user_id: UserId::try_new(user)
-                .map_err(|e| AuthError::BadRequest(format!("invalid user id: {e}")))?,
+                .map_err(|e| TelmoniError::BadRequest(format!("invalid user id: {e}")))?,
             organization_id: OrganizationId::try_new(organization)
-                .map_err(|e| AuthError::BadRequest(format!("invalid x-organization-id: {e}")))?,
+                .map_err(|e| TelmoniError::BadRequest(format!("invalid x-organization-id: {e}")))?,
             organization_role: Some(organization_role),
             project,
             session_id: None,
@@ -376,22 +377,22 @@ async fn emit_lane(
     Json(body): Json<EmitBody>,
 ) -> Result<axum::response::Response, TelmoniError> {
     let organization_id = header(&headers, "x-organization-id")
-        .ok_or_else(|| AuthError::BadRequest("missing x-organization-id header".into()))
+        .ok_or_else(|| TelmoniError::BadRequest("missing x-organization-id header".into()))
         .and_then(|raw| {
             OrganizationId::try_new(raw)
-                .map_err(|e| AuthError::BadRequest(format!("invalid x-organization-id: {e}")))
+                .map_err(|e| TelmoniError::BadRequest(format!("invalid x-organization-id: {e}")))
         })?;
     let project_id = match header(&headers, "x-project-id") {
         Some(raw) => Some(
             ProjectId::try_new(raw)
-                .map_err(|e| AuthError::BadRequest(format!("invalid x-project-id: {e}")))?,
+                .map_err(|e| TelmoniError::BadRequest(format!("invalid x-project-id: {e}")))?,
         ),
         None => None,
     };
     let subject_user_id = match body.subject_user_id.as_deref() {
         Some(raw) => Some(
             UserId::try_new(raw)
-                .map_err(|e| AuthError::BadRequest(format!("invalid subject_user_id: {e}")))?,
+                .map_err(|e| TelmoniError::BadRequest(format!("invalid subject_user_id: {e}")))?,
         ),
         None => None,
     };
@@ -428,7 +429,7 @@ async fn purge_organization_lane(
     Path(organization_id): Path<String>,
 ) -> Result<axum::Json<serde_json::Value>, TelmoniError> {
     let organization_id = OrganizationId::try_new(organization_id)
-        .map_err(|e| AuthError::BadRequest(format!("invalid organization id: {e}")))?;
+        .map_err(|e| TelmoniError::BadRequest(format!("invalid organization id: {e}")))?;
     let purged = handler::purge_organization(&state, &organization_id).await?;
     Ok(axum::Json(json!({ "purged": purged })))
 }
@@ -438,7 +439,7 @@ async fn purge_project_lane(
     Path(project_id): Path<String>,
 ) -> Result<axum::Json<serde_json::Value>, TelmoniError> {
     let project_id = ProjectId::try_new(project_id.as_str())
-        .map_err(|e| AuthError::BadRequest(format!("invalid project id: {e}")))?;
+        .map_err(|e| TelmoniError::BadRequest(format!("invalid project id: {e}")))?;
     let purged = handler::purge_project(&state, &project_id).await?;
     Ok(axum::Json(json!({ "purged": purged })))
 }
@@ -448,7 +449,7 @@ async fn redact_person_lane(
     Path(user_id): Path<String>,
 ) -> Result<axum::Json<serde_json::Value>, TelmoniError> {
     let user_id = UserId::try_new(user_id)
-        .map_err(|e| AuthError::BadRequest(format!("invalid user id: {e}")))?;
+        .map_err(|e| TelmoniError::BadRequest(format!("invalid user id: {e}")))?;
     let redacted = handler::redact_person(&state, &user_id).await?;
     Ok(axum::Json(json!({ "redacted": redacted })))
 }

@@ -173,7 +173,9 @@ pub async fn offer(
     let user_id = principal.user_id;
     let target = req.member_id;
     if target == user_id {
-        return Err(AuthError::BadRequest("you already own this project".into()).into());
+        return Err(TelmoniError::BadRequest(
+            "you already own this project".into(),
+        ));
     }
 
     let mut acting = locked(&state, &project_id, &user_id).await?;
@@ -667,16 +669,15 @@ fn resolve_destination_organization(
             .into());
         }
         (None, _) => {
-            return Err(AuthError::BadRequest(
+            return Err(TelmoniError::BadRequest(
                 "you own several organizations — name the one to take the project into".into(),
-            )
-            .into());
+            ));
         }
     };
     if destination == *source {
-        return Err(
-            AuthError::BadRequest("the project is already in that organization".into()).into(),
-        );
+        return Err(TelmoniError::BadRequest(
+            "the project is already in that organization".into(),
+        ));
     }
     Ok(destination)
 }
@@ -809,7 +810,9 @@ pub async fn accept(
     if organization_members::role_on_organization(&mut tx, &source, &user_id).await?
         == Some(OrganizationRole::Owner)
     {
-        return Err(AuthError::BadRequest("you already own this project".into()).into());
+        return Err(TelmoniError::BadRequest(
+            "you already own this project".into(),
+        ));
     }
     if members::role_on(&mut tx, &project_id, &user_id)
         .await?
@@ -988,9 +991,9 @@ pub async fn move_project(
         .into());
     }
     if destination == source {
-        return Err(
-            AuthError::BadRequest("the project is already in that organization".into()).into(),
-        );
+        return Err(TelmoniError::BadRequest(
+            "the project is already in that organization".into(),
+        ));
     }
 
     locks::lock_person(&mut tx, &user_id).await?;

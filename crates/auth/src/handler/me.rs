@@ -122,7 +122,7 @@ pub async fn test_session(
     Json(req): Json<TestSessionRequest>,
 ) -> Result<impl IntoResponse, TelmoniError> {
     let user_id = UserId::try_new(req.user_id.as_str())
-        .map_err(|_| AuthError::BadRequest("userId is not a usable user id".into()))?;
+        .map_err(|_| TelmoniError::BadRequest("userId is not a usable user id".into()))?;
     let email = crate::identity::validate_email(&req.email)?;
     let mut tx = person_scope(&state.db, &user_id).await?;
     let created = identities::identity(&mut tx, &user_id).await?.is_none();

@@ -214,10 +214,9 @@ pub async fn create_invite(
 
     let inviter = identities::contact(&mut acting.tx, &actor).await?;
     if inviter.as_ref().is_some_and(|c| c.email == email) {
-        return Err(AuthError::BadRequest(
+        return Err(TelmoniError::BadRequest(
             "that is your own address — you are already in this project".into(),
-        )
-        .into());
+        ));
     }
     if invites::already_a_member_by_email(&mut acting.tx, &project_id, &email).await? {
         return Err(AuthError::Conflict("that address is already a member".into()).into());
@@ -507,10 +506,9 @@ async fn seat_project_member(
     refuse_unless_still_in(&mut tx, organization, invite.project_id).await?;
     match organization_members::role_on_organization(&mut tx, organization, actor).await? {
         Some(OrganizationRole::Owner) => {
-            return Err(AuthError::BadRequest(
+            return Err(TelmoniError::BadRequest(
                 "you own this project — there is nothing to accept".into(),
-            )
-            .into());
+            ));
         }
         // Already on the roster: a second project is no further seat.
         Some(_) => {}

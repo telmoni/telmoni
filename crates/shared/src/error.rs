@@ -49,7 +49,8 @@ pub enum TelmoniError {
     #[error("upstream problem: {}", .0.status)]
     Upstream(Box<ProblemDetails>),
 
-    /// Malformed request body or parameters.
+    /// A request the lane cannot take: a body or query of the wrong shape,
+    /// or a value that fails its rule. Every crate's 400 for a value.
     #[error("bad request: {0}")]
     BadRequest(String),
 
@@ -182,22 +183,6 @@ impl TelmoniError {
             context: context.into(),
             source: Box::new(source),
         }
-    }
-
-    /// Classify a non-2xx answer from another service reached over HTTP.
-    #[must_use]
-    pub fn upstream(service: &str, op: &str, status: u16) -> Self {
-        if status == 401 || status == 403 {
-            tracing::error!(
-                service,
-                op,
-                status,
-                "our service credential was rejected by a sibling — check SERVICE_SECRET rotation"
-            );
-            return AuthError::ServiceCredentialRejected.into();
-        }
-        tracing::error!(service, op, status, "sibling service call failed");
-        Self::Internal(format!("{service} {op} returned {status}"))
     }
 
     /// Whether the database did not answer at all, rather than refusing a
@@ -336,10 +321,6 @@ pub enum AuthError {
     #[error("not found: {0}")]
     NotFound(String),
 
-    /// Auth-scoped client-side validation failure. Maps to 400.
-    #[error("bad request: {0}")]
-    BadRequest(String),
-
     /// A URL asked for an organization that none may go by: not a slug's
     /// shape, a word the console's own paths use, or a blocked word. A type
     /// of its own, so a form asking for a name and a URL at once can say which
@@ -384,7 +365,6 @@ impl AuthError {
                 "identity temporarily unavailable",
             ),
             Self::NotFound(_) => ("not-found", 404, "not found"),
-            Self::BadRequest(_) => ("bad-request", 400, "bad request"),
             Self::BadUrl(_) => ("bad-url", 400, "bad url"),
             Self::Conflict(_) => ("conflict", 409, "conflict"),
             Self::SsoRequired(_) => ("sso-required", 403, "single sign-on required"),
@@ -392,7 +372,6 @@ impl AuthError {
         };
         let detail = match self {
             Self::NotFound(m)
-            | Self::BadRequest(m)
             | Self::BadUrl(m)
             | Self::Conflict(m)
             | Self::SsoRequired(m)
@@ -644,12 +623,6 @@ mod tests {
                 "not found",
             ),
             (
-                AuthError::BadRequest("bad slug".into()),
-                "/errors/auth/bad-request",
-                400,
-                "bad request",
-            ),
-            (
                 AuthError::BadUrl("not a slug".into()),
                 "/errors/auth/bad-url",
                 400,
@@ -672,8 +645,8 @@ mod tests {
 
     #[test]
     fn auth_message_variants_carry_detail_credential_variants_do_not() {
-        let pd = AuthError::BadRequest("slug too long".into()).to_problem_details();
-        assert_eq!(pd.detail.as_deref(), Some("slug too long"));
+        let pd = AuthError::NotFound("no such invitation".into()).to_problem_details();
+        assert_eq!(pd.detail.as_deref(), Some("no such invitation"));
         assert!(
             AuthError::InvalidToken
                 .to_problem_details()
@@ -827,27 +800,6 @@ mod tests {
                 .and_then(serde_json::Value::as_u64),
             Some(3_600)
         );
-    }
-
-    /// A sibling rejecting OUR service secret must be distinguishable from a
-    /// sibling that is merely broken, or a half-finished rotation surfaces
-    /// fleet-wide as anonymous 500s that read like an outage.
-    #[test]
-    fn a_sibling_rejecting_our_secret_is_told_apart_from_a_sibling_being_broken() {
-        for status in [401u16, 403] {
-            let pd = TelmoniError::upstream("notifications", "purge", status).to_problem_details();
-            assert_eq!(
-                pd.type_uri, "/errors/auth/service-credential-rejected",
-                "{status} must name the credential, not a generic failure"
-            );
-        }
-        for status in [500u16, 502, 404, 429] {
-            let pd = TelmoniError::upstream("notifications", "purge", status).to_problem_details();
-            assert_ne!(
-                pd.type_uri, "/errors/auth/service-credential-rejected",
-                "{status} is not a credential failure"
-            );
-        }
     }
 
     /// The model's own error text is the log's, never the customer's: a

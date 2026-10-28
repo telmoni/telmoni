@@ -37,7 +37,6 @@ your code can branch on.
 | `/errors/auth/service-credential-rejected` | 401 | One of Telmoni's services refused another's credential. This is Telmoni's fault, not yours. Only the console's own calls to the server meet it: the API, the CLI's lanes and ingest take no service credential. | |
 | `/errors/auth/identity-unavailable` | 503 | Telmoni could not check who you are right now, because the identity provider's keys or its own identity service could not be reached. Try again shortly. | |
 | `/errors/auth/not-found` | 404 | The thing you named does not exist, or is not yours to see. `detail` says what kind of thing. | |
-| `/errors/auth/bad-request` | 400 | A value was not acceptable, such as a malformed email address. `detail` says which. | |
 | `/errors/auth/bad-url` | 400 | The URL asked for an organization is not one it may go by: not lowercase letters and digits in words joined by single hyphens, longer than 48 characters, a word the console's own pages use, or a word no URL may hold. `detail` says which, without repeating a word no URL may hold. A URL another organization holds is a `409` instead. | |
 | `/errors/auth/conflict` | 409 | It already exists, conflicts with something that does, or something is not in the state the request needs, such as deleting your account while you own an organization other people are in. `detail` says what. | |
 | `/errors/auth/sso-required` | 403 | Your address's domain signs in through the deployment's identity provider alone, so the email-and-password form refuses it: sign-in, sign-up and a password reset. The sign-in page offers the provider's button instead ([Configuration](/docs/self-host/configuration)). | |
@@ -45,7 +44,7 @@ your code can branch on.
 | `/errors/authz/forbidden` | 403 | You are signed in and this is not allowed: your role in the organization, an API key's scope, or something no role may do. `detail` says why. | |
 | `/errors/authz/insufficient-role` | 403 | Your role on the project does not allow this, on whichever lane asked. `detail` names the least role that would, such as `required admin, have member`. | |
 | `/errors/tenant/cross-tenant-denied` | 403 | Reserved for a request that reaches outside the organization or project it may act in; no lane returns it. | |
-| `/errors/bad-request` | 400 | The request body or query string is not the shape the lane takes, or a value failed its rule. `detail` names the shape or the parameter, never the value sent. | |
+| `/errors/bad-request` | 400 | The request body or query string is not the shape the lane takes, or a value in it failed its rule, such as a malformed email address. `detail` names the shape, the parameter or the rule. | |
 | `/errors/payload-too-large` | 413 | The request body is larger than this route accepts, such as a body over 8 KiB sent to the CLI's lanes. | |
 | `/errors/not-found` | 404 | No lane answers at this path on the machine host, under `/v1`, `/cli` or `/otlp`. Not a resource a lane looked for: that is `/errors/auth/not-found`. Under `/otlp` the body is OTLP's `Status` rather than a problem document, its message opening with the type. | |
 | `/errors/method-not-allowed` | 405 | The lane does not take this method. The `Allow` header lists the ones it does. On `/otlp/v1/traces` the body is OTLP's `Status`. | |

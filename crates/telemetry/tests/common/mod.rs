@@ -266,7 +266,7 @@ impl AuthStub {
     /// both of the person's.
     fn on_project(&self, user: &str, project: &str) -> Result<Acting, TelmoniError> {
         let user_id = UserId::try_new(user)
-            .map_err(|e| AuthError::BadRequest(format!("invalid user id: {e}")))?;
+            .map_err(|e| TelmoniError::BadRequest(format!("invalid user id: {e}")))?;
         let seat = self
             .seats
             .lock()
@@ -287,7 +287,7 @@ impl AuthStub {
             organization_role: Some(organization_role),
             project: Some(ActingProject {
                 project_id: ProjectId::try_new(project)
-                    .map_err(|e| AuthError::BadRequest(format!("invalid x-project-id: {e}")))?,
+                    .map_err(|e| TelmoniError::BadRequest(format!("invalid x-project-id: {e}")))?,
                 role,
             }),
             session_id: None,
@@ -315,13 +315,13 @@ impl Auth for AuthStub {
             .and_then(|bearer| bearer.strip_prefix("Bearer tok_"))
             .ok_or(AuthError::Unauthenticated)?;
         let organization = header(headers, "x-organization-id")
-            .ok_or_else(|| AuthError::BadRequest("missing x-organization-id header".into()))?;
+            .ok_or_else(|| TelmoniError::BadRequest("missing x-organization-id header".into()))?;
         if let Some(project) = header(headers, "x-project-id") {
             return self.on_project(user, project);
         }
 
         let user_id = UserId::try_new(user)
-            .map_err(|e| AuthError::BadRequest(format!("invalid user id: {e}")))?;
+            .map_err(|e| TelmoniError::BadRequest(format!("invalid user id: {e}")))?;
         let seats = self
             .seats
             .lock()

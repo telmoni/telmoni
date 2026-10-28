@@ -1,4 +1,4 @@
-//! `IntoResponse` impl for [`TelmoniError`] + an `AnyhowError` newtype, and
+//! `IntoResponse` impl for [`TelmoniError`], and
 //! the two problem documents a door answers about its own lanes: a path none
 //! of them serves, and a method none takes.
 
@@ -95,28 +95,6 @@ impl IntoResponse for TelmoniError {
     }
 }
 
-/// Newtype around `anyhow::Error` with an `IntoResponse` impl.
-pub struct AnyhowError(pub anyhow::Error);
-
-impl<E: Into<anyhow::Error>> From<E> for AnyhowError {
-    fn from(err: E) -> Self {
-        Self(err.into())
-    }
-}
-
-impl IntoResponse for AnyhowError {
-    fn into_response(self) -> Response {
-        match self.0.downcast::<TelmoniError>() {
-            Ok(typed) => typed.into_response(),
-            Err(other) => TelmoniError::InternalSource {
-                context: "unhandled error".into(),
-                source: other.into(),
-            }
-            .into_response(),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use axum::body::to_bytes;
@@ -208,26 +186,6 @@ mod tests {
     async fn non_rate_limit_errors_carry_no_retry_after() {
         let resp = TelmoniError::from(AuthError::Unauthenticated).into_response();
         assert!(resp.headers().get(header::RETRY_AFTER).is_none());
-    }
-
-    #[tokio::test]
-    async fn anyhow_error_downcasts_to_the_typed_response() {
-        let err = anyhow::Error::new(TelmoniError::from(AuthError::Unauthenticated));
-        let resp = AnyhowError(err).into_response();
-        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
-
-        let pd = body_problem(resp).await;
-        assert_eq!(pd.type_uri, "/errors/auth/unauthenticated");
-    }
-
-    #[tokio::test]
-    async fn anyhow_error_without_telmoni_error_is_a_redacted_500() {
-        let resp = AnyhowError(anyhow::anyhow!("boom: secret detail")).into_response();
-        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
-
-        let pd = body_problem(resp).await;
-        assert_eq!(pd.type_uri, "/errors/internal/unknown");
-        assert!(pd.detail.is_none());
     }
 
     #[tokio::test]
