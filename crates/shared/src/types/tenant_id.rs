@@ -67,10 +67,48 @@ macro_rules! tenant_id_newtype {
         impl std::error::Error for $error {}
 
         $(#[$id_doc])*
-        #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, sqlx::Type)]
+        #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
         #[serde(try_from = "String")]
-        #[sqlx(transparent)]
         pub struct $name(String);
+
+        impl sqlx::Type<sqlx::Postgres> for $name {
+            fn type_info() -> sqlx::postgres::PgTypeInfo {
+                <String as sqlx::Type<sqlx::Postgres>>::type_info()
+            }
+
+            fn compatible(ty: &sqlx::postgres::PgTypeInfo) -> bool {
+                <String as sqlx::Type<sqlx::Postgres>>::compatible(ty)
+            }
+        }
+
+        impl sqlx::postgres::PgHasArrayType for $name {
+            fn array_type_info() -> sqlx::postgres::PgTypeInfo {
+                <String as sqlx::postgres::PgHasArrayType>::array_type_info()
+            }
+        }
+
+        /// A row's id is held to [`Self::try_new`], as an input's is: one that
+        /// would not pass fails its read, rather than living on unchecked.
+        impl<'r> sqlx::Decode<'r, sqlx::Postgres> for $name {
+            fn decode(
+                value: sqlx::postgres::PgValueRef<'r>,
+            ) -> Result<Self, sqlx::error::BoxDynError> {
+                Ok(Self::try_new(<String as sqlx::Decode<'r, sqlx::Postgres>>::decode(value)?)?)
+            }
+        }
+
+        impl sqlx::Encode<'_, sqlx::Postgres> for $name {
+            fn encode_by_ref(
+                &self,
+                buf: &mut sqlx::postgres::PgArgumentBuffer,
+            ) -> Result<sqlx::encode::IsNull, sqlx::error::BoxDynError> {
+                <String as sqlx::Encode<'_, sqlx::Postgres>>::encode_by_ref(&self.0, buf)
+            }
+
+            fn size_hint(&self) -> usize {
+                <String as sqlx::Encode<'_, sqlx::Postgres>>::size_hint(&self.0)
+            }
+        }
 
         impl TryFrom<String> for $name {
             type Error = $error;
@@ -100,8 +138,8 @@ macro_rules! tenant_id_newtype {
                 Ok(Self(s))
             }
 
-            /// Unvalidated constructor for trusted sources only: DB decodes,
-            /// tests, constants. Debug builds assert the same invariants.
+            /// Unvalidated constructor for trusted sources only: tests and
+            /// constants. Debug builds assert the same invariants.
             #[must_use]
             pub fn from_trusted(s: impl Into<String>) -> Self {
                 let s = s.into();
