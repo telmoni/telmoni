@@ -453,7 +453,7 @@ impl App {
         // answer only leaves the agent failing until it does, since sign-in
         // and every other module share this process and need none of it.
         if let Some(agent) = &self.agent {
-            if let Some(embedder) = agent.embedder.as_deref() {
+            if let Ok(embedder) = agent.embedder() {
                 telmoni_agent::boot::probe_width(embedder).await?;
             }
             agent.spawn();
@@ -557,7 +557,11 @@ where
             match sweep {
                 Sweep::Auth(sweep) => sweeps::once(&app.auth, sweep).await?,
                 Sweep::AgentReindex => {
-                    let Some(agent) = app.agent.as_ref().filter(|a| a.config.enabled()) else {
+                    let Some((agent, live)) = app
+                        .agent
+                        .as_ref()
+                        .and_then(|agent| Some((agent, agent.live.as_ref()?)))
+                    else {
                         anyhow::bail!(
                             "agent-reindex needs the agent on: AGENT_DATABASE_URL and \
                              AGENT_MODEL_PROVIDER set"
@@ -565,9 +569,8 @@ where
                     };
                     // Strict here: a reindex against an endpoint whose width
                     // it cannot learn would only fail row by row.
-                    if let Some(embedder) = agent.embedder.as_deref()
-                        && telmoni_agent::boot::probe_width(embedder).await?
-                            == telmoni_agent::boot::Probe::Unanswered
+                    if telmoni_agent::boot::probe_width(live.embedder.as_ref()).await?
+                        == telmoni_agent::boot::Probe::Unanswered
                     {
                         anyhow::bail!("the embeddings endpoint did not answer; nothing reindexed");
                     }

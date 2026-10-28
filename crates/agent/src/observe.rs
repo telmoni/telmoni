@@ -156,7 +156,7 @@ impl Recorder {
     pub(crate) const fn model<'a>(
         &'a self,
         inner: &'a dyn Model,
-        config: Option<&'a ModelConfig>,
+        config: &'a ModelConfig,
     ) -> RecordingModel<'a> {
         RecordingModel {
             inner,
@@ -246,7 +246,8 @@ impl Drop for Recorder {
 pub(crate) struct RecordingModel<'a> {
     inner: &'a dyn Model,
     recorder: &'a Recorder,
-    config: Option<&'a ModelConfig>,
+    /// What `inner` was built from, which names the call's provider and model.
+    config: &'a ModelConfig,
 }
 
 #[async_trait]
@@ -286,8 +287,8 @@ impl<'a> PendingGeneration<'a> {
             generation: recorder.telmoni.is_some().then(|| Generation {
                 started_at: Utc::now(),
                 ended_at: Utc::now(),
-                provider: config.map_or("unknown", ModelConfig::provider_name),
-                model: config.map(|c| c.model.clone()).unwrap_or_default(),
+                provider: config.provider_name(),
+                model: config.model.clone(),
                 usage: None,
                 error: None,
             }),
@@ -462,14 +463,27 @@ mod tests {
         }
     }
 
+    /// A model as the tests configure one.
+    fn configured(url: &str, model: &str) -> ModelConfig {
+        ModelConfig {
+            provider: Provider::OpenAi,
+            url: url.into(),
+            model: model.into(),
+            api_key: None,
+            max_tokens: 8192,
+            timeout_secs: 60,
+        }
+    }
+
     /// One question through the recorder on `telmoni`, `then` given the
     /// recorder once it has answered and before it drops and reports.
     async fn ask(telmoni: Telmoni, tool: &'static str, then: impl FnOnce(&Recorder)) {
         let recorder = Recorder::start(Some(telmoni), &acting(), Uuid::new_v4());
         let model = CallsThenAnswers(tool, AtomicUsize::new(0));
+        let config = configured("http://model.invalid/v1", "answers");
         let mut runner = Roster;
         let outcome = {
-            let watched = recorder.model(&model, None);
+            let watched = recorder.model(&model, &config);
             let mut tools = recorder.runner(&mut runner);
             turn::converse(
                 &watched,
@@ -563,17 +577,13 @@ mod tests {
     async fn a_call_is_sent_under_the_vendor_its_url_is() {
         let capture = Capture::default();
         let recorder = Recorder::start(Some(client(&capture)), &acting(), Uuid::new_v4());
-        let config = ModelConfig {
-            provider: Provider::OpenAi,
-            url: "https://generativelanguage.googleapis.com/v1beta/openai".into(),
-            model: "gemini-3.1-flash-lite".into(),
-            api_key: None,
-            max_tokens: 8192,
-            timeout_secs: 60,
-        };
+        let config = configured(
+            "https://generativelanguage.googleapis.com/v1beta/openai",
+            "gemini-3.1-flash-lite",
+        );
         let model = CallsThenAnswers("list_members", AtomicUsize::new(0));
         recorder
-            .model(&model, Some(&config))
+            .model(&model, &config)
             .stream("system", &[], &[], &|_| {})
             .await
             .unwrap();

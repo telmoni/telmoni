@@ -20,12 +20,15 @@ use axum::http::HeaderMap;
 use sqlx::PgPool;
 
 use chrono::{DateTime, Utc};
-use telmoni_agent::config::{Config, EMBEDDING_DIMENSIONS, EmbeddingsConfig};
+use telmoni_agent::config::{
+    Config, EMBEDDING_DIMENSIONS, EmbeddingsConfig, ModelConfig, Provider,
+};
 use telmoni_agent::db::{self, AgentLane, Source, Visibility};
 use telmoni_agent::embed::Embedder;
 use telmoni_agent::index::{self, Entry, Passage};
+use telmoni_agent::model::{Message, Model, ModelTurn, TextSink, ToolSpec};
 use telmoni_agent::seam::AgentSeam;
-use telmoni_agent::{AppState, retention, retrieve};
+use telmoni_agent::{AppState, Live, retention, retrieve};
 use telmoni_shared::acting::{Acting, ActingProject};
 use telmoni_shared::db::tenant_session::{maintenance_scope, person_scope};
 use telmoni_shared::middleware::service_auth::ServiceSecrets;
@@ -104,12 +107,36 @@ fn state(pool: &PgPool, embedder: Arc<SameVector>) -> AppState {
     state_with(pool, embedder, Arc::new(Absent))
 }
 
+/// A model nothing here asks: these tests index and retrieve.
+struct Unasked;
+
+#[async_trait]
+impl Model for Unasked {
+    async fn stream(
+        &self,
+        _: &str,
+        _: &[Message],
+        _: &[ToolSpec],
+        _: TextSink<'_>,
+    ) -> Result<ModelTurn, TelmoniError> {
+        Err(TelmoniError::Internal("no model is asked here".into()))
+    }
+}
+
 fn state_with(pool: &PgPool, embedder: Arc<SameVector>, auth: Arc<dyn Auth>) -> AppState {
+    let model_config = ModelConfig {
+        provider: Provider::OpenAi,
+        url: "http://model.invalid/v1".into(),
+        model: "unasked".into(),
+        api_key: None,
+        max_tokens: 1,
+        timeout_secs: 1,
+    };
     AppState {
         db: service_pool(pool, ServiceRole::Agent),
         config: Config {
             database_url: String::new(),
-            model: None,
+            model: Some(model_config.clone()),
             embeddings: EmbeddingsConfig {
                 url: "http://embeddings.invalid/v1".into(),
                 model: "same-vector".into(),
@@ -125,9 +152,12 @@ fn state_with(pool: &PgPool, embedder: Arc<SameVector>, auth: Arc<dyn Auth>) -> 
         auth,
         notifications: Arc::new(Absent),
         entitlements: Arc::new(telmoni_shared::seam::NoLimits),
-        model: None,
-        embedder: Some(embedder),
-        reranker: None,
+        live: Some(Arc::new(Live {
+            model: Arc::new(Unasked),
+            model_config,
+            embedder,
+            reranker: None,
+        })),
         telmoni: None,
         heartbeats: telmoni_shared::heartbeat::Heartbeats::new(
             "agent",

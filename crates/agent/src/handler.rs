@@ -26,14 +26,14 @@ use telmoni_shared::db::tenant_session::{PersonAndOrganization, Scoped, person_s
 use telmoni_shared::extract::Json;
 use telmoni_shared::{AuthError, AuthzError, ProblemDetails, ProjectId, TelmoniError};
 
-use crate::AppState;
 use crate::db::{self, MessageRole, StoredMessage};
 use crate::index::conversations;
-use crate::model::{Message, Model, ToolCall, ToolResult};
+use crate::model::{Message, ToolCall, ToolResult};
 use crate::observe::Recorder;
 use crate::prompt;
 use crate::tools::{self, Citation, Citations};
 use crate::turn::{self, Ending, Runner};
+use crate::{AppState, Live};
 
 /// The longest question, in characters. The console refuses past it too,
 /// held to it by the wire contract.
@@ -88,7 +88,7 @@ pub async fn status(
     headers: HeaderMap,
 ) -> Result<impl IntoResponse, TelmoniError> {
     asker(&state, &headers).await?;
-    Ok(Json(json!({ "enabled": state.config.enabled() })))
+    Ok(Json(json!({ "enabled": state.live.is_some() })))
 }
 
 #[derive(Debug, Deserialize)]
@@ -105,7 +105,7 @@ pub async fn post_turn(
     Json(body): Json<TurnRequest>,
 ) -> Result<Response, TelmoniError> {
     let (acting, project_id) = asker(&state, &headers).await?;
-    let model = state.model.clone().ok_or(TelmoniError::AgentDisabled)?;
+    let live = Arc::clone(state.live()?);
     let message = body.message.trim().to_owned();
     if message.is_empty() || message.chars().count() > MESSAGE_MAX_CHARS {
         return Err(TelmoniError::BadRequest(format!(
@@ -171,7 +171,7 @@ pub async fn post_turn(
     tokio::spawn(run_turn(
         state.clone(),
         Asker { acting, asked_at },
-        model,
+        live,
         conversation_id,
         transcript,
         message,
@@ -367,7 +367,7 @@ const fn no_longer_the_asker(e: &TelmoniError) -> bool {
 async fn run_turn(
     state: Arc<AppState>,
     asker: Asker,
-    model: Arc<dyn Model>,
+    live: Arc<Live>,
     conversation_id: Uuid,
     mut transcript: Vec<Message>,
     question: String,
@@ -386,7 +386,7 @@ async fn run_turn(
     };
     let sink = |text: &str| events.send(TurnEvent::Text(text));
     let outcome = {
-        let watched = recorder.model(model.as_ref(), state.config.model.as_ref());
+        let watched = recorder.model(live.model.as_ref(), &live.model_config);
         let mut tools = recorder.runner(&mut runner);
         turn::converse(
             &watched,

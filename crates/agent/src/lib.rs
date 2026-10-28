@@ -57,10 +57,7 @@ pub struct AppState {
     /// binary that sells nothing hands it no limits.
     pub entitlements: Arc<dyn telmoni_shared::seam::Entitlements>,
     /// `None` while the agent is off.
-    pub model: Option<Arc<dyn model::Model>>,
-    /// `None` while the agent is off.
-    pub embedder: Option<Arc<dyn embed::Embedder>>,
-    pub reranker: Option<Arc<rerank::Reranker>>,
+    pub live: Option<Arc<Live>>,
     /// The SDK each question is reported with as it ends, as any agent
     /// reports its runs; `None` while `TELMONI_API_KEY` is unset.
     pub telmoni: Option<telmoni::Telmoni>,
@@ -84,9 +81,14 @@ impl AppState {
         self.heartbeats.stale(&self.db).await
     }
 
+    /// The agent on, or its refusal when it is off.
+    pub fn live(&self) -> Result<&Arc<Live>, TelmoniError> {
+        self.live.as_ref().ok_or(TelmoniError::AgentDisabled)
+    }
+
     /// The embedder, or the agent's refusal when it is off.
     pub fn embedder(&self) -> Result<&dyn embed::Embedder, TelmoniError> {
-        self.embedder.as_deref().ok_or(TelmoniError::AgentDisabled)
+        Ok(self.live()?.embedder.as_ref())
     }
 
     /// The loops `serve` runs while the agent is on: the indexer (the docs
@@ -94,10 +96,20 @@ impl AppState {
     /// sweep runs, so what an earlier configuration indexed still ages out.
     pub fn spawn(self: &Arc<Self>) {
         tokio::spawn(retention::run(self.clone()));
-        if self.config.enabled() {
+        if self.live.is_some() {
             tokio::spawn(index::run(self.clone()));
         }
     }
+}
+
+/// The agent on: the model and the configuration it was built from, the
+/// embedder, and the reranker where one is configured. Built whole or not at
+/// all, so no reader finds a model without an embedder.
+pub struct Live {
+    pub model: Arc<dyn model::Model>,
+    pub model_config: config::ModelConfig,
+    pub embedder: Arc<dyn embed::Embedder>,
+    pub reranker: Option<rerank::Reranker>,
 }
 
 /// The module's lanes, under `/internal/v1` behind the service secret.

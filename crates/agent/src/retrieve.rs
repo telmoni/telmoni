@@ -51,7 +51,8 @@ pub async fn search(
     limit: i64,
 ) -> Result<Vec<Found>, TelmoniError> {
     let project = acting.project_or_bad_request()?;
-    let embedder = state.embedder()?;
+    let live = state.live()?;
+    let embedder = live.embedder.as_ref();
     let vector = embedder
         .embed(&[query.to_owned()])
         .await?
@@ -60,7 +61,7 @@ pub async fn search(
         .ok_or_else(|| TelmoniError::Internal("no embedding for the query".into()))?;
     let embedding = literal(&vector)?;
     let visibility = visibilities(acting);
-    let depth = if state.reranker.is_some() {
+    let depth = if live.reranker.is_some() {
         RERANK_POOL.max(limit)
     } else {
         limit
@@ -81,7 +82,7 @@ pub async fn search(
     tx.commit().await?;
 
     let keep = usize::try_from(limit).unwrap_or(usize::MAX);
-    let Some(reranker) = state.reranker.as_ref().filter(|_| found.len() > 1) else {
+    let Some(reranker) = live.reranker.as_ref().filter(|_| found.len() > 1) else {
         return Ok(found.into_iter().take(keep).collect());
     };
     let documents: Vec<String> = found

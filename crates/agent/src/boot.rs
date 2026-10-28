@@ -13,7 +13,7 @@ use crate::config::{Config, EMBEDDING_DIMENSIONS};
 use crate::db::AgentLane;
 use crate::embed::{Embedder, OpenAiEmbedder};
 use crate::rerank::Reranker;
-use crate::{AppState, model};
+use crate::{AppState, Live, model};
 
 /// The module's pool, opened as its own database role.
 pub async fn open_pool(config: &Config) -> anyhow::Result<sqlx::PgPool> {
@@ -40,22 +40,17 @@ pub fn state(
     notifications: Arc<dyn Notifications>,
     entitlements: Arc<dyn Entitlements>,
 ) -> anyhow::Result<AppState> {
-    let (model, embedder, reranker) = match &config.model {
-        None => (None, None, None),
+    let live = match &config.model {
+        None => None,
         Some(model_config) => {
             let embedder: Arc<dyn Embedder> =
                 Arc::new(OpenAiEmbedder::new(config.embeddings.clone())?);
-            let reranker = config
-                .rerank
-                .clone()
-                .map(Reranker::new)
-                .transpose()?
-                .map(Arc::new);
-            (
-                Some(model::from_config(model_config)?),
-                Some(embedder),
-                reranker,
-            )
+            Some(Arc::new(Live {
+                model: model::from_config(model_config)?,
+                model_config: model_config.clone(),
+                embedder,
+                reranker: config.rerank.clone().map(Reranker::new).transpose()?,
+            }))
         }
     };
     // As a customer builds it: nothing blocking until its own thread's first
@@ -78,9 +73,7 @@ pub fn state(
         auth,
         notifications,
         entitlements,
-        model,
-        embedder,
-        reranker,
+        live,
         telmoni,
         heartbeats: Heartbeats::new("agent", AgentLane),
     })
