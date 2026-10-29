@@ -1127,7 +1127,10 @@ def _as_json(value: object) -> str:
     if isinstance(value, str):
         return value
     try:
-        return json.dumps(value, default=_str)
+        # Compact UTF-8, as the other three SDKs and the export's own body write it.
+        return json.dumps(
+            value, default=_str, ensure_ascii=False, separators=(",", ":")
+        )
     except Exception:  # noqa: BLE001 - never into the agent's call
         # Whatever will not serialize goes as its text, or its class's name.
         return _str(value)

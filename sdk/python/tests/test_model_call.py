@@ -304,6 +304,28 @@ def test_content_leaves_only_when_asked_and_the_project_allows(
     assert attributes_of(second)["gen_ai.input.messages"] == "second"
 
 
+def test_content_goes_as_compact_utf8_json(transport: FakeTransport) -> None:
+    """As the other three SDKs send it: no spaces, and no character escaped."""
+    on = Answer(200, {"Telmoni-Content-Mode": "on"}, b"{}")
+    transport.answers = [on, on]
+    client = Telmoni(Config(api_key="k", capture_content=True), transport=transport)
+    messages = [{"role": "user", "content": "héllo, 世界 🙂"}]
+    try:
+        with client.run("bot"):
+            pass
+        assert client.flush()
+        with client.run("bot"), client.model_call("m", input_messages=messages):
+            pass
+        assert client.flush()
+    finally:
+        client.shutdown()
+    (call,) = calls(transport)
+    assert (
+        attributes_of(call)["gen_ai.input.messages"]
+        == '[{"role":"user","content":"héllo, 世界 🙂"}]'
+    )
+
+
 def test_content_stays_home_without_capture_content_even_when_allowed(
     transport: FakeTransport,
 ) -> None:
