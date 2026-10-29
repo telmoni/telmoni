@@ -212,7 +212,7 @@ describe('a run', () => {
   it('sends an error type that is no string as its class, never its message, which is content, else as its text', async () => {
     class RateLimited extends Error {}
     const given: unknown[] = [new RateLimited('quota exceeded for alice@example.com'), RateLimited, 429];
-    for (const errorType of given) h.telmoni.run('bot', (run) => run.fail(errorType as string));
+    for (const errorType of given) h.telmoni.run('bot', (run) => run.fail(errorType));
     expect(await h.telmoni.flush()).toBe(true);
     const runs = runsIn(h.transport);
     expect(runs.map((run) => attributesOf(run)['error.type'])).toEqual(['RateLimited', 'RateLimited', '429']);

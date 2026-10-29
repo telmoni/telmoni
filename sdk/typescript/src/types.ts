@@ -118,7 +118,7 @@ export interface RunOptions {
   /** The end user the run is for, as your own id for them; ingest hashes it. */
   userId?: string | undefined;
   sessionId?: string | undefined;
-  tags?: Readonly<Record<string, string>> | undefined;
+  tags?: Readonly<Record<string, string | number | boolean>> | undefined;
   /** This run's share, over the client's `sampleRate`. */
   sampleRate?: number | undefined;
   /** The guard's cap on the run's steps: its next step past it throws `CapExceededError`. */

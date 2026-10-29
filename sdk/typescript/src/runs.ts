@@ -67,10 +67,9 @@ export class Handle {
     this.context = trace.setSpan(parent, span).setValue(RUN_KEY, run ?? this);
   }
 
-  /** Mark it failed, with the error's class and never its message. */
-  fail(errorType: string): void {
-    const given: unknown = errorType;
-    const text = given ? typeOfError(given, this.#warnOnce) : '';
+  /** Mark it failed by an error's class, a class's name or a type as text, never an error's message. */
+  fail(error: unknown): void {
+    const text = error ? typeOfError(error, this.#warnOnce) : '';
     // Ingest refuses the span over an empty one, and with a run's, the run.
     if (text !== '') {
       this.span.setAttribute(contract.ERROR_TYPE, cut(text, contract.ERROR_TYPE_MAX, "span's error type", this.#warnOnce));

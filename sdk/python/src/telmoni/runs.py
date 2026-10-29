@@ -77,7 +77,7 @@ class Handle:
         """Make ``ctx`` current until ``_end``, so spans opened inside nest."""
         self._token = context.attach(ctx)
 
-    def fail(self, error_type: str) -> None:
+    def fail(self, error_type: str | BaseException | type[BaseException]) -> None:
         """Mark it failed, with the error's class and never its message."""
         warn_once = self._client.exporter.warn_once
         text = _error_type(error_type, warn_once) if error_type else ""
@@ -394,7 +394,7 @@ class Nothing:
     run_id = ""
     agent = ""
 
-    def fail(self, error_type: str) -> None:
+    def fail(self, error_type: str | BaseException | type[BaseException]) -> None:
         return None
 
     def cancel(self) -> None:
