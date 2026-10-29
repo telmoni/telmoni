@@ -22,7 +22,20 @@ export const SCHEDULE_DELAY_S = 5;
 /** How long `shutdown` waits for the export in flight, as the Python and Rust SDKs wait. */
 export const SHUTDOWN_TIMEOUT_S = 30;
 
+/** Every client's processor, held weakly under one listener: a process that ends of itself drains each, as Python's `atexit` does. */
+const live = new Set<WeakRef<Processor>>();
+let hooked = false;
+
+function beforeExit(): void {
+  for (const held of live) {
+    const processor = held.deref();
+    if (processor === undefined) live.delete(held);
+    else processor.drainBeforeExit();
+  }
+}
+
 export class Processor implements SpanProcessor {
+  readonly #held = new WeakRef<Processor>(this);
   readonly #exporter: Exporter;
   readonly #warn: (message: string) => void;
   readonly #maxQueueSize: number;
@@ -59,6 +72,11 @@ export class Processor implements SpanProcessor {
     this.#maxQueueSize = options.maxQueueSize ?? MAX_QUEUE_SIZE;
     this.#maxBatchSize = options.maxBatchSize ?? MAX_BATCH_SIZE;
     this.#delayMs = (options.scheduleDelaySeconds ?? SCHEDULE_DELAY_S) * 1000;
+    live.add(this.#held);
+    if (!hooked) {
+      hooked = true;
+      process.on('beforeExit', beforeExit);
+    }
   }
 
   /**
@@ -116,6 +134,11 @@ export class Processor implements SpanProcessor {
     });
   }
 
+  /** Spans still queued as Node's loop empties: sent within a shutdown's 30 s, the export holding the loop. */
+  drainBeforeExit(): void {
+    if (!this.#down && !this.#idle()) void this.shutdown();
+  }
+
   /**
    * Drains, then takes nothing more. Past the timeout what is left is given
    * up: the wait for a retry ends there and no batch or attempt follows, so
@@ -124,6 +147,7 @@ export class Processor implements SpanProcessor {
    * SDKs' workers hold none.
    */
   async shutdown(): Promise<void> {
+    live.delete(this.#held);
     if (this.#down) return;
     this.#down = true;
     const deadline = Date.now() + SHUTDOWN_TIMEOUT_S * 1000;

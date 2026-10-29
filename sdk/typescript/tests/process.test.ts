@@ -12,9 +12,12 @@ import { describe, expect, it } from 'vitest';
 const BUILT = fileURLToPath(new URL('../dist/index.mjs', import.meta.url));
 
 function runScript(body: string): { status: number | null; stdout: string } {
+  // Counted as the process exits, so a drain after the script's end is seen.
   const script = `
+    import { writeSync } from 'node:fs';
     import { Telmoni } from ${JSON.stringify(BUILT)};
     let exports = 0;
+    process.on('exit', () => writeSync(1, JSON.stringify({ exports })));
     const telmoni = new Telmoni({ apiKey: 'telmoni_test_key' }, {
       transport: async () => {
         exports += 1;
@@ -22,7 +25,6 @@ function runScript(body: string): { status: number | null; stdout: string } {
       },
     });
     ${body}
-    console.log(JSON.stringify({ exports }));
   `;
   const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8', timeout: 20_000 });
   return { status: result.status, stdout: result.stdout };
@@ -43,6 +45,14 @@ describe('a short-lived process', () => {
     const { status, stdout } = runScript(`
       telmoni.recordRun({ runId: '3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d', agent: 'bot', start: 1000, end: 2000 });
       if (!(await telmoni.flush())) process.exit(2);
+    `);
+    expect(status).toBe(0);
+    expect(JSON.parse(stdout)).toEqual({ exports: 1 });
+  });
+
+  it('sends what it queued when it ends of itself, neither flushed nor shut down', () => {
+    const { status, stdout } = runScript(`
+      telmoni.run('bot', () => undefined);
     `);
     expect(status).toBe(0);
     expect(JSON.parse(stdout)).toEqual({ exports: 1 });

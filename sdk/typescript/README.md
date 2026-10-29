@@ -255,7 +255,9 @@ warning — an attribute the server dropped, a batch given up on — is logged o
 per client through `console.warn`. `await telmoni.flush()` sends what is queued
 and resolves `true` once the platform has it;
 `await telmoni.shutdown()` drains and stops. The SDK's worker never keeps the
-process alive on its own, so call `shutdown()` before exiting.
+process alive on its own. A process that ends of itself is drained as Node's
+loop empties, but `process.exit()` or a signal left unhandled waits for
+nothing, so call `shutdown()` before exiting.
 
 For tests, inject the seams: `new Telmoni(config, { transport, sleep, warn,
 processor })`, where `transport` has `fetch`'s shape, `sleep` is the wait

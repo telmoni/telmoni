@@ -295,8 +295,14 @@ holding the **ingest** scope.
 </Tabs>
 
 Flush before a short-lived process exits (`flush()` / `flush()` / `Flush(ctx)`
-/ `flush()`), or shut the client down, which flushes first; a long-lived one
-needs neither.
+/ `flush()`), or shut the client down, which flushes first. A long-lived one
+needs no flush while it runs, but shuts the client down as it stops: a deploy
+or a restart stops it with a signal, which drains nothing unless its handler
+does. A process that ends of itself is drained for you, for at most a
+shutdown's wait: Python's as the interpreter exits, Rust's as its last clone
+of the client drops and TypeScript's as Node's event loop empties; none on a
+forced exit (`os._exit`, `process.exit()`, `std::process::exit`). Go's drains
+only through `Shutdown`, so defer it.
 
 ---
 
