@@ -39,7 +39,7 @@ tracing     = { workspace = true }
 uuid        = { workspace = true }
 # Its `Url` parses a ClickHouse URL's user and password out of it, as a DSN
 # carries them; the client sends them as headers, never in the URL.
-reqwest     = { workspace = true }
+reqwest     = { workspace = true, features = ["rustls-tls"] }
 
 [dev-dependencies]
 tower          = { workspace = true, features = ["util"] }

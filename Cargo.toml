@@ -98,7 +98,9 @@ tracing = "0.1"
 # lets `PUT /internal/v1/log-level` change verbosity on a running pod without a
 # restart. See `crates/shared/src/logging.rs`.
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"] }
-reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls", "multipart"], default-features = false }
+# No features: each member names what it calls, so the Rust SDK publishes
+# only its own.
+reqwest = { version = "0.12", default-features = false }
 dotenvy = "0.15"
 base64  = "0.22"
 ring    = "0.17"

@@ -44,7 +44,7 @@ sha2        = { workspace = true }
 # `base64` decodes the bearer's segments and the key set's `n` and `e`
 # (`person_token`), and the test issuer's PKCS#8 fixture.
 base64      = { workspace = true }
-reqwest     = { workspace = true }
+reqwest     = { workspace = true, features = ["json", "rustls-tls"] }
 async-trait = { workspace = true }
 
 anyhow      = { workspace = true }

@@ -24,7 +24,7 @@ uuid       = { workspace = true }
 chrono     = { workspace = true }
 anyhow     = { workspace = true }
 
-reqwest      = { workspace = true }
+reqwest      = { workspace = true, features = ["json", "rustls-tls"] }
 async-trait  = { workspace = true }
 
 # Token hashing, and reading a claim out of a token this service was handed

@@ -31,7 +31,7 @@ uuid       = { workspace = true }
 # client; everything that leaves the platform goes through the guarded
 # `telmoni_shared::net_guard::Egress` built on the same crate. Redirects are
 # never followed — see `main.rs`.
-reqwest    = { workspace = true }
+reqwest    = { workspace = true, features = ["json", "rustls-tls"] }
 # Slack signs its events with HMAC-SHA256 over `v0:{ts}:{body}`, and the
 # signed webhook generates the same kind of MAC over `{t}.{body}`: both on
 # `telmoni_shared::digest`, never a vendor SDK.

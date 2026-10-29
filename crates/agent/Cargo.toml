@@ -36,7 +36,7 @@ sha2        = { workspace = true }
 # The model, embedding and rerank endpoints, over plain HTTP: no vendor SDK.
 # Streaming responses are read chunk by chunk and their event lines parsed
 # by hand.
-reqwest     = { workspace = true }
+reqwest     = { workspace = true, features = ["json", "rustls-tls"] }
 # The one thing axum's SSE response needs that tokio does not provide: a
 # `Stream` of events, built from the turn's channel.
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
