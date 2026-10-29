@@ -157,6 +157,8 @@ export class Processor implements SpanProcessor {
       if (remaining <= 0) {
         this.#givenUp = true;
         this.#exporter.giveUp();
+        // A flush still waiting would hold the process on its own timer; nothing more will drain.
+        for (const resolve of this.#flushers.splice(0)) resolve();
         break;
       }
       await Promise.race([this.#inFlight, pause(remaining)]);

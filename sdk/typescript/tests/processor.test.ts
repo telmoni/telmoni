@@ -125,4 +125,28 @@ describe('the processor', () => {
       vi.useRealTimers();
     }
   });
+
+  it('settles a flush still waiting when a shutdown gives up, its own timer let go', async () => {
+    vi.useFakeTimers();
+    try {
+      const h = harness(
+        {},
+        { sleep: undefined, processor: { maxBatchSize: 1 } },
+        Array.from({ length: 10 }, () => answer(429, { 'Retry-After': '20' }, '{}')),
+      );
+      h.telmoni.run('bot', (run) => run.step('s', () => {}));
+      let flushed: boolean | undefined;
+      void h.telmoni.flush(60).then((value) => {
+        flushed = value;
+      });
+      const done = h.telmoni.shutdown();
+      await vi.advanceTimersByTimeAsync(30_000);
+      await done;
+      await vi.advanceTimersByTimeAsync(0);
+      expect(flushed).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
