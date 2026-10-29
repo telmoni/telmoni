@@ -326,7 +326,7 @@ Four SDKs, one contract, under `sdk/`: an agent's runs, steps, model calls and t
 | Go | `github.com/telmoni/telmoni/sdk/go` (1.26.10+) | `go.opentelemetry.io/otel`, `otel/sdk`, `otel/trace`; `net/http` sends | `New(cfg, opts…)` and `NewFromEnv()`, both `(*Client, error)`; `client.Run(ctx, agent, RunOptions)`, `run.Step`, `ModelCall`, `ToolCall(ctx, …)`, each `(context.Context, *T)` ended by `End()`; `RunFromContext`; `run.Spent()`, `run.Err()`; `Flush(ctx)`, `Shutdown(ctx)` |
 | Rust | `telmoni`, a member of this workspace | `opentelemetry`, `opentelemetry_sdk` (`trace`), `uuid`; reqwest's blocking client sends, built on the processor's thread | `Telmoni::new(config)`, `from_env()`, `with_hooks(config, Hooks)`; `run(agent, RunOptions) -> Result<Run, Error>`; `step`, `model_call`, `tool_call` as guards, each a `Result` for the guard's caps, `*_with` and `try_*_with` closures; `run.spent()`; `flush()`, `shutdown()` |
 
-**The parity table.** Every row is answered the same in all four unless a cell says otherwise; a new behaviour adds a row and, where the wire or an answer changes, a fixture.
+**The parity table.** Every row is answered the same in all four unless a cell says otherwise; a new behaviour adds a row and, where the wire or an answer changes, a fixture. Blank, wherever a row says it, is empty or Unicode's White_Space alone, as Go and Rust trim it, never Python's `str.strip` or TypeScript's `trim`.
 
 | Behaviour | Python | TypeScript | Go | Rust |
 |---|---|---|---|---|

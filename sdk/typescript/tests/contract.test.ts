@@ -74,6 +74,16 @@ describe('configuration', () => {
     expect(h.warnings).toEqual(["telmoni: the environment must be up to 128 characters; it is not sent"]);
   });
 
+  it("reads blank as Unicode's White_Space, as Go and Rust read it", () => {
+    // `trim` would take U+FEFF too, and leave U+0085.
+    expect(new Telmoni({ apiKey: 'k', release: '\ufeff2026.10.18' }).config.release).toBe('\ufeff2026.10.18');
+    expect(new Telmoni({ apiKey: 'k', release: '\u00852026.10.18\u3000' }).config.release).toBe('2026.10.18');
+    expect(new Telmoni({ apiKey: 'k', environment: '\u0085' }).config.environment).toBeUndefined();
+    const h = harness();
+    expect(() => h.telmoni.run('\u0085', () => {})).toThrow("a run needs its agent's name");
+    expect(() => h.telmoni.run('\ufeff', () => {})).not.toThrow();
+  });
+
   it('reads the five variables from the environment and no other', () => {
     vi.stubEnv('TELMONI_ENDPOINT', undefined);
     vi.stubEnv('TELMONI_API_KEY', '');

@@ -61,9 +61,14 @@ class Secret:
 
 
 def _unset_if_blank(value: str | None) -> str | None:
-    if value is None or not value.strip():
-        return None
-    return value.strip()
+    """Unset, or the value with Unicode's White_Space off its ends."""
+    trimmed = (value or "").strip(_WHITE_SPACE)
+    return trimmed or None
+
+
+def _blank(text: str) -> bool:
+    """Whether ``text`` is empty or Unicode's White_Space alone."""
+    return not text.strip(_WHITE_SPACE)
 
 
 _WHITE_SPACE = (
@@ -71,8 +76,8 @@ _WHITE_SPACE = (
     + "".join(map(chr, range(0x2000, 0x200B)))
     + "\u2028\u2029\u202f\u205f\u3000"
 )
-"""Unicode's White_Space, which an endpoint's ends are trimmed of, as Go and
-Rust trim them; `str.isspace` takes U+001C to U+001F too."""
+"""Unicode's White_Space, which a value's ends are trimmed of and a blank one
+holds alone, as Go and Rust read them; `str.isspace` takes U+001C to U+001F too."""
 _NAME = frozenset(string.ascii_letters + string.digits + "._-")
 _PATH = frozenset(string.ascii_letters + string.digits + "-._~!$&'()*+,;=:@/")
 _IPV6 = frozenset(string.hexdigits + ":.")

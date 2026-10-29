@@ -43,6 +43,7 @@ from .models import (
     StepRecord,
     ToolCallRecord,
     Usage,
+    _blank,
     _dollars,
     check_rate,
 )
@@ -425,7 +426,7 @@ class Opener:
     ) -> Run:
         warn_once = self._client.exporter.warn_once
         given: object = agent
-        if given is None or not _str(given).strip():
+        if given is None or _blank(_str(given)):
             raise ValueError("a run needs its agent's name")
         agent = _cut(
             _text(given, "run's agent", warn_once),
@@ -584,7 +585,7 @@ class Opener:
         tags = dict((record.tags or {}).items())
         if not all(isinstance(text, str) for pair in tags.items() for text in pair):
             raise TypeError("a recorded run's tags must map str to str")
-        if not record.agent.strip():
+        if _blank(record.agent):
             raise ValueError("a run needs its agent's name")
         try:
             run_uuid = uuid.UUID(record.run_id)
@@ -820,7 +821,7 @@ def _operation(given: object, warn_once: Callable[[str, str], None]) -> str:
     """A model call's operation as ingest reads one: the default for a blank one,
     and, with one warning, for one ingest would file as a step, a run or a tool
     call."""
-    if not isinstance(given, str) or not given.strip():
+    if not isinstance(given, str) or _blank(given):
         return contract.DEFAULT_MODEL_OPERATION
     if given in contract.MODEL_OPERATIONS:
         return given

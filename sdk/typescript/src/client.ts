@@ -11,6 +11,7 @@ import { Ids } from './ids.js';
 import { Processor } from './processor.js';
 import { readHeaders, writeHeaders } from './propagation.js';
 import { type Handle, Opener, Run, checkedRate, currentRun, split, within } from './runs.js';
+import { WHITE_SPACE, trimEnds } from './whitespace.js';
 import { RecordingSampler } from './sampler.js';
 import type { Config, HeaderCarrier, Hooks, ResolvedConfig, RunOptions, RunRecord } from './types.js';
 import { VERSION } from './version.js';
@@ -21,8 +22,6 @@ export const DEFAULT_ENDPOINT = 'https://api.telmoni.com';
 /** The longest a flush waits, about 24.8 days: past it Node fires a timer at once. */
 const FLUSH_MAX_MS = 2 ** 31 - 1;
 
-/** Unicode's White_Space, which an endpoint's ends are trimmed of, as Go and Rust trim them: `trim` differs. */
-const WHITE_SPACE = new Set('\t\n\v\f\r \u0085\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000');
 
 // Loops, not /[\s/]+$/, which takes quadratic time on a long run of slashes something follows.
 function trimTail(value: string): string {
@@ -31,16 +30,8 @@ function trimTail(value: string): string {
   return value.slice(0, end);
 }
 
-function trimEnds(value: string): string {
-  let start = 0;
-  while (start < value.length && WHITE_SPACE.has(value.charAt(start))) start++;
-  let end = value.length;
-  while (end > start && WHITE_SPACE.has(value.charAt(end - 1))) end--;
-  return value.slice(start, end);
-}
-
 function unsetIfBlank(value: string | undefined): string | undefined {
-  const trimmed = value?.trim();
+  const trimmed = value === undefined ? undefined : trimEnds(value);
   return trimmed ? trimmed : undefined;
 }
 

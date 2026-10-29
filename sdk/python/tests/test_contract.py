@@ -118,6 +118,19 @@ def test_from_env_reads_the_five_variables_and_no_other() -> None:
     assert config.release == "2026.10.18"
 
 
+def test_blank_is_unicodes_white_space_as_go_and_rust_read_it(
+    telmoni: Telmoni,
+) -> None:
+    """`str.strip` would take U+001C to U+001F too, which Go and Rust keep."""
+    assert Config(release="\x1c2026.10.18").release == "\x1c2026.10.18"
+    assert Config(release="\x852026.10.18\u3000").release == "2026.10.18"
+    assert Config(environment="\x85").environment is None
+    with pytest.raises(ValueError, match="agent's name"), telmoni.run("\x85"):
+        pass
+    with telmoni.run("\x1c") as run:
+        assert run.agent == "\x1c"
+
+
 def test_sample_rate_is_above_zero_and_up_to_one() -> None:
     assert Config(sample_rate=1.0).sample_rate == 1.0
     assert Config(sample_rate=0.25).sample_rate == 0.25

@@ -17,6 +17,7 @@ import { errorType, isAbort } from './errors.js';
 import { Guard, type OwnRates, type Tokens, ownRates, priced } from './guard.js';
 import { type Ids, spanIdAt } from './ids.js';
 import type { Processor } from './processor.js';
+import { isBlank } from './whitespace.js';
 import type {
   CallRecord,
   ModelAnswer,
@@ -345,7 +346,7 @@ export class Opener {
 
   run(given: string, options: RunOptions): Run {
     const named: unknown = given;
-    if (!isSet(named) || textOf(named).trim() === '') {
+    if (!isSet(named) || isBlank(textOf(named))) {
       throw new TypeError("a run needs its agent's name");
     }
     const agent = cut(asText(named, "run's agent", this.#warnOnce), contract.AGENT_MAX, "run's agent", this.#warnOnce);
@@ -447,7 +448,7 @@ export class Opener {
    */
   record(record: RunRecord): void {
     const agent: unknown = record.agent;
-    if (typeof agent !== 'string' || agent.trim() === '') {
+    if (typeof agent !== 'string' || isBlank(agent)) {
       throw new TypeError("a run needs its agent's name");
     }
     if ([...agent].length > contract.AGENT_MAX) {
@@ -823,7 +824,7 @@ function toolSpanName(name: string): string {
  * and, with one warning, for one ingest would file as a step, a run or a tool call.
  */
 function operationOf(given: unknown, warnOnce: WarnOnce): string {
-  if (typeof given !== 'string' || given.trim() === '') return contract.DEFAULT_MODEL_OPERATION;
+  if (typeof given !== 'string' || isBlank(given)) return contract.DEFAULT_MODEL_OPERATION;
   if (contract.MODEL_OPERATIONS.has(given)) return given;
   warnOnce(
     'call:operation',
