@@ -78,14 +78,6 @@ func newExporter(cfg Config, transport Transport, sleep func(time.Duration), log
 		stringAttribute("telemetry.sdk.name", "opentelemetry"),
 		stringAttribute("telemetry.sdk.version", sdk.Version()),
 	}
-	// The deployment, where the configuration names one: never from
-	// OTEL_RESOURCE_ATTRIBUTES, which the application's exporters read.
-	if cfg.Environment != "" {
-		resource = append(resource, stringAttribute(attrEnvironment, cfg.Environment))
-	}
-	if cfg.Release != "" {
-		resource = append(resource, stringAttribute(attrRelease, cfg.Release))
-	}
 	givenUp, giveUp := context.WithCancel(context.Background())
 	e := &exporter{
 		config:    cfg,
@@ -100,6 +92,24 @@ func newExporter(cfg Config, transport Transport, sleep func(time.Duration), log
 	}
 	if e.sleep == nil {
 		e.sleep = e.waitOut
+	}
+	// The deployment, where the configuration names one: never from
+	// OTEL_RESOURCE_ATTRIBUTES, which the application's exporters read.
+	for _, d := range []struct {
+		key, value, what string
+		most             int
+	}{
+		{attrEnvironment, cfg.Environment, "environment", environmentMax},
+		{attrRelease, cfg.Release, "release", releaseMax},
+	} {
+		if d.value == "" {
+			continue
+		}
+		if utf8.RuneCountInString(d.value) > d.most {
+			e.warnOnce("long:"+d.key, fmt.Sprintf("telmoni: the %s must be up to %d characters; it is not sent", d.what, d.most))
+			continue
+		}
+		e.resource = append(e.resource, stringAttribute(d.key, d.value))
 	}
 	return e
 }

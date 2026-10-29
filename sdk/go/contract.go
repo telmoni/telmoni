@@ -86,6 +86,11 @@ const (
 	providerMax  = 128
 	userIDMax    = 128
 	sessionIDMax = 200
+	// environmentMax and releaseMax are the deployment's longest names:
+	// ingest reads a resource naming a longer one as naming none, without a
+	// word.
+	environmentMax = 128
+	releaseMax     = 128
 	// batchMaxBytes is the largest body an export may be, contract.rs's
 	// BATCH_MAX_BYTES: ingest refuses one past it whole.
 	batchMaxBytes = 1 << 20

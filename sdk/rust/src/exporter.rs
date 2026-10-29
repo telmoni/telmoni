@@ -51,6 +51,7 @@ impl Exporter {
         sleep: Box<dyn Fn(Duration) + Send + Sync>,
         warner: Arc<Warner>,
     ) -> Self {
+        let resource = resource(config, &warner);
         Self {
             url: format!("{}/otlp/v1/traces", config.endpoint),
             refusal: refusal(&config.endpoint),
@@ -60,7 +61,7 @@ impl Exporter {
             sleep,
             warner,
             content_mode: Mutex::new(None),
-            resource: resource(config),
+            resource,
             given_up: AtomicBool::new(false),
         }
     }
@@ -389,7 +390,7 @@ fn problem_type(body: &[u8]) -> String {
 /// The exporter's five resource attributes, and the deployment's two where
 /// the configuration names one: never from `OTEL_RESOURCE_ATTRIBUTES`, which
 /// the application's exporters read.
-fn resource(config: &Config) -> Vec<serde_json::Value> {
+fn resource(config: &Config, warner: &Warner) -> Vec<serde_json::Value> {
     let mut attributes = vec![
         (contract::DISTRO_NAME, contract::DISTRO.to_owned()),
         ("telemetry.distro.version", VERSION.to_owned()),
@@ -397,11 +398,29 @@ fn resource(config: &Config) -> Vec<serde_json::Value> {
         ("telemetry.sdk.name", "opentelemetry".to_owned()),
         ("telemetry.sdk.version", sdk_version()),
     ];
-    if let Some(environment) = &config.environment {
-        attributes.push((contract::ENVIRONMENT, environment.clone()));
-    }
-    if let Some(release) = &config.release {
-        attributes.push((contract::RELEASE, release.clone()));
+    for (key, value, most, what) in [
+        (
+            contract::ENVIRONMENT,
+            &config.environment,
+            contract::ENVIRONMENT_MAX,
+            "environment",
+        ),
+        (
+            contract::RELEASE,
+            &config.release,
+            contract::RELEASE_MAX,
+            "release",
+        ),
+    ] {
+        let Some(value) = value else { continue };
+        if value.chars().nth(most).is_some() {
+            warner.once(
+                format!("long:{key}"),
+                &format!("telmoni: the {what} must be up to {most} characters; it is not sent"),
+            );
+            continue;
+        }
+        attributes.push((key, value.clone()));
     }
     attributes
         .into_iter()

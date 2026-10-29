@@ -772,7 +772,8 @@ SDK's name, language and version) and, where you set them, the deployment:
 `TELMONI_ENVIRONMENT` (`production`, `staging`), and `service.version` from
 `release` or `TELMONI_RELEASE` (a version or a commit), which Telmoni keeps as
 the `environment` and `release` of every span and the trace list
-[filters](/docs/workspace/traces#filters) by. A step is a span named as you named it; a model call is
+[filters](/docs/workspace/traces#filters) by. Either past 128 characters, which
+Telmoni would read as no deployment, is left off with one warning. A step is a span named as you named it; a model call is
 `<operation> <model>`, the operation `chat` unless you gave `generate_content`,
 `text_completion` or `embeddings`, with the model asked for, the
 model that answered, the provider and the token counts under the GenAI
@@ -962,8 +963,8 @@ non-enumerable property, which `console.log` and `JSON.stringify` pass over.
 | `TELMONI_ENDPOINT` | The origin ingest is served on: Telmoni's machine host, or your own deployment's | `https://api.telmoni.com` when unset or blank |
 | `TELMONI_API_KEY` | An [API key](/docs/api/api-keys) holding the **ingest** scope, created on a project's API keys page | None |
 | `TELMONI_ORG` | The organization's ID (`org_...`), held and not sent: the key names the project | None |
-| `TELMONI_ENVIRONMENT` | The deployment this process runs in — `production`, `staging` — sent as `deployment.environment.name` | None: nothing is sent |
-| `TELMONI_RELEASE` | The release this process runs — a version or a commit — sent as `service.version` | None: nothing is sent |
+| `TELMONI_ENVIRONMENT` | The deployment this process runs in — `production`, `staging` — sent as `deployment.environment.name`, up to 128 characters | None: nothing is sent |
+| `TELMONI_RELEASE` | The release this process runs — a version or a commit — sent as `service.version`, up to 128 characters | None: nothing is sent |
 
 Every SDK reads these five and no others. OpenTelemetry's own `OTEL_*`
 variables are your application's, for its own exporters, and change nothing

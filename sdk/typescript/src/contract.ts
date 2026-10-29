@@ -47,6 +47,9 @@ export const SAMPLED_OUT = 'telmoni.sampled_out';
 /** The deployment, on the resource: the client's `environment` and `release`. */
 export const ENVIRONMENT = 'deployment.environment.name';
 export const RELEASE = 'service.version';
+/** The deployment's longest environment and release, in characters: ingest reads a resource naming a longer one as naming none, without a word. */
+export const ENVIRONMENT_MAX = 128;
+export const RELEASE_MAX = 128;
 /** The W3C headers a run crosses services in: the span's context, and the run's id and agent as baggage members. */
 export const TRACEPARENT = 'traceparent';
 export const BAGGAGE = 'baggage';

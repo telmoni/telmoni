@@ -48,6 +48,10 @@ so the processor drops each however late it ends."""
 ENVIRONMENT = "deployment.environment.name"
 """The deployment, on the resource: the client's ``environment`` and ``release``."""
 RELEASE = "service.version"
+ENVIRONMENT_MAX = 128
+RELEASE_MAX = 128
+"""The deployment's longest environment and release, in characters: ingest
+reads a resource naming a longer one as naming none, without a word."""
 TRACEPARENT = "traceparent"
 """The W3C headers a run crosses services in: the span's context, and the
 run's id and agent as baggage members."""

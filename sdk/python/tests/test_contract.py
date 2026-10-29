@@ -69,6 +69,30 @@ def test_the_key_is_never_printed_or_serialized() -> None:
     assert Config(api_key=Secret("telmoni_x")).bearer() == "telmoni_x"
 
 
+def test_a_deployment_named_past_ingests_cap_is_left_off_with_one_warning(
+    transport: FakeTransport, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Ingest would read the resource as naming none, without a word."""
+    client = Telmoni(
+        Config(api_key="k", environment="e" * 129, release="r" * 128),
+        transport=transport,
+    )
+    try:
+        with client.run("bot"):
+            pass
+        assert client.flush()
+    finally:
+        client.shutdown()
+    resource = transport.bodies()[0]["resourceSpans"][0]["resource"]["attributes"]
+    keys = {attribute["key"] for attribute in resource}
+    assert "deployment.environment.name" not in keys
+    assert "service.version" in keys
+    warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    assert warnings == [
+        "telmoni: the environment must be up to 128 characters; it is not sent"
+    ]
+
+
 def test_from_env_reads_the_five_variables_and_no_other() -> None:
     with mock.patch.dict(os.environ, clear=False):
         os.environ.pop("TELMONI_ENDPOINT", None)

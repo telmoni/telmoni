@@ -243,8 +243,19 @@ export class Exporter {
     ];
     // The deployment, where the configuration names one: never from
     // OTEL_RESOURCE_ATTRIBUTES, which the application's exporters read.
-    if (config.environment !== undefined) this.#resource.push(attribute(contract.ENVIRONMENT, config.environment));
-    if (config.release !== undefined) this.#resource.push(attribute(contract.RELEASE, config.release));
+    const deployment = [
+      [contract.ENVIRONMENT, config.environment, contract.ENVIRONMENT_MAX, 'environment'],
+      [contract.RELEASE, config.release, contract.RELEASE_MAX, 'release'],
+    ] as const;
+    for (const [key, value, most, what] of deployment) {
+      if (value === undefined) continue;
+      // Counted in characters, as ingest counts them, not UTF-16's units.
+      if ([...value].length > most) {
+        this.warnOnce(`long:${key}`, `telmoni: the ${what} must be up to ${most} characters; it is not sent`);
+        continue;
+      }
+      this.#resource.push(attribute(key, value));
+    }
   }
 
   /** The project's mode, as the last answer named it; undefined before one. */

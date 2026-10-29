@@ -157,6 +157,27 @@ func TestTheKeyIsNeverPrintedOrSerialized(t *testing.T) {
 	}
 }
 
+// A deployment named past ingest's cap, which ingest would read as none
+// without a word, is left off with one warning.
+func TestADeploymentNamedPastIngestsCapIsLeftOffWithOneWarning(t *testing.T) {
+	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k"), Environment: strings.Repeat("e", 129), Release: strings.Repeat("r", 128)}, nil)
+	_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	run.End()
+	h.flush()
+	resource := h.transport.bodies(t)[0]["resourceSpans"].([]any)[0].(map[string]any)["resource"].(map[string]any)["attributes"].([]any)
+	keys := map[string]bool{}
+	for _, raw := range resource {
+		keys[raw.(map[string]any)["key"].(string)] = true
+	}
+	if keys["deployment.environment.name"] || !keys["service.version"] {
+		t.Errorf("resource keys = %v", keys)
+	}
+	want := []string{"telmoni: the environment must be up to 128 characters; it is not sent"}
+	if got := h.logs.warnings(); !reflect.DeepEqual(got, want) {
+		t.Errorf("warnings = %q, want %q", got, want)
+	}
+}
+
 func TestFromEnvReadsTheFiveVariablesAndNoOther(t *testing.T) {
 	t.Setenv("TELMONI_ENDPOINT", "")
 	t.Setenv("TELMONI_API_KEY", "")

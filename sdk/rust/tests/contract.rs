@@ -3,8 +3,8 @@
 
 mod common;
 
-use common::{Outcome, in_child, is_child};
-use telmoni::{Config, DEFAULT_ENDPOINT, Telmoni, VERSION};
+use common::{Harness, Outcome, in_child, is_child, keyed};
+use telmoni::{Config, DEFAULT_ENDPOINT, RunOptions, Telmoni, VERSION};
 
 #[test]
 fn the_default_endpoint_is_the_machine_host() {
@@ -261,4 +261,32 @@ fn one_run(given: &str) -> Result<(usize, Vec<String>), common::Failure> {
     harness.flush()?;
     harness.telmoni.shutdown();
     Ok((harness.transport.count(), harness.warnings.all()))
+}
+
+/// A deployment named past ingest's cap, which ingest would read as none
+/// without a word, is left off with one warning.
+#[test]
+fn a_deployment_named_past_ingests_cap_is_left_off_with_one_warning() -> Outcome {
+    let harness = Harness::with(Config {
+        environment: Some("e".repeat(129)),
+        release: Some("r".repeat(128)),
+        ..keyed()
+    })?;
+    harness.telmoni.run("bot", RunOptions::default())?.end();
+    harness.flush()?;
+    let bodies = harness.transport.bodies()?;
+    let body = bodies.first().ok_or("a body")?;
+    let keys: Vec<&str> = body["resourceSpans"][0]["resource"]["attributes"]
+        .as_array()
+        .ok_or("the resource's attributes")?
+        .iter()
+        .filter_map(|attribute| attribute["key"].as_str())
+        .collect();
+    assert!(!keys.contains(&"deployment.environment.name"), "{keys:?}");
+    assert!(keys.contains(&"service.version"), "{keys:?}");
+    assert_eq!(
+        harness.warnings.all(),
+        ["telmoni: the environment must be up to 128 characters; it is not sent"]
+    );
+    Ok(())
 }

@@ -30,6 +30,10 @@ pub(crate) const SAMPLED_OUT: &str = "telmoni.sampled_out";
 /// `release`.
 pub(crate) const ENVIRONMENT: &str = "deployment.environment.name";
 pub(crate) const RELEASE: &str = "service.version";
+/// The deployment's longest environment and release, in characters: ingest
+/// reads a resource naming a longer one as naming none, without a word.
+pub(crate) const ENVIRONMENT_MAX: usize = 128;
+pub(crate) const RELEASE_MAX: usize = 128;
 /// The W3C headers a run crosses services in: the span's context, and the
 /// run's id and agent as baggage members.
 pub(crate) const TRACEPARENT: &str = "traceparent";

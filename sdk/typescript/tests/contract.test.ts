@@ -12,7 +12,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ANSWER_MAX, Exporter, directTransport, fetchTransport } from '../src/exporter';
 import { DEFAULT_ENDPOINT, Telmoni, VERSION, type Config } from '../src/index';
-import { FakeTransport, answer, loadFixture } from './helpers';
+import { FakeTransport, answer, harness, loadFixture } from './helpers';
 
 afterEach(() => vi.unstubAllEnvs());
 
@@ -61,6 +61,17 @@ describe('configuration', () => {
       expect(printed).toContain('org_1');
     }
     expect(client.config.apiKey).toBe('telmoni_secret_key');
+  });
+
+  it("leaves off a deployment named past ingest's cap, with one warning", async () => {
+    // Ingest would read the resource as naming none, without a word.
+    const h = harness({ environment: 'e'.repeat(129), release: 'r'.repeat(128) });
+    h.telmoni.run('bot', () => {});
+    expect(await h.telmoni.flush()).toBe(true);
+    const keys = h.transport.bodies()[0]!.resourceSpans[0]!.resource.attributes.map((attribute) => attribute.key);
+    expect(keys).not.toContain('deployment.environment.name');
+    expect(keys).toContain('service.version');
+    expect(h.warnings).toEqual(["telmoni: the environment must be up to 128 characters; it is not sent"]);
   });
 
   it('reads the five variables from the environment and no other', () => {

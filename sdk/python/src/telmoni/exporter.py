@@ -304,10 +304,25 @@ class Exporter:
         ]
         # The deployment, where the configuration names one: never from
         # OTEL_RESOURCE_ATTRIBUTES, which the application's exporters read.
-        if config.environment is not None:
-            self._resource.append(_attribute(contract.ENVIRONMENT, config.environment))
-        if config.release is not None:
-            self._resource.append(_attribute(contract.RELEASE, config.release))
+        for key, value, most, what in (
+            (
+                contract.ENVIRONMENT,
+                config.environment,
+                contract.ENVIRONMENT_MAX,
+                "environment",
+            ),
+            (contract.RELEASE, config.release, contract.RELEASE_MAX, "release"),
+        ):
+            if value is None:
+                continue
+            if len(value) > most:
+                self.warn_once(
+                    f"long:{key}",
+                    f"telmoni: the {what} must be up to {most} characters; "
+                    "it is not sent",
+                )
+                continue
+            self._resource.append(_attribute(key, value))
 
     @property
     def content_mode(self) -> str | None:
