@@ -13,7 +13,7 @@ from ._version import __version__
 from .exporter import Exporter, Transport
 from .ids import Ids
 from .models import Config, RunRecord
-from .processor import Processor
+from .processor import Batching, Processor
 from .propagation import read_headers, write_headers
 from .runs import (
     ModelCall,
@@ -44,6 +44,7 @@ class Telmoni:
         *,
         transport: Transport | None = None,
         sleep: Callable[[float], None] | None = None,
+        batching: Batching | None = None,
     ) -> None:
         self.config = config or Config()
         # Before the exporter takes it: an endpoint set to plain HTTP after the
@@ -52,7 +53,7 @@ class Telmoni:
         # The project's own prices, which the guard counts a call by first.
         self.prices = guard.own(self.config.prices)
         self.exporter = Exporter(self.config, transport=transport, sleep=sleep)
-        self.processor = Processor(self.exporter)
+        self.processor = Processor(self.exporter, batching)
         resource = Resource(
             {
                 contract.DISTRO_NAME: contract.DISTRO,

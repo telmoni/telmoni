@@ -824,7 +824,11 @@ each 0.x minor apart, each with a current context of its own.
 ### Answers and warnings
 
 The SDK batches spans and sends them in the background, on a bounded queue,
-so a slow Telmoni never slows an agent. Each request times out after 10
+so a slow Telmoni never slows an agent. The queue holds 2,048 spans and a batch
+512, sent every 5 seconds, each of which you can set: Python's
+`Telmoni(batching=Batching(...))`, TypeScript's `processor` hook, Go's
+`WithBatching` and Rust's `Hooks::batching`; a record larger than the queue is
+refused, so raise it for records that long. Each request times out after 10
 seconds. It retries a `429` or a `503` after its `Retry-After`, waiting at most
 60 seconds, and a request that failed or timed out before its answer's head was
 whole after 1 second, then 2; after three attempts in all it drops the batch

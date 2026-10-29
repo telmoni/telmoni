@@ -7,11 +7,10 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// The hooks the tests reach for: the sample rate's random source, the queue's
-// numbers, a record's hold, the W3C grammar's helpers and a time as sent.
+// The hooks the tests reach for: the sample rate's random source, a record's
+// hold, the W3C grammar's helpers and a time as sent.
 var (
 	WithRandom         = withRandom
-	WithQueue          = withQueue
 	HoldOne            = holdOne
 	EncodeBaggageValue = encodeBaggageValue
 	DecodeBaggageValue = decodeBaggageValue

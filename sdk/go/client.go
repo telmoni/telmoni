@@ -79,11 +79,16 @@ func withRandom(random func() float64) Option {
 	}
 }
 
-// withQueue sizes the processor's queue and batch and sets its delay, so a
-// test fills a queue of two or a batch of three.
-func withQueue(maxQueue, maxBatch int, delay time.Duration) Option {
+// WithBatching sizes the export queue and its batches and sets how long spans
+// wait for company: each size at least 1, the delay at least a millisecond,
+// as a queue or batch of nothing would drop every span or spin the worker.
+func WithBatching(maxQueue, maxBatch int, delay time.Duration) Option {
 	return func(o *options) {
-		o.limits = queueLimits{maxQueue: maxQueue, maxBatch: maxBatch, delay: delay}
+		o.limits = queueLimits{
+			maxQueue: max(maxQueue, 1),
+			maxBatch: max(maxBatch, 1),
+			delay:    max(delay, time.Millisecond),
+		}
 	}
 }
 

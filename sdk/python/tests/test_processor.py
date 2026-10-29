@@ -12,23 +12,20 @@ from pathlib import Path
 import pytest
 
 from conftest import FakeTransport, answer_from, kept, load_fixture
-from telmoni import Config, Telmoni
-from telmoni.exporter import Answer, Exporter
-from telmoni.processor import Processor
+from telmoni import Batching, Config, Telmoni
+from telmoni.exporter import Answer
 
 
 def test_the_queue_is_bounded_and_drops_are_counted_once(
     transport: FakeTransport, caplog: pytest.LogCaptureFixture
 ) -> None:
-    client = Telmoni(Config(api_key="k"), transport=transport)
     # A tiny queue, and a worker that will not wake until flushed.
-    client.processor.shutdown()
-    exporter = Exporter(client.config, transport=transport)
-    processor = Processor(
-        exporter, max_queue_size=2, max_batch_size=100, schedule_delay_s=60
+    client = Telmoni(
+        Config(api_key="k"),
+        transport=transport,
+        batching=Batching(max_queue_size=2, max_batch_size=100, schedule_delay_s=60),
     )
-    client.processor = processor
-    client._provider._active_span_processor._span_processors = (processor,)
+    processor = client.processor
     try:
         with client.run("bot"):
             for n in range(5):
@@ -57,14 +54,12 @@ def test_a_warning_whose_handler_raises_never_ends_the_worker(
         def handle(self, record: logging.LogRecord) -> bool:
             raise RuntimeError("the handler's own")
 
-    client = Telmoni(Config(api_key="k"), transport=transport)
-    client.processor.shutdown()
-    exporter = Exporter(client.config, transport=transport)
-    processor = Processor(
-        exporter, max_queue_size=2, max_batch_size=100, schedule_delay_s=60
+    client = Telmoni(
+        Config(api_key="k"),
+        transport=transport,
+        batching=Batching(max_queue_size=2, max_batch_size=100, schedule_delay_s=60),
     )
-    client.processor = processor
-    client._provider._active_span_processor._span_processors = (processor,)
+    processor = client.processor
     handler = Raising()
     logging.getLogger("telmoni").addHandler(handler)
     try:
@@ -123,15 +118,12 @@ def test_shutdown_drains_until_its_deadline_then_sends_nothing_more(
     # wait; a batch of one leaves the run's own span queued behind its step.
     rate_limited = answer_from(load_fixture("answers/rate-limited.json"))
     transport = FakeTransport([rate_limited] * 10)
-    client = Telmoni(Config(api_key="k"), transport=transport)
-    client.processor.shutdown()
-    processor = Processor(
-        Exporter(client.config, transport=transport),
-        max_batch_size=1,
-        schedule_delay_s=60,
+    client = Telmoni(
+        Config(api_key="k"),
+        transport=transport,
+        batching=Batching(max_batch_size=1, schedule_delay_s=60),
     )
-    client.processor = processor
-    client._provider._active_span_processor._span_processors = (processor,)
+    processor = client.processor
     with client.run("bot"), client.step("s"):
         pass
     assert not client.flush(timeout_s=0.01)
@@ -146,15 +138,12 @@ def test_shutdown_drains_until_its_deadline_then_sends_nothing_more(
 
 
 def test_a_batch_fills_and_goes_without_a_flush(transport: FakeTransport) -> None:
-    client = Telmoni(Config(api_key="k"), transport=transport)
-    client.processor.shutdown()
-    processor = Processor(
-        Exporter(client.config, transport=transport),
-        max_batch_size=3,
-        schedule_delay_s=60,
+    client = Telmoni(
+        Config(api_key="k"),
+        transport=transport,
+        batching=Batching(max_batch_size=3, schedule_delay_s=60),
     )
-    client.processor = processor
-    client._provider._active_span_processor._span_processors = (processor,)
+    processor = client.processor
     try:
         with client.run("bot"):
             for n in range(3):

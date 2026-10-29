@@ -597,6 +597,24 @@ func TestARecordAsLargeAsABatchTravelsInOneExport(t *testing.T) {
 	}
 }
 
+// A long turn of a coding agent passes 2,048 spans, the default queue: refused
+// there, it goes once the queue is raised.
+func TestARecordPastTheDefaultQueueGoesOnceTheQueueIsRaised(t *testing.T) {
+	record := theRecord(t)
+	record.Inside = nil
+	for range 2_500 {
+		record.Inside = append(record.Inside, telmoni.ToolCallRecord{Name: "t", Start: record.Start, End: record.Start})
+	}
+	if err := newHarness(t, testConfig(), nil).client.RecordRun(context.Background(), record); !errors.Is(err, telmoni.ErrQueueFull) {
+		t.Fatalf("RecordRun past the default queue = %v, want ErrQueueFull", err)
+	}
+	h := newHarness(t, testConfig(), nil, telmoni.WithBatching(3_000, 512, 5*time.Second))
+	recordRun(t, h, record)
+	if got := len(h.transport.spans(t)); got != 2_501 {
+		t.Errorf("sent %d spans, want the record's 2,501", got)
+	}
+}
+
 // A record made once the client is shut down is refused, never answered nil
 // for a record that went nowhere.
 func TestARecordAfterShutdownIsRefused(t *testing.T) {
@@ -617,7 +635,7 @@ func TestARecordAfterShutdownIsRefused(t *testing.T) {
 // dropped; drained, the queue takes it whole.
 func TestARecordTheQueueHasNoRoomForIsRefusedWhole(t *testing.T) {
 	// Room for four spans, and a worker that will not wake until flushed.
-	h := newHarness(t, testConfig(), nil, telmoni.WithQueue(4, 100, time.Minute))
+	h := newHarness(t, testConfig(), nil, telmoni.WithBatching(4, 100, time.Minute))
 	record := theRecord(t)
 	record.Inside = nil
 	for range 2 {
@@ -711,7 +729,7 @@ func TestARecordTravelsInExportsOfItsOwn(t *testing.T) {
 // A record larger than a batch is cut into batches counted from its own
 // start, wherever it lands in the queue.
 func TestARecordLargerThanABatchIsCutFromItsOwnStart(t *testing.T) {
-	h := newHarness(t, testConfig(), nil, telmoni.WithQueue(2048, 3, time.Minute))
+	h := newHarness(t, testConfig(), nil, telmoni.WithBatching(2048, 3, time.Minute))
 	record := theRecord(t)
 	record.Inside = nil
 	for range 3 {
@@ -786,7 +804,7 @@ func TestARecordsRoomIsKeptWhileItIsBuilt(t *testing.T) {
 	cfg := testConfig()
 	cfg.Sampler = sampler
 	// Room for four spans, and a worker that will not wake until flushed.
-	h := newHarness(t, cfg, nil, telmoni.WithQueue(4, 100, time.Minute))
+	h := newHarness(t, cfg, nil, telmoni.WithBatching(4, 100, time.Minute))
 	record := theRecord(t)
 	record.Inside = nil
 	for range 2 {
@@ -818,7 +836,7 @@ func TestARecordsRoomIsKeptWhileItIsBuilt(t *testing.T) {
 // A record queued behind a live step goes in the export after the step's, with
 // no flush.
 func TestARecordGoesAtOnce(t *testing.T) {
-	h := newHarness(t, testConfig(), nil, telmoni.WithQueue(2048, 512, time.Minute))
+	h := newHarness(t, testConfig(), nil, telmoni.WithBatching(2048, 512, time.Minute))
 	ctx, live := h.client.Run(context.Background(), "live", telmoni.RunOptions{})
 	_, step := live.Step(ctx, "live step")
 	step.End()
@@ -835,7 +853,7 @@ func TestARecordGoesAtOnce(t *testing.T) {
 // export of the record's. The queue is large, so the goroutine never fills it.
 func TestASpanEndingWhileARecordIsBuiltTravelsApart(t *testing.T) {
 	for range 20 {
-		h := newHarness(t, testConfig(), nil, telmoni.WithQueue(1<<16, 512, 5*time.Second))
+		h := newHarness(t, testConfig(), nil, telmoni.WithBatching(1<<16, 512, 5*time.Second))
 		ctx, live := h.client.Run(context.Background(), "live", telmoni.RunOptions{})
 		var stop atomic.Bool
 		done := make(chan struct{})

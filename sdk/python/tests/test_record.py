@@ -34,7 +34,7 @@ from telmoni import (
     runs,
 )
 from telmoni.exporter import Exporter
-from telmoni.processor import Processor
+from telmoni.processor import Batching, Processor
 
 VERSIONED = {"telemetry.sdk.version", "telemetry.distro.version"}
 
@@ -178,7 +178,9 @@ def traces_in(body: bytes) -> set[str]:
 def with_limits(client: Telmoni, transport: FakeTransport, **limits: Any) -> Processor:
     """The client's processor swapped for one of these limits."""
     client.processor.shutdown()
-    processor = Processor(Exporter(client.config, transport=transport), **limits)
+    processor = Processor(
+        Exporter(client.config, transport=transport), Batching(**limits)
+    )
     client.processor = processor
     client._provider._active_span_processor._span_processors = (processor,)
     return processor
@@ -690,6 +692,33 @@ def test_a_record_after_shutdown_is_refused(transport: FakeTransport) -> None:
     with pytest.raises(ShutdownError, match="shut down"):
         client.record_run(the_record())
     assert transport.requests == []
+
+
+def test_a_record_past_the_default_queue_goes_once_the_queue_is_raised(
+    transport: FakeTransport,
+) -> None:
+    """A long turn of a coding agent passes 2,048 spans, the default queue."""
+    golden = the_record()
+    record = dataclasses.replace(
+        golden,
+        inside=[
+            ToolCallRecord(name="t", start=golden.start, end=golden.start)
+            for _ in range(2_500)
+        ],
+    )
+    with pytest.raises(QueueFullError):
+        Telmoni(Config(api_key="k"), transport=transport).record_run(record)
+    client = Telmoni(
+        Config(api_key="k"),
+        transport=transport,
+        batching=Batching(max_queue_size=3_000),
+    )
+    try:
+        client.record_run(record)
+        assert client.flush()
+    finally:
+        client.shutdown()
+    assert len(transport.spans()) == 2_501
 
 
 def test_a_record_the_queue_has_no_room_for_is_refused_whole(

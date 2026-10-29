@@ -19,7 +19,7 @@ import (
 
 func TestTheQueueIsBoundedAndDropsAreCountedOnce(t *testing.T) {
 	// A queue of two, and a worker that will not wake until flushed.
-	h := newHarness(t, testConfig(), nil, telmoni.WithQueue(2, 100, time.Minute))
+	h := newHarness(t, testConfig(), nil, telmoni.WithBatching(2, 100, time.Minute))
 	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
 	for n := range 5 {
 		_, step := run.Step(ctx, fmt.Sprintf("s%d", n))
@@ -91,7 +91,7 @@ func TestAShutdownGivesUpAtItsDeadline(t *testing.T) {
 		// batch of one leaves the run's own span queued behind its step.
 		slow := scripted{status: http.StatusTooManyRequests, headers: map[string]string{"Retry-After": "20"}, body: []byte("{}")}
 		transport := newFakeTransport(t, slow, slow, slow, slow, slow, slow)
-		client, err := telmoni.New(testConfig(), telmoni.WithTransport(transport.send), telmoni.WithQueue(2048, 1, time.Minute))
+		client, err := telmoni.New(testConfig(), telmoni.WithTransport(transport.send), telmoni.WithBatching(2048, 1, time.Minute))
 		if err != nil {
 			t.Fatalf("building the client: %v", err)
 		}
@@ -117,7 +117,7 @@ func TestAShutdownGivesUpAtItsDeadline(t *testing.T) {
 func TestAClientDroppedWithoutShutdownSendsWhatItQueued(t *testing.T) {
 	transport := newFakeTransport(t)
 	func() {
-		client, err := telmoni.New(testConfig(), telmoni.WithTransport(transport.send), telmoni.WithQueue(2048, 512, time.Hour))
+		client, err := telmoni.New(testConfig(), telmoni.WithTransport(transport.send), telmoni.WithBatching(2048, 512, time.Hour))
 		if err != nil {
 			t.Fatalf("building the client: %v", err)
 		}
@@ -135,7 +135,7 @@ func TestAClientDroppedWithoutShutdownSendsWhatItQueued(t *testing.T) {
 }
 
 func TestABatchFillsAndGoesWithoutAFlush(t *testing.T) {
-	h := newHarness(t, testConfig(), nil, telmoni.WithQueue(2048, 3, time.Minute))
+	h := newHarness(t, testConfig(), nil, telmoni.WithBatching(2048, 3, time.Minute))
 	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
 	for n := range 3 {
 		_, step := run.Step(ctx, fmt.Sprintf("s%d", n))
@@ -217,7 +217,7 @@ func TestAHookThatPanicsDoesNotStopTheExporter(t *testing.T) {
 	transport := newFakeTransport(t)
 	h := newHarness(t, testConfig(), transport,
 		telmoni.WithLogger(slog.New(panicking{})),
-		telmoni.WithQueue(1, 100, time.Minute),
+		telmoni.WithBatching(1, 100, time.Minute),
 	)
 	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
 	for n := range 3 {

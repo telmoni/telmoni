@@ -17,6 +17,7 @@ import weakref
 from collections import deque
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
+from dataclasses import dataclass
 from multiprocessing import util as multiprocessing_util
 
 from opentelemetry.context import Context
@@ -42,19 +43,28 @@ class ShutdownError(RuntimeError):
     nothing of it."""
 
 
+@dataclass(frozen=True)
+class Batching:
+    """How spans are batched on their way out: OpenTelemetry's numbers by
+    default. A queue without bound is ``sys.maxsize``."""
+
+    max_queue_size: int = MAX_QUEUE_SIZE
+    max_batch_size: int = MAX_BATCH_SIZE
+    schedule_delay_s: float = SCHEDULE_DELAY_S
+
+
 class Processor(SpanProcessor):
-    def __init__(
-        self,
-        exporter: Exporter,
-        *,
-        max_queue_size: int = MAX_QUEUE_SIZE,
-        max_batch_size: int = MAX_BATCH_SIZE,
-        schedule_delay_s: float = SCHEDULE_DELAY_S,
-    ) -> None:
+    def __init__(self, exporter: Exporter, batching: Batching | None = None) -> None:
+        given = batching or Batching()
         self._exporter = exporter
-        self._max_queue_size = max_queue_size
-        self._max_batch_size = max_batch_size
-        self._schedule_delay_s = schedule_delay_s
+        # A queue or batch of nothing drops every span or takes empty batches
+        # forever, and a delay of none spins an idle worker: each at least one,
+        # as Rust's, the delay within what a lock's wait takes.
+        self._max_queue_size = max(1, given.max_queue_size)
+        self._max_batch_size = max(1, given.max_batch_size)
+        self._schedule_delay_s = min(
+            max(0.001, given.schedule_delay_s), threading.TIMEOUT_MAX
+        )
         self._lock = threading.Lock()
         self._wake = threading.Condition(self._lock)
         self._recording = threading.Lock()

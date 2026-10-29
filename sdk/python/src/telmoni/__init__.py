@@ -15,11 +15,12 @@ from .models import (
     ToolCallRecord,
     Usage,
 )
-from .processor import QueueFullError, ShutdownError
+from .processor import Batching, QueueFullError, ShutdownError
 from .runs import ModelCall, Run, Step, ToolCall, current_run
 
 __all__ = [
     "DEFAULT_ENDPOINT",
+    "Batching",
     "CapExceededError",
     "Config",
     "ModelCall",
