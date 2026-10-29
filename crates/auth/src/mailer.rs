@@ -127,7 +127,7 @@ pub enum AuthMail<'a> {
     /// The built-in provider's reset: the link a new password is chosen from.
     PasswordReset { link: &'a str },
     /// The code the built-in provider mails to the NEW address of a change,
-    /// which proves that address is reachable; [`Mailer::send_email_change_code`]
+    /// which proves that address is reachable; [`AuthMail::EmailChangeCode`]
     /// goes to the current one.
     NewAddressCode { code: &'a str },
 }

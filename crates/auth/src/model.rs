@@ -13,7 +13,7 @@ use telmoni_shared::{ApiKeyScope, OrganizationId};
 #[sqlx(type_name = "text", rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
 pub enum InviteScope {
-    /// An invitation to one project: `target_id` is a `ProjectId`, the role a [`Role`].
+    /// An invitation to one project: `target_id` is a `ProjectId`, the role a [`Role`](telmoni_shared::Role).
     Project,
     /// An invitation to the organization: `target_id` is an `OrganizationId`.
     Organization,

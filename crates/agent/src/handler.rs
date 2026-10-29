@@ -219,7 +219,7 @@ pub enum TurnEvent<'a> {
     },
     Text(&'a str),
     /// `'static`, so only the agent's own names fit: the one the model
-    /// called is free text ([`tools::tool_name`]).
+    /// called is free text (`tools::tool_name`).
     Tool(&'static str),
     Citation(&'a Citation),
     Done {

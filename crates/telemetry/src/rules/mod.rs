@@ -325,7 +325,7 @@ pub struct Rule {
 impl RuleInput {
     /// The alert, or why it cannot be one: a name of 1 to [`RULE_NAME_MAX`]
     /// characters; a kind of span ours names; an aggregation its measure
-    /// folds ([`folds`]); finite thresholds, a warning one met before the
+    /// folds ([`RuleMeasure::folds`](telmoni_shared::RuleMeasure::folds)); finite thresholds, a warning one met before the
     /// alert's as the operator reads them; and re-notification from a minute
     /// to a week.
     pub fn checked(self) -> Result<Rule, TelmoniError> {
