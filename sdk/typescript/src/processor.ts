@@ -60,9 +60,14 @@ export class Processor implements SpanProcessor {
 
   constructor(exporter: Exporter, options: ProcessorOptions = {}) {
     this.#exporter = exporter;
-    this.#maxQueueSize = options.maxQueueSize ?? MAX_QUEUE_SIZE;
-    this.#maxBatchSize = options.maxBatchSize ?? MAX_BATCH_SIZE;
-    this.#delayMs = (options.scheduleDelaySeconds ?? SCHEDULE_DELAY_S) * 1000;
+    this.#maxQueueSize = bound(options.maxQueueSize ?? MAX_QUEUE_SIZE, 'maxQueueSize');
+    this.#maxBatchSize = bound(options.maxBatchSize ?? MAX_BATCH_SIZE, 'maxBatchSize');
+    const delay: unknown = options.scheduleDelaySeconds ?? SCHEDULE_DELAY_S;
+    // Node fires a timer past 2^31 - 1 ms at once.
+    if (typeof delay !== 'number' || !(delay >= 0 && delay * 1000 <= 2 ** 31 - 1)) {
+      throw new RangeError('scheduleDelaySeconds must be a number of seconds from 0, under 25 days');
+    }
+    this.#delayMs = delay * 1000;
     live.add(this.#held);
     if (!hooked) {
       hooked = true;
@@ -231,6 +236,14 @@ export class Processor implements SpanProcessor {
     this.#flushers = [];
     for (const resolve of flushers) resolve();
   }
+}
+
+/** A queue's bound as given: a whole number from 1, or `Infinity` for none; a batch of nothing would never export. */
+function bound(given: unknown, name: string): number {
+  if (typeof given === 'number' && (given === Number.POSITIVE_INFINITY || (Number.isInteger(given) && given >= 1))) {
+    return given;
+  }
+  throw new RangeError(`${name} must be a whole number from 1, or Infinity`);
 }
 
 /** A wait that holds nothing: unref'd, so a shutdown past its deadline lets the process go. */

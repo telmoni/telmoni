@@ -91,6 +91,17 @@ describe('the processor', () => {
     expect(h.transport.requests).toHaveLength(1);
   });
 
+  it('refuses a bound that is none at construction, as a batch of nothing would never export', () => {
+    for (const processor of [{ maxBatchSize: 0 }, { maxBatchSize: Number.NaN }, { maxQueueSize: 0.5 }]) {
+      expect(() => harness({}, { processor })).toThrow(RangeError);
+    }
+    for (const scheduleDelaySeconds of [-1, Number.NaN, Infinity]) {
+      expect(() => harness({}, { processor: { scheduleDelaySeconds } })).toThrow(RangeError);
+    }
+    // No bound at all, as the coding agents' plugins ask.
+    expect(() => harness({}, { processor: { maxQueueSize: Infinity, scheduleDelaySeconds: 0 } })).not.toThrow();
+  });
+
   it('flush gives up past its timeout', async () => {
     const h = harness({}, { transport: () => new Promise(() => {}) });
     h.telmoni.run('bot', () => {});

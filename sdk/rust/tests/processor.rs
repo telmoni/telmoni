@@ -49,6 +49,27 @@ fn the_queue_is_bounded_and_drops_are_counted_once() -> Outcome {
     Ok(())
 }
 
+/// A delay of nothing sends at once, and leaves an idle worker waiting to be
+/// told rather than spinning on a timer of nothing.
+#[test]
+fn a_delay_of_nothing_sends_at_once() -> Outcome {
+    let transport = FakeTransport::new([])?;
+    let warnings = Warnings::default();
+    let sleeps = Sleeps::default();
+    let mut hooks = hooks(&transport, &warnings, &sleeps);
+    hooks.batching = Batching {
+        schedule_delay: Duration::ZERO,
+        ..Batching::default()
+    };
+    let telmoni = Telmoni::with_hooks(keyed(), hooks);
+    telmoni.run("bot", RunOptions::default())?.end();
+    assert!(transport.wait_for(1), "the run's span was not sent at once");
+    telmoni.run("bot", RunOptions::default())?.end();
+    assert!(transport.wait_for(2), "an idle worker missed the next span");
+    telmoni.shutdown();
+    Ok(())
+}
+
 #[test]
 fn shutdown_drains_what_is_queued() -> Outcome {
     let harness = Harness::new()?;

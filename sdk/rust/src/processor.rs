@@ -206,7 +206,8 @@ impl SpanProcessor for Processor {
             return;
         }
         state.queue.push_back(span);
-        if state.queue.len() >= self.shared.batching.max_batch_size {
+        // The first span wakes the idle worker, a full batch a waiting one.
+        if state.queue.len() == 1 || state.queue.len() >= self.shared.batching.max_batch_size {
             self.shared.wake.notify_all();
         }
     }
@@ -249,6 +250,14 @@ fn work(shared: &Shared, exporter: &Exporter, warner: &Warner) {
     loop {
         let (batch, dropped) = {
             let mut state = lock(&shared.state);
+            // Idle, it waits to be told, never on a timer, so a zero delay
+            // cannot spin it.
+            while !due(&state, &shared.batching) && state.queue.is_empty() {
+                state = shared
+                    .wake
+                    .wait(state)
+                    .unwrap_or_else(PoisonError::into_inner);
+            }
             if !due(&state, &shared.batching) {
                 state = shared
                     .wake
