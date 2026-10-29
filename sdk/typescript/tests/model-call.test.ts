@@ -185,7 +185,7 @@ describe('a model call', () => {
       [
         'chat',
         `generate_content ${'m'.repeat(128)}`,
-        `${'o'.repeat(20)} ${'m'.repeat(128)}`.slice(0, 145),
+        `chat ${'m'.repeat(128)}`,
         `generate_content ${'😀'.repeat(128)}`,
       ].sort(),
     );
@@ -200,7 +200,7 @@ describe('a model call', () => {
     expect(sent[`generate_content ${'😀'.repeat(128)}`]!['gen_ai.response.model']).toBe('😀'.repeat(128));
     expect([...h.warnings].sort()).toEqual([
       'telmoni: a model call needs its model; one without is sent named by its operation alone',
-      "telmoni: a model call's name must be up to 145 characters; it is sent cut to its first 145",
+      "telmoni: a model call's operation must be chat, generate_content, text_completion or embeddings, which ingest reads as a model call; it is sent as chat",
       'telmoni: a model must be up to 128 characters; it is sent cut to its first 128',
       'telmoni: a provider must be up to 128 characters; it is sent cut to its first 128',
       'telmoni: a response model must be up to 128 characters; it is sent cut to its first 128',

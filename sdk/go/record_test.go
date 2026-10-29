@@ -219,6 +219,10 @@ func sameBody(t *testing.T, got, want *harness) {
 	}
 }
 
+// operationWarning is what the golden record's call of an operation ingest
+// reads as no model call warns.
+const operationWarning = "telmoni: a model call's operation must be chat, generate_content, text_completion or embeddings, which ingest reads as a model call; it is sent as chat"
+
 func TestTheRecordMatchesTheGoldenExport(t *testing.T) {
 	fixture := loadRecorded(t)
 	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret(testKey), CaptureContent: fixture.Scenario.CaptureContent}, nil)
@@ -240,6 +244,12 @@ func TestTheRecordMatchesTheGoldenExport(t *testing.T) {
 		if got := req.header.Get("User-Agent"); got != "telmoni-go/"+telmoni.Version {
 			t.Errorf("User-Agent = %q", got)
 		}
+	}
+	// The record's one call of an operation ingest reads as no model call goes
+	// as chat.
+	want := []string{operationWarning}
+	if got := h.logs.warnings(); !reflect.DeepEqual(got, want) {
+		t.Errorf("warnings = %q, want %q", got, want)
 	}
 }
 
@@ -412,14 +422,6 @@ func TestARecordRefusedReturnsAnErrorAndSendsNothing(t *testing.T) {
 		{"a model call's error type of 129 characters", func(r *telmoni.RunRecord) {
 			r.Inside = append(r.Inside, telmoni.ModelCallRecord{Model: "m", ErrorType: strings.Repeat("e", 129), Start: start, End: start})
 		}, "telmoni: a recorded model call's ErrorType must be up to 128 characters"},
-		{"an operation and a model of 145 characters together", func(r *telmoni.RunRecord) {
-			r.Inside = append(r.Inside, telmoni.ModelCallRecord{Operation: strings.Repeat("o", 17), Model: strings.Repeat("m", 128), Start: start, End: start})
-		}, "telmoni: a recorded model call's operation and model must be up to 144 characters together"},
-		{"an operation and a model of 145 characters together, in a step", func(r *telmoni.RunRecord) {
-			r.Inside = append(r.Inside, telmoni.StepRecord{Name: "s", Start: start, End: start, Calls: []telmoni.CallRecord{
-				telmoni.ModelCallRecord{Operation: strings.Repeat("é", 20), Model: strings.Repeat("é", 125), Start: start, End: start},
-			}})
-		}, "telmoni: a recorded model call's operation and model must be up to 144 characters together"},
 		{"a tool's name of 146 characters", func(r *telmoni.RunRecord) {
 			r.Inside = append(r.Inside, telmoni.ToolCallRecord{Name: strings.Repeat("t", 146), Start: start, End: start})
 		}, "telmoni: a recorded tool call's Name must be up to 145 characters"},
@@ -916,7 +918,7 @@ func TestARecordSendsItsFirst32TagsByKeyWarnedOfBeforeItsHold(t *testing.T) {
 	if attributes["telmoni.cancelled"] != true {
 		t.Errorf("telmoni.cancelled = %v, want the mark the run ended with", attributes["telmoni.cancelled"])
 	}
-	want := []string{"telmoni: a run carries up to 32 tags, the most ingest keeps; the rest are not sent"}
+	want := []string{"telmoni: a run carries up to 32 tags, the most ingest keeps; the rest are not sent", operationWarning}
 	if warnings := logs.warnings(); !reflect.DeepEqual(warnings, want) {
 		t.Errorf("warnings = %q, want %q", warnings, want)
 	}
@@ -935,7 +937,7 @@ func TestATagIngestDropsTakesNoneOfARecords32WarnedOfBeforeItsHold(t *testing.T)
 	if got, want := tagsOf(attributesOf(t, run)), slices.Sorted(maps.Keys(numberedTags(32))); !reflect.DeepEqual(got, want) {
 		t.Errorf("tags sent: %q\nwant all 32 ingest keeps: %q", got, want)
 	}
-	want := []string{"telmoni: a tag's key must be 1 to 64 characters and its value up to 256; the tag is not sent"}
+	want := []string{"telmoni: a tag's key must be 1 to 64 characters and its value up to 256; the tag is not sent", operationWarning}
 	if warnings := logs.warnings(); !reflect.DeepEqual(warnings, want) {
 		t.Errorf("warnings = %q, want %q", warnings, want)
 	}

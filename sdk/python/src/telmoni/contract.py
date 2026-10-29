@@ -100,6 +100,7 @@ CONTENT = frozenset(
 MODEL_OPERATIONS = frozenset(
     {"chat", "generate_content", "text_completion", "embeddings"}
 )
+"""The operations ingest reads as a model call; any other files one elsewhere."""
 RUN_OPERATION = "invoke_agent"
 """A run's operation, and the first word of its span's name."""
 DEFAULT_MODEL_OPERATION = "chat"

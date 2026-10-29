@@ -218,7 +218,8 @@ func (r *recorder) open(parent context.Context, name string, kind trace.SpanKind
 func (r *recorder) call(parent context.Context, call CallRecord) {
 	switch call := itemValue(call).(type) {
 	case ModelCallRecord:
-		name, own := modelCallOpening(call.Model, call.Operation, call.Provider)
+		operation, _ := modelOperation(call.Operation)
+		name, own := modelCallOpening(call.Model, operation, call.Provider)
 		// No warning under the hold: RecordRun gave it before.
 		attrs := slices.Concat(r.inherited, own, usageAttributes(call.Usage, nil))
 		span := r.open(parent, name, trace.SpanKindClient, attrs, call.Start)
@@ -305,7 +306,8 @@ func recordSpans(record RunRecord) int {
 	return n
 }
 
-// warnUsage warns of each token count the record's calls leave off.
+// warnUsage warns of each token count the record's calls leave off, and of
+// an operation sent as chat.
 func (c *Client) warnUsage(record RunRecord) {
 	for _, item := range record.Inside {
 		var calls []CallRecord
@@ -318,6 +320,9 @@ func (c *Client) warnUsage(record RunRecord) {
 		for _, call := range calls {
 			if call, ok := itemValue(call).(ModelCallRecord); ok {
 				usageAttributes(call.Usage, c.warnCount)
+				if _, setAside := modelOperation(call.Operation); setAside {
+					c.warnOperation()
+				}
 			}
 		}
 	}
@@ -359,10 +364,6 @@ func checkCall(call CallRecord) error {
 		})
 		if err != nil {
 			return err
-		}
-		// Its span is named "<operation> <model>", a name ingest caps too.
-		if utf8.RuneCountInString(modelOperation(call.Operation))+utf8.RuneCountInString(call.Model) > nameMax-1 {
-			return fmt.Errorf("telmoni: a recorded model call's operation and model must be up to %d characters together", nameMax-1)
 		}
 		return checkTimes(call.Start, call.End)
 	case ToolCallRecord:

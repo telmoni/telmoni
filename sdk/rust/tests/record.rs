@@ -261,6 +261,14 @@ fn the_record_matches_the_golden_export() -> Outcome {
                 .is_some_and(|agent| agent.starts_with("telmoni-rust/"))
         );
     }
+    // The record's one call of an operation ingest reads as no model call goes
+    // as chat.
+    assert_eq!(
+        harness.warnings.all(),
+        [
+            "telmoni: a model call's operation must be chat, generate_content, text_completion or embeddings, which ingest reads as a model call; it is sent as chat"
+        ]
+    );
     Ok(())
 }
 
@@ -638,7 +646,7 @@ fn a_record_with_a_text_past_ingests_cap_is_refused() -> Outcome {
     };
     let model = |n: usize| ModelCallRecord::new(text(n), at, at);
     let tool = |n: usize| ToolCallRecord::new(text(n), at, at);
-    let cases: [Capped<'_>; 13] = [
+    let cases: [Capped<'_>; 11] = [
         ("run's agent", 128, &|n| RunRecord {
             agent: text(n),
             ..golden.clone()
@@ -691,25 +699,6 @@ fn a_record_with_a_text_past_ingests_cap_is_refused() -> Outcome {
                 ModelCallRecord {
                     error_type: Some(text(n)),
                     ..model(1)
-                }
-                .into(),
-            )
-        }),
-        // An operation of its own, since the longest ingest reads leaves room.
-        ("model call's operation and model", 144, &|n| {
-            in_step(
-                ModelCallRecord {
-                    operation: Some(text(20)),
-                    ..model(n - 20)
-                }
-                .into(),
-            )
-        }),
-        ("model call's operation and model", 144, &|n| {
-            inside(
-                ModelCallRecord {
-                    operation: Some(text(27)),
-                    ..model(n - 27)
                 }
                 .into(),
             )
@@ -863,7 +852,8 @@ fn a_record_leaves_off_a_tag_ingest_would_drop_before_its_32() -> Outcome {
     assert_eq!(
         harness.warnings.all(),
         [
-            "telmoni: a tag's key must be 1 to 64 characters and its value up to 256; the tag is not sent"
+            "telmoni: a model call's operation must be chat, generate_content, text_completion or embeddings, which ingest reads as a model call; it is sent as chat",
+            "telmoni: a tag's key must be 1 to 64 characters and its value up to 256; the tag is not sent",
         ]
     );
     Ok(())
@@ -880,7 +870,11 @@ fn a_records_warnings_come_before_its_hold() -> Outcome {
     let client: Arc<Mutex<Option<Telmoni>>> = Arc::default();
     let through = Collected::<bool>::default();
     let (shared, noted, warned) = (Arc::clone(&client), through.clone(), warnings.clone());
-    let probe = the_record()?;
+    // No call in it, so the probe gives no warning of its own.
+    let probe = RunRecord {
+        inside: Vec::new(),
+        ..the_record()?
+    };
     hooks.warn = Box::new(move |text| {
         warned.push(text.to_owned());
         let Some(telmoni) = lock(&shared).clone() else {

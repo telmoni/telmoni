@@ -45,7 +45,7 @@ type ModelCallOptions struct {
 	// anthropic, ...
 	Provider string
 	// Operation is chat, generate_content, text_completion or embeddings;
-	// blank means chat.
+	// blank means chat, and any other goes as chat with one warning.
 	Operation string
 	// InputMessages and SystemInstructions are content: recorded as JSON,
 	// sent only when CaptureContent is on and the project's mode allows.
@@ -499,14 +499,18 @@ func (r *Run) ModelCall(ctx context.Context, model string, opts ModelCallOptions
 	if opts.Provider != "" {
 		provider = c.cut(opts.Provider, providerMax, "provider")
 	}
-	name, attrs := modelCallOpening(model, opts.Operation, provider)
+	operation, setAside := modelOperation(opts.Operation)
+	if setAside {
+		c.warnOperation()
+	}
+	name, attrs := modelCallOpening(model, operation, provider)
 	if opts.InputMessages != nil {
 		attrs = append(attrs, attribute.String(attrInputMessages, asJSON(opts.InputMessages)))
 	}
 	if opts.SystemInstructions != nil {
 		attrs = append(attrs, attribute.String(attrSystemInstructions, asJSON(opts.SystemInstructions)))
 	}
-	ctx, span := r.child(ctx, c.cut(name, nameMax, "model call's name"), trace.SpanKindClient, attrs)
+	ctx, span := r.child(ctx, name, trace.SpanKindClient, attrs)
 	return ctx, &ModelCall{handle: handle{span: span, client: c}, run: r, provider: provider, model: model}
 }
 
@@ -556,9 +560,9 @@ func (c *Client) runOpening(agent string, inherited []attribute.KeyValue, rate f
 }
 
 // modelCallOpening is a model call's span name and own attributes, live or
-// recorded, an empty model or provider left off.
+// recorded, its operation one ingest reads and an empty model or provider
+// left off.
 func modelCallOpening(model, operation, provider string) (string, []attribute.KeyValue) {
-	operation = modelOperation(operation)
 	attrs := []attribute.KeyValue{attribute.String(attrOperation, operation)}
 	name := operation
 	if model != "" {
@@ -700,13 +704,22 @@ func (t *ToolCall) Returned(result any) {
 	t.span.SetAttributes(attribute.String(attrToolCallResult, asJSON(result)))
 }
 
-// modelOperation is a model call's operation, chat when blank: sent blank, the
-// span would be named " <model>" and ingest would read it as a step.
-func modelOperation(operation string) string {
+// modelOperation is a model call's operation as ingest reads one: chat for a
+// blank one, and for one ingest would file as a step, a run or a tool call,
+// which setAside reports for the caller to warn of (warnOperation).
+func modelOperation(operation string) (read string, setAside bool) {
 	if strings.TrimSpace(operation) == "" {
-		return defaultModelOperation
+		return defaultModelOperation, false
 	}
-	return operation
+	if slices.Contains(modelOperations, operation) {
+		return operation, false
+	}
+	return defaultModelOperation, true
+}
+
+// warnOperation warns once of an operation sent as chat.
+func (c *Client) warnOperation() {
+	c.exporter.warnOnce("call:operation", "telmoni: a model call's operation must be chat, generate_content, text_completion or embeddings, which ingest reads as a model call; it is sent as chat")
 }
 
 // usageAttributes is a call's token counts but any below zero, and its cost

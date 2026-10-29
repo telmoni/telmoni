@@ -74,12 +74,13 @@ error type that is no string goes as its text with one warning, as does a tag
 that is no string, finite number or boolean; an error, or a class, handed to
 `fail()` goes as its class's name, never its message. Past ingest's caps,
 counted in characters, a name, the agent, a model, a provider, a response
-model or an error type is cut to its cap — a step's or a tool's name, and a
-model call's `<operation> <model>`, to 145, the rest to 128 — and a user past
-128 or a session past 200 is left off, since cut it would name another; a
-step named nothing goes as `step`, and a model call with no model is named by
-its operation alone; each with one warning, where ingest would refuse the
-span, or the whole run for its agent, user or session.
+model or an error type is cut to its cap — a step's or a tool's name to 145,
+the rest to 128 — and a user past 128 or a session past 200 is left off, since
+cut it would name another; a step named nothing goes as `step`, a model call
+with no model is named by its operation alone, and one of an operation ingest
+reads as no model call, any but `chat`, `generate_content`, `text_completion` and `embeddings`, goes
+as `chat`; each with one warning, where ingest would refuse the span, or the
+whole run for its agent, user or session, or file the call elsewhere.
 
 `telmoni.wrap(agent, options, fn)` returns `fn` opening a run per call, with
 the run's handle as `fn`'s last argument:
@@ -144,9 +145,8 @@ no array, in the order it ran, tags or a usage that is no object (an array or a
 else left off with one warning. A time outside what ingest reads (after the
 Unix epoch, and less than 2^64 nanoseconds after it, in July 2554), text longer
 than ingest keeps (a step's or a tool's name past 145 characters, the agent, a
-model, a provider, a user or an error type past 128, a session past 200, or a
-model call's operation and model past 144 together, counted in characters, not
-UTF-16's units), or a span
+model, a provider, a user or an error type past 128, or a session past 200,
+counted in characters, not UTF-16's units), or a span
 that ends before it starts throws a `RangeError`. Either sends nothing. A
 record the export queue has no room for throws `QueueFullError`, nothing of it
 queued: flush, or wait, and record it again. One made once the client is shut

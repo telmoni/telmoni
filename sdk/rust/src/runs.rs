@@ -106,7 +106,8 @@ pub struct ModelCallOptions {
     /// Blank reads as none.
     pub provider: Option<String>,
     /// The operation: `chat` unless given (`generate_content`,
-    /// `text_completion`, `embeddings`); a blank one is `chat` too.
+    /// `text_completion`, `embeddings`); a blank one is `chat` too, and any
+    /// other, with one warning.
     pub operation: Option<String>,
     /// The messages sent to the model: content, which leaves the process only
     /// when [`Config::capture_content`](crate::Config::capture_content) is on
@@ -274,8 +275,8 @@ impl Handle {
             held: Usage::default(),
             counted: 0.0,
         };
-        let (name, mut attributes) = model_call_opening(&model, options.operation, provider);
-        let name = cut(&name, contract::NAME_MAX, "model call's name", warner);
+        let operation = model_operation(options.operation.as_deref(), warner);
+        let (name, mut attributes) = model_call_opening(&model, operation, provider);
         if let Some(messages) = options.input_messages {
             attributes.push(KeyValue::new(contract::INPUT_MESSAGES, messages.0));
         }
@@ -902,24 +903,29 @@ pub(crate) fn run_attributes(
     attributes
 }
 
-/// The operation a model call's span is named for: `chat` unless one not
-/// blank is given.
-pub(crate) fn model_operation(given: Option<&str>) -> &str {
-    // Sent blank, the span would be named ` <model>` and ingest would read it
-    // as a step.
-    given
-        .filter(|operation| !operation.trim().is_empty())
-        .unwrap_or(contract::DEFAULT_MODEL_OPERATION)
+/// A model call's operation as ingest reads one: `chat` for a blank one, and,
+/// with one warning, for one ingest would file as a step, a run or a tool call.
+pub(crate) fn model_operation(given: Option<&str>, warner: &Warner) -> String {
+    match given.filter(|operation| !operation.trim().is_empty()) {
+        Some(operation) if contract::MODEL_OPERATIONS.contains(&operation) => operation.to_owned(),
+        Some(_) => {
+            warner.once(
+                "call:operation".to_owned(),
+                "telmoni: a model call's operation must be chat, generate_content, text_completion or embeddings, which ingest reads as a model call; it is sent as chat",
+            );
+            contract::DEFAULT_MODEL_OPERATION.to_owned()
+        }
+        None => contract::DEFAULT_MODEL_OPERATION.to_owned(),
+    }
 }
 
 /// A model call's span name, `<operation> <model>`, and what it opens with
 /// besides what the run carries and any content.
 pub(crate) fn model_call_opening(
     model: &str,
-    operation: Option<String>,
+    operation: String,
     provider: Option<String>,
 ) -> (String, Vec<KeyValue>) {
-    let operation = model_operation(operation.as_deref()).to_owned();
     // Ingest refuses a call over an empty model, but keeps one with none.
     let name = if model.is_empty() {
         operation.clone()

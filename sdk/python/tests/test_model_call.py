@@ -186,7 +186,8 @@ def test_a_provider_or_response_model_goes_as_text_and_an_empty_one_not_at_all(
 def test_a_model_calls_text_past_ingests_caps_keeps_its_call(
     telmoni: Telmoni, transport: FakeTransport, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Ingest refuses a call over an empty model, or text past its cap."""
+    """Ingest refuses a call over an empty model, or text past its cap, and files
+    one whose operation is none of its four as no model call."""
     with telmoni.run("bot") as run:
         for _ in range(2):
             with run.model_call(""):
@@ -209,7 +210,7 @@ def test_a_model_calls_text_past_ingests_caps_keeps_its_call(
     assert sent.keys() == {
         "chat",
         "generate_content " + "m" * 128,
-        ("o" * 20 + " " + "m" * 128)[:145],
+        "chat " + "m" * 128,
         "generate_content " + "😀" * 128,
     }
     assert "gen_ai.request.model" not in sent["chat"]
@@ -227,8 +228,9 @@ def test_a_model_calls_text_past_ingests_caps_keeps_its_call(
             "its operation alone"
         ),
         (
-            "telmoni: a model call's name must be up to 145 characters; "
-            "it is sent cut to its first 145"
+            "telmoni: a model call's operation must be chat, generate_content, "
+            "text_completion or embeddings, which ingest reads as a model call; "
+            "it is sent as chat"
         ),
         "telmoni: a model must be up to 128 characters; it is sent cut to its first 128",
         (

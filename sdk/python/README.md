@@ -77,11 +77,12 @@ text with one warning, as does a tag that is no string, finite number or bool;
 an exception or an exception's class handed to `fail()` goes as the class's
 name, never its message. Past ingest's caps, counted in characters, a name, the agent, a model, a
 provider, a response model or an error type is cut to its cap — a step's or a
-tool's name, and a model call's `<operation> <model>`, to 145, the rest to
-128 — and a user past 128 or a session past 200 is left off, since cut it
-would name another; a step named nothing goes as `step`, and a model call with
-no model is named by its operation alone; each with one warning, where ingest
-would refuse the span, or the whole run for its agent, user or session.
+tool's name to 145, the rest to 128 — and a user past 128 or a session past 200
+is left off, since cut it would name another; a step named nothing goes as
+`step`, a model call with no model is named by its operation alone, and one of
+an operation ingest reads as no model call, any but `chat`, `generate_content`, `text_completion` and `embeddings`,
+goes as `chat`; each with one warning, where ingest would refuse the span,
+or the whole run for its agent, user or session, or file the call elsewhere.
 
 ## A run recorded after it ended
 
@@ -130,8 +131,8 @@ UUID nor 32 hex digits, or is the nil UUID, a time without its timezone or
 outside what ingest reads (after the Unix epoch, and less than 2^64 nanoseconds
 after it, in July 2554), an empty step's name or model, text longer than
 ingest keeps (a step's or a tool's name past 145 characters, the agent, a
-model, a provider, a user or an error type past 128, a session past 200, or a
-model call's operation and model past 144 together), or a span that ends
+model, a provider, a user or an error type past 128, or a session past 200),
+or a span that ends
 before it starts raises `ValueError`. A
 field of the wrong type raises `TypeError` — a time that is no `datetime`, an
 item of another class, `inside` or `calls` that is no sequence (a list or a

@@ -30,6 +30,7 @@ Nothing is derived at random, so the export is compared nearly whole:
 2. Every `attributes` array is sorted by `key`, the resource's too; spans keep the order they were sent in.
 3. `telemetry.sdk.language` is replaced by `<language>`; `telemetry.sdk.version`, `telemetry.distro.version` and the scope's `version` by `<version>`.
 4. Everything else is compared as JSON, ids and times included. The trace's id is the run's, without its hyphens. Each span's id is the first eight bytes, in hex, of the version 5 UUID (RFC 9562) named by the span's place in the record, in decimal, under the run's id: `0` the run, then each step and call from `1` in the record's order, a step before its calls.
+5. The one warning is for the call whose operation is `rerank`, which ingest reads as no model call, so it goes as `chat`: `telmoni: a model call's operation must be chat, generate_content, text_completion or embeddings, which ingest reads as a model call; it is sent as chat`.
 
 The same record sent twice must be the same bytes, which ingest's claim on a body answers once.
 

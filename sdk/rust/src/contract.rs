@@ -84,6 +84,9 @@ pub(crate) fn is_content(key: &str) -> bool {
 
 pub(crate) const RUN_OPERATION: &str = "invoke_agent";
 pub(crate) const DEFAULT_MODEL_OPERATION: &str = "chat";
+/// The operations ingest reads as a model call; any other files one elsewhere.
+pub(crate) const MODEL_OPERATIONS: [&str; 4] =
+    ["chat", "generate_content", "text_completion", "embeddings"];
 pub(crate) const TOOL_OPERATION: &str = "execute_tool";
 
 /// The answer's header naming the project's content mode: off or on.

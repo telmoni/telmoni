@@ -239,16 +239,12 @@ fn a_model_calls_text_past_ingests_caps_keeps_its_call() -> Outcome {
         .filter(|span| name_of(span) != "invoke_agent bot")
         .map(|span| Ok((name_of(span).to_owned(), attributes_of(span)?)))
         .collect::<Result<_, Failure>>()?;
-    let custom_name: String = format!("{} {}", "o".repeat(20), m(128))
-        .chars()
-        .take(145)
-        .collect();
     let names: BTreeSet<String> = sent.keys().cloned().collect();
     let want = BTreeSet::from([
         "chat".to_owned(),
         format!("generate_content {}", m(128)),
         format!("generate_content {smiles}"),
-        custom_name,
+        format!("chat {}", m(128)),
     ]);
     assert_eq!(names, want);
     assert_eq!(sent["chat"].get("gen_ai.request.model"), None);
@@ -272,7 +268,7 @@ fn a_model_calls_text_past_ingests_caps_keeps_its_call() -> Outcome {
         warnings,
         [
             "telmoni: a model call needs its model; one without is sent named by its operation alone",
-            "telmoni: a model call's name must be up to 145 characters; it is sent cut to its first 145",
+            "telmoni: a model call's operation must be chat, generate_content, text_completion or embeddings, which ingest reads as a model call; it is sent as chat",
             "telmoni: a model must be up to 128 characters; it is sent cut to its first 128",
             "telmoni: a provider must be up to 128 characters; it is sent cut to its first 128",
             "telmoni: a response model must be up to 128 characters; it is sent cut to its first 128",

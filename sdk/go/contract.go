@@ -64,6 +64,10 @@ const (
 	sentAtHeader = "Telmoni-Sent-At"
 )
 
+// modelOperations are the operations ingest reads as a model call; any other
+// files one elsewhere.
+var modelOperations = []string{"chat", "generate_content", "text_completion", "embeddings"}
+
 const (
 	// tagsMax is the most tags ingest keeps a span, contract.rs's TAGS_MAX.
 	tagsMax = 32

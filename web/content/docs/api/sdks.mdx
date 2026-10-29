@@ -115,11 +115,11 @@ holding the **ingest** scope.
     exception's class handed to `fail()` goes as the class's name, never its
     message. Past Telmoni's caps, counted in characters, a name, the agent, a
     model, a provider, a response model or an error type is cut to its cap — a
-    step's or a tool's name, and a model call's `<operation> <model>`, to 145,
-    the rest to 128 — and a user past 128 or a session past 200 is left off,
-    since cut it would name another; a step named nothing goes as `step`, and a
-    model call with no model is named by its operation alone; each with one
-    warning.
+    step's or a tool's name to 145, the rest to 128 — and a user past 128 or a
+    session past 200 is left off, since cut it would name another; a step named
+    nothing goes as `step`, a model call with no model is named by its operation
+    alone, and one of an operation ingest reads as no model call, any but
+    `chat`, `generate_content`, `text_completion` and `embeddings`, goes as `chat`; each with one warning.
   </Tab>
   <Tab value="TypeScript">
     ```ts
@@ -172,10 +172,12 @@ holding the **ingest** scope.
     handed to `fail()` goes as its class's name, never its message. Past
     Telmoni's caps, counted in characters, a name, the agent, a model, a
     provider, a response model or an error type is cut to its cap — a step's
-    or a tool's name, and a model call's `<operation> <model>`, to 145, the
-    rest to 128 — and a user past 128 or a session past 200 is left off, since
-    cut it would name another; a step named nothing goes as `step`, and a model
-    call with no model is named by its operation alone; each with one warning.
+    or a tool's name to 145, the rest to 128 — and a user past 128 or a session
+    past 200 is left off, since cut it would name another; a step named nothing
+    goes as `step`, a model call with no model is named by its operation alone,
+    and one of an operation ingest reads as no model call, any but `chat`,
+    `generate_content`, `text_completion` and `embeddings`, goes as `chat`;
+    each with one warning.
   </Tab>
   <Tab value="Go">
     ```go
@@ -229,11 +231,12 @@ holding the **ingest** scope.
     first 32 kept, by key.
     Past Telmoni's caps, counted in characters, a name, the agent, a model, a
     provider, a response model or an error type is cut to its cap — a step's
-    or a tool's name, and a model call's `<operation> <model>`, to 145, the
-    rest to 128 — and a user past 128 or a session past 200 is left off,
-    since cut it would name another; a step named nothing goes as `step`, and
-    a model call with no model is named by its operation alone; each with one
-    warning.
+    or a tool's name to 145, the rest to 128 — and a user past 128 or a session
+    past 200 is left off, since cut it would name another; a step named nothing
+    goes as `step`, a model call with no model is named by its operation alone,
+    and one of an operation ingest reads as no model call, any but `chat`,
+    `generate_content`, `text_completion` and `embeddings`, goes as `chat`;
+    each with one warning.
   </Tab>
   <Tab value="Rust">
     ```rust
@@ -281,11 +284,12 @@ holding the **ingest** scope.
     256, and the tags past the first 32 kept, by key — and an export
     that fails is warned about, never returned. Past Telmoni's caps, counted
     in characters, a name, the agent, a model, a provider, a response model or
-    an error type is cut to its cap — a step's or a tool's name, and a model
-    call's `<operation> <model>`, to 145, the rest to 128 — and a user past
-    128 or a session past 200 is left off, since cut it would name another; a
-    step named nothing goes as `step`, and a model call with no model is named
-    by its operation alone; each with one warning. The closure forms `run_with`, `step_with`, `model_call_with` and
+    an error type is cut to its cap — a step's or a tool's name to 145, the
+    rest to 128 — and a user past 128 or a session past 200 is left off, since
+    cut it would name another; a step named nothing goes as `step`, a model
+    call with no model is named by its operation alone, and one of an operation
+    ingest reads as no model call, any but `chat`, `generate_content`,
+    `text_completion` and `embeddings`, goes as `chat`; each with one warning. The closure forms `run_with`, `step_with`, `model_call_with` and
     `tool_call_with` end the span when the closure returns and return its
     value, `step_with` and the calls' wrapped in a `Result` for the cap; their
     `try_` forms mark an `Err` on the span with the error's type name before
@@ -357,8 +361,7 @@ by as much, so time a record by the clock that sends it.
     2^64 nanoseconds after it, in July 2554), an empty step's name or model,
     text longer than Telmoni keeps (a step's or a tool's name past 145
     characters, the agent, a model, a provider, a user or an error type past
-    128, a session past 200, or a model call's operation and model past 144
-    together), or a span that ends before it starts raises `ValueError`. A field of the wrong type raises
+    128, or a session past 200), or a span that ends before it starts raises `ValueError`. A field of the wrong type raises
     `TypeError` — a time that is no `datetime`, an item of another class,
     `inside` or `calls` that is no sequence (a list or a tuple) — save a token
     count, read as a whole number where it can be and else left off with one
@@ -403,9 +406,8 @@ by as much, so time a record by the clock that sends it.
     one warning. A time outside what Telmoni reads (after the Unix epoch, and
     less than 2^64 nanoseconds after it, in July 2554), text longer than
     Telmoni keeps (a step's or a tool's name past 145 characters, the agent, a
-    model, a provider, a user or an error type past 128, a session past 200,
-    or a model call's operation and model past 144 together, counted in
-    characters), or a span that ends before it starts throws a `RangeError`. Either way, nothing is sent.
+    model, a provider, a user or an error type past 128, or a session past
+    200, counted in characters), or a span that ends before it starts throws a `RangeError`. Either way, nothing is sent.
   </Tab>
   <Tab value="Go">
     ```go
@@ -436,8 +438,8 @@ by as much, so time a record by the clock that sends it.
     what Telmoni reads (after the Unix epoch, and less than 2^64 nanoseconds
     after it, in July 2554), an empty step's name or model, text longer than
     Telmoni keeps (a step's or a tool's name past 145 characters, the agent, a
-    model, a provider, a user or an error type past 128, a session past 200,
-    or a model call's operation and model past 144 together), a nil item or a
+    model, a provider, a user or an error type past 128, or a session past
+    200), a nil item or a
     span that ends before it starts returns an error, and nothing is sent.
   </Tab>
   <Tab value="Rust">
@@ -476,9 +478,8 @@ by as much, so time a record by the clock that sends it.
     time outside what Telmoni reads, after the Unix epoch and less than 2^64
     nanoseconds after it, in July 2554 (`Error::RecordedTime`), text longer
     than Telmoni keeps — a step's or a tool's name past 145 characters, the
-    agent, a model, a provider, a user or an error type past 128, a session
-    past 200, or a model call's operation and model past 144 together
-    (`Error::TooLong`) — a span that
+    agent, a model, a provider, a user or an error type past 128, or a
+    session past 200 (`Error::TooLong`) — a span that
     ends before it starts (`Error::EndBeforeStart`) or a configured sample
     rate outside its range (`Error::SampleRate`) is returned as an error, and
     nothing is sent; a record the queue has no room for is `Error::QueueFull`.
@@ -772,7 +773,8 @@ SDK's name, language and version) and, where you set them, the deployment:
 `release` or `TELMONI_RELEASE` (a version or a commit), which Telmoni keeps as
 the `environment` and `release` of every span and the trace list
 [filters](/docs/workspace/traces#filters) by. A step is a span named as you named it; a model call is
-`chat <model>` (or the operation you gave) with the model asked for, the
+`<operation> <model>`, the operation `chat` unless you gave `generate_content`,
+`text_completion` or `embeddings`, with the model asked for, the
 model that answered, the provider and the token counts under the GenAI
 conventions' names, each a whole number from 0, another left off the call
 with one warning, and the cost you report as Langfuse's `gen_ai.usage.cost`,

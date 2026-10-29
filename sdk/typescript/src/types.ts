@@ -129,7 +129,7 @@ export interface RunOptions {
 
 export interface ModelCallOptions {
   provider?: string | undefined;
-  /** `chat` (default, and what a blank one means), `generate_content`, `text_completion` or `embeddings`. */
+  /** `chat` (default, and what a blank one means), `generate_content`, `text_completion` or `embeddings`; any other goes as `chat`, with one warning. */
   operation?: string | undefined;
   /** Content: sent only with `captureContent` and the project's mode `on`. */
   inputMessages?: unknown;
@@ -166,7 +166,7 @@ export interface ModelCallRecord extends RecordOutcome {
   type: 'model_call';
   model: string;
   provider?: string | undefined;
-  /** `chat` (default, and what a blank one means), `generate_content`, `text_completion` or `embeddings`. */
+  /** `chat` (default, and what a blank one means), `generate_content`, `text_completion` or `embeddings`; any other goes as `chat`, with one warning. */
   operation?: string | undefined;
   start: RecordTime;
   end: RecordTime;

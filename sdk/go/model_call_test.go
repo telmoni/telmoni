@@ -288,7 +288,7 @@ func TestAModelCallsTextPastIngestsCapsKeepsItsCall(t *testing.T) {
 			sent[name] = attributesOf(t, span)
 		}
 	}
-	want := []string{"chat", "generate_content " + m(128), "generate_content " + smiles, (strings.Repeat("o", 20) + " " + m(128))[:145]}
+	want := []string{"chat", "chat " + m(128), "generate_content " + m(128), "generate_content " + smiles}
 	got := make([]string, 0, len(sent))
 	for name := range sent {
 		got = append(got, name)
@@ -318,7 +318,7 @@ func TestAModelCallsTextPastIngestsCapsKeepsItsCall(t *testing.T) {
 	slices.Sort(warnings)
 	wantWarnings := []string{
 		"telmoni: a model call needs its model; one without is sent named by its operation alone",
-		"telmoni: a model call's name must be up to 145 characters; it is sent cut to its first 145",
+		"telmoni: a model call's operation must be chat, generate_content, text_completion or embeddings, which ingest reads as a model call; it is sent as chat",
 		"telmoni: a model must be up to 128 characters; it is sent cut to its first 128",
 		"telmoni: a provider must be up to 128 characters; it is sent cut to its first 128",
 		"telmoni: a response model must be up to 128 characters; it is sent cut to its first 128",

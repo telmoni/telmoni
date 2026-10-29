@@ -122,7 +122,7 @@ def normalize(body: dict[str, Any]) -> dict[str, Any]:
 
 
 def test_the_record_matches_the_golden_export(
-    telmoni: Telmoni, transport: FakeTransport
+    telmoni: Telmoni, transport: FakeTransport, caplog: pytest.LogCaptureFixture
 ) -> None:
     fixture = load_fixture("recorded.json")
     telmoni.record_run(record_from(fixture["scenario"]["record"]))
@@ -133,6 +133,15 @@ def test_the_record_matches_the_golden_export(
     for _url, headers, _body in transport.requests:
         assert headers["Authorization"] == "Bearer telmoni_test_key"
         assert headers["User-Agent"].startswith("telmoni-python/")
+    # The record's one call of an operation ingest reads as no model call goes
+    # as chat.
+    assert [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING] == [
+        (
+            "telmoni: a model call's operation must be chat, generate_content, "
+            "text_completion or embeddings, which ingest reads as a model call; "
+            "it is sent as chat"
+        )
+    ]
 
 
 def test_the_same_record_sent_again_is_the_same_bytes() -> None:
@@ -601,15 +610,6 @@ class Shifting(Sequence[StepRecord | ModelCallRecord | ToolCallRecord]):
             {"inside": [dataclasses.replace(MODEL, model="m" * 129)]},
             ValueError,
             "model call's model must be up to 128",
-        ),
-        (
-            {
-                "inside": [
-                    dataclasses.replace(MODEL, operation="o" * 17, model="m" * 128)
-                ]
-            },
-            ValueError,
-            "operation and model must be up to 144",
         ),
         (
             {"inside": [dataclasses.replace(MODEL, provider="p" * 129)]},

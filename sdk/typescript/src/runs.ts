@@ -411,14 +411,14 @@ export class Opener {
     }
     const named = filled(options.provider, 'provider', this.#warnOnce);
     const provider = named === undefined ? '' : cut(named, contract.PROVIDER_MAX, 'provider', this.#warnOnce);
-    const [opened, attributes] = modelCallOpening(run.inherited, model, options.operation, provider);
+    const operation = operationOf(options.operation, this.#warnOnce);
+    const [name, attributes] = modelCallOpening(run.inherited, model, operation, provider);
     if (isSet(options.inputMessages)) {
       attributes[contract.INPUT_MESSAGES] = asJson(options.inputMessages);
     }
     if (isSet(options.systemInstructions)) {
       attributes[contract.SYSTEM_INSTRUCTIONS] = asJson(options.systemInstructions);
     }
-    const name = cut(opened, contract.NAME_MAX, "model call's name", this.#warnOnce);
     const span = this.#start(name, parent, attributes, SpanKind.CLIENT);
     return new ModelCall(span, parent, run, this.#warnOnce, { provider, model, prices: this.#prices });
   }
@@ -489,9 +489,12 @@ export class Opener {
     // Worked out before the record is built: a count that warns calls the
     // `warn` hook, which may record a run of its own.
     const usages = new Map<CallRecord, Attributes>();
+    const operations = new Map<CallRecord, string>();
     for (const [item, calls] of items) {
       for (const each of item.type === 'step' ? calls : [item]) {
-        if (each.type === 'model_call') usages.set(each, usageOf(each.usage, this.#warnOnce));
+        if (each.type !== 'model_call') continue;
+        usages.set(each, usageOf(each.usage, this.#warnOnce));
+        operations.set(each, operationOf(each.operation, this.#warnOnce));
       }
     }
     let place = 0;
@@ -501,7 +504,8 @@ export class Opener {
       );
     const call = (item: CallRecord, parent: Context): void => {
       if (item.type === 'model_call') {
-        const [name, callAttributes] = modelCallOpening(inherited, item.model, item.operation, item.provider ?? '');
+        const operation = operations.get(item) ?? contract.DEFAULT_MODEL_OPERATION;
+        const [name, callAttributes] = modelCallOpening(inherited, item.model, operation, item.provider ?? '');
         Object.assign(callAttributes, usages.get(item));
         close(open(name, parent, callAttributes, SpanKind.CLIENT, item.start), item);
       } else {
@@ -669,15 +673,6 @@ function check(item: RunRecord | Item, kind: keyof typeof FIELDS): void {
       throw new RangeError(`a recorded ${what}'s ${field} must be up to ${most} characters`);
     }
   }
-  // Its span is named `<operation> <model>`, a name ingest caps too.
-  if (kind === 'model_call') {
-    const operation = operationOf(read.operation);
-    if ([...operation].length + [...String(read.model)].length > contract.NAME_MAX - 1) {
-      throw new RangeError(
-        `a recorded model call's operation and model must be up to ${contract.NAME_MAX - 1} characters together`,
-      );
-    }
-  }
 }
 
 /** A literal or a class's instance: an array, a `Map` or a boxed primitive is of `typeof` object too. */
@@ -801,10 +796,9 @@ function runAttributes(agent: string, inherited: Attributes, rate: number, tags:
 
 /**
  * A model call's span name and attributes, live or recorded, before its
- * messages: an empty model or provider left off.
+ * messages: its operation one ingest reads, an empty model or provider left off.
  */
-function modelCallOpening(inherited: Attributes, model: string, given: unknown, provider: string): [string, Attributes] {
-  const operation = operationOf(given);
+function modelCallOpening(inherited: Attributes, model: string, operation: string, provider: string): [string, Attributes] {
   const attributes: Attributes = { ...inherited, [contract.OPERATION]: operation };
   if (model !== '') attributes[contract.REQUEST_MODEL] = model;
   if (provider !== '') attributes[contract.PROVIDER] = provider;
@@ -824,10 +818,18 @@ function toolSpanName(name: string): string {
   return `${contract.TOOL_OPERATION} ${name}`;
 }
 
-/** A model call's operation as sent: blank reads as the default, since a call
- *  named ` <model>` would be read by ingest as a step. */
-function operationOf(given: unknown): string {
-  return typeof given === 'string' && given.trim() !== '' ? given : contract.DEFAULT_MODEL_OPERATION;
+/**
+ * A model call's operation as ingest reads one: the default for a blank one,
+ * and, with one warning, for one ingest would file as a step, a run or a tool call.
+ */
+function operationOf(given: unknown, warnOnce: WarnOnce): string {
+  if (typeof given !== 'string' || given.trim() === '') return contract.DEFAULT_MODEL_OPERATION;
+  if (contract.MODEL_OPERATIONS.has(given)) return given;
+  warnOnce(
+    'call:operation',
+    "telmoni: a model call's operation must be chat, generate_content, text_completion or embeddings, which ingest reads as a model call; it is sent as chat",
+  );
+  return contract.DEFAULT_MODEL_OPERATION;
 }
 
 /**

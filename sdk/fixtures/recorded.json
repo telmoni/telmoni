@@ -45,6 +45,7 @@
                 "model_call": {
                   "model": "claude-haiku-4-5",
                   "provider": "anthropic",
+                  "operation": "rerank",
                   "start": "2026-10-12T09:00:03.700Z",
                   "end": "2026-10-12T09:00:05.000Z",
                   "usage": {

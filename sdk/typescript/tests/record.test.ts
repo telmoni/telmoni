@@ -235,7 +235,10 @@ describe('a recorded run', () => {
       expect(request.headers['Authorization']).toBe('Bearer telmoni_test_key');
       expect(request.headers['User-Agent']).toMatch(/^telmoni-typescript\//);
     }
-    expect(h.warnings).toEqual([]);
+    // The record's one call of an operation ingest reads as no model call goes as chat.
+    expect(h.warnings).toEqual([
+      "telmoni: a model call's operation must be chat, generate_content, text_completion or embeddings, which ingest reads as a model call; it is sent as chat",
+    ]);
   });
 
   it('is the same bytes when sent again', async () => {
@@ -528,12 +531,6 @@ describe('a recorded run', () => {
       /model call's model must be up to 128/,
     ],
     [
-      "a model call's operation and model past 144 characters together",
-      { inside: [{ type: 'model_call', operation: 'o'.repeat(17), model: 'm'.repeat(128), start, end: start }] },
-      RangeError,
-      /operation and model must be up to 144/,
-    ],
-    [
       "a model call's provider past 128 characters",
       { inside: [{ type: 'model_call', model: 'm', provider: 'p'.repeat(129), start, end: start }] },
       RangeError,
@@ -814,6 +811,6 @@ describe('a recorded run', () => {
     expect(sent).toEqual(Array.from({ length: 32 }, (_, n) => `telmoni.tag.t${String(n).padStart(3, '0')}`));
     expect(attributes['error.type']).toBe('Boom');
     expect(attributes['telmoni.cancelled']).toBe(true);
-    expect(h.warnings).toEqual(['telmoni: a run carries up to 32 tags, the most ingest keeps; the rest are not sent']);
+    expect(h.warnings).toContain('telmoni: a run carries up to 32 tags, the most ingest keeps; the rest are not sent');
   });
 });

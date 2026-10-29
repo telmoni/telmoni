@@ -109,7 +109,8 @@ pub struct ModelCallRecord {
     /// Empty reads as none.
     pub provider: Option<String>,
     /// The operation: `chat` unless given (`generate_content`,
-    /// `text_completion`, `embeddings`); a blank one is `chat` too.
+    /// `text_completion`, `embeddings`); a blank one is `chat` too, and any
+    /// other, with one warning.
     pub operation: Option<String>,
     /// When the call started.
     pub start: SystemTime,
@@ -279,6 +280,10 @@ pub(crate) fn send(inner: &Inner, mut record: RunRecord) -> Result<(), Error> {
         call.usage = call
             .usage
             .map(|usage| runs::sendable_usage(usage, &inner.warner));
+        call.operation = Some(runs::model_operation(
+            call.operation.as_deref(),
+            &inner.warner,
+        ));
     }
 
     let RunRecord {
@@ -463,7 +468,6 @@ impl<'a> Checked<'a> {
     }
 
     fn model_call(call: &'a ModelCallRecord) -> Self {
-        let operation = runs::model_operation(call.operation.as_deref());
         Self {
             name: Some(&call.model),
             texts: vec![
@@ -481,12 +485,6 @@ impl<'a> Checked<'a> {
                     "model call's error_type",
                     chars(call.error_type.as_deref()),
                     contract::ERROR_TYPE_MAX,
-                ),
-                // The span is `<operation> <model>`: the space takes one of the name's.
-                (
-                    "model call's operation and model",
-                    chars(Some(operation)) + chars(Some(&call.model)),
-                    contract::NAME_MAX - 1,
                 ),
             ],
             start: call.start,
@@ -586,8 +584,8 @@ impl Spans<'_> {
         let mut attributes = inherited.to_vec();
         match call {
             CallRecord::Model(call) => {
-                let (name, own) =
-                    runs::model_call_opening(&call.model, call.operation, call.provider);
+                let operation = call.operation.unwrap_or_default();
+                let (name, own) = runs::model_call_opening(&call.model, operation, call.provider);
                 attributes.extend(own);
                 attributes.extend(call.usage.into_iter().flat_map(runs::usage_attributes));
                 let opened = self.open(name, parent, SpanKind::Client, attributes, call.start);

@@ -531,13 +531,13 @@ class Opener:
             )
         named = _text(provider, "provider", warn_once) if provider is not None else ""
         provider = _cut(named, contract.PROVIDER_MAX, "provider", warn_once)
+        operation = _operation(operation, warn_once)
         name, own = _model_call_opening(model, operation, provider)
         attributes: dict[str, Any] = {**run.inherited, **own}
         if input_messages is not None:
             attributes[contract.INPUT_MESSAGES] = _as_json(input_messages)
         if system_instructions is not None:
             attributes[contract.SYSTEM_INSTRUCTIONS] = _as_json(system_instructions)
-        name = _cut(name, contract.NAME_MAX, "model call's name", warn_once)
         call = self._child(run, ModelCall, name, attributes, SpanKind.CLIENT)
         call._run = run
         call._provider = provider
@@ -627,8 +627,14 @@ class Opener:
         need = 1 + sum(1 + len(calls) for _item, calls in items)
         # Worked out before the hold: a count that warns runs the application's
         # logging handlers, which may record a run of their own.
+        warn_once = self._client.exporter.warn_once
         usages = {
-            id(each): _usage(each.usage, self._client.exporter.warn_once)
+            id(each): _usage(each.usage, warn_once)
+            for each in spans
+            if isinstance(each, ModelCallRecord)
+        }
+        operations = {
+            id(each): _operation(each.operation, warn_once)
             for each in spans
             if isinstance(each, ModelCallRecord)
         }
@@ -648,7 +654,7 @@ class Opener:
         def call(item: CallRecord, parent: context.Context) -> None:
             if isinstance(item, ModelCallRecord):
                 name, own = _model_call_opening(
-                    item.model, item.operation, item.provider
+                    item.model, operations[id(item)], item.provider
                 )
                 own.update(usages[id(item)])
                 kind = SpanKind.CLIENT
@@ -810,20 +816,28 @@ def _run_opening(
     return f"{contract.RUN_OPERATION} {agent}", attributes
 
 
-def _operation(operation: object) -> str:
-    """A model call's operation: sent blank, the span would be named " <model>"
-    and ingest would read it as a step; one that is no string is none either."""
-    if isinstance(operation, str) and operation.strip():
-        return operation
+def _operation(given: object, warn_once: Callable[[str, str], None]) -> str:
+    """A model call's operation as ingest reads one: the default for a blank one,
+    and, with one warning, for one ingest would file as a step, a run or a tool
+    call."""
+    if not isinstance(given, str) or not given.strip():
+        return contract.DEFAULT_MODEL_OPERATION
+    if given in contract.MODEL_OPERATIONS:
+        return given
+    warn_once(
+        "call:operation",
+        "telmoni: a model call's operation must be chat, generate_content, "
+        "text_completion or embeddings, which ingest reads as a model call; "
+        "it is sent as chat",
+    )
     return contract.DEFAULT_MODEL_OPERATION
 
 
 def _model_call_opening(
-    model: str, operation: object, provider: str | None
+    model: str, operation: str, provider: str | None
 ) -> tuple[str, dict[str, Any]]:
-    """A model call's span name and own attributes, live or recorded, an empty
-    model or provider left off."""
-    operation = _operation(operation)
+    """A model call's span name and own attributes, live or recorded, its
+    operation one ingest reads and an empty model or provider left off."""
     attributes: dict[str, Any] = {contract.OPERATION: operation}
     if model:
         attributes[contract.REQUEST_MODEL] = model
@@ -1078,14 +1092,6 @@ def _check(item: RunRecord | StepRecord | CallRecord) -> None:
         if text and len(text) > most:
             raise ValueError(
                 f"a recorded {what}'s {field} must be up to {most} characters"
-            )
-    # Its span is named `<operation> <model>`, a name ingest caps too.
-    if isinstance(item, ModelCallRecord):
-        operation = _operation(item.operation)
-        if len(operation) + len(item.model) > contract.NAME_MAX - 1:
-            raise ValueError(
-                "a recorded model call's operation and model must be up to "
-                f"{contract.NAME_MAX - 1} characters together"
             )
 
 
