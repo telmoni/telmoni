@@ -808,7 +808,9 @@ that starts a trace of its own takes the decision your own sampler gives it —
 given as the `sampler` option in every SDK, Python falling back to your
 provider's sampler when you give none — so your application keeps its own sampling rate inside runs as
 outside them. A run inside a trace your application does not sample is still
-sent.
+sent. In Rust, joining and nesting take your application on the SDK's
+`opentelemetry` minor, which `telmoni::opentelemetry` re-exports: cargo builds
+each 0.x minor apart, each with a current context of its own.
 
 ### Answers and warnings
 

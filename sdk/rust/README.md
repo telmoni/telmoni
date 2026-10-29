@@ -99,7 +99,10 @@ let answer: Result<String, MyError> = telmoni.try_run_with("support-bot", RunOpt
 
 A run's `context()` carries it into a future (`FutureExt::with_context`) or
 another thread, and `attach()` makes it current for synchronous code, so the
-application's own spans nest under it.
+application's own spans nest under it. That, and a run joining the trace the
+application has current, take the application on the SDK's `opentelemetry`
+minor, re-exported as `telmoni::opentelemetry`: cargo builds each 0.x minor
+apart, each with a current context of its own.
 
 ## A run recorded after it ended
 

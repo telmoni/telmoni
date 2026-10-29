@@ -6,7 +6,9 @@
 //! application has: a run opened while an application span is current joins
 //! that span's trace, an application span opened under [`Run::attach`] or
 //! [`Run::context`] nests under the run, and each side exports its own spans
-//! only.
+//! only. Both take the application on this crate's `opentelemetry` minor,
+//! re-exported as [`opentelemetry`]: cargo builds each 0.x minor as a crate of
+//! its own, with a current context of its own.
 //!
 //! ```no_run
 //! use telmoni::{Config, ModelCallOptions, Reply, RunOptions, Telmoni, ToolCallOptions, Usage};
@@ -91,6 +93,12 @@ pub use runs::{
     Content, ModelCall, ModelCallOptions, Reply, Run, RunOptions, Step, ToolCall, ToolCallOptions,
     Usage,
 };
+
+/// The OpenTelemetry a run joins and hands its context to: nest your own spans
+/// under a run through it, or through the same `opentelemetry` minor.
+pub use opentelemetry;
+/// Its SDK, whose `ShouldSample` [`Config::sampler`] takes.
+pub use opentelemetry_sdk;
 
 /// The SDK's version: the crate's, sent as `telemetry.distro.version`, as the
 /// scope's version and in `User-Agent`.
