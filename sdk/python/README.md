@@ -25,8 +25,8 @@ point `TELMONI_ENDPOINT` at its machine host; the docs read in
 ```python
 from telmoni import Telmoni, Usage
 
-# Reads TELMONI_ENDPOINT, TELMONI_API_KEY (a key with the ingest scope) and
-# TELMONI_ORG, and nothing else.
+# Reads TELMONI_ENDPOINT, TELMONI_API_KEY (a key with the ingest scope),
+# TELMONI_ORG, TELMONI_ENVIRONMENT and TELMONI_RELEASE, and nothing else.
 telmoni = Telmoni.from_env()
 
 

@@ -15,8 +15,8 @@ func lookUp(context.Context, string) (string, error) {
 }
 
 func Example() {
-	// Reads TELMONI_ENDPOINT, TELMONI_API_KEY (a key with the ingest scope)
-	// and TELMONI_ORG, and nothing else.
+	// Reads TELMONI_ENDPOINT, TELMONI_API_KEY (a key with the ingest scope),
+	// TELMONI_ORG, TELMONI_ENVIRONMENT and TELMONI_RELEASE, and nothing else.
 	client, err := telmoni.NewFromEnv()
 	if err != nil {
 		log.Fatal(err)

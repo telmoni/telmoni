@@ -20,7 +20,7 @@ point `TELMONI_ENDPOINT` at its machine host; the docs read in
 ```ts
 import { Telmoni } from 'telmoni';
 
-// Reads TELMONI_ENDPOINT, TELMONI_API_KEY and TELMONI_ORG
+// Reads TELMONI_ENDPOINT, TELMONI_API_KEY, TELMONI_ORG, TELMONI_ENVIRONMENT and TELMONI_RELEASE
 const telmoni = Telmoni.fromEnv();
 
 const reply = await telmoni.run(

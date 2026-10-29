@@ -14,7 +14,7 @@
 //! use telmoni::{Config, ModelCallOptions, Reply, RunOptions, Telmoni, ToolCallOptions, Usage};
 //!
 //! # fn main() -> Result<(), telmoni::Error> {
-//! // Reads TELMONI_ENDPOINT, TELMONI_API_KEY and TELMONI_ORG.
+//! // Reads TELMONI_ENDPOINT, TELMONI_API_KEY, TELMONI_ORG, TELMONI_ENVIRONMENT and TELMONI_RELEASE.
 //! let telmoni = Telmoni::new(Config::from_env());
 //!
 //! let run = telmoni.run(
