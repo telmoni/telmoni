@@ -443,6 +443,15 @@ func TestThisMachineIsReachedThroughNoProxy(t *testing.T) {
 	}
 }
 
+// The ten seconds a request has, its answer's head and body within them.
+func TestTheDefaultClientGivesARequestTenSeconds(t *testing.T) {
+	for _, endpoint := range []string{telmoni.DefaultEndpoint, "http://localhost:7100"} {
+		if got := telmoni.DefaultClient(endpoint).Timeout; got != 10*time.Second {
+			t.Errorf("%s: Timeout = %v, want 10s", endpoint, got)
+		}
+	}
+}
+
 // A proxy the environment names, which net/http's own client takes for a name
 // under localhost, or one the application dials through, never stands between an
 // export and this machine.

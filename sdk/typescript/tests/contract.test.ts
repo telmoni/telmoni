@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { existsSync, readFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
-import { createServer as createNetServer, type AddressInfo } from 'node:net';
+import { createServer as createNetServer, type AddressInfo, type Socket } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { inspect } from 'node:util';
 
@@ -290,6 +290,33 @@ describe.each([
       await expect(transport(server.url, { method: 'POST', headers: {}, body: '{}' })).rejects.toThrow();
     } finally {
       await server.close();
+    }
+  });
+
+  it("gives a request ten seconds, the answer's body within them", async () => {
+    // The deadline made to fire 50 ms in, under a body that never ends: what came is kept.
+    const timeout = vi.spyOn(AbortSignal, 'timeout').mockImplementation((ms) => {
+      expect(ms).toBe(10_000);
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(new DOMException('the deadline', 'TimeoutError')), 50);
+      return controller.signal;
+    });
+    const sockets = new Set<Socket>();
+    const server = createNetServer((socket) => {
+      sockets.add(socket);
+      socket.on('error', () => {});
+      socket.once('data', () => socket.write('HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\n{}'));
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+      const answer = await transport(url, { method: 'POST', headers: {}, body: '{}' });
+      expect([answer.status, await answer.text()]).toEqual([200, '{}']);
+      expect(timeout).toHaveBeenCalledOnce();
+    } finally {
+      timeout.mockRestore();
+      for (const socket of sockets) socket.destroy();
+      await new Promise((resolve) => server.close(resolve));
     }
   });
 });
