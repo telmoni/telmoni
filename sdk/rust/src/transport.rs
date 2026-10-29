@@ -2,10 +2,10 @@
 //! transport a client is built on unless [`Hooks`](crate::Hooks) gives another.
 
 use std::fmt;
-use std::io::{self, Read};
+use std::io::Read;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// Sends one export and gives back the answer, whatever its status; `Err`
 /// only when no answer came back at all.
@@ -243,6 +243,32 @@ impl Reqwest {
     }
 }
 
+impl Reqwest {
+    /// Sends one export, its answer's head and body held to `within` of its start.
+    fn post(
+        &self,
+        url: &str,
+        headers: &[(String, String)],
+        body: &[u8],
+        within: Duration,
+    ) -> Result<Answer, TransportError> {
+        // The request's own timeout ends a read under way; the client's starts
+        // again at each read, so a body that stalls would outlast it.
+        let mut request = self
+            .client(url)?
+            .post(url)
+            .timeout(within)
+            .body(body.to_vec());
+        for (name, value) in headers {
+            request = request.header(name.as_str(), value.as_str());
+        }
+        let response = request
+            .send()
+            .map_err(|error| TransportError::new(kind(&error)))?;
+        Ok(answer(response))
+    }
+}
+
 impl Transport for Reqwest {
     fn send(
         &self,
@@ -250,22 +276,14 @@ impl Transport for Reqwest {
         headers: &[(String, String)],
         body: &[u8],
     ) -> Result<Answer, TransportError> {
-        let deadline = Instant::now() + REQUEST_TIMEOUT;
-        let mut request = self.client(url)?.post(url).body(body.to_vec());
-        for (name, value) in headers {
-            request = request.header(name.as_str(), value.as_str());
-        }
-        let response = request
-            .send()
-            .map_err(|error| TransportError::new(kind(&error)))?;
-        Ok(answer(response, deadline))
+        self.post(url, headers, body, REQUEST_TIMEOUT)
     }
 }
 
-/// What `response` answered, at most [`ANSWER_MAX`] bytes of its body read,
-/// given up at `deadline`. Its status decides: a body that breaks after it, or
-/// outlasts the deadline, is kept as far as it came, as in every SDK.
-fn answer(response: reqwest::blocking::Response, deadline: Instant) -> Answer {
+/// What `response` answered, at most [`ANSWER_MAX`] bytes of its body read
+/// before the request's deadline. Its status decides: a body that breaks after
+/// it, or outlasts the deadline, is kept as far as it came, as in every SDK.
+fn answer(response: reqwest::blocking::Response) -> Answer {
     let status = response.status().as_u16();
     let headers = response
         .headers()
@@ -279,32 +297,11 @@ fn answer(response: reqwest::blocking::Response, deadline: Instant) -> Answer {
         .collect();
     let mut body = Vec::new();
     // `read_to_end` keeps what it read before an error.
-    let _ = Within {
-        reader: response,
-        deadline,
-    }
-    .take(ANSWER_MAX)
-    .read_to_end(&mut body);
+    let _ = response.take(ANSWER_MAX).read_to_end(&mut body);
     Answer {
         status,
         headers,
         body,
-    }
-}
-
-/// A reader given up at `deadline`: reqwest's own wait starts again at each
-/// read, so an answer sent a byte at a time would otherwise hold the worker.
-struct Within<R> {
-    reader: R,
-    deadline: Instant,
-}
-
-impl<R: Read> Read for Within<R> {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        if Instant::now() >= self.deadline {
-            return Err(io::ErrorKind::TimedOut.into());
-        }
-        self.reader.read(buf)
     }
 }
 
@@ -336,6 +333,7 @@ mod tests {
     use std::net::{TcpListener, TcpStream};
     use std::sync::Arc;
     use std::thread;
+    use std::time::Instant;
 
     use super::*;
 
@@ -564,15 +562,10 @@ mod tests {
     #[test]
     fn an_answer_sent_slowly_is_given_up_at_the_deadline_as_far_as_it_came() {
         let url = answering(200, 100, 100, Duration::from_millis(50));
-        let response = Reqwest::default()
-            .client(&url)
-            .unwrap()
-            .post(url)
-            .body("{}")
-            .send()
-            .unwrap();
         let began = Instant::now();
-        let answer = answer(response, began + Duration::from_millis(300));
+        let answer = Reqwest::default()
+            .post(&url, &[], b"{}", Duration::from_millis(300))
+            .unwrap();
         assert!(
             began.elapsed() < Duration::from_secs(2),
             "{:?}",
@@ -584,5 +577,21 @@ mod tests {
             "{}",
             answer.body.len()
         );
+    }
+
+    /// A body that stalls ends at the deadline, not at a read's own wait past it.
+    #[test]
+    fn an_answer_whose_body_stalls_is_given_up_at_the_deadline() {
+        let url = answering(200, 100, 2, Duration::from_secs(3));
+        let began = Instant::now();
+        let answer = Reqwest::default()
+            .post(&url, &[], b"{}", Duration::from_millis(300))
+            .unwrap();
+        assert!(
+            began.elapsed() < Duration::from_secs(2),
+            "{:?}",
+            began.elapsed()
+        );
+        assert_eq!((answer.status, answer.body.len()), (200, 0));
     }
 }
