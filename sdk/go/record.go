@@ -149,26 +149,9 @@ func (c *Client) RecordRun(ctx context.Context, record RunRecord) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	runID := formatUUID(runUUID)
 	rate := c.config.SampleRate
-	inherited := []attribute.KeyValue{
-		attribute.String(attrRunID, runID),
-		attribute.String(attrAgent, record.Agent),
-	}
-	if record.UserID != "" {
-		inherited = append(inherited, attribute.String(attrUserID, record.UserID))
-	}
-	if record.SessionID != "" {
-		inherited = append(inherited, attribute.String(attrSessionID, record.SessionID))
-	}
-	// By key: a map ranges in a new order each time, and the same record must
-	// be the same bytes.
-	tags := c.tagAttributes(record.Tags)
-	attrs := make([]attribute.KeyValue, 0, 3+len(inherited)+len(tags))
-	attrs = append(attrs, attribute.String(attrOperation, runOperation), attribute.String(attrAgentName, record.Agent))
-	attrs = append(attrs, inherited...)
-	attrs = append(attrs, attribute.Float64(attrSampleRate, rate))
-	attrs = append(attrs, tags...)
+	inherited := inheritedAttributes(formatUUID(runUUID), record.Agent, record.UserID, record.SessionID)
+	name, attrs := c.runOpening(record.Agent, inherited, rate, record.Tags)
 	// Warned of before the hold, as the tags are: a logger that records a run
 	// would wait on it for good.
 	c.warnUsage(record)
@@ -189,7 +172,7 @@ func (c *Client) RecordRun(ctx context.Context, record RunRecord) error {
 	// No span in it: whatever span ctx carries, the record's trace is its
 	// own.
 	root := trace.ContextWithSpanContext(ctx, trace.SpanContext{})
-	run := r.open(root, runOperation+" "+record.Agent, trace.SpanKindInternal, attrs, record.Start)
+	run := r.open(root, name, trace.SpanKindInternal, attrs, record.Start)
 	inRun := trace.ContextWithSpan(root, run)
 	for _, item := range record.Inside {
 		switch item := itemValue(item).(type) {
@@ -235,24 +218,14 @@ func (r *recorder) open(parent context.Context, name string, kind trace.SpanKind
 func (r *recorder) call(parent context.Context, call CallRecord) {
 	switch call := itemValue(call).(type) {
 	case ModelCallRecord:
-		operation := modelOperation(call.Operation)
-		attrs := slices.Concat(r.inherited, []attribute.KeyValue{
-			attribute.String(attrOperation, operation),
-			attribute.String(attrRequestModel, call.Model),
-		})
-		if call.Provider != "" {
-			attrs = append(attrs, attribute.String(attrProvider, call.Provider))
-		}
+		name, own := modelCallOpening(call.Model, call.Operation, call.Provider)
 		// No warning under the hold: RecordRun gave it before.
-		attrs = append(attrs, usageAttributes(call.Usage, nil)...)
-		span := r.open(parent, operation+" "+call.Model, trace.SpanKindClient, attrs, call.Start)
+		attrs := slices.Concat(r.inherited, own, usageAttributes(call.Usage, nil))
+		span := r.open(parent, name, trace.SpanKindClient, attrs, call.Start)
 		endRecorded(span, call.End, call.ErrorType, call.Cancelled)
 	case ToolCallRecord:
-		attrs := slices.Concat(r.inherited, []attribute.KeyValue{
-			attribute.String(attrOperation, toolOperation),
-			attribute.String(attrToolName, call.Name),
-		})
-		span := r.open(parent, toolOperation+" "+call.Name, trace.SpanKindInternal, attrs, call.Start)
+		name, own := toolCallOpening(call.Name)
+		span := r.open(parent, name, trace.SpanKindInternal, slices.Concat(r.inherited, own), call.Start)
 		endRecorded(span, call.End, call.ErrorType, call.Cancelled)
 	}
 }

@@ -354,15 +354,14 @@ export class Opener {
     const guard = Guard.of(options);
     const sampledOut = rate < 1 && Math.random() >= rate;
     const runId = randomUUID();
-    const inherited: Attributes = { [contract.RUN_ID]: runId, [contract.AGENT]: agent };
     const user = filled(options.userId, 'user id', this.#warnOnce);
-    if (user !== undefined && fits(user, contract.USER_ID_MAX, 'user id', this.#warnOnce)) {
-      inherited[contract.USER_ID] = user;
-    }
     const session = filled(options.sessionId, 'session id', this.#warnOnce);
-    if (session !== undefined && fits(session, contract.SESSION_ID_MAX, 'session id', this.#warnOnce)) {
-      inherited[contract.SESSION_ID] = session;
-    }
+    const inherited = inheritedOf(
+      runId,
+      agent,
+      user !== undefined && fits(user, contract.USER_ID_MAX, 'user id', this.#warnOnce) ? user : undefined,
+      session !== undefined && fits(session, contract.SESSION_ID_MAX, 'session id', this.#warnOnce) ? session : undefined,
+    );
     // On every span of the run from its start, for the processor to drop: a
     // sampler's drop would clear the flag the application's spans inherit.
     if (sampledOut) inherited[contract.SAMPLED_OUT] = true;
@@ -385,8 +384,7 @@ export class Opener {
    */
   continued(remote: SpanContext, runId: string, given: string): Run {
     const agent = cut(given, contract.AGENT_MAX, "run's agent", this.#warnOnce);
-    const inherited: Attributes = { [contract.RUN_ID]: runId, [contract.AGENT]: agent };
-    return new Run(this, trace.wrapSpanContext(remote), context.active(), runId, agent, inherited);
+    return new Run(this, trace.wrapSpanContext(remote), context.active(), runId, agent, inheritedOf(runId, agent));
   }
 
   step(run: Run, parent: Context, given: string): Step {
@@ -404,35 +402,26 @@ export class Opener {
   modelCall(run: Run, parent: Context, given: string, options: ModelCallOptions): ModelCall {
     run[GUARD].opens(false);
     const asked = asText(given, 'model', this.#warnOnce);
-    const operation = operationOf(options.operation);
-    const attributes: Attributes = { ...run.inherited, [contract.OPERATION]: operation };
     // Ingest refuses a call over an empty model, but keeps one with none.
-    const model = asked === '' ? undefined : cut(asked, contract.MODEL_MAX, 'model', this.#warnOnce);
-    if (model === undefined) {
+    const model = asked === '' ? '' : cut(asked, contract.MODEL_MAX, 'model', this.#warnOnce);
+    if (model === '') {
       this.#warnOnce(
         'call:model',
         'telmoni: a model call needs its model; one without is sent named by its operation alone',
       );
-    } else {
-      attributes[contract.REQUEST_MODEL] = model;
     }
     const named = filled(options.provider, 'provider', this.#warnOnce);
     const provider = named === undefined ? '' : cut(named, contract.PROVIDER_MAX, 'provider', this.#warnOnce);
-    if (provider !== '') attributes[contract.PROVIDER] = provider;
+    const [opened, attributes] = modelCallOpening(run.inherited, model, options.operation, provider);
     if (isSet(options.inputMessages)) {
       attributes[contract.INPUT_MESSAGES] = asJson(options.inputMessages);
     }
     if (isSet(options.systemInstructions)) {
       attributes[contract.SYSTEM_INSTRUCTIONS] = asJson(options.systemInstructions);
     }
-    const name = cut(
-      model === undefined ? operation : `${operation} ${model}`,
-      contract.NAME_MAX,
-      "model call's name",
-      this.#warnOnce,
-    );
+    const name = cut(opened, contract.NAME_MAX, "model call's name", this.#warnOnce);
     const span = this.#start(name, parent, attributes, SpanKind.CLIENT);
-    return new ModelCall(span, parent, run, this.#warnOnce, { provider, model: model ?? '', prices: this.#prices });
+    return new ModelCall(span, parent, run, this.#warnOnce, { provider, model, prices: this.#prices });
   }
 
   toolCall(run: Run, parent: Context, given: string, options: ToolCallOptions): ToolCall {
@@ -493,9 +482,7 @@ export class Opener {
       runHex.slice(16, 20),
       runHex.slice(20),
     ].join('-');
-    const inherited: Attributes = { [contract.RUN_ID]: runId, [contract.AGENT]: record.agent };
-    if (record.userId) inherited[contract.USER_ID] = record.userId;
-    if (record.sessionId) inherited[contract.SESSION_ID] = record.sessionId;
+    const inherited = inheritedOf(runId, record.agent, record.userId, record.sessionId);
     const attributes = runAttributes(record.agent, inherited, rate, tagsOf(tagged, this.#warnOnce));
     // Sampled out, no span is built: none of a record's ends after it, and
     // the same record sent again draws again.
@@ -515,15 +502,9 @@ export class Opener {
       );
     const call = (item: CallRecord, parent: Context): void => {
       if (item.type === 'model_call') {
-        const operation = operationOf(item.operation);
-        const callAttributes: Attributes = {
-          ...inherited,
-          [contract.OPERATION]: operation,
-          [contract.REQUEST_MODEL]: item.model,
-        };
-        if (item.provider) callAttributes[contract.PROVIDER] = item.provider;
+        const [name, callAttributes] = modelCallOpening(inherited, item.model, item.operation, item.provider ?? '');
         Object.assign(callAttributes, usages.get(item));
-        close(open(`${operation} ${item.model}`, parent, callAttributes, SpanKind.CLIENT, item.start), item);
+        close(open(name, parent, callAttributes, SpanKind.CLIENT, item.start), item);
       } else {
         const callAttributes = toolAttributes(inherited, item.name);
         close(open(toolSpanName(item.name), parent, callAttributes, SpanKind.INTERNAL, item.start), item);
@@ -783,10 +764,14 @@ function numberOf(value: unknown): number {
   return typeof value === 'string' && DECIMAL.test(value) ? Number(value) : Number.NaN;
 }
 
-/**
- * A run's tags as its span's attributes: the first `TAGS_MAX` of those
- * ingest keeps, since past them they would crowd out the run's own.
- */
+/** What every span of a run carries, live or recorded: its id and agent, and its user and session where it has them. */
+function inheritedOf(runId: string, agent: string, user?: string, session?: string): Attributes {
+  const inherited: Attributes = { [contract.RUN_ID]: runId, [contract.AGENT]: agent };
+  if (user) inherited[contract.USER_ID] = user;
+  if (session) inherited[contract.SESSION_ID] = session;
+  return inherited;
+}
+
 /** A run's own span's attributes, live or recorded: its tags last. */
 function runAttributes(agent: string, inherited: Attributes, rate: number, tags: Attributes): Attributes {
   return {
@@ -796,6 +781,18 @@ function runAttributes(agent: string, inherited: Attributes, rate: number, tags:
     [contract.SAMPLE_RATE]: rate,
     ...tags,
   };
+}
+
+/**
+ * A model call's span name and attributes, live or recorded, before its
+ * messages: an empty model or provider left off.
+ */
+function modelCallOpening(inherited: Attributes, model: string, given: unknown, provider: string): [string, Attributes] {
+  const operation = operationOf(given);
+  const attributes: Attributes = { ...inherited, [contract.OPERATION]: operation };
+  if (model !== '') attributes[contract.REQUEST_MODEL] = model;
+  if (provider !== '') attributes[contract.PROVIDER] = provider;
+  return [model === '' ? operation : `${operation} ${model}`, attributes];
 }
 
 /** A tool call's attributes, live or recorded, before its arguments. */
@@ -817,6 +814,10 @@ function operationOf(given: unknown): string {
   return typeof given === 'string' && given.trim() !== '' ? given : contract.DEFAULT_MODEL_OPERATION;
 }
 
+/**
+ * A run's tags as its span's attributes: the first `TAGS_MAX` of those
+ * ingest keeps, since past them they would crowd out the run's own.
+ */
 function tagsOf(given: ReadonlyArray<readonly [string, unknown]>, warnOnce: WarnOnce): Attributes {
   const kept: Attributes = {};
   let count = 0;

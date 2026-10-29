@@ -252,29 +252,22 @@ func (c *Client) Run(ctx context.Context, agent string, opts RunOptions) (contex
 		c.exporter.warnOnce("run:spend", "telmoni: a run's MaxSpend must be a finite number of US dollars above 0; the run has no spend cap")
 	}
 	runID := newUUID()
-	inherited := []attribute.KeyValue{
-		attribute.String(attrRunID, runID),
-		attribute.String(attrAgent, agent),
+	userID, sessionID := opts.UserID, opts.SessionID
+	if userID != "" && !c.fits(userID, userIDMax, "user id") {
+		userID = ""
 	}
-	if opts.UserID != "" && c.fits(opts.UserID, userIDMax, "user id") {
-		inherited = append(inherited, attribute.String(attrUserID, opts.UserID))
+	if sessionID != "" && !c.fits(sessionID, sessionIDMax, "session id") {
+		sessionID = ""
 	}
-	if opts.SessionID != "" && c.fits(opts.SessionID, sessionIDMax, "session id") {
-		inherited = append(inherited, attribute.String(attrSessionID, opts.SessionID))
-	}
+	inherited := inheritedAttributes(runID, agent, userID, sessionID)
 	// On every span of the run from its start, for the processor to drop: a
 	// sampler's drop would clear the flag the application's spans inherit.
 	if sampledOut {
 		inherited = append(inherited, attribute.Bool(attrSampledOut, true))
 	}
-	tags := c.tagAttributes(opts.Tags)
-	attrs := make([]attribute.KeyValue, 0, 3+len(inherited)+len(tags))
-	attrs = append(attrs, attribute.String(attrOperation, runOperation), attribute.String(attrAgentName, agent))
-	attrs = append(attrs, inherited...)
-	attrs = append(attrs, attribute.Float64(attrSampleRate, rate))
-	attrs = append(attrs, tags...)
+	name, attrs := c.runOpening(agent, inherited, rate, opts.Tags)
 	displaced := providerOf(ctx)
-	ctx, span := c.tracer.Start(ctx, runOperation+" "+agent,
+	ctx, span := c.tracer.Start(ctx, name,
 		trace.WithSpanKind(trace.SpanKindInternal),
 		trace.WithAttributes(attrs...),
 	)
@@ -496,22 +489,17 @@ func (r *Run) ModelCall(ctx context.Context, model string, opts ModelCallOptions
 		return contextWithRun(refused(ctx, err), r), &ModelCall{}
 	}
 	c := r.client
-	operation := modelOperation(opts.Operation)
-	attrs := []attribute.KeyValue{attribute.String(attrOperation, operation)}
-	name := operation
 	// Ingest refuses a call over an empty model, but keeps one with none.
 	if model == "" {
 		c.exporter.warnOnce("call:model", "telmoni: a model call needs its model; one without is sent named by its operation alone")
 	} else {
 		model = c.cut(model, modelMax, "model")
-		attrs = append(attrs, attribute.String(attrRequestModel, model))
-		name = operation + " " + model
 	}
 	provider := ""
 	if opts.Provider != "" {
 		provider = c.cut(opts.Provider, providerMax, "provider")
-		attrs = append(attrs, attribute.String(attrProvider, provider))
 	}
+	name, attrs := modelCallOpening(model, opts.Operation, provider)
 	if opts.InputMessages != nil {
 		attrs = append(attrs, attribute.String(attrInputMessages, asJSON(opts.InputMessages)))
 	}
@@ -531,16 +519,65 @@ func (r *Run) ToolCall(ctx context.Context, name string, opts ToolCallOptions) (
 	if err := r.opens(ctx, false); err != nil {
 		return contextWithRun(refused(ctx, err), r), &ToolCall{}
 	}
-	name = r.client.cut(name, nameMax, "tool's name")
-	attrs := []attribute.KeyValue{
-		attribute.String(attrOperation, toolOperation),
-		attribute.String(attrToolName, name),
-	}
+	spanName, attrs := toolCallOpening(r.client.cut(name, nameMax, "tool's name"))
 	if opts.Arguments != nil {
 		attrs = append(attrs, attribute.String(attrToolCallArguments, asJSON(opts.Arguments)))
 	}
-	ctx, span := r.child(ctx, toolOperation+" "+name, trace.SpanKindInternal, attrs)
+	ctx, span := r.child(ctx, spanName, trace.SpanKindInternal, attrs)
 	return ctx, &ToolCall{handle: handle{span: span, client: r.client}, run: r}
+}
+
+// inheritedAttributes is what every span of a run carries, live or recorded:
+// its id and agent, and its user and session where it has them.
+func inheritedAttributes(runID, agent, userID, sessionID string) []attribute.KeyValue {
+	inherited := []attribute.KeyValue{
+		attribute.String(attrRunID, runID),
+		attribute.String(attrAgent, agent),
+	}
+	if userID != "" {
+		inherited = append(inherited, attribute.String(attrUserID, userID))
+	}
+	if sessionID != "" {
+		inherited = append(inherited, attribute.String(attrSessionID, sessionID))
+	}
+	return inherited
+}
+
+// runOpening is a run's span name and attributes, live or recorded, its tags
+// by key: a map ranges in a new order each time, and the same record must be
+// the same bytes.
+func (c *Client) runOpening(agent string, inherited []attribute.KeyValue, rate float64, tags map[string]string) (string, []attribute.KeyValue) {
+	kept := c.tagAttributes(tags)
+	attrs := make([]attribute.KeyValue, 0, 3+len(inherited)+len(kept))
+	attrs = append(attrs, attribute.String(attrOperation, runOperation), attribute.String(attrAgentName, agent))
+	attrs = append(attrs, inherited...)
+	attrs = append(attrs, attribute.Float64(attrSampleRate, rate))
+	return runOperation + " " + agent, append(attrs, kept...)
+}
+
+// modelCallOpening is a model call's span name and own attributes, live or
+// recorded, an empty model or provider left off.
+func modelCallOpening(model, operation, provider string) (string, []attribute.KeyValue) {
+	operation = modelOperation(operation)
+	attrs := []attribute.KeyValue{attribute.String(attrOperation, operation)}
+	name := operation
+	if model != "" {
+		attrs = append(attrs, attribute.String(attrRequestModel, model))
+		name = operation + " " + model
+	}
+	if provider != "" {
+		attrs = append(attrs, attribute.String(attrProvider, provider))
+	}
+	return name, attrs
+}
+
+// toolCallOpening is a tool call's span name and own attributes, live or
+// recorded.
+func toolCallOpening(name string) (string, []attribute.KeyValue) {
+	return toolOperation + " " + name, []attribute.KeyValue{
+		attribute.String(attrOperation, toolOperation),
+		attribute.String(attrToolName, name),
+	}
 }
 
 func (r *Run) child(ctx context.Context, name string, kind trace.SpanKind, attrs []attribute.KeyValue) (context.Context, trace.Span) {

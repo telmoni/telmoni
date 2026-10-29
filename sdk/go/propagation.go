@@ -13,7 +13,6 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -60,13 +59,10 @@ func (c *Client) Extract(ctx context.Context, header http.Header) context.Contex
 	remote := trace.SpanFromContext(trace.ContextWithRemoteSpanContext(ctx, read.spanContext))
 	agent := c.cut(read.agent, agentMax, "run's agent")
 	run := &Run{
-		handle: handle{span: remote, client: c},
-		id:     read.runID,
-		agent:  agent,
-		inherited: []attribute.KeyValue{
-			attribute.String(attrRunID, read.runID),
-			attribute.String(attrAgent, agent),
-		},
+		handle:    handle{span: remote, client: c},
+		id:        read.runID,
+		agent:     agent,
+		inherited: inheritedAttributes(read.runID, agent, "", ""),
 		guard:     &guard{},
 		displaced: displaced,
 	}

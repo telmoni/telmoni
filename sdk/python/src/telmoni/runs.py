@@ -438,36 +438,24 @@ class Opener:
         caps = guard.Guard(*guard.caps(max_steps, max_spend))
         sampled_out = rate < 1 and random.random() >= rate
         run_id = str(uuid.uuid4())
-        inherited: dict[str, str] = {contract.RUN_ID: run_id, contract.AGENT: agent}
-        if (
-            user_id is not None
-            and (user := _text(user_id, "user id", warn_once))
-            and _within(user, contract.USER_ID_MAX, "user id", warn_once)
+        user = _text(user_id, "user id", warn_once) if user_id is not None else ""
+        if user and not _within(user, contract.USER_ID_MAX, "user id", warn_once):
+            user = ""
+        session = (
+            _text(session_id, "session id", warn_once) if session_id is not None else ""
+        )
+        if session and not _within(
+            session, contract.SESSION_ID_MAX, "session id", warn_once
         ):
-            inherited[contract.USER_ID] = user
-        if (
-            session_id is not None
-            and (session := _text(session_id, "session id", warn_once))
-            and _within(session, contract.SESSION_ID_MAX, "session id", warn_once)
-        ):
-            inherited[contract.SESSION_ID] = session
+            session = ""
+        inherited = _inherited(run_id, agent, user, session)
         # On every span of the run from its start, for the processor to drop:
         # a sampler's drop would clear the flag the application's spans inherit.
         if sampled_out:
             inherited[contract.SAMPLED_OUT] = "true"
-        attributes = _tags(tags, warn_once)
-        attributes.update(
-            {
-                contract.OPERATION: "invoke_agent",
-                contract.AGENT_NAME: agent,
-                **inherited,
-                contract.SAMPLE_RATE: float(rate),
-            }
-        )
+        name, attributes = _run_opening(agent, inherited, rate, tags, warn_once)
         parent = context.get_current()
-        span = self._start(
-            f"invoke_agent {agent}", parent, attributes, SpanKind.INTERNAL
-        )
+        span = self._start(name, parent, attributes, SpanKind.INTERNAL)
         ctx = trace.set_span_in_context(span, parent)
         run = Run(
             self._client,
@@ -532,34 +520,27 @@ class Opener:
         run._guard.opens(step=False)
         warn_once = self._client.exporter.warn_once
         model = _text(model, "model", warn_once)
-        # Sent blank, the span would be named " <model>" and ingest would read
-        # it as a step; one that is no string is no operation either.
-        if not (isinstance(operation, str) and operation.strip()):
-            operation = "chat"
-        attributes: dict[str, Any] = {**run.inherited, contract.OPERATION: operation}
         # Ingest refuses a call over an empty model, but keeps one with none.
         if model:
             model = _cut(model, contract.MODEL_MAX, "model", warn_once)
-            attributes[contract.REQUEST_MODEL] = model
         else:
             warn_once(
                 "call:model",
                 "telmoni: a model call needs its model; one without is sent "
                 "named by its operation alone",
             )
-        if provider is not None and (named := _text(provider, "provider", warn_once)):
-            attributes[contract.PROVIDER] = _cut(
-                named, contract.PROVIDER_MAX, "provider", warn_once
-            )
+        named = _text(provider, "provider", warn_once) if provider is not None else ""
+        provider = _cut(named, contract.PROVIDER_MAX, "provider", warn_once)
+        name, own = _model_call_opening(model, operation, provider)
+        attributes: dict[str, Any] = {**run.inherited, **own}
         if input_messages is not None:
             attributes[contract.INPUT_MESSAGES] = _as_json(input_messages)
         if system_instructions is not None:
             attributes[contract.SYSTEM_INSTRUCTIONS] = _as_json(system_instructions)
-        name = f"{operation} {model}" if model else operation
         name = _cut(name, contract.NAME_MAX, "model call's name", warn_once)
         call = self._child(run, ModelCall, name, attributes, SpanKind.CLIENT)
         call._run = run
-        call._provider = attributes.get(contract.PROVIDER, "")
+        call._provider = provider
         call._model = model
         return call
 
@@ -577,16 +558,11 @@ class Opener:
             "tool's name",
             warn_once,
         )
-        attributes: dict[str, Any] = {
-            **run.inherited,
-            contract.OPERATION: contract.TOOL_OPERATION,
-            contract.TOOL_NAME: name,
-        }
+        span_name, own = _tool_call_opening(name)
+        attributes: dict[str, Any] = {**run.inherited, **own}
         if arguments is not None:
             attributes[contract.TOOL_CALL_ARGUMENTS] = _as_json(arguments)
-        return self._child(
-            run, ToolCall, f"execute_tool {name}", attributes, SpanKind.INTERNAL
-        )
+        return self._child(run, ToolCall, span_name, attributes, SpanKind.INTERNAL)
 
     def record(self, record: RunRecord) -> None:
         """Send a run that has ended as the live calls would have sent it.
@@ -636,23 +612,11 @@ class Opener:
             if end < start:
                 raise ValueError("a recorded span cannot end before it starts")
         rate = self._client.config.sample_rate
-        run_id = str(run_uuid)
-        inherited: dict[str, str] = {
-            contract.RUN_ID: run_id,
-            contract.AGENT: record.agent,
-        }
-        if record.user_id:
-            inherited[contract.USER_ID] = record.user_id
-        if record.session_id:
-            inherited[contract.SESSION_ID] = record.session_id
-        attributes = _tags(tags, self._client.exporter.warn_once)
-        attributes.update(
-            {
-                contract.OPERATION: "invoke_agent",
-                contract.AGENT_NAME: record.agent,
-                **inherited,
-                contract.SAMPLE_RATE: float(rate),
-            }
+        inherited = _inherited(
+            str(run_uuid), record.agent, record.user_id, record.session_id
+        )
+        run_name, attributes = _run_opening(
+            record.agent, inherited, rate, tags, self._client.exporter.warn_once
         )
         # Sampled out, no span is built: none of a record's ends after it, and
         # the same record sent again draws again.
@@ -683,35 +647,21 @@ class Opener:
 
         def call(item: CallRecord, parent: context.Context) -> None:
             if isinstance(item, ModelCallRecord):
-                operation = item.operation
-                if not (operation and operation.strip()):
-                    operation = "chat"
-                attributes: dict[str, Any] = {
-                    **inherited,
-                    contract.OPERATION: operation,
-                    contract.REQUEST_MODEL: item.model,
-                }
-                if item.provider:
-                    attributes[contract.PROVIDER] = item.provider
-                attributes.update(usages[id(item)])
-                name, kind = f"{operation} {item.model}", SpanKind.CLIENT
+                name, own = _model_call_opening(
+                    item.model, item.operation, item.provider
+                )
+                own.update(usages[id(item)])
+                kind = SpanKind.CLIENT
             else:
-                attributes = {
-                    **inherited,
-                    contract.OPERATION: contract.TOOL_OPERATION,
-                    contract.TOOL_NAME: item.name,
-                }
-                name, kind = f"execute_tool {item.name}", SpanKind.INTERNAL
+                name, own = _tool_call_opening(item.name)
+                kind = SpanKind.INTERNAL
+            attributes = {**inherited, **own}
             _close(open_span(name, parent, attributes, kind, item.start), item)
 
         with self._client.processor.hold(run_uuid.int, need):
             root = context.Context()
             span = open_span(
-                f"invoke_agent {record.agent}",
-                root,
-                attributes,
-                SpanKind.INTERNAL,
-                record.start,
+                run_name, root, attributes, SpanKind.INTERNAL, record.start
             )
             ctx = trace.set_span_in_context(span, root)
             for item, calls in items:
@@ -824,6 +774,68 @@ def _usage(
         else:
             out[contract.COST] = cost
     return out
+
+
+def _inherited(
+    run_id: str, agent: str, user_id: str | None, session_id: str | None
+) -> dict[str, str]:
+    """What every span of a run carries, live or recorded: its id and agent,
+    and its user and session where it has them."""
+    inherited = {contract.RUN_ID: run_id, contract.AGENT: agent}
+    if user_id:
+        inherited[contract.USER_ID] = user_id
+    if session_id:
+        inherited[contract.SESSION_ID] = session_id
+    return inherited
+
+
+def _run_opening(
+    agent: str,
+    inherited: Mapping[str, str],
+    rate: float,
+    tags: Mapping[str, str] | None,
+    warn_once: Callable[[str, str], None],
+) -> tuple[str, dict[str, Any]]:
+    """A run's span name and attributes, live or recorded, its tags first:
+    past the span's 128, Python's SDK drops the oldest."""
+    attributes = _tags(tags, warn_once)
+    attributes.update(
+        {
+            contract.OPERATION: "invoke_agent",
+            contract.AGENT_NAME: agent,
+            **inherited,
+            contract.SAMPLE_RATE: float(rate),
+        }
+    )
+    return f"invoke_agent {agent}", attributes
+
+
+def _operation(operation: object) -> str:
+    """A model call's operation: sent blank, the span would be named " <model>"
+    and ingest would read it as a step; one that is no string is none either."""
+    return operation if isinstance(operation, str) and operation.strip() else "chat"
+
+
+def _model_call_opening(
+    model: str, operation: object, provider: str | None
+) -> tuple[str, dict[str, Any]]:
+    """A model call's span name and own attributes, live or recorded, an empty
+    model or provider left off."""
+    operation = _operation(operation)
+    attributes: dict[str, Any] = {contract.OPERATION: operation}
+    if model:
+        attributes[contract.REQUEST_MODEL] = model
+    if provider:
+        attributes[contract.PROVIDER] = provider
+    return (f"{operation} {model}" if model else operation), attributes
+
+
+def _tool_call_opening(name: str) -> tuple[str, dict[str, Any]]:
+    """A tool call's span name and own attributes, live or recorded."""
+    return f"execute_tool {name}", {
+        contract.OPERATION: contract.TOOL_OPERATION,
+        contract.TOOL_NAME: name,
+    }
 
 
 def _tags(
@@ -1067,9 +1079,7 @@ def _check(item: RunRecord | StepRecord | CallRecord) -> None:
             )
     # Its span is named `<operation> <model>`, a name ingest caps too.
     if isinstance(item, ModelCallRecord):
-        operation = (
-            item.operation if item.operation and item.operation.strip() else "chat"
-        )
+        operation = _operation(item.operation)
         if len(operation) + len(item.model) > contract.NAME_MAX - 1:
             raise ValueError(
                 "a recorded model call's operation and model must be up to "
