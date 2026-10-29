@@ -18,7 +18,7 @@ use opentelemetry_sdk::trace::{SamplingDecision, SamplingResult, ShouldSample};
 use serde_json::{Value, json};
 use telmoni::{
     Batching, CallRecord, Config, Error, ModelCallRecord, RecordItem, RunOptions, RunRecord,
-    StepRecord, Telmoni, ToolCallRecord, Usage,
+    StepRecord, Telmoni, Text, ToolCallRecord, Usage,
 };
 
 /// A time as the fixture writes it, RFC 3339 in UTC to the millisecond:
@@ -612,14 +612,14 @@ fn a_record_with_an_empty_name_is_refused() -> Outcome {
 }
 
 /// What a refusal names, its cap, and a record holding that text at the length given.
-type Capped<'a> = (&'static str, usize, &'a dyn Fn(usize) -> RunRecord);
+type Capped<'a> = (Text, usize, &'a dyn Fn(usize) -> RunRecord);
 
 /// Each text a record holds is sent at ingest's cap and refused one past it, counted in characters.
 #[test]
 fn a_record_with_a_text_past_ingests_cap_is_refused() -> Outcome {
     assert_eq!(
         Error::TooLong {
-            what: "run's agent",
+            what: Text::RunAgent,
             max: 128
         }
         .to_string(),
@@ -649,26 +649,26 @@ fn a_record_with_a_text_past_ingests_cap_is_refused() -> Outcome {
     let model = |n: usize| ModelCallRecord::new(text(n), at, at);
     let tool = |n: usize| ToolCallRecord::new(text(n), at, at);
     let cases: [Capped<'_>; 11] = [
-        ("run's agent", 128, &|n| RunRecord {
+        (Text::RunAgent, 128, &|n| RunRecord {
             agent: text(n),
             ..golden.clone()
         }),
-        ("run's user_id", 128, &|n| RunRecord {
+        (Text::RunUserId, 128, &|n| RunRecord {
             user_id: Some(text(n)),
             ..golden.clone()
         }),
-        ("run's session_id", 200, &|n| RunRecord {
+        (Text::RunSessionId, 200, &|n| RunRecord {
             session_id: Some(text(n)),
             ..golden.clone()
         }),
-        ("run's error_type", 128, &|n| RunRecord {
+        (Text::RunErrorType, 128, &|n| RunRecord {
             error_type: Some(text(n)),
             ..golden.clone()
         }),
-        ("step's name", 145, &|n| {
+        (Text::StepName, 145, &|n| {
             inside(StepRecord::new(text(n), at, at).into())
         }),
-        ("step's error_type", 128, &|n| {
+        (Text::StepErrorType, 128, &|n| {
             inside(
                 StepRecord {
                     error_type: Some(text(n)),
@@ -678,7 +678,7 @@ fn a_record_with_a_text_past_ingests_cap_is_refused() -> Outcome {
             )
         }),
         // The longest operation and a model at its cap keep the call its name.
-        ("model call's model", 128, &|n| {
+        (Text::ModelCallModel, 128, &|n| {
             inside(
                 ModelCallRecord {
                     operation: Some("generate_content".to_owned()),
@@ -687,7 +687,7 @@ fn a_record_with_a_text_past_ingests_cap_is_refused() -> Outcome {
                 .into(),
             )
         }),
-        ("model call's provider", 128, &|n| {
+        (Text::ModelCallProvider, 128, &|n| {
             in_step(
                 ModelCallRecord {
                     provider: Some(text(n)),
@@ -696,7 +696,7 @@ fn a_record_with_a_text_past_ingests_cap_is_refused() -> Outcome {
                 .into(),
             )
         }),
-        ("model call's error_type", 128, &|n| {
+        (Text::ModelCallErrorType, 128, &|n| {
             inside(
                 ModelCallRecord {
                     error_type: Some(text(n)),
@@ -705,8 +705,8 @@ fn a_record_with_a_text_past_ingests_cap_is_refused() -> Outcome {
                 .into(),
             )
         }),
-        ("tool call's name", 145, &|n| inside(tool(n).into())),
-        ("tool call's error_type", 128, &|n| {
+        (Text::ToolCallName, 145, &|n| inside(tool(n).into())),
+        (Text::ToolCallErrorType, 128, &|n| {
             in_step(
                 ToolCallRecord {
                     error_type: Some(text(n)),

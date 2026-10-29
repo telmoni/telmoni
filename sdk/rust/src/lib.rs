@@ -85,7 +85,8 @@ mod warnings;
 
 pub use client::{Hooks, Telmoni};
 pub use config::{Config, DEFAULT_ENDPOINT, Price};
-pub use error::{Cap, Error};
+pub use error::{Cap, Error, Text};
+pub use exporter::ContentMode;
 pub use processor::Batching;
 pub use propagation::Carrier;
 pub use records::{CallRecord, ModelCallRecord, RecordItem, RunRecord, StepRecord, ToolCallRecord};

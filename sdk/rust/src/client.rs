@@ -14,7 +14,7 @@ use crate::VERSION;
 use crate::config::Config;
 use crate::contract;
 use crate::error::Error;
-use crate::exporter::Exporter;
+use crate::exporter::{ContentMode, Exporter};
 use crate::guard::{OwnRates, own_rates};
 use crate::ids::Ids;
 use crate::processor::{Batching, Processor};
@@ -174,10 +174,11 @@ impl Telmoni {
         &self.inner.config
     }
 
-    /// The project's content mode, learned from the first answer: `off` or
-    /// `on`; `None` before one.
+    /// The project's content mode, as the last answer named it; `None` before
+    /// one, or for a word ingest does not send, where the other SDKs hand the
+    /// word back.
     #[must_use]
-    pub fn content_mode(&self) -> Option<String> {
+    pub fn content_mode(&self) -> Option<ContentMode> {
         self.inner.exporter.content_mode()
     }
 

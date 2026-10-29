@@ -8,7 +8,7 @@ use std::collections::BTreeSet;
 use common::{Failure, Harness, Outcome, attributes_of, keyed, name_of, only, starting_with};
 use serde_json::{Map, Value, json};
 use telmoni::transport::Answer;
-use telmoni::{Config, Content, ModelCallOptions, Reply, RunOptions, Usage};
+use telmoni::{Config, Content, ContentMode, ModelCallOptions, Reply, RunOptions, Usage};
 
 #[test]
 fn a_model_call_carries_the_conventions_names() -> Outcome {
@@ -375,7 +375,7 @@ fn content_leaves_once_the_server_has_said_on() -> Outcome {
     let run = harness.telmoni.run("bot", RunOptions::default())?;
     run.end();
     harness.flush()?;
-    assert_eq!(harness.telmoni.content_mode().as_deref(), Some("on"));
+    assert_eq!(harness.telmoni.content_mode(), Some(ContentMode::On));
 
     let run = harness.telmoni.run("bot", RunOptions::default())?;
     let call = run.model_call(
@@ -396,13 +396,48 @@ fn content_leaves_once_the_server_has_said_on() -> Outcome {
     Ok(())
 }
 
+/// A word ingest does not send reads as no mode, after an `on` too, so content stays home.
+#[test]
+fn a_mode_ingest_does_not_send_keeps_content_home() -> Outcome {
+    let sealed = Answer {
+        status: 200,
+        headers: vec![("Telmoni-Content-Mode".to_owned(), "sealed".to_owned())],
+        body: b"{}".to_vec(),
+    };
+    let harness = Harness::answering(
+        Config {
+            capture_content: true,
+            ..keyed()
+        },
+        [Ok(mode_on()), Ok(sealed.clone()), Ok(sealed)],
+    )?;
+    for _ in 0..2 {
+        harness.telmoni.run("bot", RunOptions::default())?.end();
+        harness.flush()?;
+    }
+    assert_eq!(harness.telmoni.content_mode(), None);
+    let run = harness.telmoni.run("bot", RunOptions::default())?;
+    let call = run.model_call(
+        "m",
+        ModelCallOptions {
+            input_messages: Some("kept home".into()),
+            ..ModelCallOptions::default()
+        },
+    )?;
+    call.end();
+    run.end();
+    harness.flush()?;
+    assert!(!harness.transport.text().contains("kept home"));
+    Ok(())
+}
+
 #[test]
 fn content_stays_home_without_capture_content_even_when_allowed() -> Outcome {
     let harness = Harness::answering(keyed(), std::iter::repeat_n(Ok(mode_on()), 4))?;
     let run = harness.telmoni.run("bot", RunOptions::default())?;
     run.end();
     harness.flush()?;
-    assert_eq!(harness.telmoni.content_mode().as_deref(), Some("on"));
+    assert_eq!(harness.telmoni.content_mode(), Some(ContentMode::On));
 
     let run = harness.telmoni.run("bot", RunOptions::default())?;
     let call = run.model_call(

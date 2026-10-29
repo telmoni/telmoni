@@ -237,4 +237,6 @@ Prompts, completions, tool arguments and results are content. They are set on
 the span, and the exporter takes them off every span before it leaves the
 process unless `capture_content` is on **and** the project's content mode,
 learned from the platform's answers, is `on`. Before the first answer the mode
-is unknown, so content stays home.
+is unknown, so content stays home. `telmoni.content_mode()` hands it back as
+`Some(ContentMode::Off)` or `Some(ContentMode::On)`: `None` before an answer, or
+for a word ingest does not send, which keeps content home too.

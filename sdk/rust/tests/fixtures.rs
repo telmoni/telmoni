@@ -16,7 +16,8 @@ use common::{
 use serde_json::{Value, json};
 use telmoni::transport::{Answer, TransportError};
 use telmoni::{
-    Config, Hooks, ModelCallOptions, Reply, RunOptions, Telmoni, ToolCallOptions, Usage,
+    Config, ContentMode, Hooks, ModelCallOptions, Reply, RunOptions, Telmoni, ToolCallOptions,
+    Usage,
 };
 
 /// The fixture's normalization, as its README sets it out.
@@ -307,7 +308,7 @@ fn kept_logs_nothing_and_sets_the_mode() -> Outcome {
     a_run(&harness)?;
     harness.telmoni.shutdown();
     assert_eq!(harness.warnings.all(), Vec::<String>::new());
-    assert_eq!(harness.telmoni.content_mode().as_deref(), Some("off"));
+    assert_eq!(harness.telmoni.content_mode(), Some(ContentMode::Off));
     assert!(harness.sleeps.all().is_empty());
     Ok(())
 }

@@ -19,7 +19,7 @@ use uuid::Uuid;
 
 use crate::client::Inner;
 use crate::contract;
-use crate::error::Error;
+use crate::error::{Error, Text};
 use crate::ids;
 use crate::runs::{self, Usage};
 
@@ -409,7 +409,7 @@ struct Checked<'a> {
     /// an empty one as unset.
     name: Option<&'a str>,
     /// Each text ingest caps: what it is, its characters and its cap.
-    texts: Vec<(&'static str, usize, usize)>,
+    texts: Vec<(Text, usize, usize)>,
     start: SystemTime,
     end: SystemTime,
 }
@@ -420,22 +420,22 @@ impl<'a> Checked<'a> {
             name: Some(&record.agent),
             texts: vec![
                 (
-                    "run's agent",
+                    Text::RunAgent,
                     chars(Some(&record.agent)),
                     contract::AGENT_MAX,
                 ),
                 (
-                    "run's user_id",
+                    Text::RunUserId,
                     chars(record.user_id.as_deref()),
                     contract::USER_ID_MAX,
                 ),
                 (
-                    "run's session_id",
+                    Text::RunSessionId,
                     chars(record.session_id.as_deref()),
                     contract::SESSION_ID_MAX,
                 ),
                 (
-                    "run's error_type",
+                    Text::RunErrorType,
                     chars(record.error_type.as_deref()),
                     contract::ERROR_TYPE_MAX,
                 ),
@@ -449,9 +449,9 @@ impl<'a> Checked<'a> {
         Self {
             name: Some(&step.name),
             texts: vec![
-                ("step's name", chars(Some(&step.name)), contract::NAME_MAX),
+                (Text::StepName, chars(Some(&step.name)), contract::NAME_MAX),
                 (
-                    "step's error_type",
+                    Text::StepErrorType,
                     chars(step.error_type.as_deref()),
                     contract::ERROR_TYPE_MAX,
                 ),
@@ -473,17 +473,17 @@ impl<'a> Checked<'a> {
             name: Some(&call.model),
             texts: vec![
                 (
-                    "model call's model",
+                    Text::ModelCallModel,
                     chars(Some(&call.model)),
                     contract::MODEL_MAX,
                 ),
                 (
-                    "model call's provider",
+                    Text::ModelCallProvider,
                     chars(call.provider.as_deref()),
                     contract::PROVIDER_MAX,
                 ),
                 (
-                    "model call's error_type",
+                    Text::ModelCallErrorType,
                     chars(call.error_type.as_deref()),
                     contract::ERROR_TYPE_MAX,
                 ),
@@ -498,12 +498,12 @@ impl<'a> Checked<'a> {
             name: None,
             texts: vec![
                 (
-                    "tool call's name",
+                    Text::ToolCallName,
                     chars(Some(&call.name)),
                     contract::NAME_MAX,
                 ),
                 (
-                    "tool call's error_type",
+                    Text::ToolCallErrorType,
                     chars(call.error_type.as_deref()),
                     contract::ERROR_TYPE_MAX,
                 ),

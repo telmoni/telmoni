@@ -26,6 +26,16 @@ const RETRY_AFTER_MAX_SECS: u64 = 60;
 /// Where a dropped content field's warning sends the reader.
 const CONTENT_DOCS: &str = "https://telmoni.com/docs/api/ingest#what-is-dropped-at-the-door";
 
+/// A project's content mode, as ingest's answers name it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ContentMode {
+    /// Content is dropped at the door, so it stays home.
+    Off,
+    /// Content is kept, so it leaves where `capture_content` asks.
+    On,
+}
+
 pub(crate) struct Exporter {
     url: String,
     /// Why nothing is sent to the endpoint ([`refusal`]), which the first
@@ -36,7 +46,7 @@ pub(crate) struct Exporter {
     transport: Box<dyn Transport>,
     sleep: Box<dyn Fn(Duration) + Send + Sync>,
     warner: Arc<Warner>,
-    content_mode: Mutex<Option<String>>,
+    content_mode: Mutex<Option<ContentMode>>,
     /// The resource's attributes, encoded once: the exporter's own list,
     /// whatever the provider's resource holds.
     resource: Vec<serde_json::Value>,
@@ -67,8 +77,8 @@ impl Exporter {
     }
 
     /// The project's mode, as the last answer named it; `None` before one.
-    pub(crate) fn content_mode(&self) -> Option<String> {
-        lock(&self.content_mode).clone()
+    pub(crate) fn content_mode(&self) -> Option<ContentMode> {
+        *lock(&self.content_mode)
     }
 
     /// Gives up what is left: no attempt follows the one in flight, which a
@@ -191,7 +201,7 @@ impl Exporter {
     /// the attributes ingest drops for their length.
     fn encode<'a>(&'a self, spans: &'a [SpanData], trimmed: bool) -> Request<'a> {
         // Only an export's answer moves the mode, on this thread: once a batch.
-        let keep_content = self.capture_content && self.content_mode().as_deref() == Some("on");
+        let keep_content = self.capture_content && self.content_mode() == Some(ContentMode::On);
         Request {
             resource_spans: [ResourceSpans {
                 resource: Resource {
@@ -255,7 +265,12 @@ impl Exporter {
             .map(str::trim)
             .filter(|mode| !mode.is_empty())
         {
-            *lock(&self.content_mode) = Some(mode.to_owned());
+            // A word ingest does not send reads as none, which keeps content home.
+            *lock(&self.content_mode) = match mode {
+                "off" => Some(ContentMode::Off),
+                "on" => Some(ContentMode::On),
+                _ => None,
+            };
         }
         let body: &[u8] = if answer.body.is_empty() {
             b"{}"

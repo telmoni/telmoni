@@ -45,8 +45,8 @@ pub enum Error {
     /// A recorded text held more characters than ingest takes there, which it
     /// refuses the span for.
     TooLong {
-        /// Which text, never the text itself: `"step's name"`, …
-        what: &'static str,
+        /// Which text, never the text itself.
+        what: Text,
         /// The most characters ingest takes there.
         max: usize,
     },
@@ -72,6 +72,52 @@ pub enum Cap {
     Steps,
     /// `max_spend`: what its model calls cost.
     Spend,
+}
+
+/// A recorded text ingest caps, which [`Error::TooLong`] names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Text {
+    /// The run's agent.
+    RunAgent,
+    /// The run's `user_id`.
+    RunUserId,
+    /// The run's `session_id`.
+    RunSessionId,
+    /// The run's `error_type`.
+    RunErrorType,
+    /// A step's name.
+    StepName,
+    /// A step's `error_type`.
+    StepErrorType,
+    /// A model call's model.
+    ModelCallModel,
+    /// A model call's provider.
+    ModelCallProvider,
+    /// A model call's `error_type`.
+    ModelCallErrorType,
+    /// A tool call's name.
+    ToolCallName,
+    /// A tool call's `error_type`.
+    ToolCallErrorType,
+}
+
+impl fmt::Display for Text {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::RunAgent => "run's agent",
+            Self::RunUserId => "run's user_id",
+            Self::RunSessionId => "run's session_id",
+            Self::RunErrorType => "run's error_type",
+            Self::StepName => "step's name",
+            Self::StepErrorType => "step's error_type",
+            Self::ModelCallModel => "model call's model",
+            Self::ModelCallProvider => "model call's provider",
+            Self::ModelCallErrorType => "model call's error_type",
+            Self::ToolCallName => "tool call's name",
+            Self::ToolCallErrorType => "tool call's error_type",
+        })
+    }
 }
 
 impl fmt::Display for Error {
