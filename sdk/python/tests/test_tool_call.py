@@ -85,6 +85,20 @@ def test_the_tool_call_decorator(telmoni: Telmoni, transport: FakeTransport) -> 
     assert len(tools(transport)) == 1
 
 
+def test_a_scope_entered_again_while_open_refuses_and_keeps_its_span(
+    telmoni: Telmoni, transport: FakeTransport
+) -> None:
+    with telmoni.run("bot"):
+        search = telmoni.tool_call("search")
+        with search, pytest.raises(RuntimeError, match="this scope is open"):
+            search.__enter__()
+        # Entered again once it has closed, it opens another.
+        with search:
+            pass
+    assert telmoni.flush()
+    assert len(tools(transport)) == 2
+
+
 def test_content_that_will_not_serialize_never_raises(
     telmoni: Telmoni, transport: FakeTransport
 ) -> None:

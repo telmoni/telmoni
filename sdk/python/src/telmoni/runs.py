@@ -282,15 +282,28 @@ class Scope(Generic[H]):
     def __init__(self, open_handle: Callable[[], H | None]) -> None:
         self._open = open_handle
         self._handle: H | None = None
+        # Held while open: entered again meanwhile, nested or from another task
+        # or thread, it would lose the first handle and detach the wrong context.
+        self._busy = threading.Lock()
 
     def __enter__(self) -> H | Nothing:
-        self._handle = self._open()
+        if not self._busy.acquire(blocking=False):
+            raise RuntimeError(
+                "this scope is open; call telmoni.step() (or run, model_call, "
+                "tool_call) again for each block that opens one"
+            )
+        try:
+            self._handle = self._open()
+        except BaseException:
+            self._busy.release()
+            raise
         return self._handle if self._handle is not None else Nothing()
 
     def __exit__(self, exc_type: object, exc: BaseException | None, tb: object) -> None:
-        if self._handle is not None:
-            self._handle._end(exc)
-            self._handle = None
+        handle, self._handle = self._handle, None
+        self._busy.release()
+        if handle is not None:
+            handle._end(exc)
 
     async def __aenter__(self) -> H | Nothing:
         return self.__enter__()
@@ -363,10 +376,11 @@ class RunScope(Scope[Run]):
     """A run always opens, so its handle is never the no-op one."""
 
     def __enter__(self) -> Run:
-        handle = self._open()
+        super().__enter__()
+        handle = self._handle
         if handle is None:
+            self.__exit__(None, None, None)
             raise RuntimeError("a run did not open")
-        self._handle = handle
         return handle
 
     async def __aenter__(self) -> Run:
