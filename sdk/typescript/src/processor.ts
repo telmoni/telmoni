@@ -12,7 +12,7 @@ import type { Context } from '@opentelemetry/api';
 import type { ReadableSpan, Span, SpanProcessor } from '@opentelemetry/sdk-trace-base';
 
 import * as contract from './contract.js';
-import { QueueFullError, errorName } from './errors.js';
+import { QueueFullError, ShutdownError, errorName } from './errors.js';
 import type { Exporter } from './exporter.js';
 import type { ProcessorOptions } from './types.js';
 
@@ -83,12 +83,14 @@ export class Processor implements SpanProcessor {
    * Runs `build`, staging the spans of trace `traceId` as they end, then
    * queues them whole, to travel in exports of their own: so the same record
    * sent again is the same bytes, whatever else ends meanwhile. Throws
-   * `QueueFullError`, running nothing, when the queue has no room for the
-   * record's `need` spans; the room is kept for them meanwhile. A `build` that
-   * throws queues nothing. Of the application's, it runs the root sampler and
-   * the reads of the caller's record alone, a record's warnings given before it.
+   * `ShutdownError` once shut down, and `QueueFullError` when the queue has no
+   * room for the record's `need` spans, running nothing; the room is kept for
+   * them meanwhile. A `build` that throws queues nothing. Of the application's,
+   * it runs the root sampler and the reads of the caller's record alone, a
+   * record's warnings given before it.
    */
   record(traceId: string, need: number, build: () => void): void {
+    if (this.#down) throw new ShutdownError();
     if (this.#queue.length + need > this.#maxQueueSize) throw new QueueFullError(need);
     const stage = { traceId, spans: [] as ReadableSpan[] };
     this.#stage = stage;

@@ -19,6 +19,7 @@ use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use opentelemetry_sdk::trace::{Span, SpanData, SpanProcessor};
 
 use crate::contract;
+use crate::error::Error;
 use crate::exporter::Exporter;
 use crate::lock;
 use crate::warnings::Warner;
@@ -118,20 +119,23 @@ impl Processor {
     /// Stages the spans of the record in `trace` as they end, for
     /// [`Hold::queue`] to queue whole, to travel in exports of their own: so
     /// the same record sent again is the same bytes, whatever else ends
-    /// meanwhile. One record at a time, its room kept for it; `None`, holding
-    /// nothing, when the queue has none for its `need` spans.
-    pub(crate) fn hold(&self, trace: TraceId, need: usize) -> Option<Hold<'_>> {
+    /// meanwhile. One record at a time, its room kept for it; refused, holding
+    /// nothing, once shut down or when the queue has none for its `need` spans.
+    pub(crate) fn hold(&self, trace: TraceId, need: usize) -> Result<Hold<'_>, Error> {
         let recording = lock(&self.shared.recording);
         let mut state = lock(&self.shared.state);
+        if state.life != Life::Running {
+            return Err(Error::Shutdown);
+        }
         if state.queue.len() + need > self.shared.batching.max_queue_size {
-            return None;
+            return Err(Error::QueueFull { spans: need });
         }
         state.stage = Some(Stage {
             trace,
             spans: Vec::new(),
             reserved: need,
         });
-        Some(Hold {
+        Ok(Hold {
             shared: &self.shared,
             built: false,
             _recording: recording,

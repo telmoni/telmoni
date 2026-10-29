@@ -27,8 +27,8 @@ func ExportSpans(c *Client, spans []sdktrace.ReadOnlySpan) { c.exporter.export(s
 // releases the hold, told the record was built only when built. False when
 // the hold is refused.
 func holdOne(c *Client, runID [16]byte, built bool) bool {
-	release, ok := c.processor.hold(trace.TraceID(runID), 1)
-	if !ok {
+	release, err := c.processor.hold(trace.TraceID(runID), 1)
+	if err != nil {
 		return false
 	}
 	_, span := c.tracer.Start(withIDs(context.Background(), trace.TraceID(runID), recordedSpanID(runID, 0)), "staged")

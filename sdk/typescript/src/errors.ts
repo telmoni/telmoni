@@ -41,6 +41,14 @@ export class QueueFullError extends Error {
   }
 }
 
+/** `recordRun` refused a record once the client was shut down, queuing nothing of it. */
+export class ShutdownError extends Error {
+  constructor() {
+    super('the client is shut down; the record was not sent');
+    this.name = 'ShutdownError';
+  }
+}
+
 /**
  * A run reached a cap it was opened with, thrown at what it would open next:
  * `cap` is `steps` or `spend`, `limit` the cap and `used` what the run had

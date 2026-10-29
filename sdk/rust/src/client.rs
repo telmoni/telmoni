@@ -291,7 +291,9 @@ impl Telmoni {
     /// [`Error::EmptyAgent`], [`Error::RunId`], [`Error::EmptyName`],
     /// [`Error::TooLong`], [`Error::RecordedTime`] or [`Error::EndBeforeStart`]
     /// for a record ingest would refuse, as each says; [`Error::SampleRate`]
-    /// for a configured rate outside (0, 1]. A record refused sends nothing.
+    /// for a configured rate outside (0, 1]; [`Error::QueueFull`] when the
+    /// export queue has no room for the whole record; and [`Error::Shutdown`]
+    /// once the client is shut down. A record refused sends nothing.
     pub fn record_run(&self, record: RunRecord) -> Result<(), Error> {
         records::send(&self.inner, record)
     }

@@ -541,7 +541,8 @@ class Opener:
         travel in exports of their own, so the same record sent again is the
         same bytes, whatever else is sent meanwhile.
         Raises ``QueueFullError``, sending nothing, when the export queue has
-        no room for the whole record.
+        no room for the whole record, and ``ShutdownError`` once the client is
+        shut down.
         """
         # Checked whole before anything opens, so a refused record sends nothing.
         if not isinstance(record, RunRecord):

@@ -57,6 +57,8 @@ pub enum Error {
         /// How many spans the record would have queued.
         spans: usize,
     },
+    /// The client was shut down, so nothing of the record was queued.
+    Shutdown,
 }
 
 /// A run's cap, which [`Error::CapExceeded`] names.
@@ -111,6 +113,7 @@ impl fmt::Display for Error {
                 f,
                 "the export queue has no room for the record's {spans} spans; flush or wait, then record it again"
             ),
+            Self::Shutdown => f.write_str("the client is shut down; the record was not sent"),
         }
     }
 }

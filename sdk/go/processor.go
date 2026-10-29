@@ -86,16 +86,20 @@ type stage struct {
 // hold stages the spans of the record in trace id as they end, and release
 // queues them whole, to travel in exports of their own: so the same record
 // sent again is the same bytes, whatever else ends meanwhile. One record at a
-// time, its room kept for it; refused, holding nothing, when the queue has
-// none for its need spans. A release told the record was not built queues
-// nothing.
-func (p *processor) hold(id trace.TraceID, need int) (release func(built bool), ok bool) {
+// time, its room kept for it; refused, holding nothing, once the processor is
+// shut down or when the queue has none for its need spans. A release told the
+// record was not built queues nothing.
+func (p *processor) hold(id trace.TraceID, need int) (release func(built bool), err error) {
 	p.recording.Lock()
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.stopped {
+		p.recording.Unlock()
+		return func(bool) {}, ErrShutdown
+	}
 	if len(p.queue)+need > p.limits.maxQueue {
 		p.recording.Unlock()
-		return func(bool) {}, false
+		return func(bool) {}, ErrQueueFull
 	}
 	p.stage = &stage{traceID: id}
 	p.reserved = need
@@ -115,7 +119,7 @@ func (p *processor) hold(id trace.TraceID, need int) (release func(built bool), 
 		p.fences = append(p.fences, first+len(staged))
 		p.queue = append(p.queue, staged...)
 		p.signal()
-	}, true
+	}, nil
 }
 
 func (p *processor) OnStart(context.Context, sdktrace.ReadWriteSpan) {}

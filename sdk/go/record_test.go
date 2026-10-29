@@ -591,6 +591,21 @@ func TestARecordAsLargeAsABatchTravelsInOneExport(t *testing.T) {
 	}
 }
 
+// A record made once the client is shut down is refused, never answered nil
+// for a record that went nowhere.
+func TestARecordAfterShutdownIsRefused(t *testing.T) {
+	h := newHarness(t, testConfig(), nil)
+	if err := h.client.Shutdown(context.Background()); err != nil {
+		t.Fatalf("shutting down: %v", err)
+	}
+	if err := h.client.RecordRun(context.Background(), theRecord(t)); !errors.Is(err, telmoni.ErrShutdown) {
+		t.Fatalf("RecordRun after Shutdown = %v, want ErrShutdown", err)
+	}
+	if got := len(h.transport.all()); got != 0 {
+		t.Errorf("%d exports after a shutdown, want none", got)
+	}
+}
+
 // A record the queue has no room for is refused whole, before anything is
 // queued, since its tail — the run's own span first — would otherwise be
 // dropped; drained, the queue takes it whole.

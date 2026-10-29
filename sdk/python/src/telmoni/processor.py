@@ -37,6 +37,11 @@ class QueueFullError(RuntimeError):
     it again."""
 
 
+class ShutdownError(RuntimeError):
+    """``record_run`` refused a record once the client was shut down, queuing
+    nothing of it."""
+
+
 class Processor(SpanProcessor):
     def __init__(
         self,
@@ -113,11 +118,15 @@ class Processor(SpanProcessor):
     @contextmanager
     def hold(self, trace_id: int, need: int) -> Iterator[None]:
         """Stage the spans of the record in ``trace_id``, queued whole as the
-        block ends, in exports of their own; refused, holding nothing, without
-        room for ``need``. A record warns before it: a handler recording a run
-        would wait on the block."""
+        block ends, in exports of their own; refused, holding nothing, once shut
+        down or without room for ``need``. A record warns before it: a handler
+        recording a run would wait on the block."""
         with self._recording:
             with self._lock:
+                if self._shutdown:
+                    raise ShutdownError(
+                        "the client is shut down; the record was not sent"
+                    )
                 if len(self._queue) + need > self._max_queue_size:
                     raise QueueFullError(
                         f"the export queue has no room for the record's {need} "

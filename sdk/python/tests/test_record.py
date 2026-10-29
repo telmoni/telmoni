@@ -25,6 +25,7 @@ from telmoni import (
     ModelCallRecord,
     QueueFullError,
     RunRecord,
+    ShutdownError,
     StepRecord,
     Telmoni,
     ToolCallRecord,
@@ -680,6 +681,15 @@ def test_a_record_refused_opens_and_sends_nothing(
         client.shutdown()
     assert transport.requests == []
     assert asked == []
+
+
+def test_a_record_after_shutdown_is_refused(transport: FakeTransport) -> None:
+    """Never answered as sent when it went nowhere."""
+    client = Telmoni(Config(api_key="k"), transport=transport)
+    client.shutdown()
+    with pytest.raises(ShutdownError, match="shut down"):
+        client.record_run(the_record())
+    assert transport.requests == []
 
 
 def test_a_record_the_queue_has_no_room_for_is_refused_whole(

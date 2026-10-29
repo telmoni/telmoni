@@ -5,7 +5,7 @@
 import { SamplingDecision, type Sampler, type SamplingResult } from '@opentelemetry/sdk-trace-base';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { QueueFullError } from '../src/index';
+import { QueueFullError, ShutdownError } from '../src/index';
 import type { CallRecord, ModelCallRecord, RunRecord, StepRecord, ToolCallRecord, Usage } from '../src/index';
 import { type ExportBody, type Harness, type JsonAttribute, attributesOf, harness, loadFixture } from './helpers';
 
@@ -186,6 +186,13 @@ afterEach(() => {
 });
 
 describe('a recorded run', () => {
+  it('is refused once the client is shut down, never taken as sent', async () => {
+    const h = harness();
+    await h.telmoni.shutdown();
+    expect(() => h.telmoni.recordRun(theRecord())).toThrow(ShutdownError);
+    expect(h.transport.requests).toHaveLength(0);
+  });
+
   it('is refused whole when the queue has no room for it, and goes whole once there is', async () => {
     // Room for four spans, and a worker that will not wake until flushed.
     const h = harness({}, { processor: { maxQueueSize: 4, maxBatchSize: 100, scheduleDelaySeconds: 60 } });

@@ -930,6 +930,20 @@ fn a_records_warnings_come_before_its_hold() -> Outcome {
     Ok(())
 }
 
+/// A record made once the client is shut down is refused, never answered as
+/// sent when it went nowhere.
+#[test]
+fn a_record_after_shutdown_is_refused() -> Outcome {
+    let harness = Harness::new()?;
+    harness.telmoni.shutdown();
+    assert_eq!(
+        harness.telmoni.record_run(the_record()?),
+        Err(Error::Shutdown)
+    );
+    assert_eq!(harness.transport.count(), 0);
+    Ok(())
+}
+
 /// A record the queue has no room for is refused whole, before anything is
 /// queued, since its tail — the run's own span first — would otherwise be
 /// dropped; drained, the queue takes it whole.

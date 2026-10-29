@@ -138,6 +138,7 @@ tuple, in the order it ran) — save a token count, read as a whole number where
 it can be and else left off with one warning, and an `operation` of `None`, a
 chat. Either sends nothing. A record the export queue has no room for raises
 `QueueFullError`, nothing of it queued: flush, or wait, and record it again.
+One made once the client is shut down raises `ShutdownError`.
 
 ## The guard
 

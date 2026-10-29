@@ -149,7 +149,8 @@ model call's operation and model past 144 together, counted in characters, not
 UTF-16's units), or a span
 that ends before it starts throws a `RangeError`. Either sends nothing. A
 record the export queue has no room for throws `QueueFullError`, nothing of it
-queued: flush, or wait, and record it again.
+queued: flush, or wait, and record it again. One made once the client is shut
+down throws `ShutdownError`.
 
 ## The guard
 

@@ -454,7 +454,8 @@ export class Opener {
    * Its spans are queued whole once built, the run's own last, and travel in
    * exports of their own, so the same record sent again is the same bytes,
    * whatever else is sent meanwhile. Throws `QueueFullError`, queuing nothing,
-   * when the export queue has no room for the whole record.
+   * when the export queue has no room for the whole record, and
+   * `ShutdownError` once the client is shut down.
    */
   record(record: RunRecord): void {
     const agent: unknown = record.agent;

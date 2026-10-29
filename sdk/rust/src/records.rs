@@ -305,9 +305,7 @@ pub(crate) fn send(inner: &Inner, mut record: RunRecord) -> Result<(), Error> {
     // Queued whole or not at all: a record that outgrows the queue's room
     // would lose its tail, the run's own span first.
     let trace_id = ids::trace_id(&run_uuid);
-    let Some(hold) = inner.processor.hold(trace_id, need) else {
-        return Err(Error::QueueFull { spans: need });
-    };
+    let hold = inner.processor.hold(trace_id, need)?;
     let mut spans = Spans {
         tracer: &inner.tracer,
         run_id: run_uuid,

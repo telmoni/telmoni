@@ -106,6 +106,10 @@ var errNoName = errors.New("telmoni: a recorded step's name or model call's mode
 // to drain, and record it again.
 var ErrQueueFull = errors.New("telmoni: the export queue has no room for the record; flush or wait, then record it again")
 
+// ErrShutdown is returned by RecordRun once the client is shut down, so
+// nothing of the record was queued.
+var ErrShutdown = errors.New("telmoni: the client is shut down; the record was not sent")
+
 // RecordRun sends a run that has ended as the live calls would have sent it:
 // for a job that keeps its own log, or a hook run after the turn it reports.
 // It goes through the same exporter, content rules and sample rate, in a
@@ -118,9 +122,10 @@ var ErrQueueFull = errors.New("telmoni: the export queue has no room for the rec
 // It returns an error, sending nothing, for a blank agent, a run id that is
 // not a UUID, text past ingest's caps, a time at or before the Unix epoch or
 // 2^64 nanoseconds or more after it, an empty step or model, a nil item or a
-// span that ends before it starts, and ErrQueueFull when the queue has no
-// room for it. A record is handed over whole, so it is refused whole, where
-// a live run's mistakes are warned of.
+// span that ends before it starts, ErrQueueFull when the queue has no room
+// for it, and ErrShutdown once the client is shut down. A record is handed
+// over whole, so it is refused whole, where a live run's mistakes are warned
+// of.
 func (c *Client) RecordRun(ctx context.Context, record RunRecord) error {
 	if !c.built() {
 		return errors.New("telmoni: a Client must come from New; nothing is sent")
@@ -174,9 +179,9 @@ func (c *Client) RecordRun(ctx context.Context, record RunRecord) error {
 	}
 	// Queued whole or not at all: a record that outgrows the queue's room
 	// would lose its tail, the run's own span first.
-	release, ok := c.processor.hold(trace.TraceID(runUUID), recordSpans(record))
-	if !ok {
-		return ErrQueueFull
+	release, err := c.processor.hold(trace.TraceID(runUUID), recordSpans(record))
+	if err != nil {
+		return err
 	}
 	built := false
 	defer func() { release(built) }()
