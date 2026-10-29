@@ -54,21 +54,23 @@ func (c *Client) Extract(ctx context.Context, header http.Header) context.Contex
 	if !ok {
 		return ctx
 	}
-	ctx = trace.ContextWithRemoteSpanContext(ctx, read.spanContext)
-	agent := c.cut(read.agent, agentMax, "run's agent")
+	displaced := providerOf(ctx)
 	// The caller's span, non-recording here: steps and calls nest under it,
 	// and nothing of it is sent or ended from this side.
+	remote := trace.SpanFromContext(trace.ContextWithRemoteSpanContext(ctx, read.spanContext))
+	agent := c.cut(read.agent, agentMax, "run's agent")
 	run := &Run{
-		handle: handle{span: trace.SpanFromContext(ctx), client: c},
+		handle: handle{span: remote, client: c},
 		id:     read.runID,
 		agent:  agent,
 		inherited: []attribute.KeyValue{
 			attribute.String(attrRunID, read.runID),
 			attribute.String(attrAgent, agent),
 		},
-		guard: &guard{},
+		guard:     &guard{},
+		displaced: displaced,
 	}
-	return contextWithRun(ctx, run)
+	return contextWithRun(trace.ContextWithSpan(ctx, inContext{remote, displaced}), run)
 }
 
 // continued is what headers name: the span to continue under, and the run.

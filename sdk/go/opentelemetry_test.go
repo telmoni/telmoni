@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"go.opentelemetry.io/otel"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
@@ -97,6 +98,64 @@ func TestARunJoinsTheCurrentTraceAndTheApplicationKeepsItsSpan(t *testing.T) {
 		if name := span["name"]; name == "request" || name == "db.query" {
 			t.Errorf("the application's span %v was sent to Telmoni", name)
 		}
+	}
+}
+
+// openedByInstrumentation opens a span as otelhttp does when given no
+// provider: on the provider of the span ctx carries.
+func openedByInstrumentation(ctx context.Context) {
+	_, span := trace.SpanFromContext(ctx).TracerProvider().Tracer("otelhttp").Start(ctx, "HTTP POST")
+	span.End()
+}
+
+// Inside a run, a step or a call, the current span's provider is the one the
+// run displaced, the application's, never the SDK's.
+func TestInstrumentationInsideARunOpensSpansOnTheApplicationsProvider(t *testing.T) {
+	h := newHarness(t, testConfig(), nil)
+	app, exporter := appProvider(t, sdktrace.AlwaysSample())
+	ctx, request := app.Start(context.Background(), "request")
+	runCtx, run := h.client.Run(ctx, "bot", telmoni.RunOptions{})
+	openedByInstrumentation(runCtx)
+	callCtx, call := run.ModelCall(runCtx, "gpt-4o-mini", telmoni.ModelCallOptions{Provider: "openai"})
+	openedByInstrumentation(callCtx)
+	call.End()
+	run.End()
+	request.End()
+	h.flush()
+	appNames := make([]string, 0, 3)
+	for _, span := range exporter.GetSpans() {
+		appNames = append(appNames, span.Name)
+	}
+	sort.Strings(appNames)
+	if !reflect.DeepEqual(appNames, []string{"HTTP POST", "HTTP POST", "request"}) {
+		t.Errorf("the application exported %v", appNames)
+	}
+	for _, name := range names(h.transport.spans(t)) {
+		if name == "HTTP POST" {
+			t.Error("the application's span was sent to Telmoni")
+		}
+	}
+}
+
+// A run opened with no span of the application's current displaces the
+// global provider.
+func TestInstrumentationInARunOpenedOutsideAnySpanUsesTheGlobalProvider(t *testing.T) {
+	h := newHarness(t, testConfig(), nil)
+	exporter := tracetest.NewInMemoryExporter()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
+	t.Cleanup(func() { _ = provider.Shutdown(context.Background()) })
+	previous := otel.GetTracerProvider()
+	otel.SetTracerProvider(provider)
+	t.Cleanup(func() { otel.SetTracerProvider(previous) })
+	runCtx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	openedByInstrumentation(runCtx)
+	run.End()
+	h.flush()
+	if got := len(exporter.GetSpans()); got != 1 {
+		t.Errorf("the global provider exported %d spans, want the one", got)
+	}
+	if got := names(h.transport.spans(t)); !reflect.DeepEqual(got, []string{"invoke_agent bot"}) {
+		t.Errorf("Telmoni was sent %v, want the run alone", got)
 	}
 }
 

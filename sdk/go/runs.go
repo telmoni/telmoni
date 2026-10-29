@@ -13,6 +13,7 @@ import (
 	"sync"
 	"unicode/utf8"
 
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -140,6 +141,29 @@ type Run struct {
 	sampledOut bool
 	// guard is held by every run with a span, a continued run's with no caps.
 	guard *guard
+	// displaced is the provider instrumentation opened spans on where the run
+	// was opened, which its contexts hand out in place of the SDK's.
+	displaced trace.TracerProvider
+}
+
+// inContext is a span of the SDK's as the contexts it returns carry it: its
+// TracerProvider the one the run displaced, so instrumentation that opens
+// spans on the current span's provider, as otelhttp does unless given one,
+// stays on the application's.
+type inContext struct {
+	trace.Span
+	displaced trace.TracerProvider
+}
+
+func (s inContext) TracerProvider() trace.TracerProvider { return s.displaced }
+
+// providerOf is the provider instrumentation opens spans on in ctx: the
+// current span's, or the global one where ctx holds none.
+func providerOf(ctx context.Context) trace.TracerProvider {
+	if span := trace.SpanFromContext(ctx); span.SpanContext().IsValid() {
+		return span.TracerProvider()
+	}
+	return otel.GetTracerProvider()
 }
 
 // Step is a step of a run.
@@ -249,12 +273,13 @@ func (c *Client) Run(ctx context.Context, agent string, opts RunOptions) (contex
 	attrs = append(attrs, inherited...)
 	attrs = append(attrs, attribute.Float64(attrSampleRate, rate))
 	attrs = append(attrs, tags...)
+	displaced := providerOf(ctx)
 	ctx, span := c.tracer.Start(ctx, runOperation+" "+agent,
 		trace.WithSpanKind(trace.SpanKindInternal),
 		trace.WithAttributes(attrs...),
 	)
-	run := &Run{handle: handle{span: span, client: c}, id: runID, agent: agent, inherited: inherited, sampledOut: sampledOut, guard: caps}
-	return contextWithRun(ctx, run), run
+	run := &Run{handle: handle{span: span, client: c}, id: runID, agent: agent, inherited: inherited, sampledOut: sampledOut, guard: caps, displaced: displaced}
+	return contextWithRun(trace.ContextWithSpan(ctx, inContext{span, displaced}), run), run
 }
 
 // Spent is what the run's model calls have cost so far in US dollars,
@@ -467,7 +492,7 @@ func (r *Run) child(ctx context.Context, name string, kind trace.SpanKind, attrs
 	all = append(all, r.inherited...)
 	all = append(all, attrs...)
 	ctx, span := r.client.tracer.Start(ctx, name, trace.WithSpanKind(kind), trace.WithAttributes(all...))
-	return contextWithRun(ctx, r), span
+	return contextWithRun(trace.ContextWithSpan(ctx, inContext{span, r.displaced}), r), span
 }
 
 // Answered records what the model answered: its name, its tokens, and its
