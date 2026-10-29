@@ -479,7 +479,9 @@ by as much, so time a record by the clock that sends it.
     (`Error::TooLong`) — a span that
     ends before it starts (`Error::EndBeforeStart`) or a configured sample
     rate outside its range (`Error::SampleRate`) is returned as an error, and
-    nothing is sent.
+    nothing is sent; a record the queue has no room for is `Error::QueueFull`.
+    `record_run` takes the record, so send `record.clone()` where you would
+    record it again.
   </Tab>
 </Tabs>
 
