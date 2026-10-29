@@ -1,5 +1,7 @@
 [workspace]
-resolver = "3"
+# Not "3", whose one change holds every member's picks to the lowest
+# `rust-version` among them: the Rust SDK's floor is older than the pin.
+resolver = "2"
 # `sdk/rust` is the Rust SDK, a library an agent links, beside the three SDKs
 # that are no crate (`sdk/`); it shares this workspace's lints, lock and gate.
 members  = ["crates/*", "sdk/rust"]
@@ -9,10 +11,11 @@ members  = ["crates/*", "sdk/rust"]
 # Everything until then is a `0.0.x` pre-release.
 version = "0.0.0"
 edition = "2024"
-# Rust 1.99.1. resolver "3" needs >=1.84. `rust-toolchain.toml` pins this exact
-# compiler so the workspace builds the same everywhere; rustup auto-installs it
-# on first cargo invocation. Nothing in the tree requires this exact floor —
-# it is the pinned compiler. Bump deliberately, in step with the pin.
+# Rust 1.99.1, which `rust-toolchain.toml` pins so the workspace builds the
+# same everywhere; rustup auto-installs it on first cargo invocation. Nothing
+# in the tree requires this exact floor — it is the pinned compiler, which every
+# member but the Rust SDK, a floor of its own, inherits. Bump deliberately, in
+# step with the pin.
 rust-version = "1.99.1"
 license      = "Apache-2.0"
 publish      = false

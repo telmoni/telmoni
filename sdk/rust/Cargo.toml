@@ -4,7 +4,9 @@ name = "telmoni"
 # `0.0.0` is the server's, and never this crate's.
 version = "0.2.0"
 edition.workspace = true
-rust-version.workspace = true
+# The crate's own floor, not the workspace's pinned compiler: customers build it
+# on theirs. Let chains need 1.88; clippy's incompatible_msrv holds std to it.
+rust-version = "1.88"
 # The second sentence meets whoever typed `cargo install telmoni`.
 description = "Rust SDK for Telmoni: an agent's runs, steps, model calls and tool calls as OpenTelemetry spans. The telmoni command is the crate telmoni-cli."
 repository = "https://github.com/telmoni/telmoni"

@@ -9,7 +9,7 @@ application's spans stay with the application's exporter.
 
 ## Installation
 
-Rust 1.99.1 or later:
+Rust 1.88 or later:
 
 ```console
 cargo add telmoni
