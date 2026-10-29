@@ -195,6 +195,10 @@ struct Handle {
     guard: Arc<Guard>,
     failed: AtomicBool,
     ended: bool,
+    /// What a caller may set again, an answer, a result or a mark, by key, set
+    /// once as the span ends: OpenTelemetry's Rust span keeps every set, a key
+    /// set again included, and drops each past its 128.
+    last: Mutex<Vec<KeyValue>>,
 }
 
 impl Handle {
@@ -216,6 +220,19 @@ impl Handle {
             guard: Arc::clone(&self.guard),
             failed: AtomicBool::new(false),
             ended: false,
+            last: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Holds `attributes` to be set as the span ends, each in place of what
+    /// its key held.
+    fn set_last(&self, attributes: impl IntoIterator<Item = KeyValue>) {
+        let mut last = lock(&self.last);
+        for attribute in attributes {
+            match last.iter_mut().find(|held| held.key == attribute.key) {
+                Some(held) => *held = attribute,
+                None => last.push(attribute),
+            }
         }
     }
 
@@ -291,12 +308,13 @@ impl Handle {
             "span's error type",
             warner,
         );
-        mark_failed(&self.cx.span(), error_type);
+        self.set_last(error_type_attribute(error_type));
+        self.cx.span().set_status(Status::error(""));
         self.failed.store(true, Ordering::Relaxed);
     }
 
     fn cancel(&self) {
-        mark_cancelled(&self.cx.span());
+        self.set_last([cancelled_attribute()]);
     }
 
     fn finish(&mut self) {
@@ -309,7 +327,9 @@ impl Handle {
         if std::thread::panicking() && !self.failed.load(Ordering::Relaxed) {
             self.fail("panic");
         }
-        self.cx.span().end();
+        let span = self.cx.span();
+        span.set_attributes(std::mem::take(&mut *lock(&self.last)));
+        span.end();
     }
 }
 
@@ -646,17 +666,18 @@ impl ModelCall {
         messages: Option<Content>,
     ) -> Option<(String, String)> {
         let mut priced = lock(&self.priced);
-        let span = self.handle.cx.span();
         if let Some(model) = answered_as {
-            span.set_attribute(KeyValue::new(contract::RESPONSE_MODEL, model.clone()));
+            self.handle
+                .set_last([KeyValue::new(contract::RESPONSE_MODEL, model.clone())]);
             // The name the call is priced by, as ingest reads it.
             priced.model = model;
         }
         if let Some(messages) = messages {
-            span.set_attribute(KeyValue::new(contract::OUTPUT_MESSAGES, messages.0));
+            self.handle
+                .set_last([KeyValue::new(contract::OUTPUT_MESSAGES, messages.0)]);
         }
         if let Some(sent) = usage {
-            span.set_attributes(usage_attributes(sent));
+            self.handle.set_last(usage_attributes(sent));
             priced.held = sent.or(priced.held);
         }
         let Usage {
@@ -709,9 +730,7 @@ impl ToolCall {
     /// What the tool returned: content, sent only when asked and allowed.
     pub fn returned(&self, result: impl Into<Content>) {
         self.handle
-            .cx
-            .span()
-            .set_attribute(KeyValue::new(contract::TOOL_CALL_RESULT, result.into().0));
+            .set_last([KeyValue::new(contract::TOOL_CALL_RESULT, result.into().0)]);
     }
 }
 
@@ -769,6 +788,7 @@ pub(crate) fn open(inner: &Arc<Inner>, agent: &str, options: RunOptions) -> Resu
             guard: Arc::new(Guard::new(options.max_steps, options.max_spend)),
             failed: AtomicBool::new(false),
             ended: false,
+            last: Mutex::new(Vec::new()),
         },
         run_id,
         agent,
@@ -802,6 +822,7 @@ pub(crate) fn continued(inner: &Arc<Inner>, read: Continued) -> Run {
             guard: Arc::new(Guard::default()),
             failed: AtomicBool::new(false),
             ended: false,
+            last: Mutex::new(Vec::new()),
         },
         run_id: read.run_id,
         agent,
@@ -1021,13 +1042,22 @@ fn fits(id: &str, most: usize, what: &str, warner: &Warner) -> bool {
 /// Marks `span` failed: `error.type`, unless empty, which ingest would refuse
 /// the span for, and status `ERROR` with no description, which is content.
 pub(crate) fn mark_failed(span: &SpanRef<'_>, error_type: String) {
-    if !error_type.is_empty() {
-        span.set_attribute(KeyValue::new(contract::ERROR_TYPE, error_type));
+    if let Some(attribute) = error_type_attribute(error_type) {
+        span.set_attribute(attribute);
     }
     span.set_status(Status::error(""));
 }
 
+/// A failure's `error.type`, none if empty.
+fn error_type_attribute(error_type: String) -> Option<KeyValue> {
+    (!error_type.is_empty()).then(|| KeyValue::new(contract::ERROR_TYPE, error_type))
+}
+
 /// Marks `span` cancelled by the agent, which is neither ok nor an error.
 pub(crate) fn mark_cancelled(span: &SpanRef<'_>) {
-    span.set_attribute(KeyValue::new(contract::CANCELLED, true));
+    span.set_attribute(cancelled_attribute());
+}
+
+fn cancelled_attribute() -> KeyValue {
+    KeyValue::new(contract::CANCELLED, true)
 }

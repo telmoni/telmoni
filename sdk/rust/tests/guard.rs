@@ -370,6 +370,53 @@ fn a_call_answered_again_counts_what_its_span_holds() -> Outcome {
     Ok(())
 }
 
+/// A stream answered past the span's 128 attributes, each answer setting its
+/// five counts again, still sends its last answer and counts what it sends.
+#[test]
+fn a_call_answered_past_the_spans_attribute_limit_sends_its_last_answer() -> Outcome {
+    let harness = Harness::with(Config {
+        prices: vec![Price {
+            provider: "p".to_owned(),
+            model: "m".to_owned(),
+            input: 1e-6,
+            output: 1e-5,
+            ..Price::default()
+        }],
+        ..keyed()
+    })?;
+    let run = harness.telmoni.run("streamed", RunOptions::default())?;
+    let model_call = run.model_call(
+        "m",
+        ModelCallOptions {
+            provider: Some("p".to_owned()),
+            ..ModelCallOptions::default()
+        },
+    )?;
+    for chunk in 1..=40 {
+        model_call.answered(Reply {
+            response_model: Some("m".to_owned()),
+            usage: Some(Usage {
+                input_tokens: Some(1_000),
+                output_tokens: Some(chunk),
+                cache_read_input_tokens: Some(0),
+                cache_write_input_tokens: Some(0),
+                cost: None,
+            }),
+            ..Reply::default()
+        });
+    }
+    model_call.fail("Timeout");
+    model_call.end();
+    let spent = run.spent();
+    run.end();
+    harness.flush()?;
+    let held = attributes_of(named(&harness.spans()?, "chat m")?)?;
+    assert_eq!(held.get("gen_ai.usage.output_tokens"), Some(&json!(40)));
+    assert_eq!(held.get("error.type"), Some(&json!("Timeout")));
+    assert!(near(spent, 1_000.0 * 1e-6 + 40.0 * 1e-5), "spent {spent}");
+    Ok(())
+}
+
 /// Two threads answering one call at once leave its span holding what was counted.
 #[test]
 fn answers_raced_from_two_threads_count_what_the_span_holds() -> Outcome {
