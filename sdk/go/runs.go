@@ -402,10 +402,11 @@ func (r *Run) Cancel() {
 	r.handle.Cancel()
 }
 
-// Step opens a step named name under the span in ctx: the run's, or a step's
-// to nest under it. The context returned carries the step's span. Past a cap,
-// or under a refused opening's context, it opens nothing, and the context
-// returned is cancelled, its cause the *CapExceededError.
+// Step opens a step named name under the span in ctx when ctx carries the
+// run, a step's to nest under it, else under the run. The context returned
+// carries the step's span. Past a cap, or under a refused opening's context,
+// it opens nothing, and the context returned is cancelled, its cause the
+// *CapExceededError.
 func (r *Run) Step(ctx context.Context, name string) (context.Context, *Step) {
 	if r == nil || r.span == nil {
 		return ctx, &Step{}
@@ -422,7 +423,7 @@ func (r *Run) Step(ctx context.Context, name string) (context.Context, *Step) {
 	return ctx, &Step{handle: handle{span: span, client: r.client}, run: r}
 }
 
-// ModelCall opens a call to model under the span in ctx; Answered records
+// ModelCall opens a call to model where Step opens a step; Answered records
 // what the model answered. Past a cap it opens nothing, as Step does.
 func (r *Run) ModelCall(ctx context.Context, model string, opts ModelCallOptions) (context.Context, *ModelCall) {
 	if r == nil || r.span == nil {
@@ -458,7 +459,7 @@ func (r *Run) ModelCall(ctx context.Context, model string, opts ModelCallOptions
 	return ctx, &ModelCall{handle: handle{span: span, client: c}, run: r, provider: provider, model: model}
 }
 
-// ToolCall opens a call to the tool named name under the span in ctx;
+// ToolCall opens a call to the tool named name where Step opens a step;
 // Returned records what the tool returned.
 func (r *Run) ToolCall(ctx context.Context, name string, opts ToolCallOptions) (context.Context, *ToolCall) {
 	if r == nil || r.span == nil {
@@ -483,9 +484,9 @@ func (r *Run) child(ctx context.Context, name string, kind trace.SpanKind, attrs
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	// A context with no span in it, a fresh goroutine's say, puts the span
-	// under the run itself rather than at the root of a trace of its own.
-	if !trace.SpanContextFromContext(ctx).IsValid() {
+	// A context the run is not in, a fresh goroutine's or the one the run was
+	// opened from, puts the span under the run, in its trace.
+	if RunFromContext(ctx) != r || !trace.SpanContextFromContext(ctx).IsValid() {
 		ctx = trace.ContextWithSpan(ctx, r.span)
 	}
 	all := make([]attribute.KeyValue, 0, len(r.inherited)+len(attrs))

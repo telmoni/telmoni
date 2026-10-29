@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+
 	telmoni "github.com/telmoni/telmoni/sdk/go"
 )
 
@@ -65,6 +67,24 @@ func TestAStepFromAContextWithoutASpanGoesUnderTheRun(t *testing.T) {
 	}
 	if spans["background"]["traceId"] != spans["invoke_agent bot"]["traceId"] {
 		t.Error("the step started a trace of its own")
+	}
+}
+
+// A context the run is not in, here the request's the run was opened from,
+// puts the step under the run, not beside it under the request's span.
+func TestAStepFromAContextOutsideItsRunGoesUnderTheRun(t *testing.T) {
+	h := newHarness(t, testConfig(), nil)
+	app, _ := appProvider(t, sdktrace.AlwaysSample())
+	requestCtx, request := app.Start(context.Background(), "request")
+	_, run := h.client.Run(requestCtx, "bot", telmoni.RunOptions{})
+	_, step := run.Step(requestCtx, "plan")
+	step.End()
+	run.End()
+	request.End()
+	h.flush()
+	spans := byName(h.transport.spans(t))
+	if spans["plan"]["parentSpanId"] != spans["invoke_agent bot"]["spanId"] {
+		t.Error("a step opened with the request's context is not the run's child")
 	}
 }
 
