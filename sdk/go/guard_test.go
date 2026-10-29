@@ -128,7 +128,7 @@ func (f guardFixture) perform(t *testing.T, ctx context.Context, run *telmoni.Ru
 
 func TestTheGuardCountsEachCallAsTheServerCountsIt(t *testing.T) {
 	fixture := loadGuard(t)
-	h := newHarness(t, telmoni.Config{APIKey: testKey, Prices: fixture.Prices}, nil)
+	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret(testKey), Prices: fixture.Prices}, nil)
 	for n, spec := range fixture.Calls {
 		ctx, run := h.client.Run(context.Background(), "guarded", telmoni.RunOptions{})
 		fixture.call(ctx, run, n)
@@ -144,7 +144,7 @@ func TestARunPastACapIsRefusedWhatItOpensNext(t *testing.T) {
 	fixture := loadGuard(t)
 	for _, spec := range fixture.Runs {
 		t.Run(spec.Name, func(t *testing.T) {
-			h := newHarness(t, telmoni.Config{APIKey: testKey, Prices: fixture.Prices}, nil)
+			h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret(testKey), Prices: fixture.Prices}, nil)
 			ctx, run := h.client.Run(context.Background(), "guarded", telmoni.RunOptions{MaxSteps: spec.MaxSteps, MaxSpend: spec.MaxSpend})
 			performed := len(spec.Ops)
 			for at, op := range spec.Ops {
@@ -305,7 +305,7 @@ func TestATableNameIsPricedByTheTableTheReleaseCarries(t *testing.T) {
 	}
 	var spent []float64
 	for _, prices := range [][]telmoni.Price{nil, {file.Prices[i]}} {
-		h := newHarness(t, telmoni.Config{APIKey: testKey, Prices: prices}, nil)
+		h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret(testKey), Prices: prices}, nil)
 		ctx, run := h.client.Run(context.Background(), "priced", telmoni.RunOptions{})
 		_, call := run.ModelCall(ctx, "gpt-4o-mini", telmoni.ModelCallOptions{Provider: "openai"})
 		call.Answered(telmoni.Answer{Usage: &telmoni.Usage{InputTokens: 10_000, OutputTokens: 2_000, CacheReadInputTokens: 4_000}})
@@ -319,7 +319,7 @@ func TestATableNameIsPricedByTheTableTheReleaseCarries(t *testing.T) {
 }
 
 func TestACallAnsweredAgainCountsWhatItsSpanHolds(t *testing.T) {
-	h := newHarness(t, telmoni.Config{APIKey: testKey, Prices: []telmoni.Price{{Provider: "p", Model: "m", Input: 1e-6, Output: 1e-5}}}, nil)
+	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret(testKey), Prices: []telmoni.Price{{Provider: "p", Model: "m", Input: 1e-6, Output: 1e-5}}}, nil)
 	ctx, run := h.client.Run(context.Background(), "guarded", telmoni.RunOptions{})
 	_, call := run.ModelCall(ctx, "m", telmoni.ModelCallOptions{Provider: "p"})
 	// Answers given at once, from goroutines of the agent's own.
@@ -354,7 +354,7 @@ func TestACallAnsweredAgainCountsWhatItsSpanHolds(t *testing.T) {
 }
 
 func TestAnAnswerAfterItsCallEndedCountsNothingWithOneWarning(t *testing.T) {
-	h := newHarness(t, telmoni.Config{APIKey: testKey, Prices: []telmoni.Price{{Provider: "p", Model: "m", Input: 1e-6}}}, nil)
+	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret(testKey), Prices: []telmoni.Price{{Provider: "p", Model: "m", Input: 1e-6}}}, nil)
 	ctx, run := h.client.Run(context.Background(), "guarded", telmoni.RunOptions{})
 	_, call := run.ModelCall(ctx, "m", telmoni.ModelCallOptions{Provider: "p"})
 	call.Answered(telmoni.Answer{Usage: &telmoni.Usage{InputTokens: 1000}})

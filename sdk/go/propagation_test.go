@@ -98,7 +98,7 @@ func TestInjectWritesTheHeadersTheFixtureSpellsBesideTheCarriersOwn(t *testing.T
 }
 
 func TestInjectWritesNothingOutsideARunOrForARunSampledOut(t *testing.T) {
-	h := newHarness(t, telmoni.Config{APIKey: "k", SampleRate: 0.5}, nil,
+	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k"), SampleRate: 0.5}, nil,
 		telmoni.WithRandom(func() float64 { return 0.9 }))
 	outside := http.Header{}
 	outside.Set("baggage", "tenant=acme")

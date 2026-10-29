@@ -176,7 +176,7 @@ func TestContentLeavesOnlyWhenAskedAndTheProjectAllows(t *testing.T) {
 	// An empty run's export is answered off, the next two runs' on; each run
 	// flushed before the next opens, the mode each call is encoded under is the
 	// same on every machine.
-	h := newHarness(t, telmoni.Config{APIKey: "k", CaptureContent: true}, newFakeTransport(t, kept(t), on, on))
+	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k"), CaptureContent: true}, newFakeTransport(t, kept(t), on, on))
 	_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
 	run.End()
 	h.flush()
@@ -221,7 +221,7 @@ func TestContentLeavesOnlyWhenAskedAndTheProjectAllows(t *testing.T) {
 
 func TestContentStaysHomeWithoutCaptureContentEvenWhenAllowed(t *testing.T) {
 	on := contentOn()
-	h := newHarness(t, telmoni.Config{APIKey: "k"}, newFakeTransport(t, on, on))
+	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k")}, newFakeTransport(t, on, on))
 	_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
 	run.End()
 	h.flush()

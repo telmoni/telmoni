@@ -23,10 +23,9 @@ type Config struct {
 	// DefaultEndpoint, a host without a scheme gets https://, http:// locally.
 	Endpoint       string `json:"endpoint"`
 	OrganizationID string `json:"organization_id,omitempty"`
-	// APIKey is the API key (tm_…) with the ingest scope. It is never
-	// marshalled, and String and GoString redact it: a configuration logged
-	// or written out would otherwise carry the key.
-	APIKey string `json:"-"`
+	// APIKey is the API key (tm_…) with the ingest scope, held as a Secret
+	// so a configuration logged or written out never carries it.
+	APIKey Secret `json:"-"`
 	// CaptureContent lets prompts, completions, tool arguments and results
 	// leave the process, once the project's content mode allows it too.
 	// Otherwise the exporter takes them off every span.
@@ -55,20 +54,56 @@ type Config struct {
 // String formats the configuration for %v and %s, with the API key redacted.
 func (c Config) String() string {
 	return fmt.Sprintf("{Endpoint:%s OrganizationID:%s APIKey:%s CaptureContent:%t SampleRate:%g Environment:%s Release:%s}",
-		c.Endpoint, c.OrganizationID, redacted(c.APIKey), c.CaptureContent, c.SampleRate, c.Environment, c.Release)
+		c.Endpoint, c.OrganizationID, c.APIKey.String(), c.CaptureContent, c.SampleRate, c.Environment, c.Release)
 }
 
 // GoString formats the configuration for %#v, with the API key redacted.
 func (c Config) GoString() string {
 	return fmt.Sprintf("telmoni.Config{Endpoint:%q, OrganizationID:%q, APIKey:%q, CaptureContent:%t, SampleRate:%g, Environment:%q, Release:%q}",
-		c.Endpoint, c.OrganizationID, redacted(c.APIKey), c.CaptureContent, c.SampleRate, c.Environment, c.Release)
+		c.Endpoint, c.OrganizationID, c.APIKey.String(), c.CaptureContent, c.SampleRate, c.Environment, c.Release)
 }
 
-func redacted(secret string) string {
-	if secret == "" {
+// Secret holds the API key where nothing that prints or encodes a Config can
+// reach it: fmt's reflection, which passes a Config's own String when the
+// Config sits in an unexported field, shows the pointer inside as an address;
+// text encoders write it redacted, and gob is refused.
+type Secret struct{ key *string }
+
+// NewSecret holds key.
+func NewSecret(key string) Secret { return Secret{key: &key} }
+
+// Expose is the key itself, for the Authorization header alone.
+func (s Secret) Expose() string {
+	if s.key == nil {
+		return ""
+	}
+	return *s.key
+}
+
+// String is "<redacted>", or "" for no key.
+func (s Secret) String() string {
+	if s.Expose() == "" {
 		return ""
 	}
 	return "<redacted>"
+}
+
+// GoString formats the key for %#v, redacted.
+func (s Secret) GoString() string { return strconv.Quote(s.String()) }
+
+// MarshalText writes the key redacted, for JSON, XML, YAML and TOML alike.
+func (s Secret) MarshalText() ([]byte, error) { return []byte(s.String()), nil }
+
+// UnmarshalText reads the key from a configuration file; written out again,
+// it stays redacted.
+func (s *Secret) UnmarshalText(text []byte) error {
+	*s = NewSecret(string(text))
+	return nil
+}
+
+// GobEncode refuses: the key is never encoded.
+func (Secret) GobEncode() ([]byte, error) {
+	return nil, errors.New("telmoni: the API key is never encoded")
 }
 
 // normalized is the configuration as the client holds it: a blank value is
@@ -76,7 +111,7 @@ func redacted(secret string) string {
 func (c Config) normalized() Config {
 	c.Endpoint = endpointOf(c.Endpoint)
 	c.OrganizationID = strings.TrimSpace(c.OrganizationID)
-	c.APIKey = strings.TrimSpace(c.APIKey)
+	c.APIKey = NewSecret(strings.TrimSpace(c.APIKey.Expose()))
 	c.Environment = strings.TrimSpace(c.Environment)
 	c.Release = strings.TrimSpace(c.Release)
 	if c.SampleRate == 0 {
@@ -263,7 +298,7 @@ func ConfigFromEnv() Config {
 	return Config{
 		Endpoint:       os.Getenv("TELMONI_ENDPOINT"),
 		OrganizationID: os.Getenv("TELMONI_ORG"),
-		APIKey:         os.Getenv("TELMONI_API_KEY"),
+		APIKey:         NewSecret(os.Getenv("TELMONI_API_KEY")),
 		Environment:    os.Getenv("TELMONI_ENVIRONMENT"),
 		Release:        os.Getenv("TELMONI_RELEASE"),
 	}.normalized()

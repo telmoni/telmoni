@@ -402,7 +402,7 @@ func TestNothingIsSentOutsideARun(t *testing.T) {
 
 func TestTheSampleRateDropsWholeRunsInTheProcessor(t *testing.T) {
 	random := 0.9
-	h := newHarness(t, telmoni.Config{APIKey: "k", SampleRate: 0.25}, nil,
+	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k"), SampleRate: 0.25}, nil,
 		telmoni.WithRandom(func() float64 { return random }))
 	ctx, out := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
 	_, step := out.Step(ctx, "s")
@@ -431,7 +431,7 @@ func TestTheSampleRateDropsWholeRunsInTheProcessor(t *testing.T) {
 
 func TestASpanEndingAfterItsSampledOutRunIsDroppedToo(t *testing.T) {
 	random := 0.9
-	h := newHarness(t, telmoni.Config{APIKey: "k", SampleRate: 0.25}, nil,
+	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k"), SampleRate: 0.25}, nil,
 		telmoni.WithRandom(func() float64 { return random }))
 	ctx, dropped := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
 	_, late := dropped.Step(ctx, "late")

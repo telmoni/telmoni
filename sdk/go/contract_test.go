@@ -1,8 +1,11 @@
 package telmoni_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/gob"
 	"encoding/json"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
@@ -81,15 +84,15 @@ func TestATrailingSlashIsStripped(t *testing.T) {
 }
 
 func TestABlankEndpointOrganizationKeyEnvironmentOrReleaseReadsAsUnset(t *testing.T) {
-	cfg := mustNew(t, telmoni.Config{Endpoint: "  ", OrganizationID: " ", APIKey: "\t", Environment: " ", Release: ""}).Config()
+	cfg := mustNew(t, telmoni.Config{Endpoint: "  ", OrganizationID: " ", APIKey: telmoni.NewSecret("\t"), Environment: " ", Release: ""}).Config()
 	if cfg.Endpoint != telmoni.DefaultEndpoint {
 		t.Errorf("Endpoint = %q", cfg.Endpoint)
 	}
 	if cfg.OrganizationID != "" {
 		t.Errorf("OrganizationID = %q", cfg.OrganizationID)
 	}
-	if cfg.APIKey != "" {
-		t.Errorf("APIKey = %q", cfg.APIKey)
+	if key := cfg.APIKey.Expose(); key != "" {
+		t.Errorf("APIKey = %q", key)
 	}
 	if cfg.Environment != "" || cfg.Release != "" {
 		t.Errorf("Environment = %q, Release = %q", cfg.Environment, cfg.Release)
@@ -116,17 +119,28 @@ func TestWithoutAKeyNoAuthorizationHeaderIsSent(t *testing.T) {
 	}
 }
 
+// holder keeps a configuration in an unexported field, where fmt's reflection
+// passes Config's own String.
+type holder struct{ tm telmoni.Config }
+
 func TestTheKeyIsNeverPrintedOrSerialized(t *testing.T) {
-	cfg := telmoni.Config{OrganizationID: "org_1", APIKey: "telmoni_secret_key"}
+	cfg := telmoni.Config{OrganizationID: "org_1", APIKey: telmoni.NewSecret("telmoni_secret_key")}
 	client := mustNew(t, cfg)
 	marshalled, err := json.Marshal(cfg)
 	if err != nil {
 		t.Fatalf("marshalling the configuration: %v", err)
 	}
+	asXML, err := xml.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("writing the configuration as XML: %v", err)
+	}
+	var logged bytes.Buffer
+	slog.New(slog.NewTextHandler(&logged, nil)).Info("starting", "server", holder{cfg})
 	for _, printed := range []string{
 		fmt.Sprint(cfg), fmt.Sprintf("%+v", cfg), fmt.Sprintf("%#v", cfg),
 		fmt.Sprint(client), fmt.Sprintf("%+v", client), fmt.Sprintf("%#v", client),
-		fmt.Sprint(client.Config()), string(marshalled),
+		fmt.Sprint(client.Config()), string(marshalled), string(asXML),
+		fmt.Sprint(holder{cfg}), fmt.Sprintf("%+v", holder{cfg}), logged.String(),
 	} {
 		if strings.Contains(printed, "telmoni_secret_key") {
 			t.Errorf("printed the key: %s", printed)
@@ -135,8 +149,11 @@ func TestTheKeyIsNeverPrintedOrSerialized(t *testing.T) {
 			t.Errorf("lost the organization: %s", printed)
 		}
 	}
-	if client.Config().APIKey != "telmoni_secret_key" {
-		t.Errorf("the key did not stay readable: %q", client.Config().APIKey)
+	if err := gob.NewEncoder(&bytes.Buffer{}).Encode(cfg); err == nil {
+		t.Error("gob encoded the configuration, key and all")
+	}
+	if key := client.Config().APIKey.Expose(); key != "telmoni_secret_key" {
+		t.Errorf("the key did not stay readable: %q", key)
 	}
 }
 
@@ -152,8 +169,8 @@ func TestFromEnvReadsTheFiveVariablesAndNoOther(t *testing.T) {
 	if cfg.Endpoint != telmoni.DefaultEndpoint {
 		t.Errorf("Endpoint = %q", cfg.Endpoint)
 	}
-	if cfg.APIKey != "" {
-		t.Errorf("a blank TELMONI_API_KEY read as %q", cfg.APIKey)
+	if key := cfg.APIKey.Expose(); key != "" {
+		t.Errorf("a blank TELMONI_API_KEY read as %q", key)
 	}
 	if cfg.OrganizationID != "org_2" {
 		t.Errorf("OrganizationID = %q", cfg.OrganizationID)
@@ -170,8 +187,8 @@ func TestFromEnvReadsTheFiveVariablesAndNoOther(t *testing.T) {
 	if cfg.Endpoint != "https://api.telmoni.local" {
 		t.Errorf("Endpoint = %q", cfg.Endpoint)
 	}
-	if cfg.APIKey != "telmoni_k" {
-		t.Errorf("APIKey = %q", cfg.APIKey)
+	if key := cfg.APIKey.Expose(); key != "telmoni_k" {
+		t.Errorf("APIKey = %q", key)
 	}
 	if cfg.Environment != "" || cfg.Release != "2026.10.18" {
 		t.Errorf("Environment = %q, Release = %q", cfg.Environment, cfg.Release)
@@ -254,7 +271,7 @@ func TestARefusalWhoseBodyBreaksIsSentOnce(t *testing.T) {
 	}))
 	defer server.Close()
 	sleeps, logs := &sleepLog{}, &logSink{}
-	client, err := telmoni.New(telmoni.Config{Endpoint: server.URL, APIKey: testKey},
+	client, err := telmoni.New(telmoni.Config{Endpoint: server.URL, APIKey: telmoni.NewSecret(testKey)},
 		telmoni.WithSleep(sleeps.sleep), telmoni.WithLogger(slog.New(logs)))
 	if err != nil {
 		t.Fatalf("building the client: %v", err)
@@ -463,7 +480,7 @@ func TestProxyEnvironmentHelper(t *testing.T) {
 			return dialer.DialContext(ctx, network, os.Getenv("TELMONI_PROXY_DIAL"))
 		}
 	}
-	client, err := telmoni.New(telmoni.Config{Endpoint: "http://LOCALHOST:" + port, APIKey: testKey})
+	client, err := telmoni.New(telmoni.Config{Endpoint: "http://LOCALHOST:" + port, APIKey: telmoni.NewSecret(testKey)})
 	if err != nil {
 		t.Fatalf("building the client: %v", err)
 	}
@@ -496,7 +513,7 @@ func TestAnAnswerWhoseHeadIsCutIsSentAgain(t *testing.T) {
 	}))
 	defer server.Close()
 	sleeps, logs := &sleepLog{}, &logSink{}
-	client, err := telmoni.New(telmoni.Config{Endpoint: server.URL, APIKey: testKey},
+	client, err := telmoni.New(telmoni.Config{Endpoint: server.URL, APIKey: telmoni.NewSecret(testKey)},
 		telmoni.WithSleep(sleeps.sleep), telmoni.WithLogger(slog.New(logs)))
 	if err != nil {
 		t.Fatalf("building the client: %v", err)
@@ -557,7 +574,7 @@ func TestTheAnswerIsReadPastEvery1xxBeforeItButA101(t *testing.T) {
 			<-release
 		}))
 		logs := &logSink{}
-		client, err := telmoni.New(telmoni.Config{Endpoint: server.URL, APIKey: testKey},
+		client, err := telmoni.New(telmoni.Config{Endpoint: server.URL, APIKey: telmoni.NewSecret(testKey)},
 			telmoni.WithSleep((&sleepLog{}).sleep), telmoni.WithLogger(slog.New(logs)))
 		if err != nil {
 			t.Fatalf("building the client: %v", err)

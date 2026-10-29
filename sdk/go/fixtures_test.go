@@ -256,7 +256,7 @@ func perform(t *testing.T, h *harness, fixture runFixture) {
 func TestTheRunMatchesTheGoldenExport(t *testing.T) {
 	fixture := loadRun(t)
 	h := newHarness(t, telmoni.Config{
-		APIKey:         testKey,
+		APIKey:         telmoni.NewSecret(testKey),
 		CaptureContent: fixture.Scenario.CaptureContent,
 		Environment:    fixture.Scenario.Environment,
 		Release:        fixture.Scenario.Release,
@@ -299,7 +299,7 @@ func TestTheRunMatchesTheGoldenExport(t *testing.T) {
 
 // In nanoseconds, a retry its own: ingest moves a run by it.
 func TestEachAttemptCarriesThisClockAsItLeaves(t *testing.T) {
-	h := newHarness(t, telmoni.Config{APIKey: "k"},
+	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k")},
 		newFakeTransport(t, answerFrom(t, "answers/unavailable.json")),
 		telmoni.WithSleep(func(time.Duration) { time.Sleep(5 * time.Millisecond) }))
 	before := time.Now().UnixNano()
@@ -357,7 +357,7 @@ func expectRequests(t *testing.T, h *harness, want int) {
 }
 
 func TestKept(t *testing.T) {
-	h := newHarness(t, telmoni.Config{APIKey: "k"}, newFakeTransport(t, answerFrom(t, "answers/kept.json")))
+	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k")}, newFakeTransport(t, answerFrom(t, "answers/kept.json")))
 	if mode := h.client.ContentMode(); mode != "" {
 		t.Errorf("the content mode is %q before any answer", mode)
 	}
@@ -372,7 +372,7 @@ func TestKept(t *testing.T) {
 
 func TestDroppedIsWarnedOnce(t *testing.T) {
 	dropped := answerFrom(t, "answers/dropped.json")
-	h := newHarness(t, telmoni.Config{APIKey: "k"}, newFakeTransport(t, dropped, dropped))
+	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k")}, newFakeTransport(t, dropped, dropped))
 	aRun(t, h)
 	aRun(t, h)
 	h.shutdown()
@@ -383,7 +383,7 @@ func TestDroppedIsWarnedOnce(t *testing.T) {
 
 func TestUnlistedNamesTheTagThatWouldKeepIt(t *testing.T) {
 	unlisted := answerFrom(t, "answers/unlisted.json")
-	h := newHarness(t, telmoni.Config{APIKey: "k"}, newFakeTransport(t, unlisted))
+	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k")}, newFakeTransport(t, unlisted))
 	aRun(t, h)
 	h.shutdown()
 	expectWarnings(t, h, "telmoni: the server dropped ai.prompt (unlisted; text the field inventory does not name is never kept); "+
@@ -392,7 +392,7 @@ func TestUnlistedNamesTheTagThatWouldKeepIt(t *testing.T) {
 
 func TestATagPastTheCardinalityCapIsWarnedWithWhatKeepsIt(t *testing.T) {
 	cardinality := answerFrom(t, "answers/cardinality.json")
-	h := newHarness(t, telmoni.Config{APIKey: "k"}, newFakeTransport(t, cardinality))
+	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k")}, newFakeTransport(t, cardinality))
 	aRun(t, h)
 	h.shutdown()
 	expectWarnings(t, h, "telmoni: the server dropped telmoni.tag.request (cardinality; a project's tag takes up to 500 values a UTC day); "+
@@ -401,7 +401,7 @@ func TestATagPastTheCardinalityCapIsWarnedWithWhatKeepsIt(t *testing.T) {
 
 func TestRefusedIsWarnedOnceAndNeverRetried(t *testing.T) {
 	refused := answerFrom(t, "answers/refused.json")
-	h := newHarness(t, telmoni.Config{APIKey: "k"}, newFakeTransport(t, refused, refused))
+	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k")}, newFakeTransport(t, refused, refused))
 	aRun(t, h)
 	aRun(t, h)
 	h.shutdown()
@@ -411,7 +411,7 @@ func TestRefusedIsWarnedOnceAndNeverRetried(t *testing.T) {
 }
 
 func TestRateLimitedWaitsRetryAfterAndSendsTheSameBytes(t *testing.T) {
-	h := newHarness(t, telmoni.Config{APIKey: "k"},
+	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k")},
 		newFakeTransport(t, answerFrom(t, "answers/rate-limited.json"), kept(t)))
 	aRun(t, h)
 	h.shutdown()
@@ -426,7 +426,7 @@ func TestRateLimitedWaitsRetryAfterAndSendsTheSameBytes(t *testing.T) {
 
 func TestUnavailableIsRetriedThreeTimesThenDropped(t *testing.T) {
 	unavailable := answerFrom(t, "answers/unavailable.json")
-	h := newHarness(t, telmoni.Config{APIKey: "k"}, newFakeTransport(t, unavailable, unavailable, unavailable, kept(t)))
+	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k")}, newFakeTransport(t, unavailable, unavailable, unavailable, kept(t)))
 	aRun(t, h)
 	aRun(t, h)
 	h.shutdown()
@@ -437,7 +437,7 @@ func TestUnavailableIsRetriedThreeTimesThenDropped(t *testing.T) {
 
 func TestForbiddenIsNotRetriedAndTheNextBatchIsStillSent(t *testing.T) {
 	forbidden := answerFrom(t, "answers/forbidden.json")
-	h := newHarness(t, telmoni.Config{APIKey: "k"}, newFakeTransport(t, forbidden, forbidden))
+	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k")}, newFakeTransport(t, forbidden, forbidden))
 	aRun(t, h)
 	aRun(t, h)
 	h.shutdown()
@@ -447,7 +447,7 @@ func TestForbiddenIsNotRetriedAndTheNextBatchIsStillSent(t *testing.T) {
 }
 
 func TestANetworkFailureIsRetriedWithBackoff(t *testing.T) {
-	h := newHarness(t, telmoni.Config{APIKey: "k"},
+	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k")},
 		newFakeTransport(t, errors.New("refused"), errors.New("refused"), kept(t)))
 	aRun(t, h)
 	h.shutdown()
@@ -458,7 +458,7 @@ func TestANetworkFailureIsRetriedWithBackoff(t *testing.T) {
 
 func TestANetworkFailureThreeTimesNamesTheErrorsType(t *testing.T) {
 	down := errors.New("refused")
-	h := newHarness(t, telmoni.Config{APIKey: "k"}, newFakeTransport(t, down, down, down, kept(t)))
+	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k")}, newFakeTransport(t, down, down, down, kept(t)))
 	aRun(t, h)
 	aRun(t, h)
 	h.shutdown()

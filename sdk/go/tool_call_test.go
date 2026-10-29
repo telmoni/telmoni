@@ -79,7 +79,7 @@ func TestAFailingToolRecordsItsErrorType(t *testing.T) {
 
 func TestToolContentTravelsWhenAskedAndAllowed(t *testing.T) {
 	on := contentOn()
-	h := newHarness(t, telmoni.Config{APIKey: "k", CaptureContent: true}, newFakeTransport(t, on, on, on, on))
+	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k"), CaptureContent: true}, newFakeTransport(t, on, on, on, on))
 	_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
 	run.End()
 	h.flush()

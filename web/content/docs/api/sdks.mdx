@@ -904,7 +904,7 @@ log, a warning or an error.
     ```go
     client, err := telmoni.New(telmoni.Config{
     	Endpoint:       "https://api.telmoni.com",
-    	APIKey:         os.Getenv("TELMONI_API_KEY"),
+    	APIKey:         telmoni.NewSecret(os.Getenv("TELMONI_API_KEY")),
     	OrganizationID: "org_019a0b8c3f2e7d41",
     	CaptureContent: false,
     	SampleRate:     1.0,
@@ -937,9 +937,11 @@ one is unset, and nothing is sent for one unset. `prices` hands
 Each SDK keeps the API key out of the configuration's printed form: Rust's
 `Debug` shows `<redacted>` in its place and serialization skips it; Python
 holds it as a `Secret` that `repr`, `str` and `dataclasses.asdict` show
-redacted; Go's `String` and `GoString` redact it and JSON skips it;
-TypeScript holds `apiKey` as a non-enumerable property, which `console.log`
-and `JSON.stringify` pass over.
+redacted; Go holds it as a `Secret` too, made with `telmoni.NewSecret`, which
+prints redacted, or as an address inside a struct of yours that `%+v` or a
+logger prints field by field, never as the key; JSON skips it, YAML, TOML and
+XML write it redacted, and `gob` refuses it; TypeScript holds `apiKey` as a
+non-enumerable property, which `console.log` and `JSON.stringify` pass over.
 
 ---
 

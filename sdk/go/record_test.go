@@ -221,7 +221,7 @@ func sameBody(t *testing.T, got, want *harness) {
 
 func TestTheRecordMatchesTheGoldenExport(t *testing.T) {
 	fixture := loadRecorded(t)
-	h := newHarness(t, telmoni.Config{APIKey: testKey, CaptureContent: fixture.Scenario.CaptureContent}, nil)
+	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret(testKey), CaptureContent: fixture.Scenario.CaptureContent}, nil)
 	recordRun(t, h, recordFrom(fixture.Scenario.Record))
 	bodies := h.transport.bodies(t)
 	if len(bodies) != 1 {
@@ -324,7 +324,7 @@ func TestAFailedRecordIsMarkedOnItsRunsSpan(t *testing.T) {
 
 func TestTheSampleRateDropsARecordWhole(t *testing.T) {
 	random := 0.9
-	h := newHarness(t, telmoni.Config{APIKey: "k", SampleRate: 0.25}, nil,
+	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k"), SampleRate: 0.25}, nil,
 		telmoni.WithRandom(func() float64 { return random }))
 	record := theRecord(t)
 	recordRun(t, h, record)

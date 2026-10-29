@@ -161,7 +161,7 @@ func TestInstrumentationInARunOpenedOutsideAnySpanUsesTheGlobalProvider(t *testi
 
 func TestTheApplicationKeepsItsOwnSamplingRateInsideRuns(t *testing.T) {
 	every := &everyOther{}
-	h := newHarness(t, telmoni.Config{APIKey: testKey, Sampler: every}, nil)
+	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret(testKey), Sampler: every}, nil)
 	app, exporter := appProvider(t, every)
 	for range 100 {
 		runCtx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
@@ -207,7 +207,7 @@ func TestARunInsideATraceTheApplicationDoesNotSampleIsStillSent(t *testing.T) {
 }
 
 func TestAConfiguredSamplerDecidesARootRun(t *testing.T) {
-	h := newHarness(t, telmoni.Config{APIKey: "k", Sampler: sdktrace.NeverSample()}, nil)
+	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k"), Sampler: sdktrace.NeverSample()}, nil)
 	app, _ := appProvider(t, sdktrace.AlwaysSample())
 	runCtx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
 	if trace.SpanContextFromContext(runCtx).IsSampled() {
@@ -236,7 +236,7 @@ func TestOTELVariablesChangeNothingOfOurs(t *testing.T) {
 	} {
 		t.Setenv(key, value)
 	}
-	h := newHarness(t, telmoni.Config{APIKey: "k"}, nil)
+	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k")}, nil)
 	_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{
 		UserID:    "c",
 		SessionID: "v",

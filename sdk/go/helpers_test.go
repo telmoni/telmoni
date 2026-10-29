@@ -358,7 +358,7 @@ func newHarness(t *testing.T, cfg telmoni.Config, transport *fakeTransport, opts
 }
 
 func testConfig() telmoni.Config {
-	return telmoni.Config{APIKey: testKey}
+	return telmoni.Config{APIKey: telmoni.NewSecret(testKey)}
 }
 
 func (h *harness) flush() {

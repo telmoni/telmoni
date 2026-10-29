@@ -215,8 +215,8 @@ func (e *exporter) request(body []byte) (*http.Request, error) {
 	req.Header.Set("User-Agent", "telmoni-go/"+Version)
 	// This clock as the attempt leaves, the spans' own.
 	req.Header.Set(sentAtHeader, strconv.FormatInt(time.Now().UnixNano(), 10))
-	if e.config.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+e.config.APIKey)
+	if key := e.config.APIKey.Expose(); key != "" {
+		req.Header.Set("Authorization", "Bearer "+key)
 	}
 	return req, nil
 }

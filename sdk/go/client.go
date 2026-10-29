@@ -254,9 +254,8 @@ func (c *Client) Shutdown(ctx context.Context) error {
 	return err
 }
 
-// String formats the client for %v and %s, with the API key redacted. fmt
-// reaches an unexported field by reflection, past Config's own String, so
-// without this the client would print the key.
+// String formats the client for %v and %s as its configuration, the API key
+// redacted.
 func (c Client) String() string {
 	return "{config:" + c.config.String() + "}"
 }
