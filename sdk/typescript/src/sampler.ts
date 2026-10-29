@@ -40,10 +40,10 @@ export class RecordingSampler implements Sampler {
       return result;
     }
     const decision = this.#root.shouldSample(context, traceId, spanName, spanKind, attributes, links);
+    // Its decision and trace state, never its attributes, as Python and Go take them.
     const result: SamplingResult = {
       decision: recording(decision.decision === SamplingDecision.RECORD_AND_SAMPLED),
     };
-    if (decision.attributes !== undefined) result.attributes = decision.attributes;
     if (decision.traceState !== undefined) result.traceState = decision.traceState;
     return result;
   }

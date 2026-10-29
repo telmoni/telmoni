@@ -51,7 +51,8 @@ impl ShouldSample for RecordingSampler {
             root.should_sample(parent_context, trace_id, name, span_kind, attributes, links);
         SamplingResult {
             decision: recording(decision.decision == SamplingDecision::RecordAndSample),
-            attributes: decision.attributes,
+            // Its decision and trace state, never its attributes, as Python and Go take them.
+            attributes: Vec::new(),
             trace_state: decision.trace_state,
         }
     }

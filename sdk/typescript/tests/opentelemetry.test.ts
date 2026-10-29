@@ -120,6 +120,17 @@ describe('beside the application', () => {
     expect(appExporter.getFinishedSpans(), 'half, as outside runs').toHaveLength(50);
   });
 
+  it("a root sampler's decision is taken, never its attributes, as in every SDK", async () => {
+    const tagging: Sampler = {
+      shouldSample: () => ({ decision: SamplingDecision.RECORD_AND_SAMPLED, attributes: { 'sampler.rule': 'all' } }),
+      toString: () => 'Tagging',
+    };
+    const h = harness({ sampler: tagging });
+    h.telmoni.run('bot', () => {});
+    expect(await h.telmoni.flush()).toBe(true);
+    expect(Object.keys(attributesOf(one(runsIn(h.transport))))).not.toContain('sampler.rule');
+  });
+
   it('a run inside a trace the application does not sample is still sent', async () => {
     appSampler.target = new AlwaysOffSampler();
     let request!: SpanContext;

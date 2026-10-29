@@ -207,6 +207,43 @@ fn a_run_inside_a_trace_the_application_does_not_sample_is_still_sent() -> Outco
     Ok(())
 }
 
+/// A root sampler that tags its decision.
+#[derive(Debug, Clone)]
+struct Tagging;
+
+impl ShouldSample for Tagging {
+    fn should_sample(
+        &self,
+        _parent_context: Option<&Context>,
+        _trace_id: TraceId,
+        _name: &str,
+        _span_kind: &SpanKind,
+        _attributes: &[KeyValue],
+        _links: &[Link],
+    ) -> SamplingResult {
+        SamplingResult {
+            decision: SamplingDecision::RecordAndSample,
+            attributes: vec![KeyValue::new("sampler.rule", "all")],
+            trace_state: Default::default(),
+        }
+    }
+}
+
+/// A root sampler's decision is taken, never its attributes, as in every SDK.
+#[test]
+fn a_root_samplers_attributes_never_reach_the_run() -> Outcome {
+    let harness = Harness::with(Config {
+        sampler: Some(Box::new(Tagging)),
+        ..keyed()
+    })?;
+    harness.telmoni.run("bot", RunOptions::default())?.end();
+    harness.flush()?;
+    let spans = harness.spans()?;
+    let run = only(&spans, "invoke_agent ")?;
+    assert!(attributes_of(run)?.get("sampler.rule").is_none());
+    Ok(())
+}
+
 #[test]
 fn a_configured_sampler_decides_a_root_run() -> Outcome {
     let memory = Memory::default();
