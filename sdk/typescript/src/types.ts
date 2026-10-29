@@ -235,7 +235,8 @@ export interface ProcessorOptions {
 /** What a test or an unusual environment injects; every default is the platform's. */
 export interface Hooks {
   transport?: Transport | undefined;
-  sleep?: ((seconds: number) => Promise<void>) | undefined;
+  /** The wait between attempts; `signal` aborts once a shutdown gives the retry up. */
+  sleep?: ((seconds: number, signal: AbortSignal) => Promise<void>) | undefined;
   warn?: ((message: string) => void) | undefined;
   processor?: ProcessorOptions | undefined;
 }

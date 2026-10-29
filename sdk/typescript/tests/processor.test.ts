@@ -183,4 +183,32 @@ describe('the processor', () => {
       vi.useRealTimers();
     }
   });
+
+  it("hands a sleep of the application's the signal a shutdown's give-up aborts", async () => {
+    vi.useFakeTimers();
+    try {
+      // On a timer of its own, which would hold the process until it ends.
+      const sleep = (seconds: number, signal: AbortSignal) =>
+        new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, seconds * 1000);
+          signal.addEventListener('abort', () => {
+            clearTimeout(timer);
+            resolve();
+          });
+        });
+      const h = harness(
+        {},
+        { sleep, processor: { maxBatchSize: 1 } },
+        Array.from({ length: 10 }, () => answer(429, { 'Retry-After': '20' }, '{}')),
+      );
+      h.telmoni.run('bot', (run) => run.step('s', () => {}));
+      const done = h.telmoni.shutdown();
+      await vi.advanceTimersByTimeAsync(30_000);
+      await done;
+      expect(h.transport.requests).toHaveLength(2);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

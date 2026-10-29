@@ -266,7 +266,8 @@ nothing, so call `shutdown()` before exiting.
 
 For tests, inject the seams: `new Telmoni(config, { transport, sleep, warn,
 processor })`, where `transport` has `fetch`'s shape, `sleep` is the wait
-between retries and `processor` sizes the queue.
+between retries, handed a signal that aborts once a shutdown gives the retry up,
+and `processor` sizes the queue.
 
 The variables, their fallbacks and the other SDKs are documented at
 [telmoni.com/docs/api/sdks](https://telmoni.com/docs/api/sdks).
