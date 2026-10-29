@@ -8,6 +8,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
+	"net/url"
 	"reflect"
 	"regexp"
 	"sort"
@@ -465,4 +467,20 @@ func TestANetworkFailureThreeTimesNamesTheErrorsType(t *testing.T) {
 	expectSleeps(t, h, time.Second, 2*time.Second)
 	expectWarnings(t, h, "telmoni: export failed after 3 attempts (errors.errorString); the batch was dropped")
 	expectRequests(t, h, 4)
+}
+
+// net/http wraps every failure in a *url.Error: each is named by its cause,
+// a timeout apart, and so warned of once each.
+func TestATransportFailureIsNamedByItsCause(t *testing.T) {
+	refused := &url.Error{Op: "Post", URL: "https://api.telmoni.com", Err: &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connection refused")}}
+	timedOut := &url.Error{Op: "Post", URL: "https://api.telmoni.com", Err: context.DeadlineExceeded}
+	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k")},
+		newFakeTransport(t, refused, refused, refused, timedOut, timedOut, timedOut))
+	aRun(t, h)
+	aRun(t, h)
+	h.shutdown()
+	expectWarnings(t, h,
+		"telmoni: export failed after 3 attempts (net.OpError); the batch was dropped",
+		"telmoni: export failed after 3 attempts (timeout); the batch was dropped",
+	)
 }

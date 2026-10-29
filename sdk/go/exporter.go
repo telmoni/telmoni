@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -177,7 +178,7 @@ func (e *exporter) export(spans []sdktrace.ReadOnlySpan) bool {
 		}
 		got, err := e.send(body)
 		if err != nil {
-			failure = errorTypeName(err)
+			failure = failureName(err)
 			e.wait("", attempt)
 			continue
 		}
@@ -198,6 +199,21 @@ func (e *exporter) export(spans []sdktrace.ReadOnlySpan) bool {
 	e.warnOnce("failed:"+failure,
 		fmt.Sprintf("telmoni: export failed after %d attempts (%s); the batch was dropped", attempts, failure))
 	return false
+}
+
+// failureName names a transport's failure by its cause: net/http wraps every
+// one in a *url.Error, which would name them all alike.
+func failureName(err error) string {
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		if urlErr.Timeout() {
+			return "timeout"
+		}
+		if urlErr.Err != nil {
+			err = urlErr.Err
+		}
+	}
+	return errorTypeName(err)
 }
 
 // halve exports each half of spans, the second only where the first went.
