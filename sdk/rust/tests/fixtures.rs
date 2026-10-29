@@ -395,11 +395,11 @@ fn a_retry_after_past_the_cap_waits_the_cap() -> Outcome {
 #[test]
 fn retry_after_is_read_as_text() -> Outcome {
     let limited = |retry_after: &str| -> Result<Answer, TransportError> {
-        Ok(Answer {
-            status: 429,
-            headers: vec![("Retry-After".to_owned(), retry_after.to_owned())],
-            body: b"{}".to_vec(),
-        })
+        Ok(Answer::new(
+            429,
+            vec![("Retry-After".to_owned(), retry_after.to_owned())],
+            b"{}".to_vec(),
+        ))
     };
     let harness = Harness::answering(
         keyed(),

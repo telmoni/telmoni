@@ -21,6 +21,7 @@ pub trait Transport: Send + Sync {
 
 /// What the platform answered.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Answer {
     /// The HTTP status.
     pub status: u16,
@@ -31,6 +32,17 @@ pub struct Answer {
 }
 
 impl Answer {
+    /// An answer of `status` with `headers` and `body`, as a transport returns
+    /// one: a field the answer gains later breaks no transport.
+    #[must_use]
+    pub fn new(status: u16, headers: Vec<(String, String)>, body: Vec<u8>) -> Self {
+        Self {
+            status,
+            headers,
+            body,
+        }
+    }
+
     /// The first header named `name`, whatever its case.
     #[must_use]
     pub fn header(&self, name: &str) -> Option<&str> {
@@ -43,6 +55,7 @@ impl Answer {
 
 /// No answer came back: the platform could not be reached.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct TransportError {
     /// The error's name, which the failure warning carries, and nothing more:
     /// a message could quote the request.

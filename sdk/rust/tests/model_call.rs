@@ -310,20 +310,16 @@ fn content_is_taken_off_before_it_leaves() -> Outcome {
 }
 
 fn mode_on() -> Answer {
-    Answer {
-        status: 200,
-        headers: vec![("Telmoni-Content-Mode".to_owned(), "on".to_owned())],
-        body: br#"{"partialSuccess":null}"#.to_vec(),
-    }
+    Answer::new(
+        200,
+        vec![("Telmoni-Content-Mode".to_owned(), "on".to_owned())],
+        br#"{"partialSuccess":null}"#.to_vec(),
+    )
 }
 
 /// An answer that says nothing of the mode, as a server without the content switch did.
 fn mode_unknown() -> Answer {
-    Answer {
-        status: 200,
-        headers: Vec::new(),
-        body: br#"{"partialSuccess":null}"#.to_vec(),
-    }
+    Answer::new(200, Vec::new(), br#"{"partialSuccess":null}"#.to_vec())
 }
 
 /// ⚠ Content stays home until an answer has said the mode. No answer here
@@ -399,11 +395,11 @@ fn content_leaves_once_the_server_has_said_on() -> Outcome {
 /// A word ingest does not send reads as no mode, after an `on` too, so content stays home.
 #[test]
 fn a_mode_ingest_does_not_send_keeps_content_home() -> Outcome {
-    let sealed = Answer {
-        status: 200,
-        headers: vec![("Telmoni-Content-Mode".to_owned(), "sealed".to_owned())],
-        body: b"{}".to_vec(),
-    };
+    let sealed = Answer::new(
+        200,
+        vec![("Telmoni-Content-Mode".to_owned(), "sealed".to_owned())],
+        b"{}".to_vec(),
+    );
     let harness = Harness::answering(
         Config {
             capture_content: true,

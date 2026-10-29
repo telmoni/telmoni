@@ -292,11 +292,7 @@ pub(crate) fn answer_from(fixture: &Value) -> Result<Answer, Failure> {
         })
         .collect::<Result<Vec<_>, Failure>>()?;
     let body = serde_json::to_vec(field(fixture, "body")?)?;
-    Ok(Answer {
-        status,
-        headers,
-        body,
-    })
+    Ok(Answer::new(status, headers, body))
 }
 
 /// `answers/<name>.json`, as an answer.

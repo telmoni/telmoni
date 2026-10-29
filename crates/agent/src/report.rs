@@ -211,11 +211,7 @@ pub(crate) mod testing {
                 headers.to_vec(),
                 body.to_vec(),
             ));
-            Ok(Answer {
-                status: 200,
-                headers: Vec::new(),
-                body: b"{}".to_vec(),
-            })
+            Ok(Answer::new(200, Vec::new(), b"{}".to_vec()))
         }
     }
 
