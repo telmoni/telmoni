@@ -50,6 +50,8 @@ impl Default for Batching {
 #[derive(Clone)]
 pub(crate) struct Processor {
     shared: Arc<Shared>,
+    /// Told to give up by a shutdown past its deadline.
+    exporter: Arc<Exporter>,
 }
 
 struct Shared {
@@ -101,15 +103,16 @@ impl Processor {
             recording: Mutex::new(()),
         });
         let worker = Arc::clone(&shared);
+        let exporting = Arc::clone(&exporter);
         let spawned = std::thread::Builder::new()
             .name("telmoni-exporter".to_owned())
-            .spawn(move || work(&worker, &exporter, &warner));
+            .spawn(move || work(&worker, &exporting, &warner));
         if let Err(error) = spawned {
             // Without the worker nothing leaves, and nothing should wait for it.
             lock(&shared.state).life = Life::Finished;
             exporter_thread_failed(error.kind());
         }
-        Self { shared }
+        Self { shared, exporter }
     }
 
     /// Stages the spans of the record in `trace` as they end, for
@@ -207,6 +210,8 @@ impl SpanProcessor for Processor {
         self.flush_within(Duration::from_secs(30))
     }
 
+    /// Drains, then takes nothing more. Past the timeout what is left is given
+    /// up: no batch or attempt follows, as in the other SDKs.
     fn shutdown_with_timeout(&self, timeout: Duration) -> OTelSdkResult {
         let deadline = Instant::now() + timeout;
         let mut state = lock(&self.shared.state);
@@ -217,6 +222,9 @@ impl SpanProcessor for Processor {
         self.shared.wake.notify_all();
         while state.life != Life::Finished {
             let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+                state.queue.clear();
+                state.fences.clear();
+                self.exporter.give_up();
                 return Err(OTelSdkError::Timeout(timeout));
             };
             state = self
@@ -360,4 +368,129 @@ fn exporter_thread_failed(kind: std::io::ErrorKind) {
         target: "telmoni",
         "telmoni: the exporter's thread could not start ({kind}); nothing will be sent"
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::UNIX_EPOCH;
+
+    use opentelemetry::InstrumentationScope;
+    use opentelemetry::trace::{SpanContext, SpanId, SpanKind, Status, TraceFlags, TraceState};
+    use opentelemetry_sdk::trace::{SpanEvents, SpanLinks};
+
+    use super::*;
+    use crate::config::Config;
+    use crate::transport::{Answer, Transport, TransportError};
+
+    /// Answers every export 429, the first only once the test opens the gate.
+    #[derive(Clone, Default)]
+    struct Throttled {
+        sent: Arc<AtomicUsize>,
+        gate: Arc<(Mutex<bool>, Condvar)>,
+    }
+
+    impl Throttled {
+        fn open(&self) {
+            *lock(&self.gate.0) = true;
+            self.gate.1.notify_all();
+        }
+    }
+
+    impl Transport for Throttled {
+        fn send(
+            &self,
+            _url: &str,
+            _headers: &[(String, String)],
+            _body: &[u8],
+        ) -> Result<Answer, TransportError> {
+            if self.sent.fetch_add(1, Ordering::SeqCst) == 0 {
+                let mut open = lock(&self.gate.0);
+                while !*open {
+                    open = self
+                        .gate
+                        .1
+                        .wait(open)
+                        .unwrap_or_else(PoisonError::into_inner);
+                }
+            }
+            Ok(Answer {
+                status: 429,
+                headers: Vec::new(),
+                body: b"{}".to_vec(),
+            })
+        }
+    }
+
+    fn span(n: u8) -> SpanData {
+        SpanData {
+            span_context: SpanContext::new(
+                TraceId::from_bytes([n; 16]),
+                SpanId::from_bytes([n; 8]),
+                TraceFlags::SAMPLED,
+                false,
+                TraceState::default(),
+            ),
+            parent_span_id: SpanId::INVALID,
+            parent_span_is_remote: false,
+            span_kind: SpanKind::Internal,
+            name: "s".into(),
+            start_time: UNIX_EPOCH,
+            end_time: UNIX_EPOCH,
+            attributes: Vec::new(),
+            dropped_attributes_count: 0,
+            events: SpanEvents::default(),
+            links: SpanLinks::default(),
+            status: Status::Unset,
+            instrumentation_scope: InstrumentationScope::default(),
+        }
+    }
+
+    /// Past a shutdown's deadline the attempt in flight is the last: no batch or attempt follows.
+    #[test]
+    fn a_shutdown_past_its_deadline_starts_no_batch_or_attempt() {
+        let transport = Throttled::default();
+        let warner = Arc::new(Warner::new(Box::new(|_| {})));
+        let config = Config {
+            api_key: Some("k".to_owned()),
+            ..Config::default()
+        };
+        let exporter = Arc::new(Exporter::new(
+            &config,
+            Box::new(transport.clone()),
+            Box::new(|_| {}),
+            Arc::clone(&warner),
+        ));
+        // Batches of one: the second span waits behind the first, whose attempt hangs.
+        let batching = Batching {
+            max_queue_size: 2048,
+            max_batch_size: 1,
+            schedule_delay: Duration::from_secs(60),
+        };
+        let processor = Processor::start(exporter, batching, warner);
+        processor.on_end(span(1));
+        processor.on_end(span(2));
+        let started = Instant::now();
+        while transport.sent.load(Ordering::SeqCst) == 0 {
+            assert!(
+                started.elapsed() < Duration::from_secs(5),
+                "no attempt left"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(
+            processor
+                .shutdown_with_timeout(Duration::from_millis(50))
+                .is_err()
+        );
+        transport.open();
+        while lock(&processor.shared.state).life != Life::Finished {
+            assert!(
+                started.elapsed() < Duration::from_secs(5),
+                "the worker stayed"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(transport.sent.load(Ordering::SeqCst), 1);
+    }
 }

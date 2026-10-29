@@ -22,8 +22,8 @@ type queueLimits struct {
 var defaultQueueLimits = queueLimits{maxQueue: 2048, maxBatch: 512, delay: 5 * time.Second}
 
 // defaultWait bounds a Flush or a Shutdown whose context has no deadline, as
-// the other SDKs bound theirs: a batch mid-retry is given this long, and the
-// worker is then left to finish on its own.
+// the other SDKs bound theirs: a batch mid-retry is given this long, and a
+// Shutdown then gives up what is left.
 const defaultWait = 30 * time.Second
 
 // processor is the SDK's own batch processor: OpenTelemetry's batching and
@@ -171,7 +171,13 @@ func (p *processor) ForceFlush(ctx context.Context) error {
 	}
 }
 
+// Shutdown drains, then takes nothing more. Past its wait what is left is
+// given up, and with a ctx already done before the worker wakes: no batch or
+// attempt follows, as in the other SDKs.
 func (p *processor) Shutdown(ctx context.Context) error {
+	if ctx.Err() != nil {
+		p.exporter.giveUp()
+	}
 	if !p.stop() {
 		return nil
 	}
@@ -181,6 +187,7 @@ func (p *processor) Shutdown(ctx context.Context) error {
 	case <-p.done:
 		return nil
 	case <-ctx.Done():
+		p.exporter.giveUp()
 		return ctx.Err()
 	}
 }
@@ -240,7 +247,7 @@ func (p *processor) work() {
 			}
 			p.mu.Lock()
 		}
-		if p.stopped && len(p.queue) == 0 {
+		if p.stopped && (len(p.queue) == 0 || p.exporter.gaveUp()) {
 			p.release()
 			p.mu.Unlock()
 			return

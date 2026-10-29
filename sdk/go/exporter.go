@@ -57,12 +57,18 @@ type exporter struct {
 	logger    *slog.Logger
 	url       string
 	resource  []keyValue
+	// givenUp is done once a shutdown gives up: the request in flight is
+	// cancelled, the wait for a retry ends and no attempt follows.
+	givenUp context.Context
+	giveUp  context.CancelFunc
 
 	mu     sync.Mutex
 	mode   string
 	warned map[string]struct{}
 }
 
+// newExporter waits between attempts through sleep, or, when nil, through a
+// wait of its own that a give-up ends.
 func newExporter(cfg Config, transport Transport, sleep func(time.Duration), logger *slog.Logger) *exporter {
 	resource := []keyValue{
 		stringAttribute(distroName, distro),
@@ -79,14 +85,36 @@ func newExporter(cfg Config, transport Transport, sleep func(time.Duration), log
 	if cfg.Release != "" {
 		resource = append(resource, stringAttribute(attrRelease, cfg.Release))
 	}
-	return &exporter{
+	givenUp, giveUp := context.WithCancel(context.Background())
+	e := &exporter{
 		config:    cfg,
 		transport: transport,
 		sleep:     sleep,
 		logger:    logger,
 		url:       cfg.Endpoint + "/otlp/v1/traces",
 		resource:  resource,
+		givenUp:   givenUp,
+		giveUp:    giveUp,
 		warned:    map[string]struct{}{},
+	}
+	if e.sleep == nil {
+		e.sleep = e.waitOut
+	}
+	return e
+}
+
+// gaveUp is whether a shutdown has given up what is left.
+func (e *exporter) gaveUp() bool {
+	return e.givenUp.Err() != nil
+}
+
+// waitOut sleeps for d, or until a give-up, whichever comes first.
+func (e *exporter) waitOut(d time.Duration) {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+	case <-e.givenUp.Done():
 	}
 }
 
@@ -144,6 +172,9 @@ func (e *exporter) export(spans []sdktrace.ReadOnlySpan) bool {
 	}
 	var failure string
 	for attempt := 0; attempt < attempts; attempt++ {
+		if e.gaveUp() {
+			return false
+		}
 		got, err := e.send(body)
 		if err != nil {
 			failure = errorTypeName(err)
@@ -176,7 +207,7 @@ func (e *exporter) halve(spans []sdktrace.ReadOnlySpan) bool {
 }
 
 func (e *exporter) request(body []byte) (*http.Request, error) {
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, e.url, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(e.givenUp, http.MethodPost, e.url, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -258,10 +289,11 @@ func (e *exporter) note(message string) {
 	}
 }
 
-// wait sleeps before the next attempt, and not after the last: Retry-After's
-// seconds when the answer carries them, else 2^attempt, at most a minute.
+// wait sleeps before the next attempt, and not after the last nor once given
+// up: Retry-After's seconds when the answer carries them, else 2^attempt, at
+// most a minute.
 func (e *exporter) wait(retryAfter string, attempt int) {
-	if attempt+1 >= attempts {
+	if attempt+1 >= attempts || e.gaveUp() {
 		return
 	}
 	seconds := float64(int(1) << attempt)

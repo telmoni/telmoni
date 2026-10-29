@@ -95,6 +95,7 @@ class Processor(SpanProcessor):
         self._lock = threading.Lock()
         self._wake = threading.Condition(self._lock)
         self._recording = threading.Lock()
+        self._exporter.after_fork()
         self._queue.clear()
         self._taken = 0
         self._fences.clear()
@@ -183,12 +184,20 @@ class Processor(SpanProcessor):
                 self._flushing -= 1
 
     def shutdown(self) -> None:
+        """Drains, then takes nothing more. Past the timeout what is left is
+        given up: the wait for a retry ends there and no batch or attempt
+        follows, as in the other SDKs."""
         with self._lock:
             if self._shutdown:
                 return
             self._shutdown = True
             self._wake.notify_all()
         self._thread.join(SHUTDOWN_TIMEOUT_S)
+        if self._thread.is_alive():
+            with self._lock:
+                self._queue.clear()
+                self._fences.clear()
+            self._exporter.give_up()
 
     def _work(self) -> None:
         while True:

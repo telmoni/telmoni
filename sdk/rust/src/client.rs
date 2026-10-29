@@ -331,7 +331,8 @@ impl Telmoni {
     }
 
     /// Flushes, then stops the exporter's thread; spans opened afterwards go
-    /// nowhere. Dropping the last clone of the client and its runs does the
+    /// nowhere. Past 30 seconds what is left is given up: no batch or attempt
+    /// follows. Dropping the last clone of the client and its runs does the
     /// same, with OpenTelemetry's shorter wait.
     pub fn shutdown(&self) {
         // Ours first, with the longer wait: the provider's own call afterwards

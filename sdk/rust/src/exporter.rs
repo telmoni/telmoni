@@ -2,6 +2,7 @@
 //! each attempt stamped with this clock, each answer's content mode and drops read.
 
 use std::borrow::Cow;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, UNIX_EPOCH};
 
@@ -39,6 +40,8 @@ pub(crate) struct Exporter {
     /// The resource's attributes, encoded once: the exporter's own list,
     /// whatever the provider's resource holds.
     resource: Vec<serde_json::Value>,
+    /// Set by a shutdown past its deadline: no attempt follows, nor a wait.
+    given_up: AtomicBool,
 }
 
 impl Exporter {
@@ -58,12 +61,23 @@ impl Exporter {
             warner,
             content_mode: Mutex::new(None),
             resource: resource(config),
+            given_up: AtomicBool::new(false),
         }
     }
 
     /// The project's mode, as the last answer named it; `None` before one.
     pub(crate) fn content_mode(&self) -> Option<String> {
         lock(&self.content_mode).clone()
+    }
+
+    /// Gives up what is left: no attempt follows the one in flight, which a
+    /// wait already under way still ends on its own.
+    pub(crate) fn give_up(&self) {
+        self.given_up.store(true, Ordering::Release);
+    }
+
+    fn gave_up(&self) -> bool {
+        self.given_up.load(Ordering::Acquire)
     }
 
     /// Sends `spans`, halved past ingest's caps; false once they failed for a
@@ -120,6 +134,9 @@ impl Exporter {
         }
         let mut failure = String::new();
         for attempt in 0..ATTEMPTS {
+            if self.gave_up() {
+                return false;
+            }
             // This clock as the attempt leaves, the spans' own.
             let mut sent = headers.clone();
             sent.push((
@@ -287,9 +304,9 @@ impl Exporter {
         }
     }
 
-    /// Before the next attempt; nothing after the last.
+    /// Before the next attempt; nothing after the last, or once given up.
     fn wait(&self, retry_after: Option<&str>, attempt: u32) {
-        if attempt + 1 >= ATTEMPTS {
+        if attempt + 1 >= ATTEMPTS || self.gave_up() {
             return;
         }
         // The header's whole seconds when it has them, else 1, 2, 4… seconds.

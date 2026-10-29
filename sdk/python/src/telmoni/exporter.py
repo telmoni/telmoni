@@ -292,7 +292,9 @@ class Exporter:
     ) -> None:
         self._config = config
         self._transport = transport or _urllib_transport
-        self._sleep = sleep or time.sleep
+        # Set by a shutdown past its deadline: no attempt follows, and a wait ends.
+        self._given_up = threading.Event()
+        self._sleep = sleep or self._wait_out
         self._url = f"{config.endpoint}/otlp/v1/traces"
         self._content_mode: str | None = None
         self._warned: set[str] = set()
@@ -314,6 +316,19 @@ class Exporter:
     def content_mode(self) -> str | None:
         """The project's mode, as the last answer named it; None before one."""
         return self._content_mode
+
+    def give_up(self) -> None:
+        """Gives up what is left: the wait before a retry ends now, and no attempt
+        follows it. A shutdown past its deadline calls it."""
+        self._given_up.set()
+
+    def after_fork(self) -> None:
+        """The child of a fork: its event made anew, as a lock copied held would
+        never be let go."""
+        self._given_up = threading.Event()
+
+    def _wait_out(self, seconds: float) -> None:
+        self._given_up.wait(seconds)
 
     def export(self, spans: Sequence[ReadableSpan]) -> bool:
         """Sends the spans, halved past ingest's caps; false once they failed for a
@@ -371,6 +386,8 @@ class Exporter:
             headers["Authorization"] = f"Bearer {bearer}"
         failure = ""
         for attempt in range(ATTEMPTS):
+            if self._given_up.is_set():
+                return False
             # This clock as the attempt leaves, the spans' own.
             sent = {**headers, contract.SENT_AT_HEADER: str(time.time_ns())}
             try:
@@ -483,8 +500,8 @@ class Exporter:
             self.warn_once(f"line:{line}", f"telmoni: the server said: {line}")
 
     def _wait(self, retry_after: str | None, attempt: int) -> None:
-        """Before the next attempt; nothing after the last."""
-        if attempt + 1 >= ATTEMPTS:
+        """Before the next attempt; nothing after the last, or once given up."""
+        if attempt + 1 >= ATTEMPTS or self._given_up.is_set():
             return
         seconds = float(2**attempt)
         if retry_after is not None:

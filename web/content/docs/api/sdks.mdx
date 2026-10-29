@@ -830,7 +830,8 @@ infinity, is sent as no value, and so dropped, and a whole number past 64 bits
 as its text or a double, never costing its batch. Each attempt carries
 `Telmoni-Sent-At`, the agent's clock as it leaves, so
 [ingest](/docs/api/ingest#what-is-kept) can move
-a run from a clock a time zone or a date out as one. A flush waits up to 30 seconds. An attribute the
+a run from a clock a time zone or a date out as one. A flush waits up to 30 seconds, and a
+shutdown drains for as long, then gives up what is left, sending nothing more. An attribute the
 server drops is logged once: content with the project's content mode, which
 decides the drop, and a link to [what is dropped at the
 door](/docs/api/ingest#what-is-dropped-at-the-door); text the field inventory

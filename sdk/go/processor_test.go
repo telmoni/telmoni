@@ -65,7 +65,10 @@ func TestShutdownDrainsWhatIsQueued(t *testing.T) {
 
 func TestAShutdownWhoseContextIsDoneStillStopsTheWorker(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
-	// As a deferred Shutdown under signal.NotifyContext finds it after Ctrl-C.
+	_, queued := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	queued.End()
+	// As a deferred Shutdown under signal.NotifyContext finds it after Ctrl-C,
+	// what is queued given up with it.
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if err := h.client.Shutdown(ctx); err != nil && !errors.Is(err, context.Canceled) {
@@ -79,6 +82,35 @@ func TestAShutdownWhoseContextIsDoneStillStopsTheWorker(t *testing.T) {
 	if got := len(h.transport.all()); got != 0 {
 		t.Errorf("%d exports after a shutdown, want none", got)
 	}
+}
+
+// A shutdown drains until its deadline, then sends nothing more however long the process lives.
+func TestAShutdownGivesUpAtItsDeadline(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		// Every answer asks for 20 s, waited through the SDK's own wait; a
+		// batch of one leaves the run's own span queued behind its step.
+		slow := scripted{status: http.StatusTooManyRequests, headers: map[string]string{"Retry-After": "20"}, body: []byte("{}")}
+		transport := newFakeTransport(t, slow, slow, slow, slow, slow, slow)
+		client, err := telmoni.New(testConfig(), telmoni.WithTransport(transport.send), telmoni.WithQueue(2048, 1, time.Minute))
+		if err != nil {
+			t.Fatalf("building the client: %v", err)
+		}
+		ctx, run := client.Run(context.Background(), "bot", telmoni.RunOptions{})
+		_, step := run.Step(ctx, "s")
+		step.End()
+		run.End()
+		if err := client.Shutdown(context.Background()); !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("Shutdown = %v, want context.DeadlineExceeded", err)
+		}
+		// Before the deadline the drain went on: the step's retry, 20 s in.
+		if got := len(transport.all()); got != 2 {
+			t.Errorf("%d attempts before the deadline, want 2", got)
+		}
+		time.Sleep(10 * time.Minute)
+		if got := len(transport.all()); got != 2 {
+			t.Errorf("%d attempts once given up, want still 2", got)
+		}
+	})
 }
 
 // A client dropped without Shutdown sends what it queued at once and lets its worker go.

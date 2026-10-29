@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import FakeTransport, kept
+from conftest import FakeTransport, answer_from, kept, load_fixture
 from telmoni import Config, Telmoni
 from telmoni.exporter import Answer, Exporter
 from telmoni.processor import Processor
@@ -89,6 +89,36 @@ def test_shutdown_drains_what_is_queued(transport: FakeTransport) -> None:
     client.shutdown()
     assert [s["name"] for s in transport.spans()] == ["invoke_agent bot"]
     client.shutdown()
+
+
+def test_shutdown_drains_until_its_deadline_then_sends_nothing_more(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("telmoni.processor.SHUTDOWN_TIMEOUT_S", 0.2)
+    # Every answer asks for 2 s, past the deadline, through the exporter's own
+    # wait; a batch of one leaves the run's own span queued behind its step.
+    rate_limited = answer_from(load_fixture("answers/rate-limited.json"))
+    transport = FakeTransport([rate_limited] * 10)
+    client = Telmoni(Config(api_key="k"), transport=transport)
+    client.processor.shutdown()
+    processor = Processor(
+        Exporter(client.config, transport=transport),
+        max_batch_size=1,
+        schedule_delay_s=60,
+    )
+    client.processor = processor
+    client._provider._active_span_processor._span_processors = (processor,)
+    with client.run("bot"), client.step("s"):
+        pass
+    assert not client.flush(timeout_s=0.01)
+    assert transport.wait_for(1), "the step's first attempt"
+    processor.shutdown()
+    # Past it the worker is gone, so nothing more is sent however long the
+    # process lives, and a flush has nothing left to wait for.
+    processor._thread.join(5)
+    assert not processor._thread.is_alive()
+    assert len(transport.requests) == 1
+    assert client.flush()
 
 
 def test_a_batch_fills_and_goes_without_a_flush(transport: FakeTransport) -> None:

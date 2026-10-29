@@ -49,8 +49,8 @@ func WithTransport(t Transport) Option {
 	}
 }
 
-// WithSleep waits through sleep, instead of time.Sleep, before an export is
-// sent again.
+// WithSleep waits through sleep before an export is sent again, instead of the
+// SDK's own wait, which a shutdown giving up ends at once.
 func WithSleep(sleep func(time.Duration)) Option {
 	return func(o *options) {
 		if sleep != nil {
@@ -142,7 +142,6 @@ func New(cfg Config, opts ...Option) (*Client, error) {
 	}
 	o := options{
 		transport: defaultClient(cfg.Endpoint).Do,
-		sleep:     time.Sleep,
 		logger:    slog.Default(),
 		random:    rand.Float64,
 		limits:    defaultQueueLimits,
@@ -236,9 +235,10 @@ func (c *Client) Flush(ctx context.Context) error {
 
 // Shutdown flushes, then stops the exporter's worker. Nothing ended after it
 // is sent, even when ctx is already done. It waits for ctx, or 30 seconds
-// when ctx has no deadline, and a batch still retrying past that is left to
-// the worker, which the process exit takes with it. A client dropped without
-// it sends what it queued once collected, though an exit waits for neither.
+// when ctx has no deadline; past that, or at once for a ctx already done,
+// what is left is given up: the request in flight is cancelled and no batch
+// or attempt follows. A client dropped without it sends what it queued once
+// collected, though an exit waits for neither.
 func (c *Client) Shutdown(ctx context.Context) error {
 	if !c.built() {
 		return nil
