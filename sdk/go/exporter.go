@@ -164,13 +164,6 @@ func (e *exporter) export(spans []sdktrace.ReadOnlySpan) bool {
 		}
 		e.warnOnce("trimmed", "telmoni: a span past the 1 MiB an export may hold was sent without the attributes ingest drops for their length")
 	}
-	// A request that cannot be built, from an endpoint that is no URL, will
-	// not be built on the next attempt either.
-	if _, err := e.request(body); err != nil {
-		e.warnOnce("request:"+errorTypeName(err),
-			fmt.Sprintf("telmoni: export request could not be built (%s); the batch was dropped", errorTypeName(err)))
-		return false
-	}
 	var failure string
 	for attempt := 0; attempt < attempts; attempt++ {
 		if e.gaveUp() {
@@ -334,9 +327,16 @@ func (e *exporter) warnOnce(key, text string) {
 	}
 	e.mu.Unlock()
 	if !seen {
-		// Recovered: a panicking handler must not reach the agent's own call.
-		func() { defer func() { _ = recover() }(); e.logger.Warn(text) }()
+		e.warn(text)
 	}
+}
+
+// warn logs text through the application's logger, whose handler may panic:
+// recovered, so a warning costs neither the worker its batch nor the agent its
+// call. Nothing says so, since the logger is where warnings go.
+func (e *exporter) warn(text string) {
+	defer func() { _ = recover() }()
+	e.logger.Warn(text)
 }
 
 func remedy(attr, reason string) string {

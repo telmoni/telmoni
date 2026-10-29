@@ -10,7 +10,7 @@
 
 use std::borrow::Cow;
 use std::collections::BTreeMap;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::SystemTime;
 
 use opentelemetry::trace::{SpanKind, TraceContextExt as _, TraceId, Tracer as _};
 use opentelemetry::{Context, KeyValue};
@@ -523,8 +523,7 @@ fn chars(text: Option<&str>) -> usize {
 /// Whether ingest reads `time`: nanoseconds since the epoch, above 0 and
 /// within 64 bits.
 fn readable(time: SystemTime) -> bool {
-    time.duration_since(UNIX_EPOCH)
-        .is_ok_and(|since| u64::try_from(since.as_nanos()).is_ok_and(|nanos| nanos > 0))
+    crate::exporter::unix_nanos(time).is_some()
 }
 
 /// Every model call `inside` holds, a step's among them.

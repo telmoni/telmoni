@@ -4,7 +4,7 @@
 use std::borrow::Cow;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use opentelemetry::trace::{SpanId, SpanKind, Status};
 use opentelemetry::{Array, Key, Value};
@@ -512,13 +512,18 @@ fn kind(kind: &SpanKind) -> u8 {
     }
 }
 
+/// Nanoseconds since the epoch as ingest reads a time: none at or before it,
+/// or past 64 bits.
+pub(crate) fn unix_nanos(time: SystemTime) -> Option<u64> {
+    let nanos = u64::try_from(time.duration_since(UNIX_EPOCH).ok()?.as_nanos()).ok()?;
+    (nanos > 0).then_some(nanos)
+}
+
 /// Nanoseconds since the epoch, as the decimal string OTLP's JSON wants for a
 /// 64-bit integer.
-fn nanos(time: std::time::SystemTime) -> String {
+fn nanos(time: SystemTime) -> String {
     // 0 out of range, for ingest to refuse that span rather than the export.
-    time.duration_since(UNIX_EPOCH)
-        .map_or(0, |since| u64::try_from(since.as_nanos()).unwrap_or(0))
-        .to_string()
+    unix_nanos(time).unwrap_or(0).to_string()
 }
 
 fn any_value(value: &Value) -> AnyValue<'_> {

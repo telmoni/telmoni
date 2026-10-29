@@ -3,6 +3,7 @@ from __future__ import annotations
 import ipaddress
 import math
 import os
+import re
 import string
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -209,6 +210,30 @@ def check_endpoint(endpoint: str) -> None:
         )
 
 
+def check_rate(rate: float) -> float:
+    """A sample rate as the client and a run take it: above 0 and up to 1."""
+    if not 0 < rate <= 1:
+        raise ValueError("sample_rate must be above 0 and up to 1")
+    return rate
+
+
+def header(headers: Mapping[str, str], name: str) -> str | None:
+    """The header named ``name``, however either name is cased."""
+    wanted = name.lower()
+    for key, value in headers.items():
+        if key.lower() == wanted:
+            return value
+    return None
+
+
+_SURROGATE = re.compile("[\ud800-\udfff]")
+
+
+def replace_surrogates(text: str) -> str:
+    """``text`` with each lone surrogate, which has no UTF-8, as U+FFFD."""
+    return _SURROGATE.sub("\ufffd", text)
+
+
 @dataclass
 class Config:
     """How the SDK reaches Telmoni, and what it sends."""
@@ -248,8 +273,7 @@ class Config:
         if isinstance(self.api_key, str):
             key = _unset_if_blank(self.api_key)
             self.api_key = Secret(key) if key is not None else None
-        if not 0 < self.sample_rate <= 1:
-            raise ValueError("sample_rate must be above 0 and up to 1")
+        check_rate(self.sample_rate)
         self.environment = _unset_if_blank(self.environment)
         self.release = _unset_if_blank(self.release)
         self.prices = tuple(self.prices)

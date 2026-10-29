@@ -347,10 +347,7 @@ export class Opener {
       throw new TypeError("a run needs its agent's name");
     }
     const agent = cut(asText(named, "run's agent", this.#warnOnce), contract.AGENT_MAX, "run's agent", this.#warnOnce);
-    const rate: unknown = options.sampleRate ?? this.#config.sampleRate;
-    if (typeof rate !== 'number' || !(rate > 0 && rate <= 1)) {
-      throw new RangeError('sampleRate must be a number above 0 and up to 1');
-    }
+    const rate = checkedRate(options.sampleRate ?? this.#config.sampleRate);
     const guard = Guard.of(options);
     const sampledOut = rate < 1 && Math.random() >= rate;
     const runId = randomUUID();
@@ -762,6 +759,15 @@ function numberOf(value: unknown): number {
   if (typeof value === 'number') return value;
   if (typeof value === 'bigint' || value instanceof Number) return Number(value);
   return typeof value === 'string' && DECIMAL.test(value) ? Number(value) : Number.NaN;
+}
+
+/** A sample rate as the client and a run take it: a number above 0 and up to 1. */
+export function checkedRate(rate: unknown): number {
+  // '0.5' from an environment variable compares as a number, and goes out as text ingest refuses.
+  if (typeof rate !== 'number' || !(rate > 0 && rate <= 1)) {
+    throw new RangeError('sampleRate must be a number above 0 and up to 1');
+  }
+  return rate;
 }
 
 /** What every span of a run carries, live or recorded: its id and agent, and its user and session where it has them. */

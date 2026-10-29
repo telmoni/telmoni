@@ -37,7 +37,6 @@ function beforeExit(): void {
 export class Processor implements SpanProcessor {
   readonly #held = new WeakRef<Processor>(this);
   readonly #exporter: Exporter;
-  readonly #warn: (message: string) => void;
   readonly #maxQueueSize: number;
   readonly #maxBatchSize: number;
   readonly #delayMs: number;
@@ -59,16 +58,8 @@ export class Processor implements SpanProcessor {
   /** Set once a shutdown's deadline has passed: nothing more is started. */
   #givenUp = false;
 
-  constructor(exporter: Exporter, warn: (message: string) => void, options: ProcessorOptions = {}) {
+  constructor(exporter: Exporter, options: ProcessorOptions = {}) {
     this.#exporter = exporter;
-    // A hook of the application's may throw; the worker must not stop on it.
-    this.#warn = (message) => {
-      try {
-        warn(message);
-      } catch {
-        // Nowhere left to say so: the hook is where warnings go.
-      }
-    };
     this.#maxQueueSize = options.maxQueueSize ?? MAX_QUEUE_SIZE;
     this.#maxBatchSize = options.maxBatchSize ?? MAX_BATCH_SIZE;
     this.#delayMs = (options.scheduleDelaySeconds ?? SCHEDULE_DELAY_S) * 1000;
@@ -211,7 +202,7 @@ export class Processor implements SpanProcessor {
     const dropped = this.#dropped;
     this.#dropped = 0;
     if (dropped > 0) {
-      this.#warn(`telmoni: the export queue was full; ${dropped} spans were dropped`);
+      this.#exporter.warn(`telmoni: the export queue was full; ${dropped} spans were dropped`);
     }
     if (batch.length === 0) {
       this.#settle();
@@ -227,7 +218,7 @@ export class Processor implements SpanProcessor {
     try {
       await this.#exporter.export(batch);
     } catch (error) {
-      this.#warn(`telmoni: an export failed (${errorName(error)}); the batch was dropped`);
+      this.#exporter.warn(`telmoni: an export failed (${errorName(error)}); the batch was dropped`);
     }
   }
 

@@ -209,7 +209,7 @@ def test_extract_reads_a_lone_surrogate_in_any_member_as_the_replacement_charact
 ) -> None:
     """A header decoded with surrogateescape holds one; read strictly, it would
     raise into the handler."""
-    assert decode_baggage_value("Z\udcfcrich") == "Z�rich"
+    assert decode_baggage_value("Z\udcfcrich") == "Z\ufffdrich"
     run = telmoni.extract(
         {
             "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",

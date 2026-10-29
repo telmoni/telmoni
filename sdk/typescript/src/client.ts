@@ -10,7 +10,7 @@ import { checkedPrice } from './guard.js';
 import { Ids } from './ids.js';
 import { Processor } from './processor.js';
 import { readHeaders, writeHeaders } from './propagation.js';
-import { type Handle, Opener, Run, currentRun, split, within } from './runs.js';
+import { type Handle, Opener, Run, checkedRate, currentRun, split, within } from './runs.js';
 import { RecordingSampler } from './sampler.js';
 import type { Config, HeaderCarrier, Hooks, ResolvedConfig, RunOptions, RunRecord } from './types.js';
 import { VERSION } from './version.js';
@@ -156,11 +156,7 @@ function checkEndpoint(endpoint: string): void {
 function resolve(config: Config | undefined): ResolvedConfig {
   const endpoint = endpointOf(config?.endpoint);
   checkEndpoint(endpoint);
-  const sampleRate: unknown = config?.sampleRate ?? 1;
-  // '0.5' from an environment variable compares as a number, and goes out as text ingest refuses.
-  if (typeof sampleRate !== 'number' || !(sampleRate > 0 && sampleRate <= 1)) {
-    throw new RangeError('sampleRate must be a number above 0 and up to 1');
-  }
+  const sampleRate = checkedRate(config?.sampleRate ?? 1);
   const prices: unknown = config?.prices ?? [];
   if (!Array.isArray(prices)) throw new TypeError('prices must be an array of prices');
   const resolved: ResolvedConfig = {
@@ -198,13 +194,12 @@ export class Telmoni {
 
   constructor(config?: Config, hooks?: Hooks) {
     this.config = resolve(config);
-    const warn = hooks?.warn ?? ((message: string) => console.warn(message));
     this.#exporter = new Exporter(this.config, {
       transport: hooks?.transport ?? (bypassesProxy(this.config.endpoint) ? directTransport : fetchTransport),
       sleep: hooks?.sleep ?? realSleep,
-      warn,
+      warn: hooks?.warn ?? ((message: string) => console.warn(message)),
     });
-    this.#processor = new Processor(this.#exporter, warn, hooks?.processor);
+    this.#processor = new Processor(this.#exporter, hooks?.processor);
     const ids = new Ids();
     // sdk-trace-base's provider merges what it reads from OTEL_* under the
     // options given; with every option given, nothing of the environment's

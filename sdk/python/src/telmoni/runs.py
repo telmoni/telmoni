@@ -44,6 +44,7 @@ from .models import (
     ToolCallRecord,
     Usage,
     _dollars,
+    check_rate,
 )
 
 if TYPE_CHECKING:
@@ -433,8 +434,7 @@ class Opener:
             warn_once,
         )
         rate = self._client.config.sample_rate if sample_rate is None else sample_rate
-        if not 0 < rate <= 1:
-            raise ValueError("sample_rate must be above 0 and up to 1")
+        check_rate(rate)
         caps = guard.Guard(*guard.caps(max_steps, max_spend))
         sampled_out = rate < 1 and random.random() >= rate
         run_id = str(uuid.uuid4())

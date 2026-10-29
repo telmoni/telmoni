@@ -3,7 +3,6 @@ package telmoni
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"sync"
 	"time"
 
@@ -37,7 +36,6 @@ const defaultWait = 30 * time.Second
 // of its own.
 type processor struct {
 	exporter *exporter
-	logger   *slog.Logger
 	limits   queueLimits
 
 	// recording lets one record at a time be built.
@@ -66,10 +64,9 @@ type processor struct {
 	done chan struct{}
 }
 
-func newProcessor(exp *exporter, logger *slog.Logger, limits queueLimits) *processor {
+func newProcessor(exp *exporter, limits queueLimits) *processor {
 	p := &processor{
 		exporter: exp,
-		logger:   logger,
 		limits:   limits,
 		wake:     make(chan struct{}, 1),
 		done:     make(chan struct{}),
@@ -275,7 +272,7 @@ func (p *processor) work() {
 		p.exporting = n > 0
 		p.mu.Unlock()
 		if dropped > 0 {
-			p.warn(fmt.Sprintf("telmoni: the export queue was full; %d spans were dropped", dropped))
+			p.exporter.warn(fmt.Sprintf("telmoni: the export queue was full; %d spans were dropped", dropped))
 		}
 		if n > 0 {
 			p.export(batch)
@@ -296,18 +293,10 @@ func (p *processor) work() {
 func (p *processor) export(batch []sdktrace.ReadOnlySpan) {
 	defer func() {
 		if recover() != nil {
-			p.warn("telmoni: a hook panicked during an export; the batch was dropped")
+			p.exporter.warn("telmoni: a hook panicked during an export; the batch was dropped")
 		}
 	}()
 	p.exporter.export(batch)
-}
-
-// warn logs text through the application's logger, whose handler may panic
-// too: recovered on its own, so a warning that panics costs no batch. Nothing
-// says so, since the logger is where warnings go.
-func (p *processor) warn(text string) {
-	defer func() { _ = recover() }()
-	p.logger.Warn(text)
 }
 
 // due is whether the worker should export without waiting; under the lock. A

@@ -31,7 +31,7 @@ from opentelemetry.trace import SpanKind, StatusCode
 
 from . import contract
 from ._version import __version__
-from .models import Config, bypasses_proxy
+from .models import Config, bypasses_proxy, header, replace_surrogates
 
 logger = logging.getLogger("telmoni")
 
@@ -47,7 +47,6 @@ WARNED_MAX = 1024
 CONTENT_DOCS = "https://telmoni.com/docs/api/ingest#what-is-dropped-at-the-door"
 """Where a dropped content field's warning sends the reader."""
 
-_SURROGATE = re.compile("[\ud800-\udfff]")
 _DROPPED = re.compile(r"^span (\S+) dropped (\S+): (\w+)(?:; (.*))?$")
 _REFUSED = re.compile(r"^span (\S+) refused: (.*)$")
 
@@ -68,11 +67,7 @@ class Answer:
     body: bytes
 
     def header(self, name: str) -> str | None:
-        wanted = name.lower()
-        for key, value in self.headers.items():
-            if key.lower() == wanted:
-                return value
-        return None
+        return header(self.headers, name)
 
 
 Transport = Callable[[str, Mapping[str, str], bytes], Answer]
@@ -377,7 +372,7 @@ class Exporter:
             ensure_ascii=False,
         )
         # A lone surrogate is no text ingest reads, and would lose the batch.
-        return _SURROGATE.sub("\ufffd", text).encode()
+        return replace_surrogates(text).encode()
 
     def _send(self, body: bytes) -> bool:
         headers = {

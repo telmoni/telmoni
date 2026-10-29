@@ -142,47 +142,57 @@ export const directTransport: Transport = (url, init) =>
     request.end(body);
   });
 
+/**
+ * At most `ANSWER_MAX` bytes of a body as text, fed a chunk at a time, the rest
+ * never read; its status decides, so a body that breaks or outlasts the
+ * request's ten seconds is kept as far as it came.
+ */
+class Capped {
+  readonly #decoder = new TextDecoder();
+  #text = '';
+  #left = ANSWER_MAX;
+
+  /** Takes what fits of `chunk`; false once the cap is reached. */
+  take(chunk: Uint8Array): boolean {
+    const part = chunk.subarray(0, this.#left);
+    this.#text += this.#decoder.decode(part, { stream: true });
+    this.#left -= part.byteLength;
+    return this.#left > 0;
+  }
+
+  end(): string {
+    return this.#text + this.#decoder.decode();
+  }
+}
+
 /** As `textOf`, from Node's own answer. */
 async function messageText(response: IncomingMessage): Promise<string> {
-  const decoder = new TextDecoder();
-  let text = '';
-  let left = ANSWER_MAX;
+  const capped = new Capped();
   try {
     for await (const chunk of response) {
-      const part = (chunk as Buffer).subarray(0, left);
-      text += decoder.decode(part, { stream: true });
-      left -= part.byteLength;
-      if (left <= 0) break;
+      if (!capped.take(chunk as Buffer)) break;
     }
   } catch {
     // Broken or timed out: kept as far as it came.
   }
-  return text + decoder.decode();
+  return capped.end();
 }
 
-/**
- * At most `ANSWER_MAX` bytes of a body, as text, the rest never read; its status decides,
- * so a body that breaks or outlasts the request's ten seconds is kept as far as it came.
- */
+/** A fetch answer's body, read as `Capped` reads it. */
 async function textOf(body: ReadableStream<Uint8Array> | null): Promise<string> {
   if (body === null) return '';
   const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let text = '';
-  let left = ANSWER_MAX;
+  const capped = new Capped();
   try {
-    while (left > 0) {
+    for (let more = true; more; ) {
       const { done, value } = await reader.read();
-      if (done) break;
-      const part = value.subarray(0, left);
-      text += decoder.decode(part, { stream: true });
-      left -= part.byteLength;
+      more = !done && capped.take(value);
     }
     await reader.cancel();
   } catch {
     // Broken or timed out: a stream that failed needs no cancelling.
   }
-  return text + decoder.decode();
+  return capped.end();
 }
 
 /**
@@ -438,10 +448,15 @@ export class Exporter {
     // the life of the process; past the cap, warnings may repeat.
     if (this.#warned.size >= WARNED_MAX) this.#warned.clear();
     this.#warned.add(key);
+    this.warn(text);
+  }
+
+  /** Warns `text` through the hook, which may throw: never into the worker or the agent's own call. */
+  warn(text: string): void {
     try {
       this.#warn(text);
     } catch {
-      // Nowhere left to say so, and never into the agent's own call.
+      // Nowhere left to say so: the hook is where warnings go.
     }
   }
 }

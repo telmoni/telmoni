@@ -14,12 +14,12 @@ from dataclasses import dataclass
 from opentelemetry.trace import SpanContext, TraceFlags
 
 from . import contract
+from .models import header, replace_surrogates
 
 _UUID = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE
 )
 _HEX = re.compile(r"^[0-9a-f]+$")
-_SURROGATE = re.compile("[\ud800-\udfff]")
 
 
 @dataclass(frozen=True)
@@ -44,7 +44,7 @@ def write_headers(
     )
     members = [
         member.strip()
-        for member in (_get_header(headers, contract.BAGGAGE) or "").split(",")
+        for member in (header(headers, contract.BAGGAGE) or "").split(",")
     ]
     kept = [m for m in members if m and not _is_ours(m)]
     kept.append(f"{contract.RUN_ID}={run_id}")
@@ -54,13 +54,13 @@ def write_headers(
 
 def read_headers(headers: Mapping[str, str]) -> Continued | None:
     """The run ``headers`` name, or ``None`` for headers that name none."""
-    traceparent = _get_header(headers, contract.TRACEPARENT)
+    traceparent = header(headers, contract.TRACEPARENT)
     if traceparent is None:
         return None
     span_context = parse_traceparent(traceparent)
     if span_context is None:
         return None
-    members = _baggage_members(_get_header(headers, contract.BAGGAGE) or "")
+    members = _baggage_members(header(headers, contract.BAGGAGE) or "")
     run_id = members.get(contract.RUN_ID)
     agent = members.get(contract.AGENT)
     if run_id is None or not _UUID.fullmatch(run_id) or not agent:
@@ -124,7 +124,7 @@ def encode_baggage_value(value: str) -> str:
     space, a comma or a name in another script travels whole."""
     out = []
     # A lone surrogate has no UTF-8: the replacement character, as exported.
-    for byte in _SURROGATE.sub("\ufffd", value).encode("utf-8"):
+    for byte in replace_surrogates(value).encode("utf-8"):
         out.append(chr(byte) if _allowed_in_baggage(byte) else f"%{byte:02X}")
     return "".join(out)
 
@@ -134,7 +134,7 @@ def decode_baggage_value(value: str) -> str:
     hex digits kept as it is."""
     # A lone surrogate, which a server decoding a header with surrogateescape
     # leaves, has no UTF-8: U+FFFD, as TypeScript's encoder writes it.
-    value = _SURROGATE.sub("�", value)
+    value = replace_surrogates(value)
     out = bytearray()
     i = 0
     while i < len(value):
@@ -159,14 +159,6 @@ def _allowed_in_baggage(byte: int) -> bool:
         or 0x3C <= byte <= 0x5B
         or 0x5D <= byte <= 0x7E
     )
-
-
-def _get_header(headers: Mapping[str, str], name: str) -> str | None:
-    """The header named ``name``, however its key is cased."""
-    for key, value in headers.items():
-        if key.lower() == name:
-            return value
-    return None
 
 
 def _set_header(headers: MutableMapping[str, str], name: str, value: str) -> None:

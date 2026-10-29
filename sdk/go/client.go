@@ -150,7 +150,7 @@ func New(cfg Config, opts ...Option) (*Client, error) {
 		opt(&o)
 	}
 	exp := newExporter(cfg, o.transport, o.sleep, o.logger)
-	proc := newProcessor(exp, o.logger, o.limits)
+	proc := newProcessor(exp, o.limits)
 	root := cfg.Sampler
 	if root == nil {
 		root = sdktrace.AlwaysSample()
