@@ -37,8 +37,8 @@ shows the same list on a project's **Privacy** page, served from the same code.
   name, or what the drop does with it.
 - **Needs**: the project [content mode](/docs/api/ingest#what-is-dropped-at-the-door)
   it takes to keep it. Metadata is kept in every mode. Content would need `on`,
-  or `sealed` for what Telmoni's SDK encrypted, but no project can be switched
-  from `off` today, so content is dropped in every mode.
+  but no project can be switched from `off` today, so content is dropped in
+  every mode.
 - **Rule**: its cap or format. A span whose field breaks its rule is refused
   whole; an attribute past its cap is dropped and the span kept. The
   resource's attributes are copied onto every span of its export, so they
@@ -59,7 +59,6 @@ rather than a plain span.
 | `telmoni.tag.<key>` | any span | `tags`, under `<key>` | any | up to 32 tags; a key up to 64 characters, a value up to 256; in a project, up to 64 keys a UTC day, each taking up to 500 values |
 | `telmoni.sample_rate` | the run | the column `sample_rate` | any | above 0, up to 1: the share of runs the SDK sends |
 | `telmoni.cancelled` | any span | the column `status`, as `cancelled` | any | `true` on a span the agent cancelled |
-| `telmoni.content` | any span | read and not kept: `sealed` would mark content the SDK encrypted, which no SDK does today and no project can keep | any | `sealed` |
 
 The [coding-agent plugins](/docs/api/coding-agents) set one tag of their own:
 `skills` on Claude Code's runs, the names of the skills the turn ran, joined by
@@ -137,20 +136,20 @@ named in the answer, and nothing of it reaches a store: every project's mode is
 
 | Attribute | On | Kept as | Needs | Rule |
 |---|---|---|---|---|
-| `gen_ai.input.messages` | any span | dropped in every mode, the span kept | on, or sealed from Telmoni's SDK | content: what a person or a model wrote |
-| `gen_ai.output.messages` | any span | dropped in every mode, the span kept | on, or sealed from Telmoni's SDK | content: what a person or a model wrote |
-| `gen_ai.system_instructions` | any span | dropped in every mode, the span kept | on, or sealed from Telmoni's SDK | content: what a person or a model wrote |
-| `gen_ai.tool.definitions` | any span | dropped in every mode, the span kept | on, or sealed from Telmoni's SDK | content: what a person or a model wrote |
-| `gen_ai.tool.call.arguments` | any span | dropped in every mode, the span kept | on, or sealed from Telmoni's SDK | content: what a person or a model wrote |
-| `gen_ai.tool.call.result` | any span | dropped in every mode, the span kept | on, or sealed from Telmoni's SDK | content: what a person or a model wrote |
-| `gen_ai.retrieval.query.text` | any span | dropped in every mode, the span kept | on, or sealed from Telmoni's SDK | content: what a person or a model wrote |
-| `gen_ai.retrieval.documents` | any span | dropped in every mode, the span kept | on, or sealed from Telmoni's SDK | content: what a person or a model wrote |
-| `gen_ai.memory.query.text` | any span | dropped in every mode, the span kept | on, or sealed from Telmoni's SDK | content: what a person or a model wrote |
-| `gen_ai.memory.records` | any span | dropped in every mode, the span kept | on, or sealed from Telmoni's SDK | content: what a person or a model wrote |
-| `gen_ai.prompt.variable` | any span | dropped in every mode, the span kept | on, or sealed from Telmoni's SDK | content: what a person or a model wrote |
-| `user.email` | any span | dropped in every mode, the span kept | on, or sealed from Telmoni's SDK | names a person: content, whatever else the span carries |
-| `user.full_name` | any span | dropped in every mode, the span kept | on, or sealed from Telmoni's SDK | names a person: content, whatever else the span carries |
-| `user.name` | any span | dropped in every mode, the span kept | on, or sealed from Telmoni's SDK | names a person: content, whatever else the span carries |
+| `gen_ai.input.messages` | any span | dropped in every mode, the span kept | on | content: what a person or a model wrote |
+| `gen_ai.output.messages` | any span | dropped in every mode, the span kept | on | content: what a person or a model wrote |
+| `gen_ai.system_instructions` | any span | dropped in every mode, the span kept | on | content: what a person or a model wrote |
+| `gen_ai.tool.definitions` | any span | dropped in every mode, the span kept | on | content: what a person or a model wrote |
+| `gen_ai.tool.call.arguments` | any span | dropped in every mode, the span kept | on | content: what a person or a model wrote |
+| `gen_ai.tool.call.result` | any span | dropped in every mode, the span kept | on | content: what a person or a model wrote |
+| `gen_ai.retrieval.query.text` | any span | dropped in every mode, the span kept | on | content: what a person or a model wrote |
+| `gen_ai.retrieval.documents` | any span | dropped in every mode, the span kept | on | content: what a person or a model wrote |
+| `gen_ai.memory.query.text` | any span | dropped in every mode, the span kept | on | content: what a person or a model wrote |
+| `gen_ai.memory.records` | any span | dropped in every mode, the span kept | on | content: what a person or a model wrote |
+| `gen_ai.prompt.variable` | any span | dropped in every mode, the span kept | on | content: what a person or a model wrote |
+| `user.email` | any span | dropped in every mode, the span kept | on | names a person: content, whatever else the span carries |
+| `user.full_name` | any span | dropped in every mode, the span kept | on | names a person: content, whatever else the span carries |
+| `user.name` | any span | dropped in every mode, the span kept | on | names a person: content, whatever else the span carries |
 
 ## Everything else
 

@@ -64,7 +64,7 @@ describe("ChoiceGroup", () => {
 const MODES = [
   { value: "off", label: "Off" },
   { value: "on", label: "On", disabled: true },
-  { value: "sealed", label: "Sealed" },
+  { value: "all", label: "All" },
 ] as const;
 
 function ModesHarness({ initial }: { initial: (typeof MODES)[number]["value"] }) {
@@ -92,15 +92,15 @@ describe("ChoiceGroup with a choice that is not open", () => {
     render(<ModesHarness initial="off" />);
     const group = screen.getByRole("radiogroup", { name: "Content mode" });
     fireEvent.keyDown(group, { key: "ArrowRight" });
-    expect(screen.getByRole("radio", { name: "Sealed" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("radio", { name: "All" })).toHaveAttribute("aria-checked", "true");
     fireEvent.keyDown(group, { key: "ArrowLeft" });
     expect(screen.getByRole("radio", { name: "Off" })).toHaveAttribute("aria-checked", "true");
     fireEvent.keyDown(group, { key: "ArrowLeft" });
-    expect(screen.getByRole("radio", { name: "Sealed" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("radio", { name: "All" })).toHaveAttribute("aria-checked", "true");
     fireEvent.keyDown(group, { key: "Home" });
     expect(screen.getByRole("radio", { name: "Off" })).toHaveAttribute("aria-checked", "true");
     fireEvent.keyDown(group, { key: "End" });
-    expect(screen.getByRole("radio", { name: "Sealed" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("radio", { name: "All" })).toHaveAttribute("aria-checked", "true");
     expect(screen.getByRole("radio", { name: "On" })).toHaveAttribute("aria-checked", "false");
   });
 
@@ -111,11 +111,11 @@ describe("ChoiceGroup with a choice that is not open", () => {
     expect(screen.getByRole("radio", { name: "On" })).toHaveAttribute("aria-checked", "true");
     expect(screen.getByRole("radio", { name: "Off" })).toHaveAttribute("tabindex", "0");
     expect(screen.getByRole("radio", { name: "On" })).toHaveAttribute("tabindex", "-1");
-    expect(screen.getByRole("radio", { name: "Sealed" })).toHaveAttribute("tabindex", "-1");
+    expect(screen.getByRole("radio", { name: "All" })).toHaveAttribute("tabindex", "-1");
   });
 
-  // Closed choices at the ends, as the owner's content modes are: Home and
-  // End land on the open ends, and the arrows wrap past the closed ones.
+  // Closed choices at both ends: Home and End land on the open ends, and the
+  // arrows wrap past the closed ones.
   it("lands Home and End on the open ends, and wraps past closed ones", () => {
     const EDGES = [
       { value: "a", label: "A", disabled: true },
@@ -152,7 +152,7 @@ describe("ChoiceGroup with a choice that is not open", () => {
     const off = screen.getByRole("radio", { name: "Off" });
     off.focus();
     fireEvent.keyDown(off, { key: "ArrowLeft" });
-    expect(screen.getByRole("radio", { name: "Sealed" })).toHaveAttribute("aria-checked", "true");
-    expect(document.activeElement).toBe(screen.getByRole("radio", { name: "Sealed" }));
+    expect(screen.getByRole("radio", { name: "All" })).toHaveAttribute("aria-checked", "true");
+    expect(document.activeElement).toBe(screen.getByRole("radio", { name: "All" }));
   });
 });

@@ -86,7 +86,7 @@ pub(crate) const RUN_OPERATION: &str = "invoke_agent";
 pub(crate) const MODEL_OPERATION_DEFAULT: &str = "chat";
 pub(crate) const TOOL_OPERATION: &str = "execute_tool";
 
-/// The answer's header naming the project's content mode: off, on or sealed.
+/// The answer's header naming the project's content mode: off or on.
 pub(crate) const CONTENT_MODE_HEADER: &str = "Telmoni-Content-Mode";
 /// The request's header naming this clock as the export leaves, in nanoseconds
 /// since the epoch, by which ingest moves a run from a clock a zone or a date out.

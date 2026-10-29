@@ -428,8 +428,6 @@ impl Fields {
                     _ => return Err(Refusal::Invalid(contract::CANCELLED)),
                 };
             }
-            // Ours, for sealed content later: consumed now, read then.
-            contract::CONTENT_MARK => {}
             contract::OPERATION => self.operation = text(value).map(Cow::into_owned),
             contract::AGENT_NAME => self.agent_name = text(value).map(Cow::into_owned),
             contract::WORKFLOW_NAME => self.workflow_name = text(value).map(Cow::into_owned),

@@ -237,11 +237,11 @@ async fn every_role_reads_the_mode_and_the_modes_offered(pool: PgPool) {
         assert_eq!(body, json!({ "content_mode": "off", "offered": ["off"] }));
     }
 
-    seed(&pool, &p.project, &p.organization, ContentMode::Sealed).await;
+    seed(&pool, &p.project, &p.organization, ContentMode::On).await;
     let (_, body) = p.send(p.request("GET", MEMBER, None)).await;
     assert_eq!(
         body,
-        json!({ "content_mode": "sealed", "offered": ["off"] }),
+        json!({ "content_mode": "on", "offered": ["off"] }),
         "the read answered the default over the project's own row"
     );
 }
@@ -251,7 +251,7 @@ async fn every_role_reads_the_mode_and_the_modes_offered(pool: PgPool) {
 #[sqlx::test]
 async fn the_owner_switches_it_and_the_change_is_recorded(pool: PgPool) {
     let p = project(&pool).await;
-    seed(&pool, &p.project, &p.organization, ContentMode::Sealed).await;
+    seed(&pool, &p.project, &p.organization, ContentMode::On).await;
 
     let (status, body) = p.set(OWNER, "off").await;
     assert_eq!(status, StatusCode::OK);
@@ -262,7 +262,7 @@ async fn the_owner_switches_it_and_the_change_is_recorded(pool: PgPool) {
     );
     assert_eq!(
         audit(&pool, &p.organization).await,
-        [switched(&p.project, "sealed", "off")]
+        [switched(&p.project, "on", "off")]
     );
     assert_eq!(
         p.auth.chain_held(),
@@ -293,7 +293,7 @@ async fn a_save_that_changes_nothing_writes_and_records_nothing(pool: PgPool) {
 #[sqlx::test]
 async fn nobody_below_the_owner_changes_it(pool: PgPool) {
     let p = project(&pool).await;
-    seed(&pool, &p.project, &p.organization, ContentMode::Sealed).await;
+    seed(&pool, &p.project, &p.organization, ContentMode::On).await;
     for (user, held) in [(ADMIN, "admin"), (MEMBER, "member")] {
         let (status, body) = p.set(user, "off").await;
         assert_eq!(status, StatusCode::FORBIDDEN, "{user} changed the mode");
@@ -302,7 +302,7 @@ async fn nobody_below_the_owner_changes_it(pool: PgPool) {
     }
     assert_eq!(
         row(&pool, &p.project).await,
-        Some((p.organization.to_string(), "sealed".to_string()))
+        Some((p.organization.to_string(), "on".to_string()))
     );
     assert!(audit(&pool, &p.organization).await.is_empty());
     assert_eq!(
@@ -312,16 +312,14 @@ async fn nobody_below_the_owner_changes_it(pool: PgPool) {
     );
 }
 
-/// ⚠ `off` is the one mode offered until a table keeps content and our SDK
-/// seals it: the others are refused, to the owner too, and nothing moves.
+/// ⚠ `off` is the one mode offered until a table keeps content: `on` is
+/// refused, to the owner too, and nothing moves.
 #[sqlx::test]
 async fn a_mode_not_offered_is_refused(pool: PgPool) {
     let p = project(&pool).await;
-    for mode in ["on", "sealed"] {
-        let (status, body) = p.set(OWNER, mode).await;
-        assert_eq!(status, StatusCode::CONFLICT, "{mode} was taken");
-        assert_eq!(body["type"], "/errors/auth/conflict");
-    }
+    let (status, body) = p.set(OWNER, "on").await;
+    assert_eq!(status, StatusCode::CONFLICT, "on was taken");
+    assert_eq!(body["type"], "/errors/auth/conflict");
     assert_eq!(row(&pool, &p.project).await, None);
     assert!(audit(&pool, &p.organization).await.is_empty());
     assert_eq!(
@@ -336,6 +334,7 @@ async fn a_body_that_is_not_a_change_is_refused(pool: PgPool) {
     let p = project(&pool).await;
     for body in [
         json!({ "content_mode": "plain" }),
+        json!({ "content_mode": "sealed" }),
         json!({ "content_mode": "OFF" }),
         json!({ "content_mode": "off", "organization_id": "org_other" }),
         json!({}),
@@ -351,7 +350,7 @@ async fn a_body_that_is_not_a_change_is_refused(pool: PgPool) {
 #[sqlx::test]
 async fn the_change_lands_under_the_projects_organization_whatever_the_headers_name(pool: PgPool) {
     let p = project(&pool).await;
-    seed(&pool, &p.project, &p.organization, ContentMode::Sealed).await;
+    seed(&pool, &p.project, &p.organization, ContentMode::On).await;
     let elsewhere = OrganizationId::new();
     let mut request = p.request("PUT", OWNER, Some(json!({ "content_mode": "off" })));
     request.headers_mut().insert(
@@ -375,7 +374,7 @@ async fn the_change_lands_under_the_projects_organization_whatever_the_headers_n
 #[sqlx::test]
 async fn a_change_resolved_before_the_project_moved_is_refused(pool: PgPool) {
     let p = project(&pool).await;
-    seed(&pool, &p.project, &p.organization, ContentMode::Sealed).await;
+    seed(&pool, &p.project, &p.organization, ContentMode::On).await;
     // As auth leaves a former owner: a member of the new organization,
     // seated on the project as an admin.
     p.auth.answer_again(Ok(p.owner_read_again_as(
@@ -389,7 +388,7 @@ async fn a_change_resolved_before_the_project_moved_is_refused(pool: PgPool) {
     assert_eq!(body["type"], "/errors/auth/conflict");
     assert_eq!(
         row(&pool, &p.project).await,
-        Some((p.organization.to_string(), "sealed".to_string()))
+        Some((p.organization.to_string(), "on".to_string()))
     );
     assert!(audit(&pool, &p.organization).await.is_empty());
     assert_eq!(
@@ -404,7 +403,7 @@ async fn a_change_resolved_before_the_project_moved_is_refused(pool: PgPool) {
 #[sqlx::test]
 async fn a_change_resolved_before_the_ownership_moved_is_refused(pool: PgPool) {
     let p = project(&pool).await;
-    seed(&pool, &p.project, &p.organization, ContentMode::Sealed).await;
+    seed(&pool, &p.project, &p.organization, ContentMode::On).await;
     p.auth.answer_again(Ok(p.owner_read_again_as(
         &p.organization,
         OrganizationRole::Admin,
@@ -416,7 +415,7 @@ async fn a_change_resolved_before_the_ownership_moved_is_refused(pool: PgPool) {
     assert_eq!(body["type"], "/errors/authz/insufficient-role");
     assert_eq!(
         row(&pool, &p.project).await,
-        Some((p.organization.to_string(), "sealed".to_string()))
+        Some((p.organization.to_string(), "on".to_string()))
     );
     assert_eq!(p.auth.chain_held(), [true]);
 }
@@ -426,14 +425,14 @@ async fn a_change_resolved_before_the_ownership_moved_is_refused(pool: PgPool) {
 #[sqlx::test]
 async fn a_change_auth_refuses_when_asked_again_writes_nothing(pool: PgPool) {
     let p = project(&pool).await;
-    seed(&pool, &p.project, &p.organization, ContentMode::Sealed).await;
+    seed(&pool, &p.project, &p.organization, ContentMode::On).await;
     p.auth
         .answer_again(Err(TelmoniError::BadRequest("project not found".into())));
 
     assert_eq!(p.set(OWNER, "off").await.0, StatusCode::BAD_REQUEST);
     assert_eq!(
         row(&pool, &p.project).await,
-        Some((p.organization.to_string(), "sealed".to_string()))
+        Some((p.organization.to_string(), "on".to_string()))
     );
     assert!(audit(&pool, &p.organization).await.is_empty());
 }
@@ -443,7 +442,7 @@ async fn a_change_auth_refuses_when_asked_again_writes_nothing(pool: PgPool) {
 #[sqlx::test]
 async fn a_change_that_cannot_be_recorded_is_not_made(pool: PgPool) {
     let p = unaudited(&pool);
-    seed(&pool, &p.project, &p.organization, ContentMode::Sealed).await;
+    seed(&pool, &p.project, &p.organization, ContentMode::On).await;
 
     let (status, body) = p.set(OWNER, "off").await;
     assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
@@ -455,7 +454,7 @@ async fn a_change_that_cannot_be_recorded_is_not_made(pool: PgPool) {
     );
     assert_eq!(
         row(&pool, &p.project).await,
-        Some((p.organization.to_string(), "sealed".to_string()))
+        Some((p.organization.to_string(), "on".to_string()))
     );
 }
 
@@ -486,7 +485,7 @@ async fn refusals_come_before_the_chain_lock(pool: PgPool) {
 #[sqlx::test]
 async fn a_change_that_waits_too_long_on_the_chain_writes_nothing(pool: PgPool) {
     let p = project(&pool).await;
-    seed(&pool, &p.project, &p.organization, ContentMode::Sealed).await;
+    seed(&pool, &p.project, &p.organization, ContentMode::On).await;
     let holder = hold_chain(&pool, &p.organization).await;
 
     let (status, body) = tokio::time::timeout(Duration::from_secs(10), p.set(OWNER, "off"))
@@ -502,7 +501,7 @@ async fn a_change_that_waits_too_long_on_the_chain_writes_nothing(pool: PgPool) 
     );
     assert_eq!(
         row(&pool, &p.project).await,
-        Some((p.organization.to_string(), "sealed".to_string()))
+        Some((p.organization.to_string(), "on".to_string()))
     );
     assert!(audit(&pool, &p.organization).await.is_empty());
 }
@@ -513,7 +512,7 @@ async fn a_change_that_waits_too_long_on_the_chain_writes_nothing(pool: PgPool) 
 #[sqlx::test]
 async fn a_change_auth_answers_too_late_writes_nothing(pool: PgPool) {
     let p = project(&pool).await;
-    seed(&pool, &p.project, &p.organization, ContentMode::Sealed).await;
+    seed(&pool, &p.project, &p.organization, ContentMode::On).await;
     p.auth.delaying_next_read_again(Duration::from_secs(5));
 
     let (status, body) = p.set(OWNER, "off").await;
@@ -525,7 +524,7 @@ async fn a_change_auth_answers_too_late_writes_nothing(pool: PgPool) {
     );
     assert_eq!(
         row(&pool, &p.project).await,
-        Some((p.organization.to_string(), "sealed".to_string()))
+        Some((p.organization.to_string(), "on".to_string()))
     );
     assert!(audit(&pool, &p.organization).await.is_empty());
 }

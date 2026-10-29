@@ -11,9 +11,8 @@ export type ApiKeyScope = typeof ApiKeyScope[keyof typeof ApiKeyScope];
 
 /** Wire vocabulary of the Rust `ContentMode`: what a project keeps of its spans' content. */
 export const ContentMode = {
-  Off:    "off",
-  On:     "on",
-  Sealed: "sealed",
+  Off: "off",
+  On:  "on",
 } as const;
 export type ContentMode = typeof ContentMode[keyof typeof ContentMode];
 

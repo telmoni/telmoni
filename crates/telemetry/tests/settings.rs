@@ -81,14 +81,14 @@ async fn a_project_with_no_settings_keeps_no_content(pool: PgPool) {
 async fn a_project_reads_its_own_settings_and_no_others(pool: PgPool) {
     let state = state(&pool);
     let (ours, theirs) = (OrganizationId::new(), OrganizationId::new());
-    let (sealed, kept) = (ProjectId::new(), ProjectId::new());
-    seed(&pool, &ours, &sealed, ContentMode::Sealed).await;
-    seed(&pool, &theirs, &kept, ContentMode::On).await;
+    let (on, off) = (ProjectId::new(), ProjectId::new());
+    seed(&pool, &ours, &on, ContentMode::On).await;
+    seed(&pool, &theirs, &off, ContentMode::Off).await;
 
-    assert_eq!(mode(&state, &sealed).await, ContentMode::Sealed);
-    assert_eq!(mode(&state, &kept).await, ContentMode::On);
+    assert_eq!(mode(&state, &on).await, ContentMode::On);
+    assert_eq!(mode(&state, &off).await, ContentMode::Off);
 
-    let mut tx = project_scope(&state.db, &sealed).await.expect("scope");
+    let mut tx = project_scope(&state.db, &on).await.expect("scope");
     let visible: Vec<String> =
         sqlx::query_scalar("SELECT project_id FROM telemetry.project_settings")
             .fetch_all(tx.conn())
@@ -97,7 +97,7 @@ async fn a_project_reads_its_own_settings_and_no_others(pool: PgPool) {
     tx.commit().await.expect("commit");
     assert_eq!(
         visible,
-        [sealed.to_string()],
+        [on.to_string()],
         "a project's scope read another project's row"
     );
 
@@ -108,9 +108,9 @@ async fn a_project_reads_its_own_settings_and_no_others(pool: PgPool) {
             .await
             .expect("read under the organization");
     let rewritten = sqlx::query(
-        "UPDATE telemetry.project_settings SET content_mode = 'on' WHERE project_id = $1",
+        "UPDATE telemetry.project_settings SET content_mode = 'off' WHERE project_id = $1",
     )
-    .bind(&sealed)
+    .bind(&on)
     .execute(tx.conn())
     .await
     .expect("an organization's write runs, and reaches nothing")
@@ -118,7 +118,7 @@ async fn a_project_reads_its_own_settings_and_no_others(pool: PgPool) {
     tx.commit().await.expect("commit");
     assert_eq!(
         visible,
-        [sealed.to_string()],
+        [on.to_string()],
         "an organization read another's project"
     );
     assert_eq!(

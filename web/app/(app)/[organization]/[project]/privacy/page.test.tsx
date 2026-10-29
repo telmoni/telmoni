@@ -67,7 +67,7 @@ beforeEach(() => {
         attribute: "gen_ai.input.messages",
         on: "any span",
         kept: "dropped at the door on a project whose content mode is off",
-        needs: "on, or sealed from our SDK",
+        needs: "on",
         rule: "content: what a person or a model wrote",
       },
       {
@@ -100,7 +100,7 @@ describe("PrivacyPage", () => {
     expect(screen.getByText("telmoni.run_id")).toBeInTheDocument();
     expect(screen.getByText("gen_ai.input.messages")).toBeInTheDocument();
     expect(screen.getByText("any other text or array")).toBeInTheDocument();
-    expect(screen.getByText("on, or sealed from our SDK")).toBeInTheDocument();
+    expect(screen.getByText("on")).toBeInTheDocument();
     expect(screen.getByText(COMMIT)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "docs" })).toHaveAttribute(
       "href",

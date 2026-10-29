@@ -43,8 +43,7 @@
     ],
     "ContentMode": [
       "off",
-      "on",
-      "sealed"
+      "on"
     ],
     "DeliveryStatus": [
       "pending",

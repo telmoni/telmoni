@@ -12,7 +12,7 @@ import { cn } from "@/lib/utils";
 
 import { updateContentModeAction } from "./actions";
 
-/** "On", "On and Sealed", "On, Sealed and Off": the modes named in a sentence. */
+/** "On", or "Off and On": the modes named in a sentence. */
 function named(modes: ContentMode[]): string {
   const labels = modes.map((m) => LABELS[m]);
   const last = labels.pop();

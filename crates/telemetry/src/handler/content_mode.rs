@@ -25,9 +25,8 @@ use crate::handler::chain;
 use crate::{AppState, db};
 
 /// The modes an owner may switch a project to: `off` alone, until a table
-/// keeps content as it arrives (`on`) and our SDK seals it (`sealed`). A mode
-/// with nowhere to keep content would tell the SDK, in every answer, to send
-/// what ingest must then drop.
+/// keeps content as it arrives (`on`). A mode with nowhere to keep content
+/// would tell the SDK, in every answer, to send what ingest must then drop.
 pub const OFFERED: &[ContentMode] = &[ContentMode::Off];
 
 /// What both lanes answer: the project's mode, and the modes it may be

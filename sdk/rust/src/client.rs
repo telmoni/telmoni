@@ -174,8 +174,8 @@ impl Telmoni {
         &self.inner.config
     }
 
-    /// The project's content mode, learned from the first answer: `off`, `on`
-    /// or `sealed`; `None` before one.
+    /// The project's content mode, learned from the first answer: `off` or
+    /// `on`; `None` before one.
     #[must_use]
     pub fn content_mode(&self) -> Option<String> {
         self.inner.exporter.content_mode()

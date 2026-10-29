@@ -53,7 +53,7 @@ CREATE TABLE telemetry.project_settings (
     -- below the views); none for the default.
     session_view_id         UUID,
     created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT project_settings_content_mode_check CHECK (content_mode IN ('off', 'on', 'sealed')),
+    CONSTRAINT project_settings_content_mode_check CHECK (content_mode IN ('off', 'on')),
     -- The key is there whole or not at all.
     CONSTRAINT project_settings_hashing_key_check CHECK (
         (hashing_key_ciphertext IS NULL) = (hashing_key_nonce IS NULL)

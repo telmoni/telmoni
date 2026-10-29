@@ -67,14 +67,13 @@ describe("ContentModeForm", () => {
     expect(radio("On")).toHaveAttribute("aria-checked", "false");
   });
 
-  // ⚠ Until a table keeps content and our SDK seals it, `off` is the one mode
-  // the server offers: the others are drawn, closed, and said to be.
+  // ⚠ Until a table keeps content, `off` is the one mode the server offers:
+  // `on` is drawn, closed, and said to be.
   it("closes every mode the server does not offer, and says so", () => {
     render(form());
     expect(radio("Off")).toBeEnabled();
     expect(radio("On")).toBeDisabled();
-    expect(radio("Sealed")).toBeDisabled();
-    const note = screen.getByText("On and Sealed are not available yet.");
+    const note = screen.getByText("On is not available yet.");
     expect(screen.getByRole("radiogroup")).toHaveAttribute("aria-describedby", note.id);
     expect(isHeld(save())).toBe(true);
   });
@@ -87,9 +86,15 @@ describe("ContentModeForm", () => {
     expect(updateContentModeAction).not.toHaveBeenCalled();
   });
 
-  it("names a single closed mode in the singular", () => {
+  it("names closed modes together, in the plural", () => {
+    render(form({ offered: [] }));
+    expect(screen.getByText("Off and On are not available yet.")).toBeInTheDocument();
+  });
+
+  it("says nothing is closed when every mode is offered", () => {
     render(form({ offered: [ContentMode.Off, ContentMode.On] }));
-    expect(screen.getByText("Sealed is not available yet.")).toBeInTheDocument();
+    expect(screen.queryByText(/not available yet/)).toBeNull();
+    expect(screen.getByRole("radiogroup")).not.toHaveAttribute("aria-describedby");
   });
 
   // The action revalidates the page, which sends it back with the new mode:
@@ -142,7 +147,7 @@ describe("ContentModeForm", () => {
     });
     const saving = screen.getByRole("button", { name: "Saving..." });
     expect(isHeld(saving)).toBe(true);
-    for (const name of ["Off", "On", "Sealed"]) expect(radio(name)).toBeDisabled();
+    for (const name of ["Off", "On"]) expect(radio(name)).toBeDisabled();
     await act(async () => {
       fireEvent.click(saving);
     });
@@ -171,9 +176,9 @@ describe("ContentModeForm", () => {
   // The server refuses anyone else; the form shows them the answer as text,
   // since a group of closed radios is dimmed and out of the tab order.
   it("shows anyone but the owner the mode as text, and who may change it", () => {
-    render(form({ mode: ContentMode.Sealed, offered: [ContentMode.Off], canEdit: false }));
+    render(form({ mode: ContentMode.On, offered: [ContentMode.Off], canEdit: false }));
     expect(screen.getByText("Content mode:").parentElement).toHaveTextContent(
-      "Content mode: Sealed",
+      "Content mode: On",
     );
     expect(screen.queryByRole("radiogroup")).toBeNull();
     expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
@@ -182,15 +187,21 @@ describe("ContentModeForm", () => {
     ).toBeInTheDocument();
   });
 
-  it("follows a mode changed elsewhere, dropping an unsaved choice", () => {
-    const offered = [ContentMode.Off, ContentMode.On, ContentMode.Sealed];
+  it("follows a mode changed elsewhere, dropping what the form held", async () => {
+    updateContentModeAction.mockResolvedValue({ ok: false, error: "the mode changed" });
+    const offered = [ContentMode.Off, ContentMode.On];
     const { rerender } = render(form({ offered }));
-    fireEvent.click(radio("Sealed"));
-    expect(isHeld(save())).toBe(false);
+    fireEvent.click(radio("On"));
+    await act(async () => {
+      fireEvent.click(save());
+    });
+    expect(screen.getByText("the mode changed")).toBeInTheDocument();
 
-    // What a refresh after the owner changed it in another tab looks like.
+    // What a refresh after the owner changed it in another tab looks like:
+    // a fresh form, without the refused choice or its refusal.
     rerender(form({ mode: ContentMode.On, offered }));
 
+    expect(screen.queryByText("the mode changed")).toBeNull();
     expect(radio("On")).toHaveAttribute("aria-checked", "true");
     expect(isHeld(save())).toBe(true);
   });

@@ -116,8 +116,6 @@ pub const TAG_PREFIX: &str = "telmoni.tag.";
 pub const SAMPLE_RATE: &str = "telmoni.sample_rate";
 /// Set on a span the agent cancelled.
 pub const CANCELLED: &str = "telmoni.cancelled";
-/// `sealed` on a span whose content our SDK encrypted.
-pub const CONTENT_MARK: &str = "telmoni.content";
 /// Our SDKs' instrumentation scope.
 pub const SCOPE: &str = "telmoni";
 /// The resource attribute our SDKs name themselves by.
@@ -296,7 +294,6 @@ pub const FIELDS: &[&str] = &[
     USER_ID,
     SAMPLE_RATE,
     CANCELLED,
-    CONTENT_MARK,
     OPERATION,
     AGENT_NAME,
     WORKFLOW_NAME,
@@ -392,7 +389,7 @@ impl Serialize for ReadOn {
 pub enum Needs {
     /// Any: metadata is kept in every mode.
     AnyMode,
-    /// `on`, or `sealed` for what our SDK sealed: content.
+    /// `on`: content.
     Content,
 }
 
@@ -408,7 +405,7 @@ impl Needs {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::AnyMode => "any",
-            Self::Content => "on, or sealed from Telmoni's SDK",
+            Self::Content => "on",
         }
     }
 }
@@ -538,14 +535,6 @@ pub const INVENTORY: &[InventoryRow] = &[
         "the column status, as cancelled",
         Needs::AnyMode,
         "true on a span the agent cancelled",
-    ),
-    row(
-        CONTENT_MARK,
-        ReadOn::AnySpan,
-        "read and not kept: sealed marks content our SDK encrypted, which a sealed project alone \
-         keeps",
-        Needs::AnyMode,
-        "sealed",
     ),
     // The conventions' fields.
     row(

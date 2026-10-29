@@ -15,15 +15,11 @@ pub enum ContentMode {
     Off,
     /// Content is kept as it arrives, in Postgres alone.
     On,
-    /// Only content the SDK encrypted under the customer's key is kept,
-    /// in Postgres alone; the key never reaches the server.
-    Sealed,
 }
 
 crate::wire_enum!(ContentMode {
     Off => "off",
     On => "on",
-    Sealed => "sealed",
 });
 
 #[cfg(test)]
@@ -44,7 +40,7 @@ mod tests {
 
     #[test]
     fn from_str_rejects_unknown() {
-        for mode in ["Off", "plain", "encrypted", "true", ""] {
+        for mode in ["Off", "plain", "encrypted", "sealed", "true", ""] {
             assert!(mode.parse::<ContentMode>().is_err(), "parsed: {mode:?}");
         }
     }

@@ -103,7 +103,7 @@ export const DEFAULT_MODEL_OPERATION = 'chat';
 export const TOOL_OPERATION = 'execute_tool';
 export const RUN_OPERATION = 'invoke_agent';
 
-/** The answer's header naming the project's content mode: off, on or sealed. */
+/** The answer's header naming the project's content mode: off or on. */
 export const CONTENT_MODE_HEADER = 'Telmoni-Content-Mode';
 /**
  * The request's header naming this clock as the export leaves, in nanoseconds
