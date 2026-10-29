@@ -298,6 +298,8 @@ class Exporter:
         self._url = f"{config.endpoint}/otlp/v1/traces"
         self._content_mode: str | None = None
         self._warned: set[str] = set()
+        # The worker and the agent's threads warn alike: each key warns once.
+        self._warned_lock = threading.Lock()
         self._resource = [
             _attribute(contract.DISTRO_NAME, contract.DISTRO),
             _attribute("telemetry.distro.version", __version__),
@@ -323,9 +325,10 @@ class Exporter:
         self._given_up.set()
 
     def after_fork(self) -> None:
-        """The child of a fork: its event made anew, as a lock copied held would
-        never be let go."""
+        """The child of a fork: its event and lock made anew, as a lock copied
+        held would never be let go."""
         self._given_up = threading.Event()
+        self._warned_lock = threading.Lock()
 
     def _wait_out(self, seconds: float) -> None:
         self._given_up.wait(seconds)
@@ -513,13 +516,15 @@ class Exporter:
 
     def warn_once(self, key: str, text: str) -> None:
         """Log ``text`` once per client under ``key``, as every warning is."""
-        if key in self._warned:
-            return
-        # Bounded: a server naming ever-new attributes would otherwise grow it
-        # for the life of the process; past the cap, warnings may repeat.
-        if len(self._warned) >= WARNED_MAX:
-            self._warned.clear()
-        self._warned.add(key)
+        with self._warned_lock:
+            if key in self._warned:
+                return
+            # Bounded: a server naming ever-new attributes would otherwise grow
+            # it for the life of the process; past the cap, warnings may repeat.
+            if len(self._warned) >= WARNED_MAX:
+                self._warned.clear()
+            self._warned.add(key)
+        # Outside the lock: the handler is the application's.
         warn(text)
 
 

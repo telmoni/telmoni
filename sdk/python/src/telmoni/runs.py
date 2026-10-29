@@ -36,7 +36,6 @@ from opentelemetry.trace import (
 )
 
 from . import contract, guard, ids
-from .exporter import warn
 from .models import (
     CallRecord,
     ModelCallRecord,
@@ -411,7 +410,6 @@ class Opener:
 
     def __init__(self, client: Telmoni) -> None:
         self._client = client
-        self._warned_outside = False
 
     def run(
         self,
@@ -731,10 +729,10 @@ class Opener:
 
     def _outside(self, what: str) -> Run | None:
         run = current_run()
-        if run is None and not self._warned_outside:
-            self._warned_outside = True
-            warn(
-                "telmoni: %s opened outside a run; nothing is sent outside a run", what
+        if run is None:
+            self._client.exporter.warn_once(
+                "outside",
+                f"telmoni: {what} opened outside a run; nothing is sent outside a run",
             )
         return run
 
