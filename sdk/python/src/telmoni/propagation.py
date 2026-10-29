@@ -132,6 +132,9 @@ def encode_baggage_value(value: str) -> str:
 def decode_baggage_value(value: str) -> str:
     """A baggage value read back: each ``%XX`` its byte, a ``%`` without two
     hex digits kept as it is."""
+    # A lone surrogate, which a server decoding a header with surrogateescape
+    # leaves, has no UTF-8: U+FFFD, as TypeScript's encoder writes it.
+    value = _SURROGATE.sub("�", value)
     out = bytearray()
     i = 0
     while i < len(value):
