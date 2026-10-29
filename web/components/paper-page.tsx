@@ -43,7 +43,7 @@ export function PaperHero({
     >
       <div className="flex flex-col gap-5">
         {(badge !== undefined || eyebrow !== undefined) && (
-          <div className="flex flex-wrap items-center gap-3.5">
+          <div className="flex flex-wrap items-center gap-gutter">
             {badge !== undefined && <Badge variant="outline">{badge}</Badge>}
             {eyebrow !== undefined && <p className={EYEBROW}>{eyebrow}</p>}
           </div>

@@ -94,7 +94,7 @@ export function CreateProjectPanel({
             A project is what every API resource hangs off, with its own keys and members.
           </p>
         </SidePanelHeader>
-        <div className="min-h-0 flex-1 overflow-y-auto px-3.5">
+        <div className="min-h-0 flex-1 overflow-y-auto px-gutter">
           <SidePanelRow label="Project name" htmlFor="project-name">
             <Input
               ref={field}

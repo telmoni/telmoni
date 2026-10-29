@@ -119,7 +119,7 @@ export function ConsoleShell({
         data-slot="console-shell"
         // The page stands on the same background as the header and the rail,
         // one colour with rules between the regions, and nothing stands between
-        // it and the rail's rule but `<main>`'s own padding: 14px all round, the
+        // it and the rail's rule but `<main>`'s own padding: a gutter all round, the
         // rail's inset, which the header keeps too. The agent's window floats
         // over all of it (`components/agent/agent-window.tsx`); it comes after
         // the page so that it is reached after the page from the keyboard, and
@@ -140,7 +140,7 @@ export function ConsoleShell({
                 ref={mainRef}
                 id="console-main"
                 tabIndex={-1}
-                className="flex w-full min-w-0 flex-col gap-3 p-3.5 outline-none"
+                className="flex w-full min-w-0 flex-col gap-3 p-gutter outline-none"
               >
                 {children}
               </main>

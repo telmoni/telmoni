@@ -75,12 +75,12 @@ function AlertDialogContent({
  */
 // One surface, title to actions, with no rule between them and the body, laid
 // out as a console page is (asked 2026-10-08): the console's edge padding,
-// 14px (`p-3.5`, as `<main>` keeps), all round, and the close button inside it
-// like any other control — its box 14px from the top and the right, as a page
+// a gutter (`p-gutter`, as `<main>` keeps), all round, and the close button
+// inside it like any other control — its box a gutter from the top and the right, as a page
 // action's is — with the title on the same row, centred on it as a page title
 // is on its actions. The title's 7px centres its 22px line on the button's
 // 36px and keeps a wrapped title's first line there, so a long name never
-// pulls the button off the padding. The 14px under the header and over the
+// pulls the button off the padding. The gutter under the header and over the
 // footer are theirs, not the scrolling body's, as in `dialog.tsx`.
 function AlertDialogHeader({
   className,
@@ -91,7 +91,7 @@ function AlertDialogHeader({
     <div
       data-slot="alert-dialog-header"
       className={cn(
-        "flex shrink-0 items-start gap-3 p-3.5",
+        "flex shrink-0 items-start gap-3 p-gutter",
         className,
       )}
       {...props}
@@ -115,7 +115,7 @@ function AlertDialogBody({
   return (
     <div
       data-slot="alert-dialog-body"
-      className={cn("grid min-h-0 content-start gap-4 overflow-y-auto px-3.5", className)}
+      className={cn("grid min-h-0 content-start gap-4 overflow-y-auto px-gutter", className)}
       {...props}
     />
   );
@@ -129,7 +129,7 @@ function AlertDialogFooter({
     <div
       data-slot="alert-dialog-footer"
       className={cn(
-        "flex shrink-0 items-center justify-end gap-3 p-3.5",
+        "flex shrink-0 items-center justify-end gap-3 p-gutter",
         className,
       )}
       {...props}

@@ -190,8 +190,8 @@ export function SidePanelHeader({
   children?: ReactNode;
 }) {
   return (
-    <div className={cn("shrink-0 px-3.5", flush && "border-b border-border")}>
-      <div className={cn("grid gap-1.5 py-3.5", !flush && "border-b border-border")}>
+    <div className={cn("shrink-0 px-gutter", flush && "border-b border-border")}>
+      <div className={cn("grid gap-1.5 py-gutter", !flush && "border-b border-border")}>
         <div className="flex min-h-9 min-w-0 items-center gap-2">
           <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
           <h2 id={titleId} className="min-w-0 truncate text-base font-medium">
@@ -215,7 +215,7 @@ export function SidePanelHeader({
  *  and the header, so its rule runs on from the rail's. */
 export function SidePanelFooter({ children }: { children: ReactNode }) {
   return (
-    <div className="flex h-15 shrink-0 items-center justify-end gap-3 border-t border-border px-3.5">
+    <div className="flex h-15 shrink-0 items-center justify-end gap-3 border-t border-border px-gutter">
       {children}
     </div>
   );
@@ -223,7 +223,7 @@ export function SidePanelFooter({ children }: { children: ReactNode }) {
 
 /** One line of what the panel holds, a name beside its value as a span's
  *  details read (`trace-view.tsx`); stacked on a phone. With `htmlFor`, the
- *  name labels the field it stands beside. Its 14px above and below are the
+ *  name labels the field it stands beside. Its gutter above and below is the
  *  body's only vertical inset, so every name stands as far below its rule;
  *  the rule is drawn above it, so a row a slot wraps alone is still ruled
  *  off from the next. */
@@ -237,7 +237,7 @@ export function SidePanelRow({
   children: ReactNode;
 }) {
   return (
-    <div className="grid gap-1.5 border-t border-border py-3.5 first:border-t-0 sm:grid-cols-[minmax(0,9rem)_minmax(0,1fr)] sm:gap-3">
+    <div className="grid gap-1.5 border-t border-border py-gutter first:border-t-0 sm:grid-cols-[minmax(0,9rem)_minmax(0,1fr)] sm:gap-3">
       {htmlFor ? (
         <Label htmlFor={htmlFor} className="font-normal text-muted-foreground sm:h-9">
           {label}

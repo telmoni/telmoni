@@ -54,8 +54,8 @@ function NavRow({
   // A row is the docs sidebar's (Fumadocs, `/docs`): 36px tall, 2px apart, 8px
   // corners, muted at rest, the sidebar accent at half under the pointer, and
   // the primary colour at a tenth behind primary text when it is where you
-  // are. Closed, it is a 36px square in a column 12px in on each side; open,
-  // its icon keeps a 32px box at the row's left edge, 14px in. Both put the
+  // are. Closed, it is a 36px square in a column a gutter in on each side; open,
+  // its icon keeps a 36px box at the row's left edge, a gutter in. Both put the
   // icon's centre 30px from the window's edge, where the header's mark
   // stands, at the same height row for row, so nothing slides when the rail
   // toggles; the label then starts where the header's name does.
@@ -81,14 +81,14 @@ function NavRow({
     );
   }
   const rowClass = cn(
-    "flex h-9 items-center gap-0.5 rounded-md text-sm [a+&]:mt-0.5",
+    "flex h-9 items-center rounded-md text-sm [a+&]:mt-0.5",
     item.isActive
       ? "bg-primary/10 text-primary"
       : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground/80",
     className,
   );
   const icon = (
-    <span className="flex w-8 shrink-0 justify-center">
+    <span className="flex w-9 shrink-0 justify-center">
       <item.icon
         className="size-4"
       />
@@ -174,8 +174,8 @@ export function ConsoleSidebar({
   //
   // The rail is a column under the header's first cell: the same width, and
   // from `md` the same rule on its right, flush with the window's edge. Open,
-  // its rows keep the `px-3.5` inset; closed, the column is one 36px square
-  // 12px in on each side (`px-3`), so every icon lands on the centre the
+  // its rows keep the `px-gutter` inset; closed, the column is one 36px square
+  // a gutter in on each side, so every icon lands on the centre the
   // header's mark stands on. The control that opens and closes it is the
   // header's, in the cell above; closed, the whole column is a way to open
   // it too — the cursor says so, a bar and an arrow (`cursor-expand`), and a
@@ -219,7 +219,7 @@ export function ConsoleSidebar({
         <nav
           aria-label="Main"
           onKeyDown={onNavKeyDown}
-          className={cn("py-3.5", expanded ? "px-3.5" : "px-3")}
+          className="p-gutter"
         >
           {groups.map((group, i) => (
             <div

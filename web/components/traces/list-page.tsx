@@ -128,7 +128,7 @@ export function ListPage<L extends ListWindow>({
       <div className="group/list contents">
         <PageHeader title={title} info={info} action={<ListHeaderControls days={days} />} />
         <div className="grid gap-6">
-          <section className="grid gap-3">
+          <section className="grid gap-gutter">
             {toolbar(listed)}
             <div className="flex flex-col gap-4 md:flex-row md:items-start">
               <FacetsPanel

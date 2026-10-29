@@ -53,7 +53,7 @@ export function InstallTabs({ tabs }: { tabs: readonly InstallTab[] }) {
             tabIndex={i === at ? 0 : -1}
             onClick={() => setAt(i)}
             className={cn(
-              "relative px-5 py-3.5 text-muted-foreground transition-colors hover:text-foreground lg:px-6 lg:py-4",
+              "relative px-5 py-gutter text-muted-foreground transition-colors hover:text-foreground lg:px-6 lg:py-4",
               i === at &&
                 "text-foreground after:absolute after:inset-x-0 after:-bottom-px after:h-px after:bg-foreground",
             )}

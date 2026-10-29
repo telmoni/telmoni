@@ -29,7 +29,7 @@ export function SiteFooter({ inset = false }: { inset?: boolean }) {
   const deployment = { legalUrl: branding.LEGAL_URL, supportEmail: branding.SUPPORT_EMAIL };
   const drawn = footerColumns(deployment);
   const legal = footerLegal(deployment);
-  const pad = inset ? INSET : "px-3.5";
+  const pad = inset ? INSET : "px-gutter";
   return (
     <footer className="border-t bg-muted/30">
       <div className={cn("grid w-full grid-cols-2 gap-10 py-12 sm:grid-cols-4", pad)}>

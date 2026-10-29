@@ -361,7 +361,7 @@ export const TraceBody = memo(function TraceBody({
     <div className={cn("flex min-h-0 flex-col md:flex-row", className)}>
       {spansShown && (
         <div className="flex max-h-[45%] min-h-0 shrink-0 flex-col border-b border-border md:max-h-none md:w-2/5 md:max-w-sm md:min-w-60 md:border-r md:border-b-0">
-          <div className="flex shrink-0 items-center gap-2 px-3.5 pt-3.5 pb-2">
+          <div className="flex shrink-0 items-center gap-2 px-gutter pt-gutter pb-2">
             <SpansButton
               ref={hideSpans}
               shown
@@ -384,7 +384,7 @@ export const TraceBody = memo(function TraceBody({
             </ToggleGroup>
           </div>
           {pinned.length > 0 && (
-            <div className="flex shrink-0 flex-wrap gap-1.5 px-3.5 pb-2" aria-label="Pinned spans">
+            <div className="flex shrink-0 flex-wrap gap-1.5 px-gutter pb-2" aria-label="Pinned spans">
               {pinned.map((span) => (
                 <button
                   key={span.span_id}
@@ -401,7 +401,7 @@ export const TraceBody = memo(function TraceBody({
               ))}
             </div>
           )}
-          <div className="relative shrink-0 px-3.5 pb-2">
+          <div className="relative shrink-0 px-gutter pb-2">
             <SearchIcon
               className="pointer-events-none absolute top-1/2 left-6 size-4 -translate-y-1/2 text-muted-foreground"
               aria-hidden="true"
@@ -424,14 +424,14 @@ export const TraceBody = memo(function TraceBody({
             />
           </div>
           {rows.length === 0 ? (
-            <p className="px-3.5 py-2 text-xs text-muted-foreground">No span matches.</p>
+            <p className="px-gutter py-2 text-xs text-muted-foreground">No span matches.</p>
           ) : (
             <div
               ref={tree}
               role="tree"
               aria-label="Spans"
               onKeyDown={onKeyDown}
-              className="min-h-0 flex-1 overflow-y-auto px-2 pb-3.5"
+              className="min-h-0 flex-1 overflow-y-auto px-2 pb-gutter"
             >
               {rows.map((node) => {
                 const id = node.span.span_id;
@@ -451,7 +451,7 @@ export const TraceBody = memo(function TraceBody({
               })}
             </div>
           )}
-          <TruncatedNote trace={trace} className="shrink-0 border-t border-border px-3.5 py-2" />
+          <TruncatedNote trace={trace} className="shrink-0 border-t border-border px-gutter py-2" />
         </div>
       )}
       <SpanDetail
@@ -615,7 +615,7 @@ function SpanDetail({
 
   return (
     <section aria-label="The span chosen" className={cn("flex flex-col", className)}>
-      <div className="grid shrink-0 gap-1.5 border-b border-border p-3.5">
+      <div className="grid shrink-0 gap-1.5 border-b border-border p-gutter">
         <div className="flex min-h-9 min-w-0 items-center gap-2">
           {!spansShown && <SpansButton ref={showSpansRef} shown={false} onClick={onShowSpans} />}
           <KindIcon span={span} />
@@ -644,7 +644,7 @@ function SpanDetail({
         </div>
       </div>
       <Tabs value={tab} onValueChange={setTab} className="min-h-0 flex-1 gap-0">
-        <div className="flex shrink-0 items-center gap-2 border-b border-border px-3.5 py-1.5">
+        <div className="flex shrink-0 items-center gap-2 border-b border-border px-gutter py-1.5">
           <TabsList variant="line">
             <TabsTrigger value="details">Details</TabsTrigger>
             <TabsTrigger value="attributes">
@@ -667,7 +667,7 @@ function SpanDetail({
             <ToggleGroupItem value="raw">Raw</ToggleGroupItem>
           </ToggleGroup>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto px-3.5 py-2">
+        <div className="min-h-0 flex-1 overflow-y-auto px-gutter py-2">
           <TabsContent value="details">
             {raw ? (
               <Raw value={span} />

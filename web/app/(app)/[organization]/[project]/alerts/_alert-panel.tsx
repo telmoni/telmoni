@@ -226,7 +226,7 @@ function AlertPanel({
             feed and the connectors it links.
           </p>
         </SidePanelHeader>
-        <div className="min-h-0 flex-1 overflow-y-auto px-3.5">
+        <div className="min-h-0 flex-1 overflow-y-auto px-gutter">
           <SidePanelRow label="Name" htmlFor={`${id}-name`}>
             <Input
               ref={field}
@@ -306,7 +306,7 @@ function AlertPanel({
                   <span aria-hidden="true" className="text-sm text-muted-foreground">
                     Status
                   </span>
-                  <div className="flex min-h-9 flex-wrap items-center gap-x-3.5 gap-y-1.5">
+                  <div className="flex min-h-9 flex-wrap items-center gap-x-gutter gap-y-1.5">
                     {FILTER_STATUSES.map((status) => (
                       <Label key={status} className="font-normal">
                         <Checkbox

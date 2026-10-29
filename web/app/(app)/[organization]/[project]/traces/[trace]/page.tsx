@@ -94,7 +94,7 @@ export default async function TracePage({
             reads. The trace's line stands inside, where its wrapping on a
             narrow window takes the panes' room rather than the page's. */}
         <Card className="h-[calc(100svh-10rem)] min-h-[28rem] gap-0 overflow-hidden p-0">
-          <div className="shrink-0 border-b border-border p-3.5">
+          <div className="shrink-0 border-b border-border p-gutter">
             <TraceMeta trace={trace} organization={organization} slug={slug} incidents={incidents} />
           </div>
           <TraceLayoutBody trace={trace} organization={organization} slug={slug} />

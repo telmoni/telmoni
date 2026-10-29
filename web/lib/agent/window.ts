@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { GUTTER_PX } from "@/lib/utils";
+
 // The agent's window: where it floats, how big it is, and whether it fills
 // the screen. Geometry only, in CSS pixels from the viewport's top left, so
 // the drag and resize handlers in `components/agent/agent-window.tsx` stay
@@ -27,9 +29,9 @@ export interface WindowLayout {
 
 export type Edge = "n" | "e" | "s" | "w" | "ne" | "se" | "sw" | "nw";
 
-/** The console's edge padding (`p-3.5`): full size keeps it all round, and
- *  the window first opens that far in from the right and under the header. */
-export const WINDOW_EDGE_PX = 14;
+/** The console's gutter: full size keeps it all round, and the window first
+ *  opens that far in from the right and under the header. */
+export const WINDOW_EDGE_PX = GUTTER_PX;
 
 // The console's header (`h-15`), for where it cannot be measured. The window
 // first opens below it, clear of the button that opened it — lower when a

@@ -35,7 +35,7 @@ function Keycap({ children }: { children: string }) {
 // The bar is one row: the brand at the left and, at the right, the links
 // and then the two buttons, the row ruled off from the page. Edge to edge,
 // the brand stands on the console header's pixels — the
-// same 60px row, the mark at the same x (`px-3.5` on the cell and `pl-1` on
+// same 60px row, the mark at the same x (`px-gutter` on the cell and `pl-1` on
 // the link, as there), the same 17px name — so signing in moves nothing but
 // the page under it. `inset` is a framed public page's column: the row
 // taller, and its cells inset as the sections are.
@@ -48,7 +48,7 @@ export function SiteHeader({ signedIn, inset = false }: { signedIn: boolean; ins
       )}
     >
       <div className="flex h-full items-center justify-between">
-        <div className={cn("flex items-center", inset ? INSET : "px-3.5")}>
+        <div className={cn("flex items-center", inset ? INSET : "px-gutter")}>
           <Link
             href="/"
             aria-label={PRODUCT_NAME}

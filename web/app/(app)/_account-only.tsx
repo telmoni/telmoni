@@ -38,7 +38,7 @@ export function AccountOnly({
   return (
     <PaperShell signedIn>
       <SessionHeartbeat expiresAt={expiresAt} />
-      <main className="mx-auto grid w-full max-w-xl gap-6 px-3.5 py-10">
+      <main className="mx-auto grid w-full max-w-xl gap-6 px-gutter py-10">
         <Card data-testid="account-only">
           <h1 className="text-lg font-semibold">You&apos;re not in an organization</h1>
           <p className="mt-2 text-sm text-muted-foreground">

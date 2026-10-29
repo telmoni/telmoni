@@ -246,11 +246,11 @@ export function KeyboardShortcuts() {
             what it lets you act on. */}
         {/* The setting lives in Accessibility; the sheet says which way it
             stands and leads there. */}
-        {/* `py-2.5`: the note is text, whose line spacing sets its words about
-            4px inside its box above and below, so the box sits 10px in for
-            the words to read 14px from the list and from the edge, as the
+        {/* `py-2`: the note is text, whose line spacing sets its words about
+            4px inside its box above and below, so the box sits 8px in for
+            the words to read a gutter from the list and from the edge, as the
             sides do. */}
-        <DialogFooter className="justify-start py-2.5 text-xs text-muted-foreground">
+        <DialogFooter className="justify-start py-2 text-xs text-muted-foreground">
           <p>
             {letterKeys
               ? "Use voice control or a screen reader? Letter-key shortcuts can be turned off in "

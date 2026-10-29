@@ -3,17 +3,20 @@ import { cn } from "./utils";
 
 describe("cn", () => {
   // ⚠ **Only the value tailwind-merge does NOT ship belongs here.** It
-  // resolves `rounded-*` by matching known values, so an unrecognised one is
-  // not a radius to it: it keeps both classes and lets CSS source order pick
-  // the winner instead of the order they were written. Nothing about that is
-  // visible at the callsite — the class is spelled right, the token is real,
-  // and the element takes the other one's radius.
+  // resolves `rounded-*` and spacing by matching known values, so an
+  // unrecognised one is neither to it: it keeps both classes and lets CSS
+  // source order pick the winner instead of the order they were written.
+  // Nothing about that is visible at the callsite — the class is spelled
+  // right, the token is real, and the element takes the other one's value.
   // A case built from stock values (`full`, `none`, any step) would pass with
   // this config deleted, which is why none appears on the left AND right.
   it.each([
     ["rounded-md", "rounded-menu"],
     ["rounded-menu", "rounded-md"],
-  ])("lets %s lose to %s like any other radius", (base, override) => {
+    ["p-gutter", "p-0"],
+    ["px-2", "px-gutter"],
+    ["gap-gutter", "gap-1"],
+  ])("lets %s lose to %s like any other value", (base, override) => {
     expect(cn(base, override)).toBe(override);
   });
 
@@ -25,5 +28,6 @@ describe("cn", () => {
     expect(cn("rounded-full", "rounded-md")).toBe("rounded-md");
     expect(cn("rounded-md", "rounded-full")).toBe("rounded-full");
     expect(cn("rounded-menu", "rounded-none")).toBe("rounded-none");
+    expect(cn("p-3", "p-2")).toBe("p-2");
   });
 });

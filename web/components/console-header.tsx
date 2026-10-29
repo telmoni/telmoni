@@ -52,11 +52,11 @@ export function ConsoleHeader({
     >
       <div
         className={cn(
-          "flex shrink-0 items-center gap-3 px-3.5 md:border-r md:border-sidebar-border",
+          "flex shrink-0 items-center gap-3 px-gutter md:border-r md:border-sidebar-border",
           collapsed
-            ? // 12px in, as the closed rail's squares are: the 36px control
+            ? // A gutter in, as the closed rail's squares are: the 36px control
               // then centres its mark 30px from the edge, on the rail's icons.
-              "group/brand md:w-15 md:cursor-expand md:justify-start md:px-3"
+              "group/brand md:w-15 md:cursor-expand md:justify-start"
             : "md:w-sidebar md:justify-between",
         )}
         onClick={(e) => {
@@ -73,7 +73,7 @@ export function ConsoleHeader({
         >
           <Menu className="size-4" />
         </button>
-        {/* `pl-1`: open, the mark's centre is 30px in — the cell's 14, 4
+        {/* `pl-1.5`: open, the mark's centre is 30px in — the cell's 12, 6
             more and half its 24 — the closed column's axis, which every rail
             icon keeps in both states, so the mark rests while the rail
             toggles, and only the name and the control come
@@ -92,7 +92,7 @@ export function ConsoleHeader({
           }}
           aria-label={PRODUCT_NAME}
           className={cn(
-            "hidden min-w-0 items-center pl-1 hover:opacity-70 md:flex",
+            "hidden min-w-0 items-center pl-1.5 hover:opacity-70 md:flex",
             collapsed && "md:hidden",
           )}
         >
@@ -129,13 +129,13 @@ export function ConsoleHeader({
           </button>
         )}
       </div>
-      {/* `pl-1.5` with the switcher's own `px-2`: its name starts where the
-          page's title does, 14px from the rail's rule — the rail's own inset
+      {/* `pl-1` with the switcher's own `px-2`: its name starts where the
+          page's title does, a gutter from the rail's rule — the rail's own inset
           (`console-shell.tsx`). */}
-      <div className="flex min-w-0 flex-1 items-center gap-3.5 pl-1.5 pr-3.5">
+      <div className="flex min-w-0 flex-1 items-center gap-gutter pl-1 pr-gutter">
         <ResourceSelector organizationBadge={organizationBadge} />
       </div>
-      <div className="flex shrink-0 items-center justify-end gap-3 pr-3.5">
+      <div className="flex shrink-0 items-center justify-end gap-3 pr-gutter">
         <SearchButton />
         <AgentButton />
         <NotificationsBell />

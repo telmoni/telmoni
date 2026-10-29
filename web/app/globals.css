@@ -676,13 +676,14 @@ html.a11y-no-letter-keys [data-letter-key] {
 
   --tracking-label: 0.4em;
 
-  /* The console's side panels — the rail open, with the header's first cell
-     above it — stand at `--spacing-sidebar`. The rail's rows ("the sidebar apps")
-     are inset by `px-3.5` (14px on each side = 1.75rem total), so their content
-     width is `--spacing-sidebar-inner`. The trace list's filters stand that same
-     width so the filters match the measure of the sidebar apps. */
+  /* The console's one gutter: every padding off an edge and every gap between
+     controls side by side (`p-gutter`, `gap-gutter`); `GUTTER_PX` in TypeScript. */
+  --spacing-gutter: 0.75rem;
+
+  /* The side panels stand at `--spacing-sidebar`; the rail's rows, a gutter in
+     from each side, at `--spacing-sidebar-inner`, as do the trace list's filters. */
   --spacing-sidebar: 12rem;
-  --spacing-sidebar-inner: calc(var(--spacing-sidebar) - 1.75rem);
+  --spacing-sidebar-inner: calc(var(--spacing-sidebar) - 2 * var(--spacing-gutter));
 
   --font-sans:
     var(--font-inter), Inter, ui-sans-serif, system-ui, -apple-system,

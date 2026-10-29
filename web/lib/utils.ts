@@ -1,8 +1,8 @@
 import { clsx, type ClassValue } from "clsx";
 import { extendTailwindMerge } from "tailwind-merge";
 
-// ⚠ **tailwind-merge has to be told about the radius tokens that are OURS, or
-// they lose every conflict silently.** It resolves `rounded-*` by matching
+// ⚠ **tailwind-merge has to be told about the radius and spacing tokens that are
+// OURS, or they lose every conflict silently.** It resolves `rounded-*` by matching
 // known values — the t-shirt steps, `none`, `full` — and a name it does not
 // recognise is not a radius to it, so it keeps BOTH classes and leaves the
 // winner to CSS source order rather than to the order you wrote them in.
@@ -14,7 +14,7 @@ import { extendTailwindMerge } from "tailwind-merge";
 // config exists.
 const twMerge = extendTailwindMerge({
   extend: {
-    theme: { radius: ["menu"] },
+    theme: { radius: ["menu"], spacing: ["gutter"] },
   },
 });
 
@@ -22,7 +22,10 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+/** The console's one gutter in pixels: `--spacing-gutter` (`p-gutter`,
+ *  `gap-gutter`) in `app/globals.css`. */
+export const GUTTER_PX = 12;
+
 /** How far a menu, popover, select or tooltip stands off the window's edges:
- *  the 14px every control keeps from an edge (`p-3.5`). Near one, it moves
- *  in, or scrolls inside that, rather than touch it. */
-export const WINDOW_INSET = 14;
+ *  a gutter. Near one, it moves in, or scrolls inside that, rather than touch it. */
+export const WINDOW_INSET = GUTTER_PX;

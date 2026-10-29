@@ -34,18 +34,18 @@ describe("isCompact", () => {
 
 describe("defaultRect", () => {
   it("opens at the right, under the header, at its own size", () => {
-    expect(defaultRect(SCREEN)).toEqual({ x: 946, y: 74, width: 480, height: 720 });
+    expect(defaultRect(SCREEN)).toEqual({ x: 948, y: 72, width: 480, height: 720 });
   });
 
   it("opens under a header a banner has pushed down", () => {
-    expect(defaultRect(SCREEN, 100)).toEqual({ x: 946, y: 114, width: 480, height: 720 });
+    expect(defaultRect(SCREEN, 100)).toEqual({ x: 948, y: 112, width: 480, height: 720 });
   });
 
   it("is no taller than the screen allows, and no shorter than the minimum", () => {
-    expect(defaultRect({ width: 1280, height: 700 })).toEqual({ x: 786, y: 74, width: 480, height: 612 });
+    expect(defaultRect({ width: 1280, height: 700 })).toEqual({ x: 788, y: 72, width: 480, height: 616 });
     expect(defaultRect({ width: 1280, height: 500 })).toEqual({
-      x: 786,
-      y: 74,
+      x: 788,
+      y: 72,
       width: 480,
       height: WINDOW_MIN.height,
     });

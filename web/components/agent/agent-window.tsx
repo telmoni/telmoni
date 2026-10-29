@@ -26,7 +26,7 @@ import { cn } from "@/lib/utils";
 // as a desktop's do, so neither a press on the edge nor one just outside it
 // misses. The right edge lies wholly outside: inside it is the conversation's
 // scrollbar, which keeps its presses. A corner is the larger target, and the
-// header's and composer's 14px padding keeps every control clear of all four.
+// header's and composer's gutter keeps every control clear of all four.
 const HANDLES: { edge: Edge; className: string }[] = [
   { edge: "n", className: "inset-x-3 -top-1 h-2 cursor-ns-resize" },
   { edge: "s", className: "inset-x-3 -bottom-1 h-2 cursor-ns-resize" },
@@ -212,10 +212,10 @@ export function AgentWindow({
           // the top instead, which a touch screen's 44px buttons put off
           // centre. This one is a single line, cut short rather than wrapped.
           // The bar's inset is its own on every side, so a scrolled
-          // conversation stops 14px under the controls rather than running
+          // conversation stops a gutter under the controls rather than running
           // beneath them.
           className={cn(
-            "flex shrink-0 items-center gap-3 p-3.5 select-none",
+            "flex shrink-0 items-center gap-3 p-gutter select-none",
             !full && "touch-none",
             !full && (gesture?.kind === "move" ? "cursor-grabbing" : "cursor-grab"),
           )}

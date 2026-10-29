@@ -217,7 +217,7 @@ function SessionPanel({
         {read === null ? (
           <PeekNote>Reading the session&hellip;</PeekNote>
         ) : read.kind === "ok" ? (
-          <div className="grid content-start gap-3 p-3.5">
+          <div className="grid content-start gap-3 p-gutter">
             <div>
               <LayoutControls projectId={projectId} canSave={canSave} />
             </div>

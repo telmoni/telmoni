@@ -63,7 +63,7 @@ export function Composer({
 
   return (
     <form
-      className="shrink-0 px-3.5 pb-3.5"
+      className="shrink-0 px-gutter pb-gutter"
       onSubmit={(e) => {
         e.preventDefault();
         submit();
@@ -89,7 +89,7 @@ export function Composer({
             onChange={(e) => onDraft(e.target.value)}
             onKeyDown={onKeyDown}
             className={cn(
-              "block min-h-10 w-full resize-none border-0 bg-transparent px-3.5 pt-2.5 pb-1 text-sm outline-none",
+              "block min-h-10 w-full resize-none border-0 bg-transparent px-gutter pt-2.5 pb-1 text-sm outline-none",
               "placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50",
             )}
           />

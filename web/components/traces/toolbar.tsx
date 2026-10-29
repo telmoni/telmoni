@@ -117,7 +117,7 @@ export function TraceToolbar(props: Props) {
 
   return (
     <div
-      className="flex flex-wrap items-center gap-3.5"
+      className="flex flex-wrap items-center gap-gutter"
       aria-busy={pending}
       data-pending={pending ? "" : undefined}
     >
@@ -177,7 +177,7 @@ export function TraceToolbar(props: Props) {
  *  as the trace list's toolbar has it. */
 export function ListToolbar(props: ListControlsProps) {
   return (
-    <div className="flex flex-wrap items-center gap-3.5">
+    <div className="flex flex-wrap items-center gap-gutter">
       <ListControls {...props} />
     </div>
   );
@@ -195,7 +195,7 @@ type ListControlsProps = {
 /** A list's columns, its rows' density and its download. */
 function ListControls({ list, organization, slug, query, total }: ListControlsProps) {
   return (
-    <div className="ml-auto flex items-center gap-3.5">
+    <div className="ml-auto flex items-center gap-gutter">
       <ColumnsMenu list={list} />
       <DensityMenu />
       <DownloadMenu list={list} organization={organization} slug={slug} query={query} total={total} />
@@ -206,7 +206,7 @@ function ListControls({ list, organization, slug, query, total }: ListControlsPr
 // The window a list reads and its refresh, on the title's row.
 export function ListHeaderControls({ days }: { days: number }) {
   return (
-    <div className="flex items-center gap-3.5">
+    <div className="flex items-center gap-gutter">
       <WindowPicker days={days} />
       <RefreshControl />
     </div>

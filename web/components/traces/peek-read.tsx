@@ -126,7 +126,7 @@ export function neighbours(
 /** What a panel says in its row's place. */
 export function PeekNote({ title, children }: { title?: string; children: ReactNode }) {
   return (
-    <div className="grid gap-1 p-3.5 text-sm">
+    <div className="grid gap-1 p-gutter text-sm">
       {title && <p className="font-medium">{title}</p>}
       <p className="text-muted-foreground">{children}</p>
     </div>
