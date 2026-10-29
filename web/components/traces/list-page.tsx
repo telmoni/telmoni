@@ -130,7 +130,7 @@ export function ListPage<L extends ListWindow>({
         <div className="grid gap-6">
           <section className="grid gap-gutter">
             {toolbar(listed)}
-            <div className="flex flex-col gap-4 md:flex-row md:items-start">
+            <div className="flex flex-col gap-gutter md:flex-row md:items-start">
               <FacetsPanel
                 list={list}
                 organization={organization}

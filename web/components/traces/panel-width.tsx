@@ -4,6 +4,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   type RefObject,
+  useState,
 } from "react";
 
 import { usePointerGesture } from "@/components/use-pointer-gesture";
@@ -124,16 +125,16 @@ export type FiltersEdgeProps = EdgeHandlers & {
 };
 
 /** The filters' width, as the person dragged or keyed it, `null` for their
- *  own, and the edge between them and the list: a splitter the keyboard
+ *  own, held for the page's life alone, so a reload opens them at their own;
+ *  and the edge between them and the list: a splitter the keyboard
  *  moves too, the filters having no Full size to fall back on. */
 export function useFiltersWidth(panel: RefObject<HTMLElement | null>): {
   width: number | null;
   edge: FiltersEdgeProps;
 } {
-  const { filtersWidth } = useTracePrefs();
-  const keep = (width: number | null) => setTracePrefs({ filtersWidth: width });
+  const [kept, keep] = useState<number | null>(null);
   const { dragged, handlers } = useDraggedEdge(panel, filtersBounds, keep);
-  const width = dragged ?? filtersWidth;
+  const width = dragged ?? kept;
   const now = width ?? FILTERS_WIDTH_DEFAULT;
   const onKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
     if (e.key === "Enter") {
@@ -171,10 +172,11 @@ export function FiltersEdge({ edge }: { edge: FiltersEdgeProps }) {
       data-testid="filters-resize"
       {...handlers}
       className={cn(
-        // 6px wide, 5px from the filters and from the list (`gap-4`).
-        "absolute inset-y-0 -right-[11px] z-10 hidden w-1.5 cursor-ew-resize touch-none rounded-full outline-none md:block",
-        "hover:bg-foreground/10 focus-visible:bg-foreground/20",
-        dragging && "bg-foreground/10",
+        // The whole gap takes the pointer; the line drawn is 3px, centred in it.
+        "absolute inset-y-0 -right-gutter z-10 hidden w-gutter cursor-ew-resize touch-none outline-none md:block",
+        "after:absolute after:inset-y-0 after:left-1/2 after:w-0.75 after:-translate-x-1/2 after:rounded-full",
+        "hover:after:bg-foreground/10 focus-visible:after:bg-foreground/20",
+        dragging && "after:bg-foreground/10",
       )}
     />
   );

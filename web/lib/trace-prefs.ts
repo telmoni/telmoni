@@ -1,7 +1,6 @@
 import { z } from "zod";
 
 import { readLayoutChoice, type LayoutChoice } from "@/lib/layout";
-import { keptFiltersWidth } from "@/lib/panel-width";
 import { PEEK_WIDTH_MIN } from "@/lib/peek";
 import { DEFAULT_SESSION_COLUMNS, orderedSessionColumns, type SessionColumn } from "@/lib/sessions";
 import { DEFAULT_COLUMNS, orderedColumns, type ListName } from "@/lib/traces";
@@ -34,9 +33,6 @@ export type TracePrefs = {
   refresh: RefreshSeconds;
   /** Whether the filters' sidebar shows. */
   filters: boolean;
-  /** How wide, in pixels, the person dragged the filters; `null` for their
-   *  own width. */
-  filtersWidth: number | null;
   /** Whether a trace opened from the list fills the content area, rather
    *  than standing beside the list (`components/traces/peek.tsx`). */
   peekFull: boolean;
@@ -56,7 +52,6 @@ export const DEFAULT_PREFS: TracePrefs = {
   density: "comfortable",
   refresh: 0,
   filters: true,
-  filtersWidth: null,
   peekFull: false,
   peekWidth: null,
   layout: null,
@@ -92,9 +87,8 @@ const PrefsSchema = z.object({
   density: z.enum(DENSITIES).catch(DEFAULT_PREFS.density),
   refresh: z.literal(REFRESH_INTERVALS).catch(DEFAULT_PREFS.refresh),
   filters: z.boolean().catch(DEFAULT_PREFS.filters),
-  // Optional before the transform: a transform alone makes the key required.
-  filtersWidth: z.unknown().optional().transform((v) => keptFiltersWidth(v)),
   peekFull: z.boolean().catch(DEFAULT_PREFS.peekFull),
+  // Optional before the transform: a transform alone makes the key required.
   peekWidth: z.unknown().optional().transform((v) => keptWidth(v)),
   layout: z.unknown().optional().transform((v) => readLayoutChoice(v)),
 });

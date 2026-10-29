@@ -14,10 +14,13 @@ vi.mock("@/components/traces/navigate", () => ({
 import { FacetsPanel } from "@/components/traces/facets";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { FILTERS_WIDTH_DEFAULT, FILTERS_WIDTH_MAX, FILTERS_WIDTH_MIN, FILTERS_WIDTH_STEP } from "@/lib/panel-width";
-import { TRACE_PREFS_KEY, readPrefs } from "@/lib/trace-prefs";
+import { TRACE_PREFS_KEY } from "@/lib/trace-prefs";
 
-/** What the browser keeps of the filters' width. */
-const kept = () => readPrefs(window.localStorage.getItem(TRACE_PREFS_KEY)).filtersWidth;
+/** The filters dragged 80px wider than their own width. */
+const DRAGGED = FILTERS_WIDTH_DEFAULT + 80;
+
+/** The width the edge reports the filters at. */
+const now = () => Number(screen.getByRole("separator", { name: "Resize the filters" }).getAttribute("aria-valuenow"));
 
 /** jsdom has no pointer events: one that carries what the edge reads. */
 class FakePointerEvent extends MouseEvent {
@@ -65,17 +68,14 @@ describe("the filters' edge", () => {
 
     fireEvent.pointerDown(edge, { button: 0, isPrimary: true, pointerId: 1, clientX: 300 });
     fireEvent.pointerMove(edge, { pointerId: 1, clientX: 380 });
-    expect(aside.style.getPropertyValue("--filters-width")).toBe("244px");
-    // Followed, not yet kept: one write a drag.
-    expect(kept()).toBeNull();
+    expect(aside.style.getPropertyValue("--filters-width")).toBe(`${DRAGGED}px`);
 
     fireEvent.pointerUp(edge, { pointerId: 1, clientX: 380 });
-    expect(kept()).toBe(244);
-    expect(aside.style.getPropertyValue("--filters-width")).toBe("244px");
-    expect(edge).toHaveAttribute("aria-valuenow", "244");
+    expect(aside.style.getPropertyValue("--filters-width")).toBe(`${DRAGGED}px`);
+    expect(edge).toHaveAttribute("aria-valuenow", String(DRAGGED));
 
     fireEvent.doubleClick(edge);
-    expect(kept()).toBeNull();
+    expect(now()).toBe(FILTERS_WIDTH_DEFAULT);
     expect(aside.style.getPropertyValue("--filters-width")).toBe("");
   });
 
@@ -91,36 +91,36 @@ describe("the filters' edge", () => {
     fireEvent.pointerMove(edge, { pointerId: 3, clientX: 500 });
     expect(edge).toHaveAttribute("aria-valuenow", String(FILTERS_WIDTH_MIN));
     fireEvent.pointerCancel(edge, { pointerId: 2 });
-    expect(kept()).toBe(FILTERS_WIDTH_MIN);
+    expect(now()).toBe(FILTERS_WIDTH_MIN);
   });
 
   it("takes the arrow keys, Home and End within its bounds, and Enter for its own width", () => {
     panel();
     const edge = screen.getByRole("separator", { name: "Resize the filters" });
     fireEvent.keyDown(edge, { key: "ArrowRight" });
-    expect(kept()).toBe(FILTERS_WIDTH_DEFAULT + FILTERS_WIDTH_STEP);
+    expect(now()).toBe(FILTERS_WIDTH_DEFAULT + FILTERS_WIDTH_STEP);
     fireEvent.keyDown(edge, { key: "ArrowLeft" });
-    expect(kept()).toBe(FILTERS_WIDTH_DEFAULT);
+    expect(now()).toBe(FILTERS_WIDTH_DEFAULT);
     fireEvent.keyDown(edge, { key: "End" });
-    expect(kept()).toBe(FILTERS_WIDTH_MAX);
+    expect(now()).toBe(FILTERS_WIDTH_MAX);
     fireEvent.keyDown(edge, { key: "ArrowRight" });
-    expect(kept()).toBe(FILTERS_WIDTH_MAX);
+    expect(now()).toBe(FILTERS_WIDTH_MAX);
     fireEvent.keyDown(edge, { key: "Home" });
-    expect(kept()).toBe(FILTERS_WIDTH_MIN);
+    expect(now()).toBe(FILTERS_WIDTH_MIN);
     fireEvent.keyDown(edge, { key: "Enter" });
-    expect(kept()).toBeNull();
-    expect(edge).toHaveAttribute("aria-valuenow", String(FILTERS_WIDTH_DEFAULT));
+    expect(now()).toBe(FILTERS_WIDTH_DEFAULT);
+    expect(screen.getByRole("complementary", { name: "Filters" }).style.getPropertyValue("--filters-width")).toBe("");
   });
 
-  it("stands at the width the browser kept, held to the filters' range", () => {
-    window.localStorage.setItem(TRACE_PREFS_KEY, JSON.stringify({ filtersWidth: 244 }));
+  it("opens at its own width after a reload, whatever was dragged or an older build kept", () => {
     const { unmount } = panel();
-    expect(screen.getByRole("complementary", { name: "Filters" }).style.getPropertyValue("--filters-width")).toBe("244px");
-    expect(screen.getByRole("separator", { name: "Resize the filters" })).toHaveAttribute("aria-valuenow", "244");
+    fireEvent.keyDown(screen.getByRole("separator", { name: "Resize the filters" }), { key: "End" });
+    expect(now()).toBe(FILTERS_WIDTH_MAX);
     unmount();
-    window.localStorage.setItem(TRACE_PREFS_KEY, JSON.stringify({ filtersWidth: 9000 }));
+    window.localStorage.setItem(TRACE_PREFS_KEY, JSON.stringify({ filtersWidth: 244 }));
     panel();
     expect(screen.getByRole("complementary", { name: "Filters" }).style.getPropertyValue("--filters-width")).toBe("");
+    expect(now()).toBe(FILTERS_WIDTH_DEFAULT);
   });
 
   it("is not there while the filters are hidden", () => {

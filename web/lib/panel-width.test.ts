@@ -5,7 +5,6 @@ import {
   FILTERS_WIDTH_MIN,
   draggedPanelWidth,
   filtersBounds,
-  keptFiltersWidth,
 } from "./panel-width";
 
 describe("a panel's edge dragged", () => {
@@ -36,14 +35,5 @@ describe("the filters' bounds", () => {
     expect(filtersBounds(200).max).toBe(FILTERS_WIDTH_MIN);
     // Not laid out yet: the whole range.
     expect(filtersBounds(0).max).toBe(FILTERS_WIDTH_MAX);
-  });
-
-  it("keeps a stored width only inside them, in whole pixels", () => {
-    expect(keptFiltersWidth(244)).toBe(244);
-    expect(keptFiltersWidth(FILTERS_WIDTH_MIN)).toBe(FILTERS_WIDTH_MIN);
-    expect(keptFiltersWidth(FILTERS_WIDTH_MIN - 1)).toBeNull();
-    expect(keptFiltersWidth(FILTERS_WIDTH_MAX + 1)).toBeNull();
-    expect(keptFiltersWidth(200.5)).toBeNull();
-    expect(keptFiltersWidth("240")).toBeNull();
   });
 });

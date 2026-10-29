@@ -1,3 +1,5 @@
+import { GUTTER_PX } from "@/lib/utils";
+
 // A panel beside a list, its edge dragged: the width it comes to as the
 // pointer moves, held between the widths it may stand at. The trace and
 // session panels grow leftwards from the list's right edge, the filters
@@ -16,8 +18,8 @@ export function draggedPanelWidth(start: number, startX: number, x: number, boun
 }
 
 /** The filters' own width: `--spacing-sidebar-inner` (`globals.css`), the
- *  console's rail rows', in pixels. */
-export const FILTERS_WIDTH_DEFAULT = 164;
+ *  console's rail rows', in pixels: the 192px rail less two gutters. */
+export const FILTERS_WIDTH_DEFAULT = 192 - 2 * GUTTER_PX;
 
 /** The narrowest the filters are dragged to, and the widest. */
 export const FILTERS_WIDTH_MIN = 128;
@@ -33,14 +35,4 @@ export function filtersBounds(area: number): DragBounds {
   const max =
     area > 0 ? Math.max(FILTERS_WIDTH_MIN, Math.min(FILTERS_WIDTH_MAX, Math.floor(area / 2))) : FILTERS_WIDTH_MAX;
   return { grows: "right", min: FILTERS_WIDTH_MIN, max };
-}
-
-/** A kept width this build stands the filters at: whole pixels in their range. */
-export function keptFiltersWidth(value: unknown): number | null {
-  return typeof value === "number" &&
-    Number.isInteger(value) &&
-    value >= FILTERS_WIDTH_MIN &&
-    value <= FILTERS_WIDTH_MAX
-    ? value
-    : null;
 }
