@@ -131,6 +131,12 @@ def test_blank_is_unicodes_white_space_as_go_and_rust_read_it(
         assert run.agent == "\x1c"
 
 
+def test_capture_content_that_is_no_bool_is_refused() -> None:
+    """A "false" from the environment is truthy, and would let content out."""
+    with pytest.raises(TypeError, match="capture_content must be a bool"):
+        Config(capture_content="false")  # type: ignore[arg-type]
+
+
 def test_sample_rate_is_above_zero_and_up_to_one() -> None:
     assert Config(sample_rate=1.0).sample_rate == 1.0
     assert Config(sample_rate=0.25).sample_rate == 0.25

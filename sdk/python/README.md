@@ -165,7 +165,8 @@ Prompts, completions, tool arguments and results (`input_messages`,
 taken off by the exporter before anything leaves the process. They are sent
 only when the client is built with `Config(capture_content=True)` **and** the
 project's content mode, which the SDK learns from the server's first answer,
-is `on`.
+is `on`. A `capture_content` that is no `bool`, such as `"false"` from the
+environment, raises `TypeError`.
 
 ## Configuration
 

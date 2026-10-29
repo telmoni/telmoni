@@ -281,6 +281,9 @@ class Config:
             key = _unset_if_blank(self.api_key)
             self.api_key = Secret(key) if key is not None else None
         check_rate(self.sample_rate)
+        # "false" from an environment variable is truthy, and would let content out.
+        if not isinstance(self.capture_content, bool):
+            raise TypeError("capture_content must be a bool")
         self.environment = _unset_if_blank(self.environment)
         self.release = _unset_if_blank(self.release)
         self.prices = tuple(self.prices)

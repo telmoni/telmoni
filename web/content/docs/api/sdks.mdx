@@ -791,7 +791,9 @@ Prompts, completions, tool arguments and results — `input_messages`,
 recorded on the span and taken off by the exporter before anything leaves
 the process. They are sent only when the client is built with
 `capture_content` on **and** the project's content mode, which the SDK learns
-from the server's first answer, is `on`. No project can be switched to `on`
+from the server's first answer, is `on`; in Python and TypeScript, a setting
+that is no boolean, such as `"false"` from the environment, is refused with a
+`TypeError`, where Go and Rust take only a boolean. No project can be switched to `on`
 today, so content never leaves the process. The server's own drop at the door
 is the second lock, not the first.
 

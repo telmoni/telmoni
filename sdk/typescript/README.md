@@ -207,7 +207,8 @@ Prompts, completions, system instructions, tool arguments and tool results —
 `inputMessages`, `systemInstructions`, `outputMessages`, `arguments` and
 `returned(...)` — are content. They leave the process only when
 `captureContent: true` **and** the project's content mode is `on`, which the
-SDK learns from the platform's first answer; before that answer, and on an
+SDK learns from the platform's first answer (a `captureContent` that is no
+boolean, such as `'false'` from the environment, throws a `TypeError`); before that answer, and on an
 `off` project, the exporter takes them off every span. The server drops content
 on an `off` project too, so the SDK's strip is the first lock, not the only one.
 

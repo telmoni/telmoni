@@ -84,6 +84,13 @@ describe('configuration', () => {
     expect(() => h.telmoni.run('\ufeff', () => {})).not.toThrow();
   });
 
+  it('refuses a captureContent that is no boolean', () => {
+    // 'false' from the environment is truthy, and would let content out.
+    expect(() => new Telmoni({ apiKey: 'k', captureContent: 'false' as unknown as boolean })).toThrow(
+      'captureContent must be a boolean',
+    );
+  });
+
   it('reads the five variables from the environment and no other', () => {
     vi.stubEnv('TELMONI_ENDPOINT', undefined);
     vi.stubEnv('TELMONI_API_KEY', '');

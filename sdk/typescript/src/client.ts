@@ -150,11 +150,14 @@ function resolve(config: Config | undefined): ResolvedConfig {
   const sampleRate = checkedRate(config?.sampleRate ?? 1);
   const prices: unknown = config?.prices ?? [];
   if (!Array.isArray(prices)) throw new TypeError('prices must be an array of prices');
+  const captureContent: unknown = config?.captureContent ?? false;
+  // 'false' from an environment variable is truthy, and would let content out.
+  if (typeof captureContent !== 'boolean') throw new TypeError('captureContent must be a boolean');
   const resolved: ResolvedConfig = {
     endpoint,
     apiKey: unsetIfBlank(config?.apiKey),
     organizationId: unsetIfBlank(config?.organizationId),
-    captureContent: config?.captureContent ?? false,
+    captureContent,
     sampleRate,
     sampler: config?.sampler,
     environment: unsetIfBlank(config?.environment),
