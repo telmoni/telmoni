@@ -261,7 +261,9 @@ jobs:
         if: matrix.sdk == 'python'
         uses: actions/setup-python@v7
         with:
-          python-version: '3.11'
+          # The floor pyproject.toml's requires-python names, as Go's job builds
+          # on go.mod's.
+          python-version: '3.10'
 
       - name: Verify the Python SDK
         if: matrix.sdk == 'python'
