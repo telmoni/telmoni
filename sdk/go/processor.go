@@ -172,14 +172,9 @@ func (p *processor) ForceFlush(ctx context.Context) error {
 }
 
 func (p *processor) Shutdown(ctx context.Context) error {
-	p.mu.Lock()
-	if p.stopped {
-		p.mu.Unlock()
+	if !p.stop() {
 		return nil
 	}
-	p.stopped = true
-	p.signal()
-	p.mu.Unlock()
 	ctx, cancel := withDefaultWait(ctx)
 	defer cancel()
 	select {
@@ -188,6 +183,19 @@ func (p *processor) Shutdown(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+// stop tells the worker to send what is queued and leave, without waiting, as
+// a cleanup must; false when it was told already.
+func (p *processor) stop() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.stopped {
+		return false
+	}
+	p.stopped = true
+	p.signal()
+	return true
 }
 
 // withDefaultWait is ctx, given defaultWait when it has no deadline of its

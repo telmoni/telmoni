@@ -7,6 +7,7 @@ import (
 	"math/rand/v2"
 	"net"
 	"net/http"
+	"runtime"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -177,6 +178,9 @@ func New(cfg Config, opts ...Option) (*Client, error) {
 		}),
 		sdktrace.WithSpanProcessor(proc),
 	)
+	// Dropped without Shutdown, the worker sends what is queued and leaves once
+	// nothing reaches the provider, no copy of the client nor a span; proc never does.
+	runtime.AddCleanup(provider, func(p *processor) { p.stop() }, proc)
 	return &Client{
 		config:    cfg,
 		exporter:  exp,
@@ -233,7 +237,8 @@ func (c *Client) Flush(ctx context.Context) error {
 // Shutdown flushes, then stops the exporter's worker. Nothing ended after it
 // is sent, even when ctx is already done. It waits for ctx, or 30 seconds
 // when ctx has no deadline, and a batch still retrying past that is left to
-// the worker, which the process exit takes with it.
+// the worker, which the process exit takes with it. A client dropped without
+// it sends what it queued once collected, though an exit waits for neither.
 func (c *Client) Shutdown(ctx context.Context) error {
 	if !c.built() {
 		return nil

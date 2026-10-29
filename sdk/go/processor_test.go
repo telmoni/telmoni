@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -78,6 +79,27 @@ func TestAShutdownWhoseContextIsDoneStillStopsTheWorker(t *testing.T) {
 	if got := len(h.transport.all()); got != 0 {
 		t.Errorf("%d exports after a shutdown, want none", got)
 	}
+}
+
+// A client dropped without Shutdown sends what it queued at once and lets its worker go.
+func TestAClientDroppedWithoutShutdownSendsWhatItQueued(t *testing.T) {
+	transport := newFakeTransport(t)
+	func() {
+		client, err := telmoni.New(testConfig(), telmoni.WithTransport(transport.send), telmoni.WithQueue(2048, 512, time.Hour))
+		if err != nil {
+			t.Fatalf("building the client: %v", err)
+		}
+		_, run := client.Run(context.Background(), "bot", telmoni.RunOptions{})
+		run.End()
+	}()
+	// The cleanup runs once a collection finds nothing reaching the client.
+	for deadline := time.Now().Add(waitTimeout); time.Now().Before(deadline); {
+		runtime.GC()
+		if transport.waitFor(1, 10*time.Millisecond) {
+			return
+		}
+	}
+	t.Fatal("a client dropped without Shutdown held its queue for the hour's delay")
 }
 
 func TestABatchFillsAndGoesWithoutAFlush(t *testing.T) {
