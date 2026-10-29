@@ -52,10 +52,13 @@ pub enum Error {
     },
     /// The export queue had no room for the whole record, so nothing of it
     /// was queued: flush, or wait for the queue to drain, and record it
-    /// again.
+    /// again; one of more spans than the queue holds, once
+    /// [`Hooks::batching`](crate::Hooks::batching) raises its size.
     QueueFull {
         /// How many spans the record would have queued.
         spans: usize,
+        /// How many spans the queue holds.
+        queue: usize,
     },
     /// The client was shut down, so nothing of the record was queued.
     Shutdown,
@@ -109,7 +112,12 @@ impl fmt::Display for Error {
             Self::TooLong { what, max } => {
                 write!(f, "a recorded {what} must be up to {max} characters")
             }
-            Self::QueueFull { spans } => write!(
+            // Past the whole queue no flush makes room: never "again".
+            Self::QueueFull { spans, queue } if spans > queue => write!(
+                f,
+                "the export queue has no room for the record's {spans} spans; the queue holds {queue}, so raise its size to record it"
+            ),
+            Self::QueueFull { spans, .. } => write!(
                 f,
                 "the export queue has no room for the record's {spans} spans; flush or wait, then record it again"
             ),

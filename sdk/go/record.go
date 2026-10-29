@@ -103,8 +103,20 @@ var errNoName = errors.New("telmoni: a recorded step's name or model call's mode
 
 // ErrQueueFull is returned by RecordRun when the export queue has no room for
 // the whole record, so nothing of it was queued: flush, or wait for the queue
-// to drain, and record it again.
+// to drain, and record it again; one of more spans than the queue holds, once
+// WithBatching raises its size, its error saying so.
 var ErrQueueFull = errors.New("telmoni: the export queue has no room for the record; flush or wait, then record it again")
+
+// queueTooSmall is ErrQueueFull for a record of more spans than the whole
+// queue holds, which no flush makes room for.
+type queueTooSmall struct{ spans, queue int }
+
+func (e queueTooSmall) Error() string {
+	return fmt.Sprintf("telmoni: the export queue has no room for the record's %d spans; "+
+		"the queue holds %d, so raise its size to record it", e.spans, e.queue)
+}
+
+func (queueTooSmall) Is(target error) bool { return target == ErrQueueFull }
 
 // ErrShutdown is returned by RecordRun once the client is shut down, so
 // nothing of the record was queued.

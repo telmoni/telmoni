@@ -149,8 +149,10 @@ model, a provider, a user or an error type past 128, or a session past 200,
 counted in characters, not UTF-16's units), or a span
 that ends before it starts throws a `RangeError`. Either sends nothing. A
 record the export queue has no room for throws `QueueFullError`, nothing of it
-queued: flush, or wait, and record it again. One made once the client is shut
-down throws `ShutdownError`.
+queued: flush, or wait, and record it again. One of more spans than the queue
+holds, 2,048 unless the `processor` hook's `maxQueueSize` raises it, is never
+taken, and its error says so. One made once the client is shut down throws
+`ShutdownError`.
 
 ## The guard
 

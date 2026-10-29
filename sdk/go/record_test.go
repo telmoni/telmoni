@@ -605,8 +605,14 @@ func TestARecordPastTheDefaultQueueGoesOnceTheQueueIsRaised(t *testing.T) {
 	for range 2_500 {
 		record.Inside = append(record.Inside, telmoni.ToolCallRecord{Name: "t", Start: record.Start, End: record.Start})
 	}
-	if err := newHarness(t, testConfig(), nil).client.RecordRun(context.Background(), record); !errors.Is(err, telmoni.ErrQueueFull) {
+	err := newHarness(t, testConfig(), nil).client.RecordRun(context.Background(), record)
+	if !errors.Is(err, telmoni.ErrQueueFull) {
 		t.Fatalf("RecordRun past the default queue = %v, want ErrQueueFull", err)
+	}
+	// No flush makes room for it, so the refusal names the bound to raise.
+	if want := "telmoni: the export queue has no room for the record's 2501 spans; " +
+		"the queue holds 2048, so raise its size to record it"; err.Error() != want {
+		t.Errorf("RecordRun past the default queue = %q, want %q", err, want)
 	}
 	h := newHarness(t, testConfig(), nil, telmoni.WithBatching(3_000, 512, 5*time.Second))
 	recordRun(t, h, record)
@@ -647,8 +653,8 @@ func TestARecordTheQueueHasNoRoomForIsRefusedWhole(t *testing.T) {
 		_, step := run.Step(ctx, fmt.Sprintf("s%d", n))
 		step.End()
 	}
-	if err := h.client.RecordRun(context.Background(), record); !errors.Is(err, telmoni.ErrQueueFull) {
-		t.Fatalf("RecordRun with room for two of the record's three spans = %v, want ErrQueueFull", err)
+	if err := h.client.RecordRun(context.Background(), record); err != telmoni.ErrQueueFull {
+		t.Fatalf("RecordRun with room for two of the record's three spans = %v, want ErrQueueFull itself", err)
 	}
 	run.End()
 	h.flush()

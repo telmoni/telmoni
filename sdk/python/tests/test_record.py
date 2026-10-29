@@ -706,7 +706,10 @@ def test_a_record_past_the_default_queue_goes_once_the_queue_is_raised(
             for _ in range(2_500)
         ],
     )
-    with pytest.raises(QueueFullError):
+    # No flush makes room for it, so the refusal names the bound to raise.
+    with pytest.raises(
+        QueueFullError, match="the queue holds 2048, so raise its size to record it$"
+    ):
         Telmoni(Config(api_key="k"), transport=transport).record_run(record)
     client = Telmoni(
         Config(api_key="k"),
@@ -744,7 +747,9 @@ def test_a_record_the_queue_has_no_room_for_is_refused_whole(
             for n in range(2):
                 with client.step(f"s{n}"):
                     pass
-            with pytest.raises(QueueFullError, match="3 spans"):
+            with pytest.raises(
+                QueueFullError, match="3 spans; flush or wait, then record it again$"
+            ):
                 client.record_run(record)
         assert client.flush()
         client.record_run(record)

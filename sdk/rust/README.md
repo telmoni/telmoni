@@ -164,8 +164,9 @@ nanoseconds or more after it, in July 2554 (`Error::RecordedTime`), or a span
 that ends before it starts (`Error::EndBeforeStart`) is returned as an error,
 and nothing is sent. A record the export queue has no room for is
 `Error::QueueFull`, nothing of it queued: flush, or wait, and record it again,
-from a clone, since `record_run` takes the record. One made once the client is
-shut down is `Error::Shutdown`.
+from a clone, since `record_run` takes the record. One of more spans than the
+queue holds, 2,048 unless `Hooks::batching` raises it, is never taken, and its
+error says so. One made once the client is shut down is `Error::Shutdown`.
 
 ## The guard
 

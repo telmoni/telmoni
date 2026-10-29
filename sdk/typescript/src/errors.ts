@@ -32,11 +32,16 @@ export function errorName(error: unknown): string {
 
 /**
  * `recordRun` refused a record the export queue has no room for, queuing
- * nothing of it: flush, or wait for the queue to drain, and record it again.
+ * nothing of it: flush, or wait for the queue to drain, and record it again;
+ * one of more spans than the queue holds, once the `processor` hook's
+ * `maxQueueSize` raises its size.
  */
 export class QueueFullError extends Error {
-  constructor(spans: number) {
-    super(`the export queue has no room for the record's ${spans} spans; flush or wait, then record it again`);
+  constructor(spans: number, queue: number) {
+    // Past the whole queue no flush makes room: never "again".
+    const advice =
+      spans <= queue ? 'flush or wait, then record it again' : `the queue holds ${queue}, so raise its size to record it`;
+    super(`the export queue has no room for the record's ${spans} spans; ${advice}`);
     this.name = 'QueueFullError';
   }
 }

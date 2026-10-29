@@ -205,7 +205,7 @@ describe('a recorded run', () => {
         run.step('s0', () => {});
         run.step('s1', () => {});
         expect(() => h.telmoni.recordRun(record)).toThrow(QueueFullError);
-        expect(() => h.telmoni.recordRun(record)).toThrow('3 spans');
+        expect(() => h.telmoni.recordRun(record)).toThrow('3 spans; flush or wait, then record it again');
       });
       expect(await h.telmoni.flush()).toBe(true);
       h.telmoni.recordRun(record);
@@ -217,6 +217,23 @@ describe('a recorded run', () => {
     expect(names.filter((name) => name === 'execute_tool t')).toHaveLength(2);
     expect(names).toHaveLength(6);
     expect(h.warnings).toEqual([]);
+  });
+
+  it('names the bound to raise for a record of more spans than the queue holds, which no flush makes room for', async () => {
+    const h = harness({}, { processor: { maxQueueSize: 2 } });
+    const golden = theRecord();
+    const call: ToolCallRecord = { type: 'tool_call', name: 't', start: golden.start, end: golden.start };
+    try {
+      expect(() => h.telmoni.recordRun({ ...golden, inside: [call, call] })).toThrow(
+        new QueueFullError(3, 2),
+      );
+      expect(new QueueFullError(3, 2).message).toBe(
+        "the export queue has no room for the record's 3 spans; the queue holds 2, so raise its size to record it",
+      );
+    } finally {
+      await h.telmoni.shutdown();
+    }
+    expect(h.transport.requests).toHaveLength(0);
   });
 
   it('matches the golden export', async () => {

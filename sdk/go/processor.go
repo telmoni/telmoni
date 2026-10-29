@@ -97,6 +97,9 @@ func (p *processor) hold(id trace.TraceID, need int) (release func(built bool), 
 	}
 	if len(p.queue)+need > p.limits.maxQueue {
 		p.recording.Unlock()
+		if need > p.limits.maxQueue {
+			return func(bool) {}, queueTooSmall{spans: need, queue: p.limits.maxQueue}
+		}
 		return func(bool) {}, ErrQueueFull
 	}
 	p.stage = &stage{traceID: id}

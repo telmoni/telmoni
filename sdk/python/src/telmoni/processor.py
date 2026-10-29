@@ -35,7 +35,8 @@ SHUTDOWN_TIMEOUT_S = 30.0
 class QueueFullError(RuntimeError):
     """``record_run`` refused a record the export queue has no room for,
     queuing nothing of it: flush, or wait for the queue to drain, and record
-    it again."""
+    it again; one of more spans than the queue holds, once
+    ``Batching(max_queue_size=...)`` raises its size."""
 
 
 class ShutdownError(RuntimeError):
@@ -138,9 +139,16 @@ class Processor(SpanProcessor):
                         "the client is shut down; the record was not sent"
                     )
                 if len(self._queue) + need > self._max_queue_size:
+                    # Past the whole queue no flush makes room: never "again".
+                    advice = (
+                        "flush or wait, then record it again"
+                        if need <= self._max_queue_size
+                        else f"the queue holds {self._max_queue_size}, "
+                        "so raise its size to record it"
+                    )
                     raise QueueFullError(
                         f"the export queue has no room for the record's {need} "
-                        "spans; flush or wait, then record it again"
+                        f"spans; {advice}"
                     )
                 staged: list[ReadableSpan] = []
                 self._stage = (trace_id, staged)

@@ -129,7 +129,10 @@ impl Processor {
             return Err(Error::Shutdown);
         }
         if state.queue.len() + need > self.shared.batching.max_queue_size {
-            return Err(Error::QueueFull { spans: need });
+            return Err(Error::QueueFull {
+                spans: need,
+                queue: self.shared.batching.max_queue_size,
+            });
         }
         state.stage = Some(Stage {
             trace,

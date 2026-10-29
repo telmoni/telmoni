@@ -972,11 +972,17 @@ fn a_record_the_queue_has_no_room_for_is_refused_whole() -> Outcome {
         let step = run.step(&format!("s{n}"))?;
         step.end();
     }
+    let refused = telmoni.record_run(record.clone());
     assert_eq!(
-        telmoni.record_run(record.clone()),
-        Err(Error::QueueFull { spans: 3 }),
+        refused,
+        Err(Error::QueueFull { spans: 3, queue: 4 }),
         "room for two of the record's three spans"
     );
+    assert!(refused.err().is_some_and(|error| {
+        error
+            .to_string()
+            .ends_with("flush or wait, then record it again")
+    }));
     run.end();
     assert!(telmoni.flush());
     telmoni.record_run(record)?;
@@ -997,6 +1003,40 @@ fn a_record_the_queue_has_no_room_for_is_refused_whole() -> Outcome {
         "the live run's three spans and the record's three: {names:?}"
     );
     assert!(warnings.all().is_empty(), "{:?}", warnings.all());
+    Ok(())
+}
+
+/// A record of more spans than the queue holds, which no flush makes room for, names the bound to raise.
+#[test]
+fn a_record_past_the_whole_queue_names_the_bound() -> Outcome {
+    let transport = FakeTransport::new([])?;
+    let warnings = Warnings::default();
+    let sleeps = Sleeps::default();
+    let mut hooks = hooks(&transport, &warnings, &sleeps);
+    hooks.batching = Batching {
+        max_queue_size: 2,
+        ..Batching::default()
+    };
+    let telmoni = Telmoni::with_hooks(keyed(), hooks);
+    let golden = the_record()?;
+    let at = golden.start;
+    let record = RunRecord {
+        inside: vec![
+            ToolCallRecord::new("t", at, at).into(),
+            ToolCallRecord::new("t", at, at).into(),
+        ],
+        ..golden
+    };
+    let refused = telmoni.record_run(record);
+    assert_eq!(refused, Err(Error::QueueFull { spans: 3, queue: 2 }));
+    assert_eq!(
+        refused.err().map(|error| error.to_string()).as_deref(),
+        Some(
+            "the export queue has no room for the record's 3 spans; the queue holds 2, so raise its size to record it"
+        )
+    );
+    telmoni.shutdown();
+    assert_eq!(transport.count(), 0);
     Ok(())
 }
 

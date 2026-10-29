@@ -87,7 +87,7 @@ export class Processor implements SpanProcessor {
    */
   record(traceId: string, need: number, build: () => void): void {
     if (this.#down) throw new ShutdownError();
-    if (this.#queue.length + need > this.#maxQueueSize) throw new QueueFullError(need);
+    if (this.#queue.length + need > this.#maxQueueSize) throw new QueueFullError(need, this.#maxQueueSize);
     const stage = { traceId, spans: [] as ReadableSpan[] };
     this.#stage = stage;
     this.#reserved = need;
