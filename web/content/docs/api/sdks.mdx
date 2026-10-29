@@ -299,10 +299,12 @@ Flush before a short-lived process exits (`flush()` / `flush()` / `Flush(ctx)`
 needs no flush while it runs, but shuts the client down as it stops: a deploy
 or a restart stops it with a signal, which drains nothing unless its handler
 does. A process that ends of itself is drained for you, for at most a
-shutdown's wait: Python's as the interpreter exits, Rust's as its last clone
-of the client drops and TypeScript's as Node's event loop empties; none on a
-forced exit (`os._exit`, `process.exit()`, `std::process::exit`). Go's drains
-only through `Shutdown`, so defer it.
+shutdown's wait: Python's as the interpreter or a multiprocessing child exits,
+Rust's as its last clone of the client drops and TypeScript's as Node's event
+loop empties; none on a forced exit (`os._exit`, `process.exit()`,
+`std::process::exit`). Go's drains only through `Shutdown`, so defer it. A
+pool that terminates its workers, as `with Pool(...)` does as it closes, stops
+them with a signal too, so a task run there flushes before it returns.
 
 ---
 

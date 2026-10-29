@@ -2,14 +2,17 @@ from __future__ import annotations
 
 import gc
 import logging
+import multiprocessing
 import os
 import weakref
+from collections.abc import Mapping
+from pathlib import Path
 
 import pytest
 
-from conftest import FakeTransport
+from conftest import FakeTransport, kept
 from telmoni import Config, Telmoni
-from telmoni.exporter import Exporter
+from telmoni.exporter import Answer, Exporter
 from telmoni.processor import Processor
 
 
@@ -136,6 +139,42 @@ def test_a_forked_child_gets_a_worker_of_its_own(transport: FakeTransport) -> No
         assert os.waitstatus_to_exitcode(status) == 0, "the child sent nothing"
     finally:
         client.shutdown()
+
+
+@pytest.mark.skipif(not hasattr(os, "fork"), reason="no fork on this platform")
+@pytest.mark.filterwarnings("ignore:This process:DeprecationWarning")
+@pytest.mark.parametrize("built_in", ["the parent", "the child"])
+def test_a_multiprocessing_child_sends_its_queue_as_it_exits(
+    tmp_path: Path, built_in: str
+) -> None:
+    sent = tmp_path / "sent"
+
+    def transport(url: str, headers: Mapping[str, str], body: bytes) -> Answer:
+        # The child's export, seen by the parent through a file.
+        with sent.open("ab") as file:
+            file.write(b"export\n")
+        return kept()
+
+    parent = Telmoni(Config(api_key="k"), transport=transport)
+
+    def record() -> None:
+        client = (
+            parent
+            if built_in == "the parent"
+            else Telmoni(Config(api_key="k"), transport=transport)
+        )
+        with client.run("bot"):
+            pass
+
+    try:
+        child = multiprocessing.get_context("fork").Process(target=record)
+        child.start()
+        child.join(60)
+        assert child.exitcode == 0
+        assert sent.is_file(), "the child's queue was lost as it exited"
+        assert sent.read_bytes() == b"export\n"
+    finally:
+        parent.shutdown()
 
 
 def test_a_client_shut_down_is_not_held_by_its_fork_hook(

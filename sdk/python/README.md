@@ -54,7 +54,7 @@ with telmoni.run(
 ) as run:
     ...
 
-telmoni.flush()  # before the process exits, if it exits soon after a run
+telmoni.flush()  # before the process exits soon after a run, or a pool's task returns
 ```
 
 Each of `run`, `step`, `model_call` and `tool_call` is a context manager, an

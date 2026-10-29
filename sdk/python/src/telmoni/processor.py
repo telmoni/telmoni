@@ -9,6 +9,7 @@ are dropped and counted. A recorded run goes at once, in exports of its own.
 
 from __future__ import annotations
 
+import multiprocessing
 import os
 import threading
 import time
@@ -16,6 +17,7 @@ import weakref
 from collections import deque
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
+from multiprocessing import util as multiprocessing_util
 
 from opentelemetry.context import Context
 from opentelemetry.sdk.trace import ReadableSpan, Span, SpanProcessor
@@ -76,6 +78,15 @@ class Processor(SpanProcessor):
                     after_fork()
 
             os.register_at_fork(after_in_child=_after_in_child)
+        # A multiprocessing child leaves through os._exit, past atexit: a
+        # finalizer of its own drains it, as atexit drains the main process.
+        multiprocessing_util.register_after_fork(self, Processor._drain_at_child_exit)
+        if multiprocessing.parent_process() is not None:
+            self._drain_at_child_exit()
+
+    def _drain_at_child_exit(self) -> None:
+        # Registered in the child, after multiprocessing cleared the parent's.
+        multiprocessing_util.Finalize(self, self.shutdown, exitpriority=0)
 
     def _after_fork(self) -> None:
         """The child of a fork: the parent's worker is not in it, and its lock
