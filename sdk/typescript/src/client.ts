@@ -333,7 +333,10 @@ export class Telmoni {
     return this.#opener.continued(read.spanContext, read.runId, read.agent);
   }
 
-  /** Send everything queued; true once the platform has it, false past the timeout. */
+  /**
+   * Waits for everything queued to be sent or given up: true once nothing is left to send, kept or
+   * not, and at once after a shutdown; false past the timeout. A batch refused or dropped is warned of.
+   */
   async flush(timeoutSeconds = 30): Promise<boolean> {
     let timer: ReturnType<typeof setTimeout> | undefined;
     // Held, unlike the worker's timer: a flush is what a short-lived process

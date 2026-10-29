@@ -326,8 +326,9 @@ impl Telmoni {
         Some(runs::continued(&self.inner, read))
     }
 
-    /// Sends everything queued and waits, up to 30 seconds; `true` once the
-    /// queue is empty.
+    /// Sends everything queued and waits, up to 30 seconds; `true` once
+    /// nothing is left to send, kept or not, and at once after a shutdown. A
+    /// batch refused or dropped is warned of.
     pub fn flush(&self) -> bool {
         self.inner.processor.flush_within(WAIT).is_ok()
     }

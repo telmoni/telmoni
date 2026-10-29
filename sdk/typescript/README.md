@@ -253,9 +253,10 @@ body would pass the 1 MiB ingest takes, or that holds more than its 1,000
 spans, is sent in halves, each within both, and a span alone past 1 MiB is sent
 without the attributes ingest drops for their length, with one warning. Every
 warning — an attribute the server dropped, a batch given up on — is logged once
-per client through `console.warn`. `await telmoni.flush()` sends what is queued
-and resolves `true` once the platform has it;
-`await telmoni.shutdown()` drains and stops. The SDK's worker never keeps the
+per client through `console.warn`. `await telmoni.flush()` waits for what is
+queued and resolves `true` once nothing is left to send, kept or not (a batch
+refused or dropped is warned of), and at once after `shutdown()`; `false` past
+its timeout. `await telmoni.shutdown()` drains and stops. The SDK's worker never keeps the
 process alive on its own. A process that ends of itself is drained as Node's
 loop empties, but `process.exit()` or a signal left unhandled waits for
 nothing, so call `shutdown()` before exiting.

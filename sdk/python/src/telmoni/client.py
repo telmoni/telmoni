@@ -187,7 +187,8 @@ class Telmoni:
         return self._opener.continued(read.span_context, read.run_id, read.agent)
 
     def flush(self, timeout_s: float = 30.0) -> bool:
-        """Send everything queued; True once the platform has it."""
+        """Send everything queued; True once nothing is left to send, kept or not,
+        and at once after a shutdown. A batch refused or dropped is warned of."""
         return self.processor.force_flush(int(timeout_s * 1000))
 
     def shutdown(self) -> None:
