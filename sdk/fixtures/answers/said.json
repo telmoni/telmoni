@@ -1,0 +1,7 @@
+{
+  "status": 200,
+  "headers": { "Content-Type": "application/json", "Telmoni-Content-Mode": "off" },
+  "body": { "partialSuccess": { "rejectedSpans": 0, "errorMessage": "spans arrived out of order; each was kept" } },
+  "expect": "one warning carrying the server's line, which names neither a drop nor a refusal",
+  "warning": "telmoni: the server said: spans arrived out of order; each was kept"
+}

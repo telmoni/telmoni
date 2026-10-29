@@ -60,7 +60,7 @@ One rule in all four, written out by each rather than left to its URL parser, si
 
 ## `answers/`
 
-Each file is one answer from `POST /otlp/v1/traces` — `status`, `headers`, `body` — and `expect`, what the SDK must do with it. A suite's fake transport answers from these files; the asserted behaviour is the `expect` line.
+Each file is one answer from `POST /otlp/v1/traces` — `status`, `headers`, `body` — and `expect`, what the SDK must do with it. A suite's fake transport answers from these files; the asserted behaviour is the `expect` line. `warning` is the one line the SDK logs, word for word, when every attempt of an export meets that answer, or `null` for none: the coding agents' plugins read these lines, so a reworded one fails every suite.
 
 | File | Answer | The SDK |
 |---|---|---|
@@ -72,5 +72,6 @@ Each file is one answer from `POST /otlp/v1/traces` — `status`, `headers`, `bo
 | `rate-limited.json` | `429` with `Retry-After` | waits `Retry-After` seconds, through its injected sleep, then sends the same bytes again |
 | `unavailable.json` | `503` with `Retry-After` | waits and retries, three attempts in all, then drops the batch with one warning |
 | `forbidden.json` | `403` | never retries; warns once naming the problem type; later batches are still sent |
+| `said.json` | `200`, a partial success whose line names neither a drop nor a refusal | warns once with the server's line, as it said it |
 
 Partial success lines are the server's: `span <id> refused: <why>` and `span <id> dropped <attribute>: <reason>; <what lifts it>`, with `and N more` once 4 KiB is used (`crates/telemetry/src/ingest/report.rs`). A failure's body is OTLP's `Status`, its `message` opening with the problem type, which the SDK's warning names.

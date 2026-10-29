@@ -7,5 +7,6 @@
       "errorMessage": "span 00f067aa0ba902b7 dropped telmoni.tag.request: cardinality; a project's tag takes up to 500 values a UTC day"
     }
   },
-  "expect": "one warning naming telmoni.tag.request, and that tags keep to a few keys of a few values each"
+  "expect": "one warning naming telmoni.tag.request, and that tags keep to a few keys of a few values each",
+  "warning": "telmoni: the server dropped telmoni.tag.request (cardinality; a project's tag takes up to 500 values a UTC day); keep tags to a few keys of a few values each: an id goes as the user or the session"
 }

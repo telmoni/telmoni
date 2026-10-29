@@ -7,5 +7,6 @@
       "errorMessage": "span 00f067aa0ba902b7 dropped ai.prompt: unlisted; text the field inventory does not name is never kept"
     }
   },
-  "expect": "one warning naming ai.prompt and the tag that would keep it, telmoni.tag.ai.prompt"
+  "expect": "one warning naming ai.prompt and the tag that would keep it, telmoni.tag.ai.prompt",
+  "warning": "telmoni: the server dropped ai.prompt (unlisted; text the field inventory does not name is never kept); send it as the tag telmoni.tag.ai.prompt to keep it"
 }

@@ -3,9 +3,11 @@
 
 mod common;
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use common::{FakeTransport, Harness, Outcome, Sleeps, Warnings, client, hooks, keyed, name_of};
+use telmoni::transport::{Answer, Transport, TransportError};
 use telmoni::{Batching, RunOptions, Telmoni};
 
 #[test]
@@ -172,5 +174,46 @@ fn a_hook_that_panics_does_not_stop_the_exporter() -> Outcome {
         .filter(|span| name_of(span) == "invoke_agent bot")
         .count();
     assert_eq!(runs, 1, "the run after the panic was not sent");
+    Ok(())
+}
+
+/// ⚠ A transport that panics loses that batch alone: a flush returns and the next run goes.
+#[test]
+fn a_transport_that_panics_does_not_stop_the_exporter() -> Outcome {
+    /// Panics on its first export, then hands each to the fake.
+    struct PanicsOnce(AtomicBool, FakeTransport);
+
+    impl Transport for PanicsOnce {
+        fn send(
+            &self,
+            url: &str,
+            headers: &[(String, String)],
+            body: &[u8],
+        ) -> Result<Answer, TransportError> {
+            if !self.0.swap(true, Ordering::SeqCst) {
+                std::panic::panic_any("a transport of the application's");
+            }
+            self.1.send(url, headers, body)
+        }
+    }
+
+    let transport = FakeTransport::new([])?;
+    let warnings = Warnings::default();
+    let sleeps = Sleeps::default();
+    let mut hooks = hooks(&transport, &warnings, &sleeps);
+    hooks.transport = Box::new(PanicsOnce(AtomicBool::new(false), transport.clone()));
+    let telmoni = Telmoni::with_hooks(keyed(), hooks);
+
+    telmoni.run("lost", RunOptions::default())?.end();
+    assert!(
+        telmoni.flush(),
+        "the flush waited on a worker that was gone"
+    );
+    telmoni.run("sent", RunOptions::default())?.end();
+    assert!(telmoni.flush());
+    telmoni.shutdown();
+    let spans = transport.spans()?;
+    let names: Vec<_> = spans.iter().map(name_of).collect();
+    assert_eq!(names, ["invoke_agent sent"]);
     Ok(())
 }

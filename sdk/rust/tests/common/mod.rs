@@ -308,6 +308,33 @@ pub(crate) fn kept() -> Result<Answer, Failure> {
     answer("kept")
 }
 
+/// Every answer under `answers/`, by name.
+pub(crate) fn answer_names() -> Result<Vec<String>, Failure> {
+    let mut names = Vec::new();
+    for entry in std::fs::read_dir(fixtures_dir().join("answers"))? {
+        let file = entry?.file_name();
+        if let Some(name) = file.to_str().and_then(|file| file.strip_suffix(".json")) {
+            names.push(name.to_owned());
+        }
+    }
+    names.sort();
+    Ok(names)
+}
+
+/// The line `answers/<name>.json` says its answer logs, met on every attempt: none, or that one.
+pub(crate) fn warning_of(name: &str) -> Result<Vec<String>, Failure> {
+    let fixture = load_fixture(&format!("answers/{name}.json"))?;
+    match field(&fixture, "warning")? {
+        Value::Null => Ok(Vec::new()),
+        warning => Ok(vec![
+            warning
+                .as_str()
+                .ok_or("`warning` is not a string")?
+                .to_owned(),
+        ]),
+    }
+}
+
 // ── JSON ─────────────────────────────────────────────────────────────────────
 
 pub(crate) fn field<'a>(value: &'a Value, key: &str) -> Result<&'a Value, Failure> {
@@ -515,6 +542,9 @@ fn the_fakes_work() -> Outcome {
         int(&load_fixture("answers/forbidden.json")?, "status")?,
         403
     );
+    assert!(answer_names()?.iter().any(|name| name == "kept"));
+    assert_eq!(warning_of("kept")?, Vec::<String>::new());
+    assert_eq!(warning_of("forbidden")?.len(), 1);
 
     let span = json!({
         "name": "s",

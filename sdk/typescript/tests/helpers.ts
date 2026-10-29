@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { ROOT_CONTEXT } from '@opentelemetry/api';
@@ -21,6 +21,7 @@ export interface AnswerFixture {
   headers: Record<string, string>;
   body: unknown;
   expect: string;
+  warning: string | null;
 }
 
 /** One answer from the platform, its body already encoded. */
@@ -45,6 +46,20 @@ export function kept(): Answer {
 export function answers(name: string, times = 1): Answer[] {
   const one = answerFrom(loadFixture<AnswerFixture>(`answers/${name}.json`));
   return Array.from({ length: times }, () => ({ ...one, headers: { ...one.headers } }));
+}
+
+/** Every answer under `answers/`, by name. */
+export function answerNames(): string[] {
+  return readdirSync(`${FIXTURES}answers`)
+    .filter((file) => file.endsWith('.json'))
+    .map((file) => file.slice(0, -'.json'.length))
+    .sort();
+}
+
+/** The line an answer's fixture says it logs, met on every attempt: none, or that one. */
+export function warningOf(name: string): string[] {
+  const { warning } = loadFixture<AnswerFixture>(`answers/${name}.json`);
+  return warning === null ? [] : [warning];
 }
 
 export interface JsonAttribute {

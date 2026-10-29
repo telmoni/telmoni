@@ -2,5 +2,6 @@
   "status": 503,
   "headers": { "Content-Type": "application/json", "Retry-After": "1" },
   "body": { "code": 14, "message": "/errors/telemetry/store-unavailable: the span store is not taking rows; retry in a second" },
-  "expect": "wait 1 second and retry, three attempts in all; after the third, one warning naming /errors/telemetry/store-unavailable and the batch dropped"
+  "expect": "wait 1 second and retry, three attempts in all; after the third, one warning naming /errors/telemetry/store-unavailable and the batch dropped",
+  "warning": "telmoni: export failed after 3 attempts (503 /errors/telemetry/store-unavailable); the batch was dropped"
 }

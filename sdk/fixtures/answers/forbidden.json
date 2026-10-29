@@ -2,5 +2,6 @@
   "status": 403,
   "headers": { "Content-Type": "application/json" },
   "body": { "code": 7, "message": "/errors/authz/forbidden: this API key does not hold the ingest scope" },
-  "expect": "not retried; one warning naming /errors/authz/forbidden; the next batch is still sent"
+  "expect": "not retried; one warning naming /errors/authz/forbidden; the next batch is still sent",
+  "warning": "telmoni: export refused with 403 /errors/authz/forbidden; the batch was dropped"
 }

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"net"
 	"net/url"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"sort"
@@ -378,9 +379,7 @@ func TestDroppedIsWarnedOnce(t *testing.T) {
 	aRun(t, h)
 	aRun(t, h)
 	h.shutdown()
-	expectWarnings(t, h, "telmoni: the server dropped gen_ai.input.messages (content; the project's content mode is off); "+
-		"the project's content mode decides whether content is kept: "+
-		"https://telmoni.com/docs/api/ingest#what-is-dropped-at-the-door")
+	expectWarnings(t, h, warningOf(t, "answers/dropped.json")...)
 }
 
 func TestUnlistedNamesTheTagThatWouldKeepIt(t *testing.T) {
@@ -388,8 +387,7 @@ func TestUnlistedNamesTheTagThatWouldKeepIt(t *testing.T) {
 	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k")}, newFakeTransport(t, unlisted))
 	aRun(t, h)
 	h.shutdown()
-	expectWarnings(t, h, "telmoni: the server dropped ai.prompt (unlisted; text the field inventory does not name is never kept); "+
-		"send it as the tag telmoni.tag.ai.prompt to keep it")
+	expectWarnings(t, h, warningOf(t, "answers/unlisted.json")...)
 }
 
 func TestATagPastTheCardinalityCapIsWarnedWithWhatKeepsIt(t *testing.T) {
@@ -397,8 +395,7 @@ func TestATagPastTheCardinalityCapIsWarnedWithWhatKeepsIt(t *testing.T) {
 	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k")}, newFakeTransport(t, cardinality))
 	aRun(t, h)
 	h.shutdown()
-	expectWarnings(t, h, "telmoni: the server dropped telmoni.tag.request (cardinality; a project's tag takes up to 500 values a UTC day); "+
-		"keep tags to a few keys of a few values each: an id goes as the user or the session")
+	expectWarnings(t, h, warningOf(t, "answers/cardinality.json")...)
 }
 
 func TestRefusedIsWarnedOnceAndNeverRetried(t *testing.T) {
@@ -407,7 +404,7 @@ func TestRefusedIsWarnedOnceAndNeverRetried(t *testing.T) {
 	aRun(t, h)
 	aRun(t, h)
 	h.shutdown()
-	expectWarnings(t, h, "telmoni: the server refused a span: no telmoni.run_id and telmoni.agent; a span outside a Telmoni run is refused")
+	expectWarnings(t, h, warningOf(t, "answers/refused.json")...)
 	expectRequests(t, h, 2)
 	expectSleeps(t, h)
 }
@@ -433,7 +430,7 @@ func TestUnavailableIsRetriedThreeTimesThenDropped(t *testing.T) {
 	aRun(t, h)
 	h.shutdown()
 	expectSleeps(t, h, time.Second, time.Second)
-	expectWarnings(t, h, "telmoni: export failed after 3 attempts (503 /errors/telemetry/store-unavailable); the batch was dropped")
+	expectWarnings(t, h, warningOf(t, "answers/unavailable.json")...)
 	expectRequests(t, h, 4)
 }
 
@@ -443,9 +440,27 @@ func TestForbiddenIsNotRetriedAndTheNextBatchIsStillSent(t *testing.T) {
 	aRun(t, h)
 	aRun(t, h)
 	h.shutdown()
-	expectWarnings(t, h, "telmoni: export refused with 403 /errors/authz/forbidden; the batch was dropped")
+	expectWarnings(t, h, warningOf(t, "answers/forbidden.json")...)
 	expectRequests(t, h, 2)
 	expectSleeps(t, h)
+}
+
+// Each answer met on every attempt logs its fixture's line word for word, as the plugins read it.
+func TestEachAnswerIsWarnedWordForWord(t *testing.T) {
+	paths, err := filepath.Glob(filepath.Join(fixturesDir, "answers", "*.json"))
+	if err != nil || len(paths) == 0 {
+		t.Fatalf("listing the answers: %v", err)
+	}
+	for _, path := range paths {
+		name := "answers/" + filepath.Base(path)
+		t.Run(filepath.Base(path), func(t *testing.T) {
+			answer := answerFrom(t, name)
+			h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k")}, newFakeTransport(t, answer, answer, answer))
+			aRun(t, h)
+			h.shutdown()
+			expectWarnings(t, h, warningOf(t, name)...)
+		})
+	}
 }
 
 func TestANetworkFailureIsRetriedWithBackoff(t *testing.T) {

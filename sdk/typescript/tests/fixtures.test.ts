@@ -10,10 +10,12 @@ import {
   type ExportBody,
   type Harness,
   type JsonAttribute,
+  answerNames,
   answers,
   harness,
   kept,
   loadFixture,
+  warningOf,
 } from './helpers';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -215,11 +217,7 @@ describe('answers/', () => {
     } finally {
       await h.telmoni.shutdown();
     }
-    expect(h.warnings).toHaveLength(1);
-    expect(h.warnings[0]).toContain('gen_ai.input.messages');
-    expect(h.warnings[0]).toContain("content; the project's content mode is off");
-    expect(h.warnings[0]).toContain('content mode decides whether content is kept');
-    expect(h.warnings[0]).toContain('docs/api/ingest#what-is-dropped-at-the-door');
+    expect(h.warnings).toEqual(warningOf('dropped'));
   });
 
   it('unlisted names the tag that would keep it', async () => {
@@ -229,9 +227,7 @@ describe('answers/', () => {
     } finally {
       await h.telmoni.shutdown();
     }
-    expect(h.warnings).toHaveLength(1);
-    expect(h.warnings[0]).toContain('ai.prompt');
-    expect(h.warnings[0]).toContain('telmoni.tag.ai.prompt');
+    expect(h.warnings).toEqual(warningOf('unlisted'));
   });
 
   it('a tag past the cardinality cap is warned with what keeps it', async () => {
@@ -241,9 +237,7 @@ describe('answers/', () => {
     } finally {
       await h.telmoni.shutdown();
     }
-    expect(h.warnings).toHaveLength(1);
-    expect(h.warnings[0]).toContain('telmoni.tag.request');
-    expect(h.warnings[0]).toContain('a few keys of a few values each');
+    expect(h.warnings).toEqual(warningOf('cardinality'));
   });
 
   it('refused is warned once and never retried', async () => {
@@ -254,8 +248,7 @@ describe('answers/', () => {
     } finally {
       await h.telmoni.shutdown();
     }
-    expect(h.warnings).toHaveLength(1);
-    expect(h.warnings[0]).toContain('a span outside a Telmoni run is refused');
+    expect(h.warnings).toEqual(warningOf('refused'));
     expect(h.transport.requests, 'one export each run, neither sent again').toHaveLength(2);
   });
 
@@ -299,9 +292,7 @@ describe('answers/', () => {
       await h.telmoni.shutdown();
     }
     expect(h.sleeps).toEqual([1, 1]);
-    expect(h.warnings).toHaveLength(1);
-    expect(h.warnings[0]).toContain('3 attempts');
-    expect(h.warnings[0]).toContain('/errors/telemetry/store-unavailable');
+    expect(h.warnings).toEqual(warningOf('unavailable'));
     expect(h.transport.requests, "three for the first run, then the next run's own export").toHaveLength(4);
   });
 
@@ -313,10 +304,30 @@ describe('answers/', () => {
     } finally {
       await h.telmoni.shutdown();
     }
-    expect(h.warnings).toHaveLength(1);
-    expect(h.warnings[0]).toContain('403');
-    expect(h.warnings[0]).toContain('/errors/authz/forbidden');
+    expect(h.warnings).toEqual(warningOf('forbidden'));
     expect(h.transport.requests).toHaveLength(2);
+  });
+
+  it.each(answerNames())("%s met on every attempt logs its fixture's line word for word, as the plugins read it", async (name) => {
+    const h = harness({ apiKey: 'k' }, {}, answers(name, 3));
+    try {
+      await aRun(h);
+    } finally {
+      await h.telmoni.shutdown();
+    }
+    expect(h.warnings).toEqual(warningOf(name));
+  });
+
+  it('an export whose wait rejects is dropped in the words the plugins read', async () => {
+    const h = harness({ apiKey: 'k' }, { sleep: () => Promise.reject(new Error('broke')) }, answers('rate-limited'));
+    try {
+      await aRun(h);
+      await aRun(h);
+    } finally {
+      await h.telmoni.shutdown();
+    }
+    expect(h.warnings).toEqual(['telmoni: an export failed (Error); the batch was dropped']);
+    expect(h.transport.requests, 'the next batch still went').toHaveLength(2);
   });
 
   it('a network failure is retried with backoff', async () => {

@@ -10,8 +10,8 @@ use std::thread;
 use std::time::Duration;
 
 use common::{
-    Collected, Failure, Harness, Outcome, Sleeps, Warnings, answer, field, float, int, is_hex,
-    is_uuid_v4, keyed, load_fixture, name_of, spans_of, text,
+    Collected, Failure, Harness, Outcome, Sleeps, Warnings, answer, answer_names, field, float,
+    int, is_hex, is_uuid_v4, keyed, load_fixture, name_of, spans_of, text, warning_of,
 };
 use serde_json::{Value, json};
 use telmoni::transport::TransportError;
@@ -318,22 +318,7 @@ fn dropped_is_warned_once() -> Outcome {
     a_run(&harness)?;
     a_run(&harness)?;
     harness.telmoni.shutdown();
-    let warnings = harness.warnings.all();
-    assert_eq!(warnings.len(), 1, "{warnings:?}");
-    let warning = warnings.first().ok_or("a warning")?;
-    assert!(warning.contains("gen_ai.input.messages"), "{warning}");
-    assert!(
-        warning.contains("content; the project's content mode is off"),
-        "{warning}"
-    );
-    assert!(
-        warning.contains("content mode decides whether content is kept"),
-        "{warning}"
-    );
-    assert!(
-        warning.contains("docs/api/ingest#what-is-dropped-at-the-door"),
-        "{warning}"
-    );
+    assert_eq!(harness.warnings.all(), warning_of("dropped")?);
     Ok(())
 }
 
@@ -342,11 +327,7 @@ fn unlisted_names_the_tag_that_would_keep_it() -> Outcome {
     let harness = Harness::answering(keyed(), [Ok(answer("unlisted")?)])?;
     a_run(&harness)?;
     harness.telmoni.shutdown();
-    let warnings = harness.warnings.all();
-    assert_eq!(warnings.len(), 1, "{warnings:?}");
-    let warning = warnings.first().ok_or("a warning")?;
-    assert!(warning.contains("ai.prompt"), "{warning}");
-    assert!(warning.contains("telmoni.tag.ai.prompt"), "{warning}");
+    assert_eq!(harness.warnings.all(), warning_of("unlisted")?);
     Ok(())
 }
 
@@ -355,14 +336,7 @@ fn a_tag_past_the_cardinality_cap_is_warned_with_what_keeps_it() -> Outcome {
     let harness = Harness::answering(keyed(), [Ok(answer("cardinality")?)])?;
     a_run(&harness)?;
     harness.telmoni.shutdown();
-    let warnings = harness.warnings.all();
-    assert_eq!(warnings.len(), 1, "{warnings:?}");
-    let warning = warnings.first().ok_or("a warning")?;
-    assert!(warning.contains("telmoni.tag.request"), "{warning}");
-    assert!(
-        warning.contains("a few keys of a few values each"),
-        "{warning}"
-    );
+    assert_eq!(harness.warnings.all(), warning_of("cardinality")?);
     Ok(())
 }
 
@@ -372,13 +346,7 @@ fn refused_is_warned_once_and_never_retried() -> Outcome {
     a_run(&harness)?;
     a_run(&harness)?;
     harness.telmoni.shutdown();
-    let warnings = harness.warnings.all();
-    assert_eq!(warnings.len(), 1, "{warnings:?}");
-    assert!(
-        warnings
-            .first()
-            .is_some_and(|warning| warning.contains("a span outside a Telmoni run is refused"))
-    );
+    assert_eq!(harness.warnings.all(), warning_of("refused")?);
     assert_eq!(
         harness.transport.count(),
         2,
@@ -422,14 +390,7 @@ fn unavailable_is_retried_three_times_then_dropped() -> Outcome {
         harness.sleeps.all(),
         [Duration::from_secs(1), Duration::from_secs(1)]
     );
-    let warnings = harness.warnings.all();
-    assert_eq!(warnings.len(), 1, "{warnings:?}");
-    let warning = warnings.first().ok_or("a warning")?;
-    assert!(warning.contains("3 attempts"), "{warning}");
-    assert!(
-        warning.contains("/errors/telemetry/store-unavailable"),
-        "{warning}"
-    );
+    assert_eq!(harness.warnings.all(), warning_of("unavailable")?);
     assert_eq!(
         harness.transport.count(),
         4,
@@ -445,12 +406,22 @@ fn forbidden_is_not_retried_and_the_next_batch_is_still_sent() -> Outcome {
     a_run(&harness)?;
     a_run(&harness)?;
     harness.telmoni.shutdown();
-    let warnings = harness.warnings.all();
-    assert_eq!(warnings.len(), 1, "{warnings:?}");
-    let warning = warnings.first().ok_or("a warning")?;
-    assert!(warning.contains("403"), "{warning}");
-    assert!(warning.contains("/errors/authz/forbidden"), "{warning}");
+    assert_eq!(harness.warnings.all(), warning_of("forbidden")?);
     assert_eq!(harness.transport.count(), 2);
+    Ok(())
+}
+
+/// Each answer met on every attempt logs its fixture's line word for word, as the plugins read it.
+#[test]
+fn each_answer_is_warned_word_for_word() -> Outcome {
+    let names = answer_names()?;
+    assert!(!names.is_empty(), "no answers");
+    for name in names {
+        let harness = Harness::answering(keyed(), std::iter::repeat_n(Ok(answer(&name)?), 3))?;
+        a_run(&harness)?;
+        harness.telmoni.shutdown();
+        assert_eq!(harness.warnings.all(), warning_of(&name)?, "{name}");
+    }
     Ok(())
 }
 

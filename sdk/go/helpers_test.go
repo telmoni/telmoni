@@ -63,6 +63,22 @@ func kept(t *testing.T) scripted {
 	return answerFrom(t, "answers/kept.json")
 }
 
+// warningOf is the line an answers/*.json fixture says its answer logs, met on
+// every attempt: none, or that one.
+func warningOf(t *testing.T, name string) []string {
+	t.Helper()
+	var fixture struct {
+		Warning *string `json:"warning"`
+	}
+	if err := json.Unmarshal(loadFixture(t, name), &fixture); err != nil {
+		t.Fatalf("decoding the fixture %s: %v", name, err)
+	}
+	if fixture.Warning == nil {
+		return nil
+	}
+	return []string{*fixture.Warning}
+}
+
 type request struct {
 	url    string
 	header http.Header
