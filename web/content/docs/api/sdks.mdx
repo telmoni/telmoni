@@ -93,10 +93,12 @@ holding the **ingest** scope.
     ```
 
     Each of `run`, `step`, `model_call` and `tool_call` is a context manager,
-    an `async with`, and a decorator. An exception that escapes one marks the
-    span failed with the exception's class, never its message, and is raised
-    again; a `KeyboardInterrupt` or `asyncio.CancelledError` marks it
-    cancelled. `fail("TimeoutError")` and `cancel()` do the same by hand.
+    an `async with`, and a decorator; on a generator, sync or async, the
+    decorator's span covers its iteration. An exception that escapes one
+    marks the span failed with the exception's class, never its message, and
+    is raised again; a `KeyboardInterrupt` or `asyncio.CancelledError`, or a
+    generator closed before its end, marks it cancelled.
+    `fail("TimeoutError")` and `cancel()` do the same by hand.
     `run` raises `ValueError` for a blank agent name, a sample rate outside
     its range or a cap that is no cap ([the guard](#the-guard)). A token
     count is read from a number or its text, its fraction cut, and `Usage`'s

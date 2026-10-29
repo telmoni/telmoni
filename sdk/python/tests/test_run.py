@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import logging
 import re
 import threading
+from collections.abc import AsyncIterator, Generator, Iterator
 from unittest import mock
 
 import pytest
@@ -124,6 +126,66 @@ def test_the_decorator_opens_a_run_per_call(
     runs = [s for s in transport.spans() if s["name"] == "invoke_agent bot"]
     assert len(runs) == 2 and len(set(seen)) == 2
     assert handle.__name__ == "handle"
+
+
+def test_a_decorated_generator_spans_its_iteration(
+    telmoni: Telmoni, transport: FakeTransport
+) -> None:
+    @telmoni.run("bot")
+    def stream(n: int) -> Iterator[int]:
+        for i in range(n):
+            with telmoni.step(f"s{i}"):
+                pass
+            yield i
+
+    assert list(stream(2)) == [0, 1]
+    # Each item asked for from a copy of the consumer's context, as a thread
+    # pool asks, still runs the body in the run.
+    items = stream(2)
+    assert [contextvars.copy_context().run(next, items) for _ in range(2)] == [0, 1]
+    assert list(items) == []
+    assert telmoni.flush()
+    runs = [s for s in transport.spans() if s["name"] == "invoke_agent bot"]
+    steps = [s for s in transport.spans() if s["name"] in ("s0", "s1")]
+    assert len(runs) == 2 and len(steps) == 4
+    assert {s["parentSpanId"] for s in steps} == {r["spanId"] for r in runs}
+
+
+def test_a_decorated_generator_closed_early_is_cancelled(
+    telmoni: Telmoni, transport: FakeTransport
+) -> None:
+    @telmoni.run("bot")
+    def stream() -> Generator[int, None, None]:
+        yield 1
+        yield 2
+
+    items = stream()
+    assert next(items) == 1
+    items.close()
+    assert telmoni.flush()
+    span = run_span(transport)
+    assert attributes_of(span)["telmoni.cancelled"] is True
+    assert "status" not in span
+
+
+def test_a_decorated_async_generator_spans_its_iteration(
+    telmoni: Telmoni, transport: FakeTransport
+) -> None:
+    @telmoni.run("bot")
+    async def stream(n: int) -> AsyncIterator[int]:
+        for i in range(n):
+            async with telmoni.step(f"a{i}"):
+                await asyncio.sleep(0)
+            yield i
+
+    async def main() -> list[int]:
+        return [i async for i in stream(2)]
+
+    assert asyncio.run(main()) == [0, 1]
+    assert telmoni.flush()
+    run = run_span(transport)
+    steps = [s for s in transport.spans() if s["name"] in ("a0", "a1")]
+    assert [s["parentSpanId"] for s in steps] == [run["spanId"]] * 2
 
 
 def test_the_decorator_and_context_manager_work_in_asyncio(

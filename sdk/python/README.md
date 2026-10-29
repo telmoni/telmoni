@@ -58,10 +58,11 @@ telmoni.flush()  # before the process exits soon after a run, or a pool's task r
 ```
 
 Each of `run`, `step`, `model_call` and `tool_call` is a context manager, an
-`async with`, and a decorator. An exception that escapes one marks the span
-failed with the exception's class, never its message, and is raised again; a
-`KeyboardInterrupt` or `asyncio.CancelledError` marks it cancelled. `fail()`
-and `cancel()` do the same by hand. `run` raises `ValueError` for a blank agent
+`async with`, and a decorator; on a generator, sync or async, the decorator's
+span covers its iteration. An exception that escapes one marks the span failed
+with the exception's class, never its message, and is raised again; a
+`KeyboardInterrupt` or `asyncio.CancelledError`, or a generator closed before
+its end, marks it cancelled. `fail()` and `cancel()` do the same by hand. `run` raises `ValueError` for a blank agent
 name, a sample rate outside (0, 1] or a cap that is no cap
 ([The guard](#the-guard)). A token count is read from a number or its text,
 its fraction cut, and `Usage`'s `cost` is what the call cost in US dollars,

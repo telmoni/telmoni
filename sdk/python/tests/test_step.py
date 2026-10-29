@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import enum
 import logging
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
@@ -103,6 +104,23 @@ def test_the_step_decorator(telmoni: Telmoni, transport: FakeTransport) -> None:
         assert plan(1) == 2
     assert telmoni.flush()
     assert "plan" in by_name(transport)
+
+
+def test_the_step_decorator_on_a_generator_spans_its_iteration(
+    telmoni: Telmoni, transport: FakeTransport
+) -> None:
+    @telmoni.step("plan")
+    def plan() -> Iterator[int]:
+        yield 1
+        with telmoni.tool_call("search"):
+            pass
+        yield 2
+
+    with telmoni.run("bot"):
+        assert list(plan()) == [1, 2]
+    assert telmoni.flush()
+    spans = by_name(transport)
+    assert spans["execute_tool search"]["parentSpanId"] == spans["plan"]["spanId"]
 
 
 class Kind(enum.Enum):

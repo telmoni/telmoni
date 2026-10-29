@@ -8,6 +8,7 @@ without waiting for the trace's tree. Nothing is sent outside a run.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import functools
 import inspect
 import itertools
@@ -16,7 +17,8 @@ import math
 import random
 import threading
 import uuid
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import AsyncIterator, Callable, Generator, Mapping, Sequence
+from contextlib import aclosing
 from contextvars import Token
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -93,7 +95,8 @@ class Handle:
     def _end(self, exc: BaseException | None) -> None:
         if not self._ending():
             return
-        if isinstance(exc, (KeyboardInterrupt, asyncio.CancelledError)):
+        # A consumer that stops reading a generator cancels, as an interrupt does.
+        if isinstance(exc, (KeyboardInterrupt, asyncio.CancelledError, GeneratorExit)):
             self.cancel()
         elif exc is not None:
             self.fail(type(exc).__name__)
@@ -298,6 +301,25 @@ class Scope(Generic[H]):
         self.__exit__(exc_type, exc, tb)
 
     def __call__(self, fn: F) -> F:
+        # A generator function runs nothing when called: the scope spans its
+        # iteration instead.
+        if inspect.isasyncgenfunction(fn):
+
+            @functools.wraps(fn)
+            async def wrapped_agen(*args: Any, **kwargs: Any) -> AsyncIterator[Any]:
+                async with Scope(self._open), aclosing(fn(*args, **kwargs)) as items:
+                    async for item in items:
+                        yield item
+
+            return wrapped_agen  # type: ignore[return-value]
+        if inspect.isgeneratorfunction(fn):
+
+            @functools.wraps(fn)
+            def wrapped_gen(*args: Any, **kwargs: Any) -> Generator[Any, Any, Any]:
+                items = _spanning(Scope(self._open), fn(*args, **kwargs))
+                return (yield from _InContext(items))
+
+            return wrapped_gen  # type: ignore[return-value]
         if inspect.iscoroutinefunction(fn):
 
             @functools.wraps(fn)
@@ -313,6 +335,28 @@ class Scope(Generic[H]):
                 return fn(*args, **kwargs)
 
         return wrapped  # type: ignore[return-value]
+
+
+def _spanning(
+    scope: Scope[Any], items: Generator[Any, Any, Any]
+) -> Generator[Any, Any, Any]:
+    with scope:
+        return (yield from items)
+
+
+class _InContext(Generator[Any, Any, Any]):
+    """A generator resumed in one context of its own, whatever context asks for
+    an item: a thread pool's copy per item would lose the scope's."""
+
+    def __init__(self, items: Generator[Any, Any, Any]) -> None:
+        self._items = items
+        self._own = contextvars.copy_context()
+
+    def send(self, value: Any) -> Any:
+        return self._own.run(self._items.send, value)
+
+    def throw(self, *exc: Any) -> Any:
+        return self._own.run(self._items.throw, *exc)
 
 
 class RunScope(Scope[Run]):
