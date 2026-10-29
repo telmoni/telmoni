@@ -104,8 +104,18 @@ def test_content_that_will_not_serialize_never_raises(
 ) -> None:
     cyclic: dict[str, object] = {}
     cyclic["self"] = cyclic
+
+    class Unprintable:
+        def __str__(self) -> str:
+            raise RuntimeError("not printable")
+
+    deep: list[object] = []
+    for _ in range(10_000):
+        deep = [deep]
     with telmoni.run("bot"), telmoni.tool_call("search", arguments=cyclic) as tool:
-        tool.returned(cyclic)
+        tool.returned([Unprintable()])
+    with telmoni.run("bot"), telmoni.tool_call("search", arguments=deep) as tool:
+        # Past 4,300 digits, json and str() both refuse an int.
+        tool.returned(10**5000)
     assert telmoni.flush()
-    (span,) = tools(transport)
-    assert span["name"] == "execute_tool search"
+    assert [span["name"] for span in tools(transport)] == ["execute_tool search"] * 2

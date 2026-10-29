@@ -94,12 +94,18 @@ describe('a tool call', () => {
   it('never throws over content that will not serialize', async () => {
     const cyclic: Record<string, unknown> = {};
     cyclic.self = cyclic;
+    // As Node's querystring.parse returns: String() throws for it.
+    const bare = Object.create(null) as Record<string, unknown>;
+    bare.self = bare;
     h.telmoni.run('bot', (run) => {
       run.toolCall('search', { arguments: cyclic }, (tool) => {
         tool.returned(cyclic);
       });
+      run.toolCall('search', { arguments: bare }, (tool) => {
+        tool.returned(bare);
+      });
     });
     expect(await h.telmoni.flush()).toBe(true);
-    expect(one(tools(h.transport)).name).toBe('execute_tool search');
+    expect(tools(h.transport).map((span) => span.name)).toEqual(['execute_tool search', 'execute_tool search']);
   });
 });

@@ -2,6 +2,7 @@ package telmoni_test
 
 import (
 	"context"
+	"math"
 	"reflect"
 	"strings"
 	"testing"
@@ -106,6 +107,23 @@ func TestToolContentTravelsWhenAskedAndAllowed(t *testing.T) {
 	}
 	if echoAttributes["gen_ai.tool.call.result"] != "null" {
 		t.Errorf("gen_ai.tool.call.result = %v, want null", echoAttributes["gen_ai.tool.call.result"])
+	}
+}
+
+// Content JSON refuses goes as its type: a map that holds itself, which fmt
+// would walk until the stack overflows, kills no process.
+func TestContentJSONRefusesGoesAsItsType(t *testing.T) {
+	h := newHarness(t, testConfig(), nil)
+	cyclic := map[string]any{"a": math.NaN()}
+	cyclic["self"] = cyclic
+	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	_, tool := run.ToolCall(ctx, "search", telmoni.ToolCallOptions{Arguments: cyclic})
+	tool.Returned(cyclic)
+	tool.End()
+	run.End()
+	h.flush()
+	if got := names(withPrefix(h.transport.spans(t), "execute_tool ")); !reflect.DeepEqual(got, []string{"execute_tool search"}) {
+		t.Errorf("sent %v", got)
 	}
 }
 

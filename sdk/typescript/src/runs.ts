@@ -945,11 +945,11 @@ function readable([seconds, nanos]: HrTime): boolean {
 function asJson(value: unknown): string {
   if (typeof value === 'string') return value;
   try {
-    return JSON.stringify(value, (_key, item: unknown) => (typeof item === 'bigint' ? String(item) : item)) ?? String(value);
+    return JSON.stringify(value, (_key, item: unknown) => (typeof item === 'bigint' ? String(item) : item)) ?? textOf(value);
   } catch {
-    // A cycle, or a value that refuses to serialize: its own text, so
+    // A cycle, or a value that refuses to serialize: its text, or its type, so
     // content never throws into the agent.
-    return String(value);
+    return textOf(value);
   }
 }
 

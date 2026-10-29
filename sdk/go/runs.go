@@ -820,7 +820,7 @@ func (c *Client) tagAttributes(tags map[string]string) []attribute.KeyValue {
 }
 
 // asJSON is a content value as the span carries it: a string as given,
-// anything else as JSON, and what JSON cannot encode as fmt prints it.
+// anything else as JSON, and what JSON cannot encode as its type.
 func asJSON(value any) string {
 	if s, ok := value.(string); ok {
 		return s
@@ -829,7 +829,9 @@ func asJSON(value any) string {
 	encoder := json.NewEncoder(&buf)
 	encoder.SetEscapeHTML(false)
 	if err := encoder.Encode(value); err != nil {
-		return fmt.Sprint(value)
+		// Its type alone: fmt's %v walks a map or slice that holds itself
+		// until the stack overflows.
+		return fmt.Sprintf("%T", value)
 	}
 	return strings.TrimSuffix(buf.String(), "\n")
 }

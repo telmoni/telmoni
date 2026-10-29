@@ -864,7 +864,7 @@ def _tags(
     for key, value in (tags or {}).items():
         if value is None:
             continue
-        name, sent = f"{key}", _tag_value(value)
+        name, sent = _str(key), _tag_value(value)
         # Ingest drops it before counting, so it takes no place among the 32.
         if not 0 < len(name) <= contract.TAG_KEY_MAX or (
             _shown(sent) > contract.TAG_VALUE_MAX
@@ -1127,8 +1127,7 @@ def _as_json(value: object) -> str:
     if isinstance(value, str):
         return value
     try:
-        return json.dumps(value, default=str)
-    except (TypeError, ValueError):
-        # A cycle, or a key no JSON has: the value's own text, so content
-        # never raises into the agent.
-        return str(value)
+        return json.dumps(value, default=_str)
+    except Exception:  # noqa: BLE001 - never into the agent's call
+        # Whatever will not serialize goes as its text, or its class's name.
+        return _str(value)
