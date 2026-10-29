@@ -150,7 +150,7 @@ class Run(Handle):
         model: str,
         *,
         provider: str | None = None,
-        operation: str = "chat",
+        operation: str = contract.DEFAULT_MODEL_OPERATION,
         input_messages: object | None = None,
         system_instructions: object | None = None,
     ) -> Scope[ModelCall]:
@@ -801,19 +801,21 @@ def _run_opening(
     attributes = _tags(tags, warn_once)
     attributes.update(
         {
-            contract.OPERATION: "invoke_agent",
+            contract.OPERATION: contract.RUN_OPERATION,
             contract.AGENT_NAME: agent,
             **inherited,
             contract.SAMPLE_RATE: float(rate),
         }
     )
-    return f"invoke_agent {agent}", attributes
+    return f"{contract.RUN_OPERATION} {agent}", attributes
 
 
 def _operation(operation: object) -> str:
     """A model call's operation: sent blank, the span would be named " <model>"
     and ingest would read it as a step; one that is no string is none either."""
-    return operation if isinstance(operation, str) and operation.strip() else "chat"
+    if isinstance(operation, str) and operation.strip():
+        return operation
+    return contract.DEFAULT_MODEL_OPERATION
 
 
 def _model_call_opening(
@@ -832,7 +834,7 @@ def _model_call_opening(
 
 def _tool_call_opening(name: str) -> tuple[str, dict[str, Any]]:
     """A tool call's span name and own attributes, live or recorded."""
-    return f"execute_tool {name}", {
+    return f"{contract.TOOL_OPERATION} {name}", {
         contract.OPERATION: contract.TOOL_OPERATION,
         contract.TOOL_NAME: name,
     }

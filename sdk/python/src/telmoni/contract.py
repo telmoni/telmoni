@@ -100,6 +100,10 @@ CONTENT = frozenset(
 MODEL_OPERATIONS = frozenset(
     {"chat", "generate_content", "text_completion", "embeddings"}
 )
+RUN_OPERATION = "invoke_agent"
+"""A run's operation, and the first word of its span's name."""
+DEFAULT_MODEL_OPERATION = "chat"
+"""A model call's operation when it names none."""
 TOOL_OPERATION = "execute_tool"
 
 CONTENT_MODE_HEADER = "Telmoni-Content-Mode"

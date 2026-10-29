@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
+from . import contract
+
 if TYPE_CHECKING:
     from opentelemetry.sdk.trace.sampling import Sampler
 
@@ -363,7 +365,7 @@ class ModelCallRecord:
     start: datetime
     end: datetime
     provider: str | None = None
-    operation: str = "chat"
+    operation: str = contract.DEFAULT_MODEL_OPERATION
     usage: Usage | None = None
     error_type: str | None = None
     cancelled: bool = False

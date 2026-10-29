@@ -132,7 +132,7 @@ class Telmoni:
         model: str,
         *,
         provider: str | None = None,
-        operation: str = "chat",
+        operation: str = contract.DEFAULT_MODEL_OPERATION,
         input_messages: object | None = None,
         system_instructions: object | None = None,
         run: Run | None = None,

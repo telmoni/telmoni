@@ -83,7 +83,7 @@ pub(crate) fn is_content(key: &str) -> bool {
 }
 
 pub(crate) const RUN_OPERATION: &str = "invoke_agent";
-pub(crate) const MODEL_OPERATION_DEFAULT: &str = "chat";
+pub(crate) const DEFAULT_MODEL_OPERATION: &str = "chat";
 pub(crate) const TOOL_OPERATION: &str = "execute_tool";
 
 /// The answer's header naming the project's content mode: off or on.

@@ -909,7 +909,7 @@ pub(crate) fn model_operation(given: Option<&str>) -> &str {
     // as a step.
     given
         .filter(|operation| !operation.trim().is_empty())
-        .unwrap_or(contract::MODEL_OPERATION_DEFAULT)
+        .unwrap_or(contract::DEFAULT_MODEL_OPERATION)
 }
 
 /// A model call's span name, `<operation> <model>`, and what it opens with
