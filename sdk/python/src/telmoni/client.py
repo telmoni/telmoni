@@ -27,6 +27,9 @@ from .runs import (
 )
 from .sampler import RecordingSampler
 
+FLUSH_MAX_S = 2_147_483.647
+"""The longest a flush waits, as long as a JavaScript timer can: about 24.8 days."""
+
 
 class Telmoni:
     """The client: a tracer provider of its own, and the runs it records.
@@ -189,7 +192,9 @@ class Telmoni:
     def flush(self, timeout_s: float = 30.0) -> bool:
         """Send everything queued; True once nothing is left to send, kept or not,
         and at once after a shutdown. A batch refused or dropped is warned of."""
-        return self.processor.force_flush(int(timeout_s * 1000))
+        # NaN or none waits not at all; infinity, or past the cap, the cap.
+        seconds = min(timeout_s, FLUSH_MAX_S) if timeout_s > 0 else 0.0
+        return self.processor.force_flush(int(seconds * 1000))
 
     def shutdown(self) -> None:
         """Flush, then stop the exporter's thread."""

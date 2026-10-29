@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { answer, harness } from './helpers';
+import { FakeTransport, answer, harness } from './helpers';
 
 describe('the processor', () => {
   it('bounds the queue and counts the drops once', async () => {
@@ -95,6 +95,29 @@ describe('the processor', () => {
     const h = harness({}, { transport: () => new Promise(() => {}) });
     h.telmoni.run('bot', () => {});
     expect(await h.telmoni.flush(0.01)).toBe(false);
+  });
+
+  it('a flush given Infinity waits up to its cap, where Node would fire its timer at once', async () => {
+    const sent = new FakeTransport();
+    const h = harness(
+      {},
+      {
+        transport: async (url, init) => {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          return sent.send(url, init);
+        },
+      },
+    );
+    try {
+      h.telmoni.run('bot', () => {});
+      expect(await h.telmoni.flush(Infinity)).toBe(true);
+      expect(sent.requests).toHaveLength(1);
+      // NaN waits not at all.
+      h.telmoni.run('bot', () => {});
+      expect(await h.telmoni.flush(Number.NaN)).toBe(false);
+    } finally {
+      await h.telmoni.shutdown();
+    }
   });
 
   it('shutdown drains until its deadline, then holds no timer and sends nothing more', async () => {

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import gc
 import logging
+import math
 import multiprocessing
 import os
 import weakref
@@ -89,6 +90,29 @@ def test_shutdown_drains_what_is_queued(transport: FakeTransport) -> None:
     client.shutdown()
     assert [s["name"] for s in transport.spans()] == ["invoke_agent bot"]
     client.shutdown()
+
+
+@pytest.mark.parametrize("timeout_s", [math.inf, 1e10])
+def test_a_flush_past_its_cap_waits_rather_than_raising(
+    transport: FakeTransport, timeout_s: float
+) -> None:
+    client = Telmoni(Config(api_key="k"), transport=transport)
+    try:
+        with client.run("bot"):
+            pass
+        assert client.flush(timeout_s=timeout_s)
+    finally:
+        client.shutdown()
+
+
+def test_a_flush_of_nan_waits_not_at_all(transport: FakeTransport) -> None:
+    client = Telmoni(Config(api_key="k"), transport=transport)
+    try:
+        with client.run("bot"):
+            pass
+        assert not client.flush(timeout_s=math.nan)
+    finally:
+        client.shutdown()
 
 
 def test_shutdown_drains_until_its_deadline_then_sends_nothing_more(

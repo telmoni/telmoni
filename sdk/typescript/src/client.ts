@@ -18,6 +18,9 @@ import { VERSION } from './version.js';
 /** The machine host; the console's, `https://telmoni.com`, serves people. */
 export const DEFAULT_ENDPOINT = 'https://api.telmoni.com';
 
+/** The longest a flush waits, about 24.8 days: past it Node fires a timer at once. */
+const FLUSH_MAX_MS = 2 ** 31 - 1;
+
 /** Unicode's White_Space, which an endpoint's ends are trimmed of, as Go and Rust trim them: `trim` differs. */
 const WHITE_SPACE = new Set('\t\n\v\f\r \u0085\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000');
 
@@ -339,11 +342,13 @@ export class Telmoni {
    */
   async flush(timeoutSeconds = 30): Promise<boolean> {
     let timer: ReturnType<typeof setTimeout> | undefined;
+    // NaN or none waits not at all; Infinity, or past the cap, the cap.
+    const ms = timeoutSeconds > 0 ? Math.min(timeoutSeconds * 1000, FLUSH_MAX_MS) : 0;
     // Held, unlike the worker's timer: a flush is what a short-lived process
     // awaits last, and with nothing else holding it the process would exit
     // before the worker ran, its spans unsent. Cleared as the flush settles.
     const expired = new Promise<boolean>((resolve) => {
-      timer = setTimeout(() => resolve(false), timeoutSeconds * 1000);
+      timer = setTimeout(() => resolve(false), ms);
     });
     try {
       return await Promise.race([this.#processor.forceFlush().then(() => true), expired]);
