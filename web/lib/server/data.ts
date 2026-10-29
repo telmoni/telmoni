@@ -124,7 +124,6 @@ export type {
   UserView,
   ListView,
   ListViewQuery,
-  ViewQuery,
 } from "./entities/traces";
 
 export { fetchSessionLayout } from "./entities/session-layout";

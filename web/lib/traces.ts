@@ -651,7 +651,6 @@ export const COLUMN_MENU: readonly ColumnBlock<TraceColumn, TraceSort>[] = TRACE
 export const currentSort = TRACES.current;
 export const nextSort = TRACES.next;
 
-export const TRACE_PRESETS = TRACES.presets;
 export const presetActive = TRACES.presetActive;
 export const presetToggled = TRACES.presetToggled;
 

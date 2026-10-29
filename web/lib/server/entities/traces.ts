@@ -113,7 +113,6 @@ function viewQuerySchema<S extends Record<string, string>>(sorts: S) {
 export const ViewQuerySchema = viewQuerySchema(TraceSort);
 export const SessionViewQuerySchema = viewQuerySchema(SessionSort);
 export const UserViewQuerySchema = viewQuerySchema(UserSort);
-export type ViewQuery = z.infer<typeof ViewQuerySchema>;
 /** A saved view's query, its sort among `S`. */
 export type ListViewQuery<S extends string> = ListFilters & {
   sort?: S;

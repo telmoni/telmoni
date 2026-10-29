@@ -27,5 +27,6 @@ export function cn(...inputs: ClassValue[]) {
 export const GUTTER_PX = 12;
 
 /** How far a menu, popover, select or tooltip stands off the window's edges:
- *  a gutter. Near one, it moves in, or scrolls inside that, rather than touch it. */
+ *  a gutter. Near one, it moves in, or scrolls inside that, rather than touch it.
+ *  @alias */
 export const WINDOW_INSET = GUTTER_PX;
