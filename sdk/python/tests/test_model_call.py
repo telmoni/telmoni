@@ -261,6 +261,21 @@ def test_content_is_taken_off_before_it_leaves(
     assert "my secret prompt" not in str(transport.requests)
 
 
+def test_a_content_mode_with_blanks_about_it_is_read_trimmed(
+    transport: FakeTransport,
+) -> None:
+    """http.client keeps a header's trailing blanks; every SDK trims them."""
+    transport.answers = [Answer(200, {"Telmoni-Content-Mode": " on\t"}, b"{}")]
+    client = Telmoni(Config(api_key="k"), transport=transport)
+    try:
+        with client.run("bot"):
+            pass
+        assert client.flush()
+        assert client.content_mode == "on"
+    finally:
+        client.shutdown()
+
+
 def test_content_leaves_only_when_asked_and_the_project_allows(
     transport: FakeTransport,
 ) -> None:

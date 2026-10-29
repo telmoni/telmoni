@@ -266,7 +266,8 @@ func (e *exporter) send(body []byte) (answer, error) {
 // read takes what a kept export's answer says: the project's content mode,
 // and each span refused or attribute dropped.
 func (e *exporter) read(got answer) {
-	if mode := got.header.Get(contentModeHeader); mode != "" {
+	// Trimmed of White_Space, as every SDK trims it, whatever the transport.
+	if mode := strings.TrimSpace(got.header.Get(contentModeHeader)); mode != "" {
 		e.mu.Lock()
 		e.mode = mode
 		e.mu.Unlock()

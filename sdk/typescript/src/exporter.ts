@@ -20,6 +20,7 @@ import * as contract from './contract.js';
 import { errorName } from './errors.js';
 import type { ResolvedConfig, Transport, TransportResponse } from './types.js';
 import { VERSION } from './version.js';
+import { trimEnds } from './whitespace.js';
 
 /** How many times one batch is sent before it is dropped. */
 export const ATTEMPTS = 3;
@@ -411,7 +412,8 @@ export class Exporter {
   }
 
   async #read(answer: TransportResponse): Promise<void> {
-    const mode = answer.headers.get(contract.CONTENT_MODE_HEADER);
+    // Trimmed of White_Space, as every SDK trims it.
+    const mode = trimEnds(answer.headers.get(contract.CONTENT_MODE_HEADER) ?? '');
     if (mode) this.#contentMode = mode;
     const decoded = parseJson(await bodyOf(answer));
     const partial = isRecord(decoded) ? decoded['partialSuccess'] : undefined;

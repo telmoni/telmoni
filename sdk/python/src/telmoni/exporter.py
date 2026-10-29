@@ -31,7 +31,13 @@ from opentelemetry.trace import SpanKind, StatusCode
 
 from . import contract
 from ._version import __version__
-from .models import Config, bypasses_proxy, header, replace_surrogates
+from .models import (
+    Config,
+    _unset_if_blank,
+    bypasses_proxy,
+    header,
+    replace_surrogates,
+)
 
 logger = logging.getLogger("telmoni")
 
@@ -476,7 +482,9 @@ class Exporter:
         return encoded
 
     def _read(self, answer: Answer) -> None:
-        mode = answer.header(contract.CONTENT_MODE_HEADER)
+        # Trimmed of White_Space, as every SDK trims it: http.client keeps
+        # trailing blanks.
+        mode = _unset_if_blank(answer.header(contract.CONTENT_MODE_HEADER))
         if mode:
             self._content_mode = mode
         try:

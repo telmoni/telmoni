@@ -221,6 +221,14 @@ describe('a model call', () => {
     expect(h.transport.text()).not.toContain('the answer');
   });
 
+  it('reads a content mode with blanks about it trimmed, as every SDK does', async () => {
+    const trimmed = harness({}, {}, [answer(200, { 'Telmoni-Content-Mode': ' on\t' }, '{}')]);
+    trimmed.telmoni.run('bot', () => {});
+    expect(await trimmed.telmoni.flush()).toBe(true);
+    expect(trimmed.telmoni.contentMode).toBe('on');
+    await trimmed.telmoni.shutdown();
+  });
+
   it('sends content only when asked and the project allows', async () => {
     const on = answer(200, { 'Telmoni-Content-Mode': 'on' }, '{"partialSuccess":null}');
     const asked = harness({ captureContent: true }, {}, Array.from({ length: 6 }, () => on));

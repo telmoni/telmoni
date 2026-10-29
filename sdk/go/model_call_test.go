@@ -171,6 +171,19 @@ func TestContentIsTakenOffBeforeItLeaves(t *testing.T) {
 	}
 }
 
+// A content mode with blanks about it is read trimmed, whatever the transport
+// left on it, as every SDK reads it.
+func TestAContentModeWithBlanksAboutItIsReadTrimmed(t *testing.T) {
+	padded := scripted{status: 200, headers: map[string]string{"Telmoni-Content-Mode": " on\t"}, body: []byte("{}")}
+	h := newHarness(t, testConfig(), newFakeTransport(t, padded))
+	_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	run.End()
+	h.flush()
+	if mode := h.client.ContentMode(); mode != "on" {
+		t.Errorf("the content mode is %q, want on", mode)
+	}
+}
+
 func TestContentLeavesOnlyWhenAskedAndTheProjectAllows(t *testing.T) {
 	on := contentOn()
 	// An empty run's export is answered off, the next two runs' on; each run
