@@ -423,6 +423,39 @@ func TestRateLimitedWaitsRetryAfterAndSendsTheSameBytes(t *testing.T) {
 	expectWarnings(t, h)
 }
 
+func TestARetryAfterPastTheCapWaitsTheCap(t *testing.T) {
+	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k")},
+		newFakeTransport(t, answerFrom(t, "answers/rate-limited-long.json"), kept(t)))
+	aRun(t, h)
+	h.shutdown()
+	expectSleeps(t, h, time.Minute)
+	requests := h.transport.all()
+	expectRequests(t, h, 2)
+	if len(requests) >= 2 && !bytes.Equal(requests[0].body, requests[1].body) {
+		t.Error("the retry did not send the same bytes")
+	}
+	expectWarnings(t, h)
+}
+
+// Retry-After is read as text: ASCII digits, a sign allowed, below 0 none and
+// past 60 the cap however long, where its seconds as a Duration would overflow.
+func TestRetryAfterIsReadAsText(t *testing.T) {
+	limited := func(retryAfter string) scripted {
+		return scripted{status: 429, headers: map[string]string{"Retry-After": retryAfter}, body: []byte("{}")}
+	}
+	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k")}, newFakeTransport(t,
+		limited("99999999999"), limited("1_0"), kept(t),
+		limited("-5"), limited(" +7\t"), kept(t),
+		limited(strings.Repeat("9", 400)), kept(t)))
+	for range 3 {
+		aRun(t, h)
+	}
+	h.shutdown()
+	expectSleeps(t, h, time.Minute, 2*time.Second, 0, 7*time.Second, time.Minute)
+	expectRequests(t, h, 8)
+	expectWarnings(t, h)
+}
+
 func TestUnavailableIsRetriedThreeTimesThenDropped(t *testing.T) {
 	unavailable := answerFrom(t, "answers/unavailable.json")
 	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k")}, newFakeTransport(t, unavailable, unavailable, unavailable, kept(t)))

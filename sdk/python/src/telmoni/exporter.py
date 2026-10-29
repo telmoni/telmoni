@@ -55,6 +55,7 @@ CONTENT_DOCS = "https://telmoni.com/docs/api/ingest#what-is-dropped-at-the-door"
 
 _DROPPED = re.compile(r"^span (\S+) dropped (\S+): (\w+)(?:; (.*))?$")
 _REFUSED = re.compile(r"^span (\S+) refused: (.*)$")
+_SECONDS = re.compile(r"[ \t]*([+-]?)([0-9]+)[ \t]*")
 
 # OTLP numbers the kinds from 1; OpenTelemetry's Python enum from 0.
 _KINDS = {
@@ -524,13 +525,9 @@ class Exporter:
         """Before the next attempt; nothing after the last, or once given up."""
         if attempt + 1 >= ATTEMPTS or self._given_up.is_set():
             return
-        seconds = float(2**attempt)
-        if retry_after is not None:
-            try:
-                seconds = float(int(retry_after))
-            except ValueError:
-                pass
-        self._sleep(min(max(seconds, 0.0), RETRY_AFTER_MAX_S))
+        given = _retry_seconds(retry_after)
+        seconds = float(2**attempt) if given is None else given
+        self._sleep(min(seconds, RETRY_AFTER_MAX_S))
 
     def warn_once(self, key: str, text: str) -> None:
         """Log ``text`` once per client under ``key``, as every warning is."""
@@ -576,6 +573,19 @@ def _problem_type(body: bytes) -> str:
     if not isinstance(message, str):
         return ""
     return message.split(":", 1)[0] if message.startswith("/errors/") else ""
+
+
+def _retry_seconds(header: str | None) -> float | None:
+    """``Retry-After``'s whole seconds, read as text: a number of any length
+    reaches the cap without converting, and one below zero is none."""
+    given = _SECONDS.fullmatch(header or "")
+    if given is None:
+        return None
+    sign, digits = given.groups()
+    whole = digits.lstrip("0")
+    if sign == "-":
+        return 0.0
+    return RETRY_AFTER_MAX_S if len(whole) > 2 else float(whole or "0")
 
 
 def _nanos(at: int | None) -> str:

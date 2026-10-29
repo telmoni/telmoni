@@ -70,6 +70,7 @@ Each file is one answer from `POST /otlp/v1/traces` — `status`, `headers`, `bo
 | `cardinality.json` | `200`, a partial success naming a tag past its project's cap for the day | warns once, naming the tag, and that tags keep to a few keys of a few values each |
 | `refused.json` | `200`, a partial success refusing one span | warns once with the server's line; never retries |
 | `rate-limited.json` | `429` with `Retry-After` | waits `Retry-After` seconds, through its injected sleep, then sends the same bytes again |
+| `rate-limited-long.json` | `429` with a `Retry-After` of 20 digits, past what any of the four could hold as a whole number | waits the cap, 60 seconds, then sends the same bytes again: the header is read as text, ASCII digits with a sign allowed, below 0 none and past 60 the cap |
 | `unavailable.json` | `503` with `Retry-After` | waits and retries, three attempts in all, then drops the batch with one warning |
 | `forbidden.json` | `403` | never retries; warns once naming the problem type; later batches are still sent |
 | `said.json` | `200`, a partial success whose line names neither a drop nor a refusal | warns once with the server's line, as it said it |

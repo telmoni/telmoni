@@ -316,13 +316,11 @@ func (e *exporter) wait(retryAfter string, attempt int) {
 	if attempt+1 >= attempts || e.gaveUp() {
 		return
 	}
-	seconds := float64(int(1) << attempt)
-	if retryAfter != "" {
-		if n, err := strconv.Atoi(strings.TrimSpace(retryAfter)); err == nil {
-			seconds = float64(n)
-		}
+	delay := time.Duration(1<<attempt) * time.Second
+	if given, ok := retrySeconds(retryAfter); ok {
+		delay = given
 	}
-	e.sleep(max(min(time.Duration(seconds*float64(time.Second)), retryAfterMax), 0))
+	e.sleep(min(delay, retryAfterMax))
 }
 
 func (e *exporter) warnOnce(key, text string) {
@@ -377,6 +375,31 @@ func problemType(body []byte) string {
 	}
 	problem, _, _ := strings.Cut(decoded.Message, ":")
 	return problem
+}
+
+// retrySeconds reads Retry-After's whole seconds as text, so a number of any
+// length reaches the cap without converting, and one below zero is none.
+func retrySeconds(header string) (time.Duration, bool) {
+	text := strings.Trim(header, " \t")
+	negative := strings.HasPrefix(text, "-")
+	if negative || strings.HasPrefix(text, "+") {
+		text = text[1:]
+	}
+	if text == "" || strings.Trim(text, "0123456789") != "" {
+		return 0, false
+	}
+	digits := strings.TrimLeft(text, "0")
+	switch {
+	case negative:
+		return 0, true
+	case len(digits) > 2:
+		return retryAfterMax, true
+	}
+	seconds := 0
+	for _, digit := range digits {
+		seconds = seconds*10 + int(digit-'0')
+	}
+	return time.Duration(seconds) * time.Second, true
 }
 
 // OTLP's ExportTraceServiceRequest, in its JSON encoding. Values are pointers

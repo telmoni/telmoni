@@ -14,6 +14,7 @@ import pytest
 
 from conftest import FIXTURES, FakeTransport, answer_from, kept, load_fixture
 from telmoni import Config, Telmoni, Usage
+from telmoni.exporter import Answer
 
 UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12}$")
 HEX32 = re.compile(r"^[0-9a-f]{32}$")
@@ -237,6 +238,48 @@ def test_rate_limited_waits_retry_after_and_sends_the_same_bytes(
         client.shutdown()
     assert sleeps == [2.0]
     assert transport.requests[0][2] == transport.requests[1][2]
+    assert warnings_in(caplog) == []
+
+
+def test_a_retry_after_past_the_cap_waits_the_cap(
+    sleeps: list[float], caplog: pytest.LogCaptureFixture
+) -> None:
+    transport = FakeTransport(
+        [answer_from(load_fixture("answers/rate-limited-long.json")), kept()]
+    )
+    client = Telmoni(Config(api_key="k"), transport=transport, sleep=sleeps.append)
+    try:
+        a_run(client)
+    finally:
+        client.shutdown()
+    assert sleeps == [60.0]
+    assert transport.requests[0][2] == transport.requests[1][2]
+    assert warnings_in(caplog) == []
+
+
+def test_retry_after_is_read_as_text(
+    sleeps: list[float], caplog: pytest.LogCaptureFixture
+) -> None:
+    """ASCII digits, a sign allowed: below 0 none, past 60 the cap however long."""
+
+    def limited(retry_after: str) -> Answer:
+        return Answer(429, {"Retry-After": retry_after}, b"{}")
+
+    transport = FakeTransport(
+        [
+            *(limited("99999999999"), limited("1_0"), kept()),
+            *(limited("-5"), limited(" +7\t"), kept()),
+            *(limited("9" * 400), kept()),
+        ]
+    )
+    client = Telmoni(Config(api_key="k"), transport=transport, sleep=sleeps.append)
+    try:
+        for _ in range(3):
+            a_run(client)
+    finally:
+        client.shutdown()
+    assert sleeps == [60.0, 2.0, 0.0, 7.0, 60.0]
+    assert len(transport.requests) == 8
     assert warnings_in(caplog) == []
 
 

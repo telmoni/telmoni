@@ -36,6 +36,7 @@ const CONTENT_DOCS = 'https://telmoni.com/docs/api/ingest#what-is-dropped-at-the
 const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g;
 const DROPPED = /^span (\S+) dropped (\S+): (\w+)(?:; (.*))?$/;
 const REFUSED = /^span (\S+) refused: (.*)$/;
+const SECONDS = /^[ \t]*([+-]?)([0-9]+)[ \t]*$/;
 
 // OTLP numbers the kinds from 1; the api's enum from 0.
 const KINDS = {
@@ -447,11 +448,8 @@ export class Exporter {
   /** Before the next attempt; nothing after the last. */
   async #wait(retryAfter: string | null, attempt: number): Promise<void> {
     if (attempt + 1 >= ATTEMPTS) return;
-    let seconds = 2 ** attempt;
-    if (retryAfter !== null && /^\s*[+-]?\d+\s*$/.test(retryAfter)) {
-      seconds = Number.parseInt(retryAfter, 10);
-    }
-    await this.#sleep(Math.min(Math.max(seconds, 0), RETRY_AFTER_MAX_S), this.#givenUp.signal);
+    const seconds = retrySeconds(retryAfter) ?? 2 ** attempt;
+    await this.#sleep(Math.min(seconds, RETRY_AFTER_MAX_S), this.#givenUp.signal);
   }
 
   /** Warns `text` once per client under `key`, as every warning is. */
@@ -502,6 +500,18 @@ function problemType(body: string): string {
   const message = isRecord(decoded) ? decoded['message'] : undefined;
   if (typeof message !== 'string' || !message.startsWith('/errors/')) return '';
   return message.split(':', 1)[0] ?? '';
+}
+
+/**
+ * `Retry-After`'s whole seconds, read as text: a number of any length reaches
+ * the cap without converting, and one below zero is none.
+ */
+function retrySeconds(header: string | null): number | undefined {
+  const given = SECONDS.exec(header ?? '');
+  if (given === null) return undefined;
+  const whole = (given[2] ?? '').replace(/^0+/, '');
+  if (given[1] === '-') return 0;
+  return whole.length > 2 ? RETRY_AFTER_MAX_S : Number(whole);
 }
 
 async function bodyOf(answer: TransportResponse): Promise<string> {

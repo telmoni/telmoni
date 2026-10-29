@@ -14,7 +14,7 @@ use common::{
     int, is_hex, is_uuid_v4, keyed, load_fixture, name_of, spans_of, text, warning_of,
 };
 use serde_json::{Value, json};
-use telmoni::transport::TransportError;
+use telmoni::transport::{Answer, TransportError};
 use telmoni::{
     Config, Hooks, ModelCallOptions, Reply, RunOptions, Telmoni, ToolCallOptions, Usage,
 };
@@ -367,6 +367,62 @@ fn rate_limited_waits_retry_after_and_sends_the_same_bytes() -> Outcome {
         requests.get(1).map(|request| &request.body),
         "the same bytes again"
     );
+    assert_eq!(harness.warnings.all(), Vec::<String>::new());
+    Ok(())
+}
+
+#[test]
+fn a_retry_after_past_the_cap_waits_the_cap() -> Outcome {
+    let harness = Harness::answering(
+        keyed(),
+        [Ok(answer("rate-limited-long")?), Ok(answer("kept")?)],
+    )?;
+    a_run(&harness)?;
+    harness.telmoni.shutdown();
+    assert_eq!(harness.sleeps.all(), [Duration::from_secs(60)]);
+    let requests = harness.transport.requests();
+    assert_eq!(
+        requests.first().map(|request| &request.body),
+        requests.get(1).map(|request| &request.body),
+        "the same bytes again"
+    );
+    assert_eq!(harness.warnings.all(), Vec::<String>::new());
+    Ok(())
+}
+
+/// `Retry-After` is read as text: ASCII digits, a sign allowed, below 0 none, past 60 the cap however long.
+#[test]
+fn retry_after_is_read_as_text() -> Outcome {
+    let limited = |retry_after: &str| -> Result<Answer, TransportError> {
+        Ok(Answer {
+            status: 429,
+            headers: vec![("Retry-After".to_owned(), retry_after.to_owned())],
+            body: b"{}".to_vec(),
+        })
+    };
+    let harness = Harness::answering(
+        keyed(),
+        [
+            limited("99999999999"),
+            limited("1_0"),
+            Ok(answer("kept")?),
+            limited("-5"),
+            limited(" +7\t"),
+            Ok(answer("kept")?),
+            limited(&"9".repeat(400)),
+            Ok(answer("kept")?),
+        ],
+    )?;
+    for _ in 0..3 {
+        a_run(&harness)?;
+    }
+    harness.telmoni.shutdown();
+    let seconds = Duration::from_secs;
+    assert_eq!(
+        harness.sleeps.all(),
+        [seconds(60), seconds(2), seconds(0), seconds(7), seconds(60)]
+    );
+    assert_eq!(harness.transport.count(), 8);
     assert_eq!(harness.warnings.all(), Vec::<String>::new());
     Ok(())
 }

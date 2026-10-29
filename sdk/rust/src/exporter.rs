@@ -312,8 +312,8 @@ impl Exporter {
         }
         // The header's whole seconds when it has them, else 1, 2, 4… seconds.
         let seconds = retry_after
-            .and_then(|header| header.trim().parse::<i64>().ok())
-            .map_or(1u64 << attempt, |parsed| u64::try_from(parsed).unwrap_or(0));
+            .and_then(retry_seconds)
+            .unwrap_or(1u64 << attempt);
         (self.sleep)(Duration::from_secs(seconds.min(RETRY_AFTER_MAX_SECS)));
     }
 }
@@ -385,6 +385,25 @@ fn problem_type(body: &[u8]) -> String {
         .split_once(':')
         .map_or(message, |(problem, _)| problem)
         .to_owned()
+}
+
+/// `Retry-After`'s whole seconds, read as text: a number of any length reaches
+/// the cap without converting, and one below zero is none.
+fn retry_seconds(header: &str) -> Option<u64> {
+    let text = header.trim_matches([' ', '\t']);
+    let (negative, digits) = match text.strip_prefix('-') {
+        Some(rest) => (true, rest),
+        None => (false, text.strip_prefix('+').unwrap_or(text)),
+    };
+    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    let whole = digits.trim_start_matches('0');
+    Some(match (negative, whole.len()) {
+        (true, _) => 0,
+        (false, 0..=2) => whole.parse().unwrap_or(0),
+        (false, _) => RETRY_AFTER_MAX_SECS,
+    })
 }
 
 /// The exporter's five resource attributes, and the deployment's two where

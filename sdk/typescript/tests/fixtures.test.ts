@@ -10,6 +10,7 @@ import {
   type ExportBody,
   type Harness,
   type JsonAttribute,
+  answer,
   answerNames,
   answers,
   harness,
@@ -261,6 +262,35 @@ describe('answers/', () => {
     }
     expect(h.sleeps).toEqual([2]);
     expect(h.transport.requests[0]!.body).toBe(h.transport.requests[1]!.body);
+    expect(h.warnings).toEqual([]);
+  });
+
+  it('a Retry-After past the cap waits the cap', async () => {
+    const h = harness({ apiKey: 'k' }, {}, [...answers('rate-limited-long'), kept()]);
+    try {
+      await aRun(h);
+    } finally {
+      await h.telmoni.shutdown();
+    }
+    expect(h.sleeps).toEqual([60]);
+    expect(h.transport.requests[0]!.body).toBe(h.transport.requests[1]!.body);
+    expect(h.warnings).toEqual([]);
+  });
+
+  it('reads Retry-After as text: ASCII digits, a sign allowed, below 0 none, past 60 the cap however long', async () => {
+    const limited = (retryAfter: string) => answer(429, { 'Retry-After': retryAfter }, '{}');
+    const h = harness({ apiKey: 'k' }, {}, [
+      ...[limited('99999999999'), limited('1_0'), kept()],
+      ...[limited('-5'), limited(' +7\t'), kept()],
+      ...[limited('9'.repeat(400)), kept()],
+    ]);
+    try {
+      for (let n = 0; n < 3; n++) await aRun(h);
+    } finally {
+      await h.telmoni.shutdown();
+    }
+    expect(h.sleeps).toEqual([60, 2, 0, 7, 60]);
+    expect(h.transport.requests).toHaveLength(8);
     expect(h.warnings).toEqual([]);
   });
 
