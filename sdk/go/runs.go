@@ -79,7 +79,7 @@ type handle struct {
 
 // End ends the span; a second End does nothing.
 func (h *handle) End() {
-	if h == nil || h.span == nil {
+	if h.span == nil {
 		return
 	}
 	h.once.Do(func() { h.span.End() })
@@ -90,7 +90,7 @@ func (h *handle) End() {
 // cancelled instead: the agent gave the call up. A deadline that ran out is
 // a failure, as a timeout is in the other SDKs; it fails with its own type.
 func (h *handle) Fail(err error) {
-	if h == nil || h.span == nil || err == nil {
+	if h.span == nil || err == nil {
 		return
 	}
 	if errors.Is(err, context.Canceled) {
@@ -103,7 +103,7 @@ func (h *handle) Fail(err error) {
 // FailWith marks the span failed with errorType as its error.type, none if
 // empty, and status ERROR with no message.
 func (h *handle) FailWith(errorType string) {
-	if h == nil || h.span == nil {
+	if h.span == nil {
 		return
 	}
 	// Ingest refuses the span over an empty one, and with a run's, the run.
@@ -116,7 +116,7 @@ func (h *handle) FailWith(errorType string) {
 // Cancel marks the span cancelled by the agent, which is neither ok nor an
 // error.
 func (h *handle) Cancel() {
-	if h == nil || h.span == nil {
+	if h.span == nil {
 		return
 	}
 	h.span.SetAttributes(attribute.Bool(attrCancelled, true))
@@ -331,9 +331,8 @@ func (r *Run) Agent() string {
 }
 
 // End ends the run's span; a second End does nothing. End, Fail, FailWith and
-// Cancel are the handle's, declared again on Run so a nil Run does nothing:
-// reached through the embedded handle, the nil Run would be dereferenced
-// before the handle's own check.
+// Cancel are the handle's, declared again on each handle so a nil one does
+// nothing: reached through the embedded handle, it would be dereferenced.
 func (r *Run) End() {
 	if r == nil {
 		return
@@ -382,6 +381,70 @@ func (t *ToolCall) Fail(err error) {
 		return
 	}
 	t.handle.Fail(t.run.failure(err))
+}
+
+// End ends the step's span; a second End does nothing.
+func (s *Step) End() {
+	if s == nil {
+		return
+	}
+	s.handle.End()
+}
+
+// End ends the call's span; a second End does nothing.
+func (t *ToolCall) End() {
+	if t == nil {
+		return
+	}
+	t.handle.End()
+}
+
+// FailWith marks the step failed as its run's FailWith would.
+func (s *Step) FailWith(errorType string) {
+	if s == nil {
+		return
+	}
+	s.handle.FailWith(errorType)
+}
+
+// FailWith marks the call failed as its run's FailWith would.
+func (m *ModelCall) FailWith(errorType string) {
+	if m == nil {
+		return
+	}
+	m.handle.FailWith(errorType)
+}
+
+// FailWith marks the call failed as its run's FailWith would.
+func (t *ToolCall) FailWith(errorType string) {
+	if t == nil {
+		return
+	}
+	t.handle.FailWith(errorType)
+}
+
+// Cancel marks the step cancelled as its run's Cancel would.
+func (s *Step) Cancel() {
+	if s == nil {
+		return
+	}
+	s.handle.Cancel()
+}
+
+// Cancel marks the call cancelled as its run's Cancel would.
+func (m *ModelCall) Cancel() {
+	if m == nil {
+		return
+	}
+	m.handle.Cancel()
+}
+
+// Cancel marks the call cancelled as its run's Cancel would.
+func (t *ToolCall) Cancel() {
+	if t == nil {
+		return
+	}
+	t.handle.Cancel()
 }
 
 // FailWith marks the run failed with errorType as its error.type, none if

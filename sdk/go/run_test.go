@@ -366,6 +366,28 @@ func TestRunsAndStepsCrossGoroutines(t *testing.T) {
 	}
 }
 
+// A nil handle of the caller's own, a deferred End on a call never opened
+// say, does nothing, whichever method it is given.
+func TestANilHandleDoesNothing(t *testing.T) {
+	var (
+		run  *telmoni.Run
+		step *telmoni.Step
+		call *telmoni.ModelCall
+		tool *telmoni.ToolCall
+	)
+	for _, nothing := range []interface {
+		End()
+		Fail(error)
+		FailWith(string)
+		Cancel()
+	}{run, step, call, tool} {
+		nothing.End()
+		nothing.Fail(errors.New("x"))
+		nothing.FailWith("x")
+		nothing.Cancel()
+	}
+}
+
 func TestNothingIsSentOutsideARun(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
 	ctx := context.Background()
