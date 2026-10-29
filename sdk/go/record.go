@@ -152,14 +152,14 @@ func (c *Client) RecordRun(ctx context.Context, record RunRecord) error {
 	rate := c.config.SampleRate
 	inherited := inheritedAttributes(formatUUID(runUUID), record.Agent, record.UserID, record.SessionID)
 	name, attrs := c.runOpening(record.Agent, inherited, rate, record.Tags)
-	// Warned of before the hold, as the tags are: a logger that records a run
-	// would wait on it for good.
-	c.warnUsage(record)
 	// Sampled out, no span is built: none of a record's ends after it, and
 	// the same record sent again draws again.
 	if rate < 1 && c.random() >= rate {
 		return nil
 	}
+	// After the draw, as Python and TypeScript warn, and before the hold: a
+	// logger that records a run would wait on it for good.
+	c.warnUsage(record)
 	// Queued whole or not at all: a record that outgrows the queue's room
 	// would lose its tail, the run's own span first.
 	release, err := c.processor.hold(trace.TraceID(runUUID), recordSpans(record))

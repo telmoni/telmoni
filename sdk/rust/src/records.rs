@@ -258,7 +258,7 @@ impl From<ToolCallRecord> for CallRecord {
 
 /// Sends `record` for the client, as
 /// [`Telmoni::record_run`](crate::Telmoni::record_run) says.
-pub(crate) fn send(inner: &Inner, mut record: RunRecord) -> Result<(), Error> {
+pub(crate) fn send(inner: &Inner, record: RunRecord) -> Result<(), Error> {
     if record.agent.trim().is_empty() {
         return Err(Error::EmptyAgent);
     }
@@ -275,16 +275,6 @@ pub(crate) fn send(inner: &Inner, mut record: RunRecord) -> Result<(), Error> {
         return Err(Error::SampleRate(rate));
     }
     let need = spans_in(&record);
-    // Before the hold: a sink is the application's, and may record a run of its own.
-    for call in model_calls(&mut record.inside) {
-        call.usage = call
-            .usage
-            .map(|usage| runs::sendable_usage(usage, &inner.warner));
-        call.operation = Some(runs::model_operation(
-            call.operation.as_deref(),
-            &inner.warner,
-        ));
-    }
 
     let RunRecord {
         agent,
@@ -293,7 +283,7 @@ pub(crate) fn send(inner: &Inner, mut record: RunRecord) -> Result<(), Error> {
         tags,
         start,
         end,
-        inside,
+        mut inside,
         error_type,
         cancelled,
         ..
@@ -305,6 +295,17 @@ pub(crate) fn send(inner: &Inner, mut record: RunRecord) -> Result<(), Error> {
     // the same record sent again draws again.
     if rate < 1.0 && (inner.random)() >= rate {
         return Ok(());
+    }
+    // After the draw, as Python and TypeScript warn, and before the hold: a
+    // sink is the application's, and may record a run of its own.
+    for call in model_calls(&mut inside) {
+        call.usage = call
+            .usage
+            .map(|usage| runs::sendable_usage(usage, &inner.warner));
+        call.operation = Some(runs::model_operation(
+            call.operation.as_deref(),
+            &inner.warner,
+        ));
     }
 
     // Queued whole or not at all: a record that outgrows the queue's room

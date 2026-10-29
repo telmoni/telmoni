@@ -390,6 +390,8 @@ fn the_sample_rate_drops_a_record_whole() -> Outcome {
         0,
         "a span of the record dropped was sent"
     );
+    // Its warnings, the operation set aside among them, are for a record kept.
+    assert_eq!(warnings.all(), Vec::<String>::new());
     let kept = RunRecord {
         run_id: "0f8fad5b-d9cb-469f-a165-70867728950e".to_owned(),
         ..dropped
@@ -852,8 +854,8 @@ fn a_record_leaves_off_a_tag_ingest_would_drop_before_its_32() -> Outcome {
     assert_eq!(
         harness.warnings.all(),
         [
-            "telmoni: a model call's operation must be chat, generate_content, text_completion or embeddings, which ingest reads as a model call; it is sent as chat",
             "telmoni: a tag's key must be 1 to 64 characters and its value up to 256; the tag is not sent",
+            "telmoni: a model call's operation must be chat, generate_content, text_completion or embeddings, which ingest reads as a model call; it is sent as chat",
         ]
     );
     Ok(())

@@ -341,6 +341,10 @@ func TestTheSampleRateDropsARecordWhole(t *testing.T) {
 	if sent := len(h.transport.all()); sent != 0 {
 		t.Fatalf("a record sampled out sent %d exports", sent)
 	}
+	// Its warnings, the operation set aside among them, are for a record kept.
+	if got := h.logs.warnings(); len(got) != 0 {
+		t.Errorf("a record sampled out warned %q", got)
+	}
 	// A record sampled out builds no span, so the same record, drawn in, is
 	// sent.
 	random = 0.1
