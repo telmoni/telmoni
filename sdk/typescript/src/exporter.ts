@@ -37,13 +37,13 @@ const DROPPED = /^span (\S+) dropped (\S+): (\w+)(?:; (.*))?$/;
 const REFUSED = /^span (\S+) refused: (.*)$/;
 
 // OTLP numbers the kinds from 1; the api's enum from 0.
-const KINDS: Readonly<Record<number, number>> = {
+const KINDS = {
   [SpanKind.INTERNAL]: 1,
   [SpanKind.SERVER]: 2,
   [SpanKind.CLIENT]: 3,
   [SpanKind.PRODUCER]: 4,
   [SpanKind.CONSUMER]: 5,
-};
+} as const satisfies Record<SpanKind, number>;
 
 // JavaScript has one number type, so the contract says which of ours are
 // doubles (1.0 is an integer here) and which are counts.
@@ -386,7 +386,7 @@ export class Exporter {
       spanId: spanContext.spanId,
       ...(parent !== undefined && isSpanContextValid(parent) ? { parentSpanId: parent.spanId } : {}),
       name: span.name,
-      kind: KINDS[span.kind] ?? 1,
+      kind: KINDS[span.kind],
       startTimeUnixNano: nanos(start),
       endTimeUnixNano: nanos(end),
       attributes,

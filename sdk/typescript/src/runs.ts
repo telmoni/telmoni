@@ -21,6 +21,7 @@ import type {
   CallRecord,
   ModelAnswer,
   ModelCallOptions,
+  ModelCallRecord,
   RecordOutcome,
   RecordTime,
   ResolvedConfig,
@@ -28,6 +29,7 @@ import type {
   RunRecord,
   StepRecord,
   ToolCallOptions,
+  ToolCallRecord,
   Usage,
 } from './types.js';
 
@@ -605,13 +607,21 @@ function read(record: RunRecord): Array<[Item, readonly CallRecord[]]> {
   return items;
 }
 
-type Field = readonly [name: string, type: 'string' | 'boolean' | 'object', optional: boolean];
+/** Each kind of record, whose fields the tables below name by its keys. */
+interface Kinds {
+  run: RunRecord;
+  step: StepRecord;
+  model_call: ModelCallRecord;
+  tool_call: ToolCallRecord;
+}
+
+type Field<T> = readonly [name: keyof T & string, type: 'string' | 'boolean' | 'object', optional: boolean];
 
 /**
  * Each recorded field's type, `null` or `undefined` too where optional:
  * OpenTelemetry would warn of another mid-build, or send it wrong.
  */
-const FIELDS: Record<'run' | Item['type'], readonly Field[]> = {
+const FIELDS = {
   run: [
     ['userId', 'string', true],
     ['sessionId', 'string', true],
@@ -624,19 +634,19 @@ const FIELDS: Record<'run' | Item['type'], readonly Field[]> = {
     ['usage', 'object', true],
   ],
   tool_call: [['name', 'string', false]],
-};
-const OUTCOME: readonly Field[] = [
+} satisfies { [K in keyof Kinds]: readonly Field<Kinds[K]>[] };
+const OUTCOME: readonly Field<RecordOutcome>[] = [
   ['errorType', 'string', true],
   ['cancelled', 'boolean', true],
 ];
 
 /** The longest each recorded text may be, in characters, as ingest caps it. */
-const CAPS: Record<keyof typeof FIELDS, Readonly<Record<string, number>>> = {
+const CAPS = {
   run: { userId: contract.USER_ID_MAX, sessionId: contract.SESSION_ID_MAX },
   step: { name: contract.NAME_MAX },
   model_call: { model: contract.MODEL_MAX, provider: contract.PROVIDER_MAX },
   tool_call: { name: contract.NAME_MAX },
-};
+} satisfies { [K in keyof Kinds]: Partial<Record<keyof Kinds[K], number>> };
 
 function check(item: RunRecord | Item, kind: keyof typeof FIELDS): void {
   const what = kind.replace('_', ' ');
