@@ -70,7 +70,7 @@ function span(over: Partial<TraceSpan> & Pick<TraceSpan, "span_id" | "kind">): T
 
 const VIEW: TraceView = {
   id: "0b6f2c1e-6a4f-4d2b-9e3a-5c7d8e9f0a1b",
-  kind: "list",
+  kind: "traces",
   name: "Errors",
   query: { status: ["error"], agent: ["support-bot", "zeta"], sort: "duration", days: 30 },
   columns: [TraceColumn.Started, TraceColumn.Duration],

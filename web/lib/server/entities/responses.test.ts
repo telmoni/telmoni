@@ -61,6 +61,7 @@ import { SessionDetailSchema, SessionListSchema } from "./sessions";
 import {
   FacetsSchema,
   SavedViewOfAnyKindSchema,
+  SessionViewListSchema,
   TraceDetailSchema,
   TraceHistogramSchema,
   TraceLayoutListSchema,
@@ -135,6 +136,7 @@ const READERS: Record<string, z.ZodType> = {
   "telemetry/layouts.json": TraceLayoutListSchema,
   "telemetry/mutes.json": MuteListSchema,
   "telemetry/session-layout.json": SessionLayoutSettingSchema,
+  "telemetry/session-views.json": SessionViewListSchema,
   "telemetry/session.json": SessionDetailSchema,
   "telemetry/sessions.json": SessionListSchema,
   "telemetry/trace.json": TraceDetailSchema,
@@ -178,9 +180,9 @@ describe("the server's answers", () => {
     expect(files).toEqual(Object.keys(READERS).sort());
   });
 
-  it("a saved view of either kind reads as a save answers it", () => {
+  it("a saved view of every kind reads as a save answers it", () => {
     const Views = z.object({ views: z.array(z.unknown()) });
-    for (const name of ["telemetry/views.json", "telemetry/layouts.json"]) {
+    for (const name of ["telemetry/views.json", "telemetry/session-views.json", "telemetry/layouts.json"]) {
       for (const view of Views.parse(pinned(name)).views) {
         expect(SavedViewOfAnyKindSchema.safeParse(view).error).toBeUndefined();
       }

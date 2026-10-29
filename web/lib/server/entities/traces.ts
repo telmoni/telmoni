@@ -8,11 +8,15 @@ import { logger } from "@/lib/logger";
 import {
   LayoutDepth,
   LayoutOpen,
+  SessionColumn,
+  SessionSort,
   SortDirection,
   SpanKind,
   SpanStatus,
   TraceColumn,
   TraceSort,
+  UserColumn,
+  UserSort,
   ViewKind,
 } from "@/lib/types/enums";
 
@@ -94,16 +98,29 @@ export const TraceHistogramSchema = z.object({
 });
 export type TraceHistogram = z.infer<typeof TraceHistogramSchema>;
 
-// A saved view's query: the list's, each filter's values a list, and no
-// key the list does not take, as the server refuses one.
-export const ViewQuerySchema = z.strictObject({
-  ...ListFiltersSchema.shape,
-  sort: z.enum(TraceSort).optional(),
-  dir: z.enum(SortDirection).optional(),
-  days: z.number().optional(),
-  limit: z.number().optional(),
-});
+// A saved view's query: its list's, each filter's values a list, its sort
+// one of that list's, and no key the list does not take, as the server
+// refuses one.
+function viewQuerySchema<S extends Record<string, string>>(sorts: S) {
+  return z.strictObject({
+    ...ListFiltersSchema.shape,
+    sort: z.enum(sorts).optional(),
+    dir: z.enum(SortDirection).optional(),
+    days: z.number().optional(),
+    limit: z.number().optional(),
+  });
+}
+export const ViewQuerySchema = viewQuerySchema(TraceSort);
+export const SessionViewQuerySchema = viewQuerySchema(SessionSort);
+export const UserViewQuerySchema = viewQuerySchema(UserSort);
 export type ViewQuery = z.infer<typeof ViewQuerySchema>;
+/** A saved view's query, its sort among `S`. */
+export type ListViewQuery<S extends string> = ListFilters & {
+  sort?: S;
+  dir?: SortDirection;
+  days?: number;
+  limit?: number;
+};
 
 // The calls a layout shows: by kind, by how they ended and by name, any
 // value of each admitting a call, and a list left out every call.
@@ -134,13 +151,30 @@ const SavedViewSchema = z.object({
   updated_at: z.string(),
 });
 
-// One of the project's saved views of the list: its query and the columns it
-// showed, under a name.
+// One of the project's saved views of a list: its query and the columns it
+// showed, under a name, each by that list's words.
 export const TraceViewSchema = SavedViewSchema.extend({
-  kind: z.literal(ViewKind.List),
+  kind: z.literal(ViewKind.Traces),
   query: ViewQuerySchema,
 });
 export type TraceView = z.infer<typeof TraceViewSchema>;
+
+export const SessionViewSchema = SavedViewSchema.extend({
+  kind: z.literal(ViewKind.Sessions),
+  query: SessionViewQuerySchema,
+  columns: z.array(z.enum(SessionColumn)),
+});
+export type SessionView = z.infer<typeof SessionViewSchema>;
+
+export const UserViewSchema = SavedViewSchema.extend({
+  kind: z.literal(ViewKind.Users),
+  query: UserViewQuerySchema,
+  columns: z.array(z.enum(UserColumn)),
+});
+export type UserView = z.infer<typeof UserViewSchema>;
+
+/** A saved view of any of the three lists. */
+export type ListView = TraceView | SessionView | UserView;
 
 // One of the project's saved layouts: a layout's options and the columns a
 // trace shows, under a name.
@@ -150,13 +184,17 @@ export const TraceLayoutSchema = SavedViewSchema.extend({
 });
 export type TraceLayout = z.infer<typeof TraceLayoutSchema>;
 
-/** A saved view of either kind, as a save answers it. */
+/** A saved view of any kind, as a save answers it. */
 export const SavedViewOfAnyKindSchema = z.discriminatedUnion("kind", [
   TraceViewSchema,
+  SessionViewSchema,
+  UserViewSchema,
   TraceLayoutSchema,
 ]);
 
 export const TraceViewListSchema = z.object({ views: z.array(TraceViewSchema) });
+export const SessionViewListSchema = z.object({ views: z.array(SessionViewSchema) });
+export const UserViewListSchema = z.object({ views: z.array(UserViewSchema) });
 export const TraceLayoutListSchema = z.object({ views: z.array(TraceLayoutSchema) });
 
 /** What narrows and orders a list, and which page of it shows, as the URL
@@ -196,8 +234,8 @@ export type HistogramAccess =
   | { kind: "forbidden" }
   | { kind: "unavailable" };
 
-export type ViewsAccess =
-  | { kind: "ok"; views: TraceView[] }
+export type ViewsAccess<V extends ListView = TraceView> =
+  | { kind: "ok"; views: V[] }
   | { kind: "forbidden" }
   | { kind: "unavailable" };
 
@@ -283,13 +321,37 @@ export const fetchTraceHistogram = cache(
   },
 );
 
-/** The project's saved views of the list, by name. */
+/** The project's saved views of the trace list, by name. */
 export const fetchTraceViews = cache(async (projectId: string): Promise<ViewsAccess> => {
   const read = await readLane(
     "fetchTraceViews",
     projectId,
-    `/views?kind=${ViewKind.List}`,
+    `/views?kind=${ViewKind.Traces}`,
     TraceViewListSchema,
+  );
+  return read.kind === "ok" ? { kind: "ok", views: read.value.views } : read;
+});
+
+/** The project's saved views of the sessions list, by name. */
+export const fetchSessionViews = cache(
+  async (projectId: string): Promise<ViewsAccess<SessionView>> => {
+    const read = await readLane(
+      "fetchSessionViews",
+      projectId,
+      `/views?kind=${ViewKind.Sessions}`,
+      SessionViewListSchema,
+    );
+    return read.kind === "ok" ? { kind: "ok", views: read.value.views } : read;
+  },
+);
+
+/** The project's saved views of the users list, by name. */
+export const fetchUserViews = cache(async (projectId: string): Promise<ViewsAccess<UserView>> => {
+  const read = await readLane(
+    "fetchUserViews",
+    projectId,
+    `/views?kind=${ViewKind.Users}`,
+    UserViewListSchema,
   );
   return read.kind === "ok" ? { kind: "ok", views: read.value.views } : read;
 });

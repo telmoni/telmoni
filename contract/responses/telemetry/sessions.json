@@ -6,6 +6,7 @@
   "page": 1,
   "sessions": [
     {
+      "duration_ms": 4200,
       "errors": 1,
       "first_seen": "2027-01-15T08:00:00Z",
       "input_tokens": 2400,

@@ -7,7 +7,7 @@ import { SortHeading } from "@/components/sort-heading";
 import { ColumnHeadings, compactPadding } from "@/components/traces/list-table";
 import { sumCell, sumClass, sumTitle } from "@/components/traces/sum-cells";
 import type { UserQuery, UserRow } from "@/lib/server/entities/users";
-import { tracesHref } from "@/lib/traces";
+import { tracesHref, type ListUi } from "@/lib/traces";
 import { UserSort } from "@/lib/types/enums";
 import { useTracePrefs } from "@/lib/use-trace-prefs";
 import {
@@ -23,18 +23,20 @@ type Props = {
   organization: string;
   slug: string;
   query: UserQuery;
+  /** The page's own, which a heading's sort keeps. */
+  ui: ListUi;
   users: UserRow[];
 };
 
 // The page's rows, a user each: their id, which opens their traces, and the
 // columns the person shows (`lib/trace-prefs.ts`), each heading a link that
 // sorts by it.
-export function UserTable({ organization, slug, query, users }: Props) {
+export function UserTable({ organization, slug, query, ui, users }: Props) {
   const prefs = useTracePrefs();
   const columns = USER_COLUMNS.filter((c) => prefs.userColumns.includes(c.key));
   const { sort, dir } = currentUserSort(query);
   const tight = compactPadding(prefs.density);
-  const sorted = (column: UserSort) => usersHref(organization, slug, query, nextUserSort(query, column));
+  const sorted = (column: UserSort) => usersHref(organization, slug, query, nextUserSort(query, column), ui);
 
   return (
     <DataTable>

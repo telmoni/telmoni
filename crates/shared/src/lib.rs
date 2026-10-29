@@ -50,7 +50,8 @@ pub use types::{
     IncidentStatus, LaneCeilings, LayoutDepth, LayoutOpen, MemberCeiling, MissingData,
     NotificationKind, OrganizationAction, OrganizationId, OrganizationIdError, OrganizationRole,
     OrganizationStatus, ParseEnumError, Paused, ProjectId, ProjectIdError, Redacted, Role,
-    RuleAggregation, RuleLevel, RuleMeasure, RuleOperator, RuleWindow, SessionId, SessionIdError,
-    SessionSort, Severity, SortDirection, SpanKind, SpanStatus, TelmoniResourceKind, TraceColumn,
-    TraceSort, UserId, UserIdError, UserSort, ViewKind,
+    RuleAggregation, RuleLevel, RuleMeasure, RuleOperator, RuleWindow, SessionColumn, SessionId,
+    SessionIdError, SessionSort, Severity, SortDirection, SpanKind, SpanStatus,
+    TelmoniResourceKind, TraceColumn, TraceSort, UserColumn, UserId, UserIdError, UserSort,
+    ViewKind,
 };

@@ -4,9 +4,10 @@ import { ServiceUnavailable } from "@/components/service-unavailable";
 import { ListPage } from "@/components/traces/list-page";
 import { ListToolbar } from "@/components/traces/toolbar";
 import { UserTable } from "@/components/traces/user-table";
-import { fetchUserFacets, fetchUsers } from "@/lib/server/data";
+import { administers } from "@/lib/roles";
+import { fetchUserFacets, fetchUsers, fetchUserViews } from "@/lib/server/data";
 import { projectPage } from "@/lib/server/project-page";
-import { DEFAULT_ROWS } from "@/lib/traces";
+import { DEFAULT_ROWS, parseListUi } from "@/lib/traces";
 import { parseUserQuery } from "@/lib/users";
 
 export const metadata = { title: "Users" };
@@ -20,14 +21,17 @@ export default async function UsersPage({
   searchParams,
 }: PageProps<"/[organization]/[project]/users">) {
   const { organization, project: slug } = await params;
-  const query = parseUserQuery(await searchParams);
+  const given = await searchParams;
+  const query = parseUserQuery(given);
+  const ui = parseListUi(given);
   const resolved = await projectPage(slug);
   if (resolved.kind === "unavailable") return <ServiceUnavailable />;
   const { gate, project } = resolved;
 
-  const [access, facets] = await Promise.all([
+  const [access, facets, views] = await Promise.all([
     fetchUsers(project.id, { ...query, limit: query.limit ?? DEFAULT_ROWS }),
     fetchUserFacets(project.id, query),
+    fetchUserViews(project.id),
   ]);
 
   return (
@@ -39,6 +43,7 @@ export default async function UsersPage({
       slug={slug}
       gate={gate}
       query={query}
+      ui={ui}
       access={access}
       facets={facets.kind === "ok" ? facets.facets : null}
       rows={(list) => list.users.length}
@@ -47,8 +52,12 @@ export default async function UsersPage({
           list="users"
           organization={organization}
           slug={slug}
+          projectId={project.id}
           query={query}
+          ui={ui}
           total={list.total}
+          views={views.kind === "ok" ? views.views : null}
+          canSave={administers(project.role)}
         />
       )}
       nothingYet={(days) => (
@@ -63,7 +72,13 @@ export default async function UsersPage({
         </>
       )}
       table={(list) => (
-        <UserTable organization={organization} slug={slug} query={query} users={list.users} />
+        <UserTable
+          organization={organization}
+          slug={slug}
+          query={query}
+          ui={ui}
+          users={list.users}
+        />
       )}
     />
   );

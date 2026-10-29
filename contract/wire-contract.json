@@ -169,6 +169,18 @@
       "day",
       "week"
     ],
+    "SessionColumn": [
+      "user",
+      "traces",
+      "errors",
+      "steps",
+      "input_tokens",
+      "output_tokens",
+      "tokens",
+      "duration",
+      "first_seen",
+      "last_seen"
+    ],
     "SessionSort": [
       "session",
       "user",
@@ -178,6 +190,7 @@
       "input_tokens",
       "output_tokens",
       "tokens",
+      "duration",
       "first_seen",
       "last_seen"
     ],
@@ -244,6 +257,17 @@
       "tokens",
       "duration"
     ],
+    "UserColumn": [
+      "traces",
+      "errors",
+      "steps",
+      "input_tokens",
+      "output_tokens",
+      "tokens",
+      "duration",
+      "first_seen",
+      "last_seen"
+    ],
     "UserSort": [
       "user",
       "traces",
@@ -252,11 +276,14 @@
       "input_tokens",
       "output_tokens",
       "tokens",
+      "duration",
       "first_seen",
       "last_seen"
     ],
     "ViewKind": [
-      "list",
+      "traces",
+      "sessions",
+      "users",
       "layout"
     ]
   },

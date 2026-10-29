@@ -35,6 +35,7 @@ page, laid out as the [trace list](/docs/workspace/traces#the-list) is:
 | Errors | How many of those had a span that failed |
 | Steps | The steps those runs took, summed |
 | Tokens | Their model calls' input and output tokens, summed; hover for the split |
+| Duration | How long its runs took, summed |
 | First seen | When the session's first run in the window started, in your time zone |
 | Last seen | When its last run in the window ended |
 
@@ -56,6 +57,10 @@ lists the sessions with a run that failed, each with all its runs. A
 session's id, or a user's, can be typed in as well (**Text**), to find one.
 The filters in force stand above the rows: clear one with its ×, or all of
 them at once.
+
+**Errors**, **Slow** and **Tokens** above the list are ready-made: the
+sessions with failed spans, the sessions whose runs took longest first, or the
+sessions that used the most tokens first. Click one again to take it off.
 
 ### Sort, pages and the window
 
@@ -83,6 +88,13 @@ the same way, as the project's runs land.
 
 Every filter, the sort, the window and the page are in the page's URL, so a
 link holds the view.
+
+### Saved views
+
+**Views** keeps the list as the project's own, as the trace list's
+[saved views](/docs/workspace/traces#saved-views) do: its filters, sort,
+window, rows per page and columns, under a name. A project keeps up to 100
+views of its sessions, apart from its views of its traces and its users.
 
 ### Downloading the list
 

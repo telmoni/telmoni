@@ -99,6 +99,8 @@ export {
   fetchTraceLayouts,
   fetchTraces,
   fetchTraceViews,
+  fetchSessionViews,
+  fetchUserViews,
   traceDownload,
 } from "./entities/traces";
 export type {
@@ -118,6 +120,10 @@ export type {
   TraceSpan,
   TracesAccess,
   TraceView,
+  SessionView,
+  UserView,
+  ListView,
+  ListViewQuery,
   ViewQuery,
 } from "./entities/traces";
 

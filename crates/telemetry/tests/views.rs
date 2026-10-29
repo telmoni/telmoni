@@ -344,7 +344,7 @@ async fn a_layout_is_a_view_of_its_own_kind(pool: PgPool) {
             "PUT",
             &one,
             OWNER,
-            Some(json!({ "name": "Review", "kind": "list" })),
+            Some(json!({ "name": "Review", "kind": "traces" })),
         ))
         .await;
     assert_eq!(

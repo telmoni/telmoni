@@ -226,7 +226,7 @@ async fn every_role_reads_the_layout_and_owners_and_admins_set_it(pool: PgPool) 
 #[sqlx::test]
 async fn a_saved_layout_is_the_default_until_it_is_deleted(pool: PgPool) {
     let p = project(&pool);
-    let list = p.save(&p.project, "list", "Errors").await;
+    let list = p.save(&p.project, "traces", "Errors").await;
     let elsewhere = p.save(&p.other, "layout", "Theirs").await;
     for id in [
         list.as_str(),

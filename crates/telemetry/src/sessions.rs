@@ -31,6 +31,8 @@ pub struct SessionRow {
     pub input_tokens: u64,
     /// Its model calls' output tokens, summed.
     pub output_tokens: u64,
+    /// How long its runs took, summed, in milliseconds.
+    pub duration_ms: i64,
     /// When its first run in the window started.
     #[serde(deserialize_with = "clickhouse::serde::chrono::datetime64::micros::deserialize")]
     pub first_seen: DateTime<Utc>,
@@ -51,6 +53,8 @@ macro_rules! sessions {
             "sum(steps) AS session_steps, sum(input_total) AS session_input, ",
             "sum(output_total) AS session_output, ",
             "session_input + session_output AS session_tokens, ",
+            "sum(greatest(dateDiff('millisecond', first_started_at, last_ended_at), 0)) ",
+            "AS session_duration, ",
             "min(first_started_at) AS session_first, max(last_ended_at) AS session_last ",
             "FROM (",
             run_rows!(),
@@ -70,7 +74,7 @@ macro_rules! list_sql {
             "SELECT session_id, session_user AS user_id, session_traces AS traces, ",
             "session_errors AS errors, session_steps AS steps, ",
             "session_input AS input_tokens, session_output AS output_tokens, ",
-            "session_first AS first_seen, ",
+            "session_duration AS duration_ms, session_first AS first_seen, ",
             "session_last AS last_seen ",
             "FROM (",
             sessions!(),
@@ -102,6 +106,8 @@ const fn list_sql(sort: SessionSort, direction: SortDirection) -> &'static str {
         (SessionSort::OutputTokens, Desc) => list_sql!("output_tokens DESC"),
         (SessionSort::Tokens, Asc) => list_sql!("session_tokens ASC"),
         (SessionSort::Tokens, Desc) => list_sql!("session_tokens DESC"),
+        (SessionSort::Duration, Asc) => list_sql!("duration_ms ASC"),
+        (SessionSort::Duration, Desc) => list_sql!("duration_ms DESC"),
         (SessionSort::FirstSeen, Asc) => list_sql!("first_seen ASC"),
         (SessionSort::FirstSeen, Desc) => list_sql!("first_seen DESC"),
         (SessionSort::LastSeen, Asc) => list_sql!("last_seen ASC"),
@@ -144,6 +150,7 @@ impl Listing for Sessions {
             | SessionSort::InputTokens
             | SessionSort::OutputTokens
             | SessionSort::Tokens
+            | SessionSort::Duration
             | SessionSort::LastSeen => SortDirection::Desc,
         }
     }
@@ -173,6 +180,7 @@ mod tests {
                     SessionSort::InputTokens => "input_tokens",
                     SessionSort::OutputTokens => "output_tokens",
                     SessionSort::Tokens => "session_tokens",
+                    SessionSort::Duration => "duration_ms",
                     SessionSort::FirstSeen => "first_seen",
                     SessionSort::LastSeen => "last_seen",
                 };

@@ -51,6 +51,7 @@ vi.mock("@/lib/server/data", () => ({
   fetchProjectBySlug: (slug: string) => fetchProjectBySlug(slug),
   fetchUsers: (projectId: string, query: unknown) => fetchUsers(projectId, query),
   fetchUserFacets: (projectId: string, query: unknown) => fetchUserFacets(projectId, query),
+  fetchUserViews: async () => ({ kind: "ok", views: [] }),
 }));
 
 import UsersPage from "./page";
@@ -66,6 +67,7 @@ const USER_A = {
   steps: 40,
   input_tokens: 1200,
   output_tokens: 300,
+  duration_ms: 1500,
   first_seen: "2026-10-04T03:00:00Z",
   last_seen: "2026-10-11T03:00:02Z",
 };
@@ -76,6 +78,7 @@ const USER_B = {
   steps: 3,
   input_tokens: 10,
   output_tokens: 5,
+  duration_ms: 1500,
   first_seen: "2026-10-10T03:00:00Z",
   last_seen: "2026-10-10T03:00:01Z",
 };
@@ -173,7 +176,7 @@ describe("UsersPage", () => {
       "href",
       "/acme/web/users?sort=last_seen&dir=desc",
     );
-    expect(screen.getByRole("button", { name: /Columns/ })).toHaveTextContent("7/9");
+    expect(screen.getByRole("button", { name: /Columns/ })).toHaveTextContent("8/10");
     // The window and the refresh stand on the title's row, as on the traces page.
     const header = within(screen.getByTestId("page-header"));
     expect(header.getByRole("combobox", { name: "Window" })).toHaveTextContent("Last 7 days");
@@ -259,7 +262,7 @@ describe("UsersPage", () => {
     expect(headings()).toEqual(["User", "Errors"]);
     fireEvent.keyDown(screen.getByRole("button", { name: /^Columns/ }), { key: "Enter" });
     fireEvent.click(await screen.findByRole("menuitem", { name: "Back to the defaults" }));
-    expect(headings()).toEqual(["User", "Traces", "Errors", "Steps", "Tokens", "First seen", "Last seen"]);
+    expect(headings()).toEqual(["User", "Traces", "Errors", "Steps", "Tokens", "Duration", "First seen", "Last seen"]);
   });
 
   it("says when the filters admit no user, and tells a project that names none which attribute to set", async () => {

@@ -168,7 +168,7 @@ pub struct SessionList {
 }
 
 /// A download's header row: the page's fields, in its order.
-const CSV_HEADER: [&str; 9] = [
+const CSV_HEADER: [&str; 10] = [
     "session_id",
     "user_id",
     "traces",
@@ -176,6 +176,7 @@ const CSV_HEADER: [&str; 9] = [
     "steps",
     "input_tokens",
     "output_tokens",
+    "duration_ms",
     "first_seen",
     "last_seen",
 ];
@@ -183,7 +184,7 @@ const CSV_HEADER: [&str; 9] = [
 impl SessionRow {
     /// The row a download writes for it, under [`CSV_HEADER`], its times as
     /// RFC 3339.
-    fn cells(&self) -> [String; 9] {
+    fn cells(&self) -> [String; 10] {
         let time = |t: &DateTime<Utc>| t.to_rfc3339_opts(SecondsFormat::Micros, true);
         [
             self.session_id.clone(),
@@ -193,6 +194,7 @@ impl SessionRow {
             self.steps.to_string(),
             self.input_tokens.to_string(),
             self.output_tokens.to_string(),
+            self.duration_ms.to_string(),
             time(&self.first_seen),
             time(&self.last_seen),
         ]
@@ -440,6 +442,7 @@ mod tests {
             steps: 7,
             input_tokens: 300,
             output_tokens: 30,
+            duration_ms: 1_250,
             first_seen: at,
             last_seen: at,
         };
@@ -447,7 +450,8 @@ mod tests {
         assert_eq!(cells.len(), CSV_HEADER.len());
         assert_eq!(cells[0], "thread, 42");
         assert_eq!(cells[5], "300");
-        assert_eq!(cells[7], "2026-10-11T12:30:00.000000Z");
+        assert_eq!(cells[7], "1250");
+        assert_eq!(cells[8], "2026-10-11T12:30:00.000000Z");
     }
 
     /// A session's page reads its window and the names pinned, each trimmed

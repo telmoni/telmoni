@@ -25,6 +25,8 @@ pub enum SessionSort {
     OutputTokens,
     /// Its runs' input and output tokens, summed.
     Tokens,
+    /// How long its runs took, summed.
+    Duration,
     /// When its first run in the window started.
     FirstSeen,
     /// When its last run in the window ended: the default.
@@ -40,6 +42,7 @@ crate::wire_enum!(SessionSort {
     InputTokens => "input_tokens",
     OutputTokens => "output_tokens",
     Tokens => "tokens",
+    Duration => "duration",
     FirstSeen => "first_seen",
     LastSeen => "last_seen",
 });

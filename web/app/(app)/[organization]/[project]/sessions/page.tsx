@@ -10,11 +10,12 @@ import {
   fetchSessionFacets,
   fetchSessionLayout,
   fetchSessions,
+  fetchSessionViews,
   fetchTraceLayouts,
 } from "@/lib/server/data";
 import { projectPage } from "@/lib/server/project-page";
 import { parseSessionQuery } from "@/lib/sessions";
-import { DEFAULT_ROWS } from "@/lib/traces";
+import { DEFAULT_ROWS, parseListUi } from "@/lib/traces";
 
 export const metadata = { title: "Sessions" };
 
@@ -28,18 +29,22 @@ export default async function SessionsPage({
   searchParams,
 }: PageProps<"/[organization]/[project]/sessions">) {
   const { organization, project: slug } = await params;
-  const query = parseSessionQuery(await searchParams);
+  const given = await searchParams;
+  const query = parseSessionQuery(given);
+  const ui = parseListUi(given);
   const resolved = await projectPage(slug);
   if (resolved.kind === "unavailable") return <ServiceUnavailable />;
   const { gate, project } = resolved;
 
   // The layouts and the project's default, for the session the panel opens.
-  const [access, facets, setting, layouts] = await Promise.all([
+  const [access, facets, setting, layouts, views] = await Promise.all([
     fetchSessions(project.id, { ...query, limit: query.limit ?? DEFAULT_ROWS }),
     fetchSessionFacets(project.id, query),
     fetchSessionLayout(project.id),
     fetchTraceLayouts(project.id),
+    fetchSessionViews(project.id),
   ]);
+  const canSave = administers(project.role);
 
   return (
     <ListPage
@@ -50,6 +55,7 @@ export default async function SessionsPage({
       slug={slug}
       gate={gate}
       query={query}
+      ui={ui}
       access={access}
       facets={facets.kind === "ok" ? facets.facets : null}
       rows={(list) => list.sessions.length}
@@ -58,8 +64,12 @@ export default async function SessionsPage({
           list="sessions"
           organization={organization}
           slug={slug}
+          projectId={project.id}
           query={query}
+          ui={ui}
           total={list.total}
+          views={views.kind === "ok" ? views.views : null}
+          canSave={canSave}
         />
       )}
       nothingYet={(days) => (
@@ -78,6 +88,7 @@ export default async function SessionsPage({
           organization={organization}
           slug={slug}
           query={query}
+          ui={ui}
           sessions={list.sessions}
         />
       )}
@@ -93,7 +104,7 @@ export default async function SessionsPage({
           window={{ days: query.days }}
           layouts={layouts.kind === "ok" ? layouts.layouts : null}
           project={setting}
-          canSave={administers(project.role)}
+          canSave={canSave}
         />
       )}
     </ListPage>

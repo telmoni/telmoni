@@ -1,6 +1,6 @@
-//! A project's saved views, under [`Resource::View`]: views of its trace
-//! list (`kind` = `list`) and layouts of a session's page and a trace's
-//! (`layout`). `GET /internal/v1/telemetry/views?kind=`, which every role on
+//! A project's saved views, under [`Resource::View`]: views of its lists
+//! (`kind` = `traces`, `sessions` or `users`) and layouts of a session's page
+//! and a trace's (`layout`). `GET /internal/v1/telemetry/views?kind=`, which every role on
 //! the project reads, and `POST`, `PUT /views/{id}` and `DELETE /views/{id}`,
 //! which its owners and admins send. A view is a name, a query checked as
 //! its page would read it — the list's filters and sort, or a layout's
@@ -22,9 +22,11 @@ use telmoni_shared::db::tenant_session::{ProjectAndOrganization, Scoped, project
 use telmoni_shared::extract::{Json, Query};
 use telmoni_shared::rbac::{Resource, Verb};
 use telmoni_shared::seam::Auth;
+use telmoni_shared::types::WireEnum;
 use telmoni_shared::{
-    AuthError, LayoutDepth, LayoutOpen, OrInternal, ProjectId, SortDirection, SpanKind, SpanStatus,
-    TelmoniError, TraceColumn, TraceSort, ViewKind,
+    AuthError, LayoutDepth, LayoutOpen, OrInternal, ProjectId, SessionColumn, SessionSort,
+    SortDirection, SpanKind, SpanStatus, TelmoniError, TraceColumn, TraceSort, UserColumn,
+    UserSort, ViewKind,
 };
 
 use crate::AppState;
@@ -43,7 +45,7 @@ pub const VIEW_NAME_MAX: usize = 60;
 /// into.
 const NAME_TAKEN: &str = "trace_views_project_name_idx";
 
-/// The list's query string: which kind of view, `list` when left out.
+/// The list's query string: which kind of view, `traces` when left out.
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ViewsQuery {
@@ -51,18 +53,55 @@ pub struct ViewsQuery {
     pub kind: String,
 }
 
-/// `kind` as a URL carries it: `list` when empty.
+/// `kind` as a URL carries it: `traces` when empty.
 fn parse_kind(text: &str) -> Result<ViewKind, TelmoniError> {
     match text.trim() {
-        "" => Ok(ViewKind::List),
-        given => given
-            .parse()
-            .map_err(|_| TelmoniError::BadRequest("kind is list or layout".into())),
+        "" => Ok(ViewKind::Traces),
+        given => given.parse().map_err(|_| {
+            TelmoniError::BadRequest("kind is traces, sessions, users or layout".into())
+        }),
     }
 }
 
-/// A list view's query: the list's, each filter's values a list. A key left
-/// out narrows nothing, or asks for the list's default.
+/// `sort` as `kind`'s list reads it: one of its own sorts' words.
+fn sort_of(kind: ViewKind, sort: &str) -> Option<&'static str> {
+    fn word<E: WireEnum + std::str::FromStr>(sort: &str) -> Option<&'static str> {
+        sort.parse::<E>().ok().map(E::word)
+    }
+    match kind {
+        ViewKind::Traces => word::<TraceSort>(sort),
+        ViewKind::Sessions => word::<SessionSort>(sort),
+        ViewKind::Users => word::<UserSort>(sort),
+        ViewKind::Layout => None,
+    }
+}
+
+/// `given` as `kind`'s columns: each once, in the list's order, or `None`
+/// where one is not the list's. A layout's are a trace's.
+fn columns_of(kind: ViewKind, given: &[String]) -> Option<Vec<String>> {
+    fn ordered<E: WireEnum>(given: &[String]) -> Option<Vec<String>> {
+        let words: Vec<&str> = E::variants().iter().map(|column| column.word()).collect();
+        if !given.iter().all(|g| words.contains(&g.as_str())) {
+            return None;
+        }
+        Some(
+            words
+                .into_iter()
+                .filter(|word| given.iter().any(|g| g == word))
+                .map(str::to_owned)
+                .collect(),
+        )
+    }
+    match kind {
+        ViewKind::Traces | ViewKind::Layout => ordered::<TraceColumn>(given),
+        ViewKind::Sessions => ordered::<SessionColumn>(given),
+        ViewKind::Users => ordered::<UserColumn>(given),
+    }
+}
+
+/// A list view's query: the list's, each filter's values a list, and its sort
+/// one of that list's own. A key left out narrows nothing, or asks for the
+/// list's default.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ViewQuery {
@@ -87,7 +126,7 @@ pub struct ViewQuery {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub prompt: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub sort: Option<TraceSort>,
+    pub sort: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dir: Option<SortDirection>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -97,9 +136,15 @@ pub struct ViewQuery {
 }
 
 impl ViewQuery {
-    /// The query checked by the list's own rules, and kept as they leave it:
-    /// each value trimmed and given once.
-    fn checked(self) -> Result<Self, TelmoniError> {
+    /// The query checked by `kind`'s list's own rules, and kept as they leave
+    /// it: each value trimmed and given once.
+    fn checked(self, kind: ViewKind) -> Result<Self, TelmoniError> {
+        let sort = match self.sort.as_deref() {
+            None => None,
+            Some(given) => Some(sort_of(kind, given).ok_or_else(|| {
+                TelmoniError::BadRequest("a view's sort is none of the list's columns".into())
+            })?),
+        };
         let query = TraceQuery {
             agent: self.agent,
             user: self.user,
@@ -130,7 +175,7 @@ impl ViewQuery {
             release: filter.releases,
             tag: filter.tags,
             prompt: filter.prompts,
-            sort: self.sort,
+            sort: sort.map(str::to_owned),
             dir: self.dir,
             days: self.days.map(check_days).transpose()?,
             limit: self.limit.map(check_limit).transpose()?,
@@ -214,8 +259,8 @@ impl LayoutOptions {
 }
 
 /// What saving a view sends: its name, its kind, its query — the list's, or
-/// a layout's options — and the columns shown. The trace's id is always
-/// shown, and is none of the columns.
+/// a layout's options — and the columns shown, by the list's words. A row's
+/// own id is always shown, and is none of the columns.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ViewInput {
@@ -225,7 +270,7 @@ pub struct ViewInput {
     #[serde(default)]
     pub query: Value,
     #[serde(default)]
-    pub columns: Vec<TraceColumn>,
+    pub columns: Vec<String>,
 }
 
 /// A view as it is written: its name trimmed, its query checked and as JSON,
@@ -263,14 +308,14 @@ impl ViewInput {
         // A key the page does not read is refused as it arrives, and never
         // echoed: a person typed it, or an older console sent it.
         let query = match self.kind {
-            ViewKind::List => written(
+            ViewKind::Traces | ViewKind::Sessions | ViewKind::Users => written(
                 &serde_json::from_value::<ViewQuery>(given)
                     .map_err(|_| {
                         TelmoniError::BadRequest(
                             "a view's query names a filter the list does not take".into(),
                         )
                     })?
-                    .checked()?,
+                    .checked(self.kind)?,
             )?,
             ViewKind::Layout => written(
                 &serde_json::from_value::<LayoutOptions>(given)
@@ -282,11 +327,9 @@ impl ViewInput {
                     .checked()?,
             )?,
         };
-        let columns = TraceColumn::all()
-            .into_iter()
-            .filter(|column| self.columns.contains(column))
-            .map(|column| column.as_str().to_owned())
-            .collect();
+        let columns = columns_of(self.kind, &self.columns).ok_or_else(|| {
+            TelmoniError::BadRequest("a view's columns name one the list does not show".into())
+        })?;
         Ok(Checked {
             name: name.to_owned(),
             kind: self.kind,
@@ -307,14 +350,14 @@ impl Checked {
 }
 
 /// One saved view, as the lanes answer it: its query the list's, or a
-/// layout's options, as its kind says.
+/// layout's options, and its columns by the list's words, as its kind says.
 #[derive(Debug, Serialize)]
 pub struct View {
     pub id: Uuid,
     pub kind: ViewKind,
     pub name: String,
     pub query: Value,
-    pub columns: Vec<TraceColumn>,
+    pub columns: Vec<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -325,15 +368,26 @@ pub struct View {
 /// the menu down with it.
 fn readable(kind: ViewKind, id: Uuid, query: Value) -> Value {
     let read = match kind {
-        ViewKind::List => serde_json::from_value::<ViewQuery>(query).map(|q| written(&q)),
-        ViewKind::Layout => serde_json::from_value::<LayoutOptions>(query).map(|o| written(&o)),
+        ViewKind::Traces | ViewKind::Sessions | ViewKind::Users => {
+            serde_json::from_value::<ViewQuery>(query)
+                .ok()
+                .filter(|q| {
+                    q.sort
+                        .as_deref()
+                        .is_none_or(|sort| sort_of(kind, sort).is_some())
+                })
+                .map(|q| written(&q))
+        }
+        ViewKind::Layout => serde_json::from_value::<LayoutOptions>(query)
+            .ok()
+            .map(|o| written(&o)),
     };
     match read {
-        Ok(Ok(value)) => value,
+        Some(Ok(value)) => value,
         _ => {
             tracing::warn!(view_id = %id, kind = %kind, "telemetry: a saved view's query no longer reads");
             match kind {
-                ViewKind::List => json!({}),
+                ViewKind::Traces | ViewKind::Sessions | ViewKind::Users => json!({}),
                 ViewKind::Layout => {
                     written(&LayoutOptions::default()).unwrap_or_else(|_| json!({}))
                 }
@@ -353,7 +407,8 @@ impl From<ViewRow> for View {
             columns: row
                 .columns
                 .iter()
-                .filter_map(|column| column.parse().ok())
+                .filter(|column| columns_of(row.kind, std::slice::from_ref(column)).is_some())
+                .cloned()
                 .collect(),
             created_at: row.created_at,
             updated_at: row.updated_at,
@@ -378,7 +433,7 @@ fn view_id(given: &str) -> Result<Uuid, TelmoniError> {
 /// What a kind's views are called, in a refusal.
 const fn what(kind: ViewKind) -> &'static str {
     match kind {
-        ViewKind::List => "view",
+        ViewKind::Traces | ViewKind::Sessions | ViewKind::Users => "view",
         ViewKind::Layout => "layout",
     }
 }
@@ -403,7 +458,7 @@ fn name_taken(kind: ViewKind) -> impl Fn(sqlx::Error) -> TelmoniError {
 }
 
 /// `GET /internal/v1/telemetry/views` — the project's views of one kind, by
-/// name: the list's unless `kind` says `layout`.
+/// name: the trace list's unless `kind` names another.
 pub async fn list_views(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -575,7 +630,7 @@ mod tests {
         .checked()
         .expect("a view");
         assert_eq!(checked.name, "Errors this week");
-        assert_eq!(checked.kind, ViewKind::List);
+        assert_eq!(checked.kind, ViewKind::Traces);
         assert_eq!(
             checked.query,
             json!({
@@ -664,11 +719,50 @@ mod tests {
         }
         let kind = serde_json::from_value::<ViewInput>(json!({ "name": "x", "kind": "page" }));
         assert!(kind.is_err(), "a kind there is none of");
-        let column = serde_json::from_value::<ViewInput>(json!({
-            "name": "x",
-            "columns": ["run_id"],
-        }));
-        assert!(column.is_err(), "a column the list hides none of");
+        let column = input("x", json!({}), &["run_id<script>"])
+            .checked()
+            .expect_err("a column");
+        assert_eq!(
+            column.to_problem_details().status,
+            400,
+            "a column the list hides none of"
+        );
+    }
+
+    /// A sessions or users view is held to that list's own sorts and columns:
+    /// a trace's sort or column is refused there, and its own are kept in its
+    /// order.
+    #[test]
+    fn each_list_keeps_its_own_sorts_and_columns() {
+        let view = |kind: &str, query: Value, columns: &[&str]| {
+            serde_json::from_value::<ViewInput>(json!({
+                "name": "Slow", "kind": kind, "query": query, "columns": columns,
+            }))
+            .expect("a view's body")
+            .checked()
+        };
+        let sessions = view(
+            "sessions",
+            json!({ "sort": "duration" }),
+            &["last_seen", "user", "duration"],
+        )
+        .expect("a sessions view");
+        assert_eq!(sessions.kind, ViewKind::Sessions);
+        assert_eq!(sessions.query, json!({ "sort": "duration" }));
+        assert_eq!(sessions.columns, ["user", "duration", "last_seen"]);
+        let users =
+            view("users", json!({ "sort": "first_seen" }), &["tokens"]).expect("a users view");
+        assert_eq!(users.columns, ["tokens"]);
+        for (kind, query, columns) in [
+            ("sessions", json!({ "sort": "started" }), &[][..]),
+            ("users", json!({ "sort": "session" }), &[][..]),
+            ("users", json!({}), &["user"][..]),
+            ("sessions", json!({}), &["agent"][..]),
+            ("traces", json!({ "sort": "last_seen" }), &[][..]),
+        ] {
+            let refused = view(kind, query, columns).expect_err(kind);
+            assert_eq!(refused.to_problem_details().status, 400, "{kind}");
+        }
     }
 
     /// ⚠ A layout the page would refuse is a 400 that echoes none of it: a
@@ -706,9 +800,15 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };
-        let view = View::from(row(ViewKind::List, json!({ "customer": ["c-1"] })));
+        let view = View::from(row(ViewKind::Traces, json!({ "customer": ["c-1"] })));
         assert_eq!(view.query, json!({}));
-        assert_eq!(view.columns, [TraceColumn::Started]);
+        assert_eq!(view.columns, ["started"]);
+        let sessions = View::from(row(ViewKind::Sessions, json!({ "sort": "started" })));
+        assert_eq!(sessions.query, json!({}), "a sort the list no longer has");
+        assert!(
+            sessions.columns.is_empty(),
+            "a trace's columns are none of a session's"
+        );
         let layout = View::from(row(ViewKind::Layout, json!({ "depth": "spans" })));
         assert_eq!(layout.query["depth"], "trace");
         assert_eq!(layout.query["open"], "none");
@@ -721,9 +821,10 @@ mod tests {
     }
 
     #[test]
-    fn the_kind_is_the_lists_unless_the_url_says_layout() {
-        assert_eq!(parse_kind("").expect("the default"), ViewKind::List);
+    fn the_kind_is_the_trace_lists_unless_the_url_names_another() {
+        assert_eq!(parse_kind("").expect("the default"), ViewKind::Traces);
         assert_eq!(parse_kind(" layout ").expect("a layout"), ViewKind::Layout);
+        assert_eq!(parse_kind("users").expect("the users'"), ViewKind::Users);
         let refused = parse_kind("page<script>")
             .expect_err("refused")
             .to_problem_details();
@@ -747,7 +848,7 @@ mod tests {
             release: vec!["r".into()],
             tag: vec!["k:v".into()],
             prompt: vec!["p".into()],
-            sort: Some(telmoni_shared::TraceSort::Started),
+            sort: Some("started".into()),
             dir: Some(telmoni_shared::SortDirection::Asc),
             days: Some(7),
             limit: Some(50),

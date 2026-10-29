@@ -8,6 +8,7 @@
   "total": 1,
   "users": [
     {
+      "duration_ms": 3100,
       "errors": 1,
       "first_seen": "2027-01-15T08:00:00Z",
       "input_tokens": 120,

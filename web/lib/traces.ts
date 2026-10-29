@@ -3,9 +3,8 @@ import type {
   ListFilters,
   ListQuery,
   TraceQuery,
+  ListViewQuery,
   TraceSpan,
-  TraceView,
-  ViewQuery,
 } from "@/lib/server/entities/traces";
 import { isOneOf } from "@/lib/one-of";
 import { projectPath } from "@/lib/slug";
@@ -90,11 +89,16 @@ export const FILTER_VALUE_MAX: Record<Exclude<FilterKey, "status">, number> = {
 };
 
 /** The page's own state beside the list's query: never sent to the server. */
-export type TraceUi = {
-  /** The charts in place of the table; the table when left out. */
-  display?: "chart";
+/** What every list's page carries in its URL beside its query. */
+export type ListUi = {
   /** The saved view the page was opened from. */
   view?: string;
+};
+
+/** The trace list's: its charts too. */
+export type TraceUi = ListUi & {
+  /** The charts in place of the table; the table when left out. */
+  display?: "chart";
 };
 
 /** A list left empty, as the URL leaves a filter out. */
@@ -160,12 +164,17 @@ export function isTagPair(value: string): boolean {
   return [...value.slice(0, colon)].length <= 64 && [...value.slice(colon + 1)].length <= 256;
 }
 
-/** The page's own state from its URL. */
-export function parseTraceUi(searchParams: SearchParams): TraceUi {
+/** A list page's own state from its URL: the view it was opened from. */
+export function parseListUi(searchParams: SearchParams): ListUi {
   const view = one(searchParams.view);
+  return compact({ view: view !== undefined && isUuid(view) ? view : undefined });
+}
+
+/** The trace list's own state from its URL. */
+export function parseTraceUi(searchParams: SearchParams): TraceUi {
   return compact({
     display: one(searchParams.display) === "chart" ? ("chart" as const) : undefined,
-    view: view !== undefined && isUuid(view) ? view : undefined,
+    ...parseListUi(searchParams),
   });
 }
 
@@ -470,46 +479,132 @@ export function sortsOf<S extends string>(columns: readonly ColumnSpec<string, S
   );
 }
 
+/** A ready-made query a toolbar button applies; a cost preset waits for the list to read spend. */
+export type Preset = {
+  id: "errors" | "slow" | "tokens";
+  label: string;
+  hint: string;
+};
+
 /** A list's scaffold, from what alone differs between the three: its path,
  *  its table, its sorts' vocabulary, an id sort beside the columns' where the
- *  id sorts, and the server's default sort. */
+ *  id sorts, the server's default sort, and its ready-made queries with the
+ *  sorts the slow and the tokens ones take. */
 export function listSpec<K extends string, S extends string>(spec: {
   path: `/${ListName}`;
   table: ListTable<K, S>;
   sorts: Record<string, S>;
   idSort?: Column<S>;
   defaultSort: S;
+  presets: readonly Preset[];
+  presetSorts: { slow: S; tokens: S };
 }) {
   const sorts: readonly Column<S>[] = [
     ...(spec.idSort ? [spec.idSort] : []),
     ...sortsOf(spec.table.columns),
   ];
+  const parse = (searchParams: SearchParams): ListQuery<S> =>
+    parseListQuery(searchParams, spec.sorts);
+  const href = (
+    organization: string,
+    project: string,
+    query: ListQuery<S>,
+    patch: Partial<ListQuery<S>> = {},
+    ui: TraceUi = {},
+  ): string => listHref(organization, project, spec.path, { ...query, ...ui }, patch);
+  const current = (query: ListQuery<S>): { sort: S; dir: SortDirection } =>
+    sortInForce(sorts, spec.defaultSort, query);
+  const presetActive = (query: ListQuery<S>, preset: Preset["id"]): boolean => {
+    const { sort, dir } = current(query);
+    switch (preset) {
+      case "errors":
+        return query.status?.length === 1 && query.status[0] === SpanStatus.Error;
+      case "slow":
+      case "tokens":
+        return sort === spec.presetSorts[preset] && dir === SortDirection.Desc;
+    }
+  };
+  /** The list's query a saved view opens on, every value the page would drop
+   *  dropped, as it drops a stale URL's. */
+  const queryOfView = (view: ListViewQuery<S>): ListQuery<S> =>
+    parse({
+      ...filtersIn(view),
+      sort: view.sort,
+      dir: view.dir,
+      days: view.days === undefined ? undefined : String(view.days),
+      limit: view.limit === undefined ? undefined : String(view.limit),
+    });
   return {
     table: spec.table,
+    presets: spec.presets,
     /** The columns menu, in its rows. */
     menu: columnMenu(spec.table.columns),
     /** `columns` as the table shows them. */
     ordered: (columns: readonly string[]): K[] => ordered(spec.table.columns, columns),
     /** The query the URL carries, every value the server would refuse dropped. */
-    parse: (searchParams: SearchParams): ListQuery<S> => parseListQuery(searchParams, spec.sorts),
+    parse,
     /** The list's path with `query` in its URL: `patch` changes some keys, and
-     *  a key patched to `undefined` is dropped. */
-    href: (
-      organization: string,
-      project: string,
-      query: ListQuery<S>,
-      patch: Partial<ListQuery<S>> = {},
-    ): string => listHref(organization, project, spec.path, query, patch),
+     *  a key patched to `undefined` is dropped; `ui`, the page's own, rides along. */
+    href,
     /** The sort in force: the URL's, else the server's default. */
-    current: (query: ListQuery<S>): { sort: S; dir: SortDirection } =>
-      sortInForce(sorts, spec.defaultSort, query),
+    current,
     /** What clicking a column heading asks for, from the first page. */
     next: (query: ListQuery<S>, column: S): { sort: S; dir: SortDirection; page: undefined } => ({
       ...sortAfterClick(sorts, spec.defaultSort, query, column),
       page: undefined,
     }),
+    /** Whether the list shows what `preset` asks for. */
+    presetActive,
+    /** The query with `preset` applied, or taken off where it was: the errors
+     *  filter cleared, or the sort set back to the list's default. */
+    presetToggled: (query: ListQuery<S>, preset: Preset["id"]): ListQuery<S> => {
+      const on = presetActive(query, preset);
+      if (preset === "errors") {
+        return compact({ ...query, status: on ? undefined : [SpanStatus.Error], page: undefined });
+      }
+      return compact({
+        ...query,
+        sort: on ? undefined : spec.presetSorts[preset],
+        dir: on ? undefined : SortDirection.Desc,
+        page: undefined,
+      });
+    },
+    /** The list as a saved view keeps it: its filters, sort, window and rows. */
+    viewQueryOf: (query: ListQuery<S>): ListViewQuery<S> =>
+      compact({
+        ...filtersIn(query),
+        sort: query.sort,
+        dir: query.dir,
+        days: query.days,
+        limit: query.limit,
+      }),
+    queryOfView,
+    /** The list as a saved view opens it, the view named in the URL. */
+    viewHref: (
+      organization: string,
+      project: string,
+      view: { id: string; query: ListViewQuery<S> },
+      ui: TraceUi = {},
+    ): string => href(organization, project, queryOfView(view.query), {}, { ...ui, view: view.id }),
+    /** Whether the list shows what `view` saved: its query, the page aside, a
+     *  filter's values in any order. */
+    showsView: (query: ListQuery<S>, view: { query: ListViewQuery<S> }): boolean => {
+      const saved = queryOfView(view.query);
+      const a = current(query);
+      const b = current(saved);
+      return (
+        FILTERS.every((filter) => sameValues(query[filter], saved[filter])) &&
+        a.sort === b.sort &&
+        a.dir === b.dir &&
+        query.days === saved.days &&
+        query.limit === saved.limit
+      );
+    },
   };
 }
+
+/** What `listSpec` builds for a list of columns `K` and sorts `S`. */
+export type ListSpec<K extends string, S extends string> = ReturnType<typeof listSpec<K, S>>;
 
 /** `columns` as the trace table shows them. */
 export function orderedColumns(columns: readonly string[]): TraceColumn[] {
@@ -543,6 +638,12 @@ export const TRACES = listSpec({
   table: TRACE_TABLE,
   sorts: TraceSort,
   defaultSort: TraceSort.Started,
+  presets: [
+    { id: "errors", label: "Errors", hint: "Only the runs with failed spans" },
+    { id: "slow", label: "Slow", hint: "The longest runs first" },
+    { id: "tokens", label: "Tokens", hint: "The runs that used the most tokens first" },
+  ],
+  presetSorts: { slow: TraceSort.Duration, tokens: TraceSort.Tokens },
 });
 
 /** The trace list's columns menu, in its rows. */
@@ -550,51 +651,9 @@ export const COLUMN_MENU: readonly ColumnBlock<TraceColumn, TraceSort>[] = TRACE
 export const currentSort = TRACES.current;
 export const nextSort = TRACES.next;
 
-/** A ready-made query a toolbar button applies; a cost preset waits for the list to read spend. */
-export type Preset = {
-  id: "errors" | "slow" | "tokens";
-  label: string;
-  hint: string;
-};
-
-export const TRACE_PRESETS: readonly Preset[] = [
-  { id: "errors", label: "Errors", hint: "Only the runs that ended in error" },
-  { id: "slow", label: "Slow", hint: "The longest runs first" },
-  { id: "tokens", label: "Tokens", hint: "The runs that used the most tokens first" },
-];
-
-/** Whether the list shows what `preset` asks for. */
-export function presetActive(query: TraceQuery, preset: Preset["id"]): boolean {
-  const { sort, dir } = currentSort(query);
-  switch (preset) {
-    case "errors":
-      return query.status?.length === 1 && query.status[0] === SpanStatus.Error;
-    case "slow":
-      return sort === TraceSort.Duration && dir === SortDirection.Desc;
-    case "tokens":
-      return sort === TraceSort.Tokens && dir === SortDirection.Desc;
-  }
-}
-
-/** The query with `preset` applied, or taken off where it was: the errors
- *  filter cleared, or the sort set back to the newest first. */
-export function presetToggled(query: TraceQuery, preset: Preset["id"]): TraceQuery {
-  const on = presetActive(query, preset);
-  switch (preset) {
-    case "errors":
-      return compact({ ...query, status: on ? undefined : [SpanStatus.Error], page: undefined });
-    case "slow":
-    case "tokens": {
-      const sort = preset === "slow" ? TraceSort.Duration : TraceSort.Tokens;
-      return compact({
-        ...query,
-        sort: on ? undefined : sort,
-        dir: on ? undefined : SortDirection.Desc,
-        page: undefined,
-      });
-    }
-  }
-}
+export const TRACE_PRESETS = TRACES.presets;
+export const presetActive = TRACES.presetActive;
+export const presetToggled = TRACES.presetToggled;
 
 /** How many pages the list's total fills at `limit` rows a page: one at
  *  least, so an empty list is on its only page. */
@@ -642,48 +701,10 @@ export function listDownloadHref(
   });
 }
 
-/** What a saved view keeps of the list's query: all of it but the page. */
-export function viewQueryOf(query: TraceQuery): ViewQuery {
-  return compact({
-    ...filtersIn(query),
-    sort: query.sort,
-    dir: query.dir,
-    days: query.days,
-    limit: query.limit,
-  });
-}
-
-/** The list's query a saved view opens on, every value the page would drop
- *  dropped, as it drops a stale URL's. */
-export function queryOfView(view: ViewQuery): TraceQuery {
-  return parseTraceQuery({
-    ...filtersIn(view),
-    sort: view.sort,
-    dir: view.dir,
-    days: view.days === undefined ? undefined : String(view.days),
-    limit: view.limit === undefined ? undefined : String(view.limit),
-  });
-}
-
-/** The list as a saved view opens it, the view named in the URL. */
-export function viewHref(organization: string, project: string, view: TraceView, ui: TraceUi = {}): string {
-  return tracesHref(organization, project, queryOfView(view.query), {}, { ...ui, view: view.id });
-}
-
-/** Whether the list shows what `view` saved: its query, the page aside, a
- *  filter's values in any order. */
-export function showsView(query: TraceQuery, view: TraceView): boolean {
-  const saved = queryOfView(view.query);
-  const a = currentSort(query);
-  const b = currentSort(saved);
-  return (
-    FILTERS.every((filter) => sameValues(query[filter], saved[filter])) &&
-    a.sort === b.sort &&
-    a.dir === b.dir &&
-    query.days === saved.days &&
-    query.limit === saved.limit
-  );
-}
+export const viewQueryOf = TRACES.viewQueryOf;
+export const queryOfView = TRACES.queryOfView;
+export const viewHref = TRACES.viewHref;
+export const showsView = TRACES.showsView;
 
 // The console's own language, not the browser's: a count drawn on the server
 // is drawn again in the browser as the page goes live, and grouped there the

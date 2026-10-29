@@ -25,6 +25,7 @@ const UserRowSchema = z.object({
   steps: z.number(),
   input_tokens: z.number(),
   output_tokens: z.number(),
+  duration_ms: z.number(),
   first_seen: z.string(),
   last_seen: z.string(),
 });

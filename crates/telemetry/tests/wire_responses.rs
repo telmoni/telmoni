@@ -5,6 +5,7 @@
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;
+use serde_json::json;
 use uuid::Uuid;
 
 use telmoni_shared::slug::Slug;
@@ -12,7 +13,7 @@ use telmoni_shared::test_util::pin_contract;
 use telmoni_shared::{
     ContentMode, IncidentStatus, LayoutDepth, LayoutOpen, MissingData, OrganizationId, ProjectId,
     RuleAggregation, RuleLevel, RuleMeasure, RuleOperator, RuleWindow, SessionSort, Severity,
-    SortDirection, SpanKind, SpanStatus, TraceColumn, TraceSort, UserSort, ViewKind,
+    SortDirection, SpanKind, SpanStatus, TraceSort, UserSort, ViewKind,
 };
 use telmoni_telemetry::contract::{InventoryRow, Needs, ReadOn};
 use telmoni_telemetry::handler::content_mode::{ContentModeSetting, OFFERED};
@@ -255,6 +256,7 @@ fn the_session_list_answers_as_the_console_reads() {
                 steps: 4,
                 input_tokens: 2_400,
                 output_tokens: 680,
+                duration_ms: 4_200,
                 first_seen: at(0),
                 last_seen: at(90),
             }],
@@ -314,6 +316,7 @@ fn the_user_list_answers_as_the_console_reads() {
                 steps: 9,
                 input_tokens: 120,
                 output_tokens: 40,
+                duration_ms: 3_100,
                 first_seen: at(0),
                 last_seen: at(90),
             }],
@@ -328,26 +331,22 @@ fn the_user_list_answers_as_the_console_reads() {
     );
 }
 
-/// Saved views of both kinds: the list's, and a layout.
+/// Saved views of each kind: the trace list's, the sessions', and a layout.
 #[test]
 fn saved_views_answer_as_the_console_reads() {
-    let view = |kind, name: &str, query| View {
+    let view = |kind, name: &str, query, columns: &[&str]| View {
         id: VIEW,
         kind,
         name: name.into(),
         query,
-        columns: vec![
-            TraceColumn::Started,
-            TraceColumn::Agent,
-            TraceColumn::Tokens,
-        ],
+        columns: columns.iter().map(|&column| column.to_owned()).collect(),
         created_at: at(0),
         updated_at: at(60),
     };
     let query = ViewQuery {
         agent: vec!["support".into()],
         status: vec![SpanStatus::Error],
-        sort: Some(TraceSort::Duration),
+        sort: Some("duration".into()),
         dir: Some(SortDirection::Desc),
         days: Some(7),
         limit: Some(50),
@@ -371,13 +370,34 @@ fn saved_views_answer_as_the_console_reads() {
     pin(
         "views",
         &ViewList {
-            views: vec![view(ViewKind::List, "Failed support runs", query)],
+            views: vec![view(
+                ViewKind::Traces,
+                "Failed support runs",
+                query,
+                &["started", "agent", "tokens"],
+            )],
         },
     );
     pin(
         "layouts",
         &ViewList {
-            views: vec![view(ViewKind::Layout, "Steps, failures open", layout)],
+            views: vec![view(
+                ViewKind::Layout,
+                "Steps, failures open",
+                layout,
+                &["started", "agent", "tokens"],
+            )],
+        },
+    );
+    pin(
+        "session-views",
+        &ViewList {
+            views: vec![view(
+                ViewKind::Sessions,
+                "Slow sessions",
+                json!({ "sort": "duration", "dir": "desc" }),
+                &["user", "traces", "duration", "last_seen"],
+            )],
         },
     );
 }

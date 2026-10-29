@@ -1,4 +1,4 @@
-import { SortDirection, UserSort } from "@/lib/types/enums";
+import { SortDirection, UserColumn, UserSort } from "@/lib/types/enums";
 
 import { listSpec, type ColumnSpec, type ListTable } from "./traces";
 
@@ -6,16 +6,7 @@ import { listSpec, type ColumnSpec, type ListTable } from "./traces";
 // the sort, the window and the page, read with every value the server would
 // refuse dropped, and written with one thing changed.
 
-/** A column of the users table a person may show or hide. */
-export type UserColumn =
-  | "traces"
-  | "errors"
-  | "steps"
-  | "input_tokens"
-  | "output_tokens"
-  | "tokens"
-  | "first_seen"
-  | "last_seen";
+export { UserColumn };
 
 /** The user's id, which every row shows, since it opens their traces. */
 export const USER_ID_COLUMN = {
@@ -79,6 +70,14 @@ export const USER_COLUMNS: readonly ColumnSpec<UserColumn, UserSort>[] = [
     hint: "Input and output tokens, summed.",
   },
   {
+    key: "duration",
+    label: "Duration",
+    sort: UserSort.Duration,
+    first: SortDirection.Desc,
+    numeric: true,
+    hint: "How long their runs took, summed.",
+  },
+  {
     key: "first_seen",
     label: "First seen",
     sort: UserSort.FirstSeen,
@@ -101,6 +100,7 @@ export const DEFAULT_USER_COLUMNS: readonly UserColumn[] = [
   "errors",
   "steps",
   "tokens",
+  "duration",
   "first_seen",
   "last_seen",
 ];
@@ -121,6 +121,12 @@ export const USERS = listSpec({
   sorts: UserSort,
   idSort: { sort: UserSort.User, label: USER_ID_COLUMN.label, first: SortDirection.Asc },
   defaultSort: UserSort.Tokens,
+  // No tokens preset: most tokens first is the list's own order already.
+  presets: [
+    { id: "errors", label: "Errors", hint: "Only the users with failed spans" },
+    { id: "slow", label: "Slow", hint: "The users whose runs took longest first" },
+  ],
+  presetSorts: { slow: UserSort.Duration, tokens: UserSort.Tokens },
 });
 
 export const USER_COLUMN_MENU = USERS.menu;

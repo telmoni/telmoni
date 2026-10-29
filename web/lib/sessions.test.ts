@@ -4,6 +4,7 @@ import type { SessionTrace } from "@/lib/server/entities/sessions";
 
 import {
   DEFAULT_SESSION_COLUMNS,
+  SESSIONS,
   SESSION_COLUMN_MENU,
   currentSessionSort,
   nextSessionSort,
@@ -131,6 +132,7 @@ describe("the sessions table's columns", () => {
       "errors",
       "steps",
       "tokens",
+      "duration",
       "first_seen",
       "last_seen",
     ]);
@@ -145,8 +147,30 @@ describe("the sessions table's columns", () => {
       "user",
       "Counts: traces,errors,steps",
       "Tokens: input_tokens,output_tokens,tokens",
+      "duration",
       "first_seen",
       "last_seen",
     ]);
+  });
+});
+
+describe("the sessions list's ready-made queries and saved views", () => {
+  it("applies each preset by the list's own sorts, and takes it off again", () => {
+    const slow = SESSIONS.presetToggled({ page: 2 }, "slow");
+    expect(slow).toEqual({ sort: "duration", dir: "desc" });
+    expect(SESSIONS.presetActive(slow, "slow")).toBe(true);
+    expect(SESSIONS.presetToggled(slow, "tokens")).toEqual({ sort: "tokens", dir: "desc" });
+    expect(SESSIONS.presetToggled(slow, "slow")).toEqual({});
+    expect(SESSIONS.presetToggled({}, "errors")).toEqual({ status: ["error"] });
+  });
+
+  it("opens a view on its query, named in the URL, and knows when the list has moved off it", () => {
+    const view = { id: "8f14e45f-ceea-4e7a-9b6f-1d2c3a4b5c6d", query: { sort: "duration" as const, days: 30 } };
+    expect(SESSIONS.viewHref("acme", "web", view)).toBe(
+      `/acme/web/sessions?sort=duration&days=30&view=${view.id}`,
+    );
+    expect(SESSIONS.showsView({ sort: "duration", days: 30, page: 3 }, view)).toBe(true);
+    expect(SESSIONS.showsView({ sort: "tokens", days: 30 }, view)).toBe(false);
+    expect(SESSIONS.viewQueryOf({ sort: "duration", days: 30, page: 3 })).toEqual(view.query);
   });
 });

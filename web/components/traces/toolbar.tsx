@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useId, useState, useTransition } from "react";
+import { Fragment, type ReactNode, useEffect, useId, useState, useTransition } from "react";
 import {
   ChartColumnIcon,
   ChevronDownIcon,
@@ -42,8 +42,14 @@ import {
 } from "@/components/traces/list-table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { WindowPicker } from "@/components/window-picker";
-import type { ListQuery, TraceQuery, TraceView } from "@/lib/server/entities/traces";
-import { SESSION_COLUMN_MENU, SESSION_TABLE } from "@/lib/sessions";
+import type {
+  ListQuery,
+  SessionView,
+  TraceQuery,
+  TraceView,
+  UserView,
+} from "@/lib/server/entities/traces";
+import { SESSIONS, SESSION_COLUMN_MENU, SESSION_TABLE } from "@/lib/sessions";
 import {
   COLUMNS_PREF,
   DENSITIES,
@@ -56,38 +62,38 @@ import {
   COLUMN_MENU,
   DOWNLOAD_MAX,
   ROW_NOUN,
-  TRACE_PRESETS,
+  TRACES,
   TRACE_TABLE,
   formatCount,
   listDownloadHref,
   ordered,
-  presetActive,
-  presetToggled,
   tracesHref,
   type ColumnBlock,
   type ColumnGroup,
   type ListName,
+  type ListSpec,
   type ListTable,
   type Preset,
   type TraceUi,
 } from "@/lib/traces";
 import { toggled } from "@/lib/trace-tree";
 import { setTracePrefs, useTracePrefs } from "@/lib/use-trace-prefs";
-import { USER_COLUMN_MENU, USER_TABLE } from "@/lib/users";
+import { USERS, USER_COLUMN_MENU, USER_TABLE } from "@/lib/users";
+import type { SessionSort, UserSort } from "@/lib/types/enums";
 import { isOneOf } from "@/lib/one-of";
 import { cn } from "@/lib/utils";
 
-type Props = {
+type Common = {
   organization: string;
   slug: string;
   projectId: string;
-  query: TraceQuery;
   ui: TraceUi;
-  /** How many traces the filters admit. */
+  /** How many rows the filters admit. */
   total: number;
-  views: TraceView[] | null;
   canSave: boolean;
 };
+
+type Props = Common & { query: TraceQuery; views: TraceView[] | null };
 
 /** Each ready-made query's icon. */
 const PRESET_ICON: Record<Preset["id"], LucideIcon> = {
@@ -103,17 +109,73 @@ const TABLES: Record<ListName, { table: ListTable; menu: readonly ColumnBlock[] 
   users: { table: USER_TABLE, menu: USER_COLUMN_MENU },
 };
 
-// The trace list's toolbar, on one row of shadcn controls: the ready-made
-// queries, the saved views and the table or the charts on the left; on the
-// right what every list has (`ListControls`). The window and the refresh
-// stand on the title's row (`ListHeaderControls`). A control that changes
-// what the list holds changes its URL, and one that changes only how it
-// looks is kept in the browser (`lib/trace-prefs.ts`).
+// The trace list's toolbar: every list's (`ListToolbar`), with the table or
+// the charts beside its saved views.
 export function TraceToolbar(props: Props) {
   const { organization, slug, query, ui } = props;
+  return (
+    <ListToolbar
+      {...props}
+      list="traces"
+      extra={(go) => (
+        <Tabs
+          value={ui.display ?? "table"}
+          onValueChange={(display) =>
+            go(
+              tracesHref(organization, slug, query, {}, {
+                ...ui,
+                display: display === "chart" ? "chart" : undefined,
+              }),
+            )
+          }
+        >
+          <TabsList>
+            <TabsTrigger value="table">
+              <TableIcon />
+              Table
+            </TabsTrigger>
+            <TabsTrigger value="chart">
+              <ChartColumnIcon />
+              Chart
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
+      )}
+    />
+  );
+}
+
+/** A list, its query, and the project's views of it. */
+type ListToolbarProps = Common &
+  (
+    | { list: "traces"; query: TraceQuery; views: TraceView[] | null }
+    | { list: "sessions"; query: ListQuery<SessionSort>; views: SessionView[] | null }
+    | { list: "users"; query: ListQuery<UserSort>; views: UserView[] | null }
+  ) & {
+    /** What the list shows beside its saved views, given the toolbar's way to
+     *  navigate so the toolbar reads busy while it does. */
+    extra?: (go: (href: string) => void) => ReactNode;
+  };
+
+// A list's toolbar, on one row of shadcn controls: the ready-made queries,
+// the saved views and the list's own on the left; on the right what every
+// list has (`ListControls`). The window and the refresh stand on the title's
+// row (`ListHeaderControls`). A control that changes what the list holds
+// changes its URL, and one that changes only how it looks is kept in the
+// browser (`lib/trace-prefs.ts`).
+export function ListToolbar({ extra, total, ...props }: ListToolbarProps) {
+  const { organization, slug, ui } = props;
   const { go, pending } = useListNavigation();
-  const href = (next: TraceQuery, nextUi: TraceUi = ui) =>
-    tracesHref(organization, slug, next, {}, nextUi);
+  const presets = (() => {
+    switch (props.list) {
+      case "traces":
+        return <Presets spec={TRACES} query={props.query} go={go} at={[organization, slug, ui]} />;
+      case "sessions":
+        return <Presets spec={SESSIONS} query={props.query} go={go} at={[organization, slug, ui]} />;
+      case "users":
+        return <Presets spec={USERS} query={props.query} go={go} at={[organization, slug, ui]} />;
+    }
+  })();
 
   return (
     <div
@@ -121,66 +183,52 @@ export function TraceToolbar(props: Props) {
       aria-busy={pending}
       data-pending={pending ? "" : undefined}
     >
-      {TRACE_PRESETS.map((preset) => {
-        const Icon = PRESET_ICON[preset.id];
-        return (
-          <Tooltip key={preset.id}>
-            <TooltipTrigger asChild>
-              <Toggle
-                variant="outline"
-                pressed={presetActive(query, preset.id)}
-                onPressedChange={() => go(href(presetToggled(query, preset.id)))}
-              >
-                <Icon />
-                {preset.label}
-              </Toggle>
-            </TooltipTrigger>
-            <TooltipContent>{preset.hint}</TooltipContent>
-          </Tooltip>
-        );
-      })}
-
-      <ViewsMenu
+      {presets}
+      <ViewsMenu {...props} />
+      {extra?.((href) => go(href))}
+      <ListControls
+        list={props.list}
         organization={organization}
         slug={slug}
-        projectId={props.projectId}
-        query={query}
-        ui={ui}
-        views={props.views}
-        canSave={props.canSave}
+        query={props.query}
+        total={total}
       />
-
-      <Tabs
-        value={ui.display ?? "table"}
-        onValueChange={(display) =>
-          go(href(query, { ...ui, display: display === "chart" ? "chart" : undefined }))
-        }
-      >
-        <TabsList>
-          <TabsTrigger value="table">
-            <TableIcon />
-            Table
-          </TabsTrigger>
-          <TabsTrigger value="chart">
-            <ChartColumnIcon />
-            Chart
-          </TabsTrigger>
-        </TabsList>
-      </Tabs>
-
-      <ListControls list="traces" organization={organization} slug={slug} query={query} total={props.total} />
     </div>
   );
 }
 
-/** The sessions' or the users' toolbar: what every list has, on the right,
- *  as the trace list's toolbar has it. */
-export function ListToolbar(props: ListControlsProps) {
-  return (
-    <div className="flex flex-wrap items-center gap-gutter">
-      <ListControls {...props} />
-    </div>
-  );
+/** A list's ready-made queries, each a toggle that sets or clears it. */
+function Presets<K extends string, S extends string>({
+  spec,
+  query,
+  go,
+  at: [organization, slug, ui],
+}: {
+  spec: ListSpec<K, S>;
+  query: ListQuery<S>;
+  go: (href: string) => void;
+  at: [organization: string, slug: string, ui: TraceUi];
+}) {
+  return spec.presets.map((preset) => {
+    const Icon = PRESET_ICON[preset.id];
+    return (
+      <Tooltip key={preset.id}>
+        <TooltipTrigger asChild>
+          <Toggle
+            variant="outline"
+            pressed={spec.presetActive(query, preset.id)}
+            onPressedChange={() =>
+              go(spec.href(organization, slug, spec.presetToggled(query, preset.id), {}, ui))
+            }
+          >
+            <Icon />
+            {preset.label}
+          </Toggle>
+        </TooltipTrigger>
+        <TooltipContent>{preset.hint}</TooltipContent>
+      </Tooltip>
+    );
+  });
 }
 
 type ListControlsProps = {

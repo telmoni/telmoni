@@ -1,5 +1,5 @@
 import type { SessionTrace } from "@/lib/server/entities/sessions";
-import { SessionSort, SortDirection } from "@/lib/types/enums";
+import { SessionColumn, SessionSort, SortDirection } from "@/lib/types/enums";
 
 import { listHref, type WindowQuery } from "./list-query";
 import { listSpec, type ColumnSpec, type ListTable } from "./traces";
@@ -10,17 +10,7 @@ import { listSpec, type ColumnSpec, type ListTable } from "./traces";
 // that share the id the application gave them — not a sign-in session, which
 // `lib/server/entities/active-sessions.ts` reads.
 
-/** A column of the sessions table a person may show or hide. */
-export type SessionColumn =
-  | "user"
-  | "traces"
-  | "errors"
-  | "steps"
-  | "input_tokens"
-  | "output_tokens"
-  | "tokens"
-  | "first_seen"
-  | "last_seen";
+export { SessionColumn };
 
 /** The session's id, which every row shows, since it opens the session. */
 export const SESSION_ID_COLUMN = {
@@ -91,6 +81,14 @@ export const SESSION_COLUMNS: readonly ColumnSpec<SessionColumn, SessionSort>[] 
     hint: "Input and output tokens, summed.",
   },
   {
+    key: "duration",
+    label: "Duration",
+    sort: SessionSort.Duration,
+    first: SortDirection.Desc,
+    numeric: true,
+    hint: "How long its runs took, summed.",
+  },
+  {
     key: "first_seen",
     label: "First seen",
     sort: SessionSort.FirstSeen,
@@ -114,6 +112,7 @@ export const DEFAULT_SESSION_COLUMNS: readonly SessionColumn[] = [
   "errors",
   "steps",
   "tokens",
+  "duration",
   "first_seen",
   "last_seen",
 ];
@@ -133,6 +132,12 @@ export const SESSIONS = listSpec({
   sorts: SessionSort,
   idSort: { sort: SessionSort.Session, label: SESSION_ID_COLUMN.label, first: SortDirection.Asc },
   defaultSort: SessionSort.LastSeen,
+  presets: [
+    { id: "errors", label: "Errors", hint: "Only the sessions with failed spans" },
+    { id: "slow", label: "Slow", hint: "The sessions whose runs took longest first" },
+    { id: "tokens", label: "Tokens", hint: "The sessions that used the most tokens first" },
+  ],
+  presetSorts: { slow: SessionSort.Duration, tokens: SessionSort.Tokens },
 });
 
 export const SESSION_COLUMN_MENU = SESSIONS.menu;

@@ -41,13 +41,14 @@ pub struct UserList {
 }
 
 /// A download's header row: the page's fields, in its order.
-const CSV_HEADER: [&str; 8] = [
+const CSV_HEADER: [&str; 9] = [
     "user_id",
     "traces",
     "errors",
     "steps",
     "input_tokens",
     "output_tokens",
+    "duration_ms",
     "first_seen",
     "last_seen",
 ];
@@ -55,7 +56,7 @@ const CSV_HEADER: [&str; 8] = [
 impl UserRow {
     /// The row a download writes for them, under [`CSV_HEADER`], the times as
     /// RFC 3339.
-    fn cells(&self) -> [String; 8] {
+    fn cells(&self) -> [String; 9] {
         let time = |t: &DateTime<Utc>| t.to_rfc3339_opts(SecondsFormat::Micros, true);
         [
             self.user_id.clone(),
@@ -64,6 +65,7 @@ impl UserRow {
             self.steps.to_string(),
             self.input_tokens.to_string(),
             self.output_tokens.to_string(),
+            self.duration_ms.to_string(),
             time(&self.first_seen),
             time(&self.last_seen),
         ]
@@ -201,6 +203,7 @@ mod tests {
             steps: 2,
             input_tokens: 300,
             output_tokens: 30,
+            duration_ms: 1_250,
             first_seen: at,
             last_seen: at,
         };
@@ -208,6 +211,7 @@ mod tests {
         assert_eq!(cells.len(), CSV_HEADER.len());
         assert_eq!(cells[0], "user-a");
         assert_eq!(cells[4], "300");
+        assert_eq!(cells[6], "1250");
         assert_eq!(cells[7], "2026-10-11T12:30:00.000000Z");
     }
 }

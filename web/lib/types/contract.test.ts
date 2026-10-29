@@ -36,6 +36,7 @@ import {
   RuleMeasure,
   RuleOperator,
   RuleWindow,
+  SessionColumn,
   SessionSort,
   Severity,
   SortDirection,
@@ -43,6 +44,7 @@ import {
   SpanStatus,
   TraceColumn,
   TraceSort,
+  UserColumn,
   UserSort,
   ViewKind,
 } from "./enums";
@@ -122,6 +124,7 @@ const CONSOLE: Record<string, Record<string, string>> = {
   RuleMeasure,
   RuleOperator,
   RuleWindow,
+  SessionColumn,
   SessionSort,
   Severity,
   SortDirection,
@@ -129,6 +132,7 @@ const CONSOLE: Record<string, Record<string, string>> = {
   SpanStatus,
   TraceColumn,
   TraceSort,
+  UserColumn,
   UserSort,
   ViewKind,
 };

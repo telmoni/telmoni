@@ -23,7 +23,7 @@ import {
   sessionHref,
   sessionsHref,
 } from "@/lib/sessions";
-import { tracesHref } from "@/lib/traces";
+import { tracesHref, type ListUi } from "@/lib/traces";
 import { SessionSort } from "@/lib/types/enums";
 import { useTracePrefs } from "@/lib/use-trace-prefs";
 import { cn } from "@/lib/utils";
@@ -32,20 +32,22 @@ type Props = {
   organization: string;
   slug: string;
   query: SessionQuery;
+  /** The page's own, which a heading's sort keeps. */
+  ui: ListUi;
   sessions: SessionRow[];
 };
 
 // The page's rows, a session each, in the columns the person shows: a click
 // on the id or anywhere else on the row opens the session beside the list
 // (`session-peek.tsx`), and the row stays marked while it is open.
-export function SessionTable({ organization, slug, query, sessions }: Props) {
+export function SessionTable({ organization, slug, query, ui, sessions }: Props) {
   const prefs = useTracePrefs();
   const peeked = usePeekedSession();
   const columns = SESSION_COLUMNS.filter((c) => prefs.sessionColumns.includes(c.key));
   const { sort, dir } = currentSessionSort(query);
   const tight = compactPadding(prefs.density);
   const sorted = (column: SessionSort) =>
-    sessionsHref(organization, slug, query, nextSessionSort(query, column));
+    sessionsHref(organization, slug, query, nextSessionSort(query, column), ui);
 
   return (
     <DataTable>

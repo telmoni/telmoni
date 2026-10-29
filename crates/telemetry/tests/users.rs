@@ -452,7 +452,7 @@ async fn the_filters_facets_and_download_read_users(pool: PgPool) {
     let lines: Vec<&str> = csv.trim_start_matches('\u{feff}').lines().collect();
     assert_eq!(
         lines[0],
-        "user_id,traces,errors,steps,input_tokens,output_tokens,first_seen,last_seen"
+        "user_id,traces,errors,steps,input_tokens,output_tokens,duration_ms,first_seen,last_seen"
     );
     assert_eq!(lines.len(), 3, "a header and two users: {csv}");
     assert!(lines[1].starts_with("user-a,2,1,2,300,30,"), "{csv}");

@@ -1,6 +1,8 @@
 //! Wire-contract pin: every vocabulary the console shares with the server,
 //! from each module this binary links, as `contract/wire-contract.json`
 //! holds it for the console's `contract.test.ts`.
+// The contract's one `json!` literal nests deeper than the default allows.
+#![recursion_limit = "256"]
 
 use serde_json::{Value, json};
 use telmoni_agent::db::MessageRole;
@@ -21,8 +23,9 @@ use telmoni_shared::types::email::MAX_EMAIL_LEN;
 use telmoni_shared::{
     ApiKeyScope, ContentMode, Flag, IncidentStatus, LayoutDepth, LayoutOpen, MissingData,
     NotificationKind, OrganizationRole, OrganizationStatus, Role, RuleAggregation, RuleLevel,
-    RuleMeasure, RuleOperator, RuleWindow, SessionSort, Severity, SortDirection, SpanKind,
-    SpanStatus, TelmoniResourceKind, TraceColumn, TraceSort, UserSort, ViewKind, slug,
+    RuleMeasure, RuleOperator, RuleWindow, SessionColumn, SessionSort, Severity, SortDirection,
+    SpanKind, SpanStatus, TelmoniResourceKind, TraceColumn, TraceSort, UserColumn, UserSort,
+    ViewKind, slug,
 };
 use telmoni_telemetry::contract::UTC_OFFSET_RANGE;
 use telmoni_telemetry::handler::incidents::INCIDENTS_MAX;
@@ -87,7 +90,9 @@ fn generated_contract() -> Value {
             "TraceSort": wire::<TraceSort>(),
             "TraceColumn": wire::<TraceColumn>(),
             "UserSort": wire::<UserSort>(),
+            "UserColumn": wire::<UserColumn>(),
             "SessionSort": wire::<SessionSort>(),
+            "SessionColumn": wire::<SessionColumn>(),
             "SortDirection": wire::<SortDirection>(),
             "ContentMode": wire::<ContentMode>(),
             "ApiKeyScope": wire::<ApiKeyScope>(),

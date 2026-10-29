@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   DEFAULT_USER_COLUMNS,
+  USERS,
   USER_COLUMN_MENU,
   currentUserSort,
   nextUserSort,
@@ -83,6 +84,7 @@ describe("the users table's columns", () => {
       "errors",
       "steps",
       "tokens",
+      "duration",
       "first_seen",
       "last_seen",
     ]);
@@ -96,8 +98,17 @@ describe("the users table's columns", () => {
     ).toEqual([
       "Counts: traces,errors,steps",
       "Tokens: input_tokens,output_tokens,tokens",
+      "duration",
       "first_seen",
       "last_seen",
     ]);
+  });
+});
+
+describe("the users list's ready-made queries", () => {
+  it("offers errors and slow, most tokens first being its own order", () => {
+    expect(USERS.presets.map((p) => p.id)).toEqual(["errors", "slow"]);
+    expect(USERS.presetToggled({}, "slow")).toEqual({ sort: "duration", dir: "desc" });
+    expect(USERS.presetToggled({ sort: "duration", dir: "desc" }, "slow")).toEqual({});
   });
 });

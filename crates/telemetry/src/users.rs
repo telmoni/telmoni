@@ -29,6 +29,8 @@ pub struct UserRow {
     pub input_tokens: u64,
     /// Their model calls' output tokens, summed.
     pub output_tokens: u64,
+    /// How long their runs took, summed, in milliseconds.
+    pub duration_ms: i64,
     /// When their first run in the window started.
     #[serde(deserialize_with = "clickhouse::serde::chrono::datetime64::micros::deserialize")]
     pub first_seen: DateTime<Utc>,
@@ -47,6 +49,8 @@ macro_rules! users {
             "count() AS user_traces, countIf(errors > 0) AS user_errors, ",
             "sum(steps) AS user_steps, sum(input_total) AS user_input, ",
             "sum(output_total) AS user_output, user_input + user_output AS user_tokens, ",
+            "sum(greatest(dateDiff('millisecond', first_started_at, last_ended_at), 0)) ",
+            "AS user_duration, ",
             "min(first_started_at) AS user_first, max(last_ended_at) AS user_last ",
             "FROM (",
             run_rows!(),
@@ -65,7 +69,7 @@ macro_rules! list_sql {
         concat!(
             "SELECT user_id, user_traces AS traces, user_errors AS errors, ",
             "user_steps AS steps, user_input AS input_tokens, user_output AS output_tokens, ",
-            "user_first AS first_seen, user_last AS last_seen ",
+            "user_duration AS duration_ms, user_first AS first_seen, user_last AS last_seen ",
             "FROM (",
             users!(),
             ") ORDER BY ",
@@ -94,6 +98,8 @@ const fn list_sql(sort: UserSort, direction: SortDirection) -> &'static str {
         (UserSort::OutputTokens, Desc) => list_sql!("output_tokens DESC"),
         (UserSort::Tokens, Asc) => list_sql!("user_tokens ASC"),
         (UserSort::Tokens, Desc) => list_sql!("user_tokens DESC"),
+        (UserSort::Duration, Asc) => list_sql!("duration_ms ASC"),
+        (UserSort::Duration, Desc) => list_sql!("duration_ms DESC"),
         (UserSort::FirstSeen, Asc) => list_sql!("first_seen ASC"),
         (UserSort::FirstSeen, Desc) => list_sql!("first_seen DESC"),
         (UserSort::LastSeen, Asc) => list_sql!("last_seen ASC"),
@@ -136,6 +142,7 @@ impl Listing for Users {
             | UserSort::InputTokens
             | UserSort::OutputTokens
             | UserSort::Tokens
+            | UserSort::Duration
             | UserSort::LastSeen => SortDirection::Desc,
         }
     }
@@ -164,6 +171,7 @@ mod tests {
                     UserSort::InputTokens => "input_tokens",
                     UserSort::OutputTokens => "output_tokens",
                     UserSort::Tokens => "user_tokens",
+                    UserSort::Duration => "duration_ms",
                     UserSort::FirstSeen => "first_seen",
                     UserSort::LastSeen => "last_seen",
                 };

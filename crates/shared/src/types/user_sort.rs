@@ -22,6 +22,8 @@ pub enum UserSort {
     OutputTokens,
     /// Their runs' input and output tokens, summed: the default.
     Tokens,
+    /// How long their runs took, summed.
+    Duration,
     /// When their first run in the window started.
     FirstSeen,
     /// When their last run in the window ended.
@@ -36,6 +38,7 @@ crate::wire_enum!(UserSort {
     InputTokens => "input_tokens",
     OutputTokens => "output_tokens",
     Tokens => "tokens",
+    Duration => "duration",
     FirstSeen => "first_seen",
     LastSeen => "last_seen",
 });

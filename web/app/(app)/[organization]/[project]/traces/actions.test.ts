@@ -62,7 +62,7 @@ const LIST = `/acme/web/traces?agent=support&days=7&view=${OPEN}`;
 
 const input = {
   name: "Support, a week",
-  kind: "list",
+  kind: "traces",
   query: { agent: ["support"], days: 7 },
   columns: [],
 };
@@ -70,7 +70,7 @@ const view = (id: string) =>
   new Response(
     JSON.stringify({
       id,
-      kind: "list",
+      kind: "traces",
       name: "Support, a week",
       query: { agent: ["support"], days: 7 },
       columns: [],
@@ -154,7 +154,7 @@ describe("saving a new view", () => {
       await saveTraceViewAction(PROJECT, { ...layoutInput, query: { ...layoutInput.query, depth: "spans" } }),
     ).toEqual({ ok: false, error: "That view could not be read." });
     expect(
-      await saveTraceViewAction(PROJECT, { ...layoutInput, kind: "list" }),
+      await saveTraceViewAction(PROJECT, { ...layoutInput, kind: "traces" }),
     ).toEqual({ ok: false, error: "That view could not be read." });
     expect(fetchMock).not.toHaveBeenCalled();
   });

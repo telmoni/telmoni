@@ -127,10 +127,26 @@ export const UserSort = {
   InputTokens:  "input_tokens",
   OutputTokens: "output_tokens",
   Tokens:       "tokens",
+  Duration:     "duration",
   FirstSeen:    "first_seen",
   LastSeen:     "last_seen",
 } as const;
 export type UserSort = typeof UserSort[keyof typeof UserSort];
+
+/** Wire vocabulary of the Rust `UserColumn`: a column of the users page a
+ *  person may hide, named in a saved view. */
+export const UserColumn = {
+  Traces:       "traces",
+  Errors:       "errors",
+  Steps:        "steps",
+  InputTokens:  "input_tokens",
+  OutputTokens: "output_tokens",
+  Tokens:       "tokens",
+  Duration:     "duration",
+  FirstSeen:    "first_seen",
+  LastSeen:     "last_seen",
+} as const;
+export type UserColumn = typeof UserColumn[keyof typeof UserColumn];
 
 /** Wire vocabulary of the Rust `SessionSort`: a column of the sessions page, named in the URL. */
 export const SessionSort = {
@@ -142,10 +158,27 @@ export const SessionSort = {
   InputTokens:  "input_tokens",
   OutputTokens: "output_tokens",
   Tokens:       "tokens",
+  Duration:     "duration",
   FirstSeen:    "first_seen",
   LastSeen:     "last_seen",
 } as const;
 export type SessionSort = typeof SessionSort[keyof typeof SessionSort];
+
+/** Wire vocabulary of the Rust `SessionColumn`: a column of the sessions page
+ *  a person may hide, named in a saved view. */
+export const SessionColumn = {
+  User:         "user",
+  Traces:       "traces",
+  Errors:       "errors",
+  Steps:        "steps",
+  InputTokens:  "input_tokens",
+  OutputTokens: "output_tokens",
+  Tokens:       "tokens",
+  Duration:     "duration",
+  FirstSeen:    "first_seen",
+  LastSeen:     "last_seen",
+} as const;
+export type SessionColumn = typeof SessionColumn[keyof typeof SessionColumn];
 
 /** Wire vocabulary of the Rust `LayoutDepth`: how far a trace opens. */
 export const LayoutDepth = {
@@ -166,8 +199,10 @@ export type LayoutOpen = typeof LayoutOpen[keyof typeof LayoutOpen];
 
 /** Wire vocabulary of the Rust `ViewKind`: what a saved view is a view of. */
 export const ViewKind = {
-  List:   "list",
-  Layout: "layout",
+  Traces:   "traces",
+  Sessions: "sessions",
+  Users:    "users",
+  Layout:   "layout",
 } as const;
 export type ViewKind = typeof ViewKind[keyof typeof ViewKind];
 

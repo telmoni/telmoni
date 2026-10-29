@@ -100,9 +100,9 @@ GRANT UPDATE (organization_id) ON telemetry.project_settings TO telemetry_mainte
 -- ══════════════════════════════════════════════════════════════════════════════
 -- 2. SAVED VIEWS
 -- ══════════════════════════════════════════════════════════════════════════════
--- A project's trace list as somebody left it, under a name: its filters, sort
--- and window as the list's query takes them, and the columns it showed
--- (`kind` = 'list'); or a layout of a session's page and a trace's, its
+-- A project's list as somebody left it, under a name: its filters, sort and
+-- window as the list's query takes them, and the columns it showed (`kind` =
+-- 'traces', 'sessions' or 'users', the list's); or a layout of a session's page and a trace's, its
 -- options and the columns a trace shows (`kind` = 'layout'). Every role on
 -- the project applies one; its owners and admins save them. Filed under the
 -- project alone: the purges find a project by its settings row, which the
@@ -110,18 +110,18 @@ GRANT UPDATE (organization_id) ON telemetry.project_settings TO telemetry_mainte
 CREATE TABLE telemetry.trace_views (
     id          UUID        PRIMARY KEY,
     project_id  TEXT        NOT NULL,
-    kind        TEXT        NOT NULL DEFAULT 'list',
+    kind        TEXT        NOT NULL DEFAULT 'traces',
     name        TEXT        NOT NULL,
     -- A list's query, each filter's values a list (`{"agent": ["…"],
     -- "sort": "tokens", "days": 30}`), or a layout's options (`{"depth":
     -- "calls", "open": "failed", …}`); the lane checks each as its page
     -- would read it.
     query       JSONB       NOT NULL,
-    -- The columns shown, by `TraceColumn`'s words, in the list's order.
+    -- The columns shown, by the list's column words, in the list's order.
     columns     TEXT[]      NOT NULL,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT trace_views_kind_check CHECK (kind IN ('list', 'layout')),
+    CONSTRAINT trace_views_kind_check CHECK (kind IN ('traces', 'sessions', 'users', 'layout')),
     CONSTRAINT trace_views_name_check CHECK (char_length(name) BETWEEN 1 AND 60),
     CONSTRAINT trace_views_query_check CHECK (jsonb_typeof(query) = 'object')
 );

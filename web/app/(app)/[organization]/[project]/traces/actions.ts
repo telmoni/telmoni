@@ -15,29 +15,43 @@ import {
 import {
   LayoutQuerySchema,
   SavedViewOfAnyKindSchema,
+  SessionViewQuerySchema,
+  UserViewQuerySchema,
   ViewQuerySchema,
+  type ListView,
   type TraceLayout,
-  type TraceView,
 } from "@/lib/server/entities/traces";
 import { pathAndQuery, requestUrl } from "@/lib/server/path";
-import { TraceColumn, ViewKind } from "@/lib/types/enums";
+import { SessionColumn, TraceColumn, UserColumn, ViewKind } from "@/lib/types/enums";
 
-// A project's saved views of its trace list and saved layouts of a session's
+// A project's saved views of its lists and saved layouts of a session's
 // page and a trace's, saved, saved over and deleted through telemetry's
 // lanes, which hold the role each takes and check each as its page would
 // read it, and the layout the project opens in, set through its lane: what
 // this checks is only that the browser sent the shape each has.
 
-export type ViewResult = ActionResult<{ view?: TraceView | TraceLayout }>;
+export type ViewResult = ActionResult<{ view?: ListView | TraceLayout }>;
 
 const name = z.string().max(200);
 const columns = z.array(z.enum(TraceColumn)).max(64);
 
 /** What a view's save sends: what the browser could send, before the server
- *  checks its every value — a list's query, or a layout's options, as its
- *  kind says. */
+ *  checks its every value — a list's query and columns, or a layout's
+ *  options, as its kind says. */
 const ViewInputSchema = z.discriminatedUnion("kind", [
-  z.object({ name, kind: z.literal(ViewKind.List), query: ViewQuerySchema, columns }),
+  z.object({ name, kind: z.literal(ViewKind.Traces), query: ViewQuerySchema, columns }),
+  z.object({
+    name,
+    kind: z.literal(ViewKind.Sessions),
+    query: SessionViewQuerySchema,
+    columns: z.array(z.enum(SessionColumn)).max(64),
+  }),
+  z.object({
+    name,
+    kind: z.literal(ViewKind.Users),
+    query: UserViewQuerySchema,
+    columns: z.array(z.enum(UserColumn)).max(64),
+  }),
   z.object({ name, kind: z.literal(ViewKind.Layout), query: LayoutQuerySchema, columns }),
 ]);
 

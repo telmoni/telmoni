@@ -239,8 +239,8 @@ notifications   feed, connections, deliveries, delivery_attempts, oauth_states,
 agent           chunks (a vector and a text index), conversations, messages, cursors, erasures, heartbeats
 telemetry       project_settings (the content mode; the project's hashing key, sealed under TELEMETRY_KEK;
                 the saved layout its sessions and traces open in, if one),
-                trace_views (a project's saved views of its trace list, and its saved layouts of a
-                session's page and a trace's: one table, two kinds), rules (a project's alerts, each
+                trace_views (a project's saved views of its traces, sessions and users lists, and its
+                saved layouts of a session's page and a trace's: one table, a kind each), rules (a project's alerts, each
                 filed under its organization too, its last evaluation and its severity), incidents
                 (each alert's breaches, one open at a time, with the connections their notices went
                 to and the runs they showed), rule_connectors (the connectors each

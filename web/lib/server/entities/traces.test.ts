@@ -123,7 +123,7 @@ const LAYOUT = {
 };
 
 const VIEW = {
-  kind: "list",
+  kind: "traces",
   id: "0b6f2c1e-6a4f-4d2b-9e3a-5c7d8e9f0a1b",
   name: "Errors",
   query: { status: ["error"], sort: "duration" },
@@ -236,7 +236,7 @@ describe("the reads beside the list", () => {
     answer(200, { views: [VIEW] });
     expect(await fetchTraceViews(PROJECT)).toEqual({ kind: "ok", views: [VIEW] });
     const [url] = fetchWithTimeout.mock.calls[0]!;
-    expect(url).toBe("http://server/internal/v1/telemetry/views?kind=list");
+    expect(url).toBe("http://server/internal/v1/telemetry/views?kind=traces");
 
     answer(200, { views: [LAYOUT] });
     expect(await fetchTraceLayouts(PROJECT)).toEqual({ kind: "ok", layouts: [LAYOUT] });
