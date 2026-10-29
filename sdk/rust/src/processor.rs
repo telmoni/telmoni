@@ -66,10 +66,11 @@ struct Shared {
 #[derive(Default)]
 struct State {
     queue: VecDeque<SpanData>,
-    /// The queue's first span is the `taken`th ever queued; a batch stops at
-    /// each fence, a record's first span and one past its last.
-    taken: usize,
-    fences: VecDeque<usize>,
+    /// The queue's first span is the `taken`th ever queued, counted in 64 bits
+    /// whatever the target's `usize`; a batch stops at each fence, a record's
+    /// first span and one past its last.
+    taken: u64,
+    fences: VecDeque<u64>,
     /// The record being built, with the room its hold keeps for it.
     stage: Option<Stage>,
     dropped: usize,
@@ -260,10 +261,11 @@ fn work(shared: &Shared, exporter: &Exporter, warner: &Warner) {
             }
             let mut size = state.queue.len().min(shared.batching.max_batch_size);
             if let Some(&fence) = state.fences.front() {
-                size = size.min(fence.saturating_sub(state.taken));
+                let room = fence.saturating_sub(state.taken);
+                size = size.min(usize::try_from(room).unwrap_or(usize::MAX));
             }
             let batch: Vec<SpanData> = state.queue.drain(..size).collect();
-            state.taken += size;
+            state.taken += count(size);
             while state
                 .fences
                 .front()
@@ -306,6 +308,11 @@ fn due(state: &State, batching: &Batching) -> bool {
         || state.queue.len() >= batching.max_batch_size
 }
 
+/// A number of spans on the 64-bit count, which no target's `usize` passes.
+fn count(spans: usize) -> u64 {
+    u64::try_from(spans).unwrap_or(u64::MAX)
+}
+
 /// A record being built: its trace, its spans as they end, and the room in
 /// the queue kept for them.
 struct Stage {
@@ -341,11 +348,11 @@ impl Drop for Hold<'_> {
         if !self.built || state.life != Life::Running || staged.is_empty() {
             return;
         }
-        let first = state.taken + state.queue.len();
+        let first = state.taken + count(state.queue.len());
         if first > state.taken {
             state.fences.push_back(first);
         }
-        state.fences.push_back(first + staged.len());
+        state.fences.push_back(first + count(staged.len()));
         state.queue.extend(staged);
         drop(state);
         self.shared.wake.notify_all();

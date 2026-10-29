@@ -45,10 +45,11 @@ type processor struct {
 
 	mu    sync.Mutex
 	queue []sdktrace.ReadOnlySpan
-	// The queue's first span is the taken-th ever queued; a batch stops at
-	// each fence, a record's first span and one past its last.
-	taken  int
-	fences []int
+	// The queue's first span is the taken-th ever queued, counted in 64 bits
+	// whatever the target's int; a batch stops at each fence, a record's
+	// first span and one past its last.
+	taken  int64
+	fences []int64
 	// The record being built, its trace's spans as they end, and its room.
 	stage     *stage
 	reserved  int
@@ -112,11 +113,11 @@ func (p *processor) hold(id trace.TraceID, need int) (release func(built bool), 
 		if !built || p.stopped || len(staged) == 0 {
 			return
 		}
-		first := p.taken + len(p.queue)
+		first := p.taken + int64(len(p.queue))
 		if first > p.taken {
 			p.fences = append(p.fences, first)
 		}
-		p.fences = append(p.fences, first+len(staged))
+		p.fences = append(p.fences, first+int64(len(staged)))
 		p.queue = append(p.queue, staged...)
 		p.signal()
 	}, nil
@@ -258,14 +259,14 @@ func (p *processor) work() {
 		}
 		n := min(len(p.queue), p.limits.maxBatch)
 		if len(p.fences) > 0 {
-			n = min(n, p.fences[0]-p.taken)
+			n = min(n, int(p.fences[0]-p.taken))
 		}
 		batch := make([]sdktrace.ReadOnlySpan, n)
 		copy(batch, p.queue)
 		rest := copy(p.queue, p.queue[n:])
 		clear(p.queue[rest:])
 		p.queue = p.queue[:rest]
-		p.taken += n
+		p.taken += int64(n)
 		for len(p.fences) > 0 && p.fences[0] <= p.taken {
 			p.fences = p.fences[1:]
 		}
