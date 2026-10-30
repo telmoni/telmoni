@@ -42,7 +42,7 @@ const INSTALL: readonly InstallTab[] = [
   { label: "go", command: "go get github.com/telmoni/telmoni/sdk/go" },
   {
     label: "cli",
-    command: "curl -fsSL https://raw.githubusercontent.com/telmoni/telmoni-cli/main/install.sh | sh",
+    command: "curl -fsSL https://telmoni.com/install.sh | sh",
   },
   ...(SKILLS_URL
     ? [
