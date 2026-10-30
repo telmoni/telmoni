@@ -6,7 +6,7 @@ metadata:
   name: {{ $svc }}
   labels:
     app.kubernetes.io/name: {{ $svc }}
-    app.kubernetes.io/component: server
+    app.kubernetes.io/component: {{ $svc }}
     {{- include "telmoni.labels" $ | nindent 4 }}
 spec:
   scaleTargetRef:
@@ -29,7 +29,7 @@ metadata:
   name: {{ $svc }}
   labels:
     app.kubernetes.io/name: {{ $svc }}
-    app.kubernetes.io/component: server
+    app.kubernetes.io/component: {{ $svc }}
     {{- include "telmoni.labels" $ | nindent 4 }}
 spec:
   minAvailable: 1

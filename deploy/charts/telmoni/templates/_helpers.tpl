@@ -72,10 +72,13 @@ topologySpreadConstraints:
 {{- end }}
 
 {{/*
-Common labels
+Common labels: the release and the commit an object belongs to, beside the
+`name` and `component` (its workload) each object sets.
 */}}
 {{- define "telmoni.labels" -}}
 helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
 app.kubernetes.io/part-of: telmoni
+app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/version: {{ .Values.global.imageTag | trunc 63 | quote }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end }}

@@ -8,6 +8,7 @@ metadata:
   name: {{ include "telmoni.fullname" . }}-migrate
   labels:
     app.kubernetes.io/name: migrator
+    app.kubernetes.io/component: migrator
     {{- include "telmoni.labels" . | nindent 4 }}
   {{- if .Values.migrator.hook.enabled }}
   annotations:
@@ -23,6 +24,7 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: migrator
+        app.kubernetes.io/component: migrator
         {{- include "telmoni.labels" . | nindent 8 }}
     spec:
       restartPolicy: Never
@@ -71,7 +73,7 @@ metadata:
   name: rotate
   labels:
     app.kubernetes.io/name: migrator
-    app.kubernetes.io/component: rotate
+    app.kubernetes.io/component: migrator
     {{- include "telmoni.labels" . | nindent 4 }}
 spec:
   schedule: {{ .Values.migrator.rotateSchedule | quote }}
@@ -84,7 +86,7 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: migrator
-        app.kubernetes.io/component: rotate
+        app.kubernetes.io/component: migrator
         {{- include "telmoni.labels" . | nindent 8 }}
     spec:
       backoffLimit: 0
@@ -94,7 +96,7 @@ spec:
         metadata:
           labels:
             app.kubernetes.io/name: migrator
-            app.kubernetes.io/component: rotate
+            app.kubernetes.io/component: migrator
             {{- include "telmoni.labels" . | nindent 12 }}
         spec:
           restartPolicy: Never

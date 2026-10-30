@@ -50,6 +50,7 @@ metadata:
   name: allow-server-ingress
   labels:
     app.kubernetes.io/name: server
+    app.kubernetes.io/component: server
     {{- include "telmoni.labels" . | nindent 4 }}
 spec:
   podSelector:
@@ -70,6 +71,7 @@ metadata:
   name: allow-web-ingress
   labels:
     app.kubernetes.io/name: web
+    app.kubernetes.io/component: web
     {{- include "telmoni.labels" . | nindent 4 }}
 spec:
   podSelector:
@@ -89,6 +91,7 @@ metadata:
   name: allow-web-egress
   labels:
     app.kubernetes.io/name: web
+    app.kubernetes.io/component: web
     {{- include "telmoni.labels" . | nindent 4 }}
 spec:
   podSelector:
@@ -163,6 +166,7 @@ metadata:
   name: allow-server-to-web
   labels:
     app.kubernetes.io/name: server
+    app.kubernetes.io/component: server
     {{- include "telmoni.labels" . | nindent 4 }}
 spec:
   podSelector:

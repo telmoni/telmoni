@@ -5,6 +5,7 @@ metadata:
   name: web
   labels:
     app.kubernetes.io/name: web
+    app.kubernetes.io/component: web
     {{- include "telmoni.labels" . | nindent 4 }}
 spec:
   {{- if not .Values.highAvailability.enabled }}
@@ -20,6 +21,7 @@ spec:
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
       labels:
         app.kubernetes.io/name: web
+        app.kubernetes.io/component: web
         {{- include "telmoni.labels" . | nindent 8 }}
     spec:
       serviceAccountName: web
@@ -95,6 +97,7 @@ metadata:
   name: web
   labels:
     app.kubernetes.io/name: web
+    app.kubernetes.io/component: web
     {{- include "telmoni.labels" . | nindent 4 }}
 spec:
   type: ClusterIP

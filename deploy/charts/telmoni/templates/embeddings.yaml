@@ -5,6 +5,7 @@ metadata:
   name: embeddings
   labels:
     app.kubernetes.io/name: embeddings
+    app.kubernetes.io/component: embeddings
     {{- include "telmoni.labels" . | nindent 4 }}
 spec:
   replicas: 1
@@ -15,6 +16,7 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: embeddings
+        app.kubernetes.io/component: embeddings
         {{- include "telmoni.labels" . | nindent 8 }}
     spec:
       automountServiceAccountToken: false
@@ -87,6 +89,7 @@ metadata:
   name: embeddings
   labels:
     app.kubernetes.io/name: embeddings
+    app.kubernetes.io/component: embeddings
     {{- include "telmoni.labels" . | nindent 4 }}
 spec:
   type: ClusterIP
@@ -105,6 +108,7 @@ metadata:
   name: allow-embeddings-ingress
   labels:
     app.kubernetes.io/name: embeddings
+    app.kubernetes.io/component: embeddings
     {{- include "telmoni.labels" . | nindent 4 }}
 spec:
   podSelector:
@@ -128,6 +132,7 @@ metadata:
   name: allow-embeddings-egress
   labels:
     app.kubernetes.io/name: embeddings
+    app.kubernetes.io/component: embeddings
     {{- include "telmoni.labels" . | nindent 4 }}
 spec:
   podSelector:
@@ -151,6 +156,7 @@ metadata:
   name: allow-server-to-embeddings
   labels:
     app.kubernetes.io/name: server
+    app.kubernetes.io/component: server
     {{- include "telmoni.labels" . | nindent 4 }}
 spec:
   podSelector:

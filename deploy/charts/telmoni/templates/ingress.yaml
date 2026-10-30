@@ -8,7 +8,7 @@ metadata:
   name: web
   labels:
     app.kubernetes.io/name: web
-    app.kubernetes.io/component: ingress
+    app.kubernetes.io/component: web
     {{- include "telmoni.labels" . | nindent 4 }}
   {{- with .Values.ingress.annotations }}
   annotations:
@@ -33,7 +33,7 @@ metadata:
   name: web
   labels:
     app.kubernetes.io/name: web
-    app.kubernetes.io/component: ingress
+    app.kubernetes.io/component: web
     {{- include "telmoni.labels" . | nindent 4 }}
 spec:
   parentRefs:
@@ -57,7 +57,7 @@ metadata:
   name: web-https-redirect
   labels:
     app.kubernetes.io/name: web
-    app.kubernetes.io/component: ingress
+    app.kubernetes.io/component: web
     {{- include "telmoni.labels" . | nindent 4 }}
 spec:
   parentRefs:
@@ -76,7 +76,7 @@ metadata:
   name: web
   labels:
     app.kubernetes.io/name: web
-    app.kubernetes.io/component: ingress
+    app.kubernetes.io/component: web
     {{- include "telmoni.labels" . | nindent 4 }}
 spec:
   default:
@@ -96,7 +96,7 @@ metadata:
   name: web
   labels:
     app.kubernetes.io/name: web
-    app.kubernetes.io/component: ingress
+    app.kubernetes.io/component: web
     {{- include "telmoni.labels" . | nindent 4 }}
 spec:
   default:
@@ -126,7 +126,7 @@ metadata:
   name: server-api
   labels:
     app.kubernetes.io/name: server
-    app.kubernetes.io/component: ingress
+    app.kubernetes.io/component: server
     {{- include "telmoni.labels" . | nindent 4 }}
 spec:
   parentRefs:
@@ -166,7 +166,7 @@ metadata:
   name: server-api
   labels:
     app.kubernetes.io/name: server
-    app.kubernetes.io/component: ingress
+    app.kubernetes.io/component: server
     {{- include "telmoni.labels" . | nindent 4 }}
 spec:
   default:
@@ -188,7 +188,7 @@ metadata:
   name: server-api
   labels:
     app.kubernetes.io/name: server
-    app.kubernetes.io/component: ingress
+    app.kubernetes.io/component: server
     {{- include "telmoni.labels" . | nindent 4 }}
 spec:
   default:
