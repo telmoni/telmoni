@@ -173,6 +173,13 @@ Apply `crates/migrator/sql/role_hardening.sql`:
 psql "$SUPERUSER_DATABASE_URL" -v ON_ERROR_STOP=1 -f crates/migrator/sql/role_hardening.sql
 ```
 
+The Compose stack's Postgres publishes no port on the host, so there, run it inside its container:
+
+```bash
+docker compose -f deploy/compose/docker-compose.yml exec -T postgres \
+  psql -U telmoni -d telmoni -v ON_ERROR_STOP=1 < crates/migrator/sql/role_hardening.sql
+```
+
 This script, which refuses to run as one of the five roles and stops if any of them is missing:
 - Strips `SUPERUSER`, `CREATEROLE`, and `CREATEDB` from all five roles.
 - Enforces `NOBYPASSRLS` across `auth`, `notifications`, `agent` and `telemetry` so that application pools cannot bypass PostgreSQL Row-Level Security policies; `migrator` gets `BYPASSRLS` and `CREATE` on the database, since it owns every schema.
@@ -273,10 +280,10 @@ least, and `503` naming the rest, each as `<schema>.<loop>`:
 ```
 
 Point an uptime checker outside your cluster at it every minute: a loop
-stopped on every replica fails it within three of its periods, which no probe
-of the server's would show, and a restart is no remedy for what stopped it.
-Each replica reads the answer again at most every five seconds, so a checker
-that asks often costs nothing more; it names no organization and none of their
+stopped on every replica fails it within three of its periods and a minute,
+which no probe of the server's would show, and a restart is no remedy for what
+stopped it. Each replica reads the answer again at most once a minute, so a
+checker that asks often, or from several regions, costs nothing more; it names no organization and none of their
 data. A sweep `RUN_SWEEPS=false` leaves to your own schedule is not among its
 loops.
 
@@ -416,14 +423,17 @@ The server speaks HTTP/1.1 alone, and gives each connection 620 seconds from its
 Telmoni keeps its persistent state in two stores: everything but the spans in PostgreSQL, and the spans with their hourly totals in ClickHouse ([below](#clickhouse-backups)). Create periodic logical backups of PostgreSQL with `pg_dump`. Every tenant table forces row-level security, so run it as a role that bypasses it: a superuser, such as the Compose stack's single database user, or `migrator` with separate roles.
 
 ```bash
-# Logical database dump, from the Compose host (Postgres listens on 127.0.0.1)
-pg_dump -h 127.0.0.1 -U telmoni -d telmoni -Fc -f "/backups/telmoni_$(date +%Y%m%d_%H%M%S).dump"
+# Logical database dump, from the Compose host, inside the Postgres container
+# (it publishes no port on the host)
+docker compose -f deploy/compose/docker-compose.yml exec -T postgres \
+  pg_dump -U telmoni -d telmoni -Fc > "/backups/telmoni_$(date +%Y%m%d_%H%M%S).dump"
 ```
 
 To restore from a backup file:
 
 ```bash
-pg_restore -h 127.0.0.1 -U telmoni -d telmoni --clean --if-exists "/backups/telmoni_backup.dump"
+docker compose -f deploy/compose/docker-compose.yml exec -T postgres \
+  pg_restore -U telmoni -d telmoni --clean --if-exists < "/backups/telmoni_backup.dump"
 ```
 
 <Callout type="warn">

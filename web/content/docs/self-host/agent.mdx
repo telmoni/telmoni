@@ -69,7 +69,7 @@ The agent has access to five internal inspection tools:
 
 Telmoni sizes its PostgreSQL vector columns (`agent.chunks.embedding`) for **768-dimensional embeddings**, the width `nomic-embed-text` produces.
 
-The agent needs **pgvector 0.8 or later** in Telmoni's database: while a person can read fewer than 1,000 passages in a project and its organization, their search compares every one exactly, and past that it uses pgvector's iterative index scans; the migration stops on an older version. The Docker Compose stack runs the `pgvector/pgvector:pg17` image; on a managed database, check which version its `vector` extension offers.
+The agent needs **pgvector 0.8 or later** in Telmoni's database: while a person can read fewer than 1,000 passages in a project and its organization, their search compares every one exactly, and past that it uses pgvector's iterative index scans; the migration stops on an older version. The Docker Compose stack runs the `pgvector/pgvector:0.8.7-pg17` image; on a managed database, check which version its `vector` extension offers.
 
 <Callout type="warn">
 The server checks the vector width at boot. If your embeddings endpoint answers with a width other than 768, the server refuses to start rather than write vectors that don't fit. If the endpoint isn't answering yet (Ollama still pulling the model, say), the server starts anyway, and the indexer checks the width at the endpoint's first answer and stops indexing on a mismatch.

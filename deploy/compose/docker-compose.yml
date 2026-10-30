@@ -62,20 +62,24 @@ x-database-url: &database_url
 x-clickhouse-url: &clickhouse_url
   http://${CLICKHOUSE_USER:-telmoni}:${CLICKHOUSE_PASSWORD:?set CLICKHOUSE_PASSWORD in deploy/compose/.env}@clickhouse:8123
 
+# Docker's `local` driver rotates each container's log, where its default
+# keeps every line, and a long-running host fills its disk.
+x-logging: &logging
+  driver: local
+
 services:
   postgres:
     # Postgres 17 with pgvector, which the agent's search needs; the
     # extension is installed once, when the volume is first created.
-    image: pgvector/pgvector:pg17
+    image: pgvector/pgvector:0.8.7-pg17
     container_name: telmoni-postgres
     restart: unless-stopped
+    logging: *logging
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-telmoni}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/compose/.env}
       POSTGRES_DB: ${POSTGRES_DB:-telmoni}
     command: ["postgres", "-c", "max_connections=300"]
-    ports:
-      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ../../crates/migrator/sql/dev_extensions.sql:/docker-entrypoint-initdb.d/05-extensions.sql:ro
@@ -101,13 +105,12 @@ services:
     image: clickhouse/clickhouse-server:26.8.19.9
     container_name: telmoni-clickhouse
     restart: unless-stopped
+    logging: *logging
     mem_limit: 1536m
     environment:
       CLICKHOUSE_USER: ${CLICKHOUSE_USER:-telmoni}
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?set CLICKHOUSE_PASSWORD in deploy/compose/.env}
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
-    ports:
-      - "127.0.0.1:8123:8123"
     volumes:
       - clickhouse_data:/var/lib/clickhouse
       - ../../crates/telemetry/clickhouse/low-memory.xml:/etc/clickhouse-server/config.d/low-memory.xml:ro
@@ -125,12 +128,11 @@ services:
       start_period: 10s
 
   redis:
-    image: redis:7-alpine
+    image: redis:7.4-alpine
     container_name: telmoni-redis
     restart: unless-stopped
+    logging: *logging
     command: redis-server --save "" --loglevel warning
-    ports:
-      - "127.0.0.1:6379:6379"
     networks:
       - telmoni-net
     healthcheck:
@@ -150,6 +152,7 @@ services:
     image: ${TELMONI_IMAGE_SERVER:-ghcr.io/telmoni/server:latest}
     command: ["migrate"]
     restart: "no"
+    logging: *logging
     depends_on:
       postgres:
         condition: service_healthy
@@ -165,6 +168,7 @@ services:
     image: ${TELMONI_IMAGE_SERVER:-ghcr.io/telmoni/server:latest}
     command: ["serve"]
     restart: unless-stopped
+    logging: *logging
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -264,6 +268,7 @@ services:
     image: ollama/ollama:0.40.1
     profiles: ["agent"]
     restart: unless-stopped
+    logging: *logging
     networks:
       - telmoni-net
     volumes:
@@ -272,6 +277,7 @@ services:
   web:
     image: ${TELMONI_IMAGE_WEB:-ghcr.io/telmoni/web:latest}
     restart: unless-stopped
+    logging: *logging
     # Loopback, for the reverse proxy on this host, as the server's 8082 is:
     # Docker publishes ahead of the host's firewall, and a caller reaching
     # the console directly writes its own address into the sign-in limits.

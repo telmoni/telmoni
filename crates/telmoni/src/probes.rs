@@ -40,8 +40,9 @@ pub(crate) async fn health(State(app): State<Arc<App>>) -> (StatusCode, Json<ser
 }
 
 /// How long a replica's answer to the watchdog stands: the stores are read at
-/// most this often, however often `/heartbeat` is asked.
-const HEARTBEAT_HELD_FOR: Duration = Duration::from_secs(5);
+/// most this often, however often `/heartbeat` is asked, so an uptime check
+/// asking from several regions each minute costs one read.
+const HEARTBEAT_HELD_FOR: Duration = Duration::from_secs(60);
 
 /// `GET /heartbeat` — the **external watchdog's**, on the machine host: `200`,
 /// or `503` naming each loop of the process that no replica has beaten for
