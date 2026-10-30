@@ -17,7 +17,7 @@ use telmoni_auth::db::AuthLane;
 use telmoni_shared::TelmoniError;
 use telmoni_shared::heartbeat::Heartbeats;
 
-use crate::cli::AuthSweep;
+use crate::command::AuthSweep;
 
 /// How long after boot the first tick of each sweep runs: a minute, past the
 /// readiness probe's first passes and the thirty seconds Kubernetes gives the

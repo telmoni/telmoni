@@ -146,7 +146,7 @@ flowchart TB
 
 | Block | What it is | What it keeps |
 |---|---|---|
-| `telmoni` | The binary and its crate, `telmoni-server`: `App`, `Parts`, `Module` and `run`; `serve`, the machine door (`door.rs`), the subcommands (`cli.rs`) and the sweeps' timers (`sweeps.rs`) | — |
+| `telmoni` | The binary and its crate, `telmoni-server`: `App`, `Parts`, `Module` and `run`; `serve`, the machine door (`door.rs`), the subcommands (`command.rs`) and the sweeps' timers (`sweeps.rs`) | — |
 | `auth` | Identity, sessions and the one issuer; organizations, projects, rosters, invitations and transfers; API keys; flags; export, audit exports and deletion; `/me`, `/cli/v1` and `/v1` | The `auth` schema |
 | `notifications` | The feeds, the connectors, the delivery queue and its loop, Slack's events, the uninstalls a delete or a refused install files (`uninstall.rs`), and the retention sweep, which also finishes a deleted project's purge (`retention.rs`) | The `notifications` schema |
 | `agent` | Model adapters, embeddings, the index and hybrid search, five read-only tools, the turn loop, and the recorder that sends its own questions through the Rust SDK (`observe.rs`, `report.rs`) | The `agent` schema, with pgvector |

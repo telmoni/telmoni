@@ -20,7 +20,7 @@
 //! its own.
 
 use telmoni_server::App;
-use telmoni_server::cli::Command;
+use telmoni_server::command::Command;
 
 // The image is a static musl build, whose malloc serializes threads on one lock.
 #[global_allocator]

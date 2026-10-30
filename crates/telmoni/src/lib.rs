@@ -17,7 +17,7 @@
 
 #![deny(missing_docs)]
 
-pub mod cli;
+pub mod command;
 pub mod door;
 mod serve;
 pub mod sweeps;
@@ -43,7 +43,7 @@ use telmoni_shared::{
     AuthError, FlagSet, OrganizationId, OrganizationStatus, ProjectId, TelmoniError, UserId,
 };
 
-use cli::{Command, Sweep};
+use command::{Command, Sweep};
 
 /// The port `telmoni-server serve` listens on when `PORT` is unset.
 pub const DEFAULT_PORT: u16 = 8082;

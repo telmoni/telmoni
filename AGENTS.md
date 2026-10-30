@@ -11,7 +11,7 @@ The open-source Telmoni platform ([`telmoni/telmoni`](https://github.com/telmoni
 ## Where Things Live
 | Path | What |
 |---|---|
-| `crates/telmoni` | The `telmoni-server` binary: `serve` (every module on `PORT` 8082, the sweeps and the agent's indexer on timers), the machine door (`door.rs`) and one-shot admin subcommands (`cli.rs`). `App::assemble` is what a deployment's own binary calls. |
+| `crates/telmoni` | The `telmoni-server` binary: `serve` (every module on `PORT` 8082, the sweeps and the agent's indexer on timers), the machine door (`door.rs`) and one-shot admin subcommands (`command.rs`). `App::assemble` is what a deployment's own binary calls. |
 | `crates/auth` | Sign-in (password form, OIDC), identities, organizations, projects, members, invitations, transfers, API keys, sessions, flags, export and deletion, `/v1`. |
 | `crates/notifications` | The in-app feed, the Slack and webhook connectors, the delivery queue. |
 | `crates/agent` | The console agent, read-only: model adapters, embeddings, the index, hybrid search, tools. Needs the `vector` extension, which a superuser installs. Off until `AGENT_MODEL_PROVIDER` is set. |
