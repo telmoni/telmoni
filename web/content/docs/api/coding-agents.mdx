@@ -18,7 +18,7 @@ local model named by the path to its file is sent by the file's name alone.
 | **Cursor** | [`telmoni/cursor-observability-plugin`](https://github.com/telmoni/cursor-observability-plugin) | `@telmoni/cursor-observability-plugin`, or the repository as a Cursor plugin | `cursor` |
 
 The Claude Code plugin is built on the [Python SDK](/docs/api/sdks), which its
-hook fetches the first time it runs; the other three on the [TypeScript
+worker fetches, in the background, the first time it runs; the other three on the [TypeScript
 SDK](/docs/api/sdks), which each carries inside its own package. All send what
 the SDKs send, under a [project API key](/docs/api/api-keys) holding only the
 **ingest** scope (**Send spans**). A self-hosted Telmoni's machine host is read
@@ -48,8 +48,10 @@ is one run of the agent, and your session (Cursor's conversation) is the run's
 session (`gen_ai.conversation.id`), so the console shows a session as a
 [session](/docs/workspace/sessions) of traces. Inside the run:
 
-- **the model's work**, a model call with its model, its provider and its
-  token counts, the cache's reads and writes among them, counted as the GenAI
+- **the model's work**, a model call with its model, its provider, named as
+  the GenAI conventions and the console's prices name it (`aws.bedrock` for
+  Claude Code on Bedrock, `azure.ai.openai` for Codex's Azure), and its token
+  counts, the cache's reads and writes among them, counted as the GenAI
   conventions count them: a call per reply for Claude Code, Codex and
   OpenCode, and one for the whole turn for Cursor, which gives its tokens a
   turn at a time;
@@ -63,6 +65,9 @@ session (`gen_ai.conversation.id`), so the console shows a session as a
   their own, in the same session;
 - for Claude Code, **the skills the turn ran**, by name, as the tag `skills`.
 
+The run's release is the version of the agent that ran the turn, for Claude
+Code, Codex and Cursor; OpenCode hands its plugin none.
+
 An interrupted turn is a cancelled run, and a turn an error ended a failed one,
 named by the error's kind where the agent gives one (Claude Code's
 `rate_limit`, Codex's `context_window_exceeded`; Cursor gives none, so its run
@@ -70,7 +75,8 @@ fails as `AgentError`), never its message. A turn is sent once it has ended.
 If Telmoni cannot be reached or is busy, if its database fails it (`500`
 `/errors/internal/database`), or if it refuses the key or the endpoint, the
 turn is sent again as the session's next turn ends, the session's later turns
-waiting for it. One Telmoni took in part, or refused for good — for what it
+waiting for it, or, once the session has ended, as any session's next turn
+ends. One Telmoni took in part, or refused for good — for what it
 holds (`400`, `413`), for a paused organization (`402`) or for any other fault
 of its own (`500`) — is logged and not sent again. OpenCode's plugin holds
 turns not yet sent in memory and sends them every five minutes and as any
@@ -85,9 +91,13 @@ and the turn, and every span's from the run's.
 names, ids, times, counts and flags: each entry's kind, id, time and outcome, a
 reply's model, provider and token counts, a tool call's name, and a subagent's
 kind. The Claude Code plugin also reads the skill a `Skill` call names, which
-it sends as the tag `skills`, the kind an `Agent` call names, and whether a
-prompt is empty, opens with a tag or marks an interruption, which it never
-keeps. It never keeps or sends a
+it sends as the tag `skills`, the kind an `Agent` or `Task` call names and
+whether it runs in the background, whether a tool result says a subagent went
+on in the background, the tool call a background task's notice names, and
+whether a prompt is empty, opens with a tag or marks an interruption, which it
+never keeps. A name is sent only as a plain name: a model named by a path goes
+as its file's name or `unknown`, and a tool, skill or subagent name holding
+anything else, as a model may write, as `unknown`. It never keeps or sends a
 prompt or a reply, the model's thinking, a tool's input or output beyond that
 skill's name, a command, the path or contents of a file you work on, the
 working folder, a session's title or anyone's email, whatever the project's
@@ -129,10 +139,12 @@ takes the configuration as JSON (`{"TELMONI_API_KEY": "tm_…"}`); without
 `--values-stdin` it only lists the options. Claude Code keeps the key with its
 own credentials: in the Keychain on macOS, and in its credentials file
 elsewhere. Left blank, the endpoint is `https://api.telmoni.com`; a self-hosted
-Telmoni gives its own machine host. `TELMONI_API_KEY` and `TELMONI_ENDPOINT` in
-the environment Claude Code starts in — your shell's, or a repository's
-`.claude/settings.json` `env` block — come before the plugin's own settings, so
-one checkout can report to another project.
+Telmoni gives its own machine host. A `TELMONI_API_KEY` in the environment
+Claude Code starts in — your shell's, or a repository's `.claude/settings.json`
+`env` block — comes before the plugin's own settings, so one checkout can report
+to another project, and goes with the `TELMONI_ENDPOINT` beside it there, or the
+default: a key is never sent to an endpoint named somewhere else, so a
+repository that names its own endpoint gets no one's machine-wide key.
 
 Plugins load as a session starts, so start a new one once the key is set. The
 hook runs when a turn stops, when an API error ends one, and when the session
@@ -166,12 +178,12 @@ to run it from a checkout.
 
 The key goes in `telmoni.json` in Codex's folder — `~/.codex`, or `CODEX_HOME`
 where you set one — as `{ "apiKey": "tm_…" }`, with `"endpoint"` beside
-it for a self-hosted Telmoni; `TELMONI_API_KEY` and `TELMONI_ENDPOINT` in
-Codex's environment — your shell's, or the `.env` in Codex's folder — come
-first, and with both set the file is not read. The plugin reads the file only
-while it is yours and shut to everyone else (`chmod 600`): past one it passes
-over, it sends nothing, a key in the environment or not, since an endpoint the
-file names would otherwise give way to the default. Its log, which says why, is
+it for a self-hosted Telmoni; a `TELMONI_API_KEY` in Codex's environment — your
+shell's, or the `.env` in Codex's folder — comes first, with the
+`TELMONI_ENDPOINT` beside it there or the default, never the file's, and with it
+set the file is not read. The plugin reads the file only while it is yours and
+shut to everyone else (`chmod 600`): past one it passes over, it sends nothing,
+since an endpoint the file names would otherwise give way to the default. Its log, which says why, is
 `telmoni/hook.log` in the same folder (`~/.codex/telmoni/hook.log`). A key in
 the file is read at every hook; one in Codex's environment, as a new session
 starts.
@@ -221,11 +233,11 @@ OpenCode 1, and its `dist` folder on OpenCode 2, which takes no file there.
 The key goes in `telmoni.json` beside your OpenCode configuration
 (`~/.config/opencode/telmoni.json`, or in `OPENCODE_CONFIG_DIR` or under
 `XDG_CONFIG_HOME` where you set one), as `{ "apiKey": "tm_…" }`, with
-`"endpoint"` beside it for a self-hosted Telmoni; `TELMONI_API_KEY` and
-`TELMONI_ENDPOINT` in the environment OpenCode starts in come first, and with
-both set the file is not read. The plugin never writes the file, and reads it
-only while it is yours and shut to everyone else (`chmod 600`): past one it
-passes over, it sends nothing, a key in the environment or not. Restart
+`"endpoint"` beside it for a self-hosted Telmoni; a `TELMONI_API_KEY` in the
+environment OpenCode starts in comes first, with the `TELMONI_ENDPOINT` beside it
+there or the default, never the file's, and with it set the file is not read.
+The plugin never writes the file, and reads it only while it is yours and shut
+to everyone else (`chmod 600`): past one it passes over, it sends nothing. Restart
 OpenCode once the key is in place: the plugin reads it as OpenCode loads it.
 The plugin runs inside OpenCode and keeps nothing on disk but its log,
 `~/.local/state/telmoni/opencode/plugin.log` (under `XDG_STATE_HOME` where you
@@ -256,9 +268,9 @@ then it adds the plugin's hooks to `~/.cursor/hooks.json`, beside any other
 tool's. Cursor reloads that file as it changes, so your next prompt is
 recorded. The hooks read the key file only while it is yours and shut to
 everyone else, as `setup` leaves it: past one they pass over, they keep and send
-nothing, a key in their environment or not, and `setup` changes nothing until
-it is fixed or moved aside; with both `TELMONI_API_KEY` and `TELMONI_ENDPOINT`
-in their environment, they never read it. `remove` takes the hooks out again
+nothing, and `setup` changes nothing until it is fixed or moved aside; with
+`TELMONI_API_KEY` in their environment they never read it, and send that key
+with the `TELMONI_ENDPOINT` beside it there, or the default, never the file's. `remove` takes the hooks out again
 and deletes the key and `~/.cursor/telmoni/`, but for what `setup --project`
 kept of a repository's hooks file, for that repository's `remove --project`.
 For a self-hosted Telmoni, set `TELMONI_ENDPOINT` to its machine host when you
