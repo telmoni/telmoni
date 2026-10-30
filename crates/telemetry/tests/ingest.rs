@@ -1312,16 +1312,13 @@ async fn an_export_past_the_in_flight_bound_is_refused_unavailable(pool: PgPool)
     let (organization, project) = (OrganizationId::new(), ProjectId::new());
     let auth = AuthStub::new();
     auth.key(INGEST_KEY, &organization, &project, &[ApiKeyScope::Ingest]);
-    let Ok(state) = Arc::try_unwrap(common::state(&pool, auth.clone())) else {
+    let Ok(mut state) = Arc::try_unwrap(common::state(&pool, auth.clone())) else {
         panic!("the suite's state is shared");
     };
-    let state = Arc::new(telmoni_telemetry::AppState {
-        ingest_slots: Arc::new(tokio::sync::Semaphore::new(0)),
-        ..state
-    });
+    state.ingest_slots = Arc::new(tokio::sync::Semaphore::new(0));
 
     let answer = answer_raw(
-        state,
+        Arc::new(state),
         &format!(
             "POST {LANE} HTTP/1.1\r\nhost: localhost\r\nauthorization: Bearer {INGEST_KEY}\r\n\
              content-type: application/json\r\ncontent-length: 2\r\nconnection: close\r\n\r\n{{}}"
