@@ -35,6 +35,14 @@ annotations:
 {{- end }}
 
 {{/*
+Every container's image of this repository's, at the one required tag.
+*/}}
+{{- define "telmoni.image" -}}
+{{- $tag := required "global.imageTag: the full commit SHA this chart is checked out at" .root.Values.global.imageTag -}}
+{{- with .root.Values.global.imageRegistry }}{{ . }}/{{ end }}{{ .name }}:{{ $tag }}
+{{- end }}
+
+{{/*
 With highAvailability, a Deployment's replicas spread across nodes, so one
 node's loss leaves a replica; scheduled anyway on a single node.
 */}}

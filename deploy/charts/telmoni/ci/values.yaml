@@ -1,0 +1,4 @@
+# What the gates render the chart with (make deploy-check, CI's deploy-check
+# job, the cloud's infra-check): the values it requires, which ship empty.
+global:
+  imageTag: check

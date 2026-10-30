@@ -360,9 +360,9 @@ sdk-check:
 # file parsed, its secrets set to a placeholder.
 .PHONY: deploy-check
 deploy-check:
-	helm lint --strict deploy/charts/telmoni
-	helm template telmoni deploy/charts/telmoni > /dev/null
-	helm template telmoni deploy/charts/telmoni --set highAvailability.enabled=true,ingress.enabled=true,embeddings.enabled=true > /dev/null
+	helm lint --strict deploy/charts/telmoni -f deploy/charts/telmoni/ci/values.yaml
+	helm template telmoni deploy/charts/telmoni -f deploy/charts/telmoni/ci/values.yaml > /dev/null
+	helm template telmoni deploy/charts/telmoni -f deploy/charts/telmoni/ci/values.yaml --set highAvailability.enabled=true,ingress.enabled=true,embeddings.enabled=true > /dev/null
 	POSTGRES_PASSWORD=x CLICKHOUSE_PASSWORD=x AUTH_SECRET=x SERVICE_SECRET=x TELEMETRY_KEK=x docker compose -f deploy/compose/docker-compose.yml config -q
 
 .PHONY: fmt

@@ -3,7 +3,10 @@ global:
   # publishes, so the chart installs as it ships. A deployment with its own
   # registry points this at it.
   imageRegistry: "ghcr.io/telmoni"
-  imageTag: "latest"
+  # The full SHA of the commit this chart is checked out at, for both images
+  # (each commit CI passed on main is published under its SHA). Required: a
+  # moving tag leaves each node on the one it pulled first.
+  imageTag: ""
   imagePullPolicy: IfNotPresent
 
 config:

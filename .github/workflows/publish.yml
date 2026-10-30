@@ -27,7 +27,9 @@ permissions:
   packages: write
 
 # Publishes queue rather than overlap, so `latest` cannot end on the older of
-# two commits whose runs crossed.
+# two commits whose runs crossed. Each image is pushed under its commit's SHA
+# alone; `latest` moves for both together, once both are pushed, so a pull
+# never pairs a console and a server from two commits.
 concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: false
@@ -62,15 +64,16 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      # `latest` for the quickstarts, which name no tag, and the commit's SHA
-      # for anyone pinning. The labels tie the package to this repository.
+      # The commit's SHA, for anyone pinning. The labels tie the package to
+      # this repository; `context: git` takes the revision from the checkout,
+      # where the workflow's own would name whatever main has moved on to.
       - id: meta
         uses: docker/metadata-action@v6
         with:
+          context: git
           images: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
-          tags: |
-            type=raw,value=latest
-            type=raw,value=${{ github.event.workflow_run.head_sha }}
+          tags: type=raw,value=${{ github.event.workflow_run.head_sha }}
+          labels: org.opencontainers.image.version=${{ github.event.workflow_run.head_sha }}
       - uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.context }}
@@ -83,3 +86,25 @@ jobs:
           # The image is pushed before the cache is saved, so a cache-service
           # failure should cost the next build its speed, not this publish.
           cache-to: type=gha,mode=max,scope=${{ matrix.image }},ignore-error=true
+
+  # `latest`, for the quickstarts that name no tag, moved to this commit for
+  # both images at once, and only when both publishes passed.
+  latest:
+    name: latest
+    needs: publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - env:
+          OWNER: ${{ github.repository_owner }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          for image in server web; do
+            docker buildx imagetools create --tag "ghcr.io/$OWNER/$image:latest" "ghcr.io/$OWNER/$image:$SHA"
+          done

@@ -38,7 +38,7 @@ flowchart TD
 Before deploying the Helm chart, ensure you have:
 - A Kubernetes cluster on Google Cloud, GKE with Workload Identity or your own on Compute Engine nodes: in a pod, `TELEMETRY_KEK` and `CONNECTOR_KEK` must be Google Cloud KMS keys, reached with a token from Google's metadata server (the last item below), which a cluster elsewhere does not have
 - [Helm](https://helm.sh/docs/intro/install/) 3 (the chart's `apiVersion` is `v2`)
-- Nodes that run `linux/amd64`: the published images are built for it alone, tagged `latest` and with the full SHA of their commit, which `global.imageTag` pins
+- Nodes that run `linux/amd64`: the published images are built for it alone, each tagged with the full SHA of its commit, which `global.imageTag` names (required)
 - A PostgreSQL 17 database instance with the `vector` extension, pgvector 0.8 or later, created by a superuser before the first migration
 - The five login roles `auth`, `notifications`, `agent`, `telemetry` and `migrator`, created by you, each with its own password, then hardened with `role_hardening.sql` as the [production guide](/docs/self-host/production) describes; the connection strings below log in as them
 - A ClickHouse server outside the chart, one node, reached over its HTTP interface (8123 for `http` and 8443 for `https`, by default), with two users of its own:
@@ -202,12 +202,13 @@ Enabling `highAvailability.enabled` creates a `HorizontalPodAutoscaler` and a `P
 
 **Install the Helm chart**
 
-From your repository root, run `helm install`:
+From your repository root, run `helm install` with `global.imageTag` set to the commit your checkout is at, so the chart's templates and both images are the same commit. Every commit CI passed on `main` is published under its full SHA ([server images](https://github.com/telmoni/telmoni/pkgs/container/server)); check out one listed there. The chart refuses to render without the tag.
 
 ```bash
 helm install telmoni ./deploy/charts/telmoni \
   --namespace telmoni \
-  --values values-prod.yaml
+  --values values-prod.yaml \
+  --set global.imageTag="$(git rev-parse HEAD)"
 ```
 
 </Step>
@@ -230,13 +231,13 @@ The `server` and `web` Deployments run between the autoscaler's `minReplicas` an
 
 ### Upgrading
 
-The chart runs the images tagged `global.imageTag`, `latest` unless you pin it, with `imagePullPolicy: IfNotPresent`, so a node that already holds `latest` keeps running it. Pin `global.imageTag` to the full SHA of a commit, and change it to upgrade: `helm upgrade` runs the migration Job first, as a pre-upgrade hook, and a failed migration fails the upgrade.
+The chart runs both images at `global.imageTag`, a commit's full SHA, which it requires. Upgrade by checking out a newer commit and setting the tag to it: `helm upgrade` runs the migration Job first, as a pre-upgrade hook, and a failed migration fails the upgrade.
 
 ```bash
 helm upgrade telmoni ./deploy/charts/telmoni \
   --namespace telmoni \
   --values values-prod.yaml \
-  --set global.imageTag=<commit SHA>
+  --set global.imageTag="$(git rev-parse HEAD)"
 ```
 
 Before Telmoni's first release its migrations are edited in place rather than added to, so an upgrade across such an edit is refused: the migration Job fails naming the schema whose applied migration has changed, or ClickHouse's ledger whose digest differs, and the upgrade stops before any pod rolls, the old release still serving. The way forward is to make both stores again, which deletes every organization, project and span: drop the Postgres schemas and ClickHouse's `telemetry` database with its row policies, as an administrator, then run the upgrade again.

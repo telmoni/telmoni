@@ -37,7 +37,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: migrate
-          image: "{{ if .Values.global.imageRegistry }}{{ .Values.global.imageRegistry }}/{{ end }}{{ .Values.server.image }}:{{ .Values.global.imageTag }}"
+          image: {{ include "telmoni.image" (dict "root" . "name" .Values.server.image) | quote }}
           imagePullPolicy: {{ .Values.global.imagePullPolicy }}
           args: ["migrate"]
           envFrom:
@@ -106,7 +106,7 @@ spec:
               type: RuntimeDefault
           containers:
             - name: rotate
-              image: "{{ if .Values.global.imageRegistry }}{{ .Values.global.imageRegistry }}/{{ end }}{{ .Values.server.image }}:{{ .Values.global.imageTag }}"
+              image: {{ include "telmoni.image" (dict "root" . "name" .Values.server.image) | quote }}
               imagePullPolicy: {{ .Values.global.imagePullPolicy }}
               args: ["rotate"]
               envFrom:
