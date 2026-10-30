@@ -65,11 +65,16 @@ config:
   supportEmail: ""
   legalUrl: ""
   mailFrom: "Telmoni <no-reply@localhost>"
-  connectorKek: "local:dev_key"
+  # The key every connector's grant is sealed under; empty offers no
+  # connector. In a pod: a Cloud KMS key name, or
+  # file:/var/run/secrets/telmoni/kek/connector, the key `connector` of the
+  # Secret `server-kek` (64 hex characters), off Google Cloud.
+  connectorKek: ""
   # The key each project's hashing key is sealed under, which the user ids
-  # its spans carry are hashed with. A Cloud KMS key name in a pod, as
-  # `connectorKek` is; required, where that one may be empty.
-  telemetryKek: "local:dev_key"
+  # its spans carry are hashed with. Required: a Cloud KMS key name, or
+  # file:/var/run/secrets/telmoni/kek/telemetry, the key `telemetry` of the
+  # Secret `server-kek`.
+  telemetryKek: ""
   # The console agent. Off while modelProvider is empty; on, it needs
   # `AGENT_DATABASE_URL` in `server-secrets` (the `agent` role's DSN), and
   # `AGENT_MODEL_API_KEY` there for a hosted model. modelProvider is the
@@ -187,6 +192,20 @@ migrator:
   hook:
     enabled: true
   rotateSchedule: "0 2 * * *"
+
+networkPolicies:
+  # Off leaves every policy to the operator's own.
+  enabled: true
+  # Stores inside the cluster (Postgres, ClickHouse, Redis), admitted by
+  # selector, since an address block names no pod on Cilium datapaths (GKE
+  # Dataplane V2 among them). Each: a name, the store's pod labels, its
+  # namespace's labels (none: this namespace, where its ingress is opened
+  # too), its port, and `web: true` where the console reaches it (Redis).
+  stores: []
+  #  - name: postgres
+  #    podSelector: { app.kubernetes.io/name: postgresql }
+  #    namespaceSelector: { kubernetes.io/metadata.name: data }
+  #    port: 5432
 
 highAvailability:
   enabled: false

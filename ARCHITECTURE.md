@@ -113,7 +113,7 @@ flowchart LR
 | **An OIDC provider** | Optional: who a person is, beside or instead of the password form, set as the `AUTH_CUSTOM_*` block | Discovery, the code exchange bound by PKCE, an id token of the one algorithm configured carrying the sign-in's nonce, userinfo where asked for, logout |
 | **SMTP** | Mail: verification, reset, invitations, codes | Each message |
 | **Models** | The agent's chat model (Anthropic, or anything OpenAI-compatible), embeddings and an optional reranker: the operator's, and never egress-guarded | A turn's text and the passages it reads; every passage the agent indexes |
-| **The key-encryption key** | A Cloud KMS key on a cluster, a local key on a laptop | Each connector row's and each project's data key, to wrap or unwrap |
+| **The key-encryption key** | A Cloud KMS key, or a key file mounted from a Secret, on a cluster; a local key on a laptop | Each connector row's and each project's data key, to wrap or unwrap |
 | **Slack, customers' webhooks** | Where notices are delivered | Each notice; a webhook's is signed |
 | **The operator** | Whoever runs the installation | Subcommands, feature flags, the log level |
 

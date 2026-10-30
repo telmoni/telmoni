@@ -29,7 +29,8 @@ pub struct Config {
     /// Slack's API origin (`SLACK_API_BASE`, default `https://slack.com`).
     pub slack_api_base: String,
     /// The key that wraps every row's data key (`CONNECTOR_KEK`): a Cloud KMS
-    /// key name, or `local:<64 hex>` for a laptop. `None` disables every
+    /// key name, `file:<path>` mounted in a pod, or `local:<64 hex>` for a
+    /// laptop. `None` disables every
     /// connector: a grant this module cannot seal is one it must not accept.
     pub connector_kek: Option<Redacted>,
     /// Cloud KMS's origin (`KMS_API_BASE`); the tests point it at a mock.

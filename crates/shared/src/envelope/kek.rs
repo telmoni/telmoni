@@ -1,7 +1,8 @@
 //! The key-encryption key: what wraps each row's data key.
 //!
 //! On a deployed tier the KEK is a Cloud KMS key the process never holds: each
-//! open is a `:decrypt` call and a line in Cloud Audit Logs naming the caller.
+//! open is a `:decrypt` call and a line in Cloud Audit Logs naming the caller,
+//! or, off Google Cloud, an AES-256-GCM key in a file mounted from a Secret.
 //! On a laptop it is a local AES-256-GCM key, refused at boot in a pod.
 //!
 //! **Two answers, and only two.** [`KekError::Invalid`] means this row is
@@ -42,6 +43,10 @@ pub const KEK_VERSION: i16 = 1;
 /// The spelling of a laptop's KEK: `local:` and 64 hex characters.
 const LOCAL_PREFIX: &str = "local:";
 
+/// The spelling of a mounted KEK: `file:` and the path of a file holding the
+/// 64 hex characters, which a pod takes from a Secret, never a ConfigMap.
+const FILE_PREFIX: &str = "file:";
+
 /// A metadata-server token is dropped this long before it expires, so a
 /// call never starts on a bearer that dies in flight.
 const TOKEN_REFRESH_MARGIN: Duration = Duration::from_secs(60);
@@ -78,6 +83,8 @@ pub enum Kek {
     /// An AES-256-GCM key from the environment. A laptop's shape only. Boxed:
     /// the key schedule is half a kilobyte the KMS arm does not carry.
     Local(Box<LocalKek>),
+    /// The same key read from a mounted file: a pod's shape off Google Cloud.
+    File(Box<LocalKek>),
 }
 
 impl std::fmt::Debug for Kek {
@@ -85,14 +92,15 @@ impl std::fmt::Debug for Kek {
         match self {
             Self::Kms(kms) => f.debug_struct("Kek::Kms").field("name", &kms.name).finish(),
             Self::Local(_) => f.write_str("Kek::Local"),
+            Self::File(_) => f.write_str("Kek::File"),
         }
     }
 }
 
 impl Kek {
-    /// Build from an environment value: a Cloud KMS key name or `local:<64 hex>`.
-    /// A malformed value is named at boot, because a service with a bad KEK
-    /// would refuse every write and hold every read.
+    /// Build from an environment value: a Cloud KMS key name, `local:<64 hex>`
+    /// or `file:<path>`. A malformed value is named at boot, because a service
+    /// with a bad KEK would refuse every write and hold every read.
     pub fn parse(
         var: &str,
         value: &Redacted,
@@ -100,6 +108,14 @@ impl Kek {
         metadata_api_base: &str,
     ) -> Result<Self, String> {
         let value = value.expose().trim();
+        if let Some(path) = value.strip_prefix(FILE_PREFIX) {
+            let hex_key = Zeroizing::new(
+                std::fs::read_to_string(path).map_err(|e| format!("{var}: {path}: {e}"))?,
+            );
+            return LocalKek::from_hex(&hex_key)
+                .map(|k| Self::File(Box::new(k)))
+                .map_err(|e| format!("{var}: {path}: {e}"));
+        }
         if let Some(hex_key) = value.strip_prefix(LOCAL_PREFIX) {
             return LocalKek::from_hex(hex_key)
                 .map(|k| Self::Local(Box::new(k)))
@@ -110,16 +126,18 @@ impl Kek {
             .map_err(|e| format!("{var}: {e}"))
     }
 
-    /// `"kms"` or `"local"`, for the boot log.
+    /// `"kms"`, `"local"` or `"file"`, for the boot log.
     #[must_use]
     pub const fn kind(&self) -> &'static str {
         match self {
             Self::Kms(_) => "kms",
             Self::Local(_) => "local",
+            Self::File(_) => "file",
         }
     }
 
-    /// Whether this is a laptop's key, which a deployed tier must refuse.
+    /// Whether this is a laptop's key, which a deployed tier must refuse; a
+    /// mounted one is not.
     #[must_use]
     pub const fn is_local(&self) -> bool {
         matches!(self, Self::Local(_))
@@ -136,7 +154,7 @@ impl Kek {
     ) -> Result<Vec<u8>, KekError> {
         match self {
             Self::Kms(kms) => kms.wrap(http, dek, aad).await,
-            Self::Local(local) => local.wrap(dek, aad),
+            Self::Local(local) | Self::File(local) => local.wrap(dek, aad),
         }
     }
 
@@ -171,7 +189,7 @@ impl Kek {
         }
         match self {
             Self::Kms(kms) => kms.unwrap_dek(http, wrapped, aad).await,
-            Self::Local(local) => local.unwrap_dek(wrapped, aad),
+            Self::Local(local) | Self::File(local) => local.unwrap_dek(wrapped, aad),
         }
     }
 }
@@ -268,7 +286,7 @@ impl KmsKek {
                 .all(|segment| segment_ok(segment)) => {}
             _ => {
                 return Err(
-                    "the value is neither `local:<64 hex>` nor a Cloud KMS key name \
+                    "the value is neither `local:<64 hex>`, `file:<path>` nor a Cloud KMS key name \
                      (projects/<p>/locations/<l>/keyRings/<r>/cryptoKeys/<k>)"
                         .to_owned(),
                 );
@@ -604,6 +622,35 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(opened.as_bytes(), dek.as_bytes());
+    }
+
+    /// A key mounted from a Secret opens what the same key in `local:` wrapped,
+    /// and is no laptop's key, so a pod takes it.
+    #[tokio::test]
+    async fn a_mounted_kek_is_the_local_key_and_a_pod_takes_it() {
+        let path = std::env::temp_dir().join(format!("telmoni-kek-{}", std::process::id()));
+        std::fs::write(&path, format!("{KEY}\n")).unwrap();
+        let mounted = parse(&format!("file:{}", path.display()));
+        std::fs::remove_file(&path).unwrap();
+        let mounted = mounted.unwrap();
+        assert_eq!(mounted.kind(), "file");
+        assert!(!mounted.is_local());
+        let dek = Vault::new().new_dek().unwrap();
+        let wrapped = local().wrap(&http(), &dek, b"row-1").await.unwrap();
+        let opened = mounted
+            .unwrap_dek(&http(), &wrapped, b"row-1", KEK_VERSION)
+            .await
+            .unwrap();
+        assert_eq!(opened.as_bytes(), dek.as_bytes());
+    }
+
+    #[test]
+    fn a_kek_file_that_cannot_be_read_is_named_at_load() {
+        let err = parse("file:/nonexistent/telmoni-kek").unwrap_err();
+        assert!(
+            err.starts_with("CONNECTOR_KEK: /nonexistent/telmoni-kek: "),
+            "{err}"
+        );
     }
 
     /// The property the AAD buys: a wrapped key moved between rows fails.

@@ -2,3 +2,5 @@
 # job, the cloud's infra-check): the values it requires, which ship empty.
 global:
   imageTag: check
+config:
+  telemetryKek: file:/var/run/secrets/telmoni/kek/telemetry

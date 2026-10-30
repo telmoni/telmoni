@@ -96,6 +96,7 @@ spec:
     - name: http
       port: 11434
       targetPort: http
+{{- if .Values.networkPolicies.enabled }}
 ---
 # The server is the embeddings' one caller.
 kind: NetworkPolicy
@@ -165,4 +166,5 @@ spec:
       ports:
         - protocol: TCP
           port: 11434
+{{- end }}
 {{- end }}

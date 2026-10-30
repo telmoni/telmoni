@@ -55,7 +55,7 @@ pub fn state(
     if kek.is_local() && on_deployed_tier() {
         anyhow::bail!(
             "TELEMETRY_KEK is a local: key in a Kubernetes pod; a local key is for a laptop, \
-             and a deployed tier names a Cloud KMS key"
+             and a pod names a Cloud KMS key or file: and a key mounted from a Secret"
         );
     }
     // Bounded, so an export that keys its project ends inside an

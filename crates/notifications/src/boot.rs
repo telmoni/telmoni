@@ -52,7 +52,7 @@ pub fn state_from_env(
     if kek.as_ref().is_some_and(Kek::is_local) && on_deployed_tier() {
         anyhow::bail!(
             "CONNECTOR_KEK is a local: key in a Kubernetes pod; a local key is for a laptop, \
-             and a deployed tier names a Cloud KMS key"
+             and a pod names a Cloud KMS key or file: and a key mounted from a Secret"
         );
     }
     let connectors = Connectors::from_config(&config);

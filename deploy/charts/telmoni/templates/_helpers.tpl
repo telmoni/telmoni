@@ -43,6 +43,21 @@ Every container's image of this repository's, at the one required tag.
 {{- end }}
 
 {{/*
+A store of `networkPolicies.stores` as a policy peer: its pods by label, in
+the namespace its selector names, or in this one.
+*/}}
+{{- define "telmoni.storePeer" -}}
+podSelector:
+  matchLabels:
+    {{- toYaml .podSelector | nindent 4 }}
+{{- with .namespaceSelector }}
+namespaceSelector:
+  matchLabels:
+    {{- toYaml . | nindent 4 }}
+{{- end }}
+{{- end }}
+
+{{/*
 With highAvailability, a Deployment's replicas spread across nodes, so one
 node's loss leaves a replica; scheduled anyway on a single node.
 */}}

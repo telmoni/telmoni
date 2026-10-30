@@ -37,8 +37,18 @@ spec:
         runAsNonRoot: true
         runAsUser: 65532
         runAsGroup: 65532
+        # The mounted keys' group, so the nonroot user reads them.
+        fsGroup: 65532
         seccompProfile:
           type: RuntimeDefault
+      volumes:
+        # The KEKs off Google Cloud (config.telemetryKek's `file:`); absent,
+        # an empty directory.
+        - name: kek
+          secret:
+            secretName: server-kek
+            optional: true
+            defaultMode: 0440
       containers:
         - name: server
           image: {{ include "telmoni.image" (dict "root" . "name" .Values.server.image) | quote }}
@@ -62,6 +72,10 @@ spec:
                 name: telmoni-tier
             - secretRef:
                 name: server-secrets
+          volumeMounts:
+            - name: kek
+              mountPath: /var/run/secrets/telmoni/kek
+              readOnly: true
           resources:
             {{- toYaml .Values.server.resources | nindent 12 }}
           securityContext:

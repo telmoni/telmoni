@@ -1,3 +1,4 @@
+{{- if .Values.networkPolicies.enabled }}
 kind: NetworkPolicy
 apiVersion: networking.k8s.io/v1
 metadata:
@@ -111,16 +112,23 @@ spec:
           port: 6378
         - protocol: TCP
           port: 6379
+    {{- range .Values.networkPolicies.stores }}
+    {{- if .web }}
+    - to:
+        - {{ include "telmoni.storePeer" . | nindent 10 | trim }}
+      ports:
+        - protocol: TCP
+          port: {{ .port }}
+    {{- end }}
+    {{- end }}
 ---
 # The server and the jobs leave the cluster for everything they use: the
 # database, ClickHouse, Redis, the mail and sign-in vendors, the KMS key,
-# and a customer's webhook on whatever port it names. A ClickHouse inside the
-# cluster needs policies of its own: egress to it by pod and namespace
-# selector, since an address block is not matched against a pod's address
-# everywhere, and, in this namespace, ingress to it, which
-# `default-deny-all` refuses. The server's own URL guard
-# (crates/shared/src/net_guard.rs) refuses private addresses, which a policy
-# cannot tell from the database's.
+# and a customer's webhook on whatever port it names. A store inside the
+# cluster is admitted by selector (`networkPolicies.stores`), since an address
+# block is not matched against a pod's address everywhere. The server's own
+# URL guard (crates/shared/src/net_guard.rs) refuses private addresses, which
+# a policy cannot tell from the database's.
 kind: NetworkPolicy
 apiVersion: networking.k8s.io/v1
 metadata:
@@ -139,6 +147,13 @@ spec:
     - to:
         - ipBlock:
             cidr: 0.0.0.0/0
+    {{- range .Values.networkPolicies.stores }}
+    - to:
+        - {{ include "telmoni.storePeer" . | nindent 10 | trim }}
+      ports:
+        - protocol: TCP
+          port: {{ .port }}
+    {{- end }}
 ---
 # The server reads the docs it answers from off the console (`DOCS_CORPUS_URL`),
 # named as the embeddings are, since the address block above is no pod's.
@@ -163,3 +178,33 @@ spec:
       ports:
         - protocol: TCP
           port: 3000
+{{- range .Values.networkPolicies.stores }}
+{{- if not .namespaceSelector }}
+---
+# A store in this namespace, which `default-deny-all` closes, opened to its
+# clients alone.
+kind: NetworkPolicy
+apiVersion: networking.k8s.io/v1
+metadata:
+  name: allow-store-{{ .name }}
+  labels:
+    {{- include "telmoni.labels" $ | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- toYaml .podSelector | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values: {{ if .web }}[server, migrator, web]{{ else }}[server, migrator]{{ end }}
+      ports:
+        - protocol: TCP
+          port: {{ .port }}
+{{- end }}
+{{- end }}
+{{- end }}

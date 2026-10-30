@@ -15,7 +15,8 @@ pub struct Config {
     /// boot: a binary without ClickHouse is not one that can keep a span.
     pub clickhouse_url: Redacted,
     /// The key that seals each project's hashing key (`TELEMETRY_KEK`): a
-    /// Cloud KMS key name, or `local:<64 hex>` for a laptop. Required: every
+    /// Cloud KMS key name, `file:<path>` mounted in a pod, or `local:<64 hex>`
+    /// for a laptop. Required: every
     /// binary ingests, and a `user_id` is hashed before it is a row.
     pub telemetry_kek: Redacted,
     /// Cloud KMS's origin (`KMS_API_BASE`); the tests point it at a mock.
