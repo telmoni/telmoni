@@ -110,6 +110,11 @@ impl Exporter {
             return self.halve(spans);
         }
         let Ok(mut body) = serde_json::to_vec(&self.encode(spans, false)) else {
+            self.warner.once(
+                "encode".to_owned(),
+                "telmoni: an export could not be encoded; the batch was dropped",
+                WarningKind::ExportError.into(),
+            );
             return true;
         };
         if body.len() > contract::BATCH_MAX_BYTES {
