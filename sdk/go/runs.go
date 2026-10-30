@@ -227,7 +227,7 @@ func (c *Client) Run(ctx context.Context, agent string, opts RunOptions) (contex
 		return ctx, &Run{}
 	}
 	if strings.TrimSpace(agent) == "" {
-		c.exporter.warnOnce("run:agent", "telmoni: a run needs its agent's name; nothing is sent for one without")
+		c.exporter.warnOnce("run:agent", WarningInput, "telmoni: a run needs its agent's name; nothing is sent for one without")
 		return ctx, &Run{handle: handle{client: c}}
 	}
 	agent = c.cut(agent, agentMax, "run's agent")
@@ -236,7 +236,7 @@ func (c *Client) Run(ctx context.Context, agent string, opts RunOptions) (contex
 		if opts.SampleRate > 0 && opts.SampleRate <= 1 {
 			rate = opts.SampleRate
 		} else {
-			c.exporter.warnOnce("run:rate", "telmoni: a run's SampleRate must be above 0 and up to 1; the client's is used")
+			c.exporter.warnOnce("run:rate", WarningInput, "telmoni: a run's SampleRate must be above 0 and up to 1; the client's is used")
 		}
 	}
 	sampledOut := rate < 1 && c.random() >= rate
@@ -244,12 +244,12 @@ func (c *Client) Run(ctx context.Context, agent string, opts RunOptions) (contex
 	if opts.MaxSteps > 0 {
 		caps.maxSteps = opts.MaxSteps
 	} else if opts.MaxSteps < 0 {
-		c.exporter.warnOnce("run:steps", "telmoni: a run's MaxSteps must be above 0; the run has no step cap")
+		c.exporter.warnOnce("run:steps", WarningInput, "telmoni: a run's MaxSteps must be above 0; the run has no step cap")
 	}
 	if opts.MaxSpend > 0 && dollars(opts.MaxSpend) {
 		caps.maxSpend = opts.MaxSpend
 	} else if opts.MaxSpend != 0 {
-		c.exporter.warnOnce("run:spend", "telmoni: a run's MaxSpend must be a finite number of US dollars above 0; the run has no spend cap")
+		c.exporter.warnOnce("run:spend", WarningInput, "telmoni: a run's MaxSpend must be a finite number of US dollars above 0; the run has no spend cap")
 	}
 	runID := newUUID()
 	userID, sessionID := opts.UserID, opts.SessionID
@@ -472,7 +472,7 @@ func (r *Run) Step(ctx context.Context, name string) (context.Context, *Step) {
 	}
 	// Ingest refuses a span named nothing.
 	if name == "" {
-		r.client.exporter.warnOnce("step:name", "telmoni: a step needs its name; one without is sent named step")
+		r.client.exporter.warnOnce("step:name", WarningInput, "telmoni: a step needs its name; one without is sent named step")
 		name = "step"
 	}
 	ctx, span := r.child(ctx, r.client.cut(name, nameMax, "step's name"), trace.SpanKindInternal, nil)
@@ -491,7 +491,7 @@ func (r *Run) ModelCall(ctx context.Context, model string, opts ModelCallOptions
 	c := r.client
 	// Ingest refuses a call over an empty model, but keeps one with none.
 	if model == "" {
-		c.exporter.warnOnce("call:model", "telmoni: a model call needs its model; one without is sent named by its operation alone")
+		c.exporter.warnOnce("call:model", WarningInput, "telmoni: a model call needs its model; one without is sent named by its operation alone")
 	} else {
 		model = c.cut(model, modelMax, "model")
 	}
@@ -619,7 +619,7 @@ func (m *ModelCall) Answered(a Answer) {
 	}
 	// Given once the run's lock is released: the logger is the application's.
 	if w := m.hold(attrs, answeredAs, usage); w.key != "" {
-		m.client.exporter.warnOnce(w.key, w.text)
+		m.client.exporter.warnOnce(w.key, WarningInput, w.text)
 	}
 }
 
@@ -719,7 +719,7 @@ func modelOperation(operation string) (read string, setAside bool) {
 
 // warnOperation warns once of an operation sent as chat.
 func (c *Client) warnOperation() {
-	c.exporter.warnOnce("call:operation", "telmoni: a model call's operation must be chat, generate_content, text_completion or embeddings, which ingest reads as a model call; it is sent as chat")
+	c.exporter.warnOnce("call:operation", WarningInput, "telmoni: a model call's operation must be chat, generate_content, text_completion or embeddings, which ingest reads as a model call; it is sent as chat")
 }
 
 // usageAttributes is a call's token counts but any below zero, and its cost
@@ -757,10 +757,10 @@ func usageAttributes(u *Usage, warn func(name string)) []attribute.KeyValue {
 
 func (c *Client) warnCount(name string) {
 	if name == attrCost {
-		c.exporter.warnOnce("usage:"+name, "telmoni: "+name+" must be a finite number of US dollars from 0; the call is sent without it")
+		c.exporter.warnOnce("usage:"+name, WarningInput, "telmoni: "+name+" must be a finite number of US dollars from 0; the call is sent without it")
 		return
 	}
-	c.exporter.warnOnce("usage:"+name, "telmoni: "+name+" must be a whole number from 0 within 64 bits; the call is sent without it")
+	c.exporter.warnOnce("usage:"+name, WarningInput, "telmoni: "+name+" must be a whole number from 0 within 64 bits; the call is sent without it")
 }
 
 // cut is text up to ingest's cap, in characters, cut there with one warning,
@@ -772,7 +772,7 @@ func (c *Client) cut(text string, most int, what string) string {
 		return text
 	}
 	if c.built() {
-		c.exporter.warnOnce("cut:"+what, fmt.Sprintf("telmoni: a %s must be up to %d characters; it is sent cut to its first %d", what, most, most))
+		c.exporter.warnOnce("cut:"+what, WarningInput, fmt.Sprintf("telmoni: a %s must be up to %d characters; it is sent cut to its first %d", what, most, most))
 	}
 	runes := 0
 	for at := range text {
@@ -791,7 +791,7 @@ func (c *Client) fits(id string, most int, what string) bool {
 		return true
 	}
 	if c.built() {
-		c.exporter.warnOnce("long:"+what, fmt.Sprintf("telmoni: a %s must be up to %d characters; the run is sent without it", what, most))
+		c.exporter.warnOnce("long:"+what, WarningInput, fmt.Sprintf("telmoni: a %s must be up to %d characters; the run is sent without it", what, most))
 	}
 	return false
 }
@@ -803,13 +803,13 @@ func (c *Client) tagAttributes(tags map[string]string) []attribute.KeyValue {
 	for _, key := range slices.Sorted(maps.Keys(tags)) {
 		// Ingest drops it before counting, so it takes no place among the 32.
 		if key == "" || utf8.RuneCountInString(key) > tagKeyMax || utf8.RuneCountInString(tags[key]) > tagValueMax {
-			c.exporter.warnOnce("run:tag", "telmoni: a tag's key must be 1 to 64 characters and its value up to 256; the tag is not sent")
+			c.exporter.warnOnce("run:tag", WarningInput, "telmoni: a tag's key must be 1 to 64 characters and its value up to 256; the tag is not sent")
 			continue
 		}
 		keys = append(keys, key)
 	}
 	if len(keys) > tagsMax {
-		c.exporter.warnOnce("run:tags", "telmoni: a run carries up to 32 tags, the most ingest keeps; the rest are not sent")
+		c.exporter.warnOnce("run:tags", WarningInput, "telmoni: a run carries up to 32 tags, the most ingest keeps; the rest are not sent")
 		keys = keys[:tagsMax]
 	}
 	out := make([]attribute.KeyValue, 0, len(keys))

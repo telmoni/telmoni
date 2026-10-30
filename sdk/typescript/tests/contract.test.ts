@@ -11,7 +11,7 @@ import type { ReadableSpan } from '@opentelemetry/sdk-trace-base';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ANSWER_MAX, Exporter, directTransport, fetchTransport } from '../src/exporter';
-import { DEFAULT_ENDPOINT, Telmoni, VERSION, type Config } from '../src/index';
+import { DEFAULT_ENDPOINT, Telmoni, VERSION, type Config, type Warning } from '../src/index';
 import { FakeTransport, answer, harness, loadFixture } from './helpers';
 
 afterEach(() => vi.unstubAllEnvs());
@@ -72,6 +72,7 @@ describe('configuration', () => {
     expect(keys).not.toContain('deployment.environment.name');
     expect(keys).toContain('service.version');
     expect(h.warnings).toEqual(["telmoni: the environment must be up to 128 characters; it is not sent"]);
+    expect(h.fields).toStrictEqual([{ kind: 'input' }]);
   });
 
   it("reads blank as Unicode's White_Space, as Go and Rust read it", () => {
@@ -467,11 +468,14 @@ describe("an export past ingest's 1 MiB or 1,000 spans", () => {
           status: { code: SpanStatusCode.UNSET },
         }) as unknown as ReadableSpan,
     );
-  const exporter = (transport: FakeTransport, warnings: string[]) =>
+  const exporter = (transport: FakeTransport, warnings: string[], fields: Warning[] = []) =>
     new Exporter(new Telmoni({ apiKey: 'k' }).config, {
       transport: transport.send,
       sleep: () => Promise.resolve(),
-      warn: (message) => warnings.push(message),
+      warn: (message, warning) => {
+        warnings.push(message);
+        fields.push(warning);
+      },
     });
 
   it('is halved until each part fits, its spans each sent once and in order', async () => {
@@ -502,19 +506,22 @@ describe("an export past ingest's 1 MiB or 1,000 spans", () => {
   });
 
   it('goes no further once a part fails as the rest would, and on past a part refused for what it holds', async () => {
-    for (const [answers, sent, warned] of [
+    for (const [answers, sent, warned, field] of [
       [
         Array.from({ length: 9 }, () => new Error('refused')),
         3,
         'telmoni: export failed after 3 attempts (Error); the batch was dropped',
+        { kind: 'failed' },
       ],
-      [[answer(400, {}, '')], 3, 'telmoni: export refused with 400 ; the batch was dropped'],
+      [[answer(400, {}, '')], 3, 'telmoni: export refused with 400 ; the batch was dropped', { kind: 'refused', status: 400 }],
     ] as const) {
       const transport = new FakeTransport([...answers]);
       const warnings: string[] = [];
-      await exporter(transport, warnings).export(spans(Array<number>(2001).fill(1)));
+      const fields: Warning[] = [];
+      await exporter(transport, warnings, fields).export(spans(Array<number>(2001).fill(1)));
       expect(transport.requests).toHaveLength(sent);
       expect(warnings).toEqual([warned]);
+      expect(fields, 'a body naming no problem type hands none').toStrictEqual([field]);
     }
   });
 
@@ -531,7 +538,8 @@ describe("an export past ingest's 1 MiB or 1,000 spans", () => {
   it('sends a span alone past it without what ingest drops for its length, rather than lose it', async () => {
     const transport = new FakeTransport();
     const warnings: string[] = [];
-    const sender = exporter(transport, warnings);
+    const fields: Warning[] = [];
+    const sender = exporter(transport, warnings, fields);
     await sender.export(spans([100, 1 << 20, 100]));
     await sender.export(spans([1 << 20]));
     const kept = transport.spans().map((span) => [span.name, span.attributes.map((each) => each.key).sort()]);
@@ -540,14 +548,17 @@ describe("an export past ingest's 1 MiB or 1,000 spans", () => {
     expect(warnings).toEqual([
       'telmoni: a span past the 1 MiB an export may hold was sent without the attributes ingest drops for their length',
     ]);
+    expect(fields).toStrictEqual([{ kind: 'trimmed' }]);
   });
 
   it('drops a span whose own name passes it, with one warning', async () => {
     const transport = new FakeTransport();
     const warnings: string[] = [];
-    await exporter(transport, warnings).export(spans([1], 'x', 'x'.repeat(1 << 20)));
+    const fields: Warning[] = [];
+    await exporter(transport, warnings, fields).export(spans([1], 'x', 'x'.repeat(1 << 20)));
     expect(transport.requests).toEqual([]);
     expect(warnings).toEqual(['telmoni: a span past the 1 MiB an export may hold was dropped']);
+    expect(fields).toStrictEqual([{ kind: 'too_large' }]);
   });
 });
 

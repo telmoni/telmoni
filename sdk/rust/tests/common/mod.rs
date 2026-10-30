@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Map, Value, json};
 use telmoni::transport::{Answer, Transport, TransportError};
-use telmoni::{Config, DEFAULT_ENDPOINT, Hooks, Telmoni};
+use telmoni::{Config, DEFAULT_ENDPOINT, Hooks, Telmoni, Warning};
 
 pub(crate) type Failure = Box<dyn Error>;
 pub(crate) type Outcome = Result<(), Failure>;
@@ -189,7 +189,49 @@ impl<T: Clone> Collected<T> {
     }
 }
 
-pub(crate) type Warnings = Collected<String>;
+/// Each warning's line and what it describes, as the sink was given them.
+#[derive(Clone, Default)]
+pub(crate) struct Warnings(Collected<(String, Warning)>);
+
+impl Warnings {
+    pub(crate) fn push(&self, text: &str, warning: &Warning) {
+        self.0.push((text.to_owned(), warning.clone()));
+    }
+
+    /// The lines, in order.
+    pub(crate) fn all(&self) -> Vec<String> {
+        self.0.all().into_iter().map(|(text, _)| text).collect()
+    }
+
+    /// What each described, in order, as an answer's `fields` spells it.
+    pub(crate) fn fields(&self) -> Vec<Value> {
+        self.0
+            .all()
+            .into_iter()
+            .map(|(_, warning)| {
+                let mut fields = Map::new();
+                fields.insert("kind".to_owned(), json!(warning.kind.as_str()));
+                if let Some(status) = warning.status {
+                    fields.insert("status".to_owned(), json!(status));
+                }
+                if let Some(problem_type) = warning.problem_type {
+                    fields.insert("problem_type".to_owned(), json!(problem_type));
+                }
+                Value::Object(fields)
+            })
+            .collect()
+    }
+
+    /// Each warning's kind, in order.
+    pub(crate) fn kinds(&self) -> Vec<&'static str> {
+        self.0
+            .all()
+            .into_iter()
+            .map(|(_, warning)| warning.kind.as_str())
+            .collect()
+    }
+}
+
 pub(crate) type Sleeps = Collected<Duration>;
 
 /// The client's hooks on these fakes, the rest as the client has them.
@@ -199,7 +241,7 @@ pub(crate) fn hooks(transport: &FakeTransport, warnings: &Warnings, sleeps: &Sle
     Hooks {
         transport: Box::new(transport.clone()),
         sleep: Box::new(move |duration| slept.push(duration)),
-        warn: Box::new(move |text| warned.push(text.to_owned())),
+        warn: Box::new(move |text, warning| warned.push(text, warning)),
         ..Hooks::default()
     }
 }
@@ -328,6 +370,15 @@ pub(crate) fn warning_of(name: &str) -> Result<Vec<String>, Failure> {
                 .ok_or("`warning` is not a string")?
                 .to_owned(),
         ]),
+    }
+}
+
+/// An answer's `fields`: what its one warning describes, or none.
+pub(crate) fn fields_of(name: &str) -> Result<Vec<Value>, Failure> {
+    let fixture = load_fixture(&format!("answers/{name}.json"))?;
+    match field(&fixture, "fields")? {
+        Value::Null => Ok(Vec::new()),
+        fields => Ok(vec![fields.clone()]),
     }
 }
 
@@ -541,6 +592,11 @@ fn the_fakes_work() -> Outcome {
     assert!(answer_names()?.iter().any(|name| name == "kept"));
     assert_eq!(warning_of("kept")?, Vec::<String>::new());
     assert_eq!(warning_of("forbidden")?.len(), 1);
+    assert_eq!(fields_of("kept")?, Vec::<Value>::new());
+    assert_eq!(
+        fields_of("forbidden")?,
+        [json!({ "kind": "refused", "status": 403, "problem_type": "/errors/authz/forbidden" })]
+    );
 
     let span = json!({
         "name": "s",
@@ -574,6 +630,8 @@ fn the_fakes_work() -> Outcome {
     harness.flush()?;
     harness.telmoni.shutdown();
     assert!(harness.warnings.all().is_empty());
+    assert!(harness.warnings.fields().is_empty());
+    assert!(harness.warnings.kinds().is_empty());
     assert!(harness.sleeps.all().is_empty());
     assert!(harness.spans()?.is_empty());
 

@@ -23,7 +23,7 @@ use crate::records::{self, RunRecord};
 use crate::runs::{self, Run, RunOptions};
 use crate::sampler::RecordingSampler;
 use crate::transport::{Reqwest, Transport};
-use crate::warnings::Warner;
+use crate::warnings::{Sink, Warner, Warning};
 
 /// How long [`Telmoni::flush`] and [`Telmoni::shutdown`] wait.
 const WAIT: Duration = Duration::from_secs(30);
@@ -36,9 +36,9 @@ pub struct Hooks {
     pub transport: Box<dyn Transport>,
     /// Waits between attempts at one export; `std::thread::sleep` unless given.
     pub sleep: Box<dyn Fn(Duration) + Send + Sync>,
-    /// Takes each warning; `tracing::warn!` under the target `telmoni` unless
-    /// given.
-    pub warn: Box<dyn Fn(&str) + Send + Sync>,
+    /// Takes each warning's line and what it describes; `tracing::warn!` under
+    /// the target `telmoni`, with its fields, unless given.
+    pub warn: Box<Sink>,
     /// A number in `[0, 1)` drawn as a run starts or a record is sent: the
     /// run is kept when it falls below the sample rate.
     pub random: Box<dyn Fn() -> f64 + Send + Sync>,
@@ -51,7 +51,16 @@ impl Default for Hooks {
         Self {
             transport: Box::new(Reqwest::default()),
             sleep: Box::new(std::thread::sleep),
-            warn: Box::new(|text: &str| tracing::warn!(target: "telmoni", "{text}")),
+            warn: Box::new(|text: &str, warning: &Warning| {
+                // An `Option` field records nothing when it is `None`.
+                tracing::warn!(
+                    target: "telmoni",
+                    kind = warning.kind.as_str(),
+                    status = warning.status,
+                    problem_type = warning.problem_type.as_deref(),
+                    "{text}"
+                );
+            }),
             random: Box::new(random_unit),
             batching: Batching::default(),
         }

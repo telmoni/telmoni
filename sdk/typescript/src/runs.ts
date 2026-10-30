@@ -32,6 +32,7 @@ import type {
   ToolCallOptions,
   ToolCallRecord,
   Usage,
+  Warning,
 } from './types.js';
 
 const RUN_KEY = createContextKey('telmoni.run');
@@ -226,6 +227,7 @@ export class ModelCall extends Handle {
         'call:late',
         'telmoni: a model call must be answered before it ends; an answer given after is not sent ' +
           "and counts nothing toward the run's spend",
+        { kind: 'input' },
       );
       return;
     }
@@ -265,6 +267,7 @@ export class ModelCall extends Handle {
           `unpriced:${this.#provider}:${this.#model}`,
           `telmoni: no price for ${this.#model || 'a call with no model'} (${this.#provider || 'no provider'}), ` +
             "which reported no cost; it counts nothing toward the run's spend cap",
+          { kind: 'input' },
         );
       }
     }
@@ -317,7 +320,7 @@ export function split<O, F>(a: O | F, b: F | undefined): [O | undefined, F] {
 }
 
 /** The client's warning, once per key. */
-type WarnOnce = (key: string, text: string) => void;
+type WarnOnce = (key: string, text: string, warning: Warning) => void;
 
 /** Builds the handles for one client; the client holds one. */
 export class Opener {
@@ -391,7 +394,7 @@ export class Opener {
     let name = asText(given, "step's name", this.#warnOnce);
     // Ingest refuses a span named nothing.
     if (name === '') {
-      this.#warnOnce('step:name', 'telmoni: a step needs its name; one without is sent named step');
+      this.#warnOnce('step:name', 'telmoni: a step needs its name; one without is sent named step', { kind: 'input' });
       name = 'step';
     }
     const span = this.#start(cut(name, contract.NAME_MAX, "step's name", this.#warnOnce), parent, run.inherited, SpanKind.INTERNAL);
@@ -407,6 +410,7 @@ export class Opener {
       this.#warnOnce(
         'call:model',
         'telmoni: a model call needs its model; one without is sent named by its operation alone',
+        { kind: 'input' },
       );
     }
     const named = filled(options.provider, 'provider', this.#warnOnce);
@@ -712,6 +716,7 @@ function usageOf(usage: Usage | undefined, warnOnce: WarnOnce): Attributes {
     warnOnce(
       'usage:foreign',
       "telmoni: a usage must be telmoni's Usage, the provider's counts copied into it; the call is sent without it",
+      { kind: 'input' },
     );
     return out;
   }
@@ -727,6 +732,7 @@ function usageOf(usage: Usage | undefined, warnOnce: WarnOnce): Attributes {
       warnOnce(
         `usage:${key}`,
         `telmoni: ${key} must be a whole number from 0 within 64 bits; the call is sent without it`,
+        { kind: 'input' },
       );
     } else {
       out[key] = count;
@@ -742,6 +748,7 @@ function usageOf(usage: Usage | undefined, warnOnce: WarnOnce): Attributes {
       warnOnce(
         `usage:${contract.COST}`,
         `telmoni: ${contract.COST} must be a finite number of US dollars from 0; the call is sent without it`,
+        { kind: 'input' },
       );
     }
   }
@@ -828,6 +835,7 @@ function operationOf(given: unknown, warnOnce: WarnOnce): string {
   warnOnce(
     'call:operation',
     "telmoni: a model call's operation must be chat, generate_content, text_completion or embeddings, which ingest reads as a model call; it is sent as chat",
+    { kind: 'input' },
   );
   return contract.DEFAULT_MODEL_OPERATION;
 }
@@ -848,9 +856,12 @@ function tagsOf(given: ReadonlyArray<readonly [string, unknown]>, warnOnce: Warn
       warnOnce(
         'run:tag',
         "telmoni: a tag's key must be 1 to 64 characters and its value up to 256; the tag is not sent",
+        { kind: 'input' },
       );
     } else if (count === contract.TAGS_MAX) {
-      warnOnce('run:tags', 'telmoni: a run carries up to 32 tags, the most ingest keeps; the rest are not sent');
+      warnOnce('run:tags', 'telmoni: a run carries up to 32 tags, the most ingest keeps; the rest are not sent', {
+        kind: 'input',
+      });
     } else {
       kept[`${contract.TAG_PREFIX}${key}`] = typeof sent === 'string' ? asText(value, 'tag', warnOnce) : sent;
       count += 1;
@@ -887,7 +898,7 @@ function shown(value: string | number | boolean): number {
  */
 function asText(value: unknown, what: string, warnOnce: WarnOnce): string {
   if (typeof value === 'string') return value;
-  warnOnce(`text:${what}`, `telmoni: a ${what} that is no string is sent as its text`);
+  warnOnce(`text:${what}`, `telmoni: a ${what} that is no string is sent as its text`, { kind: 'input' });
   return textOf(value);
 }
 
@@ -908,14 +919,18 @@ function cut(value: string, most: number, what: string, warnOnce: WarnOnce): str
   if (value.length <= most) return value;
   const characters = [...value];
   if (characters.length <= most) return value;
-  warnOnce(`cut:${what}`, `telmoni: a ${what} must be up to ${most} characters; it is sent cut to its first ${most}`);
+  warnOnce(`cut:${what}`, `telmoni: a ${what} must be up to ${most} characters; it is sent cut to its first ${most}`, {
+    kind: 'input',
+  });
   return characters.slice(0, most).join('');
 }
 
 /** Whether an id is within ingest's cap; one past it is left off with one warning, since cut it would name another. */
 function fits(value: string, most: number, what: string, warnOnce: WarnOnce): boolean {
   if (value.length <= most || [...value].length <= most) return true;
-  warnOnce(`long:${what}`, `telmoni: a ${what} must be up to ${most} characters; the run is sent without it`);
+  warnOnce(`long:${what}`, `telmoni: a ${what} must be up to ${most} characters; the run is sent without it`, {
+    kind: 'input',
+  });
   return false;
 }
 

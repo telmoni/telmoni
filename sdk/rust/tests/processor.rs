@@ -48,6 +48,7 @@ fn the_queue_is_bounded_and_drops_are_counted_once() -> Outcome {
         warning.contains("4 spans"),
         "three steps and the run itself: {warning}"
     );
+    assert_eq!(warnings.kinds(), ["queue_full"]);
     Ok(())
 }
 
@@ -137,7 +138,7 @@ fn a_hook_that_panics_does_not_stop_the_exporter() -> Outcome {
     let warnings = Warnings::default();
     let sleeps = Sleeps::default();
     let mut hooks = hooks(&transport, &warnings, &sleeps);
-    hooks.warn = Box::new(|text| std::panic::panic_any(text.to_owned()));
+    hooks.warn = Box::new(|text, _| std::panic::panic_any(text.to_owned()));
     hooks.batching = Batching {
         max_queue_size: 1,
         max_batch_size: 100,
@@ -215,5 +216,10 @@ fn a_transport_that_panics_does_not_stop_the_exporter() -> Outcome {
     let spans = transport.spans()?;
     let names: Vec<_> = spans.iter().map(name_of).collect();
     assert_eq!(names, ["invoke_agent sent"]);
+    assert_eq!(
+        warnings.all(),
+        ["telmoni: a hook panicked during an export; the batch was dropped"]
+    );
+    assert_eq!(warnings.kinds(), ["export_error"]);
     Ok(())
 }

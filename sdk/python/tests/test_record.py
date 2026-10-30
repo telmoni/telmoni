@@ -19,7 +19,7 @@ import pytest
 from opentelemetry import trace
 from opentelemetry.sdk.trace.sampling import Decision, Sampler, SamplingResult
 
-from conftest import FakeTransport, attributes_of, load_fixture
+from conftest import FakeTransport, attributes_of, infos_in, load_fixture
 from telmoni import (
     Config,
     ModelCallRecord,
@@ -30,6 +30,7 @@ from telmoni import (
     Telmoni,
     ToolCallRecord,
     Usage,
+    WarningInfo,
     current_run,
     runs,
 )
@@ -142,6 +143,7 @@ def test_the_record_matches_the_golden_export(
             "it is sent as chat"
         )
     ]
+    assert infos_in(caplog) == [WarningInfo("input")]
 
 
 def test_the_same_record_sent_again_is_the_same_bytes() -> None:
@@ -323,9 +325,9 @@ def test_a_handler_may_record_a_run_while_a_record_warns(
 
     warn_once = client.exporter.warn_once
 
-    def flagged(key: str, text: str) -> None:
+    def flagged(key: str, text: str, info: WarningInfo) -> None:
         warning.set()
-        warn_once(key, text)
+        warn_once(key, text, info)
 
     client.exporter.warn_once = flagged  # type: ignore[method-assign]
     handler = Recording()

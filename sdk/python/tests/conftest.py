@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import threading
 from collections.abc import Iterator, Mapping
 from pathlib import Path
@@ -20,7 +21,7 @@ from opentelemetry.sdk.trace.sampling import (
     SamplingResult,
 )
 
-from telmoni import Config, Telmoni
+from telmoni import Config, Telmoni, WarningInfo
 from telmoni.exporter import Answer
 
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures"
@@ -76,6 +77,15 @@ class FakeTransport:
             for scope_spans in resource_spans["scopeSpans"]
             for span in scope_spans["spans"]
         ]
+
+
+def infos_in(caplog: pytest.LogCaptureFixture) -> list[WarningInfo]:
+    """Each warning's ``record.telmoni_warning``, as a handler reads it."""
+    return [
+        vars(r)["telmoni_warning"]
+        for r in caplog.records
+        if r.levelno >= logging.WARNING
+    ]
 
 
 def attributes_of(span: Mapping[str, Any]) -> dict[str, Any]:

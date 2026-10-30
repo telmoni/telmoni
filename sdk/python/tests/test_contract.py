@@ -16,8 +16,16 @@ import pytest
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.trace import SpanContext
 
-from conftest import FakeTransport, attributes_of, load_fixture
-from telmoni import DEFAULT_ENDPOINT, Config, Secret, Telmoni, __version__, exporter
+from conftest import FakeTransport, attributes_of, infos_in, load_fixture
+from telmoni import (
+    DEFAULT_ENDPOINT,
+    Config,
+    Secret,
+    Telmoni,
+    WarningInfo,
+    __version__,
+    exporter,
+)
 from telmoni.exporter import Answer, _urllib_transport
 
 
@@ -304,6 +312,7 @@ def test_a_refusal_whose_body_breaks_is_sent_once(
     assert warned == [
         "telmoni: export refused with 413 /errors/batch-too-large; the batch was dropped"
     ]
+    assert infos_in(caplog) == [WarningInfo("refused", 413, "/errors/batch-too-large")]
 
 
 def test_an_answer_whose_head_comes_slowly_is_given_up_at_the_requests_deadline(
@@ -342,6 +351,8 @@ def test_a_head_cut_before_its_blank_line_is_no_answer_and_sent_again(
             "the batch was dropped"
         )
     ]
+    # No answer came, so no status or problem type.
+    assert infos_in(caplog) == [WarningInfo("failed")]
 
 
 def test_the_answer_is_read_past_every_1xx_before_it_but_a_101(answering: str) -> None:
@@ -500,7 +511,7 @@ def test_a_batch_in_parts_ends_at_a_part_that_fails_as_the_rest_would(
 ) -> None:
     """The platform out of reach, the rest goes no further; a part refused for what
     it holds leaves the rest to go."""
-    for answers, sent, warned in (
+    for answers, sent, warned, info in (
         (
             [ConnectionRefusedError()] * 9,
             3,
@@ -508,11 +519,13 @@ def test_a_batch_in_parts_ends_at_a_part_that_fails_as_the_rest_would(
                 "telmoni: export failed after 3 attempts (ConnectionRefusedError); "
                 "the batch was dropped"
             ),
+            WarningInfo("failed"),
         ),
         (
             [Answer(400, {}, b"")],
             3,
             "telmoni: export refused with 400 ; the batch was dropped",
+            WarningInfo("refused", 400),
         ),
     ):
         caplog.clear()
@@ -527,6 +540,7 @@ def test_a_batch_in_parts_ends_at_a_part_that_fails_as_the_rest_would(
             r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING
         ]
         assert logged == [warned]
+        assert infos_in(caplog) == [info]
 
 
 def test_a_list_is_measured_as_ingest_writes_it_its_json() -> None:
@@ -614,6 +628,7 @@ def test_a_span_alone_past_it_goes_without_what_ingest_drops_for_its_length(
             "the attributes ingest drops for their length"
         )
     ]
+    assert infos_in(caplog) == [WarningInfo("trimmed")]
 
 
 def test_a_span_whose_own_name_passes_it_is_dropped_with_one_warning(
@@ -632,6 +647,7 @@ def test_a_span_whose_own_name_passes_it_is_dropped_with_one_warning(
     assert transport.requests == []
     warned = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
     assert warned == ["telmoni: a span past the 1 MiB an export may hold was dropped"]
+    assert infos_in(caplog) == [WarningInfo("too_large")]
 
 
 def test_an_answer_whose_body_comes_slowly_is_kept_as_far_as_it_came_by_the_deadline(

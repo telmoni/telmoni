@@ -857,6 +857,20 @@ does not name with the `telmoni.tag.<key>` that would keep it; and a tag past
 its project's cardinality cap with how tags keep, a few keys of a few values
 each.
 
+Each warning comes with what became of its spans, so code that reads the
+warnings need not read their words: its kind, and for an export's own failure
+the status it last met and the problem type its body named. `refused` is an
+export refused for good and `failed` one that failed every attempt, each batch
+dropped; `queue_full` spans dropped with the queue full; `export_error` a batch
+its own export dropped, unable to encode it or failing; `too_large` a span past the 1 MiB dropped and `trimmed`
+one sent without its long attributes; `dropped`, `span_refused` and `said` the
+server's answer, the rest of the export kept; and `input` something the SDK was
+handed, fixed, cut or left off. Python sets it on the log record as
+`telmoni_warning`, a `WarningInfo`; TypeScript hands it to the `warn` hook as its
+second argument, a `Warning`; Go logs it as the record's `kind`, `status` and
+`problem_type` attributes; and Rust hands it to `Hooks::warn` as its second
+argument, a `Warning`, and to `tracing::warn!` as fields of the same names.
+
 ### The key on the wire
 
 The key travels as a bearer over HTTPS. Plain HTTP is accepted only to this

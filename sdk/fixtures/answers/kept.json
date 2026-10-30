@@ -3,5 +3,6 @@
   "headers": { "Content-Type": "application/json", "Telmoni-Content-Mode": "off" },
   "body": { "partialSuccess": null },
   "expect": "kept as sent: nothing logged; the SDK's content mode is now off",
-  "warning": null
+  "warning": null,
+  "fields": null
 }

@@ -43,6 +43,7 @@ from .models import (
     StepRecord,
     ToolCallRecord,
     Usage,
+    WarningInfo,
     _blank,
     _dollars,
     check_rate,
@@ -52,6 +53,8 @@ if TYPE_CHECKING:
     from .client import Telmoni
 
 _RUN_KEY = context.create_key("telmoni.run")
+# Every warning here is about what the code handed the SDK.
+_INPUT = WarningInfo("input")
 
 H = TypeVar("H", bound="Handle")
 C = TypeVar("C", bound="Handle")
@@ -230,7 +233,7 @@ class ModelCall(Handle):
                     warning = self._count(self._run)
         # Given once the lock is released: a logging handler is the application's.
         if warning is not None:
-            warn_once(*warning)
+            warn_once(*warning, _INPUT)
 
     def _ending(self) -> bool:
         # Under the lock its answers are held under, so none lands past the end.
@@ -500,6 +503,7 @@ class Opener:
             warn_once(
                 "step:name",
                 "telmoni: a step needs its name; one without is sent named step",
+                _INPUT,
             )
             name = "step"
         name = _cut(name, contract.NAME_MAX, "step's name", warn_once)
@@ -529,6 +533,7 @@ class Opener:
                 "call:model",
                 "telmoni: a model call needs its model; one without is sent "
                 "named by its operation alone",
+                _INPUT,
             )
         named = _text(provider, "provider", warn_once) if provider is not None else ""
         provider = _cut(named, contract.PROVIDER_MAX, "provider", warn_once)
@@ -690,6 +695,7 @@ class Opener:
             self._client.exporter.warn_once(
                 "outside",
                 f"telmoni: {what} opened outside a run; nothing is sent outside a run",
+                _INPUT,
             )
         return run
 
@@ -736,7 +742,7 @@ class Opener:
 
 
 def _usage(
-    usage: object, warn_once: Callable[[str, str], None]
+    usage: object, warn_once: Callable[[str, str, WarningInfo], None]
 ) -> dict[str, int | float]:
     """The counts as whole numbers from 0, and the cost as a finite number of
     dollars from 0, which alone ingest takes; another is left off the call with
@@ -749,6 +755,7 @@ def _usage(
             "usage:foreign",
             "telmoni: a usage must be telmoni's Usage, the provider's counts copied "
             "into it; the call is sent without it",
+            _INPUT,
         )
         return {}
     counts = (
@@ -767,6 +774,7 @@ def _usage(
                 f"usage:{key}",
                 f"telmoni: {key} must be a whole number from 0 within 64 bits; "
                 "the call is sent without it",
+                _INPUT,
             )
         else:
             out[key] = count
@@ -777,6 +785,7 @@ def _usage(
                 f"usage:{contract.COST}",
                 f"telmoni: {contract.COST} must be a finite number of US dollars "
                 "from 0; the call is sent without it",
+                _INPUT,
             )
         else:
             out[contract.COST] = cost
@@ -801,7 +810,7 @@ def _run_opening(
     inherited: Mapping[str, str],
     rate: float,
     tags: Mapping[str, str] | None,
-    warn_once: Callable[[str, str], None],
+    warn_once: Callable[[str, str, WarningInfo], None],
 ) -> tuple[str, dict[str, Any]]:
     """A run's span name and attributes, live or recorded, its tags first:
     past the span's 128, Python's SDK drops the oldest."""
@@ -817,7 +826,9 @@ def _run_opening(
     return f"{contract.RUN_OPERATION} {agent}", attributes
 
 
-def _operation(given: object, warn_once: Callable[[str, str], None]) -> str:
+def _operation(
+    given: object, warn_once: Callable[[str, str, WarningInfo], None]
+) -> str:
     """A model call's operation as ingest reads one: the default for a blank one,
     and, with one warning, for one ingest would file as a step, a run or a tool
     call."""
@@ -830,6 +841,7 @@ def _operation(given: object, warn_once: Callable[[str, str], None]) -> str:
         "telmoni: a model call's operation must be chat, generate_content, "
         "text_completion or embeddings, which ingest reads as a model call; "
         "it is sent as chat",
+        _INPUT,
     )
     return contract.DEFAULT_MODEL_OPERATION
 
@@ -856,7 +868,7 @@ def _tool_call_opening(name: str) -> tuple[str, dict[str, Any]]:
 
 
 def _tags(
-    tags: Mapping[str, str] | None, warn_once: Callable[[str, str], None]
+    tags: Mapping[str, str] | None, warn_once: Callable[[str, str, WarningInfo], None]
 ) -> dict[str, Any]:
     """A run's tags as its span's attributes: the first `TAGS_MAX` of those
     ingest keeps, since past them they would crowd out the run's own."""
@@ -873,12 +885,14 @@ def _tags(
                 "run:tag",
                 "telmoni: a tag's key must be 1 to 64 characters and its value "
                 "up to 256; the tag is not sent",
+                _INPUT,
             )
         elif len(kept) == contract.TAGS_MAX:
             warn_once(
                 "run:tags",
                 "telmoni: a run carries up to 32 tags, the most ingest keeps; "
                 "the rest are not sent",
+                _INPUT,
             )
         elif isinstance(sent, str):
             kept[f"{contract.TAG_PREFIX}{name}"] = _text(value, "tag", warn_once)
@@ -913,18 +927,24 @@ def _shown(value: str | float) -> int:
     return sign + (len(digits) + 1 if point > 0 else 2 - point + len(digits))
 
 
-def _text(value: object, what: str, warn_once: Callable[[str, str], None]) -> str:
+def _text(
+    value: object, what: str, warn_once: Callable[[str, str, WarningInfo], None]
+) -> str:
     """`value` as text: one that is no string, an `Enum`'s member say, goes as
     its `str()` with one warning, where a span named by it would lose its batch."""
     if isinstance(value, str):
         return value
     warn_once(
-        f"text:{what}", f"telmoni: a {what} that is no string is sent as its text"
+        f"text:{what}",
+        f"telmoni: a {what} that is no string is sent as its text",
+        _INPUT,
     )
     return _str(value)
 
 
-def _error_type(value: object, warn_once: Callable[[str, str], None]) -> str:
+def _error_type(
+    value: object, warn_once: Callable[[str, str, WarningInfo], None]
+) -> str:
     """An error type that is no string: an exception's class, or a class's
     name, never its message, which is content; anything else as its text."""
     if isinstance(value, BaseException):
@@ -935,7 +955,7 @@ def _error_type(value: object, warn_once: Callable[[str, str], None]) -> str:
 
 
 def _cut(
-    value: str, most: int, what: str, warn_once: Callable[[str, str], None]
+    value: str, most: int, what: str, warn_once: Callable[[str, str, WarningInfo], None]
 ) -> str:
     """`value` up to ingest's cap, in characters, cut there with one warning,
     since ingest refuses a span past it."""
@@ -945,12 +965,13 @@ def _cut(
         f"cut:{what}",
         f"telmoni: a {what} must be up to {most} characters; "
         f"it is sent cut to its first {most}",
+        _INPUT,
     )
     return value[:most]
 
 
 def _within(
-    value: str, most: int, what: str, warn_once: Callable[[str, str], None]
+    value: str, most: int, what: str, warn_once: Callable[[str, str, WarningInfo], None]
 ) -> bool:
     """Whether an id is within ingest's cap; one past it is left off with one
     warning, since cut it would name another."""
@@ -960,6 +981,7 @@ def _within(
         f"long:{what}",
         f"telmoni: a {what} must be up to {most} characters; "
         "the run is sent without it",
+        _INPUT,
     )
     return False
 

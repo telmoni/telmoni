@@ -10,8 +10,8 @@ use std::thread;
 use std::time::Duration;
 
 use common::{
-    Collected, Failure, Harness, Outcome, Sleeps, Warnings, answer, answer_names, field, float,
-    int, is_hex, is_uuid_v4, keyed, load_fixture, name_of, spans_of, text, warning_of,
+    Collected, Failure, Harness, Outcome, Sleeps, Warnings, answer, answer_names, field, fields_of,
+    float, int, is_hex, is_uuid_v4, keyed, load_fixture, name_of, spans_of, text, warning_of,
 };
 use serde_json::{Value, json};
 use telmoni::transport::{Answer, TransportError};
@@ -262,7 +262,7 @@ fn each_attempt_carries_this_clock_as_it_leaves() -> Outcome {
         Hooks {
             transport: Box::new(transport.clone()),
             sleep: Box::new(|_| thread::sleep(Duration::from_millis(5))),
-            warn: Box::new(|_| {}),
+            warn: Box::new(|_, _| {}),
             ..Hooks::default()
         },
     );
@@ -320,6 +320,7 @@ fn dropped_is_warned_once() -> Outcome {
     a_run(&harness)?;
     harness.telmoni.shutdown();
     assert_eq!(harness.warnings.all(), warning_of("dropped")?);
+    assert_eq!(harness.warnings.fields(), fields_of("dropped")?);
     Ok(())
 }
 
@@ -329,6 +330,7 @@ fn unlisted_names_the_tag_that_would_keep_it() -> Outcome {
     a_run(&harness)?;
     harness.telmoni.shutdown();
     assert_eq!(harness.warnings.all(), warning_of("unlisted")?);
+    assert_eq!(harness.warnings.fields(), fields_of("unlisted")?);
     Ok(())
 }
 
@@ -338,6 +340,7 @@ fn a_tag_past_the_cardinality_cap_is_warned_with_what_keeps_it() -> Outcome {
     a_run(&harness)?;
     harness.telmoni.shutdown();
     assert_eq!(harness.warnings.all(), warning_of("cardinality")?);
+    assert_eq!(harness.warnings.fields(), fields_of("cardinality")?);
     Ok(())
 }
 
@@ -348,6 +351,7 @@ fn refused_is_warned_once_and_never_retried() -> Outcome {
     a_run(&harness)?;
     harness.telmoni.shutdown();
     assert_eq!(harness.warnings.all(), warning_of("refused")?);
+    assert_eq!(harness.warnings.fields(), fields_of("refused")?);
     assert_eq!(
         harness.transport.count(),
         2,
@@ -448,6 +452,7 @@ fn unavailable_is_retried_three_times_then_dropped() -> Outcome {
         [Duration::from_secs(1), Duration::from_secs(1)]
     );
     assert_eq!(harness.warnings.all(), warning_of("unavailable")?);
+    assert_eq!(harness.warnings.fields(), fields_of("unavailable")?);
     assert_eq!(
         harness.transport.count(),
         4,
@@ -464,6 +469,7 @@ fn forbidden_is_not_retried_and_the_next_batch_is_still_sent() -> Outcome {
     a_run(&harness)?;
     harness.telmoni.shutdown();
     assert_eq!(harness.warnings.all(), warning_of("forbidden")?);
+    assert_eq!(harness.warnings.fields(), fields_of("forbidden")?);
     assert_eq!(harness.transport.count(), 2);
     Ok(())
 }
@@ -478,6 +484,7 @@ fn each_answer_is_warned_word_for_word() -> Outcome {
         a_run(&harness)?;
         harness.telmoni.shutdown();
         assert_eq!(harness.warnings.all(), warning_of(&name)?, "{name}");
+        assert_eq!(harness.warnings.fields(), fields_of(&name)?, "{name}");
     }
     Ok(())
 }
@@ -517,6 +524,7 @@ fn a_platform_never_reached_is_warned_once_with_the_errors_name() -> Outcome {
         warnings.first().map(String::as_str),
         Some("telmoni: export failed after 3 attempts (ConnectionRefused); the batch was dropped")
     );
+    assert_eq!(harness.warnings.fields(), [json!({ "kind": "failed" })]);
     assert_eq!(harness.transport.count(), 6);
     Ok(())
 }
@@ -570,7 +578,7 @@ fn an_answer_whose_body_breaks_is_decided_by_its_status() -> Outcome {
             Config::new(endpoint, None, Some("telmoni_k".to_owned())),
             Hooks {
                 sleep: Box::new(move |duration| slept.push(duration)),
-                warn: Box::new(move |text| warned.push(text.to_owned())),
+                warn: Box::new(move |text, warning| warned.push(text, warning)),
                 ..Hooks::default()
             },
         );
@@ -584,6 +592,7 @@ fn an_answer_whose_body_breaks_is_decided_by_its_status() -> Outcome {
             "{status}: an export was sent again"
         );
         assert_eq!(sleeps.all(), Vec::<Duration>::new(), "{status}");
+        let fields = warnings.fields();
         let warnings = warnings.all();
         if status == 200 {
             assert_eq!(warnings, Vec::<String>::new());
@@ -594,6 +603,12 @@ fn an_answer_whose_body_breaks_is_decided_by_its_status() -> Outcome {
                 Some(
                     "telmoni: export refused with 413 /errors/batch-too-large; the batch was dropped"
                 )
+            );
+            assert_eq!(
+                fields,
+                [
+                    json!({ "kind": "refused", "status": 413, "problem_type": "/errors/batch-too-large" })
+                ]
             );
         }
     }

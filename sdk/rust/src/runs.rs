@@ -23,7 +23,7 @@ use crate::error::Error;
 use crate::guard::{self, Guard, Opening, Tokens};
 use crate::lock;
 use crate::propagation::Continued;
-use crate::warnings::Warner;
+use crate::warnings::{Warner, WarningKind};
 
 /// The run a context is inside, carried by every span opened under it: what
 /// `inject` reads off the current context.
@@ -245,6 +245,7 @@ impl Handle {
             warner.once(
                 "step:name".to_owned(),
                 "telmoni: a step needs its name; one without is sent named step",
+                WarningKind::Input.into(),
             );
             "step"
         } else {
@@ -263,6 +264,7 @@ impl Handle {
             warner.once(
                 "call:model".to_owned(),
                 "telmoni: a model call needs its model; one without is sent named by its operation alone",
+                WarningKind::Input.into(),
             );
         }
         let model = cut(model, contract::MODEL_MAX, "model", warner);
@@ -654,7 +656,10 @@ impl ModelCall {
     fn count(&self, answered_as: Option<String>, usage: Option<Usage>, messages: Option<Content>) {
         // Given once the lock is released: the sink is the application's.
         if let Some((key, text)) = self.hold(answered_as, usage, messages) {
-            self.handle.client.warner.once(key, &text);
+            self.handle
+                .client
+                .warner
+                .once(key, &text, WarningKind::Input.into());
         }
     }
 
@@ -882,6 +887,7 @@ pub(crate) fn run_attributes(
                 contract::TAG_KEY_MAX,
                 contract::TAG_VALUE_MAX
             ),
+            WarningKind::Input.into(),
         );
     }
     // Ingest keeps no more, and more could crowd out what the run's end sets.
@@ -892,6 +898,7 @@ pub(crate) fn run_attributes(
                 "telmoni: a run carries up to {} tags, the most ingest keeps; the rest are not sent",
                 contract::TAGS_MAX
             ),
+            WarningKind::Input.into(),
         );
     }
     for (key, value) in tags.into_iter().take(contract::TAGS_MAX) {
@@ -912,6 +919,7 @@ pub(crate) fn model_operation(given: Option<&str>, warner: &Warner) -> String {
             warner.once(
                 "call:operation".to_owned(),
                 "telmoni: a model call's operation must be chat, generate_content, text_completion or embeddings, which ingest reads as a model call; it is sent as chat",
+                WarningKind::Input.into(),
             );
             contract::DEFAULT_MODEL_OPERATION.to_owned()
         }
@@ -985,6 +993,7 @@ pub(crate) fn sendable_usage(usage: Usage, warner: &Warner) -> Usage {
                 &format!(
                     "telmoni: {name} must be a whole number from 0 within 64 bits; the call is sent without it"
                 ),
+                WarningKind::Input.into(),
             );
             return None;
         }
@@ -1010,6 +1019,7 @@ pub(crate) fn sendable_usage(usage: Usage, warner: &Warner) -> Usage {
                         "telmoni: {} must be a finite number of US dollars from 0; the call is sent without it",
                         contract::COST
                     ),
+                    WarningKind::Input.into(),
                 );
             }
             dollars
@@ -1028,6 +1038,7 @@ fn cut(text: &str, most: usize, what: &str, warner: &Warner) -> String {
         &format!(
             "telmoni: a {what} must be up to {most} characters; it is sent cut to its first {most}"
         ),
+        WarningKind::Input.into(),
     );
     text.chars().take(most).collect()
 }
@@ -1041,6 +1052,7 @@ fn fits(id: &str, most: usize, what: &str, warner: &Warner) -> bool {
     warner.once(
         format!("long:{what}"),
         &format!("telmoni: a {what} must be up to {most} characters; the run is sent without it"),
+        WarningKind::Input.into(),
     );
     false
 }

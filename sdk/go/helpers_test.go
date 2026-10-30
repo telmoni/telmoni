@@ -79,6 +79,27 @@ func warningOf(t *testing.T, name string) []string {
 	return []string{*fixture.Warning}
 }
 
+// fieldsOf is the attributes an answers/*.json fixture says its warning
+// carries, as the log sink reads them: none, or that one, a number an int64.
+func fieldsOf(t *testing.T, name string) []map[string]any {
+	t.Helper()
+	var fixture struct {
+		Fields map[string]any `json:"fields"`
+	}
+	if err := json.Unmarshal(loadFixture(t, name), &fixture); err != nil {
+		t.Fatalf("decoding the fixture %s: %v", name, err)
+	}
+	if fixture.Fields == nil {
+		return nil
+	}
+	for key, value := range fixture.Fields {
+		if n, ok := value.(float64); ok {
+			fixture.Fields[key] = int64(n)
+		}
+	}
+	return []map[string]any{fixture.Fields}
+}
+
 type request struct {
 	url    string
 	header http.Header
@@ -299,21 +320,35 @@ func withPrefix(spans []map[string]any, prefix string) []map[string]any {
 }
 
 // logSink is the slog handler the tests give the client: it keeps every
-// warning's message.
+// warning's message and attributes.
 type logSink struct {
 	mu       sync.Mutex
 	messages []string
+	attrs    []map[string]any
 }
 
 func (s *logSink) Enabled(context.Context, slog.Level) bool { return true }
 
 func (s *logSink) Handle(_ context.Context, r slog.Record) error {
 	if r.Level >= slog.LevelWarn {
+		attrs := map[string]any{}
+		r.Attrs(func(a slog.Attr) bool {
+			attrs[a.Key] = a.Value.Any()
+			return true
+		})
 		s.mu.Lock()
 		s.messages = append(s.messages, r.Message)
+		s.attrs = append(s.attrs, attrs)
 		s.mu.Unlock()
 	}
 	return nil
+}
+
+// fields is each warning's attributes, in the order given.
+func (s *logSink) fields() []map[string]any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]map[string]any(nil), s.attrs...)
 }
 
 func (s *logSink) WithAttrs([]slog.Attr) slog.Handler { return s }

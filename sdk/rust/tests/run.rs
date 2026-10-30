@@ -452,7 +452,7 @@ fn a_warning_sink_that_panics_never_reaches_the_agent() -> Outcome {
     let warnings = Warnings::default();
     let sleeps = Sleeps::default();
     let mut hooks = hooks(&transport, &warnings, &sleeps);
-    hooks.warn = Box::new(|text| std::panic::panic_any(text.to_owned()));
+    hooks.warn = Box::new(|text, _| std::panic::panic_any(text.to_owned()));
     let telmoni = Telmoni::with_hooks(keyed(), hooks);
     let run = telmoni.run(
         "bot",

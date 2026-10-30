@@ -275,7 +275,7 @@ func (p *processor) work() {
 		p.exporting = n > 0
 		p.mu.Unlock()
 		if dropped > 0 {
-			p.exporter.warn(fmt.Sprintf("telmoni: the export queue was full; %d spans were dropped", dropped))
+			p.exporter.warn(WarningQueueFull, fmt.Sprintf("telmoni: the export queue was full; %d spans were dropped", dropped))
 		}
 		if n > 0 {
 			p.export(batch)
@@ -296,7 +296,7 @@ func (p *processor) work() {
 func (p *processor) export(batch []sdktrace.ReadOnlySpan) {
 	defer func() {
 		if recover() != nil {
-			p.exporter.warn("telmoni: a hook panicked during an export; the batch was dropped")
+			p.exporter.warn(WarningExportError, "telmoni: a hook panicked during an export; the batch was dropped")
 		}
 	}()
 	p.exporter.export(batch)

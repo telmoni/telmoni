@@ -23,5 +23,7 @@ export type {
   TransportRequest,
   TransportResponse,
   Usage,
+  Warning,
+  WarningKind,
 } from './types.js';
 export { VERSION } from './version.js';

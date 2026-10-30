@@ -33,6 +33,7 @@ from . import contract
 from ._version import __version__
 from .models import (
     Config,
+    WarningInfo,
     _unset_if_blank,
     bypasses_proxy,
     header,
@@ -327,6 +328,7 @@ class Exporter:
                     f"long:{key}",
                     f"telmoni: the {what} must be up to {most} characters; "
                     "it is not sent",
+                    WarningInfo("input"),
                 )
                 continue
             self._resource.append(_attribute(key, value))
@@ -371,12 +373,14 @@ class Exporter:
                 self.warn_once(
                     "too-large",
                     "telmoni: a span past the 1 MiB an export may hold was dropped",
+                    WarningInfo("too_large"),
                 )
                 return True
             self.warn_once(
                 "trimmed",
                 "telmoni: a span past the 1 MiB an export may hold was sent without "
                 "the attributes ingest drops for their length",
+                WarningInfo("trimmed"),
             )
         return self._send(body)
 
@@ -405,6 +409,8 @@ class Exporter:
         if bearer is not None:
             headers["Authorization"] = f"Bearer {bearer}"
         failure = ""
+        # The last attempt's, as its words name it: none after a transport fault.
+        last = WarningInfo("failed")
         for attempt in range(ATTEMPTS):
             if self._given_up.is_set():
                 return False
@@ -415,19 +421,23 @@ class Exporter:
             except (OSError, http.client.HTTPException) as error:
                 # No status came: a transport fault the next attempt may not meet.
                 failure = type(error).__name__
+                last = WarningInfo("failed")
                 self._wait(None, attempt)
                 continue
             if 200 <= answer.status < 300:
                 self._read(answer)
                 return True
+            problem = _problem_type(answer.body)
             if answer.status in (429, 503):
-                failure = f"{answer.status} {_problem_type(answer.body)}"
+                failure = f"{answer.status} {problem}"
+                last = WarningInfo("failed", answer.status, problem or None)
                 self._wait(answer.header("Retry-After"), attempt)
                 continue
             self.warn_once(
                 f"status:{answer.status}",
                 f"telmoni: export refused with {answer.status} "
-                f"{_problem_type(answer.body)}; the batch was dropped",
+                f"{problem}; the batch was dropped",
+                WarningInfo("refused", answer.status, problem or None),
             )
             # Refused for what it holds, the rest of a batch may still go.
             return answer.status in (400, 413)
@@ -435,6 +445,7 @@ class Exporter:
             f"failed:{failure}",
             f"telmoni: export failed after {ATTEMPTS} attempts ({failure}); "
             "the batch was dropped",
+            last,
         )
         return False
 
@@ -508,18 +519,26 @@ class Exporter:
                 if rest:
                     text += f"; {rest}"
                 text += f"); {_remedy(attribute, reason)}"
-                self.warn_once(f"dropped:{attribute}:{reason}", text)
+                self.warn_once(
+                    f"dropped:{attribute}:{reason}", text, WarningInfo("dropped")
+                )
                 continue
             refused = _REFUSED.match(line)
             if refused:
                 why = refused.group(2)
                 self.warn_once(
-                    f"refused:{why}", f"telmoni: the server refused a span: {why}"
+                    f"refused:{why}",
+                    f"telmoni: the server refused a span: {why}",
+                    WarningInfo("span_refused"),
                 )
                 continue
             if line.startswith("and ") or not line:
                 continue
-            self.warn_once(f"line:{line}", f"telmoni: the server said: {line}")
+            self.warn_once(
+                f"line:{line}",
+                f"telmoni: the server said: {line}",
+                WarningInfo("said"),
+            )
 
     def _wait(self, retry_after: str | None, attempt: int) -> None:
         """Before the next attempt; nothing after the last, or once given up."""
@@ -529,7 +548,7 @@ class Exporter:
         seconds = float(2**attempt) if given is None else given
         self._sleep(min(seconds, RETRY_AFTER_MAX_S))
 
-    def warn_once(self, key: str, text: str) -> None:
+    def warn_once(self, key: str, text: str, info: WarningInfo) -> None:
         """Log ``text`` once per client under ``key``, as every warning is."""
         with self._warned_lock:
             if key in self._warned:
@@ -540,14 +559,14 @@ class Exporter:
                 self._warned.clear()
             self._warned.add(key)
         # Outside the lock: the handler is the application's.
-        warn(text)
+        warn(text, info=info)
 
 
-def warn(text: str, *args: object) -> None:
-    """Log a warning; a handler or filter that raises must not raise into the
-    agent's own call, nor end the worker."""
+def warn(text: str, *args: object, info: WarningInfo) -> None:
+    """Log a warning, ``info`` as ``record.telmoni_warning``; a handler or filter
+    that raises must not raise into the agent's own call, nor end the worker."""
     with contextlib.suppress(Exception):
-        logger.warning(text, *args)
+        logger.warning(text, *args, extra={"telmoni_warning": info})
 
 
 def _remedy(attribute: str, reason: str) -> str:

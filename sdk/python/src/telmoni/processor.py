@@ -25,6 +25,7 @@ from opentelemetry.sdk.trace import ReadableSpan, Span, SpanProcessor
 
 from . import contract
 from .exporter import Exporter, warn
+from .models import WarningInfo
 
 MAX_QUEUE_SIZE = 2048
 MAX_BATCH_SIZE = 512
@@ -244,7 +245,9 @@ class Processor(SpanProcessor):
                 self._exporting = bool(batch)
             if dropped:
                 warn(
-                    "telmoni: the export queue was full; %d spans were dropped", dropped
+                    "telmoni: the export queue was full; %d spans were dropped",
+                    dropped,
+                    info=WarningInfo("queue_full"),
                 )
             if batch:
                 self._export(batch)
@@ -270,4 +273,5 @@ class Processor(SpanProcessor):
             warn(
                 "telmoni: an export failed (%s); the batch was dropped",
                 type(error).__name__,
+                info=WarningInfo("export_error"),
             )

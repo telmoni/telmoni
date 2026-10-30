@@ -222,7 +222,7 @@ pub(crate) mod testing {
             Hooks {
                 transport: Box::new(capture.clone()),
                 sleep: Box::new(|_| {}),
-                warn: Box::new(|_| {}),
+                warn: Box::new(|_, _| {}),
                 ..Hooks::default()
             },
         )

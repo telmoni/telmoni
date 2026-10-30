@@ -176,6 +176,7 @@ func TestADeploymentNamedPastIngestsCapIsLeftOffWithOneWarning(t *testing.T) {
 	if got := h.logs.warnings(); !reflect.DeepEqual(got, want) {
 		t.Errorf("warnings = %q, want %q", got, want)
 	}
+	expectFields(t, h, map[string]any{"kind": "input"})
 }
 
 func TestFromEnvReadsTheFiveVariablesAndNoOther(t *testing.T) {
@@ -322,6 +323,10 @@ func TestARefusalWhoseBodyBreaksIsSentOnce(t *testing.T) {
 	want := []string{"telmoni: export refused with 413 /errors/batch-too-large; the batch was dropped"}
 	if got := logs.warnings(); !slices.Equal(got, want) {
 		t.Errorf("warnings %q, want %q", got, want)
+	}
+	fields := []map[string]any{{"kind": "refused", "status": int64(413), "problem_type": "/errors/batch-too-large"}}
+	if got := logs.fields(); !reflect.DeepEqual(got, fields) {
+		t.Errorf("fields %v, want %v", got, fields)
 	}
 }
 
@@ -785,6 +790,7 @@ func TestASpanAlonePastItGoesWithoutWhatIngestDropsForItsLength(t *testing.T) {
 	if got := h.logs.warnings(); !slices.Equal(got, warned) {
 		t.Errorf("warnings %q, want %q", got, warned)
 	}
+	expectFields(t, h, map[string]any{"kind": "trimmed"})
 }
 
 func TestASpanWhoseOwnNamePassesItIsDroppedWithOneWarning(t *testing.T) {
@@ -805,4 +811,5 @@ func TestASpanWhoseOwnNamePassesItIsDroppedWithOneWarning(t *testing.T) {
 	if got := h.logs.warnings(); !slices.Equal(got, want) {
 		t.Errorf("warnings %q, want %q", got, want)
 	}
+	expectFields(t, h, map[string]any{"kind": "too_large"})
 }

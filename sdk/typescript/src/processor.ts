@@ -207,7 +207,7 @@ export class Processor implements SpanProcessor {
     const dropped = this.#dropped;
     this.#dropped = 0;
     if (dropped > 0) {
-      this.#exporter.warn(`telmoni: the export queue was full; ${dropped} spans were dropped`);
+      this.#exporter.warn(`telmoni: the export queue was full; ${dropped} spans were dropped`, { kind: 'queue_full' });
     }
     if (batch.length === 0) {
       this.#settle();
@@ -223,7 +223,9 @@ export class Processor implements SpanProcessor {
     try {
       await this.#exporter.export(batch);
     } catch (error) {
-      this.#exporter.warn(`telmoni: an export failed (${errorName(error)}); the batch was dropped`);
+      this.#exporter.warn(`telmoni: an export failed (${errorName(error)}); the batch was dropped`, {
+        kind: 'export_error',
+      });
     }
   }
 

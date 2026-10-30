@@ -16,7 +16,7 @@ use serde::Deserialize;
 use crate::config::Price;
 use crate::error::{Cap, Error};
 use crate::lock;
-use crate::warnings::Warner;
+use crate::warnings::{Warner, WarningKind};
 
 /// The price table this release carries.
 const PRICE_FILE: &str = include_str!("model_prices.json");
@@ -125,6 +125,7 @@ pub(crate) fn own_rates(prices: &[Price], warner: &Warner) -> OwnRates {
             warner.once(
                 "price".to_owned(),
                 "telmoni: a price names its provider and its model, each a finite number of US dollars a token from 0; one that does not is left out",
+                WarningKind::Input.into(),
             );
             continue;
         }

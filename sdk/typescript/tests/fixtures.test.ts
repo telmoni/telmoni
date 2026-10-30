@@ -13,6 +13,7 @@ import {
   answer,
   answerNames,
   answers,
+  fieldsOf,
   harness,
   kept,
   loadFixture,
@@ -338,7 +339,7 @@ describe('answers/', () => {
     expect(h.transport.requests).toHaveLength(2);
   });
 
-  it.each(answerNames())("%s met on every attempt logs its fixture's line word for word, as the plugins read it", async (name) => {
+  it.each(answerNames())("%s met on every attempt logs its fixture's line and fields word for word, as the plugins read them", async (name) => {
     const h = harness({ apiKey: 'k' }, {}, answers(name, 3));
     try {
       await aRun(h);
@@ -346,6 +347,7 @@ describe('answers/', () => {
       await h.telmoni.shutdown();
     }
     expect(h.warnings).toEqual(warningOf(name));
+    expect(h.fields).toStrictEqual(fieldsOf(name));
   });
 
   it('an export whose wait rejects is dropped in the words the plugins read', async () => {
@@ -357,6 +359,7 @@ describe('answers/', () => {
       await h.telmoni.shutdown();
     }
     expect(h.warnings).toEqual(['telmoni: an export failed (Error); the batch was dropped']);
+    expect(h.fields).toStrictEqual([{ kind: 'export_error' }]);
     expect(h.transport.requests, 'the next batch still went').toHaveLength(2);
   });
 
@@ -383,5 +386,17 @@ describe('answers/', () => {
     }
     expect(h.sleeps).toEqual([1, 2]);
     expect(h.warnings).toEqual(['telmoni: export failed after 3 attempts (Unreachable); the batch was dropped']);
+    expect(h.fields, 'a transport error has no status').toStrictEqual([{ kind: 'failed' }]);
+  });
+
+  it('a failure ending on a transport error hands no status, as its line names none', async () => {
+    const h = harness({ apiKey: 'k' }, {}, [...answers('unavailable', 2), new Error('down')]);
+    try {
+      await aRun(h);
+    } finally {
+      await h.telmoni.shutdown();
+    }
+    expect(h.warnings).toEqual(['telmoni: export failed after 3 attempts (Error); the batch was dropped']);
+    expect(h.fields).toStrictEqual([{ kind: 'failed' }]);
   });
 });

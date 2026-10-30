@@ -30,7 +30,7 @@ Nothing is derived at random, so the export is compared nearly whole:
 2. Every `attributes` array is sorted by `key`, the resource's too; spans keep the order they were sent in.
 3. `telemetry.sdk.language` is replaced by `<language>`; `telemetry.sdk.version`, `telemetry.distro.version` and the scope's `version` by `<version>`.
 4. Everything else is compared as JSON, ids and times included. The trace's id is the run's, without its hyphens. Each span's id is the first eight bytes, in hex, of the version 5 UUID (RFC 9562) named by the span's place in the record, in decimal, under the run's id: `0` the run, then each step and call from `1` in the record's order, a step before its calls.
-5. The one warning is for the call whose operation is `rerank`, which ingest reads as no model call, so it goes as `chat`: `telmoni: a model call's operation must be chat, generate_content, text_completion or embeddings, which ingest reads as a model call; it is sent as chat`.
+5. The one warning is for the call whose operation is `rerank`, which ingest reads as no model call, so it goes as `chat`: `telmoni: a model call's operation must be chat, generate_content, text_completion or embeddings, which ingest reads as a model call; it is sent as chat`, its `kind` `input` (`answers/`, below).
 
 The same record sent twice must be the same bytes, which ingest's claim on a body answers once.
 
@@ -60,7 +60,22 @@ One rule in all four, written out by each rather than left to its URL parser, si
 
 ## `answers/`
 
-Each file is one answer from `POST /otlp/v1/traces` — `status`, `headers`, `body` — and `expect`, what the SDK must do with it. A suite's fake transport answers from these files; the asserted behaviour is the `expect` line. `warning` is the one line the SDK logs, word for word, when every attempt of an export meets that answer, or `null` for none: the coding agents' plugins read these lines, so a reworded one fails every suite.
+Each file is one answer from `POST /otlp/v1/traces` — `status`, `headers`, `body` — and `expect`, what the SDK must do with it. A suite's fake transport answers from these files; the asserted behaviour is the `expect` line. `warning` is the one line the SDK logs, word for word, when every attempt of an export meets that answer, or `null` for none, and `fields` what it hands beside that line, so a reader decides what became of its spans without parsing the words: the warning's `kind`, and for an export's own failure the `status` it last met and the `problem_type` its body named, each left out where there is none.
+
+Every warning any SDK gives carries one of these kinds, the same in all four:
+
+| `kind` | What became of the spans | `status`, `problem_type` |
+|---|---|---|
+| `refused` | an export refused for good, never retried, and its batch dropped; Rust's endpoint refused too, nothing sent | the answer's, where one came |
+| `failed` | an export failed every attempt, and its batch dropped | the last attempt's, as its line names them; none where that attempt met a transport error, whatever earlier ones met |
+| `queue_full` | spans dropped before sending, the queue full | — |
+| `export_error` | a batch its own export dropped: one it could not encode, or whose export raised, threw or panicked — a hook the application gave among them | — |
+| `too_large` | a span alone past an export's 1 MiB dropped, its own name too long to trim | — |
+| `trimmed` | a span alone past 1 MiB sent without the attributes ingest drops for their length | — |
+| `dropped` | an attribute the server dropped, the span kept | — |
+| `span_refused` | a span the server refused, the rest of the export kept | — |
+| `said` | a line the server gave naming neither | — |
+| `input` | something the SDK was handed fixed, cut or left off as it sent the rest, or not sent at all — a field past its cap, a count that is none, a call outside a run | — |
 
 | File | Answer | The SDK |
 |---|---|---|

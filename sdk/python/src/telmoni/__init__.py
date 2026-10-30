@@ -14,6 +14,8 @@ from .models import (
     StepRecord,
     ToolCallRecord,
     Usage,
+    WarningInfo,
+    WarningKind,
 )
 from .processor import Batching, QueueFullError, ShutdownError
 from .runs import ModelCall, Run, Step, ToolCall, current_run
@@ -37,6 +39,8 @@ __all__ = [
     "ToolCall",
     "ToolCallRecord",
     "Usage",
+    "WarningInfo",
+    "WarningKind",
     "__version__",
     "current_run",
 ]

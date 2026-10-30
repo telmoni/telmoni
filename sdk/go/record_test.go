@@ -251,6 +251,7 @@ func TestTheRecordMatchesTheGoldenExport(t *testing.T) {
 	if got := h.logs.warnings(); !reflect.DeepEqual(got, want) {
 		t.Errorf("warnings = %q, want %q", got, want)
 	}
+	expectFields(t, h, map[string]any{"kind": "input"})
 }
 
 func TestTheSameRecordSentAgainIsTheSameBytes(t *testing.T) {

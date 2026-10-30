@@ -269,6 +269,7 @@ fn the_record_matches_the_golden_export() -> Outcome {
             "telmoni: a model call's operation must be chat, generate_content, text_completion or embeddings, which ingest reads as a model call; it is sent as chat"
         ]
     );
+    assert_eq!(harness.warnings.kinds(), ["input"]);
     Ok(())
 }
 
@@ -877,8 +878,8 @@ fn a_records_warnings_come_before_its_hold() -> Outcome {
         inside: Vec::new(),
         ..the_record()?
     };
-    hooks.warn = Box::new(move |text| {
-        warned.push(text.to_owned());
+    hooks.warn = Box::new(move |text, warning| {
+        warned.push(text, warning);
         let Some(telmoni) = lock(&shared).clone() else {
             return;
         };

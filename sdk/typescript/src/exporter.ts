@@ -18,7 +18,7 @@ import type { ReadableSpan } from '@opentelemetry/sdk-trace-base';
 
 import * as contract from './contract.js';
 import { errorName } from './errors.js';
-import type { ResolvedConfig, Transport, TransportResponse } from './types.js';
+import type { ResolvedConfig, Transport, TransportResponse, Warning } from './types.js';
 import { VERSION } from './version.js';
 import { trimEnds } from './whitespace.js';
 
@@ -94,7 +94,7 @@ export interface ExporterHooks {
   transport: Transport;
   /** `signal` aborts once the wait is given up; a hook may ignore it. */
   sleep: (seconds: number, signal: AbortSignal) => Promise<void>;
-  warn: (message: string) => void;
+  warn: (message: string, warning: Warning) => void;
 }
 
 /**
@@ -223,7 +223,7 @@ export class Exporter {
   readonly #config: ResolvedConfig;
   readonly #transport: Transport;
   readonly #sleep: (seconds: number, signal: AbortSignal) => Promise<void>;
-  readonly #warn: (message: string) => void;
+  readonly #warn: (message: string, warning: Warning) => void;
   readonly #url: string;
   readonly #warned = new Set<string>();
   readonly #resource: KeyValue[];
@@ -253,7 +253,9 @@ export class Exporter {
       if (value === undefined) continue;
       // Counted in characters, as ingest counts them, not UTF-16's units.
       if ([...value].length > most) {
-        this.warnOnce(`long:${key}`, `telmoni: the ${what} must be up to ${most} characters; it is not sent`);
+        this.warnOnce(`long:${key}`, `telmoni: the ${what} must be up to ${most} characters; it is not sent`, {
+          kind: 'input',
+        });
         continue;
       }
       this.#resource.push(attribute(key, value));
@@ -291,12 +293,15 @@ export class Exporter {
       // and then fits, unless its own name does not.
       body = this.#body(spans, true);
       if (Buffer.byteLength(body) > contract.BATCH_MAX_BYTES) {
-        this.warnOnce('too-large', 'telmoni: a span past the 1 MiB an export may hold was dropped');
+        this.warnOnce('too-large', 'telmoni: a span past the 1 MiB an export may hold was dropped', {
+          kind: 'too_large',
+        });
         return true;
       }
       this.warnOnce(
         'trimmed',
         'telmoni: a span past the 1 MiB an export may hold was sent without the attributes ingest drops for their length',
+        { kind: 'trimmed' },
       );
     }
     return this.#send(body);
@@ -324,6 +329,8 @@ export class Exporter {
       headers['Authorization'] = `Bearer ${this.#config.apiKey}`;
     }
     let failure = '';
+    // The last attempt's, for the warning's fields, as its line names them; a transport error clears it.
+    let met: Warning = { kind: 'failed' };
     for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
       if (this.#givenUp.signal.aborted) return false;
       // This clock as the attempt leaves, the spans' own.
@@ -337,6 +344,7 @@ export class Exporter {
         });
       } catch (error) {
         failure = errorName(error);
+        met = { kind: 'failed' };
         await this.#wait(null, attempt);
         continue;
       }
@@ -345,14 +353,17 @@ export class Exporter {
         return true;
       }
       const text = await bodyOf(answer);
+      const named = problemType(text);
       if (answer.status === 429 || answer.status === 503) {
-        failure = `${answer.status} ${problemType(text)}`;
+        failure = `${answer.status} ${named}`;
+        met = answered('failed', answer.status, named);
         await this.#wait(answer.headers.get('Retry-After'), attempt);
         continue;
       }
       this.warnOnce(
         `status:${answer.status}`,
-        `telmoni: export refused with ${answer.status} ${problemType(text)}; the batch was dropped`,
+        `telmoni: export refused with ${answer.status} ${named}; the batch was dropped`,
+        answered('refused', answer.status, named),
       );
       // Refused for what it holds, the rest of a batch may still go.
       return answer.status === 400 || answer.status === 413;
@@ -360,6 +371,7 @@ export class Exporter {
     this.warnOnce(
       `failed:${failure}`,
       `telmoni: export failed after ${ATTEMPTS} attempts (${failure}); the batch was dropped`,
+      met,
     );
     return false;
   }
@@ -431,17 +443,17 @@ export class Exporter {
         let text = `telmoni: the server dropped ${attributeName} (${reason}`;
         if (rest) text += `; ${rest}`;
         text += `); ${remedy(attributeName, reason)}`;
-        this.warnOnce(`dropped:${attributeName}:${reason}`, text);
+        this.warnOnce(`dropped:${attributeName}:${reason}`, text, { kind: 'dropped' });
         continue;
       }
       const refused = REFUSED.exec(line);
       if (refused !== null) {
         const why = refused[2] ?? '';
-        this.warnOnce(`refused:${why}`, `telmoni: the server refused a span: ${why}`);
+        this.warnOnce(`refused:${why}`, `telmoni: the server refused a span: ${why}`, { kind: 'span_refused' });
         continue;
       }
       if (line.startsWith('and ') || line === '') continue;
-      this.warnOnce(`line:${line}`, `telmoni: the server said: ${line}`);
+      this.warnOnce(`line:${line}`, `telmoni: the server said: ${line}`, { kind: 'said' });
     }
   }
 
@@ -453,19 +465,19 @@ export class Exporter {
   }
 
   /** Warns `text` once per client under `key`, as every warning is. */
-  warnOnce(key: string, text: string): void {
+  warnOnce(key: string, text: string, warning: Warning): void {
     if (this.#warned.has(key)) return;
     // Bounded: a server naming ever-new attributes would otherwise grow it for
     // the life of the process; past the cap, warnings may repeat.
     if (this.#warned.size >= WARNED_MAX) this.#warned.clear();
     this.#warned.add(key);
-    this.warn(text);
+    this.warn(text, warning);
   }
 
   /** Warns `text` through the hook, which may throw: never into the worker or the agent's own call. */
-  warn(text: string): void {
+  warn(text: string, warning: Warning): void {
     try {
-      this.#warn(text);
+      this.#warn(text, warning);
     } catch {
       // Nowhere left to say so: the hook is where warnings go.
     }
@@ -492,6 +504,11 @@ function remedy(attributeName: string, reason: string): string {
   if (reason === 'over_cap') return 'shorten it to keep it';
   if (reason === 'cardinality') return 'keep tags to a few keys of a few values each: an id goes as the user or the session';
   return "see the server's answer";
+}
+
+/** An export's own failure as data: the status met, and the problem type where the body named one. */
+function answered(kind: 'refused' | 'failed', status: number, type: string): Warning {
+  return type === '' ? { kind, status } : { kind, status, problemType: type };
 }
 
 /** The problem type a refusal's `message` opens with, or nothing. */

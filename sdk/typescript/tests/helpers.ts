@@ -8,7 +8,7 @@ import type { Context, ContextManager } from '@opentelemetry/api';
 import { expect } from 'vitest';
 
 import { Telmoni } from '../src/index';
-import type { Config, Hooks, Transport } from '../src/index';
+import type { Config, Hooks, Transport, Warning } from '../src/index';
 
 const FIXTURES = fileURLToPath(new URL('../../fixtures/', import.meta.url));
 
@@ -22,6 +22,7 @@ export interface AnswerFixture {
   body: unknown;
   expect: string;
   warning: string | null;
+  fields: { kind: string; status?: number; problem_type?: string } | null;
 }
 
 /** One answer from the platform, its body already encoded. */
@@ -60,6 +61,14 @@ export function answerNames(): string[] {
 export function warningOf(name: string): string[] {
   const { warning } = loadFixture<AnswerFixture>(`answers/${name}.json`);
   return warning === null ? [] : [warning];
+}
+
+/** What the fixture's warning hands beside its line, as the hook's `Warning`: none, or that one. */
+export function fieldsOf(name: string): Warning[] {
+  const { fields } = loadFixture<AnswerFixture>(`answers/${name}.json`);
+  if (fields === null) return [];
+  const { problem_type: problemType, ...rest } = fields;
+  return [{ ...rest, ...(problemType === undefined ? {} : { problemType }) } as Warning];
 }
 
 export interface JsonAttribute {
@@ -188,6 +197,8 @@ export interface Harness {
   telmoni: Telmoni;
   transport: FakeTransport;
   warnings: string[];
+  /** Each warning's `Warning`, beside its line in `warnings`. */
+  fields: Warning[];
   sleeps: number[];
 }
 
@@ -195,6 +206,7 @@ export interface Harness {
 export function harness(config: Config = {}, hooks: Hooks = {}, scripted: Array<Answer | Error> = []): Harness {
   const transport = new FakeTransport(scripted);
   const warnings: string[] = [];
+  const fields: Warning[] = [];
   const sleeps: number[] = [];
   const telmoni = new Telmoni(
     { apiKey: 'telmoni_test_key', ...config },
@@ -204,13 +216,14 @@ export function harness(config: Config = {}, hooks: Hooks = {}, scripted: Array<
         sleeps.push(seconds);
         return Promise.resolve();
       },
-      warn: (message) => {
+      warn: (message, warning) => {
         warnings.push(message);
+        fields.push(warning);
       },
       ...hooks,
     },
   );
-  return { telmoni, transport, warnings, sleeps };
+  return { telmoni, transport, warnings, fields, sleeps };
 }
 
 /**

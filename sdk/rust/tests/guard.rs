@@ -566,7 +566,7 @@ fn a_sink_answering_the_call_it_warns_of_is_never_held_up() -> Outcome {
     let stalled = Arc::new(AtomicBool::new(false));
     let warn = {
         let (answering, stalled) = (Arc::clone(&answering), Arc::clone(&stalled));
-        move |_: &str| {
+        move |_: &str, _: &telmoni::Warning| {
             let Some(call) = lock(&answering).clone() else {
                 return;
             };

@@ -12,7 +12,14 @@ from typing import Any
 
 import pytest
 
-from conftest import FIXTURES, FakeTransport, answer_from, kept, load_fixture
+from conftest import (
+    FIXTURES,
+    FakeTransport,
+    answer_from,
+    infos_in,
+    kept,
+    load_fixture,
+)
 from telmoni import Config, Telmoni, Usage
 from telmoni.exporter import Answer
 
@@ -151,6 +158,19 @@ def warnings_in(caplog: pytest.LogCaptureFixture) -> list[str]:
     return [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
 
 
+def fields_in(caplog: pytest.LogCaptureFixture) -> list[dict[str, Any]]:
+    """Each warning's ``telmoni_warning`` as a fixture's ``fields`` spells it."""
+    fields = []
+    for info in infos_in(caplog):
+        given: dict[str, Any] = {"kind": info.kind}
+        if info.status is not None:
+            given["status"] = info.status
+        if info.problem_type is not None:
+            given["problem_type"] = info.problem_type
+        fields.append(given)
+    return fields
+
+
 def a_run(telmoni: Telmoni) -> None:
     """One empty run, sent in an export of its own."""
     with telmoni.run("bot"):
@@ -181,6 +201,7 @@ def test_dropped_is_warned_once(caplog: pytest.LogCaptureFixture) -> None:
     finally:
         client.shutdown()
     assert warnings_in(caplog) == [dropped["warning"]]
+    assert fields_in(caplog) == [dropped["fields"]]
 
 
 def test_unlisted_names_the_tag_that_would_keep_it(
@@ -194,6 +215,7 @@ def test_unlisted_names_the_tag_that_would_keep_it(
     finally:
         client.shutdown()
     assert warnings_in(caplog) == [unlisted["warning"]]
+    assert fields_in(caplog) == [unlisted["fields"]]
 
 
 def test_a_tag_past_the_cardinality_cap_is_warned_with_what_keeps_it(
@@ -207,6 +229,7 @@ def test_a_tag_past_the_cardinality_cap_is_warned_with_what_keeps_it(
     finally:
         client.shutdown()
     assert warnings_in(caplog) == [cardinality["warning"]]
+    assert fields_in(caplog) == [cardinality["fields"]]
 
 
 def test_refused_is_warned_once_and_never_retried(
@@ -221,6 +244,7 @@ def test_refused_is_warned_once_and_never_retried(
     finally:
         client.shutdown()
     assert warnings_in(caplog) == [refused["warning"]]
+    assert fields_in(caplog) == [refused["fields"]]
     assert len(transport.requests) == 2, "one export each run, neither sent again"
 
 
@@ -298,9 +322,27 @@ def test_unavailable_is_retried_three_times_then_dropped(
         client.shutdown()
     assert sleeps == [1.0, 1.0]
     assert warnings_in(caplog) == [fixture["warning"]]
+    assert fields_in(caplog) == [fixture["fields"]]
     assert len(transport.requests) == 4, (
         "three for the first run, then the next run's own export"
     )
+
+
+def test_a_failure_whose_last_attempt_met_no_answer_names_no_status(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The last attempt's, as the line names it: the 503s before it are not."""
+    unavailable = answer_from(load_fixture("answers/unavailable.json"))
+    transport = FakeTransport([unavailable, unavailable, OSError("refused")])
+    client = Telmoni(Config(api_key="k"), transport=transport, sleep=lambda _: None)
+    try:
+        a_run(client)
+    finally:
+        client.shutdown()
+    assert warnings_in(caplog) == [
+        "telmoni: export failed after 3 attempts (OSError); the batch was dropped"
+    ]
+    assert fields_in(caplog) == [{"kind": "failed"}]
 
 
 def test_forbidden_is_not_retried_and_the_next_batch_is_still_sent(
@@ -316,6 +358,7 @@ def test_forbidden_is_not_retried_and_the_next_batch_is_still_sent(
     finally:
         client.shutdown()
     assert warnings_in(caplog) == [fixture["warning"]]
+    assert fields_in(caplog) == [fixture["fields"]]
     assert len(transport.requests) == 2
 
 
@@ -335,6 +378,8 @@ def test_each_answer_is_warned_word_for_word(
         client.shutdown()
     warning = fixture["warning"]
     assert warnings_in(caplog) == ([] if warning is None else [warning])
+    fields = fixture["fields"]
+    assert fields_in(caplog) == ([] if fields is None else [fields])
 
 
 def test_an_export_that_raises_is_dropped_in_the_words_plugins_read(
@@ -351,6 +396,7 @@ def test_an_export_that_raises_is_dropped_in_the_words_plugins_read(
     assert warnings_in(caplog) == [
         "telmoni: an export failed (RuntimeError); the batch was dropped"
     ]
+    assert fields_in(caplog) == [{"kind": "export_error"}]
     assert len(transport.requests) == 2, "the next batch still went"
 
 

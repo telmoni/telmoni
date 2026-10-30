@@ -37,6 +37,7 @@ func TestTheQueueIsBoundedAndDropsAreCountedOnce(t *testing.T) {
 	if !strings.Contains(warnings[0], "queue was full") || !strings.Contains(warnings[0], "4 spans") {
 		t.Errorf("warning = %q, want the count of the three steps and the run dropped", warnings[0])
 	}
+	expectFields(t, h, map[string]any{"kind": "queue_full"})
 }
 
 func TestShutdownDrainsWhatIsQueued(t *testing.T) {
@@ -260,4 +261,5 @@ func TestATransportThatPanicsLosesOnlyItsBatch(t *testing.T) {
 	if len(warnings) != 1 || !strings.Contains(warnings[0], "a hook panicked during an export; the batch was dropped") {
 		t.Errorf("warnings = %q, want one saying the batch was dropped", warnings)
 	}
+	expectFields(t, h, map[string]any{"kind": "export_error"})
 }

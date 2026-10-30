@@ -60,7 +60,11 @@ func WithSleep(sleep func(time.Duration)) Option {
 }
 
 // WithLogger sends the SDK's warnings to logger instead of slog.Default().
-// Each distinct warning is logged once per client.
+// Each distinct warning is logged once per client, at Warn, with attributes a
+// handler can switch on instead of the words: "kind", a WarningKind, always;
+// and for an export's own failure (WarningRefused, WarningFailed) "status",
+// the HTTP status last met, and "problem_type", the problem its body named,
+// each only where there is one.
 func WithLogger(logger *slog.Logger) Option {
 	return func(o *options) {
 		if logger != nil {
@@ -68,6 +72,36 @@ func WithLogger(logger *slog.Logger) Option {
 		}
 	}
 }
+
+// WarningKind is what became of the spans a warning is about, its "kind"
+// attribute: the same names in all four SDKs.
+type WarningKind string
+
+const (
+	// WarningRefused is an export refused for good, its batch dropped.
+	WarningRefused WarningKind = "refused"
+	// WarningFailed is an export that failed every attempt, its batch dropped.
+	WarningFailed WarningKind = "failed"
+	// WarningQueueFull is spans dropped before sending, the queue full.
+	WarningQueueFull WarningKind = "queue_full"
+	// WarningExportError is a batch its own export dropped: one it could not
+	// encode, or whose hook panicked.
+	WarningExportError WarningKind = "export_error"
+	// WarningTooLarge is a span alone past an export's 1 MiB, dropped.
+	WarningTooLarge WarningKind = "too_large"
+	// WarningTrimmed is a span alone past 1 MiB, sent without the attributes
+	// ingest drops for their length.
+	WarningTrimmed WarningKind = "trimmed"
+	// WarningDropped is an attribute the server dropped, the span kept.
+	WarningDropped WarningKind = "dropped"
+	// WarningSpanRefused is a span the server refused, the rest kept.
+	WarningSpanRefused WarningKind = "span_refused"
+	// WarningSaid is a line the server gave naming neither.
+	WarningSaid WarningKind = "said"
+	// WarningInput is something the SDK was handed fixed, cut or left off, or
+	// not sent at all.
+	WarningInput WarningKind = "input"
+)
 
 // withRandom replaces the source the sample rate is drawn against, so a test
 // decides which runs are kept.

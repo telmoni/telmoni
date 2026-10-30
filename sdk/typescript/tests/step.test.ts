@@ -130,6 +130,7 @@ describe('a name of no string', () => {
       'telmoni: a step needs its name; one without is sent named step',
       "telmoni: a step's name must be up to 145 characters; it is sent cut to its first 145",
     ]);
+    expect(h.fields).toStrictEqual([{ kind: 'input' }, { kind: 'input' }]);
   });
 
   it('goes with the replacement character for a lone surrogate, which ingest would refuse with the request', async () => {

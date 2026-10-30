@@ -106,7 +106,7 @@ func newExporter(cfg Config, transport Transport, sleep func(time.Duration), log
 			continue
 		}
 		if utf8.RuneCountInString(d.value) > d.most {
-			e.warnOnce("long:"+d.key, fmt.Sprintf("telmoni: the %s must be up to %d characters; it is not sent", d.what, d.most))
+			e.warnOnce("long:"+d.key, WarningInput, fmt.Sprintf("telmoni: the %s must be up to %d characters; it is not sent", d.what, d.most))
 			continue
 		}
 		e.resource = append(e.resource, stringAttribute(d.key, d.value))
@@ -156,7 +156,7 @@ func (e *exporter) export(spans []sdktrace.ReadOnlySpan) bool {
 	}
 	body, err := json.Marshal(e.encode(spans, false))
 	if err != nil {
-		e.warnOnce("encode", "telmoni: an export could not be encoded; the batch was dropped")
+		e.warnOnce("encode", WarningExportError, "telmoni: an export could not be encoded; the batch was dropped")
 		return true
 	}
 	if len(body) > batchMaxBytes {
@@ -169,19 +169,21 @@ func (e *exporter) export(spans []sdktrace.ReadOnlySpan) bool {
 		// and then fits, unless its own name does not.
 		body, err = json.Marshal(e.encode(spans, true))
 		if err != nil || len(body) > batchMaxBytes {
-			e.warnOnce("too-large", "telmoni: a span past the 1 MiB an export may hold was dropped")
+			e.warnOnce("too-large", WarningTooLarge, "telmoni: a span past the 1 MiB an export may hold was dropped")
 			return true
 		}
-		e.warnOnce("trimmed", "telmoni: a span past the 1 MiB an export may hold was sent without the attributes ingest drops for their length")
+		e.warnOnce("trimmed", WarningTrimmed, "telmoni: a span past the 1 MiB an export may hold was sent without the attributes ingest drops for their length")
 	}
-	var failure string
+	var failure, problem string
+	var status int
 	for attempt := 0; attempt < attempts; attempt++ {
 		if e.gaveUp() {
 			return false
 		}
 		got, err := e.send(body)
 		if err != nil {
-			failure = failureName(err)
+			// The fields follow the words, which name the last attempt alone.
+			failure, status, problem = failureName(err), 0, ""
 			e.wait("", attempt)
 			continue
 		}
@@ -190,18 +192,35 @@ func (e *exporter) export(spans []sdktrace.ReadOnlySpan) bool {
 			return true
 		}
 		if got.status == http.StatusTooManyRequests || got.status == http.StatusServiceUnavailable {
-			failure = fmt.Sprintf("%d %s", got.status, problemType(got.body))
+			status, problem = got.status, problemType(got.body)
+			failure = fmt.Sprintf("%d %s", status, problem)
 			e.wait(got.header.Get("Retry-After"), attempt)
 			continue
 		}
-		e.warnOnce("status:"+strconv.Itoa(got.status),
-			fmt.Sprintf("telmoni: export refused with %d %s; the batch was dropped", got.status, problemType(got.body)))
+		problem = problemType(got.body)
+		e.warnOnce("status:"+strconv.Itoa(got.status), WarningRefused,
+			fmt.Sprintf("telmoni: export refused with %d %s; the batch was dropped", got.status, problem),
+			answerAttrs(got.status, problem)...)
 		// Refused for what it holds, the rest of a batch may still go.
 		return got.status == http.StatusBadRequest || got.status == http.StatusRequestEntityTooLarge
 	}
-	e.warnOnce("failed:"+failure,
-		fmt.Sprintf("telmoni: export failed after %d attempts (%s); the batch was dropped", attempts, failure))
+	e.warnOnce("failed:"+failure, WarningFailed,
+		fmt.Sprintf("telmoni: export failed after %d attempts (%s); the batch was dropped", attempts, failure),
+		answerAttrs(status, problem)...)
 	return false
+}
+
+// answerAttrs are a failed export's status and problem type, each where there
+// is one.
+func answerAttrs(status int, problem string) []slog.Attr {
+	var attrs []slog.Attr
+	if status != 0 {
+		attrs = append(attrs, slog.Int("status", status))
+	}
+	if problem != "" {
+		attrs = append(attrs, slog.String("problem_type", problem))
+	}
+	return attrs
 }
 
 // failureName names a transport's failure by its cause: net/http wraps every
@@ -295,17 +314,17 @@ func (e *exporter) note(message string) {
 				text += "; " + rest
 			}
 			text += "); " + remedy(attr, reason)
-			e.warnOnce("dropped:"+attr+":"+reason, text)
+			e.warnOnce("dropped:"+attr+":"+reason, WarningDropped, text)
 			continue
 		}
 		if m := refusedLine.FindStringSubmatch(line); m != nil {
-			e.warnOnce("refused:"+m[2], "telmoni: the server refused a span: "+m[2])
+			e.warnOnce("refused:"+m[2], WarningSpanRefused, "telmoni: the server refused a span: "+m[2])
 			continue
 		}
 		if line == "" || strings.HasPrefix(line, "and ") {
 			continue
 		}
-		e.warnOnce("line:"+line, "telmoni: the server said: "+line)
+		e.warnOnce("line:"+line, WarningSaid, "telmoni: the server said: "+line)
 	}
 }
 
@@ -323,7 +342,7 @@ func (e *exporter) wait(retryAfter string, attempt int) {
 	e.sleep(min(delay, retryAfterMax))
 }
 
-func (e *exporter) warnOnce(key, text string) {
+func (e *exporter) warnOnce(key string, kind WarningKind, text string, attrs ...slog.Attr) {
 	e.mu.Lock()
 	_, seen := e.warned[key]
 	if !seen {
@@ -336,16 +355,18 @@ func (e *exporter) warnOnce(key, text string) {
 	}
 	e.mu.Unlock()
 	if !seen {
-		e.warn(text)
+		e.warn(kind, text, attrs...)
 	}
 }
 
-// warn logs text through the application's logger, whose handler may panic:
-// recovered, so a warning costs neither the worker its batch nor the agent its
-// call. Nothing says so, since the logger is where warnings go.
-func (e *exporter) warn(text string) {
+// warn logs text with its kind and attrs through the application's logger,
+// whose handler may panic: recovered, so a warning costs neither the worker
+// its batch nor the agent its call. Nothing says so, since the logger is where
+// warnings go.
+func (e *exporter) warn(kind WarningKind, text string, attrs ...slog.Attr) {
 	defer func() { _ = recover() }()
-	e.logger.Warn(text)
+	e.logger.LogAttrs(context.Background(), slog.LevelWarn, text,
+		append([]slog.Attr{slog.String("kind", string(kind))}, attrs...)...)
 }
 
 func remedy(attr, reason string) string {

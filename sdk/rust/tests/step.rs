@@ -134,5 +134,6 @@ fn a_step_named_nothing_or_past_ingests_cap_keeps_its_span() -> Outcome {
             "telmoni: a step's name must be up to 145 characters; it is sent cut to its first 145",
         ]
     );
+    assert_eq!(harness.warnings.kinds(), ["input", "input"]);
     Ok(())
 }

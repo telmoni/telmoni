@@ -225,7 +225,7 @@ fn every_endpoint_is_read_as_the_fixture_reads_it() -> Outcome {
             endpoint,
             "{given}, read twice"
         );
-        let (sent, warnings) = one_run(given)?;
+        let (sent, warnings, _) = one_run(given)?;
         assert!(
             sent >= 1 && warnings.is_empty(),
             "{given}: {sent} sent, {warnings:?}"
@@ -240,19 +240,20 @@ fn every_endpoint_is_read_as_the_fixture_reads_it() -> Outcome {
             "cleartext" => "unencrypted HTTP",
             _ => "http:// or https://",
         };
-        let (sent, warnings) = one_run(given)?;
+        let (sent, warnings, kinds) = one_run(given)?;
         assert_eq!(sent, 0, "{given} was sent to");
         assert!(
             warnings.len() == 1 && warnings.first().is_some_and(|text| text.contains(why)),
             "{given}: {warnings:?}"
         );
+        assert_eq!(kinds, ["refused"], "{given}");
     }
     Ok(())
 }
 
 /// One run on a client whose endpoint is `given`: the exports it sent, and its
-/// warnings.
-fn one_run(given: &str) -> Result<(usize, Vec<String>), common::Failure> {
+/// warnings and their kinds.
+fn one_run(given: &str) -> Result<(usize, Vec<String>, Vec<&'static str>), common::Failure> {
     let harness = common::Harness::with(Config::new(given, None, Some("telmoni_k".to_owned())))?;
     harness
         .telmoni
@@ -260,7 +261,11 @@ fn one_run(given: &str) -> Result<(usize, Vec<String>), common::Failure> {
         .end();
     harness.flush()?;
     harness.telmoni.shutdown();
-    Ok((harness.transport.count(), harness.warnings.all()))
+    Ok((
+        harness.transport.count(),
+        harness.warnings.all(),
+        harness.warnings.kinds(),
+    ))
 }
 
 /// A deployment named past ingest's cap, which ingest would read as none

@@ -20,6 +20,7 @@ describe('the processor', () => {
     expect(h.warnings).toHaveLength(1);
     expect(h.warnings[0]).toContain('queue was full');
     expect(h.warnings[0]).toContain('4 spans');
+    expect(h.fields).toStrictEqual([{ kind: 'queue_full' }]);
   });
 
   it('keeps going past a warning whose hook throws, the next flush still sending', async () => {

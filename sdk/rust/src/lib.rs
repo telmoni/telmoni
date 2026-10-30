@@ -94,6 +94,7 @@ pub use runs::{
     Content, ModelCall, ModelCallOptions, Reply, Run, RunOptions, Step, ToolCall, ToolCallOptions,
     Usage,
 };
+pub use warnings::{Warning, WarningKind};
 
 /// The OpenTelemetry a run joins and hands its context to: nest your own spans
 /// under a run through it, or through the same `opentelemetry` minor.

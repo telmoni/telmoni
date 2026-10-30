@@ -16,7 +16,7 @@ use serde_json::json;
 use crate::config::Config;
 use crate::contract;
 use crate::transport::{Answer, Transport, refusal};
-use crate::warnings::Warner;
+use crate::warnings::{Warner, Warning, WarningKind};
 use crate::{VERSION, lock};
 
 /// How many times one batch is sent before it is dropped.
@@ -101,6 +101,7 @@ impl Exporter {
             self.warner.once(
                 "endpoint".to_owned(),
                 &format!("telmoni: {refusal}; nothing is sent"),
+                WarningKind::Refused.into(),
             );
             return false;
         }
@@ -124,6 +125,7 @@ impl Exporter {
                     self.warner.once(
                         "trimmed".to_owned(),
                         "telmoni: a span past the 1 MiB an export may hold was sent without the attributes ingest drops for their length",
+                        WarningKind::Trimmed.into(),
                     );
                     body = trimmed;
                 }
@@ -131,6 +133,7 @@ impl Exporter {
                     self.warner.once(
                         "too-large".to_owned(),
                         "telmoni: a span past the 1 MiB an export may hold was dropped",
+                        WarningKind::TooLarge.into(),
                     );
                     return true;
                 }
@@ -144,6 +147,8 @@ impl Exporter {
             headers.push(("Authorization".to_owned(), format!("Bearer {bearer}")));
         }
         let mut failure = String::new();
+        // The last attempt's alone, as the line names it.
+        let mut last: Option<(u16, String)> = None;
         for attempt in 0..ATTEMPTS {
             if self.gave_up() {
                 return false;
@@ -158,6 +163,7 @@ impl Exporter {
                 Ok(answer) => answer,
                 Err(error) => {
                     failure = error.name;
+                    last = None;
                     self.wait(None, attempt);
                     continue;
                 }
@@ -166,18 +172,20 @@ impl Exporter {
                 self.read(&answer);
                 return true;
             }
+            let problem = problem_type(&answer.body);
             if answer.status == 429 || answer.status == 503 {
-                failure = format!("{} {}", answer.status, problem_type(&answer.body));
+                failure = format!("{} {problem}", answer.status);
+                last = Some((answer.status, problem));
                 self.wait(answer.header("Retry-After"), attempt);
                 continue;
             }
             self.warner.once(
                 format!("status:{}", answer.status),
                 &format!(
-                    "telmoni: export refused with {} {}; the batch was dropped",
+                    "telmoni: export refused with {} {problem}; the batch was dropped",
                     answer.status,
-                    problem_type(&answer.body)
                 ),
+                answered(WarningKind::Refused, Some((answer.status, problem))),
             );
             // Refused for what it holds, the rest of a batch may still go.
             return answer.status == 400 || answer.status == 413;
@@ -187,6 +195,7 @@ impl Exporter {
             &format!(
                 "telmoni: export failed after {ATTEMPTS} attempts ({failure}); the batch was dropped"
             ),
+            answered(WarningKind::Failed, last),
         );
         false
     }
@@ -299,14 +308,18 @@ impl Exporter {
                     text.push_str(&format!("; {rest}"));
                 }
                 text.push_str(&format!("); {}", remedy(attribute, reason)));
-                self.warner
-                    .once(format!("dropped:{attribute}:{reason}"), &text);
+                self.warner.once(
+                    format!("dropped:{attribute}:{reason}"),
+                    &text,
+                    WarningKind::Dropped.into(),
+                );
                 continue;
             }
             if let Some(why) = refused(line) {
                 self.warner.once(
                     format!("refused:{why}"),
                     &format!("telmoni: the server refused a span: {why}"),
+                    WarningKind::SpanRefused.into(),
                 );
                 continue;
             }
@@ -316,6 +329,7 @@ impl Exporter {
             self.warner.once(
                 format!("line:{line}"),
                 &format!("telmoni: the server said: {line}"),
+                WarningKind::Said.into(),
             );
         }
     }
@@ -381,6 +395,20 @@ fn remedy(attribute: &str, reason: &str) -> String {
                 .to_owned()
         }
         _ => "see the server's answer".to_owned(),
+    }
+}
+
+/// An export's own failure, with the status and problem type it last met,
+/// an empty problem type none.
+fn answered(kind: WarningKind, last: Option<(u16, String)>) -> Warning {
+    let (status, problem_type) = match last {
+        Some((status, problem)) => (Some(status), Some(problem).filter(|p| !p.is_empty())),
+        None => (None, None),
+    };
+    Warning {
+        kind,
+        status,
+        problem_type,
     }
 }
 
@@ -451,6 +479,7 @@ fn resource(config: &Config, warner: &Warner) -> Vec<serde_json::Value> {
             warner.once(
                 format!("long:{key}"),
                 &format!("telmoni: the {what} must be up to {most} characters; it is not sent"),
+                WarningKind::Input.into(),
             );
             continue;
         }
@@ -665,7 +694,10 @@ mod tests {
         }
     }
 
-    fn exporter(kept: &Kept, warnings: &Arc<Mutex<Vec<String>>>) -> Exporter {
+    /// Each warning's line and what it describes.
+    type Warned = Arc<Mutex<Vec<(String, Warning)>>>;
+
+    fn exporter(kept: &Kept, warnings: &Warned) -> Exporter {
         let warned = Arc::clone(warnings);
         let config = Config {
             api_key: Some("k".to_owned()),
@@ -675,8 +707,8 @@ mod tests {
             &config,
             Box::new(kept.clone()),
             Box::new(|_| {}),
-            Arc::new(Warner::new(Box::new(move |text| {
-                lock(&warned).push(text.to_owned());
+            Arc::new(Warner::new(Box::new(move |text, warning| {
+                lock(&warned).push((text.to_owned(), warning.clone()));
             }))),
         )
     }
@@ -797,9 +829,10 @@ mod tests {
         );
         assert_eq!(
             *lock(&warnings),
-            [
-                "telmoni: a span past the 1 MiB an export may hold was sent without the attributes ingest drops for their length"
-            ]
+            [(
+                "telmoni: a span past the 1 MiB an export may hold was sent without the attributes ingest drops for their length".to_owned(),
+                WarningKind::Trimmed.into()
+            )]
         );
     }
 
@@ -812,7 +845,10 @@ mod tests {
         assert!(lock(&kept.0).is_empty());
         assert_eq!(
             *lock(&warnings),
-            ["telmoni: a span past the 1 MiB an export may hold was dropped"]
+            [(
+                "telmoni: a span past the 1 MiB an export may hold was dropped".to_owned(),
+                WarningKind::TooLarge.into()
+            )]
         );
     }
 
@@ -851,16 +887,30 @@ mod tests {
     /// the platform out of reach, and on past a part refused for what it holds.
     #[test]
     fn a_batch_in_parts_ends_at_a_part_that_fails_as_the_rest_would() {
-        for (answers, sent, warned) in [
+        let failed = Warning::from(WarningKind::Failed);
+        for (answers, sent, warned, described) in [
             (
                 vec![None; 9],
                 3,
                 "telmoni: export failed after 3 attempts (Connect); the batch was dropped",
+                failed.clone(),
+            ),
+            // The fields are the last attempt's, as the line is.
+            (
+                vec![Some(503), Some(503), None],
+                3,
+                "telmoni: export failed after 3 attempts (Connect); the batch was dropped",
+                failed,
             ),
             (
                 vec![Some(400)],
                 3,
                 "telmoni: export refused with 400 ; the batch was dropped",
+                Warning {
+                    kind: WarningKind::Refused,
+                    status: Some(400),
+                    problem_type: None,
+                },
             ),
         ] {
             let transport = Scripted::default();
@@ -875,13 +925,13 @@ mod tests {
                 &config,
                 Box::new(transport.clone()),
                 Box::new(|_| {}),
-                Arc::new(Warner::new(Box::new(move |text| {
-                    lock(&warned_to).push(text.to_owned());
+                Arc::new(Warner::new(Box::new(move |text, warning| {
+                    lock(&warned_to).push((text.to_owned(), warning.clone()));
                 }))),
             );
             exporter.export(&spans(&[1; 2001]));
             assert_eq!(*lock(&transport.sent), sent);
-            assert_eq!(*lock(&warnings), [warned]);
+            assert_eq!(*lock(&warnings), [(warned.to_owned(), described)]);
         }
     }
 

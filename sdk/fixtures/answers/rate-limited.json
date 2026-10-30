@@ -3,5 +3,6 @@
   "headers": { "Content-Type": "application/json", "Retry-After": "2" },
   "body": { "code": 8, "message": "/errors/tenant/rate-limited: too many exports this minute; retry after 2 seconds" },
   "expect": "wait 2 seconds through the injected sleep, then send the same bytes again; nothing logged once the retry is kept",
-  "warning": "telmoni: export failed after 3 attempts (429 /errors/tenant/rate-limited); the batch was dropped"
+  "warning": "telmoni: export failed after 3 attempts (429 /errors/tenant/rate-limited); the batch was dropped",
+  "fields": { "kind": "failed", "status": 429, "problem_type": "/errors/tenant/rate-limited" }
 }

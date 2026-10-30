@@ -11,8 +11,8 @@ from pathlib import Path
 
 import pytest
 
-from conftest import FakeTransport, answer_from, kept, load_fixture
-from telmoni import Batching, Config, Telmoni
+from conftest import FakeTransport, answer_from, infos_in, kept, load_fixture
+from telmoni import Batching, Config, Telmoni, WarningInfo
 from telmoni.exporter import Answer
 
 
@@ -43,6 +43,7 @@ def test_the_queue_is_bounded_and_drops_are_counted_once(
         and "queue was full" in warnings[0]
         and "4 spans" in warnings[0]
     )
+    assert infos_in(caplog) == [WarningInfo("queue_full")]
 
 
 def test_a_warning_whose_handler_raises_never_ends_the_worker(

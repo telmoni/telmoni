@@ -22,7 +22,7 @@ use crate::contract;
 use crate::error::Error;
 use crate::exporter::Exporter;
 use crate::lock;
-use crate::warnings::Warner;
+use crate::warnings::{Warner, WarningKind};
 
 /// How spans are batched on their way out: OpenTelemetry's batch processor's
 /// numbers, which are its defaults here too.
@@ -290,19 +290,20 @@ fn work(shared: &Shared, exporter: &Exporter, warner: &Warner) {
             (batch, dropped)
         };
         // A hook of the application's may panic: the warner catches its sink's,
-        // and an export's is caught here, losing that batch alone, said where
-        // the hook cannot reach, so the worker outlives either.
+        // and an export's is caught here, losing that batch alone, so the
+        // worker outlives either.
         if dropped > 0 {
-            warner.warn(&format!(
-                "telmoni: the export queue was full; {dropped} spans were dropped"
-            ));
+            warner.warn(
+                &format!("telmoni: the export queue was full; {dropped} spans were dropped"),
+                WarningKind::QueueFull.into(),
+            );
         }
         if !batch.is_empty()
             && panic::catch_unwind(AssertUnwindSafe(|| exporter.export(&batch))).is_err()
         {
-            tracing::warn!(
-                target: "telmoni",
-                "telmoni: a hook panicked during an export; the batch was dropped"
+            warner.warn(
+                "telmoni: a hook panicked during an export; the batch was dropped",
+                WarningKind::ExportError.into(),
             );
         }
         let mut state = lock(&shared.state);
@@ -389,6 +390,7 @@ impl Drop for Finished<'_> {
 fn exporter_thread_failed(kind: std::io::ErrorKind) {
     tracing::warn!(
         target: "telmoni",
+        kind = WarningKind::ExportError.as_str(),
         "telmoni: the exporter's thread could not start ({kind}); nothing will be sent"
     );
 }
@@ -473,7 +475,7 @@ mod tests {
     #[test]
     fn a_shutdown_past_its_deadline_starts_no_batch_or_attempt() {
         let transport = Throttled::default();
-        let warner = Arc::new(Warner::new(Box::new(|_| {})));
+        let warner = Arc::new(Warner::new(Box::new(|_, _| {})));
         let config = Config {
             api_key: Some("k".to_owned()),
             ..Config::default()

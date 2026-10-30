@@ -221,7 +221,7 @@ export class Telmoni {
       this.#processor,
       this.config,
       ids,
-      (key, text) => this.#exporter.warnOnce(key, text),
+      (key, text, warning) => this.#exporter.warnOnce(key, text, warning),
     );
   }
 

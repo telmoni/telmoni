@@ -10,8 +10,8 @@ from unittest import mock
 
 import pytest
 
-from conftest import FakeTransport, attributes_of
-from telmoni import Config, Run, Telmoni, current_run
+from conftest import FakeTransport, attributes_of, infos_in
+from telmoni import Config, Run, Telmoni, WarningInfo, current_run
 
 UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12}$")
 
@@ -226,6 +226,7 @@ def test_nothing_is_sent_outside_a_run(
     assert transport.requests == []
     warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
     assert len(warnings) == 1 and "outside a run" in warnings[0]
+    assert infos_in(caplog) == [WarningInfo("input")]
 
 
 def test_the_sample_rate_drops_whole_runs_in_the_processor(

@@ -8,5 +8,6 @@
     }
   },
   "expect": "one warning naming ai.prompt and the tag that would keep it, telmoni.tag.ai.prompt",
-  "warning": "telmoni: the server dropped ai.prompt (unlisted; text the field inventory does not name is never kept); send it as the tag telmoni.tag.ai.prompt to keep it"
+  "warning": "telmoni: the server dropped ai.prompt (unlisted; text the field inventory does not name is never kept); send it as the tag telmoni.tag.ai.prompt to keep it",
+  "fields": { "kind": "dropped" }
 }

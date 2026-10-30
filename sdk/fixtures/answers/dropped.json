@@ -8,5 +8,6 @@
     }
   },
   "expect": "one warning naming gen_ai.input.messages, the reason (content; the project's content mode is off) and what decides it (the project's content mode), with the page that says which modes keep content (api/ingest, What is dropped at the door); a second answer naming the same attribute logs nothing",
-  "warning": "telmoni: the server dropped gen_ai.input.messages (content; the project's content mode is off); the project's content mode decides whether content is kept: https://telmoni.com/docs/api/ingest#what-is-dropped-at-the-door"
+  "warning": "telmoni: the server dropped gen_ai.input.messages (content; the project's content mode is off); the project's content mode decides whether content is kept: https://telmoni.com/docs/api/ingest#what-is-dropped-at-the-door",
+  "fields": { "kind": "dropped" }
 }

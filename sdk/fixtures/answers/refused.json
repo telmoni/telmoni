@@ -8,5 +8,6 @@
     }
   },
   "expect": "one warning carrying the server's line; the export is not retried",
-  "warning": "telmoni: the server refused a span: no telmoni.run_id and telmoni.agent; a span outside a Telmoni run is refused"
+  "warning": "telmoni: the server refused a span: no telmoni.run_id and telmoni.agent; a span outside a Telmoni run is refused",
+  "fields": { "kind": "span_refused" }
 }

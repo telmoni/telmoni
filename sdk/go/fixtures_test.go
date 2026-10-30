@@ -341,6 +341,21 @@ func expectWarnings(t *testing.T, h *harness, want ...string) {
 	}
 }
 
+// expectAnswer is the warning an answers/*.json fixture names, word for word,
+// with exactly the fields it names beside it.
+func expectAnswer(t *testing.T, h *harness, name string) {
+	t.Helper()
+	expectWarnings(t, h, warningOf(t, name)...)
+	expectFields(t, h, fieldsOf(t, name)...)
+}
+
+func expectFields(t *testing.T, h *harness, want ...map[string]any) {
+	t.Helper()
+	if got := h.logs.fields(); !reflect.DeepEqual(got, want) {
+		t.Errorf("fields\n got: %v\nwant: %v", got, want)
+	}
+}
+
 func expectSleeps(t *testing.T, h *harness, want ...time.Duration) {
 	t.Helper()
 	got := h.sleeps.all()
@@ -379,7 +394,7 @@ func TestDroppedIsWarnedOnce(t *testing.T) {
 	aRun(t, h)
 	aRun(t, h)
 	h.shutdown()
-	expectWarnings(t, h, warningOf(t, "answers/dropped.json")...)
+	expectAnswer(t, h, "answers/dropped.json")
 }
 
 func TestUnlistedNamesTheTagThatWouldKeepIt(t *testing.T) {
@@ -387,7 +402,7 @@ func TestUnlistedNamesTheTagThatWouldKeepIt(t *testing.T) {
 	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k")}, newFakeTransport(t, unlisted))
 	aRun(t, h)
 	h.shutdown()
-	expectWarnings(t, h, warningOf(t, "answers/unlisted.json")...)
+	expectAnswer(t, h, "answers/unlisted.json")
 }
 
 func TestATagPastTheCardinalityCapIsWarnedWithWhatKeepsIt(t *testing.T) {
@@ -395,7 +410,7 @@ func TestATagPastTheCardinalityCapIsWarnedWithWhatKeepsIt(t *testing.T) {
 	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k")}, newFakeTransport(t, cardinality))
 	aRun(t, h)
 	h.shutdown()
-	expectWarnings(t, h, warningOf(t, "answers/cardinality.json")...)
+	expectAnswer(t, h, "answers/cardinality.json")
 }
 
 func TestRefusedIsWarnedOnceAndNeverRetried(t *testing.T) {
@@ -404,7 +419,7 @@ func TestRefusedIsWarnedOnceAndNeverRetried(t *testing.T) {
 	aRun(t, h)
 	aRun(t, h)
 	h.shutdown()
-	expectWarnings(t, h, warningOf(t, "answers/refused.json")...)
+	expectAnswer(t, h, "answers/refused.json")
 	expectRequests(t, h, 2)
 	expectSleeps(t, h)
 }
@@ -463,7 +478,7 @@ func TestUnavailableIsRetriedThreeTimesThenDropped(t *testing.T) {
 	aRun(t, h)
 	h.shutdown()
 	expectSleeps(t, h, time.Second, time.Second)
-	expectWarnings(t, h, warningOf(t, "answers/unavailable.json")...)
+	expectAnswer(t, h, "answers/unavailable.json")
 	expectRequests(t, h, 4)
 }
 
@@ -473,12 +488,12 @@ func TestForbiddenIsNotRetriedAndTheNextBatchIsStillSent(t *testing.T) {
 	aRun(t, h)
 	aRun(t, h)
 	h.shutdown()
-	expectWarnings(t, h, warningOf(t, "answers/forbidden.json")...)
+	expectAnswer(t, h, "answers/forbidden.json")
 	expectRequests(t, h, 2)
 	expectSleeps(t, h)
 }
 
-// Each answer met on every attempt logs its fixture's line word for word, as the plugins read it.
+// Each answer met on every attempt logs its fixture's line word for word, and its fields, as the plugins read it.
 func TestEachAnswerIsWarnedWordForWord(t *testing.T) {
 	paths, err := filepath.Glob(filepath.Join(fixturesDir, "answers", "*.json"))
 	if err != nil || len(paths) == 0 {
@@ -491,7 +506,7 @@ func TestEachAnswerIsWarnedWordForWord(t *testing.T) {
 			h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k")}, newFakeTransport(t, answer, answer, answer))
 			aRun(t, h)
 			h.shutdown()
-			expectWarnings(t, h, warningOf(t, name)...)
+			expectAnswer(t, h, name)
 		})
 	}
 }
@@ -514,7 +529,20 @@ func TestANetworkFailureThreeTimesNamesTheErrorsType(t *testing.T) {
 	h.shutdown()
 	expectSleeps(t, h, time.Second, 2*time.Second)
 	expectWarnings(t, h, "telmoni: export failed after 3 attempts (errors.errorString); the batch was dropped")
+	// No answer came, so neither a status nor a problem type.
+	expectFields(t, h, map[string]any{"kind": "failed"})
 	expectRequests(t, h, 4)
+}
+
+// A transport failure last names no status, though an answer came before it.
+func TestAFailureEndingInTransportErrorCarriesNoStatus(t *testing.T) {
+	down := errors.New("refused")
+	unavailable := answerFrom(t, "answers/unavailable.json")
+	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k")}, newFakeTransport(t, unavailable, unavailable, down))
+	aRun(t, h)
+	h.shutdown()
+	expectWarnings(t, h, "telmoni: export failed after 3 attempts (errors.errorString); the batch was dropped")
+	expectFields(t, h, map[string]any{"kind": "failed"})
 }
 
 // net/http wraps every failure in a *url.Error: each is named by its cause,

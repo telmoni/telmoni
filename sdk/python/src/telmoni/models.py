@@ -8,7 +8,7 @@ import string
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from . import contract
 
@@ -327,6 +327,33 @@ class Usage:
     cache_read_input_tokens: int | None = None
     cache_write_input_tokens: int | None = None
     cost: float | None = None
+
+
+WarningKind = Literal[
+    "refused",
+    "failed",
+    "queue_full",
+    "export_error",
+    "too_large",
+    "trimmed",
+    "dropped",
+    "span_refused",
+    "said",
+    "input",
+]
+"""What became of the spans a warning is about, the same in every SDK."""
+
+
+@dataclass(frozen=True)
+class WarningInfo:
+    """What a warning says, as data: each is logged with it as
+    ``record.telmoni_warning``, so a handler switches on it, not on the words.
+    ``status`` and ``problem_type`` are an export's own failure's, where an
+    answer named them."""
+
+    kind: WarningKind
+    status: int | None = None
+    problem_type: str | None = None
 
 
 @dataclass(frozen=True)

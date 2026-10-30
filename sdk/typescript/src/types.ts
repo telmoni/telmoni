@@ -232,11 +232,32 @@ export interface ProcessorOptions {
   scheduleDelaySeconds?: number | undefined;
 }
 
+/** What became of the spans a warning tells of, the same in every SDK (`fixtures/README.md`, `answers/`). */
+export type WarningKind =
+  | 'refused'
+  | 'failed'
+  | 'queue_full'
+  | 'export_error'
+  | 'too_large'
+  | 'trimmed'
+  | 'dropped'
+  | 'span_refused'
+  | 'said'
+  | 'input';
+
+/** A warning as data, beside its line; `status` and `problemType` only for an export's own failure. */
+export interface Warning {
+  kind: WarningKind;
+  status?: number;
+  problemType?: string;
+}
+
 /** What a test or an unusual environment injects; every default is the platform's. */
 export interface Hooks {
   transport?: Transport | undefined;
   /** The wait between attempts; `signal` aborts once a shutdown gives the retry up. */
   sleep?: ((seconds: number, signal: AbortSignal) => Promise<void>) | undefined;
-  warn?: ((message: string) => void) | undefined;
+  /** Each warning's line, and what it says as data for a reader to switch on. */
+  warn?: ((message: string, warning: Warning) => void) | undefined;
   processor?: ProcessorOptions | undefined;
 }
