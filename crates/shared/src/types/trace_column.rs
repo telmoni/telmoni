@@ -49,6 +49,8 @@ pub enum TraceColumn {
     Tokens,
     /// How long it ran.
     Duration,
+    /// How soon its first model call's answer began.
+    TimeToFirstToken,
     /// The models its calls answered with.
     Models,
     /// The tools its calls ran.
@@ -77,6 +79,7 @@ crate::wire_enum!(TraceColumn {
     CacheWriteTokens => "cache_write_tokens",
     Tokens => "tokens",
     Duration => "duration",
+    TimeToFirstToken => "time_to_first_token",
     Models => "models",
     Tools => "tools",
 });

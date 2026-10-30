@@ -48,6 +48,63 @@ describe('a model call', () => {
     expect(typed['gen_ai.usage.input_tokens']).toEqual({ intValue: '12' });
   });
 
+  it('sends what it was asked with as typed request attributes, each absent where not given', async () => {
+    h.telmoni.run('bot', (run) => {
+      run.modelCall(
+        'm',
+        { temperature: 1, topP: 0.9, topK: 40, maxTokens: 256, frequencyPenalty: 0.5, presencePenalty: -0.5, seed: 7 },
+        (call) => call.answered({ timeToFirstToken: 0.35 }),
+      );
+      run.modelCall('n', { temperature: 0.2 }, () => undefined);
+    });
+    expect(await h.telmoni.flush()).toBe(true);
+    const typed = (name: string) => {
+      const span = one(h.transport.spans().filter((each) => each.name === name));
+      return Object.fromEntries(span.attributes.map((a) => [a.key, a.value]));
+    };
+    const asked = typed('chat m');
+    expect(asked['gen_ai.request.temperature']).toEqual({ doubleValue: 1 });
+    expect(asked['gen_ai.request.top_p']).toEqual({ doubleValue: 0.9 });
+    expect(asked['gen_ai.request.top_k']).toEqual({ doubleValue: 40 });
+    expect(asked['gen_ai.request.max_tokens']).toEqual({ intValue: '256' });
+    expect(asked['gen_ai.request.frequency_penalty']).toEqual({ doubleValue: 0.5 });
+    expect(asked['gen_ai.request.presence_penalty']).toEqual({ doubleValue: -0.5 });
+    expect(asked['gen_ai.request.seed']).toEqual({ intValue: '7' });
+    expect(asked['gen_ai.response.time_to_first_chunk']).toEqual({ doubleValue: 0.35 });
+    const bare = typed('chat n');
+    expect(bare['gen_ai.request.temperature']).toEqual({ doubleValue: 0.2 });
+    expect(Object.keys(bare).filter((key) => key.startsWith('gen_ai.request.') && key !== 'gen_ai.request.model')).toEqual([
+      'gen_ai.request.temperature',
+    ]);
+    expect(bare['gen_ai.response.time_to_first_chunk']).toBeUndefined();
+    expect(h.warnings).toEqual([]);
+  });
+
+  it('leaves off a time to first token below 0 or no number, and a parameter no number, each warned once', async () => {
+    h.telmoni.run('bot', (run) => {
+      run.modelCall('m', (call) => call.answered({ responseModel: 'm-1', timeToFirstToken: -0.1 }));
+      run.modelCall('m', (call) => call.answered({ timeToFirstToken: Number.NaN }));
+      run.modelCall('n', { maxTokens: Number.NaN, seed: 3.7, temperature: 'warm' as unknown as number, topP: Infinity }, () => undefined);
+    });
+    expect(await h.telmoni.flush()).toBe(true);
+    const [first, second] = h.transport.spans().filter((span) => span.name === 'chat m').map(attributesOf);
+    expect(first!['gen_ai.response.model'], 'the call still sent').toBe('m-1');
+    expect(first!['gen_ai.response.time_to_first_chunk']).toBeUndefined();
+    expect(second!['gen_ai.response.time_to_first_chunk']).toBeUndefined();
+    const asked = attributesOf(one(h.transport.spans().filter((span) => span.name === 'chat n')));
+    expect(asked['gen_ai.request.max_tokens']).toBeUndefined();
+    expect(asked['gen_ai.request.temperature']).toBeUndefined();
+    expect(asked['gen_ai.request.top_p']).toBeUndefined();
+    expect(asked['gen_ai.request.seed'], 'a fraction cut, as a token count is').toBe(3);
+    expect(h.warnings).toEqual([
+      'telmoni: gen_ai.response.time_to_first_chunk must be a finite number of seconds from 0; the call is sent without it',
+      'telmoni: gen_ai.request.temperature must be a finite number; the call is sent without it',
+      'telmoni: gen_ai.request.top_p must be a finite number; the call is sent without it',
+      'telmoni: gen_ai.request.max_tokens must be a whole number within 64 bits; the call is sent without it',
+    ]);
+    expect(h.fields).toStrictEqual([{ kind: 'input' }, { kind: 'input' }, { kind: 'input' }, { kind: 'input' }]);
+  });
+
   it('sends a token count as a whole number from 0, and leaves off another', async () => {
     const usage = { inputTokens: Number.NaN, outputTokens: 12.7, cacheReadInputTokens: Infinity, cacheWriteInputTokens: 2 ** 63 };
     // Ingest refuses the call over a count below zero, or one no number.

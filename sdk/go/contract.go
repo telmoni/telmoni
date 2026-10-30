@@ -45,6 +45,16 @@ const (
 	// name, since the conventions have none.
 	attrCost      = "gen_ai.usage.cost"
 	attrSessionID = "gen_ai.conversation.id"
+	// attrTimeToFirstChunk is in seconds, from the request to the first chunk.
+	attrTimeToFirstChunk = "gen_ai.response.time_to_first_chunk"
+
+	attrRequestTemperature      = "gen_ai.request.temperature"
+	attrRequestTopP             = "gen_ai.request.top_p"
+	attrRequestTopK             = "gen_ai.request.top_k"
+	attrRequestFrequencyPenalty = "gen_ai.request.frequency_penalty"
+	attrRequestPresencePenalty  = "gen_ai.request.presence_penalty"
+	attrRequestMaxTokens        = "gen_ai.request.max_tokens"
+	attrRequestSeed             = "gen_ai.request.seed"
 
 	attrInputMessages      = "gen_ai.input.messages"
 	attrOutputMessages     = "gen_ai.output.messages"

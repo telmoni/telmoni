@@ -499,7 +499,7 @@ pub struct TraceList {
 }
 
 /// A download's header row: the list's fields, in its order.
-const CSV_HEADER: [&str; 23] = [
+const CSV_HEADER: [&str; 24] = [
     "run_id",
     "agent",
     "user_id",
@@ -510,6 +510,7 @@ const CSV_HEADER: [&str; 23] = [
     "started_at",
     "ended_at",
     "duration_ms",
+    "time_to_first_token_ms",
     "spans",
     "steps",
     "model_calls",
@@ -529,7 +530,7 @@ impl TraceRow {
     /// The row a download writes for it, under [`CSV_HEADER`]: its times as
     /// RFC 3339, and its models, tools, environments and releases each one
     /// cell, `; ` between them.
-    fn cells(&self) -> [String; 23] {
+    fn cells(&self) -> [String; 24] {
         let time = |t: &DateTime<Utc>| t.to_rfc3339_opts(SecondsFormat::Micros, true);
         [
             self.run_id.to_string(),
@@ -542,6 +543,9 @@ impl TraceRow {
             time(&self.started_at),
             time(&self.ended_at),
             self.duration_ms.to_string(),
+            self.time_to_first_token_ms
+                .map(|ms| ms.to_string())
+                .unwrap_or_default(),
             self.spans.to_string(),
             self.steps.to_string(),
             self.model_calls.to_string(),
@@ -698,6 +702,8 @@ pub struct TraceSpan {
     pub cache_write_input_tokens: u64,
     /// What it cost in US dollars, as reported; none where it reported none.
     pub cost: Option<f64>,
+    /// Seconds to its answer's first token; none where it reported none.
+    pub time_to_first_token: Option<f64>,
     pub user_id: String,
     pub session_id: String,
     pub environment: String,
@@ -729,6 +735,7 @@ impl From<SpanRow> for TraceSpan {
             cache_read_input_tokens: row.cache_read_input_tokens,
             cache_write_input_tokens: row.cache_write_input_tokens,
             cost: row.cost,
+            time_to_first_token: row.time_to_first_token,
             user_id: row.user_id,
             session_id: row.session_id,
             environment: row.environment,
@@ -1288,6 +1295,7 @@ mod tests {
             started_at: DateTime::from_timestamp_millis(1_791_721_800_000).expect("a time"),
             ended_at: DateTime::from_timestamp_millis(1_791_721_801_500).expect("a time"),
             duration_ms: 1_500,
+            time_to_first_token_ms: Some(250.0),
             spans: 4,
             steps: 1,
             model_calls: 2,
@@ -1308,7 +1316,9 @@ mod tests {
         assert!(line.starts_with(
             "00000000-0000-0000-0000-000000000000,\"'=cmd\",,\"thread, 42\",true,error,RuntimeError,"
         ));
-        assert!(line.contains("2026-10-11T12:30:00.000000Z,2026-10-11T12:30:01.500000Z,1500,"));
+        assert!(
+            line.contains("2026-10-11T12:30:00.000000Z,2026-10-11T12:30:01.500000Z,1500,250,4,")
+        );
         assert!(line.ends_with(",a; b,,production,\r\n"));
         let json = serde_json::to_value(&trace).expect("JSON");
         let mut keys: Vec<&str> = json

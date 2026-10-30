@@ -238,6 +238,7 @@
       "cache_write_tokens",
       "tokens",
       "duration",
+      "time_to_first_token",
       "models",
       "tools"
     ],
@@ -254,7 +255,8 @@
       "input_tokens",
       "output_tokens",
       "tokens",
-      "duration"
+      "duration",
+      "time_to_first_token"
     ],
     "UserColumn": [
       "traces",

@@ -1,6 +1,8 @@
+import type { ReactElement } from "react";
 import { describe, expect, it } from "vitest";
 
-import type { TraceSpan, TraceView } from "@/lib/server/entities/traces";
+import { cellOf } from "@/components/traces/cells";
+import type { Trace, TraceSpan, TraceView } from "@/lib/server/entities/traces";
 import { TraceColumn } from "@/lib/types/enums";
 
 import {
@@ -55,6 +57,7 @@ function span(over: Partial<TraceSpan> & Pick<TraceSpan, "span_id" | "kind">): T
     cache_read_input_tokens: 0,
     cache_write_input_tokens: 0,
     cost: null,
+    time_to_first_token: null,
     user_id: "",
     session_id: "",
     environment: "",
@@ -419,6 +422,42 @@ describe("numbers into words", () => {
 
   it("shortens an id to eight characters", () => {
     expect(shortId("5d4f5c68-0000-4000-8000-000000000001")).toBe("5d4f5c68");
+  });
+});
+
+describe("a run's time to first token in the list", () => {
+  const column = TRACE_COLUMNS.find((spec) => spec.key === TraceColumn.TimeToFirstToken)!;
+  const run = (ms: number | null): Trace => ({
+    run_id: "3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d",
+    agent: "nightly-report",
+    user_id: "",
+    session_id: "",
+    ended: true,
+    status: "ok",
+    error_type: "",
+    started_at: "2026-10-11T03:00:00Z",
+    ended_at: "2026-10-11T03:00:02Z",
+    duration_ms: 2000,
+    time_to_first_token_ms: ms,
+    spans: 2,
+    steps: 0,
+    model_calls: 1,
+    tool_calls: 0,
+    errors: 0,
+    input_tokens: 10,
+    output_tokens: 5,
+    cache_read_input_tokens: 0,
+    cache_write_input_tokens: 0,
+    models: [],
+    tools: [],
+    environments: [],
+    releases: [],
+  });
+
+  it("reads as a duration, and as a dash where none of its calls reported one", () => {
+    expect(cellOf(column, run(420), {}, null)).toBe("420 ms");
+    const none = cellOf(column, run(null), {}, null) as ReactElement<{ children: string }>;
+    expect(none.props.children).toBe("—");
   });
 });
 

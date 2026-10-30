@@ -63,6 +63,15 @@ export const ERROR_TYPE = 'error.type';
 export const RESPONSE_MODEL = 'gen_ai.response.model';
 export const REQUEST_MODEL = 'gen_ai.request.model';
 export const PROVIDER = 'gen_ai.provider.name';
+export const REQUEST_TEMPERATURE = 'gen_ai.request.temperature';
+export const REQUEST_TOP_P = 'gen_ai.request.top_p';
+export const REQUEST_TOP_K = 'gen_ai.request.top_k';
+export const REQUEST_MAX_TOKENS = 'gen_ai.request.max_tokens';
+export const REQUEST_FREQUENCY_PENALTY = 'gen_ai.request.frequency_penalty';
+export const REQUEST_PRESENCE_PENALTY = 'gen_ai.request.presence_penalty';
+export const REQUEST_SEED = 'gen_ai.request.seed';
+/** In seconds, from the request to the answer's first chunk. */
+export const TIME_TO_FIRST_CHUNK = 'gen_ai.response.time_to_first_chunk';
 export const INPUT_TOKENS = 'gen_ai.usage.input_tokens';
 export const OUTPUT_TOKENS = 'gen_ai.usage.output_tokens';
 export const CACHE_READ_INPUT_TOKENS = 'gen_ai.usage.cache_read.input_tokens';

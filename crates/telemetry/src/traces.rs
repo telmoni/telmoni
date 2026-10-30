@@ -159,6 +159,8 @@ pub struct TraceRow {
     pub ended_at: DateTime<Utc>,
     /// From the first start to the last end, in milliseconds.
     pub duration_ms: i64,
+    /// Its first model call's time to first token that reported one, in milliseconds.
+    pub time_to_first_token_ms: Option<f64>,
     /// Every span of it.
     pub spans: u64,
     /// Its steps.
@@ -288,6 +290,10 @@ pub struct BucketRow {
     pub duration_p50_ms: f64,
     /// And 95th percentile.
     pub duration_p95_ms: f64,
+    /// Their times to first token's median, in milliseconds, where any reported one.
+    pub time_to_first_token_p50_ms: Option<f64>,
+    /// And 95th percentile.
+    pub time_to_first_token_p95_ms: Option<f64>,
 }
 
 /// One bar of the histogram as the console draws it: a [`BucketRow`], or a
@@ -308,6 +314,10 @@ pub struct Bar {
     pub duration_p50_ms: Option<f64>,
     /// And 95th percentile.
     pub duration_p95_ms: Option<f64>,
+    /// Their times to first token's median, in milliseconds, where any reported one.
+    pub time_to_first_token_p50_ms: Option<f64>,
+    /// And 95th percentile.
+    pub time_to_first_token_p95_ms: Option<f64>,
 }
 
 /// A run's status: its own span's once that has arrived, else `error` where
@@ -385,6 +395,7 @@ macro_rules! run_sums {
             "anyIf(error_type, kind = 'run') AS run_error_type, ",
             "min(started_at) AS first_started_at, max(ended_at) AS last_ended_at, ",
             "greatest(dateDiff('millisecond', first_started_at, last_ended_at), 0) AS duration_ms, ",
+            "argMinIf(time_to_first_token, started_at, kind = 'model_call') * 1000 AS time_to_first_token_ms, ",
             "count() AS spans, countIf(kind = 'step') AS steps, ",
             "countIf(kind = 'model_call') AS model_calls, ",
             "countIf(kind = 'tool_call') AS tool_calls, ",
@@ -502,6 +513,7 @@ macro_rules! list_sql {
             "run_session_id AS session_id, run_ended AS ended, run_status AS status, ",
             "run_error_type AS error_type, ",
             "first_started_at AS started_at, last_ended_at AS ended_at, duration_ms, ",
+            "time_to_first_token_ms, ",
             "spans, steps, model_calls, tool_calls, errors, ",
             "input_total AS input_tokens, output_total AS output_tokens, ",
             "cache_read_total AS cache_read_input_tokens, ",
@@ -547,6 +559,8 @@ const fn list_sql(sort: TraceSort, direction: SortDirection) -> &'static str {
         (TraceSort::Tokens, Desc) => list_sql!("tokens DESC"),
         (TraceSort::Duration, Asc) => list_sql!("duration_ms ASC"),
         (TraceSort::Duration, Desc) => list_sql!("duration_ms DESC"),
+        (TraceSort::TimeToFirstToken, Asc) => list_sql!("time_to_first_token_ms ASC"),
+        (TraceSort::TimeToFirstToken, Desc) => list_sql!("time_to_first_token_ms DESC"),
     }
 }
 
@@ -568,7 +582,9 @@ const HISTOGRAM_SQL: &str = concat!(
     "countIf(run_status = 'ok') AS ok, countIf(run_status = 'error') AS error, ",
     "countIf(run_status = 'cancelled') AS cancelled, sum(tokens) AS token_total, ",
     "quantile(0.5)(duration_ms) AS duration_p50_ms, ",
-    "quantile(0.95)(duration_ms) AS duration_p95_ms ",
+    "quantile(0.95)(duration_ms) AS duration_p95_ms, ",
+    "quantile(0.5)(time_to_first_token_ms) AS time_to_first_token_p50_ms, ",
+    "quantile(0.95)(time_to_first_token_ms) AS time_to_first_token_p95_ms ",
     "FROM (",
     runs!(),
     ") GROUP BY at_ms ORDER BY at_ms"
@@ -656,7 +672,7 @@ const FACETS_SQL: &str = facets_sql!("count()", "");
 const SPANS_SQL: &str = "SELECT project_id, received_at, units, run_id, agent, trace_id, \
      span_id, parent_span_id, kind, name, started_at, ended_at, status, error_type, model, \
      provider, input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, \
-     cost, user_id, session_id, environment, release, tags, sample_rate, attributes \
+     cost, time_to_first_token, user_id, session_id, environment, release, tags, sample_rate, attributes \
      FROM telemetry.spans \
      WHERE project_id IN {projects:Array(String)} AND run_id = {run:UUID} \
      AND span_id IN (SELECT span_id FROM (SELECT span_id, sum(units) OVER (\
@@ -744,7 +760,8 @@ impl Listing for Traces {
             | TraceSort::InputTokens
             | TraceSort::OutputTokens
             | TraceSort::Tokens
-            | TraceSort::Duration => SortDirection::Desc,
+            | TraceSort::Duration
+            | TraceSort::TimeToFirstToken => SortDirection::Desc,
             TraceSort::Agent | TraceSort::User | TraceSort::Session | TraceSort::Status => {
                 SortDirection::Asc
             }
@@ -881,6 +898,8 @@ pub fn bars(
                     tokens: row.token_total,
                     duration_p50_ms: Some(row.duration_p50_ms),
                     duration_p95_ms: Some(row.duration_p95_ms),
+                    time_to_first_token_p50_ms: row.time_to_first_token_p50_ms,
+                    time_to_first_token_p95_ms: row.time_to_first_token_p95_ms,
                 },
                 None => Bar {
                     at: start,
@@ -890,6 +909,8 @@ pub fn bars(
                     tokens: 0,
                     duration_p50_ms: None,
                     duration_p95_ms: None,
+                    time_to_first_token_p50_ms: None,
+                    time_to_first_token_p95_ms: None,
                 },
             });
         }
@@ -1006,6 +1027,7 @@ mod tests {
                     TraceSort::OutputTokens => "output_tokens",
                     TraceSort::Tokens => "tokens",
                     TraceSort::Duration => "duration_ms",
+                    TraceSort::TimeToFirstToken => "time_to_first_token_ms",
                 };
                 let order = format!("ORDER BY {column} {}", direction.to_string().to_uppercase());
                 assert!(sql.contains(&order), "{sort} {direction}: {sql}");
@@ -1170,6 +1192,8 @@ mod tests {
             token_total: 10,
             duration_p50_ms: 5.0,
             duration_p95_ms: 9.0,
+            time_to_first_token_p50_ms: None,
+            time_to_first_token_p95_ms: None,
         }
     }
 

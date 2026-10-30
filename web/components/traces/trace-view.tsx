@@ -580,6 +580,17 @@ function Raw({ value }: { value: unknown }) {
   );
 }
 
+/** What a model call was asked with, as the conventions name it, in the order a request reads. */
+const REQUEST_PARAMETERS = [
+  ["gen_ai.request.temperature", "Temperature"],
+  ["gen_ai.request.top_p", "Top p"],
+  ["gen_ai.request.top_k", "Top k"],
+  ["gen_ai.request.max_tokens", "Max tokens"],
+  ["gen_ai.request.frequency_penalty", "Frequency penalty"],
+  ["gen_ai.request.presence_penalty", "Presence penalty"],
+  ["gen_ai.request.seed", "Seed"],
+] as const;
+
 /** The span chosen, in full: what it was, how it ended and when, what it
  *  spent, and every attribute kept with it; formatted, or raw as the server
  *  sent it. The tab and the format hold as another span is chosen. */
@@ -705,6 +716,14 @@ function SpanDetail({
                   </FilterField>
                 )}
                 {span.provider && <Field label="Provider">{span.provider}</Field>}
+                {REQUEST_PARAMETERS.map(
+                  ([key, label]) =>
+                    span.attributes[key] !== undefined && (
+                      <Field key={key} label={label}>
+                        {span.attributes[key]}
+                      </Field>
+                    ),
+                )}
                 {span.environment && (
                   <FilterField
                     label="Environment"
@@ -745,6 +764,9 @@ function SpanDetail({
                   <LocalTime iso={span.ended_at} mode="precise" />
                 </Field>
                 <Field label="Duration">{formatDuration(spanMillis(span))}</Field>
+                {span.time_to_first_token !== null && (
+                  <Field label="Time to first token">{formatDuration(span.time_to_first_token * 1000)}</Field>
+                )}
                 {run && span.user_id && (
                   <FilterField
                     label="User"

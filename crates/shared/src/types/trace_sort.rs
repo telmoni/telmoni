@@ -34,6 +34,8 @@ pub enum TraceSort {
     Tokens,
     /// How long it ran.
     Duration,
+    /// How soon its first model call's answer began.
+    TimeToFirstToken,
 }
 
 // The list's own columns, left to right.
@@ -51,6 +53,7 @@ crate::wire_enum!(TraceSort {
     OutputTokens => "output_tokens",
     Tokens => "tokens",
     Duration => "duration",
+    TimeToFirstToken => "time_to_first_token",
 });
 
 #[cfg(test)]

@@ -222,6 +222,14 @@ export class ModelCall extends Handle {
     const named = filled(answer.responseModel, 'response model', this.#warnOnce);
     const model = named === undefined ? undefined : cut(named, contract.MODEL_MAX, 'response model', this.#warnOnce);
     const sent = usageOf(answer.usage, this.#warnOnce);
+    const firstToken = finiteFromZero(answer.timeToFirstToken);
+    if (isSet(answer.timeToFirstToken) && firstToken === undefined) {
+      this.#warnOnce(
+        `call:${contract.TIME_TO_FIRST_CHUNK}`,
+        `telmoni: ${contract.TIME_TO_FIRST_CHUNK} must be a finite number of seconds from 0; the call is sent without it`,
+        { kind: 'input' },
+      );
+    }
     if (this.ended) {
       this.#warnOnce(
         'call:late',
@@ -238,6 +246,7 @@ export class ModelCall extends Handle {
     }
     this.span.setAttributes(sent);
     this.#held = { ...this.#held, ...sent };
+    if (firstToken !== undefined) this.span.setAttribute(contract.TIME_TO_FIRST_CHUNK, firstToken);
     if (answer.outputMessages !== undefined) {
       this.span.setAttribute(contract.OUTPUT_MESSAGES, asJson(answer.outputMessages));
     }
@@ -417,6 +426,35 @@ export class Opener {
     const provider = named === undefined ? '' : cut(named, contract.PROVIDER_MAX, 'provider', this.#warnOnce);
     const operation = operationOf(options.operation, this.#warnOnce);
     const [name, attributes] = modelCallOpening(run.inherited, model, operation, provider);
+    for (const [key, value] of [
+      [contract.REQUEST_TEMPERATURE, options.temperature],
+      [contract.REQUEST_TOP_P, options.topP],
+      [contract.REQUEST_TOP_K, options.topK],
+      [contract.REQUEST_FREQUENCY_PENALTY, options.frequencyPenalty],
+      [contract.REQUEST_PRESENCE_PENALTY, options.presencePenalty],
+    ] as const) {
+      if (!isSet(value)) continue;
+      const number = numberOf(value);
+      if (!Number.isFinite(number)) {
+        this.#warnOnce(`call:${key}`, `telmoni: ${key} must be a finite number; the call is sent without it`, { kind: 'input' });
+      } else {
+        attributes[key] = number;
+      }
+    }
+    for (const [key, value] of [
+      [contract.REQUEST_MAX_TOKENS, options.maxTokens],
+      [contract.REQUEST_SEED, options.seed],
+    ] as const) {
+      if (!isSet(value)) continue;
+      const count = whole(value, -(2 ** 63), 2 ** 63);
+      if (count === undefined) {
+        this.#warnOnce(`call:${key}`, `telmoni: ${key} must be a whole number within 64 bits; the call is sent without it`, {
+          kind: 'input',
+        });
+      } else {
+        attributes[key] = count;
+      }
+    }
     if (isSet(options.inputMessages)) {
       attributes[contract.INPUT_MESSAGES] = asJson(options.inputMessages);
     }
@@ -739,10 +777,8 @@ function usageOf(usage: Usage | undefined, warnOnce: WarnOnce): Attributes {
     }
   }
   if (isSet(usage.cost)) {
-    const given: unknown = usage.cost;
-    // Text, which Python's SDK leaves off, is no cost either.
-    const cost = typeof given === 'bigint' || given instanceof Number ? Number(given) : given;
-    if (typeof cost === 'number' && Number.isFinite(cost) && cost >= 0) {
+    const cost = finiteFromZero(usage.cost);
+    if (cost !== undefined) {
       out[contract.COST] = cost;
     } else {
       warnOnce(
@@ -753,6 +789,13 @@ function usageOf(usage: Usage | undefined, warnOnce: WarnOnce): Attributes {
     }
   }
   return out;
+}
+
+/** A finite number from 0, as ingest takes a cost or a time to first token, or undefined. */
+function finiteFromZero(given: unknown): number | undefined {
+  // Text, which Python's SDK leaves off, is no number either.
+  const number = typeof given === 'bigint' || given instanceof Number ? Number(given) : given;
+  return typeof number === 'number' && Number.isFinite(number) && number >= 0 ? number : undefined;
 }
 
 /** `value` truncated to a whole number from `least` and below `end`, as ingest takes one, or undefined. */

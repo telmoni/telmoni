@@ -87,11 +87,13 @@ def perform(telmoni: Telmoni, scenario: dict[str, Any]) -> None:
                 call_spec["model"],
                 provider=call_spec["provider"],
                 input_messages=call_spec["input_messages"],
+                **call_spec["request"],
             ) as call:
                 call.answered(
                     response_model=call_spec["response_model"],
                     usage=Usage(**call_spec["usage"]),
                     output_messages=call_spec["output_messages"],
+                    time_to_first_token=call_spec["time_to_first_token"],
                 )
         tool_spec = run_spec["inside"][1]["tool_call"]
         with telmoni.tool_call(tool_spec["name"]) as tool:

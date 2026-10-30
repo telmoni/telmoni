@@ -959,6 +959,64 @@ async fn a_trace_carries_what_its_run_spent_and_the_models_no_price_covers(pool:
     );
 }
 
+/// A run's time to first token is its first model call's that reported one: it
+/// sorts the slowest first, a run with none last either way, and its bar charts
+/// the runs' median.
+#[sqlx::test]
+async fn a_runs_time_to_first_token_is_its_first_model_calls(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let p = projects(&pool);
+    // At a minute's start, so no hour's bar parts the runs.
+    let minute = (Utc::now() - Duration::minutes(1))
+        .timestamp()
+        .div_euclid(60)
+        * 60;
+    let start = DateTime::from_timestamp(minute, 0).expect("a time");
+    let (slow, quick, none) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+    let call = |run: Uuid, n: u64, seconds: Option<f64>| SpanRow {
+        time_to_first_token: seconds,
+        ..span_at(
+            &p.ours,
+            run,
+            SpanKind::ModelCall,
+            "chat gpt-4o",
+            start + Duration::milliseconds(i64::try_from(n).expect("small") * 10),
+            5,
+            n,
+        )
+    };
+    ch.store
+        .insert_spans(&[
+            call(slow, 1, None),
+            call(slow, 2, Some(0.8)),
+            call(slow, 3, Some(0.3)),
+            call(quick, 4, Some(0.2)),
+            call(none, 5, None),
+        ])
+        .await
+        .expect("the calls land");
+
+    let list = p.list("?sort=time_to_first_token").await;
+    assert_eq!(ids(&list), [slow, quick, none]);
+    assert_eq!(trace(&list, slow)["time_to_first_token_ms"], 800.0);
+    assert_eq!(trace(&list, none)["time_to_first_token_ms"], Value::Null);
+    assert_eq!(
+        ids(&p.list("?sort=time_to_first_token&dir=asc").await),
+        [quick, slow, none]
+    );
+    let histogram = p.get(&format!("{LANE}/histogram?days=1")).await;
+    let medians: Vec<f64> = histogram["bars"]
+        .as_array()
+        .expect("bars")
+        .iter()
+        .filter_map(|bar| bar["time_to_first_token_p50_ms"].as_f64())
+        .collect();
+    assert_eq!(medians.len(), 1, "{medians:?}");
+    assert!((medians[0] - 500.0).abs() < 1e-6, "{medians:?}");
+}
+
 /// A run whose spans hold more units than a page shows is cut where they pass, and says so.
 #[sqlx::test]
 async fn a_trace_of_wide_spans_is_cut_where_their_units_pass_the_cap(pool: PgPool) {

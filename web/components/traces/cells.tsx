@@ -118,6 +118,12 @@ export function cellOf(
       return formatCount(trace.input_tokens + trace.output_tokens);
     case TraceColumn.Duration:
       return formatDuration(trace.duration_ms);
+    case TraceColumn.TimeToFirstToken:
+      return trace.time_to_first_token_ms === null ? (
+        <span className="text-muted-foreground">—</span>
+      ) : (
+        formatDuration(trace.time_to_first_token_ms)
+      );
     case TraceColumn.Models:
       return (
         <Values

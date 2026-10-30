@@ -312,6 +312,7 @@ pub fn map(span: &Span, context: &Context<'_>, dropped: &mut Drops) -> Result<Sp
         cache_read_input_tokens: fields.cache_read_input_tokens.unwrap_or_default(),
         cache_write_input_tokens: fields.cache_write_input_tokens.unwrap_or_default(),
         cost: fields.cost,
+        time_to_first_token: fields.time_to_first_token,
         user_id,
         session_id: fields.session_id.unwrap_or_default(),
         environment: context.environment.to_owned(),
@@ -369,6 +370,7 @@ struct Fields {
     cache_read_input_tokens: Option<u64>,
     cache_write_input_tokens: Option<u64>,
     cost: Option<f64>,
+    time_to_first_token: Option<f64>,
     user_id: Option<String>,
     session_id: Option<String>,
     cancelled: bool,
@@ -480,6 +482,13 @@ impl Fields {
                     .ok_or(Refusal::Invalid(contract::COST))?;
                 // -0 is 0, which a sum would otherwise print signed.
                 self.cost = Some(cost.abs());
+            }
+            contract::TIME_TO_FIRST_CHUNK => {
+                let seconds = number(value)
+                    .filter(|seconds| seconds.is_finite() && *seconds >= 0.0)
+                    .ok_or(Refusal::Invalid(contract::TIME_TO_FIRST_CHUNK))?;
+                // -0 is 0, as for a cost.
+                self.time_to_first_token = Some(seconds.abs());
             }
             contract::SESSION_ID => {
                 self.session_id = Some(bounded_text(
@@ -704,6 +713,10 @@ mod tests {
                     Value::IntValue(40),
                 ),
                 kv(contract::COST, Value::DoubleValue(0.0081)),
+                kv(
+                    "gen_ai.response.time_to_first_chunk",
+                    Value::DoubleValue(0.35),
+                ),
                 kv(contract::USER_ID, s("acme-42")),
                 kv(contract::SESSION_ID, Value::IntValue(7)),
                 kv("telmoni.tag.team", s("search")),
@@ -717,6 +730,7 @@ mod tests {
                     }),
                 ),
                 kv("gen_ai.request.temperature", Value::DoubleValue(0.5)),
+                kv("gen_ai.request.choice.count", Value::IntValue(2)),
                 kv(
                     "gen_ai.input.messages",
                     s("[{\"role\":\"user\",\"content\":\"hi\"}]"),
@@ -775,6 +789,7 @@ mod tests {
             "the replaced cache name reads as the current one"
         );
         assert_eq!(row.cost, Some(0.0081));
+        assert_eq!(row.time_to_first_token, Some(0.35));
         assert_eq!(row.status, SpanStatus::Error);
         assert_eq!(row.user_id, "h(acme-42)", "stored as the project hashes it");
         assert_eq!(row.session_id, "7", "a scalar reads as text");
@@ -789,6 +804,7 @@ mod tests {
                     r#"["stop"]"#.to_owned()
                 ),
                 ("gen_ai.request.temperature".to_owned(), "0.5".to_owned()),
+                ("gen_ai.request.choice.count".to_owned(), "2".to_owned()),
             ],
             "the resource's inventory, the span's, and an unlisted number"
         );
@@ -926,6 +942,16 @@ mod tests {
                 Refusal::Invalid(contract::COST),
             ),
             (contract::COST, s("0.01"), Refusal::Invalid(contract::COST)),
+            (
+                contract::TIME_TO_FIRST_CHUNK,
+                Value::DoubleValue(-0.1),
+                Refusal::Invalid(contract::TIME_TO_FIRST_CHUNK),
+            ),
+            (
+                contract::TIME_TO_FIRST_CHUNK,
+                s("0.3"),
+                Refusal::Invalid(contract::TIME_TO_FIRST_CHUNK),
+            ),
             (
                 contract::SAMPLE_RATE,
                 Value::DoubleValue(1.5),

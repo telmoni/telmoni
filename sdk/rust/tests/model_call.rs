@@ -4,6 +4,7 @@
 mod common;
 
 use std::collections::BTreeSet;
+use std::time::Duration;
 
 use common::{Failure, Harness, Outcome, attributes_of, keyed, name_of, only, starting_with};
 use serde_json::{Map, Value, json};
@@ -37,6 +38,7 @@ fn a_model_call_carries_the_conventions_names() -> Outcome {
             cost: None,
         }),
         output_messages: None,
+        time_to_first_token: None,
     });
     call.end();
     let run_id = run.run_id().to_owned();
@@ -507,5 +509,63 @@ fn content_is_a_string_as_given_or_json() -> Outcome {
     assert_eq!(Content::from(json!({ "a": 1 })).as_str(), r#"{"a":1}"#);
     assert_eq!(Content::new(&[1, 2])?.as_str(), "[1,2]");
     assert_eq!(Content::new("text")?.as_str(), r#""text""#);
+    Ok(())
+}
+
+/// The request's parameters go typed, 0 among them, and the first token in
+/// seconds; none of them where not given.
+#[test]
+fn a_call_carries_its_parameters_and_its_first_token() -> Outcome {
+    let harness = Harness::new()?;
+    let run = harness.telmoni.run("bot", RunOptions::default())?;
+    let asked = run.model_call(
+        "asked",
+        ModelCallOptions {
+            temperature: Some(0.0),
+            top_p: Some(0.9),
+            top_k: Some(40.0),
+            frequency_penalty: Some(0.5),
+            presence_penalty: Some(-0.5),
+            max_tokens: Some(256),
+            seed: Some(7),
+            ..ModelCallOptions::default()
+        },
+    )?;
+    asked.answered(Reply {
+        time_to_first_token: Some(Duration::from_millis(350)),
+        ..Reply::default()
+    });
+    asked.end();
+    let plain = run.model_call("plain", ModelCallOptions::default())?;
+    plain.answered(Reply::default());
+    plain.end();
+    run.end();
+    harness.flush()?;
+
+    let spans = harness.spans()?;
+    let asked = attributes_of(only(&spans, "chat asked")?)?;
+    for (key, value) in [
+        ("gen_ai.request.temperature", json!(0.0)),
+        ("gen_ai.request.top_p", json!(0.9)),
+        ("gen_ai.request.top_k", json!(40.0)),
+        ("gen_ai.request.frequency_penalty", json!(0.5)),
+        ("gen_ai.request.presence_penalty", json!(-0.5)),
+        ("gen_ai.request.max_tokens", json!(256)),
+        ("gen_ai.request.seed", json!(7)),
+        ("gen_ai.response.time_to_first_chunk", json!(0.35)),
+    ] {
+        assert_eq!(asked.get(key), Some(&value), "{key}");
+    }
+    let plain = attributes_of(only(&spans, "chat plain")?)?;
+    let plain: BTreeSet<&str> = plain
+        .as_object()
+        .ok_or("attributes")?
+        .keys()
+        .map(String::as_str)
+        .filter(|key| {
+            key.starts_with("gen_ai.request.") || *key == "gen_ai.response.time_to_first_chunk"
+        })
+        .collect();
+    assert_eq!(plain, BTreeSet::from(["gen_ai.request.model"]));
     Ok(())
 }

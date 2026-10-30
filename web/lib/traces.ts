@@ -430,6 +430,14 @@ export const TRACE_COLUMNS: readonly ColumnSpec[] = [
     numeric: true,
     hint: "From the run's first span's start to its last span's end.",
   },
+  {
+    key: TraceColumn.TimeToFirstToken,
+    label: "Time to first token",
+    sort: TraceSort.TimeToFirstToken,
+    first: SortDirection.Desc,
+    numeric: true,
+    hint: "How soon its first model call that reported one began to answer.",
+  },
   { key: TraceColumn.Models, label: "Models" },
   { key: TraceColumn.Tools, label: "Tools" },
 ];

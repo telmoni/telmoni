@@ -81,6 +81,7 @@ commas. It is kept as any tag is.
 | `gen_ai.usage.cache_read.input_tokens` | a model call | the column `cache_read_input_tokens` | any | a whole number, 0 or more |
 | `gen_ai.usage.cache_write.input_tokens` | a model call | the column `cache_write_input_tokens` | any | a whole number, 0 or more |
 | `gen_ai.usage.cost` | a model call | the column `cost` | any | a number, 0 or more: what the call cost in US dollars, as reported; a call without one is [priced by its tokens](/docs/api/ingest#what-a-call-cost) |
+| `gen_ai.response.time_to_first_chunk` | a model call | the column `time_to_first_token` | any | a number of seconds, 0 or more: from the call's request to its answer's first chunk |
 | `gen_ai.conversation.id` | any span | the column `session_id` | any | 1 to 200 characters, kept as sent |
 | `deployment.environment.name` | the resource | the column `environment`, on every span of the export | any | up to 128 characters, as sent: `production`, `staging`; longer, read as none |
 | `service.version` | the resource | the column `release`, on every span of the export | any | up to 128 characters, as sent: a version or a commit; longer, read as none |
@@ -115,6 +116,13 @@ them.
 | `gen_ai.response.finish_reasons` | a model call | `attributes`, under its own name | any | an array, as its JSON |
 | `gen_ai.response.status` | a model call | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
 | `gen_ai.request.reasoning.level` | a model call | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
+| `gen_ai.request.temperature` | a model call | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
+| `gen_ai.request.top_p` | a model call | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
+| `gen_ai.request.top_k` | a model call | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
+| `gen_ai.request.max_tokens` | a model call | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
+| `gen_ai.request.frequency_penalty` | a model call | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
+| `gen_ai.request.presence_penalty` | a model call | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
+| `gen_ai.request.seed` | a model call | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
 | `gen_ai.agent.version` | the run | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
 | `gen_ai.tool.call.id` | a tool call | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
 | `gen_ai.tool.type` | a tool call | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |

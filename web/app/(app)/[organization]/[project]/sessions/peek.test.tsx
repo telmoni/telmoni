@@ -50,6 +50,7 @@ function detail(id: string) {
         started_at: "2026-10-11T03:00:00Z",
         ended_at: "2026-10-11T03:00:02Z",
         duration_ms: 2000,
+        time_to_first_token_ms: null,
         spans: 4,
         steps: 3,
         model_calls: 1,

@@ -781,7 +781,20 @@ Telmoni would read as no deployment, is left off with one warning. A step is a s
 model that answered, the provider and the token counts under the GenAI
 conventions' names, each a whole number from 0, another left off the call
 with one warning, and the cost you report as Langfuse's `gen_ai.usage.cost`,
-a number of US dollars from 0; a tool call is `execute_tool <name>`. The exception's class
+a number of US dollars from 0. Where you give them, a model call also carries
+what it was asked with — `gen_ai.request.temperature`, `top_p`, `top_k`,
+`frequency_penalty` and `presence_penalty` as numbers, `max_tokens` and `seed`
+as whole numbers within 64 bits — taken by the call as it opens (Python's
+`model_call(temperature=…, top_p=…)`, TypeScript's `{ temperature, topP }`,
+Go's `ModelCallOptions{Temperature: &t}`, Rust's
+`ModelCallOptions { temperature: Some(t), .. }`), and how soon its answer
+began, `gen_ai.response.time_to_first_chunk` in seconds from 0, taken by its
+answer (`answered(time_to_first_token=0.35)`, `{ timeToFirstToken: 0.35 }`,
+`Answer{TimeToFirstToken: d}`, `Reply { time_to_first_token: Some(d), .. }`).
+In Python and TypeScript, a parameter that is no finite number, and a time
+below 0 or not finite, is left off the call with one warning, as is a time below 0 in Go;
+a whole number's fraction is cut, as a token count's is. A tool call is
+`execute_tool <name>`. The exception's class
 alone marks a failure, as `error.type`; no message, stack trace or event is
 ever sent. The [ingest page](/docs/api/ingest) lists every attribute and what
 the server keeps of each.

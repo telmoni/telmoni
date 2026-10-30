@@ -35,6 +35,7 @@ async fn an_insert_with_no_setting_lands_in_spans_and_the_hourly_rollup() {
         output_tokens: 300,
         cache_read_input_tokens: 1_000,
         cost: Some(0.0123),
+        time_to_first_token: Some(0.42),
         user_id: "9f86d081884c7d659a2feaa0c55ad015".into(),
         session_id: "thread-42".into(),
         environment: "production".into(),
@@ -76,8 +77,8 @@ async fn an_insert_with_no_setting_lands_in_spans_and_the_hourly_rollup() {
             "SELECT project_id, received_at, units, run_id, agent, trace_id, span_id, \
              parent_span_id, kind, name, started_at, ended_at, status, error_type, model, \
              provider, input_tokens, output_tokens, cache_read_input_tokens, \
-             cache_write_input_tokens, cost, user_id, session_id, environment, release, tags, \
-             sample_rate, attributes \
+             cache_write_input_tokens, cost, time_to_first_token, user_id, session_id, environment, \
+             release, tags, sample_rate, attributes \
              FROM telemetry.spans \
              WHERE project_id IN {projects:Array(String)} AND kind IN {kinds:Array(String)} \
              ORDER BY kind",

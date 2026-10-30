@@ -29,6 +29,16 @@ interface ModelCallSpec {
   provider: string;
   model: string;
   response_model: string;
+  request: {
+    temperature: number;
+    top_p: number;
+    top_k: number;
+    max_tokens: number;
+    frequency_penalty: number;
+    presence_penalty: number;
+    seed: number;
+  };
+  time_to_first_token: number;
   usage: {
     input_tokens: number;
     output_tokens: number;
@@ -137,7 +147,17 @@ async function perform(telmoni: Telmoni, scenario: Scenario): Promise<void> {
         const call = stepSpec.inside[0].model_call;
         await step.modelCall(
           call.model,
-          { provider: call.provider, inputMessages: call.input_messages },
+          {
+            provider: call.provider,
+            temperature: call.request.temperature,
+            topP: call.request.top_p,
+            topK: call.request.top_k,
+            maxTokens: call.request.max_tokens,
+            frequencyPenalty: call.request.frequency_penalty,
+            presencePenalty: call.request.presence_penalty,
+            seed: call.request.seed,
+            inputMessages: call.input_messages,
+          },
           async (modelCall) => {
             modelCall.answered({
               responseModel: call.response_model,
@@ -148,6 +168,7 @@ async function perform(telmoni: Telmoni, scenario: Scenario): Promise<void> {
                 cacheWriteInputTokens: call.usage.cache_write_input_tokens,
                 cost: call.usage.cost,
               },
+              timeToFirstToken: call.time_to_first_token,
               outputMessages: call.output_messages,
             });
           },

@@ -79,7 +79,8 @@ export type Facets = z.infer<typeof FacetsSchema>;
 
 // The window in bars of equal width, each starting on the reader's clock:
 // the runs that started in it by how they ended, their tokens, and the
-// median and 95th percentile of their durations, none where no run started.
+// median and 95th percentile of their durations and of their times to first
+// token, none where no run started or reported one.
 const HistogramBarSchema = z.object({
   at: z.string(),
   ok: z.number(),
@@ -88,6 +89,8 @@ const HistogramBarSchema = z.object({
   tokens: z.number(),
   duration_p50_ms: z.number().nullable(),
   duration_p95_ms: z.number().nullable(),
+  time_to_first_token_p50_ms: z.number().nullable(),
+  time_to_first_token_p95_ms: z.number().nullable(),
 });
 
 export const TraceHistogramSchema = z.object({

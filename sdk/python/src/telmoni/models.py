@@ -376,20 +376,27 @@ class Price:
                 raise ValueError("a price names its provider and its model")
         given = [self.input, self.output]
         given += [p for p in (self.cache_read, self.cache_write) if p is not None]
-        if any(_dollars(price) is None for price in given):
+        if any(_from_zero(price) is None for price in given):
             raise ValueError("a price is a finite number of US dollars a token, from 0")
 
 
-def _dollars(value: object) -> float | None:
-    """An amount of US dollars as a float, whatever number it was given as; None
-    for one below 0, not finite, or no number, a `bool` or text among them."""
+def _number(value: object) -> float | None:
+    """A float, whatever number it was given as; None for no number, a `bool` or
+    text among them."""
     if isinstance(value, (bool, str, bytes)):
         return None
     try:
-        dollars = float(value)  # type: ignore[arg-type]
+        return float(value)  # type: ignore[arg-type]
     except (TypeError, ValueError, OverflowError):
         return None
-    return dollars if math.isfinite(dollars) and dollars >= 0 else None
+
+
+def _from_zero(value: object) -> float | None:
+    """A finite number from 0, as a cost, a spend cap or a time is; else None."""
+    number = _number(value)
+    return (
+        number if number is not None and math.isfinite(number) and number >= 0 else None
+    )
 
 
 @dataclass(frozen=True)

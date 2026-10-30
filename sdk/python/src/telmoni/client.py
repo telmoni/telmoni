@@ -136,9 +136,28 @@ class Telmoni:
         operation: str = contract.DEFAULT_MODEL_OPERATION,
         input_messages: object | None = None,
         system_instructions: object | None = None,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        top_k: float | None = None,
+        max_tokens: int | None = None,
+        frequency_penalty: float | None = None,
+        presence_penalty: float | None = None,
+        seed: int | None = None,
         run: Run | None = None,
     ) -> Scope[ModelCall]:
-        """A model call inside the current run; ``answered()`` records the reply."""
+        """A model call inside the current run; ``answered()`` records the reply.
+
+        ``temperature`` to ``seed`` are what the model was asked with; one
+        given as no number is left off the call with one warning."""
+        request = {
+            contract.REQUEST_TEMPERATURE: temperature,
+            contract.REQUEST_TOP_P: top_p,
+            contract.REQUEST_TOP_K: top_k,
+            contract.REQUEST_MAX_TOKENS: max_tokens,
+            contract.REQUEST_FREQUENCY_PENALTY: frequency_penalty,
+            contract.REQUEST_PRESENCE_PENALTY: presence_penalty,
+            contract.REQUEST_SEED: seed,
+        }
         return Scope(
             lambda: self._opener.model_call(
                 model,
@@ -147,6 +166,7 @@ class Telmoni:
                 operation=operation,
                 input_messages=input_messages,
                 system_instructions=system_instructions,
+                request=request,
             )
         )
 

@@ -38,6 +38,7 @@ const TRACE = {
   started_at: "2026-10-11T03:00:00Z",
   ended_at: "2026-10-11T03:00:02Z",
   duration_ms: 2000,
+  time_to_first_token_ms: 400,
   spans: 4,
   steps: 1,
   model_calls: 1,
@@ -91,6 +92,8 @@ const HISTOGRAM = {
       tokens: 1500,
       duration_p50_ms: 2000,
       duration_p95_ms: 2000,
+      time_to_first_token_p50_ms: 400,
+      time_to_first_token_p95_ms: 400,
     },
     {
       at: "2026-10-11T03:30:00Z",
@@ -100,6 +103,8 @@ const HISTOGRAM = {
       tokens: 0,
       duration_p50_ms: null,
       duration_p95_ms: null,
+      time_to_first_token_p50_ms: null,
+      time_to_first_token_p95_ms: null,
     },
   ],
 };
@@ -150,6 +155,7 @@ const SPAN = {
   cache_read_input_tokens: 0,
   cache_write_input_tokens: 0,
   cost: null,
+  time_to_first_token: null,
   user_id: "9f86d081884c7d659a2feaa0c55ad015",
   session_id: "conv-1",
   environment: "production",

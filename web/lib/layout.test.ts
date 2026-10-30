@@ -84,6 +84,7 @@ function span(over: Partial<TraceSpan> & Pick<TraceSpan, "span_id" | "kind">): T
     cache_read_input_tokens: 0,
     cache_write_input_tokens: 0,
     cost: null,
+    time_to_first_token: null,
     user_id: "",
     session_id: "",
     environment: "",

@@ -96,6 +96,7 @@ const TRACE_A = {
   started_at: "2026-10-11T03:00:00Z",
   ended_at: "2026-10-11T03:00:02Z",
   duration_ms: 2000,
+  time_to_first_token_ms: null,
   spans: 4,
   steps: 1,
   model_calls: 1,
@@ -122,6 +123,7 @@ const TRACE_B = {
   input_tokens: 10,
   output_tokens: 5,
   duration_ms: 500,
+  time_to_first_token_ms: null,
 };
 
 function list(over: Record<string, unknown> = {}) {
@@ -251,7 +253,7 @@ describe("TracesPage", () => {
     // Columns past the first eight are offered, not shown; the count holds the
     // trace's id, which always shows.
     expect(table.queryByRole("columnheader", { name: /Model calls/ })).toBeNull();
-    expect(screen.getByRole("button", { name: /Columns/ })).toHaveTextContent("9/23");
+    expect(screen.getByRole("button", { name: /Columns/ })).toHaveTextContent("9/24");
     // The window and the refresh stand on the title's row.
     const header = within(screen.getByTestId("page-header"));
     expect(header.getByRole("combobox", { name: "Window" })).toHaveTextContent("Last 7 days");

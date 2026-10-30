@@ -131,6 +131,15 @@ export interface ModelCallOptions {
   provider?: string | undefined;
   /** `chat` (default, and what a blank one means), `generate_content`, `text_completion` or `embeddings`; any other goes as `chat`, with one warning. */
   operation?: string | undefined;
+  /** What the model was asked with, each sent under the conventions' `gen_ai.request.*` name. */
+  temperature?: number | undefined;
+  topP?: number | undefined;
+  topK?: number | undefined;
+  /** A whole number within 64 bits, as is `seed`; another is left off the call with one warning. */
+  maxTokens?: number | undefined;
+  frequencyPenalty?: number | undefined;
+  presencePenalty?: number | undefined;
+  seed?: number | undefined;
   /** Content: sent only with `captureContent` and the project's mode `on`. */
   inputMessages?: unknown;
   /** Content, as above. */
@@ -141,6 +150,8 @@ export interface ModelCallOptions {
 export interface ModelAnswer {
   responseModel?: string | undefined;
   usage?: Usage | undefined;
+  /** Seconds from the call's start to the answer's first token; one below 0 or not finite is left off with one warning. */
+  timeToFirstToken?: number | undefined;
   /** Content: sent only with `captureContent` and the project's mode `on`. */
   outputMessages?: unknown;
 }

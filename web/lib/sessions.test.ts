@@ -28,6 +28,7 @@ function trace(ended_at: string): SessionTrace {
     started_at: "2026-10-11T03:00:00Z",
     ended_at,
     duration_ms: 0,
+    time_to_first_token_ms: null,
     spans: 1,
     steps: 0,
     model_calls: 0,

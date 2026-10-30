@@ -25,13 +25,14 @@ import { isOneOf } from "@/lib/one-of";
 import { cn } from "@/lib/utils";
 
 /** What a chart of the list draws. */
-const METRICS = ["runs", "tokens", "duration"] as const;
+const METRICS = ["runs", "tokens", "duration", "first_token"] as const;
 type Metric = (typeof METRICS)[number];
 
 const METRIC_LABEL: Record<Metric, string> = {
   runs: "Runs",
   tokens: "Tokens",
   duration: "Duration",
+  first_token: "Time to first token",
 };
 
 // The theme's own colours, which follow it into the dark: a run that ended
@@ -77,16 +78,16 @@ function barLabel(iso: string, seconds: number): string {
     : at.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
 }
 
-/** The histogram's bars as the charts read them. */
-function rows(histogram: TraceHistogram) {
+/** The histogram's bars as the charts read them, the percentiles `metric`'s. */
+function rows(histogram: TraceHistogram, metric: Metric) {
   return histogram.bars.map((bar) => ({
     at: bar.at,
     ok: bar.ok,
     error: bar.error,
     cancelled: bar.cancelled,
     tokens: bar.tokens,
-    p50: bar.duration_p50_ms,
-    p95: bar.duration_p95_ms,
+    p50: metric === "first_token" ? bar.time_to_first_token_p50_ms : bar.duration_p50_ms,
+    p95: metric === "first_token" ? bar.time_to_first_token_p95_ms : bar.duration_p95_ms,
   }));
 }
 
@@ -105,10 +106,11 @@ function MetricChart({
   const inBrowser = useInBrowser();
   if (!inBrowser) return <div className={cn("w-full", className)} aria-hidden="true" />;
 
-  const data = rows(histogram);
+  const data = rows(histogram, metric);
   const seconds = histogram.bucket_seconds;
+  const lines = metric === "duration" || metric === "first_token";
   const config = metric === "runs" ? RUNS : metric === "tokens" ? TOKENS : DURATION;
-  const value = (v: number) => (metric === "duration" ? formatDuration(v) : formatCount(v));
+  const value = (v: number) => (lines ? formatDuration(v) : formatCount(v));
   // A longer window's bars narrower than a day are labelled where a day
   // starts alone, so its dates step along the axis rather than repeat.
   const dayStarts =
@@ -128,7 +130,7 @@ function MetricChart({
   );
   const tooltip = (
     <ChartTooltip
-      cursor={metric === "duration" ? true : { fillOpacity: 0.5 }}
+      cursor={lines ? true : { fillOpacity: 0.5 }}
       content={
         <ChartTooltipContent
           labelFormatter={(_, payload) => {
@@ -166,7 +168,7 @@ function MetricChart({
 
   return (
     <ChartContainer config={config} className={cn("aspect-auto w-full", className)}>
-      {metric === "duration" ? (
+      {lines ? (
         <LineChart data={data} margin={{ left: 0, right: 8, top: 4 }}>
           {grid}
           {axis}
@@ -234,9 +236,10 @@ export function TraceHistogramStrip({ histogram }: { histogram: TraceHistogram }
   );
 }
 
-// The charts in the table's place: the window's runs by how they ended,
-// their tokens, and how long they ran — the median and the slowest
-// twentieth — each a bar of the same width.
+// The charts in the table's place, two by two: the window's runs by how they
+// ended, their tokens, how long they ran and how soon their first model call
+// began to answer — the median and the slowest twentieth — each a bar of the
+// same width.
 export function TraceCharts({ histogram }: { histogram: TraceHistogram }) {
   return (
     <div className="grid gap-4 lg:grid-cols-2">
@@ -244,7 +247,7 @@ export function TraceCharts({ histogram }: { histogram: TraceHistogram }) {
         <div
           key={metric}
           role="region"
-          className={cn("grid gap-2 rounded-xl border border-border p-4", metric === "runs" && "lg:col-span-2")}
+          className="grid gap-2 rounded-xl border border-border p-4"
           aria-label={METRIC_LABEL[metric]}
         >
           <h2 className="text-sm font-medium">

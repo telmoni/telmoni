@@ -126,6 +126,7 @@ function span(over: Record<string, unknown>) {
     cache_read_input_tokens: 0,
     cache_write_input_tokens: 0,
     cost: null,
+    time_to_first_token: null,
     user_id: "",
     session_id:"",
     environment: "",
@@ -162,6 +163,8 @@ const SPANS = [
     provider: "anthropic",
     input_tokens: 1200,
     output_tokens: 300,
+    time_to_first_token: 0.42,
+    attributes: { "gen_ai.request.temperature": "0.2", "gen_ai.request.seed": "7" },
     started_at: "2026-10-11T03:00:00.020Z",
     ended_at: "2026-10-11T03:00:01.520Z",
   }),
@@ -284,7 +287,7 @@ describe("TracePage", () => {
     );
   });
 
-  it("reads the span chosen in the tree: its model and tokens, and how it failed", async () => {
+  it("reads the span chosen in the tree: its model, what it was asked with, its tokens, and how it failed", async () => {
     render(await TracePage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     const tree = screen.getByRole("tree", { name: "Spans" });
 
@@ -300,6 +303,10 @@ describe("TracePage", () => {
     );
     expect(within(chosen()).getByText("1,200")).toBeInTheDocument();
     expect(within(chosen()).getByText("anthropic")).toBeInTheDocument();
+    expect(within(chosen()).getByText("Temperature").nextSibling).toHaveTextContent("0.2");
+    expect(within(chosen()).getByText("Seed").nextSibling).toHaveTextContent("7");
+    expect(within(chosen()).queryByText("Top p")).toBeNull();
+    expect(within(chosen()).getByText("Time to first token").nextSibling).toHaveTextContent("420 ms");
   });
 
   it("walks the tree from the keyboard, the focus with the span chosen, and shuts a branch and opens it again", async () => {

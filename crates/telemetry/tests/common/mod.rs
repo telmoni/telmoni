@@ -1257,6 +1257,7 @@ pub(crate) fn received(
         cache_read_input_tokens: 0,
         cache_write_input_tokens: 0,
         cost: None,
+        time_to_first_token: None,
         user_id: String::new(),
         session_id: String::new(),
         environment: String::new(),

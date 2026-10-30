@@ -161,11 +161,19 @@ fn perform(harness: &Harness, scenario: &Value) -> Outcome {
             .ok_or("a model call")?,
         "model_call",
     )?;
+    let request = field(call_spec, "request")?;
     let call = step.model_call(
         text(call_spec, "model")?,
         ModelCallOptions {
             provider: Some(text(call_spec, "provider")?.to_owned()),
             input_messages: Some(field(call_spec, "input_messages")?.clone().into()),
+            temperature: Some(float(request, "temperature")?),
+            top_p: Some(float(request, "top_p")?),
+            top_k: Some(float(request, "top_k")?),
+            frequency_penalty: Some(float(request, "frequency_penalty")?),
+            presence_penalty: Some(float(request, "presence_penalty")?),
+            max_tokens: Some(int(request, "max_tokens")?),
+            seed: Some(int(request, "seed")?),
             ..ModelCallOptions::default()
         },
     )?;
@@ -180,6 +188,10 @@ fn perform(harness: &Harness, scenario: &Value) -> Outcome {
             cost: Some(field(usage, "cost")?.as_f64().ok_or("cost")?),
         }),
         output_messages: Some(field(call_spec, "output_messages")?.clone().into()),
+        time_to_first_token: Some(Duration::from_secs_f64(float(
+            call_spec,
+            "time_to_first_token",
+        )?)),
     });
     call.end();
     step.end();

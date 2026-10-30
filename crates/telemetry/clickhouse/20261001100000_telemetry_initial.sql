@@ -68,6 +68,8 @@ CREATE TABLE IF NOT EXISTS telemetry.spans
     -- What a call cost in US dollars as reported, NULL where it reported
     -- none: a read prices those by their tokens, and never writes the price.
     cost                     Nullable(Float64),
+    -- Seconds to a call's first token, NULL where it reported none.
+    time_to_first_token      Nullable(Float64),
     user_id                  String,
     session_id               String,
     -- The deployment the span's resource named, and its release; empty

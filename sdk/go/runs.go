@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	"go.opentelemetry.io/otel"
@@ -51,6 +52,15 @@ type ModelCallOptions struct {
 	// sent only when CaptureContent is on and the project's mode allows.
 	InputMessages      any
 	SystemInstructions any
+	// The parameters the model was asked with, each sent as given; nil is
+	// not given, since 0 is a value each can take.
+	Temperature      *float64
+	TopP             *float64
+	TopK             *float64
+	FrequencyPenalty *float64
+	PresencePenalty  *float64
+	MaxTokens        *int64
+	Seed             *int64
 }
 
 // ToolCallOptions is what a tool call is opened with.
@@ -67,6 +77,9 @@ type Answer struct {
 	// OutputMessages are content: recorded as JSON, sent only when
 	// CaptureContent is on and the project's mode allows.
 	OutputMessages any
+	// TimeToFirstToken is from the call's start to its answer's first token,
+	// 0 for none; one below 0 is left off with one warning.
+	TimeToFirstToken time.Duration
 }
 
 // handle is a span the SDK opened, until its End. A handle opened outside a
@@ -504,6 +517,26 @@ func (r *Run) ModelCall(ctx context.Context, model string, opts ModelCallOptions
 		c.warnOperation()
 	}
 	name, attrs := modelCallOpening(model, operation, provider)
+	for _, p := range []struct {
+		name  string
+		value *float64
+	}{
+		{attrRequestTemperature, opts.Temperature},
+		{attrRequestTopP, opts.TopP},
+		{attrRequestTopK, opts.TopK},
+		{attrRequestFrequencyPenalty, opts.FrequencyPenalty},
+		{attrRequestPresencePenalty, opts.PresencePenalty},
+	} {
+		if p.value != nil {
+			attrs = append(attrs, attribute.Float64(p.name, *p.value))
+		}
+	}
+	if opts.MaxTokens != nil {
+		attrs = append(attrs, attribute.Int64(attrRequestMaxTokens, *opts.MaxTokens))
+	}
+	if opts.Seed != nil {
+		attrs = append(attrs, attribute.Int64(attrRequestSeed, *opts.Seed))
+	}
 	if opts.InputMessages != nil {
 		attrs = append(attrs, attribute.String(attrInputMessages, asJSON(opts.InputMessages)))
 	}
@@ -616,6 +649,12 @@ func (m *ModelCall) Answered(a Answer) {
 	attrs = append(attrs, usage...)
 	if a.OutputMessages != nil {
 		attrs = append(attrs, attribute.String(attrOutputMessages, asJSON(a.OutputMessages)))
+	}
+	// Ingest refuses the call over one below 0, as over a negative count.
+	if a.TimeToFirstToken > 0 {
+		attrs = append(attrs, attribute.Float64(attrTimeToFirstChunk, a.TimeToFirstToken.Seconds()))
+	} else if a.TimeToFirstToken < 0 {
+		m.client.exporter.warnOnce("answer:"+attrTimeToFirstChunk, WarningInput, "telmoni: "+attrTimeToFirstChunk+" must be a duration from 0; the call is sent without it")
 	}
 	// Given once the run's lock is released: the logger is the application's.
 	if w := m.hold(attrs, answeredAs, usage); w.key != "" {

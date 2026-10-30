@@ -11,6 +11,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use opentelemetry::trace::{SpanKind, SpanRef, Status, TraceContextExt as _, Tracer as _};
 use opentelemetry::{Context, ContextGuard, KeyValue, Value};
@@ -115,6 +116,21 @@ pub struct ModelCallOptions {
     pub input_messages: Option<Content>,
     /// The system instructions: content, as above.
     pub system_instructions: Option<Content>,
+    /// The parameters the model was asked with, each sent as given; `None` is
+    /// not given, since 0 is a value each can take.
+    pub temperature: Option<f64>,
+    /// As above.
+    pub top_p: Option<f64>,
+    /// As above.
+    pub top_k: Option<f64>,
+    /// As above.
+    pub frequency_penalty: Option<f64>,
+    /// As above.
+    pub presence_penalty: Option<f64>,
+    /// As above.
+    pub max_tokens: Option<i64>,
+    /// As above.
+    pub seed: Option<i64>,
 }
 
 /// What a tool call is opened with.
@@ -137,6 +153,8 @@ pub struct Reply {
     /// when [`Config::capture_content`](crate::Config::capture_content) is on
     /// and the project's mode allows.
     pub output_messages: Option<Content>,
+    /// From the call's start to its answer's first token.
+    pub time_to_first_token: Option<Duration>,
 }
 
 /// Content as it goes on a span: a string, kept as given, or anything else
@@ -279,6 +297,31 @@ impl Handle {
         };
         let operation = model_operation(options.operation.as_deref(), warner);
         let (name, mut attributes) = model_call_opening(&model, operation, provider);
+        attributes.extend(
+            [
+                (
+                    contract::REQUEST_TEMPERATURE,
+                    options.temperature.map(Value::F64),
+                ),
+                (contract::REQUEST_TOP_P, options.top_p.map(Value::F64)),
+                (contract::REQUEST_TOP_K, options.top_k.map(Value::F64)),
+                (
+                    contract::REQUEST_FREQUENCY_PENALTY,
+                    options.frequency_penalty.map(Value::F64),
+                ),
+                (
+                    contract::REQUEST_PRESENCE_PENALTY,
+                    options.presence_penalty.map(Value::F64),
+                ),
+                (
+                    contract::REQUEST_MAX_TOKENS,
+                    options.max_tokens.map(Value::I64),
+                ),
+                (contract::REQUEST_SEED, options.seed.map(Value::I64)),
+            ]
+            .into_iter()
+            .filter_map(|(key, value)| value.map(|value| KeyValue::new(key, value))),
+        );
         if let Some(messages) = options.input_messages {
             attributes.push(KeyValue::new(contract::INPUT_MESSAGES, messages.0));
         }
@@ -639,7 +682,8 @@ impl Run {
 }
 
 impl ModelCall {
-    /// What the model answered: its name, its tokens, and its messages.
+    /// What the model answered: its name, its tokens, its messages, and when
+    /// its first token came.
     pub fn answered(&self, reply: Reply) {
         let warner = &self.handle.client.warner;
         // Ingest refuses the call over an empty one.
@@ -648,6 +692,12 @@ impl ModelCall {
             .filter(|model| !model.is_empty())
             .map(|model| cut(&model, contract::MODEL_MAX, "response model", warner));
         let usage = reply.usage.map(|usage| sendable_usage(usage, warner));
+        if let Some(first) = reply.time_to_first_token {
+            self.handle.set_last([KeyValue::new(
+                contract::TIME_TO_FIRST_CHUNK,
+                first.as_secs_f64(),
+            )]);
+        }
         self.count(answered_as, usage, reply.output_messages);
     }
 

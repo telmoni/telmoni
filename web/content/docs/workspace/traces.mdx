@@ -33,8 +33,9 @@ run's last span ended, the deployment its spans were sent from
 version or a commit), each once where a run crossed services deployed apart,
 the class of the error it ended on (**Error**: `TimeoutError`,
 `RateLimitError` — never its message), its model calls, tool calls, errors
-and spans, its input, output and cached tokens, and the models and tools its
-calls used.
+and spans, its input, output and cached tokens, how soon the first of its
+model calls that said began to answer (**Time to first token**), and the
+models and tools its calls used.
 The counts and the tokens are each a group that opens under its heading,
 which says how many of it show; a column whose name does not say what it
 holds says so behind its ⓘ; and the trace's id always shows. Your columns,
@@ -85,9 +86,9 @@ days, by the day each span arrived. A window of more runs than the store
 reads at once, about a hundred thousand, shows the page as unavailable; a
 shorter one reads. Above the rows, its runs stand as bars by when they started — how
 they ended, or their tokens, or the median and 95th percentile of their
-durations, as the menu above the bars picks — each bar an hour, a few hours,
-a day or a week, starting on your own clock. **Chart** shows the three as
-charts in the table's place.
+durations or of their times to first token, as the menu above the bars picks
+— each bar an hour, a few hours, a day or a week, starting on your own clock.
+**Chart** shows the four as charts in the table's place, two by two.
 
 As the project's runs land, a bar above the list counts the new traces rather
 than moving the rows under your hand; **Show** reads the list again, with them
@@ -166,8 +167,11 @@ status and the error's type, its model and provider, the environment and
 release it was sent from, the tool it called — the model, the environment,
 the release and the tool each a link to the list narrowed to them — its
 tokens, input, output and cached, the cost it reported, in US dollars, where
-it reported one, when it started and ended to the
-millisecond, how long it ran, when it was received, and its ids. The run's own span adds the
+it reported one, what a model call was asked with — its temperature, top p
+and top k, max tokens, frequency and presence penalties and seed — where it
+said, when it started and ended to the
+millisecond, how long it ran and how soon its answer began, when it was
+received, and its ids. The run's own span adds the
 run's steps, calls and tokens, its user, session and tags, and its sample
 rate. **Attributes** lists what else was kept with the
 span under its own name, and **Raw** shows either as it was stored. The

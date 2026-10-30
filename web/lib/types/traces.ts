@@ -52,6 +52,8 @@ export const TraceSchema = z.object({
   started_at: z.string(),
   ended_at: z.string(),
   duration_ms: z.number(),
+  /** Its first model call's time to first token that reported one, in milliseconds. */
+  time_to_first_token_ms: z.number().nullable(),
   spans: z.number(),
   steps: z.number(),
   model_calls: z.number(),
@@ -92,6 +94,8 @@ export const TraceSpanSchema = z.object({
   cache_write_input_tokens: z.number(),
   /** What it cost in US dollars, as reported; null where it reported none. */
   cost: z.number().nullable(),
+  /** Seconds to its answer's first token; null where it reported none. */
+  time_to_first_token: z.number().nullable(),
   user_id: z.string(),
   session_id: z.string(),
   /** The deployment its resource named, and its release; empty for none. */

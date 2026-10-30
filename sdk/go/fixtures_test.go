@@ -60,7 +60,17 @@ type modelCallSpec struct {
 	Provider      string `json:"provider"`
 	Model         string `json:"model"`
 	ResponseModel string `json:"response_model"`
-	Usage         struct {
+	Request       struct {
+		Temperature      *float64 `json:"temperature"`
+		TopP             *float64 `json:"top_p"`
+		TopK             *float64 `json:"top_k"`
+		MaxTokens        *int64   `json:"max_tokens"`
+		FrequencyPenalty *float64 `json:"frequency_penalty"`
+		PresencePenalty  *float64 `json:"presence_penalty"`
+		Seed             *int64   `json:"seed"`
+	} `json:"request"`
+	TimeToFirstToken float64 `json:"time_to_first_token"`
+	Usage            struct {
 		InputTokens           int      `json:"input_tokens"`
 		OutputTokens          int      `json:"output_tokens"`
 		CacheReadInputTokens  int      `json:"cache_read_input_tokens"`
@@ -232,11 +242,19 @@ func perform(t *testing.T, h *harness, fixture runFixture) {
 	stepCtx, step := run.Step(ctx, stepSpec.Step)
 	callSpec := stepSpec.Inside[0].ModelCall
 	_, call := run.ModelCall(stepCtx, callSpec.Model, telmoni.ModelCallOptions{
-		Provider:      callSpec.Provider,
-		InputMessages: callSpec.InputMessages,
+		Provider:         callSpec.Provider,
+		InputMessages:    callSpec.InputMessages,
+		Temperature:      callSpec.Request.Temperature,
+		TopP:             callSpec.Request.TopP,
+		TopK:             callSpec.Request.TopK,
+		FrequencyPenalty: callSpec.Request.FrequencyPenalty,
+		PresencePenalty:  callSpec.Request.PresencePenalty,
+		MaxTokens:        callSpec.Request.MaxTokens,
+		Seed:             callSpec.Request.Seed,
 	})
 	call.Answered(telmoni.Answer{
-		ResponseModel: callSpec.ResponseModel,
+		ResponseModel:    callSpec.ResponseModel,
+		TimeToFirstToken: time.Duration(callSpec.TimeToFirstToken * float64(time.Second)),
 		Usage: &telmoni.Usage{
 			InputTokens:           callSpec.Usage.InputTokens,
 			OutputTokens:          callSpec.Usage.OutputTokens,

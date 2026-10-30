@@ -86,6 +86,7 @@ export const TraceSort = {
   OutputTokens: "output_tokens",
   Tokens:       "tokens",
   Duration:     "duration",
+  TimeToFirstToken: "time_to_first_token",
 } as const;
 export type TraceSort = typeof TraceSort[keyof typeof TraceSort];
 
@@ -112,6 +113,7 @@ export const TraceColumn = {
   CacheWriteTokens: "cache_write_tokens",
   Tokens:           "tokens",
   Duration:         "duration",
+  TimeToFirstToken: "time_to_first_token",
   Models:           "models",
   Tools:            "tools",
 } as const;

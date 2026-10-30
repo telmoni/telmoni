@@ -45,7 +45,8 @@ from .models import (
     Usage,
     WarningInfo,
     _blank,
-    _dollars,
+    _from_zero,
+    _number,
     check_rate,
 )
 
@@ -157,6 +158,13 @@ class Run(Handle):
         operation: str = contract.DEFAULT_MODEL_OPERATION,
         input_messages: object | None = None,
         system_instructions: object | None = None,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        top_k: float | None = None,
+        max_tokens: int | None = None,
+        frequency_penalty: float | None = None,
+        presence_penalty: float | None = None,
+        seed: int | None = None,
     ) -> Scope[ModelCall]:
         return self._client.model_call(
             model,
@@ -164,6 +172,13 @@ class Run(Handle):
             operation=operation,
             input_messages=input_messages,
             system_instructions=system_instructions,
+            temperature=temperature,
+            top_p=top_p,
+            top_k=top_k,
+            max_tokens=max_tokens,
+            frequency_penalty=frequency_penalty,
+            presence_penalty=presence_penalty,
+            seed=seed,
             run=self,
         )
 
@@ -197,9 +212,11 @@ class ModelCall(Handle):
         response_model: str | None = None,
         usage: Usage | None = None,
         output_messages: object | None = None,
+        time_to_first_token: float | None = None,
     ) -> None:
-        """What the model answered: its name, its tokens, and its messages. An
-        answer given after the call ended is not sent, and counts nothing."""
+        """What the model answered: its name, its tokens, its messages, and the
+        seconds to its first token. An answer given after the call ended is not
+        sent, and counts nothing."""
         warn_once = self._client.exporter.warn_once
         model = None
         # Ingest refuses the call over an empty one.
@@ -209,6 +226,17 @@ class ModelCall(Handle):
             model = _cut(named, contract.MODEL_MAX, "response model", warn_once)
         sent = _usage(usage, warn_once)
         messages = None if output_messages is None else _as_json(output_messages)
+        first_token = None
+        if time_to_first_token is not None:
+            # Ingest refuses the call over one below 0 or not finite, as a cost.
+            first_token = _from_zero(time_to_first_token)
+            if first_token is None:
+                warn_once(
+                    f"call:{contract.TIME_TO_FIRST_CHUNK}",
+                    f"telmoni: {contract.TIME_TO_FIRST_CHUNK} must be a finite "
+                    "number of seconds from 0; the call is sent without it",
+                    _INPUT,
+                )
         warning: tuple[str, str] | None = None
         with self._answering:
             if self._ended:
@@ -228,6 +256,8 @@ class ModelCall(Handle):
                 self._span.set_attributes(sent)
                 if messages is not None:
                     self._span.set_attribute(contract.OUTPUT_MESSAGES, messages)
+                if first_token is not None:
+                    self._span.set_attribute(contract.TIME_TO_FIRST_CHUNK, first_token)
                 self._held = {**self._held, **sent}
                 if self._run is not None:
                     warning = self._count(self._run)
@@ -518,6 +548,7 @@ class Opener:
         operation: str,
         input_messages: object | None,
         system_instructions: object | None,
+        request: Mapping[str, Any],
     ) -> ModelCall | None:
         run = run or self._outside("model_call")
         if run is None:
@@ -544,6 +575,24 @@ class Opener:
             attributes[contract.INPUT_MESSAGES] = _as_json(input_messages)
         if system_instructions is not None:
             attributes[contract.SYSTEM_INSTRUCTIONS] = _as_json(system_instructions)
+        for key, value in request.items():
+            if value is None:
+                continue
+            sent: float | None = None
+            if key in (contract.REQUEST_MAX_TOKENS, contract.REQUEST_SEED):
+                sent, must = _whole(value, _INT64), "a whole number within 64 bits"
+            else:
+                number = _number(value)
+                finite = number is not None and math.isfinite(number)
+                sent, must = (number if finite else None), "a finite number"
+            if sent is None:
+                warn_once(
+                    f"call:{key}",
+                    f"telmoni: {key} must be {must}; the call is sent without it",
+                    _INPUT,
+                )
+            else:
+                attributes[key] = sent
         call = self._child(run, ModelCall, name, attributes, SpanKind.CLIENT)
         call._run = run
         call._provider = provider
@@ -779,7 +828,7 @@ def _usage(
         else:
             out[key] = count
     if usage.cost is not None:
-        cost = _dollars(usage.cost)
+        cost = _from_zero(usage.cost)
         if cost is None:
             warn_once(
                 f"usage:{contract.COST}",
@@ -1131,6 +1180,7 @@ def _close(
 
 # What ingest takes: a token count from 0 that fits 64 bits.
 _COUNT = range(2**63)
+_INT64 = range(-(2**63), 2**63)
 
 
 def _whole(value: float, allowed: range) -> int | None:

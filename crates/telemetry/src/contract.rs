@@ -152,6 +152,8 @@ pub const CACHE_WRITE_INPUT_TOKENS: &str = "gen_ai.usage.cache_write.input_token
 /// What the call cost in US dollars, as reported: Langfuse's name, since the
 /// conventions have none.
 pub const COST: &str = "gen_ai.usage.cost";
+/// Seconds from a model call's request to its answer's first chunk.
+pub const TIME_TO_FIRST_CHUNK: &str = "gen_ai.response.time_to_first_chunk";
 /// The session a span belongs to, under the conventions' name for it.
 pub const SESSION_ID: &str = "gen_ai.conversation.id";
 
@@ -243,6 +245,13 @@ pub const INVENTORY_SPAN: &[&str] = &[
     "gen_ai.response.finish_reasons",
     "gen_ai.response.status",
     "gen_ai.request.reasoning.level",
+    "gen_ai.request.temperature",
+    "gen_ai.request.top_p",
+    "gen_ai.request.top_k",
+    "gen_ai.request.max_tokens",
+    "gen_ai.request.frequency_penalty",
+    "gen_ai.request.presence_penalty",
+    "gen_ai.request.seed",
     "gen_ai.agent.version",
     "gen_ai.tool.call.id",
     "gen_ai.tool.type",
@@ -307,6 +316,7 @@ pub const FIELDS: &[&str] = &[
     CACHE_READ_INPUT_TOKENS,
     CACHE_WRITE_INPUT_TOKENS,
     COST,
+    TIME_TO_FIRST_CHUNK,
     SESSION_ID,
 ];
 
@@ -633,6 +643,13 @@ pub const INVENTORY: &[InventoryRow] = &[
          is priced by its tokens",
     ),
     row(
+        TIME_TO_FIRST_CHUNK,
+        ReadOn::ModelCall,
+        "the column time_to_first_token",
+        Needs::AnyMode,
+        "a number of seconds, 0 or more: from the call's request to its answer's first chunk",
+    ),
+    row(
         SESSION_ID,
         ReadOn::AnySpan,
         "the column session_id",
@@ -706,6 +723,55 @@ pub const INVENTORY: &[InventoryRow] = &[
     ),
     row(
         "gen_ai.request.reasoning.level",
+        ReadOn::ModelCall,
+        KEPT_ATTRIBUTE,
+        Needs::AnyMode,
+        RULE_ATTRIBUTE,
+    ),
+    row(
+        "gen_ai.request.temperature",
+        ReadOn::ModelCall,
+        KEPT_ATTRIBUTE,
+        Needs::AnyMode,
+        RULE_ATTRIBUTE,
+    ),
+    row(
+        "gen_ai.request.top_p",
+        ReadOn::ModelCall,
+        KEPT_ATTRIBUTE,
+        Needs::AnyMode,
+        RULE_ATTRIBUTE,
+    ),
+    row(
+        "gen_ai.request.top_k",
+        ReadOn::ModelCall,
+        KEPT_ATTRIBUTE,
+        Needs::AnyMode,
+        RULE_ATTRIBUTE,
+    ),
+    row(
+        "gen_ai.request.max_tokens",
+        ReadOn::ModelCall,
+        KEPT_ATTRIBUTE,
+        Needs::AnyMode,
+        RULE_ATTRIBUTE,
+    ),
+    row(
+        "gen_ai.request.frequency_penalty",
+        ReadOn::ModelCall,
+        KEPT_ATTRIBUTE,
+        Needs::AnyMode,
+        RULE_ATTRIBUTE,
+    ),
+    row(
+        "gen_ai.request.presence_penalty",
+        ReadOn::ModelCall,
+        KEPT_ATTRIBUTE,
+        Needs::AnyMode,
+        RULE_ATTRIBUTE,
+    ),
+    row(
+        "gen_ai.request.seed",
         ReadOn::ModelCall,
         KEPT_ATTRIBUTE,
         Needs::AnyMode,

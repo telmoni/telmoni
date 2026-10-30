@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	telmoni "github.com/telmoni/telmoni/sdk/go"
 )
@@ -120,6 +121,90 @@ func TestATokenCountBelowZeroIsLeftOffItsCallWithOneWarning(t *testing.T) {
 	if warnings := h.logs.warnings(); !reflect.DeepEqual(warnings, wantWarnings) {
 		t.Errorf("warnings = %q\nwant one for each count: %q", warnings, wantWarnings)
 	}
+}
+
+// The parameters a call was asked with go typed, a 0 among them, and none
+// not given.
+func TestAModelCallCarriesTheParametersItWasAskedWith(t *testing.T) {
+	h := newHarness(t, testConfig(), nil)
+	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	zero, topP, topK, frequency, presence := 0.0, 0.9, 40.0, 0.5, -0.5
+	maxTokens, seed := int64(256), int64(0)
+	_, call := run.ModelCall(ctx, "asked", telmoni.ModelCallOptions{
+		Temperature:      &zero,
+		TopP:             &topP,
+		TopK:             &topK,
+		FrequencyPenalty: &frequency,
+		PresencePenalty:  &presence,
+		MaxTokens:        &maxTokens,
+		Seed:             &seed,
+	})
+	call.End()
+	_, call = run.ModelCall(ctx, "unasked", telmoni.ModelCallOptions{})
+	call.End()
+	run.End()
+	h.flush()
+	spans := byName(calls(t, h))
+	want := map[string]any{
+		"gen_ai.request.temperature":       0.0,
+		"gen_ai.request.top_p":             0.9,
+		"gen_ai.request.top_k":             40.0,
+		"gen_ai.request.frequency_penalty": 0.5,
+		"gen_ai.request.presence_penalty":  -0.5,
+		"gen_ai.request.max_tokens":        int64(256),
+		"gen_ai.request.seed":              int64(0),
+	}
+	asked := attributesOf(t, spans["chat asked"])
+	for key, value := range want {
+		if asked[key] != value {
+			t.Errorf("%s = %#v, want %#v", key, asked[key], value)
+		}
+	}
+	unasked := attributesOf(t, spans["chat unasked"])
+	for key := range want {
+		if value, ok := unasked[key]; ok {
+			t.Errorf("%s = %v on a call not asked with it", key, value)
+		}
+	}
+}
+
+// A time to first token goes in seconds; one below 0 is left off with one
+// warning, and the call is still sent.
+func TestATimeToFirstTokenGoesInSecondsAndOneBelowZeroIsLeftOff(t *testing.T) {
+	h := newHarness(t, testConfig(), nil)
+	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	_, call := run.ModelCall(ctx, "streamed", telmoni.ModelCallOptions{})
+	call.Answered(telmoni.Answer{TimeToFirstToken: 350 * time.Millisecond})
+	call.End()
+	for range 2 {
+		_, call = run.ModelCall(ctx, "backwards", telmoni.ModelCallOptions{})
+		call.Answered(telmoni.Answer{TimeToFirstToken: -time.Millisecond})
+		call.End()
+	}
+	_, call = run.ModelCall(ctx, "whole", telmoni.ModelCallOptions{})
+	call.Answered(telmoni.Answer{})
+	call.End()
+	run.End()
+	h.flush()
+	spans := calls(t, h)
+	if len(spans) != 4 {
+		t.Fatalf("want four model calls, got %v", sortedNames(spans))
+	}
+	for _, span := range spans {
+		got, ok := attributesOf(t, span)["gen_ai.response.time_to_first_chunk"]
+		if span["name"] == "chat streamed" {
+			if got != 0.35 {
+				t.Errorf("time to first token = %#v, want 0.35", got)
+			}
+		} else if ok {
+			t.Errorf("%v carries a time to first token of %v", span["name"], got)
+		}
+	}
+	want := []string{"telmoni: gen_ai.response.time_to_first_chunk must be a duration from 0; the call is sent without it"}
+	if got := h.logs.warnings(); !reflect.DeepEqual(got, want) {
+		t.Errorf("warnings = %q, want %q", got, want)
+	}
+	expectFields(t, h, map[string]any{"kind": "input"})
 }
 
 // A blank operation is chat, as one left out is: sent blank, the span would

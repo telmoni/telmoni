@@ -18,7 +18,7 @@ from decimal import Decimal
 from importlib import resources
 from typing import NamedTuple
 
-from .models import Price, _dollars
+from .models import Price, _from_zero
 
 
 class CapExceededError(RuntimeError):
@@ -181,7 +181,7 @@ def caps(max_steps: object, max_spend: object) -> tuple[int | None, float | None
         isinstance(max_steps, bool) or not isinstance(max_steps, int) or max_steps < 1
     ):
         raise ValueError("max_steps must be a whole number above 0")
-    spend = None if max_spend is None else _dollars(max_spend)
+    spend = None if max_spend is None else _from_zero(max_spend)
     if max_spend is not None and not spend:
         raise ValueError("max_spend must be a finite number of US dollars above 0")
     return max_steps, spend
