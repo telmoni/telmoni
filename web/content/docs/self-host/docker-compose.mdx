@@ -37,13 +37,13 @@ The compose file is `deploy/compose/docker-compose.yml`.
 
 **Generate secrets and configure environment variables**
 
-Compose reads `.env` from the compose file's directory. With `docker compose -f deploy/compose/docker-compose.yml`, the environment file is `deploy/compose/.env`. Create it from scratch with the keys shown below, not from the repository's root `.env.example`: that file is the development stack's. It points mail at a local Mailpit, which this stack does not run, and names hosted model endpoints.
+Compose reads `.env` from the compose file's directory. With `docker compose -f deploy/compose/docker-compose.yml`, the environment file is `deploy/compose/.env`. Copy it from the example beside the compose file, not from the repository's root `.env.example`: that file is the development stack's. It points mail at a local Mailpit, which this stack does not run, and names hosted model endpoints.
 
 ```bash
-touch deploy/compose/.env
+cp deploy/compose/.env.example deploy/compose/.env
 ```
 
-Five values have no default, and the stack does not start without them:
+Five values have no default, and `up` refuses to start without them, naming the one missing:
 - `SERVICE_SECRET`: A shared secret the web console sends to the backend server as the `x-service-secret` header on every internal call, compared in constant time.
 - `AUTH_SECRET`: A secret of 32 bytes or more used to seal and decrypt session cookies.
 - `POSTGRES_PASSWORD`: The password of the stack's one database user. A default in the compose file would be the same on every install.
@@ -62,7 +62,7 @@ openssl rand -hex 32
 Update `deploy/compose/.env` with the generated values and set your initial administrator credentials:
 
 ```sh
-# Secrets: the first five have no default, and the stack does not start without them
+# Secrets: the first five have no default, and `up` refuses to start without them
 SERVICE_SECRET=f3b9c7e2a1d4...      # Output from openssl rand -hex 32
 AUTH_SECRET=8e6a1c5d0f2b...         # Output from openssl rand -hex 32
 POSTGRES_PASSWORD=4c7d2e9f1a6b...   # Output from openssl rand -hex 32
@@ -106,17 +106,19 @@ The compose file also passes the server these sign-in settings from this file, e
 
 **Start the Telmoni stack**
 
-Run the compose file in detached mode:
+Run the compose file in detached mode, waiting for the stack to come up:
 
 ```bash
-docker compose -f deploy/compose/docker-compose.yml up -d
+docker compose -f deploy/compose/docker-compose.yml up -d --wait
 ```
+
+`--wait` returns once the console's healthcheck passes, and fails when a container exits instead, as the server or the console does on a value it refuses (an `AUTH_SECRET` under 32 bytes, a `TELEMETRY_KEK` that is not 64 hex characters); `docker compose -f deploy/compose/docker-compose.yml logs server web` then names it.
 
 Compose starts the services in dependency order:
 1. Starts `postgres`, `clickhouse` and `redis`, each published on the host's loopback interface only (`127.0.0.1:5432`, `127.0.0.1:8123` and `127.0.0.1:6379`), and waits for their healthchecks.
 2. Once Postgres and ClickHouse are healthy, runs the one-shot `migrate` container, which applies every schema's DDL, writes the model prices, then ClickHouse's database and tables, and exits `0`. This quickstart runs every module as the one database user, which owns every table, so the object grants for separate roles are skipped with a note in its log.
-3. Starts the `server` container once `migrate` has exited `0`. It listens on port `8082` inside the compose network, published on the host's loopback interface alone (`127.0.0.1:8082`) for the machine lanes — ingest at `/otlp/v1/traces`, where the SDKs send; the read API under `/v1`; the CLI's sign-in under `/cli/v1`; Slack's signed events at `/webhooks/v1/slack` — which your reverse proxy forwards there by path or on a host of its own ([Production → Reverse proxy configuration](/docs/self-host/production#reverse-proxy-configuration)); an SDK or the CLI on the host itself may use `http://localhost:8082` directly. The console's lanes share the port, behind the service secret, and are the console's to call.
-4. Starts the `web` container once the server container has started (Compose does not wait for the server to answer) and Redis is healthy, publishing port `3000` on every interface of the host, unlike the server, Postgres, ClickHouse and Redis; keep it behind your firewall and TLS proxy.
+3. Starts the `server` container once `migrate` has exited `0`. It listens on port `8082` inside the compose network, published on the host's loopback interface alone (`127.0.0.1:8082`) for the machine lanes — ingest at `/otlp/v1/traces`, where the SDKs send; the read API under `/v1`; the CLI's sign-in under `/cli/v1`; Slack's signed events at `/webhooks/v1/slack`; the heartbeat at `/heartbeat` — which your reverse proxy forwards there by path or on a host of its own ([Production → Reverse proxy configuration](/docs/self-host/production#reverse-proxy-configuration)); an SDK or the CLI on the host itself may use `http://localhost:8082` directly. The console's lanes share the port, behind the service secret, and are the console's to call.
+4. Starts the `web` container once the server container has started (Compose does not wait for the server to answer) and Redis is healthy, publishing port `3000` on the host's loopback interface alone (`127.0.0.1:3000`), as the server's is, for the TLS proxy on the same host. Docker publishes a port ahead of the host's firewall, so a port on every interface would be open whatever `ufw` or `firewalld` say, and a caller reaching the console directly could write its own address into the per-address sign-in limits. A proxy on another host needs `TELMONI_WEB_BIND=0.0.0.0` in `deploy/compose/.env`, which publishes it on every interface; firewall it then by other means.
 
 </Step>
 
@@ -130,7 +132,7 @@ Check running containers:
 docker compose -f deploy/compose/docker-compose.yml ps
 ```
 
-Postgres, ClickHouse and Redis run as `telmoni-postgres`, `telmoni-clickhouse` and `telmoni-redis` (`pgvector/pgvector:pg17`, `clickhouse/clickhouse-server:26.8.19.9` and `redis:7-alpine`), and their healthchecks show them `(healthy)`. ClickHouse is capped at 1.5 GiB of memory, which it takes as its ceiling; raise `mem_limit` in the compose file on a bigger host. The `server` and `web` containers (and `ollama` when running with `--profile agent`) take the compose project's name, `telmoni-selfhost-<service>-1`, and run `ghcr.io/telmoni/server:latest` and `ghcr.io/telmoni/web:latest` (built for `linux/amd64` only). Each image is also tagged with the full SHA of the commit it was built from; `TELMONI_IMAGE_SERVER` and `TELMONI_IMAGE_WEB` in `deploy/compose/.env` pin one. They have no healthcheck, so they show `Up` alone. The server image's entrypoint is `/app/telmoni-server`, so its command reads `/app/telmoni-server serve`.
+Postgres, ClickHouse and Redis run as `telmoni-postgres`, `telmoni-clickhouse` and `telmoni-redis` (`pgvector/pgvector:pg17`, `clickhouse/clickhouse-server:26.8.19.9` and `redis:7-alpine`), and their healthchecks show them `(healthy)`. ClickHouse is capped at 1.5 GiB of memory, which it takes as its ceiling; raise `mem_limit` in the compose file on a bigger host. The `server` and `web` containers (and `ollama` when running with `--profile agent`) take the compose project's name, `telmoni-selfhost-<service>-1`, and run `ghcr.io/telmoni/server:latest` and `ghcr.io/telmoni/web:latest` (built for `linux/amd64` only). Each image is also tagged with the full SHA of the commit it was built from; `TELMONI_IMAGE_SERVER` and `TELMONI_IMAGE_WEB` in `deploy/compose/.env` pin both to one ([Upgrading](#upgrading)). The console's healthcheck asks its `/api/health`, so it shows `(healthy)`; the server has none (its image has no shell to run one), so it shows `Up` alone. The server image's entrypoint is `/app/telmoni-server`, so its command reads `/app/telmoni-server serve`.
 
 The one-shot `migrate` container has exited by then, as `telmoni-selfhost-migrate-1` with `Exited (0)` and the command `/app/telmoni-server migrate`. It appears only when listing all containers:
 
@@ -211,14 +213,22 @@ docker compose -f deploy/compose/docker-compose.yml run --rm migrate rotate
 
 ### Upgrading
 
-The Compose file runs the images tagged `latest`, unless `TELMONI_IMAGE_SERVER` and `TELMONI_IMAGE_WEB` name others, and `up -d` pulls an image only when the host has none, so pull first (with `--profile agent` on both if you run the agent):
+The Compose file runs the images tagged `latest` unless `TELMONI_IMAGE_SERVER` and `TELMONI_IMAGE_WEB` name others. Pin both to one commit, the full SHA of a commit the [server package page](https://github.com/telmoni/telmoni/pkgs/container/server) lists, and upgrade by moving the pin: the console and the server change their contract with each other in place before Telmoni's first release, so a pair from two commits can fail. `up -d` pulls an image only when the host has none, so pull first, then run the migration alone, then start the rest (with `--profile agent` on each if you run the agent):
 
 ```bash
 docker compose -f deploy/compose/docker-compose.yml pull
-docker compose -f deploy/compose/docker-compose.yml up -d
+docker compose -f deploy/compose/docker-compose.yml run --rm migrate
+docker compose -f deploy/compose/docker-compose.yml up -d --wait
 ```
 
-The `migrate` service runs the new release's migrations before the server starts.
+`run --rm migrate` first: a migration it refuses leaves the running server and console as they were.
+
+Before Telmoni's first release its migrations are edited in place rather than added to, so an upgrade across such an edit is refused: `migrate` exits naming the schema whose applied migration has changed, or ClickHouse's ledger whose digest differs. The way forward is to make both stores again, which deletes every organization, project and span:
+
+```bash
+docker compose -f deploy/compose/docker-compose.yml down -v
+docker compose -f deploy/compose/docker-compose.yml up -d --wait
+```
 
 ### Stopping the stack
 

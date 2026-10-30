@@ -263,7 +263,16 @@ async fn run_migrations(
         .await?;
 
     let migrator = sqlx::migrate::Migrator::new(set.dir.as_path()).await?;
-    migrator.run(&pool).await?;
+    migrator.run(&pool).await.map_err(|e| match e {
+        sqlx::migrate::MigrateError::VersionMismatch(_)
+        | sqlx::migrate::MigrateError::VersionMissing(_) => anyhow::anyhow!(
+            "{}: {e}; before launch a migration is edited in place, so a schema made from an \
+             older file is made again: `make db-reset` on a laptop, `down -v` under Compose; \
+             elsewhere drop the schema and run `migrate` again",
+            set.schema
+        ),
+        other => other.into(),
+    })?;
 
     tracing::info!(
         migrations_dir = %set.dir.display(),

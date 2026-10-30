@@ -3,11 +3,8 @@
 # runs first.
 #
 # Quickstart:
-#   1. Write .env beside this file with the keys the docs list
-#      (telmoni.com/docs/self-host/docker-compose) — not a copy of the
-#      repository's root .env.example, which is the development stack's and
-#      names services this stack does not run. Five values have no default
-#      and the stack does not start without them:
+#   1. cp deploy/compose/.env.example deploy/compose/.env, and fill its first
+#      five, which have no default: `up` refuses to start without them.
 #      SERVICE_SECRET (any random string; both processes get the same one),
 #      AUTH_SECRET (the console's cookie seal, 32 bytes or more),
 #      POSTGRES_PASSWORD and CLICKHOUSE_PASSWORD (each store's one user's; a
@@ -21,12 +18,19 @@
 #      CONNECTOR_KEK=local:<openssl rand -hex 32>, which seals their grants
 #      at rest: a secret to back up beside the database, since a dump
 #      restored without it leaves every grant unreadable.
-#   2. Run: docker compose -f deploy/compose/docker-compose.yml up -d
-#   3. The console answers on :3000, and the machine lanes — ingest at
-#      /otlp/v1/traces, where the SDKs send; the read API under /v1; the
-#      CLI's sign-in under /cli/v1; Slack's events at /webhooks/v1/slack —
-#      on 127.0.0.1:8082; the reverse proxy in front
+#   2. Run: docker compose -f deploy/compose/docker-compose.yml up -d --wait
+#      (--wait fails when a container exits, as one with a bad value does).
+#   3. The console answers on 127.0.0.1:3000, and the machine lanes — ingest
+#      at /otlp/v1/traces, where the SDKs send; the read API under /v1; the
+#      CLI's sign-in under /cli/v1; Slack's events at /webhooks/v1/slack; the
+#      heartbeat at /heartbeat — on 127.0.0.1:8082; the reverse proxy in front
 #      (telmoni.com/docs/self-host/production) forwards each.
+#
+# Upgrading: pin both images to one commit (TELMONI_IMAGE_SERVER and
+# TELMONI_IMAGE_WEB), move the pin, then `pull`, `run --rm migrate` and
+# `up -d --wait`, so a refused migration leaves the running stack as it was.
+# Before Telmoni's first release its migrations are edited in place, and an
+# upgrade across such an edit needs both stores made again (`down -v`).
 #
 # The server runs its own sweeps on a timer (the deletion saga, retention, the
 # daily audit walk, the audit exports' retries and expiry), so nothing here
@@ -186,7 +190,7 @@ services:
       TELEMETRY_CLICKHOUSE_URL: *clickhouse_url
       # The key each project's hashing key is sealed under; no default, since
       # one shipped here would be the same on every install.
-      TELEMETRY_KEK: ${TELEMETRY_KEK}
+      TELEMETRY_KEK: ${TELEMETRY_KEK:?set TELEMETRY_KEK in deploy/compose/.env as local:<openssl rand -hex 32>}
       # An ingest key of a project of your own: the console agent reports its
       # questions as runs through this server's own door, as any agent does;
       # empty for none.
@@ -197,7 +201,7 @@ services:
       # the machine lanes' per-address limits read it there, as the console's
       # do. 0 when the server is reached directly.
       TRUSTED_PROXY_HOPS: ${TRUSTED_PROXY_HOPS:-1}
-      SERVICE_SECRET: ${SERVICE_SECRET}
+      SERVICE_SECRET: ${SERVICE_SECRET:?set SERVICE_SECRET in deploy/compose/.env}
       APP_URL: ${APP_URL:-http://localhost:3000}
       # The login form is on unless AUTH_DISABLE_USERNAME_PASSWORD; nobody
       # new signs up, at the form or
@@ -268,8 +272,12 @@ services:
   web:
     image: ${TELMONI_IMAGE_WEB:-ghcr.io/telmoni/web:latest}
     restart: unless-stopped
+    # Loopback, for the reverse proxy on this host, as the server's 8082 is:
+    # Docker publishes ahead of the host's firewall, and a caller reaching
+    # the console directly writes its own address into the sign-in limits.
+    # TELMONI_WEB_BIND=0.0.0.0 publishes it on every interface.
     ports:
-      - "3000:3000"
+      - "${TELMONI_WEB_BIND:-127.0.0.1}:3000:3000"
     depends_on:
       server:
         condition: service_started
@@ -277,12 +285,19 @@ services:
         condition: service_healthy
     networks:
       - telmoni-net
+    # Distroless keeps `node` off PATH, and has no shell or curl.
+    healthcheck:
+      test: ["CMD", "/nodejs/bin/node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
     environment:
       PORT: "3000"
       NODE_ENV: production
       AUTH_URL: ${AUTH_URL:-http://localhost:3000}
-      AUTH_SECRET: ${AUTH_SECRET}
-      SERVICE_SECRET: ${SERVICE_SECRET}
+      AUTH_SECRET: ${AUTH_SECRET:?set AUTH_SECRET in deploy/compose/.env, 32 bytes or more}
+      SERVICE_SECRET: ${SERVICE_SECRET:?set SERVICE_SECRET in deploy/compose/.env}
       SERVER_URL: http://server:8082
       REDIS_URL: redis://redis:6379
       # How many entries the proxy in front appends to X-Forwarded-For: the

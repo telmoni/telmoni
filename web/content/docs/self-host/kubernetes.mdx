@@ -239,6 +239,8 @@ helm upgrade telmoni ./deploy/charts/telmoni \
   --set global.imageTag=<commit SHA>
 ```
 
+Before Telmoni's first release its migrations are edited in place rather than added to, so an upgrade across such an edit is refused: the migration Job fails naming the schema whose applied migration has changed, or ClickHouse's ledger whose digest differs, and the upgrade stops before any pod rolls, the old release still serving. The way forward is to make both stores again, which deletes every organization, project and span: drop the Postgres schemas and ClickHouse's `telemetry` database with its row policies, as an administrator, then run the upgrade again.
+
 ---
 
 ## Kubernetes security & isolation

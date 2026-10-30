@@ -195,7 +195,7 @@ $ docker compose -f deploy/compose/docker-compose.yml run --rm \
     migrate
 ```
 
-After every run the migrator applies `object_grants.sql`. It grants each module's role `SELECT`, `INSERT`, `UPDATE` and `DELETE` on its own schema, and `SELECT` and `INSERT` on `audit.events` to `auth`, `notifications` and `telemetry`. It takes back the module roles' writes to the tables only the owner or a maintenance lane writes (the feature-flag tables, the model prices, the delivery log, the agent's erasure fences), and `telemetry`'s deletes from the project settings its maintenance lane purges. When any of the four module roles is missing, as in the Compose quickstart, the grants are skipped with a warning naming it. Then it writes the model prices the binary carries over `telemetry.model_prices`, replacing the last run's. Then it creates ClickHouse's `telemetry` database, its tables and their row policies, every statement `IF NOT EXISTS`, so a second run changes nothing. The database records the digest of the statements it was made from, and a release whose statements differ refuses to run over it rather than skip the difference: before Telmoni's first release, that means recreating ClickHouse's volume.
+After every run the migrator applies `object_grants.sql`. It grants each module's role `SELECT`, `INSERT`, `UPDATE` and `DELETE` on its own schema, and `SELECT` and `INSERT` on `audit.events` to `auth`, `notifications` and `telemetry`. It takes back the module roles' writes to the tables only the owner or a maintenance lane writes (the feature-flag tables, the model prices, the delivery log, the agent's erasure fences), and `telemetry`'s deletes from the project settings its maintenance lane purges. When any of the four module roles is missing, as in the Compose quickstart, the grants are skipped with a warning naming it. Then it writes the model prices the binary carries over `telemetry.model_prices`, replacing the last run's. Then it creates ClickHouse's `telemetry` database, its tables and their row policies, every statement `IF NOT EXISTS`, so a second run changes nothing. The database records the digest of the statements it was made from, and a release whose statements differ refuses to run over it rather than skip the difference: before Telmoni's first release, that means making the stores again ([Docker Compose → Upgrading](/docs/self-host/docker-compose#upgrading), [Kubernetes → Upgrading](/docs/self-host/kubernetes#upgrading)).
 
 </Step>
 
@@ -314,7 +314,7 @@ telmoni-server terminate org_019a0b8c3f2e7d41
 
 ## Reverse proxy configuration
 
-In production, place Telmoni behind a reverse proxy that terminates TLS and forwards the console's host to the web console on port `3000`, and the machine lanes — ingest at `/otlp/v1/traces`, where the SDKs send; the read API under `/v1`; the CLI's sign-in under `/cli/v1`; and Slack's signed events at `/webhooks/v1/slack` — and the [heartbeat](#the-heartbeat) at `/heartbeat` to the server on port `8082`: on a host of their own (`api.telmoni.example.com`, which is then the SDKs' and the CLI's `endpoint`) or under their paths on the console's host (then the endpoint). Forward only those paths to `8082`: on that port every other lane but the health probes (`/health`, `/livez`) requires the service secret and is the console's to call, and a person's every request enters through the console. Never expose either port directly to the public internet. The Compose file publishes `3000` on every interface of the host, so firewall it, or publish it on `127.0.0.1` alone with a Compose override; it publishes `8082` on `127.0.0.1` already, for the proxy on the same host. The server reads `TRUSTED_PROXY_HOPS` as the console does, so the machine lanes' per-address limits find the caller's address past the same proxies.
+In production, place Telmoni behind a reverse proxy that terminates TLS and forwards the console's host to the web console on port `3000`, and the machine lanes — ingest at `/otlp/v1/traces`, where the SDKs send; the read API under `/v1`; the CLI's sign-in under `/cli/v1`; and Slack's signed events at `/webhooks/v1/slack` — and the [heartbeat](#the-heartbeat) at `/heartbeat` to the server on port `8082`: on a host of their own (`api.telmoni.example.com`, which is then the SDKs' and the CLI's `endpoint`) or under their paths on the console's host (then the endpoint). Forward only those paths to `8082`: on that port every other lane but the health probes (`/health`, `/livez`) requires the service secret and is the console's to call, and a person's every request enters through the console. Never expose either port directly to the public internet. The Compose file publishes both on `127.0.0.1` alone, for the proxy on the same host; a proxy on another host needs `TELMONI_WEB_BIND=0.0.0.0`, which publishes `3000` on every interface, ahead of the host's firewall, so close it there by other means. The server reads `TRUSTED_PROXY_HOPS` as the console does, so the machine lanes' per-address limits find the caller's address past the same proxies.
 
 **What the console expects of the proxy.** The console's rate limiter takes each caller's address from `X-Forwarded-For`, counting `TRUSTED_PROXY_HOPS` entries back from the end: one for each entry the proxies in front append, so that entry is the first one no caller wrote. An IPv6 address is counted by its /64, the block one subscriber holds, as the server's machine lanes count it. The Compose file sets `TRUSTED_PROXY_HOPS=1` for the single reverse proxy below, which may set `X-Forwarded-For` to the client's address, as both configurations do, or append it to whatever the client sent; either way the last entry is the client's. Count every entry an outer hop appends as well: a plain load balancer in front of the proxy adds one (`2`), Google's load balancer adds two — the client's address and then its own, which is why the Helm chart's default is `2` with nothing else in front, and `3` with an appending proxy behind it. `0` is for nothing in front at all, and leaves the per-address limits to the caller's own header. `X-Real-IP` is not read.
 
@@ -332,10 +332,10 @@ The server speaks HTTP/1.1 alone, and gives each connection 620 seconds from its
         encode zstd gzip
 
         # The machine lanes, by path: ingest, where the SDKs send, the read
-        # API, the CLI's sign-in and Slack's events. On a host of their own
-        # instead, give that host a site block holding this handle alone, and
-        # set it as the SDKs' and the CLI's endpoint.
-        @machines path /otlp/* /v1/* /cli/* /webhooks/v1/slack
+        # API, the CLI's sign-in, Slack's events and the heartbeat. On a host
+        # of their own instead, give that host a site block holding this
+        # handle alone, and set it as the SDKs' and the CLI's endpoint.
+        @machines path /otlp/* /v1/* /cli/* /webhooks/v1/slack /heartbeat
         handle @machines {
             reverse_proxy localhost:8082 {
                 header_up X-Forwarded-For {remote_host}
@@ -377,10 +377,10 @@ The server speaks HTTP/1.1 alone, and gives each connection 620 seconds from its
         client_max_body_size 25M;
 
         # The machine lanes, by path: ingest, where the SDKs send, the read
-        # API, the CLI's sign-in and Slack's events. On a host of their own
-        # instead, give that host a server block holding this location alone,
-        # and set it as the SDKs' and the CLI's endpoint.
-        location ~ ^/(otlp|v1|cli)/|^/webhooks/v1/slack$ {
+        # API, the CLI's sign-in, Slack's events and the heartbeat. On a host
+        # of their own instead, give that host a server block holding this
+        # location alone, and set it as the SDKs' and the CLI's endpoint.
+        location ~ ^/(otlp|v1|cli)/|^/(webhooks/v1/slack|heartbeat)$ {
             proxy_pass http://127.0.0.1:8082;
             proxy_http_version 1.1;
             proxy_set_header Host $host;

@@ -97,7 +97,7 @@ The project's **Traces** page shows the run with its model call, tokens and timi
 
 Both paths pull the images [`publish.yml`](.github/workflows/publish.yml) publishes to the GitHub Container Registry, `ghcr.io/telmoni/server` and `ghcr.io/telmoni/web` (linux/amd64):
 
-- **[Docker Compose](https://telmoni.com/docs/self-host/docker-compose)**: `deploy/compose/docker-compose.yml` runs the server, the console, PostgreSQL, ClickHouse and Redis on one machine. Write its `.env` once, then `docker compose -f deploy/compose/docker-compose.yml up -d`.
+- **[Docker Compose](https://telmoni.com/docs/self-host/docker-compose)**: `deploy/compose/docker-compose.yml` runs the server, the console, PostgreSQL, ClickHouse and Redis on one machine. Copy `deploy/compose/.env.example` to `deploy/compose/.env`, fill its five secrets, then `docker compose -f deploy/compose/docker-compose.yml up -d --wait`.
 - **[Kubernetes](https://telmoni.com/docs/self-host/kubernetes)**: the chart in `deploy/charts/telmoni` deploys the server, the console and the migration job.
 
 Configuration comes only from the environment ([every setting](https://telmoni.com/docs/self-host/configuration)); [Production](https://telmoni.com/docs/self-host/production) covers OIDC, database role hardening, the reverse proxy and backups. A self-hosted Telmoni phones nothing home: the server calls only the services you configure.
