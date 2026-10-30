@@ -449,7 +449,7 @@ flowchart LR
 - **Two doors.** The console's, for people; and the machine lanes' — ingest at `/otlp/v1/traces`, the read API under `/v1`, the CLI's session lanes under `/cli/v1` and Slack's events at `/webhooks/v1/slack` — on a Service of their own, `server-api`, routed on a host of their own (`ingress.apiHost`) or by path on the console's host, whose slugs are reserved for them, and only the lanes' paths either way: every other lane of the server is the console's to call, behind the service secret, and each machine lane has a gate of its own, a project API key, the CLI's device code or bearer, or Slack's signature. The server reads `TRUSTED_PROXY_HOPS` from the same ConfigMap value the console does (`web.trustedProxyHops`), since both sit behind the same Gateway.
 - **Order:** the ConfigMap and the migrator's account as hooks, then the migration, then the rollout; a failed migration fails the upgrade before anything rolls.
 - **Compose** runs the whole of it on one machine, every module as one superuser, ClickHouse as one user, and `rotate` by hand; it publishes the console, and the server's port on loopback alone, for the reverse proxy on the host to forward the machine lanes to.
-- **CI** checks, tests against Postgres and ClickHouse, and lints and renders the chart and parses the compose file, as `make deploy-check` does; `publish.yml` pushes the `web` and `server` images once CI passes on `main`; nothing deploys.
+- **CI** checks, tests against Postgres and ClickHouse, and lints and renders the chart and parses the compose file, as `make deploy-check` does; nothing is published or deployed: a deployment builds the `server` and `web` images from its checkout.
 
 ## Extending the core
 

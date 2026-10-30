@@ -58,7 +58,7 @@ When moving from a local evaluation or single-node Docker quickstart to a produc
 
 ## System requirements
 
-- **Platform**: The published images are built for `linux/amd64` only. Building your own does not change that for the server, whose Dockerfile compiles for x86_64 alone.
+- **Platform**: No image is published; you build both from a checkout, for `linux/amd64` only, since the server's Dockerfile compiles for x86_64 alone.
 - **Database**: PostgreSQL with the `vector` extension at pgvector 0.8 or later; the Compose stack runs `pgvector/pgvector:0.8.7-pg17`.
 - **ClickHouse**: One node, reached over its HTTP interface; the Compose stack runs `clickhouse/clickhouse-server:26.8.19.9`. Its server must allow custom settings under the `SQL_` prefix, as it does unless `custom_settings_prefixes` is changed.
 - **Redis**: One endpoint, shared by the console and the server; the Compose stack runs `redis:7.4-alpine`.

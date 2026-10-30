@@ -1,11 +1,11 @@
 global:
-  # Where the server and web images are pulled from: the ones this repository
-  # publishes, so the chart installs as it ships. A deployment with its own
-  # registry points this at it.
-  imageRegistry: "ghcr.io/telmoni"
-  # The full SHA of the commit this chart is checked out at, for both images
-  # (each commit CI passed on main is published under its SHA). Required: a
-  # moving tag leaves each node on the one it pulled first.
+  # The registry the server and web images are pulled from, which you build
+  # from this checkout and push there yourself: none is published. Empty, a
+  # render pulls nothing that runs.
+  imageRegistry: ""
+  # The full SHA of the commit this chart is checked out at, which both images
+  # are tagged with as you build them. Required: a moving tag leaves each node
+  # on the one it pulled first.
   imageTag: ""
   imagePullPolicy: IfNotPresent
 

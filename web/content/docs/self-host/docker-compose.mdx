@@ -106,10 +106,10 @@ The compose file also passes the server these sign-in settings from this file, e
 
 **Start the Telmoni stack**
 
-Run the compose file in detached mode, waiting for the stack to come up:
+Run the compose file in detached mode, waiting for the stack to come up. No image is published, so `--build` builds the server and console images from your checkout first, which takes some minutes the first time:
 
 ```bash
-docker compose -f deploy/compose/docker-compose.yml up -d --wait --wait-timeout 180
+docker compose -f deploy/compose/docker-compose.yml up -d --build --wait --wait-timeout 180
 ```
 
 `--wait` returns once the console's healthcheck passes, and fails when it does not within three minutes, as on an `AUTH_SECRET` under 32 bytes. It cannot see the server, which has no healthcheck (its image has no shell to run one), so check that `docker compose -f deploy/compose/docker-compose.yml ps` shows it `Up` and not `Restarting`: a value it refuses, such as a `TELEMETRY_KEK` that is not 64 hex characters, restarts it, and `docker compose -f deploy/compose/docker-compose.yml logs server web` names the value.
@@ -132,7 +132,7 @@ Check running containers:
 docker compose -f deploy/compose/docker-compose.yml ps
 ```
 
-Postgres, ClickHouse and Redis run as `telmoni-postgres`, `telmoni-clickhouse` and `telmoni-redis` (`pgvector/pgvector:0.8.7-pg17`, `clickhouse/clickhouse-server:26.8.19.9` and `redis:7.4-alpine`), and their healthchecks show them `(healthy)`. ClickHouse is capped at 1.5 GiB of memory, which it takes as its ceiling; raise `mem_limit` in the compose file on a bigger host. Every container logs through Docker's `local` driver, which rotates its files, so a long-running host keeps a bounded log. The `server` and `web` containers (and `ollama` when running with `--profile agent`) take the compose project's name, `telmoni-selfhost-<service>-1`, and run `ghcr.io/telmoni/server:latest` and `ghcr.io/telmoni/web:latest` (built for `linux/amd64` only). Each image is also tagged with the full SHA of the commit it was built from, and `latest` moves for both together, once both are published; `TELMONI_IMAGE_SERVER` and `TELMONI_IMAGE_WEB` in `deploy/compose/.env` pin both to one ([Upgrading](#upgrading)). The console's healthcheck asks its `/api/health`, so it shows `(healthy)`; the server has none (its image has no shell to run one), so it shows `Up` alone. The server image's entrypoint is `/app/telmoni-server`, so its command reads `/app/telmoni-server serve`.
+Postgres, ClickHouse and Redis run as `telmoni-postgres`, `telmoni-clickhouse` and `telmoni-redis` (`pgvector/pgvector:0.8.7-pg17`, `clickhouse/clickhouse-server:26.8.19.9` and `redis:7.4-alpine`), and their healthchecks show them `(healthy)`. ClickHouse is capped at 1.5 GiB of memory, which it takes as its ceiling; raise `mem_limit` in the compose file on a bigger host. Every container logs through Docker's `local` driver, which rotates its files, so a long-running host keeps a bounded log. The `server` and `web` containers (and `ollama` when running with `--profile agent`) take the compose project's name, `telmoni-selfhost-<service>-1`, and run `telmoni-server:local` and `telmoni-web:local`, built from your checkout for `linux/amd64` only; `TELMONI_IMAGE_SERVER` and `TELMONI_IMAGE_WEB` in `deploy/compose/.env` name others ([Upgrading](#upgrading)). The console's healthcheck asks its `/api/health`, so it shows `(healthy)`; the server has none (its image has no shell to run one), so it shows `Up` alone. The server image's entrypoint is `/app/telmoni-server`, so its command reads `/app/telmoni-server serve`.
 
 The one-shot `migrate` container has exited by then, as `telmoni-selfhost-migrate-1` with `Exited (0)` and the command `/app/telmoni-server migrate`. It appears only when listing all containers:
 
@@ -213,10 +213,10 @@ docker compose -f deploy/compose/docker-compose.yml run --rm migrate rotate
 
 ### Upgrading
 
-The Compose file runs the images tagged `latest` unless `TELMONI_IMAGE_SERVER` and `TELMONI_IMAGE_WEB` name others. Pin both to one commit, the full SHA of a commit the [server package page](https://github.com/telmoni/telmoni/pkgs/container/server) lists, and upgrade by moving the pin: the console and the server change their contract with each other in place before Telmoni's first release, so a pair from two commits can fail. `up -d` pulls an image only when the host has none, so pull first, then run the migration alone, then start the rest (with `--profile agent` on each if you run the agent):
+The Compose file builds both images from your checkout, as `telmoni-server:local` and `telmoni-web:local` unless `TELMONI_IMAGE_SERVER` and `TELMONI_IMAGE_WEB` name others. Upgrade by checking out a newer commit and building both from it: the console and the server change their contract with each other in place before Telmoni's first release, so a pair from two commits can fail. Build first, then run the migration alone, then start the rest (with `--profile agent` on each if you run the agent):
 
 ```bash
-docker compose -f deploy/compose/docker-compose.yml pull
+docker compose -f deploy/compose/docker-compose.yml build
 docker compose -f deploy/compose/docker-compose.yml run --rm migrate
 docker compose -f deploy/compose/docker-compose.yml up -d --wait --wait-timeout 180
 ```

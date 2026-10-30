@@ -18,8 +18,10 @@
 #      CONNECTOR_KEK=local:<openssl rand -hex 32>, which seals their grants
 #      at rest: a secret to back up beside the database, since a dump
 #      restored without it leaves every grant unreadable.
-#   2. Run: docker compose -f deploy/compose/docker-compose.yml up -d --wait --wait-timeout 180
-#      (--wait waits on the console's healthcheck; the server has none, so
+#   2. Run: docker compose -f deploy/compose/docker-compose.yml up -d --build --wait --wait-timeout 180
+#      (--build builds the server and console images from this checkout: no
+#      image is published, so the first run takes some minutes;
+#      --wait waits on the console's healthcheck; the server has none, so
 #      `ps` shows whether it is Up or Restarting on a value it refuses).
 #   3. The console answers on 127.0.0.1:3000, and the machine lanes — ingest
 #      at /otlp/v1/traces, where the SDKs send; the read API under /v1; the
@@ -27,8 +29,7 @@
 #      heartbeat at /heartbeat — on 127.0.0.1:8082; the reverse proxy in front
 #      (telmoni.com/docs/self-host/production) forwards each.
 #
-# Upgrading: pin both images to one commit (TELMONI_IMAGE_SERVER and
-# TELMONI_IMAGE_WEB), move the pin, then `pull`, `run --rm migrate` and
+# Upgrading: check out the newer commit, then `build`, `run --rm migrate` and
 # `up -d --wait --wait-timeout 180`, so a refused migration leaves the running stack as it was.
 # Before Telmoni's first release its migrations are edited in place, and an
 # upgrade across such an edit needs both stores made again (`down -v`).
@@ -150,7 +151,10 @@ services:
   # each module its own role (`role_hardening.sql`) gets the object grants
   # from the same run.
   migrate:
-    image: ${TELMONI_IMAGE_SERVER:-ghcr.io/telmoni/server:latest}
+    image: ${TELMONI_IMAGE_SERVER:-telmoni-server:local}
+    build: &server_build
+      context: ../..
+      dockerfile: crates/telmoni/Dockerfile
     command: ["migrate"]
     restart: "no"
     logging: *logging
@@ -166,7 +170,8 @@ services:
       MIGRATOR_CLICKHOUSE_URL: *clickhouse_url
 
   server:
-    image: ${TELMONI_IMAGE_SERVER:-ghcr.io/telmoni/server:latest}
+    image: ${TELMONI_IMAGE_SERVER:-telmoni-server:local}
+    build: *server_build
     command: ["serve"]
     restart: unless-stopped
     logging: *logging
@@ -276,7 +281,8 @@ services:
       - ollama_models:/root/.ollama
 
   web:
-    image: ${TELMONI_IMAGE_WEB:-ghcr.io/telmoni/web:latest}
+    image: ${TELMONI_IMAGE_WEB:-telmoni-web:local}
+    build: ../../web
     restart: unless-stopped
     logging: *logging
     # Loopback, for the reverse proxy on this host, as the server's 8082 is:
