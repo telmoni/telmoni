@@ -116,8 +116,7 @@ spec:
 # paths reach the server from outside; the console's `/internal/v1`, behind
 # the service secret, never does. Each prefix takes the lane's every version,
 # so a path missing one gets the server's 404. A matched path outranks the
-# console's catch-all, and a named host a route naming none. A backend policy
-# for the lanes is the deployment's to add, as the console's is here.
+# console's catch-all, and a named host a route naming none.
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -173,6 +172,28 @@ spec:
       httpHealthCheck:
         port: 8082
         requestPath: /livez
+  targetRef:
+    group: ""
+    kind: Service
+    name: server-api
+---
+# Draining lets an export in flight finish on a stopping pod: the load
+# balancer never retries a POST, so one cut short is lost.
+apiVersion: networking.gke.io/v1
+kind: GCPBackendPolicy
+metadata:
+  name: server-api
+  labels:
+    app.kubernetes.io/name: server
+    app.kubernetes.io/component: ingress
+    {{- include "telmoni.labels" . | nindent 4 }}
+spec:
+  default:
+    logging:
+      enabled: true
+      sampleRate: {{ .Values.ingress.apiLogSampleRate | int }}
+    connectionDraining:
+      drainingTimeoutSec: 30
   targetRef:
     group: ""
     kind: Service

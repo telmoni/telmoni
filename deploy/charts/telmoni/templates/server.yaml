@@ -22,6 +22,12 @@ spec:
         {{- include "telmoni.labels" . | nindent 8 }}
     spec:
       serviceAccountName: server
+      # The endpoint leaves the Service and the load balancer a few seconds
+      # after the kill, so the pod serves through preStop, then drains.
+      terminationGracePeriodSeconds: 45
+      {{- if .Values.highAvailability.enabled }}
+      {{- include "telmoni.spread" "server" | nindent 6 }}
+      {{- end }}
       automountServiceAccountToken: false
       enableServiceLinks: false
       securityContext:
@@ -35,6 +41,10 @@ spec:
           image: "{{ if .Values.global.imageRegistry }}{{ .Values.global.imageRegistry }}/{{ end }}{{ .Values.server.image }}:{{ .Values.global.imageTag }}"
           imagePullPolicy: {{ .Values.global.imagePullPolicy }}
           args: ["serve"]
+          lifecycle:
+            preStop:
+              sleep:
+                seconds: 10
           ports:
             - name: http
               containerPort: 8082
@@ -57,13 +67,20 @@ spec:
             capabilities:
               drop:
                 - ALL
+          # The server binds once its pools connect and the embeddings probe
+          # answers, so a slow boot gets 90 s before liveness counts.
+          startupProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 2
+            failureThreshold: 45
           # Liveness is process-up only; readiness reaches every module's
           # tables, so a pod whose role lost a grant takes no traffic.
           livenessProbe:
             httpGet:
               path: /livez
               port: http
-            initialDelaySeconds: 2
             periodSeconds: 10
             timeoutSeconds: 2
             failureThreshold: 3
@@ -71,10 +88,10 @@ spec:
             httpGet:
               path: /health
               port: http
-            initialDelaySeconds: 2
             periodSeconds: 5
-            timeoutSeconds: 2
-            failureThreshold: 2
+            # Past the pools' 5 s acquire, so a busy pool is slow, not unready.
+            timeoutSeconds: 6
+            failureThreshold: 3
 ---
 apiVersion: v1
 kind: Service

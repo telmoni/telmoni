@@ -205,3 +205,6 @@ ingress:
   # under their paths on the console's host, which is then the endpoint.
   # Either way only the lanes' paths reach the server from outside.
   apiHost: ""
+  # The share of the lanes' requests the load balancer logs, in millionths:
+  # every one by default, as the console's.
+  apiLogSampleRate: 1000000

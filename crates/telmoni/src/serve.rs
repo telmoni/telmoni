@@ -170,5 +170,6 @@ fn died(name: &str, ended: Result<(), tokio::task::JoinError>) -> anyhow::Result
 }
 
 /// How long a stopping process waits for an alert pass to finish the alert
-/// in hand: well inside the 30 s a pod is given to stop.
+/// in hand: well inside the 45 s the chart gives a pod to stop, past its
+/// 10 s preStop.
 const ALERTS_STOP_WAIT: Duration = Duration::from_secs(20);

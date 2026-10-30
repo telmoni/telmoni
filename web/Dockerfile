@@ -48,6 +48,9 @@ ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     PORT=3000 \
     HOSTNAME=0.0.0.0
+# Past the 600 s Google's load balancer keeps an idle connection, as the
+# server's 620 s is (accept.rs); Node's own is 5 s.
+ENV KEEP_ALIVE_TIMEOUT=620000
 # Standalone layout: server.js + minimal node_modules at the root, static
 # assets under .next/static, public/ alongside.
 COPY --from=builder /app/.next/standalone ./

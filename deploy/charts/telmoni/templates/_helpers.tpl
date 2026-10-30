@@ -35,6 +35,20 @@ annotations:
 {{- end }}
 
 {{/*
+With highAvailability, a Deployment's replicas spread across nodes, so one
+node's loss leaves a replica; scheduled anyway on a single node.
+*/}}
+{{- define "telmoni.spread" -}}
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: ScheduleAnyway
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/name: {{ . }}
+{{- end }}
+
+{{/*
 Common labels
 */}}
 {{- define "telmoni.labels" -}}
