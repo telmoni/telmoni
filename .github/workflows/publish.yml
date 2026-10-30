@@ -65,15 +65,17 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       # The commit's SHA, for anyone pinning. The labels tie the package to
-      # this repository; `context: git` takes the revision from the checkout,
-      # where the workflow's own would name whatever main has moved on to.
+      # this repository; the revision is set here, as the action's own would
+      # name whatever main has moved on to, and its git context cannot read the
+      # detached checkout.
       - id: meta
         uses: docker/metadata-action@v6
         with:
-          context: git
           images: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
           tags: type=raw,value=${{ github.event.workflow_run.head_sha }}
-          labels: org.opencontainers.image.version=${{ github.event.workflow_run.head_sha }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.event.workflow_run.head_sha }}
+            org.opencontainers.image.version=${{ github.event.workflow_run.head_sha }}
       - uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.context }}
