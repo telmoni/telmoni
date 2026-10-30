@@ -23,9 +23,9 @@ Create a default fully qualified app name.
 
 {{/*
 What the migrate hook needs before it runs. A pre-install hook runs before
-the release's ordinary objects exist, so its service account and the tier's
-ConfigMap are hooks too, made first and kept (no hook-succeeded). Helm does
-not delete hooks on uninstall.
+the release's ordinary objects exist, so its service account is a hook too,
+made first and kept (no hook-succeeded). Helm does not delete hooks on
+uninstall.
 */}}
 {{- define "telmoni.migrateHookPrereq" -}}
 annotations:

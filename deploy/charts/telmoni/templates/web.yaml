@@ -15,6 +15,9 @@ spec:
       app.kubernetes.io/name: web
   template:
     metadata:
+      # A changed value rolls the pods, which read the ConfigMap at start.
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
       labels:
         app.kubernetes.io/name: web
         {{- include "telmoni.labels" . | nindent 8 }}

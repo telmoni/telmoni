@@ -40,9 +40,12 @@ spec:
           image: {{ include "telmoni.image" (dict "root" . "name" .Values.server.image) | quote }}
           imagePullPolicy: {{ .Values.global.imagePullPolicy }}
           args: ["migrate"]
+          # Its one value inline, so the ConfigMap need not be a hook, which a
+          # rollback would never restore.
+          env:
+            - name: LOG_LEVEL
+              value: {{ .Values.config.logLevel | quote }}
           envFrom:
-            - configMapRef:
-                name: telmoni-tier
             - secretRef:
                 name: migrator-secrets
           resources:

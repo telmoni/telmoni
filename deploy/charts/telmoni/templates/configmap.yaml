@@ -5,9 +5,6 @@ metadata:
   labels:
     app.kubernetes.io/component: config
     {{- include "telmoni.labels" . | nindent 4 }}
-  {{- if and .Values.migrator.enabled .Values.migrator.hook.enabled }}
-  {{- include "telmoni.migrateHookPrereq" . | nindent 2 }}
-  {{- end }}
 data:
   LOG_LEVEL: {{ .Values.config.logLevel | quote }}
   # One count for the console and the server: both sit behind the same
