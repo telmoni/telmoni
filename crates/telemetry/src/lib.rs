@@ -117,6 +117,9 @@ pub struct AppState {
     /// How long an export's body may take to arrive
     /// (`handler::ingest::BODY_WAIT`); a field so a suite can wait less.
     pub body_wait: std::time::Duration,
+    /// Exports this process holds past their read
+    /// (`handler::ingest::IN_FLIGHT_MAX`).
+    pub ingest_slots: Arc<tokio::sync::Semaphore>,
 }
 
 impl AppState {

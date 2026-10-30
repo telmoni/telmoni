@@ -13,7 +13,7 @@ use telmoni_shared::seam::{Auth, Entitlements, Notifications};
 
 use crate::contract::EXPORTS_PER_MINUTE;
 use crate::db::TelemetryLane;
-use crate::handler::ingest::BODY_WAIT;
+use crate::handler::ingest::{BODY_WAIT, IN_FLIGHT_MAX};
 use crate::rate_limit::RateLimit;
 use crate::replica::Redis;
 use crate::{AppState, Config, hashing, store::Store};
@@ -83,5 +83,6 @@ pub fn state(
         alerts_held: crate::rules::evaluate::Held::default(),
         alerts_stopping: crate::rules::evaluate::Stopping::default(),
         body_wait: BODY_WAIT,
+        ingest_slots: Arc::new(tokio::sync::Semaphore::new(IN_FLIGHT_MAX)),
     })
 }

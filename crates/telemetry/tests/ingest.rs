@@ -1305,6 +1305,36 @@ async fn a_body_that_does_not_arrive_in_time_is_refused(pool: PgPool) {
     assert_eq!(auth.homes_asked(), 0, "nothing keyed");
 }
 
+/// An export past the process's in-flight bound is refused `503` before its
+/// body is kept, which exporters retry.
+#[sqlx::test]
+async fn an_export_past_the_in_flight_bound_is_refused_unavailable(pool: PgPool) {
+    let (organization, project) = (OrganizationId::new(), ProjectId::new());
+    let auth = AuthStub::new();
+    auth.key(INGEST_KEY, &organization, &project, &[ApiKeyScope::Ingest]);
+    let Ok(state) = Arc::try_unwrap(common::state(&pool, auth.clone())) else {
+        panic!("the suite's state is shared");
+    };
+    let state = Arc::new(telmoni_telemetry::AppState {
+        ingest_slots: Arc::new(tokio::sync::Semaphore::new(0)),
+        ..state
+    });
+
+    let answer = answer_raw(
+        state,
+        &format!(
+            "POST {LANE} HTTP/1.1\r\nhost: localhost\r\nauthorization: Bearer {INGEST_KEY}\r\n\
+             content-type: application/json\r\ncontent-length: 2\r\nconnection: close\r\n\r\n{{}}"
+        ),
+    )
+    .await;
+    assert!(answer.starts_with("HTTP/1.1 503"), "{answer}");
+    assert!(
+        answer.contains("/errors/telemetry/store-unavailable: ingest is at its in-flight limit"),
+        "{answer}"
+    );
+}
+
 /// A chunked body hyper cannot read is refused `invalid-batch`, never as too large.
 #[sqlx::test]
 async fn a_body_that_cannot_be_read_is_invalid_not_too_large(pool: PgPool) {

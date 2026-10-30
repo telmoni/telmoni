@@ -56,6 +56,11 @@ const SENT_AT_HEADER: HeaderName = HeaderName::from_static(contract::SENT_AT);
 /// organization's deletion waits before its purge.
 pub(crate) const BODY_WAIT: Duration = Duration::from_secs(60);
 
+/// The most exports one process holds past their read, every project's
+/// together: a slow ClickHouse keeps each until its insert ends, and this,
+/// not the pod's memory limit, is where that queue stops.
+pub(crate) const IN_FLIGHT_MAX: usize = 64;
+
 /// `POST /otlp/v1/traces`.
 pub async fn export(State(state): State<Arc<AppState>>, request: Request) -> Response {
     // Before anything waits: the sender's clock is read against it.
@@ -87,6 +92,16 @@ async fn handle(
             read_out(request, body, state.body_wait).await;
             return Err(refused);
         }
+    };
+
+    // Refused before the body is read, as a busy store is, which exporters
+    // retry; the slot goes with the write, which outlives a hang-up.
+    let Ok(slot) = Arc::clone(&state.ingest_slots).try_acquire_owned() else {
+        read_out(request, body, state.body_wait).await;
+        return Err(TelemetryError::StoreUnavailable(
+            "ingest is at its in-flight limit; retry in a second".into(),
+        )
+        .into());
     };
 
     // One byte past the cap is read, so that past it is known.
@@ -127,6 +142,7 @@ async fn handle(
         let state = Arc::clone(state);
         let key = key.clone();
         async move {
+            let _slot = slot;
             match write(&state, &key, encoding, &bytes, sender, &token).await {
                 Ok((content_mode, body)) => {
                     guard.answer(&state.redis, content_mode).await;
