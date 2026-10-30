@@ -5,6 +5,7 @@ The open-source Telmoni platform ([`telmoni/telmoni`](https://github.com/telmoni
 ## Ground Rules
 - **Pre-launch:** nothing has shipped. Fix schemas, wire contracts, Redis keys and APIs directly to their ideal state; no migration paths, dual-writes, shims or versioned schemas.
 - **Quality gate:** never weaken a test or leave the tree broken.
+- **Build only what is asked:** the smallest change that does the task, in the files that already hold it. No feature, option, abstraction, layer, helper, crate, module or file for a need that is not here yet, and no refactor beyond the task (a split, a rename, a rewrite for style): propose it with what it costs, and wait. A new repository, package, service or workflow is the owner's to make.
 - **Ask first:** any dependency change (any edit to `Cargo.toml`, `Cargo.lock`, `web/package.json`, `web/package-lock.json` or an SDK's manifest or lockfile under `sdk/`, lockfile-only refreshes included) and any external-state change (`helm install`/`upgrade`, `kubectl apply`, `gcloud` writes, secrets, DNS, a hosted model or embeddings call with a real key).
 - **No new migration files:** edit the module's existing migration, and give a new module exactly one per store it keeps; rebuild with `make db-reset` when asked.
 
