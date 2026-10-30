@@ -93,7 +93,8 @@ reply's model, provider and token counts, a tool call's name, and a subagent's
 kind. The Claude Code plugin also reads the skill a `Skill` call names, which
 it sends as the tag `skills`, the kind an `Agent` or `Task` call names and
 whether it runs in the background, whether a tool result says a subagent went
-on in the background, the tool call a background task's notice names, and
+on in the background, the tool call a background task's notice names, the
+subagent a report handed back names, and
 whether a prompt is empty, opens with a tag or marks an interruption, which it
 never keeps. A name is sent only as a plain name: a model named by a path goes
 as its file's name or `unknown`, and a tool, skill or subagent name holding
@@ -150,7 +151,8 @@ Plugins load as a session starts, so start a new one once the key is set. The
 hook runs when a turn stops, when an API error ends one, and when the session
 ends, and hands its work to a process of its own, so no turn waits on
 Telmoni; a turn that started a subagent in the background is sent once the
-subagent's notice has been answered. Its log is `hook.log` in the plugin's
+subagent's report or notice has been answered, and the log says so at each
+hook that holds it. Its log is `hook.log` in the plugin's
 data folder: `~/.claude/plugins/data/telmoni-observability-telmoni-plugins/`
 for an install from the marketplace, `telmoni-observability-inline/` there
 under `--plugin-dir`, or `~/.claude/telmoni/` where Claude Code gives the
@@ -193,7 +195,8 @@ answer, while another plugin's hooks run or Codex compacts the session. Codex
 before 0.145 writes no error at a turn's end, so there a turn an error ended
 is recorded as one that completed. Codex's older session files hold a shell
 command's exit code only in its output, which the plugin never reads: there, a
-command that failed is recorded as one that ran.
+command that failed is recorded as one that ran. From Codex 0.164, which runs
+every tool through one `exec`, each tool call is named `exec`.
 
 ---
 
