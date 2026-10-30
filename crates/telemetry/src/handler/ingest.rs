@@ -94,16 +94,6 @@ async fn handle(
         }
     };
 
-    // Refused before the body is read, as a busy store is, which exporters
-    // retry; the slot goes with the write, which outlives a hang-up.
-    let Ok(slot) = Arc::clone(&state.ingest_slots).try_acquire_owned() else {
-        read_out(request, body, state.body_wait).await;
-        return Err(TelemetryError::StoreUnavailable(
-            "ingest is at its in-flight limit; retry in a second".into(),
-        )
-        .into());
-    };
-
     // One byte past the cap is read, so that past it is known.
     let Ok(read) = tokio::time::timeout(state.body_wait, to_bytes(body, BATCH_MAX_BYTES + 1)).await
     else {
@@ -114,6 +104,15 @@ async fn handle(
         .into());
     };
     let raw = read.map_err(unread)?;
+    // Taken once the body is in, so a sender trickling one holds no slot;
+    // refused as a busy store is, which exporters retry. The slot goes with
+    // the write, which outlives a hang-up.
+    let Ok(slot) = Arc::clone(&state.ingest_slots).try_acquire_owned() else {
+        return Err(TelemetryError::StoreUnavailable(
+            "ingest is at its in-flight limit; retry in a second".into(),
+        )
+        .into());
+    };
     let bytes = decode::inflate(raw, gzipped).map_err(decode_error)?;
 
     let digest = claims::digest(&bytes);

@@ -109,10 +109,10 @@ The compose file also passes the server these sign-in settings from this file, e
 Run the compose file in detached mode, waiting for the stack to come up:
 
 ```bash
-docker compose -f deploy/compose/docker-compose.yml up -d --wait
+docker compose -f deploy/compose/docker-compose.yml up -d --wait --wait-timeout 180
 ```
 
-`--wait` returns once the console's healthcheck passes, and fails when a container exits instead, as the server or the console does on a value it refuses (an `AUTH_SECRET` under 32 bytes, a `TELEMETRY_KEK` that is not 64 hex characters); `docker compose -f deploy/compose/docker-compose.yml logs server web` then names it.
+`--wait` returns once the console's healthcheck passes, and fails when it does not within three minutes, as on an `AUTH_SECRET` under 32 bytes. It cannot see the server, which has no healthcheck (its image has no shell to run one), so check that `docker compose -f deploy/compose/docker-compose.yml ps` shows it `Up` and not `Restarting`: a value it refuses, such as a `TELEMETRY_KEK` that is not 64 hex characters, restarts it, and `docker compose -f deploy/compose/docker-compose.yml logs server web` names the value.
 
 Compose starts the services in dependency order:
 1. Starts `postgres`, `clickhouse` and `redis`, reachable on the compose network alone (no port on the host, so a Postgres or Redis the host already runs does not collide; reach them with `docker compose exec`), and waits for their healthchecks.
@@ -218,7 +218,7 @@ The Compose file runs the images tagged `latest` unless `TELMONI_IMAGE_SERVER` a
 ```bash
 docker compose -f deploy/compose/docker-compose.yml pull
 docker compose -f deploy/compose/docker-compose.yml run --rm migrate
-docker compose -f deploy/compose/docker-compose.yml up -d --wait
+docker compose -f deploy/compose/docker-compose.yml up -d --wait --wait-timeout 180
 ```
 
 `run --rm migrate` first: a migration it refuses leaves the running server and console as they were.
@@ -227,7 +227,7 @@ Before Telmoni's first release its migrations are edited in place rather than ad
 
 ```bash
 docker compose -f deploy/compose/docker-compose.yml down -v
-docker compose -f deploy/compose/docker-compose.yml up -d --wait
+docker compose -f deploy/compose/docker-compose.yml up -d --wait --wait-timeout 180
 ```
 
 ### Stopping the stack

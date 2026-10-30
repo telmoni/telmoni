@@ -1305,8 +1305,8 @@ async fn a_body_that_does_not_arrive_in_time_is_refused(pool: PgPool) {
     assert_eq!(auth.homes_asked(), 0, "nothing keyed");
 }
 
-/// An export past the process's in-flight bound is refused `503` before its
-/// body is kept, which exporters retry.
+/// An export past the process's in-flight bound is refused `503`, which
+/// exporters retry.
 #[sqlx::test]
 async fn an_export_past_the_in_flight_bound_is_refused_unavailable(pool: PgPool) {
     let (organization, project) = (OrganizationId::new(), ProjectId::new());

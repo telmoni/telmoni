@@ -18,8 +18,9 @@
 #      CONNECTOR_KEK=local:<openssl rand -hex 32>, which seals their grants
 #      at rest: a secret to back up beside the database, since a dump
 #      restored without it leaves every grant unreadable.
-#   2. Run: docker compose -f deploy/compose/docker-compose.yml up -d --wait
-#      (--wait fails when a container exits, as one with a bad value does).
+#   2. Run: docker compose -f deploy/compose/docker-compose.yml up -d --wait --wait-timeout 180
+#      (--wait waits on the console's healthcheck; the server has none, so
+#      `ps` shows whether it is Up or Restarting on a value it refuses).
 #   3. The console answers on 127.0.0.1:3000, and the machine lanes — ingest
 #      at /otlp/v1/traces, where the SDKs send; the read API under /v1; the
 #      CLI's sign-in under /cli/v1; Slack's events at /webhooks/v1/slack; the
@@ -28,7 +29,7 @@
 #
 # Upgrading: pin both images to one commit (TELMONI_IMAGE_SERVER and
 # TELMONI_IMAGE_WEB), move the pin, then `pull`, `run --rm migrate` and
-# `up -d --wait`, so a refused migration leaves the running stack as it was.
+# `up -d --wait --wait-timeout 180`, so a refused migration leaves the running stack as it was.
 # Before Telmoni's first release its migrations are edited in place, and an
 # upgrade across such an edit needs both stores made again (`down -v`).
 #
