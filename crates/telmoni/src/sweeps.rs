@@ -7,7 +7,7 @@
 //! step is idempotent, so a tick cut short by a rollout is finished by the
 //! next. A failed tick is logged and the next one runs; one that ends beats in
 //! `auth.heartbeats`, for the watchdog. `telmoni-server sweep <name>` runs any
-//! of them once by hand.
+//! of them once by hand, and the agent's reindex, which has no timer.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -17,6 +17,7 @@ use telmoni_auth::db::AuthLane;
 use telmoni_shared::TelmoniError;
 use telmoni_shared::heartbeat::Heartbeats;
 
+use crate::App;
 use crate::command::AuthSweep;
 
 /// How long after boot the first tick of each sweep runs: a minute, past the
@@ -96,6 +97,31 @@ pub(crate) async fn once(auth: &AppState, sweep: AuthSweep) -> Result<(), Telmon
             }
         }
     }
+    Ok(())
+}
+
+/// `sweep agent-reindex`: every passage a different model embedded, embedded
+/// again by the configured one ([`telmoni_agent::index::reindex`]).
+pub(crate) async fn agent_reindex(app: &App) -> anyhow::Result<()> {
+    let Some((agent, live)) = app
+        .agent
+        .as_ref()
+        .and_then(|agent| Some((agent, agent.live.as_ref()?)))
+    else {
+        anyhow::bail!(
+            "agent-reindex needs the agent on: AGENT_DATABASE_URL and \
+             AGENT_MODEL_PROVIDER set"
+        );
+    };
+    // Strict here: a reindex against an endpoint whose width
+    // it cannot learn would only fail row by row.
+    if telmoni_agent::boot::probe_width(live.embedder.as_ref()).await?
+        == telmoni_agent::boot::Probe::Unanswered
+    {
+        anyhow::bail!("the embeddings endpoint did not answer; nothing reindexed");
+    }
+    let redone = telmoni_agent::index::reindex(agent).await?;
+    tracing::info!(redone, "agent reindex complete");
     Ok(())
 }
 

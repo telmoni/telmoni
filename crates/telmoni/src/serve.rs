@@ -1,262 +1,174 @@
-//! The accept loop: `axum::serve`'s, but for the timer it never gives hyper,
-//! without which a request's head has no deadline and a connection that
-//! never finishes one is held for good.
+//! `telmoni-server serve`: every module's routes under one listener, and
+//! every loop of the process beside it.
 
-use std::future::Future;
-use std::net::SocketAddr;
-use std::pin::pin;
+use std::sync::Arc;
 use std::time::Duration;
 
-use axum::Router;
-use axum::serve::Listener;
-use hyper_util::rt::{TokioExecutor, TokioIo, TokioTimer};
-use hyper_util::server::conn::auto::Builder;
-use hyper_util::service::TowerToHyperService;
-use tokio::net::TcpListener;
-use tokio::sync::watch;
-use tower::{Service, ServiceExt};
+use axum::{Router, middleware, routing::get};
 
-/// How long a connection may take over a request's head, from its accept or
-/// its last answer: past the 600 s Google's load balancer keeps an idle
-/// connection to a backend, which a backend must outlast or the next request
-/// sent on one it closes fails.
-pub(crate) const HEAD_WAIT: Duration = Duration::from_secs(620);
+use telmoni_shared::config::env_parse;
+use telmoni_shared::middleware::service_auth::require_service_secret;
 
-/// Serves `router` on `listener`, each request carrying its peer's address,
-/// until `signal`; then takes no connection more and waits for those open to
-/// finish what they are answering. HTTP/1 alone: nothing speaks HTTP/2 to
-/// the server, and the HTTP/2 sniff holds a silent connection with no timer.
-pub(crate) async fn serve(
-    mut listener: TcpListener,
-    router: Router,
-    head_wait: Duration,
-    signal: impl Future<Output = ()> + Send + 'static,
-) {
-    let mut connected = router.into_make_service_with_connect_info::<SocketAddr>();
-    let (signal_tx, signal_rx) = watch::channel(());
-    tokio::spawn(async move {
-        signal.await;
-        drop(signal_rx);
-    });
-    let (close_tx, close_rx) = watch::channel(());
+use crate::probes::{health, heartbeat, livez, not_found};
+use crate::{App, accept, sweeps};
 
-    loop {
-        let (io, peer) = tokio::select! {
-            accepted = Listener::accept(&mut listener) => accepted,
-            () = signal_tx.closed() => break,
-        };
-        let Ok(service) = ServiceExt::<SocketAddr>::ready(&mut connected).await;
-        let Ok(service) = service.call(peer).await;
-        let service = TowerToHyperService::new(service);
-        let signal_tx = signal_tx.clone();
-        let close_rx = close_rx.clone();
-        tokio::spawn(async move {
-            let mut builder = Builder::new(TokioExecutor::new()).http1_only();
-            builder
-                .http1()
-                .timer(TokioTimer::new())
-                .header_read_timeout(head_wait);
-            let mut connection = pin!(builder.serve_connection(TokioIo::new(io), service));
-            let mut draining = false;
-            loop {
-                tokio::select! {
-                    served = connection.as_mut() => {
-                        if let Err(error) = served {
-                            tracing::trace!(error = %error, "a connection ended");
-                        }
-                        break;
-                    }
-                    () = signal_tx.closed(), if !draining => {
-                        draining = true;
-                        connection.as_mut().graceful_shutdown();
-                    }
-                }
-            }
-            drop(close_rx);
-        });
+impl App {
+    /// Every module's routes under one router, with the health probes and
+    /// the request layers added once.
+    pub fn router(self: &Arc<Self>) -> Router {
+        let probes = Router::new()
+            .route("/health", get(health))
+            .route("/livez", get(livez))
+            .route("/heartbeat", get(heartbeat))
+            .with_state(self.clone());
+        let log_level = Router::new()
+            .route(
+                "/internal/v1/log-level",
+                get(telmoni_shared::logging::get_level)
+                    .put(telmoni_shared::logging::put_level)
+                    .delete(telmoni_shared::logging::reset_level),
+            )
+            .layer(middleware::from_fn_with_state(
+                self.secrets.clone(),
+                require_service_secret,
+            ));
+        // The machine lanes behind the door, each named, then versioned: the
+        // read API at `/v1`, the CLI's at `/cli/v1`, and ingest at `/otlp`,
+        // whose `/v1/traces` is OTLP's own, nested whole so `/otlp/` is its to
+        // answer too. Each lane gates its own, by key, bearer or device code.
+        // The probes are the platform's, and carry no version.
+        let core = Router::new()
+            .merge(probes)
+            .merge(log_level)
+            .merge(telmoni_auth::router(self.auth.clone()))
+            .nest(
+                "/v1",
+                self.door.v1(telmoni_auth::v1_router(self.auth.clone())),
+            )
+            .nest(
+                "/cli/v1",
+                self.door.cli(telmoni_auth::cli_router(self.auth.clone())),
+            )
+            .nest_service(
+                "/otlp",
+                self.door
+                    .otlp(telmoni_telemetry::otlp_router(self.telemetry.clone())),
+            )
+            .merge(telmoni_notifications::router(self.notifications.clone()))
+            .merge(telmoni_telemetry::router(self.telemetry.clone()))
+            .merge(match &self.agent {
+                Some(agent) => telmoni_agent::router(agent.clone()),
+                None => telmoni_agent::absent_router(self.secrets.clone()),
+            });
+        self.modules
+            .iter()
+            .fold(core, |router, module| router.merge(module.router()))
+            // A path no lane serves is the server's own problem document, as
+            // a lane's is under it.
+            .fallback(not_found)
+            .layer(middleware::from_fn(
+                telmoni_shared::middleware::http::request_scope,
+            ))
+            .layer(telmoni_shared::middleware::http::trace_layer())
+            .layer(telmoni_shared::middleware::http::request_id_layers())
+            .layer(middleware::from_fn(
+                telmoni_shared::middleware::http::fresh_request_id,
+            ))
     }
 
-    drop(close_rx);
-    drop(listener);
-    close_tx.closed().await;
-}
-
-#[cfg(test)]
-mod tests {
-    use std::time::Instant;
-
-    use axum::extract::ConnectInfo;
-    use axum::routing::get;
-    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
-    use tokio::net::TcpStream;
-    use tokio::sync::oneshot;
-    use tokio::task::JoinHandle;
-
-    use super::*;
-
-    /// A deadline short enough to see a connection given up within a test.
-    const WAIT: Duration = Duration::from_millis(300);
-
-    /// The loop on a port of its own, with its stop and its end.
-    async fn started(head_wait: Duration) -> (SocketAddr, oneshot::Sender<()>, JoinHandle<()>) {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let address = listener.local_addr().unwrap();
-        let router =
-            Router::new()
-                .route(
-                    "/peer",
-                    get(|ConnectInfo(peer): ConnectInfo<SocketAddr>| async move {
-                        peer.ip().to_string()
-                    }),
-                )
-                .route(
-                    "/slow",
-                    get(|| async {
-                        tokio::time::sleep(Duration::from_millis(300)).await;
-                        "done"
-                    }),
-                );
-        let (stop, stopped) = oneshot::channel::<()>();
-        let served = tokio::spawn(serve(listener, router, head_wait, async {
-            let _ = stopped.await;
-        }));
-        (address, stop, served)
-    }
-
-    /// How long the server took to close `stream`, if it did within `limit`.
-    async fn closed_within(stream: &mut TcpStream, limit: Duration) -> Option<Duration> {
-        let from = Instant::now();
-        let mut buffer = [0_u8; 1024];
-        let closed = async {
-            while let Ok(read) = stream.read(&mut buffer).await {
-                if read == 0 {
-                    break;
-                }
-            }
-        };
-        tokio::time::timeout(limit, closed)
-            .await
-            .ok()
-            .map(|()| from.elapsed())
-    }
-
-    /// One whole answer, read to its `Content-Length`.
-    async fn answer(stream: &mut TcpStream) -> String {
-        let mut read = Vec::new();
-        let mut buffer = [0_u8; 1024];
-        loop {
-            let text = String::from_utf8_lossy(&read).into_owned();
-            if let Some((head, body)) = text.split_once("\r\n\r\n") {
-                let length = head
-                    .lines()
-                    .find_map(|line| {
-                        line.to_ascii_lowercase()
-                            .strip_prefix("content-length:")
-                            .map(|n| n.trim().parse().unwrap())
-                    })
-                    .unwrap_or(0);
-                if body.len() >= length {
-                    return text;
-                }
-            }
-            let n = stream.read(&mut buffer).await.unwrap();
-            assert!(n > 0, "the answer was cut short: {text:?}");
-            read.extend_from_slice(&buffer[..n]);
+    /// Run the process until it is told to stop: refuse what a deployed tier
+    /// must not run with, start every loop, and serve on `port`.
+    /// `RUN_SWEEPS=false` leaves auth's sweeps to `telmoni-server sweep` runs
+    /// scheduled elsewhere.
+    pub async fn serve(self: Arc<Self>, port: u16) -> anyhow::Result<()> {
+        if self.auth.config.allow_test_session && telmoni_shared::envelope::on_deployed_tier() {
+            anyhow::bail!(
+                "ALLOW_TEST_SESSION is set in a Kubernetes pod; the test door signs in anyone \
+                 for whoever holds the service secret, and is for a laptop alone"
+            );
         }
-    }
 
-    /// A head never finished is given up at its deadline, where it was held for good.
-    #[tokio::test]
-    async fn a_head_never_finished_is_closed_at_its_deadline() {
-        let (address, _stop, _served) = started(WAIT).await;
-        let mut stream = TcpStream::connect(address).await.unwrap();
-        stream
-            .write_all(b"GET /peer HTTP/1.1\r\nHost: localhost\r\n")
-            .await
-            .unwrap();
-        let after = closed_within(&mut stream, Duration::from_secs(10))
-            .await
-            .expect("still open at ten seconds");
-        assert!(
-            after >= WAIT / 2,
-            "closed after {after:?}, short of its deadline"
+        // A wrong width stops the pod; an embeddings endpoint that does not
+        // answer only leaves the agent failing until it does, since sign-in
+        // and every other module share this process and need none of it.
+        if let Some(agent) = &self.agent {
+            if let Ok(embedder) = agent.embedder() {
+                telmoni_agent::boot::probe_width(embedder).await?;
+            }
+            agent.spawn();
+        }
+        tokio::spawn(telmoni_notifications::retention::run(
+            self.notifications.clone(),
+        ));
+        let delivery = tokio::spawn(telmoni_notifications::delivery::run(
+            self.notifications.clone(),
+        ));
+        let purges = tokio::spawn(telmoni_telemetry::sweep::run(self.telemetry.clone()));
+        let refusals = tokio::spawn(telmoni_telemetry::ceilings::run(self.telemetry.clone()));
+        let alerts = tokio::spawn(telmoni_telemetry::rules::evaluate::run(
+            self.telemetry.clone(),
+        ));
+        // Told as the shutdown comes, so a pass stops between alerts while
+        // the server drains.
+        tokio::spawn({
+            let telemetry = self.telemetry.clone();
+            async move {
+                telmoni_shared::shutdown::shutdown_signal().await;
+                telemetry.alerts_stopping.ask();
+            }
+        });
+        if env_parse("RUN_SWEEPS", true)? {
+            sweeps::spawn(self.auth.clone(), &self.sweeps);
+        } else {
+            tracing::warn!(
+                "RUN_SWEEPS is false; the deletion, retention and audit sweeps run only as `telmoni-server sweep`"
+            );
+        }
+        for module in &self.modules {
+            module.spawn();
+        }
+
+        let addr = format!("0.0.0.0:{port}");
+        let listener = tokio::net::TcpListener::bind(&addr).await?;
+        tracing::info!(
+            addr = %addr,
+            trusted_proxy_hops = self.door.trusted_proxy_hops(),
+            "telmoni listening"
         );
-    }
 
-    /// A connection idle after its answer is given up at the same deadline.
-    #[tokio::test]
-    async fn an_idle_connection_is_closed_at_its_deadline() {
-        let (address, _stop, _served) = started(WAIT).await;
-        let mut stream = TcpStream::connect(address).await.unwrap();
-        stream
-            .write_all(b"GET /peer HTTP/1.1\r\nHost: localhost\r\n\r\n")
-            .await
-            .unwrap();
-        assert!(answer(&mut stream).await.starts_with("HTTP/1.1 200"));
-        let after = closed_within(&mut stream, Duration::from_secs(10))
-            .await
-            .expect("still open at ten seconds");
-        assert!(
-            after >= WAIT / 2,
-            "closed after {after:?}, short of its deadline"
+        // With the peer's address on every request, so the door's per-address
+        // limits hold a caller that sends no `X-Forwarded-For` too.
+        let serve = accept::serve(
+            listener,
+            self.router(),
+            accept::HEAD_WAIT,
+            telmoni_shared::shutdown::shutdown_signal(),
         );
-    }
-
-    /// A connection that sends nothing is given up at the deadline, no protocol sniff holding it.
-    #[tokio::test]
-    async fn a_silent_connection_is_closed_at_its_deadline() {
-        let (address, _stop, _served) = started(WAIT).await;
-        let mut stream = TcpStream::connect(address).await.unwrap();
-        let after = closed_within(&mut stream, Duration::from_secs(10))
-            .await
-            .expect("still open at ten seconds");
-        assert!(
-            after >= WAIT / 2,
-            "closed after {after:?}, short of its deadline"
-        );
-    }
-
-    /// The deadline outlasts the 600 s Google's load balancer keeps an idle connection.
-    #[test]
-    fn the_deadline_outlasts_the_load_balancers_idle_connections() {
-        assert!(HEAD_WAIT > Duration::from_secs(600));
-    }
-
-    /// A request carries its peer's address, which the door reads.
-    #[tokio::test]
-    async fn a_request_carries_its_peers_address() {
-        let (address, _stop, _served) = started(WAIT).await;
-        let mut stream = TcpStream::connect(address).await.unwrap();
-        stream
-            .write_all(b"GET /peer HTTP/1.1\r\nHost: localhost\r\n\r\n")
-            .await
-            .unwrap();
-        let answer = answer(&mut stream).await;
-        assert!(
-            answer.starts_with("HTTP/1.1 200") && answer.ends_with("\r\n\r\n127.0.0.1"),
-            "{answer:?}"
-        );
-    }
-
-    /// The stop lets an answer under way finish, then ends without waiting out an idle connection.
-    #[tokio::test]
-    async fn a_stop_drains_the_answer_under_way() {
-        let (address, stop, served) = started(Duration::from_secs(60)).await;
-        let mut stream = TcpStream::connect(address).await.unwrap();
-        stream
-            .write_all(b"GET /slow HTTP/1.1\r\nHost: localhost\r\n\r\n")
-            .await
-            .unwrap();
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        stop.send(()).unwrap();
-        let answer = answer(&mut stream).await;
-        assert!(
-            answer.starts_with("HTTP/1.1 200") && answer.ends_with("done"),
-            "{answer:?}"
-        );
-        tokio::time::timeout(Duration::from_secs(5), served)
-            .await
-            .expect("the drain never ended")
-            .unwrap();
+        // ⚠ These loops are raced against the server: a dead one would leave
+        // a Ready pod that quietly stops delivering, finishing purges or
+        // telling owners of their plan's refusals, so the process exits and
+        // the restart is the recovery.
+        tokio::select! {
+            () = serve => {},
+            ended = delivery => return died("the delivery loop", ended),
+            ended = purges => return died("telemetry's purge sweep", ended),
+            ended = refusals => return died("the plan refusals' notices", ended),
+            ended = alerts => return died("the alerts' evaluation", ended),
+        }
+        // The alert in hand is settled and told before the process ends.
+        self.telemetry.alerts_stopping.stop(ALERTS_STOP_WAIT).await;
+        Ok(())
     }
 }
+
+/// A loop raced against the server ended, which it never does on its own.
+fn died(name: &str, ended: Result<(), tokio::task::JoinError>) -> anyhow::Result<()> {
+    match ended {
+        Ok(()) => anyhow::bail!("{name} exited; restarting the process"),
+        Err(e) => anyhow::bail!("{name} died: {e}"),
+    }
+}
+
+/// How long a stopping process waits for an alert pass to finish the alert
+/// in hand: well inside the 30 s a pod is given to stop.
+const ALERTS_STOP_WAIT: Duration = Duration::from_secs(20);
