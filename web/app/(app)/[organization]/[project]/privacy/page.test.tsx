@@ -70,7 +70,7 @@ beforeEach(() => {
     since: "2026-09-30T10:00:00Z",
     spans: 1200,
     sent: [{ attribute: "user.email", spans: 400 }],
-    retention: { span_days: 360, rollup_months: 13 },
+    retention: { span_days: 90, max_span_days: 360, rollup_months: 13 },
   };
   mockReads = {
     kind: "ok",
@@ -172,12 +172,38 @@ describe("PrivacyPage", () => {
     expect(screen.getByRole("button", { name: "Erase" })).toBeDisabled();
   });
 
+  it("tells anyone how an end user is given their data", async () => {
+    render(await PrivacyPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+    expect(screen.getByRole("link", { name: "Users" })).toHaveAttribute(
+      "href",
+      "/acme/my-project/users",
+    );
+    expect(screen.getByRole("link", { name: "Traces" })).toHaveAttribute(
+      "href",
+      "/acme/my-project/traces",
+    );
+  });
+
+  // ⚠ The project's own retention is its owner's or an admin's to choose,
+  // up to the longest offered; a member reads it alone.
+  it("offers an admin the retention to choose, and a member the days alone", async () => {
+    render(await PrivacyPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+    expect(screen.queryByLabelText("Keep spans for")).not.toBeInTheDocument();
+
+    mockProject = { ...(mockProject as object), role: Role.Admin };
+    render(await PrivacyPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+    const field = screen.getByLabelText("Keep spans for");
+    expect(field).toHaveValue(90);
+    expect(field).toHaveAttribute("max", "360");
+    expect(screen.getByText("days, up to 360")).toBeInTheDocument();
+  });
+
   it("counts what arrived by the inventory's rows, and how long it is kept", async () => {
     render(await PrivacyPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByText("user.email")).toBeInTheDocument();
     expect(screen.getByText("400")).toBeInTheDocument();
     expect(screen.getByText(/Of 1,200 spans/)).toBeInTheDocument();
-    expect(screen.getByText("360 days after a span arrives")).toBeInTheDocument();
+    expect(screen.getByText("90 days after a span arrives")).toBeInTheDocument();
     expect(screen.getByText("13 months")).toBeInTheDocument();
     expect(screen.getByText(/In this deployment's own stores/)).toBeInTheDocument();
   });

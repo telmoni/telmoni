@@ -1,8 +1,9 @@
 {
   "days": 30,
   "retention": {
+    "max_span_days": 360,
     "rollup_months": 13,
-    "span_days": 360
+    "span_days": 90
   },
   "sent": [
     {

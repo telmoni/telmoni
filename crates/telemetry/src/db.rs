@@ -72,6 +72,46 @@ pub async fn set_content_mode(
     Ok(())
 }
 
+/// A project's own retention, in days: none where it keeps the longest sold,
+/// or has no settings row.
+pub async fn retention_days<B: HasProject>(
+    tx: &mut Scoped<'_, B>,
+    project_id: &ProjectId,
+) -> sqlx::Result<Option<i16>> {
+    Ok(sqlx::query_scalar(
+        "SELECT retention_days FROM telemetry.project_settings WHERE project_id = $1",
+    )
+    .bind(project_id)
+    .fetch_optional(tx.conn())
+    .await?
+    .flatten())
+}
+
+/// A project's retention, set, as [`set_content_mode`] sets its mode: its row
+/// made where it has none and filed under the scope's organization; `None`
+/// for the longest sold. Answers what it held before.
+pub async fn set_retention_days(
+    tx: &mut Scoped<'_, ProjectAndOrganization>,
+    project_id: &ProjectId,
+    organization_id: &OrganizationId,
+    days: Option<i16>,
+) -> sqlx::Result<Option<i16>> {
+    let before = retention_days(tx, project_id).await?;
+    sqlx::query(
+        "INSERT INTO telemetry.project_settings (project_id, organization_id, retention_days)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (project_id) DO UPDATE
+            SET organization_id = EXCLUDED.organization_id,
+                retention_days  = EXCLUDED.retention_days",
+    )
+    .bind(project_id)
+    .bind(organization_id)
+    .bind(days)
+    .execute(tx.conn())
+    .await?;
+    Ok(before)
+}
+
 /// The projects an organization's settings rows name: every project that
 /// sent a span while it held it, which its purge must find in ClickHouse,
 /// since a span names no organization.

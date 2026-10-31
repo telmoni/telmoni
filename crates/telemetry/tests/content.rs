@@ -924,7 +924,8 @@ async fn no_tag_value_or_end_user_id_reaches_a_log_an_error_or_the_audit_chain(p
         None,
     );
     let named = [("telmoni.tag.app", TAG), ("user.id", USER)];
-    door.send(export_of(RUN, TRACE, SPAN, &named, "result")).await;
+    door.send(export_of(RUN, TRACE, SPAN, &named, "result"))
+        .await;
     common::eventually("the trace is read", || found(&door, RUN)).await;
 
     let tag = format!("app:{TAG}");
@@ -933,11 +934,20 @@ async fn no_tag_value_or_end_user_id_reaches_a_log_an_error_or_the_audit_chain(p
         (format!("/traces?tag={tag}"), StatusCode::OK),
         (format!("/traces?user={USER}"), StatusCode::OK),
         (format!("/users?user={USER}"), StatusCode::OK),
-        (format!("/traces/export?tag={tag}&format=json"), StatusCode::OK),
-        (format!("/users/export?user={USER}&format=json"), StatusCode::OK),
+        (
+            format!("/traces/export?tag={tag}&format=json"),
+            StatusCode::OK,
+        ),
+        (
+            format!("/users/export?user={USER}&format=json"),
+            StatusCode::OK,
+        ),
         // Refused: neither the value nor the id may come back in the detail.
         (format!("/traces?tag={TAG}"), StatusCode::BAD_REQUEST),
-        (format!("/traces?user={}", USER.repeat(8)), StatusCode::BAD_REQUEST),
+        (
+            format!("/traces?user={}", USER.repeat(8)),
+            StatusCode::BAD_REQUEST,
+        ),
     ] {
         let (status, answer) = door.lane("GET", &path, "admin-1", None).await;
         assert_eq!(status, expected, "{path}: {answer}");
@@ -946,7 +956,12 @@ async fn no_tag_value_or_end_user_id_reaches_a_log_an_error_or_the_audit_chain(p
         }
     }
     let (status, answer) = door
-        .lane("POST", "/users/erase", "admin-1", Some(json!({ "user_id": USER })))
+        .lane(
+            "POST",
+            "/users/erase",
+            "admin-1",
+            Some(json!({ "user_id": USER })),
+        )
         .await;
     assert_eq!(status, StatusCode::OK, "{answer}");
 
@@ -1200,7 +1215,7 @@ async fn content_past_its_spans_retention_goes_with_its_bytes(pool: PgPool) {
     .await
     .expect("age one field past retention");
 
-    let gone = retention::purge_content(&pool, Utc::now())
+    let gone = retention::purge_content(&pool, Utc::now(), &[])
         .await
         .expect("the purge");
     assert_eq!(gone, 1);
@@ -1214,6 +1229,105 @@ async fn content_past_its_spans_retention_goes_with_its_bytes(pool: PgPool) {
     assert_eq!(
         door.held(&pool, &door.organization).await,
         Some(before - i64::try_from("result".len()).expect("small"))
+    );
+}
+
+/// A project that keeps fewer days loses the content past them with its
+/// spans; content inside them stays.
+#[sqlx::test]
+async fn content_past_a_projects_own_retention_goes(pool: PgPool) {
+    let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let door = door(&pool, ContentMode::On).await;
+    door.send(export("result")).await;
+    sqlx::query(
+        "UPDATE telemetry.plain_content SET received_at = now() - interval '40 days' \
+          WHERE project_id = $1 AND field = 'gen_ai.tool.call.result'",
+    )
+    .bind(&door.project)
+    .execute(&pool)
+    .await
+    .expect("age one field past the project's thirty days");
+
+    let gone = retention::purge_content(&pool, Utc::now(), &[(door.project.clone(), 30)])
+        .await
+        .expect("the purge");
+    assert_eq!(gone, 1);
+    let names: Vec<String> = door
+        .kept(&pool)
+        .await
+        .into_iter()
+        .map(|row| row.0)
+        .collect();
+    assert_eq!(names, ["app.ticket", "gen_ai.input.messages"]);
+}
+
+/// ⚠ An owner or admin chooses the project's retention, one day up to the
+/// longest sold, each change filed with its days from and to; a member reads
+/// it and is refused the change.
+#[sqlx::test]
+async fn an_owner_or_admin_chooses_the_retention_and_a_member_reads_it(pool: PgPool) {
+    let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    apply_audit_migrations(&pool).await;
+    let door = door(&pool, ContentMode::Off).await;
+    for (user, organization_role, seat) in [
+        ("admin-1", OrganizationRole::Admin, None),
+        ("member-1", OrganizationRole::Member, Some(Role::Member)),
+    ] {
+        door.auth.seat(
+            user,
+            &door.organization,
+            &door.project,
+            organization_role,
+            seat,
+        );
+    }
+    let put = |user: &'static str, days: Value| {
+        door.lane(
+            "PUT",
+            "/retention",
+            user,
+            Some(json!({ "retention_days": days })),
+        )
+    };
+
+    let (status, answer) = put("member-1", json!(30)).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{answer}");
+    for days in [json!(0), json!(361), json!(-1)] {
+        let (status, answer) = put("admin-1", days.clone()).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{days}: {answer}");
+    }
+    let (status, answer) = put("admin-1", json!(30)).await;
+    assert_eq!(status, StatusCode::OK, "{answer}");
+    assert_eq!(
+        answer,
+        json!({ "span_days": 30, "max_span_days": 360, "rollup_months": 13 })
+    );
+    let (_, posture) = door.lane("GET", "/privacy", "member-1", None).await;
+    assert_eq!(posture["retention"]["span_days"], 30, "{posture}");
+    // The same days again files nothing; the longest, named, is none again.
+    put("admin-1", json!(30)).await;
+    let (status, answer) = put("admin-1", json!(360)).await;
+    assert_eq!(status, StatusCode::OK, "{answer}");
+    assert_eq!(answer["span_days"], 360);
+
+    let filed: Vec<String> = sqlx::query_scalar(
+        "SELECT metadata::text FROM audit.events \
+          WHERE organization_id = $1 AND resource_kind = 'project' ORDER BY seq",
+    )
+    .bind(&door.organization)
+    .fetch_all(&pool)
+    .await
+    .expect("the chain");
+    assert_eq!(
+        filed,
+        [
+            r#"{"retention_days": {"to": 30, "from": 360}}"#,
+            r#"{"retention_days": {"to": 360, "from": 30}}"#,
+        ]
     );
 }
 

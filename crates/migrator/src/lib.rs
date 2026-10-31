@@ -55,9 +55,9 @@ pub async fn migrate_from_env() -> anyhow::Result<()> {
 
 /// Rotate every partitioned Postgres table once — create the months ahead,
 /// and drop the expired ones where the registry allows it (nowhere today) —
-/// then drop ClickHouse's days and months past retention and the content that
-/// follows them, whether the one before failed or not. The first failure is
-/// the answer.
+/// then drop ClickHouse's days and months past retention, the spans past a
+/// project's own, and the content that follows them, whether the one before
+/// failed or not. The first failure is the answer.
 pub async fn rotate_from_env() -> anyhow::Result<()> {
     let options = migrator_options()?;
     let clickhouse = telmoni_telemetry::store::client(&require(CLICKHOUSE_URL_VAR)?)
@@ -66,34 +66,40 @@ pub async fn rotate_from_env() -> anyhow::Result<()> {
     // fails must not hold back every night's purge behind it.
     let rotated = rotate::rotate(&options).await;
     let now = chrono::Utc::now();
-    let purged = telmoni_telemetry::retention::purge(&clickhouse, now).await;
-    if let Ok(purged) = &purged {
-        tracing::info!(
-            span_days = purged.span_days,
-            rollup_months = purged.rollup_months,
-            "rotate: clickhouse purged"
-        );
-    }
-    let content = purge_content(&options, now).await;
-    rotated?;
-    purged?;
-    content?;
-    Ok(())
-}
-
-/// The content past its span's retention, deleted in Postgres, its count logged.
-async fn purge_content(
-    options: &sqlx::postgres::PgConnectOptions,
-    now: chrono::DateTime<chrono::Utc>,
-) -> anyhow::Result<()> {
     let pool = sqlx::postgres::PgPoolOptions::new()
         .max_connections(1)
         .acquire_timeout(std::time::Duration::from_secs(10))
         .connect_with(options.clone())
         .await
-        .context("rotate: connect for the content purge")?;
-    let rows = telmoni_telemetry::retention::purge_content(&pool, now).await?;
-    tracing::info!(rows, "rotate: content past its span's retention purged");
+        .context("rotate: connect for telemetry's purges");
+    // Without the projects' own retentions, the longest still holds for all.
+    let shortened = match &pool {
+        Ok(pool) => telmoni_telemetry::retention::shortened(pool).await,
+        Err(_) => Ok(Vec::new()),
+    };
+    let none = Vec::new();
+    let cut = shortened.as_ref().unwrap_or(&none);
+    let purged = telmoni_telemetry::retention::purge(&clickhouse, now, cut).await;
+    if let Ok(purged) = &purged {
+        tracing::info!(
+            span_days = purged.span_days,
+            rollup_months = purged.rollup_months,
+            projects_shortened = cut.len(),
+            "rotate: clickhouse purged"
+        );
+    }
+    let content = match &pool {
+        Ok(pool) => telmoni_telemetry::retention::purge_content(pool, now, cut).await,
+        Err(_) => Ok(0),
+    };
+    if let Ok(rows) = &content {
+        tracing::info!(rows, "rotate: content past its span's retention purged");
+    }
+    rotated?;
+    pool?;
+    shortened?;
+    purged?;
+    content?;
     Ok(())
 }
 

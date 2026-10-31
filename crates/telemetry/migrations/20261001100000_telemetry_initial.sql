@@ -49,16 +49,20 @@ CREATE TABLE telemetry.project_settings (
     hashing_key_wrapped_dek BYTEA,
     hashing_key_version     SMALLINT,
     -- The key the project's content is sealed under (`plain_content`): a data
-    -- key of the row's own, wrapped under TELEMETRY_KEK, made with the first
-    -- content the project keeps.
+    -- key of the row's own, wrapped under CONTENT_KEK, made with the first
+    -- content the project keeps, and deleted to make all of it unreadable.
     content_key_wrapped_dek BYTEA,
     content_key_version     SMALLINT,
     -- The saved layout its sessions and traces open in, which stands until
     -- it is deleted and the console's own default holds again (the key,
     -- below the views); none for the default.
     session_view_id         UUID,
+    -- How long the project's spans and content are kept, in days, where an
+    -- owner or admin chose fewer than the longest sold; none for the longest.
+    retention_days          SMALLINT,
     created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT project_settings_content_mode_check CHECK (content_mode IN ('off', 'on')),
+    CONSTRAINT project_settings_retention_days_check CHECK (retention_days BETWEEN 1 AND 360),
     -- The key is there whole or not at all.
     CONSTRAINT project_settings_hashing_key_check CHECK (
         (hashing_key_ciphertext IS NULL) = (hashing_key_nonce IS NULL)

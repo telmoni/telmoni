@@ -5,7 +5,8 @@ description: "How long Telmoni keeps each kind of data — telemetry, the organi
 
 Telmoni keeps each kind of data for a window of its own. The windows are the
 platform's: the same on a self-hosted deployment and on the hosted service,
-and none is set per project yet. Deleting a project, an organization or an
+but for a project's spans and their content, which its owner or an admin may
+keep for fewer days. Deleting a project, an organization or an
 account ends every window early for what they held, as
 [Data deletion](/docs/workspace/data-deletion) describes.
 
@@ -13,14 +14,21 @@ account ends every window early for what they held, as
 
 Telemetry is kept only while its project is active.
 
+A project's **Owner** or an **Admin** chooses how many days its spans and the
+content kept with them are kept, from 1 up to 360, on the project's
+**Privacy** page; the change is in the audit log. The nightly purge holds it
+from that night: a project's spans and content older than its days are
+deleted, gone from every read at once and off the disk the same night. The
+hourly totals keep their 13 months whatever the project chose.
+
 | Data | Kept | Then |
 |---|---|---|
-| Spans: every run, step, model call and tool call, as metadata | 360 days after a span arrives | `telmoni-server rotate` drops each day of spans once every span in it is older |
+| Spans: every run, step, model call and tool call, as metadata | 360 days after a span arrives, or the fewer days the project chose | `telmoni-server rotate` drops each day of spans once every span in it is older, and deletes a project's older than its own days |
 | Hourly totals: spans, units, tokens, the cost calls reported and durations by project, agent, kind, model, provider, tool, status, environment and release, which name no user and no tag | 13 months | `rotate` drops each month of totals once it is older |
 | A deleted project's spans and totals | Until the project is deleted | Marked deleted the moment the project goes, and gone from every read within moments, as the store applies the mark; `rotate` rewrites them off the disk that night |
-| The content a project whose content mode is `on` keeps: each field of a span, sealed under the project's own key, in Postgres | As long as its span: 360 days after it arrives | `rotate` deletes it with its span's day; purged with the project |
+| The content a project whose content mode is `on` keeps: each field of a span, sealed under the project's own key, in Postgres | As long as its span | `rotate` deletes it with its span; purged with the project |
 | The claim on an export's bytes, which answers a retry with the first answer rather than writing twice | 1 hour | Expires |
-| A project's telemetry settings: its content mode, the key its end-user ids are hashed under, and the key its content is sealed under | While the project exists | Purged with the project |
+| A project's telemetry settings: its content mode, its retention, the key its end-user ids are hashed under, and the key its content is sealed under | While the project exists | Purged with the project |
 | A project's saved views of its traces, sessions and users: each one's name, filters, sort, window and columns | Until an Owner or Admin deletes it, or the project goes | Purged with the project |
 | A project's saved layouts of its sessions and traces: each one's name, options and columns, and the layout the project opens in | Until an Owner or Admin deletes it, or the project goes | Purged with the project |
 | A project's [alerts](/docs/workspace/alerts): each one's definition, the connectors it tells and its last value | Until a member deletes it, or the project goes | Deleted with its incidents and its maintenance windows, or purged with the project |

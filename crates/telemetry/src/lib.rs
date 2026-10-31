@@ -169,6 +169,7 @@ pub fn router(state: Arc<AppState>) -> Router {
             "/telemetry/content-mode/code",
             post(handler::content_mode::request_content_mode_code),
         )
+        .route("/telemetry/retention", put(handler::privacy::put_retention))
         .route(
             "/telemetry/field-inventory",
             get(handler::field_inventory::get_field_inventory),

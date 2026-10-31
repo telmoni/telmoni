@@ -14,6 +14,7 @@ export const PrivacyPostureSchema = z.object({
   sent: z.array(z.object({ attribute: z.string(), spans: z.number().int() })),
   retention: z.object({
     span_days: z.number().int(),
+    max_span_days: z.number().int(),
     rollup_months: z.number().int(),
   }),
 });

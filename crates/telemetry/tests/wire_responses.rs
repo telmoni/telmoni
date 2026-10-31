@@ -626,7 +626,8 @@ fn the_privacy_posture_answers_as_the_console_reads() {
                 spans: 400,
             }],
             retention: Retention {
-                span_days: 360,
+                span_days: 90,
+                max_span_days: 360,
                 rollup_months: 13,
             },
         },

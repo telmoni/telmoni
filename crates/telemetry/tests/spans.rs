@@ -444,7 +444,7 @@ async fn the_nightly_purge_drops_whole_days_and_months_past_retention() {
         .await
         .expect("insert spans of three days");
 
-    let purged = retention::purge(&ch.migrator, Utc::now())
+    let purged = retention::purge(&ch.migrator, Utc::now(), &[])
         .await
         .expect("the purge runs as the migrator");
     assert!(purged.span_days >= 1, "no day was dropped: {purged:?}");
@@ -483,7 +483,7 @@ async fn the_nightly_purge_drops_whole_days_and_months_past_retention() {
     );
     assert!(!months.is_empty(), "the purge took this month's totals");
 
-    let again = retention::purge(&ch.migrator, Utc::now())
+    let again = retention::purge(&ch.migrator, Utc::now(), &[])
         .await
         .expect("a second purge runs");
     assert_eq!(
@@ -491,6 +491,53 @@ async fn the_nightly_purge_drops_whole_days_and_months_past_retention() {
         retention::Purged::default(),
         "a second night found more to drop"
     );
+}
+
+/// ⚠ A project that chose fewer days loses its spans past them that night,
+/// and no other project's go: a span inside its days, and every span of a
+/// project keeping the longest, stay.
+#[tokio::test]
+async fn a_project_that_keeps_fewer_days_loses_its_older_spans_and_no_other_does() {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let (shortened, longest) = (ProjectId::new(), ProjectId::new());
+    let (old, recent) = (
+        Utc::now() - Duration::days(40),
+        Utc::now() - Duration::days(10),
+    );
+    let mut rows = Vec::new();
+    for project in [&shortened, &longest] {
+        rows.push(received(project, SpanKind::Run, "nightly-report", 100, old));
+        rows.push(received(
+            project,
+            SpanKind::Run,
+            "nightly-report",
+            100,
+            recent,
+        ));
+    }
+    ch.store
+        .insert_spans(&rows)
+        .await
+        .expect("insert both projects' spans");
+
+    retention::purge(&ch.migrator, Utc::now(), &[(shortened.clone(), 30)])
+        .await
+        .expect("the purge runs as the migrator");
+
+    for (project, left) in [(&shortened, 1_u64), (&longest, 2)] {
+        let count: u64 = ch
+            .store
+            .read(
+                &Projects::one(project.clone()),
+                "SELECT count() FROM telemetry.spans WHERE project_id IN {projects:Array(String)}",
+            )
+            .fetch_one()
+            .await
+            .expect("count what is left");
+        assert_eq!(count, left, "{project}");
+    }
 }
 
 /// ⚠ **A deleted project's rows go, and no other project's.** Marked by the

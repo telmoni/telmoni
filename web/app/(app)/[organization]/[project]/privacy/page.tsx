@@ -26,6 +26,7 @@ import { projectPath } from "@/lib/slug";
 import { formatCount } from "@/lib/traces";
 
 import { EraseEndUserForm } from "./_erase-end-user";
+import { RetentionForm } from "./_retention";
 
 export const metadata = { title: "Privacy" };
 
@@ -211,8 +212,9 @@ export default async function PrivacyPage({
           title="Retention"
           description={
             <>
-              How long what this project sends is kept, the same for every project; deleting a
-              trace, an end user or the project ends it early.{" "}
+              How long what this project sends is kept: its spans as long as its owner or an
+              admin chooses, up to the longest offered, and its hourly totals the same for every
+              project. Deleting a trace, an end user or the project ends it early.{" "}
               <Link href="/docs/workspace/data-retention" className="underline underline-offset-4">
                 Every window
               </Link>
@@ -246,6 +248,16 @@ export default async function PrivacyPage({
           ) : (
             <NoticeCard title="Retention could not be read." body="Reload to try again." />
           )}
+          {posture && admin && (
+            <Card>
+              <RetentionForm
+                key={posture.retention.span_days}
+                projectId={project.id}
+                days={posture.retention.span_days}
+                max={posture.retention.max_span_days}
+              />
+            </Card>
+          )}
         </Section>
 
         <Section title="Residency" description="Where what this project sends is stored.">
@@ -264,6 +276,33 @@ export default async function PrivacyPage({
                 ClickHouse, and content in Postgres.
               </p>
             )}
+          </Card>
+        </Section>
+
+        <Section
+          title="Give an end user their data"
+          description="What the project keeps about one end user, for them to have."
+        >
+          <Card className="text-sm">
+            <p>
+              Filter{" "}
+              <Link
+                href={projectPath(organization, slug, "/users")}
+                className="underline underline-offset-4"
+              >
+                Users
+              </Link>{" "}
+              or{" "}
+              <Link
+                href={projectPath(organization, slug, "/traces")}
+                className="underline underline-offset-4"
+              >
+                Traces
+              </Link>{" "}
+              by their id under <span className="font-medium">User</span>, then download: their
+              totals, or every trace of theirs the project keeps with any content kept, as JSON or
+              CSV.
+            </p>
           </Card>
         </Section>
 

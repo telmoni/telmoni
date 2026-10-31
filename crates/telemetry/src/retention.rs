@@ -7,7 +7,9 @@
 //! its purge and gone from every read within moments as the store applies
 //! the mark ([`crate::store::Store::delete_project`]), leave the disk by
 //! the next night's run ([`rewrite_deleted`]). The content an `on` project
-//! keeps in Postgres follows its span's day ([`purge_content`]).
+//! keeps in Postgres follows its span's day ([`purge_content`]). A project
+//! that chose fewer days than the longest sold has its older spans deleted
+//! the same night, and their content with them ([`shortened`]).
 
 use anyhow::Context;
 use chrono::{DateTime, Datelike, Duration, Months, NaiveDate, TimeZone, Utc};
@@ -58,15 +60,52 @@ pub struct Purged {
 
 /// The first instant `spans` keeps at `now`: midnight UTC of the day
 /// [`SPAN_RETENTION_DAYS`] before. Each day's partition wholly before it goes.
-/// A date out of range keeps everything rather than drop what it should not.
 #[must_use]
 pub fn span_cutoff(now: DateTime<Utc>) -> DateTime<Utc> {
+    cutoff_after(now, SPAN_RETENTION_DAYS)
+}
+
+/// The first instant kept at `now` by a retention of `days`: midnight UTC of
+/// the day that many before. A date out of range keeps everything rather
+/// than drop what it should not.
+#[must_use]
+pub fn cutoff_after(now: DateTime<Utc>, days: i64) -> DateTime<Utc> {
     midnight(
         now.date_naive()
-            .checked_sub_signed(Duration::days(SPAN_RETENTION_DAYS))
+            .checked_sub_signed(Duration::days(days))
             .unwrap_or(NaiveDate::MIN),
     )
 }
+
+/// A project that keeps fewer days than the longest sold, and how many.
+pub type Shortened = (telmoni_shared::ProjectId, i64);
+
+/// Every project whose owner or admin chose a retention shorter than
+/// [`SPAN_RETENTION_DAYS`], read as the migrator, whom row security does not
+/// hold.
+///
+/// # Errors
+///
+/// Postgres did not answer.
+pub async fn shortened(pool: &sqlx::PgPool) -> anyhow::Result<Vec<Shortened>> {
+    let rows: Vec<(telmoni_shared::ProjectId, i16)> = sqlx::query_as(
+        "SELECT project_id, retention_days FROM telemetry.project_settings
+          WHERE retention_days < $1 ORDER BY project_id",
+    )
+    .bind(i16::try_from(SPAN_RETENTION_DAYS).unwrap_or(i16::MAX))
+    .fetch_all(pool)
+    .await
+    .context("listing the projects that keep fewer days")?;
+    Ok(rows
+        .into_iter()
+        .map(|(project, days)| (project, i64::from(days)))
+        .collect())
+}
+
+/// A shortened project's spans before its cutoff, a lightweight delete
+/// awaited until marked, so the night's rewrite takes them off the disk.
+const DELETE_SHORTENED: &str = "DELETE FROM telemetry.spans \
+     WHERE project_id = {project:String} AND received_at < {cutoff:DateTime64(6, 'UTC')}";
 
 /// The first instant `spans_hourly` keeps at `now`: the first of the month
 /// [`ROLLUP_RETENTION_MONTHS`] before. Each month's partition wholly before
@@ -91,7 +130,11 @@ fn midnight(day: NaiveDate) -> DateTime<Utc> {
 /// every project's. Idempotent: a partition already gone is not listed, and
 /// a mask already applied rewrites nothing. Every step runs whichever failed
 /// before it; the first failure is the answer.
-pub async fn purge(client: &clickhouse::Client, now: DateTime<Utc>) -> anyhow::Result<Purged> {
+pub async fn purge(
+    client: &clickhouse::Client,
+    now: DateTime<Utc>,
+    shortened: &[Shortened],
+) -> anyhow::Result<Purged> {
     let span_days = drop_before(
         client,
         "spans",
@@ -110,6 +153,9 @@ pub async fn purge(client: &clickhouse::Client, now: DateTime<Utc>) -> anyhow::R
     )
     .await
     .context("dropping months of hourly totals past retention");
+    let cut = delete_shortened(client, shortened, now)
+        .await
+        .context("deleting the spans past a project's own retention");
     let rewritten = rewrite_deleted(client)
         .await
         .context("rewriting away the rows deleted projects left");
@@ -117,8 +163,37 @@ pub async fn purge(client: &clickhouse::Client, now: DateTime<Utc>) -> anyhow::R
         span_days: span_days?,
         rollup_months: rollup_months?,
     };
+    cut?;
     rewritten?;
     Ok(purged)
+}
+
+/// Each shortened project's spans past its own cutoff, deleted; every project
+/// tried whichever failed before it, the first failure the answer.
+async fn delete_shortened(
+    client: &clickhouse::Client,
+    shortened: &[Shortened],
+    now: DateTime<Utc>,
+) -> anyhow::Result<()> {
+    let mut first_failure = None;
+    for (project, days) in shortened {
+        let deleted = within(
+            STATEMENT_TIMEOUT,
+            client
+                .query_raw(DELETE_SHORTENED)
+                .with_setting("lightweight_deletes_sync", "1")
+                .param("project", project.as_str())
+                .param("cutoff", micros(cutoff_after(now, *days)))
+                .execute(),
+        )
+        .await;
+        if let Err(e) = deleted {
+            tracing::error!(project_id = %project, days, error = %e,
+                "rotate: a project's spans past its own retention could not be deleted");
+            first_failure.get_or_insert(e);
+        }
+    }
+    first_failure.map_or(Ok(()), |e| Err(e.into()))
 }
 
 /// Content rows deleted at once by [`purge_content`]: a night's lot goes in
@@ -130,7 +205,11 @@ pub(crate) const CONTENT_BATCH: i64 = 5_000;
 /// in its own transaction taking its bytes off the count of the organization
 /// the project is filed under ([`crate::db::delete_content`]). Answers how
 /// many rows went.
-pub async fn purge_content(pool: &sqlx::PgPool, now: DateTime<Utc>) -> anyhow::Result<u64> {
+pub async fn purge_content(
+    pool: &sqlx::PgPool,
+    now: DateTime<Utc>,
+    shortened: &[Shortened],
+) -> anyhow::Result<u64> {
     let cutoff = span_cutoff(now);
     let projects: Vec<telmoni_shared::ProjectId> = sqlx::query_scalar(
         "SELECT DISTINCT project_id FROM telemetry.plain_content WHERE received_at < $1",
@@ -140,28 +219,41 @@ pub async fn purge_content(pool: &sqlx::PgPool, now: DateTime<Utc>) -> anyhow::R
     .await
     .context("listing the projects with content past its span's retention")?;
     let mut gone = 0u64;
-    for project in projects {
-        loop {
-            let mut tx = pool
-                .begin()
-                .await
-                .context("a content purge's transaction")?;
-            let batch = crate::db::delete_content(
-                &mut tx,
-                std::slice::from_ref(&project),
-                Some(cutoff),
-                CONTENT_BATCH,
-            )
-            .await
-            .context("deleting content past its span's retention")?;
-            tx.commit().await.context("committing a content purge")?;
-            gone += batch;
-            if batch < CONTENT_BATCH.unsigned_abs() {
-                break;
-            }
-        }
+    for project in &projects {
+        gone += delete_content_before(pool, project, cutoff).await?;
+    }
+    for (project, days) in shortened {
+        gone += delete_content_before(pool, project, cutoff_after(now, *days)).await?;
     }
     Ok(gone)
+}
+
+/// One project's content received before `cutoff`, a batch a transaction.
+async fn delete_content_before(
+    pool: &sqlx::PgPool,
+    project: &telmoni_shared::ProjectId,
+    cutoff: DateTime<Utc>,
+) -> anyhow::Result<u64> {
+    let mut gone = 0u64;
+    loop {
+        let mut tx = pool
+            .begin()
+            .await
+            .context("a content purge's transaction")?;
+        let batch = crate::db::delete_content(
+            &mut tx,
+            std::slice::from_ref(project),
+            Some(cutoff),
+            CONTENT_BATCH,
+        )
+        .await
+        .context("deleting content past its span's retention")?;
+        tx.commit().await.context("committing a content purge")?;
+        gone += batch;
+        if batch < CONTENT_BATCH.unsigned_abs() {
+            return Ok(gone);
+        }
+    }
 }
 
 /// Apply the deleted mask on both tables, as the migrator, waiting on each

@@ -2,7 +2,8 @@
 //! /internal/v1/telemetry/privacy`, what its spans arrived with over the last
 //! [`SENT_DAYS`] by the field inventory's rows, dropped content among them,
 //! and how long its spans and the hourly totals that outlive them are kept.
-//! Every role on the project `x-project-id` names reads it.
+//! Every role on the project `x-project-id` names reads it; its owners and
+//! admins choose its retention, `PUT /internal/v1/telemetry/retention`.
 
 use std::sync::Arc;
 
@@ -12,13 +13,17 @@ use chrono::{DateTime, Duration, Utc};
 use clickhouse::Row;
 use serde::{Deserialize, Serialize};
 
-use telmoni_shared::TelmoniError;
+use serde_json::json;
+use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
+use telmoni_shared::db::tenant_session::project_scope;
 use telmoni_shared::extract::Json;
 use telmoni_shared::rbac::{Resource, Verb};
+use telmoni_shared::{AuditAction, TelmoniError, TelmoniResourceKind};
 
-use crate::AppState;
+use crate::handler::chain;
 use crate::retention::{ROLLUP_RETENTION_MONTHS, SPAN_RETENTION_DAYS};
 use crate::store::{self, Projects, micros};
+use crate::{AppState, db};
 
 /// The days the page counts back over.
 pub const SENT_DAYS: u32 = 30;
@@ -60,13 +65,34 @@ pub struct Sent {
     pub spans: u64,
 }
 
-/// The windows `telmoni-server rotate` holds, the same for every project.
+/// The windows `telmoni-server rotate` holds for the project.
 #[derive(Debug, Serialize)]
 pub struct Retention {
-    /// Spans, and the content an `on` project keeps with them.
+    /// Spans, and the content an `on` project keeps with them: the project's
+    /// own choice, else [`SPAN_RETENTION_DAYS`].
     pub span_days: i64,
-    /// The hourly totals, which name no user and no tag.
+    /// The most it may choose: the longest sold.
+    pub max_span_days: i64,
+    /// The hourly totals, which name no user and no tag, the same for every
+    /// project.
     pub rollup_months: u32,
+}
+
+impl Retention {
+    fn of(chosen: Option<i16>) -> Self {
+        Self {
+            span_days: chosen.map_or(SPAN_RETENTION_DAYS, i64::from),
+            max_span_days: SPAN_RETENTION_DAYS,
+            rollup_months: ROLLUP_RETENTION_MONTHS,
+        }
+    }
+}
+
+/// The body of a change: the days to keep, or none for the longest sold.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RetentionChange {
+    pub retention_days: Option<i64>,
 }
 
 /// `GET /internal/v1/telemetry/privacy` — the project's posture.
@@ -78,6 +104,9 @@ pub async fn get_privacy(
     let project_id = &acting
         .require_project(Verb::Read, Resource::Project)?
         .project_id;
+    let mut tx = project_scope(&state.db, project_id).await?;
+    let chosen = db::retention_days(&mut tx, project_id).await?;
+    tx.commit().await?;
     let since = Utc::now() - Duration::days(i64::from(SENT_DAYS));
     let counted: Counted = state
         .store
@@ -108,9 +137,65 @@ pub async fn get_privacy(
         since,
         spans: counted.spans,
         sent,
-        retention: Retention {
-            span_days: SPAN_RETENTION_DAYS,
-            rollup_months: ROLLUP_RETENTION_MONTHS,
-        },
+        retention: Retention::of(chosen),
     }))
+}
+
+/// `PUT /internal/v1/telemetry/retention` — how many days the project keeps
+/// its spans and content, one up to the longest sold, or none for that;
+/// decided under the organization's chain lock, the role checked again
+/// there, and a change recorded, from and to, in the same transaction. The
+/// nightly purge holds it; the hourly totals keep their months.
+pub async fn put_retention(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(change): Json<RetentionChange>,
+) -> Result<Json<Retention>, TelmoniError> {
+    let acting = state.auth.resolve(&headers).await?;
+    let project_id = acting
+        .require_project(Verb::Update, Resource::Project)?
+        .project_id
+        .clone();
+    // The longest, named, is kept as none: the same days, and it follows
+    // what is sold.
+    let days = match change.retention_days {
+        None | Some(SPAN_RETENTION_DAYS) => None,
+        Some(days) if (1..SPAN_RETENTION_DAYS).contains(&days) => i16::try_from(days).ok(),
+        Some(_) => {
+            return Err(TelmoniError::BadRequest(format!(
+                "a project keeps its spans 1 to {SPAN_RETENTION_DAYS} days"
+            )));
+        }
+    };
+    let auth = &*state.auth;
+    chain::write(&state.db, &acting, &project_id, "retention", async |tx| {
+        chain::held(auth, &acting, tx, Verb::Update, Resource::Project).await?;
+        let before = db::set_retention_days(tx, &project_id, &acting.organization_id, days).await?;
+        if before != days {
+            emit_audit(
+                tx,
+                AuditEvent::new(
+                    &acting.organization_id,
+                    Actor::User(acting.user_id.as_str()),
+                    AuditAction::Updated,
+                    TelmoniResourceKind::Project,
+                )
+                .in_project(&project_id)
+                .on(project_id.as_str())
+                .details(
+                    json!({ "retention_days": { "from": days_of(before), "to": days_of(days) } }),
+                ),
+            )
+            .await?;
+        }
+        Ok(())
+    })
+    .await?;
+    tracing::info!(project_id = %project_id, retention_days = days_of(days), "telemetry: a project's retention set");
+    Ok(Json(Retention::of(days)))
+}
+
+/// The days a choice keeps, the longest sold for none.
+fn days_of(chosen: Option<i16>) -> i64 {
+    chosen.map_or(SPAN_RETENTION_DAYS, i64::from)
 }
