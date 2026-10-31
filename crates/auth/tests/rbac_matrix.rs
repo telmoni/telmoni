@@ -37,6 +37,7 @@ const MATRIX: &[Cell] = &[
     cell(Role::Owner, Verb::Delete, Resource::Connector, true),
     cell(Role::Owner, Verb::Read, Resource::Audit, true),
     cell(Role::Owner, Verb::Read, Resource::Trace, true),
+    cell(Role::Owner, Verb::Delete, Resource::Trace, true),
     cell(Role::Owner, Verb::Read, Resource::View, true),
     cell(Role::Owner, Verb::Create, Resource::View, true),
     cell(Role::Owner, Verb::Update, Resource::View, true),
@@ -63,6 +64,7 @@ const MATRIX: &[Cell] = &[
     cell(Role::Admin, Verb::Delete, Resource::Connector, true),
     cell(Role::Admin, Verb::Read, Resource::Audit, true),
     cell(Role::Admin, Verb::Read, Resource::Trace, true),
+    cell(Role::Admin, Verb::Delete, Resource::Trace, true),
     cell(Role::Admin, Verb::Read, Resource::View, true),
     cell(Role::Admin, Verb::Create, Resource::View, true),
     cell(Role::Admin, Verb::Update, Resource::View, true),
@@ -89,6 +91,7 @@ const MATRIX: &[Cell] = &[
     cell(Role::Member, Verb::Delete, Resource::Connector, false),
     cell(Role::Member, Verb::Read, Resource::Audit, false),
     cell(Role::Member, Verb::Read, Resource::Trace, true),
+    cell(Role::Member, Verb::Delete, Resource::Trace, false),
     cell(Role::Member, Verb::Read, Resource::View, true),
     cell(Role::Member, Verb::Create, Resource::View, false),
     cell(Role::Member, Verb::Update, Resource::View, false),
@@ -253,6 +256,7 @@ fn an_admin_can_manage_everything_except_delete_project() {
 
     assert_allows(Role::Admin, Verb::Read, Resource::Audit);
     assert_allows(Role::Admin, Verb::Read, Resource::Trace);
+    assert_allows(Role::Admin, Verb::Delete, Resource::Trace);
 
     assert_allows(Role::Admin, Verb::Read, Resource::View);
     assert_allows(Role::Admin, Verb::Create, Resource::View);
@@ -396,10 +400,8 @@ fn every_array_lists_every_variant_exactly_once() {
 fn is_meaningless_combo(verb: Verb, resource: Resource) -> bool {
     matches!(
         (verb, resource),
-        (
-            Verb::Create | Verb::Update | Verb::Delete,
-            Resource::Audit | Resource::Trace
-        )
+        (Verb::Create | Verb::Update | Verb::Delete, Resource::Audit)
+            | (Verb::Create | Verb::Update, Resource::Trace)
     )
 }
 
