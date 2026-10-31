@@ -26,7 +26,7 @@ use telmoni_shared::audit::{Actor, lock_chain};
 use telmoni_shared::envelope::SealedRef;
 use telmoni_shared::middleware::service_auth::SERVICE_SECRET_HEADER;
 use telmoni_shared::seam::Telemetry as _;
-use telmoni_shared::test_util::apply_audit_migrations;
+use telmoni_shared::test_util::{apply_audit_migrations, captured_logs};
 use telmoni_shared::{
     ApiKeyScope, ContentMode, OrganizationId, OrganizationRole, ProjectId, Role, TelmoniError,
 };
@@ -636,6 +636,133 @@ async fn the_content_key_is_wrapped_apart_and_a_purge_deletes_it_with_the_conten
     .expect("count the keys left");
     assert_eq!(keys, 0, "the key went");
     assert!(door.kept(&pool).await.is_empty(), "and the content with it");
+}
+
+/// What every content field below carries, so a copy of it anywhere is found.
+const SENTINEL: &str = "s3nt1nel-written-by-a-person";
+
+/// Every content field the inventory names, and a text it names nowhere, each
+/// carrying [`SENTINEL`], but the two [`export_of`] sets itself: its tool's
+/// result is given the sentinel, its messages are its own.
+fn every_content_field() -> Vec<(String, String)> {
+    contract::CONTENT
+        .iter()
+        .copied()
+        .chain(["app.note"])
+        .filter(|key| !matches!(*key, "gen_ai.input.messages" | "gen_ai.tool.call.result"))
+        .map(|key| (key.to_owned(), format!("{SENTINEL} as {key}")))
+        .collect()
+}
+
+/// ⚠ Minimization: what a person or a model wrote reaches no log line at any
+/// level, no answer of ingest's nor an error's detail, no ClickHouse column
+/// and nothing the console agent reads — the audit chain it indexes; its role
+/// reaches no telemetry table (`crates/shared/tests/db_roles.rs`) — whether
+/// its project keeps it sealed (`on`) or drops it (`off`).
+#[sqlx::test]
+async fn no_content_reaches_a_log_an_answer_clickhouse_or_what_the_agent_reads(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    apply_audit_migrations(&pool).await;
+    let (_logging, logs) = captured_logs();
+    let fields = every_content_field();
+    let named: Vec<(&str, &str)> = fields
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect();
+    let long = format!("{SENTINEL} as the tool's result");
+    let kept = door(&pool, ContentMode::On).await;
+    let dropped = door(&pool, ContentMode::Off).await;
+    kept.auth.seat(
+        "admin-1",
+        &kept.organization,
+        &kept.project,
+        OrganizationRole::Owner,
+        None,
+    );
+    let mut answers = Vec::new();
+    for door in [&kept, &dropped] {
+        let (_, answer) = door.send(export_of(RUN, TRACE, SPAN, &named, &long)).await;
+        answers.push(answer.to_string());
+    }
+    common::eventually("the kept trace is read", || found(&kept, RUN)).await;
+    assert!(
+        !kept.kept(&pool).await.is_empty(),
+        "the on project kept it, sealed"
+    );
+
+    // Every column of every row as text, searched where it is kept: a row
+    // holds bytes, the hashed user id among them, that are no UTF-8 here.
+    let (mut rows, mut carrying) = (0_u64, 0_u64);
+    for door in [&kept, &dropped] {
+        let only = Projects::one(door.project.clone());
+        for every_column in [
+            "SELECT count(), countIf(position(formatRow('JSONEachRow', *), {sentinel:String}) > 0) \
+               FROM telemetry.spans WHERE project_id IN {projects:Array(String)}",
+            "SELECT count(), countIf(position(formatRow('JSONEachRow', *), {sentinel:String}) > 0) \
+               FROM telemetry.spans_hourly WHERE project_id IN {projects:Array(String)}",
+        ] {
+            let (all, with): (u64, u64) = ch
+                .store
+                .read(&only, every_column)
+                .param("sentinel", SENTINEL)
+                .fetch_one()
+                .await
+                .expect("search every column of the project's rows");
+            rows += all;
+            carrying += with;
+        }
+    }
+    assert!(rows >= 4, "both projects' spans and totals: {rows}");
+    assert_eq!(carrying, 0, "content in ClickHouse");
+
+    content::open(
+        &kept.state,
+        Actor::User("admin-1"),
+        &kept.project,
+        &[TRACE.to_owned()],
+    )
+    .await
+    .expect("the content opens, its read filed");
+    let refused = door_over(&pool, ContentMode::On, false).await;
+    let (status, _, answer) = refused
+        .post(export_of(RUN_B, TRACE_B, SPAN_B, &named, &long))
+        .await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{answer}");
+    answers.push(answer.to_string());
+    let (status, answer) = kept
+        .lane("DELETE", &format!("/traces/{RUN}"), "admin-1", None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{answer}");
+    answers.push(answer.to_string());
+
+    let tables: Vec<String> = sqlx::query_scalar(
+        "SELECT table_schema || '.' || table_name FROM information_schema.tables \
+          WHERE table_schema IN ('telemetry', 'audit') AND table_type = 'BASE TABLE'",
+    )
+    .fetch_all(&pool)
+    .await
+    .expect("list the tables");
+    assert!(tables.iter().any(|table| table == "audit.events"));
+    // The search finds what is there: the project's id, in its settings row.
+    let mut found_the_project = false;
+    for table in tables {
+        let text: String = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            "SELECT coalesce(string_agg(t::text, ' '), '') FROM {table} t"
+        )))
+        .fetch_one(&pool)
+        .await
+        .expect("read the table whole");
+        assert!(!text.contains(SENTINEL), "content in {table} in plain text");
+        found_the_project |= text.contains(kept.project.as_str());
+    }
+    assert!(found_the_project, "the search reads the tables' text");
+    assert!(
+        !answers.iter().any(|answer| answer.contains(SENTINEL)),
+        "{answers:?}"
+    );
+    assert!(!logs.text().contains(SENTINEL), "content in a log line");
 }
 
 /// A moved project's content still opens, filed in the new organization's
