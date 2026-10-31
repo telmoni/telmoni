@@ -38,6 +38,13 @@ spec:
         runAsGroup: 65532
         seccompProfile:
           type: RuntimeDefault
+      # The two paths Next writes, its cache and the temporary directory, each
+      # wiped with the pod; the image itself is read-only.
+      volumes:
+        - name: next-cache
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
       containers:
         - name: web
           image: {{ include "telmoni.image" (dict "root" . "name" .Values.web.image) | quote }}
@@ -62,11 +69,16 @@ spec:
                 name: telmoni-tier
             - secretRef:
                 name: web-secrets
+          volumeMounts:
+            - name: next-cache
+              mountPath: /app/.next/cache
+            - name: tmp
+              mountPath: /tmp
           resources:
             {{- toYaml .Values.web.resources | nindent 12 }}
           securityContext:
             allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop:
                 - ALL
