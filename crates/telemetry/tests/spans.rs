@@ -51,6 +51,7 @@ async fn an_insert_with_no_setting_lands_in_spans_and_the_hourly_rollup() {
                 r#"["stop"]"#.into(),
             ),
         ],
+        sent: vec!["gen_ai.response.id".into(), "gen_ai.input.messages".into()],
         ..span(&project, SpanKind::ModelCall, "chat", 1_500)
     };
     let run = SpanRow {
@@ -78,7 +79,7 @@ async fn an_insert_with_no_setting_lands_in_spans_and_the_hourly_rollup() {
              parent_span_id, kind, name, started_at, ended_at, status, error_type, model, \
              provider, input_tokens, output_tokens, cache_read_input_tokens, \
              cache_write_input_tokens, cost, time_to_first_token, user_id, session_id, environment, \
-             release, tags, sample_rate, attributes \
+             release, tags, sample_rate, attributes, sent \
              FROM telemetry.spans \
              WHERE project_id IN {projects:Array(String)} AND kind IN {kinds:Array(String)} \
              ORDER BY kind",

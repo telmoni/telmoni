@@ -1,0 +1,15 @@
+{
+  "days": 30,
+  "retention": {
+    "rollup_months": 13,
+    "span_days": 360
+  },
+  "sent": [
+    {
+      "attribute": "gen_ai.input.messages",
+      "spans": 400
+    }
+  ],
+  "since": "2027-01-15T08:00:00Z",
+  "spans": 1200
+}

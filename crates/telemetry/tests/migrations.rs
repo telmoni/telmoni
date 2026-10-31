@@ -244,6 +244,7 @@ fn spans_has_a_column_for_every_field_of_the_row_and_no_other() {
         tags: Vec::new(),
         sample_rate: None,
         attributes: Vec::new(),
+        sent: Vec::new(),
     };
     let fields: BTreeSet<String> = serde_json::to_value(&row)
         .expect("the row serializes")

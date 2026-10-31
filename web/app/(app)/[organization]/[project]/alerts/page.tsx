@@ -25,7 +25,6 @@ import {
   hoursWords,
   incidentKindsLabel,
   inForce,
-  memberNames,
   metricWords,
   renotifyWords,
   severityVariant,
@@ -34,7 +33,7 @@ import {
   windowsFor,
   type ConnectionChoice,
 } from "@/lib/alerts";
-import { ownerContact } from "@/lib/identity";
+import { memberNames, ownerContact } from "@/lib/identity";
 import { sole } from "@/lib/list-query";
 import { administers } from "@/lib/roles";
 import {

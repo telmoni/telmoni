@@ -40,15 +40,31 @@ export type AuditAccess =
   | { kind: "forbidden" }
   | { kind: "unavailable" };
 
+/** One action on one kind of resource, since `from`: what a page that lists
+ *  a single kind of event narrows the log to. */
+export interface AuditFilter {
+  action: string;
+  resourceKind: ResourceKind;
+  from: string;
+}
+
 export const fetchAuditEvents = cache(
-  async (projectId: string, limit: number = LIST_LIMIT): Promise<AuditAccess> => {
+  async (
+    projectId: string,
+    limit: number = LIST_LIMIT,
+    filter?: AuditFilter,
+  ): Promise<AuditAccess> => {
     const ctx = await identityContext();
     if (!ctx) return { kind: "unavailable" };
+    const query = new URLSearchParams({ limit: String(limit) });
+    if (filter) {
+      query.set("action", filter.action);
+      query.set("resource_kind", filter.resourceKind);
+      query.set("from", filter.from);
+    }
     return listAudit(
       "fetchAuditEvents",
-      `${env.SERVER_URL}/internal/v1/audit/projects/${encodeURIComponent(
-        projectId,
-      )}?limit=${limit}`,
+      `${env.SERVER_URL}/internal/v1/audit/projects/${encodeURIComponent(projectId)}?${query}`,
       projectHeaders(ctx, projectId),
     );
   },

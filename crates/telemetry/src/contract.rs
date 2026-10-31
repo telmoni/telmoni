@@ -456,6 +456,39 @@ pub struct InventoryRow {
 
 /// How the page spells a tag: any key under [`TAG_PREFIX`].
 pub const TAG_FAMILY: &str = "telmoni.tag.<key>";
+/// The rows for what arrives under a name no other row gives.
+pub const OTHER_SCALAR: &str = "any other number or boolean";
+pub const OTHER_TEXT: &str = "any other text, array or map";
+/// The row for what an exception writes, outside the attributes.
+pub const EVENTS: &str = "the span's events and status message";
+
+/// The inventory row an attribute sent on a span, or on its resource, falls
+/// under: what a span's `sent` records, so a project's Privacy page counts
+/// what arrived by the same rows the inventory shows.
+#[must_use]
+pub fn sent_as(key: &str, value_is_scalar: bool, on_resource: bool) -> &'static str {
+    if !on_resource && key.starts_with(TAG_PREFIX) {
+        return TAG_FAMILY;
+    }
+    INVENTORY
+        .iter()
+        .find(|row| {
+            (row.on == ReadOn::Resource) == on_resource
+                && (row.attribute == key
+                    || row
+                        .attribute
+                        .strip_suffix('*')
+                        .is_some_and(|prefix| key.starts_with(prefix)))
+        })
+        .map_or(
+            if value_is_scalar {
+                OTHER_SCALAR
+            } else {
+                OTHER_TEXT
+            },
+            |row| row.attribute,
+        )
+}
 
 const KEPT_ATTRIBUTE: &str = "attributes, under its own name";
 /// `1024` as the contract's sentences print it: `1,024`.
@@ -967,14 +1000,14 @@ pub const INVENTORY: &[InventoryRow] = &[
     ),
     // Everything else.
     row(
-        "any other number or boolean",
+        OTHER_SCALAR,
         ReadOn::AnySpan,
         KEPT_ATTRIBUTE,
         Needs::AnyMode,
         "a measurement no person writes; on the resource, dropped without a word",
     ),
     row(
-        "any other text, array or map",
+        OTHER_TEXT,
         ReadOn::AnySpan,
         "dropped on a project whose content mode is off, the span kept and the attribute named in \
          the answer as unlisted; on one whose mode is on, kept as content under its own name",
@@ -982,7 +1015,7 @@ pub const INVENTORY: &[InventoryRow] = &[
         "content arrives under names no convention gave it; on the resource, dropped without a word",
     ),
     row(
-        "the span's events and status message",
+        EVENTS,
         ReadOn::AnySpan,
         "never kept",
         Needs::AnyMode,
@@ -1040,6 +1073,25 @@ mod tests {
         }
         assert!(RULE_CONTENT.contains(&format!("{} characters", grouped(ATTRIBUTE_VALUE_MAX))));
         assert!(RULE_CONTENT.contains(&format!("{} MiB", BATCH_MAX_BYTES / (1024 * 1024))));
+    }
+
+    /// Every attribute a row names is counted under that row, where it is
+    /// read; anything else under the row for what no other row names.
+    #[test]
+    fn what_a_span_sent_is_counted_by_its_inventory_row() {
+        for row in INVENTORY {
+            if [TAG_FAMILY, OTHER_SCALAR, OTHER_TEXT, EVENTS].contains(&row.attribute) {
+                continue;
+            }
+            let sent = row.attribute.replace('*', "version");
+            let on_resource = row.on == ReadOn::Resource;
+            assert_eq!(sent_as(&sent, false, on_resource), row.attribute, "{sent}");
+        }
+        assert_eq!(sent_as("telmoni.tag.team", false, false), TAG_FAMILY);
+        assert_eq!(sent_as("service.name", false, false), OTHER_TEXT);
+        assert_eq!(sent_as("gen_ai.response.id", false, true), OTHER_TEXT);
+        assert_eq!(sent_as("app.retries", true, false), OTHER_SCALAR);
+        assert_eq!(sent_as("app.note", false, false), OTHER_TEXT);
     }
 
     #[test]

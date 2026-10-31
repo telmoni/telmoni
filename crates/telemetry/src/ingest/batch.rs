@@ -100,6 +100,7 @@ pub fn read(
                 environment: &resource.environment,
                 release: &resource.release,
                 resource: &resource.attributes,
+                resource_sent: &resource.sent,
                 store_user_id,
                 keep_content,
             };

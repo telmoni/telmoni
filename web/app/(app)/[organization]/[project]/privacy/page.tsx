@@ -1,36 +1,69 @@
 import Link from "next/link";
 
 import { DataTable, THead, Th, Td } from "@/components/data-table";
+import { LocalTime } from "@/components/local-time";
+import { NoticeCard } from "@/components/notice-card";
 import { PageHeader } from "@/components/page-header";
 import { Section } from "@/components/section";
 import { ServiceUnavailable } from "@/components/service-unavailable";
 import { Card } from "@/components/ui/card";
 import { CONTENT_MODE_LABEL, CONTENT_MODE_MEANS } from "@/lib/content-mode";
+import { CONTENT_READ, READS_MAX, contentReaders } from "@/lib/content-reads";
+import { RESIDENCY } from "@/lib/extension/residency";
+import { memberNames } from "@/lib/identity";
 import { administers } from "@/lib/roles";
-import { fetchContentMode, fetchFieldInventory } from "@/lib/server/data";
+import {
+  activeOrganization,
+  fetchAuditEvents,
+  fetchContentMode,
+  fetchFieldInventory,
+  fetchMembers,
+  fetchOrganizationMembers,
+  fetchPrivacyPosture,
+} from "@/lib/server/data";
 import { projectPage } from "@/lib/server/project-page";
 import { projectPath } from "@/lib/slug";
+import { formatCount } from "@/lib/traces";
 
 import { EraseEndUserForm } from "./_erase-end-user";
 
 export const metadata = { title: "Privacy" };
 
-// What this project keeps, on one page: its content mode, and the field
-// inventory — every attribute ingest reads and what becomes of it — served by
-// the server from the code ingest runs, so this page cannot promise what the
-// door does not do. A project admin erases an end user here too. The posture
-// page grows from here.
+// The project's privacy posture, the page a security review reads: its
+// content mode, what its spans arrived with lately by the field inventory's
+// rows, who read its content, how long what it sends is kept and where, and
+// the inventory itself — every number the server's, from the code ingest and
+// the nightly purge run. A project admin erases an end user here too.
 export default async function PrivacyPage({
   params,
 }: PageProps<"/[organization]/[project]/privacy">) {
   const { organization, project: slug } = await params;
   const resolved = await projectPage(slug);
   if (resolved.kind === "unavailable") return <ServiceUnavailable />;
-  const { project } = resolved;
-  const [contentMode, inventory] = await Promise.all([
+  const { gate, project } = resolved;
+  const admin = administers(project.role);
+  // The organization's roster names its admins, who read every project with
+  // no seat on it; only its owner and admins may read it.
+  const [contentMode, inventory, posture, roster, everyone] = await Promise.all([
     fetchContentMode(project.id),
     fetchFieldInventory(project.id),
+    fetchPrivacyPosture(project.id),
+    admin ? fetchMembers(project.id) : null,
+    administers(activeOrganization(gate)?.role) ? fetchOrganizationMembers() : null,
   ]);
+  // The audit log is its admins' to read, over the posture's own window.
+  const reads =
+    admin && posture
+      ? await fetchAuditEvents(project.id, READS_MAX, {
+          ...CONTENT_READ,
+          from: posture.since,
+        })
+      : null;
+  const who = memberNames(
+    everyone?.kind === "ok" ? everyone.members : null,
+    roster?.kind === "ok" ? roster.members : null,
+  );
+  const needs = new Map(inventory?.rows.map((row) => [row.attribute, row.needs]));
 
   return (
     <>
@@ -68,6 +101,173 @@ export default async function PrivacyPage({
         </Section>
 
         <Section
+          title="What arrived"
+          description={
+            posture
+              ? `Every attribute the spans this project received in the last ${posture.days} days arrived with, by its row of the field inventory below — content dropped at the door among them. Telmoni counts the names alone, never what they held.`
+              : "Every attribute this project's spans arrived with lately, by its row of the field inventory below."
+          }
+        >
+          {!posture ? (
+            <NoticeCard title="What arrived could not be read." body="Reload to try again." />
+          ) : posture.sent.length === 0 ? (
+            <NoticeCard
+              title="Nothing arrived."
+              body={`No spans arrived in the last ${posture.days} days.`}
+            />
+          ) : (
+            <>
+              <DataTable>
+                <THead>
+                  <Th>Attribute</Th>
+                  <Th className="text-right">Spans</Th>
+                  <Th>Needs</Th>
+                </THead>
+                <tbody>
+                  {posture.sent.map((row) => (
+                    <tr key={row.attribute}>
+                      <Td className="whitespace-nowrap text-xs">{row.attribute}</Td>
+                      <Td className="whitespace-nowrap text-right text-xs tabular-nums">
+                        {formatCount(row.spans)}
+                      </Td>
+                      <Td className="whitespace-nowrap text-xs text-muted-foreground">
+                        {needs.get(row.attribute) ?? "—"}
+                      </Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </DataTable>
+              <p className="text-xs text-muted-foreground">
+                Of {formatCount(posture.spans)} spans. A field that needs <code>on</code> is kept
+                only while the content mode is on.
+              </p>
+            </>
+          )}
+        </Section>
+
+        <Section
+          title="Who read content"
+          description={
+            posture
+              ? `Each person who opened this project's content in the last ${posture.days} days, from the audit log, where every read is filed before a field is opened. A project moved from another organization leaves its earlier reads in that one's log.`
+              : "Each person who opened this project's content lately, from the audit log."
+          }
+        >
+          {!admin ? (
+            <NoticeCard
+              title="For admins."
+              body="A project admin or the organization owner sees who read content."
+            />
+          ) : reads?.kind !== "ok" ? (
+            <NoticeCard title="Who read content could not be read." body="Reload to try again." />
+          ) : reads.events.length === 0 ? (
+            <NoticeCard
+              title="No reads."
+              body={`Nobody read this project's content in the last ${posture?.days} days.`}
+            />
+          ) : (
+            <>
+              <DataTable>
+                <THead>
+                  <Th>Reader</Th>
+                  <Th className="text-right">Reads</Th>
+                  <Th className="text-right">Traces</Th>
+                  <Th>Last read</Th>
+                </THead>
+                <tbody>
+                  {contentReaders(reads.events).map((reader) => (
+                    <tr key={reader.actorId}>
+                      <Td className="text-xs">{who(reader.actorId)}</Td>
+                      <Td className="whitespace-nowrap text-right text-xs tabular-nums">
+                        {formatCount(reader.reads)}
+                      </Td>
+                      <Td className="whitespace-nowrap text-right text-xs tabular-nums">
+                        {formatCount(reader.traces)}
+                      </Td>
+                      <Td className="whitespace-nowrap text-xs text-muted-foreground">
+                        <LocalTime iso={reader.last} />
+                      </Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </DataTable>
+              {reads.events.length === READS_MAX && (
+                <p className="text-xs text-muted-foreground">
+                  The latest {formatCount(READS_MAX)} reads; the{" "}
+                  <Link
+                    href={projectPath(organization, slug, "/audit-log")}
+                    className="underline underline-offset-4"
+                  >
+                    audit log
+                  </Link>{" "}
+                  holds every one.
+                </p>
+              )}
+            </>
+          )}
+        </Section>
+
+        <Section
+          title="Retention"
+          description={
+            <>
+              How long what this project sends is kept, the same for every project; deleting a
+              trace, an end user or the project ends it early.{" "}
+              <Link href="/docs/workspace/data-retention" className="underline underline-offset-4">
+                Every window
+              </Link>
+              .
+            </>
+          }
+        >
+          {posture ? (
+            <DataTable>
+              <THead>
+                <Th>Data</Th>
+                <Th>Kept</Th>
+              </THead>
+              <tbody>
+                <tr>
+                  <Td className="text-xs">Spans, and the content kept with them</Td>
+                  <Td className="whitespace-nowrap text-xs">
+                    {posture.retention.span_days} days after a span arrives
+                  </Td>
+                </tr>
+                <tr>
+                  <Td className="text-xs">
+                    Hourly totals, which name no end user and no tag
+                  </Td>
+                  <Td className="whitespace-nowrap text-xs">
+                    {posture.retention.rollup_months} months
+                  </Td>
+                </tr>
+              </tbody>
+            </DataTable>
+          ) : (
+            <NoticeCard title="Retention could not be read." body="Reload to try again." />
+          )}
+        </Section>
+
+        <Section title="Residency" description="Where what this project sends is stored.">
+          <Card className="grid gap-1 text-sm">
+            {RESIDENCY ? (
+              <p>
+                {RESIDENCY.where}{" "}
+                <Link href={RESIDENCY.href} className="underline underline-offset-4">
+                  More
+                </Link>
+                .
+              </p>
+            ) : (
+              <p>
+                In this deployment&apos;s own stores, wherever its operator runs them: spans in
+                ClickHouse, and content in Postgres.
+              </p>
+            )}
+          </Card>
+        </Section>
+
+        <Section
           title="Erase an end user"
           description={
             <>
@@ -82,7 +282,7 @@ export default async function PrivacyPage({
           }
         >
           <Card className="grid gap-1 text-sm">
-            {administers(project.role) ? (
+            {admin ? (
               <EraseEndUserForm projectId={project.id} />
             ) : (
               <p className="text-muted-foreground">
@@ -139,12 +339,10 @@ export default async function PrivacyPage({
               </p>
             </>
           ) : (
-            <Card className="grid gap-1 text-sm">
-              <p className="font-medium">The inventory could not be read.</p>
-              <p className="text-muted-foreground">
-                Reload to try again. The docs page lists the same attributes.
-              </p>
-            </Card>
+            <NoticeCard
+              title="The inventory could not be read."
+              body="Reload to try again. The docs page lists the same attributes."
+            />
           )}
         </Section>
       </div>

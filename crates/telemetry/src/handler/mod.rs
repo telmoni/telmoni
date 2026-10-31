@@ -10,6 +10,7 @@ pub mod health;
 pub mod incidents;
 pub mod ingest;
 pub mod mutes;
+pub mod privacy;
 pub mod rules;
 pub mod session_layout;
 pub mod sessions;

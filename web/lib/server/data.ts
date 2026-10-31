@@ -73,6 +73,9 @@ export type { ContentModeSetting } from "./entities/content-mode";
 export { fetchFieldInventory } from "./entities/field-inventory";
 export type { FieldInventory } from "./entities/field-inventory";
 
+export { fetchPrivacyPosture } from "./entities/privacy";
+export type { PrivacyPosture } from "./entities/privacy";
+
 export {
   INCIDENTS_MAX,
   fetchAlerts,

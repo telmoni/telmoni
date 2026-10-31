@@ -56,6 +56,7 @@ import { ContentModeSettingSchema } from "./content-mode";
 import { FieldInventorySchema } from "./field-inventory";
 import { FeedSchema } from "./notification-feed";
 import { OrganizationHealthSchema } from "./organization-health";
+import { PrivacyPostureSchema } from "./privacy";
 import { SessionLayoutSettingSchema } from "./session-layout";
 import { SessionDetailSchema, SessionListSchema } from "./sessions";
 import {
@@ -135,6 +136,7 @@ const READERS: Record<string, z.ZodType> = {
   "telemetry/incidents.json": IncidentListSchema,
   "telemetry/layouts.json": TraceLayoutListSchema,
   "telemetry/mutes.json": MuteListSchema,
+  "telemetry/privacy.json": PrivacyPostureSchema,
   "telemetry/session-layout.json": SessionLayoutSettingSchema,
   "telemetry/session-views.json": SessionViewListSchema,
   "telemetry/session.json": SessionDetailSchema,

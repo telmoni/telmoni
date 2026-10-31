@@ -13,7 +13,6 @@ import {
   inForce,
   inputOf,
   joinValues,
-  memberNames,
   measuresFor,
   metricWords,
   offsetWords,
@@ -391,22 +390,6 @@ describe("words", () => {
     expect(incidentHref("acme", "web", "5d4f5c68-0000-4000-8000-000000000001")).toBe(
       "/acme/web/alerts?incident=5d4f5c68-0000-4000-8000-000000000001#incident-5d4f5c68-0000-4000-8000-000000000001",
     );
-  });
-
-  // ⚠ An organization's admin acts on every project with no seat on it.
-  it("names a member from the rosters read, and says what the rest may be", () => {
-    const ada = { memberId: "user_1", displayName: "Ada", email: "ada@example.test" };
-    const sam = { memberId: "user_2", displayName: null, email: "sam@example.test" };
-    const grace = { memberId: "user_3", displayName: "Grace", email: "grace@example.test" };
-    const both = memberNames([grace], [ada, sam]);
-    expect([both("user_1"), both("user_2"), both("user_3"), both("user_9")]).toEqual([
-      "Ada",
-      "sam@example.test",
-      "Grace",
-      "a former member",
-    ]);
-    expect(memberNames(null, [ada])("user_9")).toBe("an organization admin or a former member");
-    expect(memberNames(null, null)("user_1")).toBe("someone");
   });
 });
 

@@ -32,6 +32,8 @@ pub struct Context<'a> {
     pub release: &'a str,
     /// The resource's attributes the inventory names.
     pub resource: &'a [(String, String)],
+    /// The inventory rows the resource's attributes fall under.
+    pub resource_sent: &'a [&'static str],
     /// What a `user_id` is stored as: the project's own hash of it.
     pub store_user_id: &'a dyn Fn(&str) -> String,
     /// Whether the project keeps content: its mode is `on`.
@@ -142,6 +144,8 @@ pub struct ResourceFields {
     pub release: String,
     /// The attributes the inventory names, as `attributes` keeps them.
     pub attributes: Vec<(String, String)>,
+    /// The inventory rows every attribute it sent falls under, each once.
+    pub sent: Vec<&'static str>,
 }
 
 /// The deployment a resource names, and the attributes of it the inventory
@@ -161,6 +165,12 @@ pub fn read_resource(resource: Option<&Resource>) -> ResourceFields {
         .unwrap_or_default()
     {
         let value = kv.value.as_ref().and_then(|v| v.value.as_ref());
+        if let Some(value) = value {
+            note(
+                &mut fields.sent,
+                contract::sent_as(&kv.key, is_scalar(value), true),
+            );
+        }
         match kv.key.as_str() {
             contract::ENVIRONMENT => {
                 fields.environment = resource_text(value, contract::ENVIRONMENT_MAX);
@@ -242,6 +252,12 @@ pub fn map(
     };
     for kv in &span.attributes {
         fields.read(kv, &span_id, dropped).map_err(refuse)?;
+    }
+    for &row in context.resource_sent {
+        note(&mut fields.sent, row);
+    }
+    if !span.events.is_empty() || span.status.as_ref().is_some_and(|s| !s.message.is_empty()) {
+        note(&mut fields.sent, contract::EVENTS);
     }
 
     let (Some(run_id), Some(agent)) = (fields.run_id, fields.agent.take()) else {
@@ -327,6 +343,7 @@ pub fn map(
         tags: fields.tags,
         sample_rate: fields.sample_rate,
         attributes: fields.attributes,
+        sent: fields.sent.into_iter().map(str::to_owned).collect(),
     };
     row.units = units_of(&row);
     Ok((row, fields.content))
@@ -386,6 +403,7 @@ struct Fields {
     attributes: Vec<(String, String)>,
     keeps_content: bool,
     content: Vec<(String, String)>,
+    sent: Vec<&'static str>,
 }
 
 impl Fields {
@@ -396,6 +414,10 @@ impl Fields {
         let Some(value) = kv.value.as_ref().and_then(|v| v.value.as_ref()) else {
             return Ok(());
         };
+        note(
+            &mut self.sent,
+            contract::sent_as(&kv.key, is_scalar(value), false),
+        );
         let mut drop_attribute =
             |attribute: &str, reason: DropReason| dropped.push(span_id, attribute, reason);
 
@@ -709,6 +731,21 @@ fn as_text(value: &Value) -> Option<Cow<'_, str>> {
     }
 }
 
+/// `row` added to what a span sent, once.
+fn note(sent: &mut Vec<&'static str>, row: &'static str) {
+    if !sent.contains(&row) {
+        sent.push(row);
+    }
+}
+
+/// Whether a value is a number or a boolean, which no person writes.
+const fn is_scalar(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::IntValue(_) | Value::DoubleValue(_) | Value::BoolValue(_)
+    )
+}
+
 /// Nanoseconds since the epoch as an instant, to the microsecond the table
 /// keeps; `None` for zero, which OpenTelemetry never sends for a span that
 /// ended.
@@ -822,8 +859,47 @@ mod tests {
             environment: "",
             release: "",
             resource,
+            resource_sent: &[],
             store_user_id: store,
             keep_content: false,
+        }
+    }
+
+    /// A span records each inventory row it and its resource arrived with,
+    /// once, what it dropped among them.
+    #[test]
+    fn a_span_records_the_inventory_rows_it_arrived_with() {
+        let project = ProjectId::new();
+        let resource = read_resource(Some(&Resource {
+            attributes: vec![
+                kv("service.name", s("reporter")),
+                kv("host.name", s("laptop")),
+            ],
+            ..Resource::default()
+        }));
+        let hash = |id: &str| format!("h({id})");
+        let on = Context {
+            resource_sent: &resource.sent,
+            ..context(&project, &resource.attributes, &hash)
+        };
+        let (row, _) = map(&call(), &on, &mut Drops::default()).expect("kept");
+        for sent in [
+            contract::RUN_ID,
+            "gen_ai.usage.cache_creation.input_tokens",
+            contract::TAG_FAMILY,
+            "gen_ai.input.messages",
+            "user.email",
+            contract::OTHER_SCALAR,
+            contract::OTHER_TEXT,
+            contract::EVENTS,
+            "service.name",
+        ] {
+            assert_eq!(
+                row.sent.iter().filter(|row| *row == sent).count(),
+                1,
+                "{sent}: {:?}",
+                row.sent
+            );
         }
     }
 

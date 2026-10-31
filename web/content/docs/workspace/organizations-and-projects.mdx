@@ -88,7 +88,9 @@ URL](#name-and-url)). On these pages,
   the user they served — [`/alerts`](/docs/workspace/alerts) — its alerts and
   their incidents — and `/dashboards`, which says what it will show until its
   page is built, and `/api-keys`, `/connectors`, `/members`,
-  `/audit-log`, `/privacy` — the project's content mode and the
+  `/audit-log`, `/privacy` — the project's privacy posture: its content mode,
+  what its spans arrived with in the last thirty days, who read its content
+  then, how long its data is kept and where, and the
   [field inventory](/docs/api/field-inventory), every attribute Telmoni reads
   from a span and what becomes of it — and `/settings` under it.
 - **Account pages** live under `/account`, including `/account/settings`,
@@ -268,7 +270,9 @@ project's **Settings** page (`/{organization}/{project}/settings`).
   shown. The console agent reads none of it, in any mode.
 
 Ingest reads the mode on every export, so it acts at the door, as the span
-arrives. The project's **Privacy** page shows the mode beside the [field
+arrives. The project's **Privacy** page shows the mode, what its spans arrived
+with in the last thirty days, content dropped at the door among it, who read
+its content then, how long its data is kept and where, and the [field
 inventory](/docs/api/field-inventory): every attribute ingest reads, and what
 becomes of each.
 

@@ -21,6 +21,7 @@ use telmoni_telemetry::handler::field_inventory::FieldInventory;
 use telmoni_telemetry::handler::health::{Health, HealthIncident, HealthProject};
 use telmoni_telemetry::handler::incidents::IncidentList;
 use telmoni_telemetry::handler::mutes::MuteList;
+use telmoni_telemetry::handler::privacy::{Posture, Retention, Sent};
 use telmoni_telemetry::handler::rules::{Alert, AlertLink, AlertList};
 use telmoni_telemetry::handler::session_layout::SessionLayoutSetting;
 use telmoni_telemetry::handler::sessions::{SessionDetail, SessionList, SessionTrace};
@@ -583,6 +584,27 @@ fn the_field_inventory_answers_as_the_console_reads() {
                 needs: Needs::AnyMode,
                 rule: "at most 256 characters",
             }],
+        },
+    );
+}
+
+/// A project's privacy posture, one inventory row sent.
+#[test]
+fn the_privacy_posture_answers_as_the_console_reads() {
+    pin(
+        "privacy",
+        &Posture {
+            days: 30,
+            since: at(0),
+            spans: 1_200,
+            sent: vec![Sent {
+                attribute: "gen_ai.input.messages".into(),
+                spans: 400,
+            }],
+            retention: Retention {
+                span_days: 360,
+                rollup_months: 13,
+            },
         },
     );
 }

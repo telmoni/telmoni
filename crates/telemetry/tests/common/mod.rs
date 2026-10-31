@@ -1289,6 +1289,7 @@ pub(crate) fn received(
         tags: Vec::new(),
         sample_rate: None,
         attributes: Vec::new(),
+        sent: Vec::new(),
     }
 }
 

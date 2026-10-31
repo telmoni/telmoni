@@ -82,6 +82,9 @@ CREATE TABLE IF NOT EXISTS telemetry.spans
     -- The attributes the field inventory names, and any other whose value is
     -- a number or a boolean; an array is kept as its JSON.
     attributes               Map(LowCardinality(String), String),
+    -- The field inventory's rows for every attribute the span arrived with,
+    -- dropped content among them, each once: names, never values.
+    sent                     Array(LowCardinality(String)),
     INDEX run_id_idx run_id TYPE bloom_filter GRANULARITY 1,
     -- An end user's erasure and the users filter read by the hash alone,
     -- and the erasure their sessions by the id.

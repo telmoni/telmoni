@@ -314,6 +314,9 @@ pub struct SpanRow {
     pub sample_rate: Option<f64>,
     /// The attributes the contract keeps, under their own names.
     pub attributes: Vec<(String, String)>,
+    /// The field inventory's rows for every attribute it arrived with, kept
+    /// or dropped, each once: what a project's Privacy page counts.
+    pub sent: Vec<String>,
 }
 
 /// A closed set as its text, the shape its `LowCardinality(String)` column

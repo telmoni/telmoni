@@ -165,6 +165,7 @@ pub fn router(state: Arc<AppState>) -> Router {
             "/telemetry/field-inventory",
             get(handler::field_inventory::get_field_inventory),
         )
+        .route("/telemetry/privacy", get(handler::privacy::get_privacy))
         .route("/telemetry/traces", get(handler::traces::list_traces))
         .route("/telemetry/traces/facets", get(handler::traces::get_facets))
         .route(

@@ -9,6 +9,31 @@ export function personName(who: {
   return named ? named : who.email;
 }
 
+/** One entry of a roster, the organization's or the project's. */
+type Named = { memberId: string; displayName?: string | null; email: string };
+
+/** Who a member's id names, from the rosters that could be read: the
+ *  organization's, which its owner and admins alone read, then the project's.
+ *  Someone neither names has left, where the organization's was read; else
+ *  they may be an admin of it, seated on no project. */
+export function memberNames(
+  organization: readonly Named[] | null,
+  project: readonly Named[] | null,
+): (id: string) => string {
+  const people = new Map(
+    [...(organization ?? []), ...(project ?? [])].map((member) => [
+      member.memberId,
+      personName(member),
+    ]),
+  );
+  const unknown = organization
+    ? "a former member"
+    : project
+      ? "an organization admin or a former member"
+      : "someone";
+  return (id) => people.get(id) ?? unknown;
+}
+
 export function personDetail(who: {
   displayName?: string | null;
   email: string;

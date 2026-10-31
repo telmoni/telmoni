@@ -16,6 +16,10 @@ let mockContext: unknown;
 let mockProject: unknown;
 let mockContentMode: unknown;
 let mockInventory: unknown;
+let mockPosture: unknown;
+let mockReads: unknown;
+let mockMembers: unknown;
+let mockOrganization: unknown;
 const fetchProjectBySlug = vi.fn<(slug: string) => Promise<unknown>>(async () => mockProject);
 const fetchContentMode = vi.fn<(projectId: string) => Promise<unknown>>(
   async () => mockContentMode,
@@ -24,11 +28,18 @@ const fetchFieldInventory = vi.fn<(projectId: string) => Promise<unknown>>(
   async () => mockInventory,
 );
 
+const fetchAuditEvents = vi.fn<(...args: unknown[]) => Promise<unknown>>(async () => mockReads);
+
 vi.mock("@/lib/server/data", () => ({
   getServerContext: async () => mockContext,
+  activeOrganization: () => mockOrganization,
   fetchProjectBySlug: (slug: string) => fetchProjectBySlug(slug),
   fetchContentMode: (projectId: string) => fetchContentMode(projectId),
   fetchFieldInventory: (projectId: string) => fetchFieldInventory(projectId),
+  fetchPrivacyPosture: async () => mockPosture,
+  fetchAuditEvents: (...args: unknown[]) => fetchAuditEvents(...args),
+  fetchMembers: async () => mockMembers,
+  fetchOrganizationMembers: async () => ({ kind: "forbidden" }),
 }));
 
 import PrivacyPage from "./page";
@@ -53,6 +64,33 @@ beforeEach(() => {
     role: Role.Member,
   };
   mockContentMode = { content_mode: "off", offered: ["off"] };
+  mockOrganization = { id: "org_1", role: "member" };
+  mockPosture = {
+    days: 30,
+    since: "2026-09-30T10:00:00Z",
+    spans: 1200,
+    sent: [{ attribute: "user.email", spans: 400 }],
+    retention: { span_days: 360, rollup_months: 13 },
+  };
+  mockReads = {
+    kind: "ok",
+    events: [
+      {
+        id: "e1",
+        actorId: "user_1",
+        action: "viewed",
+        resourceKind: "project",
+        resourceId: "project_7bQx2mNv9BcK4dLp",
+        createdAt: "2026-10-29T10:00:00Z",
+        metadata: { trace_ids: ["t1", "t2"], fields: 4 },
+      },
+    ],
+  };
+  mockMembers = {
+    kind: "ok",
+    members: [{ memberId: "user_1", displayName: "Ada", email: "ada@example.test" }],
+    ceiling: null,
+  };
   mockInventory = {
     conventions_commit: COMMIT,
     rows: [
@@ -100,7 +138,7 @@ describe("PrivacyPage", () => {
     expect(screen.getByText("telmoni.run_id")).toBeInTheDocument();
     expect(screen.getByText("gen_ai.input.messages")).toBeInTheDocument();
     expect(screen.getByText("any other text or array")).toBeInTheDocument();
-    expect(screen.getByText("on")).toBeInTheDocument();
+    expect(screen.getAllByText("on").length).toBeGreaterThan(0);
     expect(screen.getByText(COMMIT)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "docs" })).toHaveAttribute(
       "href",
@@ -132,6 +170,52 @@ describe("PrivacyPage", () => {
     render(await PrivacyPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByRole("textbox", { name: "End user id" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Erase" })).toBeDisabled();
+  });
+
+  it("counts what arrived by the inventory's rows, and how long it is kept", async () => {
+    render(await PrivacyPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+    expect(screen.getByText("user.email")).toBeInTheDocument();
+    expect(screen.getByText("400")).toBeInTheDocument();
+    expect(screen.getByText(/Of 1,200 spans/)).toBeInTheDocument();
+    expect(screen.getByText("360 days after a span arrives")).toBeInTheDocument();
+    expect(screen.getByText("13 months")).toBeInTheDocument();
+    expect(screen.getByText(/In this deployment's own stores/)).toBeInTheDocument();
+  });
+
+  // ⚠ The audit log is an admin's: a member is told who sees the reads,
+  // and nothing of them is asked for.
+  it("shows an admin who read content over the posture's window, by name", async () => {
+    render(await PrivacyPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+    expect(fetchAuditEvents).not.toHaveBeenCalled();
+    expect(
+      screen.getByText("A project admin or the organization owner sees who read content."),
+    ).toBeInTheDocument();
+
+    mockProject = { ...(mockProject as object), role: Role.Admin };
+    render(await PrivacyPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+    const [projectId, limit, filter] = fetchAuditEvents.mock.calls[0]!;
+    expect([projectId, limit]).toEqual(["project_7bQx2mNv9BcK4dLp", 1000]);
+    expect(filter).toEqual({
+      action: "viewed",
+      resourceKind: "project",
+      from: "2026-09-30T10:00:00Z",
+    });
+    expect(screen.getByText("Ada")).toBeInTheDocument();
+  });
+
+  it("says so when the posture cannot be read, and keeps the rest", async () => {
+    mockPosture = null;
+    mockProject = { ...(mockProject as object), role: Role.Admin };
+    render(await PrivacyPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+    for (const notice of [
+      "What arrived could not be read.",
+      "Retention could not be read.",
+      "Who read content could not be read.",
+    ]) {
+      expect(screen.getByText(notice)).toBeInTheDocument();
+    }
+    expect(fetchAuditEvents).not.toHaveBeenCalled();
+    expect(screen.getByText("telmoni.run_id")).toBeInTheDocument();
   });
 
   it("renders ServiceUnavailable when context fails", async () => {

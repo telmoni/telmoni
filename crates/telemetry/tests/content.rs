@@ -486,6 +486,81 @@ async fn a_project_left_off_keeps_no_content_and_makes_no_key(pool: PgPool) {
     assert!(!keyed);
 }
 
+/// The Privacy page counts what spans arrived with by the inventory's rows,
+/// the content an `off` project dropped among them, to any role on it.
+#[sqlx::test]
+async fn the_posture_counts_what_arrived_by_inventory_row_dropped_content_too(pool: PgPool) {
+    let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let door = door(&pool, ContentMode::Off).await;
+    door.auth.seat(
+        "member-1",
+        &door.organization,
+        &door.project,
+        OrganizationRole::Member,
+        Some(Role::Member),
+    );
+    door.send(export_of(
+        RUN,
+        TRACE,
+        SPAN,
+        &[("telmoni.tag.team", "ops")],
+        "long",
+    ))
+    .await;
+    door.send(export_of(RUN_B, TRACE_B, SPAN_B, &[], "other"))
+        .await;
+    common::eventually("both traces are read", || async {
+        door.lane("GET", "/privacy", "member-1", None).await.1["spans"] == 2
+    })
+    .await;
+
+    let (status, posture) = door.lane("GET", "/privacy", "member-1", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(posture["days"], 30);
+    let since = chrono::DateTime::parse_from_rfc3339(posture["since"].as_str().expect("since"))
+        .expect("an instant");
+    assert_eq!(
+        (Utc::now() - since.to_utc()).num_days(),
+        30,
+        "the window starts thirty days back"
+    );
+    assert_eq!(
+        posture["retention"]["span_days"],
+        retention::SPAN_RETENTION_DAYS
+    );
+    assert_eq!(
+        posture["retention"]["rollup_months"],
+        retention::ROLLUP_RETENTION_MONTHS
+    );
+    let sent: Vec<(&str, u64)> = posture["sent"]
+        .as_array()
+        .expect("sent")
+        .iter()
+        .map(|row| {
+            (
+                row["attribute"].as_str().expect("an attribute"),
+                row["spans"].as_u64().expect("a count"),
+            )
+        })
+        .collect();
+    for (attribute, spans) in [
+        (contract::RUN_ID, 2),
+        ("gen_ai.input.messages", 2),
+        ("gen_ai.tool.call.result", 2),
+        (contract::OTHER_TEXT, 2),
+        (contract::TAG_FAMILY, 1),
+    ] {
+        assert!(sent.contains(&(attribute, spans)), "{attribute}: {sent:?}");
+    }
+    assert!(door.kept(&pool).await.is_empty(), "the content was dropped");
+    assert_eq!(sent[0].1, 2, "most spans first");
+
+    let (refused, _) = door.lane("GET", "/privacy", "stranger", None).await;
+    assert_eq!(refused, StatusCode::FORBIDDEN);
+}
+
 /// A transfer moves the project's bytes to the organization that now holds
 /// it; its purge then deletes its content and takes the bytes off that one.
 #[sqlx::test]
