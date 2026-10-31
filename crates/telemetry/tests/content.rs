@@ -902,6 +902,71 @@ async fn no_content_reaches_a_log_an_answer_clickhouse_or_what_the_agent_reads(p
     assert!(!logs.text().contains(SENTINEL), "content in a log line");
 }
 
+/// ⚠ Records that hold nothing personal: a tag's value and an end user's id
+/// reach no log line at any level, no error's detail and no audit row's
+/// metadata, through ingest, the lists and downloads filtered by both, a
+/// filter refused, and the end user's erasure.
+#[sqlx::test]
+async fn no_tag_value_or_end_user_id_reaches_a_log_an_error_or_the_audit_chain(pool: PgPool) {
+    let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    apply_audit_migrations(&pool).await;
+    let (_logging, logs) = captured_logs();
+    const TAG: &str = "t4g-value-a-customer-chose";
+    const USER: &str = "end-user-4u1-who-the-agent-served";
+    let door = door(&pool, ContentMode::On).await;
+    door.auth.seat(
+        "admin-1",
+        &door.organization,
+        &door.project,
+        OrganizationRole::Owner,
+        None,
+    );
+    let named = [("telmoni.tag.app", TAG), ("user.id", USER)];
+    door.send(export_of(RUN, TRACE, SPAN, &named, "result")).await;
+    common::eventually("the trace is read", || found(&door, RUN)).await;
+
+    let tag = format!("app:{TAG}");
+    let mut errors = Vec::new();
+    for (path, expected) in [
+        (format!("/traces?tag={tag}"), StatusCode::OK),
+        (format!("/traces?user={USER}"), StatusCode::OK),
+        (format!("/users?user={USER}"), StatusCode::OK),
+        (format!("/traces/export?tag={tag}&format=json"), StatusCode::OK),
+        (format!("/users/export?user={USER}&format=json"), StatusCode::OK),
+        // Refused: neither the value nor the id may come back in the detail.
+        (format!("/traces?tag={TAG}"), StatusCode::BAD_REQUEST),
+        (format!("/traces?user={}", USER.repeat(8)), StatusCode::BAD_REQUEST),
+    ] {
+        let (status, answer) = door.lane("GET", &path, "admin-1", None).await;
+        assert_eq!(status, expected, "{path}: {answer}");
+        if !status.is_success() {
+            errors.push(answer.to_string());
+        }
+    }
+    let (status, answer) = door
+        .lane("POST", "/users/erase", "admin-1", Some(json!({ "user_id": USER })))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{answer}");
+
+    let metadata: Vec<String> =
+        sqlx::query_scalar("SELECT coalesce(metadata::text, '') FROM audit.events")
+            .fetch_all(&pool)
+            .await
+            .expect("read the chain's metadata");
+    assert!(!metadata.is_empty(), "the erasure was filed");
+    for (what, text) in [
+        ("an error's detail", errors.join(" ")),
+        ("an audit row's metadata", metadata.join(" ")),
+        ("a log line", logs.text()),
+    ] {
+        assert!(!text.contains(TAG), "a tag's value in {what}: {text}");
+        assert!(!text.contains(USER), "an end user's id in {what}: {text}");
+    }
+    assert_eq!(errors.len(), 2, "both refusals were read");
+}
+
 /// A run's turn of a conversation as an SDK sends it: the run's own span
 /// with the person's message and the agent's answer, and a model call under
 /// it with the messages it was sent, both in session `session`.
