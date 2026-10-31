@@ -588,6 +588,86 @@ async fn a_transfer_moves_the_bytes_and_a_purge_takes_them_off(pool: PgPool) {
     assert_eq!(door.held(&pool, &taker).await, Some(0));
 }
 
+/// A moved project's content still opens, filed in the new organization's
+/// chain, and an erasure by `user_id` still finds it: both keys moved with
+/// its settings row.
+#[sqlx::test]
+async fn a_moved_project_still_opens_its_content_and_erases_by_user_id(pool: PgPool) {
+    let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    apply_audit_migrations(&pool).await;
+    let door = door(&pool, ContentMode::On).await;
+    door.auth.seat(
+        "admin-1",
+        &door.organization,
+        &door.project,
+        OrganizationRole::Owner,
+        None,
+    );
+    door.send(export_of(
+        RUN,
+        TRACE,
+        SPAN,
+        &[(contract::USER_ID, "acme-42")],
+        "result",
+    ))
+    .await;
+    common::eventually("the trace is read", || found(&door, RUN)).await;
+
+    let taker = OrganizationId::new();
+    TelemetrySeam(door.state.clone())
+        .move_project(&door.project, &taker)
+        .await
+        .expect("the move");
+    let left = door.organization.clone();
+    let moved = Door {
+        organization: taker,
+        ..door
+    };
+    moved.auth.seat(
+        "admin-1",
+        &moved.organization,
+        &moved.project,
+        OrganizationRole::Owner,
+        None,
+    );
+
+    let opened = content::open(
+        &moved.state,
+        Actor::User("admin-1"),
+        &moved.project,
+        &[TRACE.to_owned()],
+    )
+    .await
+    .expect("the moved content opens");
+    assert_eq!(opened.len(), 1, "its key moved with the settings row");
+    assert_eq!(moved.viewed(&pool).await.len(), 1, "filed where it now is");
+    let stayed: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit.events WHERE organization_id = $1 AND action = 'viewed'",
+    )
+    .bind(&left)
+    .fetch_one(&pool)
+    .await
+    .expect("read the old chain as the owner");
+    assert_eq!(stayed, 0, "nothing filed in the organization it left");
+
+    let (status, answer) = moved
+        .lane(
+            "POST",
+            "/users/erase",
+            "admin-1",
+            Some(json!({ "user_id": "acme-42" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{answer}");
+    assert_eq!(answer["traces"], 1, "its hashing key moved too: {answer}");
+    assert!(
+        moved.kept(&pool).await.is_empty(),
+        "the content went with it"
+    );
+}
+
 /// The nightly purge deletes content whose span's day has gone, and the
 /// bytes with it; content inside retention stays.
 #[sqlx::test]

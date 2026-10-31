@@ -341,6 +341,13 @@ An organization Owner can hand a project to one of the project's Admins:
      the move commits, with their delivery history and the project's activity
      feed, and a removal that fails moves nothing. The console agent removes
      what it holds about the project in the old organization.
+   - **Telemetry and content move with it**: every span, and the
+     [content](#a-projects-content-mode) the project keeps, which still opens
+     and which [erasing an end user](/docs/workspace/data-deletion) still
+     finds, its size counted on the new organization from the move. Each
+     earlier read of that content stays in the old organization's log, with
+     the project's other earlier events; the project's **Privacy** page says
+     so.
    - Both organizations' audit logs record the move; the receiving one also
      notes the name the project was offered under when a clash renamed it. The
      project's earlier events stay in the old organization's log, so its
