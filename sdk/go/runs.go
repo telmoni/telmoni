@@ -377,11 +377,6 @@ func (r *Run) Answered(a RunAnswer) {
 	if a.OutputMessages != nil {
 		attrs = append(attrs, attribute.String(attrOutputMessages, asJSON(a.OutputMessages)))
 	}
-	if r.guard == nil {
-		// No guard holds its end: the attributes go as given, as Spent and Err read nothing.
-		r.span.SetAttributes(attrs...)
-		return
-	}
 	r.guard.mu.Lock()
 	ended := r.ended
 	if !ended && len(attrs) > 0 {
