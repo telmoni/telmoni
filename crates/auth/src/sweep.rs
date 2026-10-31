@@ -392,6 +392,47 @@ async fn verify_one_chain(
     Ok(report)
 }
 
+/// An OPERATOR revokes every live API key of an organization, the
+/// organization and everything else left standing: the kill switch for keys
+/// in the wrong hands. Under the organization's lock, as the membership lanes
+/// take it, and recorded on its chain as the operator's. Answers how many went.
+///
+/// # Errors
+///
+/// No such organization, one already being deleted, or Postgres.
+pub async fn revoke_keys(
+    state: &AppState,
+    organization: &OrganizationId,
+) -> Result<u64, TelmoniError> {
+    let mut tx = organization_scope(&state.db, organization).await?;
+    locks::lock_organization(&mut tx, organization).await?;
+    match organizations::status(&mut tx, organization).await? {
+        None => return Err(AuthError::NotFound("no such organization".into()).into()),
+        Some(OrganizationStatus::Active) => {}
+        Some(_) => {
+            return Err(
+                AuthError::Conflict("this organization is already being deleted".into()).into(),
+            );
+        }
+    }
+    let revoked = tokens::revoke_all_in_organization(&mut tx, organization).await?;
+    emit_audit(
+        &mut tx,
+        AuditEvent::new(
+            organization,
+            Actor::Service("operator"),
+            AuditAction::Deleted,
+            TelmoniResourceKind::Token,
+        )
+        .on(organization.as_str())
+        .details(json!({ "every_key": true, "revoked": revoked })),
+    )
+    .await?;
+    tx.commit().await?;
+    tracing::warn!(organization_id = %organization, revoked, "an organization's API keys revoked by an operator");
+    Ok(revoked)
+}
+
 /// What a termination came to: whether the hook purge landed in the call,
 /// and when the row goes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

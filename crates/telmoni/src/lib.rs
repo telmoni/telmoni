@@ -346,5 +346,11 @@ where
             );
             Ok(())
         }
+        Command::RevokeKeys(organization) => {
+            let app = build().await?;
+            let revoked = telmoni_auth::sweep::revoke_keys(&app.auth, &organization).await?;
+            tracing::info!(organization_id = %organization, revoked, "revoke-keys complete");
+            Ok(())
+        }
     }
 }

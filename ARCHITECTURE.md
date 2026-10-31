@@ -100,7 +100,7 @@ flowchart LR
   Server -->|"turns, embeddings"| Models
   Server -->|"wrap, unwrap"| KEK
   Server -->|"deliveries"| Dest
-  Operator -->|"migrate, rotate, sweep, terminate"| Server
+  Operator -->|"migrate, rotate, sweep, terminate, revoke-keys"| Server
 ```
 
 | Party | What it is to the core | What crosses |

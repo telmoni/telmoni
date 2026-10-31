@@ -91,6 +91,8 @@ pub enum Command {
     Sweep(Sweep),
     /// Close an organization without its owner's code.
     Terminate(OrganizationId),
+    /// Revoke every live API key of an organization, and nothing else.
+    RevokeKeys(OrganizationId),
 }
 
 impl Command {
@@ -98,7 +100,7 @@ impl Command {
     #[must_use]
     pub fn usage() -> String {
         format!(
-            "usage: telmoni-server serve | migrate | rotate | sweep <{}> | terminate <org_id>",
+            "usage: telmoni-server serve | migrate | rotate | sweep <{}> | terminate <org_id> | revoke-keys <org_id>",
             Sweep::names()
         )
     }
@@ -113,14 +115,17 @@ impl Command {
             ["sweep", sweep] => Sweep::parse(sweep)
                 .map(Self::Sweep)
                 .ok_or_else(|| anyhow::anyhow!("{} (got sweep {sweep:?})", Self::usage())),
-            ["terminate", organization] => {
-                let id = OrganizationId::try_new(*organization)
-                    .map_err(|e| anyhow::anyhow!("{} (bad organization id: {e})", Self::usage()))?;
-                Ok(Self::Terminate(id))
-            }
+            ["terminate", organization] => Ok(Self::Terminate(organization_id(organization)?)),
+            ["revoke-keys", organization] => Ok(Self::RevokeKeys(organization_id(organization)?)),
             _ => anyhow::bail!("{} (got {args:?})", Self::usage()),
         }
     }
+}
+
+/// An organization's id as a command names it, or the usage.
+fn organization_id(word: &str) -> anyhow::Result<OrganizationId> {
+    OrganizationId::try_new(word)
+        .map_err(|e| anyhow::anyhow!("{} (bad organization id: {e})", Command::usage()))
 }
 
 #[cfg(test)]
@@ -146,6 +151,10 @@ mod tests {
             parse(&["terminate", "org_abc"]).unwrap(),
             Command::Terminate(id) if id.as_str() == "org_abc"
         ));
+        assert!(matches!(
+            parse(&["revoke-keys", "org_abc"]).unwrap(),
+            Command::RevokeKeys(id) if id.as_str() == "org_abc"
+        ));
 
         for bad in [
             vec![],
@@ -155,6 +164,8 @@ mod tests {
             vec!["serve", "now"],
             vec!["terminate"],
             vec!["terminate", "not an id"],
+            vec!["revoke-keys"],
+            vec!["revoke-keys", "not an id"],
             vec!["restore", "org_abc"],
             vec!["release", "outbox"],
         ] {

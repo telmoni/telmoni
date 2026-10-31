@@ -2815,6 +2815,79 @@ async fn an_invitation_from_an_organization_being_deleted_is_withdrawn_with_it(p
 
 // ── An operator's termination ────────────────────────────────────────────────
 
+/// ⚠ An operator revokes every live key of one organization, the rotation
+/// grace's among them, and nothing else: the organization stays active, no
+/// other's key is touched, and the chain records it as `service:operator`.
+/// One being deleted, or none, is refused.
+#[sqlx::test]
+async fn an_operator_revokes_one_organizations_keys_and_nothing_else(pool: PgPool) {
+    telmoni_shared::test_util::apply_audit_migrations(&pool).await;
+    seed_organization_deletion(&pool, "active").await;
+    seed_keys(&pool).await;
+    seed_person(&pool, SURVIVOR_OWNER).await;
+    seed_organization(&pool, SURVIVOR, SURVIVOR_OWNER, "active").await;
+    sqlx::query(
+        "INSERT INTO auth.api_tokens (organization_id, project_id, name, token_hash, token_hint,
+                                      created_by, scopes)
+         VALUES ($1, $2, 'theirs', 'hash_theirs', 'tm_hint', $3, ARRAY['read'])",
+    )
+    .bind(SURVIVOR)
+    .bind(project_of(SURVIVOR))
+    .bind(SURVIVOR_OWNER)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (_, _, state) = app_and_state(pool.clone(), None, 8_000);
+
+    let revoked = sweep::revoke_keys(&state, &organization_id_of(ORGANIZATION).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(revoked, 3);
+    assert_eq!(unrevoked_keys(&pool).await, 0);
+    let theirs: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM auth.api_tokens WHERE organization_id = $1 AND revoked_at IS NULL",
+    )
+    .bind(SURVIVOR)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(theirs, 1, "another organization's key was touched");
+    let status: String =
+        sqlx::query_scalar("SELECT status FROM auth.organizations WHERE external_id = $1")
+            .bind(ORGANIZATION)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(status, "active");
+    let filed: Vec<(String, Value)> = sqlx::query_as(
+        "SELECT actor_id, metadata FROM audit.events
+          WHERE organization_id = $1 AND resource_kind = 'token' AND action = 'deleted'",
+    )
+    .bind(ORGANIZATION)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        filed,
+        [(
+            "service:operator".to_owned(),
+            json!({ "every_key": true, "revoked": 3 })
+        )]
+    );
+
+    mark_pending(&pool, ORGANIZATION).await;
+    assert!(
+        sweep::revoke_keys(&state, &organization_id_of(ORGANIZATION).unwrap())
+            .await
+            .is_err()
+    );
+    assert!(
+        sweep::revoke_keys(&state, &organization_id_of("org_nobody").unwrap())
+            .await
+            .is_err()
+    );
+}
+
 /// ⚠ **An operator closes an organization without its owner's code**, and it
 /// stands where an owner's deletion would: closed to every lane, the hook
 /// purged, its row waiting out the grace, and the chain recording it as

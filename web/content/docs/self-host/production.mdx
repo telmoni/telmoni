@@ -299,6 +299,15 @@ telmoni-server terminate org_019a0b8c3f2e7d41
 
 `terminate` closes the organization without its owner's confirmation code, as `service:operator` in its audit log. There is no way back: the next deletion sweep past the wait erases it, as it erases one its owner deleted.
 
+If an organization's API keys are in the wrong hands, and the organization should stand:
+
+```bash
+# Revoke every live API key of the organization, its rotation graces among them
+telmoni-server revoke-keys org_019a0b8c3f2e7d41
+```
+
+`revoke-keys` touches nothing else: the organization, its members and their sessions stand, and its admins mint new keys. It is recorded as `service:operator` in its audit log.
+
 ---
 
 ## What the server refuses at boot

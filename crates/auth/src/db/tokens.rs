@@ -1,7 +1,7 @@
 //! `auth.api_tokens` — a project's keys.
 
 use chrono::{DateTime, Utc};
-use telmoni_shared::db::tenant_session::{Maintenance, PersonAndOrganization, Project, Scoped};
+use telmoni_shared::db::tenant_session::{HasOrganization, Maintenance, Project, Scoped};
 use telmoni_shared::{ApiKeyScope, OrganizationId, ProjectId, UserId};
 use uuid::Uuid;
 
@@ -170,8 +170,8 @@ pub async fn revoke_in_project(
 /// query function that changes the binding under `tx`'s type, and it restores
 /// it before returning. In-grace tokens (a future `revoked_at`) are collapsed
 /// to now, as the single revoke does.
-pub async fn revoke_all_in_organization(
-    tx: &mut Scoped<'_, PersonAndOrganization>,
+pub async fn revoke_all_in_organization<B: HasOrganization>(
+    tx: &mut Scoped<'_, B>,
     organization_id: &OrganizationId,
 ) -> sqlx::Result<u64> {
     let projects: Vec<ProjectId> =
@@ -193,8 +193,8 @@ pub async fn revoke_all_in_organization(
     Ok(revoked)
 }
 
-async fn revoke_live_in_project(
-    tx: &mut Scoped<'_, PersonAndOrganization>,
+async fn revoke_live_in_project<B: HasOrganization>(
+    tx: &mut Scoped<'_, B>,
     organization_id: &OrganizationId,
     project_id: &ProjectId,
 ) -> sqlx::Result<u64> {
