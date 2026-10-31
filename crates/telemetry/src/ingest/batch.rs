@@ -5,6 +5,7 @@ use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
+use uuid::Uuid;
 
 use telmoni_shared::ProjectId;
 
@@ -36,6 +37,7 @@ pub struct Batch {
 /// One kept span's content: each field by its name, as it arrived.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpanContent {
+    pub run_id: Uuid,
     pub trace_id: String,
     pub span_id: String,
     pub fields: Vec<(String, String)>,
@@ -110,6 +112,7 @@ pub fn read(
                     Ok((row, fields)) => {
                         if !fields.is_empty() {
                             batch.content.push(SpanContent {
+                                run_id: row.run_id,
                                 trace_id: row.trace_id.clone(),
                                 span_id: row.span_id.clone(),
                                 fields,

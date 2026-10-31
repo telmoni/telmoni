@@ -69,6 +69,7 @@ pub async fn keep(
                 state
                     .vault
                     .seal(&key, &Redacted::from(text), aad.as_bytes())?;
+            sealed.run_ids.push(span.run_id);
             sealed.trace_ids.push(span.trace_id.clone());
             sealed.span_ids.push(span.span_id.clone());
             sealed.fields.push(field);
@@ -113,7 +114,7 @@ pub async fn open(
 
     let key = key_for(state, project_id).await?;
     let mut opened: Vec<SpanContent> = Vec::new();
-    for (trace_id, span_id, field, ciphertext, nonce) in kept {
+    for (run_id, trace_id, span_id, field, ciphertext, nonce) in kept {
         let text = state
             .vault
             .open(
@@ -131,6 +132,7 @@ pub async fn open(
                 span.fields.push((field, text));
             }
             _ => opened.push(SpanContent {
+                run_id,
                 trace_id,
                 span_id,
                 fields: vec![(field, text)],
@@ -157,7 +159,7 @@ async fn file_the_read(
     // The traces read, not those asked for: kept is ordered by trace.
     let mut read: Vec<&str> = kept
         .iter()
-        .map(|(trace_id, ..)| trace_id.as_str())
+        .map(|(_, trace_id, ..)| trace_id.as_str())
         .collect();
     read.dedup();
     let project = project_id.to_string();

@@ -16,18 +16,26 @@ use axum::http::{HeaderMap, header};
 use axum::response::{IntoResponse, Response};
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde::Serialize;
+use serde_json::json;
 use uuid::Uuid;
 
+use telmoni_shared::acting::Acting;
 use telmoni_shared::csv;
+use telmoni_shared::db::tenant_session::{ProjectAndOrganization, Scoped};
 use telmoni_shared::extract::{Json, Query};
 use telmoni_shared::rbac::{Resource, Verb};
-use telmoni_shared::{AuthError, SortDirection, SpanKind, SpanStatus, TelmoniError, TraceSort};
+use telmoni_shared::{
+    AuditAction, AuthError, ProjectId, SortDirection, SpanKind, SpanStatus, TelmoniError,
+    TelmoniResourceKind, TraceSort,
+};
 
 use crate::AppState;
 use crate::contract::{
     AGENT_MAX, ATTRIBUTE_VALUE_MAX, ENVIRONMENT_MAX, MODEL_MAX, NAME_MAX, RELEASE_MAX,
     SESSION_ID_MAX, TAG_KEY_MAX, TAG_VALUE_MAX, USER_ID_MAX, UTC_OFFSET_RANGE,
 };
+use crate::erasure::{self, Erase};
+use crate::handler::chain::{self, Change};
 use crate::spend::{self, Unread};
 use crate::store::{self, Projects, SpanRow};
 use crate::traces::{
@@ -649,6 +657,17 @@ pub struct TraceHistogram {
     pub bars: Vec<Bar>,
 }
 
+/// What a trace's deletion answers: how much of it went.
+#[derive(Debug, Serialize)]
+pub struct TraceDeleted {
+    /// The run deleted.
+    pub run_id: Uuid,
+    /// Its spans, marked deleted.
+    pub spans: u64,
+    /// The content fields its spans kept, deleted.
+    pub fields: u64,
+}
+
 /// What one trace's lane answers.
 #[derive(Debug, Serialize)]
 pub struct TraceDetail {
@@ -931,6 +950,73 @@ pub async fn export_traces(
     let (rows, format) =
         export_rows::<Traces>(&state, &headers, pairs, Reading::TraceExport).await?;
     download(format, &rows, &CSV_HEADER, TraceRow::cells, "trace")
+}
+
+/// `DELETE /internal/v1/telemetry/traces/{run_id}` — one trace deleted by a
+/// project admin: the request filed in the organization's chain first, then
+/// the run marked deleted in ClickHouse and its content deleted, and the
+/// receipt mailed to whoever asked. `404` for a run the project does not hold.
+pub async fn delete_trace(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(run_id): Path<String>,
+) -> Result<Json<TraceDeleted>, TelmoniError> {
+    let acting = state.auth.resolve(&headers).await?;
+    let project_id = &acting
+        .require_project(Verb::Delete, Resource::Trace)?
+        .project_id;
+    let run_id: Uuid = run_id
+        .parse()
+        .map_err(|_| TelmoniError::BadRequest("a trace is named by its run's id, a UUID".into()))?;
+    let found = erasure::find(&state, project_id, Erase::Trace(run_id)).await?;
+    if found.runs.is_empty() {
+        return Err(AuthError::NotFound("no trace with that run id in this project".into()).into());
+    }
+    let spans = found.spans;
+    chain::write(
+        &state.db,
+        &acting,
+        project_id,
+        "trace deletion",
+        async |tx| file_trace_deletion(&state, &acting, project_id, tx, run_id, spans).await,
+    )
+    .await?;
+    let erase = Erase::Trace(run_id);
+    let fields = erasure::carry_out(&state, project_id, erase, found, &acting.user_id).await?;
+    tracing::info!(project_id = %project_id, run_id = %run_id, spans, fields, "telemetry: a trace deleted");
+    Ok(Json(TraceDeleted {
+        run_id,
+        spans,
+        fields,
+    }))
+}
+
+/// The deletion's request, filed under the organization's chain lock, the
+/// role checked again on auth's second answer.
+async fn file_trace_deletion(
+    state: &AppState,
+    acting: &Acting,
+    project_id: &ProjectId,
+    tx: &mut Scoped<'_, ProjectAndOrganization>,
+    run_id: Uuid,
+    spans: u64,
+) -> Result<(), TelmoniError> {
+    chain::held(
+        state.auth.as_ref(),
+        acting,
+        tx,
+        Verb::Delete,
+        Resource::Trace,
+    )
+    .await?;
+    let change = Change {
+        action: AuditAction::Deleted,
+        kind: TelmoniResourceKind::Trace,
+        id: run_id,
+        metadata: json!({ "spans": spans }),
+    };
+    chain::file(tx, acting, project_id, change).await?;
+    Ok(())
 }
 
 /// `GET /internal/v1/telemetry/traces/{run_id}` — one trace's spans, the run's

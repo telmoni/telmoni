@@ -6,16 +6,20 @@ import { Section } from "@/components/section";
 import { ServiceUnavailable } from "@/components/service-unavailable";
 import { Card } from "@/components/ui/card";
 import { CONTENT_MODE_LABEL, CONTENT_MODE_MEANS } from "@/lib/content-mode";
+import { administers } from "@/lib/roles";
 import { fetchContentMode, fetchFieldInventory } from "@/lib/server/data";
 import { projectPage } from "@/lib/server/project-page";
 import { projectPath } from "@/lib/slug";
+
+import { EraseEndUserForm } from "./_erase-end-user";
 
 export const metadata = { title: "Privacy" };
 
 // What this project keeps, on one page: its content mode, and the field
 // inventory — every attribute ingest reads and what becomes of it — served by
 // the server from the code ingest runs, so this page cannot promise what the
-// door does not do. The posture page grows from here.
+// door does not do. A project admin erases an end user here too. The posture
+// page grows from here.
 export default async function PrivacyPage({
   params,
 }: PageProps<"/[organization]/[project]/privacy">) {
@@ -58,6 +62,31 @@ export default async function PrivacyPage({
             ) : (
               <p className="text-muted-foreground">
                 This project&apos;s content mode could not be read. Reload to try again.
+              </p>
+            )}
+          </Card>
+        </Section>
+
+        <Section
+          title="Erase an end user"
+          description={
+            <>
+              Every trace whose spans carry this id as <code>user.id</code>, the traces of their
+              sessions that name no one, and any content they kept, deleted at once. The id is
+              matched exactly as your app sent it.{" "}
+              <Link href="/docs/workspace/data-deletion" className="underline underline-offset-4">
+                What erasure takes
+              </Link>
+              .
+            </>
+          }
+        >
+          <Card className="grid gap-1 text-sm">
+            {administers(project.role) ? (
+              <EraseEndUserForm projectId={project.id} />
+            ) : (
+              <p className="text-muted-foreground">
+                A project admin or the organization owner erases an end user.
               </p>
             )}
           </Card>

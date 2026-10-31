@@ -85,11 +85,11 @@ pub fn can(role: Role, verb: Verb, resource: Resource) -> bool {
     // Combinations no customer endpoint exposes — deny outright. The chain is
     // written by `emit_audit` and hash-linked. A role that could edit it would
     // make it a record of what somebody was willing to leave behind. A trace
-    // is written by ingest and removed by the purge: a record, not a thing a
-    // person edits.
+    // is written by ingest, never edited: deleting one, or an end user's, is
+    // its one mutation.
     if matches!(
         (verb, resource),
-        (V::Create | V::Update | V::Delete, R::Audit | R::Trace)
+        (V::Create | V::Update | V::Delete, R::Audit) | (V::Create | V::Update, R::Trace)
     ) {
         return false;
     }
@@ -193,7 +193,8 @@ mod tests {
         assert!(!can(Role::Owner, Verb::Delete, Resource::Audit));
         assert!(!can(Role::Owner, Verb::Create, Resource::Trace));
         assert!(!can(Role::Owner, Verb::Update, Resource::Trace));
-        assert!(!can(Role::Owner, Verb::Delete, Resource::Trace));
+        assert!(can(Role::Owner, Verb::Delete, Resource::Trace));
+        assert!(!can(Role::Member, Verb::Delete, Resource::Trace));
     }
 
     #[test]
@@ -249,7 +250,7 @@ mod tests {
         assert!(can(Role::Admin, Verb::Read, Resource::Trace));
         assert!(!can(Role::Admin, Verb::Create, Resource::Trace));
         assert!(!can(Role::Admin, Verb::Update, Resource::Trace));
-        assert!(!can(Role::Admin, Verb::Delete, Resource::Trace));
+        assert!(can(Role::Admin, Verb::Delete, Resource::Trace));
 
         assert!(can(Role::Admin, Verb::Read, Resource::View));
         assert!(can(Role::Admin, Verb::Create, Resource::View));
@@ -316,7 +317,10 @@ mod tests {
             minimum_role(Verb::Read, Resource::Trace),
             Some(Role::Member)
         );
-        assert_eq!(minimum_role(Verb::Delete, Resource::Trace), None);
+        assert_eq!(
+            minimum_role(Verb::Delete, Resource::Trace),
+            Some(Role::Admin)
+        );
         assert_eq!(minimum_role(Verb::Read, Resource::View), Some(Role::Member));
         assert_eq!(
             minimum_role(Verb::Create, Resource::View),

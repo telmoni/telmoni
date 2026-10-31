@@ -466,7 +466,11 @@ impl Telemetry for RecordingTelemetry {
         self.purge_organization.take().unwrap_or(Ok(1))
     }
 
-    async fn purge_project(&self, project_id: &ProjectId) -> Result<u64, TelmoniError> {
+    async fn purge_project(
+        &self,
+        _organization_id: &OrganizationId,
+        project_id: &ProjectId,
+    ) -> Result<u64, TelmoniError> {
         self.calls
             .record(SiblingCall::TelemetryPurgeProject(project_id.to_string()));
         self.purge_project.take().unwrap_or(Ok(1))

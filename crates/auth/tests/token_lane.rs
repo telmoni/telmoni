@@ -91,7 +91,7 @@ impl Telemetry for Meter {
         Ok(0)
     }
 
-    async fn purge_project(&self, _: &ProjectId) -> Result<u64, TelmoniError> {
+    async fn purge_project(&self, _: &OrganizationId, _: &ProjectId) -> Result<u64, TelmoniError> {
         Ok(0)
     }
 

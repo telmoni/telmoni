@@ -48,6 +48,7 @@ pub mod config;
 pub mod content;
 pub mod contract;
 pub mod db;
+pub mod erasure;
 pub mod handler;
 pub mod hashing;
 pub mod ingest;
@@ -101,6 +102,10 @@ pub struct AppState {
     pub hashing_keys: hashing::Cache,
     /// Each project's content key, opened once per process ([`content`]).
     pub content_keys: hashing::Cache<Arc<telmoni_shared::envelope::Dek>>,
+    /// The projects an export's settling is asking auth about again, one
+    /// task a project at once and one after an insert's wait
+    /// ([`handler::ingest`]).
+    pub settling: std::sync::Mutex<std::collections::HashSet<(telmoni_shared::ProjectId, bool)>>,
     /// Redis, as this replica holds it ([`replica`]): ingest's claims and
     /// limits, shared with every other replica.
     pub redis: replica::Redis,
@@ -172,7 +177,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         )
         .route(
             "/telemetry/traces/{run_id}",
-            get(handler::traces::get_trace),
+            get(handler::traces::get_trace).delete(handler::traces::delete_trace),
         )
         .route("/telemetry/users", get(handler::users::list_users))
         .route(
@@ -180,6 +185,7 @@ pub fn router(state: Arc<AppState>) -> Router {
             get(handler::users::get_user_facets),
         )
         .route("/telemetry/users/export", get(handler::users::export_users))
+        .route("/telemetry/users/erase", post(handler::users::erase_user))
         .route("/telemetry/sessions", get(handler::sessions::list_sessions))
         .route(
             "/telemetry/session-facets",

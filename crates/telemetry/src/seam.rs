@@ -12,14 +12,21 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use serde_json::json;
 
-use telmoni_shared::db::tenant_session::maintenance_scope;
-use telmoni_shared::seam::Telemetry;
-use telmoni_shared::{OrganizationId, ProjectId, TelemetryError, TelmoniError};
+use telmoni_shared::audit::requested_by;
+use telmoni_shared::db::tenant_session::{maintenance_scope, organization_scope};
+use telmoni_shared::seam::{Receipt, Telemetry};
+use telmoni_shared::{
+    AuditAction, OrganizationId, ProjectId, TelemetryError, TelmoniError, TelmoniResourceKind,
+};
 
 use crate::AppState;
 use crate::db::{self, TelemetryLane};
 use crate::store;
+
+/// How long a project's receipt stays claimed: past any purge's retry.
+const RECEIPT_CLAIMED_SECS: u64 = 24 * 60 * 60;
 
 /// The module as its siblings hold it: `Arc::new(TelemetrySeam(state))` is
 /// the `Arc<dyn Telemetry>` auth is handed.
@@ -44,10 +51,12 @@ async fn mark_deleted(state: &AppState, project: &ProjectId) -> Result<(), Telmo
 }
 
 /// One project's purge, as auth calls it after the delete and the sweep
-/// calls it again: its spans and totals, then the rest. Safe to repeat;
+/// calls it again: its spans and totals, then the rest, then the receipt to
+/// whoever `organization_id`'s chain names as asking. Safe to repeat;
 /// answers how many rows went from Postgres.
 pub(crate) async fn purge_project(
     state: &AppState,
+    organization_id: &OrganizationId,
     project_id: &ProjectId,
 ) -> Result<u64, TelmoniError> {
     mark_deleted(state, project_id).await?;
@@ -59,7 +68,67 @@ pub(crate) async fn purge_project(
         purged,
         "telemetry purge: the project's rows marked deleted and its settings and views removed"
     );
+    mail_project_receipt(state, organization_id, project_id).await;
     Ok(purged)
+}
+
+/// The project's receipt, mailed apart from the purge, so a slow mail is
+/// neither held to the purge's budget nor cut short with it: to the person
+/// whose deletion the organization's chain filed, under the name it filed.
+/// Claimed in Redis first, so the delete's purge and the sweep's, racing,
+/// mail it once; without Redis it is mailed all the same.
+async fn mail_project_receipt(
+    state: &AppState,
+    organization_id: &OrganizationId,
+    project_id: &ProjectId,
+) {
+    let (db, auth) = (state.db.clone(), Arc::clone(&state.auth));
+    let (organization_id, project_id) = (organization_id.clone(), project_id.clone());
+    let connection = state.redis.connection().await;
+    tokio::spawn(async move {
+        if let Some(mut connection) = connection {
+            let claimed: Result<Option<String>, redis::RedisError> = redis::cmd("SET")
+                .arg(format!("telemetry:receipt:project:{project_id}"))
+                .arg(1)
+                .arg("NX")
+                .arg("EX")
+                .arg(RECEIPT_CLAIMED_SECS)
+                .query_async(&mut connection)
+                .await;
+            if matches!(claimed, Ok(None)) {
+                return;
+            }
+        }
+        let asked = async {
+            let mut tx = organization_scope(&db, &organization_id).await?;
+            let asked = requested_by(
+                tx.conn(),
+                &organization_id,
+                AuditAction::Deleted,
+                TelmoniResourceKind::Project,
+                project_id.as_str(),
+                &json!({}),
+            )
+            .await?;
+            tx.commit().await?;
+            Ok::<_, TelmoniError>(asked)
+        };
+        match asked.await {
+            Ok(Some((to, filed))) => {
+                let name = filed
+                    .get("name")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or(project_id.as_str());
+                auth.mail_receipt(&to, Receipt::Project { name }).await;
+            }
+            Ok(None) => {}
+            Err(e) => tracing::warn!(
+                project_id = %project_id,
+                error = %e,
+                "telemetry purge: who asked for the project's deletion could not be read; no receipt is mailed"
+            ),
+        }
+    });
 }
 
 #[async_trait]
@@ -86,8 +155,12 @@ impl Telemetry for TelemetrySeam {
         Ok(purged)
     }
 
-    async fn purge_project(&self, project_id: &ProjectId) -> Result<u64, TelmoniError> {
-        purge_project(&self.0, project_id).await
+    async fn purge_project(
+        &self,
+        organization_id: &OrganizationId,
+        project_id: &ProjectId,
+    ) -> Result<u64, TelmoniError> {
+        purge_project(&self.0, organization_id, project_id).await
     }
 
     async fn admit_data_out(&self, organization_id: &OrganizationId) -> Result<(), TelmoniError> {

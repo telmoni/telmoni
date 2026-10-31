@@ -44,7 +44,8 @@ use crate::ingest::claims::{self, Claim, Guard};
 use crate::ingest::decode::{self, DecodeError, Encoding};
 use crate::ingest::report::Report;
 use crate::live;
-use crate::{AppState, content, db, hashing};
+use crate::store::ASYNC_INSERT_WAIT;
+use crate::{AppState, content, db, erasure, hashing};
 
 /// The header every `200` carries: the project's content mode, so an SDK
 /// learns it from its first export.
@@ -239,21 +240,34 @@ async fn write(
     )
     .await;
 
-    state
-        .store
-        .insert_spans_once(&batch.rows, token)
-        .await
-        .map_err(store_failed)?;
+    // A run deleted as it still runs sends on: what it sends is not kept.
+    let runs = erasure::drop_deleted(state, &key.project_id, &mut batch).await;
+    if runs > 0 {
+        tracing::debug!(project_id = %key.project_id, runs, "ingest: spans of deleted runs dropped");
+    }
+    if let Err(error) = state.store.insert_spans_once(&batch.rows, token).await {
+        // ClickHouse may finish an insert the client stopped waiting for, as
+        // late as its own wait: settled once that has passed.
+        if matches!(error, clickhouse::error::Error::TimedOut) && !batch.rows.is_empty() {
+            settle_later(state, &key.project_id, ASYNC_INSERT_WAIT);
+        }
+        return Err(store_failed(error));
+    }
+    erasure::mark_late(state, &key.project_id, &mut batch).await;
     // After the spans, so no content outlives or precedes its span: a write
     // that fails lets the claim go, and the retry's spans land once under the
-    // token while its content is kept, each field once.
-    content::keep(
+    // token while its content is kept, each field once. A purge that took
+    // the settings row refuses the content, and the spans are settled all
+    // the same.
+    let kept = content::keep(
         state,
         &key.project_id,
         received_at,
         std::mem::take(&mut batch.content),
     )
-    .await?;
+    .await;
+    let here = !batch.rows.is_empty() && settle_written(state, &key.project_id).await;
+    kept?;
 
     tracing::debug!(
         project_id = %key.project_id,
@@ -266,7 +280,7 @@ async fn write(
     // The organization's open consoles are told, so a page reading this
     // project's spans draws itself again — unless nothing was kept or the
     // project is gone. The answer waits for the check, not the telling.
-    if !batch.rows.is_empty() && settle_written(state, &key.project_id).await {
+    if here {
         live::spans_ingested(
             Arc::clone(state),
             key.organization_id.as_str(),
@@ -332,56 +346,144 @@ fn response_body(
 /// How long an export waits for auth to say whether its project still exists.
 const SETTLE_BUDGET: Duration = Duration::from_secs(1);
 
+/// The waits between a settle's later asks, doubling: about four minutes in
+/// all, past an insert ClickHouse finishes on its own.
+const SETTLE_LATER: [Duration; 8] = [
+    Duration::from_secs(1),
+    Duration::from_secs(2),
+    Duration::from_secs(4),
+    Duration::from_secs(8),
+    Duration::from_secs(16),
+    Duration::from_secs(32),
+    Duration::from_secs(64),
+    Duration::from_secs(128),
+];
+
 /// Whether the export's project still exists. An export racing its
 /// project's purge can land after the purge's mark, so a project that is
 /// gone has its spans marked deleted again. Auth is asked rather than the
 /// settings row, since auth commits the delete before the purge marks and
-/// the row goes only after. Without an answer in time the rows are kept,
-/// logged.
-async fn settle_written(state: &AppState, project_id: &ProjectId) -> bool {
-    let homes = match tokio::time::timeout(
+/// the row goes only after. Without an answer in time, or a mark ClickHouse
+/// did not take, it is asked again later ([`settle_later`]), and the rows
+/// stand meanwhile.
+async fn settle_written(state: &Arc<AppState>, project_id: &ProjectId) -> bool {
+    match outlived(state, project_id).await {
+        Some(true) => true,
+        Some(false) => {
+            if !marked_again(state, project_id).await {
+                settle_later(state, project_id, Duration::ZERO);
+            }
+            false
+        }
+        None => {
+            settle_later(state, project_id, Duration::ZERO);
+            true
+        }
+    }
+}
+
+/// [`settle_written`] apart from the export's answer, after `first`: auth
+/// asked again, and the spans marked deleted again once it says the project
+/// is gone, until the waits run out. One at once a project, and one after an
+/// insert's wait, since a mark takes every row the project holds, so neither
+/// an outage of auth's nor a slow ClickHouse is asked again by each export.
+/// Held in memory, so a replica stopped meanwhile leaves the spans until the
+/// retention line.
+fn settle_later(state: &Arc<AppState>, project_id: &ProjectId, first: Duration) {
+    let place = (project_id.clone(), !first.is_zero());
+    if !state
+        .settling
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(place.clone())
+    {
+        return;
+    }
+    let (state, project_id) = (Arc::clone(state), project_id.clone());
+    tokio::spawn(async move {
+        let _settled = Settling(Arc::clone(&state), place);
+        tokio::time::sleep(first).await;
+        for wait in SETTLE_LATER {
+            match outlived(&state, &project_id).await {
+                Some(true) => return,
+                Some(false) if marked_again(&state, &project_id).await => return,
+                Some(false) | None => tokio::time::sleep(wait).await,
+            }
+        }
+        tracing::warn!(
+            project_id = %project_id,
+            "ingest: an export's project could not be settled; its spans stay until the \
+             retention line if it was deleted"
+        );
+    });
+}
+
+/// A project's place in [`AppState::settling`], given up however its task
+/// ends.
+struct Settling(Arc<AppState>, (ProjectId, bool));
+
+impl Drop for Settling {
+    fn drop(&mut self) {
+        self.0
+            .settling
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&self.1);
+    }
+}
+
+/// Whether auth still holds the project, or `None` without its answer in
+/// time.
+async fn outlived(state: &AppState, project_id: &ProjectId) -> Option<bool> {
+    match tokio::time::timeout(
         SETTLE_BUDGET,
         state.auth.project_homes(std::slice::from_ref(project_id)),
     )
     .await
     {
-        Ok(Ok(homes)) => homes,
+        Ok(Ok(homes)) => Some(homes.iter().any(|home| home.project_id == *project_id)),
         Ok(Err(e)) => {
             tracing::warn!(
                 project_id = %project_id,
                 error = %e,
-                "ingest: auth could not say whether an export's project outlived its write; the \
-                 rows are kept as written"
+                "ingest: auth could not say whether an export's project outlived its write; \
+                 it is asked again"
             );
-            return true;
+            None
         }
         Err(_) => {
             tracing::warn!(
                 project_id = %project_id,
                 "ingest: auth did not say in time whether an export's project outlived its \
-                 write; the rows are kept as written"
+                 write; it is asked again"
             );
-            return true;
+            None
         }
-    };
-    if homes.iter().any(|home| home.project_id == *project_id) {
-        return true;
     }
+}
+
+/// A gone project's spans marked deleted again; whether ClickHouse took it.
+async fn marked_again(state: &AppState, project_id: &ProjectId) -> bool {
     match state.store.delete_project(project_id).await {
-        Ok(()) => tracing::info!(
-            project_id = %project_id,
-            "ingest: an export's project was deleted as it landed; its spans are marked deleted \
-             again"
-        ),
+        Ok(()) => {
+            tracing::info!(
+                project_id = %project_id,
+                "ingest: an export's project was deleted as it landed; its spans are marked \
+                 deleted again"
+            );
+            true
+        }
         // The error's text can carry ClickHouse's message: log its kind alone.
-        Err(error) => tracing::warn!(
-            project_id = %project_id,
-            kind = crate::store::Fault::of(&error).as_str(),
-            "ingest: an export's project was deleted as it landed, and ClickHouse did not mark \
-             its spans deleted again; they stay until the retention line"
-        ),
+        Err(error) => {
+            tracing::warn!(
+                project_id = %project_id,
+                kind = crate::store::Fault::of(&error).as_str(),
+                "ingest: an export's project was deleted as it landed, and ClickHouse did not \
+                 mark its spans deleted again; it is asked again"
+            );
+            false
+        }
     }
-    false
 }
 
 async fn release(guard: Guard, state: &AppState) {

@@ -162,7 +162,7 @@ function PeekPanel({ organization, slug, projectId, run, runs }: Props & { run: 
             noun="trace"
             missing={{
               title: "No trace with this id in this project.",
-              body: "Its spans may have passed their retention, or the run belongs to another project.",
+              body: "It may have been deleted, its spans may have passed their retention, or the run belongs to another project.",
             }}
             retry={again}
           />

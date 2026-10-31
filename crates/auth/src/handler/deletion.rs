@@ -49,11 +49,12 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 use serde_json::json;
 
-use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
+use telmoni_shared::audit::{Actor, AuditEvent, emit_audit, requested_by};
 use telmoni_shared::db::tenant_session::{
     HasOrganization, Scoped, maintenance_scope, organization_scope, person_scope,
 };
 use telmoni_shared::extract::Json;
+use telmoni_shared::seam::Receipt;
 use telmoni_shared::{
     AuditAction, AuthError, OrganizationId, OrganizationRole, OrganizationStatus, ProjectId, Role,
     TelmoniError, TelmoniResourceKind, UserId,
@@ -66,7 +67,9 @@ use crate::{
         offers::{self, OfferWrite, Roster},
         organization_members,
         organizations::{self, FinalizeStanding},
+        projects,
     },
+    mailer::AuthMail,
     model::{AuditKind, DeletionKind},
 };
 
@@ -274,9 +277,10 @@ async fn within<T>(
 /// Telemetry's teardown for one project after it is deleted: its spans and
 /// totals marked deleted, then its settings. No telemetry module is nothing
 /// to purge. A purge that fails here is retried by telemetry's own sweep
-/// every ten minutes.
+/// every ten minutes; whichever finishes it mails the receipt.
 pub(crate) async fn purge_project_telemetry(
     state: &AppState,
+    organization_id: &OrganizationId,
     project_id: &ProjectId,
 ) -> Result<(), TelmoniError> {
     let Some(telemetry) = state.siblings.telemetry.as_ref() else {
@@ -285,7 +289,7 @@ pub(crate) async fn purge_project_telemetry(
     within(
         TELEMETRY_PROJECT_BUDGET,
         "telemetry's project purge",
-        telemetry.purge_project(project_id),
+        telemetry.purge_project(organization_id, project_id),
     )
     .await
 }
@@ -443,6 +447,17 @@ pub async fn finalize_organization(
     // would take it anyway. This matches nothing then, and the step answers
     // what stands.
     locks::lock_organization(&mut tx, organization_id).await?;
+    // Read before the row goes: what it was called, and who asked.
+    let name = organizations::name_of(&mut tx, organization_id).await?;
+    let requester = requested_by(
+        tx.conn(),
+        organization_id,
+        AuditAction::Updated,
+        TelmoniResourceKind::Organization,
+        organization_id.as_str(),
+        &json!({ "deletion": "requested" }),
+    )
+    .await?;
     if !organizations::delete_ripe(&mut tx, organization_id).await? {
         tx.rollback().await?;
         return Ok(match finalize_standing_of(state, organization_id).await? {
@@ -470,7 +485,59 @@ pub async fn finalize_organization(
     tx.commit().await?;
 
     tracing::info!(organization_id = %organization_id, "organization deletion finalized (hard delete)");
+    if let (Some((to, _)), Some(name)) = (requester, name) {
+        mail_receipt(state, &to, Receipt::Organization { name: &name }).await;
+    }
     Ok(FinalizeOutcome::Finalized)
+}
+
+/// A deletion's receipt, mailed to `to`: their address read across tenants,
+/// as the project the receipt names is. Logged, never raised: the deletion
+/// it reports is done whether or not the mail goes.
+pub(crate) async fn mail_receipt(state: &AppState, to: &UserId, receipt: Receipt<'_>) {
+    let project_id = match receipt {
+        Receipt::Trace { project_id, .. } | Receipt::EndUser { project_id, .. } => {
+            Some(project_id.clone())
+        }
+        Receipt::Project { .. } | Receipt::Organization { .. } => None,
+    };
+    let found = crate::db::lane(&state.db, async |tx| {
+        let person = identities::get(tx, to).await?;
+        let homes = match &project_id {
+            Some(project_id) => projects::homes(tx, std::slice::from_ref(project_id)).await?,
+            None => Vec::new(),
+        };
+        Ok((person, homes))
+    })
+    .await;
+    let (person, homes) = match found {
+        Ok(found) => found,
+        Err(e) => {
+            tracing::warn!(error = %e, "a deletion's receipt was not mailed: its address could not be read");
+            return;
+        }
+    };
+    let Some(person) = person else {
+        tracing::info!("a deletion's receipt was not mailed: the person who asked is gone");
+        return;
+    };
+    let project = homes.first().map_or_else(
+        || project_id.map(|id| id.to_string()).unwrap_or_default(),
+        |home| format!("{}/{}", home.organization_slug, home.slug),
+    );
+    if let Err(e) = state
+        .mailer
+        .send_mail(
+            person.email.as_str(),
+            AuthMail::DeletionReceipt {
+                receipt,
+                project: &project,
+            },
+        )
+        .await
+    {
+        tracing::warn!(error = %e, "a deletion's receipt was not mailed — check MAIL_FROM, the mail transport and the sending domain's DNS");
+    }
 }
 
 /// Ask notifications to rewrite every notice that names the person — "A

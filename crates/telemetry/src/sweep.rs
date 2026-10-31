@@ -67,18 +67,21 @@ pub async fn sweep(state: &AppState) -> Result<Swept, TelmoniError> {
         let mut tx = maintenance_scope(&state.db, TelemetryLane).await?;
         let page = db::settings_after(&mut tx, &after, PAGE).await?;
         tx.commit().await?;
-        let Some(last) = page.last() else {
+        let Some((last, _)) = page.last() else {
             return Ok(swept);
         };
+        let projects: Vec<ProjectId> = page.iter().map(|(project, _)| project.clone()).collect();
         let held: HashSet<ProjectId> = state
             .auth
-            .project_homes(&page)
+            .project_homes(&projects)
             .await?
             .into_iter()
             .map(|home| home.project_id)
             .collect();
-        for project_id in page.iter().filter(|project| !held.contains(*project)) {
-            match seam::purge_project(state, project_id).await {
+        for (project_id, organization_id) in
+            page.iter().filter(|(project, _)| !held.contains(project))
+        {
+            match seam::purge_project(state, organization_id, project_id).await {
                 Ok(_) => swept.purged += 1,
                 Err(e @ TelmoniError::Telemetry(TelemetryError::StoreUnavailable(_))) => {
                     return Err(e);

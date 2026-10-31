@@ -83,6 +83,10 @@ CREATE TABLE IF NOT EXISTS telemetry.spans
     -- a number or a boolean; an array is kept as its JSON.
     attributes               Map(LowCardinality(String), String),
     INDEX run_id_idx run_id TYPE bloom_filter GRANULARITY 1,
+    -- An end user's erasure and the users filter read by the hash alone,
+    -- and the erasure their sessions by the id.
+    INDEX user_id_idx user_id TYPE bloom_filter GRANULARITY 1,
+    INDEX session_id_idx session_id TYPE bloom_filter GRANULARITY 1,
     INDEX received_at_idx received_at TYPE minmax GRANULARITY 1
 )
 ENGINE = MergeTree

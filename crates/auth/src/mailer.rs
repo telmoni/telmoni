@@ -22,6 +22,7 @@
 use std::sync::Arc;
 
 use telmoni_shared::mail::{Mail, MailSender};
+use telmoni_shared::seam::Receipt;
 use telmoni_shared::{OrganizationRole, Role};
 
 pub use telmoni_shared::mail::MailError;
@@ -130,6 +131,12 @@ pub enum AuthMail<'a> {
     /// which proves that address is reachable; [`AuthMail::EmailChangeCode`]
     /// goes to the current one.
     NewAddressCode { code: &'a str },
+    /// Tell the person who asked for a deletion that it is done: what went,
+    /// in `project` where it was one project's, and that it is final.
+    DeletionReceipt {
+        receipt: Receipt<'a>,
+        project: &'a str,
+    },
 }
 
 /// Writes auth's mails and hands each to a transport.
@@ -289,6 +296,9 @@ impl ComposingMailer {
             AuthMail::EmailVerification { link } => self.send_email_verification(to, link).await,
             AuthMail::PasswordReset { link } => self.send_password_reset(to, link).await,
             AuthMail::NewAddressCode { code } => self.send_new_address_code(to, code).await,
+            AuthMail::DeletionReceipt { receipt, project } => {
+                self.send_deletion_receipt(to, receipt, project).await
+            }
         }
     }
 
@@ -688,11 +698,66 @@ impl ComposingMailer {
         )
         .await
     }
+
+    async fn send_deletion_receipt(
+        &self,
+        to: &str,
+        receipt: Receipt<'_>,
+        project: &str,
+    ) -> Result<(), MailError> {
+        let product = telmoni_shared::PRODUCT_NAME;
+        let (subject, what) = match receipt {
+            Receipt::Trace { run_id, spans, .. } => (
+                format!("A trace was deleted from {project}"),
+                format!(
+                    "The trace {run_id} of {project} was deleted as you asked: its \
+                     spans, {spans} in all, and any content they kept."
+                ),
+            ),
+            Receipt::EndUser { traces, .. } => (
+                format!("An end user's telemetry was erased from {project}"),
+                format!(
+                    "One end user of {project} was erased as you asked: every trace \
+                     of theirs, {traces} in all, and any content those traces kept. \
+                     Neither this mail nor the audit log names them by the id the \
+                     project sent."
+                ),
+            ),
+            Receipt::Project { name } => (
+                format!("The project {name} was deleted"),
+                format!(
+                    "The project {name} was deleted as you asked, and its \
+                     telemetry with it: every span, its hourly totals and any \
+                     content it kept."
+                ),
+            ),
+            Receipt::Organization { name } => (
+                format!("The organization {name} was deleted"),
+                format!(
+                    "The organization {name} was erased as you asked, with its \
+                     projects, members, API keys and telemetry."
+                ),
+            ),
+        };
+        self.send(
+            to,
+            subject,
+            format!(
+                "{what}\n\n\
+                 It is gone from every read in {product} now, and off the disk \
+                 once the store next rewrites it, overnight. There is no undo. \
+                 Your request is recorded in the organization's audit log.\n\n\
+                 If you did not ask for this, write to {contact} right away.",
+                contact = self.contact(),
+            ),
+        )
+        .await
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{ComposingMailer, InvitedTo};
+    use super::{ComposingMailer, InvitedTo, Receipt};
     use std::sync::{Arc, Mutex};
     use telmoni_shared::mail::{Mail, MailError, MailSender};
     use telmoni_shared::{OrganizationRole, Role};
@@ -739,6 +804,30 @@ mod tests {
             "a blank address: {}",
             mail.text
         );
+    }
+
+    /// A receipt names what went and where, says it is final and where a
+    /// reader who did not ask turns; an end user's names no id.
+    #[tokio::test]
+    async fn a_receipt_says_what_went_and_that_it_is_final() {
+        let project_id = telmoni_shared::ProjectId::new();
+        let receipt = composed(async |m| {
+            let receipt = Receipt::EndUser {
+                project_id: &project_id,
+                traces: 0,
+            };
+            m.send_deletion_receipt("ada@example.com", receipt, "acme/web")
+                .await
+                .expect("recorded");
+        })
+        .await;
+        assert_eq!(
+            receipt.subject,
+            "An end user's telemetry was erased from acme/web"
+        );
+        for said in ["0 in all", "There is no undo", "audit log", SUPPORT] {
+            assert!(receipt.text.contains(said), "{said}: {}", receipt.text);
+        }
     }
 
     #[tokio::test]

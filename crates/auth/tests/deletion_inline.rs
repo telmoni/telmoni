@@ -3175,3 +3175,49 @@ async fn an_erasure_writes_its_chains_by_byte(pool: PgPool) {
     held.rollback().await.unwrap();
     assert!(deleting.await.unwrap().unwrap().status().is_success());
 }
+
+/// ⚠ The receipt: an owner's deletion mails them once the finalize has
+/// erased the organization, naming it, and not before; an operator's
+/// termination mails nobody.
+#[sqlx::test]
+async fn the_finalize_mails_the_owner_who_asked_a_receipt(pool: PgPool) {
+    const CLOSED: &str = "org_inline_closed";
+    seed_organization_deletion(&pool, "active").await;
+    name_organization(&pool, ORGANIZATION, "Alpha Robotics").await;
+    seed_organization(&pool, CLOSED, USER, "active").await;
+    let recorder = Arc::new(Recorder::default());
+    let (router, _provider) = app_mailing(pool.clone(), recorder.clone());
+    let app = || router.clone();
+
+    let resp = app()
+        .oneshot(delete_organization(&pool, USER, ORGANIZATION, CODE).await)
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::ACCEPTED);
+    assert!(recorder.mails().is_empty(), "no receipt before the erasure");
+    let_the_wait_pass(&pool, ORGANIZATION).await;
+    let resp = app().oneshot(finalize(ORGANIZATION)).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+    let mails = recorder.mails();
+    assert_eq!(mails.len(), 1, "{mails:?}");
+    assert_eq!(
+        mails[0].to,
+        email_of(USER),
+        "the receipt went to the owner who asked"
+    );
+    assert_eq!(
+        mails[0].subject,
+        "The organization Alpha Robotics was deleted"
+    );
+
+    let resp = app().oneshot(terminate(CLOSED)).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::ACCEPTED);
+    let_the_wait_pass(&pool, CLOSED).await;
+    let resp = app().oneshot(finalize(CLOSED)).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+    assert_eq!(
+        recorder.mails().len(),
+        1,
+        "an operator's closing mails nobody"
+    );
+}

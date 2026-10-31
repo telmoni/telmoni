@@ -483,6 +483,9 @@ CREATE TABLE telemetry.model_prices (
 -- organization's purge finds its projects by their settings rows.
 CREATE TABLE telemetry.plain_content (
     project_id  TEXT        NOT NULL,
+    -- The span's run, by which a trace's deletion and an end user's erasure
+    -- take its content, whenever its spans landed.
+    run_id      UUID        NOT NULL,
     trace_id    TEXT        NOT NULL,
     span_id     TEXT        NOT NULL,
     field       TEXT        NOT NULL,
@@ -497,6 +500,8 @@ CREATE TABLE telemetry.plain_content (
 
 -- The nightly purge deletes by it.
 CREATE INDEX plain_content_received_idx ON telemetry.plain_content (received_at);
+-- A deletion of runs deletes by it.
+CREATE INDEX plain_content_run_idx ON telemetry.plain_content (project_id, run_id);
 
 ALTER TABLE telemetry.plain_content ENABLE ROW LEVEL SECURITY;
 ALTER TABLE telemetry.plain_content FORCE ROW LEVEL SECURITY;

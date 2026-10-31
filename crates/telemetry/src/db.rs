@@ -90,15 +90,15 @@ pub async fn projects_of(
 }
 
 /// A page of the projects with a settings row, in id order after `after`
-/// (empty for the first page), for the purge sweep: the row stays until its
-/// project's purge finishes.
+/// (empty for the first page), each with the organization it is filed under,
+/// for the purge sweep: the row stays until its project's purge finishes.
 pub async fn settings_after(
     tx: &mut Scoped<'_, Maintenance<TelemetryLane>>,
     after: &str,
     limit: i64,
-) -> sqlx::Result<Vec<ProjectId>> {
-    sqlx::query_scalar(
-        "SELECT project_id FROM telemetry.project_settings
+) -> sqlx::Result<Vec<(ProjectId, OrganizationId)>> {
+    sqlx::query_as(
+        "SELECT project_id, organization_id FROM telemetry.project_settings
           WHERE project_id > $1
           ORDER BY project_id
           LIMIT $2",
@@ -614,6 +614,7 @@ pub async fn set_content_key_if_none(
 /// One content field, sealed, as `plain_content` keeps it.
 #[derive(Debug, Default)]
 pub struct SealedFields {
+    pub run_ids: Vec<Uuid>,
     pub trace_ids: Vec<String>,
     pub span_ids: Vec<String>,
     pub fields: Vec<String>,
@@ -634,10 +635,11 @@ pub async fn keep_content(
     sqlx::query(
         "WITH kept AS (
              INSERT INTO telemetry.plain_content
-                 (project_id, trace_id, span_id, field, received_at, ciphertext, nonce, bytes)
-             SELECT $1, t, s, f, $3, c, n, b
-               FROM UNNEST($4::text[], $5::text[], $6::text[], $7::bytea[], $8::bytea[], $9::int[])
-                 AS u(t, s, f, c, n, b)
+                 (project_id, run_id, trace_id, span_id, field, received_at, ciphertext, nonce, bytes)
+             SELECT $1, r, t, s, f, $3, c, n, b
+               FROM UNNEST($10::uuid[], $4::text[], $5::text[], $6::text[], $7::bytea[],
+                           $8::bytea[], $9::int[])
+                 AS u(r, t, s, f, c, n, b)
              ON CONFLICT DO NOTHING
              RETURNING bytes)
          INSERT INTO telemetry.content_held (organization_id, bytes)
@@ -654,13 +656,14 @@ pub async fn keep_content(
     .bind(&sealed.ciphertexts)
     .bind(&sealed.nonces)
     .bind(&sealed.bytes)
+    .bind(&sealed.run_ids)
     .execute(tx.conn())
     .await?;
     Ok(())
 }
 
-/// One content field as kept: its trace, span and name, sealed.
-pub(crate) type KeptField = (String, String, String, Vec<u8>, Vec<u8>);
+/// One content field as kept: its run, trace, span and name, sealed.
+pub(crate) type KeptField = (Uuid, String, String, String, Vec<u8>, Vec<u8>);
 
 /// Every field the project keeps for the traces, sealed, in trace, span and
 /// name order: the crate's own, read only by [`crate::content::open`], which
@@ -671,7 +674,7 @@ pub(crate) async fn read_content(
     trace_ids: &[String],
 ) -> sqlx::Result<Vec<KeptField>> {
     sqlx::query_as(
-        "SELECT trace_id, span_id, field, ciphertext, nonce
+        "SELECT run_id, trace_id, span_id, field, ciphertext, nonce
            FROM telemetry.plain_content
           WHERE project_id = $1 AND trace_id = ANY($2)
           ORDER BY trace_id, span_id, field",
@@ -694,6 +697,34 @@ pub async fn delete_content(
     before: Option<DateTime<Utc>>,
     limit: i64,
 ) -> sqlx::Result<u64> {
+    delete_content_of(conn, project_ids, before, limit, None).await
+}
+
+/// The project's content rows of these runs, whenever their spans landed,
+/// deleted and counted off as [`delete_content`] does them: a trace's
+/// deletion's, or an end user's erasure's.
+pub async fn delete_runs_content(
+    conn: &mut sqlx::PgConnection,
+    project_id: &ProjectId,
+    runs: &[Uuid],
+) -> sqlx::Result<u64> {
+    delete_content_of(
+        conn,
+        std::slice::from_ref(project_id),
+        None,
+        i64::MAX,
+        Some(runs),
+    )
+    .await
+}
+
+async fn delete_content_of(
+    conn: &mut sqlx::PgConnection,
+    project_ids: &[ProjectId],
+    before: Option<DateTime<Utc>>,
+    limit: i64,
+    runs: Option<&[Uuid]>,
+) -> sqlx::Result<u64> {
     sqlx::query(
         "SELECT 1 FROM telemetry.project_settings
           WHERE project_id = ANY($1) ORDER BY project_id FOR UPDATE",
@@ -707,6 +738,7 @@ pub async fn delete_content(
               WHERE ctid IN (SELECT ctid FROM telemetry.plain_content
                               WHERE project_id = ANY($1)
                                 AND ($2::timestamptz IS NULL OR received_at < $2)
+                                AND ($4::uuid[] IS NULL OR run_id = ANY($4))
                               LIMIT $3)
              RETURNING project_id, bytes),
          sums AS (
@@ -722,6 +754,7 @@ pub async fn delete_content(
     .bind(project_ids)
     .bind(before)
     .bind(limit)
+    .bind(runs)
     .fetch_one(conn)
     .await?;
     Ok(gone.unsigned_abs())

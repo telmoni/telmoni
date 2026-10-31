@@ -409,6 +409,38 @@ pub trait Auth: Send + Sync {
         let _ = (acting, query);
         Err(not_linked("audit events"))
     }
+
+    /// A deletion's receipt, mailed to the person who asked for it once it
+    /// is done. Best effort: a mail that fails is logged, never the
+    /// deletion's failure. Nothing by default.
+    async fn mail_receipt(&self, to: &UserId, receipt: Receipt<'_>) {
+        let _ = (to, receipt);
+    }
+}
+
+/// A deletion done, as its receipt names it. Never an end user's id: the
+/// receipt says one was erased, and how much went.
+#[derive(Debug, Clone, Copy)]
+#[expect(
+    missing_docs,
+    reason = "each field is the part of the receipt its variant's doc names"
+)]
+pub enum Receipt<'a> {
+    /// One trace of a project, and how many of its spans went.
+    Trace {
+        project_id: &'a ProjectId,
+        run_id: Uuid,
+        spans: u64,
+    },
+    /// One end user of a project, and how many of their traces went.
+    EndUser {
+        project_id: &'a ProjectId,
+        traces: u64,
+    },
+    /// A project, its telemetry purged.
+    Project { name: &'a str },
+    /// An organization, erased.
+    Organization { name: &'a str },
 }
 
 /// One notice, as a module hands it to notifications.
@@ -721,10 +753,16 @@ pub trait Telemetry: Send + Sync {
         organization_id: &OrganizationId,
     ) -> Result<u64, TelmoniError>;
 
-    /// Everything held for one project, after it is deleted. ⚠ Call it
-    /// holding no lock, as [`Telemetry::purge_organization`]. One that fails
-    /// is retried by the module's own sweep, so the caller only logs it.
-    async fn purge_project(&self, project_id: &ProjectId) -> Result<u64, TelmoniError>;
+    /// Everything held for one project, after it is deleted from
+    /// `organization_id`, whose audit chain names who asked: they are mailed
+    /// the receipt once it is done. ⚠ Call it holding no lock, as
+    /// [`Telemetry::purge_organization`]. One that fails is retried by the
+    /// module's own sweep, so the caller only logs it.
+    async fn purge_project(
+        &self,
+        organization_id: &OrganizationId,
+        project_id: &ProjectId,
+    ) -> Result<u64, TelmoniError>;
 
     /// Whether the organization's machines may be sent more today: its read
     /// API and its exports refused, a 429 until midnight UTC, once its plan's

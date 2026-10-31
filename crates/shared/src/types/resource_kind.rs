@@ -30,6 +30,11 @@ pub enum TelmoniResourceKind {
     MaintenanceWindow,
     /// An alert's incident, acknowledged or resolved by a member.
     Incident,
+    /// One trace of a project, deleted by a person.
+    Trace,
+    /// One end user of a project, erased: named by the keyed hash ingest
+    /// stored, never the id the project sent.
+    EndUser,
 }
 
 crate::wire_enum!(TelmoniResourceKind {
@@ -42,6 +47,8 @@ crate::wire_enum!(TelmoniResourceKind {
     Alert => "alert",
     MaintenanceWindow => "maintenance_window",
     Incident => "incident",
+    Trace => "trace",
+    EndUser => "end_user",
 });
 
 #[cfg(test)]

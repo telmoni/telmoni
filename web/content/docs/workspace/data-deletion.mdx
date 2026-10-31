@@ -1,6 +1,6 @@
 ---
 title: "Data deletion"
-description: "What deleting a project, an organization, your account, an API key or a connector removes, how fast, what stays — the audit log, and copies already delivered elsewhere — and what cannot be deleted on its own yet."
+description: "What deleting a project, an organization, a trace, an end user, your account, an API key or a connector removes, how fast, the receipt each leaves, what stays — the audit log, and copies already delivered elsewhere — and what cannot be deleted on its own yet."
 ---
 
 Deletion in Telmoni is final: there is no restore window and no undo, and
@@ -29,6 +29,8 @@ after typing the project's name
   other connection uses — and the console agent removes what it holds about
   the project within the hour.
 - **What stays:** the project's events in the organization's audit log.
+- **Receipt:** the deletion is in the audit log at once, and whoever deleted
+  the project is mailed once its telemetry's purge lands.
 - **If a step fails:** its telemetry's purge — cut short by a store that
   did not answer, or by the project's first export still filing its
   settings past the purge's two seconds — is tried again every ten minutes
@@ -53,12 +55,39 @@ Only the **Owner** can, with a confirmation code sent to their address
   agent's conversations and search index; and telemetry's settings, saved
   views, alerts, kept content and keys. Usually within the hour. A part that cannot finish is
   retried every ten minutes until it does.
+- **Receipt:** the request is in the audit log at once, and the owner who
+  asked is mailed once the sweep has erased it; a closing by an operator
+  mails nobody.
 - **What stays:** the audit log, which is append-only and outlives the
   organization; and copies already delivered
   to a Slack channel or a webhook the organization connected, which are the
   organization's.
 - On a self-hosted deployment, an operator can close an organization from
   the server with `telmoni-server terminate`, which goes the same way.
+
+## Deleting a trace or an end user
+
+A project's **Admin** or the organization's **Owner** can.
+
+- **A trace:** **Delete** on the trace's page.
+- **An end user:** **Erase an end user** on the project's **Privacy** page,
+  by the id your app sends as `user.id`, matched exactly as it was sent:
+  every trace whose spans carry it, each whole, since a trace's other spans
+  need not carry the id, and every trace of one of their sessions that names
+  no user. A trace naming someone else stays, even in a session they share.
+- **At once:** the traces' spans are gone from every read before the
+  deletion answers, and the content they kept is deleted; the nightly
+  rotation removes the spans from disk. A trace still running is remembered
+  for a day, and what it sends after is dropped as it arrives.
+- **Receipt:** the request is recorded in the organization's audit log
+  before anything goes — a trace by its run's id, an end user by the keyed
+  hash their id is stored as, never the id — and you are mailed once it is
+  done.
+- **What stays:** the hourly totals, counts and costs that name no trace or
+  user, keep counting them; an alert's incident keeps the run's id, which
+  then opens nothing.
+- **If a step fails:** the answer is an error, and trying again finishes the
+  deletion; the audit log then records each request.
 
 ## Deleting your account
 
@@ -95,11 +124,8 @@ no organization that has other members
 
 ## What cannot be deleted on its own yet
 
-- **A single trace, session or user's telemetry.** Nothing deletes one
-  of them today: they go with their project, or when their day passes the
-  360-day retention. An end user's id is stored only as a keyed hash, so a
-  stored row names nobody on its own; an erasure by user id is not offered
-  yet.
+- **A session's telemetry, alone.** It goes with its traces, its end
+  user's erasure, its project, or when its day passes the 360-day retention.
 - **An audit log entry.** The audit log is append-only by design, kept
   through every deletion, and verified daily; only an export's file is a
   copy, and it is deleted after seven days.

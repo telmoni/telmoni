@@ -3,7 +3,8 @@
 //! key in `plain_content`, never in ClickHouse, its bytes on its
 //! organization's row of `content_held`, counted once however often an export
 //! is sent; a project left `off` keeps none and makes no key. A purge, a
-//! transfer and the nightly purge each keep the count true.
+//! transfer, the nightly purge, a trace's deletion and an end user's erasure
+//! each keep the count true.
 #![expect(clippy::expect_used, reason = "test scaffolding")]
 
 mod common;
@@ -23,9 +24,12 @@ use tower::ServiceExt;
 use common::{AuthStub, clickhouse_or_skip};
 use telmoni_shared::audit::{Actor, lock_chain};
 use telmoni_shared::envelope::SealedRef;
+use telmoni_shared::middleware::service_auth::SERVICE_SECRET_HEADER;
 use telmoni_shared::seam::Telemetry as _;
 use telmoni_shared::test_util::apply_audit_migrations;
-use telmoni_shared::{ApiKeyScope, ContentMode, OrganizationId, ProjectId, TelmoniError};
+use telmoni_shared::{
+    ApiKeyScope, ContentMode, OrganizationId, OrganizationRole, ProjectId, Role, TelmoniError,
+};
 use telmoni_telemetry::ingest::batch::SpanContent;
 use telmoni_telemetry::seam::TelemetrySeam;
 use telmoni_telemetry::store::Projects;
@@ -40,6 +44,7 @@ const MESSAGES: &str = r#"[{"role":"user","parts":[{"type":"text","content":"hi"
 struct Door {
     app: Router,
     state: Arc<AppState>,
+    auth: Arc<AuthStub>,
     organization: OrganizationId,
     project: ProjectId,
 }
@@ -66,13 +71,14 @@ async fn door_over(pool: &PgPool, mode: ContentMode, stores: bool) -> Door {
     .await
     .expect("seed the project's mode");
     let state = if stores {
-        common::state_with_stores(pool, auth)
+        common::state_with_stores(pool, auth.clone())
     } else {
-        common::state(pool, auth)
+        common::state(pool, auth.clone())
     };
     Door {
         app: router(state.clone()).nest("/otlp", otlp_router(state.clone())),
         state,
+        auth,
         organization,
         project,
     }
@@ -81,25 +87,37 @@ async fn door_over(pool: &PgPool, mode: ContentMode, stores: bool) -> Door {
 /// A model call carrying a message, a tool's result past an attribute's cap,
 /// a map no inventory names, and its kept metadata.
 fn export(long: &str) -> Vec<u8> {
+    export_of(RUN, TRACE, SPAN, &[], long)
+}
+
+/// [`export`], as run `run`'s span `span` of trace `trace`, with the text
+/// attributes `named`.
+fn export_of(run: &str, trace: &str, span: &str, named: &[(&str, &str)], long: &str) -> Vec<u8> {
+    let mut attributes = vec![
+        json!({ "key": contract::RUN_ID, "value": { "stringValue": run } }),
+        json!({ "key": contract::AGENT, "value": { "stringValue": "nightly-report" } }),
+        json!({ "key": contract::OPERATION, "value": { "stringValue": "chat" } }),
+        json!({ "key": "gen_ai.response.id", "value": { "stringValue": "resp_01" } }),
+        json!({ "key": "gen_ai.input.messages", "value": { "stringValue": MESSAGES } }),
+        json!({ "key": "gen_ai.tool.call.result", "value": { "stringValue": long } }),
+        json!({ "key": "app.ticket", "value": { "kvlistValue": { "values": [
+            { "key": "id", "value": { "intValue": "42" } }
+        ]}}}),
+    ];
+    attributes.extend(
+        named
+            .iter()
+            .map(|(key, value)| json!({ "key": key, "value": { "stringValue": value } })),
+    );
     json!({
         "resourceSpans": [{
             "scopeSpans": [{ "scope": { "name": contract::SCOPE }, "spans": [{
-                "traceId": TRACE,
-                "spanId": SPAN,
+                "traceId": trace,
+                "spanId": span,
                 "name": "chat claude-sonnet-5-5",
                 "startTimeUnixNano": "1760000000000000000",
                 "endTimeUnixNano": "1760000001500000000",
-                "attributes": [
-                    { "key": contract::RUN_ID, "value": { "stringValue": RUN } },
-                    { "key": contract::AGENT, "value": { "stringValue": "nightly-report" } },
-                    { "key": contract::OPERATION, "value": { "stringValue": "chat" } },
-                    { "key": "gen_ai.response.id", "value": { "stringValue": "resp_01" } },
-                    { "key": "gen_ai.input.messages", "value": { "stringValue": MESSAGES } },
-                    { "key": "gen_ai.tool.call.result", "value": { "stringValue": long } },
-                    { "key": "app.ticket", "value": { "kvlistValue": { "values": [
-                        { "key": "id", "value": { "intValue": "42" } }
-                    ]}}}
-                ]
+                "attributes": attributes
             }]}]
         }]
     })
@@ -175,6 +193,73 @@ impl Door {
                 (actor, kind, resource, project, details)
             })
             .collect()
+    }
+
+    /// One of the console's lanes, as `user` on the project: its status and
+    /// answer.
+    async fn lane(
+        &self,
+        method: &str,
+        path: &str,
+        user: &str,
+        body: Option<Value>,
+    ) -> (StatusCode, Value) {
+        let request = Request::builder()
+            .method(method)
+            .uri(format!("/internal/v1/telemetry{path}"))
+            .header(SERVICE_SECRET_HEADER, common::SECRET)
+            .header(header::AUTHORIZATION, format!("Bearer tok_{user}"))
+            .header("x-organization-id", self.organization.as_str())
+            .header("x-project-id", self.project.as_str())
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(body.map_or_else(Body::empty, |body| Body::from(body.to_string())))
+            .expect("a request");
+        let response = self.app.clone().oneshot(request).await.expect("an answer");
+        let status = response.status();
+        let bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("a body")
+            .to_bytes();
+        (
+            status,
+            serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+        )
+    }
+
+    /// The deletions in the organization's chain: actor, kind, resource and
+    /// details.
+    async fn deletions(&self, pool: &PgPool) -> Vec<(String, String, String, Value)> {
+        let rows: Vec<(String, String, String, String)> = sqlx::query_as(
+            "SELECT actor_id, resource_kind, resource_id, metadata::text \
+               FROM audit.events WHERE organization_id = $1 AND action = 'deleted' ORDER BY seq",
+        )
+        .bind(&self.organization)
+        .fetch_all(pool)
+        .await
+        .expect("read the chain as the owner");
+        rows.into_iter()
+            .map(|(actor, kind, resource, details)| {
+                (
+                    actor,
+                    kind,
+                    resource,
+                    serde_json::from_str(&details).expect("details are JSON"),
+                )
+            })
+            .collect()
+    }
+
+    /// The traces whose content the project keeps.
+    async fn kept_traces(&self, pool: &PgPool) -> Vec<String> {
+        sqlx::query_scalar(
+            "SELECT DISTINCT trace_id FROM telemetry.plain_content WHERE project_id = $1 ORDER BY 1",
+        )
+        .bind(&self.project)
+        .fetch_all(pool)
+        .await
+        .expect("read the content as the owner")
     }
 
     async fn held(&self, pool: &PgPool, organization: &OrganizationId) -> Option<i64> {
@@ -319,6 +404,7 @@ async fn each_read_of_content_is_a_viewed_row_in_the_organizations_chain(pool: P
     assert_eq!(
         opened,
         [SpanContent {
+            run_id: RUN.parse().expect("a run's id"),
             trace_id: TRACE.to_owned(),
             span_id: SPAN.to_owned(),
             fields: vec![
@@ -420,7 +506,9 @@ async fn a_transfer_moves_the_bytes_and_a_purge_takes_them_off(pool: PgPool) {
     assert_eq!(door.held(&pool, &door.organization).await, Some(0));
     assert_eq!(door.held(&pool, &taker).await, Some(bytes));
 
-    seam.purge_project(&door.project).await.expect("the purge");
+    seam.purge_project(&door.organization, &door.project)
+        .await
+        .expect("the purge");
     assert!(door.kept(&pool).await.is_empty());
     assert_eq!(door.held(&pool, &taker).await, Some(0));
 }
@@ -524,5 +612,275 @@ async fn a_transfer_waits_for_a_purge_in_flight_and_moves_what_it_left(pool: PgP
         door.held(&pool, &taker).await.unwrap_or_default(),
         0,
         "no expired bytes followed the project"
+    );
+}
+
+const RUN_B: &str = "0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f02";
+const TRACE_B: &str = "5bf92f3577b34da6a3ce929d0e0e4737";
+const SPAN_B: &str = "01f067aa0ba902b8";
+const RUN_C: &str = "0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f03";
+const TRACE_C: &str = "6bf92f3577b34da6a3ce929d0e0e4738";
+const SPAN_C: &str = "02f067aa0ba902b9";
+const RUN_D: &str = "0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f04";
+const TRACE_D: &str = "7bf92f3577b34da6a3ce929d0e0e4739";
+const SPAN_D: &str = "04f067aa0ba902bb";
+const SPAN_E: &str = "05f067aa0ba902bc";
+
+/// Whether the trace's lane still finds run `run`.
+async fn found(door: &Door, run: &str) -> bool {
+    door.lane("GET", &format!("/traces/{run}"), "admin-1", None)
+        .await
+        .0
+        == StatusCode::OK
+}
+
+/// ⚠ A trace is deleted by an admin alone: the request filed before anything
+/// goes, then its spans gone from every read and its content and bytes gone,
+/// a span it sends after dropped, and the receipt mailed; another trace
+/// stands, and a run not the project's files nothing.
+#[sqlx::test]
+async fn a_deleted_trace_is_filed_then_gone_from_both_stores(pool: PgPool) {
+    let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    apply_audit_migrations(&pool).await;
+    let door = door(&pool, ContentMode::On).await;
+    door.auth
+        .seat(
+            "admin-1",
+            &door.organization,
+            &door.project,
+            OrganizationRole::Member,
+            Some(Role::Admin),
+        )
+        .seat(
+            "member-1",
+            &door.organization,
+            &door.project,
+            OrganizationRole::Member,
+            Some(Role::Member),
+        );
+    door.send(export("result")).await;
+    door.send(export_of(RUN_B, TRACE_B, SPAN_B, &[], "other"))
+        .await;
+    common::eventually("both traces are read", || async {
+        found(&door, RUN).await && found(&door, RUN_B).await
+    })
+    .await;
+
+    let (status, _) = door
+        .lane("DELETE", &format!("/traces/{RUN}"), "member-1", None)
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "a member deletes nothing");
+    let stranger = "0191a3b4-7c2e-7d3f-8e4a-000000000000";
+    let (status, _) = door
+        .lane("DELETE", &format!("/traces/{stranger}"), "admin-1", None)
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert!(
+        door.deletions(&pool).await.is_empty(),
+        "nothing found, nothing filed"
+    );
+
+    let (status, answer) = door
+        .lane("DELETE", &format!("/traces/{RUN}"), "admin-1", None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{answer}");
+    assert_eq!(answer, json!({ "run_id": RUN, "spans": 1, "fields": 3 }));
+    assert_eq!(
+        door.deletions(&pool).await,
+        [(
+            "admin-1".to_owned(),
+            "trace".to_owned(),
+            RUN.to_owned(),
+            json!({ "spans": 1 })
+        )]
+    );
+    assert_eq!(door.kept_traces(&pool).await, [TRACE_B]);
+    let other =
+        i64::try_from("other".len() + r#"{"id":42}"#.len() + MESSAGES.len()).expect("small");
+    assert_eq!(door.held(&pool, &door.organization).await, Some(other));
+    assert!(
+        !found(&door, RUN).await,
+        "gone from every read once answered"
+    );
+    door.send(export_of(RUN, TRACE, "03f067aa0ba902ba", &[], "late"))
+        .await;
+    assert!(
+        !found(&door, RUN).await,
+        "a span the run sends after is dropped"
+    );
+    assert_eq!(door.kept_traces(&pool).await, [TRACE_B], "and its content");
+    assert!(found(&door, RUN_B).await, "another trace stands");
+    assert_eq!(
+        door.auth.receipts(),
+        [("admin-1".to_owned(), "trace".to_owned())]
+    );
+}
+
+/// ⚠ An end user is erased by the id their spans carry, hashed as ingest
+/// hashed it: their traces and their sessions' unnamed ones go with their
+/// content, another user's stand in the same session, and the chain names
+/// the hash, never the id. An id on no trace is filed too.
+#[sqlx::test]
+async fn an_end_user_is_erased_by_the_id_their_spans_carry(pool: PgPool) {
+    let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    apply_audit_migrations(&pool).await;
+    let door = door(&pool, ContentMode::On).await;
+    door.auth.seat(
+        "admin-1",
+        &door.organization,
+        &door.project,
+        OrganizationRole::Owner,
+        None,
+    );
+    let (user, session) = (contract::USER_ID, contract::SESSION_ID);
+    door.send(export_of(
+        RUN,
+        TRACE,
+        SPAN,
+        &[(user, "acme-42"), (session, "conv-1")],
+        "result",
+    ))
+    .await;
+    door.send(export_of(
+        RUN_C,
+        TRACE_C,
+        SPAN_C,
+        &[(session, "conv-1")],
+        "unnamed",
+    ))
+    .await;
+    door.send(export_of(
+        RUN_B,
+        TRACE_B,
+        SPAN_B,
+        &[(user, "acme-43"), (session, "conv-1")],
+        "other",
+    ))
+    .await;
+    // A run of the session, unnamed there, that names another user elsewhere.
+    door.send(export_of(
+        RUN_D,
+        TRACE_D,
+        SPAN_D,
+        &[(session, "conv-1")],
+        "turn",
+    ))
+    .await;
+    door.send(export_of(
+        RUN_D,
+        TRACE_D,
+        SPAN_E,
+        &[(user, "acme-44")],
+        "tool",
+    ))
+    .await;
+    common::eventually("every trace is read", || async {
+        found(&door, RUN).await
+            && found(&door, RUN_B).await
+            && found(&door, RUN_C).await
+            && found(&door, RUN_D).await
+    })
+    .await;
+
+    let long = "u".repeat(contract::USER_ID_MAX + 1);
+    let (status, _) = door
+        .lane(
+            "POST",
+            "/users/erase",
+            "admin-1",
+            Some(json!({ "user_id": long })),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "no span carries an id that long"
+    );
+
+    let (status, answer) = door
+        .lane(
+            "POST",
+            "/users/erase",
+            "admin-1",
+            Some(json!({ "user_id": "acme-42" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{answer}");
+    assert_eq!(answer, json!({ "traces": 2, "spans": 2, "fields": 6 }));
+    assert_eq!(door.kept_traces(&pool).await, [TRACE_B, TRACE_D]);
+    assert!(
+        !found(&door, RUN).await,
+        "their trace is gone once answered"
+    );
+    assert!(
+        !found(&door, RUN_C).await,
+        "and their session's unnamed one"
+    );
+    assert!(
+        found(&door, RUN_B).await,
+        "another user's trace stands, though it shares the session"
+    );
+    assert!(
+        found(&door, RUN_D).await,
+        "as does one naming another user on a span outside it"
+    );
+
+    let (status, answer) = door
+        .lane(
+            "POST",
+            "/users/erase",
+            "admin-1",
+            Some(json!({ "user_id": "nobody" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{answer}");
+    assert_eq!(answer, json!({ "traces": 0, "spans": 0, "fields": 0 }));
+
+    let hashed = |raw: &str| {
+        let door = &door;
+        let raw = raw.to_owned();
+        async move {
+            telmoni_telemetry::hashing::storage_for_project(&door.state, &door.project)
+                .await
+                .expect("the project's key")
+                .store(&raw)
+        }
+    };
+    assert_eq!(
+        door.deletions(&pool).await,
+        [
+            (
+                "admin-1".to_owned(),
+                "end_user".to_owned(),
+                hashed("acme-42").await,
+                json!({ "traces": 2 })
+            ),
+            (
+                "admin-1".to_owned(),
+                "end_user".to_owned(),
+                hashed("nobody").await,
+                json!({ "traces": 0 })
+            ),
+        ]
+    );
+    let named: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit.events WHERE organization_id = $1 \
+            AND (resource_id = 'acme-42' OR metadata::text LIKE '%acme-42%')",
+    )
+    .bind(&door.organization)
+    .fetch_one(&pool)
+    .await
+    .expect("read the chain as the owner");
+    assert_eq!(named, 0, "the chain never names the id");
+    assert_eq!(
+        door.auth.receipts(),
+        [
+            ("admin-1".to_owned(), "end_user".to_owned()),
+            ("admin-1".to_owned(), "end_user".to_owned())
+        ]
     );
 }

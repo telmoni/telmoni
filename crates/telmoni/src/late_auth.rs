@@ -8,7 +8,7 @@ use axum::http::HeaderMap;
 use telmoni_shared::acting::{Acting, ActingKey};
 use telmoni_shared::seam::{
     AuditEventsQuery, Auth, DocumentCursor, OwnedOrganization, ProjectHome, ReadableProject,
-    SourceDocument,
+    Receipt, SourceDocument,
 };
 use telmoni_shared::{
     AuthError, FlagSet, OrganizationId, OrganizationStatus, ProjectId, TelmoniError, UserId,
@@ -118,5 +118,11 @@ impl Auth for LateAuth {
         query: &AuditEventsQuery,
     ) -> Result<serde_json::Value, TelmoniError> {
         self.get()?.audit_events(acting, query).await
+    }
+
+    async fn mail_receipt(&self, to: &UserId, receipt: Receipt<'_>) {
+        if let Ok(auth) = self.get() {
+            auth.mail_receipt(to, receipt).await;
+        }
     }
 }

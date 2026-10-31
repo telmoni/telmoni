@@ -985,7 +985,7 @@ async fn an_export_landing_after_its_projects_purge_is_marked_with_it(pool: PgPo
                 .expect("the purge's mark");
         } else {
             TelemetrySeam(lane.state.clone())
-                .purge_project(&lane.project)
+                .purge_project(&OrganizationId::new(), &lane.project)
                 .await
                 .expect("the project's purge");
         }
@@ -1080,6 +1080,36 @@ async fn an_export_auth_cannot_settle_keeps_its_rows(pool: PgPool) {
         3,
         "every export's span kept"
     );
+}
+
+/// An export whose settling auth could not answer is settled later: auth
+/// asked again on a task of its own, and a project deleted meanwhile has its
+/// spans marked deleted once auth says so.
+#[sqlx::test]
+async fn an_export_left_unsettled_is_settled_once_auth_answers(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let lane = lane(&pool, true);
+    lane.export("chat first").await;
+    lane.auth.failing_homes(true);
+    ch.store
+        .delete_project(&lane.project)
+        .await
+        .expect("the purge's mark");
+    lane.export("chat unanswered").await;
+    common::eventually("the export's span lands past the mark", || async {
+        common::rows_of(&ch.store, &lane.project).await.0 == 1
+    })
+    .await;
+
+    lane.auth
+        .forget_after(&lane.project, 0)
+        .failing_homes(false);
+    common::eventually("the later settle marks it deleted", || async {
+        common::rows_of(&ch.store, &lane.project).await.0 == 0
+    })
+    .await;
 }
 
 /// An exporter that hangs up once its rows are in does not cut the write off

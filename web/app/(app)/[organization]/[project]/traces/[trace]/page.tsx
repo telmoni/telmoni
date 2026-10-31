@@ -4,6 +4,7 @@ import { AccessDenied } from "@/components/access-denied";
 import { NoticeCard } from "@/components/notice-card";
 import { PageHeader } from "@/components/page-header";
 import { ServiceUnavailable } from "@/components/service-unavailable";
+import { DeleteTrace } from "@/components/traces/delete-trace";
 import { LayoutControls } from "@/components/traces/layout-controls";
 import { TraceLayoutBody } from "@/components/traces/trace-layout";
 import { LayoutProvider } from "@/components/traces/use-layout";
@@ -31,7 +32,8 @@ export const metadata = { title: "Trace" };
 // and what it spent on one line, then its spans as the tree they ran in
 // beside the span chosen, in full, opened as far as the page's layout goes
 // (`lib/layout.ts`). Every pixel is metadata: no prompt, completion or tool
-// payload reaches this page, in any content mode.
+// payload reaches this page, in any content mode. A project admin deletes it
+// from here.
 export default async function TracePage({
   params,
 }: PageProps<"/[organization]/[project]/traces/[trace]">) {
@@ -65,7 +67,7 @@ export default async function TracePage({
           title="No trace with this id in this project."
           body={
             <>
-              Its spans may have passed their retention, or the run belongs to another project.{" "}
+              It may have been deleted, its spans may have passed their retention, or the run belongs to another project.{" "}
               <Link href={list} className="underline underline-offset-4">
                 Back to the traces
               </Link>
@@ -86,7 +88,12 @@ export default async function TracePage({
           title={root.agent}
           backHref={list}
           backLabel="Traces"
-          action={<LayoutControls projectId={project.id} canSave={administers(project.role)} />}
+          action={
+            <div className="flex items-center gap-gutter">
+              <LayoutControls projectId={project.id} canSave={administers(project.role)} />
+              {administers(project.role) && <DeleteTrace projectId={project.id} runId={trace.run_id} />}
+            </div>
+          }
         />
         {/* As tall as the window leaves under the header and the page's title,
             both of a set height, so the spans and the span chosen scroll each

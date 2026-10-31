@@ -24,7 +24,7 @@ use telmoni_shared::rbac::project_role;
 use telmoni_shared::seam::OrganizationAlert;
 use telmoni_shared::seam::{
     Auth, Emitted, Entitlements, NoLimits, Notice, Notifications, ProjectHome, ReadableProject,
-    Route, Routed,
+    Receipt, Route, Routed,
 };
 use telmoni_shared::test_util::{ServiceRole, chain_lock_held, service_pool};
 use telmoni_shared::{
@@ -79,6 +79,8 @@ pub(crate) struct AuthStub {
     /// How long each answer of where projects are takes to come, as an auth
     /// whose pool is spent takes.
     homes_delay: Mutex<Duration>,
+    /// Each receipt mailed: to whom, and what it names.
+    receipts: Mutex<Vec<(String, String)>>,
 }
 
 impl AuthStub {
@@ -95,6 +97,15 @@ impl AuthStub {
             chain_probe: Some(pool.clone()),
             ..Self::default()
         })
+    }
+
+    /// Each receipt mailed, in order: to whom, and the deletion as
+    /// `trace`, `end_user`, `project <name>` or `organization <name>`.
+    pub(crate) fn receipts(&self) -> Vec<(String, String)> {
+        self.receipts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     /// How many times a request read its answer again.
@@ -298,6 +309,19 @@ impl AuthStub {
 
 #[async_trait]
 impl Auth for AuthStub {
+    async fn mail_receipt(&self, to: &UserId, receipt: Receipt<'_>) {
+        let what = match receipt {
+            Receipt::Trace { .. } => "trace".to_owned(),
+            Receipt::EndUser { .. } => "end_user".to_owned(),
+            Receipt::Project { name } => format!("project {name}"),
+            Receipt::Organization { name } => format!("organization {name}"),
+        };
+        self.receipts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push((to.to_string(), what));
+    }
+
     async fn resolve_api_key(&self, headers: &HeaderMap) -> Result<ActingKey, TelmoniError> {
         let token = header(headers, "authorization")
             .and_then(|bearer| bearer.strip_prefix("Bearer "))

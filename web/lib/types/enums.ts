@@ -315,6 +315,8 @@ export const ResourceKind = {
   Alert:             "alert",
   MaintenanceWindow: "maintenance_window",
   Incident:          "incident",
+  Trace:             "trace",
+  EndUser:           "end_user",
 } as const;
 export type ResourceKind = typeof ResourceKind[keyof typeof ResourceKind];
 

@@ -7,14 +7,20 @@ mod common;
 
 use std::time::Duration;
 
+use serde_json::json;
 use sqlx::PgPool;
 use uuid::Uuid;
 
 use common::AuthStub;
+use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
 use telmoni_shared::db::project_move;
 use telmoni_shared::db::tenant_session::maintenance_scope;
 use telmoni_shared::seam::Telemetry;
-use telmoni_shared::{OrganizationId, OrganizationRole, ProjectId, SpanKind, TelmoniError};
+use telmoni_shared::test_util::apply_audit_migrations;
+use telmoni_shared::{
+    AuditAction, OrganizationId, OrganizationRole, ProjectId, SpanKind, TelmoniError,
+    TelmoniResourceKind,
+};
 use telmoni_telemetry::db::{self, TelemetryLane};
 use telmoni_telemetry::seam::TelemetrySeam;
 use telmoni_telemetry::sweep::{self, Swept};
@@ -246,7 +252,7 @@ async fn a_projects_purge_cut_short_is_finished_by_the_sweep(pool: PgPool) {
     // Deleted, and its purge cut short by a ClickHouse that does not answer.
     auth.forget(&gone);
     TelemetrySeam(away.clone())
-        .purge_project(&gone)
+        .purge_project(&OrganizationId::new(), &gone)
         .await
         .expect_err("a purge over a store that does not answer");
     let left = left_of(&pool, &gone).await;
@@ -426,5 +432,65 @@ async fn a_pass_that_loses_its_database_ends_there(pool: PgPool) {
             .text()
             .contains("a deleted project's purge failed again"),
         "a project was tried as though the database had answered"
+    );
+}
+
+/// ⚠ A purge the sweep finishes mails its receipt to the person the chain
+/// names as deleting the project, under the name it filed, once however
+/// many purges land; a project a service deleted, or no one, mails nobody.
+#[sqlx::test]
+async fn a_finished_purge_mails_its_receipt_to_whoever_asked(pool: PgPool) {
+    let Some(_clickhouse) =
+        common::clickhouse_or_skip("a_finished_purge_mails_its_receipt_to_whoever_asked").await
+    else {
+        return;
+    };
+    apply_audit_migrations(&pool).await;
+    let auth = AuthStub::new();
+    let state = common::state_with_stores(&pool, auth.clone());
+    let organization = OrganizationId::new();
+    let (asked, by_service, unfiled) = (ProjectId::new(), ProjectId::new(), ProjectId::new());
+    for project in [&asked, &by_service, &unfiled] {
+        settings_and_a_view(&pool, project, &organization).await;
+    }
+    let mut tx = pool.begin().await.expect("a transaction");
+    for (project, actor) in [
+        (&asked, Actor::User("owner-1")),
+        (&by_service, Actor::Service("operator")),
+    ] {
+        emit_audit(
+            &mut tx,
+            AuditEvent::new(
+                &organization,
+                actor,
+                AuditAction::Deleted,
+                TelmoniResourceKind::Project,
+            )
+            .in_project(project)
+            .on(project.as_str())
+            .details(json!({ "name": "Acme" })),
+        )
+        .await
+        .expect("the deletion filed");
+    }
+    tx.commit().await.expect("filed");
+
+    assert_eq!(
+        sweep::sweep(&state).await.expect("a pass"),
+        Swept { purged: 3, left: 0 }
+    );
+    common::eventually("the receipt is mailed", || async {
+        !auth.receipts().is_empty()
+    })
+    .await;
+    // The delete's own purge landing after the sweep's mails no second.
+    TelemetrySeam(state.clone())
+        .purge_project(&organization, &asked)
+        .await
+        .expect("a purge again");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(
+        auth.receipts(),
+        [("owner-1".to_owned(), "project Acme".to_owned())]
     );
 }

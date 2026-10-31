@@ -18,7 +18,7 @@ use telmoni_shared::extract::header;
 use telmoni_shared::rbac::{Resource, Verb};
 use telmoni_shared::seam::{
     Audience, AuditEventsQuery, Auth, Closing, DocumentCursor, FoundedOrganization, MovedProject,
-    OrganizationFounding, OwnedOrganization, ProjectHome, ReadableProject, SourceDocument,
+    OrganizationFounding, OwnedOrganization, ProjectHome, ReadableProject, Receipt, SourceDocument,
 };
 use telmoni_shared::slug::Slug;
 use telmoni_shared::{
@@ -330,6 +330,10 @@ impl Auth for AppState {
             "scope": if whole_chain { InviteScope::Organization } else { InviteScope::Project },
             "events": events,
         }))
+    }
+
+    async fn mail_receipt(&self, to: &UserId, receipt: Receipt<'_>) {
+        crate::handler::deletion::mail_receipt(self, to, receipt).await;
     }
 }
 

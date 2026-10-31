@@ -18,7 +18,7 @@ use sqlx::PgConnection;
 use uuid::Uuid;
 
 use crate::db::audit_hash::row_hash;
-use crate::types::{OrganizationId, ProjectId};
+use crate::types::{OrganizationId, ProjectId, UserId};
 use crate::{types::AuditAction, types::TelmoniResourceKind};
 
 /// Who performed an audited action, rendered to the exact `actor_id` wire form.
@@ -151,6 +151,38 @@ pub async fn lock_chain(
         .execute(conn)
         .await?;
     Ok(())
+}
+
+/// The person who filed the newest `action` row on `resource_id` in the
+/// organization's chain whose metadata holds `matching`, and that metadata:
+/// who a deletion's receipt goes to. `None` where a service filed it, or
+/// none was filed. Read on a transaction that sees the organization's rows.
+pub async fn requested_by(
+    conn: &mut PgConnection,
+    organization_id: &OrganizationId,
+    action: AuditAction,
+    resource_kind: TelmoniResourceKind,
+    resource_id: &str,
+    matching: &Value,
+) -> sqlx::Result<Option<(UserId, Value)>> {
+    let row: Option<(String, Option<Value>)> = sqlx::query_as(
+        "SELECT actor_id, metadata FROM audit.events
+          WHERE organization_id = $1 AND action = $2 AND resource_kind = $3
+            AND resource_id = $4 AND metadata @> $5
+          ORDER BY seq DESC LIMIT 1",
+    )
+    .bind(organization_id)
+    .bind(action.to_string())
+    .bind(resource_kind.to_string())
+    .bind(resource_id)
+    .bind(matching)
+    .fetch_optional(conn)
+    .await?;
+    Ok(row.and_then(|(actor, metadata)| {
+        let person = !actor.starts_with("service:") && !actor.starts_with("external:");
+        let user = UserId::try_new(actor).ok().filter(|_| person)?;
+        Some((user, metadata.unwrap_or(Value::Null)))
+    }))
 }
 
 /// How long any writer waits for an organization's chain lock: the role's own

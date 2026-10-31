@@ -127,7 +127,9 @@
       "connector",
       "alert",
       "maintenance_window",
-      "incident"
+      "incident",
+      "trace",
+      "end_user"
     ],
     "Role": [
       "owner",

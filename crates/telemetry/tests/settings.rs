@@ -230,9 +230,19 @@ async fn the_purges_and_the_move_reach_only_what_they_name(pool: PgPool) {
         .expect("a project with no settings moves with nothing to move");
 
     assert_eq!(seam.purge_organization(&leaving).await.expect("purge"), 1);
-    assert_eq!(seam.purge_project(&deleted).await.expect("purge"), 1);
+    assert_eq!(
+        seam.purge_project(&OrganizationId::new(), &deleted)
+            .await
+            .expect("purge"),
+        1
+    );
     assert_eq!(seam.purge_organization(&leaving).await.expect("again"), 0);
-    assert_eq!(seam.purge_project(&deleted).await.expect("again"), 0);
+    assert_eq!(
+        seam.purge_project(&OrganizationId::new(), &deleted)
+            .await
+            .expect("again"),
+        0
+    );
 
     assert_eq!(organization_of(&pool, &left).await, None);
     assert_eq!(organization_of(&pool, &deleted).await, None);

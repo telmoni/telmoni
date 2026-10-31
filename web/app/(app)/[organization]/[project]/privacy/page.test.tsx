@@ -121,6 +121,19 @@ describe("PrivacyPage", () => {
     expect(screen.getByTestId("page-header")).toHaveTextContent("Privacy");
   });
 
+  it("offers an admin the erasure of an end user, and tells a member who erases one", async () => {
+    render(await PrivacyPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+    expect(screen.queryByRole("textbox", { name: "End user id" })).not.toBeInTheDocument();
+    expect(
+      screen.getByText("A project admin or the organization owner erases an end user."),
+    ).toBeInTheDocument();
+
+    mockProject = { ...(mockProject as object), role: Role.Admin };
+    render(await PrivacyPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+    expect(screen.getByRole("textbox", { name: "End user id" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Erase" })).toBeDisabled();
+  });
+
   it("renders ServiceUnavailable when context fails", async () => {
     mockContext = null;
     render(await PrivacyPage({ params: PARAMS, searchParams: Promise.resolve({}) }));

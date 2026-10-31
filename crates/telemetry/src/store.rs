@@ -55,7 +55,7 @@ const INSERT_END_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// How long ClickHouse itself waits for an insert's flush, past the client's
 /// wait: rows the client gave up on may still be written until it ends.
-const ASYNC_INSERT_WAIT: Duration = Duration::from_secs(120);
+pub(crate) const ASYNC_INSERT_WAIT: Duration = Duration::from_secs(120);
 
 /// The longest a read may run on the server, in seconds: one node answers
 /// every project, so a read that runs away is every reader's outage. The
@@ -79,6 +79,12 @@ const READ_TIMEOUT: Duration = Duration::from_secs(10);
 const DELETE_SPANS: &str = "DELETE FROM telemetry.spans WHERE project_id = {project:String}";
 const DELETE_ROLLUP: &str =
     "DELETE FROM telemetry.spans_hourly WHERE project_id = {project:String}";
+/// Some of a project's runs marked deleted: what [`Store::delete_runs`] sends.
+/// The hourly totals keep their counts, since they name no run.
+const DELETE_RUNS: &str = "DELETE FROM telemetry.spans
+     WHERE project_id = {project:String} AND has({runs:Array(UUID)}, run_id)";
+/// The most runs one of those names, about 190 KB of URL.
+const RUNS_PER_DELETE: usize = 5_000;
 
 /// The longest the client waits for ClickHouse to take a delete down: the
 /// statement answers once the mutation is recorded, not once it has run, so
@@ -410,20 +416,48 @@ impl Store {
     /// ⚠ An error's text can carry ClickHouse's own message: log its kind,
     /// never the text.
     pub async fn delete_project(&self, project: &ProjectId) -> clickhouse::error::Result<()> {
-        let only = Projects::one(project.clone());
         for statement in [DELETE_SPANS, DELETE_ROLLUP] {
             within(
                 DELETE_TIMEOUT,
-                self.client
-                    .query_raw(statement)
-                    .with_setting(PROJECTS_SETTING, only.setting())
-                    .with_setting("lightweight_deletes_sync", "0")
-                    .param("project", project.as_str())
-                    .execute(),
+                self.delete(project, statement, false).execute(),
             )
             .await?;
         }
         Ok(())
+    }
+
+    /// `runs` of `project` marked deleted, as [`Store::delete_project`] marks
+    /// a project's, but answered once the mark has been applied, so a page
+    /// read after it no longer shows them; off the disk by `rotate`.
+    ///
+    /// ⚠ An error's text can carry ClickHouse's own message: log its kind,
+    /// never the text.
+    pub async fn delete_runs(
+        &self,
+        project: &ProjectId,
+        runs: &[Uuid],
+    ) -> clickhouse::error::Result<()> {
+        // A parameter travels in the URL, which ClickHouse caps at 1 MiB.
+        for some in runs.chunks(RUNS_PER_DELETE) {
+            let delete = self.delete(project, DELETE_RUNS, true).param("runs", some);
+            within(DELETE_TIMEOUT, delete.execute()).await?;
+        }
+        Ok(())
+    }
+
+    /// A lightweight delete of `project`'s rows, answered once the mark is
+    /// recorded, or once it has been applied where `applied`.
+    fn delete(
+        &self,
+        project: &ProjectId,
+        statement: &str,
+        applied: bool,
+    ) -> clickhouse::query::Query {
+        self.client
+            .query_raw(statement)
+            .with_setting(PROJECTS_SETTING, Projects::one(project.clone()).setting())
+            .with_setting("lightweight_deletes_sync", if applied { "1" } else { "0" })
+            .param("project", project.as_str())
     }
 
     /// A read of `projects`' rows alone: `sql`, a literal, sent as written,

@@ -63,6 +63,14 @@ const SessionLayoutInputSchema = z.strictObject({ view_id: z.guid().nullable() }
  *  that a loop cannot fill a project's hundred views in one. */
 const SAVES: Ceiling = { call: "traces:views", limit: 20 };
 
+/** Deletions a person asks for in a minute: each one a mark the span store
+ *  queues, so a hand's pace and no loop's. */
+const DELETIONS: Ceiling = { call: "traces:delete", limit: 10 };
+
+/** How long a deletion is waited for: its reads and marks each have ten
+ *  seconds, and the server finishes it if the console stops waiting. */
+const DELETION_WAIT_MS = 60_000;
+
 /** One of telemetry's lanes under `/internal/v1/telemetry`, called as the
  *  person: the answer, or why it was not sent or was refused. */
 async function call(
@@ -70,18 +78,24 @@ async function call(
   lane: string,
   projectId: string,
   body?: unknown,
+  ceiling: Ceiling = SAVES,
+  waitMs?: number,
 ): Promise<ActionResult<{ res: Response }>> {
-  const gate = await admitProject(SAVES, projectId);
+  const gate = await admitProject(ceiling, projectId);
   if (!gate.ok) return refused(gate.error);
 
-  const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/v1/telemetry${lane}`, {
+  const url = `${env.SERVER_URL}/internal/v1/telemetry${lane}`;
+  const init = {
     method,
     headers: {
       ...gate.headers,
       ...(body ? { "content-type": "application/json" } : {}),
     },
     body: body ? JSON.stringify(body) : undefined,
-  });
+  };
+  const res = await (waitMs
+    ? tryFetchWithTimeout(url, init, waitMs)
+    : tryFetchWithTimeout(url, init));
   if (!res) return refused("Telemetry is unreachable. Try again.");
   if (!res.ok) {
     const { message } = await extractProblem(res);
@@ -171,4 +185,43 @@ export async function setSessionLayoutAction(
   refresh();
   if (!setting.success) return refused("Unexpected response from telemetry.");
   return { ok: true, setting: setting.data };
+}
+
+/** One trace deleted, by its run's id: the page then goes back to the list,
+ *  where it no longer shows. The receipt is mailed by the server. */
+export async function deleteTraceAction(projectId: string, runId: string): Promise<ActionResult> {
+  if (!z.guid().safeParse(runId).success) return refused("Invalid trace id.");
+  const sent = await call("DELETE", `/traces/${runId}`, projectId, undefined, DELETIONS, DELETION_WAIT_MS);
+  if (!sent.ok) return sent;
+  const here = await requestUrl();
+  here.pathname = here.pathname.replace(/\/[^/]+$/, "");
+  here.search = "";
+  redirect(pathAndQuery(here));
+}
+
+const ErasedSchema = z.object({ traces: z.number().int().nonnegative() });
+
+export type ErasureResult = ActionResult<{ traces: number }>;
+
+/** One end user erased by the id the project's SDK sent, every trace it is
+ *  on deleted: how many went. The id goes in the body, never a URL. */
+export async function eraseEndUserAction(projectId: string, userId: unknown): Promise<ErasureResult> {
+  // Characters, as ingest counts them, not UTF-16's units.
+  const parsed = z
+    .string()
+    .refine((id) => id.length > 0 && [...id].length <= 128)
+    .safeParse(userId);
+  if (!parsed.success) return refused("An end user's id is 1 to 128 characters.");
+  const sent = await call(
+    "POST",
+    "/users/erase",
+    projectId,
+    { user_id: parsed.data },
+    DELETIONS,
+    DELETION_WAIT_MS,
+  );
+  if (!sent.ok) return sent;
+  const erased = ErasedSchema.safeParse(await sent.res.json().catch(() => null));
+  if (!erased.success) return refused("Unexpected response from telemetry.");
+  return { ok: true, traces: erased.data.traces };
 }
