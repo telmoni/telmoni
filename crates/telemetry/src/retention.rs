@@ -6,7 +6,8 @@
 //! night missed is caught up by the next. A deleted project's rows, marked by
 //! its purge and gone from every read within moments as the store applies
 //! the mark ([`crate::store::Store::delete_project`]), leave the disk by
-//! the next night's run ([`rewrite_deleted`]).
+//! the next night's run ([`rewrite_deleted`]). The content an `on` project
+//! keeps in Postgres follows its span's day ([`purge_content`]).
 
 use anyhow::Context;
 use chrono::{DateTime, Datelike, Duration, Months, NaiveDate, TimeZone, Utc};
@@ -118,6 +119,49 @@ pub async fn purge(client: &clickhouse::Client, now: DateTime<Utc>) -> anyhow::R
     };
     rewritten?;
     Ok(purged)
+}
+
+/// Content rows deleted at once by [`purge_content`]: a night's lot goes in
+/// batches, so no one statement holds the table long.
+const CONTENT_BATCH: i64 = 5_000;
+
+/// Delete the content whose span's day [`purge`] drops, as the migrator, whom
+/// row security does not hold: a project at a time, a batch at a time, each
+/// in its own transaction taking its bytes off the count of the organization
+/// the project is filed under ([`crate::db::delete_content`]). Answers how
+/// many rows went.
+pub async fn purge_content(pool: &sqlx::PgPool, now: DateTime<Utc>) -> anyhow::Result<u64> {
+    let cutoff = span_cutoff(now);
+    let projects: Vec<telmoni_shared::ProjectId> = sqlx::query_scalar(
+        "SELECT DISTINCT project_id FROM telemetry.plain_content WHERE received_at < $1",
+    )
+    .bind(cutoff)
+    .fetch_all(pool)
+    .await
+    .context("listing the projects with content past its span's retention")?;
+    let mut gone = 0u64;
+    for project in projects {
+        loop {
+            let mut tx = pool
+                .begin()
+                .await
+                .context("a content purge's transaction")?;
+            let batch = crate::db::delete_content(
+                &mut tx,
+                std::slice::from_ref(&project),
+                Some(cutoff),
+                CONTENT_BATCH,
+            )
+            .await
+            .context("deleting content past its span's retention")?;
+            tx.commit().await.context("committing a content purge")?;
+            gone += batch;
+            if batch < CONTENT_BATCH.unsigned_abs() {
+                break;
+            }
+        }
+    }
+    Ok(gone)
 }
 
 /// Apply the deleted mask on both tables, as the migrator, waiting on each

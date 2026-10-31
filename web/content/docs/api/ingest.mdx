@@ -130,13 +130,19 @@ attributes.
 `gen_ai.tool.call.arguments`, `gen_ai.tool.call.result`,
 `gen_ai.retrieval.query.text`, `gen_ai.retrieval.documents`,
 `gen_ai.memory.query.text`, `gen_ai.memory.records`, `gen_ai.prompt.variable`,
-and the `user.email`, `user.full_name` and `user.name` that name a person — is
-dropped on a project whose content mode is `off`, which is every project today,
-and never reaches a store. The span is kept, and the answer names the field.
+and the `user.email`, `user.full_name` and `user.name` that name a person, with
+`telmoni.content_cut`, the fields an SDK cut to fit an export — is dropped on a
+project whose content mode is `off`, the default, and never reaches a store.
+The span is kept, and the answer names the field. On a project whose mode is
+`on`, each is kept as it arrives, sealed under a key of the project's own in
+Postgres alone, for as long as its span: free of an attribute's 1,024
+characters, held only by the 1 MiB an export may be.
 
-**Any other text, or array**, the [field inventory](/docs/api/field-inventory)
-does not name is dropped in every mode as `unlisted`: content arrives under
-names no convention gave it. A span's events and its status message are never
+**Any other text, array or map** the [field inventory](/docs/api/field-inventory)
+does not name is dropped on an `off` project as `unlisted`, and kept as content
+under its own name on an `on` one: content arrives under names no convention
+gave it. Bytes, and a name under `telmoni.` ingest does not read, are dropped
+as `unlisted` in every mode. A span's events and its status message are never
 kept.
 
 **A tag past its project's cardinality cap** is dropped as `cardinality`, the

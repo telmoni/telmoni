@@ -109,7 +109,7 @@ impl Exporter {
         if spans.len() > contract::BATCH_SPANS_MAX {
             return self.halve(spans);
         }
-        let Ok(mut body) = serde_json::to_vec(&self.encode(spans, false)) else {
+        let Ok(mut body) = serde_json::to_vec(&self.encode(spans, false, &[])) else {
             self.warner.once(
                 "encode".to_owned(),
                 "telmoni: an export could not be encoded; the batch was dropped",
@@ -123,24 +123,34 @@ impl Exporter {
             if spans.len() > 1 {
                 return self.halve(spans);
             }
-            // A span alone past it goes without what ingest drops for its length,
+            // Content sent goes first, the longest field first, each named; else a
+            // span alone past it goes without what ingest drops for its length,
             // and then fits, unless its own name does not.
-            match serde_json::to_vec(&self.encode(spans, true)) {
-                Ok(trimmed) if trimmed.len() <= contract::BATCH_MAX_BYTES => {
-                    self.warner.once(
+            if let Some(cut) = self.cut(spans) {
+                self.warner.once(
+                    "content-cut".to_owned(),
+                    "telmoni: a span past the 1 MiB an export may hold was sent without its longest content, named in telmoni.content_cut",
+                    WarningKind::Trimmed.into(),
+                );
+                body = cut;
+            } else {
+                match serde_json::to_vec(&self.encode(spans, true, &[])) {
+                    Ok(trimmed) if trimmed.len() <= contract::BATCH_MAX_BYTES => {
+                        self.warner.once(
                         "trimmed".to_owned(),
                         "telmoni: a span past the 1 MiB an export may hold was sent without the attributes ingest drops for their length",
                         WarningKind::Trimmed.into(),
                     );
-                    body = trimmed;
-                }
-                _ => {
-                    self.warner.once(
-                        "too-large".to_owned(),
-                        "telmoni: a span past the 1 MiB an export may hold was dropped",
-                        WarningKind::TooLarge.into(),
-                    );
-                    return true;
+                        body = trimmed;
+                    }
+                    _ => {
+                        self.warner.once(
+                            "too-large".to_owned(),
+                            "telmoni: a span past the 1 MiB an export may hold was dropped",
+                            WarningKind::TooLarge.into(),
+                        );
+                        return true;
+                    }
                 }
             }
         }
@@ -211,11 +221,56 @@ impl Exporter {
         self.export(head) && self.export(tail)
     }
 
+    /// The one span's body without its longest content, as few fields as fit it
+    /// in an export: a content field, or any past ingest's caps, which on a
+    /// project that keeps content is content too; `None` where it sends no
+    /// content, or fits without all of it.
+    fn cut(&self, spans: &[SpanData]) -> Option<Vec<u8>> {
+        if !self.keeps_content() {
+            return None;
+        }
+        let mut content: Vec<(&str, usize)> = spans
+            .iter()
+            .flat_map(|span| &span.attributes)
+            .map(|attribute| (attribute.key.as_str(), &attribute.value))
+            .filter(|(key, value)| {
+                *key != contract::CONTENT_CUT
+                    && (contract::is_content(key) || past_caps(key, value))
+            })
+            .map(|(key, value)| (key, ingest_length(value)))
+            .collect();
+        content.sort_by_key(|(_, length)| std::cmp::Reverse(*length));
+        let mut cut: Vec<&str> = Vec::new();
+        for (key, _) in content {
+            if cut.contains(&key) {
+                continue;
+            }
+            cut.push(key);
+            if let Ok(body) = serde_json::to_vec(&self.encode(spans, false, &cut))
+                && body.len() <= contract::BATCH_MAX_BYTES
+            {
+                return Some(body);
+            }
+        }
+        None
+    }
+
+    /// Whether content leaves: the code asked, and the project's mode allows.
+    /// Only an export's answer moves the mode, on this thread: once a batch.
+    fn keeps_content(&self) -> bool {
+        self.capture_content && self.content_mode() == Some(ContentMode::On)
+    }
+
     /// OTLP's `ExportTraceServiceRequest`, in its JSON encoding; `trimmed`, without
-    /// the attributes ingest drops for their length.
-    fn encode<'a>(&'a self, spans: &'a [SpanData], trimmed: bool) -> Request<'a> {
-        // Only an export's answer moves the mode, on this thread: once a batch.
-        let keep_content = self.capture_content && self.content_mode() == Some(ContentMode::On);
+    /// the attributes ingest drops for their length; `cut`, without those content
+    /// fields, named in `telmoni.content_cut`.
+    fn encode<'a>(
+        &'a self,
+        spans: &'a [SpanData],
+        trimmed: bool,
+        cut: &'a [&'a str],
+    ) -> Request<'a> {
+        let keep_content = self.keeps_content();
         Request {
             resource_spans: [ResourceSpans {
                 resource: Resource {
@@ -228,20 +283,29 @@ impl Exporter {
                     },
                     spans: spans
                         .iter()
-                        .map(|span| self.span(span, trimmed, keep_content))
+                        .map(|span| self.span(span, trimmed, keep_content, cut))
                         .collect(),
                 }],
             }],
         }
     }
 
-    fn span<'a>(&self, span: &'a SpanData, trimmed: bool, keep_content: bool) -> OtlpSpan<'a> {
+    fn span<'a>(
+        &self,
+        span: &'a SpanData,
+        trimmed: bool,
+        keep_content: bool,
+        cut: &'a [&'a str],
+    ) -> OtlpSpan<'a> {
         // The last value set under a key is the one that stands, as a map
         // would have it: OpenTelemetry's span keeps every set in a list.
         let mut attributes: Vec<(&str, &Value)> = Vec::new();
         for attribute in &span.attributes {
             let key = attribute.key.as_str();
-            if !keep_content && contract::is_content(key) {
+            if (!keep_content && contract::is_content(key))
+                || cut.contains(&key)
+                || (!cut.is_empty() && key == contract::CONTENT_CUT)
+            {
                 continue;
             }
             match attributes.iter_mut().find(|(seen, _)| *seen == key) {
@@ -249,7 +313,7 @@ impl Exporter {
                 None => attributes.push((key, &attribute.value)),
             }
         }
-        let attributes = attributes
+        let mut attributes: Vec<OtlpAttribute<'a>> = attributes
             .into_iter()
             .filter(|(key, value)| !(trimmed && past_caps(key, value)))
             .map(|(key, value)| OtlpAttribute {
@@ -257,6 +321,17 @@ impl Exporter {
                 value: any_value(value),
             })
             .collect();
+        if !cut.is_empty() {
+            attributes.push(OtlpAttribute {
+                key: contract::CONTENT_CUT,
+                value: AnyValue::Array {
+                    values: cut
+                        .iter()
+                        .map(|key| AnyValue::String(Cow::Borrowed(key)))
+                        .collect(),
+                },
+            });
+        }
         OtlpSpan {
             trace_id: span.span_context.trace_id().to_string(),
             span_id: span.span_context.span_id().to_string(),
@@ -386,7 +461,7 @@ fn refused(line: &str) -> Option<&str> {
 fn remedy(attribute: &str, reason: &str) -> String {
     match reason {
         // The page, not a setting to change: which modes keep content is the
-        // platform's to say, and no project can choose one that does yet.
+        // platform's to say, and only the organization's owner switches one.
         "content" => {
             format!("the project's content mode decides whether content is kept: {CONTENT_DOCS}")
         }
@@ -646,12 +721,15 @@ fn array_values(array: &Array) -> Vec<AnyValue<'_>> {
 }
 
 /// Whether ingest drops an attribute for its length alone: a key past 128
-/// characters, or a value past 1,024 as ingest writes it, a list as its JSON.
+/// characters, or a value past 1,024 as ingest writes it.
 fn past_caps(key: &str, value: &Value) -> bool {
-    if key.chars().count() > contract::ATTRIBUTE_KEY_MAX {
-        return true;
-    }
-    let length = match value {
+    key.chars().count() > contract::ATTRIBUTE_KEY_MAX
+        || ingest_length(value) > contract::ATTRIBUTE_VALUE_MAX
+}
+
+/// A value's length in characters as ingest writes it, a list as its JSON.
+fn ingest_length(value: &Value) -> usize {
+    match value {
         Value::String(text) => text.as_str().chars().count(),
         Value::Array(array) => {
             let items: Vec<serde_json::Value> = match array {
@@ -664,8 +742,7 @@ fn past_caps(key: &str, value: &Value) -> bool {
             serde_json::Value::Array(items).to_string().chars().count()
         }
         other => other.to_string().chars().count(),
-    };
-    length > contract::ATTRIBUTE_VALUE_MAX
+    }
 }
 
 #[cfg(test)]
@@ -836,6 +913,55 @@ mod tests {
             *lock(&warnings),
             [(
                 "telmoni: a span past the 1 MiB an export may hold was sent without the attributes ingest drops for their length".to_owned(),
+                WarningKind::Trimmed.into()
+            )]
+        );
+    }
+
+    /// With content sent, the longest fields go first, as few as fit the span,
+    /// each named in `telmoni.content_cut`; the rest of the span goes whole.
+    #[test]
+    fn a_span_alone_past_it_goes_without_its_longest_content_named() {
+        let (kept, warnings) = (Kept::default(), Arc::default());
+        let mut sender = exporter(&kept, &warnings);
+        sender.capture_content = true;
+        *lock(&sender.content_mode) = Some(ContentMode::On);
+        let mut big = spans(&[1]);
+        big[0].attributes.extend([
+            KeyValue::new("gen_ai.input.messages", "i".repeat(600_000)),
+            KeyValue::new("gen_ai.tool.call.result", "r".repeat(700_000)),
+            KeyValue::new("gen_ai.output.messages", "o".repeat(2_000)),
+            KeyValue::new("app.notes", "n".repeat(800_000)),
+            KeyValue::new(
+                "telmoni.content_cut",
+                Value::Array(vec![opentelemetry::StringValue::from("set by the code")].into()),
+            ),
+        ]);
+        sender.export(&big);
+        assert_eq!(
+            sent(&kept),
+            [
+                "s0:app.kept,gen_ai.input.messages,gen_ai.output.messages,telmoni.content_cut,telmoni.tag.big"
+            ]
+        );
+        let body: serde_json::Value = serde_json::from_slice(&lock(&kept.0)[0]).unwrap();
+        let cut = body["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["attributes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|each| each["key"] == contract::CONTENT_CUT)
+            .map(|each| each["value"].clone());
+        assert_eq!(
+            cut,
+            Some(json!({ "arrayValue": { "values": [
+                    { "stringValue": "app.notes" },
+                    { "stringValue": "gen_ai.tool.call.result" }
+                ] } }))
+        );
+        assert_eq!(
+            *lock(&warnings),
+            [(
+                "telmoni: a span past the 1 MiB an export may hold was sent without its longest content, named in telmoni.content_cut".to_owned(),
                 WarningKind::Trimmed.into()
             )]
         );

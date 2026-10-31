@@ -74,6 +74,9 @@ pub(crate) const TOOL_CALL_ARGUMENTS: &str = "gen_ai.tool.call.arguments";
 pub(crate) const TOOL_CALL_RESULT: &str = "gen_ai.tool.call.result";
 
 /// What the exporter takes off a span unless asked and the project allows.
+/// The content fields the exporter cut so a span fits an export, by name.
+pub(crate) const CONTENT_CUT: &str = "telmoni.content_cut";
+
 const CONTENT: &[&str] = &[
     INPUT_MESSAGES,
     OUTPUT_MESSAGES,
@@ -89,6 +92,7 @@ const CONTENT: &[&str] = &[
     "user.email",
     "user.full_name",
     "user.name",
+    CONTENT_CUT,
 ];
 
 /// Whether `key` is content.

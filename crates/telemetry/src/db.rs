@@ -1,5 +1,5 @@
-//! The telemetry module's Postgres: each project's settings, and its saved
-//! views of the trace list and layouts of a session.
+//! The telemetry module's Postgres: each project's settings, its saved views
+//! of the trace list and layouts of a session, and the content it keeps.
 
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
@@ -140,12 +140,18 @@ pub async fn purge_organization(
     .execute(tx.conn())
     .await?
     .rows_affected();
+    let content = purge_project_content(tx, &projects).await?;
+    let held = sqlx::query("DELETE FROM telemetry.content_held WHERE organization_id = $1")
+        .bind(organization_id)
+        .execute(tx.conn())
+        .await?
+        .rows_affected();
     let settings = sqlx::query("DELETE FROM telemetry.project_settings WHERE organization_id = $1")
         .bind(organization_id)
         .execute(tx.conn())
         .await?
         .rows_affected();
-    Ok(rules + mutes + views + settings)
+    Ok(rules + mutes + views + content + held + settings)
 }
 
 /// How long a purge waits for any lock: one left queued for a project's lock
@@ -188,12 +194,13 @@ pub async fn purge_project(
         .execute(tx.conn())
         .await?
         .rows_affected();
+    let content = purge_project_content(tx, std::slice::from_ref(project_id)).await?;
     let settings = sqlx::query("DELETE FROM telemetry.project_settings WHERE project_id = $1")
         .bind(project_id)
         .execute(tx.conn())
         .await?
         .rows_affected();
-    Ok(rules + mutes + views + settings)
+    Ok(rules + mutes + views + content + settings)
 }
 
 /// A saved view as its row keeps it: a view of the trace list, or a layout
@@ -405,6 +412,32 @@ pub async fn move_project(
         .bind(organization_id)
         .execute(tx.conn())
         .await?;
+    // The content's bytes follow it to the organization that now holds it,
+    // its settings row locked first, as `delete_content` locks it.
+    sqlx::query("SELECT 1 FROM telemetry.project_settings WHERE project_id = $1 FOR UPDATE")
+        .bind(project_id)
+        .execute(tx.conn())
+        .await?;
+    sqlx::query(
+        "WITH project AS (
+             SELECT s.organization_id AS left_org,
+                    (SELECT coalesce(sum(bytes), 0) FROM telemetry.plain_content
+                      WHERE project_id = $1) AS bytes
+               FROM telemetry.project_settings s
+              WHERE s.project_id = $1 AND s.organization_id <> $2),
+         taken AS (
+             UPDATE telemetry.content_held h SET bytes = greatest(h.bytes - p.bytes, 0)
+               FROM project p WHERE h.organization_id = p.left_org AND p.bytes > 0
+             RETURNING 1)
+         INSERT INTO telemetry.content_held (organization_id, bytes)
+         SELECT $2, bytes FROM project WHERE bytes > 0
+         ON CONFLICT (organization_id) DO UPDATE
+            SET bytes = telemetry.content_held.bytes + EXCLUDED.bytes",
+    )
+    .bind(project_id)
+    .bind(organization_id)
+    .execute(tx.conn())
+    .await?;
     Ok(sqlx::query(
         "UPDATE telemetry.project_settings SET organization_id = $2 WHERE project_id = $1",
     )
@@ -525,4 +558,180 @@ pub async fn set_hashing_key_if_none(
     .await?
     .rows_affected()
         > 0)
+}
+
+/// A project's content key as its row keeps it: a data key wrapped by
+/// `TELEMETRY_KEK`, with the key version it was wrapped under.
+#[derive(Debug, Clone)]
+pub struct WrappedContentKey {
+    pub wrapped_dek: Vec<u8>,
+    pub key_version: i16,
+}
+
+/// The key a project's content is sealed under, or `None` where it has no
+/// row or no key yet.
+pub async fn content_key<B: HasProject>(
+    tx: &mut Scoped<'_, B>,
+    project_id: &ProjectId,
+) -> sqlx::Result<Option<WrappedContentKey>> {
+    let row: Option<(Option<Vec<u8>>, Option<i16>)> = sqlx::query_as(
+        "SELECT content_key_wrapped_dek, content_key_version
+           FROM telemetry.project_settings
+          WHERE project_id = $1",
+    )
+    .bind(project_id)
+    .fetch_optional(tx.conn())
+    .await?;
+    Ok(row.and_then(|(wrapped_dek, key_version)| {
+        Some(WrappedContentKey {
+            wrapped_dek: wrapped_dek?,
+            key_version: key_version?,
+        })
+    }))
+}
+
+/// The project's content key, set where its row has none: the first writer's
+/// stays, as [`set_hashing_key_if_none`]'s does.
+pub async fn set_content_key_if_none(
+    tx: &mut Scoped<'_, ProjectAndOrganization>,
+    project_id: &ProjectId,
+    key: &WrappedContentKey,
+) -> sqlx::Result<bool> {
+    Ok(sqlx::query(
+        "UPDATE telemetry.project_settings
+            SET content_key_wrapped_dek = $2, content_key_version = $3
+          WHERE project_id = $1 AND content_key_wrapped_dek IS NULL",
+    )
+    .bind(project_id)
+    .bind(&key.wrapped_dek)
+    .bind(key.key_version)
+    .execute(tx.conn())
+    .await?
+    .rows_affected()
+        > 0)
+}
+
+/// One content field, sealed, as `plain_content` keeps it.
+#[derive(Debug, Default)]
+pub struct SealedFields {
+    pub trace_ids: Vec<String>,
+    pub span_ids: Vec<String>,
+    pub fields: Vec<String>,
+    pub ciphertexts: Vec<Vec<u8>>,
+    pub nonces: Vec<Vec<u8>>,
+    pub bytes: Vec<i32>,
+}
+
+/// Content kept, its bytes added to the organization's count. A field
+/// already kept, an export's retry, is kept once and counted once.
+pub async fn keep_content(
+    tx: &mut Scoped<'_, ProjectAndOrganization>,
+    project_id: &ProjectId,
+    organization_id: &OrganizationId,
+    received_at: DateTime<Utc>,
+    sealed: &SealedFields,
+) -> sqlx::Result<()> {
+    sqlx::query(
+        "WITH kept AS (
+             INSERT INTO telemetry.plain_content
+                 (project_id, trace_id, span_id, field, received_at, ciphertext, nonce, bytes)
+             SELECT $1, t, s, f, $3, c, n, b
+               FROM UNNEST($4::text[], $5::text[], $6::text[], $7::bytea[], $8::bytea[], $9::int[])
+                 AS u(t, s, f, c, n, b)
+             ON CONFLICT DO NOTHING
+             RETURNING bytes)
+         INSERT INTO telemetry.content_held (organization_id, bytes)
+         SELECT $2, coalesce(sum(bytes), 0) FROM kept
+         ON CONFLICT (organization_id) DO UPDATE
+            SET bytes = telemetry.content_held.bytes + EXCLUDED.bytes",
+    )
+    .bind(project_id)
+    .bind(organization_id)
+    .bind(received_at)
+    .bind(&sealed.trace_ids)
+    .bind(&sealed.span_ids)
+    .bind(&sealed.fields)
+    .bind(&sealed.ciphertexts)
+    .bind(&sealed.nonces)
+    .bind(&sealed.bytes)
+    .execute(tx.conn())
+    .await?;
+    Ok(())
+}
+
+/// One content field as kept: its trace, span and name, sealed.
+pub(crate) type KeptField = (String, String, String, Vec<u8>, Vec<u8>);
+
+/// Every field the project keeps for the traces, sealed, in trace, span and
+/// name order: the crate's own, read only by [`crate::content::open`], which
+/// files each read.
+pub(crate) async fn read_content(
+    tx: &mut Scoped<'_, ProjectAndOrganization>,
+    project_id: &ProjectId,
+    trace_ids: &[String],
+) -> sqlx::Result<Vec<KeptField>> {
+    sqlx::query_as(
+        "SELECT trace_id, span_id, field, ciphertext, nonce
+           FROM telemetry.plain_content
+          WHERE project_id = $1 AND trace_id = ANY($2)
+          ORDER BY trace_id, span_id, field",
+    )
+    .bind(project_id)
+    .bind(trace_ids)
+    .fetch_all(tx.conn())
+    .await
+}
+
+/// Up to `limit` of the projects' content rows deleted, those received before
+/// `before` where it is given, their bytes taken off the count of the
+/// organization each project's settings row is filed under; answers how many
+/// went. ⚠ Each settings row is locked first, in id order, as a transfer locks
+/// it: a transfer and a purge each count what the other left, and never the
+/// same bytes twice.
+pub async fn delete_content(
+    conn: &mut sqlx::PgConnection,
+    project_ids: &[ProjectId],
+    before: Option<DateTime<Utc>>,
+    limit: i64,
+) -> sqlx::Result<u64> {
+    sqlx::query(
+        "SELECT 1 FROM telemetry.project_settings
+          WHERE project_id = ANY($1) ORDER BY project_id FOR UPDATE",
+    )
+    .bind(project_ids)
+    .execute(&mut *conn)
+    .await?;
+    let gone: i64 = sqlx::query_scalar(
+        "WITH gone AS (
+             DELETE FROM telemetry.plain_content
+              WHERE ctid IN (SELECT ctid FROM telemetry.plain_content
+                              WHERE project_id = ANY($1)
+                                AND ($2::timestamptz IS NULL OR received_at < $2)
+                              LIMIT $3)
+             RETURNING project_id, bytes),
+         sums AS (
+             SELECT s.organization_id, sum(g.bytes) AS bytes
+               FROM gone g JOIN telemetry.project_settings s USING (project_id)
+              GROUP BY s.organization_id),
+         taken AS (
+             UPDATE telemetry.content_held h SET bytes = greatest(h.bytes - sums.bytes, 0)
+               FROM sums WHERE h.organization_id = sums.organization_id
+             RETURNING 1)
+         SELECT count(*) FROM gone",
+    )
+    .bind(project_ids)
+    .bind(before)
+    .bind(limit)
+    .fetch_one(conn)
+    .await?;
+    Ok(gone.unsigned_abs())
+}
+
+/// A project's content deleted, and its bytes taken off its organization's
+/// count; run before its settings row goes.
+async fn purge_project_content(
+    tx: &mut Scoped<'_, Maintenance<TelemetryLane>>,
+    project_ids: &[ProjectId],
+) -> sqlx::Result<u64> {
+    delete_content(tx.conn(), project_ids, None, i64::MAX).await
 }

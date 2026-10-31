@@ -551,6 +551,46 @@ describe("an export past ingest's 1 MiB or 1,000 spans", () => {
     expect(fields).toStrictEqual([{ kind: 'trimmed' }]);
   });
 
+  it('sends a span alone past it without its longest content, as few fields as fit, each named', async () => {
+    const on = answer(200, { 'Telmoni-Content-Mode': 'on' }, '{}');
+    const transport = new FakeTransport([on, on]);
+    const warnings: string[] = [];
+    const fields: Warning[] = [];
+    const sender = new Exporter(new Telmoni({ apiKey: 'k', captureContent: true }).config, {
+      transport: transport.send,
+      sleep: () => Promise.resolve(),
+      warn: (message, warning) => {
+        warnings.push(message);
+        fields.push(warning);
+      },
+    });
+    const [big] = spans([1]);
+    Object.assign(big!.attributes, {
+      'gen_ai.input.messages': 'i'.repeat(600_000),
+      'gen_ai.tool.call.result': 'r'.repeat(700_000),
+      'gen_ai.output.messages': 'o'.repeat(2_000),
+      'app.notes': 'n'.repeat(800_000),
+      'telmoni.content_cut': ['set by the code'],
+    });
+    await sender.export(spans([1]));
+    await sender.export([big!]);
+    const sent = transport.spans().at(-1)!.attributes;
+    expect(sent.map((each) => each.key).sort()).toEqual([
+      'app.kept',
+      'gen_ai.input.messages',
+      'gen_ai.output.messages',
+      'telmoni.content_cut',
+      'telmoni.tag.big',
+    ]);
+    expect(sent.find((each) => each.key === 'telmoni.content_cut')!.value).toEqual({
+      arrayValue: { values: [{ stringValue: 'app.notes' }, { stringValue: 'gen_ai.tool.call.result' }] },
+    });
+    expect(warnings).toEqual([
+      'telmoni: a span past the 1 MiB an export may hold was sent without its longest content, named in telmoni.content_cut',
+    ]);
+    expect(fields).toStrictEqual([{ kind: 'trimmed' }]);
+  });
+
   it('drops a span whose own name passes it, with one warning', async () => {
     const transport = new FakeTransport();
     const warnings: string[] = [];

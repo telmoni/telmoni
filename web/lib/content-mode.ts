@@ -11,5 +11,5 @@ export const CONTENT_MODE_MEANS: Record<ContentMode, string> = {
   [ContentMode.Off]:
     "Content is dropped as each span arrives, and the span is kept without it.",
   [ContentMode.On]:
-    "Content is kept as it arrives, in Postgres alone, and every read of it is audited.",
+    "Content is kept as sent, sealed under the project's own key in Postgres alone, for as long as its span, wherever the code asks the SDK to send it.",
 };

@@ -118,13 +118,15 @@ const LANE_WRITTEN: &[&str] = &["notifications.delivery_attempts", "agent.erasur
 /// The tables the runtime role writes but never deletes from: its
 /// maintenance lane purges them with their project or organization. A
 /// project's settings row removed by a request would set its content mode
-/// back with no audit row.
-const LANE_DELETED: &[&str] = &["telemetry.project_settings"];
+/// back with no audit row; an organization's count of the content it keeps
+/// goes with the organization alone.
+const LANE_DELETED: &[&str] = &["telemetry.project_settings", "telemetry.content_held"];
 
 /// The tables the runtime role only adds to: its maintenance lane drains
-/// them, landing or settling each row and removing it. A request that
-/// rewrote or removed one could unsay an uninstall before it is sent.
-const LANE_DRAINED: &[&str] = &["notifications.uninstalls"];
+/// them, landing or settling each row and removing it, or purges them. A
+/// request that rewrote or removed one could unsay an uninstall before it is
+/// sent, or swap a span's content for other bytes.
+const LANE_DRAINED: &[&str] = &["notifications.uninstalls", "telemetry.plain_content"];
 
 /// The runtime roles that write audit rows, each auditing its own writes on
 /// the organization's chain: every module's but the agent's, which changes
@@ -555,6 +557,20 @@ async fn the_maintenance_lanes_narrowed_grants_hold_in_every_tier() {
             "telemetry_maintenance",
             "telemetry.trace_views",
             &["SELECT", "DELETE"],
+        ),
+        // The purges delete content with its project, and a transfer counts
+        // a project's to move its bytes; the nightly purge runs as the owner.
+        (
+            "telemetry_maintenance",
+            "telemetry.plain_content",
+            &["SELECT", "DELETE"],
+        ),
+        // The purges take a project's bytes off, or delete the organization's
+        // row; a transfer moves a project's bytes, making the row it lands on.
+        (
+            "telemetry_maintenance",
+            "telemetry.content_held",
+            &["SELECT", "INSERT", "UPDATE", "DELETE"],
         ),
         // The loop leases, settles and holds the alerts to their plan, each a
         // column grant; the purges delete them; a project's scope writes them.

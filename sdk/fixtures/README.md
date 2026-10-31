@@ -71,7 +71,7 @@ Every warning any SDK gives carries one of these kinds, the same in all four:
 | `queue_full` | spans dropped before sending, the queue full | — |
 | `export_error` | a batch its own export dropped: one it could not encode, or whose export raised, threw or panicked — a hook the application gave among them | — |
 | `too_large` | a span alone past an export's 1 MiB dropped, its own name too long to trim | — |
-| `trimmed` | a span alone past 1 MiB sent without the attributes ingest drops for their length | — |
+| `trimmed` | a span alone past 1 MiB sent without its longest content, named in `telmoni.content_cut`, or without the attributes ingest drops for their length | — |
 | `dropped` | an attribute the server dropped, the span kept | — |
 | `span_refused` | a span the server refused, the rest of the export kept | — |
 | `said` | a line the server gave naming neither | — |

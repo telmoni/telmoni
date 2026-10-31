@@ -1,6 +1,7 @@
 {
   "content_mode": "off",
   "offered": [
-    "off"
+    "off",
+    "on"
   ]
 }

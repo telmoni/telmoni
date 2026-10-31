@@ -68,8 +68,9 @@ export default async function PrivacyPage({
           description={
             <>
               Every attribute Telmoni reads from a span, where it is read, what becomes of it,
-              and the content mode it needs. Text under any other name is dropped in every
-              mode. The names are the GenAI semantic conventions&apos; at a pinned commit; the
+              and the content mode it needs. Text under any other name is kept as content where
+              the mode is on, and dropped where it is off. The names are the GenAI semantic
+              conventions&apos; at a pinned commit; the
               same list is in the{" "}
               <Link href="/docs/api/field-inventory" className="underline underline-offset-4">
                 docs

@@ -24,10 +24,10 @@ use telmoni_shared::{
 use crate::handler::chain;
 use crate::{AppState, db};
 
-/// The modes an owner may switch a project to: `off` alone, until a table
-/// keeps content as it arrives (`on`). A mode with nowhere to keep content
-/// would tell the SDK, in every answer, to send what ingest must then drop.
-pub const OFFERED: &[ContentMode] = &[ContentMode::Off];
+/// The modes an owner may switch a project to. A mode with nowhere to keep
+/// content would tell the SDK, in every answer, to send what ingest must then
+/// drop, so a mode joins only once ingest keeps what it promises.
+pub const OFFERED: &[ContentMode] = &[ContentMode::Off, ContentMode::On];
 
 /// What both lanes answer: the project's mode, and the modes it may be
 /// switched to.

@@ -87,6 +87,9 @@ export const TOOL_CALL_ARGUMENTS = 'gen_ai.tool.call.arguments';
 export const TOOL_CALL_RESULT = 'gen_ai.tool.call.result';
 
 /** What the exporter takes off a span unless asked and the project allows. */
+/** The content fields the exporter cut so a span fits an export, by name. */
+export const CONTENT_CUT = 'telmoni.content_cut';
+
 export const CONTENT: ReadonlySet<string> = new Set([
   INPUT_MESSAGES,
   OUTPUT_MESSAGES,
@@ -102,6 +105,7 @@ export const CONTENT: ReadonlySet<string> = new Set([
   'user.email',
   'user.full_name',
   'user.name',
+  CONTENT_CUT,
 ]);
 
 export const MODEL_OPERATIONS: ReadonlySet<string> = new Set([

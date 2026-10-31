@@ -65,7 +65,7 @@ export default async function SettingsPage({
 
         <Section
           title="Content"
-          description="What this project keeps of the content its spans carry: prompts and completions, tool inputs and outputs, error messages, a person's name or email address, and anything else a person or a model wrote. Off keeps none of it: content is dropped as each span arrives, and the span is kept without it."
+          description="What this project keeps of the content its spans carry: prompts and completions, tool inputs and outputs, error messages, a person's name or email address, and anything else a person or a model wrote. Off keeps none of it: content is dropped as each span arrives, and the span is kept without it. On keeps it as sent, for as long as its span, wherever the code asks the SDK to send it."
         >
           <Card>
             {contentMode ? (

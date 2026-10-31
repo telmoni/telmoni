@@ -76,6 +76,7 @@ pub fn state(
         vault: Vault::new(),
         kek,
         hashing_keys: hashing::Cache::default(),
+        content_keys: hashing::Cache::default(),
         redis,
         rate_limit: RateLimit::new("telemetry:ingest:limit", EXPORTS_PER_MINUTE),
         ceilings: crate::ceilings::Ceilings::default(),

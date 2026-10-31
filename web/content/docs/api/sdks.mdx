@@ -808,9 +808,10 @@ the process. They are sent only when the client is built with
 `capture_content` on **and** the project's content mode, which the SDK learns
 from the server's first answer, is `on`; in Python and TypeScript, a setting
 that is no boolean, such as `"false"` from the environment, is refused with a
-`TypeError`, where Go and Rust take only a boolean. No project can be switched to `on`
-today, so content never leaves the process. The server's own drop at the door
-is the second lock, not the first.
+`TypeError`, where Go and Rust take only a boolean. Sent, content is kept as it
+arrives, sealed in Postgres alone, for as long as its span (see [what is
+dropped at the door](/docs/api/ingest#what-is-dropped-at-the-door)). The
+server's own drop at the door is the second lock, not the first.
 
 ### Sampling
 
@@ -852,8 +853,11 @@ answer whose body breaks after its head, or runs past the 10 seconds, is
 decided by its status, read as far as it came. A batch whose body would pass the
 1 MiB [ingest](/docs/api/ingest#refusals) takes, or that holds more than its
 1,000 spans, is sent in halves, each within both, and a span that alone passes
-the 1 MiB is sent without the attributes ingest drops for their length — a key
-past 128 characters, a value past 1,024 — with one warning. Once a part fails
+the 1 MiB is sent, where it carries content the project keeps, without its
+longest content — a content field, or any value past 1,024 characters, which
+such a project keeps as content — the longest first and as few as fit it, each named in
+`telmoni.content_cut`; else without the attributes ingest drops for their
+length — a key past 128 characters, a value past 1,024 — each with one warning. Once a part fails
 as the rest would, Telmoni out of reach or busy past the retries, or the key
 refused, the parts after it are dropped with it; past a part refused for what it
 holds, they are sent. A number attribute JSON cannot carry, `NaN` or an
@@ -876,7 +880,7 @@ the status it last met and the problem type its body named. `refused` is an
 export refused for good and `failed` one that failed every attempt, each batch
 dropped; `queue_full` spans dropped with the queue full; `export_error` a batch
 its own export dropped, unable to encode it or failing; `too_large` a span past the 1 MiB dropped and `trimmed`
-one sent without its long attributes; `dropped`, `span_refused` and `said` the
+one sent without its longest content or its long attributes; `dropped`, `span_refused` and `said` the
 server's answer, the rest of the export kept; and `input` something the SDK was
 handed, fixed, cut or left off. Python sets it on the log record as
 `telmoni_warning`, a `WarningInfo`; TypeScript hands it to the `warn` hook as its

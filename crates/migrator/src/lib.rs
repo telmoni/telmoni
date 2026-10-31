@@ -55,8 +55,9 @@ pub async fn migrate_from_env() -> anyhow::Result<()> {
 
 /// Rotate every partitioned Postgres table once — create the months ahead,
 /// and drop the expired ones where the registry allows it (nowhere today) —
-/// then drop ClickHouse's days and months past retention, whether the first
-/// failed or not. The first failure is the answer.
+/// then drop ClickHouse's days and months past retention and the content that
+/// follows them, whether the one before failed or not. The first failure is
+/// the answer.
 pub async fn rotate_from_env() -> anyhow::Result<()> {
     let options = migrator_options()?;
     let clickhouse = telmoni_telemetry::store::client(&require(CLICKHOUSE_URL_VAR)?)
@@ -64,7 +65,8 @@ pub async fn rotate_from_env() -> anyhow::Result<()> {
     // Both stores every night, whichever fails: a Postgres rotation that
     // fails must not hold back every night's purge behind it.
     let rotated = rotate::rotate(&options).await;
-    let purged = telmoni_telemetry::retention::purge(&clickhouse, chrono::Utc::now()).await;
+    let now = chrono::Utc::now();
+    let purged = telmoni_telemetry::retention::purge(&clickhouse, now).await;
     if let Ok(purged) = &purged {
         tracing::info!(
             span_days = purged.span_days,
@@ -72,8 +74,26 @@ pub async fn rotate_from_env() -> anyhow::Result<()> {
             "rotate: clickhouse purged"
         );
     }
+    let content = purge_content(&options, now).await;
     rotated?;
     purged?;
+    content?;
+    Ok(())
+}
+
+/// The content past its span's retention, deleted in Postgres, its count logged.
+async fn purge_content(
+    options: &sqlx::postgres::PgConnectOptions,
+    now: chrono::DateTime<chrono::Utc>,
+) -> anyhow::Result<()> {
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .acquire_timeout(std::time::Duration::from_secs(10))
+        .connect_with(options.clone())
+        .await
+        .context("rotate: connect for the content purge")?;
+    let rows = telmoni_telemetry::retention::purge_content(&pool, now).await?;
+    tracing::info!(rows, "rotate: content past its span's retention purged");
     Ok(())
 }
 

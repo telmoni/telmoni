@@ -115,6 +115,10 @@ const (
 
 // content is what the exporter takes off a span unless the code asked and the
 // project allows.
+// attrContentCut names the content fields the exporter cut so a span fits an
+// export.
+const attrContentCut = "telmoni.content_cut"
+
 var content = map[string]bool{
 	attrInputMessages:             true,
 	attrOutputMessages:            true,
@@ -130,4 +134,5 @@ var content = map[string]bool{
 	"user.email":                  true,
 	"user.full_name":              true,
 	"user.name":                   true,
+	attrContentCut:                true,
 }

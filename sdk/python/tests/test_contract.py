@@ -631,6 +631,60 @@ def test_a_span_alone_past_it_goes_without_what_ingest_drops_for_its_length(
     assert infos_in(caplog) == [WarningInfo("trimmed")]
 
 
+def test_a_span_alone_past_it_goes_without_its_longest_content_named(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """With content sent, the longest fields go first, as few as fit the span,
+    each named in telmoni.content_cut; the rest of the span goes whole."""
+    on = Answer(200, {"Telmoni-Content-Mode": "on"}, b"{}")
+    transport = FakeTransport([on, on])
+    client = Telmoni(Config(api_key="k", capture_content=True), transport=transport)
+    context = SpanContext(trace_id=1, span_id=1, is_remote=False)
+    big = ReadableSpan(
+        name="big",
+        context=context,
+        start_time=1,
+        end_time=2,
+        attributes={
+            "gen_ai.input.messages": "i" * 600_000,
+            "gen_ai.tool.call.result": "r" * 700_000,
+            "gen_ai.output.messages": "o" * 2_000,
+            "app.notes": "n" * 800_000,
+            "app.kept": "yes",
+            "telmoni.content_cut": ["set by the code"],
+        },
+    )
+    try:
+        client.exporter.export(_spans(1))
+        client.exporter.export([big])
+    finally:
+        client.shutdown()
+    sent = attributes_of(transport.spans()[-1])
+    assert sent["telmoni.content_cut"] == {
+        "values": [
+            {"stringValue": "app.notes"},
+            {"stringValue": "gen_ai.tool.call.result"},
+        ]
+    }
+    keys = [a["key"] for a in transport.spans()[-1]["attributes"]]
+    assert keys.count("telmoni.content_cut") == 1
+    assert sorted(sent) == [
+        "app.kept",
+        "gen_ai.input.messages",
+        "gen_ai.output.messages",
+        "telmoni.content_cut",
+    ]
+    assert len(sent["gen_ai.input.messages"]) == 600_000, "content is free of 1,024"
+    warned = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    assert warned == [
+        (
+            "telmoni: a span past the 1 MiB an export may hold was sent without "
+            "its longest content, named in telmoni.content_cut"
+        )
+    ]
+    assert infos_in(caplog) == [WarningInfo("trimmed")]
+
+
 def test_a_span_whose_own_name_passes_it_is_dropped_with_one_warning(
     caplog: pytest.LogCaptureFixture,
 ) -> None:

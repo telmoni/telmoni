@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -154,7 +156,7 @@ func (e *exporter) export(spans []sdktrace.ReadOnlySpan) bool {
 	if len(spans) > batchSpansMax {
 		return e.halve(spans)
 	}
-	body, err := json.Marshal(e.encode(spans, false))
+	body, err := json.Marshal(e.encode(spans, false, nil))
 	if err != nil {
 		e.warnOnce("encode", WarningExportError, "telmoni: an export could not be encoded; the batch was dropped")
 		return true
@@ -165,14 +167,20 @@ func (e *exporter) export(spans []sdktrace.ReadOnlySpan) bool {
 		if len(spans) > 1 {
 			return e.halve(spans)
 		}
-		// A span alone past it goes without what ingest drops for its length,
-		// and then fits, unless its own name does not.
-		body, err = json.Marshal(e.encode(spans, true))
-		if err != nil || len(body) > batchMaxBytes {
-			e.warnOnce("too-large", WarningTooLarge, "telmoni: a span past the 1 MiB an export may hold was dropped")
-			return true
+		// Content sent goes first, the longest field first, each named.
+		if cut, ok := e.cut(spans[0]); ok {
+			body = cut
+			e.warnOnce("content-cut", WarningTrimmed, "telmoni: a span past the 1 MiB an export may hold was sent without its longest content, named in telmoni.content_cut")
+		} else {
+			// A span alone past it goes without what ingest drops for its length,
+			// and then fits, unless its own name does not.
+			body, err = json.Marshal(e.encode(spans, true, nil))
+			if err != nil || len(body) > batchMaxBytes {
+				e.warnOnce("too-large", WarningTooLarge, "telmoni: a span past the 1 MiB an export may hold was dropped")
+				return true
+			}
+			e.warnOnce("trimmed", WarningTrimmed, "telmoni: a span past the 1 MiB an export may hold was sent without the attributes ingest drops for their length")
 		}
-		e.warnOnce("trimmed", WarningTrimmed, "telmoni: a span past the 1 MiB an export may hold was sent without the attributes ingest drops for their length")
 	}
 	var failure, problem string
 	var status int
@@ -373,7 +381,7 @@ func remedy(attr, reason string) string {
 	switch reason {
 	case "content":
 		// The page, not a setting to change: which modes keep content is the
-		// platform's to say, and no project can choose one that does yet.
+		// platform's to say, and only the organization's owner switches one.
 		return "the project's content mode decides whether content is kept: " + contentDocs
 	case "unlisted":
 		return "send it as the tag " + tagPrefix + attr + " to keep it"
@@ -493,15 +501,51 @@ type arrayValue struct {
 	Values []anyValue `json:"values"`
 }
 
-// encode is OTLP's ExportTraceServiceRequest; trimmed, without the attributes
-// ingest drops for their length.
-func (e *exporter) encode(spans []sdktrace.ReadOnlySpan, trimmed bool) exportRequest {
+// cut is the span's body without its longest content, as few fields as fit it
+// in an export: a content field, or any past ingest's caps, which on a project
+// that keeps content is content too; false where it sends no content, or fits
+// without all of it.
+func (e *exporter) cut(span sdktrace.ReadOnlySpan) ([]byte, bool) {
+	if !e.keepsContent() {
+		return nil, false
+	}
+	type field struct {
+		key    string
+		length int
+	}
+	var fields []field
+	for _, kv := range span.Attributes() {
+		if key := string(kv.Key); key != attrContentCut && (content[key] || pastCaps(kv)) {
+			length, _ := ingestLength(kv.Value)
+			fields = append(fields, field{key, length})
+		}
+	}
+	sort.SliceStable(fields, func(i, j int) bool { return fields[i].length > fields[j].length })
+	cut := make([]string, 0, len(fields))
+	for _, f := range fields {
+		cut = append(cut, f.key)
+		body, err := json.Marshal(e.encode([]sdktrace.ReadOnlySpan{span}, false, cut))
+		if err == nil && len(body) <= batchMaxBytes {
+			return body, true
+		}
+	}
+	return nil, false
+}
+
+func (e *exporter) keepsContent() bool {
 	e.mu.Lock()
-	keepContent := e.config.CaptureContent && e.mode == "on"
-	e.mu.Unlock()
+	defer e.mu.Unlock()
+	return e.config.CaptureContent && e.mode == "on"
+}
+
+// encode is OTLP's ExportTraceServiceRequest; trimmed, without the attributes
+// ingest drops for their length; cut, without those content fields, named in
+// telmoni.content_cut.
+func (e *exporter) encode(spans []sdktrace.ReadOnlySpan, trimmed bool, cut []string) exportRequest {
+	keepContent := e.keepsContent()
 	encoded := make([]otlpSpan, 0, len(spans))
 	for _, span := range spans {
-		encoded = append(encoded, encodeSpan(span, keepContent, trimmed))
+		encoded = append(encoded, encodeSpan(span, keepContent, trimmed, cut))
 	}
 	return exportRequest{ResourceSpans: []resourceSpans{{
 		Resource: otlpResource{Attributes: e.resource},
@@ -512,17 +556,23 @@ func (e *exporter) encode(spans []sdktrace.ReadOnlySpan, trimmed bool) exportReq
 	}}}
 }
 
-func encodeSpan(span sdktrace.ReadOnlySpan, keepContent, trimmed bool) otlpSpan {
+func encodeSpan(span sdktrace.ReadOnlySpan, keepContent, trimmed bool, cut []string) otlpSpan {
 	attributes := span.Attributes()
-	encoded := make([]keyValue, 0, len(attributes))
+	encoded := make([]keyValue, 0, len(attributes)+1)
 	for _, kv := range attributes {
 		if !keepContent && content[string(kv.Key)] {
+			continue
+		}
+		if slices.Contains(cut, string(kv.Key)) || (len(cut) > 0 && string(kv.Key) == attrContentCut) {
 			continue
 		}
 		if trimmed && pastCaps(kv) {
 			continue
 		}
 		encoded = append(encoded, keyValue{Key: string(kv.Key), Value: encodeValue(kv.Value)})
+	}
+	if len(cut) > 0 {
+		encoded = append(encoded, keyValue{Key: attrContentCut, Value: encodeValue(attribute.StringSliceValue(cut))})
 	}
 	start, end := span.StartTime(), span.EndTime()
 	if end.IsZero() {
@@ -550,25 +600,32 @@ func encodeSpan(span sdktrace.ReadOnlySpan, keepContent, trimmed bool) otlpSpan 
 }
 
 // pastCaps is whether ingest drops an attribute for its length alone: a key past
-// 128 characters, or a value past 1,024 as ingest writes it, a slice as its JSON.
+// 128 characters, or a value past 1,024 as ingest writes it.
 func pastCaps(kv attribute.KeyValue) bool {
 	if utf8.RuneCountInString(string(kv.Key)) > attributeKeyMax {
 		return true
 	}
-	switch kv.Value.Type() {
+	length, ok := ingestLength(kv.Value)
+	return !ok || length > attributeValueMax
+}
+
+// ingestLength is a value's length in characters as ingest writes it, a slice
+// as its JSON; false for one that cannot be written, a slice with NaN in it,
+// which ingest drops whole.
+func ingestLength(v attribute.Value) (int, bool) {
+	switch v.Type() {
 	case attribute.STRING:
-		return utf8.RuneCountInString(kv.Value.AsString()) > attributeValueMax
+		return utf8.RuneCountInString(v.AsString()), true
 	case attribute.BOOLSLICE, attribute.INT64SLICE, attribute.FLOAT64SLICE, attribute.STRINGSLICE:
 		var text bytes.Buffer
 		encoder := json.NewEncoder(&text)
 		encoder.SetEscapeHTML(false)
-		// One with NaN in it, which ingest drops whole, is dropped here too.
-		if err := encoder.Encode(kv.Value.AsInterface()); err != nil {
-			return true
+		if err := encoder.Encode(v.AsInterface()); err != nil {
+			return 0, false
 		}
-		return utf8.RuneCount(bytes.TrimSuffix(text.Bytes(), []byte("\n"))) > attributeValueMax
+		return utf8.RuneCount(bytes.TrimSuffix(text.Bytes(), []byte("\n"))), true
 	}
-	return utf8.RuneCountInString(kv.Value.Emit()) > attributeValueMax
+	return utf8.RuneCountInString(v.Emit()), true
 }
 
 // nanos is OTLP's JSON spelling of a time: its Unix nanoseconds, in decimal,

@@ -300,6 +300,16 @@ export class Exporter {
       // Ingest refuses it whole, its 413 maybe breaking the upload still
       // going out, which reads as no answer and is sent again: halved.
       if (spans.length > 1) return this.#halve(spans);
+      // Content sent goes first, the longest field first, each named.
+      const cut = this.#cut(spans[0]!);
+      if (cut !== undefined) {
+        this.warnOnce(
+          'content-cut',
+          'telmoni: a span past the 1 MiB an export may hold was sent without its longest content, named in telmoni.content_cut',
+          { kind: 'trimmed' },
+        );
+        return this.#send(cut);
+      }
       // A span alone past it goes without what ingest drops for its length,
       // and then fits, unless its own name does not.
       body = this.#body(spans, true);
@@ -324,9 +334,36 @@ export class Exporter {
     return (await this.export(spans.slice(0, half))) && this.export(spans.slice(half));
   }
 
-  #body(spans: readonly ReadableSpan[], trimmed = false): string {
+  /**
+   * The span's body without its longest content, as few fields as fit it in an export: a content field, or any
+   * past ingest's caps, which on a project that keeps content is content too; undefined where it sends no
+   * content, or fits without all of it.
+   */
+  #cut(span: ReadableSpan): string | undefined {
+    if (!this.#keepsContent()) return undefined;
+    const content = Object.entries(span.attributes)
+      .filter(
+        ([key, value]) =>
+          value !== undefined && key !== contract.CONTENT_CUT && (contract.CONTENT.has(key) || pastCaps(key, value)),
+      )
+      .map(([key, value]) => [key, Array.from(asIngestWrites(value!)).length] as const)
+      .sort((a, b) => b[1] - a[1]);
+    const cut: string[] = [];
+    for (const [key] of content) {
+      cut.push(key);
+      const body = this.#body([span], false, cut);
+      if (Buffer.byteLength(body) <= contract.BATCH_MAX_BYTES) return body;
+    }
+    return undefined;
+  }
+
+  #keepsContent(): boolean {
+    return this.#config.captureContent && this.#contentMode === 'on';
+  }
+
+  #body(spans: readonly ReadableSpan[], trimmed = false, cut: readonly string[] = []): string {
     // A lone surrogate is no text ingest reads, and would lose the batch.
-    return JSON.stringify(this.encode(spans, trimmed), (_key, value: unknown) =>
+    return JSON.stringify(this.encode(spans, trimmed, cut), (_key, value: unknown) =>
       typeof value === 'string' ? value.replace(LONE_SURROGATE, '\ufffd') : value,
     );
   }
@@ -387,8 +424,11 @@ export class Exporter {
     return false;
   }
 
-  /** OTLP's `ExportTraceServiceRequest`, in its JSON encoding; `trimmed`, without the attributes ingest drops for their length. */
-  encode(spans: readonly ReadableSpan[], trimmed = false): ExportTraceServiceRequest {
+  /**
+   * OTLP's `ExportTraceServiceRequest`, in its JSON encoding; `trimmed`, without the attributes ingest drops for their
+   * length; `cut`, without those content fields, named in `telmoni.content_cut`.
+   */
+  encode(spans: readonly ReadableSpan[], trimmed = false, cut: readonly string[] = []): ExportTraceServiceRequest {
     return {
       resourceSpans: [
         {
@@ -396,7 +436,7 @@ export class Exporter {
           scopeSpans: [
             {
               scope: { name: contract.SCOPE, version: VERSION },
-              spans: spans.map((span) => this.#span(span, trimmed)),
+              spans: spans.map((span) => this.#span(span, trimmed, cut)),
             },
           ],
         },
@@ -404,15 +444,17 @@ export class Exporter {
     };
   }
 
-  #span(span: ReadableSpan, trimmed = false): OtlpSpan {
-    const keepContent = this.#config.captureContent && this.#contentMode === 'on';
+  #span(span: ReadableSpan, trimmed = false, cut: readonly string[] = []): OtlpSpan {
+    const keepContent = this.#keepsContent();
     const attributes: KeyValue[] = [];
     for (const [key, value] of Object.entries(span.attributes)) {
       if (value === undefined) continue;
       if (!keepContent && contract.CONTENT.has(key)) continue;
+      if (cut.includes(key) || (cut.length > 0 && key === contract.CONTENT_CUT)) continue;
       if (trimmed && pastCaps(key, value)) continue;
       attributes.push(attribute(key, value));
     }
+    if (cut.length > 0) attributes.push(attribute(contract.CONTENT_CUT, [...cut]));
     const spanContext = span.spanContext();
     const parent = span.parentSpanContext;
     const start = span.startTime;
@@ -495,21 +537,25 @@ export class Exporter {
   }
 }
 
+/** An attribute's value as ingest writes it, a list as its JSON. */
+function asIngestWrites(value: AttributeValue): string {
+  return Array.isArray(value)
+    ? JSON.stringify(value.filter((item) => item !== null && item !== undefined))
+    : String(value);
+}
+
 /**
  * Whether ingest drops an attribute for its length alone: a key past 128 characters,
- * or a value past 1,024 as ingest writes it, a list as its JSON.
+ * or a value past 1,024 as ingest writes it.
  */
 function pastCaps(key: string, value: AttributeValue): boolean {
   if (Array.from(key).length > contract.ATTRIBUTE_KEY_MAX) return true;
-  const text = Array.isArray(value)
-    ? JSON.stringify(value.filter((item) => item !== null && item !== undefined))
-    : String(value);
-  return Array.from(text).length > contract.ATTRIBUTE_VALUE_MAX;
+  return Array.from(asIngestWrites(value)).length > contract.ATTRIBUTE_VALUE_MAX;
 }
 
 function remedy(attributeName: string, reason: string): string {
   // The page, not a setting to change: which modes keep content is the
-  // platform's to say, and no project can choose one that does yet.
+  // platform's to say, and only the organization's owner switches one.
   if (reason === 'content') return `the project's content mode decides whether content is kept: ${CONTENT_DOCS}`;
   if (reason === 'unlisted') return `send it as the tag ${contract.TAG_PREFIX}${attributeName} to keep it`;
   if (reason === 'over_cap') return 'shorten it to keep it';

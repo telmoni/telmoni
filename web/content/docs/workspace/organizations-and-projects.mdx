@@ -254,11 +254,18 @@ project's **Settings** page (`/{organization}/{project}/settings`).
 
 - **Off**, the mode every project starts in, keeps none of it: each piece of
   content is dropped as its span arrives, and the span is kept without it.
-- **On** is not available yet. The Owner sees it on the page, closed.
+- **On** keeps it as it arrives, wherever the code asks the SDK to send it
+  too: sealed under a key of the project's own, in Postgres alone, for as long
+  as its span. A failure's message and stack trace are not among it, since no
+  SDK sends them, and the console does not show content yet. Turning it back
+  to **Off** keeps what was sent until its span's retention ends, and takes in
+  no more.
 - Only the organization's **Owner** can change a project's mode, because what
   a project keeps changes what the organization is responsible for. Admins and
   Members see the mode and cannot change it.
-- Every change is recorded in the [audit log](/docs/workspace/audit-log).
+- Every change is recorded in the [audit log](/docs/workspace/audit-log), and
+  so is each read of the content, by a person or an export, before it is
+  shown. The console agent reads none of it, in any mode.
 
 Ingest reads the mode on every export, so it acts at the door, as the span
 arrives. The project's **Privacy** page shows the mode beside the [field

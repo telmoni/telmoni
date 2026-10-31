@@ -1,16 +1,17 @@
 ---
 title: "Field inventory"
-description: "Every attribute Telmoni reads from a span, at the pinned commit of the GenAI semantic conventions: where it is read, what becomes of it, and the content mode it needs. Anything else is dropped at the door."
+description: "Every attribute Telmoni reads from a span, at the pinned commit of the GenAI semantic conventions: where it is read, what becomes of it, and the content mode it needs. Text under any other name is content."
 ---
 
-Telmoni keeps metadata about an agent's runs and drops everything else at the
-door. This page is the whole list of what ingest reads from a span and from
-its resource, and what becomes of each: the column it fills, the `attributes`
-it is kept in under its own name, or the drop. **Any text, or array, under a
-name this page does not list is dropped in every content mode**, the span kept
-and the attribute named in the answer — content arrives under names no
-convention gave it, so what is kept is this list, not a guess at what is
-content.
+Telmoni keeps metadata about an agent's runs, and content only where a
+project's content mode is `on`. This page is the whole list of what ingest
+reads from a span and from its resource, and what becomes of each: the column
+it fills, the `attributes` it is kept in under its own name, or the drop.
+**Any text, array or map under a name this page does not list is content**:
+dropped on a project whose mode is `off`, the span kept and the attribute
+named in the answer, and kept under its own name on one whose mode is `on` —
+content arrives under names no convention gave it, so what is kept as metadata
+is this list, not a guess at what is content.
 
 The names are the [GenAI semantic conventions](https://github.com/open-telemetry/semantic-conventions-genai)'
 at commit `6fd0d763a092db245a54104fc1124031eb3c51d2`, pinned on purpose: the
@@ -36,9 +37,7 @@ shows the same list on a project's **Privacy** page, served from the same code.
 - **Kept as**: the column of `spans` it fills, `attributes` under its own
   name, or what the drop does with it.
 - **Needs**: the project [content mode](/docs/api/ingest#what-is-dropped-at-the-door)
-  it takes to keep it. Metadata is kept in every mode. Content would need `on`,
-  but no project can be switched from `off` today, so content is dropped in
-  every mode.
+  it takes to keep it. Metadata is kept in every mode, content only in `on`.
 - **Rule**: its cap or format. A span whose field breaks its rule is refused
   whole; an attribute past its cap is dropped and the span kept. The
   resource's attributes are copied onto every span of its export, so they
@@ -137,32 +136,36 @@ them.
 
 ## Content
 
-Content is what a person or a model wrote, and the people a span names. Each of
-these is dropped at the door in every content mode, the span kept and the field
-named in the answer, and nothing of it reaches a store: every project's mode is
-`off`, and none can be switched to another today.
+Content is what a person or a model wrote, and the people a span names. On a
+project whose content mode is `off`, each of these is dropped at the door, the
+span kept and the field named in the answer, and nothing of it reaches a store.
+On one whose mode is `on`, each is kept as it arrives, sealed under a key of
+the project's own in Postgres alone, never in ClickHouse, for as long as its
+span: free of an attribute's 1,024 characters, held only by an export's 1 MiB,
+and counted in no span's units.
 
 | Attribute | On | Kept as | Needs | Rule |
 |---|---|---|---|---|
-| `gen_ai.input.messages` | any span | dropped in every mode, the span kept | on | content: what a person or a model wrote |
-| `gen_ai.output.messages` | any span | dropped in every mode, the span kept | on | content: what a person or a model wrote |
-| `gen_ai.system_instructions` | any span | dropped in every mode, the span kept | on | content: what a person or a model wrote |
-| `gen_ai.tool.definitions` | any span | dropped in every mode, the span kept | on | content: what a person or a model wrote |
-| `gen_ai.tool.call.arguments` | any span | dropped in every mode, the span kept | on | content: what a person or a model wrote |
-| `gen_ai.tool.call.result` | any span | dropped in every mode, the span kept | on | content: what a person or a model wrote |
-| `gen_ai.retrieval.query.text` | any span | dropped in every mode, the span kept | on | content: what a person or a model wrote |
-| `gen_ai.retrieval.documents` | any span | dropped in every mode, the span kept | on | content: what a person or a model wrote |
-| `gen_ai.memory.query.text` | any span | dropped in every mode, the span kept | on | content: what a person or a model wrote |
-| `gen_ai.memory.records` | any span | dropped in every mode, the span kept | on | content: what a person or a model wrote |
-| `gen_ai.prompt.variable` | any span | dropped in every mode, the span kept | on | content: what a person or a model wrote |
-| `user.email` | any span | dropped in every mode, the span kept | on | names a person: content, whatever else the span carries |
-| `user.full_name` | any span | dropped in every mode, the span kept | on | names a person: content, whatever else the span carries |
-| `user.name` | any span | dropped in every mode, the span kept | on | names a person: content, whatever else the span carries |
+| `gen_ai.input.messages` | any span | dropped where the mode is `off`, the span kept; kept, sealed, where it is `on` | on | content: what a person or a model wrote |
+| `gen_ai.output.messages` | any span | dropped where the mode is `off`, the span kept; kept, sealed, where it is `on` | on | content: what a person or a model wrote |
+| `gen_ai.system_instructions` | any span | dropped where the mode is `off`, the span kept; kept, sealed, where it is `on` | on | content: what a person or a model wrote |
+| `gen_ai.tool.definitions` | any span | dropped where the mode is `off`, the span kept; kept, sealed, where it is `on` | on | content: what a person or a model wrote |
+| `gen_ai.tool.call.arguments` | any span | dropped where the mode is `off`, the span kept; kept, sealed, where it is `on` | on | content: what a person or a model wrote |
+| `gen_ai.tool.call.result` | any span | dropped where the mode is `off`, the span kept; kept, sealed, where it is `on` | on | content: what a person or a model wrote |
+| `gen_ai.retrieval.query.text` | any span | dropped where the mode is `off`, the span kept; kept, sealed, where it is `on` | on | content: what a person or a model wrote |
+| `gen_ai.retrieval.documents` | any span | dropped where the mode is `off`, the span kept; kept, sealed, where it is `on` | on | content: what a person or a model wrote |
+| `gen_ai.memory.query.text` | any span | dropped where the mode is `off`, the span kept; kept, sealed, where it is `on` | on | content: what a person or a model wrote |
+| `gen_ai.memory.records` | any span | dropped where the mode is `off`, the span kept; kept, sealed, where it is `on` | on | content: what a person or a model wrote |
+| `gen_ai.prompt.variable` | any span | dropped where the mode is `off`, the span kept; kept, sealed, where it is `on` | on | content: what a person or a model wrote |
+| `user.email` | any span | dropped where the mode is `off`, the span kept; kept, sealed, where it is `on` | on | names a person: content, whatever else the span carries |
+| `user.full_name` | any span | dropped where the mode is `off`, the span kept; kept, sealed, where it is `on` | on | names a person: content, whatever else the span carries |
+| `user.name` | any span | dropped where the mode is `off`, the span kept; kept, sealed, where it is `on` | on | names a person: content, whatever else the span carries |
+| `telmoni.content_cut` | any span | dropped where the mode is `off`, the span kept; kept, sealed, where it is `on` | on | the content fields an SDK cut, the longest first, so its span fits an export |
 
 ## Everything else
 
 | Attribute | On | Kept as | Needs | Rule |
 |---|---|---|---|---|
 | any other number or boolean | any span | `attributes`, under its own name, except a name under `telmoni.`, which is dropped as `unlisted` | any | a measurement no person writes; on the resource, dropped without a word |
-| any other text or array | any span | dropped in every mode, the span kept and the attribute named in the answer as `unlisted` | any | content arrives under names no convention gave it; on the resource, dropped without a word |
+| any other text, array or map | any span | dropped where the mode is `off`, the span kept and the attribute named in the answer as `unlisted`; kept as content under its own name where it is `on` | on | content arrives under names no convention gave it; on the resource, dropped without a word |
 | the span's events and status message | any span | never kept | any | where an exception writes its message and stack trace |

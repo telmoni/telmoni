@@ -14,12 +14,16 @@ pub enum AuditAction {
     Updated,
     /// Resource removed (DELETE).
     Deleted,
-    /// A copy of the resource's data left the platform. ⚠ **The one READ this
-    /// vocabulary spells**: reads are not audited as a rule, but an
+    /// A copy of the resource's data left the platform. ⚠ **One of the two
+    /// reads this vocabulary spells**: reads are not audited as a rule, but an
     /// organization's whole record leaving the building is exactly what a leak
     /// investigation must find. The row records that it happened, never what
     /// was in it.
     Exported,
+    /// A project's content was opened, by a person or an export: the other
+    /// read, since content is what a person or a model wrote. The row names
+    /// the traces, never what they hold.
+    Viewed,
 }
 
 crate::wire_enum!(AuditAction {
@@ -27,6 +31,7 @@ crate::wire_enum!(AuditAction {
     Updated => "updated",
     Deleted => "deleted",
     Exported => "exported",
+    Viewed => "viewed",
 });
 
 #[cfg(test)]

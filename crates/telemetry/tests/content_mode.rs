@@ -234,14 +234,17 @@ async fn every_role_reads_the_mode_and_the_modes_offered(pool: PgPool) {
     for user in [OWNER, ADMIN, MEMBER] {
         let (status, body) = p.send(p.request("GET", user, None)).await;
         assert_eq!(status, StatusCode::OK, "{user} could not read the mode");
-        assert_eq!(body, json!({ "content_mode": "off", "offered": ["off"] }));
+        assert_eq!(
+            body,
+            json!({ "content_mode": "off", "offered": ["off", "on"] })
+        );
     }
 
     seed(&pool, &p.project, &p.organization, ContentMode::On).await;
     let (_, body) = p.send(p.request("GET", MEMBER, None)).await;
     assert_eq!(
         body,
-        json!({ "content_mode": "on", "offered": ["off"] }),
+        json!({ "content_mode": "on", "offered": ["off", "on"] }),
         "the read answered the default over the project's own row"
     );
 }
@@ -255,7 +258,10 @@ async fn the_owner_switches_it_and_the_change_is_recorded(pool: PgPool) {
 
     let (status, body) = p.set(OWNER, "off").await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body, json!({ "content_mode": "off", "offered": ["off"] }));
+    assert_eq!(
+        body,
+        json!({ "content_mode": "off", "offered": ["off", "on"] })
+    );
     assert_eq!(
         row(&pool, &p.project).await,
         Some((p.organization.to_string(), "off".to_string()))
@@ -279,7 +285,10 @@ async fn a_save_that_changes_nothing_writes_and_records_nothing(pool: PgPool) {
     let p = project(&pool).await;
     let (status, body) = p.set(OWNER, "off").await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body, json!({ "content_mode": "off", "offered": ["off"] }));
+    assert_eq!(
+        body,
+        json!({ "content_mode": "off", "offered": ["off", "on"] })
+    );
     assert_eq!(row(&pool, &p.project).await, None);
 
     seed(&pool, &p.project, &p.organization, ContentMode::Off).await;
@@ -312,20 +321,24 @@ async fn nobody_below_the_owner_changes_it(pool: PgPool) {
     );
 }
 
-/// ⚠ `off` is the one mode offered until a table keeps content: `on` is
-/// refused, to the owner too, and nothing moves.
+/// ⚠ `on` is offered now that ingest keeps content: the owner turns it on
+/// and the change is recorded, from `off`.
 #[sqlx::test]
-async fn a_mode_not_offered_is_refused(pool: PgPool) {
+async fn the_owner_turns_content_on(pool: PgPool) {
     let p = project(&pool).await;
     let (status, body) = p.set(OWNER, "on").await;
-    assert_eq!(status, StatusCode::CONFLICT, "on was taken");
-    assert_eq!(body["type"], "/errors/auth/conflict");
-    assert_eq!(row(&pool, &p.project).await, None);
-    assert!(audit(&pool, &p.organization).await.is_empty());
+    assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(
-        p.auth.read_again(),
-        0,
-        "a mode not offered waited on a lock"
+        body,
+        json!({ "content_mode": "on", "offered": ["off", "on"] })
+    );
+    assert_eq!(
+        row(&pool, &p.project).await,
+        Some((p.organization.to_string(), "on".to_string()))
+    );
+    assert_eq!(
+        audit(&pool, &p.organization).await,
+        [switched(&p.project, "off", "on")]
     );
 }
 
@@ -458,9 +471,8 @@ async fn a_change_that_cannot_be_recorded_is_not_made(pool: PgPool) {
     );
 }
 
-/// Somebody below the owner, and a mode not offered, are refused before the
-/// organization's chain lock is taken: refused at once, with the lock held
-/// elsewhere the whole time.
+/// Somebody below the owner is refused before the organization's chain lock
+/// is taken: refused at once, with the lock held elsewhere the whole time.
 #[sqlx::test]
 async fn refusals_come_before_the_chain_lock(pool: PgPool) {
     let p = project(&pool).await;
@@ -468,7 +480,6 @@ async fn refusals_come_before_the_chain_lock(pool: PgPool) {
     for (user, mode, refused) in [
         (ADMIN, "off", StatusCode::FORBIDDEN),
         (MEMBER, "off", StatusCode::FORBIDDEN),
-        (OWNER, "on", StatusCode::CONFLICT),
     ] {
         let answer = tokio::time::timeout(Duration::from_secs(1), p.set(user, mode))
             .await

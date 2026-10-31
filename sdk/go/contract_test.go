@@ -793,6 +793,39 @@ func TestASpanAlonePastItGoesWithoutWhatIngestDropsForItsLength(t *testing.T) {
 	expectFields(t, h, map[string]any{"kind": "trimmed"})
 }
 
+// With content sent, a span alone past it goes without its longest content
+// fields, as few as fit it, each named in telmoni.content_cut.
+func TestASpanAlonePastItGoesWithoutItsLongestContentNamed(t *testing.T) {
+	config := testConfig()
+	config.CaptureContent = true
+	h := newHarness(t, config, newFakeTransport(t, contentOn(), contentOn()))
+	telmoni.ExportSpans(h.client, bigSpans(1))
+	span := tracetest.SpanStubFromReadOnlySpan(bigSpans(1)[0])
+	span.Attributes = append(span.Attributes,
+		attribute.String("gen_ai.input.messages", strings.Repeat("i", 600_000)),
+		attribute.String("gen_ai.tool.call.result", strings.Repeat("r", 700_000)),
+		attribute.String("gen_ai.output.messages", strings.Repeat("o", 2_000)),
+		attribute.String("app.notes", strings.Repeat("n", 800_000)),
+		attribute.StringSlice("telmoni.content_cut", []string{"set by the code"}),
+	)
+	telmoni.ExportSpans(h.client, []sdktrace.ReadOnlySpan{span.Snapshot()})
+	spans := h.transport.spans(t)
+	sent := attributesOf(t, spans[len(spans)-1])
+	keys := slices.Sorted(maps.Keys(sent))
+	want := []string{"app.kept", "gen_ai.input.messages", "gen_ai.output.messages", "telmoni.content_cut", "telmoni.tag.big"}
+	if !slices.Equal(keys, want) {
+		t.Errorf("sent with %q, want %q", keys, want)
+	}
+	if got := fmt.Sprint(sent["telmoni.content_cut"]); !strings.Contains(got, "app.notes") || !strings.Contains(got, "gen_ai.tool.call.result") || strings.Contains(got, "input") || strings.Contains(got, "set by") {
+		t.Errorf("telmoni.content_cut is %s", got)
+	}
+	warned := []string{"telmoni: a span past the 1 MiB an export may hold was sent without its longest content, named in telmoni.content_cut"}
+	if got := h.logs.warnings(); !slices.Equal(got, warned) {
+		t.Errorf("warnings %q, want %q", got, warned)
+	}
+	expectFields(t, h, map[string]any{"kind": "trimmed"})
+}
+
 func TestASpanWhoseOwnNamePassesItIsDroppedWithOneWarning(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
 	named := tracetest.SpanStub{

@@ -45,14 +45,19 @@ impl std::fmt::Debug for UserIdStorage {
     }
 }
 
-/// Each project's storage, once read: a process asks the key service once
-/// per project. Never emptied: a project's key never changes while its row
-/// stands, and a purged project's entry hashes nothing again.
-#[derive(Default)]
-pub struct Cache(RwLock<HashMap<ProjectId, UserIdStorage>>);
+/// Each project's key, once opened: a process asks the key service once per
+/// project. Never emptied: a project's key never changes while its row
+/// stands, and a purged project's entry opens nothing again.
+pub struct Cache<T = UserIdStorage>(RwLock<HashMap<ProjectId, T>>);
 
-impl Cache {
-    fn get(&self, project_id: &ProjectId) -> Option<UserIdStorage> {
+impl<T> Default for Cache<T> {
+    fn default() -> Self {
+        Self(RwLock::default())
+    }
+}
+
+impl<T: Clone> Cache<T> {
+    pub(crate) fn get(&self, project_id: &ProjectId) -> Option<T> {
         self.0
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -60,7 +65,7 @@ impl Cache {
             .cloned()
     }
 
-    fn put(&self, project_id: ProjectId, storage: UserIdStorage) {
+    pub(crate) fn put(&self, project_id: ProjectId, storage: T) {
         self.0
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -164,7 +169,7 @@ async fn seal_new_key(state: &AppState, aad: &[u8]) -> Result<SealedHashingKey, 
         .kek
         .wrap(&state.http, &dek, aad)
         .await
-        .map_err(|e| kek_refused(&e))?;
+        .map_err(|e| kek_refused(&e, "hashing key"))?;
     let material = state.vault.new_dek()?;
     let secret = Redacted::from(hex_lower(material.as_bytes()));
     let Sealed { ciphertext, nonce } = state.vault.seal(&dek, &secret, aad)?;
@@ -187,7 +192,7 @@ async fn open_key(
         .kek
         .unwrap_dek(&state.http, &sealed.wrapped_dek, aad, sealed.key_version)
         .await
-        .map_err(|e| kek_refused(&e))?;
+        .map_err(|e| kek_refused(&e, "hashing key"))?;
     let secret = state.vault.open(
         &dek,
         telmoni_shared::envelope::SealedRef {
@@ -203,19 +208,19 @@ async fn open_key(
 }
 
 /// The KEK did not give a key back: an outage to retry, or a row that is
-/// broken, which retrying will not mend.
-fn kek_refused(error: &KekError) -> TelmoniError {
+/// broken, which retrying will not mend. `what` names the key, as a log reads it.
+pub(crate) fn kek_refused(error: &KekError, what: &str) -> TelmoniError {
     match error {
         KekError::Unavailable(_) => {
             tracing::warn!(error = %error, "telemetry: the key service did not answer");
-            TelemetryError::StoreUnavailable(
-                "the key service that seals a project's hashing key did not answer".into(),
-            )
+            TelemetryError::StoreUnavailable(format!(
+                "the key service that seals a project's {what} did not answer"
+            ))
             .into()
         }
         KekError::Invalid(_) => {
-            tracing::error!(error = %error, "telemetry: a project's hashing key will not open");
-            TelmoniError::Internal("telemetry: a project's hashing key will not open".into())
+            tracing::error!(error = %error, key = what, "telemetry: a project's key will not open");
+            TelmoniError::Internal(format!("telemetry: a project's {what} will not open"))
         }
     }
 }

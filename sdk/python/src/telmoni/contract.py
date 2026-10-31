@@ -89,6 +89,8 @@ OUTPUT_MESSAGES = "gen_ai.output.messages"
 SYSTEM_INSTRUCTIONS = "gen_ai.system_instructions"
 TOOL_CALL_ARGUMENTS = "gen_ai.tool.call.arguments"
 TOOL_CALL_RESULT = "gen_ai.tool.call.result"
+CONTENT_CUT = "telmoni.content_cut"
+"""The content fields the exporter cut so a span fits an export, by name."""
 
 CONTENT = frozenset(
     {
@@ -106,6 +108,7 @@ CONTENT = frozenset(
         "user.email",
         "user.full_name",
         "user.name",
+        CONTENT_CUT,
     }
 )
 """What the exporter takes off a span unless asked and the project allows."""

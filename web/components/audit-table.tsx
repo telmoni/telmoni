@@ -68,7 +68,7 @@ function EventDetails({ event }: { event: AuditEvent }) {
   if (event.requestId) fields.push(["Request", event.requestId]);
   if (event.rowHash) fields.push(["Row hash", event.rowHash]);
   if (event.metadata !== null && event.metadata !== undefined) {
-    fields.push(["Changed", stableJson(event.metadata)]);
+    fields.push(["Metadata", stableJson(event.metadata)]);
   }
   if (fields.length === 0) return null;
 

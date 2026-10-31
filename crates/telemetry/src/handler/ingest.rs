@@ -5,8 +5,10 @@
 //! refusal reading it out first; the body, no further than its cap; its
 //! digest claimed, so a retry with the same bytes is answered rather than
 //! written again; then the spans read by the contract, their content dropped
-//! and their tags held to the cardinality cap ([`cardinality`]), and the rows
-//! written once ClickHouse holds them, marked deleted again if their project
+//! or kept as the project's mode says, and their tags held to the cardinality
+//! cap ([`cardinality`]), and the rows
+//! written once ClickHouse holds them, the content of a project that keeps it
+//! sealed in Postgres after them ([`content`]), marked deleted again if their project
 //! was deleted meanwhile; and the organization's open consoles told of them
 //! ([`crate::live`]).
 //! Every answer is OTLP's, in the request's encoding: the response on `200`,
@@ -42,7 +44,7 @@ use crate::ingest::claims::{self, Claim, Guard};
 use crate::ingest::decode::{self, DecodeError, Encoding};
 use crate::ingest::report::Report;
 use crate::live;
-use crate::{AppState, db, hashing};
+use crate::{AppState, content, db, hashing};
 
 /// The header every `200` carries: the project's content mode, so an SDK
 /// learns it from its first export.
@@ -215,10 +217,18 @@ async fn write(
     // Made and sealed on the project's first export, which also files its
     // settings row, so the purges find every project with spans.
     let storage = hashing::storage_for(state, key).await?;
+    let mut tx = project_scope(&state.db, &key.project_id).await?;
+    let content_mode = db::content_mode(&mut tx, &key.project_id).await?;
+    tx.commit().await?;
     let received_at = Utc::now().trunc_subsecs(6);
-    let mut batch = batch::read(&request, &key.project_id, received_at, sender, &|raw| {
-        storage.store(raw)
-    })
+    let mut batch = batch::read(
+        &request,
+        &key.project_id,
+        received_at,
+        sender,
+        &|raw| storage.store(raw),
+        content_mode == ContentMode::On,
+    )
     .map_err(batch_error)?;
     cardinality::hold(
         &state.redis,
@@ -229,15 +239,21 @@ async fn write(
     )
     .await;
 
-    let mut tx = project_scope(&state.db, &key.project_id).await?;
-    let content_mode = db::content_mode(&mut tx, &key.project_id).await?;
-    tx.commit().await?;
-
     state
         .store
         .insert_spans_once(&batch.rows, token)
         .await
         .map_err(store_failed)?;
+    // After the spans, so no content outlives or precedes its span: a write
+    // that fails lets the claim go, and the retry's spans land once under the
+    // token while its content is kept, each field once.
+    content::keep(
+        state,
+        &key.project_id,
+        received_at,
+        std::mem::take(&mut batch.content),
+    )
+    .await?;
 
     tracing::debug!(
         project_id = %key.project_id,
@@ -265,7 +281,7 @@ async fn write(
 /// The answer to an export sent again: its own bytes, the first copy's by
 /// their digest, read by the contract again under the mode the first answer
 /// named, its tags held to the cap again, which keeps the values its first
-/// copy did. Nothing is kept, so no user id is hashed.
+/// copy did. Nothing is kept, so no user id is hashed and no content sealed.
 async fn answer_again(
     state: &AppState,
     encoding: Encoding,
@@ -275,8 +291,15 @@ async fn answer_again(
 ) -> Result<Response, TelmoniError> {
     let request = decode::request(bytes, encoding).map_err(decode_error)?;
     let now = Utc::now();
-    let mut batch =
-        batch::read(&request, project_id, now, None, &|_| String::new()).map_err(batch_error)?;
+    let mut batch = batch::read(
+        &request,
+        project_id,
+        now,
+        None,
+        &|_| String::new(),
+        content_mode == ContentMode::On,
+    )
+    .map_err(batch_error)?;
     cardinality::hold(
         &state.redis,
         project_id,

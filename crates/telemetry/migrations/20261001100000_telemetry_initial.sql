@@ -48,6 +48,11 @@ CREATE TABLE telemetry.project_settings (
     hashing_key_nonce       BYTEA,
     hashing_key_wrapped_dek BYTEA,
     hashing_key_version     SMALLINT,
+    -- The key the project's content is sealed under (`plain_content`): a data
+    -- key of the row's own, wrapped under TELEMETRY_KEK, made with the first
+    -- content the project keeps.
+    content_key_wrapped_dek BYTEA,
+    content_key_version     SMALLINT,
     -- The saved layout its sessions and traces open in, which stands until
     -- it is deleted and the console's own default holds again (the key,
     -- below the views); none for the default.
@@ -58,7 +63,9 @@ CREATE TABLE telemetry.project_settings (
     CONSTRAINT project_settings_hashing_key_check CHECK (
         (hashing_key_ciphertext IS NULL) = (hashing_key_nonce IS NULL)
         AND (hashing_key_ciphertext IS NULL) = (hashing_key_wrapped_dek IS NULL)
-        AND (hashing_key_ciphertext IS NULL) = (hashing_key_version IS NULL))
+        AND (hashing_key_ciphertext IS NULL) = (hashing_key_version IS NULL)),
+    CONSTRAINT project_settings_content_key_check CHECK (
+        (content_key_wrapped_dek IS NULL) = (content_key_version IS NULL))
 );
 
 -- The rule for every table here: one the organization's purge deletes by
@@ -463,3 +470,69 @@ CREATE TABLE telemetry.model_prices (
         AND cache_read >= 0 AND cache_read < 'Infinity'
         AND cache_write >= 0 AND cache_write < 'Infinity')
 );
+
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 9. CONTENT
+-- ══════════════════════════════════════════════════════════════════════════════
+-- What a project whose content mode is `on` keeps of its spans' content, a
+-- row a field, each sealed under the project's content key with the span's id
+-- and the field's name as associated data. ClickHouse holds none of it. A row
+-- follows its span: kept as long as the span's day, by `received_at`, and
+-- gone with its project. Filed under the project alone, as a view is: the
+-- organization's purge finds its projects by their settings rows.
+CREATE TABLE telemetry.plain_content (
+    project_id  TEXT        NOT NULL,
+    trace_id    TEXT        NOT NULL,
+    span_id     TEXT        NOT NULL,
+    field       TEXT        NOT NULL,
+    received_at TIMESTAMPTZ NOT NULL,
+    ciphertext  BYTEA       NOT NULL,
+    nonce       BYTEA       NOT NULL,
+    -- The field's length in bytes as it arrived, counted on `content_held`.
+    bytes       INTEGER     NOT NULL,
+    PRIMARY KEY (project_id, trace_id, span_id, field),
+    CONSTRAINT plain_content_bytes_check CHECK (bytes >= 0)
+);
+
+-- The nightly purge deletes by it.
+CREATE INDEX plain_content_received_idx ON telemetry.plain_content (received_at);
+
+ALTER TABLE telemetry.plain_content ENABLE ROW LEVEL SECURITY;
+ALTER TABLE telemetry.plain_content FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY tenant_isolation ON telemetry.plain_content
+    USING      (project_id = current_setting('app.project_id', true))
+    WITH CHECK (project_id = current_setting('app.project_id', true));
+
+CREATE POLICY maintenance_access ON telemetry.plain_content
+    TO telemetry_maintenance
+    USING      (current_user = 'telemetry_maintenance')
+    WITH CHECK (current_user = 'telemetry_maintenance');
+
+-- The purges delete a project's content, and a transfer counts it.
+GRANT SELECT, DELETE ON telemetry.plain_content TO telemetry_maintenance;
+
+-- The bytes of content an organization's projects keep, so its ceiling is read
+-- without a scan: added to as content is kept, taken from as it goes.
+CREATE TABLE telemetry.content_held (
+    organization_id TEXT   PRIMARY KEY,
+    bytes           BIGINT NOT NULL DEFAULT 0,
+    CONSTRAINT content_held_bytes_check CHECK (bytes >= 0)
+);
+
+ALTER TABLE telemetry.content_held ENABLE ROW LEVEL SECURITY;
+ALTER TABLE telemetry.content_held FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY tenant_isolation ON telemetry.content_held
+    USING      (organization_id = current_setting('app.organization_id', true))
+    WITH CHECK (organization_id = current_setting('app.organization_id', true));
+
+CREATE POLICY maintenance_access ON telemetry.content_held
+    TO telemetry_maintenance
+    USING      (current_user = 'telemetry_maintenance')
+    WITH CHECK (current_user = 'telemetry_maintenance');
+
+-- The purges take a project's bytes off and delete an organization's row; a
+-- transfer moves a project's bytes to the organization that now holds it.
+GRANT SELECT, INSERT, UPDATE, DELETE ON telemetry.content_held TO telemetry_maintenance;

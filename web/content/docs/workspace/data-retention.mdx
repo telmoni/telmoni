@@ -18,8 +18,9 @@ Telemetry is kept only while its project is active.
 | Spans: every run, step, model call and tool call, as metadata | 360 days after a span arrives | `telmoni-server rotate` drops each day of spans once every span in it is older |
 | Hourly totals: spans, units, tokens, the cost calls reported and durations by project, agent, kind, model, provider, tool, status, environment and release, which name no user and no tag | 13 months | `rotate` drops each month of totals once it is older |
 | A deleted project's spans and totals | Until the project is deleted | Marked deleted the moment the project goes, and gone from every read within moments, as the store applies the mark; `rotate` rewrites them off the disk that night |
+| The content a project whose content mode is `on` keeps: each field of a span, sealed under the project's own key, in Postgres | As long as its span: 360 days after it arrives | `rotate` deletes it with its span's day; purged with the project |
 | The claim on an export's bytes, which answers a retry with the first answer rather than writing twice | 1 hour | Expires |
-| A project's telemetry settings: its content mode, and the key its end-user ids are hashed under | While the project exists | Purged with the project |
+| A project's telemetry settings: its content mode, the key its end-user ids are hashed under, and the key its content is sealed under | While the project exists | Purged with the project |
 | A project's saved views of its traces, sessions and users: each one's name, filters, sort, window and columns | Until an Owner or Admin deletes it, or the project goes | Purged with the project |
 | A project's saved layouts of its sessions and traces: each one's name, options and columns, and the layout the project opens in | Until an Owner or Admin deletes it, or the project goes | Purged with the project |
 | A project's [alerts](/docs/workspace/alerts): each one's definition, the connectors it tells and its last value | Until a member deletes it, or the project goes | Deleted with its incidents and its maintenance windows, or purged with the project |
@@ -27,10 +28,10 @@ Telemetry is kept only while its project is active.
 | Maintenance windows, kept after they end as the record of who muted what | While their alert, or their project, exists | Deleted with it |
 
 Content — prompts, completions, system instructions, tool inputs and outputs,
-retrieved documents, error messages and every attribute that names a person —
-is kept for no time at all: it is dropped at the door in the one content mode
-offered today, as the [ingest page](/docs/api/ingest#what-is-dropped-at-the-door)
-lists. An end user's id is stored only as a keyed hash
+retrieved documents and every attribute that names a person — is kept for no
+time at all on a project whose content mode is `off`, the default: it is
+dropped at the door, as the [ingest page](/docs/api/ingest#what-is-dropped-at-the-door)
+lists. On one whose mode is `on`, it is kept as long as its span, above. An end user's id is stored only as a keyed hash
 ([Users](/docs/workspace/users)).
 
 ## The organization's records

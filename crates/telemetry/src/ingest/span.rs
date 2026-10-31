@@ -34,6 +34,8 @@ pub struct Context<'a> {
     pub resource: &'a [(String, String)],
     /// What a `user_id` is stored as: the project's own hash of it.
     pub store_user_id: &'a dyn Fn(&str) -> String,
+    /// Whether the project keeps content: its mode is `on`.
+    pub keep_content: bool,
 }
 
 /// Why a span was refused whole.
@@ -202,14 +204,18 @@ fn resource_text(value: Option<&Value>, max: usize) -> String {
         .map_or_else(String::new, Cow::into_owned)
 }
 
-/// The span as a row, or the refusal; every attribute dropped on the way is
-/// pushed to `dropped`.
+/// The span as a row and the content it keeps, each field by its name, or the
+/// refusal; every attribute dropped on the way is pushed to `dropped`.
 ///
 /// # Errors
 ///
 /// The span broke a field's rule: it is refused whole, and nothing of it is
 /// kept.
-pub fn map(span: &Span, context: &Context<'_>, dropped: &mut Drops) -> Result<SpanRow, Refused> {
+pub fn map(
+    span: &Span,
+    context: &Context<'_>,
+    dropped: &mut Drops,
+) -> Result<(SpanRow, Vec<(String, String)>), Refused> {
     let span_id = hex(&span.span_id);
     let refuse = |reason: Refusal| Refused {
         span_id: span_id.clone(),
@@ -231,6 +237,7 @@ pub fn map(span: &Span, context: &Context<'_>, dropped: &mut Drops) -> Result<Sp
     attributes.extend_from_slice(context.resource);
     let mut fields = Fields {
         attributes,
+        keeps_content: context.keep_content,
         ..Fields::default()
     };
     for kv in &span.attributes {
@@ -322,7 +329,7 @@ pub fn map(span: &Span, context: &Context<'_>, dropped: &mut Drops) -> Result<Sp
         attributes: fields.attributes,
     };
     row.units = units_of(&row);
-    Ok(row)
+    Ok((row, fields.content))
 }
 
 /// What a row counts against its plan: one unit per started KiB of its text
@@ -377,6 +384,8 @@ struct Fields {
     sample_rate: Option<f64>,
     tags: Vec<(String, String)>,
     attributes: Vec<(String, String)>,
+    keeps_content: bool,
+    content: Vec<(String, String)>,
 }
 
 impl Fields {
@@ -497,10 +506,15 @@ impl Fields {
                     contract::SESSION_ID,
                 )?);
             }
-            // ⚠ Dropped in every mode: no table keeps content yet, and the
-            // switch offers no mode but `off` until one does. The answer
-            // names the mode, so a sender reads why.
-            _ if contract::is_content(key) => drop_attribute(key, DropReason::Content),
+            // ⚠ Dropped unless the project keeps content; the answer names
+            // the mode, so a sender reads why.
+            _ if contract::is_content(key) => {
+                if self.keeps_content {
+                    self.keep_content(key, value, &mut drop_attribute);
+                } else {
+                    drop_attribute(key, DropReason::Content);
+                }
+            }
             _ if key.starts_with("telmoni.") => drop_attribute(key, DropReason::Unlisted),
             _ if contract::is_inventory_span(key) => match as_text(value) {
                 Some(rendered) => self.keep_attribute(key, rendered, &mut drop_attribute),
@@ -511,6 +525,11 @@ impl Fields {
                     if let Some(rendered) = scalar(value) {
                         self.keep_attribute(key, rendered, &mut drop_attribute);
                     }
+                }
+                Value::StringValue(_) | Value::ArrayValue(_) | Value::KvlistValue(_)
+                    if self.keeps_content =>
+                {
+                    self.keep_content(key, value, &mut drop_attribute);
                 }
                 Value::StringValue(_)
                 | Value::StringValueStrindex(_)
@@ -561,6 +580,51 @@ impl Fields {
         }
         self.attributes
             .push((key.to_owned(), rendered.into_owned()));
+    }
+
+    /// Content, kept whole under its name: free of an attribute's value cap,
+    /// an export's size the one that holds it. Bytes are no text it keeps.
+    fn keep_content(&mut self, key: &str, value: &Value, drop: &mut impl FnMut(&str, DropReason)) {
+        if key.chars().count() > contract::ATTRIBUTE_KEY_MAX {
+            return drop(key, DropReason::OverCap(Cap::AttributeKey));
+        }
+        let text = match value {
+            Value::ArrayValue(_) | Value::KvlistValue(_) => json_of(value).to_string(),
+            _ => match scalar(value) {
+                Some(text) => text.into_owned(),
+                None => return drop(key, DropReason::Unlisted),
+            },
+        };
+        self.content.push((key.to_owned(), text));
+    }
+}
+
+/// Any value as JSON, nested arrays and maps among it; what is no JSON value,
+/// bytes or a number JSON cannot spell, as null.
+fn json_of(value: &Value) -> serde_json::Value {
+    let of = |any: &opentelemetry_proto::tonic::common::v1::AnyValue| {
+        any.value.as_ref().map_or(serde_json::Value::Null, json_of)
+    };
+    match value {
+        Value::StringValue(s) => serde_json::Value::from(s.as_str()),
+        Value::BoolValue(b) => serde_json::Value::from(*b),
+        Value::IntValue(n) => serde_json::Value::from(*n),
+        Value::DoubleValue(d) => {
+            serde_json::Number::from_f64(*d).map_or(serde_json::Value::Null, Into::into)
+        }
+        Value::ArrayValue(array) => array.values.iter().map(of).collect(),
+        Value::KvlistValue(map) => map
+            .values
+            .iter()
+            .map(|kv| {
+                (
+                    kv.key.clone(),
+                    kv.value.as_ref().map_or(serde_json::Value::Null, of),
+                )
+            })
+            .collect::<serde_json::Map<_, _>>()
+            .into(),
+        Value::StringValueStrindex(_) | Value::BytesValue(_) => serde_json::Value::Null,
     }
 }
 
@@ -759,6 +823,7 @@ mod tests {
             release: "",
             resource,
             store_user_id: store,
+            keep_content: false,
         }
     }
 
@@ -768,7 +833,8 @@ mod tests {
         let resource = vec![("service.name".to_owned(), "reporter".to_owned())];
         let hash = |id: &str| format!("h({id})");
         let mut dropped = Drops::default();
-        let row = map(&call(), &context(&project, &resource, &hash), &mut dropped).expect("kept");
+        let (row, _) =
+            map(&call(), &context(&project, &resource, &hash), &mut dropped).expect("kept");
 
         assert_eq!(row.kind, SpanKind::ModelCall);
         assert_eq!(row.name, "chat claude-sonnet-5-5");
@@ -831,6 +897,75 @@ mod tests {
         assert!(dropped.named().iter().all(|d| d.span_id == "0f".repeat(8)));
     }
 
+    /// On a project that keeps content, the content fields and the text no
+    /// inventory names are kept whole under their names; the columns, the
+    /// kept attributes and what is ours are read as in every mode.
+    #[test]
+    fn a_project_that_keeps_content_keeps_it_whole_and_its_columns_alike() {
+        let project = ProjectId::new();
+        let hash = |id: &str| format!("h({id})");
+        let long = "x".repeat(contract::ATTRIBUTE_VALUE_MAX * 4);
+        let nested = Value::KvlistValue(opentelemetry_proto::tonic::common::v1::KeyValueList {
+            values: vec![kv(
+                "a",
+                Value::ArrayValue(opentelemetry_proto::tonic::common::v1::ArrayValue {
+                    values: vec![AnyValue {
+                        value: Some(Value::IntValue(1)),
+                    }],
+                }),
+            )],
+        });
+        let mut span = call();
+        span.attributes.extend([
+            kv("gen_ai.tool.call.result", s(&long)),
+            kv("vendor.metadata", nested),
+            kv("vendor.blob", Value::BytesValue(vec![1, 2])),
+            kv("telmoni.unknown", s("ours, unread")),
+        ]);
+        let mut off = Drops::default();
+        let (_, kept_off) = map(&span, &context(&project, &[], &hash), &mut off).expect("kept");
+        assert!(kept_off.is_empty(), "off keeps none: {kept_off:?}");
+
+        let on = Context {
+            keep_content: true,
+            ..context(&project, &[], &hash)
+        };
+        let mut dropped = Drops::default();
+        let (row, content) = map(&span, &on, &mut dropped).expect("kept");
+        let (row_off, _) =
+            map(&span, &context(&project, &[], &hash), &mut Drops::default()).expect("kept");
+        assert_eq!(
+            (row.attributes, row.units),
+            (row_off.attributes, row_off.units),
+            "content is no attribute, nor counted"
+        );
+        assert_eq!(
+            content,
+            [
+                (
+                    "gen_ai.input.messages".to_owned(),
+                    "[{\"role\":\"user\",\"content\":\"hi\"}]".to_owned()
+                ),
+                ("user.email".to_owned(), "someone@example.com".to_owned()),
+                ("vendor.prompt".to_owned(), "the whole prompt".to_owned()),
+                ("gen_ai.tool.call.result".to_owned(), long),
+                ("vendor.metadata".to_owned(), r#"{"a":[1]}"#.to_owned()),
+            ]
+        );
+        let reasons: Vec<(&str, &DropReason)> = dropped
+            .named()
+            .iter()
+            .map(|d| (d.attribute.as_str(), &d.reason))
+            .collect();
+        assert_eq!(
+            reasons,
+            [
+                ("vendor.blob", &DropReason::Unlisted),
+                ("telmoni.unknown", &DropReason::Unlisted),
+            ]
+        );
+    }
+
     #[test]
     fn a_run_is_named_by_its_agent_and_carries_its_sample_rate() {
         let project = ProjectId::new();
@@ -849,7 +984,7 @@ mod tests {
             status: None,
             ..call()
         };
-        let row = map(&run, &context(&project, &[], &keep), &mut dropped).expect("kept");
+        let (row, _) = map(&run, &context(&project, &[], &keep), &mut dropped).expect("kept");
         assert_eq!(row.kind, SpanKind::Run);
         assert_eq!(
             row.name, "nightly-report",
@@ -873,13 +1008,13 @@ mod tests {
             ..call()
         };
         let ours = context(&project, &[], &keep);
-        let row = map(&plain, &ours, &mut Drops::default()).expect("kept");
+        let (row, _) = map(&plain, &ours, &mut Drops::default()).expect("kept");
         assert_eq!(row.kind, SpanKind::Step);
         let theirs = Context {
             scope: "opentelemetry.instrumentation.httpx",
             ..ours
         };
-        let row = map(&plain, &theirs, &mut Drops::default()).expect("kept");
+        let (row, _) = map(&plain, &theirs, &mut Drops::default()).expect("kept");
         assert_eq!(row.kind, SpanKind::Span);
     }
 
@@ -1016,7 +1151,7 @@ mod tests {
             ],
             ..call()
         };
-        let row = map(
+        let (row, _) = map(
             &named_by_both,
             &context(&project, &[], &keep),
             &mut Drops::default(),
@@ -1068,6 +1203,7 @@ mod tests {
                 &mut Drops::default(),
             )
             .expect("kept")
+            .0
             .cost
         };
         assert_eq!(cost(Value::DoubleValue(0.25)), Some(0.25));
@@ -1077,7 +1213,7 @@ mod tests {
             cost(Value::DoubleValue(-0.0)).is_some_and(f64::is_sign_positive),
             "-0 is kept as 0"
         );
-        let unreported = map(
+        let (unreported, _) = map(
             &Span {
                 attributes: vec![
                     kv(contract::RUN_ID, s(RUN)),
@@ -1115,7 +1251,7 @@ mod tests {
             ..call()
         };
         let mut dropped = Drops::default();
-        let row = map(&span, &context(&project, &[], &keep), &mut dropped).expect("kept");
+        let (row, _) = map(&span, &context(&project, &[], &keep), &mut dropped).expect("kept");
         assert_eq!(row.tags.len(), contract::TAGS_MAX);
         assert_eq!(row.attributes.len(), ATTRIBUTES_MAX);
         let over_cap = dropped
@@ -1136,7 +1272,7 @@ mod tests {
     fn units_count_each_started_kib_of_text() {
         let project = ProjectId::new();
         let keep = |id: &str| id.to_owned();
-        let row = map(
+        let (row, _) = map(
             &call(),
             &context(&project, &[], &keep),
             &mut Drops::default(),
@@ -1168,7 +1304,7 @@ mod tests {
     fn the_widest_span_fits_a_traces_page() {
         let project = ProjectId::new();
         let keep = |id: &str| id.to_owned();
-        let row = map(
+        let (row, _) = map(
             &call(),
             &context(&project, &[], &keep),
             &mut Drops::default(),
@@ -1255,7 +1391,7 @@ mod tests {
             release: &read.release,
             ..context(&project, &read.attributes, &keep)
         };
-        let row = map(&call(), &on_every_span, &mut Drops::default()).expect("kept");
+        let (row, _) = map(&call(), &on_every_span, &mut Drops::default()).expect("kept");
         assert_eq!(row.environment, "production");
         assert_eq!(row.release, "2026.10.18");
         assert!(

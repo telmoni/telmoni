@@ -594,7 +594,7 @@ mod tests {
     fn the_audit_tool_offers_every_action_and_names_them_on_a_wrong_one() {
         assert_eq!(
             Tool::AuditEvents.spec().parameters["properties"]["action"],
-            json!({ "type": "string", "enum": ["created", "updated", "deleted", "exported"] })
+            json!({ "type": "string", "enum": ["created", "updated", "deleted", "exported", "viewed"] })
         );
         assert_eq!(action(" deleted ").ok(), Some(AuditAction::Deleted));
         let Err(ToolError::Input(said)) = action("read") else {
@@ -602,7 +602,7 @@ mod tests {
         };
         assert_eq!(
             said,
-            "`action` is one of created, updated, deleted, exported"
+            "`action` is one of created, updated, deleted, exported, viewed"
         );
     }
 

@@ -116,6 +116,8 @@ pub const TAG_PREFIX: &str = "telmoni.tag.";
 pub const SAMPLE_RATE: &str = "telmoni.sample_rate";
 /// Set on a span the agent cancelled.
 pub const CANCELLED: &str = "telmoni.cancelled";
+/// The content fields an SDK cut so its span fits an export, by name.
+pub const CONTENT_CUT: &str = "telmoni.content_cut";
 /// Our SDKs' instrumentation scope.
 pub const SCOPE: &str = "telmoni";
 /// The resource attribute our SDKs name themselves by.
@@ -212,7 +214,8 @@ const fn longest(names: &[&str]) -> usize {
 // ── Content ──────────────────────────────────────────────────────────────────
 
 /// What a user wrote or a model produced, and the people it names: never a
-/// column; dropped at the door on an `off` project, the span kept.
+/// column; dropped at the door on an `off` project, the span kept, and kept
+/// whole on an `on` one, in Postgres alone. What an SDK cut of it goes with it.
 pub const CONTENT: &[&str] = &[
     "gen_ai.input.messages",
     "gen_ai.output.messages",
@@ -228,6 +231,7 @@ pub const CONTENT: &[&str] = &[
     "user.email",
     "user.full_name",
     "user.name",
+    CONTENT_CUT,
 ];
 
 /// Whether `key` is content.
@@ -471,9 +475,10 @@ const RULE_ATTRIBUTE: &str = "a key up to 128 characters and a value up to 1,024
                               up to 64 attributes a span, its resource's among them, which keep \
                               2 KiB together";
 const KEPT_CONTENT: &str = "dropped at the door on a project whose content mode is off, the span kept and \
-                            the field named in the answer; kept in Postgres alone, never in a column, once \
-                            a project may keep content";
-const RULE_CONTENT: &str = "content: what a person or a model wrote";
+                            the field named in the answer; on one whose mode is on, kept as it arrives, \
+                            sealed in Postgres alone, never in a column";
+const RULE_CONTENT: &str = "content: what a person or a model wrote; free of an attribute's 1,024 \
+                            characters, held only by an export's 1 MiB";
 const RULE_PERSON: &str = "names a person: content, whatever else the span carries";
 const RULE_NAME: &str = "1 to 145 characters";
 const RULE_UP_TO_128: &str = "up to 128 characters";
@@ -953,6 +958,13 @@ pub const INVENTORY: &[InventoryRow] = &[
         Needs::Content,
         RULE_PERSON,
     ),
+    row(
+        CONTENT_CUT,
+        ReadOn::AnySpan,
+        KEPT_CONTENT,
+        Needs::Content,
+        "the content fields an SDK cut, the longest first, so its span fits an export",
+    ),
     // Everything else.
     row(
         "any other number or boolean",
@@ -962,10 +974,11 @@ pub const INVENTORY: &[InventoryRow] = &[
         "a measurement no person writes; on the resource, dropped without a word",
     ),
     row(
-        "any other text or array",
+        "any other text, array or map",
         ReadOn::AnySpan,
-        "dropped in every mode, the span kept and the attribute named in the answer as unlisted",
-        Needs::AnyMode,
+        "dropped on a project whose content mode is off, the span kept and the attribute named in \
+         the answer as unlisted; on one whose mode is on, kept as content under its own name",
+        Needs::Content,
         "content arrives under names no convention gave it; on the resource, dropped without a word",
     ),
     row(
@@ -1025,6 +1038,8 @@ mod tests {
         ] {
             assert!(RULE_ATTRIBUTE.contains(&needle), "{needle}");
         }
+        assert!(RULE_CONTENT.contains(&format!("{} characters", grouped(ATTRIBUTE_VALUE_MAX))));
+        assert!(RULE_CONTENT.contains(&format!("{} MiB", BATCH_MAX_BYTES / (1024 * 1024))));
     }
 
     #[test]

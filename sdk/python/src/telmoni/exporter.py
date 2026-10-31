@@ -264,18 +264,22 @@ def _body(response: Any) -> bytes:
     return bytes(body)
 
 
-def _past_caps(key: str, value: Any) -> bool:
-    """Whether ingest drops an attribute for its length alone: a key past 128
-    characters, or a value past 1,024 as ingest writes it, a sequence as its JSON."""
-    if len(key) > contract.ATTRIBUTE_KEY_MAX:
-        return True
+def _text(value: Any) -> str:
+    """An attribute's value as ingest writes it, a sequence as its JSON."""
     if isinstance(value, (list, tuple)):
-        text = json.dumps(
+        return json.dumps(
             list(value), ensure_ascii=False, separators=(",", ":"), default=str
         )
-    else:
-        text = str(value)
-    return len(text) > contract.ATTRIBUTE_VALUE_MAX
+    return str(value)
+
+
+def _past_caps(key: str, value: Any) -> bool:
+    """Whether ingest drops an attribute for its length alone: a key past 128
+    characters, or a value past 1,024 as ingest writes it."""
+    return (
+        len(key) > contract.ATTRIBUTE_KEY_MAX
+        or len(_text(value)) > contract.ATTRIBUTE_VALUE_MAX
+    )
 
 
 def _sdk_version() -> str:
@@ -366,6 +370,16 @@ class Exporter:
             # going out, which reads as no answer and is sent again: halved.
             if len(spans) > 1:
                 return self._halve(spans)
+            # Content sent goes first, the longest field first, each named.
+            cut = self._cut(spans[0])
+            if cut is not None:
+                self.warn_once(
+                    "content-cut",
+                    "telmoni: a span past the 1 MiB an export may hold was sent without "
+                    "its longest content, named in telmoni.content_cut",
+                    WarningInfo("trimmed"),
+                )
+                return self._send(cut)
             # A span alone past it goes without what ingest drops for its length,
             # and then fits, unless its own name does not.
             body = self._body(spans, trimmed=True)
@@ -384,15 +398,48 @@ class Exporter:
             )
         return self._send(body)
 
+    def _cut(self, span: ReadableSpan) -> bytes | None:
+        """The span's body without its longest content, as few fields as fit it in
+        an export: a content field, or any past ingest's caps, which on a project
+        that keeps content is content too; None where it sends no content, or fits
+        without all of it."""
+        if not self._keeps_content():
+            return None
+        content = sorted(
+            (
+                (key, len(_text(value)))
+                for key, value in (span.attributes or {}).items()
+                if key != contract.CONTENT_CUT
+                and (key in contract.CONTENT or _past_caps(key, value))
+            ),
+            key=lambda field: -field[1],
+        )
+        cut: list[str] = []
+        for key, _ in content:
+            cut.append(key)
+            body = self._body([span], cut=cut)
+            if len(body) <= contract.BATCH_MAX_BYTES:
+                return body
+        return None
+
+    def _keeps_content(self) -> bool:
+        return self._config.capture_content and self._content_mode == "on"
+
     def _halve(self, spans: Sequence[ReadableSpan]) -> bool:
         """Exports each half of the spans, the second only where the first went."""
         half = len(spans) // 2
         return self.export(spans[:half]) and self.export(spans[half:])
 
-    def _body(self, spans: Sequence[ReadableSpan], *, trimmed: bool = False) -> bytes:
+    def _body(
+        self,
+        spans: Sequence[ReadableSpan],
+        *,
+        trimmed: bool = False,
+        cut: Sequence[str] = (),
+    ) -> bytes:
         # Python writes NaN and Infinity, which are no JSON: refused here, never sent.
         text = json.dumps(
-            self.encode(spans, trimmed=trimmed),
+            self.encode(spans, trimmed=trimmed, cut=cut),
             separators=(",", ":"),
             allow_nan=False,
             ensure_ascii=False,
@@ -450,10 +497,15 @@ class Exporter:
         return False
 
     def encode(
-        self, spans: Sequence[ReadableSpan], *, trimmed: bool = False
+        self,
+        spans: Sequence[ReadableSpan],
+        *,
+        trimmed: bool = False,
+        cut: Sequence[str] = (),
     ) -> dict[str, Any]:
         """OTLP's ``ExportTraceServiceRequest``, in its JSON encoding; ``trimmed``,
-        without the attributes ingest drops for their length."""
+        without the attributes ingest drops for their length; ``cut``, without
+        those content fields, named in ``telmoni.content_cut``."""
         return {
             "resourceSpans": [
                 {
@@ -461,21 +513,27 @@ class Exporter:
                     "scopeSpans": [
                         {
                             "scope": {"name": contract.SCOPE, "version": __version__},
-                            "spans": [self._span(span, trimmed) for span in spans],
+                            "spans": [self._span(span, trimmed, cut) for span in spans],
                         }
                     ],
                 }
             ]
         }
 
-    def _span(self, span: ReadableSpan, trimmed: bool = False) -> dict[str, Any]:
-        keep_content = self._config.capture_content and self._content_mode == "on"
+    def _span(
+        self, span: ReadableSpan, trimmed: bool = False, cut: Sequence[str] = ()
+    ) -> dict[str, Any]:
+        keep_content = self._keeps_content()
         attributes = [
             _attribute(key, value)
             for key, value in (span.attributes or {}).items()
             if (keep_content or key not in contract.CONTENT)
+            and key not in cut
+            and not (cut and key == contract.CONTENT_CUT)
             and not (trimmed and _past_caps(key, value))
         ]
+        if cut:
+            attributes.append(_attribute(contract.CONTENT_CUT, list(cut)))
         encoded: dict[str, Any] = {
             "traceId": format(span.context.trace_id, "032x"),
             "spanId": format(span.context.span_id, "016x"),
@@ -572,7 +630,7 @@ def warn(text: str, *args: object, info: WarningInfo) -> None:
 def _remedy(attribute: str, reason: str) -> str:
     if reason == "content":
         # The page, not a setting to change: which modes keep content is the
-        # platform's to say, and no project can choose one that does yet.
+        # platform's to say, and only the organization's owner switches one.
         return f"the project's content mode decides whether content is kept: {CONTENT_DOCS}"
     if reason == "unlisted":
         return f"send it as the tag {contract.TAG_PREFIX}{attribute} to keep it"

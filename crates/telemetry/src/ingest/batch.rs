@@ -22,13 +22,23 @@ pub enum BatchError {
     TooManySpans(usize),
 }
 
-/// What an export came to: its rows, and what it lost.
+/// What an export came to: its rows, the content they keep, and what it lost.
 #[derive(Debug, Default)]
 pub struct Batch {
     /// The spans kept, in the order they came.
     pub rows: Vec<SpanRow>,
+    /// The content of each kept span that carries any, on a project that keeps it.
+    pub content: Vec<SpanContent>,
     /// The spans refused and the attributes dropped.
     pub report: Report,
+}
+
+/// One kept span's content: each field by its name, as it arrived.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpanContent {
+    pub trace_id: String,
+    pub span_id: String,
+    pub fields: Vec<(String, String)>,
 }
 
 /// The sender's clock as its export left, by its [`crate::contract::SENT_AT`],
@@ -40,8 +50,9 @@ pub struct SenderClock {
 }
 
 /// Every span of `request`, read as the key's `project_id`'s, received at
-/// `received_at`, each `user_id` stored as `store_user_id` says; `sender` is
-/// the sender's clock, where its export names it.
+/// `received_at`, each `user_id` stored as `store_user_id` says, its content
+/// kept where `keep_content`; `sender` is the sender's clock, where its export
+/// names it.
 ///
 /// # Errors
 ///
@@ -53,6 +64,7 @@ pub fn read(
     received_at: DateTime<Utc>,
     sender: Option<SenderClock>,
     store_user_id: &dyn Fn(&str) -> String,
+    keep_content: bool,
 ) -> Result<Batch, BatchError> {
     let count: usize = request
         .resource_spans
@@ -69,7 +81,7 @@ pub fn read(
 
     let mut batch = Batch {
         rows: Vec::with_capacity(count),
-        report: Report::default(),
+        ..Batch::default()
     };
     let mut resources = Vec::with_capacity(request.resource_spans.len());
     for resource_spans in &request.resource_spans {
@@ -87,6 +99,7 @@ pub fn read(
                 release: &resource.release,
                 resource: &resource.attributes,
                 store_user_id,
+                keep_content,
             };
             for one in &scope_spans.spans {
                 // A span refused whole is named once, by its refusal: what
@@ -94,7 +107,16 @@ pub fn read(
                 // reported on top, since none of it was going to be kept.
                 let dropped_before = batch.report.dropped.len();
                 match span::map(one, &context, &mut batch.report.dropped) {
-                    Ok(row) => batch.rows.push(row),
+                    Ok((row, fields)) => {
+                        if !fields.is_empty() {
+                            batch.content.push(SpanContent {
+                                trace_id: row.trace_id.clone(),
+                                span_id: row.span_id.clone(),
+                                fields,
+                            });
+                        }
+                        batch.rows.push(row);
+                    }
                     Err(refused) => {
                         batch.report.dropped.truncate(dropped_before);
                         batch.report.refused.push(refused);
@@ -252,7 +274,7 @@ mod tests {
         let project = ProjectId::new();
         let now = Utc::now().trunc_subsecs(6);
         let keep = |id: &str| id.to_owned();
-        let batch = read(&request, &project, now, None, &keep).expect("spans");
+        let batch = read(&request, &project, now, None, &keep, false).expect("spans");
 
         let kinds: Vec<(String, SpanKind)> = batch
             .rows
@@ -336,7 +358,7 @@ mod tests {
         let project = ProjectId::new();
         let keep = |id: &str| id.to_owned();
         let times = |received_at| -> Vec<_> {
-            read(&request, &project, received_at, None, &keep)
+            read(&request, &project, received_at, None, &keep, false)
                 .expect("spans")
                 .rows
                 .iter()
@@ -403,7 +425,7 @@ mod tests {
          -> Vec<_> {
             let arrived = at(SENT) - ahead;
             let sender = named.then_some(SenderClock { sent_at, arrived });
-            read(request, &project, arrived, sender, &keep)
+            read(request, &project, arrived, sender, &keep, false)
                 .expect("spans")
                 .rows
                 .iter()
@@ -475,7 +497,8 @@ mod tests {
             }],
         };
         let keep = |id: &str| id.to_owned();
-        let batch = read(&request, &ProjectId::new(), Utc::now(), None, &keep).expect("spans");
+        let batch =
+            read(&request, &ProjectId::new(), Utc::now(), None, &keep, false).expect("spans");
         assert_eq!(batch.report.refused.len(), 1);
         let dropped = &batch.report.dropped;
         assert_eq!(
@@ -502,7 +525,7 @@ mod tests {
             }],
         };
         assert_eq!(
-            read(&empty, &project, Utc::now(), None, &keep).unwrap_err(),
+            read(&empty, &project, Utc::now(), None, &keep, false).unwrap_err(),
             BatchError::NoSpans
         );
         let too_many = ExportTraceServiceRequest {
@@ -515,7 +538,7 @@ mod tests {
             }],
         };
         assert_eq!(
-            read(&too_many, &project, Utc::now(), None, &keep).unwrap_err(),
+            read(&too_many, &project, Utc::now(), None, &keep, false).unwrap_err(),
             BatchError::TooManySpans(BATCH_SPANS_MAX + 1)
         );
     }

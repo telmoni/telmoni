@@ -3,7 +3,8 @@
 //!
 //! - **Postgres**, the `telemetry` schema, connected as the `telemetry` role:
 //!   what must be transactional or private — each project's settings, its
-//!   content mode among them, and its saved views and layouts ([`db`]).
+//!   content mode among them, its saved views and layouts ([`db`]), and the
+//!   content a project whose mode is `on` keeps, sealed ([`content`]).
 //! - **ClickHouse**, the `telemetry` database, connected as the `telemetry`
 //!   user: the spans, a row per finished span of every kind, and their
 //!   hourly rollup — metadata only, never a content field in any mode. Every
@@ -44,6 +45,7 @@ use telmoni_shared::middleware::service_auth::{ServiceSecrets, require_service_s
 pub mod boot;
 pub mod ceilings;
 pub mod config;
+pub mod content;
 pub mod contract;
 pub mod db;
 pub mod handler;
@@ -90,13 +92,15 @@ pub struct AppState {
     /// The client Cloud KMS is called through, where `TELEMETRY_KEK` names a
     /// key there.
     pub http: reqwest::Client,
-    /// Seals and opens each project's hashing key under a data key of the
-    /// row's own; holds no key itself.
+    /// Seals and opens each project's hashing key and content under a data
+    /// key of the row's own; holds no key itself.
     pub vault: telmoni_shared::envelope::Vault,
     /// What wraps each row's data key: `TELEMETRY_KEK`.
     pub kek: telmoni_shared::envelope::Kek,
     /// Each project's hashing key, opened once per process ([`hashing`]).
     pub hashing_keys: hashing::Cache,
+    /// Each project's content key, opened once per process ([`content`]).
+    pub content_keys: hashing::Cache<Arc<telmoni_shared::envelope::Dek>>,
     /// Redis, as this replica holds it ([`replica`]): ingest's claims and
     /// limits, shared with every other replica.
     pub redis: replica::Redis,
