@@ -1,6 +1,6 @@
 ---
 title: "Sessions"
-description: "A project's Sessions page: every session its agents took part in within the window, with its user, traces, errors, steps and tokens — narrowed by the trace list's filters, a page at a time, downloaded as CSV or JSON — and each session opened beside the list or on a page of its own, its runs replayed in metadata, never a message, in a layout you customize and keep."
+description: "A project's Sessions page: every session its agents took part in within the window, with its user, traces, errors, steps and tokens — narrowed by the trace list's filters, a page at a time, downloaded as CSV or JSON — and each session opened beside the list or on a page of its own, its runs replayed in order — in metadata, and where the project keeps content, as its conversation — in a layout you customize and keep."
 ---
 
 A **session** is the runs that share the session id the application gave
@@ -8,9 +8,10 @@ them: a chat, a thread, a support ticket worked over several runs — what
 OpenTelemetry calls `gen_ai.conversation.id`. A project's **Sessions** page
 lists every one seen in the window with the user it was with and what its
 runs added up to, and each opens beside the list, its runs replayed in order,
-or on a page of its own. Everything on both is metadata — which agent ran, how it ended, its
-steps and tokens — and nothing on either is a message, in any
-[content mode](/docs/api/ingest#what-is-dropped-at-the-door). A session here
+or on a page of its own. Both show its metadata — which agent ran, how it
+ended, its steps and tokens — and, on a project whose
+[content mode](/docs/workspace/organizations-and-projects#a-projects-content-mode)
+is `on`, each run's turn of the conversation. A session here
 is not a sign-in: those are listed under
 [Account › Privacy](/docs/account/privacy#active-sessions).
 
@@ -101,7 +102,8 @@ views of its sessions, apart from its views of its traces and its users.
 **Download** writes the list as a file, CSV for a spreadsheet or JSON: every
 session its filters admit, sorted as it is, up to the first 10,000, each with
 its user's id as stored. A file holds what the list holds — metadata — and
-never a message.
+no message, even where the project keeps content: a session's conversation is
+read on its page, or in its traces' download.
 
 ## A session
 
@@ -139,8 +141,10 @@ its message), its tokens and duration, and the models and tools it called
 by name, each a link to the trace list narrowed to it. Nothing opens, and
 nothing is read but the session itself; the trace's own page is a click on
 its id away. Its messages — the run's own input and output, never the
-prompts of the model calls inside it — join the line once a project keeps
-content, and its scores once traces are scored: both are on already.
+prompts of the model calls inside it — stand under the line where the
+project keeps content, so the session reads turn after turn, its reading
+recorded in the [audit log](/docs/workspace/audit-log) as `viewed`; its
+scores join once traces are scored. Both are on already.
 
 Customized to its steps, or to its steps and the calls inside them, each
 trace shows them nested under what made them as the spans recorded it, each
@@ -162,7 +166,7 @@ layout — as changed, with **Back to** it a click away:
 | Columns | The trace list's columns a trace's row shows; the trace's id always shows |
 | Pinned spans | Up to eight span names whose spans show under each trace even while it is shut — the intermediate step a reviewer checks — with their status and duration; read with the session itself |
 | Calls shown | Only the spans of the kinds, statuses and names you pick, with the spans inside them; nothing picked shows them all |
-| Messages, Scores | The run's own input and output as the turn's two messages, and the trace's scores beside it: kept with the layout now, shown once the project keeps content and once traces are scored |
+| Messages, Scores | The run's own input and output as the turn's two messages, shown where the project keeps content, and the trace's scores beside it, once traces are scored |
 
 **Keys**: `j` and `k` step through the session's traces, and `o` opens the
 one you stand on, or shuts it, wherever the layout opens a trace at all —

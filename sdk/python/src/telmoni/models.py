@@ -452,6 +452,9 @@ class RunRecord:
     user_id: str | None = None
     session_id: str | None = None
     tags: Mapping[str, str] | None = None
+    # Content: sent only when asked and the project's mode is on.
+    input_messages: object | None = None
+    output_messages: object | None = None
     inside: Sequence[StepRecord | CallRecord] = ()
     error_type: str | None = None
     cancelled: bool = False

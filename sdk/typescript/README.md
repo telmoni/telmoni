@@ -136,7 +136,8 @@ through the same exporter, content rules and sample rate, in a trace of its own
 named by the run's id, whatever context is active. Each span's id is derived
 from the run's id and the span's place in the record, so the same record sent
 again is the same bytes, which ingest answers once: give a run the same id each
-time you send it. A record holds no content. A blank agent, a run id that is
+time you send it. A record's only content is its run's own messages
+(`inputMessages`, `outputMessages`). A blank agent, a run id that is
 neither a hyphenated UUID nor 32 hex digits, or is the nil UUID, or an empty
 step's name or model throws a `TypeError`, as does a field of the wrong type —
 a time that is not one, an item of no known `type`, `inside` or `calls` that is
@@ -207,7 +208,8 @@ Headers that name no run give `undefined`.
 
 Prompts, completions, system instructions, tool arguments and tool results —
 `inputMessages`, `systemInstructions`, `outputMessages`, `arguments` and
-`returned(...)` — are content. They leave the process only when
+`returned(...)`, and a run's own `inputMessages` and
+`run.answered({ outputMessages })` — are content. They leave the process only when
 `captureContent: true` **and** the project's content mode is `on`, which the
 SDK learns from the platform's first answer (a `captureContent` that is no
 boolean, such as `'false'` from the environment, throws a `TypeError`); before that answer, and on an

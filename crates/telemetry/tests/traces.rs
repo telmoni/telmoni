@@ -754,8 +754,8 @@ async fn the_histogram_counts_each_run_in_the_bar_it_started_in(pool: PgPool) {
 }
 
 /// A download is the list's rows under its filters and sort, as CSV for a
-/// spreadsheet or JSON, or the runs chosen by id; a run of another project
-/// named by id is not in it.
+/// spreadsheet or JSON, or the runs chosen by id, each with its content, none
+/// here; a run of another project named by id is not in it.
 #[sqlx::test]
 async fn a_download_is_the_lists_rows_as_csv_or_json(pool: PgPool) {
     let Some(ch) = clickhouse_or_skip(module_path!()).await else {
@@ -775,7 +775,7 @@ async fn a_download_is_the_lists_rows_as_csv_or_json(pool: PgPool) {
         lines[0].starts_with("run_id,agent,user_id,session_id,ended,status,error_type,started_at")
     );
     assert!(
-        lines[0].ends_with(",models,tools,environments,releases"),
+        lines[0].ends_with(",models,tools,environments,releases,content"),
         "{}",
         lines[0]
     );
@@ -784,9 +784,9 @@ async fn a_download_is_the_lists_rows_as_csv_or_json(pool: PgPool) {
         "{}",
         lines[1]
     );
-    assert!(lines[1].ends_with(",gpt-x,,,"), "{}", lines[1]);
+    assert!(lines[1].ends_with(",gpt-x,,,,[]"), "{}", lines[1]);
     assert!(
-        lines[3].ends_with(",claude-sonnet-5-5,search_docs,production,2026.10.17"),
+        lines[3].ends_with(",claude-sonnet-5-5,search_docs,production,2026.10.17,[]"),
         "{}",
         lines[3]
     );
@@ -803,6 +803,11 @@ async fn a_download_is_the_lists_rows_as_csv_or_json(pool: PgPool) {
             .collect()
     };
     assert_eq!(run_ids(&rows), [a, b, c].map(|r| r.to_string()));
+    assert_eq!(
+        rows[0]["content"],
+        serde_json::json!([]),
+        "a run that kept none"
+    );
 
     let (_, _, body) = p
         .download(MEMBER, &format!("?format=json&run={a}&run={b}&run={d}"))

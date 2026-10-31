@@ -127,6 +127,7 @@ export type {
   UserView,
   ListView,
   ListViewQuery,
+  SpanFields,
 } from "./entities/traces";
 
 export { fetchSessionLayout } from "./entities/session-layout";

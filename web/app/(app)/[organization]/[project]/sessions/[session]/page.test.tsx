@@ -184,6 +184,7 @@ function detail(over: Record<string, unknown> = {}) {
       days: 7,
       limit: 100,
       more: false,
+      content: [],
       ...over,
     },
   };
@@ -222,6 +223,7 @@ function spans(run: string) {
     run_id: run,
     truncated: false,
     spend: null,
+    content: [],
     spans: [
       { ...base, span_id: "1", kind: "run", name: "support-bot" },
       { ...base, span_id: "2", kind: "step", name: "answer", parent_span_id: "1", started_at: "2026-10-11T03:00:00.010Z" },
@@ -322,6 +324,32 @@ describe("SessionPage", () => {
     // The window picker stands at the session's window; a pick rewrites this
     // page's own address, read from the router, so the encoded id carries over.
     expect(screen.getByRole("combobox", { name: "Window" })).toHaveTextContent("Last 7 days");
+  });
+
+  it("reads as its conversation where the project keeps content, each run's turn under its row", async () => {
+    const said = (role: string, text: string) => JSON.stringify([{ role, parts: [{ type: "text", content: text }] }]);
+    mockSession = detail({
+      content: [
+        {
+          run_id: RUN_A,
+          span_id: "0000000000000001",
+          fields: {
+            "gen_ai.input.messages": said("user", "Where is my order?"),
+            "gen_ai.output.messages": said("assistant", "It ships *today*."),
+          },
+        },
+      ],
+    });
+    const { unmount } = render(await SessionPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+    const table = screen.getByRole("table");
+    expect(within(table).getByText("Where is my order?")).toBeInTheDocument();
+    expect(within(table).getByText("today").tagName).toBe("EM");
+    expect(table.querySelectorAll("[data-run-turn]")).toHaveLength(1);
+    unmount();
+
+    mockSession = detail({ content: null });
+    render(await SessionPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+    expect(screen.getByText("This session's content could not be read. Reload to try again.")).toBeInTheDocument();
   });
 
   it("opens a layout of steps and calls from a link, the failed trace open, and o shuts it", async () => {

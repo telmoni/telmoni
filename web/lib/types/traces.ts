@@ -118,11 +118,22 @@ export const RunSpendSchema = z.object({
 });
 export type RunSpend = z.infer<typeof RunSpendSchema>;
 
+/** One span's content: each field its project kept, by name, as it arrived. */
+export const SpanFieldsSchema = z.object({
+  run_id: z.string(),
+  span_id: z.string(),
+  fields: z.record(z.string(), z.string()),
+});
+export type SpanFields = z.infer<typeof SpanFieldsSchema>;
+
 export const TraceDetailSchema = z.object({
   run_id: z.string(),
   spans: z.array(TraceSpanSchema),
   truncated: z.boolean(),
   /** None where the server could not read it. */
   spend: RunSpendSchema.nullable(),
+  /** Each span's content, its read filed in the audit log: empty where the
+   *  run kept none, null where it could not be opened. */
+  content: z.array(SpanFieldsSchema).nullable(),
 });
 export type TraceDetail = z.infer<typeof TraceDetailSchema>;

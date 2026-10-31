@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { SpanKind, SpanStatus } from "@/lib/types/enums";
-import { TraceSchema } from "@/lib/types/traces";
+import { SpanFieldsSchema, TraceSchema } from "@/lib/types/traces";
 
 // A session's page as the server answers it, parsed on the server by its
 // entity (`lib/server/entities/sessions.ts`) and in the browser by the peek.
@@ -29,8 +29,8 @@ export const SessionTraceSchema = TraceSchema.extend({ pinned: z.array(PinnedSpa
 export type SessionTrace = z.infer<typeof SessionTraceSchema>;
 
 // A session's own page: its traces in the order they ran, each summed as the
-// trace list sums it — a replay in metadata, never a message — and the span
-// names their pinned spans were read by.
+// trace list sums it, the span names their pinned spans were read by, and
+// each run's own turn of the conversation where the project keeps content.
 export const SessionDetailSchema = z.object({
   session_id: z.string(),
   traces: z.array(SessionTraceSchema),
@@ -38,5 +38,8 @@ export const SessionDetailSchema = z.object({
   days: z.number(),
   limit: z.number(),
   more: z.boolean(),
+  /** Each run's own span's content, its read filed: empty where the runs
+   *  kept none, null where it could not be opened. */
+  content: z.array(SpanFieldsSchema).nullable(),
 });
 export type SessionDetail = z.infer<typeof SessionDetailSchema>;

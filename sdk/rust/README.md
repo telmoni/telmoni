@@ -153,7 +153,8 @@ content rules and sample rate, in a trace of its own named by the run's id,
 whatever trace is current. Each span's id is derived from the run's id and the
 span's place in the record, so the same record sent again is the same bytes,
 which ingest answers once: give a run the same id each time you send it. A
-record holds no content, and its tags and token counts go as a live run's do.
+record's only content is its run's own messages (`input_messages`,
+`output_messages`), and its tags and token counts go as a live run's do.
 A blank agent (`Error::EmptyAgent`), a run id that is not a UUID or is the nil
 UUID (`Error::RunId`), an empty step name or model (`Error::EmptyName`), text
 past ingest's caps (`Error::TooLong`: a step's or a tool's name 145
@@ -233,7 +234,9 @@ any `Carrier`, a type that is both an OpenTelemetry `Injector` and
 
 ## Content
 
-Prompts, completions, tool arguments and results are content. They are set on
+Prompts, completions, tool arguments and results are content, and so are a
+run's own messages: `RunOptions::input_messages` and
+`run.answered(RunReply { output_messages })`. They are set on
 the span, and the exporter takes them off every span before it leaves the
 process unless `capture_content` is on **and** the project's content mode,
 learned from the platform's answers, is `on`. Before the first answer the mode

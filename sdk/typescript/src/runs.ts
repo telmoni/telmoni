@@ -26,6 +26,7 @@ import type {
   RecordOutcome,
   RecordTime,
   ResolvedConfig,
+  RunAnswer,
   RunOptions,
   RunRecord,
   StepRecord,
@@ -140,6 +141,7 @@ export class Run extends Parent {
   /** Whether the sample rate kept this run out: nothing of it is sent, nor handed to another service. */
   readonly sampledOut: boolean;
   readonly #inherited: Attributes;
+  readonly #warnOnce: WarnOnce;
   readonly [GUARD]: Guard;
 
   constructor(
@@ -157,11 +159,25 @@ export class Run extends Parent {
     this.agent = agent;
     this.sampledOut = sampledOut;
     this.#inherited = { ...inherited };
+    this.#warnOnce = opener.warnOnce;
     this[GUARD] = guard;
   }
 
   protected get owner(): Run {
     return this;
+  }
+
+  /** What the run answered: its messages. An answer given after the run ended is not sent. */
+  answered(answer: RunAnswer): void {
+    if (this.ended) {
+      this.#warnOnce('run:late', 'telmoni: a run must be answered before it ends; an answer given after is not sent', {
+        kind: 'input',
+      });
+      return;
+    }
+    if (answer.outputMessages !== undefined) {
+      this.span.setAttribute(contract.OUTPUT_MESSAGES, asJson(answer.outputMessages));
+    }
   }
 
   /** What every span inside the run carries. */
@@ -382,6 +398,9 @@ export class Opener {
       rate,
       tagsOf(Object.entries(options.tags ?? {}), this.#warnOnce),
     );
+    if (isSet(options.inputMessages)) {
+      attributes[contract.INPUT_MESSAGES] = asJson(options.inputMessages);
+    }
     const parent = context.active();
     const span = this.#start(runSpanName(agent), parent, attributes, SpanKind.INTERNAL);
     return new Run(this, span, parent, runId, agent, inherited, sampledOut, guard);
@@ -505,6 +524,10 @@ export class Opener {
     if (tagged === undefined || tagged.some(([, value]) => typeof value !== 'string')) {
       throw new TypeError("a recorded run's tags must be an object of strings");
     }
+    const messages = [
+      [contract.INPUT_MESSAGES, record.inputMessages],
+      [contract.OUTPUT_MESSAGES, record.outputMessages],
+    ] as const;
     const items = read(record);
     for (const each of [record, ...items.flatMap(([item, calls]) => [item, ...calls])]) {
       const [start, end] = [hrTimeOf(each.start), hrTimeOf(each.end)];
@@ -525,6 +548,9 @@ export class Opener {
     ].join('-');
     const inherited = inheritedOf(runId, record.agent, record.userId, record.sessionId);
     const attributes = runAttributes(record.agent, inherited, rate, tagsOf(tagged, this.#warnOnce));
+    for (const [key, value] of messages) {
+      if (isSet(value)) attributes[key] = asJson(value);
+    }
     // Sampled out, no span is built: none of a record's ends after it, and
     // the same record sent again draws again.
     if (rate < 1 && Math.random() >= rate) return;

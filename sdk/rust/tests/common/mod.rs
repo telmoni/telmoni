@@ -346,6 +346,15 @@ pub(crate) fn kept() -> Result<Answer, Failure> {
     answer("kept")
 }
 
+/// An answer naming the project's content mode `on`.
+pub(crate) fn mode_on() -> Answer {
+    Answer::new(
+        200,
+        vec![("Telmoni-Content-Mode".to_owned(), "on".to_owned())],
+        br#"{"partialSuccess":null}"#.to_vec(),
+    )
+}
+
 /// Every answer under `answers/`, by name.
 pub(crate) fn answer_names() -> Result<Vec<String>, Failure> {
     let mut names = Vec::new();
@@ -566,6 +575,7 @@ fn the_fakes_work() -> Outcome {
     let third = transport.send("u", &[], b"{}")?;
     assert_eq!(third.status, 200);
     assert_eq!(third.header("telmoni-content-mode"), Some("off"));
+    assert_eq!(mode_on().header("telmoni-content-mode"), Some("on"));
     assert!(transport.wait_for(3));
     assert_eq!(transport.count(), 3);
     let requests = transport.requests();

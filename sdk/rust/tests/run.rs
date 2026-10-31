@@ -10,10 +10,10 @@ use std::sync::{Arc, Mutex};
 
 use common::{
     FakeTransport, Harness, Outcome, Sleeps, Warnings, attributes_of, hooks, is_uuid_v4, keyed,
-    lock, name_of, named, only, run_span, starting_with, tags,
+    lock, mode_on, name_of, named, only, run_span, starting_with, tags,
 };
 use serde_json::{Value, json};
-use telmoni::{Config, Error, ModelCall, Run, RunOptions, Step, Telmoni, ToolCall};
+use telmoni::{Config, Error, ModelCall, Run, RunOptions, RunReply, Step, Telmoni, ToolCall};
 
 /// An application's error, with the SDK's own among its causes so
 /// `try_run_with` can hand a run that did not open back as one of these.
@@ -52,6 +52,7 @@ fn a_run_is_a_span_with_the_contract_attributes() -> Outcome {
             sample_rate: None,
             max_steps: None,
             max_spend: None,
+            input_messages: None,
         },
     )?;
     assert!(is_uuid_v4(run.run_id()), "{}", run.run_id());
@@ -585,5 +586,46 @@ fn a_run_is_shared_across_threads() -> Outcome {
         step.get("parentSpanId"),
         only(&spans, "invoke_agent ")?.get("spanId")
     );
+    Ok(())
+}
+
+/// A run's own messages leave only with `capture_content` and the mode `on`.
+#[test]
+fn a_runs_own_messages_leave_only_when_asked_and_the_project_allows() -> Outcome {
+    for capture_content in [true, false] {
+        let harness = Harness::answering(
+            Config {
+                capture_content,
+                ..keyed()
+            },
+            std::iter::repeat_n(Ok(mode_on()), 2),
+        )?;
+        harness.telmoni.run("warm", RunOptions::default())?.end();
+        harness.flush()?;
+        let run = harness.telmoni.run(
+            "bot",
+            RunOptions {
+                input_messages: Some(json!([{ "role": "user", "content": "hi" }]).into()),
+                ..RunOptions::default()
+            },
+        )?;
+        run.answered(RunReply {
+            output_messages: Some("hello".into()),
+        });
+        run.end();
+        harness.flush()?;
+        let spans = harness.spans()?;
+        let sent = attributes_of(named(&spans, "invoke_agent bot")?)?;
+        if capture_content {
+            assert_eq!(
+                sent.get("gen_ai.input.messages"),
+                Some(&json!(r#"[{"content":"hi","role":"user"}]"#))
+            );
+            assert_eq!(sent.get("gen_ai.output.messages"), Some(&json!("hello")));
+        } else {
+            assert!(sent.get("gen_ai.input.messages").is_none());
+            assert!(!harness.transport.text().contains("hello"));
+        }
+    }
     Ok(())
 }

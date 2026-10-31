@@ -10,7 +10,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use common::{
     Collected, Failure, FakeTransport, Harness, Outcome, Sleeps, Warnings, attributes_of, field,
-    hooks, int, keyed, load_fixture, lock, name_of, run_span, spans_of, text,
+    hooks, int, keyed, load_fixture, lock, mode_on, name_of, run_span, spans_of, text,
 };
 use opentelemetry::trace::{Link, SpanKind, TraceContextExt as _, TraceId};
 use opentelemetry::{Context, KeyValue};
@@ -147,6 +147,8 @@ fn record_from(spec: &Value) -> Result<RunRecord, Failure> {
         user_id: optional_text(spec, "user_id")?,
         session_id: optional_text(spec, "session_id")?,
         tags,
+        input_messages: None,
+        output_messages: None,
         start: at(text(spec, "start")?)?,
         end: at(text(spec, "end")?)?,
         inside,
@@ -363,6 +365,46 @@ fn a_failed_run_is_marked_on_its_own_span() -> Outcome {
         spans.iter().map(name_of).collect::<Vec<_>>(),
         ["invoke_agent claude-code"]
     );
+    Ok(())
+}
+
+/// A record's own messages leave only with `capture_content` and the mode `on`.
+#[test]
+fn a_records_own_messages_leave_only_when_asked_and_the_project_allows() -> Outcome {
+    for capture_content in [true, false] {
+        let harness = Harness::answering(
+            Config {
+                capture_content,
+                ..keyed()
+            },
+            std::iter::repeat_n(Ok(mode_on()), 2),
+        )?;
+        harness.telmoni.run("warm", RunOptions::default())?.end();
+        harness.flush()?;
+        let record = RunRecord {
+            input_messages: Some(json!(["asked"]).into()),
+            output_messages: Some(json!({ "said": "answered" }).into()),
+            inside: Vec::new(),
+            ..the_record()?
+        };
+        harness.telmoni.record_run(record.clone())?;
+        harness.flush()?;
+        let spans = harness.spans()?;
+        let sent = attributes_of(run_span(&spans, &record.run_id)?)?;
+        if capture_content {
+            assert_eq!(
+                sent.get("gen_ai.input.messages"),
+                Some(&json!(r#"["asked"]"#))
+            );
+            assert_eq!(
+                sent.get("gen_ai.output.messages"),
+                Some(&json!(r#"{"said":"answered"}"#))
+            );
+        } else {
+            assert!(sent.get("gen_ai.input.messages").is_none());
+            assert!(sent.get("gen_ai.output.messages").is_none());
+        }
+    }
     Ok(())
 }
 

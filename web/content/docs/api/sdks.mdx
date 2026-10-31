@@ -318,7 +318,8 @@ them with a signal too, so a task run there flushes before it returns.
 
 A job that keeps its own log, or a hook that runs once the work it reports is
 over, hands the finished run over whole, as data: its id, a UUID you give and
-keep with the log; its agent, user, session and tags; its start and end and
+keep with the log; its agent, user, session and tags; the messages it was
+asked and answered with, which are [content](#content); its start and end and
 how it ended; and its steps and calls, each with its own times. A step holds
 the calls made inside it. A record the export queue has no room for is refused
 whole, before anything is queued: flush, or wait, and record it again. A
@@ -497,8 +498,8 @@ id and the span's place in the record, and a record travels in bodies of its
 own, so the same record sent again is the same bytes, whatever else the client
 is sending, which Telmoni, where it reaches its Redis, answers within the hour
 as it answered the first, storing nothing twice: give a run the same id each
-time you send it. A record
-holds no content.
+time you send it. A record's
+only content is its run's own messages; its steps and calls carry none.
 The [coding-agent plugins](/docs/api/coding-agents) are built on it.
 
 ---
@@ -804,7 +805,16 @@ the server keeps of each.
 Prompts, completions, tool arguments and results — `input_messages`,
 `output_messages`, `system_instructions`, `arguments`, `returned(...)` — are
 recorded on the span and taken off by the exporter before anything leaves
-the process. They are sent only when the client is built with
+the process. A run carries its own messages the same way, on its own span:
+what it was asked as it opens, and what it answered by `answered` (Python's
+`run(input_messages=…)` and `run.answered(output_messages=…)`, TypeScript's
+`{ inputMessages }` and `run.answered({ outputMessages })`, Go's
+`RunOptions{InputMessages: …}` and `run.Answered(telmoni.RunAnswer{OutputMessages: …})`,
+Rust's `RunOptions { input_messages, .. }` and
+`run.answered(RunReply { output_messages })`), and a recorded run its
+`input_messages` and `output_messages`, `inputMessages` and `outputMessages`
+in TypeScript and Go. An answer given after its run ended is not sent, with
+one warning; in Rust, `end` takes the run, so none can come. They are sent only when the client is built with
 `capture_content` on **and** the project's content mode, which the SDK learns
 from the server's first answer, is `on`; in Python and TypeScript, a setting
 that is no boolean, such as `"false"` from the environment, is refused with a

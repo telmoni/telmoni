@@ -171,6 +171,7 @@ const DETAIL = {
   spans: [SPAN],
   truncated: false,
   spend: { spent: 0.0028, unpriced: [] },
+  content: [],
 };
 
 function answer(status: number, body: unknown) {

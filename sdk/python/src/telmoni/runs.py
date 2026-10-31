@@ -147,6 +147,22 @@ class Run(Handle):
         as its spend cap counts them, in this process."""
         return self._guard.spent
 
+    def answered(self, *, output_messages: object | None = None) -> None:
+        """What the run answered: its messages. An answer given after the run
+        ended is not sent."""
+        if self._ended:
+            self._client.exporter.warn_once(
+                "run:late",
+                "telmoni: a run must be answered before it ends; an answer given "
+                "after is not sent",
+                _INPUT,
+            )
+            return
+        if output_messages is not None:
+            self._span.set_attribute(
+                contract.OUTPUT_MESSAGES, _as_json(output_messages)
+            )
+
     def step(self, name: str) -> Scope[Step]:
         return self._client.step(name, run=self)
 
@@ -456,6 +472,7 @@ class Opener:
         sample_rate: float | None,
         max_steps: int | None = None,
         max_spend: float | None = None,
+        input_messages: object | None = None,
     ) -> Run:
         warn_once = self._client.exporter.warn_once
         given: object = agent
@@ -488,6 +505,8 @@ class Opener:
         if sampled_out:
             inherited[contract.SAMPLED_OUT] = "true"
         name, attributes = _run_opening(agent, inherited, rate, tags, warn_once)
+        if input_messages is not None:
+            attributes[contract.INPUT_MESSAGES] = _as_json(input_messages)
         parent = context.get_current()
         span = self._start(name, parent, attributes, SpanKind.INTERNAL)
         ctx = trace.set_span_in_context(span, parent)
@@ -673,6 +692,12 @@ class Opener:
         run_name, attributes = _run_opening(
             record.agent, inherited, rate, tags, self._client.exporter.warn_once
         )
+        for key, messages in (
+            (contract.INPUT_MESSAGES, record.input_messages),
+            (contract.OUTPUT_MESSAGES, record.output_messages),
+        ):
+            if messages is not None:
+                attributes[key] = _as_json(messages)
         # Sampled out, no span is built: none of a record's ends after it, and
         # the same record sent again draws again.
         if rate < 1 and random.random() >= rate:

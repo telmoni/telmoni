@@ -228,6 +228,7 @@ function SessionPanel({
               traces={read.value.traces}
               readWith={options.pinned}
               window={query}
+              content={read.value.content}
             />
             {read.value.more && (
               <p className="text-sm text-muted-foreground">

@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils";
 // What a span's row is drawn from, on the trace page and in a session's
 // outline alike: its kind's glyph, how far in it stands and the guides to
 // there, its bar on the trace's line of time, and what it says beside its
-// name. Metadata alone, as every page is.
+// name. Metadata alone: what a span kept is `span-content.tsx`'s.
 
 /** A span's kind as a glyph: the run as the Traces row draws it, a model
  *  call as the sparkle every AI surface uses, a tool as its wrench. */

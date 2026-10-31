@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Run, currentRun } from '../src/index';
-import { type Harness, attributesOf, harness, one, runsIn } from './helpers';
+import { type Harness, answer, attributesOf, harness, one, runsIn } from './helpers';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -292,6 +292,60 @@ describe('a run', () => {
         expect(currentRun(step.context)).toBe(run);
       });
     });
+  });
+
+  it('sends its own messages on its span only when asked and the project allows', async () => {
+    const on = answer(200, { 'Telmoni-Content-Mode': 'on' }, '{}');
+    const asked = harness({ captureContent: true }, {}, Array.from({ length: 4 }, () => on));
+    try {
+      asked.telmoni.run('warm', () => {});
+      expect(await asked.telmoni.flush()).toBe(true);
+      asked.telmoni.run('bot', { inputMessages: [{ role: 'user', content: 'hi' }] }, (run) => {
+        run.answered({ outputMessages: [{ role: 'assistant', content: 'hello' }] });
+      });
+      expect(await asked.telmoni.flush()).toBe(true);
+    } finally {
+      await asked.telmoni.shutdown();
+    }
+    const run = attributesOf(one(runsIn(asked.transport).filter((span) => span.name === 'invoke_agent bot')));
+    expect(run['gen_ai.input.messages']).toBe('[{"role":"user","content":"hi"}]');
+    expect(run['gen_ai.output.messages']).toBe('[{"role":"assistant","content":"hello"}]');
+  });
+
+  it('keeps its own messages home without captureContent even when the project allows it', async () => {
+    const on = answer(200, { 'Telmoni-Content-Mode': 'on' }, '{}');
+    const quiet = harness({}, {}, Array.from({ length: 4 }, () => on));
+    try {
+      quiet.telmoni.run('warm', () => {});
+      expect(await quiet.telmoni.flush()).toBe(true);
+      expect(quiet.telmoni.contentMode).toBe('on');
+      quiet.telmoni.run('bot', { inputMessages: 'never asked' }, (run) => {
+        run.answered({ outputMessages: 'never answered' });
+      });
+      expect(await quiet.telmoni.flush()).toBe(true);
+    } finally {
+      await quiet.telmoni.shutdown();
+    }
+    expect(quiet.transport.text()).not.toContain('never asked');
+    expect(quiet.transport.text()).not.toContain('never answered');
+  });
+
+  it('sends no answer given after it ended, with one warning', async () => {
+    const on = answer(200, { 'Telmoni-Content-Mode': 'on' }, '{}');
+    const asked = harness({ captureContent: true }, {}, Array.from({ length: 4 }, () => on));
+    try {
+      asked.telmoni.run('warm', () => {});
+      expect(await asked.telmoni.flush()).toBe(true);
+      const ended = asked.telmoni.run('bot', (run) => run);
+      for (let n = 0; n < 2; n++) ended.answered({ outputMessages: 'too late' });
+      expect(await asked.telmoni.flush()).toBe(true);
+    } finally {
+      await asked.telmoni.shutdown();
+    }
+    expect(asked.transport.text()).not.toContain('too late');
+    expect(asked.warnings).toEqual([
+      'telmoni: a run must be answered before it ends; an answer given after is not sent',
+    ]);
   });
 });
 

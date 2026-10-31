@@ -21,7 +21,7 @@ use crate::client::Inner;
 use crate::contract;
 use crate::error::{Error, Text};
 use crate::ids;
-use crate::runs::{self, Usage};
+use crate::runs::{self, Content, Usage};
 
 /// A run that has ended, as [`Telmoni::record_run`](crate::Telmoni::record_run)
 /// sends it: its id, a UUID the caller gives, and everything in it, each with
@@ -43,6 +43,12 @@ pub struct RunRecord {
     pub session_id: Option<String>,
     /// Tags, sent as `telmoni.tag.<key>`.
     pub tags: BTreeMap<String, String>,
+    /// The messages the run was asked with: content, which leaves the process
+    /// only when [`Config::capture_content`](crate::Config::capture_content)
+    /// is on and the project's mode allows.
+    pub input_messages: Option<Content>,
+    /// The messages the run produced: content, as above.
+    pub output_messages: Option<Content>,
     /// When the run started.
     pub start: SystemTime,
     /// When the run ended.
@@ -159,6 +165,8 @@ impl RunRecord {
             user_id: None,
             session_id: None,
             tags: BTreeMap::new(),
+            input_messages: None,
+            output_messages: None,
             start,
             end,
             inside: Vec::new(),
@@ -281,6 +289,8 @@ pub(crate) fn send(inner: &Inner, record: RunRecord) -> Result<(), Error> {
         user_id,
         session_id,
         tags,
+        input_messages,
+        output_messages,
         start,
         end,
         mut inside,
@@ -290,7 +300,15 @@ pub(crate) fn send(inner: &Inner, record: RunRecord) -> Result<(), Error> {
     } = record;
     let run_id = run_uuid.to_string();
     let inherited = runs::inherited(&run_id, &agent, user_id, session_id);
-    let attributes = runs::run_attributes(&agent, &inherited, rate, tags, &inner.warner);
+    let mut attributes = runs::run_attributes(&agent, &inherited, rate, tags, &inner.warner);
+    for (key, messages) in [
+        (contract::INPUT_MESSAGES, input_messages),
+        (contract::OUTPUT_MESSAGES, output_messages),
+    ] {
+        if let Some(messages) = messages {
+            attributes.push(KeyValue::new(key, String::from(messages.as_str())));
+        }
+    }
     // Sampled out, no span is built: none of a record's ends after it, and
     // the same record sent again draws again.
     if rate < 1.0 && (inner.random)() >= rate {

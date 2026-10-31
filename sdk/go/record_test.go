@@ -333,6 +333,31 @@ func TestAFailedRecordIsMarkedOnItsRunsSpan(t *testing.T) {
 	}
 }
 
+func TestARecordsOwnMessagesLeaveOnlyWhenAskedAndTheProjectAllows(t *testing.T) {
+	for _, capture := range []bool{true, false} {
+		t.Run(fmt.Sprintf("capture=%v", capture), func(t *testing.T) {
+			on := contentOn()
+			h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k"), CaptureContent: capture}, newFakeTransport(t, on, on))
+			_, warm := h.client.Run(context.Background(), "warm", telmoni.RunOptions{})
+			warm.End()
+			h.flush()
+			record := theRecord(t)
+			record.Inside = nil
+			record.InputMessages, record.OutputMessages = []string{"asked"}, map[string]string{"said": "answered"}
+			recordRun(t, h, record)
+			sent := attributesOf(t, byName(h.transport.spans(t))["invoke_agent claude-code"])
+			input, hasInput := sent["gen_ai.input.messages"]
+			output, hasOutput := sent["gen_ai.output.messages"]
+			if capture && (input != `["asked"]` || output != `{"said":"answered"}`) {
+				t.Errorf("gen_ai.input.messages = %v, gen_ai.output.messages = %v", input, output)
+			}
+			if !capture && (hasInput || hasOutput) {
+				t.Error("a record's content left without CaptureContent")
+			}
+		})
+	}
+}
+
 func TestTheSampleRateDropsARecordWhole(t *testing.T) {
 	random := 0.9
 	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k"), SampleRate: 0.25}, nil,

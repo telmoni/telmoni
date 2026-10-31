@@ -97,6 +97,19 @@ pub struct RunOptions {
     /// The guard's cap on the run's spend, in US dollars: reached, what it
     /// opens next is [`Error::CapExceeded`].
     pub max_spend: Option<f64>,
+    /// The messages the run was asked with: content, which leaves the process
+    /// only when [`Config::capture_content`](crate::Config::capture_content)
+    /// is on and the project's mode allows.
+    pub input_messages: Option<Content>,
+}
+
+/// What the run answered, for [`Run::answered`].
+#[derive(Debug, Clone, Default)]
+pub struct RunReply {
+    /// The messages the run produced: content, which leaves the process only
+    /// when [`Config::capture_content`](crate::Config::capture_content) is on
+    /// and the project's mode allows.
+    pub output_messages: Option<Content>,
 }
 
 /// What a model call is opened with; `ModelCallOptions::default()` is a
@@ -669,6 +682,15 @@ impl Run {
         self.handle.guard.spent()
     }
 
+    /// What the run answered: its messages. Ending the run takes the handle,
+    /// so no answer can come after.
+    pub fn answered(&self, reply: RunReply) {
+        if let Some(messages) = reply.output_messages {
+            self.handle
+                .set_last([KeyValue::new(contract::OUTPUT_MESSAGES, messages.0)]);
+        }
+    }
+
     /// Marks the run failed with `E`'s type name when `result` is an `Err`,
     /// and gives `result` back unchanged: what
     /// [`Telmoni::try_run_with`](crate::Telmoni::try_run_with) does for a
@@ -821,7 +843,10 @@ pub(crate) fn open(inner: &Arc<Inner>, agent: &str, options: RunOptions) -> Resu
     if sampled_out {
         inherited.push(KeyValue::new(contract::SAMPLED_OUT, true));
     }
-    let attributes = run_attributes(&agent, &inherited, rate, options.tags, &inner.warner);
+    let mut attributes = run_attributes(&agent, &inherited, rate, options.tags, &inner.warner);
+    if let Some(messages) = options.input_messages {
+        attributes.push(KeyValue::new(contract::INPUT_MESSAGES, messages.0));
+    }
 
     let parent = Context::current();
     let tracer = &inner.tracer;

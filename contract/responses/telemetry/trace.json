@@ -1,4 +1,14 @@
 {
+  "content": [
+    {
+      "fields": {
+        "gen_ai.input.messages": "[{\"role\":\"user\",\"parts\":[{\"type\":\"text\",\"content\":\"Summarize the report\"}]}]",
+        "gen_ai.output.messages": "[{\"role\":\"assistant\",\"parts\":[{\"type\":\"text\",\"content\":\"**Revenue** rose 4%.\"}],\"finish_reason\":\"stop\"}]"
+      },
+      "run_id": "0192f3a1-7c2e-7b4d-9a61-3c5e8f0d2b17",
+      "span_id": "00f067aa0ba902b7"
+    }
+  ],
   "run_id": "0192f3a1-7c2e-7b4d-9a61-3c5e8f0d2b17",
   "spans": [
     {

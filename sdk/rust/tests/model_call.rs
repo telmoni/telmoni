@@ -6,7 +6,9 @@ mod common;
 use std::collections::BTreeSet;
 use std::time::Duration;
 
-use common::{Failure, Harness, Outcome, attributes_of, keyed, name_of, only, starting_with};
+use common::{
+    Failure, Harness, Outcome, attributes_of, keyed, mode_on, name_of, only, starting_with,
+};
 use serde_json::{Map, Value, json};
 use telmoni::transport::Answer;
 use telmoni::{Config, Content, ContentMode, ModelCallOptions, Reply, RunOptions, Usage};
@@ -309,14 +311,6 @@ fn content_is_taken_off_before_it_leaves() -> Outcome {
     assert!(!text.contains("the answer"));
     assert!(!text.contains("be brief"));
     Ok(())
-}
-
-fn mode_on() -> Answer {
-    Answer::new(
-        200,
-        vec![("Telmoni-Content-Mode".to_owned(), "on".to_owned())],
-        br#"{"partialSuccess":null}"#.to_vec(),
-    )
 }
 
 /// An answer that says nothing of the mode, as a server without the content switch did.

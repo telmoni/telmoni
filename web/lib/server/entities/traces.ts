@@ -43,6 +43,7 @@ export {
   type FilterKey,
   type ListFilters,
   type RunSpend,
+  type SpanFields,
   type Trace,
   type TraceDetail,
   type TraceSpan,

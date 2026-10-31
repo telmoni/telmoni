@@ -8,7 +8,7 @@
 //! project `x-project-id` names and no other: the store names that project on
 //! every read, twice.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use axum::extract::{Path, State};
@@ -20,22 +20,25 @@ use serde_json::json;
 use uuid::Uuid;
 
 use telmoni_shared::acting::Acting;
+use telmoni_shared::audit::Actor;
 use telmoni_shared::csv;
 use telmoni_shared::db::tenant_session::{ProjectAndOrganization, Scoped};
 use telmoni_shared::extract::{Json, Query};
 use telmoni_shared::rbac::{Resource, Verb};
 use telmoni_shared::{
     AuditAction, AuthError, ProjectId, SortDirection, SpanKind, SpanStatus, TelmoniError,
-    TelmoniResourceKind, TraceSort,
+    TelmoniResourceKind, TraceSort, UserId,
 };
 
 use crate::AppState;
+use crate::content;
 use crate::contract::{
     AGENT_MAX, ATTRIBUTE_VALUE_MAX, ENVIRONMENT_MAX, MODEL_MAX, NAME_MAX, RELEASE_MAX,
     SESSION_ID_MAX, TAG_KEY_MAX, TAG_VALUE_MAX, USER_ID_MAX, UTC_OFFSET_RANGE,
 };
 use crate::erasure::{self, Erase};
 use crate::handler::chain::{self, Change};
+use crate::ingest::batch::SpanContent;
 use crate::spend::{self, Unread};
 use crate::store::{self, Projects, SpanRow};
 use crate::traces::{
@@ -679,6 +682,9 @@ pub struct TraceDetail {
     /// What the run has spent, as an alert on its cost reads it; none where
     /// that could not be read.
     pub spend: Option<RunSpend>,
+    /// Each span's content, opened for the reader and filed as their read:
+    /// empty where the run kept none, none where it could not be opened.
+    pub content: Option<Vec<SpanFields>>,
 }
 
 /// What a run's model calls cost so far: each call's cost as reported, else
@@ -768,16 +774,71 @@ impl From<SpanRow> for TraceSpan {
     }
 }
 
+/// Who reads a project's traces, and the project.
+pub(crate) struct Reader {
+    pub(crate) project_id: ProjectId,
+    pub(crate) user_id: UserId,
+}
+
+/// The caller, once they may read the project's traces.
+pub(crate) async fn reader(state: &AppState, headers: &HeaderMap) -> Result<Reader, TelmoniError> {
+    let acting = state.auth.resolve(headers).await?;
+    let project_id = acting
+        .require_project(Verb::Read, Resource::Trace)?
+        .project_id
+        .clone();
+    Ok(Reader {
+        project_id,
+        user_id: acting.user_id,
+    })
+}
+
 /// The project a list lane reads, once the caller may read its traces.
 pub(crate) async fn reading(
     state: &AppState,
     headers: &HeaderMap,
-) -> Result<telmoni_shared::ProjectId, TelmoniError> {
-    let acting = state.auth.resolve(headers).await?;
-    Ok(acting
-        .require_project(Verb::Read, Resource::Trace)?
-        .project_id
-        .clone())
+) -> Result<ProjectId, TelmoniError> {
+    Ok(reader(state, headers).await?.project_id)
+}
+
+/// One span's content as a lane answers it: each field kept, by its name.
+#[derive(Debug, Serialize)]
+pub struct SpanFields {
+    pub run_id: Uuid,
+    pub span_id: String,
+    pub fields: BTreeMap<String, String>,
+}
+
+impl From<SpanContent> for SpanFields {
+    fn from(span: SpanContent) -> Self {
+        Self {
+            run_id: span.run_id,
+            span_id: span.span_id,
+            fields: span.fields.into_iter().collect(),
+        }
+    }
+}
+
+/// The runs' content, or the named spans', opened for the reader and filed as
+/// their read; none where it could not be, and the page shows without it.
+pub(crate) async fn content_of(
+    state: &AppState,
+    reader: &Reader,
+    runs: &[Uuid],
+    spans: Option<&[String]>,
+) -> Option<Vec<SpanFields>> {
+    let actor = Actor::User(reader.user_id.as_str());
+    match content::open(state, actor, &reader.project_id, runs, spans).await {
+        Ok(opened) => Some(opened.into_iter().map(SpanFields::from).collect()),
+        Err(error) => {
+            tracing::warn!(
+                project_id = %reader.project_id,
+                error = %error,
+                "traces: content could not be opened; the page shows without it"
+            );
+            None
+        }
+    }
 }
 
 /// That project's rows in the store.
@@ -864,8 +925,9 @@ pub(crate) async fn export_rows<L: Listing>(
     headers: &HeaderMap,
     pairs: Vec<(String, String)>,
     reading: Reading,
-) -> Result<(Vec<L::Row>, Format), TelmoniError> {
-    let projects = readable(state, headers).await?;
+) -> Result<(Vec<L::Row>, Format, Reader), TelmoniError> {
+    let reader = reader(state, headers).await?;
+    let projects = Projects::one(reader.project_id.clone());
     let query = TraceQuery::read(pairs, reading)?;
     let filter = query.filter()?;
     let (sort, dir) = query.sort_for::<L>()?;
@@ -873,7 +935,7 @@ pub(crate) async fn export_rows<L: Listing>(
     let rows = traces::list::<L>(&state.store, &projects, &filter, (sort, dir), EXPORT_MAX, 0)
         .await
         .map_err(read_failed)?;
-    Ok((rows, format))
+    Ok((rows, format, reader))
 }
 
 /// `GET /internal/v1/telemetry/traces` — a page of the project's traces in the
@@ -947,9 +1009,44 @@ pub async fn export_traces(
     headers: HeaderMap,
     Query(pairs): Query<Vec<(String, String)>>,
 ) -> Result<Response, TelmoniError> {
-    let (rows, format) =
+    let (rows, format, reader) =
         export_rows::<Traces>(&state, &headers, pairs, Reading::TraceExport).await?;
-    download(format, &rows, &CSV_HEADER, TraceRow::cells, "trace")
+    // One read of every run's content, filed once; a download that cannot
+    // open it fails rather than leaving it out unsaid.
+    let runs: Vec<Uuid> = rows.iter().map(|row| row.run_id).collect();
+    let actor = Actor::User(reader.user_id.as_str());
+    let mut kept: HashMap<Uuid, Vec<SpanFields>> = HashMap::new();
+    for span in content::open(&state, actor, &reader.project_id, &runs, None).await? {
+        kept.entry(span.run_id).or_default().push(span.into());
+    }
+    let rows: Vec<TraceDownload> = rows
+        .into_iter()
+        .map(|row| TraceDownload {
+            content: kept.remove(&row.run_id).unwrap_or_default(),
+            row,
+        })
+        .collect();
+    let header: [&str; 25] =
+        std::array::from_fn(|i| CSV_HEADER.get(i).copied().unwrap_or("content"));
+    download(format, &rows, &header, TraceDownload::cells, "trace")
+}
+
+/// A trace as its download writes it: the list's row and each span's content,
+/// empty where the run kept none.
+#[derive(Debug, Serialize)]
+pub struct TraceDownload {
+    #[serde(flatten)]
+    row: TraceRow,
+    content: Vec<SpanFields>,
+}
+
+impl TraceDownload {
+    /// The row's cells and its content as one JSON cell.
+    fn cells(&self) -> [String; 25] {
+        let row = self.row.cells();
+        let content = serde_json::to_string(&self.content).unwrap_or_default();
+        std::array::from_fn(|i| row.get(i).cloned().unwrap_or_else(|| content.clone()))
+    }
 }
 
 /// `DELETE /internal/v1/telemetry/traces/{run_id}` — one trace deleted by a
@@ -1027,7 +1124,8 @@ pub async fn get_trace(
     headers: HeaderMap,
     Path(run_id): Path<String>,
 ) -> Result<Json<TraceDetail>, TelmoniError> {
-    let projects = readable(&state, &headers).await?;
+    let reader = reader(&state, &headers).await?;
+    let projects = Projects::one(reader.project_id.clone());
     let run_id: Uuid = run_id
         .parse()
         .map_err(|_| TelmoniError::BadRequest("a trace is named by its run's id, a UUID".into()))?;
@@ -1050,6 +1148,7 @@ pub async fn get_trace(
         spans: rows.into_iter().take(shown).map(TraceSpan::from).collect(),
         truncated,
         spend: spend_of(&state, &projects, run_id).await,
+        content: content_of(&state, &reader, &[run_id], None).await,
     }))
 }
 

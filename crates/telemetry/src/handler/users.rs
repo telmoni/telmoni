@@ -124,7 +124,7 @@ pub async fn export_users(
     headers: HeaderMap,
     Query(pairs): Query<Vec<(String, String)>>,
 ) -> Result<Response, TelmoniError> {
-    let (rows, format) = export_rows::<Users>(&state, &headers, pairs, Reading::Export).await?;
+    let (rows, format, _) = export_rows::<Users>(&state, &headers, pairs, Reading::Export).await?;
     download(format, &rows, &CSV_HEADER, UserRow::cells, "user")
 }
 

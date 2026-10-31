@@ -91,8 +91,8 @@ pub use processor::Batching;
 pub use propagation::Carrier;
 pub use records::{CallRecord, ModelCallRecord, RecordItem, RunRecord, StepRecord, ToolCallRecord};
 pub use runs::{
-    Content, ModelCall, ModelCallOptions, Reply, Run, RunOptions, Step, ToolCall, ToolCallOptions,
-    Usage,
+    Content, ModelCall, ModelCallOptions, Reply, Run, RunOptions, RunReply, Step, ToolCall,
+    ToolCallOptions, Usage,
 };
 pub use warnings::{Warning, WarningKind};
 

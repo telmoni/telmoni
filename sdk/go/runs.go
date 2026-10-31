@@ -38,6 +38,16 @@ type RunOptions struct {
 	// context it returns is cancelled with a *CapExceededError as its cause.
 	MaxSteps int
 	MaxSpend float64
+	// InputMessages are content: recorded as JSON, sent only when
+	// CaptureContent is on and the project's mode allows.
+	InputMessages any
+}
+
+// RunAnswer is what a run answered: its messages.
+type RunAnswer struct {
+	// OutputMessages are content: recorded as JSON, sent only when
+	// CaptureContent is on and the project's mode allows.
+	OutputMessages any
 }
 
 // ModelCallOptions is what a model call is opened with.
@@ -157,6 +167,8 @@ type Run struct {
 	// displaced is the provider instrumentation opened spans on where the run
 	// was opened, which its contexts hand out in place of the SDK's.
 	displaced trace.TracerProvider
+	// ended is whether End was called, under the guard's lock.
+	ended bool
 }
 
 // inContext is a span of the SDK's as the contexts it returns carry it: its
@@ -279,6 +291,9 @@ func (c *Client) Run(ctx context.Context, agent string, opts RunOptions) (contex
 		inherited = append(inherited, attribute.Bool(attrSampledOut, true))
 	}
 	name, attrs := c.runOpening(agent, inherited, rate, opts.Tags)
+	if opts.InputMessages != nil {
+		attrs = append(attrs, attribute.String(attrInputMessages, asJSON(opts.InputMessages)))
+	}
 	displaced := providerOf(ctx)
 	ctx, span := c.tracer.Start(ctx, name,
 		trace.WithSpanKind(trace.SpanKindInternal),
@@ -343,7 +358,40 @@ func (r *Run) End() {
 	if r == nil {
 		return
 	}
+	if r.guard != nil {
+		// Under the lock its answers are held under, so none lands past the end.
+		r.guard.mu.Lock()
+		r.ended = true
+		r.guard.mu.Unlock()
+	}
 	r.handle.End()
+}
+
+// Answered records what the run answered: its messages; one given after End
+// is not sent.
+func (r *Run) Answered(a RunAnswer) {
+	if r == nil || r.span == nil {
+		return
+	}
+	var attrs []attribute.KeyValue
+	if a.OutputMessages != nil {
+		attrs = append(attrs, attribute.String(attrOutputMessages, asJSON(a.OutputMessages)))
+	}
+	if r.guard == nil {
+		// No guard holds its end: the attributes go as given, as Spent and Err read nothing.
+		r.span.SetAttributes(attrs...)
+		return
+	}
+	r.guard.mu.Lock()
+	ended := r.ended
+	if !ended && len(attrs) > 0 {
+		r.span.SetAttributes(attrs...)
+	}
+	r.guard.mu.Unlock()
+	// Given once the lock is released: the logger is the application's.
+	if ended {
+		r.client.exporter.warnOnce("run:late", WarningInput, "telmoni: a run must be answered before it ends; an answer given after is not sent")
+	}
 }
 
 // Fail marks the run failed with err's Go type, never its message, or

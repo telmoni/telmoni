@@ -1,0 +1,99 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  cutFrom,
+  fieldsOf,
+  instructionsOf,
+  messagesOf,
+  metadataOf,
+  readable,
+  readableValue,
+} from "./messages";
+
+describe("messagesOf", () => {
+  it("reads each message's role, parts and why a model stopped", () => {
+    const source = JSON.stringify([
+      { role: "user", parts: [{ type: "text", content: "Weather in Paris?" }] },
+      {
+        role: "assistant",
+        parts: [
+          { type: "reasoning", content: "Look it up." },
+          { type: "tool_call", id: "c1", name: "weather", arguments: { city: "Paris" } },
+        ],
+        finish_reason: "tool_call",
+      },
+      { role: "tool", parts: [{ type: "tool_call_response", id: "c1", response: "Rain" }] },
+      { role: "user", parts: [{ type: "blob", modality: "image", mime_type: "image/png", content: "aGk=" }] },
+    ]);
+    expect(messagesOf(source)).toEqual([
+      { role: "user", parts: [{ type: "text", content: "Weather in Paris?" }] },
+      {
+        role: "assistant",
+        parts: [
+          { type: "reasoning", content: "Look it up." },
+          { type: "tool_call", id: "c1", name: "weather", arguments: { city: "Paris" } },
+        ],
+        finishReason: "tool_call",
+      },
+      { role: "tool", parts: [{ type: "tool_call_response", id: "c1", response: "Rain" }] },
+      { role: "user", parts: [{ type: "media", kind: "blob", modality: "image", mimeType: "image/png" }] },
+    ]);
+  });
+
+  it("keeps a part of a type it does not know as it arrived", () => {
+    const part = { type: "server_tool_call", name: "search" };
+    expect(messagesOf(JSON.stringify([{ role: "assistant", parts: [part] }]))).toEqual([
+      { role: "assistant", parts: [{ type: "other", value: part }] },
+    ]);
+  });
+
+  it("answers null for anything that is not the conventions' shape", () => {
+    for (const source of ["hello", "{}", '[{"role":"user"}]', '[{"role":"user","parts":["hi"]}]']) {
+      expect(messagesOf(source), source).toBeNull();
+    }
+  });
+});
+
+describe("instructionsOf", () => {
+  it("reads system instructions as parts, or null", () => {
+    expect(instructionsOf('[{"type":"text","content":"Be brief."}]')).toEqual([
+      { type: "text", content: "Be brief." },
+    ]);
+    expect(instructionsOf("Be brief.")).toBeNull();
+  });
+});
+
+describe("readable", () => {
+  it("indents JSON and leaves other text as it arrived", () => {
+    expect(readable('{"a":1}')).toBe('{\n  "a": 1\n}');
+    expect(readable("plain text")).toBe("plain text");
+    expect(readableValue({ city: "Paris" })).toBe('{\n  "city": "Paris"\n}');
+    expect(readableValue('{"city":"Paris"}')).toBe('{\n  "city": "Paris"\n}');
+  });
+});
+
+describe("cutFrom and metadataOf", () => {
+  it("names the fields an SDK cut, and the fields no label names", () => {
+    const fields = {
+      "telmoni.content_cut": '["gen_ai.input.messages"]',
+      "gen_ai.output.messages": "[]",
+      "app.ticket": '{"id":42}',
+      "app.customer": "acme",
+    };
+    expect(cutFrom(fields)).toEqual(["gen_ai.input.messages"]);
+    expect(cutFrom({})).toEqual([]);
+    expect(metadataOf(fields)).toEqual([
+      ["app.customer", "acme"],
+      ["app.ticket", '{"id":42}'],
+    ]);
+  });
+});
+
+describe("fieldsOf", () => {
+  it("tells a span that kept fields from one that kept none and content unread", () => {
+    const content = [{ run_id: "r", span_id: "s1", fields: { "gen_ai.input.messages": "[]" } }];
+    expect(fieldsOf(content, "s1")).toEqual({ "gen_ai.input.messages": "[]" });
+    expect(fieldsOf(content, "s2")).toBeUndefined();
+    expect(fieldsOf(null, "s1")).toBeNull();
+  });
+});

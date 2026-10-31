@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { QueueFullError, ShutdownError } from '../src/index';
 import type { CallRecord, ModelCallRecord, RunRecord, StepRecord, ToolCallRecord, Usage } from '../src/index';
-import { type ExportBody, type Harness, type JsonAttribute, attributesOf, harness, loadFixture } from './helpers';
+import { type ExportBody, type Harness, type JsonAttribute, answer, attributesOf, harness, loadFixture } from './helpers';
 
 const VERSIONED = new Set(['telemetry.sdk.version', 'telemetry.distro.version']);
 
@@ -503,6 +503,28 @@ describe('a recorded run', () => {
     expect(run.status).toEqual({ code: 2 });
     expect(attributesOf(run)['error.type']).toBe('RateLimitError');
     expect(attributesOf(run)['telmoni.cancelled']).toBeUndefined();
+  });
+
+  it('sends its own messages on its span only when asked and the project allows', async () => {
+    const on = answer(200, { 'Telmoni-Content-Mode': 'on' }, '{}');
+    const sendWith = async (captureContent: boolean): Promise<Record<string, unknown>> => {
+      const h = harness({ captureContent }, {}, [on, on]);
+      try {
+        h.telmoni.run('warm', () => {});
+        expect(await h.telmoni.flush()).toBe(true);
+        h.telmoni.recordRun({ ...theRecord(), inside: [], inputMessages: ['asked'], outputMessages: { said: 'answered' } });
+        expect(await h.telmoni.flush()).toBe(true);
+      } finally {
+        await h.telmoni.shutdown();
+      }
+      return attributesOf(h.transport.spans().find((span) => span.name === 'invoke_agent claude-code')!);
+    };
+    const asked = await sendWith(true);
+    expect(asked['gen_ai.input.messages']).toBe('["asked"]');
+    expect(asked['gen_ai.output.messages']).toBe('{"said":"answered"}');
+    const quiet = await sendWith(false);
+    expect(quiet).not.toHaveProperty('gen_ai.input.messages');
+    expect(quiet).not.toHaveProperty('gen_ai.output.messages');
   });
 
   it('is dropped whole by the sample rate', async () => {

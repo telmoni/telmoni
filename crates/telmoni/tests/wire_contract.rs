@@ -27,7 +27,7 @@ use telmoni_shared::{
     SpanKind, SpanStatus, TelmoniResourceKind, TraceColumn, TraceSort, UserColumn, UserSort,
     ViewKind, slug,
 };
-use telmoni_telemetry::contract::UTC_OFFSET_RANGE;
+use telmoni_telemetry::contract::{CONTENT, UTC_OFFSET_RANGE};
 use telmoni_telemetry::handler::incidents::INCIDENTS_MAX;
 use telmoni_telemetry::handler::traces::FILTER_VALUE_MAX;
 use telmoni_telemetry::live;
@@ -122,6 +122,7 @@ fn generated_contract() -> Value {
             "AgentTool": Tool::ALL.map(Tool::name),
             "AgentMessageRole": wire::<MessageRole>(),
             "AgentTurnEvent": wire::<TurnEventKind>(),
+            "ContentField": CONTENT,
         },
         "flags": {
             "global_only": Flag::all().iter().filter(|f| f.is_global_only())

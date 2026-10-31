@@ -665,22 +665,25 @@ pub async fn keep_content(
 /// One content field as kept: its run, trace, span and name, sealed.
 pub(crate) type KeptField = (Uuid, String, String, String, Vec<u8>, Vec<u8>);
 
-/// Every field the project keeps for the traces, sealed, in trace, span and
-/// name order: the crate's own, read only by [`crate::content::open`], which
-/// files each read.
+/// Every field the project keeps for the runs, or for those of their spans
+/// `spans` names, sealed, in trace, span and name order: the crate's own,
+/// read only by [`crate::content::open`], which files each read.
 pub(crate) async fn read_content(
     tx: &mut Scoped<'_, ProjectAndOrganization>,
     project_id: &ProjectId,
-    trace_ids: &[String],
+    runs: &[Uuid],
+    spans: Option<&[String]>,
 ) -> sqlx::Result<Vec<KeptField>> {
     sqlx::query_as(
         "SELECT run_id, trace_id, span_id, field, ciphertext, nonce
            FROM telemetry.plain_content
-          WHERE project_id = $1 AND trace_id = ANY($2)
+          WHERE project_id = $1 AND run_id = ANY($2)
+            AND ($3::text[] IS NULL OR span_id = ANY($3))
           ORDER BY trace_id, span_id, field",
     )
     .bind(project_id)
-    .bind(trace_ids)
+    .bind(runs)
+    .bind(spans)
     .fetch_all(tx.conn())
     .await
 }

@@ -71,6 +71,7 @@ function detail(id: string) {
     days: 30,
     limit: 100,
     more: false,
+    content: [],
   };
 }
 

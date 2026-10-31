@@ -618,3 +618,61 @@ func TestALoggerThatPanicsOnAWarningNeverReachesTheAgentsCall(t *testing.T) {
 		t.Errorf("spans sent: %v, want %v", got, want)
 	}
 }
+
+func TestARunsOwnMessagesLeaveOnlyWhenAskedAndTheProjectAllows(t *testing.T) {
+	on := contentOn()
+	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k"), CaptureContent: true}, newFakeTransport(t, on, on))
+	_, warm := h.client.Run(context.Background(), "warm", telmoni.RunOptions{})
+	warm.End()
+	h.flush()
+	_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{InputMessages: []map[string]string{{"role": "user", "content": "hi"}}})
+	run.Answered(telmoni.RunAnswer{OutputMessages: []map[string]string{{"role": "assistant", "content": "hello"}}})
+	run.End()
+	h.flush()
+	sent := attributesOf(t, byName(h.transport.spans(t))["invoke_agent bot"])
+	if sent["gen_ai.input.messages"] != `[{"content":"hi","role":"user"}]` {
+		t.Errorf("gen_ai.input.messages = %v", sent["gen_ai.input.messages"])
+	}
+	if sent["gen_ai.output.messages"] != `[{"content":"hello","role":"assistant"}]` {
+		t.Errorf("gen_ai.output.messages = %v", sent["gen_ai.output.messages"])
+	}
+}
+
+func TestARunsOwnMessagesStayHomeWithoutCaptureContentEvenWhenAllowed(t *testing.T) {
+	on := contentOn()
+	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k")}, newFakeTransport(t, on, on))
+	_, warm := h.client.Run(context.Background(), "warm", telmoni.RunOptions{})
+	warm.End()
+	h.flush()
+	if mode := h.client.ContentMode(); mode != "on" {
+		t.Fatalf("the content mode is %q, want on", mode)
+	}
+	_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{InputMessages: "never asked"})
+	run.Answered(telmoni.RunAnswer{OutputMessages: "never answered"})
+	run.End()
+	h.flush()
+	if text := h.transport.text(); strings.Contains(text, "never asked") || strings.Contains(text, "never answered") {
+		t.Error("a run's content left without CaptureContent")
+	}
+}
+
+func TestARunsAnswerAfterItEndedIsNotSentWithOneWarning(t *testing.T) {
+	on := contentOn()
+	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k"), CaptureContent: true}, newFakeTransport(t, on, on))
+	_, warm := h.client.Run(context.Background(), "warm", telmoni.RunOptions{})
+	warm.End()
+	h.flush()
+	_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	run.End()
+	for range 2 {
+		run.Answered(telmoni.RunAnswer{OutputMessages: "too late"})
+	}
+	h.flush()
+	if strings.Contains(h.transport.text(), "too late") {
+		t.Error("an answer given after the run ended was sent")
+	}
+	want := []string{"telmoni: a run must be answered before it ends; an answer given after is not sent"}
+	if got := h.logs.warnings(); !slices.Equal(got, want) {
+		t.Errorf("warned %q", got)
+	}
+}

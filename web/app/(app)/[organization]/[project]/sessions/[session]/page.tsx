@@ -29,8 +29,8 @@ import { formatCount, tracesHref } from "@/lib/traces";
 export const metadata = { title: "Session" };
 
 // One session: its runs in the window, in the order they ran, each summed as
-// the trace list sums it — a replay in metadata, never a message — under the
-// layout the page stands in: a turn of a conversation a line, or each
+// the trace list sums it and, where the project keeps content, its turn of
+// the conversation under it, under the layout the page stands in: a turn of a conversation a line, or each
 // trace's steps and calls, as Customize has it (`lib/layout.ts`). The list
 // opens a session in the console's side panel (`components/traces/
 // session-peek.tsx`); this page is the same session with the page's room.
@@ -179,6 +179,7 @@ export default async function SessionPage({
             traces={traces}
             readWith={session.pinned}
             window={query}
+            content={session.content}
           />
           {session.more && (
             <p className="text-sm text-muted-foreground">

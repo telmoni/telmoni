@@ -41,6 +41,11 @@ const SPAN: &str = "00f067aa0ba902b7";
 const TRACE: &str = "4bf92f3577b34da6a3ce929d0e0e4736";
 const MESSAGES: &str = r#"[{"role":"user","parts":[{"type":"text","content":"hi"}]}]"#;
 
+/// A run's id, as content is opened by.
+fn run(id: &str) -> uuid::Uuid {
+    id.parse().expect("a run's id")
+}
+
 struct Door {
     app: Router,
     state: Arc<AppState>,
@@ -383,28 +388,41 @@ async fn each_read_of_content_is_a_viewed_row_in_the_organizations_chain(pool: P
         &door.state,
         Actor::User("user-1"),
         &door.project,
-        &["0af7651916cd43dd8448eb211c80319c".to_owned()],
+        &[run(RUN_C)],
+        None,
     )
     .await
-    .expect("a trace without content opens to nothing");
+    .expect("a run without content opens to nothing");
     assert!(nothing.is_empty());
+    let unsettled = content::open(
+        &door.state,
+        Actor::User("user-1"),
+        &ProjectId::new(),
+        &[run(RUN)],
+        None,
+    )
+    .await
+    .expect("a project that never exported keeps no content, and says so");
+    assert!(unsettled.is_empty());
     assert!(
         door.viewed(&pool).await.is_empty(),
         "nothing read, nothing filed"
     );
 
-    let traces = [
-        TRACE.to_owned(),
-        "0af7651916cd43dd8448eb211c80319c".to_owned(),
-        TRACE.to_owned(),
-    ];
-    let opened = content::open(&door.state, Actor::User("user-1"), &door.project, &traces)
-        .await
-        .expect("the trace's content opens");
+    let runs = [run(RUN), run(RUN_C), run(RUN)];
+    let opened = content::open(
+        &door.state,
+        Actor::User("user-1"),
+        &door.project,
+        &runs,
+        None,
+    )
+    .await
+    .expect("the trace's content opens");
     assert_eq!(
         opened,
         [SpanContent {
-            run_id: RUN.parse().expect("a run's id"),
+            run_id: run(RUN),
             trace_id: TRACE.to_owned(),
             span_id: SPAN.to_owned(),
             fields: vec![
@@ -425,6 +443,34 @@ async fn each_read_of_content_is_a_viewed_row_in_the_organizations_chain(pool: P
             json!({ "trace_ids": [TRACE], "fields": 3 }),
         )]
     );
+
+    let elsewhere = ["00f067aa0ba902ff".to_owned()];
+    let none = content::open(
+        &door.state,
+        Actor::User("user-1"),
+        &door.project,
+        &runs,
+        Some(&elsewhere),
+    )
+    .await
+    .expect("a span the run does not hold opens to nothing");
+    assert!(none.is_empty());
+    let named = [SPAN.to_owned()];
+    let only = content::open(
+        &door.state,
+        Actor::User("user-1"),
+        &door.project,
+        &runs,
+        Some(&named),
+    )
+    .await
+    .expect("the span named opens");
+    assert_eq!(only.len(), 1, "the span named, alone");
+    assert_eq!(
+        door.viewed(&pool).await.len(),
+        2,
+        "each read filed once, none for nothing"
+    );
 }
 
 /// A read that cannot be recorded opens nothing: not with no chain to file
@@ -436,8 +482,16 @@ async fn a_read_that_cannot_be_recorded_opens_nothing(pool: PgPool) {
     };
     let door = door(&pool, ContentMode::On).await;
     door.send(export("result")).await;
-    let traces = [TRACE.to_owned()];
-    let read = || content::open(&door.state, Actor::User("user-1"), &door.project, &traces);
+    let runs = [run(RUN)];
+    let read = || {
+        content::open(
+            &door.state,
+            Actor::User("user-1"),
+            &door.project,
+            &runs,
+            None,
+        )
+    };
 
     assert!(read().await.is_err(), "no chain, no content");
 
@@ -721,7 +775,8 @@ async fn no_content_reaches_a_log_an_answer_clickhouse_or_what_the_agent_reads(p
         &kept.state,
         Actor::User("admin-1"),
         &kept.project,
-        &[TRACE.to_owned()],
+        &[run(RUN)],
+        None,
     )
     .await
     .expect("the content opens, its read filed");
@@ -763,6 +818,139 @@ async fn no_content_reaches_a_log_an_answer_clickhouse_or_what_the_agent_reads(p
         "{answers:?}"
     );
     assert!(!logs.text().contains(SENTINEL), "content in a log line");
+}
+
+/// A run's turn of a conversation as an SDK sends it: the run's own span
+/// with the person's message and the agent's answer, and a model call under
+/// it with the messages it was sent, both in session `session`.
+fn turn_of(session: &str) -> Vec<u8> {
+    let span = |id: &str, parent: &str, operation: &str, fields: &[(&str, &str)]| {
+        let mut attributes = vec![
+            json!({ "key": contract::RUN_ID, "value": { "stringValue": RUN } }),
+            json!({ "key": contract::AGENT, "value": { "stringValue": "nightly-report" } }),
+            json!({ "key": contract::OPERATION, "value": { "stringValue": operation } }),
+            json!({ "key": contract::SESSION_ID, "value": { "stringValue": session } }),
+        ];
+        attributes.extend(
+            fields
+                .iter()
+                .map(|(key, value)| json!({ "key": key, "value": { "stringValue": value } })),
+        );
+        json!({
+            "traceId": TRACE,
+            "spanId": id,
+            "parentSpanId": parent,
+            "name": operation,
+            "startTimeUnixNano": "1760000000000000000",
+            "endTimeUnixNano": "1760000001500000000",
+            "attributes": attributes
+        })
+    };
+    json!({
+        "resourceSpans": [{
+            "scopeSpans": [{ "scope": { "name": contract::SCOPE }, "spans": [
+                span(SPAN, "", "invoke_agent", &[
+                    ("gen_ai.input.messages", MESSAGES),
+                    ("gen_ai.output.messages", ANSWER),
+                ]),
+                span(SPAN_B, SPAN, "chat", &[("gen_ai.input.messages", CONTEXT)]),
+            ]}]
+        }]
+    })
+    .to_string()
+    .into_bytes()
+}
+
+const ANSWER: &str = r#"[{"role":"assistant","parts":[{"type":"text","content":"hello"}]}]"#;
+const CONTEXT: &str = r#"[{"role":"system","parts":[{"type":"text","content":"be brief"}]}]"#;
+
+/// The trace's page carries each span's content and files the read; the
+/// session's carries each run's own turn alone, filed as its own read; a
+/// project that keeps none answers an empty list and files nothing.
+#[sqlx::test]
+async fn the_trace_and_session_pages_carry_content_each_read_filed(pool: PgPool) {
+    let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    apply_audit_migrations(&pool).await;
+    let kept = door(&pool, ContentMode::On).await;
+    kept.auth.seat(
+        "admin-1",
+        &kept.organization,
+        &kept.project,
+        OrganizationRole::Owner,
+        None,
+    );
+    kept.send(turn_of("conv-1")).await;
+    common::eventually("the trace is read", || found(&kept, RUN)).await;
+
+    let (status, trace) = kept
+        .lane("GET", &format!("/traces/{RUN}"), "admin-1", None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{trace}");
+    assert_eq!(
+        trace["content"],
+        json!([
+            { "run_id": RUN, "span_id": SPAN, "fields": {
+                "gen_ai.input.messages": MESSAGES,
+                "gen_ai.output.messages": ANSWER,
+            }},
+            { "run_id": RUN, "span_id": SPAN_B, "fields": {
+                "gen_ai.input.messages": CONTEXT,
+            }},
+        ])
+    );
+    assert_eq!(kept.viewed(&pool).await.len(), 1, "the trace's read, filed");
+
+    let (status, session) = kept.lane("GET", "/sessions/conv-1", "admin-1", None).await;
+    assert_eq!(status, StatusCode::OK, "{session}");
+    assert_eq!(
+        session["content"],
+        json!([{ "run_id": RUN, "span_id": SPAN, "fields": {
+            "gen_ai.input.messages": MESSAGES,
+            "gen_ai.output.messages": ANSWER,
+        }}]),
+        "the run's own turn, not its model call's context"
+    );
+    let viewed = kept.viewed(&pool).await;
+    assert_eq!(viewed.len(), 2, "the session's read, filed");
+    assert_eq!(viewed[1].4, json!({ "trace_ids": [TRACE], "fields": 2 }));
+
+    let (status, file) = kept
+        .lane(
+            "GET",
+            &format!("/traces/export?format=json&run={RUN}"),
+            "admin-1",
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{file}");
+    assert_eq!(file[0]["run_id"], RUN);
+    assert_eq!(
+        file[0]["content"], trace["content"],
+        "the page's content, in the file"
+    );
+    assert_eq!(kept.viewed(&pool).await.len(), 3, "the download, one read");
+
+    let dropped = door(&pool, ContentMode::Off).await;
+    dropped.auth.seat(
+        "admin-1",
+        &dropped.organization,
+        &dropped.project,
+        OrganizationRole::Owner,
+        None,
+    );
+    dropped.send(turn_of("conv-2")).await;
+    common::eventually("the other trace is read", || found(&dropped, RUN)).await;
+    let (status, trace) = dropped
+        .lane("GET", &format!("/traces/{RUN}"), "admin-1", None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{trace}");
+    assert_eq!(trace["content"], json!([]), "none kept, none shown");
+    assert!(
+        dropped.viewed(&pool).await.is_empty(),
+        "nothing read, nothing filed"
+    );
 }
 
 /// A moved project's content still opens, filed in the new organization's
@@ -814,7 +1002,8 @@ async fn a_moved_project_still_opens_its_content_and_erases_by_user_id(pool: PgP
         &moved.state,
         Actor::User("admin-1"),
         &moved.project,
-        &[TRACE.to_owned()],
+        &[run(RUN)],
+        None,
     )
     .await
     .expect("the moved content opens");
@@ -958,12 +1147,19 @@ const TRACE_D: &str = "7bf92f3577b34da6a3ce929d0e0e4739";
 const SPAN_D: &str = "04f067aa0ba902bb";
 const SPAN_E: &str = "05f067aa0ba902bc";
 
-/// Whether the trace's lane still finds run `run`.
+/// Whether the run is among the project's traces: read from the list, which
+/// opens no content, so waiting for a trace files no read.
 async fn found(door: &Door, run: &str) -> bool {
-    door.lane("GET", &format!("/traces/{run}"), "admin-1", None)
-        .await
-        .0
-        == StatusCode::OK
+    let (status, list) = door.lane("GET", "/traces", "admin-1", None).await;
+    status == StatusCode::OK
+        && list
+            .get("traces")
+            .and_then(Value::as_array)
+            .is_some_and(|traces| {
+                traces
+                    .iter()
+                    .any(|trace| trace.get("run_id") == Some(&json!(run)))
+            })
 }
 
 /// ⚠ A trace is deleted by an admin alone: the request filed before anything

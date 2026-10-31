@@ -27,6 +27,10 @@ type RunRecord struct {
 	UserID    string
 	SessionID string
 	Tags      map[string]string
+	// InputMessages and OutputMessages are content: recorded as JSON, sent
+	// only when CaptureContent is on and the project's mode allows.
+	InputMessages  any
+	OutputMessages any
 	// Start and End are when the run began and ended. A zero time is refused:
 	// it is a time never set, not one the run had.
 	Start time.Time
@@ -164,6 +168,12 @@ func (c *Client) RecordRun(ctx context.Context, record RunRecord) error {
 	rate := c.config.SampleRate
 	inherited := inheritedAttributes(formatUUID(runUUID), record.Agent, record.UserID, record.SessionID)
 	name, attrs := c.runOpening(record.Agent, inherited, rate, record.Tags)
+	if record.InputMessages != nil {
+		attrs = append(attrs, attribute.String(attrInputMessages, asJSON(record.InputMessages)))
+	}
+	if record.OutputMessages != nil {
+		attrs = append(attrs, attribute.String(attrOutputMessages, asJSON(record.OutputMessages)))
+	}
 	// Sampled out, no span is built: none of a record's ends after it, and
 	// the same record sent again draws again.
 	if rate < 1 && c.random() >= rate {

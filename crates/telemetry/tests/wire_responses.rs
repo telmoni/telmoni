@@ -26,8 +26,8 @@ use telmoni_telemetry::handler::rules::{Alert, AlertLink, AlertList};
 use telmoni_telemetry::handler::session_layout::SessionLayoutSetting;
 use telmoni_telemetry::handler::sessions::{SessionDetail, SessionList, SessionTrace};
 use telmoni_telemetry::handler::traces::{
-    FacetValue, FacetValues, Facets, RunSpend, TraceDetail, TraceHistogram, TraceList, TraceSpan,
-    UnpricedModel,
+    FacetValue, FacetValues, Facets, RunSpend, SpanFields, TraceDetail, TraceHistogram, TraceList,
+    TraceSpan, UnpricedModel,
 };
 use telmoni_telemetry::handler::users::UserList;
 use telmoni_telemetry::handler::views::{LayoutFilter, LayoutOptions, View, ViewList, ViewQuery};
@@ -38,6 +38,28 @@ use telmoni_telemetry::rules::{Definition, Hours, Link, RuleFilters};
 use telmoni_telemetry::sessions::SessionRow;
 use telmoni_telemetry::traces::{Bar, PinnedRow, TraceRow};
 use telmoni_telemetry::users::UserRow;
+
+/// A run's own span's turn, as content keeps it: the person's message and
+/// the agent's answer, in the conventions' parts.
+fn turn() -> Vec<SpanFields> {
+    vec![SpanFields {
+        run_id: RUN,
+        span_id: "00f067aa0ba902b7".into(),
+        fields: [
+            (
+                "gen_ai.input.messages".to_owned(),
+                r#"[{"role":"user","parts":[{"type":"text","content":"Summarize the report"}]}]"#
+                    .to_owned(),
+            ),
+            (
+                "gen_ai.output.messages".to_owned(),
+                r#"[{"role":"assistant","parts":[{"type":"text","content":"**Revenue** rose 4%."}],"finish_reason":"stop"}]"#
+                    .to_owned(),
+            ),
+        ]
+        .into(),
+    }]
+}
 
 const RUN: Uuid = Uuid::from_u128(0x0192_f3a1_7c2e_7b4d_9a61_3c5e_8f0d_2b17);
 const RULE: Uuid = Uuid::from_u128(0x0192_f3a1_7c2e_7b4d_9a61_3c5e_8f0d_2b18);
@@ -245,6 +267,7 @@ fn a_trace_answers_as_the_console_reads() {
                     model: "acme-1".into(),
                 }],
             }),
+            content: Some(turn()),
         },
     );
 }
@@ -306,6 +329,7 @@ fn a_session_answers_as_the_console_reads() {
             days: 7,
             limit: 50,
             more: false,
+            content: Some(turn()),
         },
     );
 }

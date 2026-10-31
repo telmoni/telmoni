@@ -13,6 +13,7 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use serde_json::json;
+use uuid::Uuid;
 
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit, lock_chain_in_time};
 use telmoni_shared::db::project_move;
@@ -86,11 +87,11 @@ pub async fn keep(
     Ok(())
 }
 
-/// The traces' content, opened for `actor`, whom the caller has let read the
-/// project: the one way content is read, so every read is a `Viewed` row in
-/// the organization's chain, committed before a field is opened. The row
-/// names the traces read, never what they hold; a read that finds nothing writes
-/// none.
+/// The runs' content, or that of the spans `spans` names, opened for
+/// `actor`, whom the caller has let read the project: the one way content is
+/// read, so every read is a `Viewed` row in the organization's chain,
+/// committed before a field is opened. The row names the traces read, never
+/// what they hold; a read that finds nothing writes none.
 ///
 /// # Errors
 ///
@@ -99,10 +100,15 @@ pub async fn open(
     state: &AppState,
     actor: Actor<'_>,
     project_id: &ProjectId,
-    trace_ids: &[String],
+    runs: &[Uuid],
+    spans: Option<&[String]>,
 ) -> Result<Vec<SpanContent>, TelmoniError> {
-    let (mut tx, organization_id) = held_in_place(state, project_id).await?;
-    let kept = match file_the_read(&mut tx, &organization_id, actor, project_id, trace_ids).await {
+    // No settings row, no content: a project that never kept any.
+    let Some((mut tx, organization_id)) = held_if_kept(state, project_id).await? else {
+        return Ok(Vec::new());
+    };
+    let read = file_the_read(&mut tx, &organization_id, actor, project_id, runs, spans).await;
+    let kept = match read {
         Ok(kept) => kept,
         Err(refused) => {
             chain::rolled_back(tx.rollback().await, project_id, WHAT);
@@ -144,16 +150,17 @@ pub async fn open(
     Ok(opened)
 }
 
-/// The traces' sealed fields, and where there are any, the `Viewed` row that
+/// The runs' sealed fields, and where there are any, the `Viewed` row that
 /// files their read, its chain lock waited on no longer than a lane's.
 async fn file_the_read(
     tx: &mut Scoped<'_, ProjectAndOrganization>,
     organization_id: &OrganizationId,
     actor: Actor<'_>,
     project_id: &ProjectId,
-    trace_ids: &[String],
+    runs: &[Uuid],
+    spans: Option<&[String]>,
 ) -> Result<Vec<db::KeptField>, TelmoniError> {
-    let kept = db::read_content(tx, project_id, trace_ids).await?;
+    let kept = db::read_content(tx, project_id, runs, spans).await?;
     if kept.is_empty() {
         return Ok(kept);
     }
@@ -241,12 +248,12 @@ async fn make_key(
 }
 
 /// The project's scope bound to the organization its settings row is filed
-/// under, the project held in place so no move passes before the commit. The
-/// row is the export's own, made by its hashing key before any content.
-async fn held_in_place<'c>(
+/// under, the project held in place so no move passes before the commit; none
+/// where it has no settings row, which holds no content then.
+async fn held_if_kept<'c>(
     state: &'c AppState,
     project_id: &ProjectId,
-) -> Result<(Scoped<'c, ProjectAndOrganization>, OrganizationId), TelmoniError> {
+) -> Result<Option<(Scoped<'c, ProjectAndOrganization>, OrganizationId)>, TelmoniError> {
     let mut tx = project_scope(&state.db, project_id).await?;
     if !project_move::try_hold_in_place(tx.conn(), project_id).await? {
         chain::rolled_back(tx.rollback().await, project_id, WHAT);
@@ -257,11 +264,22 @@ async fn held_in_place<'c>(
     }
     let Some(organization_id) = db::settings_organization(&mut tx, project_id).await? else {
         chain::rolled_back(tx.rollback().await, project_id, WHAT);
-        return Err(TelemetryError::StoreUnavailable(
-            "the project's settings were deleted as it was reached; try again".into(),
-        )
-        .into());
+        return Ok(None);
     };
     let tx = tx.bind_organization(&organization_id).await?;
-    Ok((tx, organization_id))
+    Ok(Some((tx, organization_id)))
+}
+
+/// [`held_if_kept`] for a write: the row is the export's own, made by its
+/// hashing key before any content, so its absence is a purge that passed.
+async fn held_in_place<'c>(
+    state: &'c AppState,
+    project_id: &ProjectId,
+) -> Result<(Scoped<'c, ProjectAndOrganization>, OrganizationId), TelmoniError> {
+    held_if_kept(state, project_id).await?.ok_or_else(|| {
+        TelemetryError::StoreUnavailable(
+            "the project's settings were deleted as it was reached; try again".into(),
+        )
+        .into()
+    })
 }

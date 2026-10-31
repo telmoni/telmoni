@@ -106,11 +106,13 @@ class Telmoni:
         sample_rate: float | None = None,
         max_steps: int | None = None,
         max_spend: float | None = None,
+        input_messages: object | None = None,
     ) -> RunScope:
         """A run of ``agent``: ``with telmoni.run("bot") as run:`` or ``@telmoni.run("bot")``.
 
         ``max_steps`` and ``max_spend``, in US dollars, are the guard's caps:
         once the run reaches one, what it opens next raises ``CapExceededError``.
+        ``input_messages`` is content, sent only when asked and allowed.
         """
         return RunScope(
             lambda: self._opener.run(
@@ -121,6 +123,7 @@ class Telmoni:
                 sample_rate=sample_rate,
                 max_steps=max_steps,
                 max_spend=max_spend,
+                input_messages=input_messages,
             )
         )
 

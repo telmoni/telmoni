@@ -126,7 +126,8 @@ content rules and sample rate, in a trace of its own named by the run's id,
 whatever trace is current. Each span's id is derived from the run's id and the
 span's place in the record, so the same record sent again is the same bytes,
 which ingest answers once: give a run the same id each time you send it. A
-record holds no content. A blank agent, a run id that is neither a hyphenated
+record's only content is its run's own messages (`input_messages`,
+`output_messages`). A blank agent, a run id that is neither a hyphenated
 UUID nor 32 hex digits, or is the nil UUID, a time without its timezone or
 outside what ingest reads (after the Unix epoch, and less than 2^64 nanoseconds
 after it, in July 2554), an empty step's name or model, text longer than
@@ -163,8 +164,9 @@ carries no cap.
 ## Content
 
 Prompts, completions, tool arguments and results (`input_messages`,
-`output_messages`, `arguments`, `returned(...)`) are recorded on the span and
-taken off by the exporter before anything leaves the process. They are sent
+`output_messages`, `arguments`, `returned(...)`, and a run's own
+`run(input_messages=)` and `run.answered(output_messages=)`) are recorded on
+the span and taken off by the exporter before anything leaves the process. They are sent
 only when the client is built with `Config(capture_content=True)` **and** the
 project's content mode, which the SDK learns from the server's first answer,
 is `on`. A `capture_content` that is no `bool`, such as `"false"` from the

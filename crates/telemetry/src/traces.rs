@@ -699,6 +699,13 @@ const PINNED_SQL: &str = "SELECT run_id, span_id, parent_span_id, kind, name, st
      ORDER BY run_id, started_at, ended_at DESC, span_id \
      LIMIT {per_run:UInt32} BY run_id";
 
+/// Each run's own span, one a run: what a session's conversation is read from.
+const RUN_SPANS_SQL: &str = "SELECT span_id FROM telemetry.spans \
+     WHERE project_id IN {projects:Array(String)} \
+     AND received_at >= now64(6) - toIntervalDay({days:UInt16}) \
+     AND has({runs:Array(UUID)}, run_id) AND kind = 'run' \
+     LIMIT 1 BY run_id";
+
 /// `read` with the filter's every value bound: each read binds them all,
 /// since each names them all.
 pub(crate) fn filtered(read: Read, filter: &TraceFilter) -> Read {
@@ -943,6 +950,29 @@ pub async fn pinned(
         .param("runs", runs)
         .param("names", names)
         .param("per_run", PINNED_PER_RUN)
+        .fetch_all()
+        .await
+}
+
+/// The span each of `runs` keeps as its own, within `days`: where its input
+/// and output are, the run's turn of a conversation. Nothing for no runs.
+///
+/// # Errors
+///
+/// ClickHouse did not answer, or refused the read.
+pub async fn run_spans(
+    store: &Store,
+    projects: &Projects,
+    runs: &[Uuid],
+    days: u16,
+) -> clickhouse::error::Result<Vec<String>> {
+    if runs.is_empty() {
+        return Ok(Vec::new());
+    }
+    store
+        .read(projects, RUN_SPANS_SQL)
+        .param("days", days)
+        .param("runs", runs)
         .fetch_all()
         .await
 }

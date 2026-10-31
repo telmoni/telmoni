@@ -17,7 +17,7 @@ import { GET } from "./route";
 
 const PROJECT = "project_7bQx2mNv9BcK4dLp";
 const RUN = "5d4f5c68-0000-4000-8000-000000000001";
-const TRACE = { run_id: RUN, spans: [], truncated: false };
+const TRACE = { run_id: RUN, spans: [], truncated: false, content: [] };
 
 /** The peek's own read. */
 function read(run = RUN, project: string | null = PROJECT) {

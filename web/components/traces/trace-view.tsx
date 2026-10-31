@@ -27,6 +27,7 @@ import {
   TruncatedNote,
   indentStyle,
 } from "@/components/traces/span-parts";
+import { SpanContent } from "@/components/traces/span-content";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -42,6 +43,7 @@ import {
   type LayoutOptions,
 } from "@/lib/layout";
 import { incidentHref } from "@/lib/alerts";
+import { fieldsOf } from "@/lib/messages";
 import { subscribeNever } from "@/lib/in-browser";
 import { windowReaching } from "@/lib/list-query";
 import type { Incident } from "@/lib/server/entities/alerts";
@@ -457,6 +459,8 @@ export const TraceBody = memo(function TraceBody({
       <SpanDetail
         span={span}
         summary={summary}
+        fields={fieldsOf(trace.content, span.span_id)}
+        keptContent={(trace.content?.length ?? 0) > 0}
         runId={trace.run_id}
         organization={organization}
         slug={slug}
@@ -597,6 +601,8 @@ const REQUEST_PARAMETERS = [
 function SpanDetail({
   span,
   summary,
+  fields,
+  keptContent,
   runId,
   organization,
   slug,
@@ -608,6 +614,10 @@ function SpanDetail({
   span: TraceSpan;
   /** The whole trace's sums, which the run's own span is read with. */
   summary: TraceSummary;
+  /** What the span kept: `undefined` for nothing, `null` where it could not be read. */
+  fields: Readonly<Record<string, string>> | null | undefined;
+  /** Whether any span of the trace kept content: its tab then opens first. */
+  keptContent: boolean;
   runId: string;
   organization: string;
   slug: string;
@@ -616,7 +626,7 @@ function SpanDetail({
   onShowSpans: () => void;
   className?: string;
 }) {
-  const [tab, setTab] = useState("details");
+  const [tab, setTab] = useState(keptContent ? "content" : "details");
   const [raw, setRaw] = useState(false);
   const attributes = Object.entries(span.attributes).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
   const reaching = useWindowReaching(span.started_at);
@@ -657,6 +667,7 @@ function SpanDetail({
       <Tabs value={tab} onValueChange={setTab} className="min-h-0 flex-1 gap-0">
         <div className="flex shrink-0 items-center gap-2 border-b border-border px-gutter py-1.5">
           <TabsList variant="line">
+            <TabsTrigger value="content">Content</TabsTrigger>
             <TabsTrigger value="details">Details</TabsTrigger>
             <TabsTrigger value="attributes">
               Attributes
@@ -679,6 +690,19 @@ function SpanDetail({
           </ToggleGroup>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-gutter py-2">
+          <TabsContent value="content">
+            {raw ? (
+              <Raw value={fields ?? null} />
+            ) : fields === null ? (
+              <p className="py-2 text-sm text-muted-foreground">
+                This span&apos;s content could not be read. Reload to try again.
+              </p>
+            ) : fields ? (
+              <SpanContent fields={fields} />
+            ) : (
+              <p className="py-2 text-sm text-muted-foreground">This span kept no content.</p>
+            )}
+          </TabsContent>
           <TabsContent value="details">
             {raw ? (
               <Raw value={span} />

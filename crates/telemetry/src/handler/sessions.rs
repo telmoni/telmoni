@@ -25,8 +25,8 @@ use telmoni_shared::{
 
 use crate::contract::{NAME_MAX, SESSION_ID_MAX};
 use crate::handler::traces::{
-    Facets, Reading, download, export_rows, facets_page, list_page, parse_days, parse_limit,
-    read_failed, reading, values,
+    Facets, Reading, SpanFields, content_of, download, export_rows, facets_page, list_page,
+    parse_days, parse_limit, read_failed, reader, values,
 };
 use crate::handler::views::LayoutOptions;
 use crate::sessions::{SessionRow, Sessions};
@@ -216,6 +216,10 @@ pub struct SessionDetail {
     pub limit: u32,
     /// Whether the window held more of the session's traces than the limit.
     pub more: bool,
+    /// Each run's own span's content, its turn of the conversation, opened
+    /// for the reader and filed as their read: empty where the runs kept
+    /// none, none where it could not be opened.
+    pub content: Option<Vec<SpanFields>>,
 }
 
 /// One trace of a session's page: the list's sums, and the spans a layout
@@ -269,7 +273,8 @@ pub async fn export_sessions(
     headers: HeaderMap,
     Query(pairs): Query<Vec<(String, String)>>,
 ) -> Result<Response, TelmoniError> {
-    let (rows, format) = export_rows::<Sessions>(&state, &headers, pairs, Reading::Export).await?;
+    let (rows, format, _) =
+        export_rows::<Sessions>(&state, &headers, pairs, Reading::Export).await?;
     download(format, &rows, &CSV_HEADER, SessionRow::cells, "session")
 }
 
@@ -307,7 +312,8 @@ pub async fn get_session(
     Path(session_id): Path<String>,
     Query(pairs): Query<Vec<(String, String)>>,
 ) -> Result<Json<SessionDetail>, TelmoniError> {
-    let project_id = reading(&state, &headers).await?;
+    let reader = reader(&state, &headers).await?;
+    let project_id = reader.project_id.clone();
     let projects = Projects::one(project_id.clone());
     let session_id = session_id.trim().to_owned();
     if session_id.is_empty() || session_id.chars().count() > SESSION_ID_MAX {
@@ -352,6 +358,10 @@ pub async fn get_session(
     {
         spans.entry(row.run_id).or_default().push(row);
     }
+    let own = traces::run_spans(&state.store, &projects, &runs, window.days)
+        .await
+        .map_err(read_failed)?;
+    let content = content_of(&state, &reader, &runs, Some(&own)).await;
     Ok(Json(SessionDetail {
         session_id,
         traces: rows
@@ -365,6 +375,7 @@ pub async fn get_session(
         days: window.days,
         limit: window.limit,
         more,
+        content,
     }))
 }
 

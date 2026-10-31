@@ -404,6 +404,28 @@ export const AgentTool = {
 } as const;
 export type AgentTool = typeof AgentTool[keyof typeof AgentTool];
 
+/** Telemetry's content fields (`contract::CONTENT`): what a person wrote or a
+ *  model produced, kept only where a project keeps content, and drawn by the
+ *  trace page in full. */
+export const ContentField = {
+  InputMessages:       "gen_ai.input.messages",
+  OutputMessages:      "gen_ai.output.messages",
+  SystemInstructions:  "gen_ai.system_instructions",
+  ToolDefinitions:     "gen_ai.tool.definitions",
+  ToolCallArguments:   "gen_ai.tool.call.arguments",
+  ToolCallResult:      "gen_ai.tool.call.result",
+  RetrievalQueryText:  "gen_ai.retrieval.query.text",
+  RetrievalDocuments:  "gen_ai.retrieval.documents",
+  MemoryQueryText:     "gen_ai.memory.query.text",
+  MemoryRecords:       "gen_ai.memory.records",
+  PromptVariable:      "gen_ai.prompt.variable",
+  UserEmail:           "user.email",
+  UserFullName:        "user.full_name",
+  UserName:            "user.name",
+  ContentCut:          "telmoni.content_cut",
+} as const;
+export type ContentField = typeof ContentField[keyof typeof ContentField];
+
 /** Wire vocabulary of the Rust agent `MessageRole`: who wrote a message. */
 export const AgentMessageRole = {
   User:      "user",

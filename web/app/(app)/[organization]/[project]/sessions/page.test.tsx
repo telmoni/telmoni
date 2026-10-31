@@ -233,7 +233,7 @@ describe("SessionsPage", () => {
 
   it("opens the session the URL names beside the list, read by the project's id in the list's window", async () => {
     mockSearch = "days=30&peek=conv-1";
-    const fetchMock = vi.fn(async () => Response.json({ session_id: "conv-1", traces: [], pinned: [], days: 30, limit: 100, more: false }));
+    const fetchMock = vi.fn(async () => Response.json({ session_id: "conv-1", traces: [], pinned: [], days: 30, limit: 100, more: false, content: [] }));
     vi.stubGlobal("fetch", fetchMock);
     render(await SessionsPage({ params: PARAMS, searchParams: Promise.resolve({ days: "30", limit: "25" }) }));
     const panel = screen.getByRole("dialog");

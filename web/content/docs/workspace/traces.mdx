@@ -1,14 +1,16 @@
 ---
 title: "Traces"
-description: "A project's Traces page: every run of its agents as a row, newest first, narrowed by any of its values, sorted, paged, drawn over the window, saved as views and downloaded, and each run opened beside the list or on a page of its own, its spans as a tree beside the one you choose — all of it metadata."
+description: "A project's Traces page: every run of its agents as a row, newest first, narrowed by any of its values, sorted, paged, drawn over the window, saved as views and downloaded, and each run opened beside the list or on a page of its own, its spans as a tree beside the one you choose — metadata, and where the project keeps content, every message and tool call in full."
 ---
 
 A **trace** is one run's record: the run's own span and every span recorded
 inside it, found by the run's id. A project's **Traces** page lists them; each
-opens beside the list, and has a page of its own. Everything on both is
-metadata — timings, statuses, counts, model and tool names — and nothing on
-either is a prompt, a completion or a tool payload, in any
-[content mode](/docs/api/ingest#what-is-dropped-at-the-door).
+opens beside the list, and has a page of its own. Both show its metadata —
+timings, statuses, counts, model and tool names — and, on a project whose
+[content mode](/docs/workspace/organizations-and-projects#a-projects-content-mode)
+is `on`, what it kept of what a person or a model wrote, in full
+([Content](#content), below). A project left `off` keeps none, so its traces
+show none.
 
 ## The list
 
@@ -123,7 +125,11 @@ session's page and a trace's beside them. The
 **Download** writes the list as a file, CSV for a spreadsheet or JSON: every
 run its filters admit, sorted as it is, up to the first 10,000. Tick rows by
 their boxes to download those alone. A file holds what the list holds —
-metadata, with each user's id as stored — and never a message.
+metadata, with each user's id as stored — and each run's content where the
+project keeps it, each span's fields under `content`: nested in the JSON, one
+JSON cell in the CSV. A download that holds content is one read of it in the
+[audit log](/docs/workspace/audit-log), and one that cannot open it is
+refused rather than written without it.
 
 ## A trace
 
@@ -181,6 +187,30 @@ attributes pass about 8 MiB; a run with more says so under them.
 A run whose own span has not arrived yet is shown as running, and its trace
 is read again as more of its spans land. A trace that is not in the project —
 a run that has passed its retention, or one of another project's — says so.
+
+### Content
+
+On a project that keeps content, a trace's page and its view beside the list
+show it in full, as an SDK sent it under the GenAI conventions:
+
+- **At its head**, the run's own input and output: the person's message and
+  the agent's answer, a turn of a conversation, under the layout's
+  **Messages** option, on by default. A trace that kept none says so in a
+  line.
+- **Every span opened**, on its **Content** tab, first where the trace kept
+  any: a model call's system instructions, the tools it was offered, and its
+  input and output as a conversation, each message under its role, its text
+  as Markdown, its tool calls and their results as indented JSON and its
+  reasoning folded; a tool call's arguments and result; a retrieval's query
+  and documents; and the metadata the span carried. An image or a file is
+  named by its type, not drawn. **Raw** shows the fields as they arrived.
+- **A field an SDK cut** to fit an export is named in a line, since it was
+  not kept.
+
+Each opening of a trace that kept content is recorded in the
+[audit log](/docs/workspace/audit-log) as `viewed`, before the content is
+sent, naming the trace and never what it holds; the project's **Privacy**
+page lists who read it.
 
 ### Layouts
 

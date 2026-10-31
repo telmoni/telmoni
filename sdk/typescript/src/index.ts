@@ -14,6 +14,7 @@ export type {
   RecordOutcome,
   RecordTime,
   ResolvedConfig,
+  RunAnswer,
   RunOptions,
   RunRecord,
   StepRecord,

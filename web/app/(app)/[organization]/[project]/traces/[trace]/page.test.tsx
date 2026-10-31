@@ -204,6 +204,7 @@ beforeEach(() => {
       spans: SPANS,
       truncated: false,
       spend: { spent: 0.84, unpriced: [{ provider: "openai", model: "ft:gpt-4o:acme" }] },
+      content: [],
     },
   };
   mockIncidents = [];
@@ -407,10 +408,80 @@ describe("TracePage", () => {
     expect(within(chosen()).getByRole("heading", { name: "search_docs" })).toBeInTheDocument();
   });
 
+  it("shows the run's turn at its head and each span's content in full, the content tab first", async () => {
+    const turn = {
+      "gen_ai.input.messages": JSON.stringify([
+        { role: "user", parts: [{ type: "text", content: "Summarize the report" }] },
+      ]),
+      "gen_ai.output.messages": JSON.stringify([
+        { role: "assistant", parts: [{ type: "text", content: "**Revenue** rose 4%." }], finish_reason: "stop" },
+      ]),
+    };
+    const call = {
+      "gen_ai.system_instructions": JSON.stringify([{ type: "text", content: "Answer in one line." }]),
+      "gen_ai.output.messages": JSON.stringify([
+        {
+          role: "assistant",
+          parts: [
+            { type: "reasoning", content: "The tool knows." },
+            { type: "tool_call", id: "c1", name: "weather", arguments: { city: "Paris" } },
+          ],
+        },
+      ]),
+      "telmoni.content_cut": JSON.stringify(["gen_ai.input.messages"]),
+      "app.ticket": JSON.stringify({ id: 42 }),
+    };
+    mockTrace = {
+      kind: "ok",
+      trace: {
+        run_id: RUN,
+        spans: SPANS,
+        truncated: false,
+        spend: null,
+        content: [
+          { run_id: RUN, span_id: "0000000000000001", fields: turn },
+          { run_id: RUN, span_id: "0000000000000003", fields: call },
+        ],
+      },
+    };
+    mockSetting = { view_id: null };
+    const { unmount } = render(await TracePage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+    expect(screen.getAllByText("Summarize the report").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Revenue")[0]?.tagName).toBe("STRONG");
+    expect(within(chosen()).getByRole("tab", { name: "Content" })).toHaveAttribute("aria-selected", "true");
+    expect(within(chosen()).getByText("Input")).toBeInTheDocument();
+    expect(within(chosen()).getByText(/stopped: stop/)).toBeInTheDocument();
+    unmount();
+
+    mockSetting = { view_id: FULL_ID };
+    render(await TracePage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+    expect(screen.queryByText("This trace kept no content.")).toBeNull();
+    fireEvent.click(within(screen.getByRole("tree", { name: "Spans" })).getByText("chat claude-sonnet-5-5"));
+    expect(within(chosen()).getByText("Answer in one line.")).toBeInTheDocument();
+    expect(within(chosen()).getByText("Reasoning")).toBeInTheDocument();
+    expect(within(chosen()).getByText("weather")).toBeInTheDocument();
+    expect(within(chosen()).getByText(/"city": "Paris"/)).toBeInTheDocument();
+    expect(within(chosen()).getByText(/Cut to fit an export, and not kept: gen_ai.input.messages/)).toBeInTheDocument();
+    expect(within(chosen()).getByText("app.ticket")).toBeInTheDocument();
+
+    fireEvent.click(within(screen.getByRole("tree", { name: "Spans" })).getByText("search_docs"));
+    expect(within(chosen()).getByText("This span kept no content.")).toBeInTheDocument();
+  });
+
+  it("says in a line when a trace kept no content, and when it could not be read", async () => {
+    mockSetting = { view_id: null };
+    const { unmount } = render(await TracePage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+    expect(screen.getByText("This trace kept no content.")).toBeInTheDocument();
+    unmount();
+    mockTrace = { kind: "ok", trace: { run_id: RUN, spans: SPANS, truncated: false, spend: null, content: null } };
+    render(await TracePage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+    expect(screen.getByText("This trace's content could not be read. Reload to try again.")).toBeInTheDocument();
+  });
+
   it("calls a run whose own span has not arrived running", async () => {
     mockTrace = {
       kind: "ok",
-      trace: { run_id: RUN, spans: SPANS.slice(2, 3), truncated: true, spend: null },
+      trace: { run_id: RUN, spans: SPANS.slice(2, 3), truncated: true, spend: null, content: [] },
     };
     render(await TracePage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByText("Running")).toBeInTheDocument();

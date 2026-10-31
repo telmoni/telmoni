@@ -10,11 +10,12 @@ import { rowClickTaken } from "@/components/traces/list-table";
 import { SignInAgain, readSession, readTrace, startRead } from "@/components/traces/peek-read";
 import { TraceOutline } from "@/components/traces/trace-outline";
 import { PinnedChip } from "@/components/traces/span-parts";
+import { RunTurn } from "@/components/traces/span-content";
 import { useLayout } from "@/components/traces/use-layout";
 import { tracesOpenedFirst, type LayoutOptions } from "@/lib/layout";
 import type { WindowQuery } from "@/lib/list-query";
 import type { RouteRead } from "@/lib/route-read";
-import type { PinnedSpan, SessionTrace, TraceDetail } from "@/lib/server/data";
+import type { PinnedSpan, SessionTrace, SpanFields, TraceDetail } from "@/lib/server/data";
 import {
   TRACE_COLUMNS,
   shortId,
@@ -47,6 +48,9 @@ type Props = {
   /** The span names the page's traces were read with on the server. */
   readWith: readonly string[];
   window: WindowQuery;
+  /** Each run's own turn, where the project keeps content: null where it
+   *  could not be read. */
+  content: readonly SpanFields[] | null;
 };
 
 export function SessionRuns(props: Props) {
@@ -109,6 +113,7 @@ function Runs({
   projectId,
   traces,
   window: query,
+  content,
   options,
   pinned,
   reads,
@@ -159,6 +164,10 @@ function Runs({
   );
 
   return (
+    <>
+    {options.messages && content === null && (
+      <Note>This session&apos;s content could not be read. Reload to try again.</Note>
+    )}
     <DataTable>
       <THead>
         <Th className="w-0 pr-0" />
@@ -175,6 +184,7 @@ function Runs({
           const open = openable && opened.has(run);
           const pins = pinned.get(run) ?? [];
           const stood = current === run;
+          const turn = options.messages ? content?.find((span) => span.run_id === run)?.fields : undefined;
           return (
             <Fragment key={run}>
               <tr
@@ -219,6 +229,13 @@ function Runs({
                   </Td>
                 ))}
               </tr>
+              {turn && (
+                <tr data-run-turn={run}>
+                  <td colSpan={columns.length + 2} className="px-4 py-2">
+                    <RunTurn fields={turn} />
+                  </td>
+                </tr>
+              )}
               {(open || pins.length > 0) && (
                 <tr data-run-under={run}>
                   <td colSpan={columns.length + 2} className="bg-muted/30 px-4 py-2">
@@ -241,6 +258,7 @@ function Runs({
         })}
       </tbody>
     </DataTable>
+    </>
   );
 }
 

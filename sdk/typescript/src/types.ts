@@ -125,6 +125,14 @@ export interface RunOptions {
   maxSteps?: number | undefined;
   /** The guard's cap on the run's spend, in US dollars: reached, what it opens next throws. */
   maxSpend?: number | undefined;
+  /** Content: sent only with `captureContent` and the project's mode `on`. */
+  inputMessages?: unknown;
+}
+
+/** What the run answered: its messages. */
+export interface RunAnswer {
+  /** Content: sent only with `captureContent` and the project's mode `on`. */
+  outputMessages?: unknown;
 }
 
 export interface ModelCallOptions {
@@ -215,6 +223,10 @@ export interface RunRecord extends RecordOutcome {
   userId?: string | undefined;
   sessionId?: string | undefined;
   tags?: Readonly<Record<string, string>> | undefined;
+  /** Content: sent only with `captureContent` and the project's mode `on`. */
+  inputMessages?: unknown;
+  /** Content, as above. */
+  outputMessages?: unknown;
   start: RecordTime;
   end: RecordTime;
   inside?: readonly (StepRecord | CallRecord)[] | undefined;

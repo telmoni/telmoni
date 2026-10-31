@@ -12,6 +12,7 @@ import pytest
 
 from conftest import FakeTransport, attributes_of, infos_in
 from telmoni import Config, Run, Telmoni, WarningInfo, current_run
+from telmoni.exporter import Answer
 
 UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12}$")
 
@@ -561,3 +562,73 @@ def test_a_runs_text_at_ingests_caps_is_sent_whole(
     assert sent["telmoni.agent"] == sent["user.id"] == sent["error.type"] == "😀" * 128
     assert sent["gen_ai.conversation.id"] == "😀" * 200
     assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+
+def test_a_runs_own_messages_leave_only_when_asked_and_the_project_allows(
+    transport: FakeTransport,
+) -> None:
+    on = Answer(200, {"Telmoni-Content-Mode": "on"}, b"{}")
+    transport.answers = [on, on]
+    client = Telmoni(Config(api_key="k", capture_content=True), transport=transport)
+    try:
+        with client.run("warm"):
+            pass
+        assert client.flush()
+        with client.run(
+            "bot", input_messages=[{"role": "user", "content": "hi"}]
+        ) as run:
+            run.answered(output_messages=[{"role": "assistant", "content": "hello"}])
+        assert client.flush()
+    finally:
+        client.shutdown()
+    (span,) = [s for s in transport.spans() if s["name"] == "invoke_agent bot"]
+    sent = attributes_of(span)
+    assert sent["gen_ai.input.messages"] == '[{"role":"user","content":"hi"}]'
+    assert sent["gen_ai.output.messages"] == '[{"role":"assistant","content":"hello"}]'
+
+
+def test_a_runs_own_messages_stay_home_without_capture_content_even_when_allowed(
+    transport: FakeTransport,
+) -> None:
+    on = Answer(200, {"Telmoni-Content-Mode": "on"}, b"{}")
+    transport.answers = [on, on]
+    client = Telmoni(Config(api_key="k"), transport=transport)
+    try:
+        with client.run("warm"):
+            pass
+        assert client.flush()
+        assert client.content_mode == "on"
+        with client.run("bot", input_messages="never asked") as run:
+            run.answered(output_messages="never answered")
+        assert client.flush()
+    finally:
+        client.shutdown()
+    assert "never asked" not in str(transport.requests)
+    assert "never answered" not in str(transport.requests)
+
+
+def test_a_runs_answer_after_it_ended_is_not_sent_with_one_warning(
+    transport: FakeTransport, caplog: pytest.LogCaptureFixture
+) -> None:
+    on = Answer(200, {"Telmoni-Content-Mode": "on"}, b"{}")
+    transport.answers = [on, on]
+    client = Telmoni(Config(api_key="k", capture_content=True), transport=transport)
+    try:
+        with client.run("warm"):
+            pass
+        assert client.flush()
+        with client.run("bot") as run:
+            pass
+        for _ in range(2):
+            run.answered(output_messages="too late")
+        assert client.flush()
+    finally:
+        client.shutdown()
+    assert "too late" not in str(transport.requests)
+    warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    assert warnings == [
+        (
+            "telmoni: a run must be answered before it ends; an answer given after "
+            "is not sent"
+        )
+    ]

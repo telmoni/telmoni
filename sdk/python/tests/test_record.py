@@ -34,7 +34,7 @@ from telmoni import (
     current_run,
     runs,
 )
-from telmoni.exporter import Exporter
+from telmoni.exporter import Answer, Exporter
 from telmoni.processor import Batching, Processor
 
 VERSIONED = {"telemetry.sdk.version", "telemetry.distro.version"}
@@ -476,6 +476,39 @@ def test_a_failed_run_is_marked_on_its_own_span(
     assert run["status"] == {"code": 2}
     assert attributes_of(run)["error.type"] == "RateLimitError"
     assert "telmoni.cancelled" not in attributes_of(run)
+
+
+@pytest.mark.parametrize("capture_content", [True, False])
+def test_a_records_own_messages_leave_only_when_asked_and_the_project_allows(
+    transport: FakeTransport, capture_content: bool
+) -> None:
+    on = Answer(200, {"Telmoni-Content-Mode": "on"}, b"{}")
+    transport.answers = [on, on]
+    client = Telmoni(
+        Config(api_key="k", capture_content=capture_content), transport=transport
+    )
+    record = dataclasses.replace(
+        the_record(),
+        inside=(),
+        input_messages=["asked"],
+        output_messages={"said": "answered"},
+    )
+    try:
+        with client.run("warm"):
+            pass
+        assert client.flush()
+        client.record_run(record)
+        assert client.flush()
+    finally:
+        client.shutdown()
+    run = next(s for s in transport.spans() if s["name"] == "invoke_agent claude-code")
+    sent = attributes_of(run)
+    if capture_content:
+        assert sent["gen_ai.input.messages"] == '["asked"]'
+        assert sent["gen_ai.output.messages"] == '{"said":"answered"}'
+    else:
+        assert "gen_ai.input.messages" not in sent
+        assert "gen_ai.output.messages" not in sent
 
 
 def test_the_sample_rate_drops_a_record_whole(transport: FakeTransport) -> None:
