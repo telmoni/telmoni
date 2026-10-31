@@ -168,7 +168,7 @@ pub(crate) mod testing {
     use std::time::Duration;
 
     use serde_json::Value;
-    use telmoni::transport::{Answer, Transport, TransportError};
+    use telmoni::transport::{Answer, Method, Transport, TransportError};
     use telmoni::{Config, Hooks, Telmoni};
 
     /// One export as the SDK handed it to the transport: its URL, its
@@ -202,6 +202,7 @@ pub(crate) mod testing {
     impl Transport for Capture {
         fn send(
             &self,
+            _method: Method,
             url: &str,
             headers: &[(String, String)],
             body: &[u8],

@@ -117,6 +117,13 @@ const MUTATIONS: &[Mutation] = &[
         resource_kind: "Project",
         actor_id: ActorPattern::Variable,
     },
+    Mutation {
+        file: "crates/telemetry/src/handler/privacy.rs",
+        fn_name: "put_retention",
+        action: "Updated",
+        resource_kind: "Project",
+        actor_id: ActorPattern::Variable,
+    },
     // A member's changes to alerts, windows and incidents, filed by `chain::file`.
     Mutation {
         file: "crates/telemetry/src/handler/rules.rs",
@@ -209,6 +216,14 @@ const MUTATIONS: &[Mutation] = &[
         fn_name: "terminate",
         action: "Updated",
         resource_kind: "Organization",
+        actor_id: ActorPattern::Service("operator"),
+    },
+    // The operator's, run as `telmoni-server revoke-keys`.
+    Mutation {
+        file: "crates/auth/src/sweep.rs",
+        fn_name: "revoke_keys",
+        action: "Deleted",
+        resource_kind: "Token",
         actor_id: ActorPattern::Service("operator"),
     },
     Mutation {
@@ -470,9 +485,10 @@ const MUTATIONS: &[Mutation] = &[
         resource_kind: "Member",
         actor_id: ActorPattern::Variable,
     },
+    // One session's end, and every other one's, filed by the one helper.
     Mutation {
         file: "crates/auth/src/handler/sessions.rs",
-        fn_name: "revoke",
+        fn_name: "record_ended",
         action: "Deleted",
         resource_kind: "Session",
         actor_id: ActorPattern::Variable,
