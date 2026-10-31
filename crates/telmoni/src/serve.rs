@@ -43,7 +43,8 @@ impl App {
             .merge(telmoni_auth::router(self.auth.clone()))
             .nest(
                 "/v1",
-                self.door.v1(telmoni_auth::v1_router(self.auth.clone())),
+                self.door.v1(telmoni_auth::v1_router(self.auth.clone())
+                    .merge(telmoni_telemetry::v1_router(self.telemetry.clone()))),
             )
             .nest(
                 "/cli/v1",

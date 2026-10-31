@@ -528,6 +528,60 @@ CREATE POLICY maintenance_access ON telemetry.plain_content
 -- The purges delete a project's content, and a transfer counts it.
 GRANT SELECT, DELETE ON telemetry.plain_content TO telemetry_maintenance;
 
+-- An image, audio or a file a message carried, kept once a project however
+-- many spans send it: sealed under the project's content key, the hash of
+-- its bytes as associated data, its bytes counted on `content_held`.
+CREATE TABLE telemetry.media (
+    project_id  TEXT        NOT NULL,
+    sha256      TEXT        NOT NULL,
+    mime_type   TEXT        NOT NULL,
+    bytes       INTEGER     NOT NULL,
+    ciphertext  BYTEA       NOT NULL,
+    nonce       BYTEA       NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (project_id, sha256),
+    CONSTRAINT media_sha256_check CHECK (sha256 ~ '^[0-9a-f]{64}$'),
+    CONSTRAINT media_bytes_check CHECK (bytes >= 0)
+);
+
+-- Which runs name each file, so a file goes once no span within retention
+-- names it, and a trace's or an end user's erasure takes the files no other
+-- run names.
+CREATE TABLE telemetry.media_names (
+    project_id  TEXT        NOT NULL,
+    sha256      TEXT        NOT NULL,
+    run_id      UUID        NOT NULL,
+    received_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (project_id, sha256, run_id)
+);
+
+CREATE INDEX media_names_run_idx ON telemetry.media_names (project_id, run_id);
+CREATE INDEX media_names_received_idx ON telemetry.media_names (received_at);
+
+ALTER TABLE telemetry.media ENABLE ROW LEVEL SECURITY;
+ALTER TABLE telemetry.media FORCE ROW LEVEL SECURITY;
+ALTER TABLE telemetry.media_names ENABLE ROW LEVEL SECURITY;
+ALTER TABLE telemetry.media_names FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY tenant_isolation ON telemetry.media
+    USING      (project_id = current_setting('app.project_id', true))
+    WITH CHECK (project_id = current_setting('app.project_id', true));
+CREATE POLICY maintenance_access ON telemetry.media
+    TO telemetry_maintenance
+    USING      (current_user = 'telemetry_maintenance')
+    WITH CHECK (current_user = 'telemetry_maintenance');
+CREATE POLICY tenant_isolation ON telemetry.media_names
+    USING      (project_id = current_setting('app.project_id', true))
+    WITH CHECK (project_id = current_setting('app.project_id', true));
+CREATE POLICY maintenance_access ON telemetry.media_names
+    TO telemetry_maintenance
+    USING      (current_user = 'telemetry_maintenance')
+    WITH CHECK (current_user = 'telemetry_maintenance');
+
+-- The purges delete them with the content, as `plain_content`'s.
+GRANT SELECT, DELETE ON telemetry.media TO telemetry_maintenance;
+GRANT SELECT, DELETE ON telemetry.media_names TO telemetry_maintenance;
+
 -- The bytes of content an organization's projects keep, so its ceiling is read
 -- without a scan: added to as content is kept, taken from as it goes.
 CREATE TABLE telemetry.content_held (

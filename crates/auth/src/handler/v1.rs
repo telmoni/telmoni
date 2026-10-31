@@ -25,7 +25,7 @@ use telmoni_shared::Email;
 use telmoni_shared::acting::ActingKey;
 use telmoni_shared::db::tenant_session::{maintenance_scope, project_scope};
 use telmoni_shared::extract::Json;
-use telmoni_shared::middleware::api_key::{ApiKeyGate, Refusal, require_api_key};
+use telmoni_shared::middleware::api_key::{ApiKeyGate, refuse_as_problem, require_api_key};
 use telmoni_shared::middleware::problem;
 use telmoni_shared::openapi::{Answer, Method, Route};
 use telmoni_shared::slug::Slug;
@@ -140,7 +140,7 @@ pub fn router(state: Arc<AppState>) -> Router {
     let gate = ApiKeyGate {
         auth: state.clone(),
         scope: ApiKeyScope::Read,
-        refuse,
+        refuse: refuse_as_problem,
     };
     // Layers apply outermost-last: the key is checked first, the switch is
     // read for a key that passed, and the day's data out last.
@@ -166,30 +166,6 @@ pub fn router(state: Arc<AppState>) -> Router {
         .method_not_allowed_fallback(method_not_allowed)
         .fallback(not_found)
         .with_state(state)
-}
-
-/// How every `/v1` lane refuses a key: a problem document, as every answer
-/// here is, and on a `401` the `WWW-Authenticate` challenge and the detail a
-/// customer can act on. The type is the one a bad credential gets everywhere
-/// else; the request is read no further, since a `/v1` answer has one shape
-/// and no `/v1` lane takes a body.
-fn refuse(error: TelmoniError, _request: Request) -> Refusal {
-    let mut problem = error.to_problem_details();
-    let status = StatusCode::from_u16(problem.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
-    if status == StatusCode::UNAUTHORIZED {
-        problem.detail = Some(format!("a live {API_TOKEN_PREFIX} API key is required"));
-    }
-    let mut response = (status, Json(problem)).into_response();
-    response.headers_mut().insert(
-        header::CONTENT_TYPE,
-        HeaderValue::from_static("application/problem+json"),
-    );
-    if status == StatusCode::UNAUTHORIZED {
-        response
-            .headers_mut()
-            .insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Bearer"));
-    }
-    Box::pin(std::future::ready(response))
 }
 
 /// The organization's own switch, `Flag::PublicApi`: off, every lane is a

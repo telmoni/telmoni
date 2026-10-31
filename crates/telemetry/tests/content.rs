@@ -33,7 +33,7 @@ use telmoni_shared::{
 use telmoni_telemetry::ingest::batch::SpanContent;
 use telmoni_telemetry::seam::TelemetrySeam;
 use telmoni_telemetry::store::Projects;
-use telmoni_telemetry::{AppState, content, contract, otlp_router, retention, router};
+use telmoni_telemetry::{AppState, content, contract, otlp_router, retention, router, v1_router};
 
 const KEY: &str = "tm_content_key";
 const RUN: &str = "0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01";
@@ -81,7 +81,9 @@ async fn door_over(pool: &PgPool, mode: ContentMode, stores: bool) -> Door {
         common::state(pool, auth.clone())
     };
     Door {
-        app: router(state.clone()).nest("/otlp", otlp_router(state.clone())),
+        app: router(state.clone())
+            .nest("/otlp", otlp_router(state.clone()))
+            .nest("/v1", v1_router(state.clone())),
         state,
         auth,
         organization,
@@ -1078,6 +1080,148 @@ async fn the_trace_list_finds_runs_by_their_kept_content(pool: PgPool) {
         runs("refund").await.is_empty(),
         "nothing matches once the key goes"
     );
+}
+
+/// ⚠ A file a message carried, kept once by the hash of its bytes: sealed
+/// for an `on` project and nothing for an `off` one, its bytes counted; named
+/// by the runs whose content cites it; read with its read filed, served so a
+/// browser runs nothing it holds; and gone with the one trace that named it.
+#[sqlx::test]
+async fn a_file_is_kept_once_named_by_its_runs_read_filed_and_erased_with_them(pool: PgPool) {
+    let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    apply_audit_migrations(&pool).await;
+    let door = door(&pool, ContentMode::On).await;
+    door.auth.seat(
+        "admin-1",
+        &door.organization,
+        &door.project,
+        OrganizationRole::Owner,
+        None,
+    );
+    let png: &[u8] = b"\x89PNG\r\n\x1a\nnot really an image";
+    let hash = telmoni_shared::digest::sha256_hex(png);
+    let upload = |door: &Door, path: String, body: &'static [u8]| {
+        door.app.clone().oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri(path)
+                .header(header::AUTHORIZATION, format!("Bearer {KEY}"))
+                .header(header::CONTENT_TYPE, "image/png")
+                .body(Body::from(body))
+                .expect("a request"),
+        )
+    };
+    let media = |pool: &PgPool, project: &ProjectId| {
+        let (pool, project) = (pool.clone(), project.clone());
+        async move {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT count(*) FROM telemetry.media WHERE project_id = $1",
+            )
+            .bind(&project)
+            .fetch_one(&pool)
+            .await
+            .expect("count the files")
+        }
+    };
+
+    for _ in 0..2 {
+        let answer = upload(&door, format!("/v1/media/{hash}"), png)
+            .await
+            .expect("an answer");
+        let status = answer.status();
+        let text = answer
+            .into_body()
+            .collect()
+            .await
+            .expect("a body")
+            .to_bytes();
+        assert_eq!(
+            status,
+            StatusCode::NO_CONTENT,
+            "{}",
+            String::from_utf8_lossy(&text)
+        );
+    }
+    assert_eq!(media(&pool, &door.project).await, 1, "kept once");
+    let held = door.held(&pool, &door.organization).await.expect("counted");
+    assert_eq!(held, i64::try_from(png.len()).expect("small"));
+    let wrong = upload(&door, format!("/v1/media/{}", "0".repeat(64)), png)
+        .await
+        .expect("an answer");
+    assert_eq!(wrong.status(), StatusCode::BAD_REQUEST);
+    let off = door_over(&pool, ContentMode::Off, true).await;
+    let answer = upload(&off, format!("/v1/media/{hash}"), png)
+        .await
+        .expect("an answer");
+    assert_eq!(answer.status(), StatusCode::NO_CONTENT);
+    assert_eq!(
+        media(&pool, &off.project).await,
+        0,
+        "an off project keeps nothing"
+    );
+
+    let message = format!(
+        r#"[{{"role":"user","parts":[{{"type":"file","modality":"image","mime_type":"image/png","file_id":"telmoni:{hash}"}}]}}]"#
+    );
+    door.send(export_of(
+        RUN,
+        TRACE,
+        SPAN,
+        &[("gen_ai.input.messages", &message)],
+        "result",
+    ))
+    .await;
+    let names: Vec<(String, uuid::Uuid)> =
+        sqlx::query_as("SELECT sha256, run_id FROM telemetry.media_names WHERE project_id = $1")
+            .bind(&door.project)
+            .fetch_all(&pool)
+            .await
+            .expect("read the names");
+    assert_eq!(names, [(hash.clone(), run(RUN))]);
+
+    let read = door
+        .app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/internal/v1/telemetry/media/{hash}"))
+                .header(SERVICE_SECRET_HEADER, common::SECRET)
+                .header(header::AUTHORIZATION, "Bearer tok_admin-1")
+                .header("x-organization-id", door.organization.as_str())
+                .header("x-project-id", door.project.as_str())
+                .body(Body::empty())
+                .expect("a request"),
+        )
+        .await
+        .expect("an answer");
+    assert_eq!(read.status(), StatusCode::OK);
+    let headers = read.headers().clone();
+    assert_eq!(headers[header::CONTENT_TYPE], "image/png");
+    assert_eq!(headers[header::X_CONTENT_TYPE_OPTIONS], "nosniff");
+    assert_eq!(headers[header::CONTENT_SECURITY_POLICY], "sandbox");
+    let body = read.into_body().collect().await.expect("a body").to_bytes();
+    assert_eq!(&body[..], png);
+    assert!(
+        door.viewed(&pool)
+            .await
+            .iter()
+            .any(|(.., details)| details["media"] == hash.as_str()),
+        "the read is filed"
+    );
+
+    common::eventually("the trace is read", || found(&door, RUN)).await;
+    let (status, answer) = door
+        .lane("DELETE", &format!("/traces/{RUN}"), "admin-1", None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{answer}");
+    assert_eq!(
+        media(&pool, &door.project).await,
+        0,
+        "gone with the one trace that named it"
+    );
+    assert_eq!(door.held(&pool, &door.organization).await, Some(0));
 }
 
 /// A run's turn of a conversation as an SDK sends it: the run's own span

@@ -804,6 +804,38 @@ pub(crate) async fn reading(
     Ok(reader(state, headers).await?.project_id)
 }
 
+/// `GET /internal/v1/telemetry/media/{sha256}` — a file the project keeps,
+/// its read filed as a field's is: its bytes under its own type, served so a
+/// browser runs nothing it holds; `404` where the project keeps no such file.
+pub async fn get_media(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(sha256): Path<String>,
+) -> Result<Response, TelmoniError> {
+    let reader = reader(&state, &headers).await?;
+    if sha256.len() != 64 || !sha256.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(TelmoniError::BadRequest(
+            "a file is named by the SHA-256 of its bytes".into(),
+        ));
+    }
+    let actor = Actor::User(reader.user_id.as_str());
+    let Some((mime_type, body)) =
+        content::open_media(&state, actor, &reader.project_id, &sha256).await?
+    else {
+        return Err(AuthError::NotFound("the project keeps no such file".into()).into());
+    };
+    Ok((
+        [
+            (header::CONTENT_TYPE, mime_type),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff".to_owned()),
+            (header::CONTENT_SECURITY_POLICY, "sandbox".to_owned()),
+            (header::CACHE_CONTROL, "private, no-store".to_owned()),
+        ],
+        body,
+    )
+        .into_response())
+}
+
 /// One span's content as a lane answers it: each field kept, by its name.
 #[derive(Debug, Serialize)]
 pub struct SpanFields {

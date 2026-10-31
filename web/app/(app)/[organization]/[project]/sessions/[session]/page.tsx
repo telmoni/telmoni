@@ -11,6 +11,7 @@ import { LayoutControls } from "@/components/traces/layout-controls";
 import { SessionRuns } from "@/components/traces/session-runs";
 import { LayoutProvider } from "@/components/traces/use-layout";
 import { WindowPicker } from "@/components/window-picker";
+import { MediaProjectProvider } from "@/components/traces/span-content";
 import { ownerContact } from "@/lib/identity";
 import { parseLayoutUi } from "@/lib/layout";
 import { MAX_LIMIT, parseWindow } from "@/lib/list-query";
@@ -173,14 +174,16 @@ export default async function SessionPage({
           <div>
             <WindowPicker days={days} />
           </div>
-          <SessionRuns
-            {...page}
-            sessionId={session.session_id}
-            traces={traces}
-            readWith={session.pinned}
-            window={query}
-            content={session.content}
-          />
+          <MediaProjectProvider projectId={project.id}>
+            <SessionRuns
+              {...page}
+              sessionId={session.session_id}
+              traces={traces}
+              readWith={session.pinned}
+              window={query}
+              content={session.content}
+            />
+          </MediaProjectProvider>
           {session.more && (
             <p className="text-sm text-muted-foreground">
               The first {formatCount(session.limit)} of more in this window.{" "}

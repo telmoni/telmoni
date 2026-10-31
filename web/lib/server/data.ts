@@ -96,6 +96,7 @@ export { fetchOrganizationHealth } from "./entities/organization-health";
 export type { HealthIncident, OrganizationHealth } from "./entities/organization-health";
 
 export {
+  fetchMedia,
   fetchTrace,
   fetchTraceFacets,
   fetchTraceHistogram,

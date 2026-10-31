@@ -11,6 +11,7 @@ import { LayoutProvider } from "@/components/traces/use-layout";
 import { TraceMeta } from "@/components/traces/trace-view";
 import { Card } from "@/components/ui/card";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { MediaProjectProvider } from "@/components/traces/span-content";
 import { ownerContact } from "@/lib/identity";
 import { administers } from "@/lib/roles";
 import {
@@ -104,7 +105,9 @@ export default async function TracePage({
           <div className="shrink-0 border-b border-border p-gutter">
             <TraceMeta trace={trace} organization={organization} slug={slug} incidents={incidents} />
           </div>
-          <TraceLayoutBody trace={trace} organization={organization} slug={slug} />
+          <MediaProjectProvider projectId={project.id}>
+            <TraceLayoutBody trace={trace} organization={organization} slug={slug} />
+          </MediaProjectProvider>
         </Card>
         </TooltipProvider>
     </LayoutProvider>

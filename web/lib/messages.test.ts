@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   cutFrom,
+  drawnAs,
   failureOf,
+  keptFileOf,
   fieldsOf,
   instructionsOf,
   messagesOf,
@@ -119,5 +121,37 @@ describe("failureOf", () => {
     expect(
       metadataOf({ "exception.message": "boom", "otel.status_description": "x", "app.k": "v" }),
     ).toEqual([["app.k", "v"]]);
+  });
+});
+
+describe("kept files", () => {
+  it("reads a file part's id and a uri part's link, and names a file kept here by its hash", () => {
+    const hash = "b".repeat(64);
+    const [message] = messagesOf(
+      JSON.stringify([
+        {
+          role: "user",
+          parts: [
+            { type: "file", modality: "image", mime_type: "image/png", file_id: `telmoni:${hash}` },
+            { type: "uri", modality: "image", uri: "https://example.com/cat.png" },
+            { type: "file", file_id: "file-abc" },
+          ],
+        },
+      ]),
+    )!;
+    const [kept, linked, provider] = message!.parts;
+    expect(keptFileOf(kept!)).toBe(hash);
+    expect(linked).toEqual({ type: "media", kind: "uri", modality: "image", uri: "https://example.com/cat.png" });
+    expect(keptFileOf(provider!)).toBeNull();
+    expect(keptFileOf({ type: "media", kind: "file", fileId: "telmoni:short" })).toBeNull();
+  });
+
+  it("draws the four image types inline, plays audio, and offers anything else as a download", () => {
+    for (const type of ["image/png", "image/jpeg", "image/gif", "image/webp"]) {
+      expect(drawnAs(type)).toBe("image");
+    }
+    expect(drawnAs("audio/wav")).toBe("audio");
+    expect(drawnAs("image/svg+xml")).toBe("download");
+    expect(drawnAs(undefined)).toBe("download");
   });
 });

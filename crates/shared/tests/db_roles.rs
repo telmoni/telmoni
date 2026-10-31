@@ -126,7 +126,12 @@ const LANE_DELETED: &[&str] = &["telemetry.project_settings", "telemetry.content
 /// them, landing or settling each row and removing it, or purges them. A
 /// request that rewrote or removed one could unsay an uninstall before it is
 /// sent, or swap a span's content for other bytes.
-const LANE_DRAINED: &[&str] = &["notifications.uninstalls", "telemetry.plain_content"];
+const LANE_DRAINED: &[&str] = &[
+    "notifications.uninstalls",
+    "telemetry.plain_content",
+    "telemetry.media",
+    "telemetry.media_names",
+];
 
 /// The runtime roles that write audit rows, each auditing its own writes on
 /// the organization's chain: every module's but the agent's, which changes
@@ -563,6 +568,16 @@ async fn the_maintenance_lanes_narrowed_grants_hold_in_every_tier() {
         (
             "telemetry_maintenance",
             "telemetry.plain_content",
+            &["SELECT", "DELETE"],
+        ),
+        (
+            "telemetry_maintenance",
+            "telemetry.media",
+            &["SELECT", "DELETE"],
+        ),
+        (
+            "telemetry_maintenance",
+            "telemetry.media_names",
             &["SELECT", "DELETE"],
         ),
         // The purges take a project's bytes off, or delete the organization's

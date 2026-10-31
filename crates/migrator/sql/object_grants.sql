@@ -126,6 +126,12 @@ BEGIN
     IF to_regclass('telemetry.plain_content') IS NOT NULL THEN
         EXECUTE 'REVOKE UPDATE, DELETE ON telemetry.plain_content FROM telemetry';
     END IF;
+    IF to_regclass('telemetry.media') IS NOT NULL THEN
+        EXECUTE 'REVOKE UPDATE, DELETE ON telemetry.media FROM telemetry';
+    END IF;
+    IF to_regclass('telemetry.media_names') IS NOT NULL THEN
+        EXECUTE 'REVOKE UPDATE, DELETE ON telemetry.media_names FROM telemetry';
+    END IF;
     IF to_regclass('telemetry.content_held') IS NOT NULL THEN
         EXECUTE 'REVOKE DELETE ON telemetry.content_held FROM telemetry';
     END IF;

@@ -462,7 +462,9 @@ pub async fn move_project(
         "WITH project AS (
              SELECT s.organization_id AS left_org,
                     (SELECT coalesce(sum(bytes), 0) FROM telemetry.plain_content
-                      WHERE project_id = $1) AS bytes
+                      WHERE project_id = $1)
+                    + (SELECT coalesce(sum(bytes), 0) FROM telemetry.media
+                        WHERE project_id = $1) AS bytes
                FROM telemetry.project_settings s
               WHERE s.project_id = $1 AND s.organization_id <> $2),
          taken AS (
@@ -851,9 +853,132 @@ async fn delete_content_of(
     .bind(before)
     .bind(limit)
     .bind(runs)
-    .fetch_one(conn)
+    .fetch_one(&mut *conn)
     .await?;
+    delete_media_of(conn, project_ids, before, runs).await?;
     Ok(gone.unsigned_abs())
+}
+
+/// The names of the files the same content named, and then each file nothing
+/// names any more, its bytes taken off as content's are: a file unnamed by
+/// this deletion, one left unnamed a day (an upload whose spans never came),
+/// and every file where the project's whole content goes.
+async fn delete_media_of(
+    conn: &mut sqlx::PgConnection,
+    project_ids: &[ProjectId],
+    before: Option<DateTime<Utc>>,
+    runs: Option<&[Uuid]>,
+) -> sqlx::Result<()> {
+    let unnamed: Vec<String> = sqlx::query_scalar(
+        "DELETE FROM telemetry.media_names
+          WHERE project_id = ANY($1)
+            AND ($2::timestamptz IS NULL OR received_at < $2)
+            AND ($3::uuid[] IS NULL OR run_id = ANY($3))
+      RETURNING project_id || '/' || sha256",
+    )
+    .bind(project_ids)
+    .bind(before)
+    .bind(runs)
+    .fetch_all(&mut *conn)
+    .await?;
+    sqlx::query(
+        "WITH gone AS (
+             DELETE FROM telemetry.media m
+              WHERE m.project_id = ANY($1)
+                AND NOT EXISTS (SELECT 1 FROM telemetry.media_names n
+                                 WHERE n.project_id = m.project_id AND n.sha256 = m.sha256)
+                AND ($2 OR m.project_id || '/' || m.sha256 = ANY($3)
+                     OR m.created_at < now() - interval '1 day')
+             RETURNING project_id, bytes),
+         sums AS (
+             SELECT s.organization_id, sum(g.bytes) AS bytes
+               FROM gone g JOIN telemetry.project_settings s USING (project_id)
+              GROUP BY s.organization_id)
+         UPDATE telemetry.content_held h SET bytes = greatest(h.bytes - sums.bytes, 0)
+           FROM sums WHERE h.organization_id = sums.organization_id",
+    )
+    .bind(project_ids)
+    .bind(before.is_none() && runs.is_none())
+    .bind(&unnamed)
+    .execute(conn)
+    .await?;
+    Ok(())
+}
+
+/// A file a message carried, sealed, kept once a project: answers whether it
+/// was new, its bytes then counted on the organization's row.
+pub async fn keep_media(
+    tx: &mut Scoped<'_, ProjectAndOrganization>,
+    (project_id, organization_id): (&ProjectId, &OrganizationId),
+    sha256: &str,
+    mime_type: &str,
+    sealed: (&[u8], &[u8]),
+    bytes: i32,
+) -> sqlx::Result<bool> {
+    let kept: i64 = sqlx::query_scalar(
+        "WITH kept AS (
+             INSERT INTO telemetry.media (project_id, sha256, mime_type, bytes, ciphertext, nonce)
+             VALUES ($1, $3, $4, $5, $6, $7)
+             ON CONFLICT DO NOTHING
+             RETURNING bytes),
+         counted AS (
+             INSERT INTO telemetry.content_held (organization_id, bytes)
+             SELECT $2, bytes FROM kept
+             ON CONFLICT (organization_id) DO UPDATE
+                SET bytes = telemetry.content_held.bytes + EXCLUDED.bytes
+             RETURNING 1)
+         SELECT count(*) FROM kept",
+    )
+    .bind(project_id)
+    .bind(organization_id)
+    .bind(sha256)
+    .bind(mime_type)
+    .bind(bytes)
+    .bind(sealed.0)
+    .bind(sealed.1)
+    .fetch_one(tx.conn())
+    .await?;
+    Ok(kept > 0)
+}
+
+/// The files each run's kept content names, by hash: what keeps each one.
+pub async fn name_media(
+    tx: &mut Scoped<'_, ProjectAndOrganization>,
+    project_id: &ProjectId,
+    received_at: DateTime<Utc>,
+    (hashes, runs): (&[String], &[Uuid]),
+) -> sqlx::Result<()> {
+    sqlx::query(
+        "INSERT INTO telemetry.media_names (project_id, sha256, run_id, received_at)
+         SELECT $1, h, r, $2 FROM UNNEST($3::text[], $4::uuid[]) AS u(h, r)
+         ON CONFLICT DO NOTHING",
+    )
+    .bind(project_id)
+    .bind(received_at)
+    .bind(hashes)
+    .bind(runs)
+    .execute(tx.conn())
+    .await?;
+    Ok(())
+}
+
+/// A file the project keeps, sealed: its type and its bytes; none once its
+/// content key is deleted, as content reads none.
+pub(crate) async fn read_media(
+    tx: &mut Scoped<'_, ProjectAndOrganization>,
+    project_id: &ProjectId,
+    sha256: &str,
+) -> sqlx::Result<Option<(String, Vec<u8>, Vec<u8>)>> {
+    sqlx::query_as(
+        "SELECT mime_type, ciphertext, nonce FROM telemetry.media
+          WHERE project_id = $1 AND sha256 = $2
+            AND EXISTS (SELECT 1 FROM telemetry.project_settings
+                         WHERE project_id = $1 AND content_key_wrapped_dek IS NOT NULL)",
+    )
+    .bind(project_id)
+    .bind(sha256)
+    .fetch_optional(tx.conn())
+    .await
 }
 
 /// A project's content deleted, and its bytes taken off its organization's

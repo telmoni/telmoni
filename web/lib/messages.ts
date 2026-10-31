@@ -13,8 +13,16 @@ export type Part =
   | { type: "reasoning"; content: string }
   | { type: "tool_call"; id?: string; name: string; arguments?: unknown }
   | { type: "tool_call_response"; id?: string; response: unknown }
-  /** An image, audio or a file: its kind and type alone until files are kept. */
-  | { type: "media"; kind: "blob" | "uri" | "file"; modality?: string; mimeType?: string }
+  /** An image, audio or a file: inline (`blob`), at a link (`uri`), or by an
+   *  id (`file`), a file this deployment keeps named `telmoni:` and its hash. */
+  | {
+      type: "media";
+      kind: "blob" | "uri" | "file";
+      modality?: string;
+      mimeType?: string;
+      uri?: string;
+      fileId?: string;
+    }
   /** A part of a type the conventions add later, shown as it arrived. */
   | { type: "other"; value: unknown };
 
@@ -38,6 +46,8 @@ const media = z.object({
   type: z.enum(["blob", "uri", "file"]),
   modality: z.string().optional(),
   mime_type: z.string().optional(),
+  uri: z.string().optional(),
+  file_id: z.string().optional(),
 });
 const anyPart = z.object({ type: z.string() }).loose();
 
@@ -57,6 +67,8 @@ function partOf(raw: unknown): Part | null {
       kind: file.data.type,
       ...(file.data.modality ? { modality: file.data.modality } : {}),
       ...(file.data.mime_type ? { mimeType: file.data.mime_type } : {}),
+      ...(file.data.uri ? { uri: file.data.uri } : {}),
+      ...(file.data.file_id ? { fileId: file.data.file_id } : {}),
     };
   }
   return anyPart.safeParse(raw).success ? { type: "other", value: raw } : null;
@@ -190,4 +202,23 @@ export function fieldsOf(
 ): Readonly<Record<string, string>> | null | undefined {
   if (content === null) return null;
   return content.find((span) => span.span_id === spanId)?.fields;
+}
+
+/** What a `file` part names a file this deployment keeps by. */
+const KEPT_FILE = /^telmoni:([0-9a-f]{64})$/;
+
+/** The hash of the file a part names as kept here, or none. */
+export function keptFileOf(part: Part): string | null {
+  if (part.type !== "media" || part.kind !== "file" || !part.fileId) return null;
+  return KEPT_FILE.exec(part.fileId)?.[1] ?? null;
+}
+
+/** How a kept file is drawn: an image the browser shows inline, audio it
+ *  plays, and anything else, SVG among it, a download. */
+export function drawnAs(mimeType: string | undefined): "image" | "audio" | "download" {
+  if (mimeType && ["image/png", "image/jpeg", "image/gif", "image/webp"].includes(mimeType)) {
+    return "image";
+  }
+  if (mimeType?.startsWith("audio/")) return "audio";
+  return "download";
 }

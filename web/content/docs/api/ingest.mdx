@@ -153,6 +153,19 @@ failed span's status message and every event a span carries, a failure's
 class, message and stack trace under their own names, and dropped on an `off`
 one, `error.type` the class every mode keeps.
 
+**A file a message carried** — an image, audio or a document, a GenAI
+message's `blob` part — is sent apart by our SDKs before the span, so a span
+stays inside an export's 1 MiB and an image a conversation repeats is kept
+once: `PUT /v1/media/{sha256}` on the API host, under the same ingest key,
+the raw bytes as the body and their type as `Content-Type`, the path the
+SHA-256 of the body in lowercase hex. The message then names it as a `file`
+part whose `file_id` is `telmoni:` and the hash. The lane answers `204` once
+the file is kept, kept already, or kept nothing for a project whose mode is
+`off`; `400` for a hash that is not the body's; and `413` past 5 MiB. A file
+is sealed under the project's content key, kept while any span within
+retention names it, and erased with the traces or the end user that named
+it alone.
+
 **A tag past its project's cardinality cap** is dropped as `cardinality`, the
 span kept: in each UTC day a project's tags take up to 64 keys, and each key
 up to 500 values, so a tag is a label of a few values; an id goes as the user

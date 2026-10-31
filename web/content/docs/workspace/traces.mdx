@@ -220,8 +220,12 @@ show it in full, as an SDK sent it under the GenAI conventions:
   input and output as a conversation, each message under its role, its text
   as Markdown, its tool calls and their results as indented JSON and its
   reasoning folded; a tool call's arguments and result; a retrieval's query
-  and documents; and the metadata the span carried. An image or a file is
-  named by its type, not drawn. **Raw** shows the fields as they arrived.
+  and documents; and the metadata the span carried. An image the project
+  kept (PNG, JPEG, GIF or WebP) is drawn, audio plays, and any other file, SVG
+  among it, is offered as a download, each opening recorded as a read; a
+  link the agent named is shown only when you ask, since drawing it would
+  have your browser call a host the agent chose. **Raw** shows the fields as
+  they arrived.
 - **A failure**, at the top of its span's **Content** tab: its class and
   message, its stack trace folded, where the span kept them.
 - **A field an SDK cut** to fit an export is named in a line, since it was

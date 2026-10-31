@@ -147,11 +147,21 @@ impl Vault {
         plaintext: &Redacted,
         aad: &[u8],
     ) -> Result<Sealed, TelmoniError> {
+        self.seal_bytes(dek, plaintext.expose().as_bytes(), aad)
+    }
+
+    /// [`Vault::seal`] for bytes that are no text: a file a message carried.
+    pub fn seal_bytes(
+        &self,
+        dek: &Dek,
+        plaintext: &[u8],
+        aad: &[u8],
+    ) -> Result<Sealed, TelmoniError> {
         let mut nonce_bytes = [0u8; NONCE_LEN];
         self.rng
             .fill(&mut nonce_bytes)
             .map_err(|_| TelmoniError::Internal("vault: no randomness for a nonce".into()))?;
-        let mut in_out = plaintext.expose().as_bytes().to_vec();
+        let mut in_out = plaintext.to_vec();
         Self::cipher(dek)?
             .seal_in_place_append_tag(
                 Nonce::assume_unique_for_key(nonce_bytes),
@@ -172,11 +182,26 @@ impl Vault {
         sealed: SealedRef<'_>,
         aad: &[u8],
     ) -> Result<Redacted, TelmoniError> {
+        // The one allocation that ever holds the plaintext is the one
+        // `Redacted` wipes on drop.
+        let text = String::from_utf8(self.open_bytes(dek, sealed, aad)?)
+            .map_err(|_| TelmoniError::Internal("vault: plaintext is not UTF-8".into()))?;
+        Ok(Redacted::from(text))
+    }
+
+    /// [`Vault::open`] for bytes that are no text.
+    pub fn open_bytes(
+        &self,
+        dek: &Dek,
+        sealed: SealedRef<'_>,
+        aad: &[u8],
+    ) -> Result<Vec<u8>, TelmoniError> {
         let nonce: [u8; NONCE_LEN] = sealed
             .nonce
             .try_into()
             .map_err(|_| TelmoniError::Internal("vault: nonce is not 96 bits".into()))?;
-        // The one copy: the cipher opens the bytes in place.
+        // The one copy: the cipher opens the bytes in place, truncated rather
+        // than copied.
         let mut in_out = sealed.ciphertext.to_vec();
         let len = Self::cipher(dek)?
             .open_in_place(
@@ -186,12 +211,8 @@ impl Vault {
             )
             .map_err(|_| TelmoniError::Internal("vault: ciphertext did not verify".into()))?
             .len();
-        // Truncate rather than copy, so the one allocation that ever holds the
-        // plaintext is the one `Redacted` wipes on drop.
         in_out.truncate(len);
-        let text = String::from_utf8(in_out)
-            .map_err(|_| TelmoniError::Internal("vault: plaintext is not UTF-8".into()))?;
-        Ok(Redacted::from(text))
+        Ok(in_out)
     }
 }
 

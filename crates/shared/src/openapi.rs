@@ -17,8 +17,11 @@ pub enum Method {
     Get,
     /// The same read with no body — whether the thing is there at all.
     Head,
-    /// A create — the only write shape `/v1` has.
+    /// A create — `/v1`'s write shape for a thing the server names.
     Post,
+    /// An upload keyed by what it holds, which the caller names: sent again,
+    /// it changes nothing.
+    Put,
     /// A delete, which answers 204 and carries no body.
     Delete,
 }
@@ -31,6 +34,7 @@ impl Method {
             Self::Get => "get",
             Self::Head => "head",
             Self::Post => "post",
+            Self::Put => "put",
             Self::Delete => "delete",
         }
     }

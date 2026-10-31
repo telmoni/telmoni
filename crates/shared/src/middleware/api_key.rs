@@ -6,13 +6,16 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use axum::{
+    Json,
     extract::{Request, State},
+    http::{HeaderValue, StatusCode, header},
     middleware::Next,
-    response::Response,
+    response::{IntoResponse, Response},
 };
 
 use crate::error::TelmoniError;
 use crate::seam::Auth;
+use crate::types::API_TOKEN_PREFIX;
 use crate::types::ApiKeyScope;
 
 /// A lane's refusal on its way: a lane may read the request's body first.
@@ -59,4 +62,26 @@ pub async fn require_api_key(
     }
     request.extensions_mut().insert(key);
     next.run(request).await
+}
+
+/// How every `/v1` lane refuses a key: a problem document, as every answer
+/// there is, and on a `401` the `WWW-Authenticate` challenge and the detail a
+/// customer can act on. The request is read no further.
+pub fn refuse_as_problem(error: TelmoniError, _request: Request) -> Refusal {
+    let mut problem = error.to_problem_details();
+    let status = StatusCode::from_u16(problem.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+    if status == StatusCode::UNAUTHORIZED {
+        problem.detail = Some(format!("a live {API_TOKEN_PREFIX} API key is required"));
+    }
+    let mut response = (status, Json(problem)).into_response();
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/problem+json"),
+    );
+    if status == StatusCode::UNAUTHORIZED {
+        response
+            .headers_mut()
+            .insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Bearer"));
+    }
+    Box::pin(std::future::ready(response))
 }

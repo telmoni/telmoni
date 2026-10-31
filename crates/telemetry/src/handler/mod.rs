@@ -16,4 +16,5 @@ pub mod session_layout;
 pub mod sessions;
 pub mod traces;
 pub mod users;
+pub mod v1;
 pub mod views;

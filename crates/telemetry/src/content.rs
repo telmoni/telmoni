@@ -66,8 +66,13 @@ pub async fn keep(
     let (wrapped, key) = opened_key(state, project_id).await?;
     let words_key = words_key(&key);
     let mut sealed = SealedFields::default();
+    let mut named: (Vec<String>, Vec<Uuid>) = (Vec::new(), Vec::new());
     for span in content {
         for (field, text) in span.fields {
+            for hash in files_named(&text) {
+                named.0.push(hash);
+                named.1.push(span.run_id);
+            }
             let bytes = i32::try_from(text.len()).unwrap_or(i32::MAX);
             sealed
                 .words
@@ -98,6 +103,9 @@ pub async fn keep(
         .into());
     }
     db::keep_content(&mut tx, project_id, &organization_id, received_at, &sealed).await?;
+    if !named.0.is_empty() {
+        db::name_media(&mut tx, project_id, received_at, (&named.0, &named.1)).await?;
+    }
     tx.commit().await?;
     Ok(())
 }
@@ -263,6 +271,135 @@ async fn unwrapped(
         (wrapped.wrapped_dek.clone(), Arc::clone(&key)),
     );
     Ok(key)
+}
+
+/// What a message's `file` part names a file kept here by: this, then the
+/// SHA-256 of its bytes in lowercase hex.
+pub const FILE_ID_PREFIX: &str = "telmoni:";
+
+/// The largest file a project keeps, in bytes.
+pub const MEDIA_MAX: usize = 5 * 1024 * 1024;
+
+/// The hashes of the files a field's `file` parts name as kept here, each
+/// once, in order.
+#[must_use]
+pub fn files_named(text: &str) -> Vec<String> {
+    let mut hashes: Vec<String> = Vec::new();
+    for after in text.split(FILE_ID_PREFIX).skip(1) {
+        let hash: String = after.chars().take(64).collect();
+        if hash.len() == 64
+            && hash
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            && !hashes.contains(&hash)
+        {
+            hashes.push(hash);
+        }
+    }
+    hashes
+}
+
+/// A file a message carried, kept for an `on` project: sealed under the
+/// project's content key, its hash as associated data, once however many
+/// spans send it. Nothing for a project that keeps no content.
+///
+/// # Errors
+///
+/// As [`keep`].
+pub async fn keep_media(
+    state: &AppState,
+    project_id: &ProjectId,
+    (sha256, mime_type): (&str, &str),
+    body: &[u8],
+) -> Result<(), TelmoniError> {
+    let mut tx = project_scope(&state.db, project_id).await?;
+    let mode = db::content_mode(&mut tx, project_id).await?;
+    tx.commit().await?;
+    if mode != telmoni_shared::ContentMode::On {
+        return Ok(());
+    }
+    let (wrapped, key) = opened_key(state, project_id).await?;
+    let Sealed { ciphertext, nonce } =
+        state
+            .vault
+            .seal_bytes(&key, body, media_aad(sha256).as_bytes())?;
+    let (mut tx, organization_id) = held_in_place(state, project_id).await?;
+    if db::content_key(&mut tx, project_id)
+        .await?
+        .is_none_or(|now| now.wrapped_dek != wrapped)
+    {
+        chain::rolled_back(tx.rollback().await, project_id, WHAT);
+        return Err(TelemetryError::StoreUnavailable(
+            "the project's content key changed as the file was kept; try again".into(),
+        )
+        .into());
+    }
+    let bytes = i32::try_from(body.len()).unwrap_or(i32::MAX);
+    db::keep_media(
+        &mut tx,
+        (project_id, &organization_id),
+        sha256,
+        mime_type,
+        (&ciphertext, &nonce),
+        bytes,
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+/// What a file is sealed under, beside the key: its hash, so bytes moved to
+/// another row open as nothing.
+fn media_aad(sha256: &str) -> String {
+    format!("media/{sha256}")
+}
+
+/// A file the project keeps, opened for `actor`, its read filed in the
+/// organization's chain before it is opened, as a field's is ([`open`]): its
+/// type and bytes, or none where the project keeps no such file.
+///
+/// # Errors
+///
+/// As [`open`].
+pub async fn open_media(
+    state: &AppState,
+    actor: Actor<'_>,
+    project_id: &ProjectId,
+    sha256: &str,
+) -> Result<Option<(String, Vec<u8>)>, TelmoniError> {
+    let Some((mut tx, organization_id)) = held_if_kept(state, project_id).await? else {
+        return Ok(None);
+    };
+    let Some((mime_type, ciphertext, nonce)) = db::read_media(&mut tx, project_id, sha256).await?
+    else {
+        tx.commit().await?;
+        return Ok(None);
+    };
+    lock_chain_in_time(tx.conn(), &organization_id).await?;
+    emit_audit(
+        &mut tx,
+        AuditEvent::new(
+            &organization_id,
+            actor,
+            AuditAction::Viewed,
+            TelmoniResourceKind::Project,
+        )
+        .in_project(project_id)
+        .on(project_id.as_str())
+        .details(json!({ "media": sha256 })),
+    )
+    .await?;
+    tx.commit().await?;
+    let key = key_for(state, project_id).await?;
+    let body = state.vault.open_bytes(
+        &key,
+        SealedRef {
+            ciphertext: &ciphertext,
+            nonce: &nonce,
+        },
+        media_aad(sha256).as_bytes(),
+    )?;
+    Ok(Some((mime_type, body)))
 }
 
 /// The most fields a search reads to find its runs, newest first.
@@ -470,6 +607,19 @@ mod tests {
         assert_eq!(words_of("naïve café"), ["naïve", "café"]);
         assert!(words_of("  ,;  ").is_empty());
         assert_eq!(words_of(&"x".repeat(100))[0].chars().count(), WORD_MAX);
+    }
+
+    /// The files a field names as kept here, each once: a `telmoni:` and a
+    /// whole lowercase hash, never a part of one.
+    #[test]
+    fn a_field_names_the_files_kept_here_by_their_whole_hash() {
+        let (a, b) = ("a".repeat(64), "b".repeat(64));
+        let text = format!(
+            r#"[{{"file_id":"telmoni:{a}"}},{{"file_id":"telmoni:{a}"}},"telmoni:{b}","telmoni:{}","file-x"]"#,
+            "c".repeat(10)
+        );
+        assert_eq!(files_named(&text), [a, b]);
+        assert!(files_named(&format!("telmoni:{}", "A".repeat(64))).is_empty());
     }
 
     /// A phrase holds where its words run in order, and nowhere else.

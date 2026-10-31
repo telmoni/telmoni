@@ -25,6 +25,7 @@ import {
 } from "@/components/traces/peek-read";
 import { SessionRuns } from "@/components/traces/session-runs";
 import { LayoutProvider, useLayout, type LayoutPage } from "@/components/traces/use-layout";
+import { MediaProjectProvider } from "@/components/traces/span-content";
 import { MAX_LIMIT, type WindowQuery } from "@/lib/list-query";
 import { landOnList, peekUrl } from "@/lib/peek";
 import { sessionHref, sessionReadHref, sessionSums } from "@/lib/sessions";
@@ -221,15 +222,17 @@ function SessionPanel({
             <div>
               <LayoutControls projectId={projectId} canSave={canSave} />
             </div>
-            <SessionRuns
-              key={read.value.session_id}
-              {...page}
-              sessionId={read.value.session_id}
-              traces={read.value.traces}
-              readWith={options.pinned}
-              window={query}
-              content={read.value.content}
-            />
+            <MediaProjectProvider projectId={projectId}>
+              <SessionRuns
+                key={read.value.session_id}
+                {...page}
+                sessionId={read.value.session_id}
+                traces={read.value.traces}
+                readWith={options.pinned}
+                window={query}
+                content={read.value.content}
+              />
+            </MediaProjectProvider>
             {read.value.more && (
               <p className="text-sm text-muted-foreground">
                 The first {formatCount(read.value.limit)} of more in this window.{" "}

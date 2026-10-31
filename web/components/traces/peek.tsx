@@ -21,6 +21,7 @@ import {
   usePeekRead,
 } from "@/components/traces/peek-read";
 import { TraceBody, TraceMeta } from "@/components/traces/trace-view";
+import { MediaProjectProvider } from "@/components/traces/span-content";
 import { NEXT_KEY, PREVIOUS_KEY } from "@/lib/keys";
 import { openPeek, peekedRun } from "@/lib/peek";
 import { summarizeTrace } from "@/lib/trace-tree";
@@ -149,13 +150,15 @@ function PeekPanel({ organization, slug, projectId, run, runs }: Props & { run: 
         {read === null ? (
           <PeekNote>Reading the trace&hellip;</PeekNote>
         ) : read.kind === "ok" ? (
-          <TraceBody
-            key={read.value.run_id}
-            trace={read.value}
-            organization={organization}
-            slug={slug}
-            className="min-h-0 flex-1"
-          />
+          <MediaProjectProvider projectId={projectId}>
+            <TraceBody
+              key={read.value.run_id}
+              trace={read.value}
+              organization={organization}
+              slug={slug}
+              className="min-h-0 flex-1"
+            />
+          </MediaProjectProvider>
         ) : (
           <ReadFailure
             read={read}

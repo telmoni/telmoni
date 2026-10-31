@@ -1,10 +1,15 @@
-import type { ReactNode } from "react";
+"use client";
+
+import { createContext, useContext, useState, type ReactNode } from "react";
 
 import { Reply } from "@/components/agent/agent-reply";
+import { Button } from "@/components/ui/button";
 import {
   FIELD_LABEL,
   cutFrom,
+  drawnAs,
   failureOf,
+  keptFileOf,
   instructionsOf,
   messagesOf,
   metadataOf,
@@ -41,6 +46,83 @@ function Pre({ children }: { children: string }) {
   );
 }
 
+/** The project whose kept files a conversation draws: none where nobody
+ *  provided it, and a file is then named by its type. */
+const MediaProject = createContext<string | null>(null);
+
+/** Draws the kept files of the conversations under it from `projectId`. */
+export function MediaProjectProvider({
+  projectId,
+  children,
+}: {
+  projectId: string;
+  children: ReactNode;
+}) {
+  return <MediaProject.Provider value={projectId}>{children}</MediaProject.Provider>;
+}
+
+/** A part's kind and type, said in a line. */
+function MediaLabel({ part, note }: { part: Extract<Part, { type: "media" }>; note: string }) {
+  return (
+    <p className="text-xs text-muted-foreground">
+      {part.modality ?? "A file"}
+      {part.mimeType ? ` (${part.mimeType})` : ""}, {note}
+    </p>
+  );
+}
+
+/** An image, audio or a file: one this deployment keeps drawn from it, read
+ *  as its span's content is; a link drawn only when the reader asks, since
+ *  drawing it has their browser call a host the agent chose; a provider's
+ *  file named by its id. */
+function MediaPart({ part }: { part: Extract<Part, { type: "media" }> }) {
+  const projectId = useContext(MediaProject);
+  const [failed, setFailed] = useState(false);
+  const [shown, setShown] = useState(false);
+  const hash = keptFileOf(part);
+  if (hash && projectId && !failed) {
+    const href = `/api/v1/media/${hash}?project=${encodeURIComponent(projectId)}`;
+    switch (drawnAs(part.mimeType)) {
+      case "image":
+        return (
+          // A kept file, read through its own lane, which a page's optimizer never fetches.
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={href}
+            alt={part.modality ?? "An image"}
+            className="max-h-80 max-w-full rounded-md border border-border"
+            onError={() => setFailed(true)}
+          />
+        );
+      case "audio":
+        return <audio controls src={href} className="w-full" onError={() => setFailed(true)} />;
+      case "download":
+        return (
+          <a href={href} download className="text-xs underline underline-offset-4">
+            Download {part.mimeType ?? "the file"}
+          </a>
+        );
+    }
+  }
+  if (hash) return <MediaLabel part={part} note={failed ? "not kept" : "kept, not drawn here"} />;
+  if (part.kind === "uri" && part.uri) {
+    return shown ? (
+      <a href={part.uri} target="_blank" rel="noopener noreferrer" className="text-xs break-all underline underline-offset-4">
+        {part.uri}
+      </a>
+    ) : (
+      <div className="flex items-center gap-2">
+        <MediaLabel part={part} note="at a link the agent named" />
+        <Button variant="outline" size="sm" onClick={() => setShown(true)}>
+          Show link
+        </Button>
+      </div>
+    );
+  }
+  if (part.kind === "file" && part.fileId) return <MediaLabel part={part} note={`a provider's file, ${part.fileId}`} />;
+  return <MediaLabel part={part} note="not kept" />;
+}
+
 /** One part of a message. */
 function PartView({ part }: { part: Part }) {
   switch (part.type) {
@@ -73,12 +155,7 @@ function PartView({ part }: { part: Part }) {
         </div>
       );
     case "media":
-      return (
-        <p className="text-xs text-muted-foreground">
-          {part.modality ?? "A file"}
-          {part.mimeType ? ` (${part.mimeType})` : ""}, not kept
-        </p>
-      );
+      return <MediaPart part={part} />;
     case "other":
       return <Pre>{JSON.stringify(part.value, null, 2)}</Pre>;
   }

@@ -170,6 +170,7 @@ pub fn router(state: Arc<AppState>) -> Router {
             post(handler::content_mode::request_content_mode_code),
         )
         .route("/telemetry/retention", put(handler::privacy::put_retention))
+        .route("/telemetry/media/{sha256}", get(handler::traces::get_media))
         .route(
             "/telemetry/field-inventory",
             get(handler::field_inventory::get_field_inventory),
@@ -277,6 +278,8 @@ pub fn router(state: Arc<AppState>) -> Router {
         .nest("/internal/v1", internal)
         .with_state(state)
 }
+
+pub use handler::v1::router as v1_router;
 
 /// Ingest, for the binary to nest at `/otlp` behind the machine door:
 /// `POST /v1/traces` behind a project API key holding the ingest scope and
