@@ -111,6 +111,23 @@ pub(crate) const MODEL_OPERATIONS: [&str; 4] =
     ["chat", "generate_content", "text_completion", "embeddings"];
 pub(crate) const TOOL_OPERATION: &str = "execute_tool";
 
+/// The content fields whose messages' `blob` parts the exporter lifts out:
+/// each image or file put to [`MEDIA_PATH`] and sent as a `file` part naming it.
+pub(crate) const MEDIA_FIELDS: [&str; 3] = [INPUT_MESSAGES, OUTPUT_MESSAGES, SYSTEM_INSTRUCTIONS];
+/// Where an image or file is put, by the lowercase hex SHA-256 of its bytes.
+pub(crate) const MEDIA_PATH: &str = "/v1/media/";
+/// A `file` part's `file_id` naming a file put to [`MEDIA_PATH`]: this, then its SHA-256.
+pub(crate) const FILE_ID_PREFIX: &str = "telmoni:";
+/// The largest file the platform keeps: one past it is named but never put.
+pub(crate) const MEDIA_MAX_BYTES: usize = 5 * 1024 * 1024;
+/// A file's `Content-Type` where its part names no type a header can carry.
+pub(crate) const MEDIA_DEFAULT_TYPE: &str = "application/octet-stream";
+
+/// The variable [`Config::from_env`](crate::Config::from_env) reads
+/// `capture_content` from: `1` turns it on, and anything else, or nothing,
+/// leaves it off.
+pub(crate) const CAPTURE_CONTENT_ENV: &str = "TELMONI_CAPTURE_CONTENT";
+
 /// The answer's header naming the project's content mode: off or on.
 pub(crate) const CONTENT_MODE_HEADER: &str = "Telmoni-Content-Mode";
 /// The request's header naming this clock as the export leaves, in nanoseconds

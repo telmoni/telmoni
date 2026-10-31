@@ -383,7 +383,8 @@ impl Handle {
         let span = self.cx.span();
         match message {
             Some(message) => {
-                let mut attributes = vec![KeyValue::new(contract::EXCEPTION_MESSAGE, message.clone())];
+                let mut attributes =
+                    vec![KeyValue::new(contract::EXCEPTION_MESSAGE, message.clone())];
                 if !error_type.is_empty() {
                     attributes.push(KeyValue::new(contract::EXCEPTION_TYPE, error_type.clone()));
                 }

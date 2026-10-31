@@ -239,11 +239,10 @@ export interface TransportResponse {
   text(): Promise<string>;
 }
 
-export interface TransportRequest {
-  method: 'POST';
-  headers: Record<string, string>;
-  body: string;
-}
+/** An export, or an image or file put by its hash. */
+export type TransportRequest =
+  | { method: 'POST'; headers: Record<string, string>; body: string }
+  | { method: 'PUT'; headers: Record<string, string>; body: Uint8Array };
 
 /** Sends one request; rejects when the platform could not be reached. */
 export type Transport = (url: string, init: TransportRequest) => Promise<TransportResponse>;
@@ -266,9 +265,10 @@ export type WarningKind =
   | 'dropped'
   | 'span_refused'
   | 'said'
-  | 'input';
+  | 'input'
+  | 'upload_failed';
 
-/** A warning as data, beside its line; `status` and `problemType` only for an export's own failure. */
+/** A warning as data, beside its line; `status` and `problemType` only for an export's own failure, `status` a failed upload's. */
 export interface Warning {
   kind: WarningKind;
   status?: number;

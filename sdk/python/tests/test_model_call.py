@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -446,3 +449,108 @@ def test_a_failed_call_records_the_error_class(
     (span,) = [s for s in transport.spans() if s["name"] == "generate_content m"]
     assert span["status"] == {"code": 2}
     assert attributes_of(span)["error.type"] == "ConnectionError"
+
+
+PNG = base64.b64decode("iVBORw0KGgo=")
+
+
+def blob(data: bytes) -> list[dict[str, object]]:
+    """A user message holding one image, as the conventions carry it."""
+    return [
+        {
+            "role": "user",
+            "parts": [
+                {
+                    "type": "blob",
+                    "modality": "image",
+                    "mime_type": "image/png",
+                    "content": base64.b64encode(data).decode(),
+                }
+            ],
+        }
+    ]
+
+
+def file_part(data: bytes) -> dict[str, object]:
+    return {
+        "type": "file",
+        "modality": "image",
+        "mime_type": "image/png",
+        "file_id": f"telmoni:{hashlib.sha256(data).hexdigest()}",
+    }
+
+
+def sent_parts(call: dict[str, object]) -> object:
+    messages = attributes_of(call)["gen_ai.input.messages"]
+    assert isinstance(messages, str)
+    return json.loads(messages)[0]["parts"]
+
+
+def media_client(transport: FakeTransport) -> Telmoni:
+    """A client asked for content whose project keeps it, the mode learned."""
+    on = Answer(200, {"Telmoni-Content-Mode": "on"}, b"{}")
+    transport.answers = [on] * 4
+    client = Telmoni(Config(api_key="k", capture_content=True), transport=transport)
+    with client.run("warm"):
+        pass
+    assert client.flush()
+    return client
+
+
+def test_an_image_is_put_once_with_its_type_and_key(transport: FakeTransport) -> None:
+    client = media_client(transport)
+    try:
+        with client.run("bot"):
+            for _ in range(2):
+                with client.model_call("m", input_messages=blob(PNG)):
+                    pass
+        assert client.flush()
+    finally:
+        client.shutdown()
+    sha256 = hashlib.sha256(PNG).hexdigest()
+    ((url, headers, body),) = transport.uploads
+    assert url == f"{client.config.endpoint}/v1/media/{sha256}"
+    assert headers["Authorization"] == "Bearer k"
+    assert headers["Content-Type"] == "image/png"
+    assert body == PNG
+    first, second = calls(transport)
+    assert sent_parts(first) == sent_parts(second) == [file_part(PNG)]
+
+
+@pytest.mark.parametrize(
+    "failure", [Answer(413, {}, b"{}"), OSError("refused")], ids=["413", "unreached"]
+)
+def test_a_failed_upload_still_names_the_file_and_warns_once(
+    transport: FakeTransport,
+    caplog: pytest.LogCaptureFixture,
+    failure: Answer | Exception,
+) -> None:
+    transport.upload_answers = [failure, failure]
+    client = media_client(transport)
+    try:
+        for _ in range(2):
+            with client.run("bot"), client.model_call("m", input_messages=blob(PNG)):
+                pass
+            assert client.flush()
+    finally:
+        client.shutdown()
+    assert len(transport.uploads) == 2, "a hash is remembered only once kept"
+    for call in calls(transport):
+        assert sent_parts(call) == [file_part(PNG)]
+    infos = [info for info in infos_in(caplog) if info.kind == "upload_failed"]
+    expected = 413 if isinstance(failure, Answer) else None
+    assert infos == [WarningInfo("upload_failed", expected)]
+
+
+def test_a_file_past_the_cap_is_named_but_never_put(transport: FakeTransport) -> None:
+    big = b"\x89" * (5 * 1024 * 1024 + 1)
+    client = media_client(transport)
+    try:
+        with client.run("bot"), client.model_call("m", input_messages=blob(big)):
+            pass
+        assert client.flush()
+    finally:
+        client.shutdown()
+    assert transport.uploads == []
+    (call,) = calls(transport)
+    assert sent_parts(call) == [file_part(big)]

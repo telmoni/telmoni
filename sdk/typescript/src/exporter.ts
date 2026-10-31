@@ -2,11 +2,14 @@
  * The exporter: OTLP's JSON encoding over the platform's `fetch`.
  *
  * It takes content off every span unless the code asked and the project's mode
- * allows, sends to `POST {endpoint}/otlp/v1/traces`, waits out a
+ * allows, puts each image or file a message carries to
+ * `PUT {endpoint}/v1/media/{sha256}` where it sends content, sends to
+ * `POST {endpoint}/otlp/v1/traces`, waits out a
  * `Retry-After`, and reads `Telmoni-Content-Mode` and the partial success
  * from each answer, warning once for each attribute an answer names dropped.
  */
 
+import { createHash } from 'node:crypto';
 import { Agent as HttpAgent, ClientRequest, type IncomingMessage } from 'node:http';
 import { Agent as HttpsAgent } from 'node:https';
 import { urlToHttpOptions } from 'node:url';
@@ -30,6 +33,8 @@ export const ANSWER_MAX = 1 << 20;
 export const RETRY_AFTER_MAX_S = 60;
 /** How many distinct warnings are remembered before the set starts over. */
 export const WARNED_MAX = 1024;
+/** How many files put are remembered before the set starts over: an image a conversation repeats in every call is put once. */
+export const UPLOADED_MAX = 4096;
 /** Where a dropped content field's warning sends the reader. */
 const CONTENT_DOCS = 'https://telmoni.com/docs/api/ingest#what-is-dropped-at-the-door';
 
@@ -37,6 +42,13 @@ const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[
 const DROPPED = /^span (\S+) dropped (\S+): (\w+)(?:; (.*))?$/;
 const REFUSED = /^span (\S+) refused: (.*)$/;
 const SECONDS = /^[ \t]*([+-]?)([0-9]+)[ \t]*$/;
+// Padded to a multiple of 4, as Python's `validate=True` reads it; `Buffer` would skip any other character.
+const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
+// Printable ASCII, not blank: a part's type that can go as a header.
+const HEADER_SAFE = /^ *[\x21-\x7e][\x20-\x7e]*$/;
+
+/** Content fields with their blobs lifted out, by their span. */
+type Lifted = ReadonlyMap<ReadableSpan, Readonly<Record<string, string>>>;
 
 // OTLP numbers the kinds from 1; the api's enum from 0.
 const KINDS = {
@@ -127,7 +139,7 @@ export const fetchTransport: Transport = async (url, init) => {
  */
 export const directTransport: Transport = (url, init) =>
   new Promise((resolve, reject) => {
-    const body = Buffer.from(init.body);
+    const body = typeof init.body === 'string' ? Buffer.from(init.body) : init.body;
     const signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
     const request = new ClientRequest(
       {
@@ -237,6 +249,8 @@ export class Exporter {
   readonly #sleep: (seconds: number, signal: AbortSignal) => Promise<void>;
   readonly #warn: (message: string, warning: Warning) => void;
   readonly #url: string;
+  readonly #mediaUrl: string;
+  readonly #uploaded = new Set<string>();
   readonly #warned = new Set<string>();
   readonly #resource: KeyValue[];
   readonly #givenUp = new AbortController();
@@ -248,6 +262,7 @@ export class Exporter {
     this.#sleep = hooks.sleep;
     this.#warn = hooks.warn;
     this.#url = `${config.endpoint}/otlp/v1/traces`;
+    this.#mediaUrl = `${config.endpoint}${contract.MEDIA_PATH}`;
     this.#resource = [
       attribute(contract.DISTRO_NAME, contract.DISTRO),
       attribute('telemetry.distro.version', VERSION),
@@ -294,15 +309,20 @@ export class Exporter {
    */
   async export(spans: readonly ReadableSpan[]): Promise<boolean> {
     if (spans.length === 0) return true;
+    const lifted = this.#keepsContent() ? await this.#lift(spans) : new Map<ReadableSpan, Record<string, string>>();
+    return this.#export(spans, lifted);
+  }
+
+  async #export(spans: readonly ReadableSpan[], lifted: Lifted): Promise<boolean> {
     // Ingest refuses an export past 1,000 spans whole, as one past 1 MiB below.
-    if (spans.length > contract.BATCH_SPANS_MAX) return this.#halve(spans);
-    let body = this.#body(spans);
+    if (spans.length > contract.BATCH_SPANS_MAX) return this.#halve(spans, lifted);
+    let body = this.#body(spans, lifted);
     if (Buffer.byteLength(body) > contract.BATCH_MAX_BYTES) {
       // Ingest refuses it whole, its 413 maybe breaking the upload still
       // going out, which reads as no answer and is sent again: halved.
-      if (spans.length > 1) return this.#halve(spans);
+      if (spans.length > 1) return this.#halve(spans, lifted);
       // Content sent goes first, the longest field first, each named.
-      const cut = this.#cut(spans[0]!);
+      const cut = this.#cut(spans[0]!, lifted);
       if (cut !== undefined) {
         this.warnOnce(
           'content-cut',
@@ -313,7 +333,7 @@ export class Exporter {
       }
       // A span alone past it goes without what ingest drops for its length,
       // and then fits, unless its own name does not.
-      body = this.#body(spans, true);
+      body = this.#body(spans, lifted, true);
       if (Buffer.byteLength(body) > contract.BATCH_MAX_BYTES) {
         this.warnOnce('too-large', 'telmoni: a span past the 1 MiB an export may hold was dropped', {
           kind: 'too_large',
@@ -330,9 +350,97 @@ export class Exporter {
   }
 
   /** Exports each half of the spans, the second only where the first went. */
-  async #halve(spans: readonly ReadableSpan[]): Promise<boolean> {
+  async #halve(spans: readonly ReadableSpan[], lifted: Lifted): Promise<boolean> {
     const half = Math.floor(spans.length / 2);
-    return (await this.export(spans.slice(0, half))) && this.export(spans.slice(half));
+    return (await this.#export(spans.slice(0, half), lifted)) && this.#export(spans.slice(half), lifted);
+  }
+
+  /** Each span's messages with every `blob` part lifted out: a blob repeated in every span would bloat each, past 1 MiB maybe. */
+  async #lift(spans: readonly ReadableSpan[]): Promise<Lifted> {
+    const lifted = new Map<ReadableSpan, Record<string, string>>();
+    for (const span of spans) {
+      for (const key of contract.MEDIA_FIELDS) {
+        const value = span.attributes[key];
+        if (typeof value !== 'string') continue;
+        const decoded = parseJson(value);
+        if (!Array.isArray(decoded) || !(await this.#liftParts(decoded))) continue;
+        try {
+          lifted.set(span, { ...lifted.get(span), [key]: JSON.stringify(decoded) });
+        } catch {
+          // Nesting past the stack is left as it is, never the batch's loss.
+        }
+      }
+    }
+    return lifted;
+  }
+
+  /** Replaces each `blob` part in place, a message's parts too; whether any was. */
+  async #liftParts(parts: unknown[]): Promise<boolean> {
+    let lifted = false;
+    for (const [at, part] of parts.entries()) {
+      if (isRecord(part) && Array.isArray(part['parts'])) {
+        lifted = (await this.#liftParts(part['parts'] as unknown[])) || lifted;
+        continue;
+      }
+      const file = await this.#filePart(part);
+      if (file !== undefined) {
+        parts[at] = file;
+        lifted = true;
+      }
+    }
+    return lifted;
+  }
+
+  /** The `file` part naming a `blob` part's bytes, put first unless past the platform's cap or put already. */
+  async #filePart(part: unknown): Promise<Record<string, unknown> | undefined> {
+    if (!isRecord(part) || part['type'] !== 'blob') return undefined;
+    const content = part['content'];
+    if (typeof content !== 'string' || content.length % 4 !== 0 || !BASE64.test(content)) return undefined;
+    const data = Buffer.from(content, 'base64');
+    const sha256 = createHash('sha256').update(data).digest('hex');
+    if (data.byteLength <= contract.MEDIA_MAX_BYTES && !this.#uploaded.has(sha256)) {
+      await this.#upload(sha256, data, part['mime_type']);
+    }
+    // Named whatever became of it: the platform says itself what it holds.
+    const file: Record<string, unknown> = { type: 'file' };
+    for (const name of ['modality', 'mime_type']) {
+      if (name in part) file[name] = part[name];
+    }
+    file['file_id'] = `${contract.FILE_ID_PREFIX}${sha256}`;
+    return file;
+  }
+
+  /** Puts one file, once: a failure is warned of, never the export's. */
+  async #upload(sha256: string, data: Uint8Array, mimeType: unknown): Promise<void> {
+    if (this.#givenUp.signal.aborted) return;
+    const headers: Record<string, string> = {
+      'Content-Type':
+        typeof mimeType === 'string' && HEADER_SAFE.test(mimeType) ? mimeType : contract.MEDIA_DEFAULT_TYPE,
+      'User-Agent': `telmoni-typescript/${VERSION}`,
+    };
+    if (this.#config.apiKey !== undefined) {
+      headers['Authorization'] = `Bearer ${this.#config.apiKey}`;
+    }
+    let failure: string;
+    let warning: Warning = { kind: 'upload_failed' };
+    try {
+      const answer = await this.#transport(`${this.#mediaUrl}${sha256}`, { method: 'PUT', headers, body: data });
+      await bodyOf(answer);
+      if (answer.status >= 200 && answer.status < 300) {
+        if (this.#uploaded.size >= UPLOADED_MAX) this.#uploaded.clear();
+        this.#uploaded.add(sha256);
+        return;
+      }
+      failure = String(answer.status);
+      warning = { kind: 'upload_failed', status: answer.status };
+    } catch (error) {
+      failure = errorName(error);
+    }
+    this.warnOnce(
+      `upload:${failure}`,
+      `telmoni: an image or file in a message could not be uploaded (${failure}); its part was sent naming it, which the platform may not hold`,
+      warning,
+    );
   }
 
   /**
@@ -340,9 +448,9 @@ export class Exporter {
    * past ingest's caps, which on a project that keeps content is content too; undefined where it sends no
    * content, or fits without all of it.
    */
-  #cut(span: ReadableSpan): string | undefined {
+  #cut(span: ReadableSpan, lifted: Lifted): string | undefined {
     if (!this.#keepsContent()) return undefined;
-    const content = Object.entries(span.attributes)
+    const content = Object.entries(attributesOf(span, lifted))
       .filter(
         ([key, value]) =>
           value !== undefined && key !== contract.CONTENT_CUT && (contract.CONTENT.has(key) || pastCaps(key, value)),
@@ -352,7 +460,7 @@ export class Exporter {
     const cut: string[] = [];
     for (const [key] of content) {
       cut.push(key);
-      const body = this.#body([span], false, cut);
+      const body = this.#body([span], lifted, false, cut);
       if (Buffer.byteLength(body) <= contract.BATCH_MAX_BYTES) return body;
     }
     return undefined;
@@ -362,9 +470,9 @@ export class Exporter {
     return this.#config.captureContent && this.#contentMode === 'on';
   }
 
-  #body(spans: readonly ReadableSpan[], trimmed = false, cut: readonly string[] = []): string {
+  #body(spans: readonly ReadableSpan[], lifted: Lifted, trimmed = false, cut: readonly string[] = []): string {
     // A lone surrogate is no text ingest reads, and would lose the batch.
-    return JSON.stringify(this.encode(spans, trimmed, cut), (_key, value: unknown) =>
+    return JSON.stringify(this.encode(spans, lifted, trimmed, cut), (_key, value: unknown) =>
       typeof value === 'string' ? value.replace(LONE_SURROGATE, '\ufffd') : value,
     );
   }
@@ -426,10 +534,16 @@ export class Exporter {
   }
 
   /**
-   * OTLP's `ExportTraceServiceRequest`, in its JSON encoding; `trimmed`, without the attributes ingest drops for their
-   * length; `cut`, without those content fields, named in `telmoni.content_cut`.
+   * OTLP's `ExportTraceServiceRequest`, in its JSON encoding, `lifted`'s fields in place of the spans' own; `trimmed`,
+   * without the attributes ingest drops for their length; `cut`, without those content fields, named in
+   * `telmoni.content_cut`.
    */
-  encode(spans: readonly ReadableSpan[], trimmed = false, cut: readonly string[] = []): ExportTraceServiceRequest {
+  encode(
+    spans: readonly ReadableSpan[],
+    lifted: Lifted,
+    trimmed = false,
+    cut: readonly string[] = [],
+  ): ExportTraceServiceRequest {
     return {
       resourceSpans: [
         {
@@ -437,7 +551,7 @@ export class Exporter {
           scopeSpans: [
             {
               scope: { name: contract.SCOPE, version: VERSION },
-              spans: spans.map((span) => this.#span(span, trimmed, cut)),
+              spans: spans.map((span) => this.#span(span, lifted, trimmed, cut)),
             },
           ],
         },
@@ -445,10 +559,10 @@ export class Exporter {
     };
   }
 
-  #span(span: ReadableSpan, trimmed = false, cut: readonly string[] = []): OtlpSpan {
+  #span(span: ReadableSpan, lifted: Lifted, trimmed = false, cut: readonly string[] = []): OtlpSpan {
     const keepContent = this.#keepsContent();
     const attributes: KeyValue[] = [];
-    for (const [key, value] of Object.entries(span.attributes)) {
+    for (const [key, value] of Object.entries(attributesOf(span, lifted))) {
       if (value === undefined) continue;
       if (!keepContent && contract.CONTENT.has(key)) continue;
       if (cut.includes(key) || (cut.length > 0 && key === contract.CONTENT_CUT)) continue;
@@ -614,6 +728,12 @@ function parseJson(text: string): unknown {
   } catch {
     return undefined;
   }
+}
+
+/** The span's attributes, any of its fields lifted in their place. */
+function attributesOf(span: ReadableSpan, lifted: Lifted): ReadableSpan['attributes'] {
+  const fields = lifted.get(span);
+  return fields === undefined ? span.attributes : { ...span.attributes, ...fields };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

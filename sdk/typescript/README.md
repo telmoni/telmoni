@@ -20,7 +20,8 @@ point `TELMONI_ENDPOINT` at its machine host; the docs read in
 ```ts
 import { Telmoni } from 'telmoni';
 
-// Reads TELMONI_ENDPOINT, TELMONI_API_KEY, TELMONI_ORG, TELMONI_ENVIRONMENT and TELMONI_RELEASE
+// Reads TELMONI_ENDPOINT, TELMONI_API_KEY, TELMONI_ORG, TELMONI_ENVIRONMENT, TELMONI_RELEASE
+// and TELMONI_CAPTURE_CONTENT
 const telmoni = Telmoni.fromEnv();
 
 const reply = await telmoni.run(
@@ -188,8 +189,12 @@ const telmoni = new Telmoni({
 ```
 
 `Telmoni.fromEnv()` reads `TELMONI_ENDPOINT`, `TELMONI_API_KEY`,
-`TELMONI_ORG`, `TELMONI_ENVIRONMENT` and `TELMONI_RELEASE`; a blank value is
-unset, and a blank endpoint falls back to the default. No `OTEL_*` variable
+`TELMONI_ORG`, `TELMONI_ENVIRONMENT`, `TELMONI_RELEASE` and
+`TELMONI_CAPTURE_CONTENT`; a blank value is unset, and a blank endpoint falls
+back to the default. `TELMONI_CAPTURE_CONTENT` turns `captureContent` on with
+`1` alone, its blanks about it trimmed; anything else, or nothing, leaves it
+off. A client built with `new Telmoni(config)` reads no variable, so its
+`captureContent` is what the code says. No `OTEL_*` variable
 is read. `prices` hands [the guard](#the-guard) prices of your own, a
 `TypeError` or `RangeError` for one that names no provider or model or is no
 number from 0; nothing of them is sent. The key is never printed or serialized: `console.log`,
@@ -216,11 +221,22 @@ Prompts, completions, system instructions, tool arguments and tool results —
 and stack, its `exception` event and its status's message, and every event the
 application adds to a span through OpenTelemetry: without them, a failed span
 goes with its `error.type` and an error status alone. They leave the process only when
-`captureContent: true` **and** the project's content mode is `on`, which the
+`captureContent: true`, or `TELMONI_CAPTURE_CONTENT=1` under `Telmoni.fromEnv()`,
+**and** the project's content mode is `on`, which the
 SDK learns from the platform's first answer (a `captureContent` that is no
 boolean, such as `'false'` from the environment, throws a `TypeError`); before that answer, and on an
 `off` project, the exporter takes them off every span. The server drops content
 on an `off` project too, so the SDK's strip is the first lock, not the only one.
+
+An image or file a message carries, a `blob` part holding its bytes in base64
+in `inputMessages`, `outputMessages` or `systemInstructions`, never travels
+inside the span: where content is sent, the exporter puts its bytes to
+`PUT {endpoint}/v1/media/{sha256}` with the same key, once a client for each
+file, and sends the part as a `file` part whose `file_id` is
+`telmoni:<sha256>`, its `modality` and `mime_type` kept. A file past 5 MiB is
+not put, and a put that fails is warned of once (`upload_failed`); either way
+the part goes as the file it names. A part whose content is no base64 goes as
+it is.
 
 ## Beside your own OpenTelemetry
 
@@ -273,7 +289,8 @@ loop empties, but `process.exit()` or a signal left unhandled waits for
 nothing, so call `shutdown()` before exiting.
 
 For tests, inject the seams: `new Telmoni(config, { transport, sleep, warn,
-processor })`, where `transport` has `fetch`'s shape, `sleep` is the wait
+processor })`, where `transport` has `fetch`'s shape, handed an export's
+`POST` or a file's `PUT`, `sleep` is the wait
 between retries, handed a signal that aborts once a shutdown gives the retry up,
 and `processor` sizes the queue.
 

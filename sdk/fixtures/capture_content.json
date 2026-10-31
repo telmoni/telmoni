@@ -1,0 +1,16 @@
+{
+  "variable": "TELMONI_CAPTURE_CONTENT",
+  "cases": [
+    { "given": null, "capture_content": false },
+    { "given": "", "capture_content": false },
+    { "given": "1", "capture_content": true },
+    { "given": " 1\t", "capture_content": true },
+    { "given": "0", "capture_content": false },
+    { "given": "true", "capture_content": false },
+    { "given": "yes", "capture_content": false },
+    { "given": "TRUE", "capture_content": false },
+    { "given": "on", "capture_content": false },
+    { "given": "01", "capture_content": false },
+    { "given": "1.0", "capture_content": false }
+  ]
+}

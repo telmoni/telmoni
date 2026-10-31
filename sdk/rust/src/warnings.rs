@@ -15,8 +15,9 @@ const WARNED_MAX: usize = 1024;
 pub struct Warning {
     /// What became of them.
     pub kind: WarningKind,
-    /// The HTTP status an export last met; [`WarningKind::Refused`] and
-    /// [`WarningKind::Failed`] alone, where an answer came.
+    /// The HTTP status an export last met, [`WarningKind::Refused`] and
+    /// [`WarningKind::Failed`], or an upload met, [`WarningKind::UploadFailed`];
+    /// where an answer came.
     pub status: Option<u16>,
     /// The problem type that answer's body named, where it named one.
     pub problem_type: Option<String>,
@@ -58,6 +59,9 @@ pub enum WarningKind {
     Said,
     /// Something the SDK was handed fixed, cut or left off, or not sent.
     Input,
+    /// An image or file a message carried that could not be put, its span
+    /// sent naming it.
+    UploadFailed,
 }
 
 impl WarningKind {
@@ -75,6 +79,7 @@ impl WarningKind {
             Self::SpanRefused => "span_refused",
             Self::Said => "said",
             Self::Input => "input",
+            Self::UploadFailed => "upload_failed",
         }
     }
 }

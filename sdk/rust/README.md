@@ -27,7 +27,8 @@ point `TELMONI_ENDPOINT` at its machine host; the docs read in
 use telmoni::{Config, ModelCallOptions, Reply, RunOptions, Telmoni, ToolCallOptions, Usage};
 
 fn main() -> Result<(), telmoni::Error> {
-    // Reads TELMONI_ENDPOINT, TELMONI_API_KEY, TELMONI_ORG, TELMONI_ENVIRONMENT and TELMONI_RELEASE.
+    // Reads TELMONI_ENDPOINT, TELMONI_API_KEY, TELMONI_ORG, TELMONI_ENVIRONMENT, TELMONI_RELEASE
+    // and TELMONI_CAPTURE_CONTENT.
     let telmoni = Telmoni::new(Config::from_env());
 
     let run = telmoni.run(
@@ -188,7 +189,7 @@ as; else nothing. A call answered again counts as its span then holds it.
 
 ## Configuration
 
-`Config::from_env()` reads five variables, a blank value being unset:
+`Config::from_env()` reads six variables, a blank value being unset:
 
 | Variable | What |
 |---|---|
@@ -197,6 +198,7 @@ as; else nothing. A call answered again counts as its span then holds it.
 | `TELMONI_ORG` | The organization (`org_…`). |
 | `TELMONI_ENVIRONMENT` | The deployment this process runs in (`production`, `staging`), sent as `deployment.environment.name`. |
 | `TELMONI_RELEASE` | The release it runs (a version or a commit), sent as `service.version`. |
+| `TELMONI_CAPTURE_CONTENT` | `1` alone, its blanks about it trimmed, turns `capture_content` on; anything else, or nothing, leaves it off. A `capture_content` set in code over `Config::from_env()` stands. |
 
 Nothing in the SDK reads an `OTEL_*` variable. `Config` also holds
 `capture_content` (default `false`), `sample_rate` (default `1.0`; above 0 and
@@ -242,8 +244,20 @@ run's own messages: `RunOptions::input_messages` and
 `exception` event and its status's message, and every event the application
 adds to a span through OpenTelemetry. They are set on
 the span, and the exporter takes them off every span before it leaves the
-process unless `capture_content` is on **and** the project's content mode,
+process unless `capture_content` is on, in code or by `TELMONI_CAPTURE_CONTENT=1`
+under `Config::from_env()`, **and** the project's content mode,
 learned from the platform's answers, is `on`. Before the first answer the mode
 is unknown, so content stays home. `telmoni.content_mode()` hands it back as
 `Some(ContentMode::Off)` or `Some(ContentMode::On)`: `None` before an answer, or
 for a word ingest does not send, which keeps content home too.
+
+An image or file a message carries, a `blob` part holding its bytes in base64
+in `input_messages`, `output_messages` or `system_instructions`, never travels
+inside the span: where content is sent, the exporter puts its bytes to
+`PUT {endpoint}/v1/media/{sha256}` with the same key, once a client for each
+file, and sends the part as a `file` part whose `file_id` is
+`telmoni:<sha256>`, its `modality` and `mime_type` kept. A file past 5 MiB is
+not put, and a put that fails is warned of once (`WarningKind::UploadFailed`);
+either way the part goes as the file it names. A part whose content is no
+base64 goes as it is. A `Transport` of your own is handed both, by its
+`Method`: an export's `Post` and a file's `Put`.

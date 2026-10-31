@@ -3,6 +3,9 @@ package telmoni
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -38,6 +41,9 @@ const (
 	// warnedMax is how many distinct warnings are remembered before the set
 	// starts over.
 	warnedMax = 1024
+	// uploadedMax is how many files put are remembered before the set starts
+	// over: an image a conversation repeats in every call is put once.
+	uploadedMax = 4096
 	// contentDocs is where a dropped content field's warning sends the reader.
 	contentDocs = "https://telmoni.com/docs/api/ingest#what-is-dropped-at-the-door"
 )
@@ -50,7 +56,9 @@ var (
 // exporter is OTLP's JSON encoding over net/http.
 //
 // It takes content off every span unless the code asked and the project's
-// mode allows, sends to POST {endpoint}/otlp/v1/traces, waits out a
+// mode allows, puts each image or file a message carries to
+// PUT {endpoint}/v1/media/{sha256} where it sends content, sends to
+// POST {endpoint}/otlp/v1/traces, waits out a
 // Retry-After, and reads Telmoni-Content-Mode and the partial success from
 // each answer, warning once for each attribute an answer names dropped.
 type exporter struct {
@@ -59,15 +67,17 @@ type exporter struct {
 	sleep     func(time.Duration)
 	logger    *slog.Logger
 	url       string
+	mediaURL  string
 	resource  []keyValue
 	// givenUp is done once a shutdown gives up: the request in flight is
 	// cancelled, the wait for a retry ends and no attempt follows.
 	givenUp context.Context
 	giveUp  context.CancelFunc
 
-	mu     sync.Mutex
-	mode   string
-	warned map[string]struct{}
+	mu       sync.Mutex
+	mode     string
+	warned   map[string]struct{}
+	uploaded map[string]struct{}
 }
 
 // newExporter waits between attempts through sleep, or, when nil, through a
@@ -87,10 +97,12 @@ func newExporter(cfg Config, transport Transport, sleep func(time.Duration), log
 		sleep:     sleep,
 		logger:    logger,
 		url:       cfg.Endpoint + "/otlp/v1/traces",
+		mediaURL:  cfg.Endpoint + mediaPath,
 		resource:  resource,
 		givenUp:   givenUp,
 		giveUp:    giveUp,
 		warned:    map[string]struct{}{},
+		uploaded:  map[string]struct{}{},
 	}
 	if e.sleep == nil {
 		e.sleep = e.waitOut
@@ -152,6 +164,13 @@ func (e *exporter) export(spans []sdktrace.ReadOnlySpan) bool {
 	if len(spans) == 0 {
 		return true
 	}
+	if e.keepsContent() {
+		spans = e.lift(spans)
+	}
+	return e.exportLifted(spans)
+}
+
+func (e *exporter) exportLifted(spans []sdktrace.ReadOnlySpan) bool {
 	// Ingest refuses an export past 1,000 spans whole, as one past 1 MiB below.
 	if len(spans) > batchSpansMax {
 		return e.halve(spans)
@@ -249,7 +268,175 @@ func failureName(err error) string {
 // halve exports each half of spans, the second only where the first went.
 func (e *exporter) halve(spans []sdktrace.ReadOnlySpan) bool {
 	half := len(spans) / 2
-	return e.export(spans[:half]) && e.export(spans[half:])
+	return e.exportLifted(spans[:half]) && e.exportLifted(spans[half:])
+}
+
+// liftedSpan is a span whose messages had their blob parts lifted out.
+type liftedSpan struct {
+	sdktrace.ReadOnlySpan
+	attributes []attribute.KeyValue
+}
+
+func (s liftedSpan) Attributes() []attribute.KeyValue { return s.attributes }
+
+// lift is spans with every blob part of their messages lifted out: a blob
+// repeated in every span would bloat each, past 1 MiB maybe.
+func (e *exporter) lift(spans []sdktrace.ReadOnlySpan) []sdktrace.ReadOnlySpan {
+	out := slices.Clone(spans)
+	for i, span := range spans {
+		var attributes []attribute.KeyValue
+		for j, kv := range span.Attributes() {
+			if !mediaFields[string(kv.Key)] || kv.Value.Type() != attribute.STRING {
+				continue
+			}
+			text, ok := e.liftText(kv.Value.AsString())
+			if !ok {
+				continue
+			}
+			if attributes == nil {
+				attributes = slices.Clone(span.Attributes())
+			}
+			attributes[j] = attribute.String(string(kv.Key), text)
+		}
+		if attributes != nil {
+			out[i] = liftedSpan{span, attributes}
+		}
+	}
+	return out
+}
+
+// liftText is a field's JSON with each blob part lifted out; false where it
+// holds none, or is no JSON array.
+func (e *exporter) liftText(text string) (string, bool) {
+	decoder := json.NewDecoder(strings.NewReader(text))
+	// Numbers kept as written, since the field is written again.
+	decoder.UseNumber()
+	var decoded []any
+	if decoder.Decode(&decoded) != nil {
+		return "", false
+	}
+	if _, err := decoder.Token(); err != io.EOF || !e.liftParts(decoded) {
+		return "", false
+	}
+	return asJSON(decoded), true
+}
+
+// liftParts replaces each blob part in place, a message's parts too; whether
+// any was.
+func (e *exporter) liftParts(parts []any) bool {
+	lifted := false
+	for i, part := range parts {
+		if message, ok := part.(map[string]any); ok {
+			if inner, ok := message["parts"].([]any); ok {
+				lifted = e.liftParts(inner) || lifted
+				continue
+			}
+		}
+		if file, ok := e.filePart(part); ok {
+			parts[i] = file
+			lifted = true
+		}
+	}
+	return lifted
+}
+
+// filePart is the file part naming a blob part's bytes, put first unless past
+// the platform's cap or put already; false for any other part.
+func (e *exporter) filePart(part any) (map[string]any, bool) {
+	blob, ok := part.(map[string]any)
+	if !ok || blob["type"] != "blob" {
+		return nil, false
+	}
+	content, ok := blob["content"].(string)
+	// encoding/base64 skips line breaks, which the other SDKs refuse.
+	if !ok || strings.ContainsAny(content, "\r\n") {
+		return nil, false
+	}
+	data, err := base64.StdEncoding.DecodeString(content)
+	if err != nil {
+		return nil, false
+	}
+	sum := sha256.Sum256(data)
+	hash := hex.EncodeToString(sum[:])
+	e.mu.Lock()
+	_, put := e.uploaded[hash]
+	e.mu.Unlock()
+	if len(data) <= mediaMaxBytes && !put {
+		e.upload(hash, data, blob["mime_type"])
+	}
+	// Named whatever became of it: the platform says itself what it holds.
+	file := map[string]any{"type": "file", "file_id": fileIDPrefix + hash}
+	for _, name := range []string{"modality", "mime_type"} {
+		if value, ok := blob[name]; ok {
+			file[name] = value
+		}
+	}
+	return file, true
+}
+
+// upload puts one file, once: a failure is warned of, never the export's.
+func (e *exporter) upload(hash string, data []byte, mimeType any) {
+	if e.gaveUp() {
+		return
+	}
+	contentType := mediaDefaultType
+	if given, ok := mimeType.(string); ok && headerSafe(given) {
+		contentType = given
+	}
+	failure, status := e.put(e.mediaURL+hash, contentType, data)
+	if failure == "" {
+		e.mu.Lock()
+		if len(e.uploaded) >= uploadedMax {
+			clear(e.uploaded)
+		}
+		e.uploaded[hash] = struct{}{}
+		e.mu.Unlock()
+		return
+	}
+	e.warnOnce("upload:"+failure, WarningUploadFailed,
+		fmt.Sprintf("telmoni: an image or file in a message could not be uploaded (%s); its part was sent naming it, which the platform may not hold", failure),
+		answerAttrs(status, "")...)
+}
+
+// put sends one file; what failed and the status met, "" once it was kept.
+func (e *exporter) put(target, contentType string, data []byte) (failure string, status int) {
+	// A transport that panics costs the file alone.
+	defer func() {
+		if recover() != nil {
+			failure, status = "panic", 0
+		}
+	}()
+	req, err := http.NewRequestWithContext(e.givenUp, http.MethodPut, target, bytes.NewReader(data))
+	if err != nil {
+		return failureName(err), 0
+	}
+	req.Header.Set("Content-Type", contentType)
+	req.Header.Set("User-Agent", "telmoni-go/"+Version)
+	if key := e.config.APIKey.Expose(); key != "" {
+		req.Header.Set("Authorization", "Bearer "+key)
+	}
+	got, err := e.do(req)
+	if err != nil {
+		return failureName(err), 0
+	}
+	if got.status < 200 || got.status >= 300 {
+		return strconv.Itoa(got.status), got.status
+	}
+	return "", got.status
+}
+
+// headerSafe is whether a part's type can go as a header: printable ASCII,
+// not blank.
+func headerSafe(value string) bool {
+	if strings.Trim(value, " ") == "" {
+		return false
+	}
+	for i := 0; i < len(value); i++ {
+		if value[i] < 0x20 || value[i] > 0x7e {
+			return false
+		}
+	}
+	return true
 }
 
 func (e *exporter) request(body []byte) (*http.Request, error) {
@@ -272,6 +459,10 @@ func (e *exporter) send(body []byte) (answer, error) {
 	if err != nil {
 		return answer{}, err
 	}
+	return e.do(req)
+}
+
+func (e *exporter) do(req *http.Request) (answer, error) {
 	resp, err := e.transport(req)
 	if err != nil {
 		return answer{}, err

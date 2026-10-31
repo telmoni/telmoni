@@ -179,7 +179,7 @@ func TestADeploymentNamedPastIngestsCapIsLeftOffWithOneWarning(t *testing.T) {
 	expectFields(t, h, map[string]any{"kind": "input"})
 }
 
-func TestFromEnvReadsTheFiveVariablesAndNoOther(t *testing.T) {
+func TestFromEnvReadsTheSixVariablesAndNoOther(t *testing.T) {
 	t.Setenv("TELMONI_ENDPOINT", "")
 	t.Setenv("TELMONI_API_KEY", "")
 	t.Setenv("TELMONI_ORG", "org_2")
@@ -214,6 +214,46 @@ func TestFromEnvReadsTheFiveVariablesAndNoOther(t *testing.T) {
 	}
 	if cfg.Environment != "" || cfg.Release != "2026.10.18" {
 		t.Errorf("Environment = %q, Release = %q", cfg.Environment, cfg.Release)
+	}
+}
+
+func TestCaptureContentIsReadFromTheEnvironmentAsTheFixtureSays(t *testing.T) {
+	var fixture struct {
+		Cases []struct {
+			Given          *string `json:"given"`
+			CaptureContent bool    `json:"capture_content"`
+		} `json:"cases"`
+	}
+	if err := json.Unmarshal(loadFixture(t, "capture_content.json"), &fixture); err != nil {
+		t.Fatalf("decoding capture_content.json: %v", err)
+	}
+	for _, c := range fixture.Cases {
+		// Setenv first, so the variable is put back as it was when the test ends.
+		t.Setenv("TELMONI_CAPTURE_CONTENT", "")
+		if c.Given == nil {
+			os.Unsetenv("TELMONI_CAPTURE_CONTENT")
+		} else {
+			t.Setenv("TELMONI_CAPTURE_CONTENT", *c.Given)
+		}
+		if got := telmoni.ConfigFromEnv().CaptureContent; got != c.CaptureContent {
+			t.Errorf("TELMONI_CAPTURE_CONTENT %v read as %t, want %t", c.Given, got, c.CaptureContent)
+		}
+	}
+}
+
+func TestCaptureContentSetInCodeWinsOverTheEnvironment(t *testing.T) {
+	t.Setenv("TELMONI_ENDPOINT", "")
+	t.Setenv("TELMONI_CAPTURE_CONTENT", "1")
+	cfg := telmoni.ConfigFromEnv()
+	cfg.CaptureContent = false
+	if mustNew(t, cfg).Config().CaptureContent {
+		t.Error("CaptureContent false in code was read as on")
+	}
+	os.Unsetenv("TELMONI_CAPTURE_CONTENT")
+	cfg = telmoni.ConfigFromEnv()
+	cfg.CaptureContent = true
+	if !mustNew(t, cfg).Config().CaptureContent {
+		t.Error("CaptureContent true in code was read as off")
 	}
 }
 

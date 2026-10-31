@@ -128,6 +128,23 @@ DEFAULT_MODEL_OPERATION = "chat"
 """A model call's operation when it names none."""
 TOOL_OPERATION = "execute_tool"
 
+MEDIA_FIELDS = frozenset({INPUT_MESSAGES, OUTPUT_MESSAGES, SYSTEM_INSTRUCTIONS})
+"""The content fields whose messages' ``blob`` parts the exporter lifts out:
+each image or file put to ``MEDIA_PATH`` and sent as a ``file`` part naming it."""
+MEDIA_PATH = "/v1/media/"
+"""Where an image or file is put, by the lowercase hex SHA-256 of its bytes."""
+FILE_ID_PREFIX = "telmoni:"
+"""A ``file`` part's ``file_id`` naming a file put to ``MEDIA_PATH``: this, then
+its SHA-256."""
+MEDIA_MAX_BYTES = 5 * 1024 * 1024
+"""The largest file the platform keeps: one past it is named but never put."""
+MEDIA_DEFAULT_TYPE = "application/octet-stream"
+"""A file's ``Content-Type`` where its part names no type a header can carry."""
+
+CAPTURE_CONTENT_ENV = "TELMONI_CAPTURE_CONTENT"
+"""The variable ``Config.from_env`` reads ``capture_content`` from: ``1``
+turns it on, and anything else, or nothing, leaves it off."""
+
 CONTENT_MODE_HEADER = "Telmoni-Content-Mode"
 """The answer's header naming the project's content mode: off or on."""
 SENT_AT_HEADER = "Telmoni-Sent-At"

@@ -64,7 +64,7 @@ func WithSleep(sleep func(time.Duration)) Option {
 // handler can switch on instead of the words: "kind", a WarningKind, always;
 // and for an export's own failure (WarningRefused, WarningFailed) "status",
 // the HTTP status last met, and "problem_type", the problem its body named,
-// each only where there is one.
+// each only where there is one, as "status" is for WarningUploadFailed.
 func WithLogger(logger *slog.Logger) Option {
 	return func(o *options) {
 		if logger != nil {
@@ -101,6 +101,9 @@ const (
 	// WarningInput is something the SDK was handed fixed, cut or left off, or
 	// not sent at all.
 	WarningInput WarningKind = "input"
+	// WarningUploadFailed is an image or file a message carried that could not
+	// be put, its span sent naming it.
+	WarningUploadFailed WarningKind = "upload_failed"
 )
 
 // withRandom replaces the source the sample rate is drawn against, so a test

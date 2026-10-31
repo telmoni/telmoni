@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use common::{FakeTransport, Harness, Outcome, Sleeps, Warnings, client, hooks, keyed, name_of};
-use telmoni::transport::{Answer, Transport, TransportError};
+use telmoni::transport::{Answer, Method, Transport, TransportError};
 use telmoni::{Batching, RunOptions, Telmoni};
 
 #[test]
@@ -187,6 +187,7 @@ fn a_transport_that_panics_does_not_stop_the_exporter() -> Outcome {
     impl Transport for PanicsOnce {
         fn send(
             &self,
+            method: Method,
             url: &str,
             headers: &[(String, String)],
             body: &[u8],
@@ -194,7 +195,7 @@ fn a_transport_that_panics_does_not_stop_the_exporter() -> Outcome {
             if !self.0.swap(true, Ordering::SeqCst) {
                 std::panic::panic_any("a transport of the application's");
             }
-            self.1.send(url, headers, body)
+            self.1.send(method, url, headers, body)
         }
     }
 

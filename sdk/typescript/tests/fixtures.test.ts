@@ -288,6 +288,76 @@ describe('failure.json', () => {
   });
 });
 
+interface MediaFixture {
+  scenario: {
+    agent: string;
+    provider: string;
+    model: string;
+    system_instructions: unknown;
+    input_messages: unknown;
+    output_messages: unknown;
+  };
+  cases: Array<{ capture_content: boolean; content_mode: string; sends: boolean }>;
+  uploads: Array<{ path: string; content_type: string; body: string }>;
+  sent: Record<string, unknown>;
+}
+
+describe('media.json', () => {
+  const fixture = loadFixture<MediaFixture>('media.json');
+  const { scenario } = fixture;
+
+  it.each(fixture.cases)('images are lifted out of messages only under both locks: %o', async (each) => {
+    const mode = answer(200, { 'Telmoni-Content-Mode': each.content_mode }, '{}');
+    const h = harness({ apiKey: 'k', captureContent: each.capture_content }, {}, [mode, mode, mode]);
+    try {
+      await aRun(h);
+      // Twice, in two exports: each file is put once.
+      for (let i = 0; i < 2; i++) {
+        h.telmoni.run(scenario.agent, (run) => {
+          run.modelCall(
+            scenario.model,
+            {
+              provider: scenario.provider,
+              inputMessages: scenario.input_messages,
+              systemInstructions: scenario.system_instructions,
+            },
+            (call) => call.answered({ outputMessages: scenario.output_messages }),
+          );
+        });
+        expect(await h.telmoni.flush()).toBe(true);
+      }
+    } finally {
+      await h.telmoni.shutdown();
+    }
+    const calls = h.transport.spans().filter((span) => span.name.startsWith('chat '));
+    expect(calls).toHaveLength(2);
+    if (!each.sends) {
+      expect(h.transport.uploads).toEqual([]);
+      for (const call of calls) {
+        expect(call.attributes.filter((a) => a.key in fixture.sent)).toEqual([]);
+      }
+      return;
+    }
+    const uploads = [...h.transport.uploads].sort((a, b) => (a.url < b.url ? -1 : 1));
+    expect(
+      uploads.map((upload) => ({
+        path: new URL(upload.url).pathname,
+        content_type: upload.headers['Content-Type'],
+        body: Buffer.from(upload.body).toString('base64'),
+      })),
+    ).toEqual(fixture.uploads);
+    expect(uploads.every((upload) => upload.headers['Authorization'] === 'Bearer k')).toBe(true);
+    for (const call of calls) {
+      const sent = Object.fromEntries(
+        call.attributes
+          .filter((a) => a.key in fixture.sent)
+          .map((a) => [a.key, JSON.parse(a.value['stringValue'] as string) as unknown]),
+      );
+      expect(sent).toEqual(fixture.sent);
+    }
+  });
+});
+
 describe('answers/', () => {
   it('kept', async () => {
     const h = harness({ apiKey: 'k' }, {}, answers('kept'));

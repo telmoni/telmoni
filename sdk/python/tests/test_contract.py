@@ -8,7 +8,7 @@ import ssl
 import threading
 import time
 from collections.abc import Iterator
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from typing import Any
 from unittest import mock
 
@@ -101,7 +101,7 @@ def test_a_deployment_named_past_ingests_cap_is_left_off_with_one_warning(
     ]
 
 
-def test_from_env_reads_the_five_variables_and_no_other() -> None:
+def test_from_env_reads_the_six_variables_and_no_other() -> None:
     with mock.patch.dict(os.environ, clear=False):
         os.environ.pop("TELMONI_ENDPOINT", None)
         os.environ["TELMONI_API_KEY"] = ""
@@ -124,6 +124,27 @@ def test_from_env_reads_the_five_variables_and_no_other() -> None:
         config = Config.from_env()
     assert config.environment is None
     assert config.release == "2026.10.18"
+
+
+@pytest.mark.parametrize("case", load_fixture("capture_content.json")["cases"])
+def test_capture_content_is_read_from_the_environment_as_the_fixture_says(
+    case: dict[str, Any],
+) -> None:
+    with mock.patch.dict(os.environ, clear=False):
+        os.environ.pop("TELMONI_CAPTURE_CONTENT", None)
+        if case["given"] is not None:
+            os.environ["TELMONI_CAPTURE_CONTENT"] = case["given"]
+        assert Config.from_env().capture_content is case["capture_content"]
+
+
+def test_capture_content_set_in_code_wins_over_the_environment() -> None:
+    with mock.patch.dict(os.environ, clear=False):
+        os.environ["TELMONI_CAPTURE_CONTENT"] = "1"
+        off = replace(Config.from_env(), capture_content=False)
+        os.environ.pop("TELMONI_CAPTURE_CONTENT")
+        on = replace(Config.from_env(), capture_content=True)
+    assert off.capture_content is False
+    assert on.capture_content is True
 
 
 def test_blank_is_unicodes_white_space_as_go_and_rust_read_it(
@@ -185,6 +206,8 @@ _ANSWERS = {
 
 _SENT: list[bytes] = []
 """Every body the server was sent, in order."""
+_PUT: list[str] = []
+"""Every path the server was sent a ``PUT`` to."""
 
 
 class _Answering(http.server.BaseHTTPRequestHandler):
@@ -256,6 +279,10 @@ class _Answering(http.server.BaseHTTPRequestHandler):
         with contextlib.suppress(OSError):  # the client hangs up past its cap
             self.wfile.write(sent)
 
+    def do_PUT(self) -> None:
+        _PUT.append(self.path)
+        self.do_POST()
+
     def log_message(self, format: str, *args: Any) -> None:
         pass
 
@@ -263,6 +290,7 @@ class _Answering(http.server.BaseHTTPRequestHandler):
 @pytest.fixture
 def answering() -> Iterator[str]:
     _SENT.clear()
+    _PUT.clear()
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Answering)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
@@ -278,8 +306,17 @@ def test_an_answer_is_read_up_to_its_first_mebibyte(answering: str) -> None:
         ("/refused", 503, 1 << 20),
         ("/short", 200, 300),
     ):
-        answer = _urllib_transport(answering + path, {}, b"{}")
+        answer = _urllib_transport("POST", answering + path, {}, b"{}")
         assert (answer.status, len(answer.body)) == (status, read)
+
+
+def test_an_upload_goes_as_a_put_of_its_raw_bytes(answering: str) -> None:
+    body = bytes(range(256))
+    answer = _urllib_transport(
+        "PUT", answering + "/short", {"Content-Type": "image/png"}, body
+    )
+    assert answer.status == 200
+    assert _PUT == ["/short"] and _SENT == [body]
 
 
 def test_an_answer_whose_body_breaks_is_kept_as_far_as_it_came(
@@ -291,7 +328,7 @@ def test_an_answer_whose_body_breaks_is_kept_as_far_as_it_came(
         ("/too-large", 413, _PROBLEM),
         ("/chunked-cut", 413, _PROBLEM),
     ):
-        answer = _urllib_transport(answering + path, {}, b"{}")
+        answer = _urllib_transport("POST", answering + path, {}, b"{}")
         assert (answer.status, answer.body) == (status, body)
 
 
@@ -323,7 +360,7 @@ def test_an_answer_whose_head_comes_slowly_is_given_up_at_the_requests_deadline(
         mock.patch("telmoni.exporter.REQUEST_TIMEOUT_S", 0.5),
         pytest.raises(TimeoutError),
     ):
-        _urllib_transport(answering + "/slow-head", {}, b"{}")
+        _urllib_transport("POST", answering + "/slow-head", {}, b"{}")
     assert time.monotonic() - started < 1.5
 
 
@@ -332,7 +369,7 @@ def test_a_head_cut_before_its_blank_line_is_no_answer_and_sent_again(
 ) -> None:
     """As in the other SDKs: a status line alone decides nothing."""
     with pytest.raises(http.client.RemoteDisconnected):
-        _urllib_transport(answering + "/cut-head", {}, b"{}")
+        _urllib_transport("POST", answering + "/cut-head", {}, b"{}")
     _SENT.clear()
     client = Telmoni(Config(endpoint=answering + "/cut-head", api_key="k"))
     client.exporter._sleep = sleeps.append
@@ -357,15 +394,15 @@ def test_a_head_cut_before_its_blank_line_is_no_answer_and_sent_again(
 
 def test_the_answer_is_read_past_every_1xx_before_it_but_a_101(answering: str) -> None:
     """As in the other SDKs, where ``http.client`` passes a 100 alone."""
-    answer = _urllib_transport(answering + "/early-hints", {}, b"{}")
+    answer = _urllib_transport("POST", answering + "/early-hints", {}, b"{}")
     assert (answer.status, answer.header("Telmoni-Content-Mode"), answer.body) == (
         200,
         "on",
         b"{}",
     )
     with pytest.raises(http.client.RemoteDisconnected):
-        _urllib_transport(answering + "/early-hints-cut", {}, b"{}")
-    assert _urllib_transport(answering + "/upgrade", {}, b"{}").status == 101
+        _urllib_transport("POST", answering + "/early-hints-cut", {}, b"{}")
+    assert _urllib_transport("POST", answering + "/upgrade", {}, b"{}").status == 101
 
 
 def test_a_first_line_that_is_no_status_is_no_answer_and_sent_again(
@@ -373,7 +410,7 @@ def test_a_first_line_that_is_no_status_is_no_answer_and_sent_again(
 ) -> None:
     """A failure to retry, as before: the reader ``http.client`` closed stays shut."""
     with pytest.raises(http.client.BadStatusLine):
-        _urllib_transport(answering + "/no-status", {}, b"{}")
+        _urllib_transport("POST", answering + "/no-status", {}, b"{}")
     _SENT.clear()
     client = Telmoni(Config(endpoint=answering + "/no-status", api_key="k"))
     client.exporter._sleep = sleeps.append
@@ -395,7 +432,7 @@ def test_a_head_whose_headers_trickle_past_the_deadline_is_given_up(
         mock.patch("telmoni.exporter.REQUEST_TIMEOUT_S", 0.5),
         pytest.raises(TimeoutError),
     ):
-        _urllib_transport(answering + "/slow-headers", {}, b"{}")
+        _urllib_transport("POST", answering + "/slow-headers", {}, b"{}")
     assert time.monotonic() - started < 1.5
 
 
@@ -438,11 +475,15 @@ def test_this_machine_is_reached_past_any_proxy_the_environment_names(
             },
         ):
             for host in ("127.0.0.1", "localhost", "LOCALHOST"):
-                answer = _urllib_transport(f"http://{host}:{port}/short", {}, b"{}")
+                answer = _urllib_transport(
+                    "POST", f"http://{host}:{port}/short", {}, b"{}"
+                )
                 assert answer.status == 200 and len(answer.body) == 300, host
             assert _TAKEN == []
             # Another host still goes through it, as urllib sends.
-            _urllib_transport("http://telmoni-test.invalid/otlp/v1/traces", {}, b"{}")
+            _urllib_transport(
+                "POST", "http://telmoni-test.invalid/otlp/v1/traces", {}, b"{}"
+            )
             assert _TAKEN == ["http://telmoni-test.invalid/otlp/v1/traces"]
     finally:
         proxy.shutdown()
@@ -709,7 +750,7 @@ def test_an_answer_whose_body_comes_slowly_is_kept_as_far_as_it_came_by_the_dead
 ) -> None:
     started = time.monotonic()
     with mock.patch("telmoni.exporter.REQUEST_TIMEOUT_S", 0.5):
-        answer = _urllib_transport(answering + "/slow-body", {}, b"{}")
+        answer = _urllib_transport("POST", answering + "/slow-body", {}, b"{}")
     assert time.monotonic() - started < 1.5
     assert answer.status == 200
     assert len(answer.body) < 40 and set(answer.body) <= {ord("x")}
@@ -729,7 +770,7 @@ def test_the_transport_makes_one_tls_context_through_the_hook_urllib_reads(
     exporter._tls.cache_clear()
     with mock.patch("ssl._create_default_https_context", counted):
         for _ in range(2):
-            _urllib_transport(answering + "/short", {}, b"{}")
+            _urllib_transport("POST", answering + "/short", {}, b"{}")
     exporter._tls.cache_clear()
     assert len(made) == 1
 

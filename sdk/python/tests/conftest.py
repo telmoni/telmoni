@@ -44,18 +44,32 @@ def kept() -> Answer:
 
 
 class FakeTransport:
-    """Records every export and answers from a script, then with `kept`."""
+    """Records every export and answers from a script, then with `kept`; each
+    upload, a `PUT`, apart, answered from its own script, then with a 204."""
 
     def __init__(self, answers: list[Answer | Exception] | None = None) -> None:
         self.requests: list[tuple[str, dict[str, str], bytes]] = []
         self.answers = list(answers or [])
+        self.uploads: list[tuple[str, dict[str, str], bytes]] = []
+        self.upload_answers: list[Answer | Exception] = []
         self._lock = threading.Lock()
         self._received = threading.Condition(self._lock)
 
-    def __call__(self, url: str, headers: Mapping[str, str], body: bytes) -> Answer:
+    def __call__(
+        self, method: str, url: str, headers: Mapping[str, str], body: bytes
+    ) -> Answer:
         with self._lock:
-            self.requests.append((url, dict(headers), body))
-            answer = self.answers.pop(0) if self.answers else kept()
+            if method == "PUT":
+                self.uploads.append((url, dict(headers), body))
+                answer = (
+                    self.upload_answers.pop(0)
+                    if self.upload_answers
+                    else Answer(204, {}, b"")
+                )
+            else:
+                assert method == "POST"
+                self.requests.append((url, dict(headers), body))
+                answer = self.answers.pop(0) if self.answers else kept()
             self._received.notify_all()
         if isinstance(answer, Exception):
             raise answer

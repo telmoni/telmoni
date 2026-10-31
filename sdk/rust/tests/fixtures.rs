@@ -386,6 +386,123 @@ fn a_failure_leaves_in_full_only_under_both_locks() -> Outcome {
     Ok(())
 }
 
+/// Base64, padded: what `media.json` spells a file's bytes in.
+fn base64(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::new();
+    for chunk in bytes.chunks(3) {
+        let word = chunk.iter().enumerate().fold(0u32, |word, (i, byte)| {
+            word | u32::from(*byte) << (16 - 8 * i)
+        });
+        for i in 0..4 {
+            if i <= chunk.len() {
+                let at = usize::try_from(word >> (18 - 6 * i) & 63).unwrap_or(0);
+                out.push(char::from(ALPHABET.get(at).copied().unwrap_or(b'A')));
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
+#[test]
+fn images_are_lifted_out_of_messages_only_under_both_locks() -> Outcome {
+    let fixture = load_fixture("media.json")?;
+    let scenario = field(&fixture, "scenario")?;
+    let sent_fields = field(&fixture, "sent")?.as_object().ok_or("sent")?;
+    for case in field(&fixture, "cases")?.as_array().ok_or("cases")? {
+        let mode = Answer::new(
+            200,
+            vec![(
+                "Telmoni-Content-Mode".to_owned(),
+                text(case, "content_mode")?.to_owned(),
+            )],
+            b"{}".to_vec(),
+        );
+        let harness = Harness::answering(
+            Config {
+                capture_content: field(case, "capture_content")?
+                    .as_bool()
+                    .ok_or("capture_content")?,
+                api_key: Some("k".to_owned()),
+                ..keyed()
+            },
+            std::iter::repeat_n(Ok(mode), 3),
+        )?;
+        harness.telmoni.run("bot", RunOptions::default())?.end();
+        harness.flush()?;
+        // Twice, in two exports: each file is put once.
+        for _ in 0..2 {
+            let run = harness
+                .telmoni
+                .run(text(scenario, "agent")?, RunOptions::default())?;
+            let call = run.model_call(
+                text(scenario, "model")?,
+                ModelCallOptions {
+                    provider: Some(text(scenario, "provider")?.to_owned()),
+                    input_messages: Some(field(scenario, "input_messages")?.clone().into()),
+                    system_instructions: Some(
+                        field(scenario, "system_instructions")?.clone().into(),
+                    ),
+                    ..ModelCallOptions::default()
+                },
+            )?;
+            call.answered(Reply {
+                output_messages: Some(field(scenario, "output_messages")?.clone().into()),
+                ..Reply::default()
+            });
+            call.end();
+            run.end();
+            harness.flush()?;
+        }
+        let spans = harness.spans()?;
+        let calls: Vec<&Value> = spans
+            .iter()
+            .filter(|span| name_of(span).starts_with("chat "))
+            .collect();
+        assert_eq!(calls.len(), 2, "{case}");
+        let mut uploads = harness.transport.uploads();
+        if field(case, "sends")? == &json!(false) {
+            assert!(uploads.is_empty(), "{case}");
+            for call in calls {
+                let attributes = attributes_of(call)?;
+                assert!(
+                    sent_fields.keys().all(|key| attributes.get(key).is_none()),
+                    "{case}"
+                );
+            }
+            continue;
+        }
+        uploads.sort_by(|a, b| a.url.cmp(&b.url));
+        let put: Vec<Value> = uploads
+            .iter()
+            .map(|upload| {
+                assert_eq!(upload.header("Authorization"), Some("Bearer k"));
+                json!({
+                    "path": upload.url.strip_prefix(telmoni::DEFAULT_ENDPOINT).unwrap_or(&upload.url),
+                    "content_type": upload.header("Content-Type"),
+                    "body": base64(&upload.body),
+                })
+            })
+            .collect();
+        assert_eq!(&Value::Array(put), field(&fixture, "uploads")?, "{case}");
+        for call in calls {
+            let attributes = attributes_of(call)?;
+            let mut sent = serde_json::Map::new();
+            for key in sent_fields.keys() {
+                let given = attributes
+                    .get(key)
+                    .and_then(Value::as_str)
+                    .ok_or("a field")?;
+                sent.insert(key.clone(), serde_json::from_str(given)?);
+            }
+            assert_eq!(&Value::Object(sent), field(&fixture, "sent")?, "{case}");
+        }
+    }
+    Ok(())
+}
+
 /// In nanoseconds, a retry its own: ingest moves a run by it.
 #[test]
 fn each_attempt_carries_this_clock_as_it_leaves() -> Outcome {

@@ -102,10 +102,21 @@ export interface Request {
   body: string;
 }
 
-/** Records every export and answers from a script, then with `kept`. */
+export interface Upload {
+  url: string;
+  headers: Record<string, string>;
+  body: Uint8Array;
+}
+
+/**
+ * Records every export and answers from a script, then with `kept`; each
+ * upload, a `PUT`, apart, answered from its own script, then with a 204.
+ */
 export class FakeTransport {
   readonly requests: Request[] = [];
   answers: Array<Answer | Error>;
+  readonly uploads: Upload[] = [];
+  uploadAnswers: Array<Answer | Error> = [];
   #waiters: Array<{ count: number; settle: () => void }> = [];
 
   constructor(answers: Array<Answer | Error> = []) {
@@ -113,8 +124,14 @@ export class FakeTransport {
   }
 
   readonly send: Transport = async (url, init) => {
-    this.requests.push({ url, headers: { ...init.headers }, body: init.body });
-    const next = this.answers.shift() ?? kept();
+    let next: Answer | Error;
+    if (init.method === 'PUT') {
+      this.uploads.push({ url, headers: { ...init.headers }, body: init.body });
+      next = this.uploadAnswers.shift() ?? answer(204, {}, '');
+    } else {
+      this.requests.push({ url, headers: { ...init.headers }, body: init.body });
+      next = this.answers.shift() ?? kept();
+    }
     this.#notify();
     if (next instanceof Error) throw next;
     const headers = next.headers;

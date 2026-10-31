@@ -5,7 +5,8 @@ description: "The Telmoni SDKs for Python, TypeScript / JavaScript, Go and Rust:
 
 The SDKs record an agent's **runs**, and the **steps**, **model calls** and
 **tool calls** inside each, as OpenTelemetry spans, and send them to
-[ingest](/docs/api/ingest). Each one runs a tracer provider of its own beside
+[ingest](/docs/api/ingest), and the images and files their messages carry to
+the platform beside them ([content](#content)). Each one runs a tracer provider of its own beside
 whatever OpenTelemetry your application already has, sends nothing outside a
 run, and takes prompts, completions and tool payloads off every span before it
 leaves the process unless you ask and the project's content mode allows.
@@ -828,13 +829,28 @@ message and stack trace — its `exception` event and its status's message —
 and every event your code adds to an SDK span through OpenTelemetry are
 content too; without both locks below, a failed span leaves with its
 `error.type` and an error status alone, and no event. They are sent only when the client is built with
-`capture_content` on **and** the project's content mode, which the SDK learns
+`capture_content` on — in code, or by `TELMONI_CAPTURE_CONTENT=1` when it is
+built from the environment — **and** the project's content mode, which the SDK learns
 from the server's first answer, is `on`; in Python and TypeScript, a setting
 that is no boolean, such as `"false"` from the environment, is refused with a
 `TypeError`, where Go and Rust take only a boolean. Sent, content is kept as it
 arrives, sealed in Postgres alone, for as long as its span (see [what is
 dropped at the door](/docs/api/ingest#what-is-dropped-at-the-door)). The
 server's own drop at the door is the second lock, not the first.
+
+An image or file a message carries, a part of type `blob` holding its bytes in
+base64 in the input or output messages or the system instructions, never
+travels inside the span, where it would swell every span that repeats it, past
+the 1 MiB an export may hold. Where content is sent, the exporter takes the
+SHA-256 of the bytes, puts them to `PUT /v1/media/{sha256}` on the same
+endpoint with the same key and the part's `mime_type` as their type, once a
+client for each file, and sends the part as
+`{"type": "file", "modality": …, "mime_type": …, "file_id": "telmoni:<sha256>"}`,
+its `modality` and `mime_type` kept where it had them. A file past 5 MiB is not
+put, and a put that fails is logged once and never costs the batch; either way
+the part is sent as the file it names. A part whose content is no base64, and
+every `uri` and `file` part, goes as it is. With either lock off, nothing is
+put, as nothing of the content is sent.
 
 ### Sampling
 
@@ -904,8 +920,10 @@ export refused for good and `failed` one that failed every attempt, each batch
 dropped; `queue_full` spans dropped with the queue full; `export_error` a batch
 its own export dropped, unable to encode it or failing; `too_large` a span past the 1 MiB dropped and `trimmed`
 one sent without its longest content or its long attributes; `dropped`, `span_refused` and `said` the
-server's answer, the rest of the export kept; and `input` something the SDK was
-handed, fixed, cut or left off. Python sets it on the log record as
+server's answer, the rest of the export kept; `input` something the SDK was
+handed, fixed, cut or left off; and `upload_failed` an image or file that could
+not be put, with the status its put met where one came, its span sent naming
+it. Python sets it on the log record as
 `telmoni_warning`, a `WarningInfo`; TypeScript hands it to the `warn` hook as its
 second argument, a `Warning`; Go logs it as the record's `kind`, `status` and
 `problem_type` attributes; and Rust hands it to `Hooks::warn` as its second
@@ -1027,8 +1045,9 @@ non-enumerable property, which `console.log` and `JSON.stringify` pass over.
 | `TELMONI_ORG` | The organization's ID (`org_...`), held and not sent: the key names the project | None |
 | `TELMONI_ENVIRONMENT` | The deployment this process runs in — `production`, `staging` — sent as `deployment.environment.name`, up to 128 characters | None: nothing is sent |
 | `TELMONI_RELEASE` | The release this process runs — a version or a commit — sent as `service.version`, up to 128 characters | None: nothing is sent |
+| `TELMONI_CAPTURE_CONTENT` | `1` turns on [content](#content); anything else — `0`, `true`, `yes` — or nothing leaves it off, the blanks about it trimmed. A setting made in code over what `from_env` read stands, on or off | Off |
 
-Every SDK reads these five and no others. OpenTelemetry's own `OTEL_*`
+Every SDK reads these six and no others. OpenTelemetry's own `OTEL_*`
 variables are your application's, for its own exporters, and change nothing
 of the SDK's: `OTEL_RESOURCE_ATTRIBUTES` in particular reaches nothing the
 SDK sends.

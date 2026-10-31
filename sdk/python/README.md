@@ -26,7 +26,8 @@ point `TELMONI_ENDPOINT` at its machine host; the docs read in
 from telmoni import Telmoni, Usage
 
 # Reads TELMONI_ENDPOINT, TELMONI_API_KEY (a key with the ingest scope),
-# TELMONI_ORG, TELMONI_ENVIRONMENT and TELMONI_RELEASE, and nothing else.
+# TELMONI_ORG, TELMONI_ENVIRONMENT, TELMONI_RELEASE and TELMONI_CAPTURE_CONTENT,
+# and nothing else.
 telmoni = Telmoni.from_env()
 
 
@@ -169,7 +170,8 @@ Prompts, completions, tool arguments and results (`input_messages`,
 `output_messages`, `arguments`, `returned(...)`, and a run's own
 `run(input_messages=)` and `run.answered(output_messages=)`) are recorded on
 the span and taken off by the exporter before anything leaves the process. They are sent
-only when the client is built with `Config(capture_content=True)` **and** the
+only when the client is built with `Config(capture_content=True)`, or from
+`Config.from_env()` with `TELMONI_CAPTURE_CONTENT=1`, **and** the
 project's content mode, which the SDK learns from the server's first answer,
 is `on`. A failure's message and stack trace, its `exception` event and its
 status's message, and every event the application adds to a span through
@@ -177,12 +179,25 @@ OpenTelemetry, are content too: without both, a failed span goes with its
 `error.type` and an error status alone. A `capture_content` that is no `bool`,
 such as `"false"` from the environment, raises `TypeError`.
 
+An image or file a message carries, a `blob` part holding its bytes in base64
+in `input_messages`, `output_messages` or `system_instructions`, never travels
+inside the span: where content is sent, the exporter puts its bytes to
+`PUT {endpoint}/v1/media/{sha256}` with the same key, once a client for each
+file, and sends the part as a `file` part whose `file_id` is
+`telmoni:<sha256>`, its `modality` and `mime_type` kept. A file past 5 MiB is
+not put, and a put that fails is warned of once (`upload_failed`); either way
+the part goes as the file it names. A part whose content is no base64 goes as
+it is.
+
 ## Configuration
 
 `Config(endpoint, organization_id, api_key, capture_content, sample_rate, sampler,
 environment, release, prices)`, or `Config.from_env()`, which reads `TELMONI_ENDPOINT`
 (default `https://api.telmoni.com`), `TELMONI_API_KEY`, `TELMONI_ORG`,
-`TELMONI_ENVIRONMENT` and `TELMONI_RELEASE`, a blank value counting as unset.
+`TELMONI_ENVIRONMENT`, `TELMONI_RELEASE` and `TELMONI_CAPTURE_CONTENT`, a blank
+value counting as unset. `TELMONI_CAPTURE_CONTENT` turns `capture_content` on
+with `1` alone, its blanks about it trimmed; anything else, or nothing, leaves
+it off, and a `capture_content` set in code afterwards stands.
 `environment` and `release` name the deployment every span is sent from, as
 the resource's `deployment.environment.name` and `service.version`. `prices`
 hands [the guard](#the-guard) prices of your own, a `ValueError` for one that

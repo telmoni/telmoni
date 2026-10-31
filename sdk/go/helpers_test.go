@@ -107,13 +107,16 @@ type request struct {
 }
 
 // fakeTransport records every export and answers from a script, then with
-// kept.
+// kept; each upload, a PUT, apart, answered from its own script, then with a
+// 204.
 type fakeTransport struct {
-	mu       sync.Mutex
-	received *sync.Cond
-	fallback scripted
-	answers  []any
-	requests []request
+	mu            sync.Mutex
+	received      *sync.Cond
+	fallback      scripted
+	answers       []any
+	requests      []request
+	uploadAnswers []any
+	uploads       []request
 }
 
 func newFakeTransport(t *testing.T, answers ...any) *fakeTransport {
@@ -129,10 +132,20 @@ func (f *fakeTransport) send(req *http.Request) (*http.Response, error) {
 		return nil, err
 	}
 	f.mu.Lock()
-	f.requests = append(f.requests, request{url: req.URL.String(), header: req.Header.Clone(), body: body})
-	var next any = f.fallback
-	if len(f.answers) > 0 {
-		next, f.answers = f.answers[0], f.answers[1:]
+	seen := request{url: req.URL.String(), header: req.Header.Clone(), body: body}
+	var next any
+	if req.Method == http.MethodPut {
+		f.uploads = append(f.uploads, seen)
+		next = scripted{status: http.StatusNoContent}
+		if len(f.uploadAnswers) > 0 {
+			next, f.uploadAnswers = f.uploadAnswers[0], f.uploadAnswers[1:]
+		}
+	} else {
+		f.requests = append(f.requests, seen)
+		next = f.fallback
+		if len(f.answers) > 0 {
+			next, f.answers = f.answers[0], f.answers[1:]
+		}
 	}
 	f.received.Broadcast()
 	f.mu.Unlock()
@@ -179,6 +192,12 @@ func (f *fakeTransport) all() []request {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]request(nil), f.requests...)
+}
+
+func (f *fakeTransport) allUploads() []request {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]request(nil), f.uploads...)
 }
 
 func (f *fakeTransport) bodies(t *testing.T) []map[string]any {

@@ -373,7 +373,7 @@ mod tests {
 
     use super::*;
     use crate::ids;
-    use crate::transport::{Answer, TransportError};
+    use crate::transport::{Answer, Method, TransportError};
 
     /// Counts the exports it is handed, answering each as kept.
     #[derive(Clone, Default)]
@@ -382,6 +382,7 @@ mod tests {
     impl Transport for Counting {
         fn send(
             &self,
+            _method: Method,
             _url: &str,
             _headers: &[(String, String)],
             _body: &[u8],

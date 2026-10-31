@@ -406,7 +406,7 @@ mod tests {
 
     use super::*;
     use crate::config::Config;
-    use crate::transport::{Answer, Transport, TransportError};
+    use crate::transport::{Answer, Method, Transport, TransportError};
 
     /// Answers every export 429, the first only once the test opens the gate.
     #[derive(Clone, Default)]
@@ -425,6 +425,7 @@ mod tests {
     impl Transport for Throttled {
         fn send(
             &self,
+            _method: Method,
             _url: &str,
             _headers: &[(String, String)],
             _body: &[u8],

@@ -45,6 +45,18 @@ Before comparing, a suite normalizes the run's span:
 3. `exception.type` is checked to be the span's `error.type`, as each language names an error's type, then replaced by `<error.type>`.
 4. `exception.stacktrace` is checked to be a non-empty string and taken out in Python and TypeScript, which give one cheaply; Go and Rust send none.
 
+## `media.json`
+
+The images and files a message carries, lifted out of it under the content lock. For each of `cases`, a client keyed `k` is built with its `capture_content`, learns its `content_mode` from the answer to an empty run's export (`Telmoni-Content-Mode`), then opens two runs of `agent` one after the other, each flushed, each holding one model call of `model` and `provider` opened with `input_messages` and `system_instructions` and answered with `output_messages`. Every upload, a `PUT`, is answered `204`.
+
+Where `sends`, the uploads, sorted by path, are `uploads` — each its path under the endpoint, its `Content-Type`, and its body in base64 — each with `Authorization: Bearer k`, made once however many spans and exports name the file; and each model call's span holds the three fields, each parsed from its JSON and compared as JSON, as `sent`: each `blob` part a `file` part naming its file by `telmoni:` and the SHA-256 of its bytes, its `modality` and `mime_type` kept where given, and a part whose content is no base64, a `uri` or `file` part, or a part that is no object, as it was. A blob with no `mime_type` is put as `application/octet-stream`. Where not, nothing is put and neither model call carries any of the three.
+
+The rest each suite proves on its own: a failed upload, a `413` or no answer, still sends the part as its `file` part and warns once (`upload_failed`, with the status where one came), and its hash is tried again on the next export, being remembered only once kept; a file past 5 MiB is never put, and its part is sent as its `file` part all the same.
+
+## `capture_content.json`
+
+What each SDK makes of `TELMONI_CAPTURE_CONTENT` as it builds its configuration from the environment (`Config.from_env`, `Telmoni.fromEnv`, `ConfigFromEnv`, `Config::from_env`). Each of `cases` sets the variable to `given`, or leaves it unset where that is `null`, and the configuration must hold `capture_content` as it says: the value, Unicode's White_Space trimmed from its ends as every variable is, turns content on when it is `1` alone; `0`, `true`, `yes` and every other value, a blank one or none leave it off, so no spelling of "false" lets content out. Each suite proves on its own that a setting made in code stands over the variable, on or off.
+
 ## `headers.json`
 
 A run across services: what `inject` writes into an outgoing request's headers, and what `extract` reads back from an incoming one's, so headers one SDK writes are read by each of the other three.
@@ -87,6 +99,7 @@ Every warning any SDK gives carries one of these kinds, the same in all four:
 | `span_refused` | a span the server refused, the rest of the export kept | — |
 | `said` | a line the server gave naming neither | — |
 | `input` | something the SDK was handed fixed, cut or left off as it sent the rest, or not sent at all — a field past its cap, a count that is none, a call outside a run | — |
+| `upload_failed` | spans sent, an image or file their messages carried not put: its `file` part names it all the same (`media.json`) | the upload's `status`, where an answer came |
 
 | File | Answer | The SDK |
 |---|---|---|

@@ -1,15 +1,20 @@
 """The exporter: OTLP's JSON encoding over the standard library.
 
 It takes content off every span unless the code asked and the project's mode
-allows, sends to ``POST {endpoint}/otlp/v1/traces``, waits out a
+allows, puts each image or file a message carries to
+``PUT {endpoint}/v1/media/{sha256}`` where it sends content, sends to
+``POST {endpoint}/otlp/v1/traces``, waits out a
 ``Retry-After``, and reads ``Telmoni-Content-Mode`` and the partial success
 from each answer, warning once for each attribute an answer names dropped.
 """
 
 from __future__ import annotations
 
+import base64
+import binascii
 import contextlib
 import functools
+import hashlib
 import http.client
 import json
 import logging
@@ -51,6 +56,9 @@ never pays for more."""
 RETRY_AFTER_MAX_S = 60.0
 WARNED_MAX = 1024
 """How many distinct warnings are remembered before the set starts over."""
+UPLOADED_MAX = 4096
+"""How many files put are remembered before the set starts over: an image a
+conversation repeats in every call is put once."""
 CONTENT_DOCS = "https://telmoni.com/docs/api/ingest#what-is-dropped-at-the-door"
 """Where a dropped content field's warning sends the reader."""
 
@@ -78,8 +86,9 @@ class Answer:
         return header(self.headers, name)
 
 
-Transport = Callable[[str, Mapping[str, str], bytes], Answer]
-"""Sends one request; raises ``OSError`` when the platform could not be reached."""
+Transport = Callable[[str, str, Mapping[str, str], bytes], Answer]
+"""Sends one request, ``(method, url, headers, body)``; raises ``OSError`` when
+the platform could not be reached."""
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -216,9 +225,11 @@ def _tls() -> ssl.SSLContext:
     return context
 
 
-def _urllib_transport(url: str, headers: Mapping[str, str], body: bytes) -> Answer:
+def _urllib_transport(
+    method: str, url: str, headers: Mapping[str, str], body: bytes
+) -> Answer:
     request = urllib.request.Request(
-        url, data=body, headers=dict(headers), method="POST"
+        url, data=body, headers=dict(headers), method=method
     )
     deadline = _Deadline(REQUEST_TIMEOUT_S)
     handlers: list[urllib.request.BaseHandler] = [
@@ -282,6 +293,26 @@ def _past_caps(key: str, value: Any) -> bool:
     )
 
 
+_Lifted = dict[int, dict[str, str]]
+"""Content fields with their blobs lifted out, by the ``id`` of their span."""
+
+
+def _attributes(span: ReadableSpan, lifted: _Lifted) -> Mapping[str, Any]:
+    """The span's attributes, any of its fields lifted in their place."""
+    own = span.attributes or {}
+    fields = lifted.get(id(span))
+    return {**own, **fields} if fields else own
+
+
+def _header_safe(value: Any) -> bool:
+    """Whether a part's type can go as a header: printable ASCII, not blank."""
+    return (
+        isinstance(value, str)
+        and value.strip(" ") != ""
+        and all(" " <= c <= "~" for c in value)
+    )
+
+
 def _sdk_version() -> str:
     try:
         return metadata.version("opentelemetry-sdk")
@@ -303,6 +334,9 @@ class Exporter:
         self._given_up = threading.Event()
         self._sleep = sleep or self._wait_out
         self._url = f"{config.endpoint}/otlp/v1/traces"
+        self._media_url = f"{config.endpoint}{contract.MEDIA_PATH}"
+        # Only the worker exports, so the set needs no lock.
+        self._uploaded: set[str] = set()
         self._content_mode: str | None = None
         self._warned: set[str] = set()
         # The worker and the agent's threads warn alike: each key warns once.
@@ -361,17 +395,21 @@ class Exporter:
         reason not their own, which the rest of a batch they are part of would meet."""
         if not spans:
             return True
+        lifted = self._lift(spans) if self._keeps_content() else {}
+        return self._export(spans, lifted)
+
+    def _export(self, spans: Sequence[ReadableSpan], lifted: _Lifted) -> bool:
         # Ingest refuses an export past 1,000 spans whole, as one past 1 MiB below.
         if len(spans) > contract.BATCH_SPANS_MAX:
-            return self._halve(spans)
-        body = self._body(spans)
+            return self._halve(spans, lifted)
+        body = self._body(spans, lifted)
         if len(body) > contract.BATCH_MAX_BYTES:
             # Ingest refuses it whole, its 413 maybe breaking the upload still
             # going out, which reads as no answer and is sent again: halved.
             if len(spans) > 1:
-                return self._halve(spans)
+                return self._halve(spans, lifted)
             # Content sent goes first, the longest field first, each named.
-            cut = self._cut(spans[0])
+            cut = self._cut(spans[0], lifted)
             if cut is not None:
                 self.warn_once(
                     "content-cut",
@@ -382,7 +420,7 @@ class Exporter:
                 return self._send(cut)
             # A span alone past it goes without what ingest drops for its length,
             # and then fits, unless its own name does not.
-            body = self._body(spans, trimmed=True)
+            body = self._body(spans, lifted, trimmed=True)
             if len(body) > contract.BATCH_MAX_BYTES:
                 self.warn_once(
                     "too-large",
@@ -398,7 +436,7 @@ class Exporter:
             )
         return self._send(body)
 
-    def _cut(self, span: ReadableSpan) -> bytes | None:
+    def _cut(self, span: ReadableSpan, lifted: _Lifted) -> bytes | None:
         """The span's body without its longest content, as few fields as fit it in
         an export: a content field, or any past ingest's caps, which on a project
         that keeps content is content too; None where it sends no content, or fits
@@ -408,7 +446,7 @@ class Exporter:
         content = sorted(
             (
                 (key, len(_text(value)))
-                for key, value in (span.attributes or {}).items()
+                for key, value in _attributes(span, lifted).items()
                 if key != contract.CONTENT_CUT
                 and (key in contract.CONTENT or _past_caps(key, value))
             ),
@@ -417,7 +455,7 @@ class Exporter:
         cut: list[str] = []
         for key, _ in content:
             cut.append(key)
-            body = self._body([span], cut=cut)
+            body = self._body([span], lifted, cut=cut)
             if len(body) <= contract.BATCH_MAX_BYTES:
                 return body
         return None
@@ -425,21 +463,109 @@ class Exporter:
     def _keeps_content(self) -> bool:
         return self._config.capture_content and self._content_mode == "on"
 
-    def _halve(self, spans: Sequence[ReadableSpan]) -> bool:
+    def _halve(self, spans: Sequence[ReadableSpan], lifted: _Lifted) -> bool:
         """Exports each half of the spans, the second only where the first went."""
         half = len(spans) // 2
-        return self.export(spans[:half]) and self.export(spans[half:])
+        return self._export(spans[:half], lifted) and self._export(spans[half:], lifted)
+
+    def _lift(self, spans: Sequence[ReadableSpan]) -> _Lifted:
+        """Each span's messages with every ``blob`` part lifted out, by the span's
+        ``id``: a blob repeated in every span would bloat each, past 1 MiB maybe."""
+        lifted: _Lifted = {}
+        for span in spans:
+            for key, value in (span.attributes or {}).items():
+                if key not in contract.MEDIA_FIELDS or not isinstance(value, str):
+                    continue
+                # Nesting past Python's stack is left as it is, never the batch's loss.
+                with contextlib.suppress(ValueError, RecursionError):
+                    decoded = json.loads(value)
+                    if isinstance(decoded, list) and self._lift_parts(decoded):
+                        lifted.setdefault(id(span), {})[key] = json.dumps(
+                            decoded, separators=(",", ":"), ensure_ascii=False
+                        )
+        return lifted
+
+    def _lift_parts(self, parts: list[Any]) -> bool:
+        """Replaces each ``blob`` part in place, a message's parts too; whether any was."""
+        lifted = False
+        for at, part in enumerate(parts):
+            if isinstance(part, dict) and isinstance(part.get("parts"), list):
+                lifted = self._lift_parts(part["parts"]) or lifted
+                continue
+            file = self._file_part(part)
+            if file is not None:
+                parts[at] = file
+                lifted = True
+        return lifted
+
+    def _file_part(self, part: Any) -> dict[str, Any] | None:
+        """The ``file`` part naming a ``blob`` part's bytes, put first unless past
+        the platform's cap or put already; None for any other part."""
+        if not isinstance(part, dict) or part.get("type") != "blob":
+            return None
+        content = part.get("content")
+        if not isinstance(content, str):
+            return None
+        try:
+            data = base64.b64decode(content, validate=True)
+        except (binascii.Error, ValueError):
+            return None
+        sha256 = hashlib.sha256(data).hexdigest()
+        if len(data) <= contract.MEDIA_MAX_BYTES and sha256 not in self._uploaded:
+            self._upload(sha256, data, part.get("mime_type"))
+        # Named whatever became of it: the platform says itself what it holds.
+        file: dict[str, Any] = {"type": "file"}
+        for name in ("modality", "mime_type"):
+            if name in part:
+                file[name] = part[name]
+        file["file_id"] = f"{contract.FILE_ID_PREFIX}{sha256}"
+        return file
+
+    def _upload(self, sha256: str, data: bytes, mime_type: Any) -> None:
+        """Puts one file, once: a failure is warned of, never the export's."""
+        if self._given_up.is_set():
+            return
+        headers = {
+            "Content-Type": mime_type
+            if _header_safe(mime_type)
+            else contract.MEDIA_DEFAULT_TYPE,
+            "User-Agent": f"telmoni-python/{__version__}",
+        }
+        bearer = self._config.bearer()
+        if bearer is not None:
+            headers["Authorization"] = f"Bearer {bearer}"
+        info = WarningInfo("upload_failed")
+        try:
+            answer = self._transport("PUT", self._media_url + sha256, headers, data)
+        except Exception as error:  # noqa: BLE001 - an upload never costs the batch
+            failure = type(error).__name__
+        else:
+            if 200 <= answer.status < 300:
+                if len(self._uploaded) >= UPLOADED_MAX:
+                    self._uploaded.clear()
+                self._uploaded.add(sha256)
+                return
+            failure = str(answer.status)
+            info = WarningInfo("upload_failed", answer.status)
+        self.warn_once(
+            f"upload:{failure}",
+            f"telmoni: an image or file in a message could not be uploaded "
+            f"({failure}); its part was sent naming it, which the platform "
+            "may not hold",
+            info,
+        )
 
     def _body(
         self,
         spans: Sequence[ReadableSpan],
+        lifted: _Lifted,
         *,
         trimmed: bool = False,
         cut: Sequence[str] = (),
     ) -> bytes:
         # Python writes NaN and Infinity, which are no JSON: refused here, never sent.
         text = json.dumps(
-            self.encode(spans, trimmed=trimmed, cut=cut),
+            self.encode(spans, lifted, trimmed=trimmed, cut=cut),
             separators=(",", ":"),
             allow_nan=False,
             ensure_ascii=False,
@@ -464,7 +590,7 @@ class Exporter:
             # This clock as the attempt leaves, the spans' own.
             sent = {**headers, contract.SENT_AT_HEADER: str(time.time_ns())}
             try:
-                answer = self._transport(self._url, sent, body)
+                answer = self._transport("POST", self._url, sent, body)
             except (OSError, http.client.HTTPException) as error:
                 # No status came: a transport fault the next attempt may not meet.
                 failure = type(error).__name__
@@ -499,13 +625,15 @@ class Exporter:
     def encode(
         self,
         spans: Sequence[ReadableSpan],
+        lifted: _Lifted,
         *,
         trimmed: bool = False,
         cut: Sequence[str] = (),
     ) -> dict[str, Any]:
-        """OTLP's ``ExportTraceServiceRequest``, in its JSON encoding; ``trimmed``,
-        without the attributes ingest drops for their length; ``cut``, without
-        those content fields, named in ``telmoni.content_cut``."""
+        """OTLP's ``ExportTraceServiceRequest``, in its JSON encoding, ``lifted``'s
+        fields in place of the spans' own; ``trimmed``, without the attributes
+        ingest drops for their length; ``cut``, without those content fields,
+        named in ``telmoni.content_cut``."""
         return {
             "resourceSpans": [
                 {
@@ -513,7 +641,9 @@ class Exporter:
                     "scopeSpans": [
                         {
                             "scope": {"name": contract.SCOPE, "version": __version__},
-                            "spans": [self._span(span, trimmed, cut) for span in spans],
+                            "spans": [
+                                self._span(span, lifted, trimmed, cut) for span in spans
+                            ],
                         }
                     ],
                 }
@@ -521,12 +651,16 @@ class Exporter:
         }
 
     def _span(
-        self, span: ReadableSpan, trimmed: bool = False, cut: Sequence[str] = ()
+        self,
+        span: ReadableSpan,
+        lifted: _Lifted,
+        trimmed: bool = False,
+        cut: Sequence[str] = (),
     ) -> dict[str, Any]:
         keep_content = self._keeps_content()
         attributes = [
             _attribute(key, value)
-            for key, value in (span.attributes or {}).items()
+            for key, value in _attributes(span, lifted).items()
             if (keep_content or key not in contract.CONTENT)
             and key not in cut
             and not (cut and key == contract.CONTENT_CUT)

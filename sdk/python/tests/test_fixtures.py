@@ -3,8 +3,10 @@ the same run, and what each must do with the server's answers."""
 
 from __future__ import annotations
 
+import base64
 import copy
 import http.client
+import json
 import logging
 import re
 import time
@@ -199,6 +201,63 @@ def test_a_failure_leaves_in_full_only_under_both_locks(
     else:
         assert scenario["message"] not in str(transport.requests)
         assert scenario["event"]["name"] not in str(transport.requests)
+
+
+@pytest.mark.parametrize("case", load_fixture("media.json")["cases"])
+def test_images_are_lifted_out_of_messages_only_under_both_locks(
+    case: dict[str, Any], transport: FakeTransport
+) -> None:
+    fixture = load_fixture("media.json")
+    scenario = fixture["scenario"]
+    mode = Answer(200, {"Telmoni-Content-Mode": case["content_mode"]}, b"{}")
+    transport.answers = [mode] * 3
+    client = Telmoni(
+        Config(api_key="k", capture_content=case["capture_content"]),
+        transport=transport,
+    )
+    try:
+        a_run(client)
+        # Twice, in two exports: each file is put once.
+        for _ in range(2):
+            with (
+                client.run(scenario["agent"]),
+                client.model_call(
+                    scenario["model"],
+                    provider=scenario["provider"],
+                    input_messages=scenario["input_messages"],
+                    system_instructions=scenario["system_instructions"],
+                ) as call,
+            ):
+                call.answered(output_messages=scenario["output_messages"])
+            assert client.flush()
+    finally:
+        client.shutdown()
+    model_calls = [s for s in transport.spans() if s["name"].startswith("chat ")]
+    assert len(model_calls) == 2
+    if not case["sends"]:
+        assert transport.uploads == []
+        for call_span in model_calls:
+            assert not set(fixture["sent"]) & {
+                a["key"] for a in call_span["attributes"]
+            }
+        return
+    uploads = sorted(transport.uploads, key=lambda upload: upload[0])
+    assert [
+        {
+            "path": url.removeprefix(client.config.endpoint),
+            "content_type": headers["Content-Type"],
+            "body": base64.b64encode(body).decode(),
+        }
+        for url, headers, body in uploads
+    ] == fixture["uploads"]
+    assert all(headers["Authorization"] == "Bearer k" for _, headers, _ in uploads)
+    for call_span in model_calls:
+        sent = {
+            a["key"]: json.loads(a["value"]["stringValue"])
+            for a in call_span["attributes"]
+            if a["key"] in fixture["sent"]
+        }
+        assert sent == fixture["sent"]
 
 
 def test_each_attempt_carries_this_clock_as_it_leaves() -> None:

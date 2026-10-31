@@ -92,7 +92,7 @@ describe('configuration', () => {
     );
   });
 
-  it('reads the five variables from the environment and no other', () => {
+  it('reads the six variables from the environment and no other', () => {
     vi.stubEnv('TELMONI_ENDPOINT', undefined);
     vi.stubEnv('TELMONI_API_KEY', '');
     vi.stubEnv('TELMONI_ORG', 'org_2');
@@ -120,6 +120,21 @@ describe('configuration', () => {
     expect(client.config.organizationId).toBeUndefined();
     expect(client.config.environment).toBeUndefined();
     expect(client.config.release).toBe('2026.10.18');
+  });
+
+  it.each(loadFixture<{ cases: Array<{ given: string | null; capture_content: boolean }> }>('capture_content.json').cases)(
+    'reads captureContent from the environment as the fixture says: %o',
+    ({ given, capture_content: captureContent }) => {
+      vi.stubEnv('TELMONI_CAPTURE_CONTENT', given ?? undefined);
+      expect(Telmoni.fromEnv().config.captureContent).toBe(captureContent);
+    },
+  );
+
+  it('takes captureContent set in code over the environment', () => {
+    vi.stubEnv('TELMONI_CAPTURE_CONTENT', '1');
+    expect(new Telmoni({ captureContent: false }).config.captureContent).toBe(false);
+    vi.stubEnv('TELMONI_CAPTURE_CONTENT', undefined);
+    expect(new Telmoni({ captureContent: true }).config.captureContent).toBe(true);
   });
 
   it('holds the sample rate to a number above zero and up to one', () => {
@@ -249,6 +264,29 @@ describe.each([
       server.closeAllConnections();
       await new Promise((resolve) => server.close(resolve));
     }
+  });
+
+  it('puts an upload as its raw bytes', async () => {
+    const seen: Array<{ method: string | undefined; type: string | undefined; body: Buffer }> = [];
+    const server = createServer((request, response) => {
+      const chunks: Buffer[] = [];
+      request.on('data', (chunk: Buffer) => chunks.push(chunk));
+      request.on('end', () => {
+        seen.push({ method: request.method, type: request.headers['content-type'], body: Buffer.concat(chunks) });
+        response.writeHead(204).end();
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const body = Uint8Array.from({ length: 256 }, (_, i) => i);
+    try {
+      const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1/media/x`;
+      const answer = await transport(url, { method: 'PUT', headers: { 'Content-Type': 'image/png' }, body });
+      expect(answer.status).toBe(204);
+    } finally {
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    }
+    expect(seen).toEqual([{ method: 'PUT', type: 'image/png', body: Buffer.from(body) }]);
   });
 
   it('keeps an answer whose body breaks as far as it came, its status deciding', async () => {
@@ -670,7 +708,10 @@ describe('a span time', () => {
         events: [],
         status: { code: SpanStatusCode.UNSET },
       }) as unknown as ReadableSpan;
-    const encoded = exporter.encode([span([18_446_744_073, 709_551_615]), span([18_446_744_073, 709_551_616]), span([-1, 0])]);
+    const encoded = exporter.encode(
+      [span([18_446_744_073, 709_551_615]), span([18_446_744_073, 709_551_616]), span([-1, 0])],
+      new Map(),
+    );
     const sent = encoded.resourceSpans[0]!.scopeSpans[0]!.spans.map((each) => each.startTimeUnixNano);
     expect(sent).toEqual(['18446744073709551615', '0', '0']);
   });

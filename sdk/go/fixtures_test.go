@@ -6,6 +6,7 @@ package telmoni_test
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net"
@@ -422,6 +423,98 @@ func TestAFailureLeavesInFullOnlyUnderBothLocks(t *testing.T) {
 		}
 		if text := h.transport.text(); each.Sends == "withheld" && (strings.Contains(text, scenario.Message) || strings.Contains(text, scenario.Event.Name)) {
 			t.Errorf("%+v: the failure's content left", each)
+		}
+	}
+}
+
+type mediaFixture struct {
+	Scenario struct {
+		Agent              string `json:"agent"`
+		Provider           string `json:"provider"`
+		Model              string `json:"model"`
+		SystemInstructions any    `json:"system_instructions"`
+		InputMessages      any    `json:"input_messages"`
+		OutputMessages     any    `json:"output_messages"`
+	} `json:"scenario"`
+	Cases []struct {
+		CaptureContent bool   `json:"capture_content"`
+		ContentMode    string `json:"content_mode"`
+		Sends          bool   `json:"sends"`
+	} `json:"cases"`
+	Uploads []map[string]any `json:"uploads"`
+	Sent    map[string]any   `json:"sent"`
+}
+
+func TestImagesAreLiftedOutOfMessagesOnlyUnderBothLocks(t *testing.T) {
+	var fixture mediaFixture
+	if err := json.Unmarshal(loadFixture(t, "media.json"), &fixture); err != nil {
+		t.Fatalf("decoding media.json: %v", err)
+	}
+	scenario := fixture.Scenario
+	for _, each := range fixture.Cases {
+		mode := scripted{status: 200, headers: map[string]string{"Telmoni-Content-Mode": each.ContentMode}, body: []byte("{}")}
+		h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k"), CaptureContent: each.CaptureContent}, newFakeTransport(t, mode, mode, mode))
+		aRun(t, h)
+		// Twice, in two exports: each file is put once.
+		for range 2 {
+			ctx, run := h.client.Run(context.Background(), scenario.Agent, telmoni.RunOptions{})
+			_, call := run.ModelCall(ctx, scenario.Model, telmoni.ModelCallOptions{
+				Provider:           scenario.Provider,
+				InputMessages:      scenario.InputMessages,
+				SystemInstructions: scenario.SystemInstructions,
+			})
+			call.Answered(telmoni.Answer{OutputMessages: scenario.OutputMessages})
+			call.End()
+			run.End()
+			h.flush()
+		}
+		calls := withPrefix(h.transport.spans(t), "chat ")
+		if len(calls) != 2 {
+			t.Fatalf("%+v: %d model calls sent, want 2", each, len(calls))
+		}
+		uploads := h.transport.allUploads()
+		if !each.Sends {
+			if len(uploads) != 0 {
+				t.Errorf("%+v: %d files put, want none", each, len(uploads))
+			}
+			for _, call := range calls {
+				for key := range fixture.Sent {
+					if _, has := attributesOf(t, call)[key]; has {
+						t.Errorf("%+v: %s left the process", each, key)
+					}
+				}
+			}
+			continue
+		}
+		sort.Slice(uploads, func(i, j int) bool { return uploads[i].url < uploads[j].url })
+		got := make([]map[string]any, 0, len(uploads))
+		for _, upload := range uploads {
+			if upload.header.Get("Authorization") != "Bearer k" {
+				t.Errorf("%+v: a file put without the key", each)
+			}
+			got = append(got, map[string]any{
+				"path":         strings.TrimPrefix(upload.url, "https://api.telmoni.com"),
+				"content_type": upload.header.Get("Content-Type"),
+				"body":         base64.StdEncoding.EncodeToString(upload.body),
+			})
+		}
+		if !reflect.DeepEqual(got, fixture.Uploads) {
+			t.Errorf("%+v: put\n%s\nwant\n%s", each, pretty(t, got), pretty(t, fixture.Uploads))
+		}
+		for _, call := range calls {
+			sent := map[string]any{}
+			for key, value := range attributesOf(t, call) {
+				if _, ok := fixture.Sent[key]; ok {
+					var decoded any
+					if err := json.Unmarshal([]byte(value.(string)), &decoded); err != nil {
+						t.Fatalf("%s is no JSON: %v", key, err)
+					}
+					sent[key] = decoded
+				}
+			}
+			if !reflect.DeepEqual(sent, fixture.Sent) {
+				t.Errorf("%+v: sent\n%s\nwant\n%s", each, pretty(t, sent), pretty(t, fixture.Sent))
+			}
 		}
 	}
 }

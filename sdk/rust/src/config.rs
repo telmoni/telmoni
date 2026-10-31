@@ -5,6 +5,7 @@ use std::fmt;
 use opentelemetry_sdk::trace::ShouldSample;
 use serde::{Deserialize, Serialize};
 
+use crate::contract;
 use crate::transport::{host_of, is_this_machine};
 
 /// The machine host; the console's, `https://telmoni.com`, serves people.
@@ -139,13 +140,16 @@ impl Config {
         .normalized()
     }
 
-    /// Reads `TELMONI_ENDPOINT`, `TELMONI_API_KEY` and `TELMONI_ORG`, and
-    /// `TELMONI_ENVIRONMENT` and `TELMONI_RELEASE` for the deployment, a
+    /// Reads `TELMONI_ENDPOINT`, `TELMONI_API_KEY` and `TELMONI_ORG`,
+    /// `TELMONI_ENVIRONMENT` and `TELMONI_RELEASE` for the deployment, and
+    /// `TELMONI_CAPTURE_CONTENT`, whose `1` alone sets `capture_content`, a
     /// blank value being unset, as the CLI reads them. No `OTEL_*` variable is
     /// read: the SDK's tracer provider is built part by part.
     #[must_use]
     pub fn from_env() -> Self {
         Self {
+            // Only 1: a "false" or a "no" must never let content out.
+            capture_content: env_var(contract::CAPTURE_CONTENT_ENV).as_deref() == Some("1"),
             environment: env_var("TELMONI_ENVIRONMENT"),
             release: env_var("TELMONI_RELEASE"),
             ..Self::new(

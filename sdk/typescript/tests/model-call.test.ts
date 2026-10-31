@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { Usage } from '../src/index';
@@ -350,5 +352,89 @@ describe('a model call', () => {
       }),
     );
     expect(reply).toBe('the reply');
+  });
+});
+
+describe('an image in a message', () => {
+  const png = Buffer.from('iVBORw0KGgo=', 'base64');
+
+  /** A user message holding one image, as the conventions carry it. */
+  const blob = (data: Uint8Array): unknown => [
+    {
+      role: 'user',
+      parts: [
+        { type: 'blob', modality: 'image', mime_type: 'image/png', content: Buffer.from(data).toString('base64') },
+      ],
+    },
+  ];
+  const filePart = (data: Uint8Array): unknown => ({
+    type: 'file',
+    modality: 'image',
+    mime_type: 'image/png',
+    file_id: `telmoni:${createHash('sha256').update(data).digest('hex')}`,
+  });
+  const sentParts = (call: JsonSpan): unknown =>
+    (JSON.parse(attributesOf(call)['gen_ai.input.messages'] as string) as Array<{ parts: unknown }>)[0]!.parts;
+
+  /** A client asked for content whose project keeps it, the mode learned. */
+  async function mediaHarness(): Promise<Harness> {
+    const on = answer(200, { 'Telmoni-Content-Mode': 'on' }, '{}');
+    const media = harness({ apiKey: 'k', captureContent: true }, {}, [on, on, on, on]);
+    media.telmoni.run('warm', () => {});
+    expect(await media.telmoni.flush()).toBe(true);
+    return media;
+  }
+
+  it('is put once with its type and key', async () => {
+    const media = await mediaHarness();
+    try {
+      media.telmoni.run('bot', (run) => {
+        for (let i = 0; i < 2; i++) run.modelCall('m', { inputMessages: blob(png) }, () => {});
+      });
+      expect(await media.telmoni.flush()).toBe(true);
+    } finally {
+      await media.telmoni.shutdown();
+    }
+    const upload = one(media.transport.uploads);
+    expect(upload.url).toBe(`https://api.telmoni.com/v1/media/${createHash('sha256').update(png).digest('hex')}`);
+    expect(upload.headers['Authorization']).toBe('Bearer k');
+    expect(upload.headers['Content-Type']).toBe('image/png');
+    expect(Buffer.from(upload.body).equals(png)).toBe(true);
+    const sent = calls(media.transport);
+    expect(sent).toHaveLength(2);
+    for (const call of sent) expect(sentParts(call)).toEqual([filePart(png)]);
+  });
+
+  it.each([
+    ['413', answer(413, {}, '{}'), { kind: 'upload_failed', status: 413 }],
+    ['unreached', new TypeError('fetch failed'), { kind: 'upload_failed' }],
+  ] as const)('still names the file when its upload fails (%s), warned once', async (_name, failure, warning) => {
+    const media = await mediaHarness();
+    media.transport.uploadAnswers = [failure, failure];
+    try {
+      for (let i = 0; i < 2; i++) {
+        media.telmoni.run('bot', (run) => run.modelCall('m', { inputMessages: blob(png) }, () => {}));
+        expect(await media.telmoni.flush()).toBe(true);
+      }
+    } finally {
+      await media.telmoni.shutdown();
+    }
+    // A hash is remembered only once kept.
+    expect(media.transport.uploads).toHaveLength(2);
+    for (const call of calls(media.transport)) expect(sentParts(call)).toEqual([filePart(png)]);
+    expect(media.fields.filter((field) => field.kind === 'upload_failed')).toEqual([warning]);
+  });
+
+  it('is named but never put past the cap', async () => {
+    const big = Buffer.alloc(5 * 1024 * 1024 + 1, 0x89);
+    const media = await mediaHarness();
+    try {
+      media.telmoni.run('bot', (run) => run.modelCall('m', { inputMessages: blob(big) }, () => {}));
+      expect(await media.telmoni.flush()).toBe(true);
+    } finally {
+      await media.telmoni.shutdown();
+    }
+    expect(media.transport.uploads).toEqual([]);
+    expect(sentParts(one(calls(media.transport)))).toEqual([filePart(big)]);
   });
 });

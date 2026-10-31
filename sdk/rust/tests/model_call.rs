@@ -10,7 +10,7 @@ use common::{
     Failure, Harness, Outcome, attributes_of, keyed, mode_on, name_of, only, starting_with,
 };
 use serde_json::{Map, Value, json};
-use telmoni::transport::Answer;
+use telmoni::transport::{Answer, TransportError};
 use telmoni::{Config, Content, ContentMode, ModelCallOptions, Reply, RunOptions, Usage};
 
 #[test]
@@ -567,5 +567,142 @@ fn a_call_carries_its_parameters_and_its_first_token() -> Outcome {
         })
         .collect();
     assert_eq!(plain, BTreeSet::from(["gen_ai.request.model"]));
+    Ok(())
+}
+
+/// The SHA-256 of `media.json`'s PNG signature, the one image below.
+const PNG_SHA256: &str = "4c4b6a3be1314ab86138bef4314dde022e600960d8689a2c8f8631802d20dab6";
+
+/// A user message holding one image, as the conventions carry it.
+fn blob(content: &str) -> Content {
+    json!([{ "role": "user", "parts": [
+        { "type": "blob", "modality": "image", "mime_type": "image/png", "content": content },
+    ] }])
+    .into()
+}
+
+fn file_part(sha256: &str) -> Value {
+    json!([{ "type": "file", "modality": "image", "mime_type": "image/png", "file_id": format!("telmoni:{sha256}") }])
+}
+
+fn sent_parts(call: &Value) -> Result<Value, Failure> {
+    let messages = attributes_of(call)?;
+    let text = messages
+        .get("gen_ai.input.messages")
+        .and_then(Value::as_str)
+        .ok_or("the messages")?;
+    let decoded: Value = serde_json::from_str(text)?;
+    Ok(decoded.pointer("/0/parts").cloned().ok_or("the parts")?)
+}
+
+/// A client asked for content whose project keeps it, the mode learned.
+fn media_harness() -> Result<Harness, Failure> {
+    let harness = Harness::answering(
+        Config {
+            capture_content: true,
+            api_key: Some("k".to_owned()),
+            ..keyed()
+        },
+        std::iter::repeat_n(Ok(mode_on()), 4),
+    )?;
+    harness.telmoni.run("warm", RunOptions::default())?.end();
+    harness.flush()?;
+    Ok(harness)
+}
+
+fn call_with(run: &telmoni::Run, content: &str) -> Outcome {
+    run.model_call(
+        "m",
+        ModelCallOptions {
+            input_messages: Some(blob(content)),
+            ..ModelCallOptions::default()
+        },
+    )?
+    .end();
+    Ok(())
+}
+
+#[test]
+fn an_image_is_put_once_with_its_type_and_key() -> Outcome {
+    let harness = media_harness()?;
+    let run = harness.telmoni.run("bot", RunOptions::default())?;
+    call_with(&run, "iVBORw0KGgo=")?;
+    call_with(&run, "iVBORw0KGgo=")?;
+    run.end();
+    harness.flush()?;
+    let uploads = harness.transport.uploads();
+    assert_eq!(uploads.len(), 1);
+    let upload = uploads.first().ok_or("the upload")?;
+    assert_eq!(
+        upload.url,
+        format!("https://api.telmoni.com/v1/media/{PNG_SHA256}")
+    );
+    assert_eq!(upload.header("Authorization"), Some("Bearer k"));
+    assert_eq!(upload.header("Content-Type"), Some("image/png"));
+    assert_eq!(upload.body, b"\x89PNG\r\n\x1a\n");
+    let spans = harness.spans()?;
+    let calls = starting_with(&spans, "chat ");
+    assert_eq!(calls.len(), 2);
+    for call in calls {
+        assert_eq!(sent_parts(call)?, file_part(PNG_SHA256));
+    }
+    Ok(())
+}
+
+#[test]
+fn a_failed_upload_still_names_the_file_and_warns_once() -> Outcome {
+    for (failure, status) in [
+        (Ok(Answer::new(413, Vec::new(), b"{}".to_vec())), Some(413)),
+        (Err(TransportError::new("Connect")), None),
+    ] {
+        let harness = media_harness()?;
+        harness
+            .transport
+            .answer_uploads([failure.clone(), failure.clone()]);
+        for _ in 0..2 {
+            let run = harness.telmoni.run("bot", RunOptions::default())?;
+            call_with(&run, "iVBORw0KGgo=")?;
+            run.end();
+            harness.flush()?;
+        }
+        assert_eq!(
+            harness.transport.uploads().len(),
+            2,
+            "a hash is remembered only once kept"
+        );
+        let spans = harness.spans()?;
+        for call in starting_with(&spans, "chat ") {
+            assert_eq!(sent_parts(call)?, file_part(PNG_SHA256));
+        }
+        let warned: Vec<Value> = harness
+            .warnings
+            .fields()
+            .into_iter()
+            .filter(|fields| fields["kind"] == "upload_failed")
+            .collect();
+        let expected = match status {
+            Some(status) => json!({ "kind": "upload_failed", "status": status }),
+            None => json!({ "kind": "upload_failed" }),
+        };
+        assert_eq!(warned, vec![expected]);
+    }
+    Ok(())
+}
+
+#[test]
+fn a_file_past_the_cap_is_named_but_never_put() -> Outcome {
+    // 5 MiB and one byte of 0x89, three at a time.
+    let content = "iYmJ".repeat(5 * 1024 * 1024 / 3 + 1);
+    let harness = media_harness()?;
+    let run = harness.telmoni.run("bot", RunOptions::default())?;
+    call_with(&run, &content)?;
+    run.end();
+    harness.flush()?;
+    assert!(harness.transport.uploads().is_empty());
+    let spans = harness.spans()?;
+    assert_eq!(
+        sent_parts(only(&spans, "chat ")?)?,
+        file_part("01e058c4b9333d565236aa78414d2c35b3cb8e77c35d7ac8fdb756d17eec58eb")
+    );
     Ok(())
 }

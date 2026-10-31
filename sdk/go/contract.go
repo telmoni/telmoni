@@ -74,6 +74,34 @@ const (
 	sentAtHeader = "Telmoni-Sent-At"
 )
 
+// envCaptureContent is the variable ConfigFromEnv reads CaptureContent from:
+// 1 turns it on, and anything else, or nothing, leaves it off.
+const envCaptureContent = "TELMONI_CAPTURE_CONTENT"
+
+const (
+	// mediaPath is where an image or file is put, by the lowercase hex
+	// SHA-256 of its bytes.
+	mediaPath = "/v1/media/"
+	// fileIDPrefix, then its SHA-256, is a file part's file_id naming a file
+	// put to mediaPath.
+	fileIDPrefix = "telmoni:"
+	// mediaMaxBytes is the largest file the platform keeps: one past it is
+	// named but never put.
+	mediaMaxBytes = 5 * 1024 * 1024
+	// mediaDefaultType is a file's Content-Type where its part names no type a
+	// header can carry.
+	mediaDefaultType = "application/octet-stream"
+)
+
+// mediaFields are the content fields whose messages' blob parts the exporter
+// lifts out: each image or file put to mediaPath and sent as a file part
+// naming it.
+var mediaFields = map[string]bool{
+	attrInputMessages:      true,
+	attrOutputMessages:     true,
+	attrSystemInstructions: true,
+}
+
 // modelOperations are the operations ingest reads as a model call; any other
 // files one elsewhere.
 var modelOperations = []string{"chat", "generate_content", "text_completion", "embeddings"}

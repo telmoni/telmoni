@@ -1,5 +1,6 @@
-//! How an export reaches the platform: the one trait, its answer, and the
-//! transport a client is built on unless [`Hooks`](crate::Hooks) gives another.
+//! How an export, and an image or file a message carries, reach the platform:
+//! the one trait, its answer, and the transport a client is built on unless
+//! [`Hooks`](crate::Hooks) gives another.
 
 use std::fmt;
 use std::io::Read;
@@ -7,16 +8,27 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 use std::sync::Mutex;
 use std::time::Duration;
 
-/// Sends one export and gives back the answer, whatever its status; `Err`
+/// Sends one request and gives back the answer, whatever its status; `Err`
 /// only when no answer came back at all.
 pub trait Transport: Send + Sync {
-    /// `POST body` to `url` with `headers`, each a `(name, value)` pair.
+    /// Sends `body` to `url` by `method` with `headers`, each a `(name, value)` pair.
     fn send(
         &self,
+        method: Method,
         url: &str,
         headers: &[(String, String)],
         body: &[u8],
     ) -> Result<Answer, TransportError>;
+}
+
+/// What a request does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Method {
+    /// `POST`: an export.
+    Post,
+    /// `PUT`: an image or file a message carried, by the SHA-256 of its bytes.
+    Put,
 }
 
 /// What the platform answered.
@@ -257,9 +269,10 @@ impl Reqwest {
 }
 
 impl Reqwest {
-    /// Sends one export, its answer's head and body held to `within` of its start.
-    fn post(
+    /// Sends one request, its answer's head and body held to `within` of its start.
+    fn send_within(
         &self,
+        method: Method,
         url: &str,
         headers: &[(String, String)],
         body: &[u8],
@@ -269,7 +282,13 @@ impl Reqwest {
         // again at each read, so a body that stalls would outlast it.
         let mut request = self
             .client(url)?
-            .post(url)
+            .request(
+                match method {
+                    Method::Post => reqwest::Method::POST,
+                    Method::Put => reqwest::Method::PUT,
+                },
+                url,
+            )
             .timeout(within)
             .body(body.to_vec());
         for (name, value) in headers {
@@ -285,11 +304,12 @@ impl Reqwest {
 impl Transport for Reqwest {
     fn send(
         &self,
+        method: Method,
         url: &str,
         headers: &[(String, String)],
         body: &[u8],
     ) -> Result<Answer, TransportError> {
-        self.post(url, headers, body, REQUEST_TIMEOUT)
+        self.send_within(method, url, headers, body, REQUEST_TIMEOUT)
     }
 }
 
@@ -457,8 +477,23 @@ mod tests {
             .send();
         let key = [("Authorization".to_owned(), "Bearer k".to_owned())];
         let url = format!("http://LOCALHOST:{port}/otlp/v1/traces");
-        let answer = Reqwest::default().send(&url, &key, b"{}").unwrap();
+        let answer = Reqwest::default()
+            .send(Method::Post, &url, &key, b"{}")
+            .unwrap();
         assert_eq!(answer.status, 200);
+    }
+
+    #[test]
+    fn an_upload_goes_as_a_put() {
+        let (port, seen) = recording();
+        let key = [("Authorization".to_owned(), "Bearer k".to_owned())];
+        let url = format!("http://127.0.0.1:{port}/v1/media/x");
+        let answer = Reqwest::default()
+            .send(Method::Put, &url, &key, &[0, 255])
+            .unwrap();
+        assert_eq!(answer.status, 200);
+        let line = "PUT /v1/media/x HTTP/1.1".to_owned();
+        assert_eq!(*crate::lock(&seen), vec![(line, "Bearer k".to_owned())]);
     }
 
     /// As in every SDK: a status line alone, its head cut before the blank line
@@ -472,7 +507,11 @@ mod tests {
             let (_, _, mut stream) = request(stream);
             let _ = stream.write_all(b"HTTP/1.1 413 Payload Too Large\r\nContent-Ty");
         });
-        assert!(Reqwest::default().send(&url, &[], b"{}").is_err());
+        assert!(
+            Reqwest::default()
+                .send(Method::Post, &url, &[], b"{}")
+                .is_err()
+        );
     }
 
     /// The answer past every 1xx before it, as in every SDK, and an upgrade nobody
@@ -499,7 +538,9 @@ mod tests {
                 let (_, _, mut stream) = request(stream);
                 let _ = stream.write_all(reply.as_bytes());
             });
-            let answer = Reqwest::default().send(&url, &[], b"{}").unwrap();
+            let answer = Reqwest::default()
+                .send(Method::Post, &url, &[], b"{}")
+                .unwrap();
             assert_eq!(
                 (answer.status, answer.header("Telmoni-Content-Mode")),
                 (status, mode)
@@ -556,7 +597,7 @@ mod tests {
             (200, 300, 300),
         ] {
             let url = answering(status, size, size, Duration::ZERO);
-            let answer = transport.send(&url, &[], b"{}").unwrap();
+            let answer = transport.send(Method::Post, &url, &[], b"{}").unwrap();
             assert_eq!((answer.status, answer.body.len()), (status, read));
         }
     }
@@ -567,7 +608,7 @@ mod tests {
         let transport = Reqwest::default();
         for status in [200, 413] {
             let url = answering(status, 300, 100, Duration::ZERO);
-            let answer = transport.send(&url, &[], b"{}").unwrap();
+            let answer = transport.send(Method::Post, &url, &[], b"{}").unwrap();
             assert_eq!((answer.status, answer.body), (status, vec![b'x'; 100]));
         }
     }
@@ -577,7 +618,7 @@ mod tests {
         let url = answering(200, 100, 100, Duration::from_millis(50));
         let began = Instant::now();
         let answer = Reqwest::default()
-            .post(&url, &[], b"{}", Duration::from_millis(300))
+            .send_within(Method::Post, &url, &[], b"{}", Duration::from_millis(300))
             .unwrap();
         assert!(
             began.elapsed() < Duration::from_secs(2),
@@ -598,7 +639,7 @@ mod tests {
         let url = answering(200, 100, 2, Duration::from_secs(3));
         let began = Instant::now();
         let answer = Reqwest::default()
-            .post(&url, &[], b"{}", Duration::from_millis(300))
+            .send_within(Method::Post, &url, &[], b"{}", Duration::from_millis(300))
             .unwrap();
         assert!(
             began.elapsed() < Duration::from_secs(2),

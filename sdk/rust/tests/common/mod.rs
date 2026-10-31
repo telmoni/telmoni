@@ -12,7 +12,7 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use serde_json::{Map, Value, json};
-use telmoni::transport::{Answer, Transport, TransportError};
+use telmoni::transport::{Answer, Method, Transport, TransportError};
 use telmoni::{Config, DEFAULT_ENDPOINT, Hooks, Telmoni, Warning};
 
 pub(crate) type Failure = Box<dyn Error>;
@@ -39,7 +39,8 @@ impl Request {
     }
 }
 
-/// Records every export and answers from a script, then with `kept.json`.
+/// Records every export and answers from a script, then with `kept.json`; each
+/// upload, a `PUT`, apart, answered from its own script, then with a 204.
 /// Cloning shares it, so a test keeps a handle while the client owns one.
 #[derive(Clone)]
 pub(crate) struct FakeTransport {
@@ -49,6 +50,8 @@ pub(crate) struct FakeTransport {
 struct Inner {
     requests: Mutex<Vec<Request>>,
     answers: Mutex<VecDeque<Result<Answer, TransportError>>>,
+    uploads: Mutex<Vec<Request>>,
+    upload_answers: Mutex<VecDeque<Result<Answer, TransportError>>>,
     received: Condvar,
     kept: Answer,
     /// While closed, `send` holds the caller after recording its request, so
@@ -65,6 +68,8 @@ impl FakeTransport {
             inner: Arc::new(Inner {
                 requests: Mutex::new(Vec::new()),
                 answers: Mutex::new(answers.into_iter().collect()),
+                uploads: Mutex::new(Vec::new()),
+                upload_answers: Mutex::new(VecDeque::new()),
                 received: Condvar::new(),
                 kept: kept()?,
                 gate: Mutex::new(false),
@@ -75,6 +80,18 @@ impl FakeTransport {
 
     pub(crate) fn requests(&self) -> Vec<Request> {
         lock(&self.inner.requests).clone()
+    }
+
+    pub(crate) fn uploads(&self) -> Vec<Request> {
+        lock(&self.inner.uploads).clone()
+    }
+
+    /// Answers the next uploads from `answers`, in turn.
+    pub(crate) fn answer_uploads(
+        &self,
+        answers: impl IntoIterator<Item = Result<Answer, TransportError>>,
+    ) {
+        lock(&self.inner.upload_answers).extend(answers);
     }
 
     pub(crate) fn count(&self) -> usize {
@@ -140,10 +157,21 @@ impl FakeTransport {
 impl Transport for FakeTransport {
     fn send(
         &self,
+        method: Method,
         url: &str,
         headers: &[(String, String)],
         body: &[u8],
     ) -> Result<Answer, TransportError> {
+        if method == Method::Put {
+            lock(&self.inner.uploads).push(Request {
+                url: url.to_owned(),
+                headers: headers.to_vec(),
+                body: body.to_vec(),
+            });
+            return lock(&self.inner.upload_answers)
+                .pop_front()
+                .unwrap_or_else(|| Ok(Answer::new(204, Vec::new(), Vec::new())));
+        }
         let answer = {
             let mut requests = lock(&self.inner.requests);
             requests.push(Request {
@@ -566,13 +594,14 @@ fn the_fakes_work() -> Outcome {
         Err(TransportError::new("ConnectionRefused")),
     ])?;
     let first = transport.send(
+        Method::Post,
         "https://api.telmoni.local/otlp/v1/traces",
         &[("Authorization".to_owned(), "Bearer k".to_owned())],
         b"{}",
     )?;
     assert_eq!(first.status, 403);
-    assert!(transport.send("u", &[], b"{}").is_err());
-    let third = transport.send("u", &[], b"{}")?;
+    assert!(transport.send(Method::Post, "u", &[], b"{}").is_err());
+    let third = transport.send(Method::Post, "u", &[], b"{}")?;
     assert_eq!(third.status, 200);
     assert_eq!(third.header("telmoni-content-mode"), Some("off"));
     assert_eq!(mode_on().header("telmoni-content-mode"), Some("on"));
@@ -590,6 +619,11 @@ fn the_fakes_work() -> Outcome {
     assert!(transport.spans()?.is_empty());
     transport.close_gate();
     transport.open_gate();
+    transport.answer_uploads([Err(TransportError::new("Connect"))]);
+    assert!(transport.send(Method::Put, "u", &[], &[0]).is_err());
+    assert_eq!(transport.send(Method::Put, "u", &[], &[1])?.status, 204);
+    assert_eq!(transport.uploads().len(), 2);
+    assert_eq!(transport.count(), 3, "an upload is no export");
 
     let fixture = load_fixture("run.json")?;
     assert!(text(field(&fixture, "scenario")?, "capture_content").is_err());

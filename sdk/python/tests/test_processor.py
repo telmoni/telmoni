@@ -193,7 +193,9 @@ def test_a_multiprocessing_child_sends_its_queue_as_it_exits(
 ) -> None:
     sent = tmp_path / "sent"
 
-    def transport(url: str, headers: Mapping[str, str], body: bytes) -> Answer:
+    def transport(
+        method: str, url: str, headers: Mapping[str, str], body: bytes
+    ) -> Answer:
         # The child's export, seen by the parent through a file.
         with sent.open("ab") as file:
             file.write(b"export\n")

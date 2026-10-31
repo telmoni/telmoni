@@ -290,8 +290,9 @@ func DefaultConfig() Config {
 	return Config{Endpoint: DefaultEndpoint, SampleRate: 1}
 }
 
-// ConfigFromEnv reads TELMONI_ENDPOINT, TELMONI_API_KEY and TELMONI_ORG, and
-// TELMONI_ENVIRONMENT and TELMONI_RELEASE for the deployment, a blank value
+// ConfigFromEnv reads TELMONI_ENDPOINT, TELMONI_API_KEY and TELMONI_ORG,
+// TELMONI_ENVIRONMENT and TELMONI_RELEASE for the deployment, and
+// TELMONI_CAPTURE_CONTENT, whose 1 alone sets CaptureContent, a blank value
 // counting as unset. No OTEL_* variable is read: the SDK's tracer provider is
 // built part by part.
 func ConfigFromEnv() Config {
@@ -299,6 +300,8 @@ func ConfigFromEnv() Config {
 		Endpoint:       os.Getenv("TELMONI_ENDPOINT"),
 		OrganizationID: os.Getenv("TELMONI_ORG"),
 		APIKey:         NewSecret(os.Getenv("TELMONI_API_KEY")),
+		// Only 1: a "false" or a "no" must never let content out.
+		CaptureContent: strings.TrimSpace(os.Getenv(envCaptureContent)) == "1",
 		Environment:    os.Getenv("TELMONI_ENVIRONMENT"),
 		Release:        os.Getenv("TELMONI_RELEASE"),
 	}.normalized()

@@ -124,6 +124,23 @@ export const DEFAULT_MODEL_OPERATION = 'chat';
 export const TOOL_OPERATION = 'execute_tool';
 export const RUN_OPERATION = 'invoke_agent';
 
+/**
+ * The content fields whose messages' `blob` parts the exporter lifts out: each
+ * image or file put to `MEDIA_PATH` and sent as a `file` part naming it.
+ */
+export const MEDIA_FIELDS: readonly string[] = [INPUT_MESSAGES, OUTPUT_MESSAGES, SYSTEM_INSTRUCTIONS];
+/** Where an image or file is put, by the lowercase hex SHA-256 of its bytes. */
+export const MEDIA_PATH = '/v1/media/';
+/** A `file` part's `file_id` naming a file put to `MEDIA_PATH`: this, then its SHA-256. */
+export const FILE_ID_PREFIX = 'telmoni:';
+/** The largest file the platform keeps: one past it is named but never put. */
+export const MEDIA_MAX_BYTES = 5 * 1024 * 1024;
+/** A file's `Content-Type` where its part names no type a header can carry. */
+export const MEDIA_DEFAULT_TYPE = 'application/octet-stream';
+
+/** The variable `Telmoni.fromEnv` reads `captureContent` from: `1` turns it on, and anything else, or nothing, leaves it off. */
+export const CAPTURE_CONTENT_ENV = 'TELMONI_CAPTURE_CONTENT';
+
 /** The answer's header naming the project's content mode: off or on. */
 export const CONTENT_MODE_HEADER = 'Telmoni-Content-Mode';
 /**

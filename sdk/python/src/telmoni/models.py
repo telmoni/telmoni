@@ -298,8 +298,9 @@ class Config:
 
     @classmethod
     def from_env(cls) -> Config:
-        """Read ``TELMONI_ENDPOINT``, ``TELMONI_API_KEY``, ``TELMONI_ORG``, and
-        ``TELMONI_ENVIRONMENT`` and ``TELMONI_RELEASE`` for the deployment.
+        """Read ``TELMONI_ENDPOINT``, ``TELMONI_API_KEY``, ``TELMONI_ORG``,
+        ``TELMONI_ENVIRONMENT`` and ``TELMONI_RELEASE`` for the deployment, and
+        ``TELMONI_CAPTURE_CONTENT``, whose ``1`` alone sets ``capture_content``.
 
         A blank value is unset, as the CLI reads them. No ``OTEL_*`` variable is
         read: the SDK's tracer provider is built part by part.
@@ -308,6 +309,9 @@ class Config:
             endpoint=os.getenv("TELMONI_ENDPOINT") or DEFAULT_ENDPOINT,
             api_key=os.getenv("TELMONI_API_KEY"),
             organization_id=os.getenv("TELMONI_ORG"),
+            # Only 1: a "false" or a "no" must never let content out.
+            capture_content=_unset_if_blank(os.getenv(contract.CAPTURE_CONTENT_ENV))
+            == "1",
             environment=os.getenv("TELMONI_ENVIRONMENT"),
             release=os.getenv("TELMONI_RELEASE"),
         )
@@ -340,6 +344,7 @@ WarningKind = Literal[
     "span_refused",
     "said",
     "input",
+    "upload_failed",
 ]
 """What became of the spans a warning is about, the same in every SDK."""
 
@@ -349,7 +354,7 @@ class WarningInfo:
     """What a warning says, as data: each is logged with it as
     ``record.telmoni_warning``, so a handler switches on it, not on the words.
     ``status`` and ``problem_type`` are an export's own failure's, where an
-    answer named them."""
+    answer named them, and ``status`` a failed upload's."""
 
     kind: WarningKind
     status: int | None = None

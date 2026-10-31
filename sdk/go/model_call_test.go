@@ -1,7 +1,12 @@
 package telmoni_test
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"math"
 	"net"
@@ -423,5 +428,138 @@ func TestAModelCallsTextPastIngestsCapsKeepsItsCall(t *testing.T) {
 	}
 	if !reflect.DeepEqual(warnings, wantWarnings) {
 		t.Errorf("warnings = %q, want %q", warnings, wantWarnings)
+	}
+}
+
+var png = []byte("\x89PNG\r\n\x1a\n")
+
+// blob is a user message holding one image, as the conventions carry it.
+func blob(data []byte) any {
+	return []any{map[string]any{"role": "user", "parts": []any{map[string]any{
+		"type": "blob", "modality": "image", "mime_type": "image/png", "content": base64.StdEncoding.EncodeToString(data),
+	}}}}
+}
+
+func filePart(data []byte) any {
+	sum := sha256.Sum256(data)
+	return map[string]any{"type": "file", "modality": "image", "mime_type": "image/png", "file_id": "telmoni:" + hex.EncodeToString(sum[:])}
+}
+
+func sentParts(t *testing.T, call map[string]any) any {
+	t.Helper()
+	var messages []map[string]any
+	if err := json.Unmarshal([]byte(attributesOf(t, call)["gen_ai.input.messages"].(string)), &messages); err != nil {
+		t.Fatalf("the messages are no JSON: %v", err)
+	}
+	return messages[0]["parts"]
+}
+
+// mediaHarness is a client asked for content whose project keeps it, the mode
+// learned.
+func mediaHarness(t *testing.T) *harness {
+	t.Helper()
+	on := contentOn()
+	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k"), CaptureContent: true}, newFakeTransport(t, on, on, on, on))
+	_, warm := h.client.Run(context.Background(), "warm", telmoni.RunOptions{})
+	warm.End()
+	h.flush()
+	return h
+}
+
+func TestAnImageIsPutOnceWithItsTypeAndKey(t *testing.T) {
+	h := mediaHarness(t)
+	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	for range 2 {
+		_, call := run.ModelCall(ctx, "m", telmoni.ModelCallOptions{InputMessages: blob(png)})
+		call.End()
+	}
+	run.End()
+	h.flush()
+	uploads := h.transport.allUploads()
+	if len(uploads) != 1 {
+		t.Fatalf("%d files put, want 1", len(uploads))
+	}
+	sum := sha256.Sum256(png)
+	upload := uploads[0]
+	if want := "https://api.telmoni.com/v1/media/" + hex.EncodeToString(sum[:]); upload.url != want {
+		t.Errorf("put to %s, want %s", upload.url, want)
+	}
+	if got := upload.header.Get("Authorization"); got != "Bearer k" {
+		t.Errorf("Authorization = %q", got)
+	}
+	if got := upload.header.Get("Content-Type"); got != "image/png" {
+		t.Errorf("Content-Type = %q, want image/png", got)
+	}
+	if !bytes.Equal(upload.body, png) {
+		t.Errorf("put %x, want %x", upload.body, png)
+	}
+	sent := calls(t, h)
+	if len(sent) != 2 {
+		t.Fatalf("%d calls sent, want 2", len(sent))
+	}
+	for _, call := range sent {
+		if got := sentParts(t, call); !reflect.DeepEqual(got, []any{filePart(png)}) {
+			t.Errorf("sent %v, want the file part", got)
+		}
+	}
+}
+
+func TestAFailedUploadStillNamesTheFileAndWarnsOnce(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		failure any
+		fields  map[string]any
+	}{
+		{"413", scripted{status: 413, body: []byte("{}")}, map[string]any{"kind": "upload_failed", "status": int64(413)}},
+		{"unreached", &net.OpError{Op: "dial", Err: errors.New("refused")}, map[string]any{"kind": "upload_failed"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := mediaHarness(t)
+			h.transport.uploadAnswers = []any{c.failure, c.failure}
+			for range 2 {
+				ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+				_, call := run.ModelCall(ctx, "m", telmoni.ModelCallOptions{InputMessages: blob(png)})
+				call.End()
+				run.End()
+				h.flush()
+			}
+			if got := len(h.transport.allUploads()); got != 2 {
+				t.Errorf("%d uploads tried, want 2: a hash is remembered only once kept", got)
+			}
+			for _, call := range calls(t, h) {
+				if got := sentParts(t, call); !reflect.DeepEqual(got, []any{filePart(png)}) {
+					t.Errorf("sent %v, want the file part", got)
+				}
+			}
+			var warned []map[string]any
+			for _, fields := range h.logs.fields() {
+				if fields["kind"] == "upload_failed" {
+					warned = append(warned, fields)
+				}
+			}
+			if !reflect.DeepEqual(warned, []map[string]any{c.fields}) {
+				t.Errorf("warned %v, want %v once", warned, c.fields)
+			}
+		})
+	}
+}
+
+func TestAFilePastTheCapIsNamedButNeverPut(t *testing.T) {
+	big := bytes.Repeat([]byte{0x89}, 5*1024*1024+1)
+	h := mediaHarness(t)
+	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	_, call := run.ModelCall(ctx, "m", telmoni.ModelCallOptions{InputMessages: blob(big)})
+	call.End()
+	run.End()
+	h.flush()
+	if got := len(h.transport.allUploads()); got != 0 {
+		t.Errorf("%d files put, want none", got)
+	}
+	sent := calls(t, h)
+	if len(sent) != 1 {
+		t.Fatalf("%d calls sent, want 1", len(sent))
+	}
+	if got := sentParts(t, sent[0]); !reflect.DeepEqual(got, []any{filePart(big)}) {
+		t.Errorf("sent %v, want the file part", got)
 	}
 }

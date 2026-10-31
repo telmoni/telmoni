@@ -3,7 +3,7 @@
 
 mod common;
 
-use common::{Harness, Outcome, in_child, is_child, keyed};
+use common::{Harness, Outcome, field, in_child, is_child, keyed, load_fixture};
 use telmoni::{Config, DEFAULT_ENDPOINT, RunOptions, Telmoni, VERSION};
 
 #[test]
@@ -103,7 +103,7 @@ fn the_defaults_send_every_run_and_no_content() {
 }
 
 #[test]
-fn from_env_reads_the_five_variables_and_no_other() -> Outcome {
+fn from_env_reads_the_six_variables_and_no_other() -> Outcome {
     if is_child() {
         let config = Config::from_env();
         assert_eq!(config.endpoint, DEFAULT_ENDPOINT);
@@ -114,7 +114,7 @@ fn from_env_reads_the_five_variables_and_no_other() -> Outcome {
         return Ok(());
     }
     in_child(
-        "from_env_reads_the_five_variables_and_no_other",
+        "from_env_reads_the_six_variables_and_no_other",
         &[
             ("TELMONI_API_KEY", ""),
             ("TELMONI_ORG", "org_2"),
@@ -128,6 +128,57 @@ fn from_env_reads_the_five_variables_and_no_other() -> Outcome {
         ],
         &["TELMONI_ENDPOINT"],
     )
+}
+
+/// Each case in a child of its own, the value it must read as in a variable beside it.
+#[test]
+fn capture_content_is_read_from_the_environment_as_the_fixture_says() -> Outcome {
+    const WANT: &str = "TELMONI_TEST_CAPTURE_CONTENT";
+    if is_child() {
+        let want = std::env::var(WANT).as_deref() == Ok("true");
+        assert_eq!(Config::from_env().capture_content, want);
+        return Ok(());
+    }
+    let fixture = load_fixture("capture_content.json")?;
+    for case in field(&fixture, "cases")?.as_array().ok_or("cases")? {
+        let want = if field(case, "capture_content")?.as_bool().ok_or("a case")? {
+            "true"
+        } else {
+            "false"
+        };
+        let name = "capture_content_is_read_from_the_environment_as_the_fixture_says";
+        match field(case, "given")?.as_str() {
+            Some(given) => in_child(
+                name,
+                &[("TELMONI_CAPTURE_CONTENT", given), (WANT, want)],
+                &[],
+            )?,
+            None => in_child(name, &[(WANT, want)], &["TELMONI_CAPTURE_CONTENT"])?,
+        }
+    }
+    Ok(())
+}
+
+/// Code sets the opposite of what the environment says, and stands.
+#[test]
+fn capture_content_set_in_code_wins_over_the_environment() -> Outcome {
+    if is_child() {
+        let on = std::env::var_os("TELMONI_CAPTURE_CONTENT").is_some();
+        let telmoni = Telmoni::new(Config {
+            capture_content: !on,
+            ..Config::from_env()
+        });
+        assert_eq!(telmoni.config().capture_content, !on);
+        telmoni.shutdown();
+        return Ok(());
+    }
+    let name = "capture_content_set_in_code_wins_over_the_environment";
+    in_child(
+        name,
+        &[("TELMONI_CAPTURE_CONTENT", "1")],
+        &["TELMONI_ENDPOINT"],
+    )?;
+    in_child::<&str>(name, &[], &["TELMONI_CAPTURE_CONTENT", "TELMONI_ENDPOINT"])
 }
 
 #[test]

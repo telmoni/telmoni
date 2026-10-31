@@ -1,13 +1,16 @@
 //! The exporter: OTLP's JSON over the transport, content off unless asked and allowed,
+//! each image or file a message carries put by its hash where content leaves,
 //! each attempt stamped with this clock, each answer's content mode and drops read.
 
 use std::borrow::Cow;
+use std::collections::HashSet;
+use std::panic::{self, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use opentelemetry::trace::{SpanId, SpanKind, Status};
-use opentelemetry::{Array, Key, Value};
+use opentelemetry::{Array, Key, KeyValue, Value};
 use opentelemetry_sdk::resource::{ResourceDetector as _, TelemetryResourceDetector};
 use opentelemetry_sdk::trace::SpanData;
 use serde::Serialize;
@@ -15,7 +18,7 @@ use serde_json::json;
 
 use crate::config::Config;
 use crate::contract;
-use crate::transport::{Answer, Transport, refusal};
+use crate::transport::{Answer, Method, Transport, refusal};
 use crate::warnings::{Warner, Warning, WarningKind};
 use crate::{VERSION, lock};
 
@@ -23,6 +26,9 @@ use crate::{VERSION, lock};
 const ATTEMPTS: u32 = 3;
 /// The longest a `Retry-After` is honoured for.
 const RETRY_AFTER_MAX_SECS: u64 = 60;
+/// How many files put are remembered before the set starts over: an image a
+/// conversation repeats in every call is put once.
+const UPLOADED_MAX: usize = 4096;
 /// Where a dropped content field's warning sends the reader.
 const CONTENT_DOCS: &str = "https://telmoni.com/docs/api/ingest#what-is-dropped-at-the-door";
 
@@ -38,6 +44,7 @@ pub enum ContentMode {
 
 pub(crate) struct Exporter {
     url: String,
+    media_url: String,
     /// Why nothing is sent to the endpoint ([`refusal`]), which the first
     /// export says.
     refusal: Option<String>,
@@ -52,6 +59,8 @@ pub(crate) struct Exporter {
     resource: Vec<serde_json::Value>,
     /// Set by a shutdown past its deadline: no attempt follows, nor a wait.
     given_up: AtomicBool,
+    /// The hashes of the files put.
+    uploaded: Mutex<HashSet<String>>,
 }
 
 impl Exporter {
@@ -64,6 +73,7 @@ impl Exporter {
         let resource = resource(config, &warner);
         Self {
             url: format!("{}/otlp/v1/traces", config.endpoint),
+            media_url: format!("{}{}", config.endpoint, contract::MEDIA_PATH),
             refusal: refusal(&config.endpoint),
             bearer: config.api_key.clone(),
             capture_content: config.capture_content,
@@ -73,6 +83,7 @@ impl Exporter {
             content_mode: Mutex::new(None),
             resource,
             given_up: AtomicBool::new(false),
+            uploaded: Mutex::new(HashSet::new()),
         }
     }
 
@@ -105,6 +116,15 @@ impl Exporter {
             );
             return false;
         }
+        let spans = if self.keeps_content() {
+            self.lift(spans)
+        } else {
+            Cow::Borrowed(spans)
+        };
+        self.export_lifted(&spans)
+    }
+
+    fn export_lifted(&self, spans: &[SpanData]) -> bool {
         // Ingest refuses an export past 1,000 spans whole, as one past 1 MiB below.
         if spans.len() > contract::BATCH_SPANS_MAX {
             return self.halve(spans);
@@ -174,7 +194,7 @@ impl Exporter {
                 contract::SENT_AT_HEADER.to_owned(),
                 nanos(std::time::SystemTime::now()),
             ));
-            let answer = match self.transport.send(&self.url, &sent, &body) {
+            let answer = match self.transport.send(Method::Post, &self.url, &sent, &body) {
                 Ok(answer) => answer,
                 Err(error) => {
                     failure = error.name;
@@ -218,7 +238,134 @@ impl Exporter {
     /// Exports each half of `spans`, the second only where the first went.
     fn halve(&self, spans: &[SpanData]) -> bool {
         let (head, tail) = spans.split_at(spans.len() / 2);
-        self.export(head) && self.export(tail)
+        self.export_lifted(head) && self.export_lifted(tail)
+    }
+
+    /// `spans` with every `blob` part of their messages lifted out: a blob
+    /// repeated in every span would bloat each, past 1 MiB maybe.
+    fn lift<'a>(&self, spans: &'a [SpanData]) -> Cow<'a, [SpanData]> {
+        let mut lifted: Option<Vec<SpanData>> = None;
+        for (i, span) in spans.iter().enumerate() {
+            for (j, attribute) in span.attributes.iter().enumerate() {
+                if !contract::MEDIA_FIELDS.contains(&attribute.key.as_str()) {
+                    continue;
+                }
+                let Value::String(text) = &attribute.value else {
+                    continue;
+                };
+                let Some(text) = self.lift_text(text.as_str()) else {
+                    continue;
+                };
+                let copy = lifted.get_or_insert_with(|| spans.to_vec());
+                if let Some(slot) = copy.get_mut(i).and_then(|span| span.attributes.get_mut(j)) {
+                    *slot = KeyValue::new(attribute.key.clone(), text);
+                }
+            }
+        }
+        lifted.map_or(Cow::Borrowed(spans), Cow::Owned)
+    }
+
+    /// A field's JSON with each `blob` part lifted out; `None` where it holds
+    /// none, or is no JSON array.
+    fn lift_text(&self, text: &str) -> Option<String> {
+        let mut decoded: serde_json::Value = serde_json::from_str(text).ok()?;
+        if !self.lift_parts(decoded.as_array_mut()?) {
+            return None;
+        }
+        serde_json::to_string(&decoded).ok()
+    }
+
+    /// Replaces each `blob` part in place, a message's parts too; whether any was.
+    fn lift_parts(&self, parts: &mut [serde_json::Value]) -> bool {
+        let mut lifted = false;
+        for part in parts {
+            if let Some(inner) = part
+                .get_mut("parts")
+                .and_then(serde_json::Value::as_array_mut)
+            {
+                lifted |= self.lift_parts(inner);
+                continue;
+            }
+            if let Some(file) = self.file_part(part) {
+                *part = file;
+                lifted = true;
+            }
+        }
+        lifted
+    }
+
+    /// The `file` part naming a `blob` part's bytes, put first unless past the
+    /// platform's cap or put already; `None` for any other part.
+    fn file_part(&self, part: &serde_json::Value) -> Option<serde_json::Value> {
+        let blob = part.as_object()?;
+        if blob.get("type").and_then(serde_json::Value::as_str) != Some("blob") {
+            return None;
+        }
+        let data = base64_decode(blob.get("content")?.as_str()?)?;
+        let hash = sha256_hex(&data);
+        if data.len() <= contract::MEDIA_MAX_BYTES && !lock(&self.uploaded).contains(&hash) {
+            self.upload(&hash, &data, blob.get("mime_type"));
+        }
+        // Named whatever became of it: the platform says itself what it holds.
+        let mut file = serde_json::Map::new();
+        file.insert("type".to_owned(), "file".into());
+        for name in ["modality", "mime_type"] {
+            if let Some(value) = blob.get(name) {
+                file.insert(name.to_owned(), value.clone());
+            }
+        }
+        file.insert(
+            "file_id".to_owned(),
+            format!("{}{hash}", contract::FILE_ID_PREFIX).into(),
+        );
+        Some(serde_json::Value::Object(file))
+    }
+
+    /// Puts one file, once: a failure is warned of, never the export's.
+    fn upload(&self, hash: &str, data: &[u8], mime_type: Option<&serde_json::Value>) {
+        if self.gave_up() {
+            return;
+        }
+        let content_type = mime_type
+            .and_then(serde_json::Value::as_str)
+            .filter(|given| header_safe(given))
+            .unwrap_or(contract::MEDIA_DEFAULT_TYPE);
+        let mut headers = vec![
+            ("Content-Type".to_owned(), content_type.to_owned()),
+            ("User-Agent".to_owned(), format!("telmoni-rust/{VERSION}")),
+        ];
+        if let Some(bearer) = &self.bearer {
+            headers.push(("Authorization".to_owned(), format!("Bearer {bearer}")));
+        }
+        let url = format!("{}{hash}", self.media_url);
+        // A transport that panics costs the file alone.
+        let sent = panic::catch_unwind(AssertUnwindSafe(|| {
+            self.transport.send(Method::Put, &url, &headers, data)
+        }));
+        let (failure, status) = match sent {
+            Ok(Ok(answer)) if (200..300).contains(&answer.status) => {
+                let mut uploaded = lock(&self.uploaded);
+                if uploaded.len() >= UPLOADED_MAX {
+                    uploaded.clear();
+                }
+                uploaded.insert(hash.to_owned());
+                return;
+            }
+            Ok(Ok(answer)) => (answer.status.to_string(), Some(answer.status)),
+            Ok(Err(error)) => (error.name, None),
+            Err(_) => ("panic".to_owned(), None),
+        };
+        self.warner.once(
+            format!("upload:{failure}"),
+            &format!(
+                "telmoni: an image or file in a message could not be uploaded ({failure}); its part was sent naming it, which the platform may not hold"
+            ),
+            Warning {
+                kind: WarningKind::UploadFailed,
+                status,
+                problem_type: None,
+            },
+        );
     }
 
     /// The one span's body without its longest content, as few fields as fit it
@@ -504,6 +651,117 @@ fn remedy(attribute: &str, reason: &str) -> String {
         }
         _ => "see the server's answer".to_owned(),
     }
+}
+
+/// Whether a part's type can go as a header: printable ASCII, not blank.
+fn header_safe(value: &str) -> bool {
+    !value.trim_matches(' ').is_empty() && value.bytes().all(|byte| (0x20..=0x7e).contains(&byte))
+}
+
+/// Base64's bytes, padded as Python's `validate=True` reads it; `None` for
+/// any other text.
+fn base64_decode(text: &str) -> Option<Vec<u8>> {
+    let bytes = text.as_bytes();
+    if !bytes.len().is_multiple_of(4) {
+        return None;
+    }
+    let padding = bytes.iter().rev().take_while(|byte| **byte == b'=').count();
+    if padding > 2 {
+        return None;
+    }
+    let mut out = Vec::with_capacity(bytes.len() / 4 * 3);
+    let (mut buffer, mut bits) = (0u32, 0u32);
+    for byte in bytes.iter().take(bytes.len() - padding) {
+        let value = match byte {
+            b'A'..=b'Z' => byte - b'A',
+            b'a'..=b'z' => byte - b'a' + 26,
+            b'0'..=b'9' => byte - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            _ => return None,
+        };
+        buffer = (buffer << 6 | u32::from(value)) & 0xffff;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push(u8::try_from((buffer >> bits) & 0xff).unwrap_or(0));
+        }
+    }
+    Some(out)
+}
+
+/// The lowercase hex SHA-256 of `data` (FIPS 180-4), written here as the SDK
+/// takes no crate for it.
+fn sha256_hex(data: &[u8]) -> String {
+    #[rustfmt::skip]
+    const K: [u32; 64] = [
+        0x428a_2f98, 0x7137_4491, 0xb5c0_fbcf, 0xe9b5_dba5, 0x3956_c25b, 0x59f1_11f1, 0x923f_82a4,
+        0xab1c_5ed5, 0xd807_aa98, 0x1283_5b01, 0x2431_85be, 0x550c_7dc3, 0x72be_5d74, 0x80de_b1fe,
+        0x9bdc_06a7, 0xc19b_f174, 0xe49b_69c1, 0xefbe_4786, 0x0fc1_9dc6, 0x240c_a1cc, 0x2de9_2c6f,
+        0x4a74_84aa, 0x5cb0_a9dc, 0x76f9_88da, 0x983e_5152, 0xa831_c66d, 0xb003_27c8, 0xbf59_7fc7,
+        0xc6e0_0bf3, 0xd5a7_9147, 0x06ca_6351, 0x1429_2967, 0x27b7_0a85, 0x2e1b_2138, 0x4d2c_6dfc,
+        0x5338_0d13, 0x650a_7354, 0x766a_0abb, 0x81c2_c92e, 0x9272_2c85, 0xa2bf_e8a1, 0xa81a_664b,
+        0xc24b_8b70, 0xc76c_51a3, 0xd192_e819, 0xd699_0624, 0xf40e_3585, 0x106a_a070, 0x19a4_c116,
+        0x1e37_6c08, 0x2748_774c, 0x34b0_bcb5, 0x391c_0cb3, 0x4ed8_aa4a, 0x5b9c_ca4f, 0x682e_6ff3,
+        0x748f_82ee, 0x78a5_636f, 0x84c8_7814, 0x8cc7_0208, 0x90be_fffa, 0xa450_6ceb, 0xbef9_a3f7,
+        0xc671_78f2,
+    ];
+    let mut state: [u32; 8] = [
+        0x6a09_e667,
+        0xbb67_ae85,
+        0x3c6e_f372,
+        0xa54f_f53a,
+        0x510e_527f,
+        0x9b05_688c,
+        0x1f83_d9ab,
+        0x5be0_cd19,
+    ];
+    let mut message = data.to_vec();
+    let length = u64::try_from(data.len())
+        .unwrap_or(u64::MAX)
+        .wrapping_mul(8);
+    message.push(0x80);
+    while message.len() % 64 != 56 {
+        message.push(0);
+    }
+    message.extend_from_slice(&length.to_be_bytes());
+    for block in message.as_chunks::<64>().0 {
+        let mut w: Vec<u32> = block
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|word| u32::from_be_bytes(*word))
+            .collect();
+        while w.len() < 64 {
+            let back = |n: usize| w.get(w.len() - n).copied().unwrap_or(0);
+            let (w15, w2) = (back(15), back(2));
+            let s0 = w15.rotate_right(7) ^ w15.rotate_right(18) ^ (w15 >> 3);
+            let s1 = w2.rotate_right(17) ^ w2.rotate_right(19) ^ (w2 >> 10);
+            let next = back(16)
+                .wrapping_add(s0)
+                .wrapping_add(back(7))
+                .wrapping_add(s1);
+            w.push(next);
+        }
+        let [mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut h] = state;
+        for (k, word) in K.iter().zip(w) {
+            let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
+            let choice = (e & f) ^ (!e & g);
+            let t1 = h
+                .wrapping_add(s1)
+                .wrapping_add(choice)
+                .wrapping_add(*k)
+                .wrapping_add(word);
+            let s0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
+            let majority = (a & b) ^ (a & c) ^ (b & c);
+            let t2 = s0.wrapping_add(majority);
+            (h, g, f, e, d, c, b, a) = (g, f, e, d.wrapping_add(t1), c, b, a, t1.wrapping_add(t2));
+        }
+        for (slot, value) in state.iter_mut().zip([a, b, c, d, e, f, g, h]) {
+            *slot = slot.wrapping_add(value);
+        }
+    }
+    state.iter().map(|word| format!("{word:08x}")).collect()
 }
 
 /// An export's own failure, with the status and problem type it last met,
@@ -803,6 +1061,7 @@ mod tests {
     impl Transport for Kept {
         fn send(
             &self,
+            _method: Method,
             _url: &str,
             _headers: &[(String, String)],
             body: &[u8],
@@ -1034,6 +1293,7 @@ mod tests {
     impl Transport for Scripted {
         fn send(
             &self,
+            _method: Method,
             _url: &str,
             _headers: &[(String, String)],
             _body: &[u8],
@@ -1159,5 +1419,46 @@ mod tests {
         let last = UNIX_EPOCH + Duration::from_nanos(u64::MAX);
         assert_eq!(nanos(last), "18446744073709551615");
         assert_eq!(nanos(last + Duration::from_nanos(1)), "0");
+    }
+
+    /// FIPS 180-4's vectors, one and two blocks, and one of many.
+    #[test]
+    fn sha256_matches_the_standards_vectors() {
+        assert_eq!(
+            sha256_hex(b""),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+        assert_eq!(
+            sha256_hex(b"abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        assert_eq!(
+            sha256_hex(b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"),
+            "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1"
+        );
+        assert_eq!(
+            sha256_hex(&[b'a'; 1000]),
+            "41edece42d63e8d9bf515a9ba6932e1c20cbc9f5a5d134645adb5db1b9737ea3"
+        );
+    }
+
+    /// Padded base64 alone, as Python's `validate=True` reads it.
+    #[test]
+    fn base64_is_read_padded_and_nothing_else() {
+        assert_eq!(base64_decode(""), Some(Vec::new()));
+        assert_eq!(base64_decode("QQ=="), Some(b"A".to_vec()));
+        assert_eq!(base64_decode("QUI="), Some(b"AB".to_vec()));
+        assert_eq!(base64_decode("+/+/"), Some(vec![0xfb, 0xff, 0xbf]));
+        for bad in [
+            "QQ",
+            "QQ=",
+            "Q===",
+            "QQ==QQ==",
+            "QQ\nQ",
+            "not base64!",
+            "QUJD\u{e9}",
+        ] {
+            assert_eq!(base64_decode(bad), None, "{bad}");
+        }
     }
 }
