@@ -76,6 +76,10 @@ pub(crate) const TOOL_CALL_RESULT: &str = "gen_ai.tool.call.result";
 /// What the exporter takes off a span unless asked and the project allows.
 /// The content fields the exporter cut so a span fits an export, by name.
 pub(crate) const CONTENT_CUT: &str = "telmoni.content_cut";
+/// A failure, as the conventions' `exception` event carries it: content.
+pub(crate) const EXCEPTION_EVENT: &str = "exception";
+pub(crate) const EXCEPTION_TYPE: &str = "exception.type";
+pub(crate) const EXCEPTION_MESSAGE: &str = "exception.message";
 
 const CONTENT: &[&str] = &[
     INPUT_MESSAGES,

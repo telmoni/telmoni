@@ -332,6 +332,35 @@ impl Exporter {
                 },
             });
         }
+        // Events and the status message carry an exception's message: content,
+        // and the first to go from a span trimmed to fit.
+        let kept = keep_content && !trimmed;
+        let events = if kept {
+            span.events
+                .iter()
+                .map(|event| OtlpEvent {
+                    time_unix_nano: nanos(event.timestamp),
+                    name: &event.name,
+                    attributes: event
+                        .attributes
+                        .iter()
+                        .map(|attribute| OtlpAttribute {
+                            key: attribute.key.as_str(),
+                            value: any_value(&attribute.value),
+                        })
+                        .collect(),
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let status = match &span.status {
+            Status::Error { description } => Some(ErrorStatus {
+                code: 2,
+                message: (kept && !description.is_empty()).then_some(description.as_ref()),
+            }),
+            _ => None,
+        };
         OtlpSpan {
             trace_id: span.span_context.trace_id().to_string(),
             span_id: span.span_context.span_id().to_string(),
@@ -342,9 +371,8 @@ impl Exporter {
             start_time_unix_nano: nanos(span.start_time),
             end_time_unix_nano: nanos(span.end_time),
             attributes,
-            // Events and the status message are where an exception writes its
-            // message and stack trace: never sent.
-            status: matches!(span.status, Status::Error { .. }).then_some(ErrorStatus { code: 2 }),
+            events,
+            status,
         }
     }
 
@@ -623,13 +651,25 @@ struct OtlpSpan<'a> {
     start_time_unix_nano: String,
     end_time_unix_nano: String,
     attributes: Vec<OtlpAttribute<'a>>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    events: Vec<OtlpEvent<'a>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    status: Option<ErrorStatus>,
+    status: Option<ErrorStatus<'a>>,
 }
 
 #[derive(Serialize)]
-struct ErrorStatus {
+#[serde(rename_all = "camelCase")]
+struct OtlpEvent<'a> {
+    time_unix_nano: String,
+    name: &'a str,
+    attributes: Vec<OtlpAttribute<'a>>,
+}
+
+#[derive(Serialize)]
+struct ErrorStatus<'a> {
     code: u8,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message: Option<&'a str>,
 }
 
 /// One OTLP `KeyValue`.

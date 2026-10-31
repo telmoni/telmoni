@@ -90,6 +90,11 @@ SYSTEM_INSTRUCTIONS = "gen_ai.system_instructions"
 TOOL_CALL_ARGUMENTS = "gen_ai.tool.call.arguments"
 TOOL_CALL_RESULT = "gen_ai.tool.call.result"
 CONTENT_CUT = "telmoni.content_cut"
+# A failure, as the conventions' `exception` event carries it: content.
+EXCEPTION_EVENT = "exception"
+EXCEPTION_TYPE = "exception.type"
+EXCEPTION_MESSAGE = "exception.message"
+EXCEPTION_STACKTRACE = "exception.stacktrace"
 """The content fields the exporter cut so a span fits an export, by name."""
 
 CONTENT = frozenset(

@@ -465,6 +465,7 @@ describe("an export past ingest's 1 MiB or 1,000 spans", () => {
           startTime: [1, 0],
           endTime: [2, 0],
           attributes: { 'telmoni.tag.big': char.repeat(size), 'app.kept': 'yes' },
+          events: [],
           status: { code: SpanStatusCode.UNSET },
         }) as unknown as ReadableSpan,
     );
@@ -619,6 +620,7 @@ describe('a number ingest cannot read', () => {
         startTime: [1, 0],
         endTime: [2, 0],
         attributes,
+        events: [],
         status: { code: SpanStatusCode.UNSET },
       }) as unknown as ReadableSpan;
     await exporter.export([
@@ -665,6 +667,7 @@ describe('a span time', () => {
         startTime,
         endTime: startTime,
         attributes: {},
+        events: [],
         status: { code: SpanStatusCode.UNSET },
       }) as unknown as ReadableSpan;
     const encoded = exporter.encode([span([18_446_744_073, 709_551_615]), span([18_446_744_073, 709_551_616]), span([-1, 0])]);

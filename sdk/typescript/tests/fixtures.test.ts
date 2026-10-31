@@ -3,6 +3,7 @@
  * the same run, and what each must do with the server's answers.
  */
 
+import { trace } from '@opentelemetry/api';
 import { describe, expect, it } from 'vitest';
 
 import type { Telmoni } from '../src/index';
@@ -10,6 +11,7 @@ import {
   type ExportBody,
   type Harness,
   type JsonAttribute,
+  type JsonSpan,
   answer,
   answerNames,
   answers,
@@ -217,6 +219,74 @@ async function aRun({ telmoni }: Harness): Promise<void> {
   telmoni.run('bot', () => {});
   expect(await telmoni.flush()).toBe(true);
 }
+
+interface FailureFixture {
+  scenario: {
+    agent: string;
+    event: { name: string; attributes: Record<string, string | number> };
+    error: string;
+    message: string;
+  };
+  cases: Array<{ capture_content: boolean; content_mode: string; sends: 'kept' | 'withheld' }>;
+  kept: Pick<JsonSpan, 'status' | 'events'>;
+  withheld: Pick<JsonSpan, 'status' | 'events'>;
+}
+
+/** The run's span as `failure.json`'s README normalizes it. */
+function normalizeFailure(span: JsonSpan): Pick<JsonSpan, 'status' | 'events'> {
+  const errorType = span.attributes.find((a) => a.key === 'error.type')?.value['stringValue'];
+  const sent: Pick<JsonSpan, 'status' | 'events'> = span.status === undefined ? {} : { status: { ...span.status } };
+  if (span.events === undefined) return sent;
+  sent.events = structuredClone(span.events).map((event) => {
+    const at = BigInt(event.timeUnixNano);
+    expect(at >= BigInt(span.startTimeUnixNano) && at <= BigInt(span.endTimeUnixNano)).toBe(true);
+    const attributes = [...event.attributes].sort(byKey).filter((a) => {
+      if (a.key !== 'exception.stacktrace') return true;
+      expect(a.value['stringValue']).toBeTruthy();
+      return false;
+    });
+    for (const a of attributes) {
+      if (a.key !== 'exception.type') continue;
+      expect(a.value['stringValue']).toBe(errorType);
+      a.value['stringValue'] = '<error.type>';
+    }
+    return { ...event, timeUnixNano: '<time>', attributes };
+  });
+  return sent;
+}
+
+describe('failure.json', () => {
+  const fixture = loadFixture<FailureFixture>('failure.json');
+  const { scenario } = fixture;
+  class RateLimited extends Error {}
+
+  it.each(fixture.cases)('a failure leaves in full only under both locks: %o', async (each) => {
+    const mode = answer(200, { 'Telmoni-Content-Mode': each.content_mode }, '{}');
+    const h = harness({ captureContent: each.capture_content }, {}, [mode]);
+    try {
+      h.telmoni.run(scenario.agent, () => {});
+      expect(await h.telmoni.flush()).toBe(true);
+      expect(h.telmoni.contentMode).toBe(each.content_mode);
+      expect(() =>
+        h.telmoni.run(scenario.agent, (run) => {
+          trace.getSpan(run.context)!.addEvent(scenario.event.name, scenario.event.attributes);
+          throw new RateLimited(scenario.message);
+        }),
+      ).toThrow(RateLimited);
+      expect(await h.telmoni.flush()).toBe(true);
+    } finally {
+      await h.telmoni.shutdown();
+    }
+    const failed = h.transport.spans().at(-1)!;
+    expect(normalizeFailure(failed)).toEqual(fixture[each.sends]);
+    if (each.sends === 'kept') {
+      expect(JSON.stringify(failed.events!.at(-1))).toContain('exception.stacktrace');
+    } else {
+      expect(h.transport.text()).not.toContain(scenario.message);
+      expect(h.transport.text()).not.toContain(scenario.event.name);
+    }
+  });
+});
 
 describe('answers/', () => {
   it('kept', async () => {

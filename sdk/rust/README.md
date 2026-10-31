@@ -88,11 +88,13 @@ and no message; `cancel()` marks it cancelled by the agent. The `_with`
 methods take a closure and return its value, or the `Error` that kept their
 handle from opening — `telmoni.run_with(..)`, `run.step_with(..)`,
 `model_call_with`, `tool_call_with` — and their `try_` forms, for a closure
-whose error converts from `telmoni::Error`, mark an `Err` on the span with the
-error type's name before returning it unchanged:
+whose error converts from `telmoni::Error` and implements `Display`, mark an
+`Err` on the span with the error type's name, and its message as an `exception`
+event and the status's message, content ([Content](#content)), before returning
+it unchanged; `run.on_result(result)` does the same for a run held as a guard:
 
 ```rust
-// MyError implements From<telmoni::Error>.
+// MyError implements From<telmoni::Error> and Display.
 let answer: Result<String, MyError> = telmoni.try_run_with("support-bot", RunOptions::default(), |run| {
     run.try_step_with("plan", |_step| plan())
 });
@@ -236,7 +238,9 @@ any `Carrier`, a type that is both an OpenTelemetry `Injector` and
 
 Prompts, completions, tool arguments and results are content, and so are a
 run's own messages: `RunOptions::input_messages` and
-`run.answered(RunReply { output_messages })`. They are set on
+`run.answered(RunReply { output_messages })`, a failure's message, its
+`exception` event and its status's message, and every event the application
+adds to a span through OpenTelemetry. They are set on
 the span, and the exporter takes them off every span before it leaves the
 process unless `capture_content` is on **and** the project's content mode,
 learned from the platform's answers, is `on`. Before the first answer the mode

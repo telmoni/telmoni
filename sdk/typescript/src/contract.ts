@@ -89,6 +89,11 @@ export const TOOL_CALL_RESULT = 'gen_ai.tool.call.result';
 /** What the exporter takes off a span unless asked and the project allows. */
 /** The content fields the exporter cut so a span fits an export, by name. */
 export const CONTENT_CUT = 'telmoni.content_cut';
+/** A failure, as the conventions' `exception` event carries it: content. */
+export const EXCEPTION_EVENT = 'exception';
+export const EXCEPTION_TYPE = 'exception.type';
+export const EXCEPTION_MESSAGE = 'exception.message';
+export const EXCEPTION_STACKTRACE = 'exception.stacktrace';
 
 export const CONTENT: ReadonlySet<string> = new Set([
   INPUT_MESSAGES,

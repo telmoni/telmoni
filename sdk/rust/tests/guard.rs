@@ -203,6 +203,13 @@ fn a_refusal_carried_out_by_a_try_closure_is_the_callers_error() -> Outcome {
         Cap(Error),
     }
 
+    impl std::fmt::Display for Stopped {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            let Self::Cap(error) = self;
+            write!(f, "{error}")
+        }
+    }
+
     impl From<Error> for Stopped {
         fn from(error: Error) -> Self {
             Self::Cap(error)

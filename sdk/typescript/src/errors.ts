@@ -1,6 +1,6 @@
 /**
- * What an error is called, never what it says: its message is content and
- * stays home, as does its stack trace.
+ * What an error is called, never what it says: its message and stack trace
+ * are content, which only the exporter's lock lets out.
  */
 
 interface Named {

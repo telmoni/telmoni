@@ -54,6 +54,12 @@ fn a_failing_tool_records_its_error_type() -> Outcome {
     #[derive(Debug)]
     struct Timeout;
 
+    impl std::fmt::Display for Timeout {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("timed out")
+        }
+    }
+
     impl From<telmoni::Error> for Timeout {
         fn from(_: telmoni::Error) -> Self {
             Self

@@ -55,6 +55,12 @@ fn a_failing_step_records_the_error_type_and_returns_the_err() -> Outcome {
     #[derive(Debug)]
     struct PlanningFailed(&'static str);
 
+    impl std::fmt::Display for PlanningFailed {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str(self.0)
+        }
+    }
+
     impl From<telmoni::Error> for PlanningFailed {
         fn from(_: telmoni::Error) -> Self {
             Self("capped")

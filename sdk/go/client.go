@@ -209,9 +209,9 @@ func New(cfg Config, opts ...Option) (*Client, error) {
 		sdktrace.WithRawSpanLimits(sdktrace.SpanLimits{
 			AttributeValueLengthLimit:   -1,
 			AttributeCountLimit:         128,
-			EventCountLimit:             0,
+			EventCountLimit:             32,
 			LinkCountLimit:              0,
-			AttributePerEventCountLimit: 0,
+			AttributePerEventCountLimit: 32,
 			AttributePerLinkCountLimit:  0,
 		}),
 		sdktrace.WithSpanProcessor(proc),

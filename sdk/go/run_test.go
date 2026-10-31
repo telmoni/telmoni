@@ -656,6 +656,77 @@ func TestARunsOwnMessagesStayHomeWithoutCaptureContentEvenWhenAllowed(t *testing
 	}
 }
 
+func TestAFailureLeavesWithItsMessageUnderBothLocks(t *testing.T) {
+	on := contentOn()
+	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k"), CaptureContent: true}, newFakeTransport(t, on, on))
+	_, warm := h.client.Run(context.Background(), "warm", telmoni.RunOptions{})
+	warm.End()
+	h.flush()
+	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	_, step := run.Step(ctx, "plan")
+	step.Fail(&planningFailed{detail: "bad plan"})
+	step.End()
+	run.FailWith("RateLimit")
+	run.End()
+	h.flush()
+	spans := byName(h.transport.spans(t))
+	plan := spans["plan"]
+	if !reflect.DeepEqual(plan["status"], map[string]any{"code": 2.0, "message": "bad plan"}) {
+		t.Errorf("status = %v", plan["status"])
+	}
+	events := plan["events"].([]any)
+	if len(events) != 1 {
+		t.Fatalf("events = %v", events)
+	}
+	event := events[0].(map[string]any)
+	sent := attributesOf(t, event)
+	want := map[string]any{"exception.type": "telmoni_test.planningFailed", "exception.message": "bad plan"}
+	if event["name"] != "exception" || !reflect.DeepEqual(sent, want) {
+		t.Errorf("event = %v", event)
+	}
+	// A type alone carries no message to record.
+	if ran := spans["invoke_agent bot"]; !reflect.DeepEqual(ran["status"], map[string]any{"code": 2.0}) || ran["events"] != nil {
+		t.Errorf("a type alone sent %v", ran)
+	}
+}
+
+func TestAFailuresMessageStaysHomeWithoutCaptureContent(t *testing.T) {
+	on := contentOn()
+	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k")}, newFakeTransport(t, on, on))
+	_, warm := h.client.Run(context.Background(), "warm", telmoni.RunOptions{})
+	warm.End()
+	h.flush()
+	_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	run.Fail(&planningFailed{detail: "bad plan"})
+	run.End()
+	h.flush()
+	ran := byName(h.transport.spans(t))["invoke_agent bot"]
+	if !reflect.DeepEqual(ran["status"], map[string]any{"code": 2.0}) || ran["events"] != nil {
+		t.Errorf("sent %v", ran)
+	}
+	if strings.Contains(h.transport.text(), "bad plan") {
+		t.Error("a failure's message left without CaptureContent")
+	}
+}
+
+func TestAnApplicationsEventLeavesOnlyUnderBothLocks(t *testing.T) {
+	for _, capture := range []bool{true, false} {
+		on := contentOn()
+		h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k"), CaptureContent: capture}, newFakeTransport(t, on, on))
+		_, warm := h.client.Run(context.Background(), "warm", telmoni.RunOptions{})
+		warm.End()
+		h.flush()
+		ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+		trace.SpanFromContext(ctx).AddEvent("cache miss")
+		run.End()
+		h.flush()
+		_, sent := byName(h.transport.spans(t))["invoke_agent bot"]["events"]
+		if sent != capture || strings.Contains(h.transport.text(), "cache miss") != capture {
+			t.Errorf("with CaptureContent %v, the event was sent: %v", capture, sent)
+		}
+	}
+}
+
 func TestARunsAnswerAfterItEndedIsNotSentWithOneWarning(t *testing.T) {
 	on := contentOn()
 	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k"), CaptureContent: true}, newFakeTransport(t, on, on))

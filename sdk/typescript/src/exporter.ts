@@ -89,7 +89,8 @@ export interface OtlpSpan {
   startTimeUnixNano: string;
   endTimeUnixNano: string;
   attributes: KeyValue[];
-  status?: { code: number };
+  events?: { timeUnixNano: string; name: string; attributes: KeyValue[] }[];
+  status?: { code: number; message?: string };
 }
 
 export interface ExportTraceServiceRequest {
@@ -469,10 +470,21 @@ export class Exporter {
       endTimeUnixNano: nanos(end),
       attributes,
     };
-    // Events and the status message are where an exception writes its
-    // message and stack trace: never sent.
+    // Events and the status message carry an exception's message and stack
+    // trace: content, and the first to go from a span trimmed to fit.
+    const events = keepContent && !trimmed;
+    if (events && span.events.length > 0) {
+      encoded.events = span.events.map((event) => ({
+        timeUnixNano: nanos(event.time),
+        name: event.name,
+        attributes: Object.entries(event.attributes ?? {})
+          .filter((entry): entry is [string, AttributeValue] => entry[1] !== undefined)
+          .map(([key, value]) => attribute(key, value)),
+      }));
+    }
     if (span.status.code === SpanStatusCode.ERROR) {
       encoded.status = { code: 2 };
+      if (events && span.status.message) encoded.status.message = span.status.message;
     }
     return encoded;
   }

@@ -9,6 +9,7 @@ from collections.abc import AsyncIterator, Generator, Iterator
 from unittest import mock
 
 import pytest
+from opentelemetry import trace
 
 from conftest import FakeTransport, attributes_of, infos_in
 from telmoni import Config, Run, Telmoni, WarningInfo, current_run
@@ -96,6 +97,87 @@ def test_a_fail_of_an_empty_type_fails_the_run_with_none(
     (failed,) = (s for s in transport.spans() if s["name"] == "invoke_agent bot")
     assert "error.type" not in attributes_of(failed)
     assert failed["status"] == {"code": 2}
+
+
+def content_kept(transport: FakeTransport) -> Telmoni:
+    """A client asked for content whose project keeps it, the mode learned."""
+    on = Answer(200, {"Telmoni-Content-Mode": "on"}, b"{}")
+    transport.answers = [on] * 4
+    client = Telmoni(Config(api_key="k", capture_content=True), transport=transport)
+    with client.run("warm"):
+        pass
+    assert client.flush()
+    return client
+
+
+def test_a_failure_leaves_with_its_message_and_trace_under_both_locks(
+    transport: FakeTransport,
+) -> None:
+    client = content_kept(transport)
+    try:
+        with client.run("bot") as run:
+            run.fail(TimeoutError("took too long"))
+        with pytest.raises(ValueError), client.run("bot"), client.step("plan"):
+            raise ValueError("bad plan")
+        with client.run("bot") as run:
+            run.fail("RateLimit")
+        assert client.flush()
+    finally:
+        client.shutdown()
+    failed, step, ran, typed = transport.spans()[1:]
+    for span, kind, message in (
+        (failed, "TimeoutError", "took too long"),
+        (step, "ValueError", "bad plan"),
+        (ran, "ValueError", "bad plan"),
+    ):
+        assert span["status"] == {"code": 2, "message": message}
+        (event,) = span["events"]
+        sent = attributes_of(event)
+        assert event["name"] == "exception"
+        assert sent["exception.type"] == attributes_of(span)["error.type"] == kind
+        assert sent["exception.message"] == message
+        assert f"{kind}: {message}" in sent["exception.stacktrace"]
+    # A type alone carries no message to record.
+    assert typed["status"] == {"code": 2} and "events" not in typed
+
+
+def test_a_failure_keeps_its_message_home_without_capture_content(
+    transport: FakeTransport,
+) -> None:
+    on = Answer(200, {"Telmoni-Content-Mode": "on"}, b"{}")
+    transport.answers = [on, on]
+    client = Telmoni(Config(api_key="k"), transport=transport)
+    try:
+        with client.run("warm"):
+            pass
+        assert client.flush()
+        with client.run("bot") as run:
+            run.fail(TimeoutError("took too long"))
+        assert client.flush()
+    finally:
+        client.shutdown()
+    span = transport.spans()[-1]
+    assert span["status"] == {"code": 2} and "events" not in span
+    assert attributes_of(span)["error.type"] == "TimeoutError"
+    assert "took too long" not in str(transport.requests)
+
+
+def test_an_applications_event_leaves_only_under_both_locks(
+    transport: FakeTransport, telmoni: Telmoni
+) -> None:
+    keeping = FakeTransport()
+    client = content_kept(keeping)
+    try:
+        for each in (client, telmoni):
+            with each.run("bot"):
+                trace.get_current_span().add_event("cache miss", {"key": "k1"})
+            assert each.flush()
+    finally:
+        client.shutdown()
+    (event,) = keeping.spans()[-1]["events"]
+    assert event["name"] == "cache miss" and attributes_of(event) == {"key": "k1"}
+    assert "events" not in transport.spans()[-1]
+    assert "cache miss" not in str(transport.requests)
 
 
 def test_a_keyboard_interrupt_is_a_cancellation(

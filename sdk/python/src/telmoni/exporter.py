@@ -545,10 +545,25 @@ class Exporter:
         }
         if span.parent is not None and span.parent.is_valid:
             encoded["parentSpanId"] = format(span.parent.span_id, "016x")
-        # Events and the status message are where an exception writes its
-        # message and stack trace: never sent.
+        # Events and the status message carry an exception's message and stack
+        # trace: content, and the first to go from a span trimmed to fit.
+        events = keep_content and not trimmed
+        if events and span.events:
+            encoded["events"] = [
+                {
+                    "timeUnixNano": _nanos(event.timestamp),
+                    "name": event.name,
+                    "attributes": [
+                        _attribute(key, value)
+                        for key, value in (event.attributes or {}).items()
+                    ],
+                }
+                for event in span.events
+            ]
         if span.status.status_code is StatusCode.ERROR:
             encoded["status"] = {"code": 2}
+            if events and span.status.description:
+                encoded["status"]["message"] = span.status.description
         return encoded
 
     def _read(self, answer: Answer) -> None:

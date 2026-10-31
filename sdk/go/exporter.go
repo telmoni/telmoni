@@ -466,11 +466,19 @@ type otlpSpan struct {
 	StartTimeUnixNano string      `json:"startTimeUnixNano"`
 	EndTimeUnixNano   string      `json:"endTimeUnixNano"`
 	Attributes        []keyValue  `json:"attributes"`
+	Events            []otlpEvent `json:"events,omitempty"`
 	Status            *otlpStatus `json:"status,omitempty"`
 }
 
+type otlpEvent struct {
+	TimeUnixNano string     `json:"timeUnixNano"`
+	Name         string     `json:"name"`
+	Attributes   []keyValue `json:"attributes"`
+}
+
 type otlpStatus struct {
-	Code int `json:"code"`
+	Code    int    `json:"code"`
+	Message string `json:"message,omitempty"`
 }
 
 type keyValue struct {
@@ -591,10 +599,23 @@ func encodeSpan(span sdktrace.ReadOnlySpan, keepContent, trimmed bool, cut []str
 	if parent := span.Parent(); parent.IsValid() {
 		out.ParentSpanID = parent.SpanID().String()
 	}
-	// Events and the status message are where an exception writes its
-	// message and stack trace: never sent.
-	if span.Status().Code == codes.Error {
+	// Events and the status message carry an exception's message: content,
+	// and the first to go from a span trimmed to fit.
+	events := keepContent && !trimmed
+	if events {
+		for _, event := range span.Events() {
+			attributes := make([]keyValue, 0, len(event.Attributes))
+			for _, kv := range event.Attributes {
+				attributes = append(attributes, keyValue{Key: string(kv.Key), Value: encodeValue(kv.Value)})
+			}
+			out.Events = append(out.Events, otlpEvent{TimeUnixNano: nanos(event.Time), Name: event.Name, Attributes: attributes})
+		}
+	}
+	if status := span.Status(); status.Code == codes.Error {
 		out.Status = &otlpStatus{Code: 2}
+		if events {
+			out.Status.Message = status.Description
+		}
 	}
 	return out
 }

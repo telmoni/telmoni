@@ -451,6 +451,12 @@ fn a_failed_call_records_the_error_type() -> Outcome {
     #[derive(Debug)]
     struct ProviderDown;
 
+    impl std::fmt::Display for ProviderDown {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("provider down")
+        }
+    }
+
     impl From<telmoni::Error> for ProviderDown {
         fn from(_: telmoni::Error) -> Self {
             Self

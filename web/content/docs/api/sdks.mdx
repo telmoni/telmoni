@@ -95,9 +95,10 @@ holding the **ingest** scope.
     Each of `run`, `step`, `model_call` and `tool_call` is a context manager,
     an `async with`, and a decorator; on a generator, sync or async, the
     decorator's span covers its iteration. An exception that escapes one
-    marks the span failed with the exception's class, never its message, and
-    is raised again; a `KeyboardInterrupt` or `asyncio.CancelledError`, or a
-    generator closed before its end, marks it cancelled.
+    marks the span failed with the exception's class, records its message
+    and stack trace as [content](#content), and is raised again; a
+    `KeyboardInterrupt` or `asyncio.CancelledError`, or a generator closed
+    before its end, marks it cancelled.
     `fail("TimeoutError")` and `cancel()` do the same by hand.
     `run` raises `ValueError` for a blank agent name, a sample rate outside
     its range or a cap that is no cap ([the guard](#the-guard)). A token
@@ -112,9 +113,9 @@ holding the **ingest** scope.
     one warning: copy its counts into a `Usage`. A name, model, provider, user, session, response model or error
     type that is no string goes as its text with one warning, as does a tag
     that is no string, finite number or bool; an exception or an
-    exception's class handed to `fail()` goes as the class's name, never its
-    message. Past Telmoni's caps, counted in characters, a name, the agent, a
-    model, a provider, a response model or an error type is cut to its cap — a
+    exception's class handed to `fail()` goes as the class's name, an
+    exception's message and stack trace recorded as content. Past Telmoni's
+    caps, counted in characters, a name, the agent, a model, a provider, a response model or an error type is cut to its cap — a
     step's or a tool's name to 145, the rest to 128 — and a user past 128 or a
     session past 200 is left off, since cut it would name another; a step named
     nothing goes as `step`, a model call with no model is named by its operation
@@ -151,7 +152,8 @@ holding the **ingest** scope.
 
     Each callback receives its handle and may be sync or async; the span ends
     when the callback settles. An error thrown inside marks the span failed
-    with the error's class name and is thrown again; one named `AbortError`
+    with the error's class name, records an `Error`'s message and stack as
+    [content](#content), and is thrown again; one named `AbortError`
     marks it cancelled. `fail('TimeoutError')` and `cancel()` do the same by
     hand, and `wrap` turns a function into one that opens a run per call.
     `run` throws a `TypeError` for a blank agent name and a `RangeError` for
@@ -169,7 +171,8 @@ holding the **ingest** scope.
     `inputTokens` and the rest. A name, model, provider, user, session, response model
     or error type that is no string goes as its text with one warning, as does
     a tag that is no string, finite number or boolean; an error, or a class,
-    handed to `fail()` goes as its class's name, never its message. Past
+    handed to `fail()` goes as its class's name, an `Error`'s message and
+    stack recorded as content. Past
     Telmoni's caps, counted in characters, a name, the agent, a model, a
     provider, a response model or an error type is cut to its cap — a step's
     or a tool's name to 145, the rest to 128 — and a user past 128 or a session
@@ -218,8 +221,8 @@ holding the **ingest** scope.
     Each opener returns a context carrying its span, so your own OpenTelemetry
     spans started with it nest under the run, and the handle to end with
     `defer`; `telmoni.RunFromContext(ctx)` finds the run deep in a call stack.
-    `Fail(err)` marks the span failed with the error's Go type, never its
-    message, and marks it cancelled for `context.Canceled`, unless its run
+    `Fail(err)` marks the span failed with the error's Go type, records its
+    message as [content](#content), and marks it cancelled for `context.Canceled`, unless its run
     was [refused an opening](#the-guard);
     `FailWith("TimeoutError")` and `Cancel()` do the same by hand. The SDK
     never panics: a `Client` not from `New`, the nil a failed `New` returns
@@ -292,9 +295,11 @@ holding the **ingest** scope.
     `text_completion` and `embeddings`, goes as `chat`; each with one warning. The closure forms `run_with`, `step_with`, `model_call_with` and
     `tool_call_with` end the span when the closure returns and return its
     value, `step_with` and the calls' wrapped in a `Result` for the cap; their
-    `try_` forms mark an `Err` on the span with the error's type name before
+    `try_` forms mark an `Err` on the span with the error's type name,
+    recording its message (`Display`) as [content](#content), before
     returning it unchanged, and return a cap's refusal as that error type,
-    which takes one (`From<telmoni::Error>`). `fail("TimeoutError")` and
+    which takes one (`From<telmoni::Error>`); `run.on_result(result)` does
+    the same for a run held as a guard. `fail("TimeoutError")` and
     `cancel()` do the same by hand, and `context()` or `attach()` make the run
     current for your own spans.
   </Tab>
@@ -795,9 +800,13 @@ answer (`answered(time_to_first_token=0.35)`, `{ timeToFirstToken: 0.35 }`,
 In Python and TypeScript, a parameter that is no finite number, and a time
 below 0 or not finite, is left off the call with one warning, as is a time below 0 in Go;
 a whole number's fraction is cut, as a token count's is. A tool call is
-`execute_tool <name>`. The exception's class
-alone marks a failure, as `error.type`; no message, stack trace or event is
-ever sent. The [ingest page](/docs/api/ingest) lists every attribute and what
+`execute_tool <name>`. A failure is marked by the error's class, as
+`error.type`, and an error status; its message is recorded on the span as an
+OpenTelemetry `exception` event (`exception.type`, `exception.message`, and
+`exception.stacktrace` in Python and TypeScript, where a stack comes cheaply)
+and as the status's message, which leave the process only as
+[content](#content) does. A type alone, Python's `fail("TimeoutError")`, Go's
+`FailWith` or Rust's `fail`, carries no message. The [ingest page](/docs/api/ingest) lists every attribute and what
 the server keeps of each.
 
 ### Content
@@ -814,7 +823,11 @@ Rust's `RunOptions { input_messages, .. }` and
 `run.answered(RunReply { output_messages })`), and a recorded run its
 `input_messages` and `output_messages`, `inputMessages` and `outputMessages`
 in TypeScript and Go. An answer given after its run ended is not sent, with
-one warning; in Rust, `end` takes the run, so none can come. They are sent only when the client is built with
+one warning; in Rust, `end` takes the run, so none can come. A failure's
+message and stack trace — its `exception` event and its status's message —
+and every event your code adds to an SDK span through OpenTelemetry are
+content too; without both locks below, a failed span leaves with its
+`error.type` and an error status alone, and no event. They are sent only when the client is built with
 `capture_content` on **and** the project's content mode, which the SDK learns
 from the server's first answer, is `on`; in Python and TypeScript, a setting
 that is no boolean, such as `"false"` from the environment, is refused with a

@@ -56,7 +56,9 @@ Each callback gets a handle and runs with its span current; the span ends when
 the callback settles, and the callback's result is returned, so a synchronous
 callback returns synchronously and an `async` one returns its promise. An error
 thrown or rejected inside marks the span with the error's class name
-(`error.type`), never its message, and is rethrown; an error named `AbortError`
+(`error.type`), records an `Error`'s message and stack on the span as an
+`exception` event and the status's message, content ([Content](#content)), and
+is rethrown; an error named `AbortError`
 marks the span cancelled instead. `run.fail('RateLimit')` and `run.cancel()`
 mark a span by hand. Steps nest: `step.step(...)`, `step.modelCall(...)` and
 `step.toolCall(...)` open under the step; the same methods on `run` open under
@@ -72,7 +74,8 @@ the most ingest keeps; an empty user, session, provider or response model is
 left off as unset. A name, model, provider, user, session, response model or
 error type that is no string goes as its text with one warning, as does a tag
 that is no string, finite number or boolean; an error, or a class, handed to
-`fail()` goes as its class's name, never its message. Past ingest's caps,
+`fail()` goes as its class's name, an `Error`'s message and stack recorded as
+content. Past ingest's caps,
 counted in characters, a name, the agent, a model, a provider, a response
 model or an error type is cut to its cap — a step's or a tool's name to 145,
 the rest to 128 — and a user past 128 or a session past 200 is left off, since
@@ -209,7 +212,10 @@ Headers that name no run give `undefined`.
 Prompts, completions, system instructions, tool arguments and tool results —
 `inputMessages`, `systemInstructions`, `outputMessages`, `arguments` and
 `returned(...)`, and a run's own `inputMessages` and
-`run.answered({ outputMessages })` — are content. They leave the process only when
+`run.answered({ outputMessages })` — are content, and so are a failure's message
+and stack, its `exception` event and its status's message, and every event the
+application adds to a span through OpenTelemetry: without them, a failed span
+goes with its `error.type` and an error status alone. They leave the process only when
 `captureContent: true` **and** the project's content mode is `on`, which the
 SDK learns from the platform's first answer (a `captureContent` that is no
 boolean, such as `'false'` from the environment, throws a `TypeError`); before that answer, and on an

@@ -70,10 +70,10 @@ class Telmoni:
             meter_provider=NoOpMeterProvider(),
             span_limits=SpanLimits(
                 max_attributes=128,
-                max_events=0,
+                max_events=32,
                 max_links=0,
                 max_span_attributes=128,
-                max_event_attributes=0,
+                max_event_attributes=32,
                 max_link_attributes=0,
                 max_attribute_length=unlimited,
                 max_span_attribute_length=unlimited,

@@ -360,6 +360,19 @@ impl Handle {
     }
 
     fn fail(&self, error_type: &str) {
+        self.set_failed(error_type, None);
+    }
+
+    /// Marks it failed by `error`, whose message is content: kept on the span
+    /// as an exception event and the status's, for the exporter's lock.
+    fn fail_by<E: fmt::Display>(&self, error: &E) {
+        let mut message = String::new();
+        // A `Display` that errs leaves what it wrote, where `to_string` panics.
+        let _ = fmt::Write::write_fmt(&mut message, format_args!("{error}"));
+        self.set_failed(&error_type::<E>(), Some(message));
+    }
+
+    fn set_failed(&self, error_type: &str, message: Option<String>) {
         let warner = &self.client.warner;
         let error_type = cut(
             error_type,
@@ -367,8 +380,19 @@ impl Handle {
             "span's error type",
             warner,
         );
+        let span = self.cx.span();
+        match message {
+            Some(message) => {
+                let mut attributes = vec![KeyValue::new(contract::EXCEPTION_MESSAGE, message.clone())];
+                if !error_type.is_empty() {
+                    attributes.push(KeyValue::new(contract::EXCEPTION_TYPE, error_type.clone()));
+                }
+                span.add_event(contract::EXCEPTION_EVENT, attributes);
+                span.set_status(Status::error(message));
+            }
+            None => span.set_status(Status::error("")),
+        }
         self.set_last(error_type_attribute(error_type));
-        self.cx.span().set_status(Status::error(""));
         self.failed.store(true, Ordering::Relaxed);
     }
 
@@ -445,7 +469,7 @@ macro_rules! handle_methods {
             }
 
             /// Marks the span failed: status `ERROR`, and `error_type` as its
-            /// `error.type`, none if empty. No message: a message is content.
+            /// `error.type`, none if empty, with no message.
             pub fn fail(&self, error_type: &str) {
                 self.handle.fail(error_type);
             }
@@ -556,22 +580,23 @@ macro_rules! opens_children {
             }
 
             /// [`Self::step_with`] for a fallible `f`: an `Err` marks the step
-            /// failed with `E`'s type name (its last path segment) and is
-            /// returned unchanged. An `Err` is the only error a closure can
+            /// failed with `E`'s type name (its last path segment) and its
+            /// message, content under the exporter's lock, and is returned
+            /// unchanged. An `Err` is the only error a closure can
             /// carry out; a panic unwinding through marks the span `panic`.
             ///
             /// # Errors
             ///
             /// `f`'s, or [`Self::step`]'s as an `E`, before `f` runs.
-            pub fn try_step_with<T, E: From<Error>>(
+            pub fn try_step_with<T, E: From<Error> + fmt::Display>(
                 &self,
                 name: &str,
                 f: impl FnOnce(&Step) -> Result<T, E>,
             ) -> Result<T, E> {
                 let step = self.step(name)?;
                 let result = f(&step);
-                if result.is_err() {
-                    step.fail(&error_type::<E>());
+                if let Err(error) = &result {
+                    step.handle.fail_by(error);
                 }
                 step.end();
                 result
@@ -596,12 +621,13 @@ macro_rules! opens_children {
             }
 
             /// [`Self::model_call_with`] for a fallible `f`: an `Err` marks
-            /// the call failed with `E`'s type name and is returned unchanged.
+            /// the call failed with `E`'s type name and its message and is
+            /// returned unchanged.
             ///
             /// # Errors
             ///
             /// `f`'s, or [`Self::model_call`]'s as an `E`, before `f` runs.
-            pub fn try_model_call_with<T, E: From<Error>>(
+            pub fn try_model_call_with<T, E: From<Error> + fmt::Display>(
                 &self,
                 model: &str,
                 options: ModelCallOptions,
@@ -609,8 +635,8 @@ macro_rules! opens_children {
             ) -> Result<T, E> {
                 let call = self.model_call(model, options)?;
                 let result = f(&call);
-                if result.is_err() {
-                    call.fail(&error_type::<E>());
+                if let Err(error) = &result {
+                    call.handle.fail_by(error);
                 }
                 call.end();
                 result
@@ -635,12 +661,13 @@ macro_rules! opens_children {
             }
 
             /// [`Self::tool_call_with`] for a fallible `f`: an `Err` marks the
-            /// call failed with `E`'s type name and is returned unchanged.
+            /// call failed with `E`'s type name and its message and is returned
+            /// unchanged.
             ///
             /// # Errors
             ///
             /// `f`'s, or [`Self::tool_call`]'s as an `E`, before `f` runs.
-            pub fn try_tool_call_with<T, E: From<Error>>(
+            pub fn try_tool_call_with<T, E: From<Error> + fmt::Display>(
                 &self,
                 name: &str,
                 options: ToolCallOptions,
@@ -648,8 +675,8 @@ macro_rules! opens_children {
             ) -> Result<T, E> {
                 let call = self.tool_call(name, options)?;
                 let result = f(&call);
-                if result.is_err() {
-                    call.fail(&error_type::<E>());
+                if let Err(error) = &result {
+                    call.handle.fail_by(error);
                 }
                 call.end();
                 result
@@ -691,13 +718,14 @@ impl Run {
         }
     }
 
-    /// Marks the run failed with `E`'s type name when `result` is an `Err`,
+    /// Marks the run failed with `E`'s type name and its message when `result`
+    /// is an `Err`,
     /// and gives `result` back unchanged: what
     /// [`Telmoni::try_run_with`](crate::Telmoni::try_run_with) does for a
     /// closure, for a run held as a guard.
-    pub fn on_result<T, E>(&self, result: Result<T, E>) -> Result<T, E> {
-        if result.is_err() {
-            self.fail(&error_type::<E>());
+    pub fn on_result<T, E: fmt::Display>(&self, result: Result<T, E>) -> Result<T, E> {
+        if let Err(error) = &result {
+            self.handle.fail_by(error);
         }
         result
     }

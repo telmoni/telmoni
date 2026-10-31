@@ -1,3 +1,4 @@
+import { trace } from '@opentelemetry/api';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Run, currentRun } from '../src/index';
@@ -328,6 +329,85 @@ describe('a run', () => {
     }
     expect(quiet.transport.text()).not.toContain('never asked');
     expect(quiet.transport.text()).not.toContain('never answered');
+  });
+
+  it('sends a failure with its message and stack only when asked and the project allows', async () => {
+    const on = answer(200, { 'Telmoni-Content-Mode': 'on' }, '{}');
+    const asked = harness({ captureContent: true }, {}, Array.from({ length: 4 }, () => on));
+    try {
+      asked.telmoni.run('warm', () => {});
+      expect(await asked.telmoni.flush()).toBe(true);
+      asked.telmoni.run('bot', (run) => run.fail(new RangeError('took too long')));
+      expect(() =>
+        asked.telmoni.run('bot', (run) =>
+          run.step('plan', () => {
+            throw new TypeError('bad plan');
+          }),
+        ),
+      ).toThrow(TypeError);
+      asked.telmoni.run('bot', (run) => run.fail('RateLimit'));
+      expect(await asked.telmoni.flush()).toBe(true);
+    } finally {
+      await asked.telmoni.shutdown();
+    }
+    const [, failed, step, ran, typed] = asked.transport.spans();
+    for (const [span, kind, message] of [
+      [failed!, 'RangeError', 'took too long'],
+      [step!, 'TypeError', 'bad plan'],
+      [ran!, 'TypeError', 'bad plan'],
+    ] as const) {
+      expect(span.status).toEqual({ code: 2, message });
+      const event = one(span.events!);
+      const sent = attributesOf(event);
+      expect(event.name).toBe('exception');
+      expect(sent['exception.type']).toBe(kind);
+      expect(attributesOf(span)['error.type']).toBe(kind);
+      expect(sent['exception.message']).toBe(message);
+      expect(sent['exception.stacktrace']).toContain(`${kind}: ${message}`);
+    }
+    // A type alone carries no message to record.
+    expect(typed!.status).toEqual({ code: 2 });
+    expect(typed!.events).toBeUndefined();
+  });
+
+  it('keeps a failure\'s message home without captureContent even when the project allows it', async () => {
+    const on = answer(200, { 'Telmoni-Content-Mode': 'on' }, '{}');
+    const quiet = harness({}, {}, Array.from({ length: 4 }, () => on));
+    try {
+      quiet.telmoni.run('warm', () => {});
+      expect(await quiet.telmoni.flush()).toBe(true);
+      quiet.telmoni.run('bot', (run) => run.fail(new RangeError('took too long')));
+      expect(await quiet.telmoni.flush()).toBe(true);
+    } finally {
+      await quiet.telmoni.shutdown();
+    }
+    const span = quiet.transport.spans().at(-1)!;
+    expect(span.status).toEqual({ code: 2 });
+    expect(span.events).toBeUndefined();
+    expect(attributesOf(span)['error.type']).toBe('RangeError');
+    expect(quiet.transport.text()).not.toContain('took too long');
+  });
+
+  it("sends the application's own event only when asked and the project allows", async () => {
+    const on = answer(200, { 'Telmoni-Content-Mode': 'on' }, '{}');
+    const asked = harness({ captureContent: true }, {}, Array.from({ length: 4 }, () => on));
+    try {
+      for (const each of [asked, h]) {
+        each.telmoni.run('warm', () => {});
+        expect(await each.telmoni.flush()).toBe(true);
+        each.telmoni.run('bot', (run) => {
+          trace.getSpan(run.context)!.addEvent('cache miss', { key: 'k1' });
+        });
+        expect(await each.telmoni.flush()).toBe(true);
+      }
+    } finally {
+      await asked.telmoni.shutdown();
+    }
+    const event = one(asked.transport.spans().at(-1)!.events!);
+    expect(event.name).toBe('cache miss');
+    expect(attributesOf(event)).toEqual({ key: 'k1' });
+    expect(h.transport.spans().at(-1)!.events).toBeUndefined();
+    expect(h.transport.text()).not.toContain('cache miss');
   });
 
   it('sends no answer given after it ended, with one warning', async () => {

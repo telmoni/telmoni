@@ -34,6 +34,17 @@ Nothing is derived at random, so the export is compared nearly whole:
 
 The same record sent twice must be the same bytes, which ingest's claim on a body answers once.
 
+## `failure.json`
+
+A failure in full, under the content lock. For each of `cases`, a client is built with its `capture_content`, learns its `content_mode` from the answer to an empty run's export (`Telmoni-Content-Mode`), then opens a run of `agent` in which the application adds `event` to the run's span through the OpenTelemetry API, and the run ends by the language's own failure path with an error of the type `error` whose message is `message`: Python's exception raised out of the `with`, TypeScript's error thrown from the callback, Go's error handed to `Fail`, Rust's `Err` returned from a `try_` closure. The run's span, as sent, must hold `status` and `events` as `kept` or `withheld` say; `withheld` has no `events` key, and the span must carry none.
+
+Before comparing, a suite normalizes the run's span:
+
+1. Every event's `timeUnixNano` is checked to be a decimal string from the span's start to its end, then replaced by `<time>`; events keep their order, the application's first.
+2. Every event's `attributes` array is sorted by `key`.
+3. `exception.type` is checked to be the span's `error.type`, as each language names an error's type, then replaced by `<error.type>`.
+4. `exception.stacktrace` is checked to be a non-empty string and taken out in Python and TypeScript, which give one cheaply; Go and Rust send none.
+
 ## `headers.json`
 
 A run across services: what `inject` writes into an outgoing request's headers, and what `extract` reads back from an incoming one's, so headers one SDK writes are read by each of the other three.

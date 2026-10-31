@@ -44,7 +44,7 @@ func Example() {
 	_, tool := run.ToolCall(ctx, "search", telmoni.ToolCallOptions{Arguments: map[string]string{"q": "weather"}})
 	result, err := lookUp(ctx, "weather")
 	if err != nil {
-		tool.Fail(err) // error.type alone, never the message
+		tool.Fail(err) // its message sent only as content is
 	} else {
 		tool.Returned(result)
 	}

@@ -149,9 +149,9 @@ impl Telmoni {
             .with_sampler(RecordingSampler::new(config.sampler.clone()))
             .with_span_limits(SpanLimits {
                 max_attributes_per_span: 128,
-                max_events_per_span: 0,
+                max_events_per_span: 32,
                 max_links_per_span: 0,
-                max_attributes_per_event: 0,
+                max_attributes_per_event: 32,
                 max_attributes_per_link: 0,
             })
             .with_id_generator(Ids::default())
@@ -226,14 +226,15 @@ impl Telmoni {
     }
 
     /// [`Self::run_with`] for a fallible `f`: an `Err` marks the run failed
-    /// with `E`'s type name (its last path segment) and is returned
-    /// unchanged. An `Err` is the only error a closure can carry out; a panic
-    /// unwinding through marks the span `panic`.
+    /// with `E`'s type name (its last path segment) and its message, content
+    /// under the exporter's lock, and is returned unchanged. An `Err` is the
+    /// only error a closure can carry out; a panic unwinding through marks the
+    /// span `panic`.
     ///
     /// # Errors
     ///
     /// `f`'s, or a run that did not open ([`Self::run`]), turned into `E`.
-    pub fn try_run_with<T, E: From<Error>>(
+    pub fn try_run_with<T, E: From<Error> + std::fmt::Display>(
         &self,
         agent: &str,
         options: RunOptions,

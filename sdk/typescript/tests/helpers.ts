@@ -85,7 +85,8 @@ export interface JsonSpan {
   startTimeUnixNano: string;
   endTimeUnixNano: string;
   attributes: JsonAttribute[];
-  status?: { code: number };
+  events?: Array<{ timeUnixNano: string; name: string; attributes: JsonAttribute[] }>;
+  status?: { code: number; message?: string };
 }
 
 export interface ExportBody {
@@ -171,7 +172,7 @@ export class FakeTransport {
 }
 
 /** A span's attributes as plain values; a count comes back as a number. */
-export function attributesOf(span: JsonSpan): Record<string, unknown> {
+export function attributesOf(span: Pick<JsonSpan, 'attributes'>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const attribute of span.attributes) {
     const value = attribute.value;

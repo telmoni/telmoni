@@ -207,9 +207,9 @@ export class Telmoni {
       spanLimits: {
         attributeCountLimit: 128,
         attributeValueLengthLimit: Infinity,
-        eventCountLimit: 0,
+        eventCountLimit: 32,
         linkCountLimit: 0,
-        attributePerEventCountLimit: 0,
+        attributePerEventCountLimit: 32,
         attributePerLinkCountLimit: 0,
       },
       generalLimits: { attributeCountLimit: 128, attributeValueLengthLimit: Infinity },

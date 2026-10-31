@@ -16,6 +16,7 @@ import json
 import math
 import random
 import threading
+import traceback
 import uuid
 from collections.abc import AsyncIterator, Callable, Generator, Mapping, Sequence
 from contextlib import aclosing
@@ -82,16 +83,28 @@ class Handle:
         self._token = context.attach(ctx)
 
     def fail(self, error_type: str | BaseException | type[BaseException]) -> None:
-        """Mark it failed, with the error's class and never its message."""
+        """Mark it failed with the error's class; an exception's message and
+        stack trace are content, kept on the span for the exporter's lock."""
         warn_once = self._client.exporter.warn_once
         text = _error_type(error_type, warn_once) if error_type else ""
         # Ingest refuses the span over an empty one, and with a run's, the run.
         if text:
-            self._span.set_attribute(
-                contract.ERROR_TYPE,
-                _cut(text, contract.ERROR_TYPE_MAX, "span's error type", warn_once),
-            )
-        self._span.set_status(Status(StatusCode.ERROR))
+            text = _cut(text, contract.ERROR_TYPE_MAX, "span's error type", warn_once)
+            self._span.set_attribute(contract.ERROR_TYPE, text)
+        if not isinstance(error_type, BaseException):
+            self._span.set_status(Status(StatusCode.ERROR))
+            return
+        message = _str(error_type)
+        attributes = {
+            contract.EXCEPTION_MESSAGE: message,
+            contract.EXCEPTION_STACKTRACE: "".join(
+                traceback.format_exception(error_type)
+            ),
+        }
+        if text:
+            attributes[contract.EXCEPTION_TYPE] = text
+        self._span.add_event(contract.EXCEPTION_EVENT, attributes)
+        self._span.set_status(Status(StatusCode.ERROR, message or None))
 
     def cancel(self) -> None:
         """Mark it cancelled by the agent, which is neither ok nor an error."""
@@ -104,7 +117,7 @@ class Handle:
         if isinstance(exc, (KeyboardInterrupt, asyncio.CancelledError, GeneratorExit)):
             self.cancel()
         elif exc is not None:
-            self.fail(type(exc).__name__)
+            self.fail(exc)
         self._span.end()
         if self._token is not None:
             context.detach(self._token)
@@ -802,8 +815,7 @@ class Opener:
         kind: SpanKind,
         start_time: int | None = None,
     ) -> Span:
-        # The exception's message and stack trace are content: the handle
-        # records the class alone, so neither is recorded nor the status set.
+        # The handle records a failure itself, its type cut to ingest's cap.
         return self._client.tracer.start_span(
             name,
             context=parent,

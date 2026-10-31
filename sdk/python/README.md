@@ -60,7 +60,9 @@ telmoni.flush()  # before the process exits soon after a run, or a pool's task r
 Each of `run`, `step`, `model_call` and `tool_call` is a context manager, an
 `async with`, and a decorator; on a generator, sync or async, the decorator's
 span covers its iteration. An exception that escapes one marks the span failed
-with the exception's class, never its message, and is raised again; a
+with the exception's class, records its message and stack trace on the span as
+an `exception` event and the status's message, content
+([Content](#content)), and is raised again; a
 `KeyboardInterrupt` or `asyncio.CancelledError`, or a generator closed before
 its end, marks it cancelled. `fail()` and `cancel()` do the same by hand. `run` raises `ValueError` for a blank agent
 name, a sample rate outside (0, 1] or a cap that is no cap
@@ -75,7 +77,7 @@ provider or response model is left off as unset. A name, model, provider,
 user, session, response model or error type that is no string goes as its
 text with one warning, as does a tag that is no string, finite number or bool;
 an exception or an exception's class handed to `fail()` goes as the class's
-name, never its message. Past ingest's caps, counted in characters, a name, the agent, a model, a
+name, and an exception's message and stack trace are recorded as content. Past ingest's caps, counted in characters, a name, the agent, a model, a
 provider, a response model or an error type is cut to its cap — a step's or a
 tool's name to 145, the rest to 128 — and a user past 128 or a session past 200
 is left off, since cut it would name another; a step named nothing goes as
@@ -169,8 +171,11 @@ Prompts, completions, tool arguments and results (`input_messages`,
 the span and taken off by the exporter before anything leaves the process. They are sent
 only when the client is built with `Config(capture_content=True)` **and** the
 project's content mode, which the SDK learns from the server's first answer,
-is `on`. A `capture_content` that is no `bool`, such as `"false"` from the
-environment, raises `TypeError`.
+is `on`. A failure's message and stack trace, its `exception` event and its
+status's message, and every event the application adds to a span through
+OpenTelemetry, are content too: without both, a failed span goes with its
+`error.type` and an error status alone. A `capture_content` that is no `bool`,
+such as `"false"` from the environment, raises `TypeError`.
 
 ## Configuration
 

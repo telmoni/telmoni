@@ -11,6 +11,7 @@ import time
 from typing import Any
 
 import pytest
+from opentelemetry import trace
 
 from conftest import (
     FIXTURES,
@@ -134,6 +135,70 @@ def test_the_run_matches_the_golden_export(
         assert headers["Content-Type"] == "application/json"
         assert headers["User-Agent"].startswith("telmoni-python/")
         assert headers["Telmoni-Sent-At"].isdigit()
+
+
+def normalize_failure(span: dict[str, Any]) -> dict[str, Any]:
+    """The run's span as ``failure.json``'s README normalizes it."""
+    error_type = next(
+        a["value"]["stringValue"]
+        for a in span["attributes"]
+        if a["key"] == "error.type"
+    )
+    sent: dict[str, Any] = {
+        key: copy.deepcopy(span[key]) for key in ("status", "events") if key in span
+    }
+    for event in sent.get("events", []):
+        at = int(event["timeUnixNano"])
+        assert int(span["startTimeUnixNano"]) <= at <= int(span["endTimeUnixNano"])
+        event["timeUnixNano"] = "<time>"
+        attributes = []
+        for attribute in sorted(event["attributes"], key=lambda a: a["key"]):
+            if attribute["key"] == "exception.stacktrace":
+                assert attribute["value"]["stringValue"]
+                continue
+            if attribute["key"] == "exception.type":
+                assert attribute["value"]["stringValue"] == error_type
+                attribute["value"]["stringValue"] = "<error.type>"
+            attributes.append(attribute)
+        event["attributes"] = attributes
+    return sent
+
+
+class RateLimited(Exception):
+    pass
+
+
+@pytest.mark.parametrize("case", load_fixture("failure.json")["cases"])
+def test_a_failure_leaves_in_full_only_under_both_locks(
+    case: dict[str, Any], transport: FakeTransport
+) -> None:
+    fixture = load_fixture("failure.json")
+    scenario = fixture["scenario"]
+    mode = Answer(200, {"Telmoni-Content-Mode": case["content_mode"]}, b"{}")
+    transport.answers = [mode]
+    client = Telmoni(
+        Config(api_key="k", capture_content=case["capture_content"]),
+        transport=transport,
+    )
+    try:
+        with client.run(scenario["agent"]):
+            pass
+        assert client.flush()
+        assert client.content_mode == case["content_mode"]
+        with pytest.raises(RateLimited), client.run(scenario["agent"]):
+            event = scenario["event"]
+            trace.get_current_span().add_event(event["name"], event["attributes"])
+            raise RateLimited(scenario["message"])
+        assert client.flush()
+    finally:
+        client.shutdown()
+    failed = transport.spans()[-1]
+    assert normalize_failure(failed) == fixture[case["sends"]]
+    if case["sends"] == "kept":
+        assert "exception.stacktrace" in str(failed["events"][-1])
+    else:
+        assert scenario["message"] not in str(transport.requests)
+        assert scenario["event"]["name"] not in str(transport.requests)
 
 
 def test_each_attempt_carries_this_clock_as_it_leaves() -> None:

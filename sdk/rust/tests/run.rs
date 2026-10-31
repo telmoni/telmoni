@@ -12,6 +12,8 @@ use common::{
     FakeTransport, Harness, Outcome, Sleeps, Warnings, attributes_of, hooks, is_uuid_v4, keyed,
     lock, mode_on, name_of, named, only, run_span, starting_with, tags,
 };
+use opentelemetry::KeyValue;
+use opentelemetry::trace::TraceContextExt as _;
 use serde_json::{Value, json};
 use telmoni::{Config, Error, ModelCall, Run, RunOptions, RunReply, Step, Telmoni, ToolCall};
 
@@ -586,6 +588,92 @@ fn a_run_is_shared_across_threads() -> Outcome {
         step.get("parentSpanId"),
         only(&spans, "invoke_agent ")?.get("spanId")
     );
+    Ok(())
+}
+
+/// A failure's message leaves only with `capture_content` and the mode `on`.
+#[test]
+fn a_failure_leaves_with_its_message_only_when_asked_and_the_project_allows() -> Outcome {
+    for capture_content in [true, false] {
+        let harness = Harness::answering(
+            Config {
+                capture_content,
+                ..keyed()
+            },
+            std::iter::repeat_n(Ok(mode_on()), 2),
+        )?;
+        harness.telmoni.run("warm", RunOptions::default())?.end();
+        harness.flush()?;
+        let run = harness.telmoni.run("bot", RunOptions::default())?;
+        let stepped: Result<(), Failed> =
+            run.try_step_with("plan", |_step| Err(Failed::Timeout("bad plan".to_owned())));
+        assert!(stepped.is_err());
+        run.fail("RateLimit");
+        run.end();
+        harness.flush()?;
+        let spans = harness.spans()?;
+        let plan = named(&spans, "plan")?;
+        let ran = named(&spans, "invoke_agent bot")?;
+        // A type alone carries no message to record.
+        assert_eq!(ran.get("status"), Some(&json!({ "code": 2 })));
+        assert!(ran.get("events").is_none());
+        if capture_content {
+            assert_eq!(
+                plan.get("status"),
+                Some(&json!({ "code": 2, "message": "timed out: bad plan" }))
+            );
+            let events = plan
+                .get("events")
+                .and_then(Value::as_array)
+                .ok_or("events")?;
+            let [event] = events.as_slice() else {
+                return Err(format!("one event, not {events:?}").into());
+            };
+            assert_eq!(event.get("name"), Some(&json!("exception")));
+            assert_eq!(
+                attributes_of(event)?,
+                json!({ "exception.type": "Failed", "exception.message": "timed out: bad plan" })
+            );
+        } else {
+            assert_eq!(plan.get("status"), Some(&json!({ "code": 2 })));
+            assert!(plan.get("events").is_none());
+            assert!(!harness.transport.text().contains("bad plan"));
+        }
+        assert_eq!(
+            attributes_of(plan)?.get("error.type"),
+            Some(&json!("Failed"))
+        );
+    }
+    Ok(())
+}
+
+/// An event the application adds leaves only with `capture_content` and the mode `on`.
+#[test]
+fn an_applications_event_leaves_only_when_asked_and_the_project_allows() -> Outcome {
+    for capture_content in [true, false] {
+        let harness = Harness::answering(
+            Config {
+                capture_content,
+                ..keyed()
+            },
+            std::iter::repeat_n(Ok(mode_on()), 2),
+        )?;
+        harness.telmoni.run("warm", RunOptions::default())?.end();
+        harness.flush()?;
+        let run = harness.telmoni.run("bot", RunOptions::default())?;
+        run.context()
+            .span()
+            .add_event("cache miss", vec![KeyValue::new("key", "k1")]);
+        run.end();
+        harness.flush()?;
+        let spans = harness.spans()?;
+        let sent = named(&spans, "invoke_agent bot")?.get("events").is_some();
+        assert_eq!(sent, capture_content);
+        assert_eq!(
+            harness.transport.text().contains("cache miss"),
+            capture_content
+        );
+    }
     Ok(())
 }
 

@@ -119,6 +119,13 @@ const (
 // export.
 const attrContentCut = "telmoni.content_cut"
 
+// A failure, as the conventions' exception event carries it: content.
+const (
+	eventException       = "exception"
+	attrExceptionType    = "exception.type"
+	attrExceptionMessage = "exception.message"
+)
+
 var content = map[string]bool{
 	attrInputMessages:             true,
 	attrOutputMessages:            true,

@@ -1,0 +1,40 @@
+{
+  "scenario": {
+    "agent": "support-bot",
+    "event": {
+      "name": "retrying",
+      "attributes": { "attempt": 2, "reason": "the provider said it is busy" }
+    },
+    "error": "RateLimited",
+    "message": "quota exceeded for the day"
+  },
+  "cases": [
+    { "capture_content": true, "content_mode": "on", "sends": "kept" },
+    { "capture_content": true, "content_mode": "off", "sends": "withheld" },
+    { "capture_content": false, "content_mode": "on", "sends": "withheld" }
+  ],
+  "kept": {
+    "status": { "code": 2, "message": "quota exceeded for the day" },
+    "events": [
+      {
+        "timeUnixNano": "<time>",
+        "name": "retrying",
+        "attributes": [
+          { "key": "attempt", "value": { "intValue": "2" } },
+          { "key": "reason", "value": { "stringValue": "the provider said it is busy" } }
+        ]
+      },
+      {
+        "timeUnixNano": "<time>",
+        "name": "exception",
+        "attributes": [
+          { "key": "exception.message", "value": { "stringValue": "quota exceeded for the day" } },
+          { "key": "exception.type", "value": { "stringValue": "<error.type>" } }
+        ]
+      }
+    ]
+  },
+  "withheld": {
+    "status": { "code": 2 }
+  }
+}

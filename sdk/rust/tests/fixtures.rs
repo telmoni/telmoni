@@ -10,9 +10,12 @@ use std::thread;
 use std::time::Duration;
 
 use common::{
-    Collected, Failure, Harness, Outcome, Sleeps, Warnings, answer, answer_names, field, fields_of,
-    float, int, is_hex, is_uuid_v4, keyed, load_fixture, name_of, spans_of, text, warning_of,
+    Collected, Failure, Harness, Outcome, Sleeps, Warnings, answer, answer_names, attributes_of,
+    field, fields_of, float, int, is_hex, is_uuid_v4, keyed, load_fixture, name_of, spans_of, text,
+    warning_of,
 };
+use opentelemetry::KeyValue;
+use opentelemetry::trace::TraceContextExt as _;
 use serde_json::{Value, json};
 use telmoni::transport::{Answer, TransportError};
 use telmoni::{
@@ -256,6 +259,129 @@ fn the_run_matches_the_golden_export() -> Outcome {
                 .is_some_and(|at| !at.is_empty() && at.bytes().all(|b| b.is_ascii_digit()))
         );
         assert!(request.url.ends_with("/otlp/v1/traces"));
+    }
+    Ok(())
+}
+
+/// `failure.json`'s error, its type named as Rust names one.
+#[derive(Debug)]
+struct RateLimited(String);
+
+impl std::fmt::Display for RateLimited {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl From<telmoni::Error> for RateLimited {
+    fn from(error: telmoni::Error) -> Self {
+        Self(error.to_string())
+    }
+}
+
+/// The run's span as `failure.json`'s README normalizes it.
+fn normalize_failure(span: &Value) -> Result<Value, Failure> {
+    let error_type = attributes_of(span)?
+        .get("error.type")
+        .cloned()
+        .ok_or("error.type")?;
+    let mut sent = serde_json::Map::new();
+    sent.insert("status".to_owned(), field(span, "status")?.clone());
+    let Some(events) = span.get("events") else {
+        return Ok(Value::Object(sent));
+    };
+    let start: u64 = text(span, "startTimeUnixNano")?.parse()?;
+    let end: u64 = text(span, "endTimeUnixNano")?.parse()?;
+    let mut events = events.clone();
+    for event in events.as_array_mut().ok_or("events")? {
+        let at: u64 = text(event, "timeUnixNano")?.parse()?;
+        assert!((start..=end).contains(&at), "an event outside its span");
+        event["timeUnixNano"] = json!("<time>");
+        let attributes = event
+            .get_mut("attributes")
+            .and_then(Value::as_array_mut)
+            .ok_or("an event's attributes")?;
+        attributes.sort_by(|a, b| a["key"].as_str().cmp(&b["key"].as_str()));
+        for attribute in attributes.iter_mut() {
+            let key = attribute.get("key").and_then(Value::as_str);
+            assert_ne!(
+                key,
+                Some("exception.stacktrace"),
+                "Rust sends no stack trace"
+            );
+            if key == Some("exception.type") {
+                let value = attribute
+                    .pointer_mut("/value/stringValue")
+                    .ok_or("exception.type's value")?;
+                assert_eq!(*value, error_type);
+                *value = json!("<error.type>");
+            }
+        }
+    }
+    sent.insert("events".to_owned(), events);
+    Ok(Value::Object(sent))
+}
+
+#[test]
+fn a_failure_leaves_in_full_only_under_both_locks() -> Outcome {
+    let fixture = load_fixture("failure.json")?;
+    let scenario = field(&fixture, "scenario")?;
+    let agent = text(scenario, "agent")?;
+    let message = text(scenario, "message")?;
+    let event = field(scenario, "event")?;
+    let event_name = text(event, "name")?.to_owned();
+    let event_attributes: Vec<KeyValue> = field(event, "attributes")?
+        .as_object()
+        .ok_or("the event's attributes")?
+        .iter()
+        .map(|(key, value)| match value {
+            Value::Number(n) => KeyValue::new(key.clone(), n.as_i64().unwrap_or_default()),
+            other => KeyValue::new(key.clone(), other.as_str().unwrap_or_default().to_owned()),
+        })
+        .collect();
+    for case in field(&fixture, "cases")?.as_array().ok_or("cases")? {
+        let mode = text(case, "content_mode")?;
+        let harness = Harness::answering(
+            Config {
+                capture_content: field(case, "capture_content")?
+                    .as_bool()
+                    .ok_or("capture_content")?,
+                ..keyed()
+            },
+            [Ok(Answer::new(
+                200,
+                vec![("Telmoni-Content-Mode".to_owned(), mode.to_owned())],
+                b"{}".to_vec(),
+            ))],
+        )?;
+        harness.telmoni.run(agent, RunOptions::default())?.end();
+        harness.flush()?;
+        let result: Result<(), RateLimited> =
+            harness
+                .telmoni
+                .try_run_with(agent, RunOptions::default(), |run| {
+                    run.context()
+                        .span()
+                        .add_event(event_name.clone(), event_attributes.clone());
+                    Err(RateLimited(message.to_owned()))
+                });
+        assert!(result.is_err());
+        harness.flush()?;
+        let spans = harness.spans()?;
+        let failed = spans.last().ok_or("the failed run")?;
+        let sends = text(case, "sends")?;
+        assert_eq!(
+            &normalize_failure(failed)?,
+            field(&fixture, sends)?,
+            "{case}"
+        );
+        if sends == "withheld" {
+            let sent = harness.transport.text();
+            assert!(
+                !sent.contains(message) && !sent.contains(&event_name),
+                "{case}"
+            );
+        }
     }
     Ok(())
 }

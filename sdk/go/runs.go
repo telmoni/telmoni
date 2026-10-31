@@ -108,10 +108,11 @@ func (h *handle) End() {
 	h.once.Do(func() { h.span.End() })
 }
 
-// Fail marks the span failed with err's Go type and never its message: the
-// message is content. An error that is or wraps context.Canceled marks it
-// cancelled instead: the agent gave the call up. A deadline that ran out is
-// a failure, as a timeout is in the other SDKs; it fails with its own type.
+// Fail marks the span failed with err's Go type; its message is content, kept
+// on the span as an exception event and the status's for the exporter's lock.
+// An error that is or wraps context.Canceled marks it cancelled instead: the
+// agent gave the call up. A deadline that ran out is a failure, as a timeout
+// is in the other SDKs; it fails with its own type.
 func (h *handle) Fail(err error) {
 	if h.span == nil || err == nil {
 		return
@@ -120,7 +121,14 @@ func (h *handle) Fail(err error) {
 		h.Cancel()
 		return
 	}
-	h.FailWith(errorTypeName(err))
+	errorType := h.errorType(errorTypeName(err))
+	// fmt recovers an Error method that panics, as a nil receiver's may.
+	message := fmt.Sprint(err)
+	h.span.AddEvent(eventException, trace.WithAttributes(
+		attribute.String(attrExceptionType, errorType),
+		attribute.String(attrExceptionMessage, message),
+	))
+	h.span.SetStatus(codes.Error, message)
 }
 
 // FailWith marks the span failed with errorType as its error.type, none if
@@ -129,11 +137,19 @@ func (h *handle) FailWith(errorType string) {
 	if h.span == nil {
 		return
 	}
-	// Ingest refuses the span over an empty one, and with a run's, the run.
-	if errorType != "" {
-		h.span.SetAttributes(attribute.String(attrErrorType, h.client.cut(errorType, errorTypeMax, "span's error type")))
-	}
+	h.errorType(errorType)
 	h.span.SetStatus(codes.Error, "")
+}
+
+// errorType sets error.type, cut to ingest's cap, and returns what it set.
+func (h *handle) errorType(errorType string) string {
+	// Ingest refuses the span over an empty one, and with a run's, the run.
+	if errorType == "" {
+		return ""
+	}
+	errorType = h.client.cut(errorType, errorTypeMax, "span's error type")
+	h.span.SetAttributes(attribute.String(attrErrorType, errorType))
+	return errorType
 }
 
 // Cancel marks the span cancelled by the agent, which is neither ok nor an
@@ -389,7 +405,7 @@ func (r *Run) Answered(a RunAnswer) {
 	}
 }
 
-// Fail marks the run failed with err's Go type, never its message, or
+// Fail marks the run failed with err's Go type and its message, or
 // cancelled for an error that is or wraps context.Canceled, as a step's Fail
 // does; once the run was refused, such an error fails it as the refusal.
 func (r *Run) Fail(err error) {

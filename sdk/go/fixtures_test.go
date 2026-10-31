@@ -19,6 +19,9 @@ import (
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
 	telmoni "github.com/telmoni/telmoni/sdk/go"
 )
 
@@ -319,6 +322,110 @@ func TestTheRunMatchesTheGoldenExport(t *testing.T) {
 }
 
 // In nanoseconds, a retry its own: ingest moves a run by it.
+type failureFixture struct {
+	Scenario struct {
+		Agent string `json:"agent"`
+		Event struct {
+			Name       string         `json:"name"`
+			Attributes map[string]any `json:"attributes"`
+		} `json:"event"`
+		Message string `json:"message"`
+	} `json:"scenario"`
+	Cases []struct {
+		CaptureContent bool   `json:"capture_content"`
+		ContentMode    string `json:"content_mode"`
+		Sends          string `json:"sends"`
+	} `json:"cases"`
+	Kept     map[string]any `json:"kept"`
+	Withheld map[string]any `json:"withheld"`
+}
+
+// RateLimited is failure.json's error, its type named as Go names one.
+type RateLimited struct{ message string }
+
+func (e *RateLimited) Error() string { return e.message }
+
+// normalizeFailure is the run's span as failure.json's README normalizes it.
+func normalizeFailure(t *testing.T, span map[string]any) map[string]any {
+	t.Helper()
+	errorType := attributesOf(t, span)["error.type"]
+	span = deepCopy(t, span)
+	sent := map[string]any{"status": span["status"]}
+	events, ok := span["events"].([]any)
+	if !ok {
+		return sent
+	}
+	start := parseNanos(t, "start", span["startTimeUnixNano"])
+	end := parseNanos(t, "end", span["endTimeUnixNano"])
+	for _, raw := range events {
+		event := raw.(map[string]any)
+		if at := parseNanos(t, "event", event["timeUnixNano"]); at < start || at > end {
+			t.Errorf("an event at %d, outside its span's %d to %d", at, start, end)
+		}
+		event["timeUnixNano"] = "<time>"
+		attributes := event["attributes"].([]any)
+		sortByKey(attributes)
+		for _, a := range attributes {
+			attribute := a.(map[string]any)
+			value := attribute["value"].(map[string]any)
+			switch attribute["key"] {
+			case "exception.stacktrace":
+				t.Error("Go sends no stack trace")
+			case "exception.type":
+				if value["stringValue"] != errorType {
+					t.Errorf("exception.type = %v, error.type = %v", value["stringValue"], errorType)
+				}
+				value["stringValue"] = "<error.type>"
+			}
+		}
+	}
+	sent["events"] = events
+	return sent
+}
+
+func TestAFailureLeavesInFullOnlyUnderBothLocks(t *testing.T) {
+	var fixture failureFixture
+	if err := json.Unmarshal(loadFixture(t, "failure.json"), &fixture); err != nil {
+		t.Fatalf("decoding failure.json: %v", err)
+	}
+	scenario := fixture.Scenario
+	for _, each := range fixture.Cases {
+		mode := scripted{status: 200, headers: map[string]string{"Telmoni-Content-Mode": each.ContentMode}, body: []byte("{}")}
+		h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k"), CaptureContent: each.CaptureContent}, newFakeTransport(t, mode))
+		_, warm := h.client.Run(context.Background(), scenario.Agent, telmoni.RunOptions{})
+		warm.End()
+		h.flush()
+		if got := h.client.ContentMode(); got != each.ContentMode {
+			t.Fatalf("the content mode is %q, want %q", got, each.ContentMode)
+		}
+		ctx, run := h.client.Run(context.Background(), scenario.Agent, telmoni.RunOptions{})
+		var attributes []attribute.KeyValue
+		for key, value := range scenario.Event.Attributes {
+			switch v := value.(type) {
+			case float64:
+				attributes = append(attributes, attribute.Int64(key, int64(v)))
+			case string:
+				attributes = append(attributes, attribute.String(key, v))
+			}
+		}
+		trace.SpanFromContext(ctx).AddEvent(scenario.Event.Name, trace.WithAttributes(attributes...))
+		run.Fail(&RateLimited{scenario.Message})
+		run.End()
+		h.flush()
+		spans := h.transport.spans(t)
+		want := fixture.Kept
+		if each.Sends == "withheld" {
+			want = fixture.Withheld
+		}
+		if got := normalizeFailure(t, spans[len(spans)-1]); !reflect.DeepEqual(got, want) {
+			t.Errorf("%+v: sent\n%s\nwant\n%s", each, pretty(t, got), pretty(t, want))
+		}
+		if text := h.transport.text(); each.Sends == "withheld" && (strings.Contains(text, scenario.Message) || strings.Contains(text, scenario.Event.Name)) {
+			t.Errorf("%+v: the failure's content left", each)
+		}
+	}
+}
+
 func TestEachAttemptCarriesThisClockAsItLeaves(t *testing.T) {
 	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k")},
 		newFakeTransport(t, answerFrom(t, "answers/unavailable.json")),

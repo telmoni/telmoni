@@ -69,14 +69,27 @@ export class Handle {
     this.context = trace.setSpan(parent, span).setValue(RUN_KEY, run ?? this);
   }
 
-  /** Mark it failed by an error's class, a class's name or a type as text, never an error's message. */
+  /**
+   * Mark it failed by an error's class, a class's name or a type as text; an `Error`'s message and stack are
+   * content, kept on the span for the exporter's lock.
+   */
   fail(error: unknown): void {
-    const text = error ? typeOfError(error, this.#warnOnce) : '';
+    let text = error ? typeOfError(error, this.#warnOnce) : '';
     // Ingest refuses the span over an empty one, and with a run's, the run.
     if (text !== '') {
-      this.span.setAttribute(contract.ERROR_TYPE, cut(text, contract.ERROR_TYPE_MAX, "span's error type", this.#warnOnce));
+      text = cut(text, contract.ERROR_TYPE_MAX, "span's error type", this.#warnOnce);
+      this.span.setAttribute(contract.ERROR_TYPE, text);
     }
-    this.span.setStatus({ code: SpanStatusCode.ERROR });
+    if (!(error instanceof Error)) {
+      this.span.setStatus({ code: SpanStatusCode.ERROR });
+      return;
+    }
+    const message = textOf(error.message);
+    const attributes: Attributes = { [contract.EXCEPTION_MESSAGE]: message };
+    if (text !== '') attributes[contract.EXCEPTION_TYPE] = text;
+    if (typeof error.stack === 'string') attributes[contract.EXCEPTION_STACKTRACE] = error.stack;
+    this.span.addEvent(contract.EXCEPTION_EVENT, attributes);
+    this.span.setStatus({ code: SpanStatusCode.ERROR, message });
   }
 
   /** Mark it cancelled by the agent, which is neither ok nor an error. */
@@ -94,7 +107,7 @@ export class Handle {
     this.#ended = true;
     if (outcome.failed) {
       if (isAbort(outcome.error)) this.cancel();
-      else this.fail(errorType(outcome.error));
+      else this.fail(outcome.error instanceof Error ? outcome.error : errorType(outcome.error));
     }
     this.span.end();
   }
