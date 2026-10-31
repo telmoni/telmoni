@@ -56,7 +56,12 @@
       "user.email",
       "user.full_name",
       "user.name",
-      "telmoni.content_cut"
+      "telmoni.content_cut",
+      "exception.type",
+      "exception.message",
+      "exception.stacktrace",
+      "otel.status_description",
+      "telmoni.events"
     ],
     "ContentMode": [
       "off",

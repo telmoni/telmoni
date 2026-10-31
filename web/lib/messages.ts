@@ -143,11 +143,40 @@ export const FIELD_LABEL: ReadonlyArray<readonly [ContentField, string]> = [
   [ContentField.UserName, "User name"],
   [ContentField.UserFullName, "User's full name"],
   [ContentField.UserEmail, "User email"],
+  [ContentField.Events, "Events"],
 ];
+
+/** The fields a failure writes, drawn together above the rest. */
+const FAILURE_FIELDS: readonly string[] = [
+  ContentField.ExceptionType,
+  ContentField.ExceptionMessage,
+  ContentField.ExceptionStacktrace,
+  ContentField.StatusMessage,
+];
+
+/** A failure as the span kept it: its class, its message — the exception's,
+ *  else the status message — and its stack trace; none where it kept none. */
+export function failureOf(
+  fields: Readonly<Record<string, string>>,
+): { type?: string; message?: string; stacktrace?: string } | null {
+  const message = fields[ContentField.ExceptionMessage] ?? fields[ContentField.StatusMessage];
+  const type = fields[ContentField.ExceptionType];
+  const stacktrace = fields[ContentField.ExceptionStacktrace];
+  if (message === undefined && type === undefined && stacktrace === undefined) return null;
+  return {
+    ...(type !== undefined && { type }),
+    ...(message !== undefined && { message }),
+    ...(stacktrace !== undefined && { stacktrace }),
+  };
+}
 
 /** The fields a span kept that no label names: its metadata, kept as content. */
 export function metadataOf(fields: Readonly<Record<string, string>>): [string, string][] {
-  const named = new Set<string>([...FIELD_LABEL.map(([field]) => field), ContentField.ContentCut]);
+  const named = new Set<string>([
+    ...FIELD_LABEL.map(([field]) => field),
+    ...FAILURE_FIELDS,
+    ContentField.ContentCut,
+  ]);
   return Object.entries(fields)
     .filter(([name]) => !named.has(name))
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));

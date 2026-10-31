@@ -143,12 +143,15 @@ Only the organization's **Owner** switches a project's mode, on its
 `off` asks nothing, and may delete what the project kept, its key first
 ([Data deletion](/docs/workspace/data-deletion#deleting-a-projects-content)).
 
-**Any other text, array or map** the [field inventory](/docs/api/field-inventory)
-does not name is dropped on an `off` project as `unlisted`, and kept as content
-under its own name on an `on` one: content arrives under names no convention
-gave it. Bytes, and a name under `telmoni.` ingest does not read, are dropped
-as `unlisted` in every mode. A span's events and its status message are never
-kept.
+**Any other text, array or map** the [field
+inventory](/docs/api/field-inventory) does not name is dropped on an `off`
+project as `unlisted`, and kept as content under its own name on an `on` one:
+content arrives under names no convention gave it. Bytes, and a name under
+`telmoni.` ingest does not read, are dropped as `unlisted` in every mode. A
+failed span's status message and every event a span carries, a failure's
+`exception` among them, are content: kept on an `on` project, the exception's
+class, message and stack trace under their own names, and dropped on an `off`
+one, `error.type` the class every mode keeps.
 
 **A tag past its project's cardinality cap** is dropped as `cardinality`, the
 span kept: in each UTC day a project's tags take up to 64 keys, and each key

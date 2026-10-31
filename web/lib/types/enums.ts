@@ -423,6 +423,11 @@ export const ContentField = {
   UserFullName:        "user.full_name",
   UserName:            "user.name",
   ContentCut:          "telmoni.content_cut",
+  ExceptionType:       "exception.type",
+  ExceptionMessage:    "exception.message",
+  ExceptionStacktrace: "exception.stacktrace",
+  StatusMessage:       "otel.status_description",
+  Events:              "telmoni.events",
 } as const;
 export type ContentField = typeof ContentField[keyof typeof ContentField];
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   cutFrom,
+  failureOf,
   fieldsOf,
   instructionsOf,
   messagesOf,
@@ -95,5 +96,28 @@ describe("fieldsOf", () => {
     expect(fieldsOf(content, "s1")).toEqual({ "gen_ai.input.messages": "[]" });
     expect(fieldsOf(content, "s2")).toBeUndefined();
     expect(fieldsOf(null, "s1")).toBeNull();
+  });
+});
+
+describe("failureOf", () => {
+  it("reads a failure's class, the exception's message before the status's, and its stack trace", () => {
+    expect(
+      failureOf({
+        "exception.type": "ValueError",
+        "exception.message": "boom",
+        "exception.stacktrace": "Traceback",
+        "otel.status_description": "status boom",
+      }),
+    ).toEqual({ type: "ValueError", message: "boom", stacktrace: "Traceback" });
+    expect(failureOf({ "otel.status_description": "status boom" })).toEqual({
+      message: "status boom",
+    });
+    expect(failureOf({ "gen_ai.input.messages": "[]" })).toBeNull();
+  });
+
+  it("keeps a failure's fields out of the metadata", () => {
+    expect(
+      metadataOf({ "exception.message": "boom", "otel.status_description": "x", "app.k": "v" }),
+    ).toEqual([["app.k", "v"]]);
   });
 });

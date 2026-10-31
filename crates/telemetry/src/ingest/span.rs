@@ -256,9 +256,7 @@ pub fn map(
     for &row in context.resource_sent {
         note(&mut fields.sent, row);
     }
-    if !span.events.is_empty() || span.status.as_ref().is_some_and(|s| !s.message.is_empty()) {
-        note(&mut fields.sent, contract::EVENTS);
-    }
+    fields.read_failure(span, &span_id, dropped);
 
     let (Some(run_id), Some(agent)) = (fields.run_id, fields.agent.take()) else {
         return Err(refuse(Refusal::NotARun));
@@ -530,13 +528,7 @@ impl Fields {
             }
             // ⚠ Dropped unless the project keeps content; the answer names
             // the mode, so a sender reads why.
-            _ if contract::is_content(key) => {
-                if self.keeps_content {
-                    self.keep_content(key, value, &mut drop_attribute);
-                } else {
-                    drop_attribute(key, DropReason::Content);
-                }
-            }
+            _ if contract::is_content(key) => self.content_or_drop(key, value, &mut drop_attribute),
             _ if key.starts_with("telmoni.") => drop_attribute(key, DropReason::Unlisted),
             _ if contract::is_inventory_span(key) => match as_text(value) {
                 Some(rendered) => self.keep_attribute(key, rendered, &mut drop_attribute),
@@ -606,6 +598,93 @@ impl Fields {
 
     /// Content, kept whole under its name: free of an attribute's value cap,
     /// an export's size the one that holds it. Bytes are no text it keeps.
+    /// A content field kept where the project keeps content, else named as
+    /// dropped: the one rule an attribute and an event both meet.
+    fn content_or_drop(
+        &mut self,
+        key: &str,
+        value: &Value,
+        drop: &mut impl FnMut(&str, DropReason),
+    ) {
+        if self.keeps_content {
+            self.keep_content(key, value, drop);
+        } else {
+            drop(key, DropReason::Content);
+        }
+    }
+
+    /// A failure in full, all content: the status message, the first
+    /// `exception` event's class, message and stack trace under their own
+    /// names, and every event, that one among them, as one JSON array.
+    fn read_failure(&mut self, span: &Span, span_id: &str, dropped: &mut Drops) {
+        let mut drop =
+            |attribute: &str, reason: DropReason| dropped.push(span_id, attribute, reason);
+        let message = span
+            .status
+            .as_ref()
+            .map(|s| s.message.as_str())
+            .filter(|m| !m.is_empty());
+        if let Some(message) = message {
+            note(&mut self.sent, contract::STATUS_MESSAGE);
+            self.content_or_drop(
+                contract::STATUS_MESSAGE,
+                &Value::StringValue(message.to_owned()),
+                &mut drop,
+            );
+        }
+        if let Some(exception) = span
+            .events
+            .iter()
+            .find(|e| e.name == contract::EXCEPTION_EVENT)
+        {
+            for key in [
+                contract::EXCEPTION_TYPE,
+                contract::EXCEPTION_MESSAGE,
+                contract::EXCEPTION_STACKTRACE,
+            ] {
+                let value = exception
+                    .attributes
+                    .iter()
+                    .find(|kv| kv.key == key)
+                    .and_then(|kv| kv.value.as_ref()?.value.as_ref());
+                if let Some(value) = value {
+                    note(&mut self.sent, key);
+                    self.content_or_drop(key, value, &mut drop);
+                }
+            }
+        }
+        if !span.events.is_empty() {
+            note(&mut self.sent, contract::EVENTS);
+            let events: serde_json::Value = span
+                .events
+                .iter()
+                .map(|event| {
+                    let attributes: serde_json::Map<_, _> = event
+                        .attributes
+                        .iter()
+                        .map(|kv| {
+                            let value = kv.value.as_ref().and_then(|v| v.value.as_ref());
+                            (
+                                kv.key.clone(),
+                                value.map_or(serde_json::Value::Null, json_of),
+                            )
+                        })
+                        .collect();
+                    serde_json::json!({
+                        "name": event.name,
+                        "time_unix_nano": event.time_unix_nano,
+                        "attributes": attributes,
+                    })
+                })
+                .collect();
+            self.content_or_drop(
+                contract::EVENTS,
+                &Value::StringValue(events.to_string()),
+                &mut drop,
+            );
+        }
+    }
+
     fn keep_content(&mut self, key: &str, value: &Value, drop: &mut impl FnMut(&str, DropReason)) {
         if key.chars().count() > contract::ATTRIBUTE_KEY_MAX {
             return drop(key, DropReason::OverCap(Cap::AttributeKey));
@@ -843,6 +922,16 @@ mod tests {
                 message: "boom".into(),
                 code: StatusCode::Error as i32,
             }),
+            events: vec![opentelemetry_proto::tonic::trace::v1::span::Event {
+                name: contract::EXCEPTION_EVENT.into(),
+                time_unix_nano: 1_760_000_001_000_000_000,
+                attributes: vec![
+                    kv(contract::EXCEPTION_TYPE, s("ValueError")),
+                    kv(contract::EXCEPTION_MESSAGE, s("boom")),
+                    kv(contract::EXCEPTION_STACKTRACE, s("Traceback: line 1")),
+                ],
+                dropped_attributes_count: 0,
+            }],
             ..Span::default()
         }
     }
@@ -891,6 +980,10 @@ mod tests {
             "user.email",
             contract::OTHER_SCALAR,
             contract::OTHER_TEXT,
+            contract::STATUS_MESSAGE,
+            contract::EXCEPTION_TYPE,
+            contract::EXCEPTION_MESSAGE,
+            contract::EXCEPTION_STACKTRACE,
             contract::EVENTS,
             "service.name",
         ] {
@@ -968,6 +1061,11 @@ mod tests {
                 ("gen_ai.input.messages", &DropReason::Content),
                 ("user.email", &DropReason::Content),
                 ("vendor.prompt", &DropReason::Unlisted),
+                (contract::STATUS_MESSAGE, &DropReason::Content),
+                (contract::EXCEPTION_TYPE, &DropReason::Content),
+                (contract::EXCEPTION_MESSAGE, &DropReason::Content),
+                (contract::EXCEPTION_STACKTRACE, &DropReason::Content),
+                (contract::EVENTS, &DropReason::Content),
             ]
         );
         assert!(dropped.named().iter().all(|d| d.span_id == "0f".repeat(8)));
@@ -1026,6 +1124,15 @@ mod tests {
                 ("vendor.prompt".to_owned(), "the whole prompt".to_owned()),
                 ("gen_ai.tool.call.result".to_owned(), long),
                 ("vendor.metadata".to_owned(), r#"{"a":[1]}"#.to_owned()),
+                (contract::STATUS_MESSAGE.to_owned(), "boom".to_owned()),
+                (contract::EXCEPTION_TYPE.to_owned(), "ValueError".to_owned()),
+                (contract::EXCEPTION_MESSAGE.to_owned(), "boom".to_owned()),
+                (contract::EXCEPTION_STACKTRACE.to_owned(), "Traceback: line 1".to_owned()),
+                (
+                    contract::EVENTS.to_owned(),
+                    r#"[{"attributes":{"exception.message":"boom","exception.stacktrace":"Traceback: line 1","exception.type":"ValueError"},"name":"exception","time_unix_nano":1760000001000000000}]"#
+                        .to_owned()
+                ),
             ]
         );
         let reasons: Vec<(&str, &DropReason)> = dropped
@@ -1058,6 +1165,7 @@ mod tests {
                 kv(contract::CANCELLED, Value::BoolValue(true)),
             ],
             status: None,
+            events: Vec::new(),
             ..call()
         };
         let (row, _) = map(&run, &context(&project, &[], &keep), &mut dropped).expect("kept");

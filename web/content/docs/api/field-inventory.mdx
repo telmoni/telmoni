@@ -164,6 +164,11 @@ and counted in no span's units.
 | `user.full_name` | any span | dropped where the mode is `off`, the span kept; kept, sealed, where it is `on` | on | names a person: content, whatever else the span carries |
 | `user.name` | any span | dropped where the mode is `off`, the span kept; kept, sealed, where it is `on` | on | names a person: content, whatever else the span carries |
 | `telmoni.content_cut` | any span | dropped where the mode is `off`, the span kept; kept, sealed, where it is `on` | on | the content fields an SDK cut, the longest first, so its span fits an export |
+| `exception.type` | any span | dropped where the mode is `off`, the span kept; kept, sealed, where it is `on` | on | a failure's class, from its `exception` event; `error.type` holds it as metadata in every mode |
+| `exception.message` | any span | dropped where the mode is `off`, the span kept; kept, sealed, where it is `on` | on | a failure's message, from its `exception` event: it can quote what a person wrote |
+| `exception.stacktrace` | any span | dropped where the mode is `off`, the span kept; kept, sealed, where it is `on` | on | a failure's stack trace, from its `exception` event |
+| `otel.status_description` | any span | dropped where the mode is `off`, the span kept; kept, sealed, where it is `on` | on | a failed span's status message, the span's `status.message` |
+| `telmoni.events` | any span | dropped where the mode is `off`, the span kept; kept, sealed, where it is `on` | on | every event of the span, the `exception` among them: each one's name, time and attributes |
 
 ## Everything else
 
@@ -171,4 +176,3 @@ and counted in no span's units.
 |---|---|---|---|---|
 | any other number or boolean | any span | `attributes`, under its own name, except a name under `telmoni.`, which is dropped as `unlisted` | any | a measurement no person writes; on the resource, dropped without a word |
 | any other text, array or map | any span | dropped where the mode is `off`, the span kept and the attribute named in the answer as `unlisted`; kept as content under its own name where it is `on` | on | content arrives under names no convention gave it; on the resource, dropped without a word |
-| the span's events and status message | any span | never kept | any | where an exception writes its message and stack trace |

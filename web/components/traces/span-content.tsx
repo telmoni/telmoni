@@ -4,6 +4,7 @@ import { Reply } from "@/components/agent/agent-reply";
 import {
   FIELD_LABEL,
   cutFrom,
+  failureOf,
   instructionsOf,
   messagesOf,
   metadataOf,
@@ -148,13 +149,40 @@ function CutNote({ fields }: { fields: Readonly<Record<string, string>> }) {
   );
 }
 
-/** Everything a span kept, in the order a call reads: what it was told and
- *  offered, what it was sent and answered, then the rest, its metadata last. */
+/** A failure as the span kept it: its class and message, its stack trace
+ *  folded. */
+function Failure({ fields }: { fields: Readonly<Record<string, string>> }) {
+  const failure = failureOf(fields);
+  if (!failure) return null;
+  return (
+    <Section label="Failure">
+      <div className="grid gap-1.5">
+        <p className="break-words text-destructive">
+          {failure.type && <span className="font-medium">{failure.type}: </span>}
+          {failure.message}
+        </p>
+        {failure.stacktrace && (
+          <details>
+            <summary className="cursor-pointer text-xs text-muted-foreground">Stack trace</summary>
+            <div className="pt-1">
+              <Pre>{failure.stacktrace}</Pre>
+            </div>
+          </details>
+        )}
+      </div>
+    </Section>
+  );
+}
+
+/** Everything a span kept, in the order a call reads: its failure first, what
+ *  it was told and offered, what it was sent and answered, then the rest, its
+ *  metadata last. */
 export function SpanContent({ fields }: { fields: Readonly<Record<string, string>> }) {
   const metadata = metadataOf(fields);
   return (
     <div className="grid gap-4 text-sm">
       <CutNote fields={fields} />
+      <Failure fields={fields} />
       {FIELD_LABEL.map(([field, label]) => {
         const value = fields[field];
         return value === undefined ? null : (

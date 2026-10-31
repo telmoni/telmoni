@@ -118,6 +118,18 @@ pub const SAMPLE_RATE: &str = "telmoni.sample_rate";
 pub const CANCELLED: &str = "telmoni.cancelled";
 /// The content fields an SDK cut so its span fits an export, by name.
 pub const CONTENT_CUT: &str = "telmoni.content_cut";
+/// A failure's class, message and stack trace, as the `exception` event the
+/// conventions name carries them; kept as content.
+pub const EXCEPTION_TYPE: &str = "exception.type";
+pub const EXCEPTION_MESSAGE: &str = "exception.message";
+pub const EXCEPTION_STACKTRACE: &str = "exception.stacktrace";
+/// A failed span's status message, kept as content under this name.
+pub const STATUS_MESSAGE: &str = "otel.status_description";
+/// Every event of a span, the `exception` among them, kept as content: a JSON
+/// array of each one's name, time and attributes.
+pub const EVENTS: &str = "telmoni.events";
+/// The event a failure writes.
+pub const EXCEPTION_EVENT: &str = "exception";
 /// Our SDKs' instrumentation scope.
 pub const SCOPE: &str = "telmoni";
 /// The resource attribute our SDKs name themselves by.
@@ -232,6 +244,11 @@ pub const CONTENT: &[&str] = &[
     "user.full_name",
     "user.name",
     CONTENT_CUT,
+    EXCEPTION_TYPE,
+    EXCEPTION_MESSAGE,
+    EXCEPTION_STACKTRACE,
+    STATUS_MESSAGE,
+    EVENTS,
 ];
 
 /// Whether `key` is content.
@@ -459,8 +476,6 @@ pub const TAG_FAMILY: &str = "telmoni.tag.<key>";
 /// The rows for what arrives under a name no other row gives.
 pub const OTHER_SCALAR: &str = "any other number or boolean";
 pub const OTHER_TEXT: &str = "any other text, array or map";
-/// The row for what an exception writes, outside the attributes.
-pub const EVENTS: &str = "the span's events and status message";
 
 /// The inventory row an attribute sent on a span, or on its resource, falls
 /// under: what a span's `sent` records, so a project's Privacy page counts
@@ -998,6 +1013,41 @@ pub const INVENTORY: &[InventoryRow] = &[
         Needs::Content,
         "the content fields an SDK cut, the longest first, so its span fits an export",
     ),
+    row(
+        EXCEPTION_TYPE,
+        ReadOn::AnySpan,
+        KEPT_CONTENT,
+        Needs::Content,
+        "a failure's class, from its `exception` event; `error.type` holds it as metadata in every mode",
+    ),
+    row(
+        EXCEPTION_MESSAGE,
+        ReadOn::AnySpan,
+        KEPT_CONTENT,
+        Needs::Content,
+        "a failure's message, from its `exception` event: it can quote what a person wrote",
+    ),
+    row(
+        EXCEPTION_STACKTRACE,
+        ReadOn::AnySpan,
+        KEPT_CONTENT,
+        Needs::Content,
+        "a failure's stack trace, from its `exception` event",
+    ),
+    row(
+        STATUS_MESSAGE,
+        ReadOn::AnySpan,
+        KEPT_CONTENT,
+        Needs::Content,
+        "a failed span's status message, the span's `status.message`",
+    ),
+    row(
+        EVENTS,
+        ReadOn::AnySpan,
+        KEPT_CONTENT,
+        Needs::Content,
+        "every event of the span, the `exception` among them: each one's name, time and attributes",
+    ),
     // Everything else.
     row(
         OTHER_SCALAR,
@@ -1013,13 +1063,6 @@ pub const INVENTORY: &[InventoryRow] = &[
          the answer as unlisted; on one whose mode is on, kept as content under its own name",
         Needs::Content,
         "content arrives under names no convention gave it; on the resource, dropped without a word",
-    ),
-    row(
-        EVENTS,
-        ReadOn::AnySpan,
-        "never kept",
-        Needs::AnyMode,
-        "where an exception writes its message and stack trace",
     ),
 ];
 
@@ -1080,7 +1123,7 @@ mod tests {
     #[test]
     fn what_a_span_sent_is_counted_by_its_inventory_row() {
         for row in INVENTORY {
-            if [TAG_FAMILY, OTHER_SCALAR, OTHER_TEXT, EVENTS].contains(&row.attribute) {
+            if [TAG_FAMILY, OTHER_SCALAR, OTHER_TEXT].contains(&row.attribute) {
                 continue;
             }
             let sent = row.attribute.replace('*', "version");
@@ -1202,8 +1245,8 @@ mod tests {
 
     /// ⚠ The page's table and ingest's lists are held to each other: a name
     /// ingest reads with no row is undocumented, and a row ingest never reads
-    /// is a promise; the three rows that name no attribute are the rules for
-    /// everything else, and there are three.
+    /// is a promise; the two rows that name no attribute are the rules for
+    /// everything else, and there are two.
     #[test]
     fn the_inventory_names_every_attribute_ingest_reads_and_nothing_else() {
         let mut expected: Vec<String> = FIELDS
@@ -1228,7 +1271,7 @@ mod tests {
         once.dedup();
         assert_eq!(listed, once, "a name has two rows");
         assert_eq!(listed, expected, "the inventory and ingest's lists differ");
-        assert_eq!(rules.len(), 3, "the rules for everything else: {rules:?}");
+        assert_eq!(rules.len(), 2, "the rules for everything else: {rules:?}");
         for row in INVENTORY {
             assert!(
                 !row.kept.is_empty() && !row.rule.is_empty(),
