@@ -498,6 +498,10 @@ CREATE TABLE telemetry.plain_content (
     nonce       BYTEA       NOT NULL,
     -- The field's length in bytes as it arrived, counted on `content_held`.
     bytes       INTEGER     NOT NULL,
+    -- Each distinct word of the field, lower-cased, as its HMAC-SHA-256 under
+    -- a key derived from the project's content key: what a search finds the
+    -- field by, its words never held plain, nothing matching once the key goes.
+    words       TEXT[]      NOT NULL DEFAULT '{}',
     PRIMARY KEY (project_id, trace_id, span_id, field),
     CONSTRAINT plain_content_bytes_check CHECK (bytes >= 0)
 );
@@ -506,6 +510,8 @@ CREATE TABLE telemetry.plain_content (
 CREATE INDEX plain_content_received_idx ON telemetry.plain_content (received_at);
 -- A deletion of runs deletes by it.
 CREATE INDEX plain_content_run_idx ON telemetry.plain_content (project_id, run_id);
+-- A search finds the fields holding every word it hashed.
+CREATE INDEX plain_content_words_idx ON telemetry.plain_content USING gin (words);
 
 ALTER TABLE telemetry.plain_content ENABLE ROW LEVEL SECURITY;
 ALTER TABLE telemetry.plain_content FORCE ROW LEVEL SECURITY;

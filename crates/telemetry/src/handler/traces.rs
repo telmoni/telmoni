@@ -132,6 +132,8 @@ pub struct TraceQuery {
     pub utc_offset: Option<String>,
     /// A download's format: `csv` or `json`.
     pub format: Option<String>,
+    /// Words or a phrase the runs' kept content holds ([`content::search`]).
+    pub q: Option<String>,
 }
 
 impl TraceQuery {
@@ -162,6 +164,7 @@ impl TraceQuery {
                 ("page", List) => &mut query.page,
                 ("utc_offset", Histogram) => &mut query.utc_offset,
                 ("format", Export | TraceExport) => &mut query.format,
+                ("q", _) => &mut query.q,
                 _ => {
                     return Err(TelmoniError::BadRequest(
                         "the lane takes no parameter by that name".into(),
@@ -841,13 +844,41 @@ pub(crate) async fn content_of(
     }
 }
 
-/// That project's rows in the store.
-pub(crate) async fn readable(
+/// The filter `query` asks for, narrowed to the runs its search finds: to a
+/// run no span carries where it finds none, so every read answers nothing.
+async fn filter_of(
     state: &AppState,
-    headers: &HeaderMap,
-) -> Result<Projects, TelmoniError> {
-    Ok(Projects::one(reading(state, headers).await?))
+    project_id: &ProjectId,
+    query: &TraceQuery,
+) -> Result<TraceFilter, TelmoniError> {
+    let mut filter = query.filter()?;
+    let Some(q) = query.q.as_deref().map(str::trim).filter(|q| !q.is_empty()) else {
+        return Ok(filter);
+    };
+    if q.chars().count() > SEARCH_MAX {
+        return Err(TelmoniError::BadRequest(format!(
+            "a search is up to {SEARCH_MAX} characters"
+        )));
+    }
+    let found = content::search(state, project_id, q).await?;
+    let runs: Vec<Uuid> = if filter.runs.is_empty() {
+        found
+    } else {
+        found
+            .into_iter()
+            .filter(|run| filter.runs.contains(run))
+            .collect()
+    };
+    filter.runs = if runs.is_empty() {
+        vec![Uuid::nil()]
+    } else {
+        runs
+    };
+    Ok(filter)
 }
+
+/// The longest search, in characters.
+const SEARCH_MAX: usize = 200;
 
 /// A list's page as its lane read it: the rows and the total, read at once
 /// since a page past the last has no row to carry the count, and what the
@@ -875,9 +906,10 @@ pub(crate) async fn list_page<L: Listing>(
     headers: &HeaderMap,
     pairs: Vec<(String, String)>,
 ) -> Result<Listed<L>, TelmoniError> {
-    let projects = readable(state, headers).await?;
+    let project_id = reading(state, headers).await?;
+    let projects = Projects::one(project_id.clone());
     let query = TraceQuery::read(pairs, Reading::List)?;
-    let filter = query.filter()?;
+    let filter = filter_of(state, &project_id, &query).await?;
     let (sort, dir) = query.sort_for::<L>()?;
     let paging = query.paging()?;
     let (rows, total) = tokio::try_join!(
@@ -910,8 +942,10 @@ pub(crate) async fn facets_page<L: Listing>(
     headers: &HeaderMap,
     pairs: Vec<(String, String)>,
 ) -> Result<Facets, TelmoniError> {
-    let projects = readable(state, headers).await?;
-    let filter = TraceQuery::read(pairs, Reading::Facets)?.filter()?;
+    let project_id = reading(state, headers).await?;
+    let projects = Projects::one(project_id.clone());
+    let query = TraceQuery::read(pairs, Reading::Facets)?;
+    let filter = filter_of(state, &project_id, &query).await?;
     let rows = traces::facets::<L>(&state.store, &projects, &filter)
         .await
         .map_err(read_failed)?;
@@ -929,7 +963,7 @@ pub(crate) async fn export_rows<L: Listing>(
     let reader = reader(state, headers).await?;
     let projects = Projects::one(reader.project_id.clone());
     let query = TraceQuery::read(pairs, reading)?;
-    let filter = query.filter()?;
+    let filter = filter_of(state, &reader.project_id, &query).await?;
     let (sort, dir) = query.sort_for::<L>()?;
     let format = parse_format(query.format.as_deref())?;
     let rows = traces::list::<L>(&state.store, &projects, &filter, (sort, dir), EXPORT_MAX, 0)
@@ -978,9 +1012,10 @@ pub async fn get_histogram(
     headers: HeaderMap,
     Query(pairs): Query<Vec<(String, String)>>,
 ) -> Result<Json<TraceHistogram>, TelmoniError> {
-    let projects = readable(&state, &headers).await?;
+    let project_id = reading(&state, &headers).await?;
+    let projects = Projects::one(project_id.clone());
     let query = TraceQuery::read(pairs, Reading::Histogram)?;
-    let filter = query.filter()?;
+    let filter = filter_of(&state, &project_id, &query).await?;
     let utc_offset = parse_utc_offset(query.utc_offset.as_deref())?;
     let bucket_seconds = traces::bucket_seconds(filter.days);
     let rows = traces::histogram(&state.store, &projects, &filter, bucket_seconds, utc_offset)

@@ -679,6 +679,9 @@ pub struct SealedFields {
     pub ciphertexts: Vec<Vec<u8>>,
     pub nonces: Vec<Vec<u8>>,
     pub bytes: Vec<i32>,
+    /// Each field's hashed words ([`crate::content::words_of`]), as a JSON
+    /// array, since a column of arrays of differing lengths binds no other way.
+    pub words: Vec<String>,
 }
 
 /// Content kept, its bytes added to the organization's count. A field
@@ -693,11 +696,13 @@ pub async fn keep_content(
     sqlx::query(
         "WITH kept AS (
              INSERT INTO telemetry.plain_content
-                 (project_id, run_id, trace_id, span_id, field, received_at, ciphertext, nonce, bytes)
-             SELECT $1, r, t, s, f, $3, c, n, b
+                 (project_id, run_id, trace_id, span_id, field, received_at, ciphertext, nonce,
+                  bytes, words)
+             SELECT $1, r, t, s, f, $3, c, n, b,
+                    ARRAY(SELECT jsonb_array_elements_text(w::jsonb))
                FROM UNNEST($10::uuid[], $4::text[], $5::text[], $6::text[], $7::bytea[],
-                           $8::bytea[], $9::int[])
-                 AS u(r, t, s, f, c, n, b)
+                           $8::bytea[], $9::int[], $11::text[])
+                 AS u(r, t, s, f, c, n, b, w)
              ON CONFLICT DO NOTHING
              RETURNING bytes)
          INSERT INTO telemetry.content_held (organization_id, bytes)
@@ -715,9 +720,35 @@ pub async fn keep_content(
     .bind(&sealed.nonces)
     .bind(&sealed.bytes)
     .bind(&sealed.run_ids)
+    .bind(&sealed.words)
     .execute(tx.conn())
     .await?;
     Ok(())
+}
+
+/// The fields of the project's content holding every one of `words`, hashed,
+/// newest first, up to `limit`: each one's run, span and name, sealed. None
+/// once its content key is deleted, as [`read_content`] reads none.
+pub(crate) async fn search_content<B: HasProject>(
+    tx: &mut Scoped<'_, B>,
+    project_id: &ProjectId,
+    words: &[String],
+    limit: i64,
+) -> sqlx::Result<Vec<KeptField>> {
+    sqlx::query_as(
+        "SELECT run_id, trace_id, span_id, field, ciphertext, nonce
+           FROM telemetry.plain_content
+          WHERE project_id = $1 AND words @> $2
+            AND EXISTS (SELECT 1 FROM telemetry.project_settings
+                         WHERE project_id = $1 AND content_key_wrapped_dek IS NOT NULL)
+          ORDER BY received_at DESC
+          LIMIT $3",
+    )
+    .bind(project_id)
+    .bind(words)
+    .bind(limit)
+    .fetch_all(tx.conn())
+    .await
 }
 
 /// One content field as kept: its run, trace, span and name, sealed.

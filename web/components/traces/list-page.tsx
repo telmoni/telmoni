@@ -53,6 +53,7 @@ export function ListPage<L extends ListWindow>({
   before,
   instead,
   table,
+  search,
   children,
 }: {
   list: ListName;
@@ -74,6 +75,8 @@ export function ListPage<L extends ListWindow>({
   nothingYet: (days: number) => ReactNode;
   /** Drawn under the filter bar, before the rows. */
   before?: ReactNode;
+  /** A search of the list's kept content, drawn in the filter bar. */
+  search?: ReactNode;
   /** Drawn in place of the table and its pages. */
   instead?: ReactNode;
   table: (list: L) => ReactNode;
@@ -140,7 +143,14 @@ export function ListPage<L extends ListWindow>({
                 facets={facets}
               />
               <div className={cn("grid min-w-0 flex-1 gap-3", LIST_DIMS_WHILE_PENDING)}>
-                <FilterBar list={list} organization={organization} slug={slug} query={query} ui={ui} />
+                <FilterBar
+                  list={list}
+                  organization={organization}
+                  slug={slug}
+                  query={query}
+                  ui={ui}
+                  search={search}
+                />
                 {before}
                 {none ??
                   instead ?? (

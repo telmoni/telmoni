@@ -26,6 +26,7 @@ import {
   parseTraceUi,
   presetActive,
   presetToggled,
+  SEARCH_MAX,
   queryOfView,
   shortId,
   showsView,
@@ -232,6 +233,24 @@ describe("the URL as the list's state", () => {
       { filter: "tag", label: "Tag", value: "team:search", text: "team:search" },
     ]);
     expect(activeFilters({})).toEqual([]);
+  });
+
+  // ⚠ A search of kept content rides in the URL like a filter: named first,
+  // taken off by its own ×, gone with every filter, and dropped past what
+  // the server takes.
+  it("reads a search, names it first, and takes it off alone or with every filter", () => {
+    const query = parseTraceQuery({ q: "  where is my refund ", agent: "bot", page: "3" });
+    expect(query.q).toBe("where is my refund");
+    expect(activeFilters(query)[0]).toEqual({
+      filter: "q",
+      label: "Search",
+      value: "where is my refund",
+      text: "where is my refund",
+    });
+    expect(without(query, "q")).toEqual({ agent: ["bot"] });
+    expect(unfiltered(query)).toEqual({});
+    expect(parseTraceQuery({ q: "x".repeat(SEARCH_MAX + 1) }).q).toBeUndefined();
+    expect(parseTraceQuery({ q: "   " }).q).toBeUndefined();
   });
 
   it("takes a tag as key:value, the key 1 to 64 characters and the value up to 256", () => {

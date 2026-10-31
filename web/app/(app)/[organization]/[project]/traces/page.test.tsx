@@ -65,6 +65,7 @@ const fetchTraceHistogram = vi.fn<
   (projectId: string, query: unknown, utcOffset: number) => Promise<unknown>
 >(async () => mockHistogram);
 const fetchTraceViews = vi.fn<(projectId: string) => Promise<unknown>>(async () => mockViews);
+let mockContentMode: unknown = { content_mode: "off", offered: ["off", "on"] };
 
 vi.mock("@/lib/server/data", () => ({
   activeOrganization: () => null,
@@ -75,6 +76,7 @@ vi.mock("@/lib/server/data", () => ({
   fetchTraceHistogram: (projectId: string, query: unknown, utcOffset: number) =>
     fetchTraceHistogram(projectId, query, utcOffset),
   fetchTraceViews: (projectId: string) => fetchTraceViews(projectId),
+  fetchContentMode: async () => mockContentMode,
 }));
 
 import TracesPage from "./page";
@@ -212,6 +214,26 @@ beforeEach(() => {
 });
 
 describe("TracesPage", () => {
+  // ⚠ The search is offered where the project keeps content, and sent to the
+  // server with the filters; a project that keeps none has nothing to search.
+  it("offers a search of kept content where the project keeps it, and sends it on", async () => {
+    render(await TracesPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+    expect(screen.queryByRole("searchbox", { name: "Search kept content" })).toBeNull();
+
+    mockContentMode = { content_mode: "on", offered: ["off", "on"] };
+    try {
+      render(
+        await TracesPage({ params: PARAMS, searchParams: Promise.resolve({ q: "refund" }) }),
+      );
+      expect(screen.getByRole("searchbox", { name: "Search kept content" })).toHaveValue("refund");
+      expect(fetchTraces).toHaveBeenLastCalledWith(PROJECT, { q: "refund", limit: 50 });
+      expect(fetchTraceFacets).toHaveBeenLastCalledWith(PROJECT, { q: "refund" });
+      expect(screen.getByRole("link", { name: "Clear search refund" })).toBeInTheDocument();
+    } finally {
+      mockContentMode = { content_mode: "off", offered: ["off", "on"] };
+    }
+  });
+
   it("lists a page of runs in the default columns, each value a filter, and counts them all", async () => {
     render(await TracesPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByTestId("page-header")).toHaveTextContent("Traces");

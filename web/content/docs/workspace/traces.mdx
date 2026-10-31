@@ -106,6 +106,24 @@ console whose live events are paused.
 Every filter, the sort, the window and the page are in the page's URL, so a
 link holds the view you were looking at.
 
+### Searching kept content
+
+On a project that keeps content, a search box sits beside the filters in
+force. It finds the traces whose kept content holds every word you type, in
+any field of any span, and a phrase of more than one word only where its
+words run in that order, within the list's window and filters. Matching is
+by whole word and ignores case, so `refund` finds `Refund` but not
+`refunds`. The search is a filter like the others: it rides in the list's
+URL, shows as a chip you take off with its ×, and narrows the facets, the
+chart and a download alike.
+
+No index holds your content's words: each field keeps its words only as
+keyed hashes, under a key derived from the project's content key, so
+deleting that key leaves nothing a search can find. A search shows no
+content, so it adds nothing to the audit log; opening a trace it found is
+recorded as any opening is. It reads the newest 5,000 fields holding the
+words, and a document's first 4,096 distinct words.
+
 ### Saved views
 
 **Views** keeps a list as the project's own: its filters, sort, window, rows
@@ -204,6 +222,8 @@ show it in full, as an SDK sent it under the GenAI conventions:
   reasoning folded; a tool call's arguments and result; a retrieval's query
   and documents; and the metadata the span carried. An image or a file is
   named by its type, not drawn. **Raw** shows the fields as they arrived.
+- **A failure**, at the top of its span's **Content** tab: its class and
+  message, its stack trace folded, where the span kept them.
 - **A field an SDK cut** to fit an export is named in a line, since it was
   not kept.
 

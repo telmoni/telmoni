@@ -982,6 +982,104 @@ async fn no_tag_value_or_end_user_id_reaches_a_log_an_error_or_the_audit_chain(p
     assert_eq!(errors.len(), 2, "both refusals were read");
 }
 
+/// ⚠ Content searched: the trace list narrows to the runs whose kept content
+/// holds every word, a phrase in order; a search files no read, finds nothing
+/// on a project that keeps none, and nothing once the content key is deleted.
+#[sqlx::test]
+async fn the_trace_list_finds_runs_by_their_kept_content(pool: PgPool) {
+    let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    apply_audit_migrations(&pool).await;
+    let door = door(&pool, ContentMode::On).await;
+    door.auth.seat(
+        "admin-1",
+        &door.organization,
+        &door.project,
+        OrganizationRole::Owner,
+        None,
+    );
+    door.send(export_of(
+        RUN,
+        TRACE,
+        SPAN,
+        &[("app.note", "Where is my refund?")],
+        "result",
+    ))
+    .await;
+    door.send(export_of(
+        RUN_B,
+        TRACE_B,
+        SPAN_B,
+        &[("app.note", "My refund: where is it")],
+        "result",
+    ))
+    .await;
+    common::eventually("both traces are read", || async {
+        found(&door, RUN).await && found(&door, RUN_B).await
+    })
+    .await;
+    let runs = |q: &'static str| {
+        let door = &door;
+        async move {
+            let path = format!("/traces?q={}", q.replace(' ', "%20"));
+            let (status, list) = door.lane("GET", &path, "admin-1", None).await;
+            assert_eq!(status, StatusCode::OK, "{q}: {list}");
+            let mut runs: Vec<String> = list["traces"]
+                .as_array()
+                .expect("a list")
+                .iter()
+                .map(|t| t["run_id"].as_str().expect("a run").to_owned())
+                .collect();
+            runs.sort();
+            runs
+        }
+    };
+
+    assert_eq!(
+        runs("REFUND").await,
+        [RUN, RUN_B],
+        "a word, whatever its case"
+    );
+    assert_eq!(runs("where is my").await, [RUN], "a phrase, in order");
+    assert!(runs("refunds").await.is_empty(), "a whole word, not a part");
+    assert!(runs("refund missing").await.is_empty(), "every word");
+    assert!(
+        door.viewed(&pool).await.is_empty(),
+        "a search shows no content, and files none"
+    );
+
+    let other = door_over(&pool, ContentMode::Off, true).await;
+    other.auth.seat(
+        "admin-1",
+        &other.organization,
+        &other.project,
+        OrganizationRole::Owner,
+        None,
+    );
+    let (status, list) = other.lane("GET", "/traces?q=refund", "admin-1", None).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(
+        list["traces"],
+        json!([]),
+        "a project that keeps none finds none"
+    );
+
+    sqlx::query(
+        "UPDATE telemetry.project_settings \
+            SET content_key_wrapped_dek = NULL, content_key_version = NULL \
+          WHERE project_id = $1",
+    )
+    .bind(&door.project)
+    .execute(&pool)
+    .await
+    .expect("delete the content key");
+    assert!(
+        runs("refund").await.is_empty(),
+        "nothing matches once the key goes"
+    );
+}
+
 /// A run's turn of a conversation as an SDK sends it: the run's own span
 /// with the person's message and the agent's answer, and a model call under
 /// it with the messages it was sent, both in session `session`.

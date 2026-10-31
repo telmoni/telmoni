@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { XIcon } from "lucide-react";
+import type { ReactNode } from "react";
 
 import { LinkPending } from "@/components/link-pending";
 import { Badge } from "@/components/ui/badge";
@@ -14,14 +15,15 @@ import {
 } from "@/lib/traces";
 
 // The filters in force above a list: a value at a time, each taken off by
-// its own ×, and all of them at once. Plain links, so the bar is the
-// server's to draw.
+// its own ×, and all of them at once, a search of kept content beside them
+// where the list offers one. Plain links, so the bar is the server's to draw.
 export function FilterBar({
   list,
   organization,
   slug,
   query,
   ui = {},
+  search,
 }: {
   list: ListName;
   organization: string;
@@ -29,14 +31,17 @@ export function FilterBar({
   query: ListQuery<string>;
   /** The trace list's own state, which its links carry. */
   ui?: TraceUi;
+  /** A search of the list's kept content, drawn first. */
+  search?: ReactNode;
 }) {
   const chips = activeFilters(query);
-  if (chips.length === 0) return null;
+  if (chips.length === 0 && !search) return null;
   return (
     <div
       className="flex min-h-9 flex-wrap items-center gap-1.5 rounded-md border border-border px-2 py-1"
       aria-label="Filters in force"
     >
+      {search}
       {chips.map((chip) => (
         <Badge key={`${chip.filter}:${chip.value}`} variant="secondary" className="max-w-full gap-1 font-normal">
           <span className="text-muted-foreground">{chip.label}:</span>
@@ -54,14 +59,16 @@ export function FilterBar({
           </Link>
         </Badge>
       ))}
-      <Link
-        href={listPageHref(list, organization, slug, unfiltered(query), ui)}
-        scroll={false}
-        className="ml-auto text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
-      >
-        Clear all
-        <LinkPending />
-      </Link>
+      {chips.length > 0 && (
+        <Link
+          href={listPageHref(list, organization, slug, unfiltered(query), ui)}
+          scroll={false}
+          className="ml-auto text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+        >
+          Clear all
+          <LinkPending />
+        </Link>
+      )}
     </div>
   );
 }

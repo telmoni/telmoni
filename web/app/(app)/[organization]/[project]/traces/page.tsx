@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 import { NoticeCard } from "@/components/notice-card";
 import { ServiceUnavailable } from "@/components/service-unavailable";
 import { TraceCharts, TraceHistogramStrip } from "@/components/traces/charts";
+import { ContentSearch } from "@/components/traces/content-search";
 import { ListPage } from "@/components/traces/list-page";
 import { NewTraces } from "@/components/traces/new-traces";
 import { TracePeek } from "@/components/traces/peek";
@@ -12,6 +13,7 @@ import { TraceToolbar } from "@/components/traces/toolbar";
 import { UtcOffsetCookie } from "@/components/traces/utc-offset";
 import { administers } from "@/lib/roles";
 import {
+  fetchContentMode,
   fetchTraceFacets,
   fetchTraceHistogram,
   fetchTraces,
@@ -42,12 +44,15 @@ export default async function TracesPage({
   if (resolved.kind === "unavailable") return <ServiceUnavailable />;
   const { gate, project } = resolved;
 
-  const [access, facets, histogram, views] = await Promise.all([
+  const [access, facets, histogram, views, contentMode] = await Promise.all([
     fetchTraces(project.id, { ...query, limit: query.limit ?? DEFAULT_ROWS }),
     fetchTraceFacets(project.id, query),
     fetchTraceHistogram(project.id, query, utcOffset),
     fetchTraceViews(project.id),
+    fetchContentMode(project.id),
   ]);
+  // Offered where the project keeps content, or a search is already asked.
+  const searchable = contentMode?.content_mode === "on" || query.q !== undefined;
   const canSave = administers(project.role);
   // The rows this render drew, as one token: the table is keyed by it, and
   // the new-traces bar reads a change in it as the list drawn again.
@@ -68,6 +73,18 @@ export default async function TracesPage({
         access={access}
         facets={facets.kind === "ok" ? facets.facets : null}
         rows={(list) => list.traces.length}
+        search={
+          searchable ? (
+            <ContentSearch
+              key={query.q ?? ""}
+              list="traces"
+              organization={organization}
+              slug={slug}
+              query={query}
+              ui={ui}
+            />
+          ) : undefined
+        }
         toolbar={(list) => (
           <TraceToolbar
             organization={organization}

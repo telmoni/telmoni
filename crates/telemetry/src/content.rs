@@ -18,6 +18,7 @@ use uuid::Uuid;
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit, lock_chain_in_time};
 use telmoni_shared::db::project_move;
 use telmoni_shared::db::tenant_session::{ProjectAndOrganization, Scoped, project_scope};
+use telmoni_shared::digest::HmacKey;
 use telmoni_shared::envelope::{Dek, KEK_VERSION, Sealed, SealedRef};
 use telmoni_shared::{
     AuditAction, OrganizationId, ProjectId, Redacted, TelemetryError, TelmoniError,
@@ -63,10 +64,14 @@ pub async fn keep(
         return Ok(());
     }
     let (wrapped, key) = opened_key(state, project_id).await?;
+    let words_key = words_key(&key);
     let mut sealed = SealedFields::default();
     for span in content {
         for (field, text) in span.fields {
             let bytes = i32::try_from(text.len()).unwrap_or(i32::MAX);
+            sealed
+                .words
+                .push(json!(hashed_words(&words_key, &text)).to_string());
             let aad = field_aad(&span.span_id, &field);
             let Sealed { ciphertext, nonce } =
                 state
@@ -225,11 +230,23 @@ async fn opened_key(
         Some(wrapped) => wrapped,
         None => make_key(state, project_id, aad.as_bytes()).await?,
     };
+    let key = unwrapped(state, project_id, &wrapped).await?;
+    Ok((wrapped.wrapped_dek, key))
+}
+
+/// `wrapped`, opened: from the cache while it holds the key `wrapped` is,
+/// else by the key service, then cached.
+async fn unwrapped(
+    state: &AppState,
+    project_id: &ProjectId,
+    wrapped: &WrappedContentKey,
+) -> Result<Arc<Dek>, TelmoniError> {
     if let Some((held, key)) = state.content_keys.get(project_id)
         && held == wrapped.wrapped_dek
     {
-        return Ok((held, key));
+        return Ok(key);
     }
+    let aad = key_aad(project_id);
     let key = state
         .content_kek
         .unwrap_dek(
@@ -245,7 +262,127 @@ async fn opened_key(
         project_id.clone(),
         (wrapped.wrapped_dek.clone(), Arc::clone(&key)),
     );
-    Ok((wrapped.wrapped_dek, key))
+    Ok(key)
+}
+
+/// The most fields a search reads to find its runs, newest first.
+pub const SEARCH_FIELDS_MAX: i64 = 5_000;
+
+/// The most distinct words a field is found by: a document longer than this
+/// is found by its first ones.
+const WORDS_MAX: usize = 4_096;
+
+/// The longest word kept, in characters; a longer one is cut to it, as its
+/// query is.
+const WORD_MAX: usize = 64;
+
+/// What the key words are hashed under is derived for: one key a purpose.
+const WORDS_LABEL: &[u8] = b"telmoni content words";
+
+/// The key a project's words are hashed under, derived from its content key,
+/// so deleting that key leaves every stored hash matching nothing.
+fn words_key(key: &Dek) -> HmacKey {
+    HmacKey::new(HmacKey::new(key.as_bytes()).hex(WORDS_LABEL).as_bytes())
+}
+
+/// A field's words in order, lower-cased, each a run of letters and digits:
+/// a JSON field's string values alone, so a message's own keys (`role`,
+/// `parts`) find nothing, and any other text whole.
+#[must_use]
+pub fn words_of(text: &str) -> Vec<String> {
+    fn strings<'a>(value: &'a serde_json::Value, into: &mut Vec<&'a str>) {
+        match value {
+            serde_json::Value::String(s) => into.push(s),
+            serde_json::Value::Array(items) => items.iter().for_each(|v| strings(v, into)),
+            serde_json::Value::Object(map) => map.values().for_each(|v| strings(v, into)),
+            _ => {}
+        }
+    }
+    let parsed: Option<serde_json::Value> = serde_json::from_str(text).ok();
+    let mut sources = Vec::new();
+    match &parsed {
+        Some(value @ (serde_json::Value::Array(_) | serde_json::Value::Object(_))) => {
+            strings(value, &mut sources);
+        }
+        _ => sources.push(text),
+    }
+    sources
+        .iter()
+        .flat_map(|source| source.split(|c: char| !c.is_alphanumeric()))
+        .filter(|word| !word.is_empty())
+        .map(|word| word.to_lowercase().chars().take(WORD_MAX).collect())
+        .collect()
+}
+
+/// A field's distinct words, hashed for its `words` column.
+fn hashed_words(key: &HmacKey, text: &str) -> Vec<String> {
+    let mut words = words_of(text);
+    words.sort_unstable();
+    words.dedup();
+    words.truncate(WORDS_MAX);
+    words.iter().map(|word| hash_word(key, word)).collect()
+}
+
+fn hash_word(key: &HmacKey, word: &str) -> String {
+    key.prefix_hex(word.as_bytes(), 16)
+}
+
+/// The runs whose kept content holds every word of `query`, and its words in
+/// that order where it has more than one, newest first: what the trace list
+/// narrows to. A field is opened in the process to match a phrase, never
+/// shown, so nothing is filed; none where the project has no content key.
+///
+/// # Errors
+///
+/// Postgres or the key service did not answer.
+pub async fn search(
+    state: &AppState,
+    project_id: &ProjectId,
+    query: &str,
+) -> Result<Vec<Uuid>, TelmoniError> {
+    let phrase = words_of(query);
+    if phrase.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut tx = project_scope(&state.db, project_id).await?;
+    let Some(wrapped) = db::content_key(&mut tx, project_id).await? else {
+        tx.commit().await?;
+        return Ok(Vec::new());
+    };
+    let key = unwrapped(state, project_id, &wrapped).await?;
+    let words_key = words_key(&key);
+    let mut hashed: Vec<String> = phrase.iter().map(|w| hash_word(&words_key, w)).collect();
+    hashed.sort_unstable();
+    hashed.dedup();
+    let found = db::search_content(&mut tx, project_id, &hashed, SEARCH_FIELDS_MAX).await?;
+    tx.commit().await?;
+    let mut runs: Vec<Uuid> = Vec::new();
+    for (run_id, _, span_id, field, ciphertext, nonce) in found {
+        if runs.contains(&run_id) {
+            continue;
+        }
+        let holds = phrase.len() == 1 || {
+            let aad = field_aad(&span_id, &field);
+            let sealed = SealedRef {
+                ciphertext: &ciphertext,
+                nonce: &nonce,
+            };
+            state
+                .vault
+                .open(&key, sealed, aad.as_bytes())
+                .ok()
+                .is_some_and(|text| holds_in_order(&words_of(text.expose()), &phrase))
+        };
+        if holds {
+            runs.push(run_id);
+        }
+    }
+    Ok(runs)
+}
+
+/// Whether `words` hold `phrase` as one run, in order.
+fn holds_in_order(words: &[String], phrase: &[String]) -> bool {
+    words.windows(phrase.len()).any(|window| window == phrase)
 }
 
 /// A fresh data key for the project, wrapped first, holding nothing, since the
@@ -309,4 +446,53 @@ async fn held_in_place<'c>(
         )
         .into()
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A field's words are its letters and digits, lower-cased, in order; a
+    /// JSON field's string values alone, never its keys.
+    #[test]
+    fn words_are_read_from_text_and_from_a_json_fields_values_alone() {
+        assert_eq!(
+            words_of("Refund the ORDER, #4521!"),
+            ["refund", "the", "order", "4521"]
+        );
+        let messages =
+            r#"[{"role":"user","parts":[{"type":"text","content":"Where is my order?"}]}]"#;
+        // An object's values by its keys' order, each value's words in theirs.
+        assert_eq!(
+            words_of(messages),
+            ["where", "is", "my", "order", "text", "user"]
+        );
+        assert_eq!(words_of("naïve café"), ["naïve", "café"]);
+        assert!(words_of("  ,;  ").is_empty());
+        assert_eq!(words_of(&"x".repeat(100))[0].chars().count(), WORD_MAX);
+    }
+
+    /// A phrase holds where its words run in order, and nowhere else.
+    #[test]
+    fn a_phrase_holds_in_order_alone() {
+        let words = words_of("where is my order");
+        assert!(holds_in_order(&words, &words_of("my order")));
+        assert!(!holds_in_order(&words, &words_of("order my")));
+        assert!(!holds_in_order(&words, &words_of("where order")));
+    }
+
+    /// Words are hashed under a key of the content key's, never alike under
+    /// two, and each once.
+    #[test]
+    fn words_are_hashed_once_under_a_key_derived_from_the_content_key() {
+        let vault = telmoni_shared::envelope::Vault::new();
+        let (one, two) = (
+            vault.new_dek().expect("a key"),
+            vault.new_dek().expect("a key"),
+        );
+        let hashed = hashed_words(&words_key(&one), "order the order");
+        assert_eq!(hashed.len(), 2);
+        assert!(!hashed.iter().any(|h| h.contains("order")));
+        assert_ne!(hashed, hashed_words(&words_key(&two), "order the order"));
+    }
 }

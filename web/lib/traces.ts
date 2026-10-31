@@ -141,8 +141,10 @@ export function parseListQuery<S extends string>(
 ): ListQuery<S> {
   const rows = whole(searchParams.limit, 100);
   const page = whole(searchParams.page, MAX_PAGE);
+  const q = one(searchParams.q)?.trim();
   return compact({
     ...parseFilters(searchParams),
+    q: q && [...q].length <= SEARCH_MAX ? q : undefined,
     sort: oneOf(searchParams.sort, sorts),
     dir: oneOf(searchParams.dir, SortDirection),
     days: whole(searchParams.days, MAX_DAYS),
@@ -232,7 +234,12 @@ export function toggled<Q extends ListQuery<string>>(query: Q, filter: FilterKey
 
 /** The query without `value` under `filter`, or without the filter where no
  *  value is named, from the first page again. */
-export function without<Q extends ListQuery<string>>(query: Q, filter: FilterKey, value?: string): Q {
+export function without<Q extends ListQuery<string>>(
+  query: Q,
+  filter: FilterKey | "q",
+  value?: string,
+): Q {
+  if (filter === "q") return compact({ ...query, q: undefined, page: undefined });
   const kept = value === undefined ? [] : (query[filter] ?? []).filter((v) => v !== value);
   return compact({ ...query, [filter]: some(kept as string[]), page: undefined } as Q);
 }
@@ -242,18 +249,27 @@ export function unfiltered<Q extends ListQuery<string>>(query: Q): Q {
   return compact({ sort: query.sort, dir: query.dir, days: query.days, limit: query.limit } as Q);
 }
 
-/** One value of one filter in force, as the page shows it. */
-export type ActiveFilter = { filter: FilterKey; label: string; value: string; text: string };
+/** One value of one filter in force, as the page shows it: a facet's, or
+ *  the search's. */
+export type ActiveFilter = { filter: FilterKey | "q"; label: string; value: string; text: string };
 
-/** The filters in force, a value at a time, in the sidebar's order. */
+/** The longest search the server takes, in characters. */
+export const SEARCH_MAX = 200;
+
+/** The filters in force, a value at a time, in the sidebar's order, the
+ *  search first. */
 export function activeFilters(query: ListQuery<string>): ActiveFilter[] {
-  return FILTERS.flatMap((filter) =>
-    (query[filter] ?? []).map((value) => ({
-      filter,
-      label: FILTER_LABEL[filter],
-      value,
-      text: filter === "status" ? STATUS_LABEL[value as SpanStatus] : value,
-    })),
+  const searched: ActiveFilter[] =
+    query.q === undefined ? [] : [{ filter: "q", label: "Search", value: query.q, text: query.q }];
+  return searched.concat(
+    FILTERS.flatMap((filter) =>
+      (query[filter] ?? []).map((value) => ({
+        filter,
+        label: FILTER_LABEL[filter],
+        value,
+        text: filter === "status" ? STATUS_LABEL[value as SpanStatus] : value,
+      })),
+    ),
   );
 }
 

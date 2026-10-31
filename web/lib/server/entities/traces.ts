@@ -204,6 +204,8 @@ export const TraceLayoutListSchema = z.object({ views: z.array(TraceLayoutSchema
  *  carries it, `S` its columns' sorts. The server checks every value; the
  *  page drops what it cannot read before asking (`lib/traces.ts`). */
 export type ListQuery<S extends string> = ListFilters & {
+  /** Words or a phrase the runs' kept content holds. */
+  q?: string;
   sort?: S;
   dir?: SortDirection;
   days?: number;
@@ -215,8 +217,8 @@ export type TraceQuery = ListQuery<TraceSort>;
 
 /** The filters and the window alone: what the facets and the histogram take,
  *  each lane refusing a parameter it has no use for. */
-export function filtersOf(query: ListFilters & { days?: number }) {
-  return { ...filtersIn(query), days: query.days };
+export function filtersOf(query: ListFilters & { days?: number; q?: string }) {
+  return { ...filtersIn(query), q: query.q, days: query.days };
 }
 
 /** The two shapes a download comes in. */
