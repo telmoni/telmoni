@@ -804,7 +804,7 @@ function whole(value: unknown, least: number, end: number): number | undefined {
   return Number.isFinite(number) && number >= least && number < end ? number : undefined;
 }
 
-const DECIMAL = /^\s*[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?\s*$/i;
+const DECIMAL = /^\s*[+-]?(\d+(\.\d*)?|\.\d+)(e[+-]?\d+)?\s*$/i;
 
 /**
  * A number, a bigint or a decimal numeral's text: `Number` would make 1 of
