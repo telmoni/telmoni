@@ -5,7 +5,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use telmoni_shared::envelope::{Kek, Vault, on_deployed_tier};
+use telmoni_shared::envelope::{Kek, Vault};
 use telmoni_shared::heartbeat::Heartbeats;
 use telmoni_shared::middleware::service_auth::ServiceSecrets;
 use telmoni_shared::net_guard::Egress;
@@ -40,7 +40,7 @@ pub fn state_from_env(
         .connector_kek
         .as_ref()
         .map(|value| {
-            Kek::parse(
+            Kek::for_process(
                 "CONNECTOR_KEK",
                 value,
                 &config.kms_api_base,
@@ -49,12 +49,6 @@ pub fn state_from_env(
         })
         .transpose()
         .map_err(|e| anyhow::anyhow!("{e}"))?;
-    if kek.as_ref().is_some_and(Kek::is_local) && on_deployed_tier() {
-        anyhow::bail!(
-            "CONNECTOR_KEK is a local: key in a Kubernetes pod; a local key is for a laptop, \
-             and a pod names a Cloud KMS key or file: and a key mounted from a Secret"
-        );
-    }
     let connectors = Connectors::from_config(&config);
     tracing::info!(
         slack = connectors.slack.is_some(),

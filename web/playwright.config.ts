@@ -9,9 +9,10 @@ const TELEMETRY_DB = "postgresql://telemetry:telemetry_dev@localhost:5432/telmon
 // The dev ClickHouse, as the module's own user. No page the suite opens reads
 // a span, and the server dials ClickHouse at its first query, never at boot.
 const TELEMETRY_CLICKHOUSE = "http://telemetry:telemetry_dev@localhost:8123";
-// A laptop's key, whatever .env holds: it seals a project's hashing key at the
-// project's first export, and no spec exports a span.
+// Laptops' keys, whatever .env holds: they seal a project's hashing and
+// content keys at its first export, and no spec exports a span.
 const TELEMETRY_KEK = `local:${"0".repeat(64)}`;
+const CONTENT_KEK = `local:${"1".repeat(64)}`;
 // The dev Redis, the console's too.
 const REDIS_URL = "redis://localhost:6379";
 
@@ -49,6 +50,7 @@ export default defineConfig({
         TELEMETRY_DATABASE_URL: TELEMETRY_DB,
         TELEMETRY_CLICKHOUSE_URL: TELEMETRY_CLICKHOUSE,
         TELEMETRY_KEK,
+        CONTENT_KEK,
         REDIS_URL,
         PORT: "8082",
         SERVICE_SECRET,

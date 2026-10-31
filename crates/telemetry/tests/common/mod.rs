@@ -313,8 +313,8 @@ impl Auth for AuthStub {
         let what = match receipt {
             Receipt::Trace { .. } => "trace".to_owned(),
             Receipt::EndUser { .. } => "end_user".to_owned(),
-            Receipt::Project { name } => format!("project {name}"),
-            Receipt::Organization { name } => format!("organization {name}"),
+            Receipt::Project { name, .. } => format!("project {name}"),
+            Receipt::Organization { name, .. } => format!("organization {name}"),
         };
         self.receipts
             .lock()
@@ -953,9 +953,10 @@ fn module_at(
     let config = Config {
         database_url: "".into(),
         clickhouse_url: clickhouse_url.into(),
-        // A laptop's key: the suites seal and open on their own machine, and
-        // name no KMS.
+        // Laptops' keys, two apart: the suites seal and open on their own
+        // machine, and name no KMS.
         telemetry_kek: format!("local:{}", "0".repeat(64)).into(),
+        content_kek: format!("local:{}", "1".repeat(64)).into(),
         kms_api_base: "http://127.0.0.1:1".into(),
         metadata_api_base: "http://127.0.0.1:1".into(),
         redis_url: redis_url.into(),

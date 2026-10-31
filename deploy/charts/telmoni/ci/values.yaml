@@ -4,3 +4,4 @@ global:
   imageTag: check
 config:
   telemetryKek: file:/var/run/secrets/telmoni/kek/telemetry
+  contentKek: file:/var/run/secrets/telmoni/kek/content

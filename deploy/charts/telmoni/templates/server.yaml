@@ -44,8 +44,8 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       volumes:
-        # The KEKs off Google Cloud (config.telemetryKek's `file:`); absent,
-        # an empty directory.
+        # The KEKs off Google Cloud (config.telemetryKek's and contentKek's
+        # `file:`); absent, an empty directory.
         - name: kek
           secret:
             secretName: server-kek

@@ -588,6 +588,56 @@ async fn a_transfer_moves_the_bytes_and_a_purge_takes_them_off(pool: PgPool) {
     assert_eq!(door.held(&pool, &taker).await, Some(0));
 }
 
+/// A project's content key is wrapped under `CONTENT_KEK`, never the hashing
+/// key's `TELEMETRY_KEK`, and a purge deletes it with the content, so no
+/// copy of either outlives the other.
+#[sqlx::test]
+async fn the_content_key_is_wrapped_apart_and_a_purge_deletes_it_with_the_content(pool: PgPool) {
+    let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let door = door(&pool, ContentMode::On).await;
+    door.send(export("result")).await;
+    let (wrapped, version): (Vec<u8>, i16) = sqlx::query_as(
+        "SELECT content_key_wrapped_dek, content_key_version \
+           FROM telemetry.project_settings WHERE project_id = $1",
+    )
+    .bind(&door.project)
+    .fetch_one(&pool)
+    .await
+    .expect("the project's content key");
+    let aad = format!("{}/content", door.project);
+    let http = &door.state.http;
+    door.state
+        .content_kek
+        .unwrap_dek(http, &wrapped, aad.as_bytes(), version)
+        .await
+        .expect("CONTENT_KEK opens it");
+    assert!(
+        door.state
+            .kek
+            .unwrap_dek(http, &wrapped, aad.as_bytes(), version)
+            .await
+            .is_err(),
+        "TELEMETRY_KEK must not open a content key"
+    );
+
+    TelemetrySeam(door.state.clone())
+        .purge_project(&door.organization, &door.project)
+        .await
+        .expect("the purge");
+    let keys: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM telemetry.project_settings \
+          WHERE project_id = $1 AND content_key_wrapped_dek IS NOT NULL",
+    )
+    .bind(&door.project)
+    .fetch_one(&pool)
+    .await
+    .expect("count the keys left");
+    assert_eq!(keys, 0, "the key went");
+    assert!(door.kept(&pool).await.is_empty(), "and the content with it");
+}
+
 /// A moved project's content still opens, filed in the new organization's
 /// chain, and an erasure by `user_id` still finds it: both keys moved with
 /// its settings row.

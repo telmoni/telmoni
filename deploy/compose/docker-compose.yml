@@ -4,7 +4,7 @@
 #
 # Quickstart:
 #   1. cp deploy/compose/.env.example deploy/compose/.env, and fill its first
-#      five, which have no default: `up` refuses to start without them.
+#      six, which have no default: `up` refuses to start without them.
 #      SERVICE_SECRET (any random string; both processes get the same one),
 #      AUTH_SECRET (the console's cookie seal, 32 bytes or more),
 #      POSTGRES_PASSWORD and CLICKHOUSE_PASSWORD (each store's one user's; a
@@ -12,9 +12,11 @@
 #      URL, so hex), and TELEMETRY_KEK=local:<openssl rand -hex 32>, which
 #      seals the key each project's user ids are hashed under: a secret
 #      to back up beside the database, since a dump restored without it
-#      leaves every stored user id matching nothing new:
+#      leaves every stored user id matching nothing new; and
+#      CONTENT_KEK=local:<openssl rand -hex 32>, another key, which seals the
+#      key each project's kept content is under, backed up the same way:
 #        openssl rand -hex 32
-#      Connectors (Slack, webhooks) stay off until a sixth is set,
+#      Connectors (Slack, webhooks) stay off until a seventh is set,
 #      CONNECTOR_KEK=local:<openssl rand -hex 32>, which seals their grants
 #      at rest: a secret to back up beside the database, since a dump
 #      restored without it leaves every grant unreadable.
@@ -201,6 +203,8 @@ services:
       # The key each project's hashing key is sealed under; no default, since
       # one shipped here would be the same on every install.
       TELEMETRY_KEK: ${TELEMETRY_KEK:?set TELEMETRY_KEK in deploy/compose/.env as local:<openssl rand -hex 32>}
+      # The key each project's content key is sealed under, never the same.
+      CONTENT_KEK: ${CONTENT_KEK:?set CONTENT_KEK in deploy/compose/.env as local:<openssl rand -hex 32>}
       # An ingest key of a project of your own: the console agent reports its
       # questions as runs through this server's own door, as any agent does;
       # empty for none.

@@ -279,3 +279,52 @@ async fn a_plaintext_of_the_wrong_length_is_invalid() {
         .unwrap_err();
     assert!(matches!(err, KekError::Invalid(_)), "{err}");
 }
+
+/// Two keys, two resources: content's opens go to `CONTENT_KEK`'s key alone,
+/// so disabling its version holds every content read while `TELEMETRY_KEK`
+/// still opens, and neither kill switch reaches the other's rows.
+#[tokio::test]
+async fn content_and_telemetry_keys_open_at_their_own_resource_and_switch_apart() {
+    let mocks = MockServer::start().await;
+    mount_token(&mocks, 2).await;
+    let ring = "projects/telmoni-test/locations/us-central1/keyRings/telmoni/cryptoKeys";
+    let build = |name: &str| {
+        Kek::for_process(
+            "CONTENT_KEK",
+            &telmoni_shared::Redacted::from(format!("{ring}/{name}")),
+            &mocks.uri(),
+            &mocks.uri(),
+        )
+        .unwrap()
+    };
+    let (content, telemetry) = (build("content-kek"), build("telemetry-kek"));
+    Mock::given(method("POST"))
+        .and(path(format!("/v1/{ring}/content-kek:decrypt")))
+        .respond_with(kms_error(
+            400,
+            "FAILED_PRECONDITION",
+            "The request cannot be fulfilled. CryptoKeyVersion is not enabled.",
+        ))
+        .expect(1)
+        .mount(&mocks)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(format!("/v1/{ring}/telemetry-kek:decrypt")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "plaintext": STANDARD.encode(DEK),
+        })))
+        .expect(1)
+        .mount(&mocks)
+        .await;
+
+    let held = content
+        .unwrap_dek(&http(), &WRAPPED, &ROW, KEK_VERSION)
+        .await
+        .unwrap_err();
+    assert!(matches!(held, KekError::Unavailable(_)), "{held}");
+    let opened = telemetry
+        .unwrap_dek(&http(), &WRAPPED, &ROW, KEK_VERSION)
+        .await
+        .unwrap();
+    assert_eq!(opened.as_bytes(), &DEK);
+}

@@ -723,19 +723,27 @@ impl ComposingMailer {
                      project sent."
                 ),
             ),
-            Receipt::Project { name } => (
+            Receipt::Project {
+                name,
+                unreadable_since,
+            } => (
                 format!("The project {name} was deleted"),
                 format!(
                     "The project {name} was deleted as you asked, and its \
                      telemetry with it: every span, its hourly totals and any \
-                     content it kept."
+                     content it kept. {}",
+                    unreadable(unreadable_since)
                 ),
             ),
-            Receipt::Organization { name } => (
+            Receipt::Organization {
+                name,
+                unreadable_since,
+            } => (
                 format!("The organization {name} was deleted"),
                 format!(
                     "The organization {name} was erased as you asked, with its \
-                     projects, members, API keys and telemetry."
+                     projects, members, API keys and telemetry. {}",
+                    unreadable(unreadable_since)
                 ),
             ),
         };
@@ -753,6 +761,16 @@ impl ComposingMailer {
         )
         .await
     }
+}
+
+/// What a deleted content key means, in a receipt: every copy of the
+/// content, backups among them, unreadable from the moment it went.
+fn unreadable(since: chrono::DateTime<chrono::Utc>) -> String {
+    format!(
+        "Its content has been unreadable since {} UTC, every copy, backups \
+         among them: the key it was sealed under was deleted with it.",
+        since.format("%Y-%m-%d %H:%M")
+    )
 }
 
 #[cfg(test)]
@@ -804,6 +822,38 @@ mod tests {
             "a blank address: {}",
             mail.text
         );
+    }
+
+    /// A project's and an organization's receipts say since when their
+    /// content has been unreadable, its key deleted with it.
+    #[tokio::test]
+    async fn a_purge_receipt_says_since_when_its_content_is_unreadable() {
+        let since = chrono::DateTime::parse_from_rfc3339("2026-10-31T04:05:59Z")
+            .expect("a time")
+            .with_timezone(&chrono::Utc);
+        for receipt in [
+            Receipt::Project {
+                name: "web",
+                unreadable_since: since,
+            },
+            Receipt::Organization {
+                name: "Acme",
+                unreadable_since: since,
+            },
+        ] {
+            let mail = composed(async |m| {
+                m.send_deletion_receipt("ada@example.com", receipt, "acme/web")
+                    .await
+                    .expect("recorded");
+            })
+            .await;
+            assert!(
+                mail.text
+                    .contains("unreadable since 2026-10-31 04:05 UTC, every copy, backups"),
+                "{}",
+                mail.text
+            );
+        }
     }
 
     /// A receipt names what went and where, says it is final and where a

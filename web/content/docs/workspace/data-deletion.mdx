@@ -30,7 +30,8 @@ after typing the project's name
   the project within the hour.
 - **What stays:** the project's events in the organization's audit log.
 - **Receipt:** the deletion is in the audit log at once, and whoever deleted
-  the project is mailed once its telemetry's purge lands.
+  the project is mailed once its telemetry's purge lands, the mail saying
+  since when its content has been unreadable (*Backups and copies*, below).
 - **If a step fails:** its telemetry's purge — cut short by a store that
   did not answer, or by the project's first export still filing its
   settings past the purge's two seconds — is tried again every ten minutes
@@ -56,8 +57,8 @@ Only the **Owner** can, with a confirmation code sent to their address
   views, alerts, kept content and keys. Usually within the hour. A part that cannot finish is
   retried every ten minutes until it does.
 - **Receipt:** the request is in the audit log at once, and the owner who
-  asked is mailed once the sweep has erased it; a closing by an operator
-  mails nobody.
+  asked is mailed once the sweep has erased it, the mail saying since when
+  its content has been unreadable; a closing by an operator mails nobody.
 - **What stays:** the audit log, which is append-only and outlives the
   organization; and copies already delivered
   to a Slack channel or a webhook the organization connected, which are the
@@ -134,6 +135,14 @@ no organization that has other members
 
 On the hosted service, deleted data leaves the backups as they expire: the
 database keeps thirty daily backups and telemetry's store nightly ones, and
-nothing older than thirty days is kept of either. On a self-hosted
+nothing older than thirty days is kept of either.
+
+The content a project kept is the exception when the project or its
+organization is deleted. Each field is sealed under a key of the project's
+own, and that key is deleted in the same commit as the content, so from that
+moment no copy opens, a backup's among them: the receipt gives that moment as
+"unreadable since". A deleted trace's or end user's content is not: their
+project's key stays for its other content, so the backups' copies of it leave
+as they expire, as everything else does. On a self-hosted
 deployment, your backups are yours. Files you downloaded and notices already
 delivered to your channels are yours too, and nothing recalls them.

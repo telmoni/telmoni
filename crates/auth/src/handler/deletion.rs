@@ -439,6 +439,8 @@ pub async fn finalize_organization(
     // landed on a sibling since the mark — a request past its authorization
     // when the mark went down — goes with this.
     finalize_purges(state, organization_id).await?;
+    // Every project's content key went with its purge.
+    let unreadable_since = chrono::Utc::now();
 
     let mut tx = organization_scope(&state.db, organization_id).await?;
     // ⚠ **Under the lock, and only a row still pending and ripe goes.** The
@@ -486,7 +488,11 @@ pub async fn finalize_organization(
 
     tracing::info!(organization_id = %organization_id, "organization deletion finalized (hard delete)");
     if let (Some((to, _)), Some(name)) = (requester, name) {
-        mail_receipt(state, &to, Receipt::Organization { name: &name }).await;
+        let receipt = Receipt::Organization {
+            name: &name,
+            unreadable_since,
+        };
+        mail_receipt(state, &to, receipt).await;
     }
     Ok(FinalizeOutcome::Finalized)
 }

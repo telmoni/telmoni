@@ -43,12 +43,13 @@ Compose reads `.env` from the compose file's directory. With `docker compose -f 
 cp deploy/compose/.env.example deploy/compose/.env
 ```
 
-Five values have no default, and `up` refuses to start without them, naming the one missing:
+Six values have no default, and `up` refuses to start without them, naming the one missing:
 - `SERVICE_SECRET`: A shared secret the web console sends to the backend server as the `x-service-secret` header on every internal call, compared in constant time.
 - `AUTH_SECRET`: A secret of 32 bytes or more used to seal and decrypt session cookies.
 - `POSTGRES_PASSWORD`: The password of the stack's one database user. A default in the compose file would be the same on every install.
 - `CLICKHOUSE_PASSWORD`: The password of ClickHouse's one user. Like `POSTGRES_PASSWORD`, it goes into a connection URL, so keep to the hex `openssl` prints.
 - `TELEMETRY_KEK`: `local:` followed by 64 hex characters: the key that seals each project's hashing key, which the user ids its spans carry are hashed under before they are stored. A secret to back up beside your database dumps: a dump restored without it leaves every stored user id matching nothing a new key makes.
+- `CONTENT_KEK`: `local:` followed by 64 hex characters, another key: the one that seals each project's content key, for a project that keeps content. A secret to back up the same way: a dump restored without it leaves that content unreadable.
 
 A sixth, `CONNECTOR_KEK`, seals connector secrets at rest. The server starts without it unless Slack credentials are configured, but no connector (webhooks included) is offered without it. It has no default: a key shipped in the compose file would be the same on every install, and a database dump would then open every connector's grant.
 
@@ -62,12 +63,13 @@ openssl rand -hex 32
 Update `deploy/compose/.env` with the generated values and set your initial administrator credentials:
 
 ```sh
-# Secrets: the first five have no default, and `up` refuses to start without them
+# Secrets: the first six have no default, and `up` refuses to start without them
 SERVICE_SECRET=f3b9c7e2a1d4...      # Output from openssl rand -hex 32
 AUTH_SECRET=8e6a1c5d0f2b...         # Output from openssl rand -hex 32
 POSTGRES_PASSWORD=4c7d2e9f1a6b...   # Output from openssl rand -hex 32
 CLICKHOUSE_PASSWORD=b52e0c9d7f13... # Output from openssl rand -hex 32
 TELEMETRY_KEK=local:7c3e...         # local: and the output of openssl rand -hex 32; a secret to back up
+CONTENT_KEK=local:d20b...           # another openssl rand -hex 32, never the same key
 CONNECTOR_KEK=local:9a1f...         # local: and the output of openssl rand -hex 32; a secret to back up
 
 # Public application URL: APP_URL and AUTH_URL change with your domain.

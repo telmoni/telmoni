@@ -90,14 +90,16 @@ pub struct AppState {
     /// Notifications, in process: where the owners hear of an organization
     /// held to its plan's ceilings ([`ceilings`]).
     pub notifications: Arc<dyn telmoni_shared::seam::Notifications>,
-    /// The client Cloud KMS is called through, where `TELEMETRY_KEK` names a
-    /// key there.
+    /// The client Cloud KMS is called through, where `TELEMETRY_KEK` or
+    /// `CONTENT_KEK` names a key there.
     pub http: reqwest::Client,
     /// Seals and opens each project's hashing key and content under a data
     /// key of the row's own; holds no key itself.
     pub vault: telmoni_shared::envelope::Vault,
-    /// What wraps each row's data key: `TELEMETRY_KEK`.
+    /// What wraps each project's hashing key: `TELEMETRY_KEK`.
     pub kek: telmoni_shared::envelope::Kek,
+    /// What wraps each project's content key: `CONTENT_KEK`.
+    pub content_kek: telmoni_shared::envelope::Kek,
     /// Each project's hashing key, opened once per process ([`hashing`]).
     pub hashing_keys: hashing::Cache,
     /// Each project's content key, opened once per process ([`content`]).

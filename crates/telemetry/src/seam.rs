@@ -12,6 +12,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use serde_json::json;
 
 use telmoni_shared::audit::requested_by;
@@ -63,12 +64,14 @@ pub(crate) async fn purge_project(
     let mut tx = maintenance_scope(&state.db, TelemetryLane).await?;
     let purged = db::purge_project(&mut tx, project_id).await?;
     tx.commit().await?;
+    // The content key went with the settings row in that commit.
+    let unreadable_since = Utc::now();
     tracing::info!(
         project_id = %project_id,
         purged,
         "telemetry purge: the project's rows marked deleted and its settings and views removed"
     );
-    mail_project_receipt(state, organization_id, project_id).await;
+    mail_project_receipt(state, organization_id, project_id, unreadable_since).await;
     Ok(purged)
 }
 
@@ -81,6 +84,7 @@ async fn mail_project_receipt(
     state: &AppState,
     organization_id: &OrganizationId,
     project_id: &ProjectId,
+    unreadable_since: DateTime<Utc>,
 ) {
     let (db, auth) = (state.db.clone(), Arc::clone(&state.auth));
     let (organization_id, project_id) = (organization_id.clone(), project_id.clone());
@@ -119,7 +123,14 @@ async fn mail_project_receipt(
                     .get("name")
                     .and_then(serde_json::Value::as_str)
                     .unwrap_or(project_id.as_str());
-                auth.mail_receipt(&to, Receipt::Project { name }).await;
+                auth.mail_receipt(
+                    &to,
+                    Receipt::Project {
+                        name,
+                        unreadable_since,
+                    },
+                )
+                .await;
             }
             Ok(None) => {}
             Err(e) => tracing::warn!(

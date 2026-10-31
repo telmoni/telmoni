@@ -35,6 +35,7 @@ data:
   MAIL_FROM: {{ .Values.config.mailFrom | quote }}
   CONNECTOR_KEK: {{ .Values.config.connectorKek | quote }}
   TELEMETRY_KEK: {{ required "config.telemetryKek: a Cloud KMS key name, or file:/var/run/secrets/telmoni/kek/telemetry" .Values.config.telemetryKek | quote }}
+  CONTENT_KEK: {{ required "config.contentKek: a Cloud KMS key name, or file:/var/run/secrets/telmoni/kek/content" .Values.config.contentKek | quote }}
   {{- with .Values.config.agent }}
   AGENT_MODEL_PROVIDER: {{ .modelProvider | quote }}
   AGENT_MODEL_URL: {{ .modelUrl | quote }}

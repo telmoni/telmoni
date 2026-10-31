@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
-use telmoni_shared::envelope::{Kek, Vault, on_deployed_tier};
+use telmoni_shared::envelope::{Kek, Vault};
 use telmoni_shared::heartbeat::Heartbeats;
 use telmoni_shared::middleware::service_auth::ServiceSecrets;
 use telmoni_shared::seam::{Auth, Entitlements, Notifications};
@@ -34,7 +34,8 @@ pub async fn open_pool(config: &Config) -> anyhow::Result<sqlx::PgPool> {
 
 /// The state the binary runs the module on. Refuses a ClickHouse URL it
 /// cannot use, without dialling it — ClickHouse may come up after the server
-/// — and a `TELEMETRY_KEK` it cannot use, a laptop's key on a tier among them.
+/// — and a `TELEMETRY_KEK` or a `CONTENT_KEK` it cannot use, a laptop's key
+/// on a tier among them.
 pub fn state(
     config: Config,
     db: sqlx::PgPool,
@@ -45,25 +46,22 @@ pub fn state(
 ) -> anyhow::Result<AppState> {
     let store = Store::connect(config.clickhouse_url.expose())
         .context("TELEMETRY_CLICKHOUSE_URL is not a ClickHouse URL")?;
-    let kek = Kek::parse(
-        "TELEMETRY_KEK",
-        &config.telemetry_kek,
-        &config.kms_api_base,
-        &config.metadata_api_base,
-    )
-    .map_err(|e| anyhow::anyhow!("{e}"))?;
-    if kek.is_local() && on_deployed_tier() {
-        anyhow::bail!(
-            "TELEMETRY_KEK is a local: key in a Kubernetes pod; a local key is for a laptop, \
-             and a pod names a Cloud KMS key or file: and a key mounted from a Secret"
-        );
-    }
+    let key = |var: &str, value: &telmoni_shared::Redacted| {
+        Kek::for_process(var, value, &config.kms_api_base, &config.metadata_api_base)
+            .map_err(|e| anyhow::anyhow!("{e}"))
+    };
+    let kek = key("TELEMETRY_KEK", &config.telemetry_kek)?;
+    let content_kek = key("CONTENT_KEK", &config.content_kek)?;
     // Bounded, so an export that keys its project ends inside an
     // organization's deletion grace.
     let http = telmoni_shared::http::client("telmoni-telemetry", KEY_SERVICE_WAIT)?;
     let redis =
         Redis::connect(config.redis_url.expose()).context("REDIS_URL is not a Redis URL")?;
-    tracing::info!(kek = kek.kind(), "telemetry: hashing keys are sealed");
+    tracing::info!(
+        kek = kek.kind(),
+        content_kek = content_kek.kind(),
+        "telemetry: hashing and content keys are sealed"
+    );
     Ok(AppState {
         db,
         config,
@@ -75,6 +73,7 @@ pub fn state(
         http,
         vault: Vault::new(),
         kek,
+        content_kek,
         hashing_keys: hashing::Cache::default(),
         content_keys: hashing::Cache::default(),
         settling: std::sync::Mutex::default(),

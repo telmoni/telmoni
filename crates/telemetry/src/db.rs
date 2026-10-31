@@ -561,7 +561,7 @@ pub async fn set_hashing_key_if_none(
 }
 
 /// A project's content key as its row keeps it: a data key wrapped by
-/// `TELEMETRY_KEK`, with the key version it was wrapped under.
+/// `CONTENT_KEK`, with the key version it was wrapped under.
 #[derive(Debug, Clone)]
 pub struct WrappedContentKey {
     pub wrapped_dek: Vec<u8>,

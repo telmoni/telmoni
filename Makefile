@@ -106,17 +106,30 @@ env-scaffold:
 		done; \
 		echo "· minted a SERVICE_SECRET into .env and $(WEB_DIR)/.env.local (same value in both)"; \
 	fi
-	@if grep -qE '^TELEMETRY_KEK=[[:space:]]*$$' .env 2>/dev/null; then \
+	@$(MAKE) -s env-keks
+
+# The laptop's KEKs, minted into ENV_FILE where blank or missing and never
+# changed once set: the core's `.env`, or a deployment's built on it.
+ENV_FILE ?= .env
+.PHONY: env-keks
+env-keks:
+	@for var in TELEMETRY_KEK CONTENT_KEK; do \
+		[ -f "$(ENV_FILE)" ] || continue; \
+		if grep -qE "^$$var=[^[:space:]]+" "$(ENV_FILE)"; then continue; fi; \
 		key=$$(openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n'); \
 		if [ -z "$$key" ]; then \
-			echo "✗ env-scaffold: could not generate a TELEMETRY_KEK (no openssl, no /dev/urandom)."; \
-			echo "  Set TELEMETRY_KEK=local:<64 hex characters> in .env by hand."; \
+			echo "✗ env-scaffold: could not generate a $$var (no openssl, no /dev/urandom)."; \
+			echo "  Set $$var=local:<64 hex characters> in $(ENV_FILE) by hand."; \
 			exit 1; \
 		fi; \
 		tmp=$$(mktemp) || exit 1; \
-		sed "s|^TELEMETRY_KEK=[[:space:]]*$$|TELEMETRY_KEK=local:$$key|" .env > "$$tmp" && mv "$$tmp" .env; \
-		echo "· minted a local TELEMETRY_KEK into .env"; \
-	fi
+		if grep -qE "^$$var=" "$(ENV_FILE)"; then \
+			sed "s|^$$var=[[:space:]]*$$|$$var=local:$$key|" "$(ENV_FILE)" > "$$tmp" && mv "$$tmp" "$(ENV_FILE)"; \
+		else \
+			cp -p "$(ENV_FILE)" "$$tmp" && printf '%s=local:%s\n' "$$var" "$$key" >> "$$tmp" && mv "$$tmp" "$(ENV_FILE)"; \
+		fi; \
+		echo "· minted a local $$var into $(ENV_FILE)"; \
+	done
 
 .PHONY: port-check
 port-check:
@@ -173,7 +186,7 @@ schema-check:
 .PHONY: env-check-services
 env-check-services:
 	@missing=""; \
-	for var in AUTH_DATABASE_URL NOTIFICATIONS_DATABASE_URL TELEMETRY_DATABASE_URL MIGRATOR_DATABASE_URL TELEMETRY_CLICKHOUSE_URL MIGRATOR_CLICKHOUSE_URL TELEMETRY_KEK REDIS_URL SERVICE_SECRET; do \
+	for var in AUTH_DATABASE_URL NOTIFICATIONS_DATABASE_URL TELEMETRY_DATABASE_URL MIGRATOR_DATABASE_URL TELEMETRY_CLICKHOUSE_URL MIGRATOR_CLICKHOUSE_URL TELEMETRY_KEK CONTENT_KEK REDIS_URL SERVICE_SECRET; do \
 		eval val=\$$$$var; \
 		if [ -n "$$val" ]; then continue; fi; \
 		if [ -f .env ] && grep -qE "^$$var=[^[:space:]]+" .env; then continue; fi; \
@@ -363,7 +376,7 @@ deploy-check:
 	helm lint --strict deploy/charts/telmoni -f deploy/charts/telmoni/ci/values.yaml
 	helm template telmoni deploy/charts/telmoni -f deploy/charts/telmoni/ci/values.yaml > /dev/null
 	helm template telmoni deploy/charts/telmoni -f deploy/charts/telmoni/ci/values.yaml --set highAvailability.enabled=true,ingress.enabled=true,embeddings.enabled=true > /dev/null
-	POSTGRES_PASSWORD=x CLICKHOUSE_PASSWORD=x AUTH_SECRET=x SERVICE_SECRET=x TELEMETRY_KEK=x docker compose -f deploy/compose/docker-compose.yml config -q
+	POSTGRES_PASSWORD=x CLICKHOUSE_PASSWORD=x AUTH_SECRET=x SERVICE_SECRET=x TELEMETRY_KEK=x CONTENT_KEK=x docker compose -f deploy/compose/docker-compose.yml config -q
 
 .PHONY: fmt
 fmt:

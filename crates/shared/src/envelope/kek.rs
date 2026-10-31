@@ -126,6 +126,41 @@ impl Kek {
             .map_err(|e| format!("{var}: {e}"))
     }
 
+    /// [`Kek::parse`], refusing a laptop's key on a deployed tier: how every
+    /// process builds each key it seals under.
+    pub fn for_process(
+        var: &str,
+        value: &Redacted,
+        kms_api_base: &str,
+        metadata_api_base: &str,
+    ) -> Result<Self, String> {
+        Self::for_tier(
+            var,
+            value,
+            kms_api_base,
+            metadata_api_base,
+            on_deployed_tier(),
+        )
+    }
+
+    /// [`Kek::for_process`] with the tier given, so the refusal can be pinned.
+    fn for_tier(
+        var: &str,
+        value: &Redacted,
+        kms_api_base: &str,
+        metadata_api_base: &str,
+        deployed: bool,
+    ) -> Result<Self, String> {
+        let kek = Self::parse(var, value, kms_api_base, metadata_api_base)?;
+        if deployed && kek.is_local() {
+            return Err(format!(
+                "{var} is a local: key in a Kubernetes pod; a local key is for a laptop, \
+                 and a pod names a Cloud KMS key or file: and a key mounted from a Secret"
+            ));
+        }
+        Ok(kek)
+    }
+
     /// `"kms"`, `"local"` or `"file"`, for the boot log.
     #[must_use]
     pub const fn kind(&self) -> &'static str {
@@ -642,6 +677,34 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(opened.as_bytes(), dek.as_bytes());
+    }
+
+    /// A laptop's key is refused on a tier, named by its variable; a mounted
+    /// or a KMS key is taken there, and a laptop takes all three.
+    #[test]
+    fn a_tier_refuses_a_local_key_by_name_and_takes_the_others() {
+        let take = |value: &str, deployed: bool| {
+            Kek::for_tier(
+                "CONTENT_KEK",
+                &Redacted::from(value),
+                API,
+                METADATA,
+                deployed,
+            )
+        };
+        let local = format!("local:{KEY}");
+        let refused = take(&local, true).unwrap_err();
+        assert!(
+            refused.starts_with("CONTENT_KEK is a local: key"),
+            "{refused}"
+        );
+        assert!(
+            !refused.contains(KEY),
+            "the refusal prints no key: {refused}"
+        );
+        assert!(take(&local, false).is_ok_and(|kek| kek.is_local()));
+        let kms = "projects/p/locations/l/keyRings/r/cryptoKeys/content-kek";
+        assert!(take(kms, true).is_ok_and(|kek| kek.kind() == "kms"));
     }
 
     #[test]

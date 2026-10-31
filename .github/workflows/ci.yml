@@ -299,6 +299,7 @@ jobs:
           AUTH_SECRET: x
           SERVICE_SECRET: x
           TELEMETRY_KEK: x
+          CONTENT_KEK: x
         run: docker compose -f deploy/compose/docker-compose.yml config -q
 
   # Single required status check — branch protection points at this one job.

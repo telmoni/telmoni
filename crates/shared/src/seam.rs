@@ -437,10 +437,18 @@ pub enum Receipt<'a> {
         project_id: &'a ProjectId,
         traces: u64,
     },
-    /// A project, its telemetry purged.
-    Project { name: &'a str },
-    /// An organization, erased.
-    Organization { name: &'a str },
+    /// A project, its telemetry purged: its content unreadable since its
+    /// content key was deleted with its settings.
+    Project {
+        name: &'a str,
+        unreadable_since: DateTime<Utc>,
+    },
+    /// An organization, erased: its content unreadable since its purges
+    /// deleted every project's content key.
+    Organization {
+        name: &'a str,
+        unreadable_since: DateTime<Utc>,
+    },
 }
 
 /// One notice, as a module hands it to notifications.

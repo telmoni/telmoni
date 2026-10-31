@@ -75,6 +75,11 @@ config:
   # file:/var/run/secrets/telmoni/kek/telemetry, the key `telemetry` of the
   # Secret `server-kek`.
   telemetryKek: ""
+  # The key each project's content key is sealed under, never telemetryKek's:
+  # deleting a project's content key leaves what it kept unreadable. Required:
+  # a Cloud KMS key name, or file:/var/run/secrets/telmoni/kek/content, the
+  # key `content` of the Secret `server-kek`.
+  contentKek: ""
   # The console agent. Off while modelProvider is empty; on, it needs
   # `AGENT_DATABASE_URL` in `server-secrets` (the `agent` role's DSN), and
   # `AGENT_MODEL_API_KEY` there for a hosted model. modelProvider is the

@@ -19,6 +19,11 @@ pub struct Config {
     /// for a laptop. Required: every
     /// binary ingests, and a `user_id` is hashed before it is a row.
     pub telemetry_kek: Redacted,
+    /// The key that seals each project's content key (`CONTENT_KEK`), spelt
+    /// as `TELEMETRY_KEK` is and never the same key: deleting a project's
+    /// content key makes its content unreadable, backups among it. Required,
+    /// since every binary ingests.
+    pub content_kek: Redacted,
     /// Cloud KMS's origin (`KMS_API_BASE`); the tests point it at a mock.
     pub kms_api_base: String,
     /// The instance metadata server (`METADATA_API_BASE`), where the KMS
@@ -40,6 +45,7 @@ impl Config {
             database_url: require("TELEMETRY_DATABASE_URL")?.into(),
             clickhouse_url: require("TELEMETRY_CLICKHOUSE_URL")?.into(),
             telemetry_kek: require("TELEMETRY_KEK")?.into(),
+            content_kek: require("CONTENT_KEK")?.into(),
             kms_api_base: optional_base_url("KMS_API_BASE")
                 .unwrap_or_else(|| "https://cloudkms.googleapis.com".to_owned()),
             metadata_api_base: optional_base_url("METADATA_API_BASE")

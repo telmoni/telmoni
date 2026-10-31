@@ -3,8 +3,10 @@
 //! field's name as associated data, in `plain_content`, and its bytes on its
 //! organization's row of `content_held`. The key is a data key of the
 //! project's own, made with the first content it keeps, wrapped under
-//! `TELEMETRY_KEK` beside the hashing key ([`crate::hashing`]), and held in
-//! memory once opened, as that one is. Content is read only through
+//! `CONTENT_KEK`, never the hashing key's `TELEMETRY_KEK`, and held in
+//! memory once opened, as the hashing key is ([`crate::hashing`]). Deleting
+//! the settings row deletes the key, so every copy of the content, backups
+//! among them, is unreadable from that commit. Content is read only through
 //! [`open`], which files each read in the organization's audit chain.
 
 use std::sync::Arc;
@@ -198,7 +200,7 @@ pub async fn key_for(state: &AppState, project_id: &ProjectId) -> Result<Arc<Dek
         None => make_key(state, project_id, aad.as_bytes()).await?,
     };
     let key = state
-        .kek
+        .content_kek
         .unwrap_dek(
             &state.http,
             &wrapped.wrapped_dek,
@@ -223,7 +225,7 @@ async fn make_key(
     let dek = state.vault.new_dek()?;
     let wrapped = WrappedContentKey {
         wrapped_dek: state
-            .kek
+            .content_kek
             .wrap(&state.http, &dek, aad)
             .await
             .map_err(|e| kek_refused(&e, WHAT))?,
