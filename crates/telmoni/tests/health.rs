@@ -721,7 +721,7 @@ async fn a_request_is_named_by_this_process_alone() {
         assert_ne!(
             header(&probed, "x-request-id"),
             Some("req-probe"),
-            "the answer told whether {secret} is the secret"
+            "the answer told whether the probe held the secret"
         );
     }
 }

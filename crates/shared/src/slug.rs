@@ -735,7 +735,7 @@ mod tests {
         let long = "z".repeat(90);
         for name in ["Acme", "Müller GmbH", "  x  ", "a-b", long.as_str()] {
             let slug = slugify(name).unwrap();
-            assert!(is_slug(slug.as_str()), "{slug}");
+            assert!(is_slug(slug.as_str()), "slugify({name:?}) is no slug");
         }
     }
 

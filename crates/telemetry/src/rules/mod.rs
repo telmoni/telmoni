@@ -385,7 +385,7 @@ impl RuleInput {
         if self.connectors.len() > LINKS_MAX {
             return Err(bad(&format!("an alert links up to {LINKS_MAX} connectors")));
         }
-        let mut connectors: Vec<Link> = Vec::with_capacity(self.connectors.len());
+        let mut connectors: Vec<Link> = Vec::with_capacity(LINKS_MAX);
         for link in self.connectors {
             if connectors
                 .iter()

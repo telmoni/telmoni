@@ -626,14 +626,12 @@ pub fn test_issuer_verifying(db: PgPool, verify_email: bool) -> Arc<Issuer> {
     reason = "test support: a bearer that cannot be minted is a failing suite"
 )]
 pub async fn bearer_in(pool: &PgPool, user_id: &str, sid: &str) -> String {
-    let user =
-        UserId::try_new(user_id).unwrap_or_else(|e| panic!("{user_id:?} is not a user id: {e:?}"));
-    let sid =
-        SessionId::try_new(sid).unwrap_or_else(|e| panic!("{sid:?} is not a session id: {e:?}"));
+    let user = UserId::try_new(user_id).unwrap_or_else(|e| panic!("not a user id: {e:?}"));
+    let sid = SessionId::try_new(sid).unwrap_or_else(|e| panic!("not a session id: {e:?}"));
     let token = secret();
     let mut tx = person_scope(pool, &user)
         .await
-        .unwrap_or_else(|e| panic!("a scope for {user_id}: {e}"));
+        .unwrap_or_else(|e| panic!("a person's scope: {e}"));
     access_tokens::create(
         &mut tx,
         &user,
@@ -644,13 +642,13 @@ pub async fn bearer_in(pool: &PgPool, user_id: &str, sid: &str) -> String {
     .await
     .unwrap_or_else(|e| {
         panic!(
-            "a bearer for {user_id}: {e} — seed_identity first: a bearer names only somebody \
+            "a bearer: {e} — seed_identity first: a bearer names only somebody \
              auth knows"
         )
     });
     tx.commit()
         .await
-        .unwrap_or_else(|e| panic!("a bearer for {user_id}: {e}"));
+        .unwrap_or_else(|e| panic!("a bearer: {e}"));
     token
 }
 
