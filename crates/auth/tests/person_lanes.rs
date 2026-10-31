@@ -100,6 +100,7 @@ fn active_organization(me: &Value) -> String {
 const PERSON_ROUTES: &[(&str, &str)] = &[
     ("GET", "/internal/v1/auth/sessions"),
     ("POST", "/internal/v1/auth/sessions/{id}/revoke"),
+    ("POST", "/internal/v1/auth/sessions/revoke-others"),
     ("GET", "/internal/v1/projects"),
     ("POST", "/internal/v1/projects"),
     ("GET", "/internal/v1/projects/everywhere"),

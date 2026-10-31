@@ -7,6 +7,7 @@ import { Card } from "@/components/ui/card";
 import { fetchContentMode } from "@/lib/server/data";
 import { projectPage } from "@/lib/server/project-page";
 import { administers } from "@/lib/roles";
+import { getServerSession } from "@/lib/server/session";
 import { Role } from "@/lib/types/enums";
 
 import { ContentModeForm } from "./_content-mode";
@@ -25,7 +26,10 @@ export default async function SettingsPage({
   const resolved = await projectPage(slug);
   if (resolved.kind === "unavailable") return <ServiceUnavailable />;
   const { project } = resolved;
-  const contentMode = await fetchContentMode(project.id);
+  const [contentMode, session] = await Promise.all([
+    fetchContentMode(project.id),
+    getServerSession(),
+  ]);
 
   // A project's Owner is its organization's: no seat makes anyone else one.
   const isOwner = project.role === Role.Owner;
@@ -75,6 +79,7 @@ export default async function SettingsPage({
                 mode={contentMode.content_mode}
                 offered={contentMode.offered}
                 canEdit={isOwner}
+                email={session?.email ?? ""}
               />
             ) : (
               <p className="text-sm text-muted-foreground">

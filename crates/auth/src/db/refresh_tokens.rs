@@ -23,24 +23,28 @@ const SPENT_RETENTION: &str = "1 day";
 /// scheme with a reuse interval makes, and thirty seconds is a short one.
 const REUSE_GRACE_SECS: i64 = 30;
 
-/// Write a token. Under the person at sign-in and under the lane at refresh,
-/// which carries the old token and no person.
+/// Write a token of a session that began at `session_began`. Under the
+/// person at sign-in and under the lane at refresh, which carries the old
+/// token and no person.
 pub async fn create<B: Binding>(
     tx: &mut Scoped<'_, B>,
     user_id: &UserId,
     sid: &SessionId,
     token_hash: &str,
     expires_at: DateTime<Utc>,
+    session_began: DateTime<Utc>,
 ) -> sqlx::Result<()> {
     sqlx::query(
-        "INSERT INTO auth.refresh_tokens (id, user_id, sid, token_hash, expires_at, shard_key)
-         VALUES ($1, $2, $3, $4, $5, $6)",
+        "INSERT INTO auth.refresh_tokens
+             (id, user_id, sid, token_hash, expires_at, session_began, shard_key)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)",
     )
     .bind(Uuid::now_v7())
     .bind(user_id)
     .bind(sid)
     .bind(token_hash)
     .bind(expires_at)
+    .bind(session_began)
     .bind(telmoni_shared::derive_shard_key(user_id))
     .execute(tx.conn())
     .await?;
@@ -52,7 +56,11 @@ pub async fn create<B: Binding>(
 pub enum Spent {
     /// A live token, now spent, or one spent within the last few seconds:
     /// the session goes on with a new one.
-    Live { user_id: UserId, sid: SessionId },
+    Live {
+        user_id: UserId,
+        sid: SessionId,
+        session_began: DateTime<Utc>,
+    },
     /// A token spent longer ago than that. Every token of its session, its
     /// bearers included, is gone now.
     Reused,
@@ -67,6 +75,7 @@ struct Row {
     sid: SessionId,
     used_at: Option<DateTime<Utc>>,
     expires_at: DateTime<Utc>,
+    session_began: DateTime<Utc>,
 }
 
 /// Spend the token `token_hash` names, at `now`. `None` is a token this
@@ -77,7 +86,7 @@ pub async fn spend(
     now: DateTime<Utc>,
 ) -> sqlx::Result<Option<Spent>> {
     let Some(row) = sqlx::query_as::<_, Row>(
-        "SELECT id, user_id, sid, used_at, expires_at
+        "SELECT id, user_id, sid, used_at, expires_at, session_began
            FROM auth.refresh_tokens WHERE token_hash = $1
             FOR UPDATE",
     )
@@ -92,6 +101,7 @@ pub async fn spend(
             return Ok(Some(Spent::Live {
                 user_id: row.user_id,
                 sid: row.sid,
+                session_began: row.session_began,
             }));
         }
         revoke_sid(tx, &row.sid).await?;
@@ -116,6 +126,7 @@ pub async fn spend(
     Ok(Some(Spent::Live {
         user_id: row.user_id,
         sid: row.sid,
+        session_began: row.session_began,
     }))
 }
 

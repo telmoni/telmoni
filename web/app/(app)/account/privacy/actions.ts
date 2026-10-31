@@ -10,6 +10,7 @@ import { sessionEndKey } from "@/lib/auth/session-end-key";
 import { env } from "@/lib/env";
 import { admit } from "@/lib/server/admit";
 import { accountHeaders, personHeaders } from "@/lib/server/entities/identity-context";
+import { fetchActiveSessions } from "@/lib/server/entities/active-sessions";
 import { AccountDeletedSchema } from "@/lib/server/entities/organization";
 
 // The person's own lanes: they act on the account, whichever organization the
@@ -77,25 +78,36 @@ export async function revokeSessionAction(
 ): Promise<ActionResult> {
   const gate = await admit({ call: "sessions:revoke", limit: 10 });
   if (!gate.ok) return refused(gate.error);
+  return endSessions(`/${encodeURIComponent(sessionId)}/revoke`, [sessionId]);
+}
 
+/// *Sign out everywhere else*: every session but this one, each listed one
+/// refused by this console at once, as one ended alone is.
+export async function revokeOtherSessionsAction(): Promise<ActionResult> {
+  const gate = await admit({ call: "sessions:revoke-others", limit: 5 });
+  if (!gate.ok) return refused(gate.error);
+  const current = gate.session.sessionRowId;
+  const listed = (await fetchActiveSessions()) ?? [];
+  const others = listed.map((s) => s.id).filter((id) => id !== current);
+  return endSessions("/revoke-others", others);
+}
+
+/// End sessions at auth by `path` under `/internal/v1/auth/sessions`, then
+/// refuse each of `ids` here at once rather than when its bearer lapses.
+async function endSessions(path: string, ids: string[]): Promise<ActionResult> {
   const headers = await accountHeaders();
   if (!headers) return refused(UNRESOLVED);
 
-  const res = await tryFetchWithTimeout(
-    `${env.SERVER_URL}/internal/v1/auth/sessions/${encodeURIComponent(
-      sessionId,
-    )}/revoke`,
-    {
-      method: "POST",
-      headers,
-    },
-  );
+  const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/v1/auth/sessions${path}`, {
+    method: "POST",
+    headers,
+  });
   if (!res) return refused(UNREACHABLE);
   if (!res.ok) {
     const { message } = await extractProblem(res);
     return refused(message);
   }
-  await blacklistSession(sessionId);
+  await Promise.all(ids.map((id) => blacklistSession(id)));
   refresh();
   return { ok: true };
 }

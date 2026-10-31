@@ -502,9 +502,9 @@ pub async fn finalize_organization(
 /// it reports is done whether or not the mail goes.
 pub(crate) async fn mail_receipt(state: &AppState, to: &UserId, receipt: Receipt<'_>) {
     let project_id = match receipt {
-        Receipt::Trace { project_id, .. } | Receipt::EndUser { project_id, .. } => {
-            Some(project_id.clone())
-        }
+        Receipt::Trace { project_id, .. }
+        | Receipt::EndUser { project_id, .. }
+        | Receipt::Content { project_id, .. } => Some(project_id.clone()),
         Receipt::Project { .. } | Receipt::Organization { .. } => None,
     };
     let found = crate::db::lane(&state.db, async |tx| {

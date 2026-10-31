@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 
+import { CodeField } from "@/components/code-field";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -163,41 +164,27 @@ export function ChangeEmail({
             if (canConfirm) confirm();
           }}
         >
-          <div className="grid gap-2">
-            <Label htmlFor="email-code-new">
-              Code sent to <span className="font-medium">{sentTo}</span>
-            </Label>
-            <Input
-              id="email-code-new"
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              maxLength={CONFIRMATION_CODE_LENGTH}
-              value={newCode}
-              onChange={(e) => {
-                setNewCode(codeTyped(e.target.value));
-                clearError();
-              }}
-              placeholder="000000"
-              disabled={confirming}
-            />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="email-code-current">
-              Code sent to <span className="font-medium">{email}</span>
-            </Label>
-            <Input
-              id="email-code-current"
-              inputMode="numeric"
-              maxLength={CONFIRMATION_CODE_LENGTH}
-              value={currentCode}
-              onChange={(e) => {
-                setCurrentCode(codeTyped(e.target.value));
-                clearError();
-              }}
-              placeholder="000000"
-              disabled={confirming}
-            />
-          </div>
+          <CodeField
+            id="email-code-new"
+            label={<>Code sent to <span className="font-medium">{sentTo}</span></>}
+            value={newCode}
+            onType={(raw) => {
+              setNewCode(codeTyped(raw));
+              clearError();
+            }}
+            disabled={confirming}
+          />
+          <CodeField
+            id="email-code-current"
+            label={<>Code sent to <span className="font-medium">{email}</span></>}
+            value={currentCode}
+            onType={(raw) => {
+              setCurrentCode(codeTyped(raw));
+              clearError();
+            }}
+            disabled={confirming}
+            autoFill={false}
+          />
           <div className="flex items-center gap-3">
             <Button type="submit" disabled={!canConfirm}>
               {confirming ? "Changing…" : "Change my email"}

@@ -317,6 +317,10 @@ pub fn router(state: Arc<AppState>) -> Router {
             post(handler::sessions::revoke),
         )
         .route(
+            "/auth/sessions/revoke-others",
+            post(handler::sessions::revoke_others),
+        )
+        .route(
             "/projects",
             get(handler::projects::list_projects).post(handler::projects::create_project),
         )

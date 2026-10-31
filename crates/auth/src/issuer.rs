@@ -17,7 +17,7 @@
 
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use chrono::{Duration, Utc};
+use chrono::{DateTime, Duration, Utc};
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -43,6 +43,10 @@ pub const BEARER_TTL_SECS: i64 = 15 * 60;
 /// How long a refresh token is good for, unused: the console's session
 /// cookie lives as long.
 const REFRESH_TTL_DAYS: i64 = 30;
+
+/// How long a session lasts from its sign-in, however often it refreshes: no
+/// token of it is good past this, so a stolen refresh token dies with it.
+pub const SESSION_MAX_DAYS: i64 = 90;
 
 /// How long the code a sign-in hands the console is good for: one redirect.
 const CODE_TTL_SECS: i64 = 60;
@@ -183,14 +187,15 @@ impl Issuer {
     }
 
     /// The tokens a grant answers with: a bearer for the session and a fresh
-    /// refresh token, both written under `tx`. `auth_method` is how the
+    /// refresh token, both written under `tx`, neither good past
+    /// [`SESSION_MAX_DAYS`] from `session_began`. `auth_method` is how the
     /// sign-in was proved, and `id_token` the external provider's own token
     /// when the session began at one, for the sign-out that names it.
     pub(crate) async fn issue_tokens<B: IdentityRead>(
         &self,
         tx: &mut Scoped<'_, B>,
         user_id: &UserId,
-        sid: &SessionId,
+        (sid, session_began): (&SessionId, DateTime<Utc>),
         auth_method: Option<&str>,
         id_token: Option<Redacted>,
     ) -> Result<TokenResponse, TelmoniError> {
@@ -199,13 +204,14 @@ impl Issuer {
             return Err(AuthError::InvalidToken.into());
         };
         let now = Utc::now();
+        let ends = session_began + Duration::days(SESSION_MAX_DAYS);
         let access_token = secret();
         access_tokens::create(
             tx,
             user_id,
             sid,
             &hash(&access_token),
-            now + Duration::seconds(BEARER_TTL_SECS),
+            (now + Duration::seconds(BEARER_TTL_SECS)).min(ends),
         )
         .await?;
         let refresh_token = secret();
@@ -214,7 +220,8 @@ impl Issuer {
             user_id,
             sid,
             &hash(&refresh_token),
-            now + Duration::days(REFRESH_TTL_DAYS),
+            (now + Duration::days(REFRESH_TTL_DAYS)).min(ends),
+            session_began,
         )
         .await?;
         Ok(TokenResponse {
@@ -286,7 +293,13 @@ impl Issuer {
         }
         let mut tx = person_scope(&self.db, &user_id).await?;
         let tokens = self
-            .issue_tokens(&mut tx, &user_id, &sid, Some("password"), None)
+            .issue_tokens(
+                &mut tx,
+                &user_id,
+                (&sid, Utc::now()),
+                Some("password"),
+                None,
+            )
             .await?;
         tx.commit().await?;
         Ok(tokens)
@@ -303,7 +316,13 @@ impl Issuer {
     ) -> Result<TokenResponse, TelmoniError> {
         let mut tx = person_scope(&self.db, user_id).await?;
         let tokens = self
-            .issue_tokens(&mut tx, user_id, &SessionId::new(), auth_method, id_token)
+            .issue_tokens(
+                &mut tx,
+                user_id,
+                (&SessionId::new(), Utc::now()),
+                auth_method,
+                id_token,
+            )
             .await?;
         tx.commit().await?;
         Ok(tokens)
@@ -313,10 +332,22 @@ impl Issuer {
     /// the reuse grace is a copy somebody kept, and ends its whole session.
     pub async fn refresh(&self, refresh_token: &str) -> Result<TokenResponse, TelmoniError> {
         let mut tx = maintenance_scope(&self.db, AuthLane).await?;
-        match refresh_tokens::spend(&mut tx, &hash(refresh_token), Utc::now()).await? {
-            Some(refresh_tokens::Spent::Live { user_id, sid }) => {
+        let now = Utc::now();
+        match refresh_tokens::spend(&mut tx, &hash(refresh_token), now).await? {
+            Some(refresh_tokens::Spent::Live { session_began, .. })
+                if session_began + Duration::days(SESSION_MAX_DAYS) <= now =>
+            {
+                tx.commit().await?;
+                tracing::debug!("refresh refused: the session is past its ninety days");
+                Err(AuthError::InvalidToken.into())
+            }
+            Some(refresh_tokens::Spent::Live {
+                user_id,
+                sid,
+                session_began,
+            }) => {
                 let tokens = self
-                    .issue_tokens(&mut tx, &user_id, &sid, None, None)
+                    .issue_tokens(&mut tx, &user_id, (&sid, session_began), None, None)
                     .await?;
                 tx.commit().await?;
                 Ok(tokens)
@@ -332,6 +363,19 @@ impl Issuer {
                 tx.commit().await?;
                 tracing::debug!("refresh refused: the token is expired or unknown");
                 Err(AuthError::InvalidToken.into())
+            }
+        }
+    }
+
+    /// [`Issuer::revoke_sid`] for each session whose row the caller has just
+    /// revoked and committed. A failure is logged and goes no further: the
+    /// revoked row refuses the session's bearers and its next refresh.
+    pub async fn end_sessions(&self, sids: &[SessionId]) {
+        for sid in sids {
+            if let Err(e) = self.revoke_sid(sid).await {
+                tracing::warn!(error = %e,
+                    "a session's tokens survive its revoke; the row is revoked, which refuses \
+                     its bearers and its next refresh");
             }
         }
     }
@@ -405,7 +449,7 @@ impl Issuer {
                 // The device is a session of its own; how the person who
                 // approved it signed in is nothing it can answer for.
                 let tokens = self
-                    .issue_tokens(&mut tx, &user_id, &sid, None, None)
+                    .issue_tokens(&mut tx, &user_id, (&sid, Utc::now()), None, None)
                     .await?;
                 DevicePoll::Granted(Box::new(tokens))
             }

@@ -33,7 +33,7 @@ export function OrganizationSync({ rendered }: { rendered: string | null }) {
   // the cookie since, and it follows whichever one was navigated in last.
   useEffect(() => {
     if (remembered === null) return;
-    document.cookie = activeOrganizationCookie(remembered, window.location.protocol === "https:");
+    document.cookie = activeOrganizationCookie(remembered);
   }, [remembered, pathname]);
 
   useEffect(() => {

@@ -13,12 +13,13 @@ use serde_json::json;
 
 use telmoni_shared::SessionId;
 use telmoni_shared::acting::{Acting, ActingKey, ActingProject};
-use telmoni_shared::db::tenant_session::{maintenance_scope, organization_scope};
+use telmoni_shared::db::tenant_session::{maintenance_scope, organization_scope, person_scope};
 use telmoni_shared::extract::header;
 use telmoni_shared::rbac::{Resource, Verb};
 use telmoni_shared::seam::{
-    Audience, AuditEventsQuery, Auth, Closing, DocumentCursor, FoundedOrganization, MovedProject,
-    OrganizationFounding, OwnedOrganization, ProjectHome, ReadableProject, Receipt, SourceDocument,
+    Audience, AuditEventsQuery, Auth, Closing, Confirmation, DocumentCursor, FoundedOrganization,
+    MovedProject, OrganizationFounding, OwnedOrganization, ProjectHome, ReadableProject, Receipt,
+    SourceDocument,
 };
 use telmoni_shared::slug::Slug;
 use telmoni_shared::{
@@ -29,11 +30,14 @@ use telmoni_shared::{
 use crate::AppState;
 use crate::db::audit::{self, AuditQuery};
 use crate::db::{
-    AuthLane, access_tokens, flags, members, organization_members, organizations, projects, tokens,
+    AuthLane, access_tokens,
+    confirmation_codes::{self, Act},
+    flags, identities, members, organization_members, organizations, projects, tokens,
 };
 use crate::handler::{
     acting_organization, acting_project, authorize, parse_organization_id, parse_project_id,
 };
+use crate::mailer::AuthMail;
 use crate::model::InviteScope;
 
 #[async_trait]
@@ -334,6 +338,57 @@ impl Auth for AppState {
 
     async fn mail_receipt(&self, to: &UserId, receipt: Receipt<'_>) {
         crate::handler::deletion::mail_receipt(self, to, receipt).await;
+    }
+
+    async fn mail_confirmation(
+        &self,
+        acting: &Acting,
+        confirmation: Confirmation<'_>,
+    ) -> Result<(), TelmoniError> {
+        let Confirmation::ContentMode(project_id) = confirmation;
+        let user_id = &acting.user_id;
+        let (person, homes) = crate::db::lane(&self.db, async |tx| {
+            let person = identities::get(tx, user_id).await?;
+            let homes = projects::homes(tx, std::slice::from_ref(project_id)).await?;
+            Ok((person, homes))
+        })
+        .await?;
+        let Some(person) = person else {
+            return Err(AuthError::Unauthenticated.into());
+        };
+        let Some(home) = homes.first() else {
+            return Err(AuthError::NotFound("no such project".into()).into());
+        };
+        let project = format!("{}/{}", home.organization_slug, home.slug);
+        let code = confirmation_codes::generate_code();
+        crate::handler::account::mail_code(
+            self,
+            user_id,
+            person.email.as_str(),
+            (Act::ContentMode(project_id), &code),
+            AuthMail::ContentModeCode {
+                code: &code,
+                project: &project,
+            },
+        )
+        .await
+    }
+
+    async fn spend_confirmation(
+        &self,
+        acting: &Acting,
+        confirmation: Confirmation<'_>,
+        code: &str,
+    ) -> Result<(), TelmoniError> {
+        let Confirmation::ContentMode(project_id) = confirmation;
+        let user_id = &acting.user_id;
+        let tx = person_scope(&self.db, user_id).await?;
+        let (mut tx, id) =
+            crate::handler::account::live_code(tx, user_id, Act::ContentMode(project_id), code)
+                .await?;
+        confirmation_codes::consume(&mut tx, id).await?;
+        tx.commit().await?;
+        Ok(())
     }
 }
 

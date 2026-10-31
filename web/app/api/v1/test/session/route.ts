@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+
 import {
   SESSION_COOKIE,
   cookieOpts,
@@ -9,6 +10,7 @@ import {
 import { fetchWithTimeout } from "@/lib/api/fetch";
 import { problem } from "@/lib/api/respond";
 import { env } from "@/lib/env";
+import { expiredCookie } from "@/lib/proxy/organization";
 
 const ALLOWED =
   process.env.ALLOW_TEST_SESSION === "true" &&
@@ -100,6 +102,6 @@ export async function POST(request: NextRequest) {
 export async function DELETE() {
   if (!ALLOWED) return problem(403, "forbidden");
   const response = NextResponse.json({ ok: true });
-  response.cookies.delete(SESSION_COOKIE);
+  response.cookies.delete(expiredCookie(SESSION_COOKIE));
   return response;
 }

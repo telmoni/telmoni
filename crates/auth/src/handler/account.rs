@@ -23,16 +23,17 @@ use axum::{
 use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use uuid::Uuid;
 
 use telmoni_shared::Email;
 use telmoni_shared::Redacted;
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
-use telmoni_shared::db::tenant_session::person_scope;
+use telmoni_shared::db::tenant_session::{HasPerson, Scoped, person_scope};
 use telmoni_shared::extract::Json;
 use telmoni_shared::person_token::Principal;
 use telmoni_shared::{
     AuditAction, AuthError, AuthzError, OrganizationId, OrganizationStatus, TelmoniError,
-    TelmoniResourceKind, TenantError,
+    TelmoniResourceKind, TenantError, UserId,
 };
 
 use crate::mailer::AuthMail;
@@ -104,6 +105,63 @@ pub(crate) fn wrong_code(burned: bool) -> TelmoniError {
     } else {
         "invalid or expired confirmation code".to_owned()
     })
+}
+
+/// Keep the hash of `code`, minted by [`confirmation_codes::generate_code`]
+/// for `act`, and send `mail`, which carries it, to `to`: how every code lane
+/// sends one. A mail that fails is the lane's failure, since a code nobody
+/// received authorizes nothing.
+pub(crate) async fn mail_code(
+    state: &AppState,
+    user_id: &UserId,
+    to: &str,
+    (act, code): (Act<'_>, &str),
+    mail: AuthMail<'_>,
+) -> Result<(), TelmoniError> {
+    let expires_at = Utc::now() + Duration::minutes(confirmation_codes::CODE_TTL_MINUTES);
+    let mut tx = person_scope(&state.db, user_id).await?;
+    confirmation_codes::create(
+        &mut tx,
+        user_id,
+        act,
+        &crate::issuer::hash(code),
+        expires_at,
+    )
+    .await?;
+    tx.commit().await?;
+
+    let purpose = act.purpose().as_str();
+    if let Err(e) = state.mailer.send_mail(to, mail).await {
+        tracing::error!(user_id = %user_id, purpose, error = %e,
+            "a confirmation code's mail failed — check MAIL_FROM, the mail transport and the sending domain's DNS");
+        return Err(TelmoniError::MailDelivery {
+            context: format!("{} confirmation code", purpose.replace('_', "-")),
+        });
+    }
+    tracing::info!(user_id = %user_id, purpose, "confirmation code issued");
+    Ok(())
+}
+
+/// The live code `code` names for `act`, its id handed back with `tx` for the
+/// caller to consume beside the act it authorizes. A wrong one is counted
+/// and COMMITTED before the refusal — a counter that rolled back with the
+/// failed request would guard a million-code space by counting to one
+/// forever — the fifth burning the code.
+pub(crate) async fn live_code<'a, B: HasPerson>(
+    mut tx: Scoped<'a, B>,
+    user_id: &UserId,
+    act: Act<'_>,
+    code: &str,
+) -> Result<(Scoped<'a, B>, Uuid), TelmoniError> {
+    let found =
+        confirmation_codes::find_live(&mut tx, user_id, act, &crate::issuer::hash(code.trim()))
+            .await?;
+    let Some(id) = found else {
+        let burned = confirmation_codes::register_failure(&mut tx, user_id, act.purpose()).await?;
+        tx.commit().await?;
+        return Err(wrong_code(burned));
+    };
+    Ok((tx, id))
 }
 
 /// The caller's identity, or a 401 when auth never recorded one.
@@ -201,35 +259,17 @@ pub async fn request_email_change(
     }
 
     let code = confirmation_codes::generate_code();
-    let expires_at = Utc::now() + Duration::minutes(confirmation_codes::CODE_TTL_MINUTES);
-    let mut tx = person_scope(&state.db, &user_id).await?;
-    confirmation_codes::create(
-        &mut tx,
+    mail_code(
+        &state,
         &user_id,
-        Act::EmailChange,
-        &crate::issuer::hash(&code),
-        expires_at,
+        person.email.as_str(),
+        (Act::EmailChange, &code),
+        AuthMail::EmailChangeCode {
+            code: &code,
+            new_email: new_email.as_str(),
+        },
     )
     .await?;
-    tx.commit().await?;
-
-    if let Err(e) = state
-        .mailer
-        .send_mail(
-            person.email.as_str(),
-            AuthMail::EmailChangeCode {
-                code: &code,
-                new_email: new_email.as_str(),
-            },
-        )
-        .await
-    {
-        tracing::error!(user_id = %user_id, error = %e,
-            "email-change code mail failed — check MAIL_FROM and the mail transport");
-        return Err(TelmoniError::MailDelivery {
-            context: "email-change confirmation code".into(),
-        });
-    }
 
     tracing::info!(
         user_id = %user_id,
@@ -267,22 +307,7 @@ pub async fn confirm_email_change(
     if pending {
         return Err(AuthzError::Forbidden("account deletion in progress".into()).into());
     }
-    let live = confirmation_codes::find_live(
-        &mut tx,
-        &user_id,
-        Act::EmailChange,
-        &crate::issuer::hash(req.current_code.expose().trim()),
-    )
-    .await?;
-    if live.is_none() {
-        // ⚠ The count is COMMITTED before the refusal: a counter that rolled
-        // back with the failed request would guard a million-code space by
-        // counting to one forever.
-        let burned =
-            confirmation_codes::register_failure(&mut tx, &user_id, Purpose::EmailChange).await?;
-        tx.commit().await?;
-        return Err(wrong_code(burned));
-    }
+    let (tx, _) = live_code(tx, &user_id, Act::EmailChange, req.current_code.expose()).await?;
     tx.commit().await?;
 
     let confirmed = state
@@ -315,7 +340,7 @@ pub async fn confirm_email_change(
     // all go.
     identities::set_email(&mut tx, &user_id, &new_email, confirmed.email_verified).await?;
     confirmation_codes::delete_all_for_person(&mut tx, &user_id).await?;
-    let sids = sessions::revoke_all_for_person(&mut tx, &user_id).await?;
+    let sids = sessions::revoke_all_for_person(&mut tx, &user_id, None).await?;
     let revoked = sids.len();
 
     let metadata = json!({
@@ -342,13 +367,7 @@ pub async fn confirm_email_change(
     }
     tx.commit().await?;
 
-    for sid in &sids {
-        if let Err(e) = state.issuer.revoke_sid(sid).await {
-            tracing::warn!(error = %e,
-                "a session's tokens survive the email change; the row is revoked, which \
-                 refuses its bearers and its next refresh");
-        }
-    }
+    state.issuer.end_sessions(&sids).await;
 
     tracing::info!(user_id = %user_id, sessions_revoked = revoked, "account email changed");
     Ok((
@@ -487,34 +506,14 @@ pub async fn request_account_deletion_code(
     }
 
     let code = confirmation_codes::generate_code();
-    let expires_at = Utc::now() + Duration::minutes(confirmation_codes::CODE_TTL_MINUTES);
-    let mut tx = person_scope(&state.db, &user_id).await?;
-    confirmation_codes::create(
-        &mut tx,
+    mail_code(
+        &state,
         &user_id,
-        Act::AccountDeletion,
-        &crate::issuer::hash(&code),
-        expires_at,
+        person.email.as_str(),
+        (Act::AccountDeletion, &code),
+        AuthMail::AccountDeletionCode { code: &code },
     )
     .await?;
-    tx.commit().await?;
-
-    if let Err(e) = state
-        .mailer
-        .send_mail(
-            person.email.as_str(),
-            AuthMail::AccountDeletionCode { code: &code },
-        )
-        .await
-    {
-        tracing::error!(user_id = %user_id, error = %e,
-            "account-deletion code mail failed — check MAIL_FROM, the mail transport and the sending domain's DNS");
-        return Err(TelmoniError::MailDelivery {
-            context: "account-deletion confirmation code".into(),
-        });
-    }
-
-    tracing::info!(user_id = %user_id, "account-deletion confirmation code issued");
     Ok((StatusCode::ACCEPTED, Json(Sent::MAILED)))
 }
 
@@ -562,20 +561,8 @@ pub async fn delete_account(
         ));
     }
 
-    let Some(code_id) = confirmation_codes::find_live(
-        &mut tx,
-        &user_id,
-        Act::AccountDeletion,
-        &crate::issuer::hash(req.code.expose().trim()),
-    )
-    .await?
-    else {
-        let burned =
-            confirmation_codes::register_failure(&mut tx, &user_id, Purpose::AccountDeletion)
-                .await?;
-        tx.commit().await?;
-        return Err(wrong_code(burned));
-    };
+    let (mut tx, code_id) =
+        live_code(tx, &user_id, Act::AccountDeletion, req.code.expose()).await?;
 
     let owned = organization_members::owned_by(&mut tx, &user_id).await?;
     // Label and count: two organizations may carry one name, and must not
@@ -660,16 +647,10 @@ pub async fn delete_account(
         tx = otx.clear_organization().await?;
     }
     identities::mark_pending_deletion(&mut tx, &user_id).await?;
-    let sids = sessions::revoke_all_for_person(&mut tx, &user_id).await?;
+    let sids = sessions::revoke_all_for_person(&mut tx, &user_id, None).await?;
     tx.commit().await?;
 
-    for sid in &sids {
-        if let Err(e) = state.issuer.revoke_sid(sid).await {
-            tracing::warn!(error = %e,
-                "a session's tokens survive the account deletion; the row is revoked, which \
-                 refuses them");
-        }
-    }
+    state.issuer.end_sessions(&sids).await;
 
     tracing::info!(user_id = %user_id, organizations = owned.len(), "account deletion requested");
     Ok(crate::handler::deletion::account_deletion_response(&state, &user_id, &owned).await)

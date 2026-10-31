@@ -8,7 +8,7 @@
 
 use chrono::{DateTime, Utc};
 use telmoni_shared::db::tenant_session::{HasPerson, Person, Scoped};
-use telmoni_shared::{OrganizationId, UserId};
+use telmoni_shared::{OrganizationId, ProjectId, UserId};
 use uuid::Uuid;
 
 /// What a confirmation code authorizes — the stored `purpose`.
@@ -27,6 +27,8 @@ pub enum Purpose {
     EmailVerification,
     /// Choose a new password for a built-in account from its inbox alone.
     PasswordReset,
+    /// Let a project keep content: its mode leaving `off`.
+    ContentMode,
 }
 
 impl Purpose {
@@ -39,18 +41,20 @@ impl Purpose {
             Self::EmailChange => "email_change",
             Self::EmailVerification => "email_verification",
             Self::PasswordReset => "password_reset",
+            Self::ContentMode => "content_mode",
         }
     }
 
     /// Every purpose, for the test that holds this enum to the CHECK.
     #[must_use]
-    pub const fn all() -> [Self; 5] {
+    pub const fn all() -> [Self; 6] {
         [
             Self::OrganizationDeletion,
             Self::AccountDeletion,
             Self::EmailChange,
             Self::EmailVerification,
             Self::PasswordReset,
+            Self::ContentMode,
         ]
     }
 }
@@ -73,6 +77,8 @@ pub enum Act<'a> {
     EmailVerification,
     /// Reset a built-in account's password.
     PasswordReset,
+    /// Let this project keep content.
+    ContentMode(&'a ProjectId),
 }
 
 impl<'a> Act<'a> {
@@ -85,6 +91,7 @@ impl<'a> Act<'a> {
             Self::EmailChange => Purpose::EmailChange,
             Self::EmailVerification => Purpose::EmailVerification,
             Self::PasswordReset => Purpose::PasswordReset,
+            Self::ContentMode(_) => Purpose::ContentMode,
         }
     }
 
@@ -94,6 +101,20 @@ impl<'a> Act<'a> {
         match self {
             Self::OrganizationDeletion(organization) => Some(organization),
             Self::AccountDeletion
+            | Self::EmailChange
+            | Self::EmailVerification
+            | Self::PasswordReset
+            | Self::ContentMode(_) => None,
+        }
+    }
+
+    /// The project the act is bound to, when it has one.
+    #[must_use]
+    pub const fn project(self) -> Option<&'a ProjectId> {
+        match self {
+            Self::ContentMode(project) => Some(project),
+            Self::OrganizationDeletion(_)
+            | Self::AccountDeletion
             | Self::EmailChange
             | Self::EmailVerification
             | Self::PasswordReset => None,
@@ -155,13 +176,14 @@ pub async fn create(
 
     sqlx::query(
         "INSERT INTO auth.confirmation_codes
-             (id, user_id, purpose, subject, code_hash, expires_at, shard_key)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)",
+             (id, user_id, purpose, subject, project, code_hash, expires_at, shard_key)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
     )
     .bind(Uuid::now_v7())
     .bind(user_id)
     .bind(act.purpose().as_str())
     .bind(act.subject())
+    .bind(act.project())
     .bind(code_hash)
     .bind(expires_at)
     .bind(telmoni_shared::derive_shard_key(user_id))
@@ -170,8 +192,8 @@ pub async fn create(
     Ok(())
 }
 
-/// Resolve a live (unconsumed, unexpired) code, returning its id. The purpose
-/// AND the subject are in the predicate, not checked afterwards: a table
+/// Resolve a live (unconsumed, unexpired) code, returning its id. The purpose,
+/// the subject AND the project are in the predicate, not checked afterwards: a table
 /// serving several acts that matched on the hash alone would hand each one the
 /// others' keys.
 pub async fn find_live<B: HasPerson>(
@@ -184,12 +206,14 @@ pub async fn find_live<B: HasPerson>(
         "SELECT id FROM auth.confirmation_codes
           WHERE user_id = $1 AND purpose = $2
             AND subject IS NOT DISTINCT FROM $3
-            AND code_hash = $4
+            AND project IS NOT DISTINCT FROM $4
+            AND code_hash = $5
             AND consumed_at IS NULL AND expires_at > now()",
     )
     .bind(user_id)
     .bind(act.purpose().as_str())
     .bind(act.subject())
+    .bind(act.project())
     .bind(code_hash)
     .fetch_optional(tx.conn())
     .await

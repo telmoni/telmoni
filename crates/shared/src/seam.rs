@@ -19,8 +19,9 @@ use uuid::Uuid;
 use crate::acting::{Acting, ActingKey};
 use crate::slug::Slug;
 use crate::{
-    AlertCeilings, AuditAction, AuthError, FlagSet, Grants, LaneCeilings, MemberCeiling,
-    NotificationKind, OrganizationId, OrganizationStatus, ProjectId, Role, TelmoniError, UserId,
+    AlertCeilings, AuditAction, AuthError, AuthzError, FlagSet, Grants, LaneCeilings,
+    MemberCeiling, NotificationKind, OrganizationId, OrganizationStatus, ProjectId, Role,
+    TelmoniError, UserId,
 };
 
 /// Who may read a document the agent indexes, beyond the tenant its keys
@@ -416,6 +417,42 @@ pub trait Auth: Send + Sync {
     async fn mail_receipt(&self, to: &UserId, receipt: Receipt<'_>) {
         let _ = (to, receipt);
     }
+
+    /// Mail `acting`'s person a code for `confirmation`, which
+    /// [`Auth::spend_confirmation`] spends; a second asking burns the first.
+    /// The caller has already decided the person may act. Refused by
+    /// default, as the spend is.
+    async fn mail_confirmation(
+        &self,
+        acting: &Acting,
+        confirmation: Confirmation<'_>,
+    ) -> Result<(), TelmoniError> {
+        let _ = (acting, confirmation);
+        Err(AuthzError::Forbidden("no confirmation code can be mailed here".into()).into())
+    }
+
+    /// Spend the code mailed to `acting`'s person for `confirmation`, typed
+    /// as `code`: consumed where it is theirs, live and for that act, and a
+    /// wrong one counted, the fifth burning it. For a module gating an act on
+    /// the person's inbox, as telemetry's content switch is. Refused by
+    /// default, so a deployment without codes never lets the act through.
+    async fn spend_confirmation(
+        &self,
+        acting: &Acting,
+        confirmation: Confirmation<'_>,
+        code: &str,
+    ) -> Result<(), TelmoniError> {
+        let _ = (acting, confirmation, code);
+        Err(AuthzError::Forbidden("no confirmation code can be spent here".into()).into())
+    }
+}
+
+/// An act another module gates on a code mailed to the person
+/// ([`Auth::spend_confirmation`]), bound to what it acts on.
+#[derive(Debug, Clone, Copy)]
+pub enum Confirmation<'a> {
+    /// A project's content mode leaving `off`.
+    ContentMode(&'a ProjectId),
 }
 
 /// A deletion done, as its receipt names it. Never an end user's id: the
@@ -447,6 +484,12 @@ pub enum Receipt<'a> {
     /// deleted every project's content key.
     Organization {
         name: &'a str,
+        unreadable_since: DateTime<Utc>,
+    },
+    /// A project's kept content, deleted as its mode went `off`: unreadable
+    /// since its content key was deleted.
+    Content {
+        project_id: &'a ProjectId,
         unreadable_since: DateTime<Utc>,
     },
 }

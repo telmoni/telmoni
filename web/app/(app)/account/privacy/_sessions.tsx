@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import type { ActiveSession } from "@/lib/server/data";
 
-import { revokeSessionAction } from "./actions";
+import { revokeOtherSessionsAction, revokeSessionAction } from "./actions";
 
 export function deviceLabel(userAgent: string | null): string {
   if (!userAgent) return "Unknown device";
@@ -74,6 +74,19 @@ export function ActiveSessions({
     });
   };
 
+  const revokeOthers = () => {
+    setBusyId("others");
+    start(async () => {
+      const r = await revokeOtherSessionsAction();
+      startTransition(() => setBusyId(null));
+      if (!r.ok) {
+        toast.error(r.error);
+        return;
+      }
+      toast.success("Every other session ended. Those devices sign out within a few minutes.");
+    });
+  };
+
   if (sessions === null) {
     return (
       <Card>
@@ -84,50 +97,66 @@ export function ActiveSessions({
     );
   }
 
+  const others = sessions.some((session) => session.id !== currentId);
+
   return (
-    <DataTable>
-      <THead>
-        <Th>Device</Th>
-        <Th>Started</Th>
-        <Th>Last seen</Th>
-        <Th className="w-10" />
-      </THead>
-      <tbody>
-        {sessions.map((session) => {
-          const isCurrent = session.id === currentId;
-          return (
-            <tr key={session.id}>
-              <Td className="whitespace-nowrap">
-                {deviceLabel(session.userAgent)}
-                {isCurrent ? (
-                  <Badge variant="secondary" className="ml-2">
-                    Current
-                  </Badge>
-                ) : null}
-              </Td>
-              <Td className="whitespace-nowrap text-muted-foreground">
-                <LocalTime iso={session.createdAt} />
-              </Td>
-              <Td className="whitespace-nowrap text-muted-foreground">
-                <LocalTime iso={session.lastSeenAt} />
-              </Td>
-              <Td className="text-right whitespace-nowrap">
-                {isCurrent ? null : (
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    aria-label={`End session ${deviceLabel(session.userAgent)}`}
-                    disabled={pending && busyId === session.id}
-                    onClick={() => revoke(session.id)}
-                  >
-                    End session
-                  </Button>
-                )}
-              </Td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </DataTable>
+    <div className="grid gap-3">
+      {others && (
+        <div>
+          <Button
+            variant="destructive"
+            size="sm"
+            disabled={pending && busyId === "others"}
+            onClick={revokeOthers}
+          >
+            Sign out everywhere else
+          </Button>
+        </div>
+      )}
+      <DataTable>
+        <THead>
+          <Th>Device</Th>
+          <Th>Started</Th>
+          <Th>Last seen</Th>
+          <Th className="w-10" />
+        </THead>
+        <tbody>
+          {sessions.map((session) => {
+            const isCurrent = session.id === currentId;
+            return (
+              <tr key={session.id}>
+                <Td className="whitespace-nowrap">
+                  {deviceLabel(session.userAgent)}
+                  {isCurrent ? (
+                    <Badge variant="secondary" className="ml-2">
+                      Current
+                    </Badge>
+                  ) : null}
+                </Td>
+                <Td className="whitespace-nowrap text-muted-foreground">
+                  <LocalTime iso={session.createdAt} />
+                </Td>
+                <Td className="whitespace-nowrap text-muted-foreground">
+                  <LocalTime iso={session.lastSeenAt} />
+                </Td>
+                <Td className="text-right whitespace-nowrap">
+                  {isCurrent ? null : (
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      aria-label={`End session ${deviceLabel(session.userAgent)}`}
+                      disabled={pending && busyId === session.id}
+                      onClick={() => revoke(session.id)}
+                    >
+                      End session
+                    </Button>
+                  )}
+                </Td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </DataTable>
+    </div>
   );
 }

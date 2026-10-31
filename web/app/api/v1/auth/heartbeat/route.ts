@@ -11,6 +11,7 @@ import {
   sealSession,
   sessionEndedAlready,
 } from "@/lib/auth/session";
+import { expiredCookie } from "@/lib/proxy/organization";
 
 // ⚠ **Refused cross-site before anything else, because the 401 below DELETES
 // THE COOKIE.** A page on another origin can auto-submit a form here; the
@@ -30,7 +31,7 @@ export async function POST(request: NextRequest) {
   const session = await getSession();
   if (!session) {
     const response = problem(401, ended ? SESSION_ENDED : "unauthenticated");
-    response.cookies.delete(SESSION_COOKIE);
+    response.cookies.delete(expiredCookie(SESSION_COOKIE));
     return response;
   }
 
@@ -47,7 +48,7 @@ export async function POST(request: NextRequest) {
     const renewal = await refreshSessionTokens(currentSession);
     if (renewal.kind === "refused") {
       const response = problem(401, "refresh_failed");
-      response.cookies.delete(SESSION_COOKIE);
+      response.cookies.delete(expiredCookie(SESSION_COOKIE));
       return response;
     }
     // Auth did not answer, which says nothing of the session: it stands,

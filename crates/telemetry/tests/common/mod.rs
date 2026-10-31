@@ -23,8 +23,8 @@ use telmoni_shared::middleware::service_auth::ServiceSecrets;
 use telmoni_shared::rbac::project_role;
 use telmoni_shared::seam::OrganizationAlert;
 use telmoni_shared::seam::{
-    Auth, Emitted, Entitlements, NoLimits, Notice, Notifications, ProjectHome, ReadableProject,
-    Receipt, Route, Routed,
+    Auth, Confirmation, Emitted, Entitlements, NoLimits, Notice, Notifications, ProjectHome,
+    ReadableProject, Receipt, Route, Routed,
 };
 use telmoni_shared::test_util::{ServiceRole, chain_lock_held, service_pool};
 use telmoni_shared::{
@@ -81,7 +81,12 @@ pub(crate) struct AuthStub {
     homes_delay: Mutex<Duration>,
     /// Each receipt mailed: to whom, and what it names.
     receipts: Mutex<Vec<(String, String)>>,
+    /// Each content switch's code mailed: to whom, and for which project.
+    codes_mailed: Mutex<Vec<(String, String)>>,
 }
+
+/// The code auth's double takes for any content switch; any other is wrong.
+pub(crate) const CONFIRMATION_CODE: &str = "424242";
 
 impl AuthStub {
     /// Nobody seated.
@@ -99,8 +104,17 @@ impl AuthStub {
         })
     }
 
+    /// Each content switch's code mailed, in order: to whom, and the project.
+    pub(crate) fn codes_mailed(&self) -> Vec<(String, String)> {
+        self.codes_mailed
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
     /// Each receipt mailed, in order: to whom, and the deletion as
-    /// `trace`, `end_user`, `project <name>` or `organization <name>`.
+    /// `trace`, `end_user`, `project <name>`, `organization <name>` or
+    /// `content <project>`.
     pub(crate) fn receipts(&self) -> Vec<(String, String)> {
         self.receipts
             .lock()
@@ -315,11 +329,40 @@ impl Auth for AuthStub {
             Receipt::EndUser { .. } => "end_user".to_owned(),
             Receipt::Project { name, .. } => format!("project {name}"),
             Receipt::Organization { name, .. } => format!("organization {name}"),
+            Receipt::Content { project_id, .. } => format!("content {project_id}"),
         };
         self.receipts
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push((to.to_string(), what));
+    }
+
+    async fn mail_confirmation(
+        &self,
+        acting: &Acting,
+        confirmation: Confirmation<'_>,
+    ) -> Result<(), TelmoniError> {
+        let Confirmation::ContentMode(project_id) = confirmation;
+        self.codes_mailed
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push((acting.user_id.to_string(), project_id.to_string()));
+        Ok(())
+    }
+
+    async fn spend_confirmation(
+        &self,
+        _acting: &Acting,
+        _confirmation: Confirmation<'_>,
+        code: &str,
+    ) -> Result<(), TelmoniError> {
+        if code == CONFIRMATION_CODE {
+            Ok(())
+        } else {
+            Err(TelmoniError::BadRequest(
+                "invalid or expired confirmation code".into(),
+            ))
+        }
     }
 
     async fn resolve_api_key(&self, headers: &HeaderMap) -> Result<ActingKey, TelmoniError> {

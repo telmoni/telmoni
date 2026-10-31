@@ -6,6 +6,7 @@ import { z } from "zod";
 
 import { type ActionResult, refused } from "@/lib/action-result";
 import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
+import { NOT_A_CODE, isConfirmationCode } from "@/lib/confirmation-code";
 import { env } from "@/lib/env";
 import { organizationChannel, publishEvent } from "@/lib/events/publisher";
 import { checkProjectName } from "@/lib/names";
@@ -85,20 +86,45 @@ export async function updateProjectNameAction(
 
 /// The server decides who may (the organization's owner alone) and which modes
 /// are open; this only refuses what could never reach it.
+/// Mail the organization's owner the code a move out of `off` spends; the
+/// server sends it to the owner alone, and says so to anybody else.
+export async function requestContentModeCodeAction(projectId: string): Promise<ActionResult> {
+  const gate = await admitProject(
+    { call: "project:content-mode-code", limit: 3, per: "hour" },
+    projectId,
+  );
+  if (!gate.ok) return refused(gate.error);
+  const res = await tryFetchWithTimeout(
+    `${env.SERVER_URL}/internal/v1/telemetry/content-mode/code`,
+    { method: "POST", headers: gate.headers },
+  );
+  if (!res) return refused("Failed to send the code. Please try again.");
+  if (!res.ok) return refused((await extractProblem(res)).message);
+  return { ok: true };
+}
+
+/// Switch the project's mode: out of `off` with the code the owner was
+/// mailed, back to `off` deleting what it kept where `deleteContent` asks.
 export async function updateContentModeAction(
   projectId: string,
   mode: ContentMode,
+  { code, deleteContent = false }: { code?: string; deleteContent?: boolean } = {},
 ): Promise<ActionResult> {
   const gate = await admitProject({ call: "project:content-mode", limit: 10 }, projectId);
   if (!gate.ok) return refused(gate.error);
   // A Server Action takes whatever a caller posts, whatever its type says.
   const chosen = Mode.safeParse(mode);
   if (!chosen.success) return refused("That is not a content mode.");
+  if (code !== undefined && !isConfirmationCode(code)) return refused(NOT_A_CODE);
 
   const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/v1/telemetry/content-mode`, {
     method: "PUT",
     headers: { ...gate.headers, "content-type": "application/json" },
-    body: JSON.stringify({ content_mode: chosen.data }),
+    body: JSON.stringify({
+      content_mode: chosen.data,
+      ...(code !== undefined && { code }),
+      ...(deleteContent === true && { delete_content: true }),
+    }),
   });
 
   if (!res) return refused("Failed to change the content mode. Please try again.");

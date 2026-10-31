@@ -58,6 +58,9 @@ pub enum AuthMail<'a> {
     AccountDeletionCode { code: &'a str },
     /// Send an email-change confirmation code to the account's CURRENT address.
     EmailChangeCode { code: &'a str, new_email: &'a str },
+    /// Send the code that lets ONE project, which the mail names as
+    /// `organization/project`, keep content. Never logged.
+    ContentModeCode { code: &'a str, project: &'a str },
     /// Invite somebody to an organization or one of its projects, at the role
     /// `level` names on it.
     MemberInvite {
@@ -225,6 +228,9 @@ impl ComposingMailer {
             AuthMail::EmailChangeCode { code, new_email } => {
                 self.send_email_change_code(to, code, new_email).await
             }
+            AuthMail::ContentModeCode { code, project } => {
+                self.send_content_mode_code(to, code, project).await
+            }
             AuthMail::MemberInvite {
                 inviter,
                 organization,
@@ -323,6 +329,35 @@ impl ComposingMailer {
                  The code expires in 15 minutes. If you didn't request this, ignore \
                  this email and the organization stays safe. If you think someone \
                  else has access to your account, write to {contact} right away.",
+                contact = self.contact(),
+            ),
+        )
+        .await
+    }
+
+    async fn send_content_mode_code(
+        &self,
+        to: &str,
+        code: &str,
+        project: &str,
+    ) -> Result<(), MailError> {
+        self.send(
+            to,
+            format!(
+                "Confirm keeping content in {project} on {}",
+                telmoni_shared::PRODUCT_NAME
+            ),
+            format!(
+                "Your confirmation code is {code}.\n\n\
+                 Enter it to let the project {project} keep what its agents' \
+                 users and models wrote: prompts, answers, tool calls and \
+                 documents, sealed under the project's own key, each read of \
+                 them recorded in the audit log. Nothing is kept until you \
+                 enter it.\n\n\
+                 The code expires in 15 minutes. If you didn't ask for this, \
+                 ignore this email and the project keeps no content. If you \
+                 think someone else has access to your account, write to \
+                 {contact} right away.",
                 contact = self.contact(),
             ),
         )
@@ -743,6 +778,17 @@ impl ComposingMailer {
                 format!(
                     "The organization {name} was erased as you asked, with its \
                      projects, members, API keys and telemetry. {}",
+                    unreadable(unreadable_since)
+                ),
+            ),
+            Receipt::Content {
+                unreadable_since, ..
+            } => (
+                format!("The content {project} kept was deleted"),
+                format!(
+                    "The content the project {project} kept was deleted as you \
+                     asked, and it keeps none from now on: its spans and their \
+                     metadata stay until their retention ends. {}",
                     unreadable(unreadable_since)
                 ),
             ),

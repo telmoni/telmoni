@@ -109,9 +109,11 @@ impl Project {
         (status, body)
     }
 
+    /// `user` switches the project to `mode`, with the code the owner was
+    /// mailed, which a move to `off` takes no notice of.
     async fn set(&self, user: &str, mode: &str) -> (StatusCode, Value) {
-        self.send(self.request("PUT", user, Some(json!({ "content_mode": mode }))))
-            .await
+        let body = json!({ "content_mode": mode, "code": common::CONFIRMATION_CODE });
+        self.send(self.request("PUT", user, Some(body))).await
     }
 
     /// What auth answers the owner when it reads them again: the same person
@@ -318,6 +320,54 @@ async fn nobody_below_the_owner_changes_it(pool: PgPool) {
         p.auth.read_again(),
         0,
         "somebody below the owner waited on the organization's chain to be refused"
+    );
+}
+
+/// ⚠ Leaving `off` takes the code mailed to the owner, whom alone the code
+/// lane serves: none or a wrong one changes nothing and records nothing.
+#[sqlx::test]
+async fn leaving_off_takes_the_code_mailed_to_the_owner(pool: PgPool) {
+    let p = project(&pool).await;
+    let code_lane = |user: &str| {
+        let mut request = p.request("POST", user, None);
+        *request.uri_mut() = format!("{LANE}/code").parse().expect("a path");
+        request
+    };
+    for user in [ADMIN, MEMBER] {
+        let (status, body) = p.send(code_lane(user)).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{user}: {body}");
+    }
+    assert!(p.auth.codes_mailed().is_empty());
+    let (status, body) = p.send(code_lane(OWNER)).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+    assert_eq!(
+        p.auth.codes_mailed(),
+        [(OWNER.to_owned(), p.project.to_string())]
+    );
+
+    for body in [
+        json!({ "content_mode": "on" }),
+        json!({ "content_mode": "on", "code": "000000" }),
+    ] {
+        let (status, answer) = p.send(p.request("PUT", OWNER, Some(body))).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{answer}");
+    }
+    assert_eq!(row(&pool, &p.project).await, None, "nothing was written");
+    assert!(audit(&pool, &p.organization).await.is_empty());
+
+    let (status, body) = p.set(OWNER, "on").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    // Back to `off` asks nothing; deleting content is refused anywhere else.
+    let off = json!({ "content_mode": "off" });
+    assert_eq!(
+        p.send(p.request("PUT", OWNER, Some(off))).await.0,
+        StatusCode::OK
+    );
+    let wrong =
+        json!({ "content_mode": "on", "code": common::CONFIRMATION_CODE, "delete_content": true });
+    assert_eq!(
+        p.send(p.request("PUT", OWNER, Some(wrong))).await.0,
+        StatusCode::BAD_REQUEST
     );
 }
 

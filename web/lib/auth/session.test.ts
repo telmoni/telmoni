@@ -13,6 +13,7 @@ vi.mock("@/lib/auth/session-blacklist", () => ({
   isSessionBlacklisted: (key: string | null) => ended(key),
 }));
 
+import { expiredCookie } from "@/lib/proxy/organization";
 import {
   SESSION_COOKIE,
   getSession,
@@ -148,6 +149,6 @@ describe("getSession", () => {
     ended.mockResolvedValueOnce(true);
     expect(await getSession()).toBeNull();
     expect(ended).toHaveBeenLastCalledWith("row_1");
-    expect(jar.delete).toHaveBeenCalledWith(SESSION_COOKIE);
+    expect(jar.delete).toHaveBeenCalledWith(expiredCookie(SESSION_COOKIE));
   });
 });

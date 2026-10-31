@@ -611,6 +611,24 @@ pub async fn set_content_key_if_none(
         > 0)
 }
 
+/// The project's content key deleted, so nothing it sealed opens again, its
+/// backups' copies among it: answers whether there was one.
+pub async fn delete_content_key(
+    tx: &mut Scoped<'_, ProjectAndOrganization>,
+    project_id: &ProjectId,
+) -> sqlx::Result<bool> {
+    Ok(sqlx::query(
+        "UPDATE telemetry.project_settings
+            SET content_key_wrapped_dek = NULL, content_key_version = NULL
+          WHERE project_id = $1 AND content_key_wrapped_dek IS NOT NULL",
+    )
+    .bind(project_id)
+    .execute(tx.conn())
+    .await?
+    .rows_affected()
+        > 0)
+}
+
 /// One content field, sealed, as `plain_content` keeps it.
 #[derive(Debug, Default)]
 pub struct SealedFields {
@@ -667,7 +685,9 @@ pub(crate) type KeptField = (Uuid, String, String, String, Vec<u8>, Vec<u8>);
 
 /// Every field the project keeps for the runs, or for those of their spans
 /// `spans` names, sealed, in trace, span and name order: the crate's own,
-/// read only by [`crate::content::open`], which files each read.
+/// read only by [`crate::content::open`], which files each read. None once
+/// its content key is deleted ([`delete_content_key`]), whatever rows its
+/// purge has yet to take.
 pub(crate) async fn read_content(
     tx: &mut Scoped<'_, ProjectAndOrganization>,
     project_id: &ProjectId,
@@ -679,6 +699,8 @@ pub(crate) async fn read_content(
            FROM telemetry.plain_content
           WHERE project_id = $1 AND run_id = ANY($2)
             AND ($3::text[] IS NULL OR span_id = ANY($3))
+            AND EXISTS (SELECT 1 FROM telemetry.project_settings
+                         WHERE project_id = $1 AND content_key_wrapped_dek IS NOT NULL)
           ORDER BY trace_id, span_id, field",
     )
     .bind(project_id)

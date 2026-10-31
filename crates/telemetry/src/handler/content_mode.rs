@@ -1,27 +1,35 @@
 //! A project's content mode: `GET /internal/v1/telemetry/content-mode`, which
 //! every role on the project reads, and `PUT`, which its organization's owner
 //! alone may send, since what a project keeps changes what its organization
-//! is liable for. The project is the one `x-project-id` names.
+//! is liable for: leaving `off` takes the code `POST …/content-mode/code`
+//! mailed them, and going back may delete what the project kept, its key
+//! first. The project is the one `x-project-id` names.
 
 use std::sync::Arc;
 
 use axum::extract::State;
-use axum::http::HeaderMap;
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::IntoResponse;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use telmoni_shared::acting::Acting;
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
-use telmoni_shared::db::tenant_session::{ProjectAndOrganization, Scoped, project_scope};
+use telmoni_shared::db::tenant_session::{
+    ProjectAndOrganization, Scoped, maintenance_scope, project_scope,
+};
 use telmoni_shared::extract::Json;
 use telmoni_shared::rbac::{Resource, Verb};
-use telmoni_shared::seam::Auth;
+use telmoni_shared::seam::{Auth, Confirmation, Receipt};
 use telmoni_shared::{
-    AuditAction, AuthError, ContentMode, OrganizationId, ProjectId, TelmoniError,
+    AuditAction, AuthError, ContentMode, OrganizationId, ProjectId, Redacted, TelmoniError,
     TelmoniResourceKind,
 };
 
+use crate::db::TelemetryLane;
 use crate::handler::chain;
+use crate::retention::CONTENT_BATCH;
 use crate::{AppState, db};
 
 /// The modes an owner may switch a project to. A mode with nowhere to keep
@@ -54,6 +62,12 @@ impl ContentModeSetting {
 pub struct ContentModeChange {
     /// The mode to switch the project to.
     pub content_mode: ContentMode,
+    /// The code mailed to the owner, which a move out of `off` spends.
+    #[serde(default)]
+    pub code: Option<Redacted>,
+    /// With `off`: delete what the project kept, its key at once.
+    #[serde(default)]
+    pub delete_content: bool,
 }
 
 /// What a change came to, logged once it has committed.
@@ -62,6 +76,8 @@ struct Switched {
     from: Option<ContentMode>,
     /// The organization a stray row was filed under, when it re-filed one.
     refiled_from: Option<OrganizationId>,
+    /// Whether it deleted the project's content key.
+    deleted: bool,
 }
 
 /// `GET /internal/v1/telemetry/content-mode` — the project's mode.
@@ -101,12 +117,38 @@ pub async fn put_content_mode(
         ))
         .into());
     }
+    if change.delete_content && mode != ContentMode::Off {
+        return Err(TelmoniError::BadRequest(
+            "a project's content is deleted only as its mode goes off".into(),
+        ));
+    }
     let organization_id = &acting.organization_id;
+    if mode != ContentMode::Off && current_mode(&state, project_id).await? == ContentMode::Off {
+        // Spent before the switch: a switch that then fails leaves the code
+        // spent, and the owner asks for another.
+        let Some(code) = &change.code else {
+            return Err(TelmoniError::BadRequest(
+                "keeping content takes the code mailed to the organization's owner".into(),
+            ));
+        };
+        state
+            .auth
+            .spend_confirmation(
+                &acting,
+                Confirmation::ContentMode(project_id),
+                code.expose(),
+            )
+            .await?;
+    }
 
+    let delete = change.delete_content;
     let switched = chain::write(&state.db, &acting, project_id, "content mode", async |tx| {
-        switch_content_mode(&*state.auth, &acting, project_id, tx, mode).await
+        switch_content_mode(&*state.auth, &acting, project_id, tx, (mode, delete)).await
     })
     .await?;
+    if switched.deleted {
+        purge_deleted(&state, &acting.user_id, project_id, Utc::now());
+    }
     if let Some(filed_under) = &switched.refiled_from {
         // The settling's repair, which records nothing on a chain, as the
         // settling itself does not; logged as its failure was.
@@ -137,7 +179,7 @@ async fn switch_content_mode(
     acting: &Acting,
     project_id: &ProjectId,
     tx: &mut Scoped<'_, ProjectAndOrganization>,
-    mode: ContentMode,
+    (mode, delete): (ContentMode, bool),
 ) -> Result<Switched, TelmoniError> {
     let organization_id = &acting.organization_id;
 
@@ -153,7 +195,15 @@ async fn switch_content_mode(
     if changed || refiled_from.is_some() {
         db::set_content_mode(tx, project_id, organization_id, mode).await?;
     }
-    if changed {
+    // In the switch's own commit: from it, nothing the project kept opens,
+    // on any process, whatever rows the purge after has yet to take.
+    let deleted = delete && db::delete_content_key(tx, project_id).await?;
+    if changed || deleted {
+        let details = if deleted {
+            json!({ "content_mode": { "from": from, "to": mode }, "content_deleted": true })
+        } else {
+            json!({ "content_mode": { "from": from, "to": mode } })
+        };
         emit_audit(
             tx,
             AuditEvent::new(
@@ -164,12 +214,90 @@ async fn switch_content_mode(
             )
             .in_project(project_id)
             .on(project_id.as_str())
-            .details(json!({ "content_mode": { "from": from, "to": mode } })),
+            .details(details),
         )
         .await?;
     }
     Ok(Switched {
         from: changed.then_some(from),
         refiled_from,
+        deleted,
     })
+}
+
+/// The project's mode as its row holds it, for the switch to know whether it
+/// leaves `off`.
+async fn current_mode(
+    state: &AppState,
+    project_id: &ProjectId,
+) -> Result<ContentMode, TelmoniError> {
+    let mut tx = project_scope(&state.db, project_id).await?;
+    let mode = db::content_mode(&mut tx, project_id).await?;
+    tx.commit().await?;
+    Ok(mode)
+}
+
+/// `POST /internal/v1/telemetry/content-mode/code` — mail the organization's
+/// owner the code that lets the project keep content.
+pub async fn request_content_mode_code(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, TelmoniError> {
+    let acting = state.auth.resolve(&headers).await?;
+    let project_id = &acting.require_project_owner()?.project_id;
+    state
+        .auth
+        .mail_confirmation(&acting, Confirmation::ContentMode(project_id))
+        .await?;
+    Ok((StatusCode::ACCEPTED, Json(json!({ "sent": true }))))
+}
+
+/// The rows of content whose key the switch deleted, purged after its commit,
+/// a batch a transaction, and the receipt mailed to `asker`. Apart from the
+/// answer: nothing they hold opens any more, so a slow purge keeps nobody
+/// waiting, and one that fails leaves rows nothing reads, which retention
+/// takes in its time.
+fn purge_deleted(
+    state: &Arc<AppState>,
+    asker: &telmoni_shared::UserId,
+    project_id: &ProjectId,
+    unreadable_since: DateTime<Utc>,
+) {
+    let (state, asker, project_id) = (Arc::clone(state), asker.clone(), project_id.clone());
+    tokio::spawn(async move {
+        let purged = async {
+            let mut gone = 0u64;
+            loop {
+                let mut tx = maintenance_scope(&state.db, TelemetryLane).await?;
+                let batch = db::delete_content(
+                    tx.conn(),
+                    std::slice::from_ref(&project_id),
+                    None,
+                    CONTENT_BATCH,
+                )
+                .await?;
+                tx.commit().await?;
+                gone += batch;
+                if batch < CONTENT_BATCH.unsigned_abs() {
+                    return Ok::<_, TelmoniError>(gone);
+                }
+            }
+        };
+        match purged.await {
+            Ok(rows) => tracing::info!(project_id = %project_id, rows,
+                "telemetry: a project's deleted content purged"),
+            Err(e) => tracing::warn!(project_id = %project_id, error = %e,
+                "telemetry: a project's deleted content was not all purged; nothing reads what is left, and retention takes it"),
+        }
+        state
+            .auth
+            .mail_receipt(
+                &asker,
+                Receipt::Content {
+                    project_id: &project_id,
+                    unreadable_since,
+                },
+            )
+            .await;
+    });
 }

@@ -14,11 +14,18 @@ const toast = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn() }));
 vi.mock("sonner", () => ({ toast }));
 
 const updateContentModeAction = vi.hoisted(() =>
-  vi.fn<(projectId: string, mode: ContentMode) => Promise<ActionResult>>(
-    async () => ({ ok: true }),
-  ),
+  vi.fn<
+    (
+      projectId: string,
+      mode: ContentMode,
+      options?: { code?: string; deleteContent?: boolean },
+    ) => Promise<ActionResult>
+  >(async () => ({ ok: true })),
 );
-vi.mock("./actions", () => ({ updateContentModeAction }));
+const requestContentModeCodeAction = vi.hoisted(() =>
+  vi.fn<(projectId: string) => Promise<ActionResult>>(async () => ({ ok: true })),
+);
+vi.mock("./actions", () => ({ updateContentModeAction, requestContentModeCodeAction }));
 
 import { ContentModeForm } from "./_content-mode";
 
@@ -40,6 +47,7 @@ function form({
       mode={mode}
       offered={offered}
       canEdit={canEdit}
+      email="owner@example.com"
     />
   );
 }
@@ -100,15 +108,60 @@ describe("ContentModeForm", () => {
   // The action revalidates the page, which sends it back with the new mode:
   // a refresh on top would draw it twice.
   it("saves once the owner picks another open mode, and draws nothing twice", async () => {
-    render(form({ offered: [ContentMode.Off, ContentMode.On] }));
-    fireEvent.click(radio("On"));
+    render(form({ mode: ContentMode.On, offered: [ContentMode.Off, ContentMode.On] }));
+    fireEvent.click(radio("Off"));
     expect(isHeld(save())).toBe(false);
     await act(async () => {
       fireEvent.click(save());
     });
-    expect(updateContentModeAction).toHaveBeenCalledWith("project_1", ContentMode.On);
-    expect(toast.success).toHaveBeenCalledWith("Content mode set to On.");
+    expect(updateContentModeAction).toHaveBeenCalledWith("project_1", ContentMode.Off, {
+      deleteContent: false,
+    });
+    expect(toast.success).toHaveBeenCalledWith("Content mode set to Off.");
     expect(refresh).not.toHaveBeenCalled();
+  });
+
+  // ⚠ Leaving `off` is confirmed from the owner's inbox: the press mails the
+  // code, and the switch spends the code typed.
+  it("mails a code before leaving off, and switches with the code typed", async () => {
+    render(form({ offered: [ContentMode.Off, ContentMode.On] }));
+    fireEvent.click(radio("On"));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Send confirmation code" }));
+    });
+    expect(requestContentModeCodeAction).toHaveBeenCalledWith("project_1");
+    expect(updateContentModeAction).not.toHaveBeenCalled();
+    const field = screen.getByLabelText(/code sent to/);
+    expect(screen.getByText("owner@example.com")).toBeInTheDocument();
+    fireEvent.change(field, { target: { value: "12 34 56" } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Keep content" }));
+    });
+    expect(updateContentModeAction).toHaveBeenCalledWith("project_1", ContentMode.On, {
+      code: "123456",
+    });
+    expect(toast.success).toHaveBeenCalledWith("Content mode set to On.");
+  });
+
+  // Back to `off` asks nothing, and offers to delete what the project kept,
+  // saying what each choice leaves.
+  it("offers to delete what the project kept as it goes off", async () => {
+    render(form({ mode: ContentMode.On, offered: [ContentMode.Off, ContentMode.On] }));
+    expect(screen.queryByRole("checkbox")).toBeNull();
+    fireEvent.click(radio("Off"));
+    expect(screen.getByText(/stays readable to its members/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Also delete what this project kept" }));
+    expect(screen.getByText(/no copy opens again, backups among them/)).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(save());
+    });
+    expect(updateContentModeAction).toHaveBeenCalledWith("project_1", ContentMode.Off, {
+      deleteContent: true,
+    });
+    expect(requestContentModeCodeAction).not.toHaveBeenCalled();
+    expect(toast.success).toHaveBeenCalledWith(
+      "Content mode set to Off, and what the project kept is deleted.",
+    );
   });
 
   // A refusal can mean the page is out of date — the owner changed, or a
@@ -119,13 +172,13 @@ describe("ContentModeForm", () => {
       ok: false,
       error: "insufficient role: required owner, have admin",
     });
-    render(form({ offered: [ContentMode.Off, ContentMode.On] }));
-    fireEvent.click(radio("On"));
+    render(form({ mode: ContentMode.On, offered: [ContentMode.Off, ContentMode.On] }));
+    fireEvent.click(radio("Off"));
     await act(async () => {
       fireEvent.click(save());
     });
     expect(screen.getByText("insufficient role: required owner, have admin")).toBeInTheDocument();
-    expect(radio("On")).toHaveAttribute("aria-checked", "true");
+    expect(radio("Off")).toHaveAttribute("aria-checked", "true");
     expect(isHeld(save())).toBe(false);
     expect(refresh).not.toHaveBeenCalled();
   });
@@ -140,8 +193,8 @@ describe("ContentModeForm", () => {
           answer = resolve;
         }),
     );
-    render(form({ offered: [ContentMode.Off, ContentMode.On] }));
-    fireEvent.click(radio("On"));
+    render(form({ mode: ContentMode.On, offered: [ContentMode.Off, ContentMode.On] }));
+    fireEvent.click(radio("Off"));
     await act(async () => {
       fireEvent.click(save());
     });
@@ -156,7 +209,7 @@ describe("ContentModeForm", () => {
     await act(async () => {
       answer({ ok: true });
     });
-    expect(toast.success).toHaveBeenCalledWith("Content mode set to On.");
+    expect(toast.success).toHaveBeenCalledWith("Content mode set to Off.");
   });
 
   // A refusal because a mode closed brings the page back with it closed: the
@@ -164,7 +217,7 @@ describe("ContentModeForm", () => {
   it("drops a choice the server has stopped offering", () => {
     const { rerender } = render(form({ offered: [ContentMode.Off, ContentMode.On] }));
     fireEvent.click(radio("On"));
-    expect(isHeld(save())).toBe(false);
+    expect(isHeld(screen.getByRole("button", { name: "Send confirmation code" }))).toBe(false);
 
     rerender(form({ offered: [ContentMode.Off] }));
 
@@ -190,8 +243,8 @@ describe("ContentModeForm", () => {
   it("follows a mode changed elsewhere, dropping what the form held", async () => {
     updateContentModeAction.mockResolvedValue({ ok: false, error: "the mode changed" });
     const offered = [ContentMode.Off, ContentMode.On];
-    const { rerender } = render(form({ offered }));
-    fireEvent.click(radio("On"));
+    const { rerender } = render(form({ mode: ContentMode.On, offered }));
+    fireEvent.click(radio("Off"));
     await act(async () => {
       fireEvent.click(save());
     });
@@ -199,10 +252,10 @@ describe("ContentModeForm", () => {
 
     // What a refresh after the owner changed it in another tab looks like:
     // a fresh form, without the refused choice or its refusal.
-    rerender(form({ mode: ContentMode.On, offered }));
+    rerender(form({ mode: ContentMode.Off, offered }));
 
     expect(screen.queryByText("the mode changed")).toBeNull();
-    expect(radio("On")).toHaveAttribute("aria-checked", "true");
+    expect(radio("Off")).toHaveAttribute("aria-checked", "true");
     expect(isHeld(save())).toBe(true);
   });
 });

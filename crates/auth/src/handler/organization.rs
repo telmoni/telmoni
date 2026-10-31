@@ -13,7 +13,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
 };
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -30,13 +30,13 @@ use crate::mailer::AuthMail;
 use crate::{
     AppState,
     db::{
-        confirmation_codes::{self, Act, Purpose},
+        confirmation_codes::{self, Act},
         flags, identities, locks, organization_members, organizations, projects,
     },
     handler::{
         ActingOrganization,
         account::DeletionRequest,
-        account::wrong_code,
+        account::{live_code, mail_code},
         acting_organization,
         answer::Sent,
         deletion::{deletion_metadata, request_deletion},
@@ -75,41 +75,23 @@ pub async fn request_organization_deletion_code(
         return Err(AuthError::NotFound("no such organization".into()).into());
     };
 
-    let code = confirmation_codes::generate_code();
-    let expires_at = Utc::now() + Duration::minutes(confirmation_codes::CODE_TTL_MINUTES);
     let mut tx = person_scope(&state.db, &user_id).await?;
     let Some(person) = identities::get(&mut tx, &user_id).await? else {
         return Err(AuthError::Unauthenticated.into());
     };
-    confirmation_codes::create(
-        &mut tx,
+    tx.commit().await?;
+    let code = confirmation_codes::generate_code();
+    mail_code(
+        &state,
         &user_id,
-        Act::OrganizationDeletion(&organization),
-        &crate::issuer::hash(&code),
-        expires_at,
+        person.email.as_str(),
+        (Act::OrganizationDeletion(&organization), &code),
+        AuthMail::OrganizationDeletionCode {
+            code: &code,
+            organization: &name,
+        },
     )
     .await?;
-    tx.commit().await?;
-
-    if let Err(e) = state
-        .mailer
-        .send_mail(
-            person.email.as_str(),
-            AuthMail::OrganizationDeletionCode {
-                code: &code,
-                organization: &name,
-            },
-        )
-        .await
-    {
-        tracing::error!(organization_id = %organization, error = %e,
-            "organization-deletion code mail failed — check MAIL_FROM, the mail transport and the sending domain's DNS");
-        return Err(TelmoniError::MailDelivery {
-            context: "organization-deletion confirmation code".into(),
-        });
-    }
-
-    tracing::info!(organization_id = %organization, "organization-deletion confirmation code issued");
     Ok((StatusCode::ACCEPTED, Json(Sent::MAILED)))
 }
 
@@ -171,25 +153,13 @@ async fn open_deletion<'a>(
 /// Spend `code` on the organization's deletion and mark it, answering when
 /// the row goes. A wrong code is counted, and changes nothing else.
 async fn spend_code(
-    mut tx: Scoped<'_, PersonAndOrganization>,
+    tx: Scoped<'_, PersonAndOrganization>,
     user_id: &UserId,
     organization: &OrganizationId,
     code: &str,
 ) -> Result<DateTime<Utc>, TelmoniError> {
-    let Some(code_id) = confirmation_codes::find_live(
-        &mut tx,
-        user_id,
-        Act::OrganizationDeletion(organization),
-        &crate::issuer::hash(code.trim()),
-    )
-    .await?
-    else {
-        let burned =
-            confirmation_codes::register_failure(&mut tx, user_id, Purpose::OrganizationDeletion)
-                .await?;
-        tx.commit().await?;
-        return Err(wrong_code(burned));
-    };
+    let (mut tx, code_id) =
+        live_code(tx, user_id, Act::OrganizationDeletion(organization), code).await?;
     confirmation_codes::consume(&mut tx, code_id).await?;
 
     let Some(erase_after) = request_deletion(&mut tx, organization, DeletionKind::Owner).await?

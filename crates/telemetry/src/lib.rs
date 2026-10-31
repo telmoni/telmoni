@@ -102,8 +102,10 @@ pub struct AppState {
     pub content_kek: telmoni_shared::envelope::Kek,
     /// Each project's hashing key, opened once per process ([`hashing`]).
     pub hashing_keys: hashing::Cache,
-    /// Each project's content key, opened once per process ([`content`]).
-    pub content_keys: hashing::Cache<Arc<telmoni_shared::envelope::Dek>>,
+    /// Each project's content key, opened once per process and kept beside
+    /// the wrapped key it was opened from, which every use checks against
+    /// the row ([`content`]).
+    pub content_keys: hashing::Cache<(Vec<u8>, Arc<telmoni_shared::envelope::Dek>)>,
     /// The projects an export's settling is asking auth about again, one
     /// task a project at once and one after an insert's wait
     /// ([`handler::ingest`]).
@@ -162,6 +164,10 @@ pub fn router(state: Arc<AppState>) -> Router {
             "/telemetry/content-mode",
             get(handler::content_mode::get_content_mode)
                 .put(handler::content_mode::put_content_mode),
+        )
+        .route(
+            "/telemetry/content-mode/code",
+            post(handler::content_mode::request_content_mode_code),
         )
         .route(
             "/telemetry/field-inventory",

@@ -3,7 +3,12 @@ import { type NextProxy, NextResponse } from 'next/server';
 import { problem } from '@/lib/api/respond';
 import { SESSION_COOKIE, SESSION_TTL_SECONDS, cookieOpts } from '@/lib/auth/session';
 import { env } from '@/lib/env';
-import { ORGANIZATION_HEADER, PATH_HEADER, namedOrganization } from '@/lib/proxy/organization';
+import {
+  ORGANIZATION_HEADER,
+  PATH_HEADER,
+  expiredCookie,
+  namedOrganization,
+} from '@/lib/proxy/organization';
 import { isPublic } from '@/lib/proxy/public-paths';
 import { type SettledSession, settleSession } from '@/lib/proxy/session';
 
@@ -28,7 +33,7 @@ function carry(settled: SettledSession | null, response: NextResponse): NextResp
       ...cookieOpts(SESSION_TTL_SECONDS),
     });
   } else if (settled?.kind === 'ended') {
-    response.cookies.delete(SESSION_COOKIE);
+    response.cookies.delete(expiredCookie(SESSION_COOKIE));
   }
   return response;
 }

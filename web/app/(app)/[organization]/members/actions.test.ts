@@ -79,6 +79,7 @@ vi.mock("@/lib/events/publisher", () => ({
 import { identityContext } from "@/lib/server/entities/identity-context";
 import { getServerContext } from "@/lib/server/entities/organization";
 import { getServerSession } from "@/lib/server/session";
+import { ACTIVE_ORGANIZATION_COOKIE, expiredCookie } from "@/lib/proxy/organization";
 import { tryFetchWithTimeout } from "@/lib/api/fetch";
 
 import {
@@ -686,7 +687,7 @@ describe("leaveOrganizationAction", () => {
   it("drops the active-organization cookie before it redirects", async () => {
     fetchMock.mockResolvedValue({ ok: true, status: 204 } as never);
     await expect(leaveOrganizationAction(LEAVING)).rejects.toThrow("REDIRECT:/console");
-    expect(mockCookieDelete).toHaveBeenCalledWith("telmoni-organization");
+    expect(mockCookieDelete).toHaveBeenCalledWith(expiredCookie(ACTIVE_ORGANIZATION_COOKIE));
     expect(mockRevalidate).toHaveBeenCalled();
   });
 

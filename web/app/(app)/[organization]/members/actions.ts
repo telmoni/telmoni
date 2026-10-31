@@ -7,7 +7,7 @@ import { redirect } from "next/navigation";
 import { type ActionResult, refused } from "@/lib/action-result";
 import { tryFetchWithTimeout } from "@/lib/api/fetch";
 import { env } from "@/lib/env";
-import { ACTIVE_ORGANIZATION_COOKIE } from "@/lib/proxy/organization";
+import { ACTIVE_ORGANIZATION_COOKIE, expiredCookie } from "@/lib/proxy/organization";
 import { type GivenRole, owns } from "@/lib/roles";
 import { admitOrganization } from "@/lib/server/admit";
 import { organizationHeaders } from "@/lib/server/entities/identity-context";
@@ -88,7 +88,7 @@ export async function leaveOrganizationAction(organizationId: string): Promise<A
   // Evict the active-organization cookie so `/console` falls back to their
   // first remaining organization or the no-organization gate.
   const jar = await cookies();
-  jar.delete(ACTIVE_ORGANIZATION_COOKIE);
+  jar.delete(expiredCookie(ACTIVE_ORGANIZATION_COOKIE));
   revalidatePath("/", "layout");
   redirect("/console");
 }

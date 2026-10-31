@@ -21,6 +21,24 @@ export const ORGANIZATION_HEADER = "x-telmoni-organization";
  */
 export const PATH_HEADER = "x-telmoni-path";
 
+/** Whether the console's own cookies are `Secure`, and so `__Host-`: in a
+ *  production build, served over HTTPS; not under `next dev` on a laptop's
+ *  plain HTTP, where a browser would drop them. One rule for the server and
+ *  the browser, so both spell a cookie alike. */
+export const SECURE_COOKIES = process.env.NODE_ENV === "production";
+
+/** A cookie's name as the console sets it: `__Host-` first where cookies are
+ *  `Secure`, which a browser then holds to this host and path `/`. */
+export function hostCookie(name: string): string {
+  return SECURE_COOKIES ? `__Host-${name}` : name;
+}
+
+/** What deletes one of the console's cookies: a browser ignores a `__Host-`
+ *  cookie set without `Secure`, its deletion among them. */
+export function expiredCookie(name: string) {
+  return { name, path: "/", secure: SECURE_COOKIES };
+}
+
 /**
  * The organization the console last stood in, for the paths that name none:
  * Account, `/console`, the other route handlers. By id, not by slug: it outlives
@@ -34,26 +52,26 @@ export const PATH_HEADER = "x-telmoni-path";
  * `HttpOnly`, which costs nothing: the cookie claims nothing, and auth honours
  * it only for an organization the person is in.
  */
-export const ACTIVE_ORGANIZATION_COOKIE = "telmoni-organization";
+export const ACTIVE_ORGANIZATION_COOKIE = hostCookie("telmoni-organization");
 
 const REMEMBERED_SECONDS = 60 * 60 * 24 * 30;
 
 /** What a server-side write carries: the same attributes as the browser's. */
 export const ACTIVE_ORGANIZATION_COOKIE_OPTIONS = {
   path: "/",
-  secure: process.env.NODE_ENV === "production",
+  secure: SECURE_COOKIES,
   sameSite: "lax",
   maxAge: REMEMBERED_SECONDS,
 } as const;
 
 /** The cookie as `document.cookie` takes it. */
-export function activeOrganizationCookie(organizationId: string, secure: boolean): string {
+export function activeOrganizationCookie(organizationId: string): string {
   return [
     `${ACTIVE_ORGANIZATION_COOKIE}=${organizationId}`,
     "Path=/",
     `Max-Age=${REMEMBERED_SECONDS}`,
     "SameSite=Lax",
-    ...(secure ? ["Secure"] : []),
+    ...(SECURE_COOKIES ? ["Secure"] : []),
   ].join("; ");
 }
 

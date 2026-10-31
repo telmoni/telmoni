@@ -10,7 +10,10 @@ const jar = {
   set(opts: { name: string; value: string }) {
     this.store.set(opts.name, opts.value);
   },
-  delete(name: string) {
+  // A name, or the cookie with the attributes its deletion carries, as
+  // Next's jar takes either.
+  delete(cookie: string | { name: string }) {
+    const name = typeof cookie === "string" ? cookie : cookie.name;
     this.deleted.push(name);
     this.store.delete(name);
   },

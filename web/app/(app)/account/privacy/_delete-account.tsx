@@ -2,11 +2,9 @@
 
 import { useEffect } from "react";
 
+import { CodeField, CodeSentTo } from "@/components/code-field";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { signOut } from "@/lib/auth/sign-out";
-import { CONFIRMATION_CODE_LENGTH } from "@/lib/confirmation-code";
 import { PRODUCT_NAME } from "@/lib/site";
 import { useCodeConfirmed } from "@/lib/use-code-confirmed";
 
@@ -100,22 +98,13 @@ export function DeleteAccountForm({
             if (flow.canConfirm) flow.confirmCode();
           }}
         >
-          <div className="grid gap-2">
-            <Label htmlFor="delete-account-code">
-              Enter the {CONFIRMATION_CODE_LENGTH}-digit code sent to{" "}
-              <span className="font-medium">{email}</span>
-            </Label>
-            <Input
-              id="delete-account-code"
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              maxLength={CONFIRMATION_CODE_LENGTH}
-              value={flow.code}
-              onChange={(e) => flow.type(e.target.value)}
-              placeholder="000000"
-              disabled={flow.confirming}
-            />
-          </div>
+          <CodeField
+            id="delete-account-code"
+            label={<CodeSentTo email={email} />}
+            value={flow.code}
+            onType={flow.type}
+            disabled={flow.confirming}
+          />
           <div className="flex items-center gap-3">
             <Button type="submit" variant="destructive" disabled={!flow.canConfirm}>
               {flow.confirming ? "Deleting…" : "Permanently delete my account"}

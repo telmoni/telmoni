@@ -35,6 +35,9 @@ vi.mock("@/lib/env", () => ({
 }));
 // `/me` is the one thing stubbed: the real header builders make what reaches
 // auth, and that is the assertion under test.
+vi.mock("@/lib/server/entities/active-sessions", () => ({
+  fetchActiveSessions: vi.fn(),
+}));
 vi.mock("@/lib/server/entities/organization", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/server/entities/organization")>()),
   getServerContext: vi.fn(),
@@ -50,9 +53,11 @@ import { getServerContext } from "@/lib/server/entities/organization";
 import {
   deleteAccountAction,
   requestAccountDeletionCodeAction,
+  revokeOtherSessionsAction,
   revokeSessionAction,
   setAnalyticsPreferenceAction,
 } from "./actions";
+import { fetchActiveSessions } from "@/lib/server/entities/active-sessions";
 import { blacklistSession } from "@/lib/auth/session-blacklist";
 import { rateLimitRetryAfter } from "@/lib/api/rate-limit";
 
@@ -344,6 +349,38 @@ describe("revokeSessionAction", () => {
 });
 
 // The consent is the PERSON's, whichever organization they are standing in.
+describe("revokeOtherSessionsAction", () => {
+  // Every session but this one ends at auth, and each listed one is refused
+  // here at once, as one ended alone is; this one stays.
+  it("ends every other session, and refuses each here once auth has", async () => {
+    vi.mocked(fetchActiveSessions).mockResolvedValue([
+      { id: "sess_1", userAgent: null, createdAt: "", lastSeenAt: "" },
+      { id: "sess_laptop", userAgent: null, createdAt: "", lastSeenAt: "" },
+      { id: "sess_phone", userAgent: null, createdAt: "", lastSeenAt: "" },
+    ]);
+    fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
+
+    expect(await revokeOtherSessionsAction()).toEqual({ ok: true });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://auth.test/internal/v1/auth/sessions/revoke-others",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({ "x-organization-id": "org_active" }),
+      }),
+    );
+    expect(vi.mocked(blacklistSession).mock.calls.map(([id]) => id)).toEqual([
+      "sess_laptop",
+      "sess_phone",
+    ]);
+    expect(refresh).toHaveBeenCalledOnce();
+
+    vi.clearAllMocks();
+    fetchMock.mockResolvedValue(new Response(null, { status: 500 }));
+    expect(await revokeOtherSessionsAction()).toEqual({ ok: false, error: "problem" });
+    expect(blacklistSession).not.toHaveBeenCalled();
+  });
+});
+
 describe("setAnalyticsPreferenceAction", () => {
   it("records the consent on the account, under the session's bearer", async () => {
     fetchMock.mockResolvedValue(new Response(null, { status: 204 }));

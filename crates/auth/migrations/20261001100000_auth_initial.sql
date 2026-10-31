@@ -548,6 +548,9 @@ CREATE TABLE auth.refresh_tokens (
     sid        TEXT        NOT NULL,
     token_hash TEXT        NOT NULL UNIQUE,
     expires_at TIMESTAMPTZ NOT NULL,
+    -- When the session began, carried to each token it rotates to, so no
+    -- refresh outlives the session's ninety days (`SESSION_MAX_DAYS`).
+    session_began TIMESTAMPTZ NOT NULL,
     used_at    TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     shard_key  UUID        NOT NULL DEFAULT gen_random_uuid()
@@ -710,6 +713,9 @@ CREATE TABLE auth.confirmation_codes (
     user_id     TEXT        NOT NULL REFERENCES auth.identities (user_id) ON DELETE CASCADE,
     purpose     TEXT        NOT NULL,
     subject     TEXT        REFERENCES auth.organizations (external_id) ON DELETE CASCADE,
+    -- The project a content switch's code is bound to, so a code mailed for
+    -- one project never turns on another.
+    project     TEXT        REFERENCES auth.projects (external_id) ON DELETE CASCADE,
     code_hash   TEXT        NOT NULL,
     expires_at  TIMESTAMPTZ NOT NULL,
     consumed_at TIMESTAMPTZ,
@@ -720,14 +726,18 @@ CREATE TABLE auth.confirmation_codes (
     shard_key   UUID        NOT NULL DEFAULT gen_random_uuid(),
     CONSTRAINT confirmation_codes_purpose_check
         CHECK (purpose IN ('organization_deletion', 'account_deletion', 'email_change',
-                           'email_verification', 'password_reset')),
+                           'email_verification', 'password_reset', 'content_mode')),
     CONSTRAINT confirmation_codes_subject_matches_purpose_check
-        CHECK ((purpose = 'organization_deletion') = (subject IS NOT NULL))
+        CHECK ((purpose = 'organization_deletion') = (subject IS NOT NULL)),
+    CONSTRAINT confirmation_codes_project_matches_purpose_check
+        CHECK ((purpose = 'content_mode') = (project IS NOT NULL))
 );
 
 CREATE INDEX confirmation_codes_user_id_idx ON auth.confirmation_codes (user_id);
 CREATE INDEX confirmation_codes_subject_idx ON auth.confirmation_codes (subject)
     WHERE subject IS NOT NULL;
+CREATE INDEX confirmation_codes_project_idx ON auth.confirmation_codes (project)
+    WHERE project IS NOT NULL;
 -- The guess counter is per row, so a second live code would be a second budget;
 -- it is also the live lookup's index, since every read names the person and purpose.
 CREATE UNIQUE INDEX confirmation_codes_one_live_key ON auth.confirmation_codes (user_id, purpose)

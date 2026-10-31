@@ -9,7 +9,12 @@ import { getLogoutUrl, refreshTokens, revokeSession } from "@/lib/auth/oidc";
 import { blacklistSession, isSessionBlacklisted } from "@/lib/auth/session-blacklist";
 import { sessionEndKey } from "@/lib/auth/session-end-key";
 import { OAUTH_PROVIDERS } from "@/lib/connect";
-import { ACTIVE_ORGANIZATION_COOKIE } from "@/lib/proxy/organization";
+import {
+  ACTIVE_ORGANIZATION_COOKIE,
+  SECURE_COOKIES,
+  expiredCookie,
+  hostCookie,
+} from "@/lib/proxy/organization";
 
 /// What the session cookie holds, read through the one schema: a cookie an
 /// older build sealed, or one partly written, is no session rather than one
@@ -36,7 +41,7 @@ export type SessionData = z.infer<typeof SessionDataSchema>;
 /// shape still names.
 const SessionIdsSchema = SessionDataSchema.pick({ sessionId: true, sessionRowId: true, idToken: true });
 
-export const SESSION_COOKIE = "telmoni_session";
+export const SESSION_COOKIE = hostCookie("telmoni_session");
 export const PKCE_COOKIE = "telmoni_pkce";
 // One connector handshake in flight: which project it is for, which vendor, and
 // the state the vendor will echo. Sealed like the PKCE cookie and for the same
@@ -71,7 +76,7 @@ export async function getSession(): Promise<SessionData | null> {
 
   if (await isSessionBlacklisted(sessionEndKey(data))) {
     try {
-      jar.delete(SESSION_COOKIE);
+      jar.delete(expiredCookie(SESSION_COOKIE));
     } catch {
     }
     return null;
@@ -157,7 +162,7 @@ export async function destroySession(
   // The connector handshake's cookie goes too: left behind, a handshake begun
   // before the sign-out would resume for whoever signs in next on this browser.
   for (const name of [SESSION_COOKIE, PKCE_COOKIE, ACTIVE_ORGANIZATION_COOKIE, CONNECT_COOKIE]) {
-    jar.set(name, "", { path: "/", maxAge: 0 });
+    jar.set(name, "", { path: "/", maxAge: 0, secure: SECURE_COOKIES });
   }
   return providerLogoutUrl;
 }
@@ -165,7 +170,7 @@ export async function destroySession(
 export function cookieOpts(maxAge: number) {
   return {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: SECURE_COOKIES,
     sameSite: "lax" as const,
     maxAge,
     path: "/",

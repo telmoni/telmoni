@@ -3,7 +3,11 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const revoke = vi.hoisted(() => vi.fn(async () => ({ ok: true })));
-vi.mock("./actions", () => ({ revokeSessionAction: revoke }));
+const revokeOthers = vi.hoisted(() => vi.fn(async () => ({ ok: true })));
+vi.mock("./actions", () => ({
+  revokeSessionAction: revoke,
+  revokeOtherSessionsAction: revokeOthers,
+}));
 const refresh = vi.hoisted(() => vi.fn());
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }) }));
 const toastSuccess = vi.hoisted(() => vi.fn());
@@ -97,6 +101,20 @@ describe("ActiveSessions", () => {
     expect(toastSuccess).toHaveBeenCalledWith(
       expect.stringMatching(/within a few minutes/i),
     );
+  });
+
+  // Offered where there is another session to end, never with this one alone.
+  it("signs out everywhere else, offered only beside another session", async () => {
+    const { rerender } = render(<ActiveSessions sessions={rows} currentId="s-current" />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Sign out everywhere else" }));
+    });
+    expect(revokeOthers).toHaveBeenCalledOnce();
+    expect(revoke).not.toHaveBeenCalled();
+    expect(toastSuccess).toHaveBeenCalledWith(expect.stringMatching(/within a few minutes/i));
+
+    rerender(<ActiveSessions sessions={rows.slice(0, 1)} currentId="s-current" />);
+    expect(screen.queryByRole("button", { name: "Sign out everywhere else" })).toBeNull();
   });
 
   it("says so when the list cannot be read", () => {

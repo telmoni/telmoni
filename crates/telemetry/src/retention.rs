@@ -123,7 +123,7 @@ pub async fn purge(client: &clickhouse::Client, now: DateTime<Utc>) -> anyhow::R
 
 /// Content rows deleted at once by [`purge_content`]: a night's lot goes in
 /// batches, so no one statement holds the table long.
-const CONTENT_BATCH: i64 = 5_000;
+pub(crate) const CONTENT_BATCH: i64 = 5_000;
 
 /// Delete the content whose span's day [`purge`] drops, as the migrator, whom
 /// row security does not hold: a project at a time, a batch at a time, each

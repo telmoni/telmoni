@@ -138,6 +138,11 @@ The span is kept, and the answer names the field. On a project whose mode is
 Postgres alone, for as long as its span: free of an attribute's 1,024
 characters, held only by the 1 MiB an export may be.
 
+Only the organization's **Owner** switches a project's mode, on its
+**Settings** page. Leaving `off` takes a code mailed to them; going back to
+`off` asks nothing, and may delete what the project kept, its key first
+([Data deletion](/docs/workspace/data-deletion#deleting-a-projects-content)).
+
 **Any other text, array or map** the [field inventory](/docs/api/field-inventory)
 does not name is dropped on an `off` project as `unlisted`, and kept as content
 under its own name on an `on` one: content arrives under names no convention

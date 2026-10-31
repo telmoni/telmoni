@@ -1,9 +1,7 @@
 "use client";
 
+import { CodeField, CodeSentTo } from "@/components/code-field";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { CONFIRMATION_CODE_LENGTH } from "@/lib/confirmation-code";
 import { useCodeConfirmed } from "@/lib/use-code-confirmed";
 
 import {
@@ -80,22 +78,13 @@ export function DeleteOrganizationForm({
             if (flow.canConfirm) flow.confirmCode();
           }}
         >
-          <div className="grid gap-2">
-            <Label htmlFor="delete-organization-code">
-              Enter the {CONFIRMATION_CODE_LENGTH}-digit code sent to{" "}
-              <span className="font-medium">{email}</span>
-            </Label>
-            <Input
-              id="delete-organization-code"
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              maxLength={CONFIRMATION_CODE_LENGTH}
-              value={flow.code}
-              onChange={(e) => flow.type(e.target.value)}
-              placeholder="000000"
-              disabled={flow.confirming}
-            />
-          </div>
+          <CodeField
+            id="delete-organization-code"
+            label={<CodeSentTo email={email} />}
+            value={flow.code}
+            onType={flow.type}
+            disabled={flow.confirming}
+          />
           <div className="flex items-center gap-3">
             <Button type="submit" variant="destructive" disabled={!flow.canConfirm}>
               {flow.confirming ? "Deleting…" : "Delete this organization"}

@@ -495,7 +495,7 @@ impl PasswordProvider {
         // verification link gives.
         identities::set_verified(&mut tx, user_id).await?;
         confirmation_codes::delete_all_for_person(&mut tx, user_id).await?;
-        let revoked = sessions::revoke_all_for_person(&mut tx, user_id).await?;
+        let revoked = sessions::revoke_all_for_person(&mut tx, user_id, None).await?;
         access_tokens::delete_for_person(&mut tx, user_id).await?;
         refresh_tokens::delete_for_person(&mut tx, user_id).await?;
         tx.commit().await?;

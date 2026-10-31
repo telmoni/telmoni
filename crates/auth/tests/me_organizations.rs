@@ -21,7 +21,7 @@ use serde_json::{Value, json};
 use sqlx::PgPool;
 use tower::ServiceExt;
 
-use telmoni_auth::test_provider::{ScriptedProvider, as_person};
+use telmoni_auth::test_provider::{ScriptedProvider, as_person, bearer_in};
 use telmoni_auth::{AppState, Config, router};
 use telmoni_shared::UserId;
 use telmoni_shared::test_util::{ServiceRole, apply_audit_migrations, seed_identity, service_pool};
@@ -1012,4 +1012,71 @@ async fn an_accept_waits_on_the_persons_lock_and_is_refused_once_their_deletion_
     .await
     .unwrap();
     assert!(!seated, "a person being deleted took a seat");
+}
+
+/// *Sign out everywhere else* ends every session of the caller's but the one
+/// asking, and files one row on the organization the console names.
+#[sqlx::test]
+async fn sign_out_everywhere_else_spares_the_asking_session_alone(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let organization = sign_in(&pool, "user_others").await;
+    for (sid, agent) in [
+        ("ses_here", "here"),
+        ("ses_laptop", "laptop"),
+        ("ses_phone", "phone"),
+    ] {
+        sqlx::query(
+            "INSERT INTO auth.sessions (user_id, sid, user_agent) VALUES ('user_others', $1, $2)",
+        )
+        .bind(sid)
+        .bind(agent)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    let here = bearer_in(&pool, "user_others", "ses_here").await;
+    let laptop = bearer_in(&pool, "user_others", "ses_laptop").await;
+    let send = |bearer: String| {
+        let req = Request::builder()
+            .method("POST")
+            .uri("/internal/v1/auth/sessions/revoke-others")
+            .header("x-service-secret", SERVICE_SECRET)
+            .header("x-organization-id", organization.as_str())
+            .header("authorization", format!("Bearer {bearer}"))
+            .body(Body::empty())
+            .unwrap();
+        app(pool.clone()).oneshot(req)
+    };
+
+    assert_eq!(
+        send(here.clone()).await.unwrap().status(),
+        StatusCode::NO_CONTENT
+    );
+
+    let live: Vec<String> = sqlx::query_scalar(
+        "SELECT sid FROM auth.sessions WHERE user_id = 'user_others' AND revoked_at IS NULL ORDER BY sid",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(live, ["ses_here"], "the asking session alone is left");
+    assert_eq!(
+        send(laptop).await.unwrap().status(),
+        StatusCode::UNAUTHORIZED,
+        "an ended session's bearer is refused"
+    );
+    let filed: Vec<Value> = sqlx::query_scalar(
+        "SELECT metadata FROM audit.events
+          WHERE organization_id = $1 AND resource_kind = 'session' AND action = 'deleted'",
+    )
+    .bind(&organization)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(filed.len(), 1, "{filed:?}");
+    // The laptop, the phone and the sign-in `/me` recorded.
+    assert_eq!(filed[0]["sessions_revoked"], 3, "{filed:?}");
+
+    // Nothing else to end: answered alike, and nothing more filed.
+    assert_eq!(send(here).await.unwrap().status(), StatusCode::NO_CONTENT);
 }

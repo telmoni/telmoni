@@ -583,6 +583,51 @@ async fn a_refresh_rotates_the_token_and_a_reuse_ends_the_session(pool: PgPool) 
     assert_eq!(live, 0, "the session itself is ended, not only its tokens");
 }
 
+/// A session ninety days old is refused at the refresh, and no token of a
+/// younger one is minted to outlive its ninetieth day.
+#[sqlx::test]
+async fn a_session_ends_ninety_days_after_its_sign_in(pool: PgPool) {
+    telmoni_shared::test_util::apply_audit_migrations(&pool).await;
+    let db = service_pool(&pool, ServiceRole::Auth);
+    let (app, outbox) = app(pool);
+    let tokens = signed_in(&app, &outbox, "ada@example.com").await;
+    let token = tokens["refreshToken"].as_str().unwrap().to_owned();
+    let refresh = |token: String| {
+        let app = app.clone();
+        async move {
+            app.oneshot(post_json(
+                "/internal/v1/auth/refresh",
+                serde_json::json!({ "refreshToken": token }),
+            ))
+            .await
+            .unwrap()
+        }
+    };
+
+    let mut tx = maintenance_scope(&db, AuthLane).await.unwrap();
+    let outlives: bool = sqlx::query_scalar(
+        "SELECT bool_or(expires_at > session_began + make_interval(days => $1))
+           FROM auth.refresh_tokens",
+    )
+    .bind(i32::try_from(telmoni_auth::issuer::SESSION_MAX_DAYS).unwrap())
+    .fetch_one(tx.conn())
+    .await
+    .unwrap();
+    assert!(!outlives, "no token is good past the session's end");
+    // The session began ninety days ago, to the second.
+    sqlx::query(
+        "UPDATE auth.refresh_tokens
+            SET session_began = now() - make_interval(days => $1)",
+    )
+    .bind(i32::try_from(telmoni_auth::issuer::SESSION_MAX_DAYS).unwrap())
+    .execute(tx.conn())
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+
+    assert_eq!(refresh(token).await.status(), StatusCode::UNAUTHORIZED);
+}
+
 #[sqlx::test]
 async fn a_wrong_password_and_an_unknown_address_answer_alike_and_guesses_lock(pool: PgPool) {
     telmoni_shared::test_util::apply_audit_migrations(&pool).await;

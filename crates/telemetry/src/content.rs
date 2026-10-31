@@ -62,7 +62,7 @@ pub async fn keep(
     if content.is_empty() {
         return Ok(());
     }
-    let key = key_for(state, project_id).await?;
+    let (wrapped, key) = opened_key(state, project_id).await?;
     let mut sealed = SealedFields::default();
     for span in content {
         for (field, text) in span.fields {
@@ -82,6 +82,16 @@ pub async fn keep(
         }
     }
     let (mut tx, organization_id) = held_in_place(state, project_id).await?;
+    // Still the key they were sealed under: one deleted meanwhile, as the
+    // project went `off`, refuses them, and the exporter's retry meets the mode.
+    let now = db::content_key(&mut tx, project_id).await?;
+    if now.is_none_or(|now| now.wrapped_dek != wrapped) {
+        chain::rolled_back(tx.rollback().await, project_id, WHAT);
+        return Err(TelemetryError::StoreUnavailable(
+            "the project's content key changed as its content was kept; try again".into(),
+        )
+        .into());
+    }
     db::keep_content(&mut tx, project_id, &organization_id, received_at, &sealed).await?;
     tx.commit().await?;
     Ok(())
@@ -188,16 +198,25 @@ async fn file_the_read(
     Ok(kept)
 }
 
-/// The project's content key, opened: from the cache, else from its settings
-/// row, made and wrapped where the row has none, and then cached.
+/// The project's content key, opened: read from its settings row each time,
+/// the key service asked only when the row holds a key not yet opened.
 ///
 /// # Errors
 ///
 /// As [`keep`].
 pub async fn key_for(state: &AppState, project_id: &ProjectId) -> Result<Arc<Dek>, TelmoniError> {
-    if let Some(key) = state.content_keys.get(project_id) {
-        return Ok(key);
-    }
+    Ok(opened_key(state, project_id).await?.1)
+}
+
+/// The project's content key as its settings row holds it now, wrapped, and
+/// opened — made and wrapped where the row has none. The opened key comes
+/// from the cache only while the row still holds the key it was opened from,
+/// so one deleted as content went `off`, or replaced since, is used by no
+/// process: the row is read every time, the key service only on a change.
+async fn opened_key(
+    state: &AppState,
+    project_id: &ProjectId,
+) -> Result<(Vec<u8>, Arc<Dek>), TelmoniError> {
     let aad = key_aad(project_id);
     let mut tx = project_scope(&state.db, project_id).await?;
     let read = db::content_key(&mut tx, project_id).await?;
@@ -206,6 +225,11 @@ pub async fn key_for(state: &AppState, project_id: &ProjectId) -> Result<Arc<Dek
         Some(wrapped) => wrapped,
         None => make_key(state, project_id, aad.as_bytes()).await?,
     };
+    if let Some((held, key)) = state.content_keys.get(project_id)
+        && held == wrapped.wrapped_dek
+    {
+        return Ok((held, key));
+    }
     let key = state
         .content_kek
         .unwrap_dek(
@@ -217,8 +241,11 @@ pub async fn key_for(state: &AppState, project_id: &ProjectId) -> Result<Arc<Dek
         .await
         .map_err(|e| kek_refused(&e, WHAT))?;
     let key = Arc::new(key);
-    state.content_keys.put(project_id.clone(), Arc::clone(&key));
-    Ok(key)
+    state.content_keys.put(
+        project_id.clone(),
+        (wrapped.wrapped_dek.clone(), Arc::clone(&key)),
+    );
+    Ok((wrapped.wrapped_dek, key))
 }
 
 /// A fresh data key for the project, wrapped first, holding nothing, since the

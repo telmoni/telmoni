@@ -186,18 +186,23 @@ pub async fn revoke(
     .await
 }
 
-/// Revoke every live session of one person, and hand back the `sid` of each. ⚠ There is deliberately no `revoke_others`: a narrower variant can
-/// only ever revoke a subset of what the caller meant.
+/// Revoke every live session of one person but the one `keep` names, and
+/// hand back the `sid` of each: every one, with `None`, for what must end
+/// them all (an account's deletion, a new address or password), and every
+/// other for *Sign out everywhere else*.
 pub async fn revoke_all_for_person(
     tx: &mut Scoped<'_, Person>,
     user_id: &UserId,
+    keep: Option<&SessionId>,
 ) -> sqlx::Result<Vec<SessionId>> {
     sqlx::query_scalar(
         "UPDATE auth.sessions SET revoked_at = now()
           WHERE user_id = $1 AND revoked_at IS NULL
+            AND ($2::text IS NULL OR sid <> $2)
       RETURNING sid",
     )
     .bind(user_id)
+    .bind(keep)
     .fetch_all(tx.conn())
     .await
 }

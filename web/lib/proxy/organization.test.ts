@@ -1,6 +1,6 @@
 import { sealData } from "iron-session";
 import { NextRequest, NextResponse } from "next/server";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { proxy } from "@/proxy";
 
@@ -49,17 +49,30 @@ describe("activeOrganizationCookie", () => {
   // What `document.cookie` is handed. Readable by script on purpose: the
   // browser writes it, and it claims nothing. The organization's id, which a
   // rename leaves where it is.
-  it("spells the cookie for the whole site, for thirty days", () => {
-    expect(activeOrganizationCookie("org_7bQx2mNv9BcK4dLp", false)).toBe(
+  it("spells the cookie for the whole site, for thirty days, plain off a production build", () => {
+    expect(activeOrganizationCookie("org_7bQx2mNv9BcK4dLp")).toBe(
       "telmoni-organization=org_7bQx2mNv9BcK4dLp; Path=/; Max-Age=2592000; SameSite=Lax",
     );
   });
 
-  it("is Secure where the page is", () => {
-    expect(activeOrganizationCookie("org_7bQx2mNv9BcK4dLp", true)).toBe(
-      "telmoni-organization=org_7bQx2mNv9BcK4dLp; Path=/; Max-Age=2592000; SameSite=Lax; Secure",
-    );
-    expect(activeOrganizationCookie("org_7bQx2mNv9BcK4dLp", true)).not.toMatch(/httponly/i);
+  it("is Secure and __Host- in a production build, its deletion Secure too", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.resetModules();
+    try {
+      const built = await import("./organization");
+      expect(built.activeOrganizationCookie("org_7bQx2mNv9BcK4dLp")).toBe(
+        "__Host-telmoni-organization=org_7bQx2mNv9BcK4dLp; Path=/; Max-Age=2592000; SameSite=Lax; Secure",
+      );
+      expect(built.activeOrganizationCookie("org_7bQx2mNv9BcK4dLp")).not.toMatch(/httponly/i);
+      expect(built.expiredCookie(built.ACTIVE_ORGANIZATION_COOKIE)).toEqual({
+        name: "__Host-telmoni-organization",
+        path: "/",
+        secure: true,
+      });
+    } finally {
+      vi.unstubAllEnvs();
+      vi.resetModules();
+    }
   });
 });
 

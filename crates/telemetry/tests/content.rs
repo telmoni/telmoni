@@ -692,6 +692,88 @@ async fn the_content_key_is_wrapped_apart_and_a_purge_deletes_it_with_the_conten
     assert!(door.kept(&pool).await.is_empty(), "and the content with it");
 }
 
+/// ⚠ Back to `off` with its content deleted, nothing the project kept opens
+/// from the switch's commit, though its rows wait for the purge after; the
+/// purge takes them, and the owner is mailed the receipt.
+#[sqlx::test]
+async fn going_off_with_content_deleted_leaves_none_that_opens(pool: PgPool) {
+    let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    apply_audit_migrations(&pool).await;
+    let door = door(&pool, ContentMode::On).await;
+    door.auth.seat(
+        "owner-1",
+        &door.organization,
+        &door.project,
+        OrganizationRole::Owner,
+        None,
+    );
+    door.send(export("result")).await;
+    let runs = [run(RUN)];
+    let open = || {
+        content::open(
+            &door.state,
+            Actor::User("owner-1"),
+            &door.project,
+            &runs,
+            None,
+        )
+    };
+    assert!(!open().await.expect("the content opens").is_empty());
+
+    let response = door
+        .app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/internal/v1/telemetry/content-mode")
+                .header(SERVICE_SECRET_HEADER, common::SECRET)
+                .header(header::AUTHORIZATION, "Bearer tok_owner-1")
+                .header("x-organization-id", door.organization.as_str())
+                .header("x-project-id", door.project.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({ "content_mode": "off", "delete_content": true }).to_string(),
+                ))
+                .expect("a request"),
+        )
+        .await
+        .expect("an answer");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let keys: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM telemetry.project_settings \
+          WHERE project_id = $1 AND content_key_wrapped_dek IS NOT NULL",
+    )
+    .bind(&door.project)
+    .fetch_one(&pool)
+    .await
+    .expect("count the keys left");
+    assert_eq!(keys, 0, "the key went in the switch's commit");
+    assert!(
+        open().await.expect("a read answers").is_empty(),
+        "nothing opens"
+    );
+    common::eventually("the purge takes the rows", || async {
+        door.kept(&pool).await.is_empty()
+    })
+    .await;
+    common::eventually("the receipt is mailed", || async {
+        door.auth.receipts() == [("owner-1".to_owned(), format!("content {}", door.project))]
+    })
+    .await;
+    let held: i64 = sqlx::query_scalar(
+        "SELECT coalesce(sum(bytes), 0)::bigint FROM telemetry.content_held WHERE organization_id = $1",
+    )
+    .bind(&door.organization)
+    .fetch_one(&pool)
+    .await
+    .expect("the organization's count");
+    assert_eq!(held, 0, "its bytes came off the count");
+}
+
 /// What every content field below carries, so a copy of it anywhere is found.
 const SENTINEL: &str = "s3nt1nel-written-by-a-person";
 

@@ -108,6 +108,21 @@ no organization that has other members
   project's [Alerts](/docs/workspace/alerts) page, which no roster names once
   you are gone.
 
+## Deleting a project's content
+
+Only the organization's **Owner** can, on the project's **Settings** page, as
+its content mode goes back to `off`: choosing **Off**, they may tick **Also
+delete what this project kept**. Leaving it unticked keeps what the project
+kept readable, each read in the audit log, until its spans' retention ends.
+
+- **At once:** the key the content was sealed under is deleted in the same
+  change as the mode, so none of it opens again, for anybody, on any copy.
+- **Right after:** its rows are purged, and their bytes come off the
+  organization's count.
+- **Receipt:** the change is in the audit log, and the owner is mailed a
+  receipt saying since when the content has been unreadable. Its spans and
+  their metadata stay until their retention ends.
+
 ## Deleting smaller things
 
 - **An API key:** **Revoke** ends it at once, and its record is deleted seven
@@ -119,7 +134,8 @@ no organization that has other members
   sealed, until Slack has answered, a day at most
   ([Notifications](/docs/integrations/notifications)).
 - **A session:** end any session but the current one from **Active
-  sessions**; the device signs out within minutes
+  sessions**, or every other at once with **Sign out everywhere else**; the
+  device signs out within minutes
   ([Privacy](/docs/account/privacy#active-sessions)).
 - **An invitation:** withdraw it; its record goes 30 days later.
 
@@ -138,9 +154,9 @@ database keeps thirty daily backups and telemetry's store nightly ones, and
 nothing older than thirty days is kept of either.
 
 The content a project kept is the exception when the project or its
-organization is deleted. Each field is sealed under a key of the project's
-own, and that key is deleted in the same commit as the content, so from that
-moment no copy opens, a backup's among them: the receipt gives that moment as
+organization is deleted, or its content is as its mode goes `off`. Each field
+is sealed under a key of the project's own, and that key is deleted in the
+same commit as the content or the mode, so from that moment no copy opens, a backup's among them: the receipt gives that moment as
 "unreadable since". A deleted trace's or end user's content is not: their
 project's key stays for its other content, so the backups' copies of it leave
 as they expire, as everything else does. On a self-hosted
