@@ -143,8 +143,8 @@ func (e *exporter) waitOut(d time.Duration) {
 	}
 }
 
-// contentMode is the project's mode, as the last answer named it; "" before
-// one.
+// contentMode is the project's mode, as the last answer named it; "" while
+// unheard.
 func (e *exporter) contentMode() string {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -539,8 +539,12 @@ func (e *exporter) do(req *http.Request) (answer, error) {
 // read takes what a kept export's answer says: the project's content mode,
 // and each span refused or attribute dropped.
 func (e *exporter) read(got answer) {
-	// Trimmed of White_Space, as every SDK trims it, whatever the transport.
+	// Trimmed of White_Space, as every SDK trims it, whatever the transport; a
+	// word ingest does not send reads as none, which keeps content home.
 	if mode := strings.TrimSpace(got.header.Get(contentModeHeader)); mode != "" {
+		if mode != "off" && mode != "on" {
+			mode = ""
+		}
 		e.mu.Lock()
 		e.mode = mode
 		e.mu.Unlock()

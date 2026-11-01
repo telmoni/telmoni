@@ -236,6 +236,7 @@ interface FailureFixture {
 /** The run's span as `failure.json`'s README normalizes it. */
 function normalizeFailure(span: JsonSpan): Pick<JsonSpan, 'status' | 'events'> {
   const errorType = span.attributes.find((a) => a.key === 'error.type')?.value['stringValue'];
+  expect(errorType, 'the span names its error.type, withheld or kept').toBeTruthy();
   const sent: Pick<JsonSpan, 'status' | 'events'> = span.status === undefined ? {} : { status: { ...span.status } };
   if (span.events === undefined) return sent;
   sent.events = structuredClone(span.events).map((event) => {

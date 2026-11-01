@@ -111,6 +111,11 @@ export const CONTENT: ReadonlySet<string> = new Set([
   'user.full_name',
   'user.name',
   CONTENT_CUT,
+  EXCEPTION_TYPE,
+  EXCEPTION_MESSAGE,
+  EXCEPTION_STACKTRACE,
+  'otel.status_description',
+  'telmoni.events',
 ]);
 
 export const MODEL_OPERATIONS: ReadonlySet<string> = new Set([

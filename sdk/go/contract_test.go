@@ -241,6 +241,21 @@ func TestCaptureContentIsReadFromTheEnvironmentAsTheFixtureSays(t *testing.T) {
 	}
 }
 
+// Every name the server keeps as content, and no other, is held back.
+func TestTheContentHeldBackIsWhatTheFixtureNames(t *testing.T) {
+	var fixture struct {
+		Content []string `json:"content"`
+	}
+	if err := json.Unmarshal(loadFixture(t, "content.json"), &fixture); err != nil {
+		t.Fatalf("decoding content.json: %v", err)
+	}
+	held := slices.Sorted(maps.Keys(telmoni.Content))
+	slices.Sort(fixture.Content)
+	if !slices.Equal(held, fixture.Content) {
+		t.Errorf("held back %v, the fixture names %v", held, fixture.Content)
+	}
+}
+
 func TestCaptureContentSetInCodeWinsOverTheEnvironment(t *testing.T) {
 	t.Setenv("TELMONI_ENDPOINT", "")
 	t.Setenv("TELMONI_CAPTURE_CONTENT", "1")

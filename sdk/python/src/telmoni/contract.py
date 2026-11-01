@@ -114,6 +114,11 @@ CONTENT = frozenset(
         "user.full_name",
         "user.name",
         CONTENT_CUT,
+        EXCEPTION_TYPE,
+        EXCEPTION_MESSAGE,
+        EXCEPTION_STACKTRACE,
+        "otel.status_description",
+        "telmoni.events",
     }
 )
 """What the exporter takes off a span unless asked and the project allows."""

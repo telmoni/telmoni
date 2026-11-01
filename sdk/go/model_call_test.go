@@ -274,6 +274,29 @@ func TestAContentModeWithBlanksAboutItIsReadTrimmed(t *testing.T) {
 	}
 }
 
+// A word ingest does not send reads as no mode, after an on too, so content
+// stays home.
+func TestAModeIngestDoesNotSendKeepsContentHome(t *testing.T) {
+	sealed := scripted{status: 200, headers: map[string]string{"Telmoni-Content-Mode": "sealed"}, body: []byte("{}")}
+	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k"), CaptureContent: true}, newFakeTransport(t, contentOn(), sealed, sealed))
+	for range 2 {
+		_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+		run.End()
+		h.flush()
+	}
+	if mode := h.client.ContentMode(); mode != "" {
+		t.Fatalf("the content mode is %q after a word ingest does not send, want none", mode)
+	}
+	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	_, call := run.ModelCall(ctx, "m", telmoni.ModelCallOptions{InputMessages: "kept home"})
+	call.End()
+	run.End()
+	h.flush()
+	if strings.Contains(h.transport.text(), "kept home") {
+		t.Error("content left with the mode unheard")
+	}
+}
+
 func TestContentLeavesOnlyWhenAskedAndTheProjectAllows(t *testing.T) {
 	on := contentOn()
 	// An empty run's export is answered off, the next two runs' on; each run

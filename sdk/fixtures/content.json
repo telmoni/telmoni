@@ -1,0 +1,24 @@
+{
+  "content": [
+    "gen_ai.input.messages",
+    "gen_ai.output.messages",
+    "gen_ai.system_instructions",
+    "gen_ai.tool.definitions",
+    "gen_ai.tool.call.arguments",
+    "gen_ai.tool.call.result",
+    "gen_ai.retrieval.query.text",
+    "gen_ai.retrieval.documents",
+    "gen_ai.memory.query.text",
+    "gen_ai.memory.records",
+    "gen_ai.prompt.variable",
+    "user.email",
+    "user.full_name",
+    "user.name",
+    "telmoni.content_cut",
+    "exception.type",
+    "exception.message",
+    "exception.stacktrace",
+    "otel.status_description",
+    "telmoni.events"
+  ]
+}

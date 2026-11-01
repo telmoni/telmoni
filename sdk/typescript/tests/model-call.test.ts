@@ -288,6 +288,24 @@ describe('a model call', () => {
     await trimmed.telmoni.shutdown();
   });
 
+  it('reads a mode ingest does not send as none, after an on too, so content stays home', async () => {
+    const on = answer(200, { 'Telmoni-Content-Mode': 'on' }, '{}');
+    const sealed = answer(200, { 'Telmoni-Content-Mode': 'sealed' }, '{}');
+    const h = harness({ captureContent: true }, {}, [on, sealed, sealed]);
+    try {
+      for (let i = 0; i < 2; i++) {
+        h.telmoni.run('bot', () => {});
+        expect(await h.telmoni.flush()).toBe(true);
+      }
+      expect(h.telmoni.contentMode).toBeUndefined();
+      h.telmoni.run('bot', (run) => run.modelCall('m', { inputMessages: 'kept home' }, () => {}));
+      expect(await h.telmoni.flush()).toBe(true);
+    } finally {
+      await h.telmoni.shutdown();
+    }
+    expect(h.transport.text()).not.toContain('kept home');
+  });
+
   it('sends content only when asked and the project allows', async () => {
     const on = answer(200, { 'Telmoni-Content-Mode': 'on' }, '{"partialSuccess":null}');
     const asked = harness({ captureContent: true }, {}, Array.from({ length: 6 }, () => on));

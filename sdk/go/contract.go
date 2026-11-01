@@ -170,4 +170,9 @@ var content = map[string]bool{
 	"user.full_name":              true,
 	"user.name":                   true,
 	attrContentCut:                true,
+	attrExceptionType:             true,
+	attrExceptionMessage:          true,
+	"exception.stacktrace":        true,
+	"otel.status_description":     true,
+	"telmoni.events":              true,
 }

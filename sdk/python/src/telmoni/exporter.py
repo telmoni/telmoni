@@ -376,7 +376,7 @@ class Exporter:
 
     @property
     def content_mode(self) -> str | None:
-        """The project's mode, as the last answer named it; None before one."""
+        """The project's mode, as the last answer named it; None while unheard."""
         return self._content_mode
 
     def give_up(self) -> None:
@@ -730,7 +730,8 @@ class Exporter:
         # trailing blanks.
         mode = _unset_if_blank(answer.header(contract.CONTENT_MODE_HEADER))
         if mode:
-            self._content_mode = mode
+            # A word ingest does not send reads as none, which keeps content home.
+            self._content_mode = mode if mode in ("off", "on") else None
         try:
             decoded = json.loads(answer.body or b"{}")
         except ValueError:

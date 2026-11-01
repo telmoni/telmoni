@@ -368,6 +368,29 @@ def test_a_content_mode_with_blanks_about_it_is_read_trimmed(
         client.shutdown()
 
 
+def test_a_mode_ingest_does_not_send_keeps_content_home(
+    transport: FakeTransport,
+) -> None:
+    """A word ingest does not send reads as no mode, after an `on` too, so
+    content stays home."""
+    on = Answer(200, {"Telmoni-Content-Mode": "on"}, b"{}")
+    sealed = Answer(200, {"Telmoni-Content-Mode": "sealed"}, b"{}")
+    transport.answers = [on, sealed, sealed]
+    client = Telmoni(Config(api_key="k", capture_content=True), transport=transport)
+    try:
+        for _ in range(2):
+            with client.run("bot"):
+                pass
+            assert client.flush()
+        assert client.content_mode is None
+        with client.run("bot"), client.model_call("m", input_messages="kept home"):
+            pass
+        assert client.flush()
+    finally:
+        client.shutdown()
+    assert "kept home" not in str(transport.requests)
+
+
 def test_content_leaves_only_when_asked_and_the_project_allows(
     transport: FakeTransport,
 ) -> None:

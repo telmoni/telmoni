@@ -10,6 +10,7 @@ import { SpanKind, SpanStatusCode } from '@opentelemetry/api';
 import type { ReadableSpan } from '@opentelemetry/sdk-trace-base';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { CONTENT } from '../src/contract';
 import { ANSWER_MAX, Exporter, directTransport, fetchTransport } from '../src/exporter';
 import { DEFAULT_ENDPOINT, Telmoni, VERSION, type Config, type Warning } from '../src/index';
 import { FakeTransport, answer, harness, loadFixture } from './helpers';
@@ -135,6 +136,11 @@ describe('configuration', () => {
     expect(new Telmoni({ captureContent: false }).config.captureContent).toBe(false);
     vi.stubEnv('TELMONI_CAPTURE_CONTENT', undefined);
     expect(new Telmoni({ captureContent: true }).config.captureContent).toBe(true);
+  });
+
+  it('holds back every name the server keeps as content, and no other', () => {
+    const { content } = loadFixture<{ content: string[] }>('content.json');
+    expect([...CONTENT].sort()).toEqual([...content].sort());
   });
 
   it('holds the sample rate to a number above zero and up to one', () => {

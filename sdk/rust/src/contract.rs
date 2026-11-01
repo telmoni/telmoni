@@ -97,6 +97,11 @@ const CONTENT: &[&str] = &[
     "user.full_name",
     "user.name",
     CONTENT_CUT,
+    EXCEPTION_TYPE,
+    EXCEPTION_MESSAGE,
+    "exception.stacktrace",
+    "otel.status_description",
+    "telmoni.events",
 ];
 
 /// Whether `key` is content.
@@ -161,3 +166,29 @@ pub(crate) const BATCH_SPANS_MAX: usize = 1_000;
 pub(crate) const ATTRIBUTE_KEY_MAX: usize = 128;
 /// An attribute's longest value as text, in characters: ingest drops one past it.
 pub(crate) const ATTRIBUTE_VALUE_MAX: usize = 1_024;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// ⚠ Every name the server keeps as content, and no other, is held back
+    /// (`sdk/fixtures/content.json`).
+    #[test]
+    fn the_content_held_back_is_what_the_fixture_names() {
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/content.json");
+        let fixture: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).expect("the fixture reads"))
+                .expect("the fixture parses");
+        let mut named: Vec<&str> = fixture["content"]
+            .as_array()
+            .expect("a list of names")
+            .iter()
+            .map(|name| name.as_str().expect("a name"))
+            .collect();
+        let mut held = CONTENT.to_vec();
+        named.sort_unstable();
+        held.sort_unstable();
+        assert_eq!(held, named);
+    }
+}

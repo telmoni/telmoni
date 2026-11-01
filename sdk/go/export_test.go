@@ -10,6 +10,9 @@ import (
 // The largest file put, which media.json names too.
 const MediaMaxBytes = mediaMaxBytes
 
+// The names the exporter holds back as content, which content.json names too.
+var Content = content
+
 // The hooks the tests reach for: the sample rate's random source, a record's
 // hold, the W3C grammar's helpers and a time as sent.
 var (

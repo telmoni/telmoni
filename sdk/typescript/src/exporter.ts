@@ -291,7 +291,7 @@ export class Exporter {
     }
   }
 
-  /** The project's mode, as the last answer named it; undefined before one. */
+  /** The project's mode, as the last answer named it; undefined while unheard. */
   get contentMode(): string | undefined {
     return this.#contentMode;
   }
@@ -629,9 +629,10 @@ export class Exporter {
   }
 
   async #read(answer: TransportResponse): Promise<void> {
-    // Trimmed of White_Space, as every SDK trims it.
+    // Trimmed of White_Space, as every SDK trims it; a word ingest does not
+    // send reads as none, which keeps content home.
     const mode = trimEnds(answer.headers.get(contract.CONTENT_MODE_HEADER) ?? '');
-    if (mode) this.#contentMode = mode;
+    if (mode) this.#contentMode = mode === 'off' || mode === 'on' ? mode : undefined;
     const decoded = parseJson(await bodyOf(answer));
     const partial = isRecord(decoded) ? decoded['partialSuccess'] : undefined;
     if (!isRecord(partial)) return;

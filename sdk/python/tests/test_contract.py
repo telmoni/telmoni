@@ -24,6 +24,7 @@ from telmoni import (
     Telmoni,
     WarningInfo,
     __version__,
+    contract,
     exporter,
 )
 from telmoni.exporter import Answer, _urllib_transport
@@ -145,6 +146,11 @@ def test_capture_content_set_in_code_wins_over_the_environment() -> None:
         on = replace(Config.from_env(), capture_content=True)
     assert off.capture_content is False
     assert on.capture_content is True
+
+
+def test_the_content_held_back_is_what_the_fixture_names() -> None:
+    """Every name the server keeps as content, and no other, is held back."""
+    assert frozenset(load_fixture("content.json")["content"]) == contract.CONTENT
 
 
 def test_blank_is_unicodes_white_space_as_go_and_rust_read_it(

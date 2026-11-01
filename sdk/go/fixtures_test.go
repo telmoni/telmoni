@@ -349,7 +349,10 @@ func (e *RateLimited) Error() string { return e.message }
 // normalizeFailure is the run's span as failure.json's README normalizes it.
 func normalizeFailure(t *testing.T, span map[string]any) map[string]any {
 	t.Helper()
-	errorType := attributesOf(t, span)["error.type"]
+	errorType, ok := attributesOf(t, span)["error.type"]
+	if !ok {
+		t.Error("the span names no error.type, withheld or kept")
+	}
 	span = deepCopy(t, span)
 	sent := map[string]any{"status": span["status"]}
 	events, ok := span["events"].([]any)

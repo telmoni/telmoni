@@ -93,7 +93,8 @@ class Telmoni:
 
     @property
     def content_mode(self) -> str | None:
-        """The project's content mode, as the last answer named it."""
+        """The project's content mode, `off` or `on`, as the last answer named
+        it; None while unheard."""
         return self.exporter.content_mode
 
     def run(

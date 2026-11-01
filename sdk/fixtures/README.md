@@ -36,7 +36,7 @@ The same record sent twice must be the same bytes, which ingest's claim on a bod
 
 ## `failure.json`
 
-A failure in full, under the content lock. For each of `cases`, a client is built with its `capture_content`, learns its `content_mode` from the answer to an empty run's export (`Telmoni-Content-Mode`), then opens a run of `agent` in which the application adds `event` to the run's span through the OpenTelemetry API, and the run ends by the language's own failure path with an error of the type `error` whose message is `message`: Python's exception raised out of the `with`, TypeScript's error thrown from the callback, Go's error handed to `Fail`, Rust's `Err` returned from a `try_` closure. The run's span, as sent, must hold `status` and `events` as `kept` or `withheld` say; `withheld` has no `events` key, and the span must carry none.
+A failure in full, under the content lock. For each of `cases`, a client is built with its `capture_content`, learns its `content_mode` from the answer to an empty run's export (`Telmoni-Content-Mode`), then opens a run of `scenario`'s `agent` in which the application adds `event` to the run's span through the OpenTelemetry API, and the run ends by the language's own failure path with an error of the type `error` whose message is `message`: Python's exception raised out of the `with`, TypeScript's error thrown from the callback, Go's error handed to `Fail`, Rust's `Err` returned from a `try_` closure. The run's span, as sent, must hold `status` and `events` as `kept` or `withheld` say, whichever the case's `sends` names; `withheld` has no `events` key, and the span must carry none.
 
 Before comparing, a suite normalizes the run's span:
 
@@ -47,7 +47,7 @@ Before comparing, a suite normalizes the run's span:
 
 ## `media.json`
 
-The images and files a message carries, lifted out of it under the content lock. For each of `cases`, a client keyed `k` is built with its `capture_content`, learns its `content_mode` from the answer to an empty run's export (`Telmoni-Content-Mode`), then opens two runs of `agent` one after the other, each flushed, each holding one model call of `model` and `provider` opened with `input_messages` and `system_instructions` and answered with `output_messages`. Every upload, a `PUT`, is answered `204`.
+The images and files a message carries, lifted out of it under the content lock. For each of `cases`, a client keyed `k` is built with its `capture_content`, learns its `content_mode` from the answer to an empty run's export (`Telmoni-Content-Mode`), then opens two runs of `scenario`'s `agent` one after the other, each flushed, each holding one model call of its `model` and `provider` opened with `input_messages` and `system_instructions` and answered with `output_messages`. Every upload, a `PUT`, is answered `204`.
 
 Where `sends`, the uploads, sorted by path, are `uploads` — each its path under the endpoint, its `Content-Type`, and its body in base64 — each with `Authorization: Bearer k`, made once however many spans and exports name the file; and each model call's span holds the three fields, each parsed from its JSON and compared as JSON, as `sent`: each `blob` part a `file` part naming its file by `telmoni:` and the SHA-256 of its bytes, its `modality` and `mime_type` kept where given, and a part whose content is no base64, a `uri` or `file` part, or a part that is no object, as it was. A blob with no `mime_type`, or one blank or holding anything but printable ASCII, is put as `application/octet-stream`, its part keeping the type as given. Where not, nothing is put and neither model call carries any of the three.
 
@@ -61,7 +61,11 @@ A client asks the project's content mode before the first content it would send,
 
 ## `capture_content.json`
 
-What each SDK makes of `TELMONI_CAPTURE_CONTENT` as it builds its configuration from the environment (`Config.from_env`, `Telmoni.fromEnv`, `ConfigFromEnv`, `Config::from_env`). Each of `cases` sets the variable to `given`, or leaves it unset where that is `null`, and the configuration must hold `capture_content` as it says: the value, Unicode's White_Space trimmed from its ends as every variable is, turns content on when it is `1` alone; `0`, `true`, `yes` and every other value, a blank one or none leave it off, so no spelling of "false" lets content out. Each suite proves on its own that a setting made in code stands over the variable, on or off.
+What each SDK makes of `TELMONI_CAPTURE_CONTENT` as it builds its configuration from the environment (`Config.from_env`, `Telmoni.fromEnv`, `ConfigFromEnv`, `Config::from_env`). Each of `cases` sets `variable`, `TELMONI_CAPTURE_CONTENT`, to `given`, or leaves it unset where that is `null`, and the configuration must hold `capture_content` as it says: the value, Unicode's White_Space trimmed from its ends as every variable is, turns content on when it is `1` alone; `0`, `true`, `yes` and every other value, a blank one or none leave it off, so no spelling of "false" lets content out. Each suite proves on its own that a setting made in code stands over the variable, on or off.
+
+## `content.json`
+
+The attribute names every SDK takes off a span unless the code asked for content and the project's mode allows: `content` holds each, and each suite holds its own list to it, as the server's `contract::CONTENT` is held to it, so a name added on one side alone fails the other. An attribute an application sets under one of these names through the OpenTelemetry API is held back as the SDK's own content is.
 
 ## `headers.json`
 

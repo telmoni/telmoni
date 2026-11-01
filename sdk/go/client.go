@@ -252,8 +252,8 @@ func (c *Client) Config() Config {
 	return c.config
 }
 
-// ContentMode is the project's content mode, learned from the last answer:
-// "" before the first one.
+// ContentMode is the project's content mode, "off" or "on", learned from the
+// last answer: "" while unheard.
 func (c *Client) ContentMode() string {
 	if !c.built() {
 		return ""
