@@ -133,7 +133,7 @@ export default async function AlertsPage({
         headingId={ALERTS_HEADING}
         info="Each reads a measure of the project's spans over a window against its thresholds, every minute, with the incidents it opened under it, open ones first. Any member makes, edits, pauses, mutes and deletes alerts, and acknowledges or resolves their incidents."
         action={
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-gutter">
             {/* A window over every alert mutes nothing until there is one. */}
             {access.alerts.length > 0 && (
               <MuteButton projectId={project.id} ruleId={null} name={null} />
@@ -504,8 +504,9 @@ function Standing({ alert, read }: { alert: Alert; read: string | null }) {
   if (alert.paused === "plan") {
     return (
       <>
-        Paused by the plan: the organization has more alerts than its plan holds, and it runs
-        again once there is room.
+        Paused by the plan{alert.paused_at && <> since <LocalTime iso={alert.paused_at} /></>}:
+        the organization has more alerts than its plan holds, and it runs again once there is
+        room.
       </>
     );
   }

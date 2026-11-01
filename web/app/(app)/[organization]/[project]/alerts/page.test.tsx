@@ -376,7 +376,10 @@ describe("AlertsPage", () => {
     const cap = document.getElementById(`alert-${OTHER_RULE}`)!;
     expect(within(cap).getByText("The most a run spent over the last hour")).toBeInTheDocument();
     expect(within(cap).getByText("Paused")).toBeInTheDocument();
-    expect(within(cap).getByText(/Paused by the plan/)).toBeInTheDocument();
+    expect(detail(OTHER_RULE, "Now")).toHaveTextContent(
+      /^Paused by the plan since \S.*: the organization has more alerts than its plan holds/,
+    );
+    expect(detail(OTHER_RULE, "Now").querySelector("time")).toHaveAttribute("datetime", "2026-10-26T10:00:00Z");
     expect(within(cap).getByText("None: its incidents reach the project's feed alone")).toBeInTheDocument();
     expect(within(cap).getByText("Alert > $5.00")).toBeInTheDocument();
     expect(detail(OTHER_RULE, "Incidents")).toHaveTextContent(/^None$/);

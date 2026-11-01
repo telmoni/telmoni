@@ -53,7 +53,7 @@ export function IncidentActions({
   );
 
   return (
-    <div className="flex items-center justify-end gap-3">
+    <div className="flex items-center justify-end gap-gutter">
       {error && (
         <span className="text-xs text-destructive" role="alert">
           {error}

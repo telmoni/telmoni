@@ -29,7 +29,7 @@ export function AlertActions({
   const paused = alert.paused !== null;
 
   return (
-    <div className="flex flex-wrap items-center justify-end gap-3">
+    <div className="flex flex-wrap items-center justify-end gap-gutter">
       {error && (
         <span className="text-xs text-destructive" role="alert">
           {error}
@@ -113,7 +113,7 @@ export function HearAgain({
 }) {
   const { pending, error, act } = useAct(alertHeading(ruleId));
   return (
-    <span className="inline-flex flex-wrap items-center gap-3">
+    <span className="inline-flex flex-wrap items-center gap-gutter">
       <Button
         variant="outline"
         size="sm"

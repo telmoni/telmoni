@@ -116,18 +116,20 @@ describe("saveAlertAction", () => {
   });
 
   // A Server Action takes whatever is posted to it.
-  it.each<[string | null, unknown]>([
-    ["../mutes", INPUT],
-    [`${RULE}/pause`, INPUT],
-    [null, { ...INPUT, owner: "user_2" }],
-    [null, { ...INPUT, filters: { user: ["u1"] } }],
-    [null, { ...INPUT, kind: "span" }],
-    [null, { ...INPUT, alert_threshold: "5000" }],
-    [null, { ...INPUT, connectors: [{ connection_id: "../../rules", level: "alert", hours: null }] }],
-    [null, null],
-  ])("refuses the alert %j, %j, asking the server nothing", async (ruleId, input) => {
+  const which = /^Couldn't tell which alert/;
+  const unread = /^That alert could not be read/;
+  it.each<[string | null, unknown, RegExp]>([
+    ["../mutes", INPUT, which],
+    [`${RULE}/pause`, INPUT, which],
+    [null, { ...INPUT, owner: "user_2" }, unread],
+    [null, { ...INPUT, filters: { user: ["u1"] } }, unread],
+    [null, { ...INPUT, kind: "span" }, unread],
+    [null, { ...INPUT, alert_threshold: "5000" }, unread],
+    [null, { ...INPUT, connectors: [{ connection_id: "../../rules", level: "alert", hours: null }] }, unread],
+    [null, null, unread],
+  ])("refuses the alert %j, %j, asking the server nothing", async (ruleId, input, said) => {
     const res = await saveAlertAction(PROJECT, ruleId, input);
-    expect(errorOf(res)).toMatch(/Couldn't tell which alert|could not be read/);
+    expect(errorOf(res)).toMatch(said);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
