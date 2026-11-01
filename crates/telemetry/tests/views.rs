@@ -407,6 +407,83 @@ async fn a_layout_is_a_view_of_its_own_kind(pool: PgPool) {
     assert_eq!(p.names(MEMBER).await, ["Review"]);
 }
 
+/// A sessions view and a users view are each saved under their list's kind,
+/// checked by that list's sorts and columns, and listed under it alone.
+#[sqlx::test]
+async fn a_list_view_is_saved_under_its_lists_kind(pool: PgPool) {
+    let p = project(&pool);
+    let busy = json!({
+        "name": "Busy",
+        "kind": "sessions",
+        "query": { "status": ["error"], "sort": "last_seen" },
+        "columns": ["last_seen", "traces"],
+    });
+    let (status, saved) = p.send(p.request("POST", LANE, ADMIN, Some(busy))).await;
+    assert_eq!(status, StatusCode::CREATED, "{saved}");
+    assert_eq!(saved["kind"], "sessions");
+    assert_eq!(
+        saved["columns"],
+        json!(["traces", "last_seen"]),
+        "in the list's order"
+    );
+    let heavy = json!({
+        "name": "Heavy",
+        "kind": "users",
+        "query": { "sort": "tokens", "dir": "desc" },
+        "columns": ["tokens"],
+    });
+    let (status, saved) = p.send(p.request("POST", LANE, ADMIN, Some(heavy))).await;
+    assert_eq!(status, StatusCode::CREATED, "{saved}");
+    assert_eq!(saved["kind"], "users");
+    let by_repo = json!({ "name": "By repo", "kind": "sessions", "query": { "sort": "tag:repo" } });
+    let (status, saved) = p.send(p.request("POST", LANE, ADMIN, Some(by_repo))).await;
+    assert_eq!(
+        status,
+        StatusCode::CREATED,
+        "a tag sorts the sessions: {saved}"
+    );
+    assert_eq!(saved["query"]["sort"], "tag:repo");
+    for wrong in [
+        json!({ "name": "Wrong", "kind": "users", "query": { "sort": "model_calls" } }),
+        json!({ "name": "Wrong", "kind": "users", "query": { "sort": "tag:repo" } }),
+        json!({ "name": "Wrong", "kind": "sessions", "columns": ["status"] }),
+    ] {
+        let (status, body) = p.send(p.request("POST", LANE, ADMIN, Some(wrong))).await;
+        assert_eq!(
+            status,
+            StatusCode::BAD_REQUEST,
+            "a trace list's word on another list: {body}"
+        );
+    }
+
+    assert!(
+        p.names(MEMBER).await.is_empty(),
+        "none of them among the trace list's"
+    );
+    let (status, listed) = p
+        .send(p.request("GET", &format!("{LANE}?kind=sessions"), MEMBER, None))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{listed}");
+    assert_eq!(listed["views"][0]["name"], "Busy");
+    assert_eq!(
+        listed["views"][0]["query"],
+        json!({ "status": ["error"], "sort": "last_seen" }),
+        "read back by the sessions list's own sorts"
+    );
+    assert_eq!(
+        listed["views"][0]["columns"],
+        json!(["traces", "last_seen"])
+    );
+    assert_eq!(
+        p.names_of(MEMBER, &format!("{LANE}?kind=sessions")).await,
+        ["Busy", "By repo"]
+    );
+    assert_eq!(
+        p.names_of(MEMBER, &format!("{LANE}?kind=users")).await,
+        ["Heavy"]
+    );
+}
+
 /// A project reads and writes its own views and no other's: the row policy
 /// and each query's own `WHERE` both name the project.
 #[sqlx::test]
