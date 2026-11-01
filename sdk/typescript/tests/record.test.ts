@@ -505,26 +505,51 @@ describe('a recorded run', () => {
     expect(attributesOf(run)['telmoni.cancelled']).toBeUndefined();
   });
 
-  it('sends its own messages on its span only when asked and the project allows', async () => {
+  it("sends its run's, steps' and calls' content on their spans only when asked and the project allows", async () => {
     const on = answer(200, { 'Telmoni-Content-Mode': 'on' }, '{}');
-    const sendWith = async (captureContent: boolean): Promise<Record<string, unknown>> => {
+    const at = theRecord().start;
+    const sendWith = async (captureContent: boolean): Promise<Record<string, Record<string, unknown>>> => {
       const h = harness({ captureContent }, {}, [on, on]);
       try {
         h.telmoni.run('warm', () => {});
         expect(await h.telmoni.flush()).toBe(true);
-        h.telmoni.recordRun({ ...theRecord(), inside: [], inputMessages: ['asked'], outputMessages: { said: 'answered' } });
+        h.telmoni.recordRun({
+          ...theRecord(),
+          inputMessages: ['asked'],
+          outputMessages: { said: 'answered' },
+          inside: [
+            {
+              type: 'step',
+              name: 'subagent',
+              start: at,
+              end: at,
+              inputMessages: ['the task'],
+              outputMessages: ['the answer'],
+              calls: [{ type: 'model_call', model: 'm', start: at, end: at, outputMessages: { said: 'it' } }],
+            },
+            { type: 'tool_call', name: 't', start: at, end: at, arguments: { q: 1 }, result: 'found' },
+          ],
+        });
         expect(await h.telmoni.flush()).toBe(true);
       } finally {
         await h.telmoni.shutdown();
       }
-      return attributesOf(h.transport.spans().find((span) => span.name === 'invoke_agent claude-code')!);
+      return Object.fromEntries(h.transport.spans().map((span) => [span.name, attributesOf(span)]));
+    };
+    const content = {
+      'invoke_agent claude-code': { 'gen_ai.input.messages': '["asked"]', 'gen_ai.output.messages': '{"said":"answered"}' },
+      subagent: { 'gen_ai.input.messages': '["the task"]', 'gen_ai.output.messages': '["the answer"]' },
+      'chat m': { 'gen_ai.output.messages': '{"said":"it"}' },
+      'execute_tool t': { 'gen_ai.tool.call.arguments': '{"q":1}', 'gen_ai.tool.call.result': 'found' },
     };
     const asked = await sendWith(true);
-    expect(asked['gen_ai.input.messages']).toBe('["asked"]');
-    expect(asked['gen_ai.output.messages']).toBe('{"said":"answered"}');
     const quiet = await sendWith(false);
-    expect(quiet).not.toHaveProperty('gen_ai.input.messages');
-    expect(quiet).not.toHaveProperty('gen_ai.output.messages');
+    for (const [name, fields] of Object.entries(content)) {
+      for (const [key, value] of Object.entries(fields)) {
+        expect(asked[name]?.[key], `${name} ${key}`).toBe(value);
+        expect(quiet[name], name).not.toHaveProperty(key);
+      }
+    }
   });
 
   it('is dropped whole by the sample rate', async () => {

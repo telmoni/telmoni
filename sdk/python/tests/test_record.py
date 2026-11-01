@@ -479,7 +479,7 @@ def test_a_failed_run_is_marked_on_its_own_span(
 
 
 @pytest.mark.parametrize("capture_content", [True, False])
-def test_a_records_own_messages_leave_only_when_asked_and_the_project_allows(
+def test_a_records_content_leaves_only_when_asked_and_the_project_allows(
     transport: FakeTransport, capture_content: bool
 ) -> None:
     on = Answer(200, {"Telmoni-Content-Mode": "on"}, b"{}")
@@ -487,11 +487,28 @@ def test_a_records_own_messages_leave_only_when_asked_and_the_project_allows(
     client = Telmoni(
         Config(api_key="k", capture_content=capture_content), transport=transport
     )
+    at = the_record().start
     record = dataclasses.replace(
         the_record(),
-        inside=(),
         input_messages=["asked"],
         output_messages={"said": "answered"},
+        inside=(
+            StepRecord(
+                name="subagent",
+                start=at,
+                end=at,
+                input_messages=["the task"],
+                output_messages=["the answer"],
+                calls=(
+                    ModelCallRecord(
+                        model="m", start=at, end=at, output_messages={"said": "it"}
+                    ),
+                ),
+            ),
+            ToolCallRecord(
+                name="t", start=at, end=at, arguments={"q": 1}, result="found"
+            ),
+        ),
     )
     try:
         with client.run("warm"):
@@ -501,14 +518,28 @@ def test_a_records_own_messages_leave_only_when_asked_and_the_project_allows(
         assert client.flush()
     finally:
         client.shutdown()
-    run = next(s for s in transport.spans() if s["name"] == "invoke_agent claude-code")
-    sent = attributes_of(run)
-    if capture_content:
-        assert sent["gen_ai.input.messages"] == '["asked"]'
-        assert sent["gen_ai.output.messages"] == '{"said":"answered"}'
-    else:
-        assert "gen_ai.input.messages" not in sent
-        assert "gen_ai.output.messages" not in sent
+    sent = {span["name"]: attributes_of(span) for span in transport.spans()}
+    content = {
+        "invoke_agent claude-code": {
+            "gen_ai.input.messages": '["asked"]',
+            "gen_ai.output.messages": '{"said":"answered"}',
+        },
+        "subagent": {
+            "gen_ai.input.messages": '["the task"]',
+            "gen_ai.output.messages": '["the answer"]',
+        },
+        "chat m": {"gen_ai.output.messages": '{"said":"it"}'},
+        "execute_tool t": {
+            "gen_ai.tool.call.arguments": '{"q":1}',
+            "gen_ai.tool.call.result": "found",
+        },
+    }
+    for name, fields in content.items():
+        for key, value in fields.items():
+            if capture_content:
+                assert sent[name][key] == value, (name, key)
+            else:
+                assert key not in sent[name], (name, key)
 
 
 def test_the_sample_rate_drops_a_record_whole(transport: FakeTransport) -> None:

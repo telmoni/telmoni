@@ -552,7 +552,7 @@ describe("an export past ingest's 1 MiB or 1,000 spans", () => {
         'telmoni: export failed after 3 attempts (Error); the batch was dropped',
         { kind: 'failed' },
       ],
-      [[answer(400, {}, '')], 3, 'telmoni: export refused with 400 ; the batch was dropped', { kind: 'refused', status: 400 }],
+      [[answer(400, {}, '')], 3, 'telmoni: export refused with 400; the batch was dropped', { kind: 'refused', status: 400 }],
     ] as const) {
       const transport = new FakeTransport([...answers]);
       const warnings: string[] = [];

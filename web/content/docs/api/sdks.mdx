@@ -327,7 +327,10 @@ over, hands the finished run over whole, as data: its id, a UUID you give and
 keep with the log; its agent, user, session and tags; the messages it was
 asked and answered with, which are [content](#content); its start and end and
 how it ended; and its steps and calls, each with its own times. A step holds
-the calls made inside it. A record the export queue has no room for is refused
+the calls made inside it. Each step and call may carry its own content too: a
+model call the messages it produced, a tool call its arguments and its result,
+and a step the messages it was asked and answered with, a subagent's task and
+its answer say. A record the export queue has no room for is refused
 whole, before anything is queued: flush, or wait, and record it again. A
 record of more spans than the queue holds, 2,048 unless you
 [raise it](#answers-and-warnings), is never taken, and the refusal says so. One
@@ -504,8 +507,8 @@ id and the span's place in the record, and a record travels in bodies of its
 own, so the same record sent again is the same bytes, whatever else the client
 is sending, which Telmoni, where it reaches its Redis, answers within the hour
 as it answered the first, storing nothing twice: give a run the same id each
-time you send it. A record's
-only content is its run's own messages; its steps and calls carry none.
+time you send it. A record's content, its run's and each step's and call's,
+leaves under the same two locks as a live run's.
 The [coding-agent plugins](/docs/api/coding-agents) are built on it.
 
 ---
@@ -830,8 +833,9 @@ and every event your code adds to an SDK span through OpenTelemetry are
 content too; without both locks below, a failed span leaves with its
 `error.type` and an error status alone, and no event. They are sent only when the client is built with
 `capture_content` on — in code, or by `TELMONI_CAPTURE_CONTENT=1` when it is
-built from the environment — **and** the project's content mode, which the SDK learns
-from the server's first answer, is `on`; in Python and TypeScript, a setting
+built from the environment — **and** the project's content mode, which the SDK
+asks the server for before the first content it would send, with an export of
+no spans, and learns again from every answer, is `on`; in Python and TypeScript, a setting
 that is no boolean, such as `"false"` from the environment, is refused with a
 `TypeError`, where Go and Rust take only a boolean. Sent, content is kept as it
 arrives, sealed in Postgres alone, for as long as its span (see [what is
@@ -884,12 +888,14 @@ so a slow Telmoni never slows an agent. The queue holds 2,048 spans and a batch
 `Telmoni(batching=Batching(...))`, TypeScript's `processor` hook, Go's
 `WithBatching` and Rust's `Hooks::batching`; a record larger than the queue is
 refused, so raise it for records that long. Each request times out after 10
-seconds. It retries a `429` or a `503` after its `Retry-After`, waiting at most
-60 seconds, and a request that failed or timed out before its answer's head was
-whole after 1 second, then 2; after three attempts in all it drops the batch
-with one warning. Any other refusal is logged once and never retried, and an
-answer whose body breaks after its head, or runs past the 10 seconds, is
-decided by its status, read as far as it came. A batch whose body would pass the
+seconds. It retries a `429`, `502`, `503` or `504`, the statuses OpenTelemetry
+retries, after its `Retry-After`, waiting at most 60 seconds, and one with no
+`Retry-After`, as a load balancer's `502` for a server restarting, or a request
+that failed or timed out before its answer's head was whole, after 1 second,
+then 2; after three attempts in all it drops the batch with one warning. Any
+other refusal is logged once and never retried, and an answer whose body
+breaks after its head, or runs past the 10 seconds, is decided by its status,
+read as far as it came. A batch whose body would pass the
 1 MiB [ingest](/docs/api/ingest#refusals) takes, or that holds more than its
 1,000 spans, is sent in halves, each within both, and a span that alone passes
 the 1 MiB is sent, where it carries content the project keeps, without its

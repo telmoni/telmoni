@@ -190,6 +190,8 @@ export interface ModelCallRecord extends RecordOutcome {
   start: RecordTime;
   end: RecordTime;
   usage?: Usage | undefined;
+  /** Content: sent only with `captureContent` and the project's mode `on`. */
+  outputMessages?: unknown;
 }
 
 /** A tool call that has ended: its name and its times. */
@@ -198,6 +200,10 @@ export interface ToolCallRecord extends RecordOutcome {
   name: string;
   start: RecordTime;
   end: RecordTime;
+  /** Content: sent only with `captureContent` and the project's mode `on`. */
+  arguments?: unknown;
+  /** Content, as above. */
+  result?: unknown;
 }
 
 export type CallRecord = ModelCallRecord | ToolCallRecord;
@@ -209,6 +215,10 @@ export interface StepRecord extends RecordOutcome {
   start: RecordTime;
   end: RecordTime;
   calls?: readonly CallRecord[] | undefined;
+  /** Content, a subagent's task say: sent only with `captureContent` and the project's mode `on`. */
+  inputMessages?: unknown;
+  /** Content, its answer: as above. */
+  outputMessages?: unknown;
 }
 
 /**

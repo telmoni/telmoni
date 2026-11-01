@@ -96,6 +96,7 @@ fn call_from(spec: &Value) -> Result<CallRecord, Failure> {
             start: at(text(call, "start")?)?,
             end: at(text(call, "end")?)?,
             usage,
+            output_messages: None,
             error_type: optional_text(call, "error_type")?,
             cancelled: flag(call, "cancelled")?,
         }));
@@ -103,6 +104,8 @@ fn call_from(spec: &Value) -> Result<CallRecord, Failure> {
     let tool = field(spec, "tool_call")?;
     Ok(CallRecord::Tool(ToolCallRecord {
         name: text(tool, "name")?.to_owned(),
+        arguments: None,
+        result: None,
         start: at(text(tool, "start")?)?,
         end: at(text(tool, "end")?)?,
         error_type: optional_text(tool, "error_type")?,
@@ -127,6 +130,8 @@ fn record_from(spec: &Value) -> Result<RunRecord, Failure> {
             .collect::<Result<Vec<_>, _>>()?;
         inside.push(RecordItem::Step(StepRecord {
             name: text(step, "name")?.to_owned(),
+            input_messages: None,
+            output_messages: None,
             start: at(text(step, "start")?)?,
             end: at(text(step, "end")?)?,
             calls,
@@ -368,9 +373,37 @@ fn a_failed_run_is_marked_on_its_own_span() -> Outcome {
     Ok(())
 }
 
-/// A record's own messages leave only with `capture_content` and the mode `on`.
+/// A record's content, its run's, steps' and calls', leaves only with
+/// `capture_content` and the mode `on`.
 #[test]
-fn a_records_own_messages_leave_only_when_asked_and_the_project_allows() -> Outcome {
+fn a_records_content_leaves_only_when_asked_and_the_project_allows() -> Outcome {
+    let content = [
+        (
+            "invoke_agent claude-code",
+            vec![
+                ("gen_ai.input.messages", r#"["asked"]"#),
+                ("gen_ai.output.messages", r#"{"said":"answered"}"#),
+            ],
+        ),
+        (
+            "subagent",
+            vec![
+                ("gen_ai.input.messages", r#"["the task"]"#),
+                ("gen_ai.output.messages", r#"["the answer"]"#),
+            ],
+        ),
+        (
+            "chat m",
+            vec![("gen_ai.output.messages", r#"{"said":"it"}"#)],
+        ),
+        (
+            "execute_tool t",
+            vec![
+                ("gen_ai.tool.call.arguments", r#"{"q":1}"#),
+                ("gen_ai.tool.call.result", "found"),
+            ],
+        ),
+    ];
     for capture_content in [true, false] {
         let harness = Harness::answering(
             Config {
@@ -381,28 +414,49 @@ fn a_records_own_messages_leave_only_when_asked_and_the_project_allows() -> Outc
         )?;
         harness.telmoni.run("warm", RunOptions::default())?.end();
         harness.flush()?;
+        let at = the_record()?.start;
         let record = RunRecord {
             input_messages: Some(json!(["asked"]).into()),
             output_messages: Some(json!({ "said": "answered" }).into()),
-            inside: Vec::new(),
+            inside: vec![
+                StepRecord {
+                    input_messages: Some(json!(["the task"]).into()),
+                    output_messages: Some(json!(["the answer"]).into()),
+                    calls: vec![
+                        ModelCallRecord {
+                            output_messages: Some(json!({ "said": "it" }).into()),
+                            ..ModelCallRecord::new("m", at, at)
+                        }
+                        .into(),
+                    ],
+                    ..StepRecord::new("subagent", at, at)
+                }
+                .into(),
+                ToolCallRecord {
+                    arguments: Some(json!({ "q": 1 }).into()),
+                    result: Some("found".into()),
+                    ..ToolCallRecord::new("t", at, at)
+                }
+                .into(),
+            ],
             ..the_record()?
         };
-        harness.telmoni.record_run(record.clone())?;
+        harness.telmoni.record_run(record)?;
         harness.flush()?;
         let spans = harness.spans()?;
-        let sent = attributes_of(run_span(&spans, &record.run_id)?)?;
-        if capture_content {
-            assert_eq!(
-                sent.get("gen_ai.input.messages"),
-                Some(&json!(r#"["asked"]"#))
-            );
-            assert_eq!(
-                sent.get("gen_ai.output.messages"),
-                Some(&json!(r#"{"said":"answered"}"#))
-            );
-        } else {
-            assert!(sent.get("gen_ai.input.messages").is_none());
-            assert!(sent.get("gen_ai.output.messages").is_none());
+        for (name, fields) in &content {
+            let span = spans
+                .iter()
+                .find(|span| name_of(span) == *name)
+                .ok_or(*name)?;
+            let sent = attributes_of(span)?;
+            for &(key, value) in fields {
+                if capture_content {
+                    assert_eq!(sent.get(key), Some(&json!(value)), "{name} {key}");
+                } else {
+                    assert!(sent.get(key).is_none(), "{name} {key}");
+                }
+            }
         }
     }
     Ok(())

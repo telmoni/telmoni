@@ -571,8 +571,12 @@ export class Opener {
     // `warn` hook, which may record a run of its own.
     const usages = new Map<CallRecord, Attributes>();
     const operations = new Map<CallRecord, string>();
+    // Content too, whose encoding may run the caller's `toJSON`.
+    const contents = new Map<Item, Attributes>();
     for (const [item, calls] of items) {
+      if (item.type === 'step') contents.set(item, contentOf(item));
       for (const each of item.type === 'step' ? calls : [item]) {
+        contents.set(each, contentOf(each));
         if (each.type !== 'model_call') continue;
         usages.set(each, usageOf(each.usage, this.#warnOnce));
         operations.set(each, operationOf(each.operation, this.#warnOnce));
@@ -587,10 +591,10 @@ export class Opener {
       if (item.type === 'model_call') {
         const operation = operations.get(item) ?? contract.DEFAULT_MODEL_OPERATION;
         const [name, callAttributes] = modelCallOpening(inherited, item.model, operation, item.provider ?? '');
-        Object.assign(callAttributes, usages.get(item));
+        Object.assign(callAttributes, usages.get(item), contents.get(item));
         close(open(name, parent, callAttributes, SpanKind.CLIENT, item.start), item);
       } else {
-        const callAttributes = toolAttributes(inherited, item.name);
+        const callAttributes = { ...toolAttributes(inherited, item.name), ...contents.get(item) };
         close(open(toolSpanName(item.name), parent, callAttributes, SpanKind.INTERNAL, item.start), item);
       }
     };
@@ -601,7 +605,7 @@ export class Opener {
       const ctx = trace.setSpan(ROOT_CONTEXT, span);
       for (const [item, calls] of items) {
         if (item.type === 'step') {
-          const step = open(item.name, ctx, inherited, SpanKind.INTERNAL, item.start);
+          const step = open(item.name, ctx, { ...inherited, ...contents.get(item) }, SpanKind.INTERNAL, item.start);
           const inner = trace.setSpan(ctx, step);
           for (const each of calls) call(each, inner);
           close(step, item);
@@ -759,6 +763,27 @@ function check(item: RunRecord | Item, kind: keyof typeof FIELDS): void {
 /** A literal or a class's instance: an array, a `Map` or a boxed primitive is of `typeof` object too. */
 function isObject(value: unknown): value is object {
   return Object.prototype.toString.call(value) === '[object Object]';
+}
+
+/** A recorded step's or call's content as JSON, which the exporter's lock sends or keeps back. */
+function contentOf(item: Item): Attributes {
+  const fields: ReadonlyArray<readonly [string, unknown]> =
+    item.type === 'model_call'
+      ? [[contract.OUTPUT_MESSAGES, item.outputMessages]]
+      : item.type === 'tool_call'
+        ? [
+            [contract.TOOL_CALL_ARGUMENTS, item.arguments],
+            [contract.TOOL_CALL_RESULT, item.result],
+          ]
+        : [
+            [contract.INPUT_MESSAGES, item.inputMessages],
+            [contract.OUTPUT_MESSAGES, item.outputMessages],
+          ];
+  const out: Attributes = {};
+  for (const [key, value] of fields) {
+    if (isSet(value)) out[key] = asJson(value);
+  }
+  return out;
 }
 
 function close(span: Span, outcome: RecordOutcome & { end: RecordTime }): void {

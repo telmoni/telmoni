@@ -634,7 +634,7 @@ func TestTheAnswerIsReadPastEvery1xxBeforeItButA101(t *testing.T) {
 		{"HTTP/1.1 103 Early Hints\r\nLink: </x>\r\n\r\nHTTP/1.1 102 Processing\r\n\r\n" +
 			"HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 2\r\n\r\n{}", nil},
 		{"HTTP/1.1 101 Switching Protocols\r\nUpgrade: x\r\nConnection: Upgrade\r\n\r\n",
-			[]string{"telmoni: export refused with 101 ; the batch was dropped"}},
+			[]string{"telmoni: export refused with 101; the batch was dropped"}},
 	} {
 		release := make(chan struct{})
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -782,7 +782,7 @@ func TestABatchInPartsEndsAtAPartThatFailsAsTheRestWould(t *testing.T) {
 		warned  *regexp.Regexp
 	}{
 		{unreached, 3, regexp.MustCompile(`^telmoni: export failed after 3 attempts \(\S+\); the batch was dropped$`)},
-		{[]any{scripted{status: 400}}, 3, regexp.MustCompile(`^telmoni: export refused with 400 .*; the batch was dropped$`)},
+		{[]any{scripted{status: 400}}, 3, regexp.MustCompile(`^telmoni: export refused with 400; the batch was dropped$`)},
 	} {
 		h := newHarness(t, testConfig(), newFakeTransport(t, c.answers...))
 		telmoni.ExportSpans(h.client, bigSpans(sizes...))

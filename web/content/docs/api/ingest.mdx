@@ -230,9 +230,10 @@ status maps to:
 | `503` | `/errors/telemetry/store-unavailable` | The store did not take the rows, the server holds as many exports as it takes at once, the key service that seals the project's hashing key did not answer, a copy of the export is being written, or the project's first export came while the project was being moved to another organization or deleted; retry after `Retry-After` |
 | `503` | `/errors/auth/identity-unavailable` | The key could not be checked just then, or, for a project's first export, nor could which organization holds the project; no `Retry-After` |
 
-`429` and `503` are the two an exporter retries; `400`, `401`, `402`, `403`,
-`404`, `405`, `413` and `500` it does not, though a `500` for the database is
-worth sending again later.
+`429` and `503` are the two of these an exporter retries, as it retries a
+`502` or a `504` from a load balancer in front of ingest; `400`, `401`, `402`,
+`403`, `404`, `405`, `413` and `500` it does not, though a `500` for the
+database is worth sending again later.
 
 Every refusal of an export waits for its body, up to 60 seconds, so an exporter
 still sending one reads the refusal rather than a broken connection. A body past

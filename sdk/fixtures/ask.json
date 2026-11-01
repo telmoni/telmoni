@@ -1,0 +1,13 @@
+{
+  "body": { "resourceSpans": [] },
+  "agent": "a",
+  "model": "m",
+  "input_messages": [{ "role": "user", "parts": [{ "type": "text", "content": "hi" }] }],
+  "cases": [
+    { "capture_content": true, "content": true, "answers": ["on", "on"], "asked": true, "sent": true, "requests": 3 },
+    { "capture_content": true, "content": true, "answers": ["off", "off"], "asked": true, "sent": false, "requests": 3 },
+    { "capture_content": true, "content": true, "answers": [503, "on"], "asked": true, "sent": false, "requests": 3 },
+    { "capture_content": true, "content": false, "answers": ["on"], "asked": false, "sent": false, "requests": 2 },
+    { "capture_content": false, "content": true, "answers": ["on"], "asked": false, "sent": false, "requests": 2 }
+  ]
+}

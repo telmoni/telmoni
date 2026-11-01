@@ -164,10 +164,40 @@ func (e *exporter) export(spans []sdktrace.ReadOnlySpan) bool {
 	if len(spans) == 0 {
 		return true
 	}
+	// Yet to hear the project's mode, a client asks it first, so a process
+	// that sends once, as a hook does, still sends its content.
+	if e.config.CaptureContent && e.contentMode() == "" && slices.ContainsFunc(spans, holdsContent) {
+		e.ask()
+	}
 	if e.keepsContent() {
 		spans = e.lift(spans)
 	}
 	return e.exportLifted(spans)
+}
+
+// askBody is an export of no spans: how a client asks the project's content
+// mode.
+var askBody = []byte(`{"resourceSpans":[]}`)
+
+// ask asks the project's content mode with an export of no spans, which
+// ingest answers as the mode is now: once and silently, since the export
+// after it retries and warns of what it meets, its content held back
+// meanwhile.
+func (e *exporter) ask() {
+	if e.gaveUp() {
+		return
+	}
+	// Unheard, the mode keeps the content back, as no answer does.
+	if got, err := e.send(askBody); err == nil && got.status >= 200 && got.status < 300 {
+		e.read(got)
+	}
+}
+
+// holdsContent reports whether a span holds anything the content lock decides
+// on: a content field, an event or a status message.
+func holdsContent(span sdktrace.ReadOnlySpan) bool {
+	return slices.ContainsFunc(span.Attributes(), func(kv attribute.KeyValue) bool { return content[string(kv.Key)] }) ||
+		len(span.Events()) > 0 || span.Status().Description != ""
 }
 
 func (e *exporter) exportLifted(spans []sdktrace.ReadOnlySpan) bool {
@@ -218,15 +248,15 @@ func (e *exporter) exportLifted(spans []sdktrace.ReadOnlySpan) bool {
 			e.read(got)
 			return true
 		}
-		if got.status == http.StatusTooManyRequests || got.status == http.StatusServiceUnavailable {
+		if retried(got.status) {
 			status, problem = got.status, problemType(got.body)
-			failure = fmt.Sprintf("%d %s", status, problem)
+			failure = answerName(status, problem)
 			e.wait(got.header.Get("Retry-After"), attempt)
 			continue
 		}
 		problem = problemType(got.body)
 		e.warnOnce("status:"+strconv.Itoa(got.status), WarningRefused,
-			fmt.Sprintf("telmoni: export refused with %d %s; the batch was dropped", got.status, problem),
+			fmt.Sprintf("telmoni: export refused with %s; the batch was dropped", answerName(got.status, problem)),
 			answerAttrs(got.status, problem)...)
 		// Refused for what it holds, the rest of a batch may still go.
 		return got.status == http.StatusBadRequest || got.status == http.StatusRequestEntityTooLarge
@@ -235,6 +265,26 @@ func (e *exporter) exportLifted(spans []sdktrace.ReadOnlySpan) bool {
 		fmt.Sprintf("telmoni: export failed after %d attempts (%s); the batch was dropped", attempts, failure),
 		answerAttrs(status, problem)...)
 	return false
+}
+
+// retried reports whether status is one of OTLP's retryable statuses: a 502
+// or a 504 is a load balancer's, a server's rollout among its causes.
+func retried(status int) bool {
+	switch status {
+	case http.StatusTooManyRequests, http.StatusBadGateway,
+		http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return true
+	}
+	return false
+}
+
+// answerName is an answer as a warning names it: its status, then the problem
+// type its body named, where it named one.
+func answerName(status int, problem string) string {
+	if problem == "" {
+		return strconv.Itoa(status)
+	}
+	return fmt.Sprintf("%d %s", status, problem)
 }
 
 // answerAttrs are a failed export's status and problem type, each where there

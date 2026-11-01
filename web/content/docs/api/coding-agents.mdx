@@ -1,14 +1,15 @@
 ---
 title: "Coding agents"
-description: "Telmoni's plugins for Claude Code, Codex, OpenCode and Cursor: each turn of the coding agent you already run, recorded as a run, metadata only, with no code."
+description: "Telmoni's plugins for Claude Code, Codex, OpenCode and Cursor: each turn of the coding agent you already run, recorded as a run with no code, metadata alone unless you turn its conversation on."
 ---
 
 The coding-agent plugins record each turn of a coding agent you already run as
 a [run](/docs/api/sdks#a-run) in Telmoni, with no code: the models it called
 and their tokens, the tools it used and the subagents it started, each with its
-times and whether it failed. They never send a prompt, a reply, a thought, a
-tool's input or output, a command, a file's path or the folder you work in: a
-local model named by the path to its file is sent by the file's name alone.
+times and whether it failed. Unless you turn [content](#a-turns-conversation)
+on, they never send a prompt, a reply, a thought, a tool's input or output, a
+command, a file's path or the folder you work in: a local model named by the
+path to its file is sent by the file's name alone.
 
 | Agent | Plugin | Package | Runs as |
 |---|---|---|---|
@@ -87,7 +88,7 @@ sent again either. Where Telmoni reaches its Redis, a copy that arrives within
 the hour of the first is stored once: its run's id is derived from the session
 and the turn, and every span's from the run's.
 
-**What is never read.** Of what an agent writes down, a plugin reads only
+**What is never read.** With content off, of what an agent writes down, a plugin reads only
 names, ids, times, counts and flags: each entry's kind, id, time and outcome, a
 reply's model, provider and token counts, a tool call's name, and a subagent's
 kind. The Claude Code plugin also reads the skill a `Skill` call names, which
@@ -103,6 +104,37 @@ prompt or a reply, the model's thinking, a tool's input or output beyond that
 skill's name, a command, the path or contents of a file you work on, the
 working folder, a session's title or anyone's email, whatever the project's
 content mode.
+
+### A turn's conversation
+
+Each plugin can send what was said too, under the same two locks as the
+[SDKs' content](/docs/api/sdks#content): your switch, set beside the plugin's
+key, and the project's [content mode](/docs/workspace/organizations-and-projects#a-projects-content-mode), which must be
+`on`. With either off, nothing of the conversation leaves your machine. The
+switch travels with the key: a key in the environment takes
+`TELMONI_CAPTURE_CONTENT=1` there, `1` alone, as the SDKs read it, and a key in
+the plugin's own settings takes its own switch, never one from the other place.
+In Claude Code it is **Capture content** in `/plugin configure`
+(`{"TELMONI_CAPTURE_CONTENT": true}` through `--values-stdin`); in Codex and
+OpenCode, `"captureContent": true` in the plugin's `telmoni.json`; in Cursor,
+`telmoni-cursor-observability setup --capture-content`, which writes it there,
+while a repository's hooks, which hold no key, leave a cloud agent to
+`TELMONI_CAPTURE_CONTENT=1` beside its `TELMONI_API_KEY`. A switch in a file
+that is neither `true` nor `false` has the file passed over, and nothing is sent
+until it is fixed, the log saying why.
+
+On, a turn carries its conversation as its agent recorded it: your prompt, with
+its images, as the run's input, and the last reply as its output; each model
+call's reply, with the reasoning the agent wrote in plain text, never an
+encrypted or redacted thought; each tool call's input and output; and a
+subagent's task and answer on its step. An image goes as the SDKs send one, put
+aside under `/v1/media` and named in the message. Cursor's hooks name an
+attachment by its path alone, so no image comes from Cursor, and its one model
+call holds the turn's replies and thoughts in their order. Codex's own
+instructions to the model are never read. Still never sent: your email, the
+workspace's folders and the transcript's path, beyond what you or the agent
+wrote in the conversation itself. A turn waiting to be sent keeps what was said
+in the plugin's own folder, readable by you alone, until it goes.
 
 Each plugin's failures are lines in a log of its own, naming the session, or a
 Codex subagent's thread, by the start of its id, the kind of thing that went

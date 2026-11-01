@@ -252,7 +252,7 @@ export class Telmoni {
     );
   }
 
-  /** The project's content mode, learned from the first answer. */
+  /** The project's content mode, as the last answer named it. */
   get contentMode(): string | undefined {
     return this.#exporter.contentMode;
   }

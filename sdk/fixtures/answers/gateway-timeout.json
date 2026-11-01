@@ -1,0 +1,8 @@
+{
+  "status": 504,
+  "headers": { "Content-Type": "text/plain" },
+  "body": "upstream request timeout",
+  "expect": "a load balancer's answer, the server not answering in time: retried as a 502 is, three attempts in all; after the third, one warning naming the 504 and the batch dropped",
+  "warning": "telmoni: export failed after 3 attempts (504); the batch was dropped",
+  "fields": { "kind": "failed", "status": 504 }
+}

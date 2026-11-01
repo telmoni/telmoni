@@ -93,7 +93,7 @@ class Telmoni:
 
     @property
     def content_mode(self) -> str | None:
-        """The project's content mode, learned from the first answer."""
+        """The project's content mode, as the last answer named it."""
         return self.exporter.content_mode
 
     def run(

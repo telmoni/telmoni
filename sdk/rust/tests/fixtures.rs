@@ -407,6 +407,86 @@ fn base64(bytes: &[u8]) -> String {
 }
 
 #[test]
+fn the_mode_is_asked_before_the_first_content_it_would_send() -> Outcome {
+    let fixture = load_fixture("ask.json")?;
+    for case in field(&fixture, "cases")?.as_array().ok_or("cases")? {
+        let flag = |name: &'static str| -> Result<bool, Failure> {
+            Ok(field(case, name)?.as_bool().ok_or(name)?)
+        };
+        let answers = field(case, "answers")?
+            .as_array()
+            .ok_or("answers")?
+            .iter()
+            .map(|given| match given {
+                Value::String(mode) => Ok(Ok(Answer::new(
+                    200,
+                    vec![("Telmoni-Content-Mode".to_owned(), mode.clone())],
+                    b"{}".to_vec(),
+                ))),
+                _ => {
+                    let status = given.as_u64().ok_or("an answer")?;
+                    Ok(Ok(Answer::new(
+                        u16::try_from(status)?,
+                        Vec::new(),
+                        Vec::new(),
+                    )))
+                }
+            })
+            .collect::<Result<Vec<_>, Failure>>()?;
+        let harness = Harness::answering(
+            Config {
+                capture_content: flag("capture_content")?,
+                api_key: Some("k".to_owned()),
+                ..keyed()
+            },
+            answers,
+        )?;
+        for _ in 0..2 {
+            let run = harness
+                .telmoni
+                .run(text(&fixture, "agent")?, RunOptions::default())?;
+            let options = if flag("content")? {
+                ModelCallOptions {
+                    input_messages: Some(field(&fixture, "input_messages")?.clone().into()),
+                    ..ModelCallOptions::default()
+                }
+            } else {
+                ModelCallOptions::default()
+            };
+            run.model_call(text(&fixture, "model")?, options)?.end();
+            run.end();
+            harness.flush()?;
+        }
+        let bodies = harness.transport.bodies()?;
+        assert_eq!(
+            Some(u64::try_from(bodies.len())?),
+            field(case, "requests")?.as_u64(),
+            "{case}"
+        );
+        let (asks, exports): (Vec<&Value>, Vec<&Value>) =
+            bodies.iter().partition(|body| spans_of(body).is_empty());
+        if flag("asked")? {
+            assert_eq!(asks, [field(&fixture, "body")?], "{case}");
+            assert_eq!(bodies.first(), Some(field(&fixture, "body")?), "{case}");
+            let requests = harness.transport.requests();
+            let ask = requests.first().ok_or("the ask")?;
+            assert_eq!(ask.header("Authorization"), Some("Bearer k"), "{case}");
+        } else {
+            assert!(asks.is_empty(), "{case}");
+        }
+        let first = exports.first().ok_or("the first run's export")?;
+        let spans = spans_of(first);
+        let call = spans
+            .iter()
+            .find(|span| name_of(span).starts_with("chat "))
+            .ok_or("its model call")?;
+        let sent = attributes_of(call)?.get("gen_ai.input.messages").is_some();
+        assert_eq!(sent, flag("sent")?, "{case}");
+    }
+    Ok(())
+}
+
+#[test]
 fn images_are_lifted_out_of_messages_only_under_both_locks() -> Outcome {
     let fixture = load_fixture("media.json")?;
     let scenario = field(&fixture, "scenario")?;

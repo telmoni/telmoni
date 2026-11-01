@@ -9,6 +9,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use base64::Engine as _;
+use base64::alphabet;
+use base64::engine::{DecodePaddingMode, GeneralPurpose, GeneralPurposeConfig};
 use opentelemetry::trace::{SpanId, SpanKind, Status};
 use opentelemetry::{Array, Key, KeyValue, Value};
 use opentelemetry_sdk::resource::{ResourceDetector as _, TelemetryResourceDetector};
@@ -24,6 +27,9 @@ use crate::{VERSION, lock};
 
 /// How many times one batch is sent before it is dropped.
 const ATTEMPTS: u32 = 3;
+/// OTLP's retryable statuses: a 502 or a 504 is a load balancer's, a server's
+/// rollout among its causes.
+const RETRIED: [u16; 4] = [429, 502, 503, 504];
 /// The longest a `Retry-After` is honoured for.
 const RETRY_AFTER_MAX_SECS: u64 = 60;
 /// How many files put are remembered before the set starts over: an image a
@@ -116,12 +122,50 @@ impl Exporter {
             );
             return false;
         }
+        // Yet to hear the project's mode, a client asks it first, so a process
+        // that sends once, as a hook does, still sends its content.
+        if self.capture_content && self.content_mode().is_none() && spans.iter().any(holds_content)
+        {
+            self.ask();
+        }
         let spans = if self.keeps_content() {
             self.lift(spans)
         } else {
             Cow::Borrowed(spans)
         };
         self.export_lifted(&spans)
+    }
+
+    /// Asks the project's content mode with an export of no spans, which
+    /// ingest answers as the mode is now: once and silently, since the export
+    /// after it retries and warns of what it meets, its content held back
+    /// meanwhile.
+    fn ask(&self) {
+        if self.gave_up() {
+            return;
+        }
+        let mut sent = self.headers();
+        sent.push((
+            contract::SENT_AT_HEADER.to_owned(),
+            nanos(std::time::SystemTime::now()),
+        ));
+        // Unheard, the mode keeps the content back, as no answer does.
+        if let Ok(answer) = self.transport.send(Method::Post, &self.url, &sent, ASK)
+            && (200..300).contains(&answer.status)
+        {
+            self.read(&answer);
+        }
+    }
+
+    fn headers(&self) -> Vec<(String, String)> {
+        let mut headers = vec![
+            ("Content-Type".to_owned(), "application/json".to_owned()),
+            ("User-Agent".to_owned(), format!("telmoni-rust/{VERSION}")),
+        ];
+        if let Some(bearer) = &self.bearer {
+            headers.push(("Authorization".to_owned(), format!("Bearer {bearer}")));
+        }
+        headers
     }
 
     fn export_lifted(&self, spans: &[SpanData]) -> bool {
@@ -174,13 +218,7 @@ impl Exporter {
                 }
             }
         }
-        let mut headers = vec![
-            ("Content-Type".to_owned(), "application/json".to_owned()),
-            ("User-Agent".to_owned(), format!("telmoni-rust/{VERSION}")),
-        ];
-        if let Some(bearer) = &self.bearer {
-            headers.push(("Authorization".to_owned(), format!("Bearer {bearer}")));
-        }
+        let headers = self.headers();
         let mut failure = String::new();
         // The last attempt's alone, as the line names it.
         let mut last: Option<(u16, String)> = None;
@@ -208,8 +246,8 @@ impl Exporter {
                 return true;
             }
             let problem = problem_type(&answer.body);
-            if answer.status == 429 || answer.status == 503 {
-                failure = format!("{} {problem}", answer.status);
+            if RETRIED.contains(&answer.status) {
+                failure = named(answer.status, &problem);
                 last = Some((answer.status, problem));
                 self.wait(answer.header("Retry-After"), attempt);
                 continue;
@@ -217,8 +255,8 @@ impl Exporter {
             self.warner.once(
                 format!("status:{}", answer.status),
                 &format!(
-                    "telmoni: export refused with {} {problem}; the batch was dropped",
-                    answer.status,
+                    "telmoni: export refused with {}; the batch was dropped",
+                    named(answer.status, &problem),
                 ),
                 answered(WarningKind::Refused, Some((answer.status, problem))),
             );
@@ -658,110 +696,27 @@ fn header_safe(value: &str) -> bool {
     !value.trim_matches(' ').is_empty() && value.bytes().all(|byte| (0x20..=0x7e).contains(&byte))
 }
 
-/// Base64's bytes, padded as Python's `validate=True` reads it; `None` for
-/// any other text.
+/// Base64 as Python's `validate=True` reads it: padded, nothing but the
+/// alphabet, and a last symbol's spare bits ignored, as Python ignores them.
+const PADDED: GeneralPurpose = GeneralPurpose::new(
+    &alphabet::STANDARD,
+    GeneralPurposeConfig::new()
+        .with_decode_padding_mode(DecodePaddingMode::RequireCanonical)
+        .with_decode_allow_trailing_bits(true),
+);
+
+/// Base64's bytes, read as [`PADDED`] reads them; `None` for any other text.
 fn base64_decode(text: &str) -> Option<Vec<u8>> {
-    let bytes = text.as_bytes();
-    if !bytes.len().is_multiple_of(4) {
-        return None;
-    }
-    let padding = bytes.iter().rev().take_while(|byte| **byte == b'=').count();
-    if padding > 2 {
-        return None;
-    }
-    let mut out = Vec::with_capacity(bytes.len() / 4 * 3);
-    let (mut buffer, mut bits) = (0u32, 0u32);
-    for byte in bytes.iter().take(bytes.len() - padding) {
-        let value = match byte {
-            b'A'..=b'Z' => byte - b'A',
-            b'a'..=b'z' => byte - b'a' + 26,
-            b'0'..=b'9' => byte - b'0' + 52,
-            b'+' => 62,
-            b'/' => 63,
-            _ => return None,
-        };
-        buffer = (buffer << 6 | u32::from(value)) & 0xffff;
-        bits += 6;
-        if bits >= 8 {
-            bits -= 8;
-            out.push(u8::try_from((buffer >> bits) & 0xff).unwrap_or(0));
-        }
-    }
-    Some(out)
+    PADDED.decode(text).ok()
 }
 
-/// The lowercase hex SHA-256 of `data` (FIPS 180-4), written here as the SDK
-/// takes no crate for it.
+/// The lowercase hex SHA-256 of `data`.
 fn sha256_hex(data: &[u8]) -> String {
-    #[rustfmt::skip]
-    const K: [u32; 64] = [
-        0x428a_2f98, 0x7137_4491, 0xb5c0_fbcf, 0xe9b5_dba5, 0x3956_c25b, 0x59f1_11f1, 0x923f_82a4,
-        0xab1c_5ed5, 0xd807_aa98, 0x1283_5b01, 0x2431_85be, 0x550c_7dc3, 0x72be_5d74, 0x80de_b1fe,
-        0x9bdc_06a7, 0xc19b_f174, 0xe49b_69c1, 0xefbe_4786, 0x0fc1_9dc6, 0x240c_a1cc, 0x2de9_2c6f,
-        0x4a74_84aa, 0x5cb0_a9dc, 0x76f9_88da, 0x983e_5152, 0xa831_c66d, 0xb003_27c8, 0xbf59_7fc7,
-        0xc6e0_0bf3, 0xd5a7_9147, 0x06ca_6351, 0x1429_2967, 0x27b7_0a85, 0x2e1b_2138, 0x4d2c_6dfc,
-        0x5338_0d13, 0x650a_7354, 0x766a_0abb, 0x81c2_c92e, 0x9272_2c85, 0xa2bf_e8a1, 0xa81a_664b,
-        0xc24b_8b70, 0xc76c_51a3, 0xd192_e819, 0xd699_0624, 0xf40e_3585, 0x106a_a070, 0x19a4_c116,
-        0x1e37_6c08, 0x2748_774c, 0x34b0_bcb5, 0x391c_0cb3, 0x4ed8_aa4a, 0x5b9c_ca4f, 0x682e_6ff3,
-        0x748f_82ee, 0x78a5_636f, 0x84c8_7814, 0x8cc7_0208, 0x90be_fffa, 0xa450_6ceb, 0xbef9_a3f7,
-        0xc671_78f2,
-    ];
-    let mut state: [u32; 8] = [
-        0x6a09_e667,
-        0xbb67_ae85,
-        0x3c6e_f372,
-        0xa54f_f53a,
-        0x510e_527f,
-        0x9b05_688c,
-        0x1f83_d9ab,
-        0x5be0_cd19,
-    ];
-    let mut message = data.to_vec();
-    let length = u64::try_from(data.len())
-        .unwrap_or(u64::MAX)
-        .wrapping_mul(8);
-    message.push(0x80);
-    while message.len() % 64 != 56 {
-        message.push(0);
-    }
-    message.extend_from_slice(&length.to_be_bytes());
-    for block in message.as_chunks::<64>().0 {
-        let mut w: Vec<u32> = block
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .map(|word| u32::from_be_bytes(*word))
-            .collect();
-        while w.len() < 64 {
-            let back = |n: usize| w.get(w.len() - n).copied().unwrap_or(0);
-            let (w15, w2) = (back(15), back(2));
-            let s0 = w15.rotate_right(7) ^ w15.rotate_right(18) ^ (w15 >> 3);
-            let s1 = w2.rotate_right(17) ^ w2.rotate_right(19) ^ (w2 >> 10);
-            let next = back(16)
-                .wrapping_add(s0)
-                .wrapping_add(back(7))
-                .wrapping_add(s1);
-            w.push(next);
-        }
-        let [mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut h] = state;
-        for (k, word) in K.iter().zip(w) {
-            let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
-            let choice = (e & f) ^ (!e & g);
-            let t1 = h
-                .wrapping_add(s1)
-                .wrapping_add(choice)
-                .wrapping_add(*k)
-                .wrapping_add(word);
-            let s0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
-            let majority = (a & b) ^ (a & c) ^ (b & c);
-            let t2 = s0.wrapping_add(majority);
-            (h, g, f, e, d, c, b, a) = (g, f, e, d.wrapping_add(t1), c, b, a, t1.wrapping_add(t2));
-        }
-        for (slot, value) in state.iter_mut().zip([a, b, c, d, e, f, g, h]) {
-            *slot = slot.wrapping_add(value);
-        }
-    }
-    state.iter().map(|word| format!("{word:08x}")).collect()
+    ring::digest::digest(&ring::digest::SHA256, data)
+        .as_ref()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 /// An export's own failure, with the status and problem type it last met,
@@ -779,6 +734,29 @@ fn answered(kind: WarningKind, last: Option<(u16, String)>) -> Warning {
 }
 
 /// The problem type a refusal's body opens with, else nothing.
+/// An export of no spans: how a client asks the project's content mode.
+const ASK: &[u8] = br#"{"resourceSpans":[]}"#;
+
+/// Whether a span holds anything the content lock decides on: a content
+/// field, an event or a status message.
+fn holds_content(span: &SpanData) -> bool {
+    span.attributes
+        .iter()
+        .any(|kv| contract::is_content(kv.key.as_str()))
+        || !span.events.is_empty()
+        || matches!(&span.status, Status::Error { description } if !description.is_empty())
+}
+
+/// An answer as a warning names it: its status, then the problem type its
+/// body named, where it named one.
+fn named(status: u16, problem: &str) -> String {
+    if problem.is_empty() {
+        status.to_string()
+    } else {
+        format!("{status} {problem}")
+    }
+}
+
 fn problem_type(body: &[u8]) -> String {
     let body: &[u8] = if body.is_empty() { b"{}" } else { body };
     let Ok(decoded) = serde_json::from_slice::<serde_json::Value>(body) else {
@@ -1336,7 +1314,7 @@ mod tests {
             (
                 vec![Some(400)],
                 3,
-                "telmoni: export refused with 400 ; the batch was dropped",
+                "telmoni: export refused with 400; the batch was dropped",
                 Warning {
                     kind: WarningKind::Refused,
                     status: Some(400),
@@ -1421,7 +1399,7 @@ mod tests {
         assert_eq!(nanos(last + Duration::from_nanos(1)), "0");
     }
 
-    /// FIPS 180-4's vectors, one and two blocks, and one of many.
+    /// FIPS 180-4's vectors, one and two blocks and one of many, in lowercase hex.
     #[test]
     fn sha256_matches_the_standards_vectors() {
         assert_eq!(
@@ -1442,11 +1420,12 @@ mod tests {
         );
     }
 
-    /// Padded base64 alone, as Python's `validate=True` reads it.
+    /// Padded base64 alone, as Python's `validate=True` reads it, spare bits and all.
     #[test]
     fn base64_is_read_padded_and_nothing_else() {
         assert_eq!(base64_decode(""), Some(Vec::new()));
         assert_eq!(base64_decode("QQ=="), Some(b"A".to_vec()));
+        assert_eq!(base64_decode("QR=="), Some(b"A".to_vec()));
         assert_eq!(base64_decode("QUI="), Some(b"AB".to_vec()));
         assert_eq!(base64_decode("+/+/"), Some(vec![0xfb, 0xff, 0xbf]));
         for bad in [

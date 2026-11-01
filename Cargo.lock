@@ -2571,9 +2571,11 @@ dependencies = [
 name = "telmoni"
 version = "0.2.0"
 dependencies = [
+ "base64 0.22.1",
  "opentelemetry",
  "opentelemetry_sdk",
  "reqwest",
+ "ring",
  "serde",
  "serde_json",
  "tracing",

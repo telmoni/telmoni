@@ -292,7 +292,7 @@ describe('a model call', () => {
     const on = answer(200, { 'Telmoni-Content-Mode': 'on' }, '{"partialSuccess":null}');
     const asked = harness({ captureContent: true }, {}, Array.from({ length: 6 }, () => on));
     try {
-      // Before the first answer the mode is unknown, so content stays home.
+      // The mode unheard, the client asks it before the first content leaves.
       asked.telmoni.run('bot', (run) => run.modelCall('m', { inputMessages: 'first' }, () => {}));
       expect(await asked.telmoni.flush()).toBe(true);
       expect(asked.telmoni.contentMode).toBe('on');
@@ -306,7 +306,7 @@ describe('a model call', () => {
       await asked.telmoni.shutdown();
     }
     const [first, second] = calls(asked.transport);
-    expect(attributesOf(first!)).not.toHaveProperty('gen_ai.input.messages');
+    expect(attributesOf(first!)['gen_ai.input.messages']).toBe('first');
     const attributes = attributesOf(second!);
     expect(attributes['gen_ai.input.messages']).toBe('second');
     expect(attributes['gen_ai.system_instructions']).toBe('["be brief"]');

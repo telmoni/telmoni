@@ -288,6 +288,54 @@ describe('failure.json', () => {
   });
 });
 
+interface AskFixture {
+  body: unknown;
+  agent: string;
+  model: string;
+  input_messages: unknown;
+  cases: Array<{
+    capture_content: boolean;
+    content: boolean;
+    answers: Array<string | number>;
+    asked: boolean;
+    sent: boolean;
+    requests: number;
+  }>;
+}
+
+describe('ask.json', () => {
+  const fixture = loadFixture<AskFixture>('ask.json');
+  const spansOf = (body: ExportBody): JsonSpan[] =>
+    body.resourceSpans.flatMap((resource) => resource.scopeSpans.flatMap((scope) => scope.spans));
+
+  it.each(fixture.cases)('asks the mode before the first content it would send: %o', async (each) => {
+    const answered = each.answers.map((given) =>
+      typeof given === 'number' ? answer(given, {}, '') : answer(200, { 'Telmoni-Content-Mode': given }, '{}'),
+    );
+    const h = harness({ apiKey: 'k', captureContent: each.capture_content }, {}, answered);
+    try {
+      for (let i = 0; i < 2; i++) {
+        h.telmoni.run(fixture.agent, (run) => {
+          run.modelCall(fixture.model, each.content ? { inputMessages: fixture.input_messages } : {}, () => {});
+        });
+        expect(await h.telmoni.flush()).toBe(true);
+      }
+    } finally {
+      await h.telmoni.shutdown();
+    }
+    const bodies = h.transport.bodies();
+    expect(bodies).toHaveLength(each.requests);
+    const asks = bodies.filter((body) => spansOf(body).length === 0);
+    expect(asks).toEqual(each.asked ? [fixture.body] : []);
+    if (each.asked) {
+      expect(bodies[0]).toEqual(fixture.body);
+      expect(h.transport.requests[0]!.headers['Authorization']).toBe('Bearer k');
+    }
+    const call = spansOf(bodies.find((body) => spansOf(body).length > 0)!).find((span) => span.name.startsWith('chat '))!;
+    expect(call.attributes.some((a) => a.key === 'gen_ai.input.messages')).toBe(each.sent);
+  });
+});
+
 interface MediaFixture {
   scenario: {
     agent: string;

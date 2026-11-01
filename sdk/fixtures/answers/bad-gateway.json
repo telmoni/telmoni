@@ -1,0 +1,8 @@
+{
+  "status": 502,
+  "headers": { "Content-Type": "text/html; charset=UTF-8" },
+  "body": "<html><head><title>502 Server Error</title></head><body><h1>Error: Server Error</h1></body></html>",
+  "expect": "a load balancer's answer, not ingest's, as when the server it sent to is stopping: wait 2^attempt seconds, since no Retry-After came, and retry, three attempts in all; after the third, one warning naming the 502 and the batch dropped",
+  "warning": "telmoni: export failed after 3 attempts (502); the batch was dropped",
+  "fields": { "kind": "failed", "status": 502 }
+}

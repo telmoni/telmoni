@@ -140,8 +140,9 @@ through the same exporter, content rules and sample rate, in a trace of its own
 named by the run's id, whatever context is active. Each span's id is derived
 from the run's id and the span's place in the record, so the same record sent
 again is the same bytes, which ingest answers once: give a run the same id each
-time you send it. A record's only content is its run's own messages
-(`inputMessages`, `outputMessages`). A blank agent, a run id that is
+time you send it. A record's content is its run's messages (`inputMessages`,
+`outputMessages`), a model call's (`outputMessages`), a tool call's
+`arguments` and `result`, and a step's messages, a subagent's task and answer. A blank agent, a run id that is
 neither a hyphenated UUID nor 32 hex digits, or is the nil UUID, or an empty
 step's name or model throws a `TypeError`, as does a field of the wrong type —
 a time that is not one, an item of no known `type`, `inside` or `calls` that is
@@ -223,9 +224,10 @@ application adds to a span through OpenTelemetry: without them, a failed span
 goes with its `error.type` and an error status alone. They leave the process only when
 `captureContent: true`, or `TELMONI_CAPTURE_CONTENT=1` under `Telmoni.fromEnv()`,
 **and** the project's content mode is `on`, which the
-SDK learns from the platform's first answer (a `captureContent` that is no
-boolean, such as `'false'` from the environment, throws a `TypeError`); before that answer, and on an
-`off` project, the exporter takes them off every span. The server drops content
+SDK asks the platform for before the first content it would send and learns
+again from every answer (a `captureContent` that is no boolean, such as
+`'false'` from the environment, throws a `TypeError`); while the mode is
+unheard, and on an `off` project, the exporter takes them off every span. The server drops content
 on an `off` project too, so the SDK's strip is the first lock, not the only one.
 
 An image or file a message carries, a `blob` part holding its bytes in base64
@@ -273,7 +275,8 @@ hyphens and underscores, in labels of 1 to 63 characters with no hyphen at
 either end and the last no number, nor an IPv4 address in four decimal parts,
 nor an IPv6 one in brackets. Each attempt carries `Telmoni-Sent-At`, this clock
 as it leaves, by which ingest moves a run from a clock a zone or a date out as
-one. A `429` or `503` is retried after `Retry-After`, three attempts in all; an
+one. A `429`, `502`, `503` or `504` is retried, after `Retry-After` where one
+came, three attempts in all; an
 answer whose body breaks after its status is decided by that status, as a whole
 one is, and one whose head breaks off is no answer, sent again. A batch whose
 body would pass the 1 MiB ingest takes, or that holds more than its 1,000

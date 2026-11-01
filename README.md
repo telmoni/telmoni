@@ -107,7 +107,7 @@ Configuration comes only from the environment ([every setting](https://telmoni.c
 | Integration | For | What it does |
 |---|---|---|
 | [SDKs](https://telmoni.com/docs/api/sdks) | Python, TypeScript, Go, Rust | Record an agent's runs, steps, model calls and tool calls as spans. |
-| [Coding-agent plugins](https://telmoni.com/docs/api/coding-agents) | Claude Code, Codex, OpenCode, Cursor | Record each turn of a coding agent you already use as a run, with no code to write and never a prompt or a file. |
+| [Coding-agent plugins](https://telmoni.com/docs/api/coding-agents) | Claude Code, Codex, OpenCode, Cursor | Record each turn of a coding agent you already use as a run, with no code to write: metadata alone, unless you turn its content on. |
 | [CLI](https://github.com/telmoni/telmoni-cli) | macOS, Linux | `telmoni`: device-code sign-in and your organizations from a terminal, or an API key in CI. |
 | [Agent skills](https://github.com/telmoni/skills) | Claude Code, Codex, Cursor | Teach a coding agent the SDKs, the plugins, the CLI, the API, webhooks and self-hosting. |
 | [Slack](https://telmoni.com/docs/integrations/slack) | Notifications | A project's notifications, posted to a channel. |

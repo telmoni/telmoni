@@ -156,8 +156,9 @@ content rules and sample rate, in a trace of its own named by the run's id,
 whatever trace is current. Each span's id is derived from the run's id and the
 span's place in the record, so the same record sent again is the same bytes,
 which ingest answers once: give a run the same id each time you send it. A
-record's only content is its run's own messages (`input_messages`,
-`output_messages`), and its tags and token counts go as a live run's do.
+record's content is its run's messages (`input_messages`, `output_messages`),
+a model call's (`output_messages`), a tool call's `arguments` and `result`,
+and a step's messages, a subagent's task and answer; its tags and token counts go as a live run's do.
 A blank agent (`Error::EmptyAgent`), a run id that is not a UUID or is the nil
 UUID (`Error::RunId`), an empty step name or model (`Error::EmptyName`), text
 past ingest's caps (`Error::TooLong`: a step's or a tool's name 145
@@ -246,8 +247,9 @@ adds to a span through OpenTelemetry. They are set on
 the span, and the exporter takes them off every span before it leaves the
 process unless `capture_content` is on, in code or by `TELMONI_CAPTURE_CONTENT=1`
 under `Config::from_env()`, **and** the project's content mode,
-learned from the platform's answers, is `on`. Before the first answer the mode
-is unknown, so content stays home. `telmoni.content_mode()` hands it back as
+asked of the platform before the first content it would send and learned
+again from every answer, is `on`; while the mode is unheard, content stays
+home. `telmoni.content_mode()` hands it back as
 `Some(ContentMode::Off)` or `Some(ContentMode::On)`: `None` before an answer, or
 for a word ingest does not send, which keeps content home too.
 

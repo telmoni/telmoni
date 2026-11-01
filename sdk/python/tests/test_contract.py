@@ -565,7 +565,7 @@ def test_a_batch_in_parts_ends_at_a_part_that_fails_as_the_rest_would(
         (
             [Answer(400, {}, b"")],
             3,
-            "telmoni: export refused with 400 ; the batch was dropped",
+            "telmoni: export refused with 400; the batch was dropped",
             WarningInfo("refused", 400),
         ),
     ):

@@ -129,8 +129,9 @@ content rules and sample rate, in a trace of its own named by the run's id,
 whatever trace is current. Each span's id is derived from the run's id and the
 span's place in the record, so the same record sent again is the same bytes,
 which ingest answers once: give a run the same id each time you send it. A
-record's only content is its run's own messages (`input_messages`,
-`output_messages`). A blank agent, a run id that is neither a hyphenated
+record's content is its run's messages (`input_messages`, `output_messages`),
+a model call's (`output_messages`), a tool call's `arguments` and `result`,
+and a step's messages, a subagent's task and answer. A blank agent, a run id that is neither a hyphenated
 UUID nor 32 hex digits, or is the nil UUID, a time without its timezone or
 outside what ingest reads (after the Unix epoch, and less than 2^64 nanoseconds
 after it, in July 2554), an empty step's name or model, text longer than
@@ -172,8 +173,8 @@ Prompts, completions, tool arguments and results (`input_messages`,
 the span and taken off by the exporter before anything leaves the process. They are sent
 only when the client is built with `Config(capture_content=True)`, or from
 `Config.from_env()` with `TELMONI_CAPTURE_CONTENT=1`, **and** the
-project's content mode, which the SDK learns from the server's first answer,
-is `on`. A failure's message and stack trace, its `exception` event and its
+project's content mode, which the SDK asks the server for before the first
+content it would send and learns again from every answer, is `on`. A failure's message and stack trace, its `exception` event and its
 status's message, and every event the application adds to a span through
 OpenTelemetry, are content too: without both, a failed span goes with its
 `error.type` and an error status alone. A `capture_content` that is no `bool`,

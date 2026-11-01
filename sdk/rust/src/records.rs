@@ -92,6 +92,12 @@ pub enum CallRecord {
 pub struct StepRecord {
     /// The step's name, which its span takes.
     pub name: String,
+    /// The messages the step was asked with, a subagent's task say: content,
+    /// as a run's are.
+    pub input_messages: Option<Content>,
+    /// The messages the step produced, the subagent's answer: content, as
+    /// above.
+    pub output_messages: Option<Content>,
     /// When the step started.
     pub start: SystemTime,
     /// When the step ended.
@@ -105,8 +111,7 @@ pub struct StepRecord {
     pub cancelled: bool,
 }
 
-/// A model call that has ended: its model, its times and its tokens. A record
-/// holds no content.
+/// A model call that has ended: its model, its times and its tokens.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ModelCallRecord {
     /// The model asked; the span is named `<operation> <model>`.
@@ -124,6 +129,8 @@ pub struct ModelCallRecord {
     pub end: SystemTime,
     /// The tokens used.
     pub usage: Option<Usage>,
+    /// The messages the call produced: content, as a run's are.
+    pub output_messages: Option<Content>,
     /// The type of the error the call failed with, never its message; `None`
     /// when it did not fail. Empty reads as none.
     pub error_type: Option<String>,
@@ -131,12 +138,16 @@ pub struct ModelCallRecord {
     pub cancelled: bool,
 }
 
-/// A tool call that has ended: its name and its times. A record holds no
-/// content.
+/// A tool call that has ended: its name and its times.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolCallRecord {
     /// The tool's name; the span is named `execute_tool <name>`.
     pub name: String,
+    /// The arguments the tool was called with: content, as a run's messages
+    /// are.
+    pub arguments: Option<Content>,
+    /// What the tool returned: content, as above.
+    pub result: Option<Content>,
     /// When the call started.
     pub start: SystemTime,
     /// When the call ended.
@@ -177,12 +188,14 @@ impl RunRecord {
 }
 
 impl StepRecord {
-    /// A record of the step `name` from `start` to `end`, with no calls,
-    /// neither failed nor cancelled.
+    /// A record of the step `name` from `start` to `end`, with no content or
+    /// calls, neither failed nor cancelled.
     #[must_use]
     pub fn new(name: impl Into<String>, start: SystemTime, end: SystemTime) -> Self {
         Self {
             name: name.into(),
+            input_messages: None,
+            output_messages: None,
             start,
             end,
             calls: Vec::new(),
@@ -194,7 +207,7 @@ impl StepRecord {
 
 impl ModelCallRecord {
     /// A record of a `chat` call to `model` from `start` to `end`, with no
-    /// provider or tokens, neither failed nor cancelled.
+    /// provider, tokens or content, neither failed nor cancelled.
     #[must_use]
     pub fn new(model: impl Into<String>, start: SystemTime, end: SystemTime) -> Self {
         Self {
@@ -204,6 +217,7 @@ impl ModelCallRecord {
             start,
             end,
             usage: None,
+            output_messages: None,
             error_type: None,
             cancelled: false,
         }
@@ -211,12 +225,14 @@ impl ModelCallRecord {
 }
 
 impl ToolCallRecord {
-    /// A record of a call to the tool `name` from `start` to `end`, neither
-    /// failed nor cancelled.
+    /// A record of a call to the tool `name` from `start` to `end`, with no
+    /// content, neither failed nor cancelled.
     #[must_use]
     pub fn new(name: impl Into<String>, start: SystemTime, end: SystemTime) -> Self {
         Self {
             name: name.into(),
+            arguments: None,
+            result: None,
             start,
             end,
             error_type: None,
@@ -301,14 +317,10 @@ pub(crate) fn send(inner: &Inner, record: RunRecord) -> Result<(), Error> {
     let run_id = run_uuid.to_string();
     let inherited = runs::inherited(&run_id, &agent, user_id, session_id);
     let mut attributes = runs::run_attributes(&agent, &inherited, rate, tags, &inner.warner);
-    for (key, messages) in [
+    attributes.extend(content([
         (contract::INPUT_MESSAGES, input_messages),
         (contract::OUTPUT_MESSAGES, output_messages),
-    ] {
-        if let Some(messages) = messages {
-            attributes.push(KeyValue::new(key, String::from(messages.as_str())));
-        }
-    }
+    ]));
     // Sampled out, no span is built: none of a record's ends after it, and
     // the same record sent again draws again.
     if rate < 1.0 && (inner.random)() >= rate {
@@ -348,13 +360,13 @@ pub(crate) fn send(inner: &Inner, record: RunRecord) -> Result<(), Error> {
     for item in inside {
         match item {
             RecordItem::Step(step) => {
-                let opened = spans.open(
-                    step.name,
-                    &run,
-                    SpanKind::Internal,
-                    inherited.clone(),
-                    step.start,
-                );
+                let mut attributes = inherited.clone();
+                attributes.extend(content([
+                    (contract::INPUT_MESSAGES, step.input_messages),
+                    (contract::OUTPUT_MESSAGES, step.output_messages),
+                ]));
+                let opened =
+                    spans.open(step.name, &run, SpanKind::Internal, attributes, step.start);
                 for call in step.calls {
                     spans.call(call, &opened, &inherited);
                 }
@@ -607,17 +619,32 @@ impl Spans<'_> {
                 let (name, own) = runs::model_call_opening(&call.model, operation, call.provider);
                 attributes.extend(own);
                 attributes.extend(call.usage.into_iter().flat_map(runs::usage_attributes));
+                attributes.extend(content([(contract::OUTPUT_MESSAGES, call.output_messages)]));
                 let opened = self.open(name, parent, SpanKind::Client, attributes, call.start);
                 close(&opened, call.error_type, call.cancelled, call.end);
             }
             CallRecord::Tool(call) => {
                 let (name, own) = runs::tool_call_opening(&call.name);
                 attributes.extend(own);
+                attributes.extend(content([
+                    (contract::TOOL_CALL_ARGUMENTS, call.arguments),
+                    (contract::TOOL_CALL_RESULT, call.result),
+                ]));
                 let opened = self.open(name, parent, SpanKind::Internal, attributes, call.start);
                 close(&opened, call.error_type, call.cancelled, call.end);
             }
         }
     }
+}
+
+/// A record's content as attributes, each one given, which the exporter's
+/// lock sends or keeps back.
+fn content<const N: usize>(
+    fields: [(&'static str, Option<Content>); N],
+) -> impl Iterator<Item = KeyValue> {
+    fields.into_iter().filter_map(|(key, value)| {
+        value.map(|value| KeyValue::new(key, String::from(value.as_str())))
+    })
 }
 
 /// Marks the span `cx` holds failed or cancelled, as its record says, and

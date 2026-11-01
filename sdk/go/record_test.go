@@ -333,7 +333,13 @@ func TestAFailedRecordIsMarkedOnItsRunsSpan(t *testing.T) {
 	}
 }
 
-func TestARecordsOwnMessagesLeaveOnlyWhenAskedAndTheProjectAllows(t *testing.T) {
+func TestARecordsContentLeavesOnlyWhenAskedAndTheProjectAllows(t *testing.T) {
+	content := map[string]map[string]string{
+		"invoke_agent claude-code": {"gen_ai.input.messages": `["asked"]`, "gen_ai.output.messages": `{"said":"answered"}`},
+		"subagent":                 {"gen_ai.input.messages": `["the task"]`, "gen_ai.output.messages": `["the answer"]`},
+		"chat m":                   {"gen_ai.output.messages": `{"said":"it"}`},
+		"execute_tool t":           {"gen_ai.tool.call.arguments": `{"q":1}`, "gen_ai.tool.call.result": "found"},
+	}
 	for _, capture := range []bool{true, false} {
 		t.Run(fmt.Sprintf("capture=%v", capture), func(t *testing.T) {
 			on := contentOn()
@@ -342,17 +348,31 @@ func TestARecordsOwnMessagesLeaveOnlyWhenAskedAndTheProjectAllows(t *testing.T) 
 			warm.End()
 			h.flush()
 			record := theRecord(t)
-			record.Inside = nil
+			at := record.Start
 			record.InputMessages, record.OutputMessages = []string{"asked"}, map[string]string{"said": "answered"}
-			recordRun(t, h, record)
-			sent := attributesOf(t, byName(h.transport.spans(t))["invoke_agent claude-code"])
-			input, hasInput := sent["gen_ai.input.messages"]
-			output, hasOutput := sent["gen_ai.output.messages"]
-			if capture && (input != `["asked"]` || output != `{"said":"answered"}`) {
-				t.Errorf("gen_ai.input.messages = %v, gen_ai.output.messages = %v", input, output)
+			record.Inside = []telmoni.RecordItem{
+				telmoni.StepRecord{
+					Name: "subagent", Start: at, End: at,
+					InputMessages: []string{"the task"}, OutputMessages: []string{"the answer"},
+					Calls: []telmoni.CallRecord{
+						telmoni.ModelCallRecord{Model: "m", Start: at, End: at, OutputMessages: map[string]string{"said": "it"}},
+					},
+				},
+				telmoni.ToolCallRecord{Name: "t", Start: at, End: at, Arguments: map[string]int{"q": 1}, Result: "found"},
 			}
-			if !capture && (hasInput || hasOutput) {
-				t.Error("a record's content left without CaptureContent")
+			recordRun(t, h, record)
+			spans := byName(h.transport.spans(t))
+			for name, fields := range content {
+				sent := attributesOf(t, spans[name])
+				for key, want := range fields {
+					got, has := sent[key]
+					if capture && got != want {
+						t.Errorf("%s %s = %v, want %s", name, key, got, want)
+					}
+					if !capture && has {
+						t.Errorf("%s's %s left without CaptureContent", name, key)
+					}
+				}
 			}
 		})
 	}

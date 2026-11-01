@@ -58,35 +58,44 @@ type CallRecord interface {
 }
 
 // StepRecord is a step that has ended, with the calls made inside it, in the
-// order they ran. ErrorType and Cancelled mark it as a RunRecord's mark a run.
+// order they ran. InputMessages and OutputMessages, a subagent's task and
+// answer say, are content as a RunRecord's are. ErrorType and Cancelled mark
+// it as a RunRecord's mark a run.
 type StepRecord struct {
-	Name      string
-	Start     time.Time
-	End       time.Time
-	Calls     []CallRecord
-	ErrorType string
-	Cancelled bool
+	Name           string
+	InputMessages  any
+	OutputMessages any
+	Start          time.Time
+	End            time.Time
+	Calls          []CallRecord
+	ErrorType      string
+	Cancelled      bool
 }
 
 // ModelCallRecord is a model call that has ended: its model, its times and its
 // tokens. Provider and Operation are as a live call's ModelCallOptions has
-// them, a blank Operation meaning chat, and Usage as its Answer has it.
-// ErrorType and Cancelled mark it as a RunRecord's mark a run.
+// them, a blank Operation meaning chat, Usage as its Answer has it, and
+// OutputMessages content as a RunRecord's is. ErrorType and Cancelled mark it
+// as a RunRecord's mark a run.
 type ModelCallRecord struct {
-	Model     string
-	Provider  string
-	Operation string
-	Start     time.Time
-	End       time.Time
-	Usage     *Usage
-	ErrorType string
-	Cancelled bool
+	Model          string
+	Provider       string
+	Operation      string
+	Start          time.Time
+	End            time.Time
+	Usage          *Usage
+	OutputMessages any
+	ErrorType      string
+	Cancelled      bool
 }
 
 // ToolCallRecord is a tool call that has ended: its name and its times.
-// ErrorType and Cancelled mark it as a RunRecord's mark a run.
+// Arguments and Result are content as a RunRecord's messages are. ErrorType
+// and Cancelled mark it as a RunRecord's mark a run.
 type ToolCallRecord struct {
 	Name      string
+	Arguments any
+	Result    any
 	Start     time.Time
 	End       time.Time
 	ErrorType string
@@ -133,7 +142,7 @@ var ErrShutdown = errors.New("telmoni: the client is shut down; the record was n
 // span's id is derived from the run's id and the span's place in the record,
 // and the spans are queued whole once built, to travel in exports of their
 // own, so the same record sent again is the same bytes, whatever else is
-// sent meanwhile, and ingest answers it once. A record holds no content.
+// sent meanwhile, and ingest answers it once.
 //
 // It returns an error, sending nothing, for a blank agent, a run id that is
 // not a UUID, text past ingest's caps, a time at or before the Unix epoch or
@@ -182,6 +191,8 @@ func (c *Client) RecordRun(ctx context.Context, record RunRecord) error {
 	// After the draw, as Python and TypeScript warn, and before the hold: a
 	// logger that records a run would wait on it for good.
 	c.warnUsage(record)
+	// Before the hold too: a MarshalJSON of the caller's may record a run.
+	contents := recordContents(record)
 	// Queued whole or not at all: a record that outgrows the queue's room
 	// would lose its tail, the run's own span first.
 	release, err := c.processor.hold(trace.TraceID(runUUID), recordSpans(record))
@@ -190,7 +201,7 @@ func (c *Client) RecordRun(ctx context.Context, record RunRecord) error {
 	}
 	built := false
 	defer func() { release(built) }()
-	r := &recorder{tracer: c.tracer, runID: runUUID, inherited: inherited}
+	r := &recorder{tracer: c.tracer, runID: runUUID, inherited: inherited, contents: contents}
 	// No span in it: whatever span ctx carries, the record's trace is its
 	// own.
 	root := trace.ContextWithSpanContext(ctx, trace.SpanContext{})
@@ -221,11 +232,13 @@ type recorder struct {
 	tracer    trace.Tracer
 	runID     [16]byte
 	inherited []attribute.KeyValue
+	contents  [][]attribute.KeyValue
 	place     int
 }
 
 func (r *recorder) open(parent context.Context, name string, kind trace.SpanKind, attrs []attribute.KeyValue, start time.Time) trace.Span {
 	ctx := withIDs(parent, trace.TraceID(r.runID), recordedSpanID(r.runID, r.place))
+	attrs = slices.Concat(attrs, r.contents[r.place])
 	r.place++
 	_, span := r.tracer.Start(ctx, name,
 		trace.WithSpanKind(kind),
@@ -233,6 +246,44 @@ func (r *recorder) open(parent context.Context, name string, kind trace.SpanKind
 		trace.WithTimestamp(start),
 	)
 	return span
+}
+
+// recordContents is each span's content by its place in the record: none for
+// the run, whose own goes with its opening, then each step and call in the
+// record's order, a step before its calls.
+func recordContents(record RunRecord) [][]attribute.KeyValue {
+	contents := [][]attribute.KeyValue{nil}
+	for _, item := range record.Inside {
+		contents = append(contents, contentOf(item))
+		if step, ok := itemValue(item).(StepRecord); ok {
+			for _, call := range step.Calls {
+				contents = append(contents, contentOf(call))
+			}
+		}
+	}
+	return contents
+}
+
+// contentOf is a recorded step's or call's content as JSON, which the
+// exporter's lock sends or keeps back.
+func contentOf(item RecordItem) []attribute.KeyValue {
+	var out []attribute.KeyValue
+	add := func(key string, value any) {
+		if value != nil {
+			out = append(out, attribute.String(key, asJSON(value)))
+		}
+	}
+	switch item := itemValue(item).(type) {
+	case StepRecord:
+		add(attrInputMessages, item.InputMessages)
+		add(attrOutputMessages, item.OutputMessages)
+	case ModelCallRecord:
+		add(attrOutputMessages, item.OutputMessages)
+	case ToolCallRecord:
+		add(attrToolCallArguments, item.Arguments)
+		add(attrToolCallResult, item.Result)
+	}
+	return out
 }
 
 // call opens a call and ends it at once, so it is queued as it ended: before

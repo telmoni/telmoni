@@ -731,6 +731,12 @@ class Opener:
             for each in spans
             if isinstance(each, ModelCallRecord)
         }
+        # Content too, whose encoding may run the caller's ``__str__``.
+        contents = {
+            id(each): _record_content(each)
+            for item, calls in items
+            for each in (item, *calls)
+        }
         places = itertools.count()
 
         def open_span(
@@ -754,7 +760,7 @@ class Opener:
             else:
                 name, own = _tool_call_opening(item.name)
                 kind = SpanKind.INTERNAL
-            attributes = {**inherited, **own}
+            attributes = {**inherited, **own, **contents[id(item)]}
             _close(open_span(name, parent, attributes, kind, item.start), item)
 
         with self._client.processor.hold(run_uuid.int, need):
@@ -766,7 +772,11 @@ class Opener:
             for item, calls in items:
                 if isinstance(item, StepRecord):
                     step = open_span(
-                        item.name, ctx, inherited, SpanKind.INTERNAL, item.start
+                        item.name,
+                        ctx,
+                        {**inherited, **contents[id(item)]},
+                        SpanKind.INTERNAL,
+                        item.start,
                     )
                     inner = trace.set_span_in_context(step, ctx)
                     for each in calls:
@@ -1202,6 +1212,25 @@ def _check(item: RunRecord | StepRecord | CallRecord) -> None:
             raise ValueError(
                 f"a recorded {what}'s {field} must be up to {most} characters"
             )
+
+
+def _record_content(item: StepRecord | CallRecord) -> dict[str, str]:
+    """A recorded step's or call's content as JSON, which the exporter's lock
+    sends or keeps back."""
+    fields: tuple[tuple[str, object], ...]
+    if isinstance(item, ModelCallRecord):
+        fields = ((contract.OUTPUT_MESSAGES, item.output_messages),)
+    elif isinstance(item, ToolCallRecord):
+        fields = (
+            (contract.TOOL_CALL_ARGUMENTS, item.arguments),
+            (contract.TOOL_CALL_RESULT, item.result),
+        )
+    else:
+        fields = (
+            (contract.INPUT_MESSAGES, item.input_messages),
+            (contract.OUTPUT_MESSAGES, item.output_messages),
+        )
+    return {key: _as_json(value) for key, value in fields if value is not None}
 
 
 def _close(

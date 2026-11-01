@@ -203,6 +203,54 @@ def test_a_failure_leaves_in_full_only_under_both_locks(
         assert scenario["event"]["name"] not in str(transport.requests)
 
 
+@pytest.mark.parametrize("case", load_fixture("ask.json")["cases"])
+def test_the_mode_is_asked_before_the_first_content_it_would_send(
+    case: dict[str, Any], transport: FakeTransport
+) -> None:
+    fixture = load_fixture("ask.json")
+    transport.answers = [
+        Answer(given, {}, b"")
+        if isinstance(given, int)
+        else Answer(200, {"Telmoni-Content-Mode": given}, b"{}")
+        for given in case["answers"]
+    ]
+    client = Telmoni(
+        Config(api_key="k", capture_content=case["capture_content"]),
+        transport=transport,
+    )
+    messages = fixture["input_messages"] if case["content"] else None
+    try:
+        for _ in range(2):
+            with (
+                client.run(fixture["agent"]),
+                client.model_call(fixture["model"], input_messages=messages),
+            ):
+                pass
+            assert client.flush()
+    finally:
+        client.shutdown()
+
+    def spans_of(body: dict[str, Any]) -> list[dict[str, Any]]:
+        return [
+            span
+            for resource_spans in body["resourceSpans"]
+            for scope_spans in resource_spans["scopeSpans"]
+            for span in scope_spans["spans"]
+        ]
+
+    bodies = transport.bodies()
+    assert len(bodies) == case["requests"]
+    asks = [body for body in bodies if not spans_of(body)]
+    assert asks == ([fixture["body"]] if case["asked"] else [])
+    if case["asked"]:
+        assert bodies[0] == fixture["body"]
+        assert transport.requests[0][1]["Authorization"] == "Bearer k"
+    first = next(body for body in bodies if spans_of(body))
+    call = next(s for s in spans_of(first) if s["name"].startswith("chat "))
+    sent = any(a["key"] == "gen_ai.input.messages" for a in call["attributes"])
+    assert sent == case["sent"]
+
+
 @pytest.mark.parametrize("case", load_fixture("media.json")["cases"])
 def test_images_are_lifted_out_of_messages_only_under_both_locks(
     case: dict[str, Any], transport: FakeTransport

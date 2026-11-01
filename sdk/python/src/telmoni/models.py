@@ -414,6 +414,8 @@ class ModelCallRecord:
     provider: str | None = None
     operation: str = contract.DEFAULT_MODEL_OPERATION
     usage: Usage | None = None
+    # Content: sent only when asked and the project's mode is on.
+    output_messages: object | None = None
     error_type: str | None = None
     cancelled: bool = False
 
@@ -425,6 +427,9 @@ class ToolCallRecord:
     name: str
     start: datetime
     end: datetime
+    # Content: sent only when asked and the project's mode is on.
+    arguments: object | None = None
+    result: object | None = None
     error_type: str | None = None
     cancelled: bool = False
 
@@ -439,6 +444,10 @@ class StepRecord:
     name: str
     start: datetime
     end: datetime
+    # Content, a subagent's task and answer say: sent only when asked and the
+    # project's mode is on.
+    input_messages: object | None = None
+    output_messages: object | None = None
     calls: Sequence[CallRecord] = ()
     error_type: str | None = None
     cancelled: bool = False

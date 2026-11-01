@@ -49,6 +49,9 @@ logger = logging.getLogger("telmoni")
 
 ATTEMPTS = 3
 """How many times one batch is sent before it is dropped."""
+_RETRIED = frozenset({429, 502, 503, 504})
+"""OTLP's retryable statuses: a 502 or a 504 is a load balancer's, a server's
+rollout among its causes."""
 REQUEST_TIMEOUT_S = 10.0
 ANSWER_MAX = 1 << 20
 """How much of an answer is read: a problem's JSON is small, and an export
@@ -395,6 +398,14 @@ class Exporter:
         reason not their own, which the rest of a batch they are part of would meet."""
         if not spans:
             return True
+        # Yet to hear the project's mode, a client asks it first, so a process
+        # that sends once, as a hook does, still sends its content.
+        if (
+            self._config.capture_content
+            and self._content_mode is None
+            and any(_holds_content(span) for span in spans)
+        ):
+            self._ask()
         lifted = self._lift(spans) if self._keeps_content() else {}
         return self._export(spans, lifted)
 
@@ -573,7 +584,7 @@ class Exporter:
         # A lone surrogate is no text ingest reads, and would lose the batch.
         return replace_surrogates(text).encode()
 
-    def _send(self, body: bytes) -> bool:
+    def _headers(self) -> dict[str, str]:
         headers = {
             "Content-Type": "application/json",
             "User-Agent": f"telmoni-python/{__version__}",
@@ -581,6 +592,26 @@ class Exporter:
         bearer = self._config.bearer()
         if bearer is not None:
             headers["Authorization"] = f"Bearer {bearer}"
+        return headers
+
+    def _ask(self) -> None:
+        """Asks the project's content mode with an export of no spans, which
+        ingest answers as the mode is now: once and silently, since the export
+        after it retries and warns of what it meets, its content held back
+        meanwhile."""
+        if self._given_up.is_set():
+            return
+        sent = {**self._headers(), contract.SENT_AT_HEADER: str(time.time_ns())}
+        try:
+            answer = self._transport("POST", self._url, sent, _ASK)
+        except (OSError, http.client.HTTPException):
+            # Unheard, the mode keeps the content back, as no answer does.
+            return
+        if 200 <= answer.status < 300:
+            self._read(answer)
+
+    def _send(self, body: bytes) -> bool:
+        headers = self._headers()
         failure = ""
         # The last attempt's, as its words name it: none after a transport fault.
         last = WarningInfo("failed")
@@ -601,15 +632,15 @@ class Exporter:
                 self._read(answer)
                 return True
             problem = _problem_type(answer.body)
-            if answer.status in (429, 503):
-                failure = f"{answer.status} {problem}"
+            if answer.status in _RETRIED:
+                failure = _named(answer.status, problem)
                 last = WarningInfo("failed", answer.status, problem or None)
                 self._wait(answer.header("Retry-After"), attempt)
                 continue
             self.warn_once(
                 f"status:{answer.status}",
-                f"telmoni: export refused with {answer.status} "
-                f"{problem}; the batch was dropped",
+                f"telmoni: export refused with {_named(answer.status, problem)}; "
+                "the batch was dropped",
                 WarningInfo("refused", answer.status, problem or None),
             )
             # Refused for what it holds, the rest of a batch may still go.
@@ -788,6 +819,26 @@ def _remedy(attribute: str, reason: str) -> str:
     if reason == "cardinality":
         return "keep tags to a few keys of a few values each: an id goes as the user or the session"
     return "see the server's answer"
+
+
+_ASK = b'{"resourceSpans":[]}'
+"""An export of no spans: how a client asks the project's content mode."""
+
+
+def _holds_content(span: ReadableSpan) -> bool:
+    """Whether a span holds anything the content lock decides on: a content
+    field, an event or a status message."""
+    return (
+        any(key in contract.CONTENT for key in span.attributes or {})
+        or bool(span.events)
+        or bool(span.status.description)
+    )
+
+
+def _named(status: int, problem: str) -> str:
+    """An answer as a warning names it: its status, then the problem type its
+    body named, where it named one."""
+    return f"{status} {problem}" if problem else str(status)
 
 
 def _problem_type(body: bytes) -> str:

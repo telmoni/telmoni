@@ -53,6 +53,12 @@ Where `sends`, the uploads, sorted by path, are `uploads` — each its path unde
 
 The rest each suite proves on its own: a failed upload, a `413` or no answer, still sends the part as its `file` part and warns once (`upload_failed`, with the status where one came), and its hash is tried again on the next export, being remembered only once kept; a file past 5 MiB is never put, and its part is sent as its `file` part all the same.
 
+## `ask.json`
+
+A client asks the project's content mode before the first content it would send, so a process that sends once, a hook's, still sends its content. For each of `cases`, a client keyed `k` is built with its `capture_content`; its fake transport answers each request in turn from `answers` — a word, `200` with `Telmoni-Content-Mode` naming it and a body of `{}`; a number, that status with no header and no body — then as `kept.json` does. The client runs two runs of `agent`, each flushed, each holding one model call of `model`, opened with `input_messages` where `content` is true and with none where it is false.
+
+`requests` is how many requests the client made in all. Where `asked`, the first was the ask: a `POST` to the traces lane with the export's headers and `body`, an export of no spans, which ingest answers under the project's mode as it is then, never as it answered an earlier one; where not, nothing was asked. `sent` is whether the first run's export carries `gen_ai.input.messages` on its model call. A client asks once and silently, before an export holding content, while no answer has named the mode; an ask met with anything but a `2xx` leaves the mode unheard, and the export goes without its content.
+
 ## `capture_content.json`
 
 What each SDK makes of `TELMONI_CAPTURE_CONTENT` as it builds its configuration from the environment (`Config.from_env`, `Telmoni.fromEnv`, `ConfigFromEnv`, `Config::from_env`). Each of `cases` sets the variable to `given`, or leaves it unset where that is `null`, and the configuration must hold `capture_content` as it says: the value, Unicode's White_Space trimmed from its ends as every variable is, turns content on when it is `1` alone; `0`, `true`, `yes` and every other value, a blank one or none leave it off, so no spelling of "false" lets content out. Each suite proves on its own that a setting made in code stands over the variable, on or off.
@@ -111,6 +117,8 @@ Every warning any SDK gives carries one of these kinds, the same in all four:
 | `rate-limited.json` | `429` with `Retry-After` | waits `Retry-After` seconds, through its injected sleep, then sends the same bytes again |
 | `rate-limited-long.json` | `429` with a `Retry-After` of 20 digits, past what any of the four could hold as a whole number | waits the cap, 60 seconds, then sends the same bytes again: the header is read as text, ASCII digits with a sign allowed, below 0 none and past 60 the cap |
 | `unavailable.json` | `503` with `Retry-After` | waits and retries, three attempts in all, then drops the batch with one warning |
+| `bad-gateway.json` | `502` from a load balancer, an HTML body and no `Retry-After` | waits 2^attempt seconds and retries, three attempts in all, as OTLP retries a `502`, then drops the batch with one warning naming the status alone |
+| `gateway-timeout.json` | `504` from a load balancer, a plain-text body | retries as for a `502` |
 | `forbidden.json` | `403` | never retries; warns once naming the problem type; later batches are still sent |
 | `said.json` | `200`, a partial success whose line names neither a drop nor a refusal | warns once with the server's line, as it said it |
 

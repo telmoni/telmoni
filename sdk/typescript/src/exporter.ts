@@ -27,6 +27,8 @@ import { trimEnds } from './whitespace.js';
 
 /** How many times one batch is sent before it is dropped. */
 export const ATTEMPTS = 3;
+/** OTLP's retryable statuses: a 502 or a 504 is a load balancer's, a server's rollout among its causes. */
+const RETRIED: ReadonlySet<number> = new Set([429, 502, 503, 504]);
 export const REQUEST_TIMEOUT_MS = 10_000;
 /** How much of an answer is read: a problem's JSON is small, and an export never pays for more. */
 export const ANSWER_MAX = 1 << 20;
@@ -309,6 +311,11 @@ export class Exporter {
    */
   async export(spans: readonly ReadableSpan[]): Promise<boolean> {
     if (spans.length === 0) return true;
+    // Yet to hear the project's mode, a client asks it first, so a process
+    // that sends once, as a hook does, still sends its content.
+    if (this.#config.captureContent && this.#contentMode === undefined && spans.some(holdsContent)) {
+      await this.#ask();
+    }
     const lifted = this.#keepsContent() ? await this.#lift(spans) : new Map<ReadableSpan, Record<string, string>>();
     return this.#export(spans, lifted);
   }
@@ -477,7 +484,7 @@ export class Exporter {
     );
   }
 
-  async #send(body: string): Promise<boolean> {
+  #headers(): Record<string, string> {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'User-Agent': `telmoni-typescript/${VERSION}`,
@@ -485,18 +492,41 @@ export class Exporter {
     if (this.#config.apiKey !== undefined) {
       headers['Authorization'] = `Bearer ${this.#config.apiKey}`;
     }
+    return headers;
+  }
+
+  /**
+   * Asks the project's content mode with an export of no spans, which ingest
+   * answers as the mode is now: once and silently, since the export after it
+   * retries and warns of what it meets, its content held back meanwhile.
+   */
+  async #ask(): Promise<void> {
+    if (this.#givenUp.signal.aborted) return;
+    try {
+      const answer = await this.#transport(this.#url, {
+        method: 'POST',
+        headers: { ...this.#headers(), [contract.SENT_AT_HEADER]: sentAtNow() },
+        body: ASK,
+      });
+      if (answer.status >= 200 && answer.status < 300) await this.#read(answer);
+    } catch {
+      // Unheard, the mode keeps the content back, as no answer does.
+    }
+  }
+
+  async #send(body: string): Promise<boolean> {
+    const headers = this.#headers();
     let failure = '';
     // The last attempt's, for the warning's fields, as its line names them; a transport error clears it.
     let met: Warning = { kind: 'failed' };
     for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
       if (this.#givenUp.signal.aborted) return false;
-      // This clock as the attempt leaves, the spans' own.
-      const sentAt = (BigInt(Math.trunc(Date.now())) * 1_000_000n).toString();
       let answer: TransportResponse;
       try {
         answer = await this.#transport(this.#url, {
           method: 'POST',
-          headers: { ...headers, [contract.SENT_AT_HEADER]: sentAt },
+          // This clock as the attempt leaves, the spans' own.
+          headers: { ...headers, [contract.SENT_AT_HEADER]: sentAtNow() },
           body,
         });
       } catch (error) {
@@ -511,15 +541,15 @@ export class Exporter {
       }
       const text = await bodyOf(answer);
       const named = problemType(text);
-      if (answer.status === 429 || answer.status === 503) {
-        failure = `${answer.status} ${named}`;
+      if (RETRIED.has(answer.status)) {
+        failure = nameOf(answer.status, named);
         met = answered('failed', answer.status, named);
         await this.#wait(answer.headers.get('Retry-After'), attempt);
         continue;
       }
       this.warnOnce(
         `status:${answer.status}`,
-        `telmoni: export refused with ${answer.status} ${named}; the batch was dropped`,
+        `telmoni: export refused with ${nameOf(answer.status, named)}; the batch was dropped`,
         answered('refused', answer.status, named),
       );
       // Refused for what it holds, the rest of a batch may still go.
@@ -692,6 +722,28 @@ function remedy(attributeName: string, reason: string): string {
 /** An export's own failure as data: the status met, and the problem type where the body named one. */
 function answered(kind: 'refused' | 'failed', status: number, type: string): Warning {
   return type === '' ? { kind, status } : { kind, status, problemType: type };
+}
+
+/** An export of no spans: how a client asks the project's content mode. */
+const ASK = '{"resourceSpans":[]}';
+
+/** Whether a span holds anything the content lock decides on: a content field, an event or a status message. */
+function holdsContent(span: ReadableSpan): boolean {
+  return (
+    Object.keys(span.attributes).some((key) => contract.CONTENT.has(key)) ||
+    span.events.length > 0 ||
+    Boolean(span.status.message)
+  );
+}
+
+/** This clock now, in decimal nanoseconds since the Unix epoch. */
+function sentAtNow(): string {
+  return (BigInt(Math.trunc(Date.now())) * 1_000_000n).toString();
+}
+
+/** An answer as a warning names it: its status, then the problem type its body named, where it named one. */
+function nameOf(status: number, problem: string): string {
+  return problem === '' ? String(status) : `${status} ${problem}`;
 }
 
 /** The problem type a refusal's `message` opens with, or nothing. */

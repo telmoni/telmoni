@@ -445,6 +445,80 @@ type mediaFixture struct {
 	Sent    map[string]any   `json:"sent"`
 }
 
+type askFixture struct {
+	Body          map[string]any `json:"body"`
+	Agent         string         `json:"agent"`
+	Model         string         `json:"model"`
+	InputMessages any            `json:"input_messages"`
+	Cases         []struct {
+		CaptureContent bool  `json:"capture_content"`
+		Content        bool  `json:"content"`
+		Answers        []any `json:"answers"`
+		Asked          bool  `json:"asked"`
+		Sent           bool  `json:"sent"`
+		Requests       int   `json:"requests"`
+	} `json:"cases"`
+}
+
+func TestTheModeIsAskedBeforeTheFirstContentItWouldSend(t *testing.T) {
+	var fixture askFixture
+	if err := json.Unmarshal(loadFixture(t, "ask.json"), &fixture); err != nil {
+		t.Fatalf("decoding ask.json: %v", err)
+	}
+	for _, each := range fixture.Cases {
+		var answers []any
+		for _, given := range each.Answers {
+			switch given := given.(type) {
+			case string:
+				answers = append(answers, scripted{status: 200, headers: map[string]string{"Telmoni-Content-Mode": given}, body: []byte("{}")})
+			case float64:
+				answers = append(answers, scripted{status: int(given)})
+			}
+		}
+		h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k"), CaptureContent: each.CaptureContent}, newFakeTransport(t, answers...))
+		for range 2 {
+			ctx, run := h.client.Run(context.Background(), fixture.Agent, telmoni.RunOptions{})
+			var opts telmoni.ModelCallOptions
+			if each.Content {
+				opts.InputMessages = fixture.InputMessages
+			}
+			_, call := run.ModelCall(ctx, fixture.Model, opts)
+			call.End()
+			run.End()
+			h.flush()
+		}
+		bodies := h.transport.bodies(t)
+		if len(bodies) != each.Requests {
+			t.Fatalf("%+v: %d requests, want %d", each, len(bodies), each.Requests)
+		}
+		var asks, exports []map[string]any
+		for _, body := range bodies {
+			if len(spansIn(body)) == 0 {
+				asks = append(asks, body)
+			} else {
+				exports = append(exports, body)
+			}
+		}
+		if each.Asked {
+			if len(asks) != 1 || !reflect.DeepEqual(bodies[0], fixture.Body) {
+				t.Errorf("%+v: asks %v, first body %v; want the ask first and alone", each, asks, bodies[0])
+			}
+			if got := h.transport.all()[0].header.Get("Authorization"); got != "Bearer k" {
+				t.Errorf("%+v: the ask's Authorization = %q", each, got)
+			}
+		} else if len(asks) != 0 {
+			t.Errorf("%+v: asked %d times, want none", each, len(asks))
+		}
+		calls := withPrefix(spansIn(exports[0]), "chat ")
+		if len(calls) != 1 {
+			t.Fatalf("%+v: %d model calls in the first export, want 1", each, len(calls))
+		}
+		if _, sent := attributesOf(t, calls[0])["gen_ai.input.messages"]; sent != each.Sent {
+			t.Errorf("%+v: the first run's content sent = %v, want %v", each, sent, each.Sent)
+		}
+	}
+}
+
 func TestImagesAreLiftedOutOfMessagesOnlyUnderBothLocks(t *testing.T) {
 	var fixture mediaFixture
 	if err := json.Unmarshal(loadFixture(t, "media.json"), &fixture); err != nil {
