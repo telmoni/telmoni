@@ -603,12 +603,17 @@ pub async fn set_hashing_key_if_none(
 }
 
 /// A project's content key as its row keeps it: a data key wrapped by
-/// `CONTENT_KEK`, with the key version it was wrapped under.
+/// `CONTENT_KEK`, with the key version it was wrapped under, and the id each
+/// row sealed under it carries.
 #[derive(Debug, Clone)]
 pub struct WrappedContentKey {
+    pub id: Uuid,
     pub wrapped_dek: Vec<u8>,
     pub key_version: i16,
 }
+
+/// A settings row's content key columns, each there or not with the others.
+type ContentKeyRow = (Option<Uuid>, Option<Vec<u8>>, Option<i16>);
 
 /// The key a project's content is sealed under, or `None` where it has no
 /// row or no key yet.
@@ -616,24 +621,26 @@ pub async fn content_key<B: HasProject>(
     tx: &mut Scoped<'_, B>,
     project_id: &ProjectId,
 ) -> sqlx::Result<Option<WrappedContentKey>> {
-    let row: Option<(Option<Vec<u8>>, Option<i16>)> = sqlx::query_as(
-        "SELECT content_key_wrapped_dek, content_key_version
+    let row: Option<ContentKeyRow> = sqlx::query_as(
+        "SELECT content_key_id, content_key_wrapped_dek, content_key_version
            FROM telemetry.project_settings
           WHERE project_id = $1",
     )
     .bind(project_id)
     .fetch_optional(tx.conn())
     .await?;
-    Ok(row.and_then(|(wrapped_dek, key_version)| {
+    Ok(row.and_then(|(id, wrapped_dek, key_version)| {
         Some(WrappedContentKey {
+            id: id?,
             wrapped_dek: wrapped_dek?,
             key_version: key_version?,
         })
     }))
 }
 
-/// The project's content key, set where its row has none: the first writer's
-/// stays, as [`set_hashing_key_if_none`]'s does.
+/// The project's content key, set where its row has none and its mode is
+/// `on`: the first writer's stays, as [`set_hashing_key_if_none`]'s does, and
+/// a project switched `off` meanwhile gets no key for the export in flight.
 pub async fn set_content_key_if_none(
     tx: &mut Scoped<'_, ProjectAndOrganization>,
     project_id: &ProjectId,
@@ -641,34 +648,38 @@ pub async fn set_content_key_if_none(
 ) -> sqlx::Result<bool> {
     Ok(sqlx::query(
         "UPDATE telemetry.project_settings
-            SET content_key_wrapped_dek = $2, content_key_version = $3
-          WHERE project_id = $1 AND content_key_wrapped_dek IS NULL",
+            SET content_key_id = $4, content_key_wrapped_dek = $2, content_key_version = $3
+          WHERE project_id = $1 AND content_key_wrapped_dek IS NULL AND content_mode = 'on'",
     )
     .bind(project_id)
     .bind(&key.wrapped_dek)
     .bind(key.key_version)
+    .bind(key.id)
     .execute(tx.conn())
     .await?
     .rows_affected()
         > 0)
 }
 
-/// The project's content key deleted, so nothing it sealed opens again, its
-/// backups' copies among it: answers whether there was one.
+/// The project's content key deleted, so nothing reads what it sealed from
+/// then, but a backup taken before: the id its rows are purged by, or none
+/// where there was no key.
 pub async fn delete_content_key(
     tx: &mut Scoped<'_, ProjectAndOrganization>,
     project_id: &ProjectId,
-) -> sqlx::Result<bool> {
-    Ok(sqlx::query(
-        "UPDATE telemetry.project_settings
-            SET content_key_wrapped_dek = NULL, content_key_version = NULL
-          WHERE project_id = $1 AND content_key_wrapped_dek IS NOT NULL",
+) -> sqlx::Result<Option<Uuid>> {
+    sqlx::query_scalar(
+        "WITH held AS (
+             SELECT content_key_id FROM telemetry.project_settings
+              WHERE project_id = $1 AND content_key_wrapped_dek IS NOT NULL FOR UPDATE)
+         UPDATE telemetry.project_settings s
+            SET content_key_id = NULL, content_key_wrapped_dek = NULL, content_key_version = NULL
+           FROM held WHERE s.project_id = $1
+      RETURNING held.content_key_id",
     )
     .bind(project_id)
-    .execute(tx.conn())
-    .await?
-    .rows_affected()
-        > 0)
+    .fetch_optional(tx.conn())
+    .await
 }
 
 /// One content field, sealed, as `plain_content` keeps it.
@@ -695,16 +706,18 @@ pub async fn keep_content(
     project_id: &ProjectId,
     organization_id: &OrganizationId,
     received_at: DateTime<Utc>,
+    key_id: Uuid,
     sealed: &SealedFields,
 ) -> sqlx::Result<()> {
     sqlx::query(
         "WITH kept AS (
              INSERT INTO telemetry.plain_content
                  (project_id, run_id, trace_id, span_id, field, received_at, ciphertext, nonce,
-                  bytes, words, pairs)
+                  bytes, words, pairs, key_id)
              SELECT $1, r, t, s, f, $3, c, n, b,
                     ARRAY(SELECT jsonb_array_elements_text(w::jsonb)::bigint),
-                    ARRAY(SELECT jsonb_array_elements_text(p::jsonb)::bigint)
+                    ARRAY(SELECT jsonb_array_elements_text(p::jsonb)::bigint),
+                    $13
                FROM UNNEST($10::uuid[], $4::text[], $5::text[], $6::text[], $7::bytea[],
                            $8::bytea[], $9::int[], $11::text[], $12::text[])
                  AS u(r, t, s, f, c, n, b, w, p)
@@ -727,6 +740,7 @@ pub async fn keep_content(
     .bind(&sealed.run_ids)
     .bind(&sealed.words)
     .bind(&sealed.pairs)
+    .bind(key_id)
     .execute(tx.conn())
     .await?;
     Ok(())
@@ -735,7 +749,8 @@ pub async fn keep_content(
 /// The run of each field of the project's content holding every one of
 /// `words` and of `pairs`, hashed, newest first, up to `limit` fields; nothing
 /// sealed. The words' index finds the fields, each one's pairs checked on it.
-/// None once its content key is deleted, as [`read_content`] reads none.
+/// Only fields under the project's key now, as [`read_content`] reads: none
+/// once it is deleted.
 pub(crate) async fn search_content<B: HasProject>(
     tx: &mut Scoped<'_, B>,
     project_id: &ProjectId,
@@ -746,8 +761,8 @@ pub(crate) async fn search_content<B: HasProject>(
         "SELECT run_id
            FROM telemetry.plain_content
           WHERE project_id = $1 AND words @> $2 AND pairs @> $4
-            AND EXISTS (SELECT 1 FROM telemetry.project_settings
-                         WHERE project_id = $1 AND content_key_wrapped_dek IS NOT NULL)
+            AND key_id = (SELECT content_key_id FROM telemetry.project_settings
+                           WHERE project_id = $1)
           ORDER BY received_at DESC
           LIMIT $3",
     )
@@ -764,9 +779,10 @@ pub(crate) type KeptField = (Uuid, String, String, String, Vec<u8>, Vec<u8>);
 
 /// Every field the project keeps for the runs, or for those of their spans
 /// `spans` names, sealed, in trace, span and name order: the crate's own,
-/// read only by [`crate::content::open`], which files each read. None once
-/// its content key is deleted ([`delete_content_key`]), whatever rows its
-/// purge has yet to take.
+/// read only by [`crate::content::open`], which files each read. Only fields
+/// under the project's key now: none once it is deleted
+/// ([`delete_content_key`]), whatever rows its purge has yet to take, and
+/// none a deleted key sealed once a later key is made.
 pub(crate) async fn read_content(
     tx: &mut Scoped<'_, ProjectAndOrganization>,
     project_id: &ProjectId,
@@ -778,8 +794,8 @@ pub(crate) async fn read_content(
            FROM telemetry.plain_content
           WHERE project_id = $1 AND run_id = ANY($2)
             AND ($3::text[] IS NULL OR span_id = ANY($3))
-            AND EXISTS (SELECT 1 FROM telemetry.project_settings
-                         WHERE project_id = $1 AND content_key_wrapped_dek IS NOT NULL)
+            AND key_id = (SELECT content_key_id FROM telemetry.project_settings
+                           WHERE project_id = $1)
           ORDER BY trace_id, span_id, field",
     )
     .bind(project_id)
@@ -801,7 +817,7 @@ pub async fn delete_content(
     before: Option<DateTime<Utc>>,
     limit: i64,
 ) -> sqlx::Result<u64> {
-    delete_content_of(conn, project_ids, before, limit, None).await
+    delete_content_of(conn, project_ids, before, limit, None, None).await
 }
 
 /// The project's content rows of these runs, whenever their spans landed,
@@ -818,6 +834,29 @@ pub async fn delete_runs_content(
         None,
         i64::MAX,
         Some(runs),
+        None,
+    )
+    .await
+}
+
+/// The project's rows sealed under `key`, a content key deleted at `since`,
+/// and the files and names kept before then, deleted and counted off as
+/// [`delete_content`] does them: the content switch's purge, which leaves
+/// what a key made since sealed.
+pub async fn delete_key_content(
+    conn: &mut sqlx::PgConnection,
+    project_id: &ProjectId,
+    key: Uuid,
+    since: DateTime<Utc>,
+    limit: i64,
+) -> sqlx::Result<u64> {
+    delete_content_of(
+        conn,
+        std::slice::from_ref(project_id),
+        Some(since),
+        limit,
+        None,
+        Some(key),
     )
     .await
 }
@@ -828,6 +867,7 @@ async fn delete_content_of(
     before: Option<DateTime<Utc>>,
     limit: i64,
     runs: Option<&[Uuid]>,
+    key: Option<Uuid>,
 ) -> sqlx::Result<u64> {
     sqlx::query(
         "SELECT 1 FROM telemetry.project_settings
@@ -843,6 +883,7 @@ async fn delete_content_of(
                               WHERE project_id = ANY($1)
                                 AND ($2::timestamptz IS NULL OR received_at < $2)
                                 AND ($4::uuid[] IS NULL OR run_id = ANY($4))
+                                AND ($5::uuid IS NULL OR key_id = $5)
                               LIMIT $3)
              RETURNING project_id, bytes),
          sums AS (
@@ -859,9 +900,10 @@ async fn delete_content_of(
     .bind(before)
     .bind(limit)
     .bind(runs)
+    .bind(key)
     .fetch_one(&mut *conn)
     .await?;
-    delete_media_of(conn, project_ids, before, runs).await?;
+    delete_media_of(conn, project_ids, before, runs, key).await?;
     Ok(gone.unsigned_abs())
 }
 
@@ -895,6 +937,7 @@ async fn delete_media_of(
     project_ids: &[ProjectId],
     before: Option<DateTime<Utc>>,
     runs: Option<&[Uuid]>,
+    key: Option<Uuid>,
 ) -> sqlx::Result<()> {
     let unnamed: Vec<String> = sqlx::query_scalar(
         "DELETE FROM telemetry.media_names
@@ -908,14 +951,16 @@ async fn delete_media_of(
     .bind(runs)
     .fetch_all(&mut *conn)
     .await?;
+    // A file sealed under a deleted key goes whatever names it: nothing opens it.
     sqlx::query(
         "WITH gone AS (
              DELETE FROM telemetry.media m
               WHERE m.project_id = ANY($1)
-                AND NOT EXISTS (SELECT 1 FROM telemetry.media_names n
-                                 WHERE n.project_id = m.project_id AND n.sha256 = m.sha256)
-                AND ($2 OR m.project_id || '/' || m.sha256 = ANY($3)
-                     OR m.created_at < now() - $4::interval)
+                AND (m.key_id = $5
+                     OR (NOT EXISTS (SELECT 1 FROM telemetry.media_names n
+                                      WHERE n.project_id = m.project_id AND n.sha256 = m.sha256)
+                         AND ($2 OR m.project_id || '/' || m.sha256 = ANY($3)
+                              OR m.created_at < now() - $4::interval)))
              RETURNING project_id, bytes),
          sums AS (
              SELECT s.organization_id, sum(g.bytes) AS bytes
@@ -928,6 +973,7 @@ async fn delete_media_of(
     .bind(before.is_none() && runs.is_none())
     .bind(&unnamed)
     .bind(UNNAMED_MEDIA_KEPT)
+    .bind(key)
     .execute(conn)
     .await?;
     Ok(())
@@ -942,11 +988,13 @@ pub async fn keep_media(
     mime_type: &str,
     sealed: (&[u8], &[u8]),
     bytes: i32,
+    key_id: Uuid,
 ) -> sqlx::Result<bool> {
     let kept: i64 = sqlx::query_scalar(
         "WITH kept AS (
-             INSERT INTO telemetry.media (project_id, sha256, mime_type, bytes, ciphertext, nonce)
-             VALUES ($1, $3, $4, $5, $6, $7)
+             INSERT INTO telemetry.media
+                 (project_id, sha256, mime_type, bytes, ciphertext, nonce, key_id)
+             VALUES ($1, $3, $4, $5, $6, $7, $8)
              ON CONFLICT DO NOTHING
              RETURNING bytes),
          counted AS (
@@ -964,6 +1012,7 @@ pub async fn keep_media(
     .bind(bytes)
     .bind(sealed.0)
     .bind(sealed.1)
+    .bind(key_id)
     .fetch_one(tx.conn())
     .await?;
     Ok(kept > 0)
@@ -990,8 +1039,8 @@ pub async fn name_media(
     Ok(())
 }
 
-/// A file the project keeps, sealed: its type and its bytes; none once its
-/// content key is deleted, as content reads none.
+/// A file the project keeps, sealed: its type and its bytes; only one under
+/// the project's key now, as content is read, so none once that is deleted.
 pub(crate) async fn read_media(
     tx: &mut Scoped<'_, ProjectAndOrganization>,
     project_id: &ProjectId,
@@ -1000,8 +1049,8 @@ pub(crate) async fn read_media(
     sqlx::query_as(
         "SELECT mime_type, ciphertext, nonce FROM telemetry.media
           WHERE project_id = $1 AND sha256 = $2
-            AND EXISTS (SELECT 1 FROM telemetry.project_settings
-                         WHERE project_id = $1 AND content_key_wrapped_dek IS NOT NULL)",
+            AND key_id = (SELECT content_key_id FROM telemetry.project_settings
+                           WHERE project_id = $1)",
     )
     .bind(project_id)
     .bind(sha256)

@@ -719,6 +719,244 @@ async fn the_content_key_is_wrapped_apart_and_a_purge_deletes_it_with_the_conten
     assert!(door.kept(&pool).await.is_empty(), "and the content with it");
 }
 
+/// ⚠ A row sealed under a key other than the project's, one a switch deleted
+/// and a purge left, is read as none, never opened against the wrong key:
+/// back under the project's key, it opens again.
+#[sqlx::test]
+async fn a_row_sealed_under_another_key_is_read_as_none(pool: PgPool) {
+    let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    apply_audit_migrations(&pool).await;
+    let door = door(&pool, ContentMode::On).await;
+    door.auth.seat(
+        "owner-1",
+        &door.organization,
+        &door.project,
+        OrganizationRole::Owner,
+        None,
+    );
+    door.send(export("result")).await;
+    let runs = [run(RUN)];
+    let open = || {
+        content::open(
+            &door.state,
+            Actor::User("owner-1"),
+            &door.project,
+            &runs,
+            None,
+        )
+    };
+    assert!(!open().await.expect("the content opens").is_empty());
+    let found = || {
+        let door = &door;
+        async move {
+            let (status, list) = door.lane("GET", "/traces?q=result", "owner-1", None).await;
+            assert_eq!(status, StatusCode::OK, "{list}");
+            list["traces"].as_array().map_or(0, Vec::len)
+        }
+    };
+    assert_eq!(found().await, 1, "a search finds the run");
+    sqlx::query(
+        "UPDATE telemetry.plain_content SET key_id = gen_random_uuid() WHERE project_id = $1",
+    )
+    .bind(&door.project)
+    .execute(&pool)
+    .await
+    .expect("rows under another key");
+    assert!(
+        open().await.expect("a read answers").is_empty(),
+        "nothing under another key opens"
+    );
+    assert_eq!(found().await, 0, "nor is found");
+    sqlx::query(
+        "UPDATE telemetry.plain_content
+            SET key_id = (SELECT content_key_id FROM telemetry.project_settings
+                           WHERE project_id = $1)
+          WHERE project_id = $1",
+    )
+    .bind(&door.project)
+    .execute(&pool)
+    .await
+    .expect("rows under the project's key");
+    assert!(!open().await.expect("the content opens again").is_empty());
+    assert_eq!(found().await, 1, "and is found again");
+}
+
+/// ⚠ The switch's purge deletes by the key it deleted: rows sealed under the
+/// project's key since, `on` again, are left alone.
+#[sqlx::test]
+async fn the_purge_of_a_deleted_key_leaves_content_under_a_later_key(pool: PgPool) {
+    let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let door = door(&pool, ContentMode::On).await;
+    door.send(export("result")).await;
+    // The same fields again, as a deleted key would have left them.
+    let old = uuid::Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO telemetry.plain_content
+             (project_id, run_id, trace_id, span_id, field, received_at, ciphertext, nonce,
+              bytes, words, pairs, key_id)
+         SELECT project_id, run_id, trace_id, span_id || 'old', field, received_at, ciphertext,
+                nonce, bytes, words, pairs, $2
+           FROM telemetry.plain_content WHERE project_id = $1",
+    )
+    .bind(&door.project)
+    .bind(old)
+    .execute(&pool)
+    .await
+    .expect("rows under a deleted key");
+    // A file under each key, their bytes counted as the copies' are.
+    sqlx::query(
+        "INSERT INTO telemetry.media (project_id, sha256, mime_type, bytes, ciphertext, nonce, key_id)
+         VALUES ($1, repeat('a', 64), 'image/png', 10, '\\x00', '\\x00', $2),
+                ($1, repeat('b', 64), 'image/png', 10, '\\x00', '\\x00',
+                 (SELECT content_key_id FROM telemetry.project_settings WHERE project_id = $1))",
+    )
+    .bind(&door.project)
+    .bind(old)
+    .execute(&pool)
+    .await
+    .expect("a file under each key");
+    sqlx::query(
+        "UPDATE telemetry.content_held SET bytes = bytes + 20
+            + (SELECT sum(bytes) FROM telemetry.plain_content WHERE project_id = $1 AND key_id = $2)
+          WHERE organization_id = $3",
+    )
+    .bind(&door.project)
+    .bind(old)
+    .bind(&door.organization)
+    .execute(&pool)
+    .await
+    .expect("the copies and the files counted");
+    let before = door.kept(&pool).await.len();
+    let mut conn = pool.acquire().await.expect("a connection");
+    let gone = telmoni_telemetry::db::delete_key_content(
+        &mut conn,
+        &door.project,
+        old,
+        Utc::now(),
+        i64::MAX,
+    )
+    .await
+    .expect("the purge");
+    assert_eq!(
+        usize::try_from(gone).ok(),
+        Some(before / 2),
+        "the deleted key's rows alone"
+    );
+    let files: Vec<String> =
+        sqlx::query_scalar("SELECT sha256 FROM telemetry.media WHERE project_id = $1")
+            .bind(&door.project)
+            .fetch_all(&pool)
+            .await
+            .expect("the files left");
+    assert_eq!(
+        files,
+        ["b".repeat(64)],
+        "the deleted key's file went, the project's stays"
+    );
+    let left_bytes: i64 = sqlx::query_scalar(
+        "SELECT coalesce(sum(bytes), 0)::bigint + 10 FROM telemetry.plain_content WHERE project_id = $1",
+    )
+    .bind(&door.project)
+    .fetch_one(&pool)
+    .await
+    .expect("the bytes left");
+    assert_eq!(
+        door.held(&pool, &door.organization).await,
+        Some(left_bytes),
+        "the count is what is left"
+    );
+    let left: Vec<bool> = sqlx::query_scalar(
+        "SELECT key_id = (SELECT content_key_id FROM telemetry.project_settings
+                           WHERE project_id = $1)
+           FROM telemetry.plain_content WHERE project_id = $1",
+    )
+    .bind(&door.project)
+    .fetch_all(&pool)
+    .await
+    .expect("the rows left");
+    assert!(
+        left.len() == before / 2 && left.iter().all(|under| *under),
+        "the project's key's rows stand"
+    );
+}
+
+/// ⚠ Content an export carried while its project was `on` is refused once
+/// the project is `off`, however the switch and the keep interleave: no key
+/// is minted for an `off` project, and the exporter is told to try again.
+#[sqlx::test]
+async fn content_kept_after_the_switch_to_off_is_refused(pool: PgPool) {
+    let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    apply_audit_migrations(&pool).await;
+    let door = door(&pool, ContentMode::On).await;
+    door.auth.seat(
+        "owner-1",
+        &door.organization,
+        &door.project,
+        OrganizationRole::Owner,
+        None,
+    );
+    door.send(export("result")).await;
+    let response = door
+        .app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/internal/v1/telemetry/content-mode")
+                .header(SERVICE_SECRET_HEADER, common::SECRET)
+                .header(header::AUTHORIZATION, "Bearer tok_owner-1")
+                .header("x-organization-id", door.organization.as_str())
+                .header("x-project-id", door.project.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({ "content_mode": "off", "delete_content": true }).to_string(),
+                ))
+                .expect("a request"),
+        )
+        .await
+        .expect("an answer");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // A keep that read `on` before the switch and runs after it.
+    let late = content::keep(
+        &door.state,
+        &door.project,
+        Utc::now(),
+        vec![SpanContent {
+            run_id: run(RUN_B),
+            trace_id: TRACE_B.to_owned(),
+            span_id: SPAN_B.to_owned(),
+            fields: vec![("app.note".to_owned(), "kept late".to_owned())],
+        }],
+    )
+    .await;
+    assert!(late.is_err(), "refused, for the exporter to retry");
+    let keyed: bool = sqlx::query_scalar(
+        "SELECT content_key_wrapped_dek IS NOT NULL FROM telemetry.project_settings \
+          WHERE project_id = $1",
+    )
+    .bind(&door.project)
+    .fetch_one(&pool)
+    .await
+    .expect("the settings row");
+    assert!(!keyed, "no key minted for an off project");
+    let late_rows: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM telemetry.plain_content WHERE project_id = $1 AND span_id = $2",
+    )
+    .bind(&door.project)
+    .bind(SPAN_B)
+    .fetch_one(&pool)
+    .await
+    .expect("count the late rows");
+    assert_eq!(late_rows, 0, "nothing kept on an off project");
+}
+
 /// ⚠ Back to `off` with its content deleted, nothing the project kept opens
 /// from the switch's commit, though its rows wait for the purge after; the
 /// purge takes them, and the owner is mailed the receipt.
@@ -1102,7 +1340,7 @@ async fn the_trace_list_finds_runs_by_their_kept_content(pool: PgPool) {
 
     sqlx::query(
         "UPDATE telemetry.project_settings \
-            SET content_key_wrapped_dek = NULL, content_key_version = NULL \
+            SET content_key_id = NULL, content_key_wrapped_dek = NULL, content_key_version = NULL \
           WHERE project_id = $1",
     )
     .bind(&door.project)

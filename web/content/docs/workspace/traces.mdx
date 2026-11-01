@@ -135,8 +135,9 @@ the keys, never a value.
 
 On a project that keeps content, a search box sits beside the filters in
 force. It finds the traces whose kept content holds every word you type, in
-any field of any span, and a phrase of more than one word only where each of
-its words stands right before the next, within the list's window and filters.
+any field of any span, and a phrase of two words only where they stand
+together, a longer one where each neighbouring pair of its words stands
+together somewhere in one field, within the list's window and filters.
 Matching is by whole word and ignores case, so `refund` finds `Refund` but
 not `refunds`. The search is a filter like the others: it rides in the list's
 URL, shows as a chip you take off with its ×, and narrows the facets, the

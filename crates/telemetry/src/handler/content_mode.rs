@@ -13,6 +13,7 @@ use axum::response::IntoResponse;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use uuid::Uuid;
 
 use telmoni_shared::acting::Acting;
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
@@ -76,8 +77,8 @@ struct Switched {
     from: Option<ContentMode>,
     /// The organization a stray row was filed under, when it re-filed one.
     refiled_from: Option<OrganizationId>,
-    /// Whether it deleted the project's content key.
-    deleted: bool,
+    /// The project's content key it deleted, by the id its rows are purged by.
+    deleted: Option<Uuid>,
 }
 
 /// `GET /internal/v1/telemetry/content-mode` — the project's mode.
@@ -146,8 +147,8 @@ pub async fn put_content_mode(
         switch_content_mode(&*state.auth, &acting, project_id, tx, (mode, delete)).await
     })
     .await?;
-    if switched.deleted {
-        purge_deleted(&state, &acting.user_id, project_id, Utc::now());
+    if let Some(key) = switched.deleted {
+        purge_deleted(&state, &acting.user_id, project_id, Utc::now(), key);
     }
     if let Some(filed_under) = &switched.refiled_from {
         // The settling's repair, which records nothing on a chain, as the
@@ -197,9 +198,13 @@ async fn switch_content_mode(
     }
     // In the switch's own commit: from it, nothing the project kept opens,
     // on any process, whatever rows the purge after has yet to take.
-    let deleted = delete && db::delete_content_key(tx, project_id).await?;
-    if changed || deleted {
-        let details = if deleted {
+    let deleted = if delete {
+        db::delete_content_key(tx, project_id).await?
+    } else {
+        None
+    };
+    if changed || deleted.is_some() {
+        let details = if deleted.is_some() {
             json!({ "content_mode": { "from": from, "to": mode }, "content_deleted": true })
         } else {
             json!({ "content_mode": { "from": from, "to": mode } })
@@ -252,16 +257,18 @@ pub async fn request_content_mode_code(
     Ok((StatusCode::ACCEPTED, Json(json!({ "sent": true }))))
 }
 
-/// The rows of content whose key the switch deleted, purged after its commit,
-/// a batch a transaction, and the receipt mailed to `asker`. Apart from the
-/// answer: nothing they hold opens any more, so a slow purge keeps nobody
-/// waiting, and one that fails leaves rows nothing reads, which retention
-/// takes in its time.
+/// The rows sealed under `key`, the one the switch deleted, purged after its
+/// commit, a batch a transaction, and the receipt mailed to `asker`; content
+/// kept under a key made since, the project `on` again, is left alone. Apart
+/// from the answer: nothing they hold opens any more, so a slow purge keeps
+/// nobody waiting, and one that fails leaves rows nothing reads, which
+/// retention takes in its time.
 fn purge_deleted(
     state: &Arc<AppState>,
     asker: &telmoni_shared::UserId,
     project_id: &ProjectId,
     unreadable_since: DateTime<Utc>,
+    key: Uuid,
 ) {
     let (state, asker, project_id) = (Arc::clone(state), asker.clone(), project_id.clone());
     tokio::spawn(async move {
@@ -269,10 +276,11 @@ fn purge_deleted(
             let mut gone = 0u64;
             loop {
                 let mut tx = maintenance_scope(&state.db, TelemetryLane).await?;
-                let batch = db::delete_content(
+                let batch = db::delete_key_content(
                     tx.conn(),
-                    std::slice::from_ref(&project_id),
-                    None,
+                    &project_id,
+                    key,
+                    unreadable_since,
                     CONTENT_BATCH,
                 )
                 .await?;

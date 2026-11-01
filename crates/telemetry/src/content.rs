@@ -139,8 +139,16 @@ pub async fn keep(
     }
     let (tx, organization_id) = held_in_place(state, project_id).await?;
     chain::settle(tx, project_id, WHAT, async |tx| {
-        still_under(tx, project_id, &wrapped, "its content").await?;
-        db::keep_content(tx, project_id, &organization_id, received_at, &sealed).await?;
+        still_under(tx, project_id, &wrapped.wrapped_dek, "its content").await?;
+        db::keep_content(
+            tx,
+            project_id,
+            &organization_id,
+            received_at,
+            wrapped.id,
+            &sealed,
+        )
+        .await?;
         if !named.0.is_empty() {
             db::name_media(tx, project_id, received_at, (&named.0, &named.1)).await?;
         }
@@ -162,6 +170,15 @@ async fn still_under(
     if now.is_none_or(|now| now.wrapped_dek != wrapped) {
         return Err(TelemetryError::StoreUnavailable(format!(
             "the project's content key changed as {kept} was kept; try again"
+        ))
+        .into());
+    }
+    // The mode too, under the same lock: an export that read `on` before a
+    // switch to `off` committed would otherwise keep its content, under a key
+    // minted for an `off` project, which the retry's answer then refuses.
+    if db::content_mode(tx, project_id).await? != telmoni_shared::ContentMode::On {
+        return Err(TelemetryError::StoreUnavailable(format!(
+            "the project's content mode changed as {kept} was kept; try again"
         ))
         .into());
     }
@@ -293,7 +310,7 @@ pub async fn key_for(state: &AppState, project_id: &ProjectId) -> Result<Arc<Dek
 async fn opened_key(
     state: &AppState,
     project_id: &ProjectId,
-) -> Result<(Vec<u8>, Arc<Dek>), TelmoniError> {
+) -> Result<(WrappedContentKey, Arc<Dek>), TelmoniError> {
     let aad = key_aad(project_id);
     let mut tx = project_scope(&state.db, project_id).await?;
     let read = db::content_key(&mut tx, project_id).await?;
@@ -303,7 +320,7 @@ async fn opened_key(
         None => make_key(state, project_id, aad.as_bytes()).await?,
     };
     let key = unwrapped(state, project_id, &wrapped).await?;
-    Ok((wrapped.wrapped_dek, key))
+    Ok((wrapped, key))
 }
 
 /// `wrapped`, opened: from the cache while it holds the key `wrapped` is,
@@ -395,7 +412,7 @@ pub async fn keep_media(
     let bytes = i32::try_from(body.len()).unwrap_or(i32::MAX);
     let (tx, organization_id) = held_in_place(state, project_id).await?;
     chain::settle(tx, project_id, WHAT, async |tx| {
-        still_under(tx, project_id, &wrapped, "the file").await?;
+        still_under(tx, project_id, &wrapped.wrapped_dek, "the file").await?;
         db::keep_media(
             tx,
             (project_id, &organization_id),
@@ -403,6 +420,7 @@ pub async fn keep_media(
             mime_type,
             (&ciphertext, &nonce),
             bytes,
+            wrapped.id,
         )
         .await?;
         Ok(())
@@ -608,6 +626,7 @@ async fn make_key(
 ) -> Result<WrappedContentKey, TelmoniError> {
     let dek = state.vault.new_dek()?;
     let wrapped = WrappedContentKey {
+        id: Uuid::new_v4(),
         wrapped_dek: state
             .content_kek
             .wrap(&state.http, &dek, aad)
@@ -621,8 +640,13 @@ async fn make_key(
         Ok(db::content_key(tx, project_id).await?)
     })
     .await?;
+    // No row took the key: the project went `off` as it was made, so the
+    // export is refused and retried, to be answered under the mode then.
     written.ok_or_else(|| {
-        TelmoniError::Internal("telemetry: the content key just written is not there".into())
+        TelemetryError::StoreUnavailable(
+            "the project's content mode changed as its key was made; try again".into(),
+        )
+        .into()
     })
 }
 

@@ -50,7 +50,10 @@ CREATE TABLE telemetry.project_settings (
     hashing_key_version     SMALLINT,
     -- The key the project's content is sealed under (`plain_content`): a data
     -- key of the row's own, wrapped under CONTENT_KEK, made with the first
-    -- content the project keeps, and deleted to make all of it unreadable.
+    -- content the project keeps, and deleted to make all of it unreadable;
+    -- its id names it on each row it sealed, so a read and a purge tell its
+    -- rows from a later key's.
+    content_key_id          UUID,
     content_key_wrapped_dek BYTEA,
     content_key_version     SMALLINT,
     -- The saved layout its sessions and traces open in, which stands until
@@ -69,7 +72,8 @@ CREATE TABLE telemetry.project_settings (
         AND (hashing_key_ciphertext IS NULL) = (hashing_key_wrapped_dek IS NULL)
         AND (hashing_key_ciphertext IS NULL) = (hashing_key_version IS NULL)),
     CONSTRAINT project_settings_content_key_check CHECK (
-        (content_key_wrapped_dek IS NULL) = (content_key_version IS NULL))
+        (content_key_wrapped_dek IS NULL) = (content_key_version IS NULL)
+        AND (content_key_wrapped_dek IS NULL) = (content_key_id IS NULL))
 );
 
 -- The rule for every table here: one the organization's purge deletes by
@@ -512,6 +516,10 @@ CREATE TABLE telemetry.plain_content (
     -- checked on the rows its words find, so its pairs take no room in their
     -- index.
     pairs       BIGINT[]    NOT NULL DEFAULT '{}',
+    -- The content key the field is sealed under (`project_settings`), read
+    -- and searched only while it is the project's, and purged by it when the
+    -- switch deletes it, so content kept under a later key is left alone.
+    key_id      UUID        NOT NULL,
     PRIMARY KEY (project_id, trace_id, span_id, field),
     CONSTRAINT plain_content_bytes_check CHECK (bytes >= 0)
 );
@@ -548,6 +556,8 @@ CREATE TABLE telemetry.media (
     bytes       INTEGER     NOT NULL,
     ciphertext  BYTEA       NOT NULL,
     nonce       BYTEA       NOT NULL,
+    -- The content key the file is sealed under, as `plain_content.key_id`.
+    key_id      UUID        NOT NULL,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (project_id, sha256),
     CONSTRAINT media_sha256_check CHECK (sha256 ~ '^[0-9a-f]{64}$'),

@@ -116,7 +116,8 @@ delete what this project kept**. Leaving it unticked keeps what the project
 kept readable, each read in the audit log, until its spans' retention ends.
 
 - **At once:** the key the content was sealed under is deleted in the same
-  change as the mode, so none of it opens again, for anybody, on any copy.
+  change as the mode, so nothing reads it from then; a backup taken before
+  holds it until it expires (*Backups and copies*, below).
 - **Right after:** its rows are purged, and their bytes come off the
   organization's count.
 - **Receipt:** the change is in the audit log, and the owner is mailed a
