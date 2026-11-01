@@ -15,7 +15,7 @@ use axum::extract::{Path, State};
 use axum::http::{HeaderMap, header};
 use axum::response::{IntoResponse, Response};
 use chrono::{DateTime, SecondsFormat, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use uuid::Uuid;
 
@@ -26,25 +26,28 @@ use telmoni_shared::db::tenant_session::{ProjectAndOrganization, Scoped};
 use telmoni_shared::extract::{Json, Query};
 use telmoni_shared::rbac::{Resource, Verb};
 use telmoni_shared::{
-    AuditAction, AuthError, ProjectId, SortDirection, SpanKind, SpanStatus, TelmoniError,
-    TelmoniResourceKind, TraceSort, UserId,
+    AuditAction, AuthError, ProjectId, SortDirection, SpanKind, SpanStatus, TelemetryError,
+    TelmoniError, TelmoniResourceKind, TraceSort, UserId,
 };
 
 use crate::AppState;
 use crate::content;
 use crate::contract::{
     AGENT_MAX, ATTRIBUTE_VALUE_MAX, ENVIRONMENT_MAX, MODEL_MAX, NAME_MAX, RELEASE_MAX,
-    SESSION_ID_MAX, TAG_KEY_MAX, TAG_VALUE_MAX, USER_ID_MAX, UTC_OFFSET_RANGE,
+    SESSION_ID_MAX, TAG_KEY_MAX, TAG_VALUE_MAX, TAGS_MAX, USER_ID_MAX, UTC_OFFSET_RANGE,
 };
 use crate::erasure::{self, Erase};
 use crate::handler::chain::{self, Change};
 use crate::ingest::batch::SpanContent;
+use crate::ingest::cardinality;
+use crate::ingest::span::Cap;
+use crate::live;
 use crate::spend::{self, Unread};
 use crate::store::{self, Projects, SpanRow};
 use crate::traces::{
     self, Bar, DEFAULT_LIMIT, EXPORT_MAX, FACET_VALUES_MAX, FILTER_VALUES_MAX, Facet, FacetRow,
-    Listing, MAX_DAYS, MAX_LIMIT, MAX_PAGE, RUNS_MAX, SPANS_MAX, TRACE_UNITS_MAX, TraceFilter,
-    TraceRow, Traces,
+    ListSort, Listing, MAX_DAYS, MAX_LIMIT, MAX_PAGE, RUNS_MAX, SPANS_MAX, TRACE_UNITS_MAX,
+    TraceFilter, TraceRow, Traces,
 };
 
 /// The longest value each filter takes, in characters, by its name in a URL:
@@ -245,7 +248,7 @@ impl TraceQuery {
     /// # Errors
     ///
     /// A column or a direction there is none of, never echoed.
-    pub fn sort(&self) -> Result<(TraceSort, SortDirection), TelmoniError> {
+    pub fn sort(&self) -> Result<(ListSort<TraceSort>, SortDirection), TelmoniError> {
         self.sort_for::<Traces>()
     }
 
@@ -256,15 +259,20 @@ impl TraceQuery {
     ///
     /// A column or a direction there is none of, the refusal naming every
     /// column the list has and never the value.
-    pub(crate) fn sort_for<L: Listing>(&self) -> Result<(L::Sort, SortDirection), TelmoniError> {
+    pub(crate) fn sort_for<L: Listing>(
+        &self,
+    ) -> Result<(ListSort<L::Sort>, SortDirection), TelmoniError> {
         let sort = match given(self.sort.as_deref()) {
-            None => L::FALLBACK,
-            Some(given) => given
-                .parse::<L::Sort>()
-                .map_err(|_| sorts_refused(L::SORTS))?,
+            None => ListSort::Column(L::FALLBACK),
+            Some(given) => ListSort::parse(given)
+                .filter(|sort| matches!(sort, ListSort::Column(_)) || tag_sorts::<L>())
+                .ok_or_else(sorts_refused::<L>)?,
         };
         let direction = match given(self.dir.as_deref()) {
-            None => L::first_direction(sort),
+            None => match &sort {
+                ListSort::Column(column) => L::first_direction(*column),
+                ListSort::Tag(_) => SortDirection::Asc,
+            },
             Some(given) => given
                 .parse::<SortDirection>()
                 .map_err(|_| TelmoniError::BadRequest("dir is asc or desc".into()))?,
@@ -365,9 +373,18 @@ fn tag_values(given: &[String]) -> Result<Vec<String>, TelmoniError> {
     Ok(pairs)
 }
 
-/// What a sort the list does not take is refused with: every column it has.
-fn sorts_refused<S: std::fmt::Display>(all: &[S]) -> TelmoniError {
-    let words: Vec<String> = all.iter().map(ToString::to_string).collect();
+/// Whether a tag sorts list `L`.
+fn tag_sorts<L: Listing>() -> bool {
+    L::tag_sql(SortDirection::Asc).is_some()
+}
+
+/// What a sort the list does not take is refused with: every column it has,
+/// and a tag where one sorts it.
+fn sorts_refused<L: Listing>() -> TelmoniError {
+    let mut words: Vec<String> = L::SORTS.iter().map(ToString::to_string).collect();
+    if tag_sorts::<L>() {
+        words.push("tag:<key>".into());
+    }
     TelmoniError::BadRequest(format!("sort is one of {}", words.join(", ")))
 }
 
@@ -507,13 +524,13 @@ pub struct TraceList {
     /// Whether a page after this one holds more.
     pub more: bool,
     /// The sort it is in.
-    pub sort: TraceSort,
+    pub sort: ListSort<TraceSort>,
     /// And its direction.
     pub dir: SortDirection,
 }
 
 /// A download's header row: the list's fields, in its order.
-const CSV_HEADER: [&str; 24] = [
+const CSV_HEADER: [&str; 25] = [
     "run_id",
     "agent",
     "user_id",
@@ -538,13 +555,14 @@ const CSV_HEADER: [&str; 24] = [
     "tools",
     "environments",
     "releases",
+    "tags",
 ];
 
 impl TraceRow {
     /// The row a download writes for it, under [`CSV_HEADER`]: its times as
-    /// RFC 3339, and its models, tools, environments and releases each one
-    /// cell, `; ` between them.
-    fn cells(&self) -> [String; 24] {
+    /// RFC 3339, and its models, tools, environments, releases and tags each
+    /// one cell, `; ` between them.
+    fn cells(&self) -> [String; 25] {
         let time = |t: &DateTime<Utc>| t.to_rfc3339_opts(SecondsFormat::Micros, true);
         [
             self.run_id.to_string(),
@@ -573,6 +591,7 @@ impl TraceRow {
             self.tools.join("; "),
             self.environments.join("; "),
             self.releases.join("; "),
+            self.tags.join("; "),
         ]
     }
 }
@@ -919,7 +938,7 @@ pub(crate) struct Listed<L: Listing> {
     pub(crate) rows: Vec<L::Row>,
     pub(crate) total: u64,
     pub(crate) paging: Paging,
-    pub(crate) sort: L::Sort,
+    pub(crate) sort: ListSort<L::Sort>,
     pub(crate) dir: SortDirection,
     pub(crate) days: u16,
 }
@@ -949,7 +968,7 @@ pub(crate) async fn list_page<L: Listing>(
             &state.store,
             &projects,
             &filter,
-            (sort, dir),
+            (&sort, dir),
             paging.limit,
             paging.skipped
         ),
@@ -998,9 +1017,16 @@ pub(crate) async fn export_rows<L: Listing>(
     let filter = filter_of(state, &reader.project_id, &query).await?;
     let (sort, dir) = query.sort_for::<L>()?;
     let format = parse_format(query.format.as_deref())?;
-    let rows = traces::list::<L>(&state.store, &projects, &filter, (sort, dir), EXPORT_MAX, 0)
-        .await
-        .map_err(read_failed)?;
+    let rows = traces::list::<L>(
+        &state.store,
+        &projects,
+        &filter,
+        (&sort, dir),
+        EXPORT_MAX,
+        0,
+    )
+    .await
+    .map_err(read_failed)?;
     Ok((rows, format, reader))
 }
 
@@ -1093,7 +1119,7 @@ pub async fn export_traces(
             row,
         })
         .collect();
-    let header: [&str; 25] =
+    let header: [&str; 26] =
         std::array::from_fn(|i| CSV_HEADER.get(i).copied().unwrap_or("content"));
     download(format, &rows, &header, TraceDownload::cells, "trace")
 }
@@ -1109,7 +1135,7 @@ pub struct TraceDownload {
 
 impl TraceDownload {
     /// The row's cells and its content as one JSON cell.
-    fn cells(&self) -> [String; 25] {
+    fn cells(&self) -> [String; 26] {
         let row = self.row.cells();
         let content = serde_json::to_string(&self.content).unwrap_or_default();
         std::array::from_fn(|i| row.get(i).cloned().unwrap_or_else(|| content.clone()))
@@ -1178,6 +1204,193 @@ async fn file_trace_deletion(
         kind: TelmoniResourceKind::Trace,
         id: run_id,
         metadata: json!({ "spans": spans }),
+    };
+    chain::file(tx, acting, project_id, change).await?;
+    Ok(())
+}
+
+/// What a change to a run's tags sends: the tags to set, by key, and the
+/// keys to take off.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TagsChange {
+    #[serde(default)]
+    pub add: BTreeMap<String, String>,
+    #[serde(default)]
+    pub remove: Vec<String>,
+}
+
+/// What a change to a run's tags answers: the tags its own span carries now.
+#[derive(Debug, Serialize)]
+pub struct TraceTags {
+    pub run_id: Uuid,
+    pub tags: BTreeMap<String, String>,
+}
+
+impl TagsChange {
+    /// The change held to ingest's rules for a tag, never echoing one: a key
+    /// of 1 to [`TAG_KEY_MAX`] characters with no control character, an
+    /// added one with no `:` either, which the list's filter splits on; a
+    /// value of up to [`TAG_VALUE_MAX`]; each key added or taken off, not
+    /// both; at most [`TAGS_MAX`] of either.
+    fn checked(mut self) -> Result<Self, TelmoniError> {
+        let refused = |why: String| Err(TelmoniError::BadRequest(why));
+        if self.add.is_empty() && self.remove.is_empty() {
+            return refused("a change to a run's tags adds or removes one".into());
+        }
+        if self.add.len() > TAGS_MAX || self.remove.len() > TAGS_MAX {
+            return refused(format!(
+                "a change names at most {TAGS_MAX} tags to add and {TAGS_MAX} to remove"
+            ));
+        }
+        let key_ok = |key: &str| {
+            (1..=TAG_KEY_MAX).contains(&key.chars().count()) && !key.chars().any(char::is_control)
+        };
+        for (key, value) in &self.add {
+            if !key_ok(key) || key.contains(':') {
+                return refused(format!(
+                    "a tag's key is 1 to {TAG_KEY_MAX} characters, none of them a colon or a \
+                     control character"
+                ));
+            }
+            if value.chars().count() > TAG_VALUE_MAX || value.chars().any(char::is_control) {
+                return refused(format!(
+                    "a tag's value is up to {TAG_VALUE_MAX} characters, none of them a control \
+                     character"
+                ));
+            }
+        }
+        self.remove.sort();
+        self.remove.dedup();
+        for key in &self.remove {
+            if !key_ok(key) {
+                return refused(format!(
+                    "a tag's key is 1 to {TAG_KEY_MAX} characters, none of them a control \
+                     character"
+                ));
+            }
+            if self.add.contains_key(key) {
+                return refused("a tag is added or removed in one change, never both".into());
+            }
+        }
+        Ok(self)
+    }
+}
+
+/// `PATCH /internal/v1/telemetry/traces/{run_id}/tags` — a run's tags changed
+/// by any member of the project: filed in the organization's chain, naming
+/// the keys and never a value, as the run's every span takes the change in
+/// ClickHouse, so a failed write files nothing; then the organization's open
+/// consoles nudged. A span that lands later carries the tags it was sent
+/// with. `404` for a run the project does not hold; `400` past the tags a
+/// span carries or the project's tag cardinality for the day.
+pub async fn patch_tags(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(run_id): Path<String>,
+    Json(change): Json<TagsChange>,
+) -> Result<Json<TraceTags>, TelmoniError> {
+    let acting = state.auth.resolve(&headers).await?;
+    let project_id = acting
+        .require_project(Verb::Update, Resource::Trace)?
+        .project_id
+        .clone();
+    let run_id: Uuid = run_id
+        .parse()
+        .map_err(|_| TelmoniError::BadRequest("a trace is named by its run's id, a UUID".into()))?;
+    let change = change.checked()?;
+    let projects = Projects::one(project_id.clone());
+    let added: Vec<&str> = change.add.keys().map(String::as_str).collect();
+    let run = traces::run_tags(&state.store, &projects, run_id, &added, &change.remove)
+        .await
+        .map_err(read_failed)?;
+    if run.spans == 0 {
+        return Err(AuthError::NotFound("no trace with that run id in this project".into()).into());
+    }
+    if run.most > TAGS_MAX as u64 {
+        return Err(TelemetryError::TagsPastCap(Cap::Tags.to_string()).into());
+    }
+    let mut tags: BTreeMap<String, String> = run.run_tags.into_iter().collect();
+    // A value the run already carries takes no new place in the day's cap.
+    let fresh: Vec<(&str, &str)> = change
+        .add
+        .iter()
+        .filter(|(key, value)| tags.get(*key) != Some(*value))
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect();
+    if let Some(cap) = cardinality::admit(&state.redis, &project_id, Utc::now(), &fresh).await {
+        return Err(TelemetryError::TagsPastCap(cap.to_string()).into());
+    }
+    chain::write(
+        &state.db,
+        &acting,
+        &project_id,
+        "a trace's tags",
+        async |tx| {
+            file_tags_change(&state, &acting, &project_id, tx, run_id, &change).await?;
+            state
+                .store
+                .retag_run(&project_id, run_id, &change.add, &change.remove)
+                .await
+                .map_err(|error| {
+                    store::failed(
+                        &error,
+                        "tags",
+                        "the span store did not take the tags; retry",
+                    )
+                })
+        },
+    )
+    .await?;
+    tags.retain(|key, _| !change.remove.contains(key));
+    tags.extend(
+        change
+            .add
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone())),
+    );
+    live::spans_ingested(
+        Arc::clone(&state),
+        acting.organization_id.as_str(),
+        project_id.as_str(),
+        [run_id],
+    );
+    tracing::info!(
+        project_id = %project_id,
+        run_id = %run_id,
+        added = change.add.len(),
+        removed = change.remove.len(),
+        "telemetry: a trace's tags changed"
+    );
+    Ok(Json(TraceTags { run_id, tags }))
+}
+
+/// The change to a run's tags, filed under the organization's chain lock,
+/// the role checked again on auth's second answer: its keys, never a value.
+async fn file_tags_change(
+    state: &AppState,
+    acting: &Acting,
+    project_id: &ProjectId,
+    tx: &mut Scoped<'_, ProjectAndOrganization>,
+    run_id: Uuid,
+    change: &TagsChange,
+) -> Result<(), TelmoniError> {
+    chain::held(
+        state.auth.as_ref(),
+        acting,
+        tx,
+        Verb::Update,
+        Resource::Trace,
+    )
+    .await?;
+    let change = Change {
+        action: AuditAction::Updated,
+        kind: TelmoniResourceKind::Trace,
+        id: run_id,
+        metadata: json!({
+            "added": change.add.keys().collect::<Vec<_>>(),
+            "removed": change.remove,
+        }),
     };
     chain::file(tx, acting, project_id, change).await?;
     Ok(())
@@ -1282,7 +1495,7 @@ mod tests {
         assert_eq!(query.filter().expect("a filter"), TraceFilter::default());
         assert_eq!(
             query.sort().expect("a sort"),
-            (TraceSort::Started, SortDirection::Desc)
+            (ListSort::Column(TraceSort::Started), SortDirection::Desc)
         );
     }
 
@@ -1332,7 +1545,7 @@ mod tests {
         assert_eq!(filter.days, 30);
         assert_eq!(
             query.sort().expect("a sort"),
-            (TraceSort::User, SortDirection::Asc)
+            (ListSort::Column(TraceSort::User), SortDirection::Asc)
         );
         assert_eq!(parse_limit(query.limit.as_deref()).ok(), Some(50));
         assert_eq!(parse_page(query.page.as_deref()).ok(), Some(3));
@@ -1343,7 +1556,7 @@ mod tests {
         let query = read(Reading::List, &[("sort", "tokens"), ("dir", "asc")]).expect("a sort");
         assert_eq!(
             query.sort().expect("a sort"),
-            (TraceSort::Tokens, SortDirection::Asc)
+            (ListSort::Column(TraceSort::Tokens), SortDirection::Asc)
         );
         for sort in TraceSort::all() {
             let expected = match sort {
@@ -1561,6 +1774,7 @@ mod tests {
             tools: vec![],
             environments: vec!["production".into()],
             releases: vec![],
+            tags: vec!["repo:telmoni".into()],
         };
         let mut out = Vec::new();
         csv::row(&mut out, &trace.cells());
@@ -1571,7 +1785,7 @@ mod tests {
         assert!(
             line.contains("2026-10-11T12:30:00.000000Z,2026-10-11T12:30:01.500000Z,1500,250,4,")
         );
-        assert!(line.ends_with(",a; b,,production,\r\n"));
+        assert!(line.ends_with(",a; b,,production,,repo:telmoni\r\n"));
         let json = serde_json::to_value(&trace).expect("JSON");
         let mut keys: Vec<&str> = json
             .as_object()

@@ -67,6 +67,7 @@ import {
   TraceHistogramSchema,
   TraceLayoutListSchema,
   TraceListSchema,
+  TraceTagsSchema,
   TraceViewListSchema,
 } from "./traces";
 import { UserListSchema } from "./users";
@@ -141,6 +142,7 @@ const READERS: Record<string, z.ZodType> = {
   "telemetry/session-views.json": SessionViewListSchema,
   "telemetry/session.json": SessionDetailSchema,
   "telemetry/sessions.json": SessionListSchema,
+  "telemetry/trace-tags.json": TraceTagsSchema,
   "telemetry/trace.json": TraceDetailSchema,
   "telemetry/traces.json": TraceListSchema,
   "telemetry/users.json": UserListSchema,

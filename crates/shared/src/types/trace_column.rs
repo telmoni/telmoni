@@ -55,6 +55,8 @@ pub enum TraceColumn {
     Models,
     /// The tools its calls ran.
     Tools,
+    /// Its tags, as `key:value`.
+    Tags,
 }
 
 // The list's own columns, left to right.
@@ -82,6 +84,7 @@ crate::wire_enum!(TraceColumn {
     TimeToFirstToken => "time_to_first_token",
     Models => "models",
     Tools => "tools",
+    Tags => "tags",
 });
 
 #[cfg(test)]

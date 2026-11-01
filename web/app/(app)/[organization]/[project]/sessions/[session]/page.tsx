@@ -9,6 +9,7 @@ import { Section } from "@/components/section";
 import { ServiceUnavailable } from "@/components/service-unavailable";
 import { LayoutControls } from "@/components/traces/layout-controls";
 import { SessionRuns } from "@/components/traces/session-runs";
+import { TagEveryTrace } from "@/components/traces/tags";
 import { LayoutProvider } from "@/components/traces/use-layout";
 import { WindowPicker } from "@/components/window-picker";
 import { MediaProjectProvider } from "@/components/traces/span-content";
@@ -171,8 +172,13 @@ export default async function SessionPage({
           title="Runs"
           description="Each run of the session in the order it started, as the layout lays it out; j and k step through them, and o opens one where the layout opens its steps."
         >
-          <div>
+          <div className="flex flex-wrap items-center gap-gutter">
             <WindowPicker days={days} />
+            <TagEveryTrace
+              projectId={project.id}
+              runIds={traces.map((t) => t.run_id)}
+              known={[...new Set(traces.flatMap((t) => t.tags))]}
+            />
           </div>
           <MediaProjectProvider projectId={project.id}>
             <SessionRuns

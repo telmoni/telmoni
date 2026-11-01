@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/components/page-header", () => ({
@@ -37,8 +37,14 @@ vi.mock("@/app/(app)/[organization]/[project]/traces/actions", () => ({
   updateTraceViewAction: vi.fn(),
   deleteTraceViewAction: vi.fn(),
   setSessionLayoutAction: vi.fn(),
+  tagTracesAction: vi.fn(),
 }));
 
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+
+import { toast } from "sonner";
+
+import { tagTracesAction } from "@/app/(app)/[organization]/[project]/traces/actions";
 import { Role } from "@/lib/types/enums";
 import { pageSteps } from "@/lib/use-page-steps";
 
@@ -102,11 +108,13 @@ const TRACE_A = {
   tools: ["search_docs"],
   environments: [],
   releases: [],
+  tags: ["repo:telmoni"],
   pinned: [],
 };
 const TRACE_B = {
   ...TRACE_A,
   run_id: RUN_B,
+  tags: ["repo:web", "team:core"],
   // The second run named no user; the session's user is read off the first that did.
   user_id: "",
   status: "error",
@@ -324,6 +332,29 @@ describe("SessionPage", () => {
     // The window picker stands at the session's window; a pick rewrites this
     // page's own address, read from the router, so the encoded id carries over.
     expect(screen.getByRole("combobox", { name: "Window" })).toHaveTextContent("Last 7 days");
+  });
+
+  it("adds a tag to every trace it shows in one call, suggesting its traces' tags, and says how many took it", async () => {
+    vi.mocked(tagTracesAction).mockResolvedValue({ ok: true, tagged: 2 });
+    render(await SessionPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+    fireEvent.click(screen.getByRole("button", { name: "Add tag to every trace" }));
+    const form = within(await screen.findByRole("dialog", { name: "Add tag to every trace" }));
+    expect(form.getByText("Each of the 2 traces shown takes it, one after another.")).toBeInTheDocument();
+    const suggested = (field: HTMLElement) =>
+      [...document.getElementById(field.getAttribute("list")!)!.querySelectorAll("option")].map(
+        (option) => option.value,
+      );
+    expect(suggested(form.getByLabelText("Key"))).toEqual(["repo", "team"]);
+    fireEvent.change(form.getByLabelText("Key"), { target: { value: "repo" } });
+    expect(suggested(form.getByLabelText("Value"))).toEqual(["telmoni", "web"]);
+    fireEvent.change(form.getByLabelText("Value"), { target: { value: "telmoni" } });
+    fireEvent.click(form.getByRole("button", { name: "Add tag to every trace" }));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Tagged 2 traces"));
+    expect(tagTracesAction).toHaveBeenCalledOnce();
+    expect(tagTracesAction).toHaveBeenCalledWith("project_7bQx2mNv9BcK4dLp", [RUN_A, RUN_B], {
+      key: "repo",
+      value: "telmoni",
+    });
   });
 
   it("reads as its conversation where the project keeps content, each run's turn under its row", async () => {

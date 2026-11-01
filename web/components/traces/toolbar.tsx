@@ -42,6 +42,7 @@ import {
 } from "@/components/traces/list-table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { WindowPicker } from "@/components/window-picker";
+import type { SessionQuery } from "@/lib/server/entities/sessions";
 import type {
   ListQuery,
   SessionView,
@@ -79,7 +80,7 @@ import {
 import { toggled } from "@/lib/trace-tree";
 import { setTracePrefs, useTracePrefs } from "@/lib/use-trace-prefs";
 import { USERS, USER_COLUMN_MENU, USER_TABLE } from "@/lib/users";
-import type { SessionSort, UserSort } from "@/lib/types/enums";
+import type { UserSort } from "@/lib/types/enums";
 import { isOneOf } from "@/lib/one-of";
 import { cn } from "@/lib/utils";
 
@@ -149,7 +150,7 @@ export function TraceToolbar(props: Props) {
 type ListToolbarProps = Common &
   (
     | { list: "traces"; query: TraceQuery; views: TraceView[] | null }
-    | { list: "sessions"; query: ListQuery<SessionSort>; views: SessionView[] | null }
+    | { list: "sessions"; query: SessionQuery; views: SessionView[] | null }
     | { list: "users"; query: ListQuery<UserSort>; views: UserView[] | null }
   ) & {
     /** What the list shows beside its saved views, given the toolbar's way to

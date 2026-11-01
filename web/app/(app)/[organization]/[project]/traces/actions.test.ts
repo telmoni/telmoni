@@ -43,7 +43,8 @@ vi.mock("next/headers", () => ({
   headers: async () => new Headers({ "x-telmoni-path": posted.path }),
 }));
 
-import { tryFetchWithTimeout } from "@/lib/api/fetch";
+import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
+import { rateLimitRetryAfter } from "@/lib/api/rate-limit";
 import { getServerSession } from "@/lib/server/session";
 
 import {
@@ -52,6 +53,8 @@ import {
   eraseEndUserAction,
   saveTraceViewAction,
   setSessionLayoutAction,
+  setTraceTagsAction,
+  tagTracesAction,
   updateTraceViewAction,
 } from "./actions";
 
@@ -315,5 +318,125 @@ describe("erasing an end user", () => {
       });
     }
     expect(fetchMock).toHaveBeenCalledOnce();
+  });
+});
+
+// The run's tags after a change, as the lane answers them.
+const tagged = (tags: Record<string, string>) =>
+  new Response(JSON.stringify({ run_id: OPEN, tags }), { status: 200 });
+// A refusal as the server words it, read by the console's own reader.
+async function refusedWith(status: number, type: string, title: string, detail: string) {
+  const real = await vi.importActual<typeof import("@/lib/api/fetch")>("@/lib/api/fetch");
+  vi.mocked(extractProblem).mockImplementationOnce(real.extractProblem);
+  return new Response(JSON.stringify({ type, title, status, detail }), {
+    status,
+    headers: { "content-type": "application/problem+json" },
+  });
+}
+
+describe("changing a run's tags", () => {
+  it("sends the change to the run's lane as the person, and draws the page again", async () => {
+    fetchMock.mockResolvedValue(tagged({ repo: "telmoni" }));
+    expect(
+      await setTraceTagsAction(PROJECT, OPEN, { add: { repo: "telmoni" }, remove: ["team"] }),
+    ).toEqual({ ok: true, tags: { repo: "telmoni" } });
+    expect(fetchMock).toHaveBeenCalledWith(
+      `http://telemetry.test/internal/v1/telemetry/traces/${OPEN}/tags`,
+      {
+        method: "PATCH",
+        headers: { authorization: "Bearer at_1", "content-type": "application/json" },
+        body: JSON.stringify({ add: { repo: "telmoni" }, remove: ["team"] }),
+      },
+      30_000,
+    );
+    expect(mockRefresh).toHaveBeenCalledOnce();
+  });
+
+  it("says in the server's words why a tag past its cap was refused, and a run the project does not hold", async () => {
+    fetchMock.mockResolvedValueOnce(
+      await refusedWith(400, "/errors/telemetry/tags-past-cap", "tags past their cap", "a span carries up to 32 tags"),
+    );
+    expect(await setTraceTagsAction(PROJECT, OPEN, { add: { repo: "telmoni" } })).toEqual({
+      ok: false,
+      error: "tags past their cap: a span carries up to 32 tags",
+    });
+    fetchMock.mockResolvedValueOnce(
+      await refusedWith(404, "/errors/auth/not-found", "not found", "no trace with that run id in this project"),
+    );
+    expect(await setTraceTagsAction(PROJECT, OPEN, { remove: ["repo"] })).toEqual({
+      ok: false,
+      error: "not found: no trace with that run id in this project",
+    });
+    expect(mockRefresh).not.toHaveBeenCalled();
+  });
+
+  it("refuses what is no run's id, or no change of tags, before asking the lane", async () => {
+    expect(await setTraceTagsAction(PROJECT, "../views", { remove: ["repo"] })).toEqual({
+      ok: false,
+      error: "Invalid trace id.",
+    });
+    for (const change of [{ add: { repo: 7 } }, { remove: "repo" }, { rename: { a: "b" } }, null]) {
+      expect(await setTraceTagsAction(PROJECT, OPEN, change)).toEqual({
+        ok: false,
+        error: "That change to the tags could not be read.",
+      });
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("tagging every trace a session's page shows", () => {
+  it("sets the tag on each run in turn, the person admitted once, and says how many took it", async () => {
+    fetchMock.mockImplementation(async () => tagged({ team: "core" }));
+    expect(await tagTracesAction(PROJECT, [OPEN, OTHER, NEW], { key: "team", value: "core" })).toEqual({
+      ok: true,
+      tagged: 3,
+    });
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(
+      [OPEN, OTHER, NEW].map((run) => `http://telemetry.test/internal/v1/telemetry/traces/${run}/tags`),
+    );
+    for (const [, init] of fetchMock.mock.calls) {
+      expect(init).toEqual(
+        expect.objectContaining({ method: "PATCH", body: JSON.stringify({ add: { team: "core" } }) }),
+      );
+    }
+    expect(rateLimitRetryAfter).toHaveBeenCalledOnce();
+    expect(mockRefresh).toHaveBeenCalledOnce();
+  });
+
+  it("stops at the first refusal, saying how many took the tag before it, and sends no more", async () => {
+    fetchMock
+      .mockResolvedValueOnce(tagged({ team: "core" }))
+      .mockResolvedValueOnce(
+        await refusedWith(
+          400,
+          "/errors/telemetry/tags-past-cap",
+          "tags past their cap",
+          "a project's tag takes up to 500 values a UTC day",
+        ),
+      );
+    expect(await tagTracesAction(PROJECT, [OPEN, OTHER, NEW], { key: "team", value: "core" })).toEqual({
+      ok: false,
+      error:
+        "Tagged 1 of 3 traces before one was refused: tags past their cap: a project's tag takes up to 500 values a UTC day",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(mockRefresh).toHaveBeenCalledOnce();
+  });
+
+  it("refuses runs or a tag it cannot read before asking the lane", async () => {
+    const tag = { key: "team", value: "core" };
+    for (const [runs, given] of [
+      [[], tag],
+      [["../views"], tag],
+      [Array.from({ length: 501 }, () => OPEN), tag],
+      [[OPEN], { key: "team" }],
+    ] as const) {
+      expect(await tagTracesAction(PROJECT, runs, given)).toEqual({
+        ok: false,
+        error: "That tag could not be read.",
+      });
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

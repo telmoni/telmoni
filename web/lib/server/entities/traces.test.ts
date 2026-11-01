@@ -52,6 +52,7 @@ const TRACE = {
   tools: ["search_docs"],
   environments: ["production"],
   releases: ["2026.10.18"],
+  tags: ["team:search"],
 };
 const LIST = {
   traces: [TRACE],
@@ -210,6 +211,19 @@ describe("fetchTraces", () => {
     expect(await fetchTraces(PROJECT, {})).toEqual({ kind: "unavailable" });
   });
 
+  it("asks for the list sorted by a tag's key, and reads the sort it answers, but none naming no key", async () => {
+    answer(200, { ...LIST, sort: "tag:repo", dir: "asc" });
+    expect(await fetchTraces(PROJECT, { sort: "tag:repo" })).toEqual({
+      kind: "ok",
+      list: { ...LIST, sort: "tag:repo", dir: "asc" },
+    });
+    expect(fetchWithTimeout.mock.calls[0]![0]).toBe(
+      "http://server/internal/v1/telemetry/traces?sort=tag%3Arepo",
+    );
+    answer(200, { ...LIST, sort: "tag:" });
+    expect(await fetchTraces(PROJECT, {})).toEqual({ kind: "unavailable" });
+  });
+
   it("asks nothing without a project or a signed-in person", async () => {
     expect(await fetchTraces("", {})).toEqual({ kind: "unavailable" });
     identityContext.mockResolvedValue(null);
@@ -256,6 +270,14 @@ describe("the reads beside the list", () => {
     expect(await fetchTraceViews(PROJECT)).toEqual({ kind: "unavailable" });
     answer(200, { views: [{ ...LAYOUT, query: { ...LAYOUT.query, depth: "spans" } }] });
     expect(await fetchTraceLayouts(PROJECT)).toEqual({ kind: "unavailable" });
+  });
+
+  it("reads a saved view sorted by a tag's key with the Tags column, and none sorted by no key", async () => {
+    const tagged = { ...VIEW, query: { sort: "tag:repo", dir: "desc" }, columns: ["started", "tags"] };
+    answer(200, { views: [tagged] });
+    expect(await fetchTraceViews(PROJECT)).toEqual({ kind: "ok", views: [tagged] });
+    answer(200, { views: [{ ...VIEW, query: { sort: "tag:" } }] });
+    expect(await fetchTraceViews(PROJECT)).toEqual({ kind: "unavailable" });
   });
 
   it("reads a refusal as forbidden, and a shape it cannot read as unavailable", async () => {

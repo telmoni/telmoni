@@ -37,6 +37,7 @@ const MATRIX: &[Cell] = &[
     cell(Role::Owner, Verb::Delete, Resource::Connector, true),
     cell(Role::Owner, Verb::Read, Resource::Audit, true),
     cell(Role::Owner, Verb::Read, Resource::Trace, true),
+    cell(Role::Owner, Verb::Update, Resource::Trace, true),
     cell(Role::Owner, Verb::Delete, Resource::Trace, true),
     cell(Role::Owner, Verb::Read, Resource::View, true),
     cell(Role::Owner, Verb::Create, Resource::View, true),
@@ -64,6 +65,7 @@ const MATRIX: &[Cell] = &[
     cell(Role::Admin, Verb::Delete, Resource::Connector, true),
     cell(Role::Admin, Verb::Read, Resource::Audit, true),
     cell(Role::Admin, Verb::Read, Resource::Trace, true),
+    cell(Role::Admin, Verb::Update, Resource::Trace, true),
     cell(Role::Admin, Verb::Delete, Resource::Trace, true),
     cell(Role::Admin, Verb::Read, Resource::View, true),
     cell(Role::Admin, Verb::Create, Resource::View, true),
@@ -91,6 +93,7 @@ const MATRIX: &[Cell] = &[
     cell(Role::Member, Verb::Delete, Resource::Connector, false),
     cell(Role::Member, Verb::Read, Resource::Audit, false),
     cell(Role::Member, Verb::Read, Resource::Trace, true),
+    cell(Role::Member, Verb::Update, Resource::Trace, true),
     cell(Role::Member, Verb::Delete, Resource::Trace, false),
     cell(Role::Member, Verb::Read, Resource::View, true),
     cell(Role::Member, Verb::Create, Resource::View, false),
@@ -284,13 +287,14 @@ fn the_owner_and_admins_read_the_audit_log_and_none_writes_it() {
 }
 
 #[test]
-fn member_cannot_mutate_anything_but_the_alerts() {
+fn member_cannot_mutate_anything_but_the_alerts_and_the_tags() {
     for &resource in ALL_RESOURCES {
         for verb in [Verb::Create, Verb::Update, Verb::Delete] {
             if is_meaningless_combo(verb, resource) {
                 continue;
             }
-            if resource == Resource::Alert {
+            if resource == Resource::Alert || (resource == Resource::Trace && verb == Verb::Update)
+            {
                 assert_allows(Role::Member, verb, resource);
             } else {
                 assert_denies(Role::Member, verb, resource);
@@ -401,7 +405,7 @@ fn is_meaningless_combo(verb: Verb, resource: Resource) -> bool {
     matches!(
         (verb, resource),
         (Verb::Create | Verb::Update | Verb::Delete, Resource::Audit)
-            | (Verb::Create | Verb::Update, Resource::Trace)
+            | (Verb::Create, Resource::Trace)
     )
 }
 

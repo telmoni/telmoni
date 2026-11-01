@@ -24,9 +24,10 @@ ENGINE = MergeTree
 ORDER BY applied_at;
 
 -- One row per finished span — a run, a step, a model or tool call, or any
--- other span under a run — written once, when it arrives, and never updated,
--- so the table is read without FINAL; a row leaves only with its day's
--- retention or its project's deletion. A span carries its project and nothing
+-- other span under a run — written once, when it arrives, and never updated
+-- but for its run's tags, by a lightweight UPDATE whose patch every read
+-- applies, so the table is read without FINAL; a row leaves only with its
+-- day's retention or its project's deletion. A span carries its project and nothing
 -- above it: a project moves between organizations without a row rewritten.
 --
 -- Partitioned by the day it ARRIVED, by the server's clock, so the nightly
@@ -95,7 +96,10 @@ CREATE TABLE IF NOT EXISTS telemetry.spans
 ENGINE = MergeTree
 PARTITION BY toDate(received_at)
 ORDER BY (project_id, started_at)
-SETTINGS non_replicated_deduplication_window = 10000;
+-- The two block columns are what a lightweight UPDATE patches rows by.
+SETTINGS non_replicated_deduplication_window = 10000,
+         enable_block_number_column = 1,
+         enable_block_offset_column = 1;
 
 -- Each hour's totals, by project, agent, kind, model, provider, a tool call's
 -- name, status, the deployment's environment and release, and whether the

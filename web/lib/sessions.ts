@@ -1,5 +1,6 @@
 import type { SessionTrace } from "@/lib/server/entities/sessions";
 import { SessionColumn, SessionSort, SortDirection } from "@/lib/types/enums";
+import { readTagSort, type TagSort } from "@/lib/types/traces";
 
 import { listHref, type WindowQuery } from "./list-query";
 import { listSpec, type ColumnSpec, type ListTable } from "./traces";
@@ -102,6 +103,12 @@ export const SESSION_COLUMNS: readonly ColumnSpec<SessionColumn, SessionSort>[] 
     first: SortDirection.Desc,
     hint: "When its last run in the window ended.",
   },
+  {
+    key: "tags",
+    label: "Tags",
+    byTag: true,
+    hint: "Its runs' tags, each key:value once. The heading sorts the list by one key's value, the least among its runs, the sessions without it last.",
+  },
 ];
 
 /** The columns the table shows until a person picks others: what it showed
@@ -124,9 +131,9 @@ export const SESSION_TABLE: ListTable<SessionColumn, SessionSort> = {
   defaults: DEFAULT_SESSION_COLUMNS,
 };
 
-/** The sessions list: its table, menu, links and sorts, the id's among them;
- *  the server's default is the session last heard from first. */
-export const SESSIONS = listSpec({
+/** The sessions list: its table, menu, links and sorts, the id's and a tag's
+ *  among them; the server's default is the session last heard from first. */
+export const SESSIONS = listSpec<SessionColumn, SessionSort | TagSort>({
   path: "/sessions",
   table: SESSION_TABLE,
   sorts: SessionSort,
@@ -138,6 +145,7 @@ export const SESSIONS = listSpec({
     { id: "tokens", label: "Tokens", hint: "The sessions that used the most tokens first" },
   ],
   presetSorts: { slow: SessionSort.Duration, tokens: SessionSort.Tokens },
+  readSort: readTagSort,
 });
 
 export const SESSION_COLUMN_MENU = SESSIONS.menu;

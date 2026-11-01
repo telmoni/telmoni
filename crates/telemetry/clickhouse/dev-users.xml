@@ -17,7 +17,9 @@
   - `telemetry`: the module. It writes spans and reads them and their
     totals, and the row policy holds it to the projects each read names;
     it marks a deleted project's rows in both tables (`ALTER DELETE`, which
-    a lightweight delete needs), each delete naming its one project. It is
+    a lightweight delete needs), and rewrites a run's tags (`ALTER UPDATE`,
+    which a lightweight update needs), each naming its one project, since
+    the policy holds reads alone. It is
     granted those two tables and nothing else in the database: the view
     reads as its definer, so a grant on it would answer every project's
     totals past the policy, and the rollup is the view's alone to write.
@@ -45,7 +47,7 @@
             <profile>default</profile>
             <quota>default</quota>
             <grants>
-                <query>GRANT SELECT, INSERT, ALTER DELETE ON telemetry.spans</query>
+                <query>GRANT SELECT, INSERT, ALTER DELETE, ALTER UPDATE ON telemetry.spans</query>
                 <query>GRANT SELECT, ALTER DELETE ON telemetry.spans_hourly</query>
             </grants>
         </telemetry>

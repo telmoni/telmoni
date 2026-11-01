@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/components/page-header", () => ({
@@ -36,8 +36,10 @@ vi.mock("@/app/(app)/[organization]/[project]/traces/actions", () => ({
   updateTraceViewAction: vi.fn(),
   deleteTraceViewAction: vi.fn(),
   setSessionLayoutAction: vi.fn(),
+  setTraceTagsAction: vi.fn(),
 }));
 
+import { setTraceTagsAction } from "@/app/(app)/[organization]/[project]/traces/actions";
 import { Role } from "@/lib/types/enums";
 
 let mockContext: unknown;
@@ -275,6 +277,33 @@ describe("TracePage", () => {
     expect(within(run).getByText("(1,200 in, 300 out)")).toBeInTheDocument();
     expect(within(run).getAllByText("team=search").length).toBeGreaterThan(0);
     expect(within(run).getByText(RUN)).toBeInTheDocument();
+  });
+
+  it("takes a tag off the run at its ×, and adds one from the form, each through the action", async () => {
+    vi.mocked(setTraceTagsAction).mockResolvedValue({ ok: true, tags: {} });
+    render(await TracePage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+    const remove = screen.getByRole("button", { name: "Remove tag team" });
+    expect(remove.closest("[data-slot=badge]")).toHaveTextContent("team=search");
+    fireEvent.click(remove);
+    await waitFor(() =>
+      expect(setTraceTagsAction).toHaveBeenCalledWith("project_7bQx2mNv9BcK4dLp", RUN, { remove: ["team"] }),
+    );
+    // Once that change has landed, the next is taken.
+    await waitFor(() => expect(remove).not.toHaveAttribute("aria-disabled"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Add tag" }));
+    const form = within(await screen.findByRole("dialog", { name: "Add tag" }));
+    expect(form.getByRole("button", { name: "Add tag" })).toBeDisabled();
+    fireEvent.change(form.getByLabelText("Key"), { target: { value: " repo " } });
+    fireEvent.change(form.getByLabelText("Value"), { target: { value: "telmoni" } });
+    fireEvent.click(form.getByRole("button", { name: "Add tag" }));
+    await waitFor(() =>
+      expect(setTraceTagsAction).toHaveBeenLastCalledWith("project_7bQx2mNv9BcK4dLp", RUN, {
+        add: { repo: "telmoni" },
+      }),
+    );
+    // Added, the form shuts.
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Add tag" })).toBeNull());
   });
 
   it("links the incidents whose notices showed the run, each at its row of the alerts page", async () => {

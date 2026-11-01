@@ -34,7 +34,7 @@ use crate::contract::NAME_MAX;
 use crate::db::{self, ViewRow, ViewWrite};
 use crate::handler::chain;
 use crate::handler::traces::{TraceQuery, check_days, check_limit, values};
-use crate::traces::PINNED_MAX;
+use crate::traces::{ListSort, PINNED_MAX};
 
 /// The most views of one kind a project keeps: more than a menu shows at a
 /// glance.
@@ -63,14 +63,15 @@ fn parse_kind(text: &str) -> Result<ViewKind, TelmoniError> {
     }
 }
 
-/// `sort` as `kind`'s list reads it: one of its own sorts' words.
-fn sort_of(kind: ViewKind, sort: &str) -> Option<&'static str> {
-    fn word<E: WireEnum + std::str::FromStr>(sort: &str) -> Option<&'static str> {
-        sort.parse::<E>().ok().map(E::word)
+/// `sort` as `kind`'s list reads it: one of its own sorts' words, or
+/// `tag:<key>` where a tag sorts the list.
+fn sort_of(kind: ViewKind, sort: &str) -> Option<String> {
+    fn word<E: WireEnum + std::str::FromStr>(sort: &str) -> Option<String> {
+        sort.parse::<E>().ok().map(|e| e.word().to_owned())
     }
     match kind {
-        ViewKind::Traces => word::<TraceSort>(sort),
-        ViewKind::Sessions => word::<SessionSort>(sort),
+        ViewKind::Traces => ListSort::<TraceSort>::parse(sort).map(|s| s.to_string()),
+        ViewKind::Sessions => ListSort::<SessionSort>::parse(sort).map(|s| s.to_string()),
         ViewKind::Users => word::<UserSort>(sort),
         ViewKind::Layout => None,
     }
@@ -175,7 +176,7 @@ impl ViewQuery {
             release: filter.releases,
             tag: filter.tags,
             prompt: filter.prompts,
-            sort: sort.map(str::to_owned),
+            sort,
             dir: self.dir,
             days: self.days.map(check_days).transpose()?,
             limit: self.limit.map(check_limit).transpose()?,

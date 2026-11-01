@@ -29,6 +29,8 @@ pub enum SessionColumn {
     FirstSeen,
     /// When its last run in the window ended.
     LastSeen,
+    /// Its runs' tags, each once, as `key:value`.
+    Tags,
 }
 
 // The list's own columns, left to right.
@@ -43,6 +45,7 @@ crate::wire_enum!(SessionColumn {
     Duration => "duration",
     FirstSeen => "first_seen",
     LastSeen => "last_seen",
+    Tags => "tags",
 });
 
 #[cfg(test)]

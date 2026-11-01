@@ -64,6 +64,7 @@ function detail(id: string) {
         tools: ["search_docs"],
         environments: [],
         releases: [],
+        tags: [],
         pinned: [],
       },
     ],

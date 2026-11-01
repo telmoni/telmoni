@@ -775,7 +775,7 @@ async fn a_download_is_the_lists_rows_as_csv_or_json(pool: PgPool) {
         lines[0].starts_with("run_id,agent,user_id,session_id,ended,status,error_type,started_at")
     );
     assert!(
-        lines[0].ends_with(",models,tools,environments,releases,content"),
+        lines[0].ends_with(",models,tools,environments,releases,tags,content"),
         "{}",
         lines[0]
     );
@@ -784,9 +784,9 @@ async fn a_download_is_the_lists_rows_as_csv_or_json(pool: PgPool) {
         "{}",
         lines[1]
     );
-    assert!(lines[1].ends_with(",gpt-x,,,,[]"), "{}", lines[1]);
+    assert!(lines[1].ends_with(",gpt-x,,,,,[]"), "{}", lines[1]);
     assert!(
-        lines[3].ends_with(",claude-sonnet-5-5,search_docs,production,2026.10.17,[]"),
+        lines[3].ends_with(",claude-sonnet-5-5,search_docs,production,2026.10.17,team:search,[]"),
         "{}",
         lines[3]
     );

@@ -2,7 +2,7 @@ import { InfoIcon } from "lucide-react";
 import type { MouseEvent, ReactNode } from "react";
 
 import { Th } from "@/components/data-table";
-import { SortHeading } from "@/components/sort-heading";
+import { SortHeading, TagSortHeading } from "@/components/sort-heading";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { DownloadFormat } from "@/lib/server/entities/traces";
@@ -14,21 +14,32 @@ import { cn } from "@/lib/utils";
 // What the three list tables, their pickers and their downloads share, so a
 // heading, a row's click or a hint is drawn and read one way.
 
-/** The headings of the columns a table shows: a sortable one a link that
- *  sorts by it, the rest plain, counts standing right. */
+/** A table's headings: a sortable one a link that sorts by it, the tags' a
+ *  menu of the keys `tags` offers, the rest plain, counts standing right. */
 export function ColumnHeadings<K extends string, S extends string>({
   columns,
   sort,
   dir,
   sortHref,
+  tags,
 }: {
   columns: readonly ColumnSpec<K, S>[];
   sort: S;
   dir: SortDirection;
   sortHref: (column: S) => string;
+  tags?: { keys: readonly string[]; href: (key: string) => string };
 }) {
   return columns.map((column) =>
-    column.sort ? (
+    column.byTag && tags ? (
+      <TagSortHeading
+        key={column.key}
+        label={column.label}
+        sort={sort}
+        dir={dir}
+        keys={tags.keys}
+        href={tags.href}
+      />
+    ) : column.sort ? (
       <SortHeading
         key={column.key}
         label={column.label}

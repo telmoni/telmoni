@@ -51,6 +51,7 @@ let mockContext: unknown;
 let mockProject: unknown;
 let mockSessions: unknown;
 let mockFacets: unknown;
+let mockViews: unknown;
 const fetchProjectBySlug = vi.fn<(slug: string) => Promise<unknown>>(async () => mockProject);
 const fetchSessions = vi.fn<(projectId: string, query: unknown) => Promise<unknown>>(
   async () => mockSessions,
@@ -67,7 +68,7 @@ vi.mock("@/lib/server/data", () => ({
   fetchSessionFacets: (projectId: string, query: unknown) => fetchSessionFacets(projectId, query),
   fetchSessionLayout: async () => ({ view_id: null }),
   fetchTraceLayouts: async () => ({ kind: "ok", layouts: [] }),
-  fetchSessionViews: async () => ({ kind: "ok", views: [] }),
+  fetchSessionViews: async () => mockViews,
 }));
 
 import SessionsPage from "./page";
@@ -87,6 +88,7 @@ const SESSION_A = {
   duration_ms: 1500,
   first_seen: "2026-10-11T03:00:00Z",
   last_seen: "2026-10-11T03:04:02Z",
+  tags: ["repo:telmoni", "team:core"],
 };
 // An id of the application's choosing, with a slash and a space, and no user.
 const SESSION_B = {
@@ -100,6 +102,7 @@ const SESSION_B = {
   duration_ms: 1500,
   first_seen: "2026-10-10T03:00:00Z",
   last_seen: "2026-10-10T03:00:01Z",
+  tags: [],
 };
 
 function list(over: Record<string, unknown> = {}) {
@@ -141,6 +144,7 @@ beforeEach(() => {
   };
   mockProject = { id: PROJECT, slug: "web", name: "Web", role: Role.Member };
   mockSessions = list();
+  mockViews = { kind: "ok", views: [] };
   mockFacets = {
     kind: "ok",
     facets: {
@@ -217,7 +221,7 @@ describe("SessionsPage", () => {
     );
     // The tokens' halves are offered, not shown; the count holds the session's id, which always shows.
     expect(table.queryByRole("columnheader", { name: /Input tokens/ })).toBeNull();
-    expect(screen.getByRole("button", { name: /Columns/ })).toHaveTextContent("9/11");
+    expect(screen.getByRole("button", { name: /Columns/ })).toHaveTextContent("9/12");
     // The window and the refresh stand on the title's row, as on the traces page.
     const header = within(screen.getByTestId("page-header"));
     expect(header.getByRole("combobox", { name: "Window" })).toHaveTextContent("Last 7 days");
@@ -322,6 +326,40 @@ describe("SessionsPage", () => {
     );
   });
 
+  it("names the project's saved views of its sessions, each opening the list on its own query, and the one the page was opened from", async () => {
+    const id = "5d1c2b3a-4e5f-4a6b-8c7d-9e0f1a2b3c4d";
+    mockViews = {
+      kind: "ok",
+      views: [
+        {
+          id,
+          kind: "sessions",
+          name: "Busy",
+          query: { status: ["error"], sort: "last_seen" },
+          columns: ["traces", "last_seen"],
+          created_at: "2026-10-28T03:00:00Z",
+          updated_at: "2026-10-28T03:00:00Z",
+        },
+      ],
+    };
+    render(await SessionsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+    const menu = screen.getByRole("button", { name: "Saved views" });
+    expect(menu).toHaveTextContent("1");
+    fireEvent.keyDown(menu, { key: "Enter" });
+    expect(await screen.findByRole("menuitem", { name: "Busy" })).toHaveAttribute(
+      "href",
+      `/acme/web/sessions?status=error&sort=last_seen&view=${id}`,
+    );
+
+    render(
+      await SessionsPage({
+        params: PARAMS,
+        searchParams: Promise.resolve({ status: "error", sort: "last_seen", view: id }),
+      }),
+    );
+    expect(screen.getByRole("button", { name: "Saved view: Busy" })).toBeInTheDocument();
+  });
+
   it("shows the columns the person picked, in the table's order", async () => {
     window.localStorage.setItem(
       TRACE_PREFS_KEY,
@@ -333,6 +371,40 @@ describe("SessionsPage", () => {
       .map((th) => th.textContent);
     expect(headings).toEqual(["Session", "Input tokens", "Output tokens"]);
     expect(within(screen.getByRole("table")).getByText("1,200")).toBeInTheDocument();
+  });
+
+  it("shows each session's tags as chips, and sorts by a tag's key picked from the Tags heading", async () => {
+    window.localStorage.setItem(TRACE_PREFS_KEY, JSON.stringify({ sessionColumns: ["tags"] }));
+    (mockFacets as { facets: Record<string, unknown> }).facets.tag = {
+      values: [
+        { value: "team:core", count: 1 },
+        { value: "repo:telmoni", count: 1 },
+      ],
+      more: false,
+    };
+    render(
+      await SessionsPage({ params: PARAMS, searchParams: Promise.resolve({ sort: "tag:repo", dir: "desc" }) }),
+    );
+    expect(fetchSessions).toHaveBeenCalledWith(PROJECT, { sort: "tag:repo", dir: "desc", limit: 50 });
+    const table = within(screen.getByRole("table"));
+    const row = within(table.getByRole("link", { name: "conv-1" }).closest("tr")!);
+    expect(row.getByText("repo:telmoni").closest("[data-slot=badge]")).toBeInTheDocument();
+    expect(row.getByText("team:core").closest("[data-slot=badge]")).toBeInTheDocument();
+    expect(within(table.getByRole("link", { name: "chat/42 b" }).closest("tr")!).getByText("—")).toBeInTheDocument();
+
+    const heading = table.getByRole("columnheader", { name: /Tags/ });
+    expect(heading).toHaveAttribute("aria-sort", "descending");
+    fireEvent.keyDown(within(heading).getByRole("button", { name: "Tags, sorted by repo" }), {
+      key: "Enter",
+    });
+    expect(await screen.findByRole("menuitem", { name: "repo" })).toHaveAttribute(
+      "href",
+      "/acme/web/sessions?sort=tag%3Arepo&dir=asc",
+    );
+    expect(screen.getByRole("menuitem", { name: "team" })).toHaveAttribute(
+      "href",
+      "/acme/web/sessions?sort=tag%3Ateam&dir=asc",
+    );
   });
 
   it("says when the filters admit no session, with the way back to every one", async () => {

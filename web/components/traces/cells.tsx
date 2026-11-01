@@ -4,6 +4,7 @@ import Link from "next/link";
 import { LinkPending } from "@/components/link-pending";
 import { LocalTime } from "@/components/local-time";
 import { TraceStatusBadge } from "@/components/trace-status-badge";
+import { Badge } from "@/components/ui/badge";
 import type { Trace, TraceQuery } from "@/lib/server/entities/traces";
 import { formatCount, formatDuration, type ColumnSpec, type FilterKey } from "@/lib/traces";
 import { TraceColumn } from "@/lib/types/enums";
@@ -32,6 +33,8 @@ export function cellClass(column: ColumnSpec): string {
     case TraceColumn.Models:
     case TraceColumn.Tools:
       return "max-w-64 truncate text-xs";
+    case TraceColumn.Tags:
+      return "max-w-64 text-xs";
     default:
       return "whitespace-nowrap";
   }
@@ -58,6 +61,8 @@ export function titleOf(column: ColumnSpec, trace: Trace): string | undefined {
       return trace.environments.join(", ") || undefined;
     case TraceColumn.Release:
       return trace.releases.join(", ") || undefined;
+    case TraceColumn.Tags:
+      return trace.tags.join(", ") || undefined;
     default:
       return undefined;
   }
@@ -156,7 +161,47 @@ export function cellOf(
           href={narrowedTo ? (v) => narrowedTo("release", v) : null}
         />
       );
+    case TraceColumn.Tags:
+      return (
+        <TagChips
+          tags={trace.tags}
+          current={query.tag}
+          href={narrowedTo ? (v) => narrowedTo("tag", v) : null}
+        />
+      );
   }
+}
+
+/** A row's tags, each `key:value` a chip, and a filter where the page offers
+ *  one; a dash where it has none. */
+export function TagChips({
+  tags,
+  current,
+  href = null,
+}: {
+  tags: readonly string[];
+  current?: readonly string[];
+  href?: ((tag: string) => string) | null;
+}) {
+  if (tags.length === 0) return <span className="text-muted-foreground">—</span>;
+  return (
+    <span className="flex flex-wrap gap-1">
+      {tags.map((tag) =>
+        href && !(current?.length === 1 && current[0] === tag) ? (
+          <Badge key={tag} variant="secondary" className="max-w-full font-normal" asChild>
+            <Link href={href(tag)} scroll={false}>
+              <span className="truncate">{tag}</span>
+              <LinkPending />
+            </Link>
+          </Badge>
+        ) : (
+          <Badge key={tag} variant="secondary" className="max-w-full font-normal">
+            <span className="truncate">{tag}</span>
+          </Badge>
+        ),
+      )}
+    </span>
+  );
 }
 
 /** A value, or a dash where the run sent none. */

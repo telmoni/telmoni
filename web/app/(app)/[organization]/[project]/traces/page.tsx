@@ -57,6 +57,7 @@ export default async function TracesPage({
   // The rows this render drew, as one token: the table is keyed by it, and
   // the new-traces bar reads a change in it as the list drawn again.
   const drawn = access.kind === "ok" ? access.list.traces.map((t) => t.run_id).join() : "";
+  const knownTags = facets.kind === "ok" ? facets.facets.tag.values.map((v) => v.value) : [];
 
   return (
     <>
@@ -144,6 +145,7 @@ export default async function TracesPage({
               query={query}
               ui={ui}
               traces={list.traces}
+              knownTags={knownTags}
             />
           </>
         )}
@@ -157,6 +159,7 @@ export default async function TracesPage({
             slug={slug}
             projectId={project.id}
             runs={access.list.traces.map((t) => t.run_id)}
+            knownTags={knownTags}
           />
         )}
       </ListPage>

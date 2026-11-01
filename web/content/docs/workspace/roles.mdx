@@ -59,6 +59,7 @@ sessions, its alerts, and project audit events.
 | Open the project's [saved views](/docs/workspace/traces#saved-views) of its traces, sessions and users and [saved layouts](/docs/workspace/sessions#keeping-a-layout) of its sessions | Yes | Yes | Yes |
 | Save, rename, and delete saved views and layouts, and set the layout the project opens in | Yes | Yes | No |
 | Make, edit, pause, mute, and delete the project's [alerts](/docs/workspace/alerts); acknowledge and resolve its incidents | Yes | Yes | Yes |
+| Add and remove a trace's [tags](/docs/workspace/traces#tags) | Yes | Yes | Yes |
 | View API keys (names and dates, never the raw key) | Yes | Yes | Yes |
 | Create, rotate, and revoke API keys | Yes | Yes | No |
 | View connectors and delivery logs | Yes | Yes | Yes |
@@ -81,11 +82,13 @@ sessions, its alerts, and project audit events.
   trace list's views and the sessions' layouts, and sets the layout the
   project opens in; and reads the project audit log. Cannot change the project's content mode, or
   delete or transfer the project.
-- **Member**: Read-only access to project resources but its alerts. Can
+- **Member**: Read-only access to project resources but its alerts and its
+  traces' tags. Can
   inspect active connectors, delivery logs, and API key metadata (name,
   creation date, last used date), and open the project's saved views and
   layouts. Cannot view the project audit log, and changes nothing but the
-  project's alerts and their incidents, as every role can; whether the
+  project's alerts and their incidents and its traces' tags, as every role
+  can; whether the
   project's notices are marked read, which is the same for everyone on the
   project; and their own seat, which they give up with **Leave** on the
   project's **Members** page.

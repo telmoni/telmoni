@@ -14,6 +14,9 @@
       "output_tokens": 680,
       "session_id": "s_9c2e",
       "steps": 4,
+      "tags": [
+        "repo:telmoni"
+      ],
       "traces": 2,
       "user_id": "u_1f3a"
     }

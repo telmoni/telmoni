@@ -7,6 +7,7 @@ import { z } from "zod";
 import { type ActionResult, refused } from "@/lib/action-result";
 import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
 import { env } from "@/lib/env";
+import { MAX_LIMIT } from "@/lib/list-query";
 import { type Ceiling, admitProject } from "@/lib/server/admit";
 import {
   SessionLayoutSettingSchema,
@@ -16,6 +17,7 @@ import {
   LayoutQuerySchema,
   SavedViewOfAnyKindSchema,
   SessionViewQuerySchema,
+  TraceTagsSchema,
   UserViewQuerySchema,
   ViewQuerySchema,
   type ListView,
@@ -24,11 +26,10 @@ import {
 import { pathAndQuery, requestUrl } from "@/lib/server/path";
 import { SessionColumn, TraceColumn, UserColumn, ViewKind } from "@/lib/types/enums";
 
-// A project's saved views of its lists and saved layouts of a session's
-// page and a trace's, saved, saved over and deleted through telemetry's
-// lanes, which hold the role each takes and check each as its page would
-// read it, and the layout the project opens in, set through its lane: what
-// this checks is only that the browser sent the shape each has.
+// A project's saved views and layouts, saved, saved over and deleted; the
+// layout it opens in; a run's tags and its deletion; an end user's erasure:
+// each through its lane in telemetry, which holds the role each takes and
+// checks every value. What this checks is the shape the browser sent.
 
 export type ViewResult = ActionResult<{ view?: ListView | TraceLayout }>;
 
@@ -71,10 +72,20 @@ const DELETIONS: Ceiling = { call: "traces:delete", limit: 10 };
  *  seconds, and the server finishes it if the console stops waiting. */
 const DELETION_WAIT_MS = 60_000;
 
+/** Changes to runs' tags a person asks for in a minute, a session's every
+ *  trace one of them: a hand's pace. */
+const TAGGINGS: Ceiling = { call: "traces:tags", limit: 30 };
+
+/** How long a change to a run's tags is waited for: its read and its patch
+ *  each have ten seconds. */
+const TAGGING_WAIT_MS = 30_000;
+
+type Method = "POST" | "PUT" | "PATCH" | "DELETE";
+
 /** One of telemetry's lanes under `/internal/v1/telemetry`, called as the
  *  person: the answer, or why it was not sent or was refused. */
 async function call(
-  method: "POST" | "PUT" | "DELETE",
+  method: Method,
   lane: string,
   projectId: string,
   body?: unknown,
@@ -83,12 +94,22 @@ async function call(
 ): Promise<ActionResult<{ res: Response }>> {
   const gate = await admitProject(ceiling, projectId);
   if (!gate.ok) return refused(gate.error);
+  return callAs(gate.headers, method, lane, body, waitMs);
+}
 
+/** A lane called with the headers of a person already admitted. */
+async function callAs(
+  headers: Record<string, string>,
+  method: Method,
+  lane: string,
+  body?: unknown,
+  waitMs?: number,
+): Promise<ActionResult<{ res: Response }>> {
   const url = `${env.SERVER_URL}/internal/v1/telemetry${lane}`;
   const init = {
     method,
     headers: {
-      ...gate.headers,
+      ...headers,
       ...(body ? { "content-type": "application/json" } : {}),
     },
     body: body ? JSON.stringify(body) : undefined,
@@ -197,6 +218,76 @@ export async function deleteTraceAction(projectId: string, runId: string): Promi
   here.pathname = here.pathname.replace(/\/[^/]+$/, "");
   here.search = "";
   redirect(pathAndQuery(here));
+}
+
+/** What a change to a run's tags sends: the tags to set, by key, and the
+ *  keys to take off. */
+const TagsChangeSchema = z.strictObject({
+  add: z.record(z.string(), z.string()).optional(),
+  remove: z.array(z.string()).optional(),
+});
+
+/** The tag set on each of a session's runs, and the runs, by their ids: as
+ *  many as its page shows. */
+const TagSchema = z.strictObject({ key: z.string(), value: z.string() });
+const RunIdsSchema = z.array(z.guid()).min(1).max(MAX_LIMIT);
+
+export type TagsResult = ActionResult<{ tags: Record<string, string> }>;
+
+/** A run's tags changed on its every span, by the run's id: the keys
+ *  `remove` names taken off, then `add` set; the page is drawn again. */
+export async function setTraceTagsAction(
+  projectId: string,
+  runId: string,
+  change: unknown,
+): Promise<TagsResult> {
+  if (!z.guid().safeParse(runId).success) return refused("Invalid trace id.");
+  const parsed = TagsChangeSchema.safeParse(change);
+  if (!parsed.success) return refused("That change to the tags could not be read.");
+  const sent = await call(
+    "PATCH",
+    `/traces/${runId}/tags`,
+    projectId,
+    parsed.data,
+    TAGGINGS,
+    TAGGING_WAIT_MS,
+  );
+  if (!sent.ok) return sent;
+  const tags = TraceTagsSchema.safeParse(await sent.res.json().catch(() => null));
+  refresh();
+  if (!tags.success) return refused("Unexpected response from telemetry.");
+  return { ok: true, tags: tags.data.tags };
+}
+
+export type TaggedResult = ActionResult<{ tagged: number }>;
+
+/** One tag set on each of `runIds` in turn, the first refusal stopping the
+ *  rest: how many took it, or how many had before it. */
+export async function tagTracesAction(
+  projectId: string,
+  runIds: unknown,
+  tag: unknown,
+): Promise<TaggedResult> {
+  const runs = RunIdsSchema.safeParse(runIds);
+  const parsed = TagSchema.safeParse(tag);
+  if (!runs.success || !parsed.success) return refused("That tag could not be read.");
+  const gate = await admitProject(TAGGINGS, projectId);
+  if (!gate.ok) return refused(gate.error);
+  const add = { [parsed.data.key]: parsed.data.value };
+  let tagged = 0;
+  for (const runId of runs.data) {
+    const sent = await callAs(gate.headers, "PATCH", `/traces/${runId}/tags`, { add }, TAGGING_WAIT_MS);
+    if (!sent.ok) {
+      if (tagged === 0) return sent;
+      refresh();
+      return refused(
+        `Tagged ${tagged} of ${runs.data.length} traces before one was refused: ${sent.error}`,
+      );
+    }
+    tagged += 1;
+  }
+  refresh();
+  return { ok: true, tagged };
 }
 
 const ErasedSchema = z.object({ traces: z.number().int().nonnegative() });

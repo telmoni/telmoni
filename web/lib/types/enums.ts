@@ -116,6 +116,7 @@ export const TraceColumn = {
   TimeToFirstToken: "time_to_first_token",
   Models:           "models",
   Tools:            "tools",
+  Tags:             "tags",
 } as const;
 export type TraceColumn = typeof TraceColumn[keyof typeof TraceColumn];
 
@@ -178,6 +179,7 @@ export const SessionColumn = {
   Duration:     "duration",
   FirstSeen:    "first_seen",
   LastSeen:     "last_seen",
+  Tags:         "tags",
 } as const;
 export type SessionColumn = typeof SessionColumn[keyof typeof SessionColumn];
 

@@ -31,6 +31,8 @@ import {
   shortId,
   showsView,
   orderedColumns,
+  tagKeys,
+  tagValues,
   timelineBars,
   toggled,
   traceHref,
@@ -263,6 +265,33 @@ describe("the URL as the list's state", () => {
     expect(isTagPair(`k:${"v".repeat(257)}`)).toBe(false);
   });
 
+  it("keeps a sort by a tag's key with its direction, ascending first, and drops one the server would refuse", () => {
+    expect(parseTraceQuery({ sort: "tag:repo", dir: "desc" })).toEqual({ sort: "tag:repo", dir: "desc" });
+    expect(parseTraceQuery({ sort: `tag:${"😀".repeat(64)}` })).toEqual({ sort: `tag:${"😀".repeat(64)}` });
+    for (const sort of ["tag:", `tag:${"k".repeat(65)}`, "tag:re\u0007po", "tags:repo"]) {
+      expect(parseTraceQuery({ sort }), sort).toEqual({});
+    }
+    expect(tracesHref("acme", "web", parseTraceQuery({ sort: "tag:repo", page: "2" }))).toBe(
+      "/acme/web/traces?sort=tag%3Arepo&page=2",
+    );
+    expect(currentSort({ sort: "tag:repo" })).toEqual({ sort: "tag:repo", dir: "asc" });
+    expect(nextSort({ sort: "tag:repo" }, "tag:repo")).toEqual({ sort: "tag:repo", dir: "desc", page: undefined });
+    expect(nextSort({ sort: "tokens", page: 3 }, "tag:repo")).toEqual({
+      sort: "tag:repo",
+      dir: "asc",
+      page: undefined,
+    });
+  });
+
+  it("reads the keys a tag facet names, and the values each takes, each once and in order", () => {
+    const pairs = ["team:search", "repo:web", "team:core", "repo:web", "a:b:c", "untagged"];
+    expect(tagKeys(pairs)).toEqual(["a", "repo", "team"]);
+    expect(tagValues(pairs, "team")).toEqual(["core", "search"]);
+    expect(tagValues(pairs, "a")).toEqual(["b:c"]);
+    expect(tagValues(pairs, "a:b")).toEqual([]);
+    expect(tagValues(pairs, "")).toEqual([]);
+  });
+
   it("offers every column the server names, and shows the list's first eight until a person picks", () => {
     expect(TRACE_COLUMNS.map((c) => c.key).sort()).toEqual(Object.values(TraceColumn).sort());
     expect(DEFAULT_COLUMNS).toEqual([
@@ -405,6 +434,19 @@ describe("a saved view", () => {
     expect(showsView({ ...shown, days: 7 }, VIEW)).toBe(false);
     expect(showsView({ ...shown, sort: "tokens" }, VIEW)).toBe(false);
   });
+
+  it("keeps a sort by a tag's key, opens on it, and is shown while the list holds it", () => {
+    const listed = parseTraceQuery({ sort: "tag:repo", dir: "desc", page: "2" });
+    const view: TraceView = { ...VIEW, query: viewQueryOf(listed) };
+    expect(view.query).toEqual({ sort: "tag:repo", dir: "desc" });
+    expect(queryOfView(view.query)).toEqual({ sort: "tag:repo", dir: "desc" });
+    expect(viewHref("acme", "web", view)).toBe(`/acme/web/traces?sort=tag%3Arepo&dir=desc&view=${VIEW.id}`);
+    expect(showsView(listed, view)).toBe(true);
+    expect(showsView({ ...listed, dir: "asc" }, view)).toBe(false);
+    expect(showsView({ ...listed, sort: "tag:team" }, view)).toBe(false);
+    // Ascending is a tag's first way, so a view saved without a direction is shown by it.
+    expect(showsView({ sort: "tag:repo", dir: "asc" }, { query: { sort: "tag:repo" } })).toBe(true);
+  });
 });
 
 describe("numbers into words", () => {
@@ -471,6 +513,7 @@ describe("a run's time to first token in the list", () => {
     tools: [],
     environments: [],
     releases: [],
+    tags: [],
   });
 
   it("reads as a duration, and as a dash where none of its calls reported one", () => {

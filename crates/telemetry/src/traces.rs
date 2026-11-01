@@ -19,6 +19,7 @@ use uuid::Uuid;
 
 use telmoni_shared::{SortDirection, SpanKind, SpanStatus, TraceSort};
 
+use crate::contract::TAG_KEY_MAX;
 use crate::store::{Projects, Read, SpanRow, Store, text};
 
 /// How many days back the list reads when the request names none.
@@ -188,6 +189,9 @@ pub struct TraceRow {
     pub environments: Vec<String>,
     /// The releases its spans were sent from, each once, sorted.
     pub releases: Vec<String>,
+    /// Its tags as `key:value`, any of its spans carrying them, each once,
+    /// sorted.
+    pub tags: Vec<String>,
 }
 
 /// How many rows the filter admits in the window: runs, sessions or users.
@@ -472,6 +476,8 @@ macro_rules! run_rows {
             "countIf(kind = 'step') AS steps, countIf(status = 'error') AS errors, ",
             "sumIf(input_tokens, kind = 'model_call') AS input_total, ",
             "sumIf(output_tokens, kind = 'model_call') AS output_total, ",
+            "arraySort(groupUniqArrayArray(arrayMap((k, v) -> concat(k, ':', v), ",
+            "mapKeys(tags), mapValues(tags)))) AS run_tag_pairs, ",
             "toUInt8((empty({agents:Array(String)}) OR has({agents:Array(String)}, any(agent))) ",
             "AND (empty({users:Array(String)}) OR has({users:Array(String)}, run_user_id)) ",
             "AND (empty({sessions:Array(String)}) OR has({sessions:Array(String)}, run_session_id)) ",
@@ -507,7 +513,7 @@ pub(crate) use window;
 /// literal: the query module takes nothing else. The outer SELECT gives the
 /// sums the row's names.
 macro_rules! list_sql {
-    ($order:literal) => {
+    ($order:expr) => {
         concat!(
             "SELECT run_id, run_agent AS agent, run_user_id AS user_id, ",
             "run_session_id AS session_id, run_ended AS ended, run_status AS status, ",
@@ -518,7 +524,7 @@ macro_rules! list_sql {
             "input_total AS input_tokens, output_total AS output_tokens, ",
             "cache_read_total AS cache_read_input_tokens, ",
             "cache_write_total AS cache_write_input_tokens, models, tools, ",
-            "environments, releases ",
+            "environments, releases, tag_pairs AS tags ",
             "FROM (",
             runs!(),
             ") ORDER BY ",
@@ -528,6 +534,24 @@ macro_rules! list_sql {
         )
     };
 }
+
+/// A list's order by a tag, its key bound as `sort_tag`: each row's least
+/// value of it among `$pairs`, its `key:value` pairs sorted, and a row
+/// without it last either way.
+macro_rules! by_tag {
+    ($pairs:literal, $direction:literal) => {
+        concat!(
+            "empty(arrayFilter(p -> startsWith(p, concat({sort_tag:String}, ':')), ",
+            $pairs,
+            ")) ASC, arrayFilter(p -> startsWith(p, concat({sort_tag:String}, ':')), ",
+            $pairs,
+            ")[1] ",
+            $direction
+        )
+    };
+}
+
+pub(crate) use by_tag;
 
 /// The list's SQL for one sort: a literal per column and direction.
 const fn list_sql(sort: TraceSort, direction: SortDirection) -> &'static str {
@@ -737,8 +761,49 @@ pub(crate) trait Listing {
     const FACETS_SQL: &'static str;
     /// The page's SQL for one sort: a literal per column and direction.
     fn list_sql(sort: Self::Sort, direction: SortDirection) -> &'static str;
+    /// The page's SQL sorted by a tag, `{sort_tag:String}` its key; none for
+    /// a list no tag sorts.
+    fn tag_sql(_direction: SortDirection) -> Option<&'static str> {
+        None
+    }
     /// The way a column sorts when the URL names none.
     fn first_direction(sort: Self::Sort) -> SortDirection;
+}
+
+/// A list's sort: one of its own columns, or `tag:<key>`, its rows by their
+/// value of that tag, a key of 1 to [`TAG_KEY_MAX`] characters.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ListSort<S> {
+    Column(S),
+    Tag(String),
+}
+
+impl<S: std::str::FromStr> ListSort<S> {
+    /// `given` as a sort: `tag:` and a key, no character of it a control
+    /// one, else one of the list's own words.
+    pub fn parse(given: &str) -> Option<Self> {
+        match given.strip_prefix("tag:") {
+            Some(key) => ((1..=TAG_KEY_MAX).contains(&key.chars().count())
+                && !key.chars().any(char::is_control))
+            .then(|| Self::Tag(key.to_owned())),
+            None => given.parse().ok().map(Self::Column),
+        }
+    }
+}
+
+impl<S: std::fmt::Display> std::fmt::Display for ListSort<S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Column(column) => column.fmt(f),
+            Self::Tag(key) => write!(f, "tag:{key}"),
+        }
+    }
+}
+
+impl<S: std::fmt::Display> Serialize for ListSort<S> {
+    fn serialize<Z: serde::Serializer>(&self, serializer: Z) -> Result<Z::Ok, Z::Error> {
+        serializer.collect_str(self)
+    }
 }
 
 /// The trace list: a run a row.
@@ -754,6 +819,13 @@ impl Listing for Traces {
 
     fn list_sql(sort: TraceSort, direction: SortDirection) -> &'static str {
         list_sql(sort, direction)
+    }
+
+    fn tag_sql(direction: SortDirection) -> Option<&'static str> {
+        Some(match direction {
+            SortDirection::Asc => list_sql!(by_tag!("tag_pairs", "ASC")),
+            SortDirection::Desc => list_sql!(by_tag!("tag_pairs", "DESC")),
+        })
     }
 
     /// The newest, the longest and the most first; names in the alphabet's
@@ -787,11 +859,20 @@ pub(crate) async fn list<L: Listing>(
     store: &Store,
     projects: &Projects,
     filter: &TraceFilter,
-    (sort, direction): (L::Sort, SortDirection),
+    (sort, direction): (&ListSort<L::Sort>, SortDirection),
     limit: u32,
     offset: u64,
 ) -> clickhouse::error::Result<Vec<L::Row>> {
-    filtered(store.read(projects, L::list_sql(sort, direction)), filter)
+    // A tag sort is refused before a list no tag sorts is read.
+    let (sql, tag) = match sort {
+        ListSort::Column(column) => (L::list_sql(*column, direction), ""),
+        ListSort::Tag(key) => match L::tag_sql(direction) {
+            Some(sql) => (sql, key.as_str()),
+            None => (L::list_sql(L::FALLBACK, direction), ""),
+        },
+    };
+    filtered(store.read(projects, sql), filter)
+        .param("sort_tag", tag)
         .param("limit", limit)
         .param("offset", offset)
         .fetch_all()
@@ -996,6 +1077,50 @@ pub async fn spans(
         .param("limit", limit)
         .param("units_max", units)
         .fetch_all()
+        .await
+}
+
+/// A run's tags as its own span carries them, how many spans it has, and the
+/// most tags any of them would carry once `removed` are taken off and the
+/// `added` keys set: what a change to its tags is checked against.
+const RUN_TAGS_SQL: &str = "SELECT anyIf(tags, kind = 'run') AS run_tags, count() AS spans, \
+     max(length(arrayDistinct(arrayConcat( \
+         arrayFilter(k -> NOT has({removed:Array(String)}, k), mapKeys(tags)), \
+         {added:Array(String)})))) AS most \
+     FROM telemetry.spans \
+     WHERE project_id IN {projects:Array(String)} AND run_id = {run:UUID}";
+
+/// What [`run_tags`] reads of a run.
+#[derive(Debug, Clone, Row, Deserialize)]
+pub struct RunTags {
+    /// The tags its own span carries; none where that span has not landed.
+    /// Named apart from the column, which the read's other sum reads.
+    pub run_tags: Vec<(String, String)>,
+    /// How many spans it has: none for a run the project does not hold.
+    pub spans: u64,
+    /// The most tags one of its spans would carry after the change.
+    pub most: u64,
+}
+
+/// Run `run_id`'s tags in `projects`, as [`RunTags`] reads them, with the
+/// change of `added` keys and `removed` ones weighed.
+///
+/// # Errors
+///
+/// ClickHouse did not answer, or refused the read.
+pub async fn run_tags(
+    store: &Store,
+    projects: &Projects,
+    run_id: Uuid,
+    added: &[&str],
+    removed: &[String],
+) -> clickhouse::error::Result<RunTags> {
+    store
+        .read(projects, RUN_TAGS_SQL)
+        .param("run", run_id)
+        .param("added", added)
+        .param("removed", removed)
+        .fetch_one()
         .await
 }
 

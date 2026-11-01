@@ -46,6 +46,7 @@ vi.mock("next/headers", () => ({
   }),
 }));
 
+import { TRACE_PREFS_KEY } from "@/lib/trace-prefs";
 import { Role } from "@/lib/types/enums";
 
 let mockContext: unknown;
@@ -112,6 +113,7 @@ const TRACE_A = {
   tools: ["search_docs"],
   environments: ["production"],
   releases: ["2026.10.18"],
+  tags: ["repo:telmoni", "team:core"],
 };
 const TRACE_B = {
   ...TRACE_A,
@@ -126,6 +128,7 @@ const TRACE_B = {
   output_tokens: 5,
   duration_ms: 500,
   time_to_first_token_ms: null,
+  tags: [],
 };
 
 function list(over: Record<string, unknown> = {}) {
@@ -275,7 +278,7 @@ describe("TracesPage", () => {
     // Columns past the first eight are offered, not shown; the count holds the
     // trace's id, which always shows.
     expect(table.queryByRole("columnheader", { name: /Model calls/ })).toBeNull();
-    expect(screen.getByRole("button", { name: /Columns/ })).toHaveTextContent("9/24");
+    expect(screen.getByRole("button", { name: /Columns/ })).toHaveTextContent("9/25");
     // The window and the refresh stand on the title's row.
     const header = within(screen.getByTestId("page-header"));
     expect(header.getByRole("combobox", { name: "Window" })).toHaveTextContent("Last 7 days");
@@ -432,6 +435,66 @@ describe("TracesPage", () => {
     expect(screen.getByTestId("charts")).toBeInTheDocument();
     expect(screen.queryByRole("table")).toBeNull();
     expect(screen.getByRole("tab", { name: /Chart/ })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("shows each run's tags as chips in the Tags column, each narrowing the list to it", async () => {
+    window.localStorage.setItem(TRACE_PREFS_KEY, JSON.stringify({ columns: ["agent", "tags"] }));
+    render(await TracesPage({ params: PARAMS, searchParams: Promise.resolve({ tag: "team:core" }) }));
+    const table = within(screen.getByRole("table"));
+    expect(table.getByRole("columnheader", { name: /Tags/ })).toBeInTheDocument();
+    const row = within(table.getByRole("link", { name: "5d4f5c68" }).closest("tr")!);
+    expect(row.getByRole("link", { name: "repo:telmoni" })).toHaveAttribute(
+      "href",
+      "/acme/web/traces?tag=repo%3Atelmoni",
+    );
+    // The tag the list is narrowed to alone is a chip, no longer a link.
+    expect(row.queryByRole("link", { name: "team:core" })).toBeNull();
+    expect(row.getByText("team:core").closest("[data-slot=badge]")).toBeInTheDocument();
+    // A run with no tags shows a dash.
+    expect(within(table.getByRole("link", { name: "7a1b2c3d" }).closest("tr")!).getByText("—")).toBeInTheDocument();
+  });
+
+  it("sorts by a tag's key picked from the Tags heading, the keys those the window's tag facet names", async () => {
+    window.localStorage.setItem(TRACE_PREFS_KEY, JSON.stringify({ columns: ["agent", "tags"] }));
+    (mockFacets as { facets: Record<string, unknown> }).facets.tag = {
+      values: [
+        { value: "team:core", count: 2 },
+        { value: "repo:telmoni", count: 1 },
+        { value: "team:search", count: 1 },
+      ],
+      more: false,
+    };
+    const { unmount } = render(
+      await TracesPage({ params: PARAMS, searchParams: Promise.resolve({ agent: "zeta" }) }),
+    );
+    const heading = screen.getByRole("columnheader", { name: /Tags/ });
+    expect(heading).toHaveAttribute("aria-sort", "none");
+    fireEvent.keyDown(within(heading).getByRole("button", { name: "Tags" }), { key: "Enter" });
+    expect(await screen.findByText("Sort by tag")).toBeInTheDocument();
+    expect(
+      screen.getAllByRole("menuitem").map((item) => [item.textContent, item.getAttribute("href")]),
+    ).toEqual([
+      ["repo", "/acme/web/traces?agent=zeta&sort=tag%3Arepo&dir=asc"],
+      ["team", "/acme/web/traces?agent=zeta&sort=tag%3Ateam&dir=asc"],
+    ]);
+    unmount();
+
+    // Sorted by one, the heading names it, offered though the window's tags
+    // no longer hold it, and picking it again turns it round.
+    (mockFacets as { facets: Record<string, unknown> }).facets.tag = {
+      values: [{ value: "repo:telmoni", count: 1 }],
+      more: false,
+    };
+    render(await TracesPage({ params: PARAMS, searchParams: Promise.resolve({ sort: "tag:team" }) }));
+    expect(fetchTraces).toHaveBeenLastCalledWith(PROJECT, { sort: "tag:team", limit: 50 });
+    const sorted = screen.getByRole("columnheader", { name: /Tags/ });
+    expect(sorted).toHaveAttribute("aria-sort", "ascending");
+    expect(within(sorted).getByText("team")).toBeInTheDocument();
+    fireEvent.keyDown(within(sorted).getByRole("button", { name: "Tags, sorted by team" }), { key: "Enter" });
+    const team = await screen.findByRole("menuitem", { name: "team" });
+    expect(team).toHaveAttribute("href", "/acme/web/traces?sort=tag%3Ateam&dir=desc");
+    expect(team).toHaveAttribute("aria-current", "true");
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["repo", "team"]);
   });
 
   it("describes each column in its menu by what it means, for a screen reader as for a pointer", async () => {

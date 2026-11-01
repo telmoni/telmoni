@@ -90,6 +90,7 @@ export default async function SessionsPage({
           query={query}
           ui={ui}
           sessions={list.sessions}
+          knownTags={facets.kind === "ok" ? facets.facets.tag.values.map((v) => v.value) : []}
         />
       )}
     >

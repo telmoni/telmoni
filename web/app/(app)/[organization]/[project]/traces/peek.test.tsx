@@ -1,6 +1,10 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("@/app/(app)/[organization]/[project]/traces/actions", () => ({
+  setTraceTagsAction: vi.fn(),
+}));
 
 let mockSearch = new URLSearchParams();
 vi.mock("next/navigation", () => ({
@@ -16,14 +20,17 @@ vi.mock("@/components/console-shell", () => ({
   useConsoleShell: () => ({ element: mockShell, cover }),
 }));
 
+import { setTraceTagsAction } from "@/app/(app)/[organization]/[project]/traces/actions";
 import { TracePeek } from "@/components/traces/peek";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { TRACE_PREFS_KEY } from "@/lib/trace-prefs";
 
 const RUN_A = "5d4f5c68-0000-4000-8000-00000000000a";
 const RUN_B = "5d4f5c68-0000-4000-8000-00000000000b";
+/** The window's tags, as the list's facet names them. */
+const KNOWN = ["repo:telmoni", "team:search", "repo:web"];
 
-function trace(run: string) {
+function trace(run: string, tags: Record<string, string> = {}) {
   return {
     run_id: run,
     truncated: false,
@@ -53,7 +60,7 @@ function trace(run: string) {
         session_id: "",
         environment: "",
         release: "",
-        tags: {},
+        tags,
         sample_rate: null,
         attributes: {},
         units: 1,
@@ -78,7 +85,13 @@ function open(run: string) {
 function peek() {
   return render(
     <TooltipProvider>
-      <TracePeek organization="acme" slug="web" projectId="project_1" runs={[RUN_A, RUN_B]} />
+      <TracePeek
+        organization="acme"
+        slug="web"
+        projectId="project_1"
+        runs={[RUN_A, RUN_B]}
+        knownTags={KNOWN}
+      />
     </TooltipProvider>,
   );
 }
@@ -172,6 +185,39 @@ describe("TracePeek", () => {
     expect(again).toHaveAttribute(
       "href",
       `/auth/login?returnTo=${encodeURIComponent(`/acme/web/traces?days=30&peek=${RUN_A}`)}`,
+    );
+  });
+
+  it("changes the run's tags from the panel, suggesting the window's keys and the key's values, and reads the run again", async () => {
+    vi.mocked(setTraceTagsAction).mockResolvedValue({ ok: true, tags: {} });
+    answers[RUN_A] = () => Response.json(trace(RUN_A, { team: "search" }));
+    open(RUN_A);
+    peek();
+    const panel = screen.getByRole("dialog");
+    fireEvent.click(await within(panel).findByRole("button", { name: "Add tag" }));
+    const form = within(await screen.findByRole("dialog", { name: "Add tag" }));
+    const suggested = (field: HTMLElement) =>
+      [...document.getElementById(field.getAttribute("list")!)!.querySelectorAll("option")].map(
+        (option) => option.value,
+      );
+    expect(suggested(form.getByLabelText("Key"))).toEqual(["repo", "team"]);
+    expect(suggested(form.getByLabelText("Value"))).toEqual([]);
+    fireEvent.change(form.getByLabelText("Key"), { target: { value: "repo" } });
+    expect(suggested(form.getByLabelText("Value"))).toEqual(["telmoni", "web"]);
+    fireEvent.change(form.getByLabelText("Value"), { target: { value: "web" } });
+    const reads = fetchMock.mock.calls.length;
+    fireEvent.click(form.getByRole("button", { name: "Add tag" }));
+    await waitFor(() =>
+      expect(setTraceTagsAction).toHaveBeenCalledWith("project_1", RUN_A, { add: { repo: "web" } }),
+    );
+    // The panel's read is its own, so it reads the run again once the change lands.
+    await waitFor(() => expect(fetchMock.mock.calls.length).toBeGreaterThan(reads));
+
+    const remove = within(panel).getByRole("button", { name: "Remove tag team" });
+    await waitFor(() => expect(remove).not.toHaveAttribute("aria-disabled"));
+    fireEvent.click(remove);
+    await waitFor(() =>
+      expect(setTraceTagsAction).toHaveBeenLastCalledWith("project_1", RUN_A, { remove: ["team"] }),
     );
   });
 

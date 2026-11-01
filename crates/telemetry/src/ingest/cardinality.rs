@@ -155,6 +155,40 @@ pub async fn hold(
     }
 }
 
+/// Tags a person adds to a run in the console, held to its project's cap for
+/// the day `now` falls in as an export's are, each one kept counted: the cap
+/// the first is past, or `None` where every one is kept or Redis does not
+/// answer.
+pub async fn admit(
+    redis: &Redis,
+    project_id: &ProjectId,
+    now: DateTime<Utc>,
+    added: &[(&str, &str)],
+) -> Option<Cap> {
+    let mut keys: Vec<&str> = Vec::new();
+    let mut tags: Vec<(usize, &str)> = Vec::with_capacity(added.len());
+    for &(key, value) in added {
+        let k = keys
+            .iter()
+            .position(|known| *known == key)
+            .unwrap_or_else(|| {
+                keys.push(key);
+                keys.len() - 1
+            });
+        tags.push((k, value));
+    }
+    if tags.is_empty() {
+        return None;
+    }
+    let verdicts = ask(redis, project_id, now.date_naive(), &keys, &tags).await?;
+    verdicts
+        .into_iter()
+        .find_map(|verdict| match verdict.reason()? {
+            DropReason::Cardinality(cap) => Some(cap),
+            _ => None,
+        })
+}
+
 /// Each tag's verdict, in order; `None`, every tag kept, where Redis does not
 /// answer.
 async fn ask(

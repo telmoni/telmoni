@@ -42,6 +42,7 @@ function trace(ended_at: string): SessionTrace {
     tools: [],
     environments: [],
     releases: [],
+    tags: [],
     pinned: [],
   };
 }
@@ -151,6 +152,7 @@ describe("the sessions table's columns", () => {
       "duration",
       "first_seen",
       "last_seen",
+      "tags",
     ]);
   });
 });
@@ -173,5 +175,21 @@ describe("the sessions list's ready-made queries and saved views", () => {
     expect(SESSIONS.showsView({ sort: "duration", days: 30, page: 3 }, view)).toBe(true);
     expect(SESSIONS.showsView({ sort: "tokens", days: 30 }, view)).toBe(false);
     expect(SESSIONS.viewQueryOf({ sort: "duration", days: 30, page: 3 })).toEqual(view.query);
+  });
+
+  it("keeps a sort by a tag's key, ascending first, in its URL and its saved views", () => {
+    expect(parseSessionQuery({ sort: "tag:team", dir: "desc" })).toEqual({ sort: "tag:team", dir: "desc" });
+    expect(parseSessionQuery({ sort: "tag:" })).toEqual({});
+    expect(currentSessionSort({ sort: "tag:team" })).toEqual({ sort: "tag:team", dir: "asc" });
+    expect(nextSessionSort({ sort: "tag:team" }, "tag:team")).toEqual({
+      sort: "tag:team",
+      dir: "desc",
+      page: undefined,
+    });
+    const view = { id: "8f14e45f-ceea-4e7a-9b6f-1d2c3a4b5c6d", query: { sort: "tag:team" as const } };
+    expect(SESSIONS.viewQueryOf({ sort: "tag:team", page: 3 })).toEqual(view.query);
+    expect(SESSIONS.viewHref("acme", "web", view)).toBe(`/acme/web/sessions?sort=tag%3Ateam&view=${view.id}`);
+    expect(SESSIONS.showsView({ sort: "tag:team", page: 3 }, view)).toBe(true);
+    expect(SESSIONS.showsView({ sort: "tag:repo" }, view)).toBe(false);
   });
 });

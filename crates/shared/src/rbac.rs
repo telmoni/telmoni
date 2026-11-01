@@ -45,9 +45,8 @@ pub enum Resource {
     /// members do not; the resource exists to deny the write verbs structurally.
     Audit,
     /// A project's traces: the runs its agents recorded, which every role on
-    /// the project reads. Ingest alone writes a span, and only the nightly
-    /// purge or the project's own deletion removes one, so the write verbs
-    /// are denied structurally.
+    /// the project reads. Ingest alone writes a span; any member edits a
+    /// run's tags, and its owners and admins delete a trace or an end user's.
     Trace,
     /// A project's saved views of its trace list: a filter, a sort and the
     /// columns shown, under a name. Every role on the project applies them;
@@ -85,11 +84,11 @@ pub fn can(role: Role, verb: Verb, resource: Resource) -> bool {
     // Combinations no customer endpoint exposes — deny outright. The chain is
     // written by `emit_audit` and hash-linked. A role that could edit it would
     // make it a record of what somebody was willing to leave behind. A trace
-    // is written by ingest, never edited: deleting one, or an end user's, is
-    // its one mutation.
+    // is written by ingest and never edited but for its tags; deleting one,
+    // or an end user's, is its other mutation.
     if matches!(
         (verb, resource),
-        (V::Create | V::Update | V::Delete, R::Audit) | (V::Create | V::Update, R::Trace)
+        (V::Create | V::Update | V::Delete, R::Audit) | (V::Create, R::Trace)
     ) {
         return false;
     }
@@ -101,10 +100,15 @@ pub fn can(role: Role, verb: Verb, resource: Resource) -> bool {
         // the project (and structurally impossible audit mutations).
         Role::Admin => !(resource == R::Project && verb == V::Delete),
 
-        // Reads the work, mutates nothing but the project's alerts. The chain
-        // is the exception: what everyone did is the owner's record of the
-        // collaboration, not the work a member was invited to see.
-        Role::Member => resource == R::Alert || (resource != R::Audit && verb == V::Read),
+        // Reads the work, mutates nothing but the project's alerts and its
+        // runs' tags. The chain is the exception: what everyone did is the
+        // owner's record of the collaboration, not the work a member was
+        // invited to see.
+        Role::Member => {
+            resource == R::Alert
+                || (resource == R::Trace && verb == V::Update)
+                || (resource != R::Audit && verb == V::Read)
+        }
     }
 }
 
@@ -192,13 +196,13 @@ mod tests {
         assert!(!can(Role::Owner, Verb::Create, Resource::Audit));
         assert!(!can(Role::Owner, Verb::Delete, Resource::Audit));
         assert!(!can(Role::Owner, Verb::Create, Resource::Trace));
-        assert!(!can(Role::Owner, Verb::Update, Resource::Trace));
+        assert!(can(Role::Owner, Verb::Update, Resource::Trace));
         assert!(can(Role::Owner, Verb::Delete, Resource::Trace));
         assert!(!can(Role::Member, Verb::Delete, Resource::Trace));
     }
 
     #[test]
-    fn member_is_read_only_but_for_the_alerts() {
+    fn member_is_read_only_but_for_the_alerts_and_the_tags() {
         assert!(can(Role::Member, Verb::Read, Resource::Member));
         assert!(can(Role::Member, Verb::Read, Resource::Project));
         assert!(can(Role::Member, Verb::Read, Resource::Trace));
@@ -207,7 +211,8 @@ mod tests {
             for verb in [Verb::Create, Verb::Update, Verb::Delete] {
                 assert_eq!(
                     can(Role::Member, verb, resource),
-                    resource == Resource::Alert,
+                    resource == Resource::Alert
+                        || (resource == Resource::Trace && verb == Verb::Update),
                     "Member {verb:?} {resource:?}"
                 );
             }
@@ -249,7 +254,7 @@ mod tests {
 
         assert!(can(Role::Admin, Verb::Read, Resource::Trace));
         assert!(!can(Role::Admin, Verb::Create, Resource::Trace));
-        assert!(!can(Role::Admin, Verb::Update, Resource::Trace));
+        assert!(can(Role::Admin, Verb::Update, Resource::Trace));
         assert!(can(Role::Admin, Verb::Delete, Resource::Trace));
 
         assert!(can(Role::Admin, Verb::Read, Resource::View));
@@ -320,6 +325,10 @@ mod tests {
         assert_eq!(
             minimum_role(Verb::Delete, Resource::Trace),
             Some(Role::Admin)
+        );
+        assert_eq!(
+            minimum_role(Verb::Update, Resource::Trace),
+            Some(Role::Member)
         );
         assert_eq!(minimum_role(Verb::Read, Resource::View), Some(Role::Member));
         assert_eq!(

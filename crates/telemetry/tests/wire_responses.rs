@@ -27,7 +27,7 @@ use telmoni_telemetry::handler::session_layout::SessionLayoutSetting;
 use telmoni_telemetry::handler::sessions::{SessionDetail, SessionList, SessionTrace};
 use telmoni_telemetry::handler::traces::{
     FacetValue, FacetValues, Facets, RunSpend, SpanFields, TraceDetail, TraceHistogram, TraceList,
-    TraceSpan, UnpricedModel,
+    TraceSpan, TraceTags, UnpricedModel,
 };
 use telmoni_telemetry::handler::users::UserList;
 use telmoni_telemetry::handler::views::{LayoutFilter, LayoutOptions, View, ViewList, ViewQuery};
@@ -36,7 +36,7 @@ use telmoni_telemetry::rules::incidents::IncidentRow;
 use telmoni_telemetry::rules::mutes::MuteRow;
 use telmoni_telemetry::rules::{Definition, Hours, Link, RuleFilters};
 use telmoni_telemetry::sessions::SessionRow;
-use telmoni_telemetry::traces::{Bar, PinnedRow, TraceRow};
+use telmoni_telemetry::traces::{Bar, ListSort, PinnedRow, TraceRow};
 use telmoni_telemetry::users::UserRow;
 
 /// A run's own span's turn, as content keeps it: the person's message and
@@ -109,6 +109,7 @@ fn trace() -> TraceRow {
         tools: vec!["search".into()],
         environments: vec!["production".into()],
         releases: vec!["1.4.2".into()],
+        tags: vec!["repo:telmoni".into()],
     }
 }
 
@@ -145,7 +146,7 @@ fn the_trace_list_answers_as_the_console_reads() {
             page: 1,
             total: 1,
             more: false,
-            sort: TraceSort::Started,
+            sort: ListSort::Column(TraceSort::Started),
             dir: SortDirection::Desc,
         },
     );
@@ -272,6 +273,21 @@ fn a_trace_answers_as_the_console_reads() {
     );
 }
 
+/// A run's tags, as a change to them answers.
+#[test]
+fn a_runs_tags_answer_as_the_console_reads() {
+    pin(
+        "trace-tags",
+        &TraceTags {
+            run_id: RUN,
+            tags: [("branch", "main"), ("repo", "telmoni")]
+                .into_iter()
+                .map(|(key, value)| (key.to_owned(), value.to_owned()))
+                .collect(),
+        },
+    );
+}
+
 /// The sessions page's list.
 #[test]
 fn the_session_list_answers_as_the_console_reads() {
@@ -289,13 +305,14 @@ fn the_session_list_answers_as_the_console_reads() {
                 duration_ms: 4_200,
                 first_seen: at(0),
                 last_seen: at(90),
+                tags: vec!["repo:telmoni".into()],
             }],
             days: 7,
             limit: 50,
             page: 1,
             total: 1,
             more: false,
-            sort: SessionSort::LastSeen,
+            sort: ListSort::Column(SessionSort::LastSeen),
             dir: SortDirection::Desc,
         },
     );
@@ -356,7 +373,7 @@ fn the_user_list_answers_as_the_console_reads() {
             page: 1,
             total: 1,
             more: false,
-            sort: UserSort::Tokens,
+            sort: ListSort::Column(UserSort::Tokens),
             dir: SortDirection::Desc,
         },
     );

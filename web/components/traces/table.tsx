@@ -31,12 +31,14 @@ import {
   formatCount,
   nextSort,
   shortId,
+  tagKeys,
   traceHref,
   tracesHref,
   type FilterKey,
   type TraceUi,
 } from "@/lib/traces";
-import { SpanStatus } from "@/lib/types/enums";
+import { SpanStatus, type TraceSort } from "@/lib/types/enums";
+import type { TagSort } from "@/lib/types/traces";
 import { useTracePrefs } from "@/lib/use-trace-prefs";
 import { cn } from "@/lib/utils";
 
@@ -46,6 +48,8 @@ type Props = {
   query: TraceQuery;
   ui: TraceUi;
   traces: Trace[];
+  /** The window's tags, each `key:value`, whose keys the Tags heading sorts by. */
+  knownTags: readonly string[];
 };
 
 // The page's rows, a run each: its id, which opens its trace, with a failed
@@ -56,7 +60,7 @@ type Props = {
 // and the row stays marked while it is open. Rows are chosen to download
 // those alone; the choice is the page's, so a page of new rows starts with
 // none chosen (the page keys this on its rows).
-export function TraceTable({ organization, slug, query, ui, traces }: Props) {
+export function TraceTable({ organization, slug, query, ui, traces, knownTags }: Props) {
   const prefs = useTracePrefs();
   const peeked = usePeekedRun();
   const [chosen, setChosen] = useState<ReadonlySet<string>>(() => new Set());
@@ -67,6 +71,8 @@ export function TraceTable({ organization, slug, query, ui, traces }: Props) {
   const some = !every && traces.some((t) => chosen.has(t.run_id));
   const narrowedTo = (filter: FilterKey, value: string) =>
     tracesHref(organization, slug, query, { [filter]: [value], page: undefined }, ui);
+  const sortedBy = (by: TraceSort | TagSort) =>
+    tracesHref(organization, slug, query, nextSort(query, by), ui);
 
   const choose = (runId: string, on: boolean) =>
     setChosen((was) => {
@@ -117,7 +123,8 @@ export function TraceTable({ organization, slug, query, ui, traces }: Props) {
             columns={columns}
             sort={sort}
             dir={dir}
-            sortHref={(column) => tracesHref(organization, slug, query, nextSort(query, column), ui)}
+            sortHref={sortedBy}
+            tags={{ keys: tagKeys(knownTags), href: (key) => sortedBy(`tag:${key}`) }}
           />
         </THead>
         <tbody>

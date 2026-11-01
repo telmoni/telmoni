@@ -37,6 +37,7 @@ let mockContext: unknown;
 let mockProject: unknown;
 let mockUsers: unknown;
 let mockFacets: unknown;
+let mockViews: unknown;
 const fetchProjectBySlug = vi.fn<(slug: string) => Promise<unknown>>(async () => mockProject);
 const fetchUsers = vi.fn<(projectId: string, query: unknown) => Promise<unknown>>(
   async () => mockUsers,
@@ -51,7 +52,7 @@ vi.mock("@/lib/server/data", () => ({
   fetchProjectBySlug: (slug: string) => fetchProjectBySlug(slug),
   fetchUsers: (projectId: string, query: unknown) => fetchUsers(projectId, query),
   fetchUserFacets: (projectId: string, query: unknown) => fetchUserFacets(projectId, query),
-  fetchUserViews: async () => ({ kind: "ok", views: [] }),
+  fetchUserViews: async () => mockViews,
 }));
 
 import UsersPage from "./page";
@@ -120,6 +121,7 @@ beforeEach(() => {
   };
   mockProject = { id: PROJECT, slug: "web", name: "Web", role: Role.Member };
   mockUsers = list();
+  mockViews = { kind: "ok", views: [] };
   mockFacets = {
     kind: "ok",
     facets: {
@@ -250,6 +252,40 @@ describe("UsersPage", () => {
       "href",
       "/acme/web/users/export?agent=support-bot&format=json",
     );
+  });
+
+  it("names the project's saved views of its users, each opening the list on its own query, and the one the page was opened from", async () => {
+    const id = "6e2d3c4b-5f6a-4b7c-9d8e-0f1a2b3c4d5e";
+    mockViews = {
+      kind: "ok",
+      views: [
+        {
+          id,
+          kind: "users",
+          name: "Heavy",
+          query: { sort: "duration", dir: "desc" },
+          columns: ["duration"],
+          created_at: "2026-10-28T03:00:00Z",
+          updated_at: "2026-10-28T03:00:00Z",
+        },
+      ],
+    };
+    render(await UsersPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+    const menu = screen.getByRole("button", { name: "Saved views" });
+    expect(menu).toHaveTextContent("1");
+    fireEvent.keyDown(menu, { key: "Enter" });
+    expect(await screen.findByRole("menuitem", { name: "Heavy" })).toHaveAttribute(
+      "href",
+      `/acme/web/users?sort=duration&dir=desc&view=${id}`,
+    );
+
+    render(
+      await UsersPage({
+        params: PARAMS,
+        searchParams: Promise.resolve({ sort: "duration", dir: "desc", view: id }),
+      }),
+    );
+    expect(screen.getByRole("button", { name: "Saved view: Heavy" })).toBeInTheDocument();
   });
 
   it("shows the columns the person picked, and puts them back to the defaults", async () => {

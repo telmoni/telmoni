@@ -15,7 +15,14 @@ import {
   TraceColumn,
   TraceSort,
 } from "@/lib/types/enums";
-import { FILTER_KEYS, filtersIn } from "@/lib/types/traces";
+import {
+  FILTER_KEYS,
+  TAG_KEY_MAX,
+  TAG_VALUE_MAX,
+  filtersIn,
+  readTagSort,
+  type TagSort,
+} from "@/lib/types/traces";
 
 import {
   MAX_DAYS,
@@ -84,7 +91,7 @@ export const FILTER_VALUE_MAX: Record<Exclude<FilterKey, "status">, number> = {
   session: 200,
   environment: 128,
   release: 128,
-  tag: 64 + 1 + 256,
+  tag: TAG_KEY_MAX + 1 + TAG_VALUE_MAX,
   prompt: 1_024,
 };
 
@@ -132,20 +139,22 @@ export function parseFilters(searchParams: SearchParams): ListFilters {
   );
 }
 
-/** A list's query as the URL carries it, its sort among `sorts`: the
- *  filters, the window, and rows a page offers; the first page is the URL's
- *  when it names none. */
+/** A list's query as the URL carries it, its sort among `sorts` or one
+ *  `readSort` reads: the filters, the window, and rows a page offers; the
+ *  first page is the URL's when it names none. */
 export function parseListQuery<S extends string>(
   searchParams: SearchParams,
   sorts: Record<string, S>,
+  readSort?: (text: string) => S | undefined,
 ): ListQuery<S> {
   const rows = whole(searchParams.limit, 100);
   const page = whole(searchParams.page, MAX_PAGE);
   const q = one(searchParams.q)?.trim();
+  const sort = one(searchParams.sort);
   return compact({
     ...parseFilters(searchParams),
     q: q && [...q].length <= SEARCH_MAX ? q : undefined,
-    sort: oneOf(searchParams.sort, sorts),
+    sort: oneOf(searchParams.sort, sorts) ?? (sort === undefined ? undefined : readSort?.(sort)),
     dir: oneOf(searchParams.dir, SortDirection),
     days: whole(searchParams.days, MAX_DAYS),
     limit: isOneOf(ROWS_PER_PAGE, rows) ? rows : undefined,
@@ -163,7 +172,24 @@ export function parseTraceQuery(searchParams: SearchParams): TraceQuery {
 export function isTagPair(value: string): boolean {
   const colon = value.indexOf(":");
   if (colon < 1) return false;
-  return [...value.slice(0, colon)].length <= 64 && [...value.slice(colon + 1)].length <= 256;
+  return (
+    [...value.slice(0, colon)].length <= TAG_KEY_MAX &&
+    [...value.slice(colon + 1)].length <= TAG_VALUE_MAX
+  );
+}
+
+/** The keys among `pairs`, each `key:value` as a tag's facet names it, split
+ *  at its first colon as the filter splits one: each once, in order. */
+export function tagKeys(pairs: readonly string[]): string[] {
+  return [...new Set(pairs.filter(isTagPair).map((pair) => pair.slice(0, pair.indexOf(":"))))].sort();
+}
+
+/** The values `key` takes among `pairs`, each once, in order. */
+export function tagValues(pairs: readonly string[], key: string): string[] {
+  const values = pairs
+    .filter((pair) => isTagPair(pair) && pair.slice(0, pair.indexOf(":")) === key)
+    .map((pair) => pair.slice(pair.indexOf(":") + 1));
+  return [...new Set(values)].sort();
 }
 
 /** A list page's own state from its URL: the view it was opened from. */
@@ -291,6 +317,8 @@ export type ColumnSpec<K extends string = TraceColumn, S extends string = TraceS
   label: string;
   sort?: S;
   first?: SortDirection;
+  /** Whether its heading sorts by one tag's value, the key picked from a menu. */
+  byTag?: boolean;
   numeric?: boolean;
   group?: ColumnGroup;
   hint?: string;
@@ -456,6 +484,12 @@ export const TRACE_COLUMNS: readonly ColumnSpec[] = [
   },
   { key: TraceColumn.Models, label: "Models" },
   { key: TraceColumn.Tools, label: "Tools" },
+  {
+    key: TraceColumn.Tags,
+    label: "Tags",
+    byTag: true,
+    hint: "The run's tags, each key:value. The heading sorts the list by one key's value, the runs without it last.",
+  },
 ];
 
 /** A row of the columns menu: a column, or a group of them under a heading
@@ -511,9 +545,9 @@ export type Preset = {
 };
 
 /** A list's scaffold, from what alone differs between the three: its path,
- *  its table, its sorts' vocabulary, an id sort beside the columns' where the
- *  id sorts, the server's default sort, and its ready-made queries with the
- *  sorts the slow and the tokens ones take. */
+ *  table and sorts, an id sort where the id sorts, the server's default, its
+ *  ready-made queries and the sorts two of them take, and how it reads a
+ *  tag's sort where a tag sorts it. */
 export function listSpec<K extends string, S extends string>(spec: {
   path: `/${ListName}`;
   table: ListTable<K, S>;
@@ -522,13 +556,14 @@ export function listSpec<K extends string, S extends string>(spec: {
   defaultSort: S;
   presets: readonly Preset[];
   presetSorts: { slow: S; tokens: S };
+  readSort?: (text: string) => S | undefined;
 }) {
   const sorts: readonly Column<S>[] = [
     ...(spec.idSort ? [spec.idSort] : []),
     ...sortsOf(spec.table.columns),
   ];
   const parse = (searchParams: SearchParams): ListQuery<S> =>
-    parseListQuery(searchParams, spec.sorts);
+    parseListQuery(searchParams, spec.sorts, spec.readSort);
   const href = (
     organization: string,
     project: string,
@@ -655,9 +690,9 @@ export const TRACE_TABLE: ListTable<TraceColumn, TraceSort> = {
   defaults: DEFAULT_COLUMNS,
 };
 
-/** The trace list: its table, menu and sorts, the server's default newest
+/** The trace list, a tag's among its sorts, the server's default newest
  *  first. Its links are `tracesHref`'s, which carry the page's own state. */
-export const TRACES = listSpec({
+export const TRACES = listSpec<TraceColumn, TraceSort | TagSort>({
   path: "/traces",
   table: TRACE_TABLE,
   sorts: TraceSort,
@@ -668,10 +703,11 @@ export const TRACES = listSpec({
     { id: "tokens", label: "Tokens", hint: "The runs that used the most tokens first" },
   ],
   presetSorts: { slow: TraceSort.Duration, tokens: TraceSort.Tokens },
+  readSort: readTagSort,
 });
 
 /** The trace list's columns menu, in its rows. */
-export const COLUMN_MENU: readonly ColumnBlock<TraceColumn, TraceSort>[] = TRACES.menu;
+export const COLUMN_MENU: readonly ColumnBlock<TraceColumn, TraceSort | TagSort>[] = TRACES.menu;
 export const currentSort = TRACES.current;
 export const nextSort = TRACES.next;
 

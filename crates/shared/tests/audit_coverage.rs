@@ -175,6 +175,13 @@ const MUTATIONS: &[Mutation] = &[
         actor_id: ActorPattern::Variable,
     },
     Mutation {
+        file: "crates/telemetry/src/handler/traces.rs",
+        fn_name: "file_tags_change",
+        action: "Updated",
+        resource_kind: "Trace",
+        actor_id: ActorPattern::Variable,
+    },
+    Mutation {
         file: "crates/telemetry/src/handler/users.rs",
         fn_name: "file_erasure",
         action: "Deleted",

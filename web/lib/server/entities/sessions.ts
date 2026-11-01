@@ -2,12 +2,14 @@ import { cache } from "react";
 import { z } from "zod";
 
 import { queryString } from "@/lib/list-query";
-import { SessionSort, SortDirection } from "@/lib/types/enums";
+import { type SessionSort, SortDirection } from "@/lib/types/enums";
 import { SessionDetailSchema, type SessionDetail } from "@/lib/types/sessions";
+import type { TagSort } from "@/lib/types/traces";
 
 import {
   FacetsSchema,
   MISSING,
+  SessionSortSchema,
   filtersOf,
   readDownload,
   readLane,
@@ -33,6 +35,8 @@ const SessionRowSchema = z.object({
   duration_ms: z.number(),
   first_seen: z.string(),
   last_seen: z.string(),
+  /** Its runs' tags, each `key:value` once, in order. */
+  tags: z.array(z.string()),
 });
 export type SessionRow = z.infer<typeof SessionRowSchema>;
 
@@ -44,7 +48,7 @@ export const SessionListSchema = z.object({
   page: z.number(),
   total: z.number(),
   more: z.boolean(),
-  sort: z.enum(SessionSort),
+  sort: SessionSortSchema,
   dir: z.enum(SortDirection),
 });
 export type SessionList = z.infer<typeof SessionListSchema>;
@@ -60,7 +64,7 @@ export {
 
 /** What narrows and orders the list, and which page of it shows, as the URL
  *  carries it (`lib/sessions.ts`). */
-export type SessionQuery = ListQuery<SessionSort>;
+export type SessionQuery = ListQuery<SessionSort | TagSort>;
 
 export type SessionsAccess =
   | { kind: "ok"; list: SessionList }

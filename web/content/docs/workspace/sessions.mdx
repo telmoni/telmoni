@@ -41,8 +41,8 @@ page, laid out as the [trace list](/docs/workspace/traces#the-list) is:
 | Last seen | When its last run in the window ended |
 
 **Columns** shows or hides each of these, and the input and output tokens
-apart, the counts and the tokens each a group under its own heading; the
-session's id always shows. Your columns, and how tightly the rows sit
+apart, the counts and the tokens each a group under its own heading, and the
+tags its runs carry, each once (**Tags**); the session's id always shows. Your columns, and how tightly the rows sit
 (**Row density**, the same on every list), are kept in your browser rather
 than in the page's link.
 
@@ -67,7 +67,9 @@ sessions that used the most tokens first. Click one again to take it off.
 
 **Sort** by any column by clicking its heading; a second click turns it
 round. Ids and first seen sort the alphabet's and the calendar's way; the
-most and the latest come first on the others.
+most and the latest come first on the others. The **Tags** heading sorts by a
+tag picked from **Sort by tag**, each session by the least of its runs' values
+of it, the sessions without it last either way.
 
 **Rows per page** is 25, 50 or 100; beside it, the total the filters admit,
 and the way to the first, previous, next and last page.
@@ -120,6 +122,10 @@ the same window as the list: show up to 500 from the page, or narrow the
 window. The panel's ↑ and ↓ buttons step through the list's sessions;
 Escape, Close or Back shuts it, since the open session is in the page's URL
 (`?peek=`), so a link holds it; **Full size** gives it the whole content area.
+
+On the session's own page, **Add tag to every trace**, a **Key** and a
+**Value**, puts a [tag](/docs/workspace/traces#tags) on every run it shows, one
+change a run, stopping at the first refused and saying how many it tagged.
 
 A session id is the application's own text, up to 200 characters, so the
 page's URL carries it encoded. A session none of the project's runs in the

@@ -29,6 +29,7 @@ use crate::erasure::{self, Erase};
 use crate::handler::chain;
 use crate::handler::traces::{Facets, Reading, download, export_rows, facets_page, list_page};
 use crate::hashing;
+use crate::traces::ListSort;
 use crate::users::{UserRow, Users};
 
 /// What the page's lane answers.
@@ -47,7 +48,7 @@ pub struct UserList {
     /// Whether a page after this one holds more.
     pub more: bool,
     /// The sort it is in.
-    pub sort: UserSort,
+    pub sort: ListSort<UserSort>,
     /// And its direction.
     pub dir: SortDirection,
 }
@@ -149,7 +150,7 @@ mod tests {
         assert_eq!(query.paging().expect("the default").limit, DEFAULT_LIMIT);
         assert_eq!(
             query.sort_for::<Users>().expect("the default"),
-            (UserSort::Tokens, SortDirection::Desc)
+            (ListSort::Column(UserSort::Tokens), SortDirection::Desc)
         );
     }
 
@@ -160,7 +161,7 @@ mod tests {
                 .expect("read");
             assert_eq!(
                 query.sort_for::<Users>().expect("a column"),
-                (column, Users::first_direction(column))
+                (ListSort::Column(column), Users::first_direction(column))
             );
         }
         assert_eq!(Users::first_direction(UserSort::User), SortDirection::Asc);
@@ -193,7 +194,7 @@ mod tests {
                 .and_then(|_| {
                     query
                         .paging()
-                        .map(|_| (UserSort::Tokens, SortDirection::Desc))
+                        .map(|_| (ListSort::Column(UserSort::Tokens), SortDirection::Desc))
                 })
                 .expect_err("refused");
             let problem = refused.to_problem_details();

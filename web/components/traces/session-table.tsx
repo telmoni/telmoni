@@ -4,6 +4,7 @@ import Link from "next/link";
 
 import { DataTable, THead, Td } from "@/components/data-table";
 import { SortHeading } from "@/components/sort-heading";
+import { TagChips } from "@/components/traces/cells";
 import {
   ColumnHeadings,
   compactPadding,
@@ -23,8 +24,9 @@ import {
   sessionHref,
   sessionsHref,
 } from "@/lib/sessions";
-import { tracesHref, type ListUi } from "@/lib/traces";
+import { tagKeys, tracesHref, type ListUi } from "@/lib/traces";
 import { SessionSort } from "@/lib/types/enums";
+import type { TagSort } from "@/lib/types/traces";
 import { useTracePrefs } from "@/lib/use-trace-prefs";
 import { cn } from "@/lib/utils";
 
@@ -35,19 +37,21 @@ type Props = {
   /** The page's own, which a heading's sort keeps. */
   ui: ListUi;
   sessions: SessionRow[];
+  /** The window's tags, each `key:value`, whose keys the Tags heading sorts by. */
+  knownTags: readonly string[];
 };
 
 // The page's rows, a session each, in the columns the person shows: a click
 // on the id or anywhere else on the row opens the session beside the list
 // (`session-peek.tsx`), and the row stays marked while it is open.
-export function SessionTable({ organization, slug, query, ui, sessions }: Props) {
+export function SessionTable({ organization, slug, query, ui, sessions, knownTags }: Props) {
   const prefs = useTracePrefs();
   const peeked = usePeekedSession();
   const columns = SESSION_COLUMNS.filter((c) => prefs.sessionColumns.includes(c.key));
   const { sort, dir } = currentSessionSort(query);
   const tight = compactPadding(prefs.density);
-  const sorted = (column: SessionSort) =>
-    sessionsHref(organization, slug, query, nextSessionSort(query, column), ui);
+  const sorted = (by: SessionSort | TagSort) =>
+    sessionsHref(organization, slug, query, nextSessionSort(query, by), ui);
 
   return (
     <DataTable>
@@ -59,7 +63,13 @@ export function SessionTable({ organization, slug, query, ui, sessions }: Props)
           dir={dir}
           href={sorted(SessionSort.Session)}
         />
-        <ColumnHeadings columns={columns} sort={sort} dir={dir} sortHref={sorted} />
+        <ColumnHeadings
+          columns={columns}
+          sort={sort}
+          dir={dir}
+          sortHref={sorted}
+          tags={{ keys: tagKeys(knownTags), href: (key) => sorted(`tag:${key}`) }}
+        />
       </THead>
       <tbody>
         {sessions.map((session) => (
@@ -102,6 +112,14 @@ export function SessionTable({ organization, slug, query, ui, sessions }: Props)
                   ) : (
                     <span className="text-muted-foreground">—</span>
                   )}
+                </Td>
+              ) : column.key === "tags" ? (
+                <Td
+                  key={column.key}
+                  className={cn("max-w-64 text-xs", tight)}
+                  title={session.tags.join(", ") || undefined}
+                >
+                  <TagChips tags={session.tags} />
                 </Td>
               ) : (
                 <Td

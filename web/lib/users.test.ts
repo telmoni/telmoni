@@ -33,6 +33,8 @@ describe("the users list's URL", () => {
       page: 2,
     });
     expect(parseUserQuery({ sort: "spend", dir: "sideways", days: "0", limit: "500" })).toEqual({});
+    // No tag sorts the users list: the server refuses one.
+    expect(parseUserQuery({ sort: "tag:team" })).toEqual({});
     expect(parseUserQuery({ user: "someone" })).toEqual({ user: ["someone"] });
   });
 

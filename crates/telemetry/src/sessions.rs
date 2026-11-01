@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use telmoni_shared::{SessionSort, SortDirection};
 
-use crate::traces::{Listing, facets_sql, run_rows};
+use crate::traces::{Listing, by_tag, facets_sql, run_rows};
 
 /// One session as the page reads it: its runs, summed.
 #[derive(Debug, Clone, PartialEq, Eq, Row, Serialize, Deserialize)]
@@ -39,6 +39,8 @@ pub struct SessionRow {
     /// When its last run in the window ended: what the page sorts by first.
     #[serde(deserialize_with = "clickhouse::serde::chrono::datetime64::micros::deserialize")]
     pub last_seen: DateTime<Utc>,
+    /// Its runs' tags as `key:value`, each once, sorted.
+    pub tags: Vec<String>,
 }
 
 /// The sessions that hold a run the filter admits, a row each, summed over
@@ -55,7 +57,8 @@ macro_rules! sessions {
             "session_input + session_output AS session_tokens, ",
             "sum(greatest(dateDiff('millisecond', first_started_at, last_ended_at), 0)) ",
             "AS session_duration, ",
-            "min(first_started_at) AS session_first, max(last_ended_at) AS session_last ",
+            "min(first_started_at) AS session_first, max(last_ended_at) AS session_last, ",
+            "arraySort(groupUniqArrayArray(run_tag_pairs)) AS session_tag_pairs ",
             "FROM (",
             run_rows!(),
             ") WHERE run_session_id != '' ",
@@ -69,13 +72,13 @@ macro_rules! sessions {
 /// literal: the query module takes nothing else. The outer SELECT gives the
 /// sums the row's names.
 macro_rules! list_sql {
-    ($order:literal) => {
+    ($order:expr) => {
         concat!(
             "SELECT session_id, session_user AS user_id, session_traces AS traces, ",
             "session_errors AS errors, session_steps AS steps, ",
             "session_input AS input_tokens, session_output AS output_tokens, ",
             "session_duration AS duration_ms, session_first AS first_seen, ",
-            "session_last AS last_seen ",
+            "session_last AS last_seen, session_tag_pairs AS tags ",
             "FROM (",
             sessions!(),
             ") ORDER BY ",
@@ -137,6 +140,14 @@ impl Listing for Sessions {
 
     fn list_sql(sort: SessionSort, direction: SortDirection) -> &'static str {
         list_sql(sort, direction)
+    }
+
+    /// A session's least value of the tag among its runs.
+    fn tag_sql(direction: SortDirection) -> Option<&'static str> {
+        Some(match direction {
+            SortDirection::Asc => list_sql!(by_tag!("session_tag_pairs", "ASC")),
+            SortDirection::Desc => list_sql!(by_tag!("session_tag_pairs", "DESC")),
+        })
     }
 
     /// The most and the latest first; ids in the alphabet's order, and the

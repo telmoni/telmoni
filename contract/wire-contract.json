@@ -205,7 +205,8 @@
       "tokens",
       "duration",
       "first_seen",
-      "last_seen"
+      "last_seen",
+      "tags"
     ],
     "SessionSort": [
       "session",
@@ -267,7 +268,8 @@
       "duration",
       "time_to_first_token",
       "models",
-      "tools"
+      "tools",
+      "tags"
     ],
     "TraceSort": [
       "started",

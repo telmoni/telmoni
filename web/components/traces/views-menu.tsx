@@ -6,6 +6,7 @@ import {
   updateTraceViewAction,
 } from "@/app/(app)/[organization]/[project]/traces/actions";
 import { SavedMenu } from "@/components/traces/saved-menu";
+import type { SessionQuery } from "@/lib/server/entities/sessions";
 import type {
   ListQuery,
   ListViewQuery,
@@ -16,7 +17,7 @@ import type {
 } from "@/lib/server/entities/traces";
 import { SESSIONS } from "@/lib/sessions";
 import { TRACES, type ListSpec, type TraceUi } from "@/lib/traces";
-import { type SessionSort, type UserSort, ViewKind } from "@/lib/types/enums";
+import { type UserSort, ViewKind } from "@/lib/types/enums";
 import { setTracePrefs, useTracePrefs } from "@/lib/use-trace-prefs";
 import { USERS } from "@/lib/users";
 
@@ -35,7 +36,7 @@ type Common = {
 type Props = Common &
   (
     | { list: "traces"; query: TraceQuery; views: TraceView[] | null }
-    | { list: "sessions"; query: ListQuery<SessionSort>; views: SessionView[] | null }
+    | { list: "sessions"; query: SessionQuery; views: SessionView[] | null }
     | { list: "users"; query: ListQuery<UserSort>; views: UserView[] | null }
   );
 

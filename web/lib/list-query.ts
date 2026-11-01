@@ -159,16 +159,21 @@ export function listHref(
  *  clicked. */
 export type Column<S extends string> = { sort: S; label: string; first: SortDirection };
 
-/** The sort in force: the URL's, else `fallback`, each column its own way
- *  unless the URL says which. */
+/** The way `sort` runs when the URL says none: its column's, else a tag's,
+ *  which the server sorts ascending. */
+function firstWay<S extends string>(columns: readonly Column<S>[], sort: S): SortDirection {
+  return columns.find((c) => c.sort === sort)?.first ?? SortDirection.Asc;
+}
+
+/** The sort in force: the URL's, else `fallback`, each its own way unless
+ *  the URL says which. */
 export function sortInForce<S extends string>(
   columns: readonly Column<S>[],
   fallback: S,
   query: { sort?: S; dir?: SortDirection },
 ): { sort: S; dir: SortDirection } {
   const sort = query.sort ?? fallback;
-  const dir = query.dir ?? columns.find((c) => c.sort === sort)?.first ?? SortDirection.Desc;
-  return { sort, dir };
+  return { sort, dir: query.dir ?? firstWay(columns, sort) };
 }
 
 /** What clicking a column heading asks for: the other way when the list is
@@ -186,8 +191,5 @@ export function sortAfterClick<S extends string>(
       dir: current.dir === SortDirection.Asc ? SortDirection.Desc : SortDirection.Asc,
     };
   }
-  return {
-    sort: column,
-    dir: columns.find((c) => c.sort === column)?.first ?? SortDirection.Desc,
-  };
+  return { sort: column, dir: firstWay(columns, column) };
 }

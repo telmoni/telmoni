@@ -103,7 +103,13 @@ export default async function TracePage({
             narrow window takes the panes' room rather than the page's. */}
         <Card className="h-[calc(100svh-10rem)] min-h-[28rem] gap-0 overflow-hidden p-0">
           <div className="shrink-0 border-b border-border p-gutter">
-            <TraceMeta trace={trace} organization={organization} slug={slug} incidents={incidents} />
+            <TraceMeta
+              trace={trace}
+              organization={organization}
+              slug={slug}
+              projectId={project.id}
+              incidents={incidents}
+            />
           </div>
           <MediaProjectProvider projectId={project.id}>
             <TraceLayoutBody trace={trace} organization={organization} slug={slug} />

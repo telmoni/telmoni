@@ -28,6 +28,7 @@ import {
   indentStyle,
 } from "@/components/traces/span-parts";
 import { SpanContent } from "@/components/traces/span-content";
+import { TraceTags } from "@/components/traces/tags";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -132,18 +133,27 @@ function RunSpent({ spend }: { spend: RunSpend }) {
 
 /** The trace summed on one line under its name: how it ended, when it began,
  *  how long it ran, its tokens, what it spent as its cost alert reads it, the
- *  session, the user and the tags it carried, and on its page the incidents
- *  whose notices showed it. Drawn again only for another trace (`memo`): the
- *  peek's edge, dragged, draws the panel around it at every move. */
+ *  session, the user, its tags to take off or add to, and on its page the
+ *  incidents whose notices showed it. Drawn again only for another trace
+ *  (`memo`): the peek's edge, dragged, draws the panel around it each move. */
 export const TraceMeta = memo(function TraceMeta({
   trace,
   organization,
   slug,
+  projectId,
+  knownTags = [],
+  onTagged,
   incidents = [],
 }: {
   trace: TraceDetail;
   organization: string;
   slug: string;
+  /** The project a change to the run's tags is made in. */
+  projectId: string;
+  /** The window's tags, each `key:value`, which adding one suggests. */
+  knownTags?: readonly string[];
+  /** Told once a change to the run's tags lands. */
+  onTagged?: () => void;
   incidents?: readonly Pick<Incident, "id" | "rule_name">[];
 }) {
   const summary = useMemo(() => summarizeTrace(trace.spans), [trace.spans]);
@@ -180,11 +190,13 @@ export const TraceMeta = memo(function TraceMeta({
           user {shortId(root.user_id)}
         </MetaLink>
       )}
-      {Object.entries(root.tags).map(([key, value]) => (
-        <Badge key={key} variant="secondary" className="text-xs font-normal">
-          {key}={value}
-        </Badge>
-      ))}
+      <TraceTags
+        projectId={projectId}
+        runId={trace.run_id}
+        tags={root.tags}
+        known={knownTags}
+        onChange={onTagged}
+      />
       {incidents.map((incident) => (
         <MetaLink
           key={incident.id}

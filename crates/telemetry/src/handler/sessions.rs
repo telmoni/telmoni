@@ -31,7 +31,7 @@ use crate::handler::traces::{
 use crate::handler::views::LayoutOptions;
 use crate::sessions::{SessionRow, Sessions};
 use crate::store::Projects;
-use crate::traces::{self, PINNED_MAX, PinnedRow, TraceFilter, TraceRow, Traces, Window};
+use crate::traces::{self, ListSort, PINNED_MAX, PinnedRow, TraceFilter, TraceRow, Traces, Window};
 use crate::{AppState, db};
 
 /// A session's own page's query string, every value text until it is
@@ -162,13 +162,13 @@ pub struct SessionList {
     /// Whether a page after this one holds more.
     pub more: bool,
     /// The sort it is in.
-    pub sort: SessionSort,
+    pub sort: ListSort<SessionSort>,
     /// And its direction.
     pub dir: SortDirection,
 }
 
 /// A download's header row: the page's fields, in its order.
-const CSV_HEADER: [&str; 10] = [
+const CSV_HEADER: [&str; 11] = [
     "session_id",
     "user_id",
     "traces",
@@ -179,12 +179,13 @@ const CSV_HEADER: [&str; 10] = [
     "duration_ms",
     "first_seen",
     "last_seen",
+    "tags",
 ];
 
 impl SessionRow {
     /// The row a download writes for it, under [`CSV_HEADER`], its times as
-    /// RFC 3339.
-    fn cells(&self) -> [String; 10] {
+    /// RFC 3339 and its tags one cell, `; ` between them.
+    fn cells(&self) -> [String; 11] {
         let time = |t: &DateTime<Utc>| t.to_rfc3339_opts(SecondsFormat::Micros, true);
         [
             self.session_id.clone(),
@@ -197,6 +198,7 @@ impl SessionRow {
             self.duration_ms.to_string(),
             time(&self.first_seen),
             time(&self.last_seen),
+            self.tags.join("; "),
         ]
     }
 }
@@ -336,7 +338,7 @@ pub async fn get_session(
         &state.store,
         &projects,
         &filter,
-        (TraceSort::Started, SortDirection::Asc),
+        (&ListSort::Column(TraceSort::Started), SortDirection::Asc),
         window.limit + 1,
         0,
     )
@@ -400,7 +402,7 @@ mod tests {
         assert_eq!(query.paging().expect("the default").limit, DEFAULT_LIMIT);
         assert_eq!(
             query.sort_for::<Sessions>().expect("the default"),
-            (SessionSort::LastSeen, SortDirection::Desc)
+            (ListSort::Column(SessionSort::LastSeen), SortDirection::Desc)
         );
     }
 
@@ -411,7 +413,7 @@ mod tests {
                 .expect("read");
             assert_eq!(
                 query.sort_for::<Sessions>().expect("a column"),
-                (column, Sessions::first_direction(column))
+                (ListSort::Column(column), Sessions::first_direction(column))
             );
         }
         assert_eq!(
@@ -456,6 +458,7 @@ mod tests {
             duration_ms: 1_250,
             first_seen: at,
             last_seen: at,
+            tags: vec!["repo:telmoni".into(), "team:core".into()],
         };
         let cells = session.cells();
         assert_eq!(cells.len(), CSV_HEADER.len());
@@ -463,6 +466,7 @@ mod tests {
         assert_eq!(cells[5], "300");
         assert_eq!(cells[7], "1250");
         assert_eq!(cells[8], "2026-10-11T12:30:00.000000Z");
+        assert_eq!(cells[10], "repo:telmoni; team:core");
     }
 
     /// A session's page reads its window and the names pinned, each trimmed

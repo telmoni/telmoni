@@ -21,11 +21,13 @@ import {
 import {
   FILTER_KEYS,
   ListFiltersSchema,
+  TagSortSchema,
   TraceDetailSchema,
   TraceSchema,
   filtersIn,
   type FilterKey,
   type ListFilters,
+  type TagSort,
   type TraceDetail,
 } from "@/lib/types/traces";
 
@@ -47,6 +49,11 @@ export {
   type TraceSpan,
 } from "@/lib/types/traces";
 
+// A list's sort as it answers and keeps one: a word of its columns', or, on
+// the trace and sessions lists, a tag's.
+const TraceSortSchema = z.union([z.enum(TraceSort), TagSortSchema]);
+export const SessionSortSchema = z.union([z.enum(SessionSort), TagSortSchema]);
+
 // A page of the list, and how many traces the filters admit on every page.
 export const TraceListSchema = z.object({
   traces: z.array(TraceSchema),
@@ -55,10 +62,16 @@ export const TraceListSchema = z.object({
   page: z.number(),
   total: z.number(),
   more: z.boolean(),
-  sort: z.enum(TraceSort),
+  sort: TraceSortSchema,
   dir: z.enum(SortDirection),
 });
 export type TraceList = z.infer<typeof TraceListSchema>;
+
+// A run's tags as a change to them answers: its own span's, after it.
+export const TraceTagsSchema = z.object({
+  run_id: z.string(),
+  tags: z.record(z.string(), z.string()),
+});
 
 // One filter's values among the window's runs, each with how many of the
 // list's rows carry it under every other filter: the ticked first.
@@ -103,18 +116,18 @@ export type TraceHistogram = z.infer<typeof TraceHistogramSchema>;
 // A saved view's query: its list's, each filter's values a list, its sort
 // one of that list's, and no key the list does not take, as the server
 // refuses one.
-function viewQuerySchema<S extends Record<string, string>>(sorts: S) {
+function viewQuerySchema<S extends string>(sort: z.ZodType<S>) {
   return z.strictObject({
     ...ListFiltersSchema.shape,
-    sort: z.enum(sorts).optional(),
+    sort: sort.optional(),
     dir: z.enum(SortDirection).optional(),
     days: z.number().optional(),
     limit: z.number().optional(),
   });
 }
-export const ViewQuerySchema = viewQuerySchema(TraceSort);
-export const SessionViewQuerySchema = viewQuerySchema(SessionSort);
-export const UserViewQuerySchema = viewQuerySchema(UserSort);
+export const ViewQuerySchema = viewQuerySchema(TraceSortSchema);
+export const SessionViewQuerySchema = viewQuerySchema(SessionSortSchema);
+export const UserViewQuerySchema = viewQuerySchema(z.enum(UserSort));
 /** A saved view's query, its sort among `S`. */
 export type ListViewQuery<S extends string> = ListFilters & {
   sort?: S;
@@ -199,7 +212,7 @@ export const UserViewListSchema = z.object({ views: z.array(UserViewSchema) });
 export const TraceLayoutListSchema = z.object({ views: z.array(TraceLayoutSchema) });
 
 /** What narrows and orders a list, and which page of it shows, as the URL
- *  carries it, `S` its columns' sorts. The server checks every value; the
+ *  carries it, `S` the sorts it takes. The server checks every value; the
  *  page drops what it cannot read before asking (`lib/traces.ts`). */
 export type ListQuery<S extends string> = ListFilters & {
   /** Words or a phrase the runs' kept content holds. */
@@ -211,7 +224,7 @@ export type ListQuery<S extends string> = ListFilters & {
   page?: number;
 };
 
-export type TraceQuery = ListQuery<TraceSort>;
+export type TraceQuery = ListQuery<TraceSort | TagSort>;
 
 /** The filters and the window alone: what the facets and the histogram take,
  *  each lane refusing a parameter it has no use for. */

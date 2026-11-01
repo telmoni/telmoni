@@ -34,7 +34,7 @@ use std::sync::Arc;
 
 use axum::{
     Router, middleware,
-    routing::{get, post, put},
+    routing::{get, patch, post, put},
 };
 use sqlx::PgPool;
 
@@ -189,6 +189,10 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route(
             "/telemetry/traces/{run_id}",
             get(handler::traces::get_trace).delete(handler::traces::delete_trace),
+        )
+        .route(
+            "/telemetry/traces/{run_id}/tags",
+            patch(handler::traces::patch_tags),
         )
         .route("/telemetry/users", get(handler::users::list_users))
         .route(

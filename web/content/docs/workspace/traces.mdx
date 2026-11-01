@@ -36,8 +36,9 @@ version or a commit), each once where a run crossed services deployed apart,
 the class of the error it ended on (**Error**: `TimeoutError`,
 `RateLimitError` — never its message), its model calls, tool calls, errors
 and spans, its input, output and cached tokens, how soon the first of its
-model calls that said began to answer (**Time to first token**), and the
-models and tools its calls used.
+model calls that said began to answer (**Time to first token**), the
+models and tools its calls used, and its [tags](#tags), each `key:value`
+(**Tags**).
 The counts and the tokens are each a group that opens under its heading,
 which says how many of it show; a column whose name does not say what it
 holds says so behind its ⓘ; and the trace's id always shows. Your columns,
@@ -75,9 +76,12 @@ first. Click one again to take it off.
 ### Sort, pages and the window
 
 **Sort** by clicking a column's heading; every column sorts but Trace, Ended,
-Spans, Cache read, Cache write, Models and Tools. A second click turns it
-round. Names sort in the alphabet's order, and the newest, the longest and the
-most come first on the others.
+Environment, Release, Error, Spans, Cache read, Cache write, Models and
+Tools. A second click turns it round. Names sort in the alphabet's order, and
+the newest, the longest and the most come first on the others. The **Tags**
+heading sorts by a tag: **Sort by tag** lists the keys the window's runs
+carry, and picking one orders the runs by their value of it, A to Z, picking
+it again Z to A, the runs without it last either way.
 
 **Rows per page** is 25, 50 or 100; beside it, the total the filters admit,
 and the way to the first, previous, next and last page. A list past a
@@ -105,6 +109,26 @@ console whose live events are paused.
 
 Every filter, the sort, the window and the page are in the page's URL, so a
 link holds the view you were looking at.
+
+### Tags
+
+A run's tags are the labels it was sent with, `telmoni.tag.<key>` on its
+spans or the [tags a coding agent's developer sets](/docs/api/coding-agents#tags),
+and anyone on the project changes them after: on the trace's own page or in
+its view beside the list, each tag's × takes it off, and **Add tag**, a **Key**
+and a **Value**, puts one on, the keys and values the window's runs carry
+suggested. A session's page tags every trace it shows at once
+([sessions](/docs/workspace/sessions#a-session)). A change goes on every span
+of the run, so the filters, the facets, the **Tags** column, a sort by a tag
+and the download read it at once, and every console open on the project draws
+it. A span the run sends after a change carries the tags it was sent with.
+
+A key is 1 to 64 characters, none of them a colon, and a value up to 256; a
+span carries up to 32 tags, and a project's tags take up to 64 keys a UTC day,
+each up to 500 values ([the cap](/docs/api/ingest#what-is-dropped-at-the-door)):
+a change past either is refused and changes nothing. Each change is a line of
+the organization's [audit log](/docs/workspace/audit-log), naming the run and
+the keys, never a value.
 
 ### Searching kept content
 
@@ -211,10 +235,11 @@ a run that has passed its retention, or one of another project's — says so.
 On a project that keeps content, a trace's page and its view beside the list
 show it in full, as an SDK sent it under the GenAI conventions:
 
-- **At its head**, the run's own input and output: the person's message and
-  the agent's answer, a turn of a conversation, under the layout's
-  **Messages** option, on by default. A trace that kept none says so in a
-  line.
+- **At its head**, on the trace's own page, the run's own input and output:
+  the person's message and the agent's answer, a turn of a conversation,
+  under the layout's **Messages** option, on by default. A trace that kept
+  none says so in a line. The view beside the list shows each span's content
+  alone, its tree whole.
 - **Every span opened**, on its **Content** tab, first where the trace kept
   any: a model call's system instructions, the tools it was offered, and its
   input and output as a conversation, each message under its role, its text

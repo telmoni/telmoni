@@ -35,6 +35,33 @@ export function filtersIn(query: ListFilters): ListFilters {
   return Object.fromEntries(FILTER_KEYS.map((key) => [key, query[key]])) as ListFilters;
 }
 
+/** The longest key and value a tag has, in characters, as ingest keeps one. */
+export const TAG_KEY_MAX = 64;
+export const TAG_VALUE_MAX = 256;
+
+/** A sort by one tag's value, `tag:` and its key: the trace and sessions
+ *  lists take one beside their columns' words. */
+export type TagSort = `tag:${string}`;
+
+/** `text` as a tag sort, as the server reads one: `tag:` and a key of 1 to
+ *  64 characters, none a control character; else none. */
+export function readTagSort(text: string): TagSort | undefined {
+  if (!text.startsWith("tag:")) return undefined;
+  const key = text.slice("tag:".length);
+  const length = [...key].length;
+  return length >= 1 && length <= TAG_KEY_MAX && !/\p{Cc}/u.test(key) ? `tag:${key}` : undefined;
+}
+
+/** The key a list is sorted by, where its sort is a tag's. */
+export function tagSortKey(sort: string): string | undefined {
+  return readTagSort(sort)?.slice("tag:".length);
+}
+
+/** A tag sort, as a list answers one and a saved view keeps it. */
+export const TagSortSchema = z.custom<TagSort>(
+  (value) => typeof value === "string" && readTagSort(value) !== undefined,
+);
+
 // One trace of the list: a run's spans summed by the server, which reads the
 // project's spans and no other's. `user_id` is as stored, hashed, and
 // `ended` says whether the run's own span has
@@ -70,6 +97,8 @@ export const TraceSchema = z.object({
   environments: z.array(z.string()),
   /** The releases its spans were sent from, each once. */
   releases: z.array(z.string()),
+  /** Its tags, each `key:value` once, in order. */
+  tags: z.array(z.string()),
 });
 export type Trace = z.infer<typeof TraceSchema>;
 
