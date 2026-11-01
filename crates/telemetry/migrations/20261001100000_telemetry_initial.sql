@@ -480,11 +480,12 @@ CREATE TABLE telemetry.model_prices (
 -- 9. CONTENT
 -- ══════════════════════════════════════════════════════════════════════════════
 -- What a project whose content mode is `on` keeps of its spans' content, a
--- row a field, each sealed under the project's content key with the span's id
--- and the field's name as associated data. ClickHouse holds none of it. A row
--- follows its span: kept as long as the span's day, by `received_at`, and
--- gone with its project. Filed under the project alone, as a view is: the
--- organization's purge finds its projects by their settings rows.
+-- row a field, each compressed, then sealed under the project's content key
+-- with the span's id and the field's name as associated data. ClickHouse
+-- holds none of it. A row follows its span: kept as long as the span's day,
+-- by `received_at`, and gone with its project. Filed under the project alone,
+-- as a view is: the organization's purge finds its projects by their settings
+-- rows.
 CREATE TABLE telemetry.plain_content (
     project_id  TEXT        NOT NULL,
     -- The span's run, by which a trace's deletion and an end user's erasure
@@ -496,12 +497,17 @@ CREATE TABLE telemetry.plain_content (
     received_at TIMESTAMPTZ NOT NULL,
     ciphertext  BYTEA       NOT NULL,
     nonce       BYTEA       NOT NULL,
-    -- The field's length in bytes as it arrived, counted on `content_held`.
+    -- The field's sealed length in bytes, counted on `content_held`.
     bytes       INTEGER     NOT NULL,
-    -- Each distinct word of the field, lower-cased, as its HMAC-SHA-256 under
-    -- a key derived from the project's content key: what a search finds the
-    -- field by, its words never held plain, nothing matching once the key goes.
-    words       TEXT[]      NOT NULL DEFAULT '{}',
+    -- Each distinct word of the field, lower-cased, as the first 64 bits of its
+    -- HMAC-SHA-256 under a key derived from the project's content key: what a
+    -- search finds the field by, its words never held plain, nothing matching
+    -- once the key goes.
+    words       BIGINT[]    NOT NULL DEFAULT '{}',
+    -- Each pair of neighbouring words, hashed as its words are: a phrase is
+    -- checked on the rows its words find, so its pairs take no room in their
+    -- index.
+    pairs       BIGINT[]    NOT NULL DEFAULT '{}',
     PRIMARY KEY (project_id, trace_id, span_id, field),
     CONSTRAINT plain_content_bytes_check CHECK (bytes >= 0)
 );

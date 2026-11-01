@@ -338,37 +338,41 @@ async fn a_project_that_keeps_content_seals_each_field_and_counts_it_once(pool: 
                     .any(|w| w == MESSAGES.as_bytes()),
                 "{field} is sealed"
             );
-            door.state
-                .vault
-                .open(
-                    &key,
-                    SealedRef { ciphertext, nonce },
-                    content::field_aad(SPAN, field).as_bytes(),
-                )
-                .expect("a field opens under its own span and name")
-                .expose()
-                .to_owned()
+            content::open_field(
+                &door.state.vault,
+                &key,
+                SealedRef { ciphertext, nonce },
+                &content::field_aad(SPAN, field),
+            )
+            .expect("a field opens under its own span and name")
         })
         .collect();
     assert_eq!(opened, [r#"{"id":42}"#, MESSAGES, long.as_str()]);
     let (_, ciphertext, nonce, _) = &kept[1];
     assert!(
-        door.state
-            .vault
-            .open(
-                &key,
-                SealedRef { ciphertext, nonce },
-                content::field_aad(SPAN, "gen_ai.output.messages").as_bytes(),
-            )
-            .is_err(),
+        content::open_field(
+            &door.state.vault,
+            &key,
+            SealedRef { ciphertext, nonce },
+            &content::field_aad(SPAN, "gen_ai.output.messages"),
+        )
+        .is_err(),
         "a field moved to another name does not open"
     );
 
-    let bytes: i64 = kept.iter().map(|(.., bytes)| i64::from(*bytes)).sum();
-    assert_eq!(
-        bytes,
-        i64::try_from(MESSAGES.len() + long.len() + 9).expect("small")
+    // Each counted at its sealed size, compressed first.
+    for (field, ciphertext, _, bytes) in &kept {
+        assert_eq!(
+            usize::try_from(*bytes).ok(),
+            Some(ciphertext.len()),
+            "{field}"
+        );
+    }
+    assert!(
+        kept[2].1.len() < long.len() / 10,
+        "the long field compressed"
     );
+    let bytes: i64 = kept.iter().map(|(.., bytes)| i64::from(*bytes)).sum();
     assert_eq!(door.held(&pool, &door.organization).await, Some(bytes));
 
     let attributes: Vec<String> = ch
@@ -1006,8 +1010,8 @@ async fn no_tag_value_or_end_user_id_reaches_a_log_an_error_or_the_audit_chain(p
 }
 
 /// ⚠ Content searched: the trace list narrows to the runs whose kept content
-/// holds every word, a phrase in order; a search files no read, finds nothing
-/// on a project that keeps none, and nothing once the content key is deleted.
+/// holds every word, a phrase in order, by hashes alone; a search opens and
+/// files nothing, finds nothing on a project that keeps none or once its key goes.
 #[sqlx::test]
 async fn the_trace_list_finds_runs_by_their_kept_content(pool: PgPool) {
     let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
@@ -1071,6 +1075,14 @@ async fn the_trace_list_finds_runs_by_their_kept_content(pool: PgPool) {
         door.viewed(&pool).await.is_empty(),
         "a search shows no content, and files none"
     );
+    // ⚠ Found by hashes alone: a run whose sealed text no longer opens is still
+    // found by a phrase, since a search opens no field to look.
+    sqlx::query("UPDATE telemetry.plain_content SET ciphertext = '\\x00' WHERE run_id = $1::uuid")
+        .bind(RUN)
+        .execute(&pool)
+        .await
+        .expect("spoil the run's sealed text");
+    assert_eq!(runs("where is my").await, [RUN], "a phrase, by its hashes");
 
     let other = door_over(&pool, ContentMode::Off, true).await;
     other.auth.seat(
@@ -1100,6 +1112,53 @@ async fn the_trace_list_finds_runs_by_their_kept_content(pool: PgPool) {
     assert!(
         runs("refund").await.is_empty(),
         "nothing matches once the key goes"
+    );
+}
+
+/// ⚠ A field held small: compressed before it is sealed, and its sealed text
+/// and both hash arrays under three times its text as Postgres stores them.
+#[sqlx::test]
+async fn a_kept_field_takes_under_three_times_its_text(pool: PgPool) {
+    let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let door = door(&pool, ContentMode::On).await;
+    // Ten kilobytes of prose: two hundred words, drawn as a writer repeats them.
+    let vocabulary: Vec<String> = (0..200)
+        .map(|n| format!("w{}", n * 7919 % 100_003))
+        .collect();
+    let (mut text, mut seed) = (String::new(), 42_u64);
+    while text.len() < 10 * 1024 {
+        seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+        let at = usize::try_from(seed >> 33).unwrap_or_default() % vocabulary.len();
+        text.push_str(&vocabulary[at]);
+        text.push_str(if seed % 13 == 0 { ". " } else { " " });
+    }
+    door.send(export_of(
+        RUN,
+        TRACE,
+        SPAN,
+        &[("app.note", text.as_str())],
+        "result",
+    ))
+    .await;
+    let (stored, sealed): (i64, i32) = sqlx::query_as(
+        "SELECT (pg_column_size(ciphertext) + pg_column_size(words) + pg_column_size(pairs))::bigint,
+                bytes
+           FROM telemetry.plain_content WHERE project_id = $1 AND field = 'app.note'",
+    )
+    .bind(&door.project)
+    .fetch_one(&pool)
+    .await
+    .expect("the field, kept");
+    let written = i64::try_from(text.len()).expect("small");
+    assert!(
+        i64::from(sealed) < written / 2,
+        "compressed: {sealed} for {written}"
+    );
+    assert!(
+        stored < 3 * written,
+        "{stored} bytes stored for {written} of text"
     );
 }
 
@@ -1520,10 +1579,14 @@ async fn content_past_its_spans_retention_goes_with_its_bytes(pool: PgPool) {
         .map(|row| row.0)
         .collect();
     assert_eq!(names, ["app.ticket", "gen_ai.input.messages"]);
-    assert_eq!(
-        door.held(&pool, &door.organization).await,
-        Some(before - i64::try_from("result".len()).expect("small"))
-    );
+    let left: i64 = door
+        .kept(&pool)
+        .await
+        .iter()
+        .map(|(.., bytes)| i64::from(*bytes))
+        .sum();
+    assert!(left < before, "the aged field's bytes go with it");
+    assert_eq!(door.held(&pool, &door.organization).await, Some(left));
 }
 
 /// A project that keeps fewer days loses the content past them with its
@@ -1780,8 +1843,13 @@ async fn a_deleted_trace_is_filed_then_gone_from_both_stores(pool: PgPool) {
         )]
     );
     assert_eq!(door.kept_traces(&pool).await, [TRACE_B]);
-    let other =
-        i64::try_from("other".len() + r#"{"id":42}"#.len() + MESSAGES.len()).expect("small");
+    // The other trace's fields alone stay counted, each at its sealed size.
+    let other: i64 = door
+        .kept(&pool)
+        .await
+        .iter()
+        .map(|(.., bytes)| i64::from(*bytes))
+        .sum();
     assert_eq!(door.held(&pool, &door.organization).await, Some(other));
     assert!(
         !found(&door, RUN).await,

@@ -80,6 +80,10 @@ opentelemetry = { version = "0.33", default-features = false, features = ["trace
 opentelemetry_sdk = { version = "0.33", default-features = false, features = ["trace"] }
 # gzip, which an exporter may send; a body's size is capped as it inflates.
 flate2 = "1"
+# Kept content, compressed before it is sealed, at zstd's default level; its
+# legacy formats and dictionary trainer left out, since nothing here reads or
+# makes them.
+zstd = { version = "0.14", default-features = false }
 # The server's Redis: ingest's claims on a body's digest and its rate limits,
 # shared by every replica. The reference client, with TLS from the start, so
 # a self-hoster's TLS Redis works and a managed one is a value, not a change;

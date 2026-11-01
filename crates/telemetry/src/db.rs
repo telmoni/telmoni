@@ -684,6 +684,8 @@ pub struct SealedFields {
     /// Each field's hashed words ([`crate::content::words_of`]), as a JSON
     /// array, since a column of arrays of differing lengths binds no other way.
     pub words: Vec<String>,
+    /// Each field's hashed pairs of neighbouring words, the same way.
+    pub pairs: Vec<String>,
 }
 
 /// Content kept, its bytes added to the organization's count. A field
@@ -699,12 +701,13 @@ pub async fn keep_content(
         "WITH kept AS (
              INSERT INTO telemetry.plain_content
                  (project_id, run_id, trace_id, span_id, field, received_at, ciphertext, nonce,
-                  bytes, words)
+                  bytes, words, pairs)
              SELECT $1, r, t, s, f, $3, c, n, b,
-                    ARRAY(SELECT jsonb_array_elements_text(w::jsonb))
+                    ARRAY(SELECT jsonb_array_elements_text(w::jsonb)::bigint),
+                    ARRAY(SELECT jsonb_array_elements_text(p::jsonb)::bigint)
                FROM UNNEST($10::uuid[], $4::text[], $5::text[], $6::text[], $7::bytea[],
-                           $8::bytea[], $9::int[], $11::text[])
-                 AS u(r, t, s, f, c, n, b, w)
+                           $8::bytea[], $9::int[], $11::text[], $12::text[])
+                 AS u(r, t, s, f, c, n, b, w, p)
              ON CONFLICT DO NOTHING
              RETURNING bytes)
          INSERT INTO telemetry.content_held (organization_id, bytes)
@@ -723,24 +726,26 @@ pub async fn keep_content(
     .bind(&sealed.bytes)
     .bind(&sealed.run_ids)
     .bind(&sealed.words)
+    .bind(&sealed.pairs)
     .execute(tx.conn())
     .await?;
     Ok(())
 }
 
-/// The fields of the project's content holding every one of `words`, hashed,
-/// newest first, up to `limit`: each one's run, span and name, sealed. None
-/// once its content key is deleted, as [`read_content`] reads none.
+/// The run of each field of the project's content holding every one of
+/// `words` and of `pairs`, hashed, newest first, up to `limit` fields; nothing
+/// sealed. The words' index finds the fields, each one's pairs checked on it.
+/// None once its content key is deleted, as [`read_content`] reads none.
 pub(crate) async fn search_content<B: HasProject>(
     tx: &mut Scoped<'_, B>,
     project_id: &ProjectId,
-    words: &[String],
+    (words, pairs): (&[i64], &[i64]),
     limit: i64,
-) -> sqlx::Result<Vec<KeptField>> {
-    sqlx::query_as(
-        "SELECT run_id, trace_id, span_id, field, ciphertext, nonce
+) -> sqlx::Result<Vec<Uuid>> {
+    sqlx::query_scalar(
+        "SELECT run_id
            FROM telemetry.plain_content
-          WHERE project_id = $1 AND words @> $2
+          WHERE project_id = $1 AND words @> $2 AND pairs @> $4
             AND EXISTS (SELECT 1 FROM telemetry.project_settings
                          WHERE project_id = $1 AND content_key_wrapped_dek IS NOT NULL)
           ORDER BY received_at DESC
@@ -749,6 +754,7 @@ pub(crate) async fn search_content<B: HasProject>(
     .bind(project_id)
     .bind(words)
     .bind(limit)
+    .bind(pairs)
     .fetch_all(tx.conn())
     .await
 }

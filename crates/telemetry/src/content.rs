@@ -1,14 +1,15 @@
 //! What a project whose content mode is `on` keeps of its spans' content:
-//! each field sealed under the project's content key, the span's id and the
-//! field's name as associated data, in `plain_content`, and its bytes on its
-//! organization's row of `content_held`. The key is a data key of the
-//! project's own, made with the first content it keeps, wrapped under
-//! `CONTENT_KEK`, never the hashing key's `TELEMETRY_KEK`, and held in
-//! memory once opened, as the hashing key is ([`crate::hashing`]). Deleting
-//! the settings row deletes the key, so every copy of the content, backups
-//! among them, is unreadable from that commit. Content is read only through
+//! each field compressed, then sealed under the project's content key, the
+//! span's id and the field's name as associated data, in `plain_content`, and
+//! its sealed bytes on its organization's row of `content_held`. The key is a
+//! data key of the project's own, made with the first content it keeps,
+//! wrapped under `CONTENT_KEK`, never the hashing key's `TELEMETRY_KEK`, and
+//! held in memory once opened, as the hashing key is ([`crate::hashing`]).
+//! Deleting the settings row deletes the key, so nothing reads the content
+//! from that commit, but a backup taken before. Content is read only through
 //! [`open`], which files each read in the organization's audit chain.
 
+use std::io::Read;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
@@ -17,14 +18,15 @@ use uuid::Uuid;
 
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit, lock_chain_in_time};
 use telmoni_shared::db::tenant_session::{ProjectAndOrganization, Scoped, project_scope};
-use telmoni_shared::digest::HmacKey;
-use telmoni_shared::envelope::{Dek, KEK_VERSION, Sealed, SealedRef};
+use telmoni_shared::digest::{HmacKey, hex_decode};
+use telmoni_shared::envelope::{Dek, KEK_VERSION, Sealed, SealedRef, Vault};
 use telmoni_shared::{
     AuditAction, OrganizationId, ProjectId, Redacted, TelemetryError, TelmoniError,
     TelmoniResourceKind,
 };
 
 use crate::AppState;
+use crate::contract::BATCH_MAX_BYTES;
 use crate::db::{self, SealedFields, WrappedContentKey};
 use crate::handler::chain;
 use crate::hashing::kek_refused;
@@ -44,6 +46,53 @@ fn key_aad(project_id: &ProjectId) -> String {
 #[must_use]
 pub fn field_aad(span_id: &str, field: &str) -> String {
     format!("{span_id}/{field}")
+}
+
+/// `text` compressed and sealed under `key`, bound to `aad`: a ciphertext does
+/// not compress, so a field is compressed before it is sealed.
+fn seal_field(
+    vault: &Vault,
+    key: &Dek,
+    text: &Redacted,
+    aad: &str,
+) -> Result<Sealed, TelmoniError> {
+    let packed = zstd::bulk::compress(text.expose().as_bytes(), zstd::DEFAULT_COMPRESSION_LEVEL)
+        .map_err(|_| TelmoniError::Internal("content: a field would not compress".into()))?;
+    vault.seal_bytes(key, &packed, aad.as_bytes())
+}
+
+/// The most a field decompresses to: one export's body, the JSON ingest
+/// writes of its events, arrays and maps a few times longer at most.
+const FIELD_MAX: usize = 16 * BATCH_MAX_BYTES;
+
+/// A field [`keep`] sealed, opened under `key` and `aad` and decompressed back
+/// to its text, never past `FIELD_MAX`.
+///
+/// # Errors
+///
+/// The field does not open under them, or does not decompress to text.
+pub fn open_field(
+    vault: &Vault,
+    key: &Dek,
+    sealed: SealedRef<'_>,
+    aad: &str,
+) -> Result<String, TelmoniError> {
+    let packed = vault.open_bytes(key, sealed, aad.as_bytes())?;
+    let cap = u64::try_from(FIELD_MAX).unwrap_or(u64::MAX);
+    let mut text = String::new();
+    zstd::Decoder::with_buffer(packed.as_slice())
+        .and_then(|decoder| {
+            decoder
+                .take(cap.saturating_add(1))
+                .read_to_string(&mut text)
+        })
+        .map_err(|_| TelmoniError::Internal("content: a field would not decompress".into()))?;
+    if text.len() > FIELD_MAX {
+        return Err(TelmoniError::Internal(
+            "content: a field decompresses past its cap".into(),
+        ));
+    }
+    Ok(text)
 }
 
 /// An export's content, sealed and kept, its bytes counted; nothing where it
@@ -72,15 +121,13 @@ pub async fn keep(
                 named.0.push(hash);
                 named.1.push(span.run_id);
             }
-            let bytes = i32::try_from(text.len()).unwrap_or(i32::MAX);
-            sealed
-                .words
-                .push(json!(hashed_words(&words_key, &text)).to_string());
+            let (words, pairs) = hashed_words(&words_key, &text);
+            sealed.words.push(json!(words).to_string());
+            sealed.pairs.push(json!(pairs).to_string());
             let aad = field_aad(&span.span_id, &field);
             let Sealed { ciphertext, nonce } =
-                state
-                    .vault
-                    .seal(&key, &Redacted::from(text), aad.as_bytes())?;
+                seal_field(&state.vault, &key, &Redacted::from(text), &aad)?;
+            let bytes = i32::try_from(ciphertext.len()).unwrap_or(i32::MAX);
             sealed.run_ids.push(span.run_id);
             sealed.trace_ids.push(span.trace_id.clone());
             sealed.span_ids.push(span.span_id.clone());
@@ -152,18 +199,15 @@ pub async fn open(
     let key = key_for(state, project_id).await?;
     let mut opened: Vec<SpanContent> = Vec::new();
     for (run_id, trace_id, span_id, field, ciphertext, nonce) in kept {
-        let text = state
-            .vault
-            .open(
-                &key,
-                SealedRef {
-                    ciphertext: &ciphertext,
-                    nonce: &nonce,
-                },
-                field_aad(&span_id, &field).as_bytes(),
-            )?
-            .expose()
-            .to_owned();
+        let text = open_field(
+            &state.vault,
+            &key,
+            SealedRef {
+                ciphertext: &ciphertext,
+                nonce: &nonce,
+            },
+            &field_aad(&span_id, &field),
+        )?;
         match opened.last_mut() {
             Some(span) if span.trace_id == trace_id && span.span_id == span_id => {
                 span.fields.push((field, text));
@@ -461,23 +505,67 @@ pub fn words_of(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// A field's distinct words, hashed for its `words` column.
-fn hashed_words(key: &HmacKey, text: &str) -> Vec<String> {
-    let mut words = words_of(text);
-    words.sort_unstable();
-    words.dedup();
-    words.truncate(WORDS_MAX);
-    words.iter().map(|word| hash_word(key, word)).collect()
+/// A field's words and each pair of neighbouring words, hashed for its
+/// `words` and `pairs` columns: the first [`WORDS_MAX`] distinct of each, in
+/// its order.
+fn hashed_words(key: &HmacKey, text: &str) -> (Vec<i64>, Vec<i64>) {
+    let words = words_of(text);
+    let pairs = pairs_of(&words);
+    let hashed = |items: Vec<String>| {
+        first_distinct(items)
+            .iter()
+            .map(|item| hash_word(key, item))
+            .collect()
+    };
+    (hashed(words), hashed(pairs))
 }
 
-fn hash_word(key: &HmacKey, word: &str) -> String {
-    key.prefix_hex(word.as_bytes(), 16)
+/// What a search asks of a field: each word of `query` among its `words`, and
+/// each pair of its neighbours among its `pairs`, so a phrase is matched by
+/// hashes alone.
+fn query_hashes(key: &HmacKey, query: &[String]) -> (Vec<i64>, Vec<i64>) {
+    let hashed = |items: &[String]| {
+        let mut hashed: Vec<i64> = items.iter().map(|item| hash_word(key, item)).collect();
+        hashed.sort_unstable();
+        hashed.dedup();
+        hashed
+    };
+    (hashed(query), hashed(&pairs_of(query)))
 }
 
-/// The runs whose kept content holds every word of `query`, and its words in
-/// that order where it has more than one, newest first: what the trace list
-/// narrows to. A field is opened in the process to match a phrase, never
-/// shown, so nothing is filed; none where the project has no content key.
+/// Each word with the one after it. A word holds no space, so a pair names
+/// its two words and no others.
+fn pairs_of(words: &[String]) -> Vec<String> {
+    words
+        .windows(2)
+        .filter_map(|pair| match pair {
+            [first, second] => Some(format!("{first} {second}")),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The first [`WORDS_MAX`] distinct of `items`, in their order.
+fn first_distinct(items: Vec<String>) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    items
+        .into_iter()
+        .filter(|item| seen.insert(item.clone()))
+        .take(WORDS_MAX)
+        .collect()
+}
+
+/// A word's, or a pair's, first 64 bits of keyed hash: enough to name it within
+/// a project, where a collision only finds a field that lacks it.
+fn hash_word(key: &HmacKey, word: &str) -> i64 {
+    let bytes = hex_decode(&key.prefix_hex(word.as_bytes(), 8)).unwrap_or_default();
+    <[u8; 8]>::try_from(bytes.as_slice()).map_or(0, i64::from_be_bytes)
+}
+
+/// The runs whose kept content holds every word of `query`, and each of its
+/// words beside the next where it has more than one, newest first: what the
+/// trace list narrows to. Matched by keyed hashes alone, so no field is opened
+/// and nothing is filed; none where the project has no content key.
 ///
 /// # Errors
 ///
@@ -497,39 +585,17 @@ pub async fn search(
         return Ok(Vec::new());
     };
     let key = unwrapped(state, project_id, &wrapped).await?;
-    let words_key = words_key(&key);
-    let mut hashed: Vec<String> = phrase.iter().map(|w| hash_word(&words_key, w)).collect();
-    hashed.sort_unstable();
-    hashed.dedup();
-    let found = db::search_content(&mut tx, project_id, &hashed, SEARCH_FIELDS_MAX).await?;
+    let (words, pairs) = query_hashes(&words_key(&key), &phrase);
+    let found =
+        db::search_content(&mut tx, project_id, (&words, &pairs), SEARCH_FIELDS_MAX).await?;
     tx.commit().await?;
     let mut runs: Vec<Uuid> = Vec::new();
-    for (run_id, _, span_id, field, ciphertext, nonce) in found {
-        if runs.contains(&run_id) {
-            continue;
-        }
-        let holds = phrase.len() == 1 || {
-            let aad = field_aad(&span_id, &field);
-            let sealed = SealedRef {
-                ciphertext: &ciphertext,
-                nonce: &nonce,
-            };
-            state
-                .vault
-                .open(&key, sealed, aad.as_bytes())
-                .ok()
-                .is_some_and(|text| holds_in_order(&words_of(text.expose()), &phrase))
-        };
-        if holds {
+    for run_id in found {
+        if !runs.contains(&run_id) {
             runs.push(run_id);
         }
     }
     Ok(runs)
-}
-
-/// Whether `words` hold `phrase` as one run, in order.
-fn holds_in_order(words: &[String], phrase: &[String]) -> bool {
-    words.windows(phrase.len()).any(|window| window == phrase)
 }
 
 /// A fresh data key for the project, wrapped first, holding nothing, since the
@@ -658,13 +724,70 @@ mod tests {
         assert_eq!(named, put);
     }
 
-    /// A phrase holds where its words run in order, and nowhere else.
+    /// ⚠ A field opens as it was sealed, compressed between: an empty one, a
+    /// line, and one past an export's body, as ingest's JSON of events may be;
+    /// one past the cap does not, nor bytes sealed without being compressed.
     #[test]
-    fn a_phrase_holds_in_order_alone() {
-        let words = words_of("where is my order");
-        assert!(holds_in_order(&words, &words_of("my order")));
-        assert!(!holds_in_order(&words, &words_of("order my")));
-        assert!(!holds_in_order(&words, &words_of("where order")));
+    fn a_field_opens_as_it_was_sealed() {
+        let vault = Vault::new();
+        let key = vault.new_dek().expect("a key");
+        let open = |sealed: &Sealed| {
+            open_field(
+                &vault,
+                &key,
+                SealedRef {
+                    ciphertext: &sealed.ciphertext,
+                    nonce: &sealed.nonce,
+                },
+                "span/field",
+            )
+        };
+        let seal = |text: &str| {
+            seal_field(&vault, &key, &Redacted::from(text), "span/field").expect("sealed")
+        };
+        let long = "event ".repeat(BATCH_MAX_BYTES / 2);
+        for text in ["", "Where is my refund?", long.as_str()] {
+            assert_eq!(open(&seal(text)).expect("opened"), text);
+        }
+        assert!(open(&seal(&"a".repeat(FIELD_MAX + 1))).is_err());
+        let raw = vault
+            .seal_bytes(&key, b"Where is my refund?", b"span/field")
+            .expect("sealed");
+        assert!(open(&raw).is_err());
+    }
+
+    /// A phrase is found where each of its words stands beside the next, in
+    /// that order, by the field's hashes alone.
+    #[test]
+    fn a_phrase_is_found_by_its_neighbouring_pairs_alone() {
+        let vault = telmoni_shared::envelope::Vault::new();
+        let key = words_key(&vault.new_dek().expect("a key"));
+        let (words, pairs) = hashed_words(&key, "where is my order");
+        let finds = |query: &str| {
+            let (asked, asked_pairs) = query_hashes(&key, &words_of(query));
+            asked.iter().all(|hash| words.contains(hash))
+                && asked_pairs.iter().all(|hash| pairs.contains(hash))
+        };
+        assert!(finds("my order") && finds("where is my"));
+        assert!(!finds("order my"), "out of order");
+        assert!(!finds("where order"), "not side by side");
+    }
+
+    /// ⚠ A field longer than the cap is found by its first distinct words and
+    /// pairs, as it reads, never by the alphabet's.
+    #[test]
+    fn a_long_field_is_found_by_its_first_words() {
+        let vault = telmoni_shared::envelope::Vault::new();
+        let key = words_key(&vault.new_dek().expect("a key"));
+        let mut text: Vec<String> = (0..WORDS_MAX).map(|n| format!("w{n:04}")).collect();
+        text.push("a".to_owned());
+        let (words, pairs) = hashed_words(&key, &text.join(" "));
+        assert_eq!((words.len(), pairs.len()), (WORDS_MAX, WORDS_MAX));
+        assert!(words.contains(&hash_word(&key, &format!("w{:04}", WORDS_MAX - 1))));
+        assert!(
+            !words.contains(&hash_word(&key, "a")),
+            "a word past the cap"
+        );
     }
 
     /// Words are hashed under a key of the content key's, never alike under
@@ -676,9 +799,12 @@ mod tests {
             vault.new_dek().expect("a key"),
             vault.new_dek().expect("a key"),
         );
-        let hashed = hashed_words(&words_key(&one), "order the order");
-        assert_eq!(hashed.len(), 2);
-        assert!(!hashed.iter().any(|h| h.contains("order")));
-        assert_ne!(hashed, hashed_words(&words_key(&two), "order the order"));
+        let (words, pairs) = hashed_words(&words_key(&one), "order the order");
+        // `order` and `the`; the pairs `order the` and `the order`.
+        assert_eq!((words.len(), pairs.len()), (2, 2));
+        assert_ne!(
+            (words, pairs),
+            hashed_words(&words_key(&two), "order the order")
+        );
     }
 }

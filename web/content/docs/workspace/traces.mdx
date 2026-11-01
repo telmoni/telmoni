@@ -134,19 +134,20 @@ the keys, never a value.
 
 On a project that keeps content, a search box sits beside the filters in
 force. It finds the traces whose kept content holds every word you type, in
-any field of any span, and a phrase of more than one word only where its
-words run in that order, within the list's window and filters. Matching is
-by whole word and ignores case, so `refund` finds `Refund` but not
-`refunds`. The search is a filter like the others: it rides in the list's
+any field of any span, and a phrase of more than one word only where each of
+its words stands right before the next, within the list's window and filters.
+Matching is by whole word and ignores case, so `refund` finds `Refund` but
+not `refunds`. The search is a filter like the others: it rides in the list's
 URL, shows as a chip you take off with its ×, and narrows the facets, the
 chart and a download alike.
 
-No index holds your content's words: each field keeps its words only as
-keyed hashes, under a key derived from the project's content key, so
-deleting that key leaves nothing a search can find. A search shows no
-content, so it adds nothing to the audit log; opening a trace it found is
-recorded as any opening is. It reads the newest 5,000 fields holding the
-words, and a document's first 4,096 distinct words.
+No index holds your content's words: each field keeps its words, and each
+pair of words side by side, only as keyed hashes, under a key derived from
+the project's content key, so deleting that key leaves nothing a search can
+find. A search reads those hashes alone and opens no content, so it adds
+nothing to the audit log; opening a trace it found is recorded as any opening
+is. It reads the newest 5,000 fields holding the words, and a document's first
+4,096 distinct words and pairs.
 
 ### Saved views
 
