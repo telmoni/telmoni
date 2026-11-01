@@ -161,7 +161,8 @@ the raw bytes as the body and their type as `Content-Type`, the path the
 SHA-256 of the body in lowercase hex. The message then names it as a `file`
 part whose `file_id` is `telmoni:` and the hash. The lane answers `204` once
 the file is kept, kept already, or kept nothing for a project whose mode is
-`off`; `400` for a hash that is not the body's; and `413` past 5 MiB. A file
+`off`; `400` for a hash that is not the body's; and `413` past 5 MiB, each
+refusal a problem document, the 413's `max_bytes` the most it takes. A file
 is sealed under the project's content key, kept while any span within
 retention names it, and erased with the traces or the end user that named
 it alone.

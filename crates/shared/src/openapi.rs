@@ -9,8 +9,8 @@
 
 use serde_json::{Map, Value, json};
 
-/// The one HTTP method a [`Route`] answers. `/v1` has no PUT and no PATCH,
-/// and their absence is the contract: nothing here is updated in place.
+/// The one HTTP method a [`Route`] answers. `/v1` has no PATCH, and a PUT
+/// only for a thing named by what it holds: nothing here is updated in place.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Method {
     /// A read.
@@ -125,7 +125,8 @@ pub fn document(
                     "description":
                         "A `tm_` API key, minted on a project's API keys page. \
                          It reads its organization and that project, within the \
-                         scopes it was minted with: every lane here needs `read`.",
+                         scopes it was minted with: an upload needs `ingest`, as \
+                         an export does, and every other lane here `read`.",
                 },
             },
             "schemas": { "Problem": problem_schema() },
@@ -182,6 +183,17 @@ fn operation(route: &Route, universal: &[Answer]) -> Value {
         }
         if !route.bearer {
             obj.insert("security".into(), json!([]));
+        }
+        // A PUT is an upload: its body is the bytes themselves, of any type.
+        if route.method == Method::Put {
+            obj.insert(
+                "requestBody".into(),
+                json!({
+                    "required": true,
+                    "description": "The bytes, their media type as `Content-Type`.",
+                    "content": { "*/*": {} },
+                }),
+            );
         }
     }
     op
@@ -280,6 +292,31 @@ mod tests {
         let op = &doc["paths"]["/v1/thing/{id}"]["get"];
         assert!(op["security"].is_null());
         assert!(op["responses"]["401"].is_object());
+    }
+
+    /// An upload takes its bytes as its body, of any type, and a read takes none.
+    #[test]
+    fn an_upload_takes_its_bytes_as_its_body_and_a_read_takes_none() {
+        const UPLOAD: &[Route] = &[Route {
+            method: Method::Put,
+            bearer: true,
+            path: "/v1/file/{sha256}",
+            summary: "Keep a file",
+            description: "Kept once.",
+            params: &[],
+            answers: &[Answer {
+                status: 204,
+                description: "Kept.",
+            }],
+        }];
+        let doc = document("T", "1", "https://example.test", UNIVERSAL, UPLOAD);
+        let body = &doc["paths"]["/v1/file/{sha256}"]["put"]["requestBody"];
+        assert_eq!(body["required"], true);
+        assert!(body["content"]["*/*"].is_object(), "{body}");
+
+        let doc = document("T", "1", "https://example.test", UNIVERSAL, ONE);
+        let get = &doc["paths"]["/v1/thing/{id}"]["get"];
+        assert!(get["requestBody"].is_null(), "{get}");
     }
 
     #[test]

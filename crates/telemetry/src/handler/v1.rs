@@ -1,22 +1,25 @@
 //! Telemetry's `/v1` lanes, behind a project API key holding the `ingest`
 //! scope: the files an SDK lifts out of a span's messages before it exports
 //! the span, each kept once by the hash of its bytes. The binary merges this
-//! module's [`router`] into the one it nests at `/v1`, whose fallbacks answer
-//! every path and method no lane here takes.
+//! module's [`router`] into the one it nests at `/v1`, whose fallback answers
+//! every path no lane here serves.
 
 use std::sync::Arc;
 
 use axum::Router;
 use axum::body::Bytes;
+use axum::extract::rejection::BytesRejection;
 use axum::extract::{DefaultBodyLimit, Path, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::middleware;
+use axum::response::Response;
 use axum::routing::put;
 
 use telmoni_shared::TelmoniError;
 use telmoni_shared::acting::ActingKey;
 use telmoni_shared::digest::sha256_hex;
 use telmoni_shared::middleware::api_key::{ApiKeyGate, refuse_as_problem, require_api_key};
+use telmoni_shared::middleware::problem;
 use telmoni_shared::openapi::{Answer, Method, Param, Route};
 use telmoni_shared::types::ApiKeyScope;
 
@@ -75,7 +78,8 @@ pub const V1_LANES: &[V1Lane] = &[V1Lane {
 }];
 
 /// This module's `/v1` lanes, the `/v1` taken off, behind the ingest key's
-/// gate; no fallback, since the router it is merged into has its own.
+/// gate. A method none takes is a problem document outside the gate, as
+/// auth's lanes answer one; a path none serves is the merged router's.
 pub fn router(state: Arc<AppState>) -> Router {
     let gate = ApiKeyGate {
         auth: state.auth.clone(),
@@ -99,7 +103,13 @@ pub fn router(state: Arc<AppState>) -> Router {
         })
         .layer(DefaultBodyLimit::max(MEDIA_MAX))
         .route_layer(middleware::from_fn_with_state(gate, require_api_key))
+        .method_not_allowed_fallback(method_not_allowed)
         .with_state(state)
+}
+
+/// A method the upload does not take: `405` with `Allow`.
+async fn method_not_allowed() -> Response {
+    problem::method_not_allowed("PUT")
 }
 
 /// `PUT /v1/media/{sha256}` — keep a file for the key's project, by the hash
@@ -109,8 +119,15 @@ pub async fn put_media(
     key: ActingKey,
     Path(sha256): Path<String>,
     headers: HeaderMap,
-    body: Bytes,
+    body: Result<Bytes, BytesRejection>,
 ) -> Result<StatusCode, TelmoniError> {
+    // axum refuses a body past the limit in plain text; every `/v1` refusal is a problem.
+    let body = body.map_err(|rejection| match rejection.status() {
+        StatusCode::PAYLOAD_TOO_LARGE => TelmoniError::PayloadTooLarge {
+            max_bytes: u64::try_from(MEDIA_MAX).unwrap_or(u64::MAX),
+        },
+        _ => TelmoniError::BadRequest("the body could not be read".into()),
+    })?;
     if sha256_hex(&body) != sha256 {
         return Err(TelmoniError::BadRequest(
             "the path names a file by the SHA-256 of its body, in lowercase hex".into(),

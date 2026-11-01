@@ -61,11 +61,12 @@ regex = "1"
 # paths run against a real HTTP answer.
 wiremock = "0.6"
 # `openapi_contract` generates `contract/openapi.json` from the serving
-# service's own route table. A dev-dependency cycle (it depends on this crate),
-# which Cargo permits: it exists only for the test target, so nothing links it
-# into a service binary. The alternative — a third crate holding the list —
-# would put a service's public API somewhere other than the service.
+# services' own route tables. Dev-dependency cycles (each depends on this
+# crate), which Cargo permits: they exist only for the test target, so nothing
+# links them into a service binary. The alternative — a third crate holding the
+# list — would put a service's public API somewhere other than the service.
 telmoni-auth = { path = "../auth" }
+telmoni-telemetry = { path = "../telemetry" }
 
 [lints]
 workspace = true

@@ -2707,6 +2707,7 @@ dependencies = [
  "sqlx",
  "subtle",
  "telmoni-auth",
+ "telmoni-telemetry",
  "thiserror",
  "tokio",
  "tower",

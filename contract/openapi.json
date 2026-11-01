@@ -31,7 +31,7 @@
     },
     "securitySchemes": {
       "bearerAuth": {
-        "description": "A `tm_` API key, minted on a project's API keys page. It reads its organization and that project, within the scopes it was minted with: every lane here needs `read`.",
+        "description": "A `tm_` API key, minted on a project's API keys page. It reads its organization and that project, within the scopes it was minted with: an upload needs `ingest`, as an export does, and every other lane here `read`.",
         "scheme": "bearer",
         "type": "http"
       }
@@ -44,6 +44,85 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/v1/media/{sha256}": {
+      "put": {
+        "description": "An image, audio or a file a span's message carried, sent once by the SHA-256 of its bytes, which its message then names as `telmoni:` and the hash. Kept, sealed, for a project that keeps content, and nothing for one that does not; sent again, it changes nothing.",
+        "parameters": [
+          {
+            "description": "The SHA-256 of the body, in lowercase hex.",
+            "in": "path",
+            "name": "sha256",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "*/*": {}
+          },
+          "description": "The bytes, their media type as `Content-Type`.",
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Kept, kept already, or nothing kept for a project that keeps no content."
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A hash that is not the body's."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No live `tm_` API key was presented. A revoked, expired or unknown key answers the same way."
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A body past 5 MiB."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too many requests. The server meters by source address and by key before the request reaches a lane, and says when to come back in `Retry-After`."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The lane is switched off, or something it needs did not answer. A switched-off lane says when to try again in `Retry-After`."
+          }
+        },
+        "summary": "Keep a file a message carried"
+      }
+    },
     "/v1/members": {
       "get": {
         "description": "Everyone on the project the key was minted on, the owner first, with the role each holds. The same list the console's project roster shows, so a key reads no more than the project admin who minted it could; the organization's roster is the console's alone.",

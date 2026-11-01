@@ -35,6 +35,11 @@ fn lanes() -> Vec<Route> {
     telmoni_auth::handler::v1::V1_LANES
         .iter()
         .map(|l| l.route)
+        .chain(
+            telmoni_telemetry::handler::v1::V1_LANES
+                .iter()
+                .map(|l| l.route),
+        )
         .collect()
 }
 
@@ -76,15 +81,12 @@ fn no_two_lanes_share_a_path_and_a_method() {
     assert_eq!(before, seen.len(), "two lanes claim one address and method");
 }
 
-/// `/v1` is additive only and has no update, so PUT and PATCH have nothing to mean.
+/// `/v1` has no update: a PUT only where the path names the body by its hash.
 #[test]
 fn nothing_under_v1_is_updated_in_place() {
     for route in lanes() {
         assert!(
-            matches!(
-                route.method,
-                Method::Get | Method::Head | Method::Post | Method::Delete
-            ),
+            route.method != Method::Put || route.path.ends_with("/{sha256}"),
             "{}: /v1 has no update",
             route.path
         );

@@ -5,12 +5,14 @@ description: "The Telmoni read-only API: authentication, rate limits, and the pu
 
 The Telmoni API is a read-only HTTP interface under `/v1`. Authenticated by a
 [project API key](/docs/api/api-keys), it provides programmatic access to
-organization metadata and roster details. It has no write routes; spans go to a
-lane of their own, [`/otlp/v1/traces`](/docs/api/ingest), with a key holding the
-`ingest` scope, where the routes here need `read`. The routes are also described
-as an OpenAPI 3.1 document,
+organization metadata and roster details. The routes here write nothing and need
+the `read` scope. Spans go to a lane of their own,
+[`/otlp/v1/traces`](/docs/api/ingest), with a key holding the `ingest` scope, as
+does the one write under `/v1`, `PUT /v1/media/{sha256}`, where our SDKs keep a
+file a message carried ([Ingest](/docs/api/ingest)). Every route under `/v1`,
+that one among them, is also described as an OpenAPI 3.1 document,
 [`contract/openapi.json`](https://github.com/telmoni/telmoni/blob/main/contract/openapi.json)
-in the platform's repository, generated from the same table the server routes by.
+in the platform's repository, generated from the same tables the server routes by.
 
 ## Base URL and authentication
 
@@ -46,7 +48,7 @@ A live key without the `read` scope is refused with `403 Forbidden` and
 
 ## HTTP methods
 
-All routes accept `GET` and `HEAD`. Any other method returns `405 Method Not
+The routes here accept `GET` and `HEAD`. Any other method returns `405 Method Not
 Allowed` with an `Allow` header and a problem document, except `OPTIONS`, which
 answers `204` with `Allow: GET, HEAD, OPTIONS`.
 
