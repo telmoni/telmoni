@@ -329,7 +329,7 @@ async fn the_heartbeat_names_the_loops_no_replica_has_beaten() {
     );
 }
 
-/// A flood of the watchdog's asks reads the loops once a few seconds.
+/// A flood of the watchdog's asks reads the loops once a minute.
 #[tokio::test]
 async fn the_heartbeat_reads_the_loops_once_for_a_flood() {
     let (app, module) = looping(&["billing.reconcile"]);
