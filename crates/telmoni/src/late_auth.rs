@@ -7,8 +7,9 @@ use axum::http::HeaderMap;
 
 use telmoni_shared::acting::{Acting, ActingKey};
 use telmoni_shared::seam::{
-    AuditEventsQuery, Auth, DocumentCursor, OwnedOrganization, ProjectHome, ReadableProject,
-    Receipt, SourceDocument,
+    AuditEventsQuery, Auth, Closing, Confirmation, DocumentCursor, FoundedOrganization,
+    MovedProject, OrganizationFounding, OwnedOrganization, ProjectHome, ReadableProject, Receipt,
+    SourceDocument,
 };
 use telmoni_shared::{
     AuthError, FlagSet, OrganizationId, OrganizationStatus, ProjectId, TelmoniError, UserId,
@@ -123,6 +124,99 @@ impl Auth for LateAuth {
     async fn mail_receipt(&self, to: &UserId, receipt: Receipt<'_>) {
         if let Ok(auth) = self.get() {
             auth.mail_receipt(to, receipt).await;
+        }
+    }
+
+    async fn check_founding(
+        &self,
+        name: &str,
+        slug: Option<&telmoni_shared::slug::Slug>,
+    ) -> Result<(), TelmoniError> {
+        self.get()?.check_founding(name, slug).await
+    }
+
+    async fn found_organization(
+        &self,
+        founding: &OrganizationFounding,
+    ) -> Result<FoundedOrganization, TelmoniError> {
+        self.get()?.found_organization(founding).await
+    }
+
+    async fn close_if_empty(&self, acting: &Acting, code: &str) -> Result<Closing, TelmoniError> {
+        self.get()?.close_if_empty(acting, code).await
+    }
+
+    async fn move_project(
+        &self,
+        acting: &Acting,
+        project_id: &ProjectId,
+        into: &OrganizationId,
+    ) -> Result<MovedProject, TelmoniError> {
+        self.get()?.move_project(acting, project_id, into).await
+    }
+
+    async fn mail_confirmation(
+        &self,
+        acting: &Acting,
+        confirmation: Confirmation<'_>,
+    ) -> Result<(), TelmoniError> {
+        self.get()?.mail_confirmation(acting, confirmation).await
+    }
+
+    async fn spend_confirmation(
+        &self,
+        acting: &Acting,
+        confirmation: Confirmation<'_>,
+        code: &str,
+    ) -> Result<(), TelmoniError> {
+        self.get()?
+            .spend_confirmation(acting, confirmation, code)
+            .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Each call goes to auth, never the seam's default: before auth is built,
+    /// every one answers that identity is unavailable.
+    #[tokio::test]
+    async fn every_call_goes_to_auth() {
+        let late = LateAuth::default();
+        let acting = Acting {
+            user_id: UserId::new(),
+            organization_id: OrganizationId::new(),
+            organization_role: None,
+            project: None,
+            session_id: None,
+            expires_at: 0,
+        };
+        let project = ProjectId::new();
+        let founding = OrganizationFounding {
+            organization_id: OrganizationId::new(),
+            founder: UserId::new(),
+            name: "Acme".into(),
+            slug: None,
+        };
+        let content = || Confirmation::ContentMode(&project);
+        let into = OrganizationId::new();
+        let refused = [
+            late.mail_confirmation(&acting, content()).await.err(),
+            late.spend_confirmation(&acting, content(), "1").await.err(),
+            late.check_founding("Acme", None).await.err(),
+            late.found_organization(&founding).await.err(),
+            late.close_if_empty(&acting, "1").await.err(),
+            late.move_project(&acting, &project, &into).await.err(),
+        ];
+        for refused in refused {
+            assert!(
+                matches!(
+                    refused,
+                    Some(TelmoniError::Auth(AuthError::IdentityUnavailable))
+                ),
+                "{refused:?}"
+            );
         }
     }
 }
