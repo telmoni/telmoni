@@ -235,3 +235,7 @@ ingress:
   # The share of the lanes' requests the load balancer logs, in millionths:
   # every one by default, as the console's.
   apiLogSampleRate: 1000000
+  # A Cloud Armor security policy, by name, that the console's backend and the
+  # lanes' both take, to refuse addresses at the load balancer: none by
+  # default, since Cloud Armor bills by the request.
+  securityPolicy: ""

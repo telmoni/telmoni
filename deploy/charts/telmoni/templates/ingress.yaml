@@ -101,6 +101,9 @@ metadata:
 spec:
   default:
     timeoutSec: 3600
+    {{- with .Values.ingress.securityPolicy }}
+    securityPolicy: {{ . | quote }}
+    {{- end }}
     logging:
       enabled: true
       sampleRate: 1000000
@@ -192,6 +195,9 @@ metadata:
     {{- include "telmoni.labels" . | nindent 4 }}
 spec:
   default:
+    {{- with .Values.ingress.securityPolicy }}
+    securityPolicy: {{ . | quote }}
+    {{- end }}
     logging:
       enabled: true
       sampleRate: {{ .Values.ingress.apiLogSampleRate | int }}
