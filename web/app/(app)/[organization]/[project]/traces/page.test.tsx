@@ -283,6 +283,24 @@ describe("TracesPage", () => {
     expect(screen.getByTestId("histogram")).toBeInTheDocument();
   });
 
+  // The class is metadata, so drawing it files no read; its message is the peek's.
+  it("writes a failed run's class under its id, and none for a run still going", async () => {
+    mockTraces = list({
+      traces: [
+        { ...TRACE_A, status: "error", error_type: "RateLimitError" },
+        { ...TRACE_B, error_type: "RateLimitError" },
+      ],
+    });
+    render(await TracesPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+    const table = within(screen.getByRole("table"));
+    expect(table.getByRole("link", { name: "5d4f5c68" }).closest("td")).toHaveTextContent(
+      "RateLimitError",
+    );
+    expect(table.getByRole("link", { name: "7a1b2c3d" }).closest("td")).not.toHaveTextContent(
+      "RateLimitError",
+    );
+  });
+
   // In Chrome a scroll into view moves where the page's first Tab starts, past the skip link.
   it("chooses no facet's value as its list mounts, so none is scrolled into view", async () => {
     render(await TracesPage({ params: PARAMS, searchParams: Promise.resolve({}) }));

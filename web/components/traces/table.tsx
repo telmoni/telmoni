@@ -36,6 +36,7 @@ import {
   type FilterKey,
   type TraceUi,
 } from "@/lib/traces";
+import { SpanStatus } from "@/lib/types/enums";
 import { useTracePrefs } from "@/lib/use-trace-prefs";
 import { cn } from "@/lib/utils";
 
@@ -47,12 +48,14 @@ type Props = {
   traces: Trace[];
 };
 
-// The page's rows, a run each: its id, which opens its trace, and the
-// columns the person shows (`lib/trace-prefs.ts`), each heading that sorts a
-// link that sorts by it. A click on a row opens its trace in the peek beside
-// the list (`peek.tsx`), and the row stays marked while it is open. Rows are
-// chosen to download those alone; the choice is the page's, so a page of new
-// rows starts with none chosen (the page keys this on its rows).
+// The page's rows, a run each: its id, which opens its trace, with a failed
+// run's class under it — metadata, so a redraw files no read; its message is
+// content, the peek's — and the columns the person shows
+// (`lib/trace-prefs.ts`), each heading that sorts a link that sorts by it. A
+// click on a row opens its trace in the peek beside the list (`peek.tsx`),
+// and the row stays marked while it is open. Rows are chosen to download
+// those alone; the choice is the page's, so a page of new rows starts with
+// none chosen (the page keys this on its rows).
 export function TraceTable({ organization, slug, query, ui, traces }: Props) {
   const prefs = useTracePrefs();
   const peeked = usePeekedRun();
@@ -154,6 +157,11 @@ export function TraceTable({ organization, slug, query, ui, traces }: Props) {
                 >
                   {shortId(trace.run_id)}
                 </Link>
+                {trace.ended && trace.status === SpanStatus.Error && trace.error_type && (
+                  <span className="block max-w-48 truncate text-xs text-destructive" title={trace.error_type}>
+                    {trace.error_type}
+                  </span>
+                )}
               </Td>
               {columns.map((column) => (
                 <Td
