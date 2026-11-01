@@ -443,6 +443,29 @@ async fn exchange_duplicate_code_returns_cached_result_without_calling_the_provi
         1,
         "the duplicate code was served from the cache"
     );
+
+    // The same code under another verifier is no key to the cache: whoever
+    // holds a stolen code is sent to the provider, which refuses its reuse.
+    let other = "v".repeat(43);
+    let resp = app
+        .clone()
+        .oneshot(post_json(
+            "/internal/v1/auth/exchange",
+            serde_json::json!({ "code": "code_dup", "codeVerifier": other, "nonce": NONCE, "provider": "external" }),
+        ))
+        .await
+        .unwrap();
+    let answered = resp.into_body().collect().await.expect("body").to_bytes();
+    assert_ne!(
+        serde_json::from_slice::<serde_json::Value>(&answered).unwrap_or_default(),
+        body1,
+        "no cached answer for another verifier"
+    );
+    assert_eq!(
+        provider.count(|c| matches!(c, Call::Exchange { .. })),
+        2,
+        "another verifier was taken to the provider"
+    );
 }
 
 /// With the provider's sign-ups closed, only a subject already linked signs

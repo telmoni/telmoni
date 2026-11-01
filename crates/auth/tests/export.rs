@@ -7,8 +7,10 @@
     reason = "test scaffolding: asserts and fixture setup"
 )]
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
+use async_trait::async_trait;
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
@@ -19,7 +21,10 @@ use tower::ServiceExt;
 
 use telmoni_auth::test_provider::{ScriptedProvider, as_person, bearer_in};
 use telmoni_auth::{AppState, Config, router};
+use telmoni_shared::seam::Telemetry;
 use telmoni_shared::test_util::{ServiceRole, apply_audit_migrations, seed_identity, service_pool};
+use telmoni_shared::types::CONNECTION_BYTES;
+use telmoni_shared::{OrganizationId, ProjectId, TelmoniError, TenantError};
 
 const SERVICE_SECRET: &str = "test-service-secret";
 const OWNER: &str = "user_export_owner";
@@ -28,6 +33,10 @@ const OWNER: &str = "user_export_owner";
 const PROVIDER_SID: &str = "ses_abc123";
 
 fn app(pool: PgPool) -> Router {
+    app_with(pool, telmoni_auth::Siblings::default())
+}
+
+fn app_with(pool: PgPool, siblings: telmoni_auth::Siblings) -> Router {
     let config = Config {
         database_url: String::new(),
         service_secret: SERVICE_SECRET.into(),
@@ -48,7 +57,7 @@ fn app(pool: PgPool) -> Router {
         ))),
         db,
         config,
-        siblings: telmoni_auth::Siblings::default(),
+        siblings,
         mailer: Arc::new(telmoni_auth::mailer::ComposingMailer::new(Arc::new(
             telmoni_shared::mail::NoopSender,
         ))),
@@ -536,4 +545,106 @@ async fn an_export_carries_nothing_from_a_project_the_caller_is_only_a_member_of
             "the member's export carries the other organization's {leaked}"
         );
     }
+}
+
+/// Telemetry as the export meters through it: a day of `day` bytes, every
+/// spend kept, the day refused once spent.
+struct Meter {
+    day: u64,
+    spent: Mutex<HashMap<OrganizationId, u64>>,
+}
+
+impl Meter {
+    fn of(&self, organization_id: &OrganizationId) -> u64 {
+        self.spent
+            .lock()
+            .unwrap()
+            .get(organization_id)
+            .copied()
+            .unwrap_or(0)
+    }
+}
+
+#[async_trait]
+impl Telemetry for Meter {
+    async fn purge_organization(&self, _: &OrganizationId) -> Result<u64, TelmoniError> {
+        Ok(0)
+    }
+
+    async fn purge_project(&self, _: &OrganizationId, _: &ProjectId) -> Result<u64, TelmoniError> {
+        Ok(0)
+    }
+
+    async fn admit_data_out(&self, organization_id: &OrganizationId) -> Result<(), TelmoniError> {
+        if self.of(organization_id) < self.day {
+            return Ok(());
+        }
+        Err(TenantError::PastCeiling {
+            detail: "the day's data out is spent".into(),
+            retry_after_secs: 60,
+        }
+        .into())
+    }
+
+    async fn spend_data_out(&self, organization_id: &OrganizationId, bytes: u64) {
+        *self
+            .spent
+            .lock()
+            .unwrap()
+            .entry(organization_id.clone())
+            .or_default() += bytes;
+    }
+
+    async fn move_project(&self, _: &ProjectId, _: &OrganizationId) -> Result<(), TelmoniError> {
+        Ok(())
+    }
+}
+
+/// The export is the organization's data out, as every lane that hands bytes
+/// over: counted once taken, with its connection, and refused once the day is
+/// spent, a 429 that says when it lifts.
+#[sqlx::test]
+async fn the_export_is_counted_and_refused_past_the_day(pool: PgPool) {
+    let (organization, _) = seed(&pool).await;
+    let organization_id = OrganizationId::try_new(organization.as_str()).unwrap();
+    let meter = Arc::new(Meter {
+        day: 1,
+        spent: Mutex::new(HashMap::new()),
+    });
+    let take = || {
+        let pool = pool.clone();
+        let organization = organization.clone();
+        let meter = meter.clone();
+        async move {
+            let req = Request::builder()
+                .method("GET")
+                .uri("/internal/v1/organization/export")
+                .header("x-service-secret", SERVICE_SECRET)
+                .header("x-organization-id", organization.as_str());
+            let req = as_person(req, &pool, OWNER)
+                .await
+                .body(Body::empty())
+                .unwrap();
+            let siblings = telmoni_auth::Siblings {
+                telemetry: Some(meter),
+                ..telmoni_auth::Siblings::default()
+            };
+            app_with(pool, siblings).oneshot(req).await.unwrap()
+        }
+    };
+
+    let resp = take().await;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let answer = resp.into_body().collect().await.unwrap().to_bytes();
+    let answered = u64::try_from(answer.len()).unwrap();
+    assert_eq!(meter.of(&organization_id), answered + CONNECTION_BYTES);
+
+    let resp = take().await;
+    assert_eq!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(json_body(resp).await["type"], "/errors/tenant/rate-limited");
+    assert_eq!(
+        meter.of(&organization_id),
+        answered + CONNECTION_BYTES,
+        "a refusal is not counted"
+    );
 }

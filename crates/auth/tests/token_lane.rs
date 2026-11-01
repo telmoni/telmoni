@@ -508,6 +508,58 @@ async fn a_token_route_without_the_project_header_is_refused(pool: PgPool) {
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }
 
+/// The CLI's `/me` is counted against the organization it acts in and never
+/// refused: the day's ceiling stops a script on the read API, not a person's
+/// terminal, so a day already spent still answers.
+#[sqlx::test]
+async fn the_cli_me_is_counted_and_never_refused(pool: PgPool) {
+    let fixture = token(&pool).await;
+    let organization = OrganizationId::try_new(fixture.organization.as_str()).unwrap();
+    let meter = Arc::new(Meter {
+        day: 0,
+        spent: Mutex::new(HashMap::new()),
+    });
+    let me = || async {
+        let request = as_person(
+            Request::builder()
+                .method("POST")
+                .uri("/cli/v1/me")
+                .header("x-service-secret", SERVICE_SECRET)
+                .header("x-organization-id", fixture.organization.as_str())
+                .header("content-type", "application/json"),
+            &pool,
+            USER,
+        )
+        .await
+        .body(Body::from(json!({}).to_string()))
+        .unwrap();
+        app_with(
+            pool.clone(),
+            telmoni_auth::Siblings {
+                telemetry: Some(meter.clone()),
+                ..telmoni_auth::Siblings::default()
+            },
+        )
+        .oneshot(request)
+        .await
+        .unwrap()
+    };
+
+    let resp = me().await;
+    assert_eq!(resp.status(), StatusCode::OK, "a spent day still answers");
+    let answer = resp.into_body().collect().await.unwrap().to_bytes();
+    let answered = u64::try_from(answer.len()).unwrap();
+    assert_eq!(meter.of(&organization), answered + CONNECTION_BYTES);
+    let resp = me().await;
+    assert_eq!(resp.status(), StatusCode::OK, "and the next");
+    let again = resp.into_body().collect().await.unwrap().to_bytes();
+    let again = u64::try_from(again.len()).unwrap();
+    assert_eq!(
+        meter.of(&organization),
+        answered + again + 2 * CONNECTION_BYTES
+    );
+}
+
 /// The read API holds an organization to its plan's data out a day: each
 /// answer is counted with what its connection costs, and once the day is
 /// spent the next is refused, a 429 that says when it lifts.
