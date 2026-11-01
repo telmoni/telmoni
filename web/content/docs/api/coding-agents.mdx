@@ -97,7 +97,8 @@ whether it runs in the background, whether a tool result says a subagent went
 on in the background, the tool call a background task's notice names, the
 subagent a report handed back names, and
 whether a prompt is empty, opens with a tag or marks an interruption, which it
-never keeps. A name is sent only as a plain name: a model named by a path goes
+never keeps; and the [tags](#tags) you set, which every plugin reads from a
+`.telmoni-tags.json` and the Claude Code plugin from its own `tag` skill too. A name is sent only as a plain name: a model named by a path goes
 as its file's name or `unknown`, and a tool, skill or subagent name holding
 anything else, as a model may write, as `unknown`. It never keeps or sends a
 prompt or a reply, the model's thinking, a tool's input or output beyond that
@@ -142,6 +143,35 @@ wrong and, where Telmoni refused a turn, its answer, never anything said in
 the session. None of them holds the agent up: a plugin that runs as a hook
 hands its work to a process of its own and returns at once, in Cursor, which
 waits on every hook, as soon as Node has started.
+
+### Tags
+
+Tags label a session's turns, so one session's runs say which repository or
+branch each was about as the work moves between them. They are set two ways,
+and never derived from a path:
+
+- **A file**, `.telmoni-tags.json`, in the folder a turn started in or the
+  nearest folder above it holding one: `{"repo": "telmoni", "branch": "main"}`.
+  Its tags go on every turn started there. It is read for its tags alone,
+  never through a link, and its path is never sent.
+- **Asking**, in Claude Code: `/telmoni-observability:tag repo=telmoni`, or in
+  plain words, "tag this repo telmoni", which has Claude call the plugin's
+  `tag` skill. Several go at once (`repo=telmoni branch=main`), and `repo=`
+  takes one back. A tag you ask for holds from that turn to the session's end,
+  or until you change it or take it back, and wins over the file's for its
+  key; a turn already recorded keeps what it was sent with. In Codex, Cursor
+  and OpenCode, tags come from the file alone.
+
+A key is 1 to 64 letters, digits, `_`, `.` or `-`, and a value up to 256
+characters; a turn carries 32 tags at most, Claude Code's `skills` among them,
+which is the plugin's own. A tag that breaks a rule is dropped with a line in
+the plugin's log, and the turn is sent without it. A project keeps up to 64
+tag keys a UTC day, each taking up to 500 values; past them, ingest drops the
+tag and keeps the span
+([its cap](/docs/api/ingest#what-is-dropped-at-the-door)). Tags are metadata:
+they are sent in every content mode and seen by everyone on the project, so no
+secret or personal detail belongs in one. `repo` and `branch` are good keys to
+start with.
 
 ---
 
