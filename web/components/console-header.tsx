@@ -55,7 +55,7 @@ export function ConsoleHeader({
           "flex shrink-0 items-center gap-3 px-gutter md:border-r md:border-sidebar-border",
           collapsed
             ? // A gutter in, as the closed rail's squares are: the 36px control
-              // then centres its mark 30px from the edge, on the rail's icons.
+              // then draws its mark on the open lockup's pixel.
               "group/brand md:w-15 md:cursor-expand md:justify-start"
             : "md:w-sidebar md:justify-between",
         )}
@@ -73,14 +73,13 @@ export function ConsoleHeader({
         >
           <Menu className="size-4" />
         </button>
-        {/* `pl-1.5`: open, the mark's centre is 30px in — the cell's 12, 6
-            more and half its 24 — the closed column's axis, which every rail
-            icon keeps in both states, so the mark rests while the rail
-            toggles, and only the name and the control come
-            and go; `gap-1.5` starts the name where the rows' labels start,
-            48px in. The link's own box still opens on the rows' edge. Below
-            `md` there is no brand at all: the bar is a phone's width, and the
-            switcher's names need it more than the product's own does. */}
+        {/* `pl-1.5`: open, the mark's left edge is 18px in — the cell's 12
+            and 6 more — the same 18 the closed control gives it, so the mark
+            rests on the rail's axis while the rail toggles, and only the name
+            and the control come and go. The link's own box still opens on
+            the rows' edge. Below `md` there is no brand at all: the bar is a
+            phone's width, and the switcher's names need it more than the
+            product's own does. */}
         <Link
           href={home}
           // Already there, a click would only run the page again — the
@@ -108,12 +107,13 @@ export function ConsoleHeader({
             aria-expanded={false}
             aria-controls="console-sidebar"
             title="Open sidebar"
-            className="group hidden size-9 shrink-0 cursor-pointer items-center justify-center rounded-md hover:bg-sidebar-accent/50 md:flex"
+            className="group relative hidden size-9 shrink-0 cursor-pointer items-center rounded-md pl-1.5 hover:bg-sidebar-accent/50 md:flex"
           >
-            {/* Where the open lockup's mark stands, so nothing moves when
-                the rail closes. */}
-            <TelmoniMark className="group-hover/brand:hidden group-focus-visible:hidden" />
-            <PanelLeft className="hidden size-4 text-muted-foreground group-hover/brand:block group-focus-visible:block" />
+            {/* The open lockup's mark exactly — its height, and its left edge
+                at the same `pl-1.5` — so not a pixel of it changes when the
+                rail closes; the control's icon is centred over it instead. */}
+            <TelmoniMark className="h-5 w-auto group-hover/brand:hidden group-focus-visible:hidden" />
+            <PanelLeft className="absolute inset-0 m-auto hidden size-4 text-muted-foreground group-hover/brand:block group-focus-visible:block" />
           </button>
         ) : (
           <button
