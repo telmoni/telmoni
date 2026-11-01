@@ -142,6 +142,28 @@ describe('guard.json', () => {
     expect(opened, 'a refused op opened nothing').toHaveLength(performed.length);
   });
 
+  it('stops a run at its cap with the network cut', async () => {
+    // Every export fails: the cap is the process's own count, and nothing of Telmoni's.
+    const cut = Array.from({ length: 16 }, () => new Error('unreachable'));
+    const { telmoni, transport } = harness({ prices: handed() }, {}, cut);
+    let thrown: unknown;
+    telmoni.run('guarded', { maxSteps: 2 }, (run) => {
+      run.step('step', () => undefined);
+      run.step('step', () => undefined);
+      try {
+        run.step('step', () => undefined);
+      } catch (error) {
+        thrown = error;
+      }
+    });
+    expect(thrown).toBeInstanceOf(CapExceededError);
+    const refusal = thrown as CapExceededError;
+    expect([refusal.cap, refusal.used]).toEqual(['steps', 2]);
+    await telmoni.flush();
+    await telmoni.shutdown();
+    expect(transport.requests.length, 'every export was tried, and failed').toBeGreaterThan(0);
+  });
+
   it.each(FIXTURE.refusals.map((spec) => [spec.says, spec] as const))('says %s', (_says, spec) => {
     expect(new CapExceededError(spec.cap, spec.limit, spec.used).message).toBe(spec.says);
   });

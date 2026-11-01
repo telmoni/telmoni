@@ -14,6 +14,7 @@ use common::{
     named, text,
 };
 use serde_json::{Value, json};
+use telmoni::transport::TransportError;
 use telmoni::{
     Cap, Config, Error, Hooks, ModelCall, ModelCallOptions, Price, Reply, Run, RunOptions, Telmoni,
     ToolCallOptions, Usage,
@@ -111,6 +112,41 @@ fn each_call_is_counted_as_the_server_counts_it() -> Outcome {
         assert_eq!(run.spent(), counted, "{}", text(spec, "name")?);
         run.end();
     }
+    Ok(())
+}
+
+/// The cap is the process's own count: with every export failing, the third
+/// step of a run capped at two is refused all the same.
+#[test]
+fn a_cap_stops_a_run_with_the_network_cut() -> Outcome {
+    let fixture = load_fixture("guard.json")?;
+    let cut = (0..16).map(|_| Err(TransportError::new("ConnectionRefused")));
+    let harness = Harness::answering(
+        Config {
+            prices: prices(&fixture)?,
+            ..keyed()
+        },
+        cut,
+    )?;
+    let run = harness.telmoni.run(
+        "guarded",
+        RunOptions {
+            max_steps: Some(2),
+            ..RunOptions::default()
+        },
+    )?;
+    run.step("step")?.end();
+    run.step("step")?.end();
+    let Err(Error::CapExceeded { cap, used, .. }) = run.step("step") else {
+        return Err("the third step opened past its cap".into());
+    };
+    assert_eq!((cap, used), (Cap::Steps, 2.0));
+    run.end();
+    harness.telmoni.flush();
+    assert!(
+        !harness.transport.requests().is_empty(),
+        "every export was tried, and failed"
+    );
     Ok(())
 }
 

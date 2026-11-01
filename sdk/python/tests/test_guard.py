@@ -66,6 +66,32 @@ def test_each_call_is_counted_as_the_server_counts_it(transport: FakeTransport) 
         telmoni.shutdown()
 
 
+def test_a_cap_stops_a_run_with_the_network_cut() -> None:
+    """The cap is the process's own count: with every export failing, the
+    third step of a run capped at two is refused all the same."""
+    transport = FakeTransport([OSError("unreachable")] * 16)
+    telmoni = Telmoni(
+        Config(api_key="k", prices=handed(load_fixture("guard.json"))),
+        transport=transport,
+        sleep=lambda _: None,
+    )
+    try:
+        with telmoni.run("guarded", max_steps=2) as run:
+            for _ in range(2):
+                with telmoni.step("step", run=run):
+                    pass
+            with (
+                pytest.raises(CapExceededError) as raised,
+                telmoni.step("step", run=run),
+            ):
+                pass
+            assert (raised.value.cap, raised.value.used) == ("steps", 2)
+        telmoni.flush()
+    finally:
+        telmoni.shutdown()
+    assert transport.requests, "every export was tried, and failed"
+
+
 @pytest.mark.parametrize(
     "case", load_fixture("guard.json")["runs"], ids=lambda case: case["name"]
 )
@@ -84,7 +110,9 @@ def test_a_run_past_a_cap_raises_at_what_it_opens_next(
                     with pytest.raises(CapExceededError) as raised:
                         perform(telmoni, run, op, fixture["calls"])
                     assert raised.value.cap == refused["cap"]
-                    assert raised.value.limit == pytest.approx(refused["limit"])
+                    assert raised.value.limit == pytest.approx(
+                        refused["limit"], abs=1e-12
+                    )
                     assert raised.value.used == pytest.approx(
                         refused["used"], abs=1e-12
                     )

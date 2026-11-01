@@ -186,6 +186,38 @@ func TestARunPastACapIsRefusedWhatItOpensNext(t *testing.T) {
 	}
 }
 
+// The cap is the process's own count: with every export failing, the third
+// step of a run capped at two is refused all the same.
+func TestACapStopsARunWithTheNetworkCut(t *testing.T) {
+	cut := make([]any, 16)
+	for i := range cut {
+		cut[i] = errors.New("unreachable")
+	}
+	transport := newFakeTransport(t, cut...)
+	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret(testKey), Prices: loadGuard(t).Prices}, transport)
+	ctx, run := h.client.Run(context.Background(), "guarded", telmoni.RunOptions{MaxSteps: 2})
+	for range 2 {
+		_, step := run.Step(ctx, "step")
+		step.End()
+	}
+	opened, third := run.Step(ctx, "step")
+	third.End()
+	var refusal *telmoni.CapExceededError
+	if !errors.As(context.Cause(opened), &refusal) || refusal.Cap != "steps" || refusal.Used != 2 {
+		t.Fatalf("the third step was not refused at its cap: %v", context.Cause(opened))
+	}
+	run.End()
+	flushed, cancel := context.WithTimeout(context.Background(), waitTimeout)
+	defer cancel()
+	_ = h.client.Flush(flushed)
+	transport.mu.Lock()
+	tried := len(transport.requests)
+	transport.mu.Unlock()
+	if tried == 0 {
+		t.Error("no export was tried")
+	}
+}
+
 func TestARefusalSaysWhatTheOtherSDKsSay(t *testing.T) {
 	for _, spec := range loadGuard(t).Refusals {
 		if got := spec.CapExceededError.Error(); got != spec.Says {
