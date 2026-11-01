@@ -1,6 +1,8 @@
 import Link from "next/link";
+import { notFound } from "next/navigation";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { getSignInConfig } from "@/lib/auth/oidc";
 
 import { sole } from "@/lib/list-query";
 import { ResetForm } from "./_form";
@@ -14,6 +16,9 @@ export default async function ResetPage({
   const params = await searchParams;
   const userId = sole(params.uid);
   const token = sole(params.token);
+  // As the page that mails the link: none while the password form is off.
+  const config = await getSignInConfig();
+  if (config && !config.passwordSignIn) notFound();
 
   return (
     <Card className="gap-3">

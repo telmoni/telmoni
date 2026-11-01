@@ -1,10 +1,19 @@
+import { notFound } from "next/navigation";
+import { connection } from "next/server";
+
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { getSignInConfig } from "@/lib/auth/oidc";
 
 import { ForgotForm } from "./_form";
 
 export const metadata = { title: "Reset your password" };
 
-export default function ForgotPage() {
+export default async function ForgotPage() {
+  // Read per request: with the password form off its lanes are not mounted,
+  // so there is no page; when auth cannot say, the form's action answers.
+  await connection();
+  const config = await getSignInConfig();
+  if (config && !config.passwordSignIn) notFound();
   return (
     <Card className="gap-3">
       <CardHeader>

@@ -32,6 +32,10 @@ const ERASURE_FENCE_DAYS: i32 = 30;
 /// Hourly, as notifications' sweep runs.
 const SWEEP_EVERY: Duration = Duration::from_secs(3600);
 
+/// A minute, as notifications' sweep: the watchdog reads the loop from boot,
+/// and a first tick an hour out had it stale after every wake.
+const START_DELAY: Duration = Duration::from_secs(60);
+
 /// Rows deleted per statement.
 const SWEEP_CHUNK: i64 = 5_000;
 
@@ -67,12 +71,12 @@ fn windows() -> impl Iterator<Item = (Source, i32)> {
 /// The loop's name in `agent.heartbeats`.
 pub const HEARTBEAT: &str = "retention";
 
-/// The sweep loop, the first a period after boot. A failed sweep is rows kept
+/// The sweep loop, the first a minute after boot. A failed sweep is rows kept
 /// too long, and is retried.
 pub async fn run(state: Arc<AppState>) {
     state
         .heartbeats
-        .every(&state.db, HEARTBEAT, SWEEP_EVERY, SWEEP_EVERY, || {
+        .every(&state.db, HEARTBEAT, START_DELAY, SWEEP_EVERY, || {
             let state = state.clone();
             async move {
                 let removed = sweep_once(&state).await?;

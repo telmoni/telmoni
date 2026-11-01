@@ -423,7 +423,7 @@ Most of it runs inside `serve`, in every replica, and all of it is safe for repl
 | Telemetry's purge sweep: a deleted project's purge its delete could not finish, found by the settings row it left once auth no longer has the project | `serve`, every replica, ten minutes | Each purge holds its project alone; one finished leaves no row to find |
 | The alerts' evaluation: every alert a minute after its last, its organization held to its plan first (`rules/evaluate.rs`) | `serve`, every replica, a minute | Leases, `SKIP LOCKED`; each settled where its lease and its definition still stand |
 | Notifications' retention, a deleted project's purge its delete could not finish, found by the rows it left once auth no longer has the project, and the uninstalls deletes filed that did not go through | `serve`, every replica, hourly, the first a minute after boot | Advisory locks, chunk by chunk; each purge and each uninstall safe to repeat |
-| The agent's retention | `serve`, hourly | Advisory locks, chunk by chunk |
+| The agent's retention | `serve`, hourly, the first a minute after boot | Advisory locks, chunk by chunk |
 | Agent indexer | `serve`, when the agent is on | Cursor leases |
 | Migrations | `telmoni-server migrate`, a Helm hook Job | One Job |
 | Partition rotation, and ClickHouse's purge | `telmoni-server rotate`, a daily CronJob | `Forbid` |
