@@ -142,6 +142,7 @@ fn generated_contract() -> Value {
         "live": {
             "organization_channel": live::ORGANIZATION_CHANNEL,
             "spans_ingested": live::SPANS_INGESTED,
+            "tags_changed": live::TAGS_CHANGED,
         },
         "content": { "file_id_prefix": FILE_ID_PREFIX },
         "limits": {

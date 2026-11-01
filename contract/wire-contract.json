@@ -369,7 +369,8 @@
   },
   "live": {
     "organization_channel": "bfev:organization:",
-    "spans_ingested": "spans:ingested"
+    "spans_ingested": "spans:ingested",
+    "tags_changed": "tags:changed"
   },
   "rules": {
     "folds": {

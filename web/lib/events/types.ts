@@ -53,12 +53,13 @@ const SlugMovedSchema = z.object({
 });
 
 /// A project's spans just arrived — one export's worth, kept — so a page
-/// reading them draws itself again, or counts them for the reader. `runs`
-/// names the batch's runs, so the
-/// trace page knows whether its own is among them, and `more` that the batch
-/// held runs past the cap the nudge carries. Nothing a span holds is in it:
-/// the nudge says "read again", never what to read. The server publishes it
-/// (`crates/telemetry/src/live.rs`), on the organization's channel.
+/// reading them draws itself again, or counts them for the reader; or a
+/// run's tags changed in the console, which a page draws in place. `runs`
+/// names the batch's runs, so the trace page knows whether its own is among
+/// them, and `more` that the batch held runs past the cap the nudge carries.
+/// Nothing a span holds is in it: the nudge says "read again", never what to
+/// read. The server publishes it (`crates/telemetry/src/live.rs`), on the
+/// organization's channel.
 const SpansIngestedSchema = z.object({
   organizationId: z.string(),
   projectId: z.string(),
@@ -103,6 +104,10 @@ export const RealtimeEventSchema = z.discriminatedUnion("type", [
     type: z.literal(Live.spansIngested),
     data: SpansIngestedSchema,
   }),
+  z.object({
+    type: z.literal(Live.tagsChanged),
+    data: SpansIngestedSchema,
+  }),
 ]);
 
 export type RealtimeEvent = z.infer<typeof RealtimeEventSchema>;
@@ -126,4 +131,5 @@ export const RealtimeEventDataSchema: {
   "invite:revoked": InviteRefSchema,
   "invite:resolved": InviteRefSchema,
   [Live.spansIngested]: SpansIngestedSchema,
+  [Live.tagsChanged]: SpansIngestedSchema,
 };

@@ -30,6 +30,10 @@ const RUNS_MAX: usize = 32;
 /// wire contract.
 pub const SPANS_INGESTED: &str = "spans:ingested";
 
+/// A run's tags changed in the console: the same nudge, naming the one run,
+/// which the trace list draws in place rather than counts as new.
+pub const TAGS_CHANGED: &str = "tags:changed";
+
 #[derive(Debug, Serialize)]
 struct Event<D> {
     #[serde(rename = "type")]
@@ -72,9 +76,18 @@ fn spans_message(
     project_id: &str,
     run_ids: impl IntoIterator<Item = Uuid>,
 ) -> serde_json::Result<String> {
+    message(SPANS_INGESTED, organization_id, project_id, run_ids)
+}
+
+fn message(
+    kind: &'static str,
+    organization_id: &str,
+    project_id: &str,
+    run_ids: impl IntoIterator<Item = Uuid>,
+) -> serde_json::Result<String> {
     let (runs, more) = runs(run_ids);
     serde_json::to_string(&Event {
-        kind: SPANS_INGESTED,
+        kind,
         data: Spans {
             organization_id,
             project_id,
@@ -105,6 +118,24 @@ pub fn spans_ingested(
             project_id = %project_id,
             error = %error,
             "ingest: the console's nudge did not encode"
+        ),
+    }
+}
+
+/// Tell the organization's open consoles that `run_id`'s tags changed, as
+/// [`spans_ingested`] tells them of an export.
+pub fn tags_changed(state: Arc<AppState>, organization_id: &str, project_id: &str, run_id: Uuid) {
+    match message(TAGS_CHANGED, organization_id, project_id, [run_id]) {
+        Ok(message) => publish(
+            state,
+            organization_id,
+            message,
+            "telling the console of a tag change",
+        ),
+        Err(error) => tracing::debug!(
+            project_id = %project_id,
+            error = %error,
+            "telemetry: the console's tag nudge did not encode"
         ),
     }
 }
@@ -182,6 +213,19 @@ mod tests {
             parsed["data"]["more"], false,
             "the cap itself is not past it"
         );
+    }
+
+    /// A tag change is the same nudge under its own name, naming its one run.
+    #[test]
+    fn a_tag_change_is_nudged_under_its_own_name() {
+        let run = Uuid::new_v4();
+        let parsed: Value = serde_json::from_str(
+            &message(TAGS_CHANGED, "org_1", "project_1", [run]).expect("json"),
+        )
+        .expect("json");
+        assert_eq!(parsed["type"], "tags:changed");
+        assert_eq!(parsed["data"]["runs"], Value::from(vec![run.to_string()]));
+        assert_eq!(parsed["data"]["more"], false);
     }
 
     /// The nudge for `runs`, which plain ids and a bool always encode.

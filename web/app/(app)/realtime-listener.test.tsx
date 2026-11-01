@@ -404,6 +404,39 @@ describe("RealtimeListener - spans:ingested", () => {
     expect(newTraces("project_1"), "r1 is on the list already").toEqual({ count: 2, more: true });
   });
 
+  // A tag change moves no row, so the list draws it where the reader looks
+  // rather than counting a run it already shows as new.
+  it("draws the Traces list in place for a run's tags changed, counting nothing", () => {
+    listDrawn("project_1", { rows: ["r1"], empty: false, first: true });
+    mockPathname = "/acme/web/traces";
+    render(<RealtimeListener />);
+    MockEventSource.instances[0]!.emit("tags:changed", {
+      organizationId: "org_1",
+      projectId: "project_1",
+      runs: ["run_9"],
+      more: false,
+    });
+    expect(mockRefresh).toHaveBeenCalledTimes(1);
+    expect(newTraces("project_1")).toEqual({ count: 0, more: false });
+  });
+
+  // A draw would put the counted traces on the list unasked, so the change
+  // waits for Show, which draws it with them.
+  it("holds a tag change for Show while the Traces list counts new traces", () => {
+    listDrawn("project_1", { rows: ["r1"], empty: false, first: true });
+    mockPathname = "/acme/web/traces";
+    render(<RealtimeListener />);
+    nudge("project_1", ["run_2"]);
+    MockEventSource.instances[0]!.emit("tags:changed", {
+      organizationId: "org_1",
+      projectId: "project_1",
+      runs: ["r1"],
+      more: false,
+    });
+    expect(mockRefresh).not.toHaveBeenCalled();
+    expect(newTraces("project_1")).toEqual({ count: 1, more: false });
+  });
+
   // Nothing on an empty list can move, so its first trace shows itself —
   // under the hold and only in view, as the other pages are drawn.
   it("draws an empty Traces list rather than counting for it", () => {

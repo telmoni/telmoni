@@ -85,7 +85,7 @@ const contract = JSON.parse(
   enums: Record<string, string[]>;
   flags: { off_detail: Record<string, string> };
   slugs: { max_length: number; reserved: { organization: string[]; project: string[] } };
-  live: { organization_channel: string; spans_ingested: string };
+  live: { organization_channel: string; spans_ingested: string; tags_changed: string };
   content: { file_id_prefix: string };
   limits: { agent_stream_max_secs: number; [limit: string]: unknown };
   rules: { folds: Record<string, string[]>; measures: Record<string, string[]> };
@@ -162,6 +162,7 @@ describe("wire contract", () => {
   it("listens where the server publishes, for the event it names", () => {
     expect(Live.organizationChannel).toBe(contract.live.organization_channel);
     expect(Live.spansIngested).toBe(contract.live.spans_ingested);
+    expect(Live.tagsChanged).toBe(contract.live.tags_changed);
   });
 
   // A file part names a kept file only under the server's prefix, so a drift

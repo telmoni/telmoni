@@ -307,6 +307,18 @@ describe("GET /api/v1/events (SSE)", () => {
         }),
       );
       messageListener?.(
+        channel,
+        JSON.stringify({
+          type: "tags:changed",
+          data: {
+            organizationId: "org_team",
+            projectId: "project_2",
+            runs: ["d86dd262-54c7-445a-8647-8623af421fa5"],
+            more: false,
+          },
+        }),
+      );
+      messageListener?.(
         USER_CHANNEL,
         JSON.stringify({ type: "membership:changed", data: { organizationId: "org_team" } }),
       );
@@ -322,12 +334,14 @@ describe("GET /api/v1/events (SSE)", () => {
     it("tells a member without a seat on the project nothing of it, not even its run ids", async () => {
       const text = await heard([TEAM], []);
       expect(text).not.toContain("spans:ingested");
+      expect(text).not.toContain("tags:changed");
       expect(text).not.toContain("d86dd262");
     });
 
     it("tells a member holding a seat on the project", async () => {
       const text = await heard([TEAM], [SEAT]);
       expect(text).toContain("event: spans:ingested\n");
+      expect(text).toContain("event: tags:changed\n");
     });
 
     it("tells the organization's admins and owner of every project, seat or not", async () => {

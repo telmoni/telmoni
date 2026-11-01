@@ -455,6 +455,7 @@ export type AgentTurnEvent = typeof AgentTurnEvent[keyof typeof AgentTurnEvent];
 export const Live = {
   organizationChannel: "bfev:organization:",
   spansIngested:       "spans:ingested",
+  tagsChanged:         "tags:changed",
 } as const;
 
 /** What a message's `file` part names a file this deployment keeps by, its

@@ -1301,33 +1301,48 @@ pub async fn patch_tags(
     let change = change.checked()?;
     let projects = Projects::one(project_id.clone());
     let added: Vec<&str> = change.add.keys().map(String::as_str).collect();
-    let run = traces::run_tags(&state.store, &projects, run_id, &added, &change.remove)
-        .await
-        .map_err(read_failed)?;
-    if run.spans == 0 {
-        return Err(AuthError::NotFound("no trace with that run id in this project".into()).into());
-    }
-    if run.most > TAGS_MAX as u64 {
-        return Err(TelemetryError::TagsPastCap(Cap::Tags.to_string()).into());
-    }
-    let mut tags: BTreeMap<String, String> = run.run_tags.into_iter().collect();
-    // A value the run already carries takes no new place in the day's cap.
-    let fresh: Vec<(&str, &str)> = change
-        .add
-        .iter()
-        .filter(|(key, value)| tags.get(*key) != Some(*value))
-        .map(|(key, value)| (key.as_str(), value.as_str()))
-        .collect();
-    if let Some(cap) = cardinality::admit(&state.redis, &project_id, Utc::now(), &fresh).await {
-        return Err(TelemetryError::TagsPastCap(cap.to_string()).into());
-    }
-    chain::write(
+    let tags = chain::write(
         &state.db,
         &acting,
         &project_id,
         "a trace's tags",
         async |tx| {
-            file_tags_change(&state, &acting, &project_id, tx, run_id, &change).await?;
+            // The run is read under the chain's lock, so two changes to one
+            // run at the cap are weighed one after the other, never both past it.
+            chain::held(
+                state.auth.as_ref(),
+                &acting,
+                tx,
+                Verb::Update,
+                Resource::Trace,
+            )
+            .await?;
+            let run = traces::run_tags(&state.store, &projects, run_id, &added, &change.remove)
+                .await
+                .map_err(read_failed)?;
+            if run.spans == 0 {
+                return Err(AuthError::NotFound(
+                    "no trace with that run id in this project".into(),
+                )
+                .into());
+            }
+            if run.most > TAGS_MAX as u64 {
+                return Err(TelemetryError::TagsPastCap(Cap::Tags.to_string()).into());
+            }
+            let mut tags: BTreeMap<String, String> = run.run_tags.into_iter().collect();
+            // A value the run already carries takes no new place in the day's cap.
+            let fresh: Vec<(&str, &str)> = change
+                .add
+                .iter()
+                .filter(|(key, value)| tags.get(*key) != Some(*value))
+                .map(|(key, value)| (key.as_str(), value.as_str()))
+                .collect();
+            if let Some(cap) =
+                cardinality::admit(&state.redis, &project_id, Utc::now(), &fresh).await
+            {
+                return Err(TelemetryError::TagsPastCap(cap.to_string()).into());
+            }
+            file_tags_change(tx, &acting, &project_id, run_id, &change).await?;
             state
                 .store
                 .retag_run(&project_id, run_id, &change.add, &change.remove)
@@ -1338,22 +1353,23 @@ pub async fn patch_tags(
                         "tags",
                         "the span store did not take the tags; retry",
                     )
-                })
+                })?;
+            tags.retain(|key, _| !change.remove.contains(key));
+            tags.extend(
+                change
+                    .add
+                    .iter()
+                    .map(|(key, value)| (key.clone(), value.clone())),
+            );
+            Ok(tags)
         },
     )
     .await?;
-    tags.retain(|key, _| !change.remove.contains(key));
-    tags.extend(
-        change
-            .add
-            .iter()
-            .map(|(key, value)| (key.clone(), value.clone())),
-    );
-    live::spans_ingested(
+    live::tags_changed(
         Arc::clone(&state),
         acting.organization_id.as_str(),
         project_id.as_str(),
-        [run_id],
+        run_id,
     );
     tracing::info!(
         project_id = %project_id,
@@ -1365,24 +1381,15 @@ pub async fn patch_tags(
     Ok(Json(TraceTags { run_id, tags }))
 }
 
-/// The change to a run's tags, filed under the organization's chain lock,
-/// the role checked again on auth's second answer: its keys, never a value.
+/// The change to a run's tags, filed in the organization's chain, whose lock
+/// the caller holds: its keys, never a value.
 async fn file_tags_change(
-    state: &AppState,
+    tx: &mut Scoped<'_, ProjectAndOrganization>,
     acting: &Acting,
     project_id: &ProjectId,
-    tx: &mut Scoped<'_, ProjectAndOrganization>,
     run_id: Uuid,
     change: &TagsChange,
 ) -> Result<(), TelmoniError> {
-    chain::held(
-        state.auth.as_ref(),
-        acting,
-        tx,
-        Verb::Update,
-        Resource::Trace,
-    )
-    .await?;
     let change = Change {
         action: AuditAction::Updated,
         kind: TelmoniResourceKind::Trace,
