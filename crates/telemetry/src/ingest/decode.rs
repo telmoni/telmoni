@@ -115,7 +115,7 @@ pub fn request(bytes: &[u8], encoding: Encoding) -> Result<ExportTraceServiceReq
 /// decode builds each span before the fault that ends it, so a body this
 /// count cannot read goes no further. The count takes all the decode does:
 /// every field it does not need, a group among them, is stepped over unread.
-fn span_count(bytes: &[u8], encoding: Encoding) -> Result<usize, DecodeError> {
+pub(crate) fn span_count(bytes: &[u8], encoding: Encoding) -> Result<usize, DecodeError> {
     match encoding {
         Encoding::Json => serde_json::from_slice::<JsonShape>(bytes)
             .map(|shape| {

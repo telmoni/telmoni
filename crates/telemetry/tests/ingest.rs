@@ -1,9 +1,9 @@
 //! Ingest through the module's own router: an export behind a key with the
 //! ingest scope is read by the contract, its content dropped and named in
 //! the answer, its user ids hashed under the project's own key, and its
-//! rows put in ClickHouse; a key without the scope, a body past the cap, one
-//! that is not OTLP and one with no span are each refused in OTLP's `Status`
-//! in the request's encoding; a body sent again is answered as it first was;
+//! rows put in ClickHouse; a key without the scope, a body past the cap and
+//! one that is not OTLP are each refused in OTLP's `Status` in the request's
+//! encoding; a body sent again is answered as it first was;
 //! and an export whose project was deleted as it landed is marked deleted
 //! with the rest of the project's spans.
 #![expect(clippy::expect_used, reason = "test scaffolding")]
@@ -428,19 +428,13 @@ async fn a_body_past_the_cap_is_too_large_however_it_is_sent(pool: PgPool) {
 #[sqlx::test]
 async fn a_body_that_is_not_an_export_is_invalid(pool: PgPool) {
     let lane = lane(&pool, false);
-    let cases: [(&str, Option<&str>, Vec<u8>, &str); 4] = [
+    let cases: [(&str, Option<&str>, Vec<u8>, &str); 3] = [
         ("text/plain", None, b"hello".to_vec(), "Content-Type"),
         (
             "application/json",
             None,
             b"{not json".to_vec(),
             "not OTLP's JSON",
-        ),
-        (
-            "application/json",
-            None,
-            json!({ "resourceSpans": [] }).to_string().into_bytes(),
-            "holds no span",
         ),
         (
             "application/json",

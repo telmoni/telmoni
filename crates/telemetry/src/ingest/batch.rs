@@ -17,8 +17,6 @@ use crate::store::SpanRow;
 /// Why an export was refused whole, before any span of it was read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BatchError {
-    /// Not one span in it.
-    NoSpans,
     /// More spans than [`BATCH_SPANS_MAX`]: how many.
     TooManySpans(usize),
 }
@@ -58,8 +56,8 @@ pub struct SenderClock {
 ///
 /// # Errors
 ///
-/// The export holds no span, or more than the batch allows; nothing of it
-/// is read.
+/// The export holds more spans than the batch allows; nothing of it is
+/// read.
 pub fn read(
     request: &ExportTraceServiceRequest,
     project_id: &ProjectId,
@@ -74,9 +72,6 @@ pub fn read(
         .flat_map(|resource| resource.scope_spans.iter())
         .map(|scope| scope.spans.len())
         .sum();
-    if count == 0 {
-        return Err(BatchError::NoSpans);
-    }
     if count > BATCH_SPANS_MAX {
         return Err(BatchError::TooManySpans(count));
     }
@@ -519,19 +514,9 @@ mod tests {
     }
 
     #[test]
-    fn an_export_with_no_span_or_too_many_is_refused_whole() {
+    fn an_export_of_too_many_spans_is_refused_whole() {
         let project = ProjectId::new();
         let keep = |id: &str| id.to_owned();
-        let empty = ExportTraceServiceRequest {
-            resource_spans: vec![ResourceSpans {
-                scope_spans: vec![scoped(contract::SCOPE, Vec::new())],
-                ..ResourceSpans::default()
-            }],
-        };
-        assert_eq!(
-            read(&empty, &project, Utc::now(), None, &keep, false).unwrap_err(),
-            BatchError::NoSpans
-        );
         let too_many = ExportTraceServiceRequest {
             resource_spans: vec![ResourceSpans {
                 scope_spans: vec![scoped(

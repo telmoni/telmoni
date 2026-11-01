@@ -117,6 +117,11 @@ async fn handle(
         .into());
     };
     let bytes = decode::inflate(raw, gzipped).map_err(decode_error)?;
+    // An export of no spans writes nothing, and is how an SDK asks the mode
+    // before its first content: answered as the mode is now, never claimed.
+    if decode::span_count(&bytes, encoding).map_err(decode_error)? == 0 {
+        return mode_now(state, encoding, &key.project_id).await;
+    }
 
     let digest = claims::digest(&bytes);
     let guard = match claims::claim(&state.redis, &key.project_id, &digest).await {
@@ -323,6 +328,20 @@ async fn answer_again(
     )
     .await;
     let body = response_body(encoding, &batch.report, content_mode)?;
+    Ok(answer(encoding, content_mode, body))
+}
+
+/// The answer to an export of no spans: nothing written, under the project's
+/// content mode as it is now.
+async fn mode_now(
+    state: &AppState,
+    encoding: Encoding,
+    project_id: &ProjectId,
+) -> Result<Response, TelmoniError> {
+    let mut tx = project_scope(&state.db, project_id).await?;
+    let content_mode = db::content_mode(&mut tx, project_id).await?;
+    tx.commit().await?;
+    let body = response_body(encoding, &Report::default(), content_mode)?;
     Ok(answer(encoding, content_mode, body))
 }
 
@@ -678,7 +697,6 @@ fn decode_error(error: DecodeError) -> TelmoniError {
 
 fn batch_error(error: BatchError) -> TelmoniError {
     match error {
-        BatchError::NoSpans => TelemetryError::InvalidBatch("the export holds no span".into()),
         BatchError::TooManySpans(count) => TelemetryError::InvalidBatch(format!(
             "the export holds {count} spans; at most {BATCH_SPANS_MAX}"
         )),
@@ -730,7 +748,7 @@ mod tests {
             HeaderValue::from_static("application/json"),
         );
         let refused = refuse(
-            TelemetryError::InvalidBatch("the export holds no span".into()).into(),
+            TelemetryError::InvalidBatch("the export holds 1200 spans; at most 1000".into()).into(),
             &headers,
         );
         assert_eq!(refused.status(), StatusCode::BAD_REQUEST);

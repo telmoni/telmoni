@@ -278,6 +278,27 @@ impl Door {
     }
 }
 
+/// An export of no spans, how an SDK asks the mode before its first content,
+/// is answered under the mode as it is now, the same body sent again too.
+#[sqlx::test]
+async fn an_export_of_no_spans_is_answered_under_the_mode_as_it_is_now(pool: PgPool) {
+    let door = door_over(&pool, ContentMode::On, false).await;
+    let ask = json!({ "resourceSpans": [] }).to_string().into_bytes();
+    let (status, mode, answer) = door.post(ask.clone()).await;
+    assert_eq!(status, StatusCode::OK, "{answer}");
+    assert_eq!(mode, "on");
+    assert!(answer["partialSuccess"].is_null(), "nothing lost: {answer}");
+    sqlx::query("UPDATE telemetry.project_settings SET content_mode = $2 WHERE project_id = $1")
+        .bind(&door.project)
+        .bind(ContentMode::Off)
+        .execute(&pool)
+        .await
+        .expect("switch the mode off");
+    let (status, mode, _) = door.post(ask).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(mode, "off", "never an earlier answer's mode");
+}
+
 /// ⚠ On: every field kept whole and sealed, opened only by the project's own
 /// key under its span and name; ClickHouse holds the span's metadata alone;
 /// the bytes counted once, a copy of the export answered and counted no more.
@@ -1151,6 +1172,37 @@ async fn a_file_is_kept_once_named_by_its_runs_read_filed_and_erased_with_them(p
         .await
         .expect("an answer");
     assert_eq!(wrong.status(), StatusCode::BAD_REQUEST);
+    let refused = |method: &str, body: Vec<u8>| {
+        door.app.clone().oneshot(
+            Request::builder()
+                .method(method)
+                .uri(format!("/v1/media/{hash}"))
+                .header(header::AUTHORIZATION, format!("Bearer {KEY}"))
+                .body(Body::from(body))
+                .expect("a request"),
+        )
+    };
+    for (answer, status) in [
+        (
+            refused("PUT", vec![0; content::MEDIA_MAX + 1]).await,
+            StatusCode::PAYLOAD_TOO_LARGE,
+        ),
+        (
+            refused("GET", Vec::new()).await,
+            StatusCode::METHOD_NOT_ALLOWED,
+        ),
+    ] {
+        let answer = answer.expect("an answer");
+        assert_eq!(answer.status(), status);
+        assert_eq!(
+            answer
+                .headers()
+                .get(header::CONTENT_TYPE)
+                .map(|v| v.as_bytes()),
+            Some(&b"application/problem+json"[..]),
+            "{status} is a problem document, as every /v1 refusal is"
+        );
+    }
     let off = door_over(&pool, ContentMode::Off, true).await;
     let answer = upload(&off, format!("/v1/media/{hash}"), png)
         .await
