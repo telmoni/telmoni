@@ -847,8 +847,9 @@ base64 in the input or output messages or the system instructions, never
 travels inside the span, where it would swell every span that repeats it, past
 the 1 MiB an export may hold. Where content is sent, the exporter takes the
 SHA-256 of the bytes, puts them to `PUT /v1/media/{sha256}` on the same
-endpoint with the same key and the part's `mime_type` as their type, once a
-client for each file, and sends the part as
+endpoint with the same key and the part's `mime_type` as their type
+(`application/octet-stream` where it has none, or one blank or of anything
+but printable ASCII), once a client for each file, and sends the part as
 `{"type": "file", "modality": …, "mime_type": …, "file_id": "telmoni:<sha256>"}`,
 its `modality` and `mime_type` kept where it had them. A file past 5 MiB is not
 put, and a put that fails is logged once and never costs the batch; either way

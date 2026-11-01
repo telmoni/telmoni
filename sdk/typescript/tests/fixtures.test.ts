@@ -6,6 +6,7 @@
 import { trace } from '@opentelemetry/api';
 import { describe, expect, it } from 'vitest';
 
+import { MEDIA_MAX_BYTES } from '../src/contract';
 import type { Telmoni } from '../src/index';
 import {
   type ExportBody,
@@ -346,6 +347,7 @@ interface MediaFixture {
     output_messages: unknown;
   };
   cases: Array<{ capture_content: boolean; content_mode: string; sends: boolean }>;
+  max_bytes: number;
   uploads: Array<{ path: string; content_type: string; body: string }>;
   sent: Record<string, unknown>;
 }
@@ -353,6 +355,10 @@ interface MediaFixture {
 describe('media.json', () => {
   const fixture = loadFixture<MediaFixture>('media.json');
   const { scenario } = fixture;
+
+  it("puts a file up to the platform's cap", () => {
+    expect(MEDIA_MAX_BYTES).toBe(fixture.max_bytes);
+  });
 
   it.each(fixture.cases)('images are lifted out of messages only under both locks: %o', async (each) => {
     const mode = answer(200, { 'Telmoni-Content-Mode': each.content_mode }, '{}');

@@ -536,15 +536,9 @@ class Exporter:
         """Puts one file, once: a failure is warned of, never the export's."""
         if self._given_up.is_set():
             return
-        headers = {
-            "Content-Type": mime_type
-            if _header_safe(mime_type)
-            else contract.MEDIA_DEFAULT_TYPE,
-            "User-Agent": f"telmoni-python/{__version__}",
-        }
-        bearer = self._config.bearer()
-        if bearer is not None:
-            headers["Authorization"] = f"Bearer {bearer}"
+        headers = self._headers(
+            mime_type if _header_safe(mime_type) else contract.MEDIA_DEFAULT_TYPE
+        )
         info = WarningInfo("upload_failed")
         try:
             answer = self._transport("PUT", self._media_url + sha256, headers, data)
@@ -584,9 +578,9 @@ class Exporter:
         # A lone surrogate is no text ingest reads, and would lose the batch.
         return replace_surrogates(text).encode()
 
-    def _headers(self) -> dict[str, str]:
+    def _headers(self, content_type: str = "application/json") -> dict[str, str]:
         headers = {
-            "Content-Type": "application/json",
+            "Content-Type": content_type,
             "User-Agent": f"telmoni-python/{__version__}",
         }
         bearer = self._config.bearer()

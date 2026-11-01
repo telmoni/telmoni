@@ -8,7 +8,7 @@ const { fetchWithTimeout, warn } = vi.hoisted(() => ({
 
 vi.mock("@/lib/api/fetch", () => ({ fetchWithTimeout }));
 vi.mock("@/lib/logger", () => ({ logger: { warn } }));
-import { readJson, valueOf } from "./read";
+import { readBytes, readJson, valueOf } from "./read";
 
 const Schema = z.object({ n: z.number() });
 
@@ -67,6 +67,44 @@ describe("readJson", () => {
     expect(warn).toHaveBeenCalledWith(
       { fetcher: "fetchThing", error: "connect ECONNREFUSED" },
       "entities: fetch failed",
+    );
+  });
+});
+
+describe("readBytes", () => {
+  function bytes(status: number, type: string | null) {
+    fetchWithTimeout.mockResolvedValue({
+      ok: status < 400,
+      status,
+      headers: new Headers(type ? { "content-type": type } : {}),
+      arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
+    });
+  }
+  const readFile = () =>
+    readBytes("fetchFile", "http://server/file", { cache: "no-store" }, { 404: "missing" }, 30_000);
+
+  it("answers the bytes and their type as they came, waiting as long as it was told", async () => {
+    bytes(200, "image/png");
+    const read = await readFile();
+    expect(read).toEqual({ kind: "ok", body: expect.any(ArrayBuffer), contentType: "image/png" });
+    expect(fetchWithTimeout).toHaveBeenCalledWith("http://server/file", { cache: "no-store" }, 30_000);
+  });
+
+  it("names bytes of no type as a stream of octets", async () => {
+    bytes(200, null);
+    expect(await readFile()).toMatchObject({ kind: "ok", contentType: "application/octet-stream" });
+  });
+
+  it("refuses as readJson does: a named status, a 403, then any other logged", async () => {
+    bytes(404, null);
+    expect(await readFile()).toEqual({ kind: "missing" });
+    bytes(403, null);
+    expect(await readFile()).toEqual({ kind: "forbidden" });
+    bytes(401, null);
+    expect(await readFile()).toEqual({ kind: "unavailable" });
+    expect(warn).toHaveBeenCalledWith(
+      { fetcher: "fetchFile", status: 401 },
+      "entities: upstream refused",
     );
   });
 });

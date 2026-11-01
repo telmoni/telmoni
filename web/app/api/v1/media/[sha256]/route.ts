@@ -2,15 +2,13 @@ import type { NextRequest } from "next/server";
 
 import { privateProblem } from "@/lib/api/respond";
 import { isProjectId } from "@/lib/ids";
-import { drawnAs } from "@/lib/messages";
+import { drawnAs, isFileHash } from "@/lib/messages";
 import { type Ceiling, admit } from "@/lib/server/admit";
 import { fetchMedia } from "@/lib/server/data";
 
 /** Files a person may open in a minute: a conversation draws each image it
  *  holds once, and a page of them stays well under it. */
 const READS: Ceiling = { call: "media:read", limit: 240 };
-
-const HASH = /^[0-9a-f]{64}$/;
 
 // A file a project keeps, for the trace page's conversations, each read
 // filed by the server as its span's content is. Served so the browser runs
@@ -23,18 +21,18 @@ export async function GET(request: NextRequest, { params }: RouteContext<"/api/v
   const projectId = request.nextUrl.searchParams.get("project") ?? "";
   if (!isProjectId(projectId)) return privateProblem(404, "Unknown project.");
   const { sha256 } = await params;
-  if (!HASH.test(sha256)) return privateProblem(404, "No such file.");
+  if (!isFileHash(sha256)) return privateProblem(404, "No such file.");
 
   const access = await fetchMedia(projectId, sha256);
   switch (access.kind) {
     case "ok":
       return new Response(access.body, {
         headers: {
-          "content-type": access.type,
+          "content-type": access.contentType,
           "x-content-type-options": "nosniff",
           "content-security-policy": "sandbox",
           "cache-control": "private, no-store",
-          "content-disposition": drawnAs(access.type) === "download" ? "attachment" : "inline",
+          "content-disposition": drawnAs(access.contentType) === "download" ? "attachment" : "inline",
         },
       });
     case "missing":

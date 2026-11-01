@@ -859,10 +859,31 @@ async fn delete_content_of(
     Ok(gone.unsigned_abs())
 }
 
+/// How long a file nothing names is kept, as a Postgres interval: an upload
+/// comes before the export whose spans name it.
+const UNNAMED_MEDIA_KEPT: &str = "1 day";
+
+/// The projects holding a file nothing has named past [`UNNAMED_MEDIA_KEPT`],
+/// an upload whose spans never came, which [`delete_media_of`] then takes.
+pub(crate) async fn projects_with_unnamed_media(
+    pool: &sqlx::PgPool,
+) -> sqlx::Result<Vec<ProjectId>> {
+    sqlx::query_scalar(
+        "SELECT DISTINCT m.project_id FROM telemetry.media m
+          WHERE m.created_at < now() - $1::interval
+            AND NOT EXISTS (SELECT 1 FROM telemetry.media_names n
+                             WHERE n.project_id = m.project_id AND n.sha256 = m.sha256)",
+    )
+    .bind(UNNAMED_MEDIA_KEPT)
+    .fetch_all(pool)
+    .await
+}
+
 /// The names of the files the same content named, and then each file nothing
 /// names any more, its bytes taken off as content's are: a file unnamed by
-/// this deletion, one left unnamed a day (an upload whose spans never came),
-/// and every file where the project's whole content goes.
+/// this deletion, one left unnamed past [`UNNAMED_MEDIA_KEPT`] (an upload
+/// whose spans never came), and every file where the project's whole content
+/// goes.
 async fn delete_media_of(
     conn: &mut sqlx::PgConnection,
     project_ids: &[ProjectId],
@@ -888,7 +909,7 @@ async fn delete_media_of(
                 AND NOT EXISTS (SELECT 1 FROM telemetry.media_names n
                                  WHERE n.project_id = m.project_id AND n.sha256 = m.sha256)
                 AND ($2 OR m.project_id || '/' || m.sha256 = ANY($3)
-                     OR m.created_at < now() - interval '1 day')
+                     OR m.created_at < now() - $4::interval)
              RETURNING project_id, bytes),
          sums AS (
              SELECT s.organization_id, sum(g.bytes) AS bytes
@@ -900,6 +921,7 @@ async fn delete_media_of(
     .bind(project_ids)
     .bind(before.is_none() && runs.is_none())
     .bind(&unnamed)
+    .bind(UNNAMED_MEDIA_KEPT)
     .execute(conn)
     .await?;
     Ok(())

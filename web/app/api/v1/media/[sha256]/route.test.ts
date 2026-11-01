@@ -33,15 +33,15 @@ describe("GET /api/v1/media/[sha256]", () => {
   // ⚠ The browser runs nothing a file holds: never sniffed, sandboxed, kept
   // by no cache, and anything but an image or audio a download.
   it("serves an image inline, and an SVG as a download, each sandboxed and unsniffed", async () => {
-    for (const [type, disposition] of [
+    for (const [contentType, disposition] of [
       ["image/png", "inline"],
       ["audio/mpeg", "inline"],
       ["image/svg+xml", "attachment"],
     ] as const) {
-      vi.mocked(fetchMedia).mockResolvedValue({ kind: "ok", body: new ArrayBuffer(3), type });
+      vi.mocked(fetchMedia).mockResolvedValue({ kind: "ok", body: new ArrayBuffer(3), contentType });
       const res = await read();
       expect(res.status).toBe(200);
-      expect(res.headers.get("content-type")).toBe(type);
+      expect(res.headers.get("content-type")).toBe(contentType);
       expect(res.headers.get("x-content-type-options")).toBe("nosniff");
       expect(res.headers.get("content-security-policy")).toBe("sandbox");
       expect(res.headers.get("cache-control")).toBe("private, no-store");

@@ -227,15 +227,9 @@ pub async fn purge_content(
     }
     // A file uploaded whose spans never came is named by none: it goes with
     // the night's pass over its project, though no content does.
-    let unnamed: Vec<telmoni_shared::ProjectId> = sqlx::query_scalar(
-        "SELECT DISTINCT m.project_id FROM telemetry.media m
-          WHERE m.created_at < now() - interval '1 day'
-            AND NOT EXISTS (SELECT 1 FROM telemetry.media_names n
-                             WHERE n.project_id = m.project_id AND n.sha256 = m.sha256)",
-    )
-    .fetch_all(pool)
-    .await
-    .context("listing the projects with files nothing names")?;
+    let unnamed = crate::db::projects_with_unnamed_media(pool)
+        .await
+        .context("listing the projects with files nothing names")?;
     for project in &unnamed {
         gone += delete_content_before(pool, project, cutoff).await?;
     }

@@ -160,6 +160,18 @@ fn is_mime_type(value: &str) -> bool {
 mod tests {
     use super::*;
 
+    /// The lane's words name what the code keeps: the prefix a message names
+    /// a file by, and the cap a 413 refuses past.
+    #[test]
+    fn the_lanes_words_name_its_prefix_and_its_cap() {
+        let route = &V1_LANES[0].route;
+        let prefix = format!("`{}`", content::FILE_ID_PREFIX);
+        assert!(route.description.contains(&prefix), "{}", route.description);
+        let past = route.answers.iter().find(|answer| answer.status == 413);
+        let cap = format!("{} MiB", MEDIA_MAX / (1024 * 1024));
+        assert!(past.is_some_and(|answer| answer.description.contains(&cap)));
+    }
+
     #[test]
     fn a_media_type_is_type_and_subtype_alone() {
         for good in ["image/png", "audio/mpeg", "application/vnd.ms-excel"] {

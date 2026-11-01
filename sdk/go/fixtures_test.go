@@ -441,8 +441,9 @@ type mediaFixture struct {
 		ContentMode    string `json:"content_mode"`
 		Sends          bool   `json:"sends"`
 	} `json:"cases"`
-	Uploads []map[string]any `json:"uploads"`
-	Sent    map[string]any   `json:"sent"`
+	MaxBytes int              `json:"max_bytes"`
+	Uploads  []map[string]any `json:"uploads"`
+	Sent     map[string]any   `json:"sent"`
 }
 
 type askFixture struct {
@@ -523,6 +524,9 @@ func TestImagesAreLiftedOutOfMessagesOnlyUnderBothLocks(t *testing.T) {
 	var fixture mediaFixture
 	if err := json.Unmarshal(loadFixture(t, "media.json"), &fixture); err != nil {
 		t.Fatalf("decoding media.json: %v", err)
+	}
+	if telmoni.MediaMaxBytes != fixture.MaxBytes {
+		t.Errorf("a file is put up to %d bytes, media.json says %d", telmoni.MediaMaxBytes, fixture.MaxBytes)
 	}
 	scenario := fixture.Scenario
 	for _, each := range fixture.Cases {

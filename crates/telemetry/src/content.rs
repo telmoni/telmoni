@@ -16,7 +16,6 @@ use serde_json::json;
 use uuid::Uuid;
 
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit, lock_chain_in_time};
-use telmoni_shared::db::project_move;
 use telmoni_shared::db::tenant_session::{ProjectAndOrganization, Scoped, project_scope};
 use telmoni_shared::digest::HmacKey;
 use telmoni_shared::envelope::{Dek, KEK_VERSION, Sealed, SealedRef};
@@ -91,22 +90,34 @@ pub async fn keep(
             sealed.bytes.push(bytes);
         }
     }
-    let (mut tx, organization_id) = held_in_place(state, project_id).await?;
-    // Still the key they were sealed under: one deleted meanwhile, as the
-    // project went `off`, refuses them, and the exporter's retry meets the mode.
-    let now = db::content_key(&mut tx, project_id).await?;
+    let (tx, organization_id) = held_in_place(state, project_id).await?;
+    chain::settle(tx, project_id, WHAT, async |tx| {
+        still_under(tx, project_id, &wrapped, "its content").await?;
+        db::keep_content(tx, project_id, &organization_id, received_at, &sealed).await?;
+        if !named.0.is_empty() {
+            db::name_media(tx, project_id, received_at, (&named.0, &named.1)).await?;
+        }
+        Ok(())
+    })
+    .await
+}
+
+/// Refuses what was sealed under `wrapped` once the project's content key is
+/// another: one deleted meanwhile, as the project went `off`, or made again,
+/// and the exporter's retry meets the mode. `kept` names what was sealed.
+async fn still_under(
+    tx: &mut Scoped<'_, ProjectAndOrganization>,
+    project_id: &ProjectId,
+    wrapped: &[u8],
+    kept: &str,
+) -> Result<(), TelmoniError> {
+    let now = db::content_key(tx, project_id).await?;
     if now.is_none_or(|now| now.wrapped_dek != wrapped) {
-        chain::rolled_back(tx.rollback().await, project_id, WHAT);
-        return Err(TelemetryError::StoreUnavailable(
-            "the project's content key changed as its content was kept; try again".into(),
-        )
+        return Err(TelemetryError::StoreUnavailable(format!(
+            "the project's content key changed as {kept} was kept; try again"
+        ))
         .into());
     }
-    db::keep_content(&mut tx, project_id, &organization_id, received_at, &sealed).await?;
-    if !named.0.is_empty() {
-        db::name_media(&mut tx, project_id, received_at, (&named.0, &named.1)).await?;
-    }
-    tx.commit().await?;
     Ok(())
 }
 
@@ -127,18 +138,13 @@ pub async fn open(
     spans: Option<&[String]>,
 ) -> Result<Vec<SpanContent>, TelmoniError> {
     // No settings row, no content: a project that never kept any.
-    let Some((mut tx, organization_id)) = held_if_kept(state, project_id).await? else {
+    let Some((tx, organization_id)) = held_if_kept(state, project_id).await? else {
         return Ok(Vec::new());
     };
-    let read = file_the_read(&mut tx, &organization_id, actor, project_id, runs, spans).await;
-    let kept = match read {
-        Ok(kept) => kept,
-        Err(refused) => {
-            chain::rolled_back(tx.rollback().await, project_id, WHAT);
-            return Err(refused);
-        }
-    };
-    tx.commit().await?;
+    let kept = chain::settle(tx, project_id, WHAT, async |tx| {
+        file_the_read(tx, &organization_id, actor, project_id, runs, spans).await
+    })
+    .await?;
     if kept.is_empty() {
         return Ok(Vec::new());
     }
@@ -187,14 +193,28 @@ async fn file_the_read(
     if kept.is_empty() {
         return Ok(kept);
     }
-    lock_chain_in_time(tx.conn(), organization_id).await?;
     // The traces read, not those asked for: kept is ordered by trace.
     let mut read: Vec<&str> = kept
         .iter()
         .map(|(_, trace_id, ..)| trace_id.as_str())
         .collect();
     read.dedup();
-    let project = project_id.to_string();
+    let read = json!({ "trace_ids": read, "fields": kept.len() });
+    file_viewed(tx, organization_id, actor, project_id, read).await?;
+    Ok(kept)
+}
+
+/// The `Viewed` row that files a read of the project's content, `read`
+/// naming what was read and never what it holds, its chain lock waited on no
+/// longer than a lane's.
+async fn file_viewed(
+    tx: &mut Scoped<'_, ProjectAndOrganization>,
+    organization_id: &OrganizationId,
+    actor: Actor<'_>,
+    project_id: &ProjectId,
+    read: serde_json::Value,
+) -> Result<(), TelmoniError> {
+    lock_chain_in_time(tx.conn(), organization_id).await?;
     emit_audit(
         tx,
         AuditEvent::new(
@@ -204,11 +224,11 @@ async fn file_the_read(
             TelmoniResourceKind::Project,
         )
         .in_project(project_id)
-        .on(&project)
-        .details(json!({ "trace_ids": read, "fields": kept.len() })),
+        .on(project_id.as_str())
+        .details(read),
     )
     .await?;
-    Ok(kept)
+    Ok(())
 }
 
 /// The project's content key, opened: read from its settings row each time,
@@ -280,6 +300,16 @@ pub const FILE_ID_PREFIX: &str = "telmoni:";
 /// The largest file a project keeps, in bytes.
 pub const MEDIA_MAX: usize = 5 * 1024 * 1024;
 
+/// Whether `text` names a file as one is kept here: the SHA-256 of its bytes
+/// in lowercase hex, as `sha256_hex` writes it.
+#[must_use]
+pub fn is_file_hash(text: &str) -> bool {
+    text.len() == 64
+        && text
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
 /// The hashes of the files a field's `file` parts name as kept here, each
 /// once, in order.
 #[must_use]
@@ -287,12 +317,7 @@ pub fn files_named(text: &str) -> Vec<String> {
     let mut hashes: Vec<String> = Vec::new();
     for after in text.split(FILE_ID_PREFIX).skip(1) {
         let hash: String = after.chars().take(64).collect();
-        if hash.len() == 64
-            && hash
-                .bytes()
-                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-            && !hashes.contains(&hash)
-        {
+        if is_file_hash(&hash) && !hashes.contains(&hash) {
             hashes.push(hash);
         }
     }
@@ -323,29 +348,22 @@ pub async fn keep_media(
         state
             .vault
             .seal_bytes(&key, body, media_aad(sha256).as_bytes())?;
-    let (mut tx, organization_id) = held_in_place(state, project_id).await?;
-    if db::content_key(&mut tx, project_id)
-        .await?
-        .is_none_or(|now| now.wrapped_dek != wrapped)
-    {
-        chain::rolled_back(tx.rollback().await, project_id, WHAT);
-        return Err(TelemetryError::StoreUnavailable(
-            "the project's content key changed as the file was kept; try again".into(),
-        )
-        .into());
-    }
     let bytes = i32::try_from(body.len()).unwrap_or(i32::MAX);
-    db::keep_media(
-        &mut tx,
-        (project_id, &organization_id),
-        sha256,
-        mime_type,
-        (&ciphertext, &nonce),
-        bytes,
-    )
-    .await?;
-    tx.commit().await?;
-    Ok(())
+    let (tx, organization_id) = held_in_place(state, project_id).await?;
+    chain::settle(tx, project_id, WHAT, async |tx| {
+        still_under(tx, project_id, &wrapped, "the file").await?;
+        db::keep_media(
+            tx,
+            (project_id, &organization_id),
+            sha256,
+            mime_type,
+            (&ciphertext, &nonce),
+            bytes,
+        )
+        .await?;
+        Ok(())
+    })
+    .await
 }
 
 /// What a file is sealed under, beside the key: its hash, so bytes moved to
@@ -367,29 +385,21 @@ pub async fn open_media(
     project_id: &ProjectId,
     sha256: &str,
 ) -> Result<Option<(String, Vec<u8>)>, TelmoniError> {
-    let Some((mut tx, organization_id)) = held_if_kept(state, project_id).await? else {
+    let Some((tx, organization_id)) = held_if_kept(state, project_id).await? else {
         return Ok(None);
     };
-    let Some((mime_type, ciphertext, nonce)) = db::read_media(&mut tx, project_id, sha256).await?
-    else {
-        tx.commit().await?;
-        return Ok(None);
-    };
-    lock_chain_in_time(tx.conn(), &organization_id).await?;
-    emit_audit(
-        &mut tx,
-        AuditEvent::new(
-            &organization_id,
-            actor,
-            AuditAction::Viewed,
-            TelmoniResourceKind::Project,
-        )
-        .in_project(project_id)
-        .on(project_id.as_str())
-        .details(json!({ "media": sha256 })),
-    )
+    let kept = chain::settle(tx, project_id, WHAT, async |tx| {
+        let kept = db::read_media(tx, project_id, sha256).await?;
+        if kept.is_some() {
+            let read = json!({ "media": sha256 });
+            file_viewed(tx, &organization_id, actor, project_id, read).await?;
+        }
+        Ok(kept)
+    })
     .await?;
-    tx.commit().await?;
+    let Some((mime_type, ciphertext, nonce)) = kept else {
+        return Ok(None);
+    };
     let key = key_for(state, project_id).await?;
     let body = state.vault.open_bytes(
         &key,
@@ -539,10 +549,12 @@ async fn make_key(
             .map_err(|e| kek_refused(&e, WHAT))?,
         key_version: KEK_VERSION,
     };
-    let (mut tx, _) = held_in_place(state, project_id).await?;
-    db::set_content_key_if_none(&mut tx, project_id, &wrapped).await?;
-    let written = db::content_key(&mut tx, project_id).await?;
-    tx.commit().await?;
+    let (tx, _) = held_in_place(state, project_id).await?;
+    let written = chain::settle(tx, project_id, WHAT, async |tx| {
+        db::set_content_key_if_none(tx, project_id, &wrapped).await?;
+        Ok(db::content_key(tx, project_id).await?)
+    })
+    .await?;
     written.ok_or_else(|| {
         TelmoniError::Internal("telemetry: the content key just written is not there".into())
     })
@@ -555,14 +567,7 @@ async fn held_if_kept<'c>(
     state: &'c AppState,
     project_id: &ProjectId,
 ) -> Result<Option<(Scoped<'c, ProjectAndOrganization>, OrganizationId)>, TelmoniError> {
-    let mut tx = project_scope(&state.db, project_id).await?;
-    if !project_move::try_hold_in_place(tx.conn(), project_id).await? {
-        chain::rolled_back(tx.rollback().await, project_id, WHAT);
-        return Err(TelemetryError::StoreUnavailable(
-            "the project is moving to another organization, or being deleted; try again".into(),
-        )
-        .into());
-    }
+    let mut tx = chain::hold_project(&state.db, project_id, WHAT).await?;
     let Some(organization_id) = db::settings_organization(&mut tx, project_id).await? else {
         chain::rolled_back(tx.rollback().await, project_id, WHAT);
         return Ok(None);
@@ -620,6 +625,37 @@ mod tests {
         );
         assert_eq!(files_named(&text), [a, b]);
         assert!(files_named(&format!("telmoni:{}", "A".repeat(64))).is_empty());
+        assert!(!is_file_hash(&"A".repeat(64)));
+    }
+
+    /// ⚠ What the SDKs put and name (`sdk/fixtures/media.json`) is what is
+    /// kept here: at the lane's path, under its cap, each file named in what
+    /// they sent under this prefix.
+    #[test]
+    fn the_sdks_files_are_put_and_named_as_kept_here() {
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../sdk/fixtures/media.json");
+        let fixture: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(path).expect("media.json"))
+                .expect("media.json is JSON");
+        assert_eq!(fixture["max_bytes"], MEDIA_MAX);
+        let lane = crate::handler::v1::V1_LANES
+            .iter()
+            .find(|lane| lane.op == crate::handler::v1::V1Op::Media)
+            .map(|lane| lane.route.path.trim_end_matches("{sha256}"))
+            .expect("the media lane");
+        let mut put: Vec<String> = fixture["uploads"]
+            .as_array()
+            .expect("uploads")
+            .iter()
+            .map(|upload| upload["path"].as_str().and_then(|p| p.strip_prefix(lane)))
+            .map(|hash| hash.expect("an upload at the lane").to_owned())
+            .collect();
+        assert!(put.iter().all(|hash| is_file_hash(hash)), "{put:?}");
+        let mut named = files_named(&fixture["sent"].to_string());
+        put.sort();
+        named.sort();
+        assert_eq!(named, put);
     }
 
     /// A phrase holds where its words run in order, and nowhere else.

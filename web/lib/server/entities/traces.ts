@@ -1,10 +1,8 @@
 import { cache } from "react";
 import { z } from "zod";
 
-import { fetchWithTimeout } from "@/lib/api/fetch";
 import { env } from "@/lib/env";
 import { queryString } from "@/lib/list-query";
-import { logger } from "@/lib/logger";
 import {
   LayoutDepth,
   LayoutOpen,
@@ -32,7 +30,7 @@ import {
 } from "@/lib/types/traces";
 
 import { identityContext, projectHeaders } from "./identity-context";
-import { type Read, readFailed, readJson } from "./read";
+import { type Read, readBytes, readJson } from "./read";
 
 export {
   FILTER_KEYS,
@@ -266,6 +264,17 @@ export type TraceAccess =
  *  a page's ordinary deadline would cut short. */
 const DOWNLOAD_TIMEOUT_MS = 30_000;
 
+/** How one of telemetry's lanes is asked for the project: its URL and the
+ *  request's headers, or none where nobody is signed in. */
+async function laneRequest(projectId: string, path: string): Promise<[string, RequestInit] | null> {
+  const ctx = projectId ? await identityContext() : null;
+  if (!ctx) return null;
+  return [
+    `${env.SERVER_URL}/internal/v1/telemetry${path}`,
+    { headers: projectHeaders(ctx, projectId), cache: "no-store" },
+  ];
+}
+
 /** One of telemetry's lanes as the project reads it, its answer held to
  *  `schema`. */
 export async function readLane<T, E extends string = never>(
@@ -275,20 +284,14 @@ export async function readLane<T, E extends string = never>(
   schema: z.ZodType<T>,
   statuses?: Readonly<Partial<Record<number, E>>>,
 ): Promise<Read<T, E>> {
-  const ctx = projectId ? await identityContext() : null;
-  if (!ctx) return { kind: "unavailable" };
-  return readJson(
-    fetcher,
-    `${env.SERVER_URL}/internal/v1/telemetry${path}`,
-    { headers: projectHeaders(ctx, projectId), cache: "no-store" },
-    schema,
-    statuses,
-  );
+  const request = await laneRequest(projectId, path);
+  if (!request) return { kind: "unavailable" };
+  return readJson(fetcher, ...request, schema, statuses);
 }
 
 /** A file the project keeps, as its lane serves it: its bytes and type. */
 export type MediaAccess =
-  | { kind: "ok"; body: ArrayBuffer; type: string }
+  | { kind: "ok"; body: ArrayBuffer; contentType: string }
   | { kind: "missing" }
   | { kind: "forbidden" }
   | { kind: "unavailable" };
@@ -296,22 +299,9 @@ export type MediaAccess =
 /** A file the project keeps, by the hash of its bytes; its read is filed by
  *  the server before it answers. */
 export async function fetchMedia(projectId: string, sha256: string): Promise<MediaAccess> {
-  const ctx = await identityContext();
-  if (!ctx) return { kind: "unavailable" };
-  try {
-    const res = await fetchWithTimeout(`${env.SERVER_URL}/internal/v1/telemetry/media/${sha256}`, {
-      headers: projectHeaders(ctx, projectId),
-      cache: "no-store",
-    });
-    if (res.status === 400 || res.status === 404) return { kind: "missing" };
-    if (res.status === 401 || res.status === 403) return { kind: "forbidden" };
-    if (!res.ok) return { kind: "unavailable" };
-    const type = res.headers.get("content-type") ?? "application/octet-stream";
-    return { kind: "ok", body: await res.arrayBuffer(), type };
-  } catch (error) {
-    logger.warn({ error: error instanceof Error ? error.message : String(error) }, "fetchMedia: unreachable");
-    return { kind: "unavailable" };
-  }
+  const request = await laneRequest(projectId, `/media/${sha256}`);
+  if (!request) return { kind: "unavailable" };
+  return readBytes("fetchMedia", ...request, MISSING);
 }
 
 /** A path the server cannot read as a run or a session, or one it has none
@@ -408,30 +398,9 @@ export async function readDownload(
   projectId: string,
   path: string,
 ): Promise<DownloadAccess> {
-  if (!projectId) return { kind: "unavailable" };
-  const ctx = await identityContext();
-  if (!ctx) return { kind: "unavailable" };
-  try {
-    const res = await fetchWithTimeout(
-      `${env.SERVER_URL}/internal/v1/telemetry${path}`,
-      { headers: projectHeaders(ctx, projectId), cache: "no-store" },
-      DOWNLOAD_TIMEOUT_MS,
-    );
-    if (res.status === 403) return { kind: "forbidden" };
-    if (res.status === 400) return { kind: "refused" };
-    if (!res.ok) {
-      logger.warn({ fetcher, status: res.status }, "entities: upstream refused");
-      return { kind: "unavailable" };
-    }
-    return {
-      kind: "ok",
-      body: await res.arrayBuffer(),
-      contentType: res.headers.get("content-type") ?? "application/octet-stream",
-    };
-  } catch (err) {
-    readFailed(fetcher, err);
-    return { kind: "unavailable" };
-  }
+  const request = await laneRequest(projectId, path);
+  if (!request) return { kind: "unavailable" };
+  return readBytes(fetcher, ...request, { 400: "refused" }, DOWNLOAD_TIMEOUT_MS);
 }
 
 /** The list as a file: every trace the filters admit, sorted as the page is,

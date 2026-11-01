@@ -14,6 +14,8 @@
           { "type": "text", "content": "What is in these?" },
           { "type": "blob", "modality": "image", "mime_type": "image/png", "content": "iVBORw0KGgo=" },
           { "type": "blob", "modality": "image", "content": "R0lGODlhAQABAA==" },
+          { "type": "blob", "modality": "image", "mime_type": " ", "content": "AAE=" },
+          { "type": "blob", "modality": "image", "mime_type": "image/png\r\nX-Injected: 1", "content": "AAI=" },
           { "type": "blob", "modality": "image", "mime_type": "image/png", "content": "not base64!" },
           { "type": "uri", "modality": "image", "mime_type": "image/png", "uri": "https://example.com/cat.png" },
           { "type": "file", "modality": "image", "file_id": "file-abc123" },
@@ -37,6 +39,7 @@
     { "capture_content": true, "content_mode": "off", "sends": false },
     { "capture_content": false, "content_mode": "on", "sends": false }
   ],
+  "max_bytes": 5242880,
   "uploads": [
     {
       "path": "/v1/media/4c4b6a3be1314ab86138bef4314dde022e600960d8689a2c8f8631802d20dab6",
@@ -49,9 +52,19 @@
       "body": "/9j/4AAQSkZJRgABAQ=="
     },
     {
+      "path": "/v1/media/b413f47d13ee2fe6c845b2ee141af81de858df4ec549a58b7970bb96645bc8d2",
+      "content_type": "application/octet-stream",
+      "body": "AAE="
+    },
+    {
       "path": "/v1/media/fb6567d497606314a968515ebf9063dcee9fcff777897c384ed8e6a26dbd7190",
       "content_type": "application/octet-stream",
       "body": "R0lGODlhAQABAA=="
+    },
+    {
+      "path": "/v1/media/fcf0a6c700dd13e274b6fba8deea8dd9b26e4eedde3495717cac8408c9c5177f",
+      "content_type": "application/octet-stream",
+      "body": "AAI="
     }
   ],
   "sent": {
@@ -79,6 +92,18 @@
             "type": "file",
             "modality": "image",
             "file_id": "telmoni:fb6567d497606314a968515ebf9063dcee9fcff777897c384ed8e6a26dbd7190"
+          },
+          {
+            "type": "file",
+            "modality": "image",
+            "mime_type": " ",
+            "file_id": "telmoni:b413f47d13ee2fe6c845b2ee141af81de858df4ec549a58b7970bb96645bc8d2"
+          },
+          {
+            "type": "file",
+            "modality": "image",
+            "mime_type": "image/png\r\nX-Injected: 1",
+            "file_id": "telmoni:fcf0a6c700dd13e274b6fba8deea8dd9b26e4eedde3495717cac8408c9c5177f"
           },
           { "type": "blob", "modality": "image", "mime_type": "image/png", "content": "not base64!" },
           { "type": "uri", "modality": "image", "mime_type": "image/png", "uri": "https://example.com/cat.png" },

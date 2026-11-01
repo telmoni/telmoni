@@ -7,6 +7,9 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+// The largest file put, which media.json names too.
+const MediaMaxBytes = mediaMaxBytes
+
 // The hooks the tests reach for: the sample rate's random source, a record's
 // hold, the W3C grammar's helpers and a time as sent.
 var (

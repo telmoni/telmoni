@@ -455,6 +455,12 @@ export const Live = {
   spansIngested:       "spans:ingested",
 } as const;
 
+/** What a message's `file` part names a file this deployment keeps by, its
+ *  hash after it — the Rust `content::FILE_ID_PREFIX`. */
+export const Content = {
+  fileIdPrefix: "telmoni:",
+} as const;
+
 /** The sentence a switched-off feature answers with, by flag — the Rust `Flag::off_detail`. */
 export const FlagOffDetail = {
   api_tokens: "API keys are switched off right now.",

@@ -165,7 +165,7 @@ the file is kept, kept already, or kept nothing for a project whose mode is
 refusal a problem document, the 413's `max_bytes` the most it takes. A file
 is sealed under the project's content key, kept while any span within
 retention names it, and erased with the traces or the end user that named
-it alone.
+it alone; one that no span names a day after it was put is erased too.
 
 **A tag past its project's cardinality cap** is dropped as `cardinality`, the
 span kept: in each UTC day a project's tags take up to 64 keys, and each key

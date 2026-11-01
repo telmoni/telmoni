@@ -13,12 +13,13 @@ use uuid::Uuid;
 
 use telmoni_shared::acting::Acting;
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit, lock_chain_in_time};
-use telmoni_shared::db::tenant_session::{ProjectAndOrganization, Scoped, project_scope};
+use telmoni_shared::db::project_move;
+use telmoni_shared::db::tenant_session::{Project, ProjectAndOrganization, Scoped, project_scope};
 use telmoni_shared::rbac::{Resource, Verb};
 use telmoni_shared::seam::{ANSWER_BUDGET, Auth, resolve_again_in_time};
 use telmoni_shared::{
-    AuditAction, AuthError, OrganizationId, OrganizationStatus, ProjectId, TelmoniError,
-    TelmoniResourceKind,
+    AuditAction, AuthError, OrganizationId, OrganizationStatus, ProjectId, TelemetryError,
+    TelmoniError, TelmoniResourceKind,
 };
 
 /// A transaction bound to the project and to the organization `acting` acts
@@ -34,9 +35,26 @@ pub(crate) async fn scoped<'a>(
         .await?)
 }
 
-/// `write` in a transaction bound to the project and its organization:
-/// committed where it answers, rolled back at once where it is refused, so
-/// its chain lock goes before the answer. `lane` names it in the log.
+/// The project's scope, held in place so no move or deletion passes before
+/// its commit; refused, and rolled back at once, while one is under way.
+pub(crate) async fn hold_project<'a>(
+    pool: &'a PgPool,
+    project_id: &ProjectId,
+    lane: &'static str,
+) -> Result<Scoped<'a, Project>, TelmoniError> {
+    let mut tx = project_scope(pool, project_id).await?;
+    if !project_move::try_hold_in_place(tx.conn(), project_id).await? {
+        rolled_back(tx.rollback().await, project_id, lane);
+        return Err(TelemetryError::StoreUnavailable(
+            "the project is moving to another organization, or being deleted; try again".into(),
+        )
+        .into());
+    }
+    Ok(tx)
+}
+
+/// `write` in a transaction bound to the project and its organization, as
+/// [`settle`] runs it. `lane` names it in the log.
 pub(crate) async fn write<T>(
     pool: &PgPool,
     acting: &Acting,
@@ -44,8 +62,19 @@ pub(crate) async fn write<T>(
     lane: &'static str,
     write: impl AsyncFnOnce(&mut Scoped<'_, ProjectAndOrganization>) -> Result<T, TelmoniError>,
 ) -> Result<T, TelmoniError> {
-    let mut tx = scoped(pool, acting, project_id).await?;
-    match write(&mut tx).await {
+    let tx = scoped(pool, acting, project_id).await?;
+    settle(tx, project_id, lane, write).await
+}
+
+/// `work` in `tx`: committed where it answers, rolled back at once where it
+/// is refused, so its chain or move lock goes before the answer.
+pub(crate) async fn settle<T>(
+    mut tx: Scoped<'_, ProjectAndOrganization>,
+    project_id: &ProjectId,
+    lane: &'static str,
+    work: impl AsyncFnOnce(&mut Scoped<'_, ProjectAndOrganization>) -> Result<T, TelmoniError>,
+) -> Result<T, TelmoniError> {
+    match work(&mut tx).await {
         Ok(done) => {
             tx.commit().await?;
             Ok(done)

@@ -12,7 +12,6 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use telmoni_shared::acting::ActingKey;
-use telmoni_shared::db::project_move;
 use telmoni_shared::db::tenant_session::project_scope;
 use telmoni_shared::digest::{HmacKey, hex_lower};
 use telmoni_shared::envelope::{KEK_VERSION, KekError, Sealed};
@@ -127,16 +126,7 @@ async fn key_project(
     aad: &[u8],
 ) -> Result<SealedHashingKey, TelmoniError> {
     let sealed = seal_new_key(state, aad).await?;
-    let mut tx = project_scope(&state.db, project_id).await?;
-    if !project_move::try_hold_in_place(tx.conn(), project_id).await? {
-        chain::rolled_back(tx.rollback().await, project_id, "hashing key");
-        return Err(TelemetryError::StoreUnavailable(
-            "the project is moving to another organization, or being deleted; the export is \
-             tried again"
-                .into(),
-        )
-        .into());
-    }
+    let mut tx = chain::hold_project(&state.db, project_id, "hashing key").await?;
     let organization_id = match db::settings_organization(&mut tx, project_id).await? {
         Some(filed) => filed,
         None => match chain::home(state.auth.as_ref(), project_id).await {

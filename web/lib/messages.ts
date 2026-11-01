@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { ContentField } from "@/lib/types/enums";
+import { Content, ContentField } from "@/lib/types/enums";
 import type { SpanFields } from "@/lib/types/traces";
 
 // What a span's content fields hold, read as the GenAI conventions write
@@ -204,13 +204,18 @@ export function fieldsOf(
   return content.find((span) => span.span_id === spanId)?.fields;
 }
 
-/** What a `file` part names a file this deployment keeps by. */
-const KEPT_FILE = /^telmoni:([0-9a-f]{64})$/;
+/** Whether `text` names a file as the server keeps one: the SHA-256 of its
+ *  bytes in lowercase hex. */
+export function isFileHash(text: string): boolean {
+  return /^[0-9a-f]{64}$/.test(text);
+}
 
 /** The hash of the file a part names as kept here, or none. */
 export function keptFileOf(part: Part): string | null {
-  if (part.type !== "media" || part.kind !== "file" || !part.fileId) return null;
-  return KEPT_FILE.exec(part.fileId)?.[1] ?? null;
+  if (part.type !== "media" || part.kind !== "file") return null;
+  if (!part.fileId?.startsWith(Content.fileIdPrefix)) return null;
+  const hash = part.fileId.slice(Content.fileIdPrefix.length);
+  return isFileHash(hash) ? hash : null;
 }
 
 /** How a kept file is drawn: an image the browser shows inline, audio it

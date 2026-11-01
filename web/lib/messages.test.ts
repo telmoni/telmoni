@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -144,6 +147,31 @@ describe("kept files", () => {
     expect(linked).toEqual({ type: "media", kind: "uri", modality: "image", uri: "https://example.com/cat.png" });
     expect(keptFileOf(provider!)).toBeNull();
     expect(keptFileOf({ type: "media", kind: "file", fileId: "telmoni:short" })).toBeNull();
+  });
+
+  // What the SDKs send names each file they put (`sdk/fixtures/media.json`),
+  // so a drift from their prefix would draw none of them. Each `file` part is
+  // read alone, since the fixture's fields hold parts no message parses.
+  it("names every file the SDKs put by the hash they put it under", () => {
+    const fixture = JSON.parse(
+      readFileSync(fileURLToPath(new URL("../../sdk/fixtures/media.json", import.meta.url)), "utf8"),
+    ) as { uploads: { path: string }[]; sent: Record<string, unknown> };
+    const files: unknown[] = [];
+    const walk = (value: unknown): void => {
+      if (Array.isArray(value)) return value.forEach(walk);
+      if (value === null || typeof value !== "object") return;
+      if ((value as { type?: unknown }).type === "file") files.push(value);
+      Object.values(value).forEach(walk);
+    };
+    walk(fixture.sent);
+    const named = new Set(
+      files
+        .map((part) => messagesOf(JSON.stringify([{ role: "user", parts: [part] }]))![0]!.parts[0]!)
+        .map(keptFileOf)
+        .filter((hash) => hash !== null),
+    );
+    const put = new Set(fixture.uploads.map((upload) => upload.path.split("/").at(-1)));
+    expect(named).toEqual(put);
   });
 
   it("draws the four image types inline, plays audio, and offers anything else as a download", () => {

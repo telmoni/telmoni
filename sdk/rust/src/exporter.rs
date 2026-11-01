@@ -158,8 +158,14 @@ impl Exporter {
     }
 
     fn headers(&self) -> Vec<(String, String)> {
+        self.headers_for("application/json")
+    }
+
+    /// A request's headers to the platform: its body's type, the SDK's name
+    /// and the key.
+    fn headers_for(&self, content_type: &str) -> Vec<(String, String)> {
         let mut headers = vec![
-            ("Content-Type".to_owned(), "application/json".to_owned()),
+            ("Content-Type".to_owned(), content_type.to_owned()),
             ("User-Agent".to_owned(), format!("telmoni-rust/{VERSION}")),
         ];
         if let Some(bearer) = &self.bearer {
@@ -368,13 +374,7 @@ impl Exporter {
             .and_then(serde_json::Value::as_str)
             .filter(|given| header_safe(given))
             .unwrap_or(contract::MEDIA_DEFAULT_TYPE);
-        let mut headers = vec![
-            ("Content-Type".to_owned(), content_type.to_owned()),
-            ("User-Agent".to_owned(), format!("telmoni-rust/{VERSION}")),
-        ];
-        if let Some(bearer) = &self.bearer {
-            headers.push(("Authorization".to_owned(), format!("Bearer {bearer}")));
-        }
+        let headers = self.headers_for(content_type);
         let url = format!("{}{hash}", self.media_url);
         // A transport that panics costs the file alone.
         let sent = panic::catch_unwind(AssertUnwindSafe(|| {
@@ -1130,6 +1130,16 @@ mod tests {
                     .collect::<Vec<_>>()
             })
             .collect()
+    }
+
+    /// A file is put up to the platform's cap, which `media.json` names too.
+    #[test]
+    fn a_file_is_put_up_to_the_platforms_cap() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/media.json");
+        let fixture: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(path).expect("media.json"))
+                .expect("media.json is JSON");
+        assert_eq!(fixture["max_bytes"], contract::MEDIA_MAX_BYTES);
     }
 
     /// Ingest refuses an export past its 1 MiB whole, and its 413 may break an

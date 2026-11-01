@@ -1,5 +1,8 @@
 {
   "$generated": "by `make contract` from the modules' vocabularies and slug.rs — do not edit by hand",
+  "content": {
+    "file_id_prefix": "telmoni:"
+  },
   "enums": {
     "AgentMessageRole": [
       "user",

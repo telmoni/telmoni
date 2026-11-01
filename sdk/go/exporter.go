@@ -456,14 +456,9 @@ func (e *exporter) put(target, contentType string, data []byte) (failure string,
 			failure, status = "panic", 0
 		}
 	}()
-	req, err := http.NewRequestWithContext(e.givenUp, http.MethodPut, target, bytes.NewReader(data))
+	req, err := e.newRequest(http.MethodPut, target, contentType, data)
 	if err != nil {
 		return failureName(err), 0
-	}
-	req.Header.Set("Content-Type", contentType)
-	req.Header.Set("User-Agent", "telmoni-go/"+Version)
-	if key := e.config.APIKey.Expose(); key != "" {
-		req.Header.Set("Authorization", "Bearer "+key)
 	}
 	got, err := e.do(req)
 	if err != nil {
@@ -489,18 +484,28 @@ func headerSafe(value string) bool {
 	return true
 }
 
-func (e *exporter) request(body []byte) (*http.Request, error) {
-	req, err := http.NewRequestWithContext(e.givenUp, http.MethodPost, e.url, bytes.NewReader(body))
+// newRequest is one request to the platform: its body's type, the SDK's name
+// and the key.
+func (e *exporter) newRequest(method, target, contentType string, body []byte) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(e.givenUp, method, target, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("User-Agent", "telmoni-go/"+Version)
-	// This clock as the attempt leaves, the spans' own.
-	req.Header.Set(sentAtHeader, strconv.FormatInt(time.Now().UnixNano(), 10))
 	if key := e.config.APIKey.Expose(); key != "" {
 		req.Header.Set("Authorization", "Bearer "+key)
 	}
+	return req, nil
+}
+
+func (e *exporter) request(body []byte) (*http.Request, error) {
+	req, err := e.newRequest(http.MethodPost, e.url, "application/json", body)
+	if err != nil {
+		return nil, err
+	}
+	// This clock as the attempt leaves, the spans' own.
+	req.Header.Set(sentAtHeader, strconv.FormatInt(time.Now().UnixNano(), 10))
 	return req, nil
 }
 

@@ -12,6 +12,7 @@ import {
   AttemptTrigger,
   ConnectionStatus,
   ConnectorProvider,
+  Content,
   ContentField,
   ContentMode,
   DeliveryStatus,
@@ -85,6 +86,7 @@ const contract = JSON.parse(
   flags: { off_detail: Record<string, string> };
   slugs: { max_length: number; reserved: { organization: string[]; project: string[] } };
   live: { organization_channel: string; spans_ingested: string };
+  content: { file_id_prefix: string };
   limits: { agent_stream_max_secs: number; [limit: string]: unknown };
   rules: { folds: Record<string, string[]>; measures: Record<string, string[]> };
 };
@@ -160,6 +162,12 @@ describe("wire contract", () => {
   it("listens where the server publishes, for the event it names", () => {
     expect(Live.organizationChannel).toBe(contract.live.organization_channel);
     expect(Live.spansIngested).toBe(contract.live.spans_ingested);
+  });
+
+  // A file part names a kept file only under the server's prefix, so a drift
+  // would draw none of them.
+  it("reads a kept file under the server's prefix", () => {
+    expect(Content.fileIdPrefix).toBe(contract.content.file_id_prefix);
   });
 
   // The console checks these before it asks, so a copy below the server's

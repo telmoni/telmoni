@@ -420,14 +420,9 @@ export class Exporter {
   /** Puts one file, once: a failure is warned of, never the export's. */
   async #upload(sha256: string, data: Uint8Array, mimeType: unknown): Promise<void> {
     if (this.#givenUp.signal.aborted) return;
-    const headers: Record<string, string> = {
-      'Content-Type':
-        typeof mimeType === 'string' && HEADER_SAFE.test(mimeType) ? mimeType : contract.MEDIA_DEFAULT_TYPE,
-      'User-Agent': `telmoni-typescript/${VERSION}`,
-    };
-    if (this.#config.apiKey !== undefined) {
-      headers['Authorization'] = `Bearer ${this.#config.apiKey}`;
-    }
+    const headers = this.#headers(
+      typeof mimeType === 'string' && HEADER_SAFE.test(mimeType) ? mimeType : contract.MEDIA_DEFAULT_TYPE,
+    );
     let failure: string;
     let warning: Warning = { kind: 'upload_failed' };
     try {
@@ -484,9 +479,9 @@ export class Exporter {
     );
   }
 
-  #headers(): Record<string, string> {
+  #headers(contentType = 'application/json'): Record<string, string> {
     const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
+      'Content-Type': contentType,
       'User-Agent': `telmoni-typescript/${VERSION}`,
     };
     if (this.#config.apiKey !== undefined) {

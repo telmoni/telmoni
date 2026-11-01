@@ -813,7 +813,7 @@ pub async fn get_media(
     Path(sha256): Path<String>,
 ) -> Result<Response, TelmoniError> {
     let reader = reader(&state, &headers).await?;
-    if sha256.len() != 64 || !sha256.bytes().all(|b| b.is_ascii_hexdigit()) {
+    if !content::is_file_hash(&sha256) {
         return Err(TelmoniError::BadRequest(
             "a file is named by the SHA-256 of its bytes".into(),
         ));

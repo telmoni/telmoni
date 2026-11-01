@@ -27,6 +27,7 @@ use telmoni_shared::{
     SpanKind, SpanStatus, TelmoniResourceKind, TraceColumn, TraceSort, UserColumn, UserSort,
     ViewKind, slug,
 };
+use telmoni_telemetry::content::FILE_ID_PREFIX;
 use telmoni_telemetry::contract::{CONTENT, UTC_OFFSET_RANGE};
 use telmoni_telemetry::handler::incidents::INCIDENTS_MAX;
 use telmoni_telemetry::handler::traces::FILTER_VALUE_MAX;
@@ -142,6 +143,7 @@ fn generated_contract() -> Value {
             "organization_channel": live::ORGANIZATION_CHANNEL,
             "spans_ingested": live::SPANS_INGESTED,
         },
+        "content": { "file_id_prefix": FILE_ID_PREFIX },
         "limits": {
             "list_default_days": DEFAULT_DAYS,
             "list_max_days": MAX_DAYS,

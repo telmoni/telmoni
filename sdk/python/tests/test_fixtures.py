@@ -23,7 +23,7 @@ from conftest import (
     kept,
     load_fixture,
 )
-from telmoni import Config, Telmoni, Usage
+from telmoni import Config, Telmoni, Usage, contract
 from telmoni.exporter import Answer
 
 UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12}$")
@@ -249,6 +249,10 @@ def test_the_mode_is_asked_before_the_first_content_it_would_send(
     call = next(s for s in spans_of(first) if s["name"].startswith("chat "))
     sent = any(a["key"] == "gen_ai.input.messages" for a in call["attributes"])
     assert sent == case["sent"]
+
+
+def test_a_file_is_put_up_to_the_platforms_cap() -> None:
+    assert contract.MEDIA_MAX_BYTES == load_fixture("media.json")["max_bytes"]
 
 
 @pytest.mark.parametrize("case", load_fixture("media.json")["cases"])
