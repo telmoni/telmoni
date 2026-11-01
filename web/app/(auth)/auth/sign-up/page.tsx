@@ -1,3 +1,5 @@
+import { notFound } from "next/navigation";
+
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getSignInConfig } from "@/lib/auth/oidc";
 
@@ -13,9 +15,13 @@ export const metadata = { title: "Create an account" };
 export default async function SignUpPage({
   searchParams,
 }: PageProps<"/auth/sign-up">) {
+  // With the password form off its lanes are not mounted, so there is no
+  // page, whatever state a sign-in in progress sealed; when auth cannot say,
+  // the form's action answers.
+  const config = await getSignInConfig();
+  if (config && !config.passwordSignIn) notFound();
   const params = await searchParams;
   const pending = await pendingSignIn(sole(params.state));
-  const config = await getSignInConfig();
   const verifyEmail = config?.verifyEmail ?? false;
   const byInvitation = config ? !config.allowSignUp : false;
 
