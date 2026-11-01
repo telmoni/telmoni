@@ -35,7 +35,7 @@ pub async fn open_pool(config: &Config) -> anyhow::Result<sqlx::PgPool> {
 /// The state the binary runs the module on. Refuses a ClickHouse URL it
 /// cannot use, without dialling it — ClickHouse may come up after the server
 /// — and a `TELEMETRY_KEK` or a `CONTENT_KEK` it cannot use, a laptop's key
-/// on a tier among them.
+/// on a tier and one key named for both among them.
 pub fn state(
     config: Config,
     db: sqlx::PgPool,
@@ -50,6 +50,7 @@ pub fn state(
         Kek::for_process(var, value, &config.kms_api_base, &config.metadata_api_base)
             .map_err(|e| anyhow::anyhow!("{e}"))
     };
+    one_key_a_purpose(&config)?;
     let kek = key("TELEMETRY_KEK", &config.telemetry_kek)?;
     let content_kek = key("CONTENT_KEK", &config.content_kek)?;
     // Bounded, so an export that keys its project ends inside an
@@ -86,4 +87,50 @@ pub fn state(
         body_wait: BODY_WAIT,
         ingest_slots: Arc::new(tokio::sync::Semaphore::new(IN_FLIGHT_MAX)),
     })
+}
+
+/// Refuses one key named for both purposes, so that disabling or deleting one
+/// leaves the other's rows readable.
+fn one_key_a_purpose(config: &Config) -> anyhow::Result<()> {
+    if config.telemetry_kek.expose().trim() == config.content_kek.expose().trim() {
+        anyhow::bail!("TELEMETRY_KEK and CONTENT_KEK name one key; each takes a key of its own");
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config(telemetry_kek: &str, content_kek: &str) -> Config {
+        Config {
+            database_url: "".into(),
+            clickhouse_url: "".into(),
+            telemetry_kek: telemetry_kek.into(),
+            content_kek: content_kek.into(),
+            kms_api_base: String::new(),
+            metadata_api_base: String::new(),
+            redis_url: "".into(),
+            app_url: None,
+        }
+    }
+
+    /// ⚠ One key for both, a laptop's or a KMS name, is refused naming the two
+    /// variables and neither value.
+    #[test]
+    fn one_key_named_for_both_purposes_is_refused() {
+        let local = format!("local:{}", "0".repeat(64));
+        let kms = "projects/p/locations/global/keyRings/r/cryptoKeys/k";
+        for same in [local.as_str(), kms] {
+            let refused = one_key_a_purpose(&config(same, &format!(" {same}\n")))
+                .expect_err("one key for both")
+                .to_string();
+            assert!(
+                refused.contains("TELEMETRY_KEK") && refused.contains("CONTENT_KEK"),
+                "{refused}"
+            );
+            assert!(!refused.contains(same), "a key's value in the refusal");
+        }
+        one_key_a_purpose(&config(&local, &format!("local:{}", "1".repeat(64)))).expect("two keys");
+    }
 }

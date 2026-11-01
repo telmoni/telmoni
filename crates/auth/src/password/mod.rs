@@ -51,9 +51,6 @@ pub const VERIFICATION_TTL_HOURS: i64 = 24;
 /// How long the password-reset link works.
 pub const RESET_TTL_MINUTES: i64 = 60;
 
-/// How many links of one kind an address is mailed in a day.
-const LINKS_PER_DAY: i64 = 5;
-
 /// What a sign-up earned.
 #[derive(Clone, Debug)]
 pub enum SignedUp {
@@ -293,17 +290,7 @@ impl PasswordProvider {
         email: &Email,
     ) -> Result<(), TelmoniError> {
         let mut tx = person_scope(&self.db, user_id).await?;
-        let since = Utc::now() - Duration::days(1);
-        let issued =
-            confirmation_codes::count_since(&mut tx, user_id, Purpose::EmailVerification, since)
-                .await?;
-        if issued >= LINKS_PER_DAY {
-            tx.commit().await?;
-            return Err(TenantError::RateLimited {
-                retry_after_secs: 24 * 60 * 60,
-            }
-            .into());
-        }
+        confirmation_codes::admit_one_more(&mut tx, user_id, Purpose::EmailVerification).await?;
         let token = secret();
         confirmation_codes::create(
             &mut tx,
@@ -653,17 +640,7 @@ impl ResetSender {
         email: &Email,
     ) -> Result<PasswordResetLink, TelmoniError> {
         let mut tx = person_scope(&self.db, user_id).await?;
-        let since = Utc::now() - Duration::days(1);
-        let issued =
-            confirmation_codes::count_since(&mut tx, user_id, Purpose::PasswordReset, since)
-                .await?;
-        if issued >= LINKS_PER_DAY {
-            tx.commit().await?;
-            return Err(TenantError::RateLimited {
-                retry_after_secs: 24 * 60 * 60,
-            }
-            .into());
-        }
+        confirmation_codes::admit_one_more(&mut tx, user_id, Purpose::PasswordReset).await?;
         let token = secret();
         let expires_at = Utc::now() + Duration::minutes(RESET_TTL_MINUTES);
         confirmation_codes::create(

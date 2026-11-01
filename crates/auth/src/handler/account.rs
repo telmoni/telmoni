@@ -33,7 +33,7 @@ use telmoni_shared::extract::Json;
 use telmoni_shared::person_token::Principal;
 use telmoni_shared::{
     AuditAction, AuthError, AuthzError, OrganizationId, OrganizationStatus, TelmoniError,
-    TelmoniResourceKind, TenantError, UserId,
+    TelmoniResourceKind, UserId,
 };
 
 use crate::mailer::AuthMail;
@@ -51,9 +51,6 @@ use crate::{
     },
     model::{AuditKind, DeletionKind},
 };
-
-/// How many email-change codes one person may be issued in a day.
-const EMAIL_CHANGE_DAILY_MAX: i64 = 5;
 
 /// Body for `POST /internal/v1/me/email-change` — the address to move to.
 /// Derived `Debug`: an address is not a credential.
@@ -109,8 +106,8 @@ pub(crate) fn wrong_code(burned: bool) -> TelmoniError {
 
 /// Keep the hash of `code`, minted by [`confirmation_codes::generate_code`]
 /// for `act`, and send `mail`, which carries it, to `to`: how every code lane
-/// sends one. A mail that fails is the lane's failure, since a code nobody
-/// received authorizes nothing.
+/// sends one, five of a purpose a day at most. A mail that fails is the
+/// lane's failure, since a code nobody received authorizes nothing.
 pub(crate) async fn mail_code(
     state: &AppState,
     user_id: &UserId,
@@ -120,6 +117,7 @@ pub(crate) async fn mail_code(
 ) -> Result<(), TelmoniError> {
     let expires_at = Utc::now() + Duration::minutes(confirmation_codes::CODE_TTL_MINUTES);
     let mut tx = person_scope(&state.db, user_id).await?;
+    confirmation_codes::admit_one_more(&mut tx, user_id, act.purpose()).await?;
     confirmation_codes::create(
         &mut tx,
         user_id,
@@ -233,19 +231,10 @@ pub async fn request_email_change(
         ));
     }
 
-    let since = Utc::now() - Duration::days(1);
+    // Before the provider mails the address typed, not only before ours goes.
     let mut tx = person_scope(&state.db, &user_id).await?;
-    let issued =
-        confirmation_codes::count_since(&mut tx, &user_id, Purpose::EmailChange, since).await?;
+    confirmation_codes::admit_one_more(&mut tx, &user_id, Purpose::EmailChange).await?;
     tx.commit().await?;
-    if issued >= EMAIL_CHANGE_DAILY_MAX {
-        // A full day, matching the rolling window: a shorter `Retry-After`
-        // would be a promise the next press cannot keep.
-        return Err(TenantError::RateLimited {
-            retry_after_secs: 24 * 60 * 60,
-        }
-        .into());
-    }
 
     let challenge = state
         .account_holder(&user_id)

@@ -6,9 +6,9 @@
 //! transaction as the act it authorizes, so a replay cannot authorize a second.
 //! Every code is the PERSON's: it is their inbox that proves it.
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use telmoni_shared::db::tenant_session::{HasPerson, Person, Scoped};
-use telmoni_shared::{OrganizationId, ProjectId, UserId};
+use telmoni_shared::{OrganizationId, ProjectId, TelmoniError, TenantError, UserId};
 use uuid::Uuid;
 
 /// What a confirmation code authorizes — the stored `purpose`.
@@ -296,6 +296,32 @@ pub async fn count_since(
     .bind(since)
     .fetch_one(tx.conn())
     .await
+}
+
+/// The most codes, or links, of one purpose a person is sent in a day.
+pub const DAILY_MAX: i64 = 5;
+
+/// Refused past [`DAILY_MAX`] of `purpose` in the last day: every code and
+/// link mailed to a person is held here, whatever a console holds back.
+///
+/// # Errors
+///
+/// `429` with a day's `Retry-After` past the cap; Postgres failing.
+pub async fn admit_one_more(
+    tx: &mut Scoped<'_, Person>,
+    user_id: &UserId,
+    purpose: Purpose,
+) -> Result<(), TelmoniError> {
+    let since = Utc::now() - Duration::days(1);
+    if count_since(tx, user_id, purpose, since).await? >= DAILY_MAX {
+        // A full day, matching the rolling window: a shorter `Retry-After`
+        // would be a promise the next press cannot keep.
+        return Err(TenantError::RateLimited {
+            retry_after_secs: 24 * 60 * 60,
+        }
+        .into());
+    }
+    Ok(())
 }
 
 #[cfg(test)]
