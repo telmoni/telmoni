@@ -204,14 +204,14 @@ CREATE TABLE telemetry.rules (
     severity          TEXT             NOT NULL DEFAULT 'unknown',
     severity_since    TIMESTAMPTZ      NOT NULL DEFAULT now(),
     told_at           TIMESTAMPTZ,
-    lease_id          UUID,
-    leased_until      TIMESTAMPTZ,
-    created_at        TIMESTAMPTZ      NOT NULL DEFAULT now(),
-    updated_at        TIMESTAMPTZ      NOT NULL DEFAULT now(),
     -- The connections its last notice reached, replaced by each move and
     -- joined by each reminder: a reminder goes to the linked connectors not
     -- among them, whatever their hours or a window say of the time it was told.
     told_to           UUID[]           NOT NULL DEFAULT '{}',
+    lease_id          UUID,
+    leased_until      TIMESTAMPTZ,
+    created_at        TIMESTAMPTZ      NOT NULL DEFAULT now(),
+    updated_at        TIMESTAMPTZ      NOT NULL DEFAULT now(),
     CONSTRAINT rules_name_check CHECK (char_length(name) BETWEEN 1 AND 60),
     CONSTRAINT rules_kind_check CHECK (kind IN ('run', 'step', 'model_call', 'tool_call')),
     CONSTRAINT rules_measure_check
