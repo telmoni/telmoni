@@ -110,6 +110,8 @@ class Telmoni:
     ) -> RunScope:
         """A run of ``agent``: ``with telmoni.run("bot") as run:`` or ``@telmoni.run("bot")``.
 
+        ``user_id`` is the end user the run is for, as your own id for them,
+        which ingest hashes; ``session_id`` the session its runs share.
         ``max_steps`` and ``max_spend``, in US dollars, are the guard's caps:
         once the run reaches one, what it opens next raises ``CapExceededError``.
         ``input_messages`` is content, sent only when asked and allowed.

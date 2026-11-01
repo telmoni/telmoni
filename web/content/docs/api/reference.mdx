@@ -59,8 +59,12 @@ answers `204` with `Allow: GET, HEAD, OPTIONS`.
 | Per API key | 600 requests / minute |
 | Per source IP address (an IPv6 address by its /64) | 1,200 requests / minute |
 
-Exceeding either rate limit returns `429 Too Many Requests` along with a
-`Retry-After` header. See [Errors](/docs/errors). The server meters both
+The [CLI](/docs/api/cli)'s lanes under `/cli/v1` are metered the same way: 600
+requests a minute a bearer, and 120 an address, the few a sign-in's polls and a
+refresh take.
+
+Exceeding a rate limit returns `429 Too Many Requests` along with a
+`Retry-After` header. See [Errors](/docs/errors). The server meters each
 itself, the address read past the proxies in front of it
 (`TRUSTED_PROXY_HOPS`), and shares the counts between its replicas through
 Redis.

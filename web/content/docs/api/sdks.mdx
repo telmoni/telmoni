@@ -634,10 +634,10 @@ release carries — LiteLLM's, the one Telmoni
 [prices a call by](/docs/api/ingest#what-a-call-cost), by its provider and the
 model it answered as, whole; else nothing. The table names each provider as
 the GenAI conventions spell it, the spelling the
-[field inventory](/docs/api/field-inventory) gives: `openai`, `anthropic`,
-`gcp.gemini`, `gcp.vertex_ai`, `aws.bedrock`, `azure.ai.openai`, `mistral_ai`,
-`x_ai`; a call naming its provider otherwise, `gemini` or `bedrock` say, finds
-no price there. Prices of your own, handed to the
+[field inventory](/docs/api/field-inventory) gives — `openai`, `anthropic`,
+`gcp.gemini`, `aws.bedrock` and the rest of its list — so a call naming its
+provider otherwise, `gemini` or `bedrock` say, finds no price there. Prices of
+your own, handed to the
 client as `prices`, come before the table's, for a model it lacks or prices
 otherwise than you pay; the SDK alone holds them, so Telmoni's own reads, an
 alert on what each run spent among them, still price that call by the table.
@@ -772,7 +772,7 @@ there, and counts there only what its calls in that process cost; a
 A run is a span of its own, named `invoke_agent <agent>`, inside your current
 trace when one is current and a trace of its own otherwise. It carries the
 run's id (`telmoni.run_id`, a UUID), its agent (`telmoni.agent`), the user
-and conversation you named (`user.id`, `gen_ai.conversation.id`), the first 32
+and session you named (`user.id`, `gen_ai.conversation.id`), the first 32
 of its tags Telmoni would keep, the most it keeps, as `telmoni.tag.<key>`, and
 the sample rate. Every span inside the run
 carries the run's id, agent, user and session, so Telmoni knows each

@@ -529,7 +529,7 @@ const RULE_CONTENT: &str = "content: what a person or a model wrote; free of an 
                             characters, held only by an export's 1 MiB";
 const RULE_PERSON: &str = "names a person: content, whatever else the span carries";
 const RULE_NAME: &str = "1 to 145 characters";
-const RULE_UP_TO_128: &str = "up to 128 characters";
+const RULE_1_TO_128: &str = "1 to 128 characters";
 const RULE_COUNT: &str = "a whole number, 0 or more";
 const RULE_REPLACED: &str = "a name the conventions replaced, read as the current one";
 
@@ -575,7 +575,7 @@ pub const INVENTORY: &[InventoryRow] = &[
         "the column user_id, as its HMAC-SHA-256 under a key of the project's own, the first \
          16 bytes in hex",
         Needs::AnyMode,
-        RULE_UP_TO_128,
+        RULE_1_TO_128,
     ),
     row(
         TAG_FAMILY,
@@ -635,28 +635,28 @@ pub const INVENTORY: &[InventoryRow] = &[
         ReadOn::AnySpan,
         "the column error_type",
         Needs::AnyMode,
-        "up to 128 characters: the exception's class, never its message",
+        "1 to 128 characters: the exception's class, never its message",
     ),
     row(
         RESPONSE_MODEL,
         ReadOn::ModelCall,
         "the column model",
         Needs::AnyMode,
-        "up to 128 characters, as the provider spells it",
+        "1 to 128 characters, as the provider spells it",
     ),
     row(
         REQUEST_MODEL,
         ReadOn::ModelCall,
         "the column model, where the response names none",
         Needs::AnyMode,
-        "up to 128 characters, as the provider spells it",
+        "1 to 128 characters, as the provider spells it",
     ),
     row(
         PROVIDER,
         ReadOn::ModelCall,
         "the column provider",
         Needs::AnyMode,
-        "up to 128 characters, as the conventions spell it: openai, anthropic, gcp.vertex_ai, \
+        "1 to 128 characters, as the conventions spell it: openai, anthropic, gcp.vertex_ai, \
          aws.bedrock",
     ),
     row(
@@ -707,7 +707,7 @@ pub const INVENTORY: &[InventoryRow] = &[
         ReadOn::AnySpan,
         "the column session_id",
         Needs::AnyMode,
-        "up to 200 characters, kept as sent",
+        "1 to 200 characters, kept as sent",
     ),
     row(
         ENVIRONMENT,
@@ -1082,16 +1082,22 @@ mod tests {
         };
         assert!(rule(AGENT).starts_with(&format!("1 to {AGENT_MAX} characters")));
         assert_eq!(RULE_NAME, format!("1 to {NAME_MAX} characters"));
-        assert_eq!(RULE_UP_TO_128, format!("up to {USER_ID_MAX} characters"));
+        assert_eq!(RULE_1_TO_128, format!("1 to {USER_ID_MAX} characters"));
+        // An empty one refuses the span, as one past its cap does.
         for (attribute, max) in [
             (ERROR_TYPE, ERROR_TYPE_MAX),
             (RESPONSE_MODEL, MODEL_MAX),
             (REQUEST_MODEL, MODEL_MAX),
             (PROVIDER, PROVIDER_MAX),
             (SESSION_ID, SESSION_ID_MAX),
-            (ENVIRONMENT, ENVIRONMENT_MAX),
-            (RELEASE, RELEASE_MAX),
         ] {
+            assert!(
+                rule(attribute).starts_with(&format!("1 to {max} characters")),
+                "{attribute}"
+            );
+        }
+        // A resource's, empty or past its cap, reads as none.
+        for (attribute, max) in [(ENVIRONMENT, ENVIRONMENT_MAX), (RELEASE, RELEASE_MAX)] {
             assert!(
                 rule(attribute).starts_with(&format!("up to {max} characters")),
                 "{attribute}"
@@ -1299,5 +1305,26 @@ mod tests {
         assert_eq!(json["attribute"], RUN_ID);
         assert_eq!(json["on"], "every span");
         assert_eq!(json["needs"], "any");
+    }
+
+    /// ⚠ What every SDK holds back as content (`sdk/fixtures/content.json`,
+    /// which each suite holds its own list to) is this list, name for name.
+    #[test]
+    fn the_sdks_hold_back_the_content_named_here() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../sdk/fixtures/content.json");
+        let fixture: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).expect("the fixture reads"))
+                .expect("the fixture parses");
+        let mut held: Vec<&str> = fixture["content"]
+            .as_array()
+            .expect("a list of names")
+            .iter()
+            .map(|name| name.as_str().expect("a name"))
+            .collect();
+        let mut ours = CONTENT.to_vec();
+        held.sort_unstable();
+        ours.sort_unstable();
+        assert_eq!(held, ours);
     }
 }
