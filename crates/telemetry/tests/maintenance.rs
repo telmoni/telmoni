@@ -642,6 +642,34 @@ async fn a_project_keeps_its_newest_ended_windows(pool: PgPool) {
     );
 }
 
+/// ⚠ A window dated to start before now starts now: it never reaches back
+/// over a notice told before it was set, which the window's end would tell
+/// again.
+#[sqlx::test]
+async fn a_window_dated_before_now_starts_now(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let (app, _, organization, project) = bare(&pool);
+    let asked = Utc::now();
+    let (status, window) = bare_send(
+        &app,
+        &organization,
+        &project,
+        "POST",
+        MUTES,
+        Some(&json!({
+            "starts_at": asked - TimeDelta::hours(2),
+            "ends_at": asked + TimeDelta::hours(1),
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{window}");
+    let starts_at: chrono::DateTime<Utc> = window["starts_at"]
+        .as_str()
+        .and_then(|at| at.parse().ok())
+        .expect("the window's start");
+    assert!(starts_at >= asked, "{starts_at} is before {asked}");
+}
+
 /// ⚠ A window in force is listed past any number ended before they began.
 #[sqlx::test]
 async fn a_window_in_force_is_listed_past_those_ended_ahead_of_it(pool: PgPool) {

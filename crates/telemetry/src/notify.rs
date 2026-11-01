@@ -69,8 +69,10 @@ pub async fn tell_incidents(
 }
 
 /// The alert's open incident told again, as a reminder, to the linked
-/// connectors that hear it now but a window or their hours kept from its last
-/// notice; that notice is then now, so each is told it once. One taken is not.
+/// connectors that hear it now but its last notice did not reach, a window or
+/// their hours then having kept it from them (`told_to` names whom it
+/// reached, so an edit of their hours or a window dated back tells nobody
+/// twice); that notice is then now, so each is told it once. One taken is not.
 pub async fn tell_held(state: &AppState, rule: &RuleRow, value: Option<f64>) {
     let Some(last) = rule.told_at else {
         return;
@@ -83,13 +85,14 @@ pub async fn tell_held(state: &AppState, rule: &RuleRow, value: Option<f64>) {
             return Ok(None);
         };
         let links = db::links_of(&mut tx, rule.id).await?;
-        let muted_then = mutes::in_force(&mut tx, &rule.project_id, rule.id, last).await?;
         let muted = mutes::in_force(&mut tx, &rule.project_id, rule.id, now).await?;
         let hearers: Vec<Uuid> = links
             .into_iter()
             .map(db::LinkRow::link)
             .filter(|link| {
-                (muted_then || !link.in_hours(last)) && !muted && link.hears(incident.severity, now)
+                !rule.told_to.contains(&link.connection_id)
+                    && !muted
+                    && link.hears(incident.severity, now)
             })
             .map(|link| link.connection_id)
             .collect();
@@ -182,11 +185,11 @@ async fn tell_one(
             let run = shown.filter(|_| reached.anyone).map(|run| run.run_id);
             keep_told(
                 state,
-                &rule.organization_id,
-                &rule.project_id,
+                (&rule.organization_id, &rule.project_id, rule.id),
                 one.incident_id,
                 &reached.connections,
                 run,
+                one.telling,
             )
             .await;
         }
@@ -253,16 +256,19 @@ async fn tell<'a>(
 }
 
 /// Where one of an incident's notices went, and the run it showed, kept on
-/// the incident; logged by its ids where it cannot be, as the notice stands.
+/// the incident, and on the alert as its last notice's hearers — a move's in
+/// place of the last, a reminder's beside them; logged by its ids where it
+/// cannot be, as the notice stands.
 async fn keep_told(
     state: &AppState,
-    organization_id: &OrganizationId,
-    project_id: &ProjectId,
+    (organization_id, project_id, rule_id): (&OrganizationId, &ProjectId, Uuid),
     incident_id: Uuid,
     connections: &[Uuid],
     run: Option<Uuid>,
+    telling: Telling,
 ) {
-    if connections.is_empty() && run.is_none() {
+    let replaces = telling != Telling::Reminder;
+    if !replaces && connections.is_empty() && run.is_none() {
         return;
     }
     let write = async {
@@ -271,6 +277,18 @@ async fn keep_told(
             .bind_organization(organization_id)
             .await?;
         incidents::told(&mut tx, project_id, incident_id, connections, run).await?;
+        sqlx::query(
+            "UPDATE telemetry.rules
+                SET told_to = CASE WHEN $3 THEN $2::uuid[]
+                              ELSE ARRAY(SELECT DISTINCT unnest(told_to || $2::uuid[]) ORDER BY 1) END
+              WHERE id = $1 AND project_id = $4",
+        )
+        .bind(rule_id)
+        .bind(connections)
+        .bind(replaces)
+        .bind(project_id)
+        .execute(tx.conn())
+        .await?;
         tx.commit().await?;
         Ok::<_, TelmoniError>(())
     };
@@ -609,12 +627,19 @@ fn words(rule: &RuleRow, value: Option<f64>, told: &Told) -> (String, String) {
         ),
         (Move::Opened, Severity::Warning) => (
             "warning",
-            past(
-                "warning",
-                rule.definition
-                    .warning_threshold
-                    .map_or_else(String::new, threshold),
-            ),
+            match rule.definition.warning_threshold {
+                Some(at) => past("warning", threshold(at)),
+                // An edit took the warning threshold away; the incident stands
+                // until the next reading moves it.
+                None => match value {
+                    Some(_) => {
+                        format!("{what} is {shown}, at warning, whose threshold was removed.")
+                    }
+                    None => format!(
+                        "{what} has no value now; its incident stands at warning, whose threshold was removed."
+                    ),
+                },
+            },
         ),
         (Move::Opened, _) => (
             "alert",
@@ -778,11 +803,11 @@ async fn tell_resolved(state: &AppState, incident: &IncidentRow, links: &[Link],
         Ok(reached) => {
             keep_told(
                 state,
-                organization_id,
-                project_id,
+                (organization_id, project_id, rule_id),
                 incident_id,
                 &reached.connections,
                 None,
+                Telling::First,
             )
             .await;
         }

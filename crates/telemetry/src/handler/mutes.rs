@@ -1,9 +1,9 @@
 //! A project's maintenance windows, under [`Resource::Alert`] as its alerts
 //! are: `GET` and `POST /internal/v1/telemetry/mutes`, and `POST
 //! /mutes/{id}/end`, each open to any member of the project. A window mutes
-//! one alert, or every alert of the project, from its start — now, unless
-//! given — to its end, at most thirty days on; ended early, it keeps who
-//! ended it. A project keeps its newest [`MUTES_ENDED_KEPT`] ended, and each
+//! one alert, or every alert of the project, from its start — now, or a
+//! later time given; one given before now is now — to its end, at most
+//! thirty days on; ended early, it keeps who ended it. A project keeps its newest [`MUTES_ENDED_KEPT`] ended, and each
 //! window opened or ended early is filed in the organization's audit chain,
 //! the record of who muted what.
 
@@ -46,7 +46,7 @@ pub struct MuteInput {
     /// The alert to mute; none, every alert of the project.
     #[serde(default)]
     pub rule_id: Option<Uuid>,
-    /// When it starts; now, if none.
+    /// When it starts; now, if none or before now.
     #[serde(default)]
     pub starts_at: Option<DateTime<Utc>>,
     pub ends_at: DateTime<Utc>,
@@ -91,7 +91,9 @@ pub async fn create_mute(
         .require_project(Verb::Create, Resource::Alert)?
         .project_id;
     let now = Utc::now();
-    let starts_at = input.starts_at.unwrap_or(now);
+    // A start before now is now: a window never reaches back over a notice
+    // told before it was set, which would be told again as the window ends.
+    let starts_at = input.starts_at.map_or(now, |at| at.max(now));
     let bad = |why: &str| TelmoniError::BadRequest(why.to_owned());
     if input.ends_at <= starts_at || input.ends_at <= now {
         return Err(bad(

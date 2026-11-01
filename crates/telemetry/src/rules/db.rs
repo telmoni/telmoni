@@ -31,6 +31,8 @@ pub struct RuleRow {
     pub severity: Severity,
     pub severity_since: DateTime<Utc>,
     pub told_at: Option<DateTime<Utc>>,
+    /// The connections its last notice reached, so a reminder goes to the rest.
+    pub told_to: Vec<Uuid>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -63,7 +65,7 @@ impl<'q> BindDefinition<'q>
 const RULE_COLUMNS: &str = "id, project_id, organization_id, name, kind, measure, aggregation, \
     filters, lookback, operator, alert_threshold, warning_threshold, missing_data, \
     renotify_minutes, paused, paused_at, value, evaluated_at, severity, severity_since, told_at, \
-    created_at, updated_at";
+    told_to, created_at, updated_at";
 
 /// Who paused an alert: a member, by hand, or its plan, on a fall past its
 /// number, which lifts its own once there is room again.

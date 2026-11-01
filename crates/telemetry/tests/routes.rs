@@ -445,6 +445,46 @@ async fn an_incident_told_out_of_a_connectors_hours_is_told_it_once_they_begin(p
     assert_eq!(project.sent().len(), 2, "told once");
 }
 
+/// ⚠ A connector that heard an incident is not told it again when its hours
+/// are edited after: the alert keeps whom its last notice reached.
+#[sqlx::test]
+async fn a_connector_that_heard_an_incident_is_not_told_again_when_its_hours_change(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let project = Project::new(&pool, &ch, Arc::new(NoLimits)).await;
+    let pager = Uuid::new_v4();
+    let within = json!([{ "connection_id": pager, "level": "alert", "hours": hours(-60, 60) }]);
+    let (status, made) = project
+        .send("POST", RULES, Some(&calls(0.5, None, &within)))
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{made}");
+    let rule = format!("{RULES}/{}", made["id"].as_str().expect("an id"));
+    project.evaluate(&pool).await;
+    assert_eq!(
+        project.sent(),
+        [(NotificationKind::IncidentOpened, vec![pager])]
+    );
+
+    // Saved over with hours that, read against a notice three hours back,
+    // would say the pager was out of them when it was told.
+    let (status, saved) = project
+        .send("PUT", &rule, Some(&calls(0.5, None, &within)))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    sqlx::query("UPDATE telemetry.rules SET told_at = now() - interval '3 hours'")
+        .execute(&pool)
+        .await
+        .expect("told earlier");
+    project.evaluate(&pool).await;
+    project.evaluate(&pool).await;
+    assert_eq!(
+        project.sent().len(),
+        1,
+        "told once, whatever its hours say now"
+    );
+}
+
 /// ⚠ A recovery under a window reaches the connectors that heard its incident, and no other.
 #[sqlx::test]
 async fn a_recovery_under_a_window_reaches_the_connectors_that_heard_its_incident(pool: PgPool) {
