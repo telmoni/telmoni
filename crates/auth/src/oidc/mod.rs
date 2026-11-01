@@ -127,7 +127,7 @@ impl IdTokenClaims {
     }
 }
 
-/// What a provider is held to (`AUTH_<PROVIDER>_CHECKS`): PKCE and the
+/// What the provider is held to (`AUTH_CUSTOM_CHECKS`): PKCE and the
 /// nonce, each on unless the deployment names the
 /// provider as one that refuses it; `state` always, since the callback is
 /// built on it.

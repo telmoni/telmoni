@@ -93,7 +93,7 @@ $ export TELMONI_API_KEY="tm_..."
 $ telmoni status
 ```
 
-At a terminal, a command that acts with a key asks before it uses a new one, on stderr and without showing it: `TELMONI_API_KEY holds an API key. Use it ahead of the saved login? [y/N]`. Your answer is kept for that key alone, in `config.json` under `api_key_answers`, by the key's SHA-256 rather than the key, so a new key is asked about again; no answer at all, as Ctrl-D gives, passes it over for that command alone. A key you decline is passed over as if the variable were unset. To change your answer, set [`use_api_key_env`](#configuration-keys-reference) while the variable holds the key:
+At a terminal, a command that acts with a key asks before it uses a new one, on stderr and without showing it: `TELMONI_API_KEY holds an API key. Use it ahead of the saved login? [y/N]`. Your answer is kept for that key alone, in `config.json` under `api_key_answers`, by the key's SHA-256 rather than the key, so a new key is asked about again; no answer at all, as Ctrl-D gives, passes it over for that command alone. A key you decline is passed over as if the variable were unset, with a note on stderr saying so each time. To change your answer, set [`use_api_key_env`](#configuration-keys-reference) while the variable holds the key:
 
 ```console
 $ telmoni config set use_api_key_env true

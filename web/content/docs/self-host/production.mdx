@@ -7,9 +7,9 @@ A production deployment of Telmoni separates the database roles, keeps audit par
 
 ## Identity & Authentication: Production OIDC Hardening
 
-When first launching Telmoni, you can seed an initial account with `ADMIN_EMAIL` and `ADMIN_PASSWORD`. It signs in through the login form (an email address and a password that Telmoni holds), which is on unless `AUTH_DISABLE_USERNAME_PASSWORD=true`.
+When first launching Telmoni, you can seed an initial account with `ADMIN_EMAIL` and `ADMIN_PASSWORD`. It signs in at the password form (an email address and a password that Telmoni holds), which is on unless `AUTH_DISABLE_USERNAME_PASSWORD=true`.
 
-In a production deployment, **we strongly recommend connecting an OpenID Connect (OIDC) identity provider**, one that publishes its discovery document at `{issuer}/.well-known/openid-configuration` and signs ID tokens with RS256 or the algorithm `AUTH_CUSTOM_ID_TOKEN_SIGNED_RESPONSE_ALG` names, and disabling the login form entirely.
+In a production deployment, **we strongly recommend connecting an OpenID Connect (OIDC) identity provider**, one that publishes its discovery document at `{issuer}/.well-known/openid-configuration` and signs ID tokens with RS256 or the algorithm `AUTH_CUSTOM_ID_TOKEN_SIGNED_RESPONSE_ALG` names, and turning the password form off.
 
 ### Why use OIDC in production?
 
@@ -82,7 +82,7 @@ To keep the password form for other addresses while your own domains sign in thr
 <Callout type="warn">
 The Telmoni server performs sanity checks at boot:
 - If `AUTH_DISABLE_USERNAME_PASSWORD=true` is set without a configured provider (`AUTH_CUSTOM_CLIENT_ID`), the server halts immediately because nobody could sign in.
-- If `ADMIN_EMAIL` or `ADMIN_PASSWORD` is set alongside `AUTH_DISABLE_USERNAME_PASSWORD=true`, the server halts because a password account could never log in. Remove both before enabling `AUTH_DISABLE_USERNAME_PASSWORD`.
+- If `ADMIN_EMAIL` or `ADMIN_PASSWORD` is set alongside `AUTH_DISABLE_USERNAME_PASSWORD=true`, the server halts because a password account could never sign in. Remove both before enabling `AUTH_DISABLE_USERNAME_PASSWORD`.
 </Callout>
 </Step>
 

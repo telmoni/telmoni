@@ -23,7 +23,7 @@ use super::jwks::{JwksCache, KeySetUrl};
 const EXP_LEEWAY_SECS: i64 = 30;
 
 /// The one algorithm a provider's id tokens may carry
-/// (`AUTH_<PROVIDER>_ID_TOKEN_SIGNED_RESPONSE_ALG`): each one `ring`
+/// (`AUTH_CUSTOM_ID_TOKEN_SIGNED_RESPONSE_ALG`): each one `ring`
 /// verifies, so no crate is added for one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SigningAlg {
