@@ -352,14 +352,25 @@ impl RuleInput {
                 _ => "cost is counted per run, from its model calls",
             }));
         }
+        let filters = self.filters.checked()?;
         if self.measure == RuleMeasure::Cost {
             // Read from the calls as they land, before the run's own status is known.
-            if !(self.filters.status.is_empty() && self.filters.tool.is_empty()) {
+            if !(filters.status.is_empty() && filters.tool.is_empty()) {
                 return Err(bad(
                     "a run's cost is read from its model calls as they land: filter it by \
                      agent, model, provider, environment or release",
                 ));
             }
+        }
+        // A field its spans never carry would hold the alert at nothing for ever.
+        let calls = self.kind == SpanKind::ModelCall || self.measure == RuleMeasure::Cost;
+        if !calls && !(filters.model.is_empty() && filters.provider.is_empty()) {
+            return Err(bad(
+                "model and provider filter model calls, or a run's cost by its calls",
+            ));
+        }
+        if self.kind != SpanKind::ToolCall && !filters.tool.is_empty() {
+            return Err(bad("tool filters tool calls alone"));
         }
         if !self.alert_threshold.is_finite() {
             return Err(bad("the alert threshold is a finite number"));
@@ -405,7 +416,7 @@ impl RuleInput {
                 kind: self.kind,
                 measure: self.measure,
                 aggregation: self.aggregation,
-                filters: self.filters.checked()?,
+                filters,
                 window: self.window,
                 operator: self.operator,
                 alert_threshold: self.alert_threshold,
@@ -673,6 +684,50 @@ mod tests {
                 .checked()
                 .is_err()
             );
+        }
+    }
+
+    /// A filter names a field the alert's spans carry, as the form offers them.
+    #[test]
+    fn a_filter_names_a_field_its_spans_carry() {
+        let tools = || RuleFilters {
+            tool: vec!["search_docs".into()],
+            ..RuleFilters::default()
+        };
+        let calls = RuleInput {
+            kind: SpanKind::ToolCall,
+            filters: tools(),
+            ..input()
+        };
+        assert!(calls.checked().is_ok());
+        for refused in [
+            RuleInput {
+                kind: SpanKind::Step,
+                ..input()
+            },
+            RuleInput {
+                kind: SpanKind::Run,
+                ..input()
+            },
+            RuleInput {
+                kind: SpanKind::Step,
+                filters: RuleFilters {
+                    provider: vec!["anthropic".into()],
+                    ..RuleFilters::default()
+                },
+                ..input()
+            },
+            RuleInput {
+                filters: tools(),
+                ..input()
+            },
+            RuleInput {
+                kind: SpanKind::Run,
+                filters: tools(),
+                ..input()
+            },
+        ] {
+            assert!(refused.checked().is_err());
         }
     }
 }

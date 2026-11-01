@@ -182,6 +182,8 @@ async fn an_alert_that_reads_two_ways_is_refused(pool: PgPool) {
         ("aggregation", json!("count")),
         ("warning_threshold", json!(6000)),
         ("kind", json!("span")),
+        ("kind", json!("step")),
+        ("filters", json!({ "tool": ["search_docs"] })),
         ("window", json!("month")),
         ("renotify_minutes", json!(0)),
     ] {
