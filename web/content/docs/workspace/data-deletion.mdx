@@ -153,12 +153,13 @@ On the hosted service, deleted data leaves the backups as they expire: the
 database keeps thirty daily backups and telemetry's store nightly ones, and
 nothing older than thirty days is kept of either.
 
-The content a project kept is the exception when the project or its
-organization is deleted, or its content is as its mode goes `off`. Each field
-is sealed under a key of the project's own, and that key is deleted in the
-same commit as the content or the mode, so from that moment no copy opens, a backup's among them: the receipt gives that moment as
-"unreadable since". A deleted trace's or end user's content is not: their
-project's key stays for its other content, so the backups' copies of it leave
-as they expire, as everything else does. On a self-hosted
-deployment, your backups are yours. Files you downloaded and notices already
-delivered to your channels are yours too, and nothing recalls them.
+When a project or its organization is deleted, or a project's content is
+deleted as its mode goes `off`, the content's key goes in the same commit:
+each field is sealed under a key of the project's own, so from that moment
+nothing reads the content and no backup taken after holds it, the moment the
+receipt gives as "unreadable since". A backup taken before holds the key
+beside the content, and leaves as it expires, as everything else does; so
+does a deleted trace's or end user's content, whose project's key stays for
+its other content. On a self-hosted deployment, your backups are yours. Files
+you downloaded and notices already delivered to your channels are yours too,
+and nothing recalls them.

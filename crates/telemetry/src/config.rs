@@ -21,7 +21,7 @@ pub struct Config {
     pub telemetry_kek: Redacted,
     /// The key that seals each project's content key (`CONTENT_KEK`), spelt
     /// as `TELEMETRY_KEK` is and never the same key: deleting a project's
-    /// content key makes its content unreadable, backups among it. Required,
+    /// content key makes its content unreadable, but in a backup taken before. Required,
     /// since every binary ingests.
     pub content_kek: Redacted,
     /// Cloud KMS's origin (`KMS_API_BASE`); the tests point it at a mock.

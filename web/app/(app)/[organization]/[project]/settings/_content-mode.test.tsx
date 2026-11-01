@@ -151,7 +151,7 @@ describe("ContentModeForm", () => {
     fireEvent.click(radio("Off"));
     expect(screen.getByText(/stays readable to its members/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("checkbox", { name: "Also delete what this project kept" }));
-    expect(screen.getByText(/no copy opens again, backups among them/)).toBeInTheDocument();
+    expect(screen.getByText(/nothing reads it again; a backup taken before keeps a copy until it expires/)).toBeInTheDocument();
     await act(async () => {
       fireEvent.click(save());
     });

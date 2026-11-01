@@ -449,7 +449,7 @@ docker compose -f deploy/compose/docker-compose.yml exec -T postgres \
 Connector credentials are sealed with `CONNECTOR_KEK`, each project's hashing key with `TELEMETRY_KEK` and each project's content key with `CONTENT_KEK`, and a dump restored without the matching key leaves what it seals permanently unreadable. A `local:` key is a secret: back it up alongside your dumps. A Cloud KMS key cannot be dumped: never disable or destroy it while a dump that needs it exists.
 </Callout>
 
-A dump holds a project's content only beside the key it is sealed under, so deleting a project, or its organization, deletes the key in the same commit as the content: from that moment no dump's copy of that content opens, even restored with `CONTENT_KEK`, which is what a deletion's receipt means by "unreadable since".
+A dump holds a project's content only beside the key it is sealed under, so deleting a project, or its organization, deletes the key in the same commit as the content: no dump made from that moment holds a copy, which is what a deletion's receipt means by "unreadable since". A dump made before holds both, and opens with `CONTENT_KEK` until you delete it, so keep a dump no longer than you would keep what it holds.
 
 ### ClickHouse backups
 

@@ -809,12 +809,13 @@ impl ComposingMailer {
     }
 }
 
-/// What a deleted content key means, in a receipt: every copy of the
-/// content, backups among them, unreadable from the moment it went.
+/// What a deleted content key means, in a receipt: nothing reads the
+/// content from the moment it went, but a backup taken before.
 fn unreadable(since: chrono::DateTime<chrono::Utc>) -> String {
     format!(
-        "Its content has been unreadable since {} UTC, every copy, backups \
-         among them: the key it was sealed under was deleted with it.",
+        "Its content has been unreadable since {} UTC, when the key it was \
+         sealed under was deleted with it; a backup taken before then holds a \
+         copy until it expires.",
         since.format("%Y-%m-%d %H:%M")
     )
 }
@@ -895,7 +896,7 @@ mod tests {
             .await;
             assert!(
                 mail.text
-                    .contains("unreadable since 2026-10-31 04:05 UTC, every copy, backups"),
+                    .contains("unreadable since 2026-10-31 04:05 UTC, when the key it was"),
                 "{}",
                 mail.text
             );

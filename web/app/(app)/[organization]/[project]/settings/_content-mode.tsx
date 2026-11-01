@@ -154,7 +154,7 @@ export function ContentModeForm({
           </Label>
           <p className="text-sm text-muted-foreground">
             {deleteContent
-              ? "Its key is deleted at once, so no copy opens again, backups among them. There is no undo, and you are mailed a receipt."
+              ? "Its key is deleted with it at once, so nothing reads it again; a backup taken before keeps a copy until it expires. There is no undo, and you are mailed a receipt."
               : "What it kept stays readable to its members, each read recorded, until its spans' retention ends."}
           </p>
         </div>
