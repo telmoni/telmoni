@@ -115,7 +115,7 @@ export function MemberRow({
   const canOffer = canManage && isOwnerCaller && member.role === Role.Admin;
   const offered = Boolean(member.offerExpiresAt);
   const control = (label: string, text: string) => (
-    <Button variant="outline" size="sm" className="h-9 text-xs" disabled={pending} aria-label={label}>
+    <Button variant="outline" size="sm" disabled={pending} aria-label={label}>
       {text}
     </Button>
   );
@@ -152,7 +152,7 @@ export function MemberRow({
             label={roleLabel}
             onChange={(role) => run(() => act.setRole(member.memberId, role))}
             disabled={pending}
-            className="h-9 w-32 text-xs"
+            className="w-32 text-xs"
             ariaLabel={`Role for ${member.email}`}
           />
         ) : (
@@ -164,7 +164,7 @@ export function MemberRow({
         <LocalTime iso={member.createdAt} mode="date" />
       </Td>
       <Td className="text-right whitespace-nowrap">
-        <div className="flex items-center justify-end gap-3">
+        <div className="flex items-center justify-end gap-gutter">
           {canOffer && !offered && (
             <ConfirmDialog
               trigger={control(`${words.transfer} to ${member.email}`, words.transfer)}
@@ -234,7 +234,6 @@ export function InviteRow({
               <Button
                 variant="outline"
                 size="sm"
-                className="h-9 text-xs"
                 disabled={pending}
                 aria-label={`Withdraw the invitation to ${invite.email}`}
               >

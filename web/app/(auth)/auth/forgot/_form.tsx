@@ -25,7 +25,7 @@ export function ForgotForm() {
 
   return (
     <form
-      className="grid gap-3"
+      className="grid gap-gutter"
       onSubmit={(e) => {
         e.preventDefault();
         if (pending) return;

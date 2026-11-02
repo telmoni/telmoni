@@ -25,7 +25,7 @@ export default async function RefusedPage({
 }: PageProps<"/auth/refused">) {
   const reason = refusalNamed(sole((await searchParams).reason));
   return (
-    <Card className="gap-3">
+    <Card className="gap-gutter">
       <CardHeader>
         <CardTitle>You are not signed in</CardTitle>
         <CardDescription>{WORDS[reason]}</CardDescription>

@@ -87,7 +87,7 @@ export default async function ConnectorsPage({
     <>
       <PageHeader title="Connectors" />
       <div className="grid gap-6">
-        <section className="grid gap-3">
+        <section className="grid gap-gutter">
           <p className="text-sm text-muted-foreground">
             Connect this project to the places it already talks. A Slack channel
             gets every notice this project and its organization raise; a webhook,
@@ -112,7 +112,7 @@ export default async function ConnectorsPage({
           {/* Two to a row from `sm` up, one below it: a tile holds a mark, a
               name and a sentence, and two of those across a phone is a
               column of initials. */}
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid gap-gutter sm:grid-cols-2">
             {PROVIDERS.map((provider) => (
               <Tile
                 key={provider}
@@ -153,8 +153,8 @@ function Tile({
   const start = isOAuthProvider(provider) ? connectStartPath(provider, projectId) : null;
   return (
     <Card className="gap-4">
-      <div className="flex items-start justify-between gap-3">
-        <span className="flex items-center gap-3">
+      <div className="flex items-start justify-between gap-gutter">
+        <span className="flex items-center gap-gutter">
           {/* No colour class: these marks carry their brand's own. */}
           <Icon className="size-6 shrink-0" />
           <span className="text-sm font-medium">{name}</span>
@@ -168,13 +168,13 @@ function Tile({
       <p className="text-sm text-muted-foreground">{BLURB[provider]}</p>
 
       {enabled && connections.length > 0 && (
-        <ul className="grid gap-3">
+        <ul className="grid gap-gutter">
           {connections.map((connection) => (
             <li
               key={connection.id}
-              className="grid gap-2 rounded-menu border border-border p-3"
+              className="grid gap-2 rounded-menu border border-border p-gutter"
             >
-              <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center justify-between gap-gutter">
                 <span className="flex min-w-0 items-baseline gap-2">
                   <span className="min-w-0 truncate text-sm font-medium">
                     {connectionName(connection)}
@@ -213,7 +213,7 @@ function Tile({
                   <LocalTime iso={connection.previous_secret_expires_at} />
                 </p>
               )}
-              <div className="flex flex-wrap items-center gap-3">
+              <div className="flex flex-wrap items-center gap-gutter">
                 <DeliveriesButton
                   projectId={projectId}
                   connectionId={connection.id}

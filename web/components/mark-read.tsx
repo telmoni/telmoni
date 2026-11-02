@@ -14,7 +14,6 @@ export function MarkRead({ unread, mark }: { unread: number; mark: () => Promise
     <Button
       variant="outline"
       size="sm"
-      className="h-9 text-xs"
       disabled={pending}
       onClick={() => run(mark)}
     >

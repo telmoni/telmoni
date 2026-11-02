@@ -104,7 +104,6 @@ export function DeliveriesButton({
       <Button
         variant="outline"
         size="sm"
-        className="h-9 text-xs"
         aria-label={`Show deliveries to ${label}`}
         onClick={() => {
           setOpen(true);
@@ -155,8 +154,8 @@ export function DeliveriesButton({
                 No deliveries yet.
               </p>
             ) : (
-              <div className="grid gap-3">
-                <ul className="grid gap-3">
+              <div className="grid gap-gutter">
+                <ul className="grid gap-gutter">
                   {load.entries.map((entry) => (
                     <DeliveryRow
                       key={entry.id}
@@ -214,8 +213,8 @@ function DeliveryRow({
   onResend: () => void;
 }) {
   return (
-    <li className="grid gap-2 rounded-menu border border-border p-3">
-      <div className="flex items-start justify-between gap-3">
+    <li className="grid gap-2 rounded-menu border border-border p-gutter">
+      <div className="flex items-start justify-between gap-gutter">
         <span className="grid min-w-0 gap-0.5">
           <span className="text-xs text-muted-foreground">{eventKindLabel(entry.kind)}</span>
           <span className="min-w-0 truncate text-sm font-medium">{entry.subject}</span>

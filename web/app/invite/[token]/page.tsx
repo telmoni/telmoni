@@ -69,7 +69,7 @@ export default async function InvitePage({
           accept it. That address is the one it was sent to, and the only one
           that can take it.
         </p>
-        <div className="flex flex-wrap gap-3">
+        <div className="flex flex-wrap gap-gutter">
           <Button asChild>
             <a href={`/auth/signup?returnTo=${encodeURIComponent(back)}`}>
               Create an account
@@ -114,7 +114,7 @@ export default async function InvitePage({
 function Shell({ children }: { children: React.ReactNode }) {
   return (
     <div className="theme-paper flex min-h-svh flex-col items-center justify-center bg-background p-8">
-      <Card className="grid w-full max-w-md gap-3">{children}</Card>
+      <Card className="grid w-full max-w-md gap-gutter">{children}</Card>
     </div>
   );
 }

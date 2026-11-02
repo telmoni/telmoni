@@ -36,8 +36,8 @@ export function OrganizationNameForm({
   };
 
   return (
-    <form onSubmit={handleSubmit} className="grid gap-3">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+    <form onSubmit={handleSubmit} className="grid gap-gutter">
+      <div className="flex flex-col gap-gutter sm:flex-row sm:items-center">
         <Input
           value={name}
           onChange={(e) => setName(e.target.value)}

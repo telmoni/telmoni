@@ -13,7 +13,7 @@ export function ConfirmEmail({ userId, token }: { userId: string; token: string 
 
   if (done) {
     return (
-      <div className="grid gap-3 text-sm">
+      <div className="grid gap-gutter text-sm">
         <p>Your email address is confirmed. Sign in to get started.</p>
         <div>
           {/* A Route Handler, not a page, so never a <Link>: a link's prefetch
@@ -28,7 +28,7 @@ export function ConfirmEmail({ userId, token }: { userId: string; token: string 
   }
 
   return (
-    <div className="grid gap-3">
+    <div className="grid gap-gutter">
       <div>
         <Button
           disabled={pending}

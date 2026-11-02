@@ -15,12 +15,12 @@ export function Conversation({ messages, turn }: { messages: AgentMessage[]; tur
         m.role === "user" ? (
           <p
             key={m.id}
-            className="ml-8 justify-self-end rounded-lg bg-muted px-3 py-2 text-sm whitespace-pre-wrap wrap-break-word"
+            className="ml-8 justify-self-end rounded-lg bg-muted px-gutter py-2 text-sm whitespace-pre-wrap wrap-break-word"
           >
             {m.content}
           </p>
         ) : (
-          <div key={m.id} className="grid gap-3">
+          <div key={m.id} className="grid gap-gutter">
             {m.content !== "" && <Reply content={m.content} citations={m.citations} />}
             {m.content === "" && streaming && i === messages.length - 1 && !tool && (
               <AgentThinking />

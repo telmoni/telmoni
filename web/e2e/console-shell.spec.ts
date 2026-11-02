@@ -81,27 +81,25 @@ test.describe("Console chrome row", () => {
     const rail = page.locator("#console-sidebar");
     const row = rail.getByRole("link", { name: "Overview" });
 
-    // Open, the header's first cell is the rail's own width and shares its
-    // inset: the brand opens on the edge every row opens on, the control
-    // that closes the rail ends on the edge every row ends on, and the
-    // cell's rule continues as the rail's.
+    // Open, the header's first cell holds the toggle on the left — in line
+    // with the nav row icons below — and the brand to its right, aligned
+    // with the nav row labels at the 48px mark (rowOpen.x + 28px icon slot + 8px gap).
     const railOpen = (await rail.boundingBox())!;
     const brandOpen = (await brand.boundingBox())!;
     const rowOpen = (await row.boundingBox())!;
     const close = (await page.getByRole("button", { name: "Collapse navigation" }).boundingBox())!;
-    expect(Math.abs(brandOpen.x - rowOpen.x)).toBeLessThanOrEqual(1);
+    expect(Math.abs(close.x + close.width / 2 - (rowOpen.x + 14))).toBeLessThanOrEqual(1);
     expect(Math.abs(rowOpen.x - railOpen.x - 14)).toBeLessThanOrEqual(1);
-    expect(Math.abs(close.x + close.width - (rowOpen.x + rowOpen.width))).toBeLessThanOrEqual(1);
+    expect(Math.abs(brandOpen.x - (rowOpen.x + 36))).toBeLessThanOrEqual(1);
+    expect(brandOpen.x).toBeGreaterThan(close.x + close.width);
 
     await page.getByRole("button", { name: "Collapse navigation" }).click();
     const open = page.getByRole("button", { name: "Expand navigation" });
     await expect(open).toBeVisible();
     await page.waitForTimeout(400);
 
-    // ⚠ **The name goes; the mark stays and becomes the control.** Closed,
-    // the rail is one icon wide with the inset on both sides, and the mark,
-    // now the button that opens the rail, lands on the centre every icon
-    // shares; the lockup is the one piece of chrome wider than the column.
+    // Closed, the brand is hidden and the toggle button remains on the
+    // center axis that every icon shares.
     await expect(brand).toBeHidden();
     const railShut = (await rail.boundingBox())!;
     const centre = railShut.x + railShut.width / 2;

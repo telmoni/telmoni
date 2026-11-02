@@ -25,7 +25,7 @@ export default async function DevicePage({
   }
 
   return (
-    <Card className="gap-3">
+    <Card className="gap-gutter">
       <CardHeader>
         <CardTitle>Sign in a device</CardTitle>
         <CardDescription>

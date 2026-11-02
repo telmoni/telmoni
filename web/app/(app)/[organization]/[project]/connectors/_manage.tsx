@@ -63,12 +63,11 @@ export function ConnectionActions({
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-3">
+    <div className="flex flex-wrap items-center gap-gutter">
       {connection.status === "active" && (
         <Button
           variant="outline"
           size="sm"
-          className="h-9 text-xs"
           disabled={pending}
           onClick={sendTest}
         >
@@ -80,7 +79,6 @@ export function ConnectionActions({
           <Button
             variant="outline"
             size="sm"
-            className="h-9 text-xs"
             disabled={pending}
             aria-label={`Choose the events sent to ${label}`}
             onClick={() => setEditingEvents(true)}
@@ -100,7 +98,6 @@ export function ConnectionActions({
           <Button
             variant="outline"
             size="sm"
-            className="h-9 text-xs"
             disabled={pending}
             aria-label={`Rotate the signing secret for ${label}`}
             onClick={() => setRotating(true)}
@@ -122,7 +119,7 @@ export function ConnectionActions({
         reconnectHref && (
           // The same handshake as a first install: it lands on the same key
           // and repairs the row in place.
-          <Button asChild variant="outline" size="sm" className="h-9 text-xs">
+          <Button asChild variant="outline" size="sm">
             <a href={reconnectHref}>Reconnect</a>
           </Button>
         )
@@ -133,7 +130,7 @@ export function ConnectionActions({
           <Button
             variant="outline"
             size="sm"
-            className="h-9 text-xs text-destructive hover:text-destructive hover:bg-destructive/10"
+            className="text-destructive hover:text-destructive hover:bg-destructive/10"
             disabled={pending}
             aria-label={`Disconnect ${label}`}
           >

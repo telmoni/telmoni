@@ -26,7 +26,7 @@ export default async function SignUpPage({
   const byInvitation = config ? !config.allowSignUp : false;
 
   return (
-    <Card className="gap-3">
+    <Card className="gap-gutter">
       <CardHeader>
         <CardTitle>Create an account</CardTitle>
         <CardDescription>
@@ -37,7 +37,7 @@ export default async function SignUpPage({
               : "Your account is ready as soon as you press the button."}
         </CardDescription>
       </CardHeader>
-      <CardContent className="grid gap-3">
+      <CardContent className="grid gap-gutter">
         <SignUpForm
           state={pending.state}
           email={sole(params.email) ?? ""}

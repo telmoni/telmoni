@@ -30,7 +30,7 @@ export function Notices({
   project?: ProjectAt;
 }) {
   return (
-    <section className="grid gap-3" aria-label={label}>
+    <section className="grid gap-gutter" aria-label={label}>
       <div className="flex items-center justify-between gap-2">
         <h2 className="text-sm font-medium">{label}</h2>
         {action}

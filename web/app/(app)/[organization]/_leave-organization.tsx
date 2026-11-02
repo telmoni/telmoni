@@ -34,7 +34,7 @@ export function LeaveOrganization({
   const { pending, error, run } = useAction();
 
   return (
-    <Card className="gap-3">
+    <Card className="gap-gutter">
       <div className="grid gap-1">
         <p className="text-sm font-medium">Leave {name}</p>
         <p className="text-sm text-muted-foreground">
@@ -54,7 +54,6 @@ export function LeaveOrganization({
             <Button
               variant="outline"
               size="sm"
-              className="h-9 text-xs"
               disabled={pending}
             >
               {/* Named by what it shows, which a voice command says. */}

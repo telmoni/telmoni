@@ -21,7 +21,7 @@ export default async function ResetPage({
   if (config && !config.passwordSignIn) notFound();
 
   return (
-    <Card className="gap-3">
+    <Card className="gap-gutter">
       <CardHeader>
         <CardTitle>Choose a new password</CardTitle>
         <CardDescription>

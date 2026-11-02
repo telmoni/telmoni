@@ -15,14 +15,14 @@ export default async function ForgotPage() {
   const config = await getSignInConfig();
   if (config && !config.passwordSignIn) notFound();
   return (
-    <Card className="gap-3">
+    <Card className="gap-gutter">
       <CardHeader>
         <CardTitle>Reset your password</CardTitle>
         <CardDescription>
           Enter the address on your account and we email you a link to choose a new one.
         </CardDescription>
       </CardHeader>
-      <CardContent className="grid gap-3">
+      <CardContent className="grid gap-gutter">
         <ForgotForm />
         <p className="text-sm text-muted-foreground">
           {/* A Route Handler, not a page, so never a <Link>: a link's prefetch

@@ -85,7 +85,7 @@ export function TraceTable({ organization, slug, query, ui, traces, knownTags }:
   return (
     <div className="grid gap-2">
       {chosen.size > 0 && (
-        <div className="flex flex-wrap items-center gap-2 rounded-md bg-muted px-3 py-1.5 text-sm" role="status">
+        <div className="flex flex-wrap items-center gap-2 rounded-md bg-muted px-gutter py-1.5 text-sm" role="status">
           <span>
             {formatCount(chosen.size)} {chosen.size === 1 ? "trace" : "traces"} chosen
           </span>

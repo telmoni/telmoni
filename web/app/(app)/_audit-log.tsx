@@ -47,7 +47,7 @@ export function AuditLog({
     <>
       <PageHeader title="Audit log" action={action} />
       <div className="grid gap-6">
-        <section className="grid gap-3">
+        <section className="grid gap-gutter">
           <div className="grid gap-1">
             <h2 className="text-sm font-medium">Activity</h2>
             <p className="text-sm text-muted-foreground">{description}</p>

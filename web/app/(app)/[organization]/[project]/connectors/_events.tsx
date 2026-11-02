@@ -80,7 +80,7 @@ export function EventPicker({
           Every kind of notice, including kinds added later.
         </p>
       ) : (
-        <ul className="grid gap-3 rounded-menu border border-border p-3">
+        <ul className="grid gap-gutter rounded-menu border border-border p-gutter">
           {NOTIFICATION_KINDS.map((kind) => {
             const switchId = `${id}-${kind}`;
             const checked = value.kinds.includes(kind);

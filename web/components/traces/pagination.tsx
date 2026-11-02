@@ -90,7 +90,7 @@ export function ListPagination({ list, organization, slug, query, ui = {}, total
       <span className="font-medium tabular-nums">
         Page {formatCount(page)} of {formatCount(pages)}
       </span>
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-gutter">
         <PageButton href={to(1)} disabled={page <= 1} label="First page" icon={ChevronsLeftIcon} />
         <PageButton href={to(page - 1)} disabled={page <= 1} label="Previous page" icon={ChevronLeftIcon} />
         <PageButton href={to(page + 1)} disabled={page >= pages} label="Next page" icon={ChevronRightIcon} />

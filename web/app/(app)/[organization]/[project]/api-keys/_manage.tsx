@@ -191,9 +191,9 @@ function MintKeyPanel({
             <p className="text-muted-foreground">Optional.</p>
           </SidePanelRow>
           <SidePanelRow label="What it opens">
-            <div className="grid max-w-md gap-3">
+            <div className="grid max-w-md gap-gutter">
               {API_KEY_SCOPES.map(({ scope, label, detail }) => (
-                <div key={scope} className="flex items-center justify-between gap-3">
+                <div key={scope} className="flex items-center justify-between gap-gutter">
                   <Label htmlFor={`key-scope-${scope}`} className="grid gap-0.5 font-normal">
                     <span>{label}</span>
                     <span className="text-xs text-muted-foreground">{detail}</span>

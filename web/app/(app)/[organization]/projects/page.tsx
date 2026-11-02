@@ -60,7 +60,7 @@ export default async function OrganizationProjectsPage() {
         {/* The tiles, with Leave beside a project the person holds a seat
             in; never for the owner, who holds every project outright and
             whose leave the lane refuses. */}
-        <section className="grid gap-3" aria-label="Projects">
+        <section className="grid gap-gutter" aria-label="Projects">
           {projects === null ? (
             <NoticeCard title="The projects could not be loaded." body="Try again in a moment." />
           ) : projects.length === 0 ? (

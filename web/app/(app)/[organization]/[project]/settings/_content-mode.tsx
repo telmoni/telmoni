@@ -62,7 +62,7 @@ export function ContentModeForm({
   // is dimmed and out of the tab order, which is no way to show an answer.
   if (!canEdit) {
     return (
-      <div className="grid gap-3 text-sm">
+      <div className="grid gap-gutter text-sm">
         <p>
           <span className="font-medium">Content mode:</span> {LABELS[mode]}
         </p>
@@ -121,8 +121,8 @@ export function ContentModeForm({
   const shownError = error ?? (leavingOff ? flow.error : null);
 
   return (
-    <form onSubmit={handleSubmit} className="grid gap-3">
-      <div className="flex flex-wrap items-center gap-3">
+    <form onSubmit={handleSubmit} className="grid gap-gutter">
+      <div className="flex flex-wrap items-center gap-gutter">
         <span id={labelId} className="text-sm font-medium">
           Content mode
         </span>
@@ -160,7 +160,7 @@ export function ContentModeForm({
         </div>
       )}
       {leavingOff && flow.step.step === "code" && (
-        <div className="grid gap-3">
+        <div className="grid gap-gutter">
           <CodeField
             id={codeId}
             label={<CodeSentTo email={email} />}
@@ -168,7 +168,7 @@ export function ContentModeForm({
             onType={flow.type}
             disabled={flow.confirming}
           />
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-gutter">
             <Button type="submit" disabled={!flow.canConfirm}>
               {flow.confirming ? "Saving..." : "Keep content"}
             </Button>

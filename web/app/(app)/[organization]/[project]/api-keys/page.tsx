@@ -51,7 +51,7 @@ export default async function ApiKeysPage({
         }
       />
       <div className="grid gap-6">
-        <section className="grid gap-3">
+        <section className="grid gap-gutter">
           {/* No heading: this is the page's only section, so one would repeat
               the `PageHeader` above it word for word. Every other console page
               that carries an `h2` here uses it to name a section the title

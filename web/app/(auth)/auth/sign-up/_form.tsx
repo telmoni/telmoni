@@ -50,7 +50,7 @@ export function SignUpForm({
 
   if (sentTo) {
     return (
-      <div className="grid gap-3 text-sm">
+      <div className="grid gap-gutter text-sm">
         <p>
           Check your email. We sent a link to <span className="font-medium">{sentTo}</span> to
           confirm it is yours; it works once and expires in 24 hours.
@@ -66,13 +66,13 @@ export function SignUpForm({
 
   return (
     <form
-      className="grid gap-3"
+      className="grid gap-gutter"
       onSubmit={(e) => {
         e.preventDefault();
         if (!pending && !mismatch) submit();
       }}
     >
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-2 gap-gutter">
         <div className="grid gap-2">
           <Label htmlFor="given-name">First name</Label>
           <Input

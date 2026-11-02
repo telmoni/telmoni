@@ -49,7 +49,7 @@ export function NewTraces({
   return (
     <div
       role="status"
-      className="flex items-center justify-between gap-3 rounded-md bg-muted px-3 py-1.5 text-sm"
+      className="flex items-center justify-between gap-gutter rounded-md bg-muted px-gutter py-1.5 text-sm"
     >
       <span>
         {formatCount(view.count)}

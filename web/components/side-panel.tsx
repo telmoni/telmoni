@@ -215,7 +215,7 @@ export function SidePanelHeader({
  *  and the header, so its rule runs on from the rail's. */
 export function SidePanelFooter({ children }: { children: ReactNode }) {
   return (
-    <div className="flex h-15 shrink-0 items-center justify-end gap-3 border-t border-border px-gutter">
+    <div className="flex h-13 shrink-0 items-center justify-end gap-gutter border-t border-border px-gutter">
       {children}
     </div>
   );
@@ -239,11 +239,11 @@ export function SidePanelRow({
   return (
     <div className="grid gap-1.5 border-t border-border py-gutter first:border-t-0 sm:grid-cols-[minmax(0,9rem)_minmax(0,1fr)] sm:gap-3">
       {htmlFor ? (
-        <Label htmlFor={htmlFor} className="font-normal text-muted-foreground sm:h-9">
+        <Label htmlFor={htmlFor} className="font-normal text-muted-foreground sm:h-7 sm:flex sm:items-center">
           {label}
         </Label>
       ) : (
-        <span className="text-sm text-muted-foreground">{label}</span>
+        <span className="text-sm text-muted-foreground sm:h-7 sm:flex sm:items-center">{label}</span>
       )}
       <div className="grid min-w-0 content-start gap-1.5 text-sm">{children}</div>
     </div>

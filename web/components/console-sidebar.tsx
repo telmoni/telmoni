@@ -51,10 +51,10 @@ function NavRow({
   // before the page came, and wrong on the overviews: the row says Overview
   // where the page is titled by its name.
   //
-  // A row is the docs sidebar's (Fumadocs, `/docs`): 36px tall, 2px apart, 8px
+  // A row matches the console's icon buttons: 28px (h-7) tall, 2px apart, 8px
   // corners, muted at rest, the sidebar accent at half under the pointer, and
   // the primary colour at a tenth behind primary text when it is where you
-  // are. Closed, it is a 36px square in a column a gutter in on each side; open,
+  // are. Closed, it is a 28px square centered in a column a gutter in on each side; open,
   // its icon keeps a 36px box at the row's left edge, a gutter in. Both put the
   // icon's centre 30px from the window's edge, where the header's mark
   // stands, at the same height row for row, so nothing slides when the rail
@@ -69,7 +69,7 @@ function NavRow({
         aria-current={item.isActive ? "page" : undefined}
         {...(step ? { ["data-rail-step"]: "" } : {})}
         className={cn(
-          "flex size-9 items-center justify-center rounded-md [a+&]:mt-0.5",
+          "flex size-7 items-center justify-center mx-auto rounded-md [a+&]:mt-0.5",
           item.isActive
             ? "bg-primary/10 text-primary"
             : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground/80",
@@ -81,14 +81,14 @@ function NavRow({
     );
   }
   const rowClass = cn(
-    "flex h-9 items-center rounded-md text-sm [a+&]:mt-0.5",
+    "flex h-7 items-center gap-2 rounded-md text-sm [a+&]:mt-0.5",
     item.isActive
       ? "bg-primary/10 text-primary"
       : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground/80",
     className,
   );
   const icon = (
-    <span className="flex w-9 shrink-0 justify-center">
+    <span className="flex size-7 shrink-0 items-center justify-center">
       <item.icon
         className="size-4"
       />
@@ -174,7 +174,7 @@ export function ConsoleSidebar({
   //
   // The rail is a column under the header's first cell: the same width, and
   // from `md` the same rule on its right, flush with the window's edge. Open,
-  // its rows keep the `px-gutter` inset; closed, the column is one 36px square
+  // its rows keep the `px-gutter` inset; closed, the column is one 28px square
   // a gutter in on each side, so every icon lands on the centre the
   // header's mark stands on. The control that opens and closes it is the
   // header's, in the cell above; closed, the whole column is a way to open
@@ -187,7 +187,7 @@ export function ConsoleSidebar({
       id="console-sidebar"
       className={cn(
         "flex min-h-0 flex-col overflow-hidden bg-sidebar",
-        "fixed top-15 bottom-0 left-0 z-40 w-72",
+        "fixed top-13 bottom-0 left-0 z-40 w-72",
         // The drawer's edge, open only: closed, it waits just off the
         // screen's left edge, where a shadow cast right would show. Closed
         // below `md` it is hidden as well, or Tab would walk its rows unseen;
@@ -196,7 +196,7 @@ export function ConsoleSidebar({
           ? "-translate-x-full max-md:invisible md:cursor-expand"
           : "translate-x-0 shadow-drawer md:shadow-none",
         "md:static md:shrink-0 md:translate-x-0 md:border-r md:border-sidebar-border",
-        collapsed ? "md:w-15" : "md:w-sidebar",
+        collapsed ? "md:w-13" : "md:w-sidebar",
         // `translate`, the property Tailwind's `-translate-x-full` sets, not
         // `transform`; `visibility` beside it holds the drawer visible until
         // the slide ends.
@@ -272,10 +272,10 @@ export function ConsoleSidebar({
       </ScrollArea>
       {/* The foot: the header's first cell mirrored, as tall, with its rule
           above as the cell's is below. The version stands centred on the
-          rail's axis, 30px in, where the header's mark and every rail icon
+          rail's axis, 26px in, where the header's mark and every rail icon
           do, so it rests while the rail toggles and fits it closed. */}
-      <div className="flex h-15 shrink-0 items-center border-t border-sidebar-border px-3">
-        <div className="flex w-9 shrink-0 justify-center">
+      <div className="flex h-13 shrink-0 items-center border-t border-sidebar-border px-gutter">
+        <div className="flex size-7 shrink-0 items-center justify-center">
           <p className="whitespace-nowrap text-xs text-muted-foreground tabular-nums">
             <span className="sr-only">
               {PRODUCT_NAME} version {version}

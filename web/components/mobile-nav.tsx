@@ -45,7 +45,7 @@ export function MobileNav({ signedIn }: { signedIn: boolean }) {
         ref={triggerRef}
         variant="ghost"
         size={null}
-        className="size-9 text-muted-foreground hover:text-foreground"
+        className="size-7 text-muted-foreground hover:text-foreground"
         aria-label={open ? "Close menu" : "Open menu"}
         onClick={() => setOpen(!open)}
       >
@@ -73,7 +73,7 @@ export function MobileNav({ signedIn }: { signedIn: boolean }) {
               {PRIMARY_NAV.map((item) =>
                 item.panel ? (
                   <div key={item.label} className="flex flex-col gap-1">
-                    <span className="px-3 pt-3 pb-1 text-xs tracking-label text-muted-foreground uppercase">
+                    <span className="px-gutter pt-gutter pb-1 text-xs tracking-label text-muted-foreground uppercase">
                       {item.label}
                     </span>
                     {panelLinks(item.panel).map((link) => (
@@ -91,7 +91,7 @@ export function MobileNav({ signedIn }: { signedIn: boolean }) {
                   visitor's way out outlined and the thing to do filled; a
                   member's both outlined, as the header has them. */}
               {signedIn ? (
-                <div className="flex flex-col gap-3">
+                <div className="flex flex-col gap-gutter">
                   <Button asChild size="sm" variant="outline" className={NAV_TYPE}>
                     <Link href="/console" onNavigate={() => setOpen(false)}>
                       Console
@@ -100,7 +100,7 @@ export function MobileNav({ signedIn }: { signedIn: boolean }) {
                   <SignOutButton className={NAV_TYPE} />
                 </div>
               ) : (
-                <div className="flex flex-col gap-3">
+                <div className="flex flex-col gap-gutter">
                   <Button asChild size="sm" variant="outline" className={NAV_TYPE}>
                     {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
                     <a href="/auth/login">

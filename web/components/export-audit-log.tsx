@@ -223,7 +223,7 @@ function ExportDialog({
             </div>
 
             {range === "custom" && (
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-2 gap-gutter">
                 <div className="grid gap-2">
                   <Label htmlFor={`${id}-from`}>First day</Label>
                   <Input
@@ -309,7 +309,7 @@ function RecentExports({ organization }: { organization: string }) {
       <span className="text-sm font-medium">Your recent exports</span>
       <ul className="grid gap-1">
         {recent.map((entry) => (
-          <li key={entry.id} className="flex min-h-9 items-center justify-between gap-3 text-sm">
+          <li key={entry.id} className="flex min-h-9 items-center justify-between gap-gutter text-sm">
             <span className="min-w-0 truncate text-muted-foreground">
               {exportSummary(entry, now)}
             </span>

@@ -7,7 +7,7 @@ function Card({ className, ...props }: React.ComponentProps<"div">) {
     <div
       data-slot="card"
       className={cn(
-        // The one card padding, 16px, matching table cells (`px-4`); callers
+        // The one card padding, the gutter, as a table cell's; callers
         // don't set their own, except `p-0` for a card that is a table. No
         // fill: a card stands on the page's own background, drawn by a
         // half-pixel rule alone, so the page reads as one surface with its
@@ -17,7 +17,7 @@ function Card({ className, ...props }: React.ComponentProps<"div">) {
         // draws exactly what `border` draws. A shadow's spread is drawn at
         // its true width: one device pixel on a dense display, a half-tone
         // line on a plain one.
-        "flex flex-col gap-6 rounded-xl ring-[0.5px] ring-border p-4 text-card-foreground",
+        "flex flex-col gap-6 rounded-xl ring-[0.5px] ring-border p-gutter text-card-foreground",
         className
       )}
       {...props}

@@ -26,7 +26,7 @@ export function AgentButton() {
       title={`Agent (${isMac ? "⌘" : "Ctrl "}${key})`}
       onClick={() => setAgentOpen((open) => !open)}
       className={cn(
-        "relative flex size-9 shrink-0 items-center justify-center",
+        "relative flex size-7 shrink-0 items-center justify-center",
         "rounded-md text-muted-foreground hover:text-foreground",
         "outline-none focus-visible:ring-2 focus-visible:ring-ring",
         // Half the accent, as the search, the bell and the account beside it.

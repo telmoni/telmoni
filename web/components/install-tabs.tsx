@@ -66,7 +66,7 @@ export function InstallTabs({ tabs }: { tabs: readonly InstallTab[] }) {
         id={`${id}-panel`}
         role="tabpanel"
         aria-labelledby={`${id}-tab-${at}`}
-        className="flex items-center justify-between gap-3 px-5 py-5 lg:px-6 lg:py-7"
+        className="flex items-center justify-between gap-gutter px-5 py-5 lg:px-6 lg:py-7"
       >
         <code className="block min-w-0 flex-1 overflow-x-auto whitespace-pre text-foreground">
           {tab.command}

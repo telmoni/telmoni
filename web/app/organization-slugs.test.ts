@@ -66,6 +66,7 @@ describe("the proxy's matcher", () => {
 
   it.each([
     "icon-svg",
+    "icon-png",
     "favicon-ico",
     "apple-icon-png",
     "opengraph-image-png",
@@ -79,6 +80,7 @@ describe("the proxy's matcher", () => {
 
   it.each([
     "/icon.svg",
+    "/icon.png",
     "/favicon.ico",
     "/apple-icon.png",
     "/opengraph-image.png",

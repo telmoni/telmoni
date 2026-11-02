@@ -24,7 +24,7 @@ export function SearchButton() {
       title={letterKeys ? `Search (${chord} or ${SEARCH_KEY})` : `Search (${chord})`}
       onClick={() => setSearchOpen(true)}
       className={cn(
-        "flex size-9 shrink-0 items-center justify-center",
+        "flex size-7 shrink-0 items-center justify-center",
         "rounded-md text-muted-foreground hover:text-foreground",
         "outline-none focus-visible:ring-2 focus-visible:ring-ring",
         "hover:bg-sidebar-accent/50",

@@ -40,7 +40,7 @@ function roleLabel(role: string): string {
 /** Text a person reads in a block, wrapped and scrolled within its width. */
 function Pre({ children }: { children: string }) {
   return (
-    <pre className="overflow-x-auto rounded-md bg-muted p-3 font-mono text-xs leading-5 break-all whitespace-pre-wrap">
+    <pre className="overflow-x-auto rounded-md bg-muted p-gutter font-mono text-xs leading-5 break-all whitespace-pre-wrap">
       {children}
     </pre>
   );
@@ -175,7 +175,7 @@ function Parts({ parts }: { parts: readonly Part[] }) {
 /** Messages in order, each under its role. */
 export function Conversation({ messages }: { messages: readonly Message[] }) {
   return (
-    <ol className="grid gap-3">
+    <ol className="grid gap-gutter">
       {messages.map((message, i) => (
         <li key={i} className="grid gap-1">
           <p className="text-xs font-medium text-muted-foreground">
@@ -298,7 +298,7 @@ export function RunTurn({ fields }: { fields: Readonly<Record<string, string>> |
     return <p className="text-xs text-muted-foreground">This trace kept no content.</p>;
   }
   return (
-    <div className="grid gap-3 text-sm">
+    <div className="grid gap-gutter text-sm">
       {fields && <CutNote fields={fields} />}
       {input !== undefined && <FieldValue field={ContentField.InputMessages} value={input} />}
       {output !== undefined && <FieldValue field={ContentField.OutputMessages} value={output} />}

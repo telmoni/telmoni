@@ -78,10 +78,7 @@ function AlertDialogContent({
 // a gutter (`p-gutter`, as `<main>` keeps), all round, and the close button
 // inside it like any other control — its box a gutter from the top and the right, as a page
 // action's is — with the title on the same row, centred on it as a page title
-// is on its actions. The title's 7px centres its 22px line on the button's
-// 36px and keeps a wrapped title's first line there, so a long name never
-// pulls the button off the padding. The gutter under the header and over the
-// footer are theirs, not the scrolling body's, as in `dialog.tsx`.
+// is on its actions.
 function AlertDialogHeader({
   className,
   children,
@@ -91,7 +88,7 @@ function AlertDialogHeader({
     <div
       data-slot="alert-dialog-header"
       className={cn(
-        "flex shrink-0 items-start gap-3 p-gutter",
+        "flex shrink-0 items-start gap-gutter p-gutter",
         className,
       )}
       {...props}
@@ -99,7 +96,7 @@ function AlertDialogHeader({
       {children}
       <AlertDialogPrimitive.Cancel
         data-slot="alert-dialog-close"
-        className="ml-auto flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50"
+        className="ml-auto flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50"
       >
         <XIcon className="size-4" />
         <span className="sr-only">Close</span>
@@ -129,7 +126,7 @@ function AlertDialogFooter({
     <div
       data-slot="alert-dialog-footer"
       className={cn(
-        "flex shrink-0 items-center justify-end gap-3 p-gutter",
+        "flex shrink-0 items-center justify-end gap-gutter p-gutter",
         className,
       )}
       {...props}

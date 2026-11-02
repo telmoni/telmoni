@@ -215,7 +215,7 @@ export function AgentWindow({
           // conversation stops a gutter under the controls rather than running
           // beneath them.
           className={cn(
-            "flex shrink-0 items-center gap-3 p-gutter select-none",
+            "flex shrink-0 items-center gap-gutter p-gutter select-none",
             !full && "touch-none",
             !full && (gesture?.kind === "move" ? "cursor-grabbing" : "cursor-grab"),
           )}

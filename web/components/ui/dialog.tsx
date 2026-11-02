@@ -80,9 +80,7 @@ function DialogContent({
 // a gutter (`p-gutter`, as `<main>` keeps), all round, and the close button
 // inside it like any other control — its box a gutter from the top, the right and what
 // comes under it, as a page action's is — with the title on the same row,
-// centred on it as a page title is on its actions. The title's 7px centres its
-// 22px line on the button's 36px and keeps a wrapped title's first line there,
-// so a long name never pulls the button off the padding.
+// centred on it as a page title is on its actions.
 //
 // ⚠ **The gutter under the header and over the footer is theirs, not the
 // body's** (asked 2026-10-15). The body scrolls when the window is short, and
@@ -98,7 +96,7 @@ function DialogHeader({
     <div
       data-slot="dialog-header"
       className={cn(
-        "flex shrink-0 items-start gap-3 p-gutter",
+        "flex shrink-0 items-start gap-gutter p-gutter",
         className,
       )}
       {...props}
@@ -106,7 +104,7 @@ function DialogHeader({
       {children}
       <DialogPrimitive.Close
         data-slot="dialog-close"
-        className="ml-auto flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50"
+        className="ml-auto flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50"
       >
         <XIcon className="size-4" />
         <span className="sr-only">Close</span>
@@ -130,7 +128,7 @@ function DialogFooter({ className, ...props }: React.ComponentProps<"div">) {
     <div
       data-slot="dialog-footer"
       className={cn(
-        "flex shrink-0 items-center justify-end gap-3 p-gutter",
+        "flex shrink-0 items-center justify-end gap-gutter p-gutter",
         className,
       )}
       {...props}

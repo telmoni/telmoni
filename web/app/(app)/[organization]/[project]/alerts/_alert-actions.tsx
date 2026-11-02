@@ -113,7 +113,7 @@ export function HearAgain({
 }) {
   const { pending, error, act } = useAct(alertHeading(ruleId));
   return (
-    <span className="inline-flex flex-wrap items-center gap-gutter">
+    <span className="inline-flex flex-wrap items-center gap-2">
       <Button
         variant="outline"
         size="sm"

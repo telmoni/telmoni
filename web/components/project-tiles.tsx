@@ -30,7 +30,7 @@ export function ProjectTiles({
   action?: (project: ProjectTile) => ReactNode;
 }) {
   return (
-    <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+    <ul className="grid grid-cols-1 gap-gutter sm:grid-cols-2 lg:grid-cols-3">
       {projects.map((project) => {
         const control = action?.(project);
         return (
@@ -38,12 +38,12 @@ export function ProjectTiles({
             <Card className="flex flex-row items-center overflow-hidden p-0 gap-0">
               <Link
                 href={projectPath(organization, project.slug)}
-                className="flex min-w-0 flex-1 items-center justify-between gap-3 p-4 text-sm transition-colors hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
+                className="flex min-w-0 flex-1 items-center justify-between gap-gutter p-gutter text-sm transition-colors hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
               >
                 <span className="min-w-0 truncate font-medium">{project.name}</span>
                 <RoleBadge role={project.role} />
               </Link>
-              {control && <div className="shrink-0 pr-3">{control}</div>}
+              {control && <div className="shrink-0 pr-gutter">{control}</div>}
             </Card>
           </li>
         );

@@ -109,7 +109,7 @@ export function LayoutControls(props: Props) {
   const from = layout.current ? `“${layout.current.name}”` : DEFAULT_LAYOUT_NAME;
   return (
     <TooltipProvider>
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-gutter">
         <CustomizeMenu layout={layout} from={from} />
         <LayoutsMenu {...props} layout={layout} />
       </div>

@@ -23,7 +23,7 @@ export function DeleteProjectForm({
   const onConfirm = () => run(() => deleteProjectAction(projectId));
 
   return (
-    <div className="grid gap-3">
+    <div className="grid gap-gutter">
       <p className="text-muted-foreground">
         Deleting <span className="font-medium text-foreground">{projectName}</span>{" "}
         removes its API keys, members and pending invitations. Keys stop

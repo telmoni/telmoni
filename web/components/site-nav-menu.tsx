@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 
 // ⚠ **A trigger and a plain link have to be the same shape, so neither is a
 // `Button`.** A Button would give the link its pill and the trigger nothing,
-// and the two sit side by side in one row. This is `size="sm"`'s geometry
+// and the two sit side by side in one row. This is `size="md"`'s geometry
 // written out once — `h-9 px-3` — with the ghost variant's fill.
 //
 // `data-[state=open]` is what borrows the open look: the item whose panel is
@@ -65,7 +65,7 @@ function Panel({ panel }: { panel: NavPanel }) {
     // row appears at, that leaves ~530px before the gutter and the reserved
     // scrollbar. 30rem clears it. The clamp is the backstop.
     //
-    // That offset shrank when the row went to the console's `gap-3`; it grows
+    // That offset shrank when the row went to the console's `gap-gutter`; it grows
     // again if the gaps or the wordmark do, so re-measure before widening.
     //
     // Widening this means measuring where `Company` actually starts at 1024px
@@ -101,7 +101,7 @@ function Panel({ panel }: { panel: NavPanel }) {
           )}
         >
           {panel.groups.map((group) => (
-            <div key={group.title} className="flex flex-col gap-3 p-6">
+            <div key={group.title} className="flex flex-col gap-gutter p-6">
               <span className="text-xs tracking-label text-muted-foreground uppercase">
                 {group.title}
               </span>
@@ -131,7 +131,7 @@ export function SiteNavMenu() {
       delayDuration={100}
     >
       <NavigationMenu.List
-        className="flex h-9 list-none items-center gap-3"
+        className="flex h-9 list-none items-center gap-gutter"
       >
         {PRIMARY_NAV.map((item) => (
           <NavigationMenu.Item

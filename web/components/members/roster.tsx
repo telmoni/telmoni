@@ -16,7 +16,7 @@ export type RoleCard = { badge: string; body: ReactNode };
 
 export function RoleCards({ cards }: { cards: Record<Role, RoleCard> }) {
   return (
-    <section className="grid gap-3 lg:grid-cols-3">
+    <section className="grid gap-gutter lg:grid-cols-3">
       {[Role.Owner, Role.Admin, Role.Member].map((role) => (
         <Card key={role} className="gap-1.5">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -64,7 +64,7 @@ export function Invited({
 }) {
   if (invites.length === 0) return null;
   return (
-    <section className="grid gap-3">
+    <section className="grid gap-gutter">
       <h2 className="text-sm font-medium">Invited</h2>
       <DataTable>
         <THead>

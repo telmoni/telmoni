@@ -54,7 +54,7 @@ export function SignInForm({
 
   if (sso && continueWith) {
     return (
-      <div className="grid gap-3">
+      <div className="grid gap-gutter">
         <p className="text-sm text-muted-foreground" role="status">
           {error}
         </p>
@@ -64,9 +64,9 @@ export function SignInForm({
   }
 
   return (
-    <div className="grid gap-3">
+    <div className="grid gap-gutter">
       <form
-        className="grid gap-3"
+        className="grid gap-gutter"
         onSubmit={(e) => {
           e.preventDefault();
           if (!pending) submit();

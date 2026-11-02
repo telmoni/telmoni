@@ -161,7 +161,7 @@ export const TraceMeta = memo(function TraceMeta({
   const reaching = useWindowReaching(summary.startedAt);
   const tokens = summary.inputTokens + summary.outputTokens;
   return (
-    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-muted-foreground">
+    <div className="flex min-w-0 flex-wrap items-center gap-x-gutter gap-y-1.5 text-xs text-muted-foreground">
       <StatusBadge status={run?.status ?? null} detail={run?.error_type} />
       <LocalTime iso={summary.startedAt} />
       <span className="tabular-nums">{formatDuration(summary.durationMs)}</span>
@@ -569,7 +569,7 @@ const SpanRow = memo(function SpanRow({
  *  name and value. */
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="grid grid-cols-[minmax(0,9rem)_minmax(0,1fr)] gap-3 border-b border-border py-2 last:border-b-0">
+    <div className="grid grid-cols-[minmax(0,9rem)_minmax(0,1fr)] gap-gutter border-b border-border py-2 last:border-b-0">
       <dt className="min-w-0 wrap-break-word text-muted-foreground">{label}</dt>
       <dd className="min-w-0 wrap-break-word">{children}</dd>
     </div>
@@ -590,7 +590,7 @@ function FilterField({ label, href, children }: { label: string; href: string; c
 /** A value as the server sent it. */
 function Raw({ value }: { value: unknown }) {
   return (
-    <pre className="overflow-x-auto rounded-md bg-muted p-3 font-mono text-xs leading-5 break-all whitespace-pre-wrap">
+    <pre className="overflow-x-auto rounded-md bg-muted p-gutter font-mono text-xs leading-5 break-all whitespace-pre-wrap">
       {JSON.stringify(value, null, 2)}
     </pre>
   );
@@ -657,7 +657,7 @@ function SpanDetail({
           </h3>
           <span className="shrink-0 text-xs text-muted-foreground">{KIND_LABEL[span.kind]}</span>
         </div>
-        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs tabular-nums text-muted-foreground">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-gutter gap-y-1 text-xs tabular-nums text-muted-foreground">
           <SpanStatusBadge span={span} />
           <LocalTime iso={span.started_at} mode="precise" />
           <span>{formatDuration(spanMillis(span))}</span>

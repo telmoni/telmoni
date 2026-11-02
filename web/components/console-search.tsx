@@ -248,19 +248,19 @@ export function ConsoleSearch() {
             below, the header's and the legend's gutter, as in every modal. */}
         <DialogBody id={PANEL_ID} className="block p-0">
           {projectId && loading && (
-            <p className="px-gutter py-3 text-sm text-muted-foreground">
+            <p className="px-gutter py-gutter text-sm text-muted-foreground">
               Looking through this project&rsquo;s resources…
             </p>
           )}
           {indexError && (
-            <p className="px-gutter py-3 text-sm text-muted-foreground" role="status">
+            <p className="px-gutter py-gutter text-sm text-muted-foreground" role="status">
               {indexError}
             </p>
           )}
           {index && <IndexNotices index={index} />}
 
           {groups.length === 0 && query.trim() !== "" && (
-            <p className="px-gutter py-3 text-sm text-muted-foreground">
+            <p className="px-gutter py-gutter text-sm text-muted-foreground">
               Nothing here matches “{query.trim()}”.
             </p>
           )}
@@ -320,7 +320,7 @@ function GroupLabel({ id, children }: { id: string; children: string }) {
   return (
     <p
       id={id}
-      className="px-gutter pt-3 pb-1 text-xs font-medium tracking-wide text-muted-foreground uppercase"
+      className="px-gutter pt-gutter pb-1 text-xs font-medium tracking-wide text-muted-foreground uppercase"
     >
       {children}
     </p>

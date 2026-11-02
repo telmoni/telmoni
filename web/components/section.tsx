@@ -18,7 +18,7 @@ export function Section({
   children: ReactNode;
 }) {
   return (
-    <section className="grid gap-3">
+    <section className="grid gap-gutter">
       <div className="grid gap-1">
         <h2
           id={headingId}

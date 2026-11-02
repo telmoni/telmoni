@@ -123,7 +123,7 @@ export default async function MembersPage({
         {canManage && <MemberCeilingNotice ceiling={listing.ceiling} />}
         <RoleCards cards={ROLES} />
 
-        <section className="grid gap-3">
+        <section className="grid gap-gutter">
           {listing.members.length === 0 ? (
             <NoticeCard
               title="Nobody else has access to this project."

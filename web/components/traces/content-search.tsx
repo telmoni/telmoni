@@ -1,8 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import { SearchIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
 
 import { Input } from "@/components/ui/input";
 import type { ListQuery } from "@/lib/server/entities/traces";
@@ -25,6 +25,7 @@ export function ContentSearch({
 }) {
   const router = useRouter();
   const [value, setValue] = useState(query.q ?? "");
+
   return (
     <form
       role="search"
@@ -39,7 +40,7 @@ export function ContentSearch({
       }}
     >
       <SearchIcon
-        className="pointer-events-none absolute top-1/2 left-2 size-4 -translate-y-1/2 text-muted-foreground"
+        className="pointer-events-none absolute top-1/2 left-1.5 size-4 -translate-y-1/2 text-muted-foreground"
         aria-hidden="true"
       />
       <Input
@@ -49,7 +50,7 @@ export function ContentSearch({
         maxLength={SEARCH_MAX}
         value={value}
         onChange={(e) => setValue(e.target.value)}
-        className="h-8 pl-8"
+        className="pl-7"
       />
     </form>
   );

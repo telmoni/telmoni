@@ -374,7 +374,7 @@ export function AgentPanel() {
 // it, with the one thing to do about it where there is one.
 function Notice({ children, action }: { children: React.ReactNode; action?: React.ReactNode }) {
   return (
-    <div className="my-auto grid justify-items-center gap-3 text-center">
+    <div className="my-auto grid justify-items-center gap-gutter text-center">
       <Empty>{children}</Empty>
       {action}
     </div>

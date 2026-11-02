@@ -30,7 +30,7 @@ export function RetentionForm({
 
   return (
     <form
-      className="flex flex-wrap items-end gap-3"
+      className="flex flex-wrap items-end gap-gutter"
       onSubmit={(e) => {
         e.preventDefault();
         if (!changed || pending) return;

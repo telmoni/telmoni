@@ -45,7 +45,7 @@ export function ProjectBanner({
         <p>{activeNotification.message}</p>
       </div>
 
-      <div className="flex items-center gap-3 shrink-0">
+      <div className="flex items-center gap-gutter shrink-0">
         {activeNotification.href && activeNotification.linkText && (
           <Link
             href={activeNotification.href}
@@ -58,7 +58,7 @@ export function ProjectBanner({
           type="button"
           onClick={() => setDismissed(true)}
           aria-label="Close notification"
-          className="text-muted-foreground hover:text-foreground transition-colors p-0.5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
         >
           <X className="size-4" />
         </button>

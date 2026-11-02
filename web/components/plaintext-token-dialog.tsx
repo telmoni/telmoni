@@ -36,7 +36,7 @@ export function PlaintextTokenDialog({
         </DialogHeader>
         <DialogBody>
           <DialogDescription>{description}</DialogDescription>
-          <pre className="break-all rounded-md bg-muted p-3 font-mono text-xs select-all">
+          <pre className="break-all rounded-md bg-muted p-gutter font-mono text-xs select-all">
             {token}
           </pre>
         </DialogBody>

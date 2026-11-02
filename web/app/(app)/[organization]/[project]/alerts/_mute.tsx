@@ -232,7 +232,7 @@ export function EndMute({
 }) {
   const { pending, error, act } = useAct(landing);
   return (
-    <span className="inline-flex flex-wrap items-center gap-gutter">
+    <span className="inline-flex flex-wrap items-center gap-2">
       <Button
         variant="outline"
         size="sm"

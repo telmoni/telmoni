@@ -13,7 +13,7 @@ export default async function ConfirmSignOutPage() {
   if ((await getServerSession()) === null) redirect("/");
 
   return (
-    <Card className="gap-3">
+    <Card className="gap-gutter">
       <CardHeader>
         <CardTitle>Sign out?</CardTitle>
         <CardDescription>
@@ -21,7 +21,7 @@ export default async function ConfirmSignOutPage() {
           and takes you to the home page; nothing happens until you choose.
         </CardDescription>
       </CardHeader>
-      <CardContent className="flex gap-2">
+      <CardContent className="flex gap-gutter">
         <form method="post" action="/auth/logout">
           <Button type="submit">Sign out</Button>
         </form>

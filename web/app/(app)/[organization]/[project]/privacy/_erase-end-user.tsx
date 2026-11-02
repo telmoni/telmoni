@@ -28,7 +28,7 @@ export function EraseEndUserForm({ projectId }: { projectId: string }) {
     );
 
   return (
-    <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+    <div className="flex flex-col gap-gutter sm:flex-row sm:items-center">
       <Input
         value={userId}
         onChange={(e) => setUserId(e.target.value)}

@@ -140,7 +140,7 @@ export function ConsoleShell({
                 ref={mainRef}
                 id="console-main"
                 tabIndex={-1}
-                className="flex w-full min-w-0 flex-col gap-3 p-gutter outline-none"
+                className="flex w-full min-w-0 flex-col gap-gutter p-gutter outline-none"
               >
                 {children}
               </main>

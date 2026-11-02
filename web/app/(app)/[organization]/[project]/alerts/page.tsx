@@ -133,17 +133,17 @@ export default async function AlertsPage({
         headingId={ALERTS_HEADING}
         info="Each reads a measure of the project's spans over a window against its thresholds, every minute, with the incidents it opened under it, open ones first. Any member makes, edits, pauses, mutes and deletes alerts, and acknowledges or resolves their incidents."
         action={
-          <div className="flex items-center gap-gutter">
+          <>
             {/* A window over every alert mutes nothing until there is one. */}
             {access.alerts.length > 0 && (
               <MuteButton projectId={project.id} ruleId={null} name={null} />
             )}
             <NewAlert projectId={project.id} connections={connections} />
-          </div>
+          </>
         }
       />
       <div className="grid gap-6">
-        <section className="grid gap-3">
+        <section className="grid gap-gutter">
           {everyAlert.length > 0 && (
             <Rows>
               {everyAlert.map((mute) => (
@@ -257,8 +257,8 @@ function AlertCard({
   const filters = filterWords(alert.filters);
   const read = readSince(alert);
   return (
-    <Card id={`alert-${alert.id}`} className="scroll-mt-4 gap-3">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+    <Card id={`alert-${alert.id}`} className="scroll-mt-4 gap-gutter">
+      <div className="flex flex-wrap items-start justify-between gap-gutter">
         <div className="grid min-w-0 gap-1">
           <div className="flex min-w-0 items-center gap-2">
             <h2 id={alertHeading(alert.id)} tabIndex={-1} className="min-w-0 truncate text-sm font-medium">
@@ -275,7 +275,7 @@ function AlertCard({
       </div>
       {/* On their first baselines, so a name stands level with a line whose
           button makes it taller. */}
-      <dl className="grid items-baseline gap-x-3 gap-y-2 border-t border-border pt-3 text-sm sm:grid-cols-[9rem_minmax(0,1fr)]">
+      <dl className="grid items-baseline gap-x-gutter gap-y-2 border-t border-border pt-gutter text-sm sm:grid-cols-[9rem_minmax(0,1fr)]">
         <Detail label="Now">
           <Standing alert={alert} read={read} />
         </Detail>
@@ -298,7 +298,7 @@ function AlertCard({
                 const stopped = connection ? CONNECTION_STATUS_LABEL[connection.status] : null;
                 const taken = connection ? incidentKindsLabel(connection.eventKinds) : null;
                 return (
-                  <li key={link.connection_id} className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                  <li key={link.connection_id} className="flex flex-wrap items-center gap-x-gutter gap-y-1.5">
                     {/* A webhook's host is one word, which a phone's width must break. */}
                     <span className="min-w-0">
                       {name}
@@ -345,7 +345,7 @@ function AlertCard({
           ) : (
             <ul className="grid gap-1.5">
               {windows.map((mute) => (
-                <li key={mute.id} className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                <li key={mute.id} className="flex flex-wrap items-center gap-x-gutter gap-y-1.5">
                   <span>
                     {mute.rule_id === null ? "Every alert: " : ""}
                     <WindowWords mute={mute} who={who} now={now} />
@@ -369,7 +369,7 @@ function AlertCard({
           {incidents.length === 0 ? (
             "None"
           ) : (
-            <ul className="grid gap-3">
+            <ul className="grid gap-gutter">
               {incidents.map((incident) => (
                 <IncidentItem
                   key={incident.id}
@@ -423,7 +423,7 @@ function IncidentItem({
       aria-current={followed ? "true" : undefined}
       tabIndex={followed ? -1 : undefined}
     >
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+      <div className="flex flex-wrap items-center gap-x-gutter gap-y-1.5">
         <Badge variant={severityVariant(incident.severity)} className="font-normal">
           {SEVERITY_LABEL[incident.severity]}
         </Badge>

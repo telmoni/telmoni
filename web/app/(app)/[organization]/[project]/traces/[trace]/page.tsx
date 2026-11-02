@@ -90,10 +90,10 @@ export default async function TracePage({
           backHref={list}
           backLabel="Traces"
           action={
-            <div className="flex items-center gap-gutter">
+            <>
               <LayoutControls projectId={project.id} canSave={administers(project.role)} />
               {administers(project.role) && <DeleteTrace projectId={project.id} runId={trace.run_id} />}
-            </div>
+            </>
           }
         />
         {/* As tall as the window leaves under the header and the page's title,

@@ -31,7 +31,7 @@ export default async function SignInPage({
   const config = (await getSignInConfig()) ?? FORM_ALONE;
 
   return (
-    <Card className="gap-3">
+    <Card className="gap-gutter">
       <CardHeader>
         <CardTitle>Sign in</CardTitle>
         <CardDescription>
@@ -40,7 +40,7 @@ export default async function SignInPage({
             : `Through ${config.external?.name ?? "your identity provider"}.`}
         </CardDescription>
       </CardHeader>
-      <CardContent className="grid gap-3">
+      <CardContent className="grid gap-gutter">
         {config.passwordSignIn ? (
           <SignInForm
             state={pending.state}

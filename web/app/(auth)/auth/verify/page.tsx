@@ -16,7 +16,7 @@ export default async function VerifyPage({
   const token = sole(params.token);
 
   return (
-    <Card className="gap-3">
+    <Card className="gap-gutter">
       <CardHeader>
         <CardTitle>Confirm your email address</CardTitle>
         <CardDescription>One press, and the account is yours to sign in to.</CardDescription>

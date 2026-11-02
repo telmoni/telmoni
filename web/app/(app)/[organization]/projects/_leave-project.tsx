@@ -16,14 +16,13 @@ export function LeaveProject({
   const { pending, error, run } = useAction();
 
   return (
-    <div className="flex items-center justify-end gap-3">
+    <div className="flex items-center justify-end gap-gutter">
       {error && <span className="text-xs text-destructive">{error}</span>}
       <ConfirmDialog
         trigger={
           <Button
             variant="outline"
             size="sm"
-            className="h-9 text-xs"
             disabled={pending}
             aria-label={`Leave ${name}`}
           >

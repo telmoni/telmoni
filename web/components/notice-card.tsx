@@ -14,7 +14,7 @@ export function NoticeCard({
 }: { title: string; body: ReactNode } & Omit<ComponentProps<typeof Card>, "title">) {
   return (
     <Card className={cn("gap-0 overflow-hidden p-0", className)} {...card}>
-      <div className="grid gap-1 p-4">
+      <div className="grid gap-1 p-gutter">
         <p className="text-sm font-medium">{title}</p>
         <p className="text-sm text-muted-foreground">{body}</p>
       </div>

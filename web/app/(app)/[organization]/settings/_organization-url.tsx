@@ -37,10 +37,10 @@ export function OrganizationUrlForm({
   };
 
   return (
-    <form onSubmit={handleSubmit} className="grid gap-3">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+    <form onSubmit={handleSubmit} className="grid gap-gutter">
+      <div className="flex flex-col gap-gutter sm:flex-row sm:items-center">
         <div className="flex max-w-md flex-1 items-center gap-1">
-          <span className="shrink-0 text-sm text-muted-foreground">{host}/</span>
+          <span className="shrink-0 text-xs text-muted-foreground">{host}/</span>
           <Input
             value={value}
             onChange={(e) => setValue(e.target.value)}

@@ -176,7 +176,7 @@ function SessionPanel({
         onClose={close}
       >
         {session && sums && (
-          <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
+          <p className="flex flex-wrap items-center gap-x-gutter gap-y-1 text-sm text-muted-foreground">
             {sums.user ? (
               <Link
                 href={tracesHref(organization, slug, { user: [sums.user], days: query.days })}
@@ -218,7 +218,7 @@ function SessionPanel({
         {read === null ? (
           <PeekNote>Reading the session&hellip;</PeekNote>
         ) : read.kind === "ok" ? (
-          <div className="grid content-start gap-3 p-gutter">
+          <div className="grid content-start gap-gutter p-gutter">
             <div>
               <LayoutControls projectId={projectId} canSave={canSave} />
             </div>

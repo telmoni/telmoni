@@ -93,7 +93,7 @@ export function Composer({
               "placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50",
             )}
           />
-          <div className="flex items-center justify-between gap-3 px-2 pb-2">
+          <div className="flex items-center justify-between gap-gutter px-2 pb-2">
             <p className="flex min-w-0 items-center gap-1.5 pl-1.5 text-xs text-muted-foreground">
               <Info aria-hidden className="size-3.5 shrink-0" />
               <span className="truncate">{about}</span>

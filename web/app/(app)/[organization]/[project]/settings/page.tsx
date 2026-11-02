@@ -95,7 +95,7 @@ export default async function SettingsPage({
             danger
             description="Permanently deletes this project and everything inside it. Immediate and irreversible; no grace period or undo."
           >
-            <Card className="grid gap-3 bg-destructive/5 text-sm">
+            <Card className="grid gap-gutter bg-destructive/5 text-sm">
               <DeleteProjectForm projectId={project.id} projectName={project.name} />
             </Card>
           </Section>

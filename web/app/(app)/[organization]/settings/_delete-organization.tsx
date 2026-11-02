@@ -85,7 +85,7 @@ export function DeleteOrganizationForm({
             onType={flow.type}
             disabled={flow.confirming}
           />
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-gutter">
             <Button type="submit" variant="destructive" disabled={!flow.canConfirm}>
               {flow.confirming ? "Deleting…" : "Delete this organization"}
             </Button>

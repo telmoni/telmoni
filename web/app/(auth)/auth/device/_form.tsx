@@ -30,7 +30,7 @@ export function DeviceForm({ code: initialCode }: { code: string }) {
 
   return (
     <form
-      className="grid gap-3"
+      className="grid gap-gutter"
       onSubmit={(e) => {
         e.preventDefault();
         if (!pending) decide("approve");
@@ -56,7 +56,7 @@ export function DeviceForm({ code: initialCode }: { code: string }) {
           {error}
         </p>
       )}
-      <div className="flex gap-2">
+      <div className="flex gap-gutter">
         <Button type="submit" disabled={pending || !code.trim()}>
           {pending ? "Working…" : "Approve"}
         </Button>

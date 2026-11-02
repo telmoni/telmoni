@@ -38,16 +38,16 @@ import { cn } from "@/lib/utils";
 // does, and a fill drawn around it reads as the name shifting; the chevron
 // answers the pointer instead.
 const TRIGGER = cn(
-  "group h-9 min-w-0 shrink justify-start gap-1.5 overflow-hidden rounded-md font-normal",
+  "group h-7 min-w-0 shrink justify-start gap-1.5 overflow-hidden rounded-md font-normal py-0 text-sm",
   "transition-none hover:bg-transparent data-[state=open]:bg-transparent",
 );
 const CHEVRON =
   "size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground group-data-[state=open]:text-foreground";
 
-// A 36px trigger centred in the 59px above the header's 1px rule ends 12.5px
+// A 28px trigger centred in the 51px above the header's 1px rule ends 12px
 // short of the header's bottom edge, so a menu opens right under the rule,
 // like the bell's and the account's.
-const MENU_OFFSET = 12.5;
+const MENU_OFFSET = 12;
 // Along the bar a menu starts where its trigger's name does, the trigger's
 // own padding (`px-2`, `px-2.5`) in from its unseen edge, so the
 // organization's stands on the content's padding line, with the page's title.
@@ -68,7 +68,7 @@ function ResourceRow({ row, settingsLabel }: { row: SwitcherRow; settingsLabel: 
     <div className="flex items-center gap-0.5 rounded-md hover:bg-accent/50 focus-within:bg-accent/50">
       <DropdownMenuItem
         asChild
-        className="h-9 min-w-0 flex-1 cursor-pointer gap-2 px-2 focus:bg-transparent [&_svg]:size-3.5"
+        className="h-7 min-w-0 flex-1 cursor-pointer gap-2 px-2 focus:bg-transparent [&_svg]:size-3.5"
       >
         <Link href={row.href} aria-current={row.active ? "true" : undefined}>
           <span className="min-w-0 flex-1 truncate">{row.label}</span>
@@ -104,7 +104,7 @@ function NewRow({ onSelect, children }: { onSelect: () => void; children: string
     <>
       <DropdownMenuSeparator />
       <DropdownMenuItem
-        className="h-9 cursor-pointer gap-2 px-2"
+        className="h-7 cursor-pointer gap-2 px-2"
         onSelect={(e) => {
           e.preventDefault();
           onSelect();
@@ -295,7 +295,7 @@ export function ResourceSelector({
                   Projects
                 </DropdownMenuLabel>
                 {projectMenu.length === 0 && (
-                  <p className="flex h-9 items-center px-2 text-sm text-muted-foreground">
+                  <p className="flex h-7 items-center px-2 text-sm text-muted-foreground">
                     {canCreate ? "No projects yet" : "No projects you can open"}
                   </p>
                 )}

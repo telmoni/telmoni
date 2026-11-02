@@ -68,7 +68,7 @@ function DropdownMenuGroup({
   )
 }
 
-// An item is the docs sidebar's row (Fumadocs, `/docs`): 36px tall, 2px
+// An item matches the console's icon buttons: 28px (h-7) tall, 2px
 // apart, 8px corners, and a fill at half strength under the pointer or the
 // keyboard. Half the accent, not the sidebar accent the rail takes: a menu
 // stands on its own surface, and the dark sidebar accent is that surface's
@@ -88,7 +88,7 @@ function DropdownMenuItem({
       data-inset={inset}
       data-variant={variant}
       className={cn(
-        "relative flex h-9 cursor-pointer items-center gap-2 rounded-md px-2 text-sm outline-hidden select-none transition-colors",
+        "relative flex h-7 cursor-pointer items-center gap-2 rounded-md px-2 text-sm outline-hidden select-none transition-colors",
         // An item after an item stands 2px off it, as a rail row stands off
         // the one above it (`console-sidebar.tsx`).
         "[[data-slot=dropdown-menu-item]+&]:mt-0.5",
@@ -117,7 +117,7 @@ function DropdownMenuCheckboxItem({
     <DropdownMenuPrimitive.CheckboxItem
       data-slot="dropdown-menu-checkbox-item"
       className={cn(
-        "relative flex h-9 cursor-pointer items-center gap-2 rounded-md py-1.5 pr-2 pl-8 text-sm outline-hidden select-none transition-colors",
+        "relative flex h-7 cursor-pointer items-center gap-2 rounded-md py-1 pr-2 pl-8 text-sm outline-hidden select-none transition-colors",
         "focus:bg-accent/50 focus:text-accent-foreground",
         "data-disabled:cursor-not-allowed data-disabled:opacity-50",
         "[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg]:size-4",
@@ -157,7 +157,7 @@ function DropdownMenuRadioItem({
     <DropdownMenuPrimitive.RadioItem
       data-slot="dropdown-menu-radio-item"
       className={cn(
-        "relative flex h-9 cursor-pointer items-center gap-2 rounded-md py-1.5 pr-2 pl-8 text-sm outline-hidden select-none transition-colors",
+        "relative flex h-7 cursor-pointer items-center gap-2 rounded-md py-1 pr-2 pl-8 text-sm outline-hidden select-none transition-colors",
         "focus:bg-accent/50 focus:text-accent-foreground",
         "data-disabled:cursor-not-allowed data-disabled:opacity-50",
         "[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg]:size-4",
@@ -188,7 +188,7 @@ function DropdownMenuLabel({
       data-slot="dropdown-menu-label"
       data-inset={inset}
       className={cn(
-        "px-2 py-1.5 text-sm font-medium data-inset:pl-8",
+        "px-2 py-1 text-sm font-medium data-inset:pl-8",
         className
       )}
       {...props}
@@ -200,7 +200,7 @@ function DropdownMenuLabel({
 // rail's rules are: Chrome floors a border's width to whole device pixels, one
 // at 1.5× as at 1×, where a filled 1px box is snapped by its edges and came
 // out two pixels on some rows. The rule's block is 8px — 4 above, the pixel,
-// 3 below — whole pixels, so the 36px rows under a rule stay on whole pixels
+// 3 below — whole pixels, so the 28px rows under a rule stay on whole pixels
 // too.
 function DropdownMenuSeparator({
   className,
@@ -250,7 +250,7 @@ function DropdownMenuSubTrigger({
       data-slot="dropdown-menu-sub-trigger"
       data-inset={inset}
       className={cn(
-        "flex h-9 cursor-pointer items-center rounded-md px-2 text-sm outline-hidden select-none transition-colors",
+        "flex h-7 cursor-pointer items-center rounded-md px-2 text-sm outline-hidden select-none transition-colors",
         "focus:bg-accent/50 focus:text-accent-foreground",
         "data-[state=open]:bg-accent data-[state=open]:text-accent-foreground",
         "data-inset:pl-8",

@@ -100,7 +100,7 @@ export default async function OrganizationSettingsPage() {
             danger
             description="Closes this organization for everyone in it the moment you confirm: access ends, its API keys stop working, and its projects, keys and everything else it held are erased for good within the hour. There is no undo. Your account stays."
           >
-            <Card className="grid gap-3 bg-destructive/5 text-sm">
+            <Card className="grid gap-gutter bg-destructive/5 text-sm">
               <DeleteOrganizationForm
                 organizationId={organization.organizationId}
                 organization={label}

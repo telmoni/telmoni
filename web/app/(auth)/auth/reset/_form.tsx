@@ -17,7 +17,7 @@ export function ResetForm({ userId, token }: { userId: string; token: string }) 
 
   if (done) {
     return (
-      <div className="grid gap-3 text-sm">
+      <div className="grid gap-gutter text-sm">
         <p>Your password is changed. Sign in with it from now on.</p>
         <div>
           {/* A Route Handler, not a page, so never a <Link>: a link's prefetch
@@ -35,7 +35,7 @@ export function ResetForm({ userId, token }: { userId: string; token: string }) 
 
   return (
     <form
-      className="grid gap-3"
+      className="grid gap-gutter"
       onSubmit={(e) => {
         e.preventDefault();
         if (pending || mismatch) return;

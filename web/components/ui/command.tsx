@@ -2,9 +2,9 @@
 
 import * as React from "react"
 import { Command as CommandPrimitive } from "cmdk"
-import { cn } from "@/lib/utils"
 import { SearchIcon } from "lucide-react"
 
+import { cn } from "@/lib/utils"
 import {
   Dialog,
   DialogContent,
@@ -29,8 +29,6 @@ function Command({
   )
 }
 
-// The console's dialog draws its close button in its header, not its content,
-// so this one takes no `showCloseButton`: a palette closes on Escape.
 function CommandDialog({
   title = "Command Palette",
   description = "Search for a command to run...",
@@ -64,13 +62,13 @@ function CommandInput({
   return (
     <div
       data-slot="command-input-wrapper"
-      className="flex h-9 items-center gap-2 border-b px-3"
+      className="flex h-7 items-center gap-1.5 border-b border-border px-1.5"
     >
       <SearchIcon className="size-4 shrink-0 text-muted-foreground" />
       <CommandPrimitive.Input
         data-slot="command-input"
         className={cn(
-          "flex h-10 w-full rounded-md bg-transparent py-3 text-sm outline-hidden placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50",
+          "flex h-7 w-full rounded-md bg-transparent text-xs outline-hidden placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50",
           className
         )}
         {...props}
@@ -136,7 +134,7 @@ function CommandSeparator({
   )
 }
 
-// A row as a menu's is (`dropdown-menu.tsx`): 36px tall, 8px corners, and the
+// A row as a menu's is (`dropdown-menu.tsx`): 28px (h-7) tall, 8px corners, and the
 // accent at half strength under the pointer or the keyboard, so a list to
 // search reads as the menus beside it.
 function CommandItem({
@@ -147,7 +145,7 @@ function CommandItem({
     <CommandPrimitive.Item
       data-slot="command-item"
       className={cn(
-        "relative flex h-9 cursor-pointer items-center gap-2 rounded-md px-2 text-sm outline-hidden select-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-[selected=true]:bg-accent/50 data-[selected=true]:text-accent-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground",
+        "relative flex h-7 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-xs outline-hidden select-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-[selected=true]:bg-accent/50 data-[selected=true]:text-accent-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground",
         className
       )}
       {...props}

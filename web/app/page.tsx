@@ -170,7 +170,7 @@ const FAQ = [
 // for both.
 function WayIn({ signedIn }: { signedIn: boolean }) {
   return (
-    <div className="flex flex-wrap gap-3">
+    <div className="flex flex-wrap gap-gutter">
       {signedIn ? (
         <Button asChild size="sm">
           <Link href="/console">Console</Link>
@@ -213,7 +213,7 @@ export default async function SplashPage() {
         {/* The product shot — a recording of the console — is still to be
             taken; its frame holds the place and says so. */}
         <div className="dots flex aspect-video w-full items-center justify-center border-b border-border">
-          <p className="flex items-center gap-3 border border-dashed border-border bg-background px-5 py-4 text-sm text-muted-foreground">
+          <p className="flex items-center gap-gutter border border-dashed border-border bg-background px-5 py-4 text-sm text-muted-foreground">
             <Play aria-hidden="true" className="size-4" />
             A recording of the console, coming soon
           </p>
@@ -262,7 +262,7 @@ export default async function SplashPage() {
             {FAQ.map((entry) => (
               <details key={entry.question} className="group">
                 <summary
-                  className={`flex cursor-pointer list-none items-start gap-4 py-3 text-foreground [&::-webkit-details-marker]:hidden ${BODY}`}
+                  className={`flex cursor-pointer list-none items-start gap-4 py-gutter text-foreground [&::-webkit-details-marker]:hidden ${BODY}`}
                 >
                   <Plus
                     aria-hidden="true"

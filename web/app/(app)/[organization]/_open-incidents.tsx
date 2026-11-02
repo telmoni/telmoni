@@ -19,7 +19,7 @@ export function OpenIncidents({
   if (health.kind === "forbidden") return null;
   if (health.kind === "ok" && health.incidents.length === 0) return null;
   return (
-    <section className="grid gap-3" aria-label="Open incidents">
+    <section className="grid gap-gutter" aria-label="Open incidents">
       <div className="flex items-center justify-between gap-2">
         <h2 className="text-sm font-medium">Open incidents</h2>
       </div>

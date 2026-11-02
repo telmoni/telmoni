@@ -63,9 +63,9 @@ export function SiteHeader({ signedIn, inset = false }: { signedIn: boolean; ins
             its key. A member gets two outlined: the console is where they
             already are, not a thing to sell, and the key stays on it. Below
             `lg` neither shows; the drawer carries the same pair. */}
-        <div className={cn("flex items-center gap-3", inset ? INSET : "px-3")}>
+        <div className={cn("flex items-center gap-gutter", inset ? INSET : "px-gutter")}>
           <SiteNavMenu />
-          <div className="hidden items-center gap-2 lg:flex">
+          <div className="hidden items-center gap-gutter lg:flex">
             {signedIn ? (
               <>
                 <SignOutButton className={NAV_TYPE} />

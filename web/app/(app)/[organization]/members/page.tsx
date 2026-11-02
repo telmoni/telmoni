@@ -121,7 +121,7 @@ export default async function OrganizationMembersPage() {
         <MemberCeilingNotice ceiling={listing.ceiling} />
         <RoleCards cards={ROLES} />
 
-        <section className="grid gap-3">
+        <section className="grid gap-gutter">
           <RosterTable>
             {listing.members.map((m) => (
               <MemberRow

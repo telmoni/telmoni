@@ -7,7 +7,7 @@ export function MemberCeilingNotice({ ceiling }: { ceiling: RosterCeiling | null
   return (
     <p
       data-testid="member-ceiling"
-      className="rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground"
+      className="rounded-md border border-border bg-muted/40 px-gutter py-2 text-sm text-muted-foreground"
     >
       {ceiling.detail}
     </p>

@@ -345,7 +345,7 @@ function AlertPanel({
             />
           </SidePanelRow>
           <SidePanelRow label="Alert when" htmlFor={`${id}-alert`}>
-            <div className="flex max-w-md flex-wrap items-center gap-3">
+            <div className="flex max-w-md flex-wrap items-center gap-gutter">
               <span className="text-muted-foreground">{OPERATOR_LABEL[draft.operator]}</span>
               <Threshold
                 id={`${id}-alert`}
@@ -358,7 +358,7 @@ function AlertPanel({
           </SidePanelRow>
           {takesWarning(draft.operator) && (
             <SidePanelRow label="Warn when" htmlFor={`${id}-warning`}>
-              <div className="flex max-w-md flex-wrap items-center gap-3">
+              <div className="flex max-w-md flex-wrap items-center gap-gutter">
                 <span className="text-muted-foreground">{OPERATOR_LABEL[draft.operator]}</span>
                 <Threshold
                   id={`${id}-warning`}
@@ -390,7 +390,7 @@ function AlertPanel({
             </p>
           </SidePanelRow>
           <SidePanelRow label="Notify again" htmlFor={`${id}-renotify`}>
-            <div className="flex max-w-md items-center gap-3">
+            <div className="flex max-w-md items-center gap-gutter">
               <span className="text-muted-foreground">Every</span>
               <Input
                 id={`${id}-renotify`}
@@ -530,15 +530,15 @@ function Links({
   const levelHint = `${id}-level-hint`;
   return (
     <>
-      <ul className="grid max-w-xl gap-3" aria-label="Connectors">
+      <ul className="grid max-w-xl gap-gutter" aria-label="Connectors">
         {rows.map((connection) => {
           const link = links.find((l) => l.connectionId === connection.id) ?? null;
           const switchId = `${id}-link-${connection.id}`;
           const status = CONNECTION_STATUS_LABEL[connection.status];
           const taken = incidentKindsLabel(connection.eventKinds);
           return (
-            <li key={connection.id} className="grid gap-3 rounded-menu border border-border p-3">
-              <div className="flex items-center justify-between gap-3">
+            <li key={connection.id} className="grid gap-gutter rounded-menu border border-border p-gutter">
+              <div className="flex items-center justify-between gap-gutter">
                 <span className="flex min-w-0 items-center gap-2">
                   <Label id={`${switchId}-name`} htmlFor={switchId} className="min-w-0 truncate font-normal">
                     {connection.name}
@@ -603,8 +603,8 @@ function LinkFields({
   const hours = link.hours;
   return (
     // Named by its connector, so a control here says whose it is.
-    <div role="group" aria-labelledby={`${id}-name`} className="grid gap-3">
-      <div className="grid gap-3 sm:grid-cols-2">
+    <div role="group" aria-labelledby={`${id}-name`} className="grid gap-gutter">
+      <div className="grid gap-gutter sm:grid-cols-2">
         <div className="grid gap-1.5">
           <Label htmlFor={`${id}-level`} className="font-normal text-muted-foreground">
             Hears
@@ -648,7 +648,7 @@ function LinkFields({
         </div>
       </div>
       {hours && (
-        <div className="grid gap-3">
+        <div className="grid gap-gutter">
           <ToggleGroup
             type="multiple"
             variant="outline"
@@ -666,8 +666,8 @@ function LinkFields({
             ))}
           </ToggleGroup>
           {/* Each label with its field, so a narrow panel never leaves one at a line's end. */}
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-gutter">
+            <span className="flex items-center gap-gutter">
               <Label htmlFor={`${id}-from`} className="font-normal text-muted-foreground">
                 From
               </Label>
@@ -681,7 +681,7 @@ function LinkFields({
                 className="w-32"
               />
             </span>
-            <span className="flex items-center gap-3">
+            <span className="flex items-center gap-gutter">
               <Label htmlFor={`${id}-to`} className="font-normal text-muted-foreground">
                 to
               </Label>
@@ -695,7 +695,7 @@ function LinkFields({
                 className="w-32"
               />
             </span>
-            <span className="flex items-center gap-3">
+            <span className="flex items-center gap-gutter">
               <Label htmlFor={`${id}-offset`} className="font-normal text-muted-foreground">
                 Offset
               </Label>

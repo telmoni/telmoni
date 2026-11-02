@@ -52,7 +52,7 @@ function BlockView({ block, citations }: { block: Block; citations: AgentCitatio
     }
     case "code":
       return (
-        <pre className="overflow-x-auto rounded-md bg-muted px-3 py-2 font-mono text-xs">
+        <pre className="overflow-x-auto rounded-md bg-muted px-gutter py-2 font-mono text-xs">
           <code>{block.text}</code>
         </pre>
       );

@@ -172,7 +172,7 @@ export default async function SessionPage({
           title="Runs"
           description="Each run of the session in the order it started, as the layout lays it out; j and k step through them, and o opens one where the layout opens its steps."
         >
-          <div className="flex flex-wrap items-center gap-gutter">
+          <div className="flex flex-wrap items-center gap-2">
             <WindowPicker days={days} />
             <TagEveryTrace
               projectId={project.id}
