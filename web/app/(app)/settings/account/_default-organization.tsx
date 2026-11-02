@@ -35,7 +35,7 @@ export function DefaultOrganization({
   const onSave = () => run(() => setDefaultOrganizationAction(chosen), "Default organization saved.");
 
   return (
-    <div className="grid gap-3">
+    <div className="grid gap-gutter">
       <Select value={chosen} onValueChange={setChosen} disabled={pending}>
         <SelectTrigger aria-label="Default organization" className="w-full sm:w-72">
           <SelectValue />

@@ -56,7 +56,7 @@ export default async function AccountPrivacyPage() {
           danger
           description="Permanently deletes your account, and every organization you own on your own. Access ends at once and the erasure follows, usually within the hour, with no undo. To delete one organization and keep your account, use that organization's settings."
         >
-          <Card className="grid gap-3 bg-destructive/5 text-sm">
+          <Card className="grid gap-gutter bg-destructive/5 text-sm">
             <DeleteAccountForm
               email={session.email}
               ownedOrganizations={ownedOrganizations}

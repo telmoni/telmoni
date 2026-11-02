@@ -8,8 +8,8 @@ import type { TraceColumn } from "@/lib/types/enums";
 import { DEFAULT_USER_COLUMNS, orderedUserColumns, type UserColumn } from "@/lib/users";
 
 // What a person chose of the lists' look, kept in their own browser: the
-// columns each list shows, and for every list how tightly the rows sit, how
-// often it reads itself again, whether the filters stand beside it and how
+// columns each list shows, and for every list how tightly the rows sit (set on
+// the General settings page), whether the filters stand beside it and how
 // wide; how wide a trace opened from it stands, and the layout they last
 // chose for a session's page and a trace's. None of it is a list's state — a
 // link a colleague opens shows their own columns — so none of it is in the
@@ -19,10 +19,6 @@ import { DEFAULT_USER_COLUMNS, orderedUserColumns, type UserColumn } from "@/lib
 export const DENSITIES = ["comfortable", "compact"] as const;
 export type Density = (typeof DENSITIES)[number];
 
-/** How often, in seconds, the page reads itself again; 0 is never. */
-export const REFRESH_INTERVALS = [0, 30, 60, 300, 900] as const;
-export type RefreshSeconds = (typeof REFRESH_INTERVALS)[number];
-
 export type TracePrefs = {
   columns: readonly TraceColumn[];
   /** The sessions table's columns. */
@@ -30,7 +26,6 @@ export type TracePrefs = {
   /** The users table's. */
   userColumns: readonly UserColumn[];
   density: Density;
-  refresh: RefreshSeconds;
   /** Whether the filters' sidebar shows. */
   filters: boolean;
   /** Whether a trace opened from the list fills the content area, rather
@@ -50,7 +45,6 @@ export const DEFAULT_PREFS: TracePrefs = {
   sessionColumns: DEFAULT_SESSION_COLUMNS,
   userColumns: DEFAULT_USER_COLUMNS,
   density: "comfortable",
-  refresh: 0,
   filters: true,
   peekFull: false,
   peekWidth: null,
@@ -85,7 +79,6 @@ const PrefsSchema = z.object({
   ]),
   userColumns: Strings.transform((v) => orderedUserColumns(v)).catch([...DEFAULT_PREFS.userColumns]),
   density: z.enum(DENSITIES).catch(DEFAULT_PREFS.density),
-  refresh: z.literal(REFRESH_INTERVALS).catch(DEFAULT_PREFS.refresh),
   filters: z.boolean().catch(DEFAULT_PREFS.filters),
   peekFull: z.boolean().catch(DEFAULT_PREFS.peekFull),
   // Optional before the transform: a transform alone makes the key required.
@@ -111,10 +104,3 @@ export const COLUMNS_PREF = {
   sessions: "sessionColumns",
   users: "userColumns",
 } as const satisfies Record<ListName, keyof TracePrefs>;
-
-/** How often the page reads itself again, in words. */
-export function refreshLabel(seconds: RefreshSeconds): string {
-  if (seconds === 0) return "Off";
-  if (seconds < 60) return `${seconds} s`;
-  return `${seconds / 60} min`;
-}

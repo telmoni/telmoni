@@ -9,7 +9,7 @@ import type { GivenSeat } from "@/lib/types/given-seat";
 const markSeatSeenAction = vi.hoisted(() =>
   vi.fn<(projectId: string) => Promise<ActionResult>>(async () => ({ ok: true })),
 );
-vi.mock("@/app/(app)/account/notifications/seat-actions", () => ({ markSeatSeenAction }));
+vi.mock("@/app/(app)/settings/notifications/seat-actions", () => ({ markSeatSeenAction }));
 
 import { useGivenSeats } from "@/lib/store";
 import { StoreProvider } from "@/lib/store/provider";

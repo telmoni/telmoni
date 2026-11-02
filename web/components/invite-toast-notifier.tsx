@@ -56,7 +56,7 @@ export function InviteToastNotifier() {
           // ⚠ **GOES TO THE PAGE, not the account menu**, whose invitation
           // rows are themselves links to this same href: opened from here,
           // "Review" cost a press and arrived nowhere. Accept and Decline
-          // live only on `/account/notifications`.
+          // live only on `/settings/notifications`.
           onClick: () => router.push(NOTIFICATIONS_HREF),
         },
         onDismiss: () => {

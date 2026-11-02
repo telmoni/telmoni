@@ -4,21 +4,7 @@ import { useConsoleUi } from "@/components/console-ui-context";
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useTheme } from "next-themes";
-import {
-  Activity,
-  BookOpen,
-  House,
-  Keyboard,
-  LogOut,
-  Monitor,
-  Moon,
-  Palette,
-  Square,
-  SquareRoundCorner,
-  Sun,
-  User,
-} from "lucide-react";
+import { Activity, BookOpen, House, Keyboard, LogOut, Settings, User } from "lucide-react";
 
 import { GithubIcon } from "@/components/brand-icons";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -29,15 +15,11 @@ import {
   DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { signOut } from "@/lib/auth/sign-out";
-import { CORNERS_DEFAULT, isCorners, type Corners } from "@/lib/corners";
-import { setCorners, useCorners } from "@/lib/use-corners";
 import { SEARCH_MODIFIER_KEY, inFront, isChord } from "@/lib/keys";
 import { useIsMac } from "@/lib/use-platform";
 import { DOCS_URL, REPO_URL, STATUS_URL } from "@/lib/site";
@@ -45,37 +27,10 @@ import { useUser } from "@/lib/store";
 import { displayName } from "@/lib/user-display";
 import { cn } from "@/lib/utils";
 
-const THEMES = [
-  { value: "system", label: "System theme", icon: Monitor },
-  { value: "light", label: "Light theme", icon: Sun },
-  { value: "dark", label: "Dark theme", icon: Moon },
-] as const;
-
-const ROW = "h-9 gap-2 px-2 cursor-pointer";
-
-const CORNER_CHOICES = [
-  { value: "rounded", label: "Rounded corners", icon: SquareRoundCorner },
-  { value: "sharp", label: "Sharp corners", icon: Square },
-] as const satisfies ReadonlyArray<{
-  value: Corners;
-  label: string;
-  icon: typeof Square;
-}>;
-
-// `SegmentedSwitch`'s shape, built from Radix menu items instead of buttons;
-// its track classes are repeated on the two groups below. Each icon is
-// `text-inherit`, the segment's colour, which a menu row would mute.
-const SWITCH_SEGMENT = [
-  "size-7 justify-center gap-0 p-0 pl-0 rounded-none",
-  "[&>span:first-child]:hidden",
-  "text-muted-foreground data-[state=checked]:bg-secondary",
-  "data-[state=checked]:text-foreground",
-];
+const ROW = "h-7 gap-2 px-2 cursor-pointer";
 
 export function NavUser() {
   const user = useUser();
-  const { theme, setTheme } = useTheme();
-  const corners = useCorners();
   const { setShortcutsOpen } = useConsoleUi();
   const [open, setOpen] = useState(false);
   const isMac = useIsMac();
@@ -105,9 +60,9 @@ export function NavUser() {
             aria-keyshortcuts="Control+Shift+K Meta+Shift+K"
             title={`${name} (${chord})`}
             size={null}
-            className="size-9 shrink-0 rounded-md text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground"
+            className="size-7 shrink-0 rounded-md text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground"
           >
-            <Avatar>
+            <Avatar className="size-full">
               <AvatarImage src="" alt="" />
               <AvatarFallback className="bg-transparent text-inherit">
                 <User aria-hidden className="size-4" />
@@ -121,21 +76,21 @@ export function NavUser() {
           align="end"
           // Right under the header's rule, as the switchers' menus open
           // (`resource-selector.tsx`).
-          sideOffset={12.5}
+          sideOffset={12}
         >
           {/* The head is the address alone, a row the foot's height, as the
               switchers head their menus with one line: the name is the
               account page's to show, not the menu's. */}
-          <DropdownMenuLabel className="flex h-9 items-center px-2 py-0 text-xs font-normal text-muted-foreground">
+          <DropdownMenuLabel className="flex h-7 items-center px-2 py-0 text-xs font-normal text-muted-foreground">
             <span className="truncate">{user.email}</span>
           </DropdownMenuLabel>
 
           <DropdownMenuSeparator />
           <DropdownMenuGroup>
             <DropdownMenuItem asChild className={ROW}>
-              <Link href="/account/settings">
-                <User />
-                <span>Account</span>
+              <Link href="/settings">
+                <Settings />
+                <span>Settings</span>
               </Link>
             </DropdownMenuItem>
 
@@ -164,7 +119,7 @@ export function NavUser() {
             )}
 
             <DropdownMenuItem
-              className={ROW}
+              className={cn(ROW, "pr-1")}
               onSelect={() => setShortcutsOpen(true)}
             >
               <Keyboard />
@@ -177,68 +132,6 @@ export function NavUser() {
               </KbdGroup>
             </DropdownMenuItem>
 
-            <DropdownMenuSeparator />
-            <div
-              data-slot="dropdown-menu-item"
-              className="flex h-9 items-center justify-between gap-2 px-2"
-            >
-              <span className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Palette className="size-4" />
-                Theme
-              </span>
-              <DropdownMenuRadioGroup
-                value={theme ?? "system"}
-                onValueChange={setTheme}
-                aria-label="Theme"
-                className="flex items-center overflow-hidden rounded-md border border-border"
-              >
-                {THEMES.map(({ value, label, icon: Icon }) => (
-                  <DropdownMenuRadioItem
-                    key={value}
-                    value={value}
-                    aria-label={label}
-                    title={label}
-                    onSelect={(e) => e.preventDefault()}
-                    className={cn(SWITCH_SEGMENT)}
-                  >
-                    <Icon className="size-3.5 text-inherit" />
-                  </DropdownMenuRadioItem>
-                ))}
-              </DropdownMenuRadioGroup>
-            </div>
-
-            <div
-              data-slot="dropdown-menu-item"
-              className="mt-0.5 flex h-9 items-center justify-between gap-2 px-2"
-            >
-              <span className="flex items-center gap-2 text-sm text-muted-foreground">
-                <SquareRoundCorner className="size-4" />
-                Corners
-              </span>
-              <DropdownMenuRadioGroup
-                value={corners ?? CORNERS_DEFAULT}
-                onValueChange={(v) => {
-                  if (isCorners(v)) setCorners(v);
-                }}
-                aria-label="Corners"
-                className="flex items-center overflow-hidden rounded-md border border-border"
-              >
-                {CORNER_CHOICES.map(({ value, label, icon: Icon }) => (
-                  <DropdownMenuRadioItem
-                    key={value}
-                    value={value}
-                    aria-label={label}
-                    title={label}
-                    onSelect={(e) => e.preventDefault()}
-                    className={cn(SWITCH_SEGMENT)}
-                  >
-                    <Icon className="size-3.5 text-inherit" />
-                  </DropdownMenuRadioItem>
-                ))}
-              </DropdownMenuRadioGroup>
-            </div>
-
-
             {STATUS_URL && (
               <DropdownMenuItem asChild className={ROW}>
                 <a href={STATUS_URL} target="_blank" rel="noreferrer">
@@ -249,11 +142,11 @@ export function NavUser() {
             )}
           </DropdownMenuGroup>
 
-          {/* The foot is the switchers' foot: a rule, then one 36px row, so
+          {/* The foot is the switchers' foot: a rule, then one 28px row, so
               every menu in the header ends the same way. */}
           <DropdownMenuSeparator />
           <DropdownMenuItem
-            className="h-9 cursor-pointer gap-2 px-2"
+            className="h-7 cursor-pointer gap-2 px-2"
             onSelect={(event) => {
               event.preventDefault();
               signOut();

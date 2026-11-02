@@ -6,7 +6,7 @@ import type { LucideIcon } from "lucide-react";
 
 export interface ExtraNavItem {
   /** The group the row joins. */
-  group: "Project" | "Organization" | "Account";
+  group: "Project" | "Organization" | "Settings";
   title: string;
   /** Under the group's root, as the core's rows are: `/reports`. */
   path: string;

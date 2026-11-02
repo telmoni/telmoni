@@ -43,7 +43,7 @@ export function ProjectOffersSection({
 }) {
   if (offers.length === 0) return null;
   return (
-    <section className="grid gap-3" data-testid="project-offers">
+    <section className="grid gap-gutter" data-testid="project-offers">
       <div className="flex items-center gap-2">
         <h2 className="text-sm font-medium">Project offers</h2>
         <Badge variant="secondary" className="text-xs">
@@ -75,7 +75,7 @@ function ProjectOfferCard({
   const decline = () => run(() => declineProjectOfferAction(offer.projectId));
 
   return (
-    <Card className="grid gap-3">
+    <Card className="grid gap-gutter">
       <div className="grid gap-1">
         <p className="text-sm font-medium">
           {owner} wants to hand you the project {offer.name}
@@ -97,7 +97,7 @@ function ProjectOfferCard({
           {error}
         </p>
       )}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-gutter">
         {owned.length === 0 ? (
           <p className="text-sm text-muted-foreground" data-testid="project-offer-nowhere">
             You own no organization to take it into.

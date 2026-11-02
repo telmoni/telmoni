@@ -189,8 +189,8 @@ describe("RealtimeListener - membership:removed edge cases", () => {
     expect(mockRefresh).not.toHaveBeenCalled();
   });
 
-  it("does not eject from /account/settings when removed from an organization", () => {
-    mockPathname = "/account/settings";
+  it("does not eject from /settings/account when removed from an organization", () => {
+    mockPathname = "/settings/account";
     render(<RealtimeListener />);
 
     const es = MockEventSource.instances[0]!;
@@ -320,7 +320,7 @@ describe("RealtimeListener - rosters", () => {
     },
   );
 
-  it.each(["/acme", "/acme/settings", "/acme/web", "/acme/web/api-keys", "/account/settings"])(
+  it.each(["/acme", "/acme/settings", "/acme/web", "/acme/web/api-keys", "/settings/account"])(
     "leaves %s alone when an invitation is sent",
     (pathname) => {
       mockPathname = pathname;
@@ -340,7 +340,7 @@ describe("RealtimeListener - membership:changed", () => {
     mockActiveOrgId = "org_1";
   });
 
-  it.each(["/acme/web/members", "/acme/settings", "/account/settings"])(
+  it.each(["/acme/web/members", "/acme/settings", "/settings/account"])(
     "refreshes %s and moves nowhere",
     (pathname) => {
       mockPathname = pathname;

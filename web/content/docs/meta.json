@@ -7,7 +7,7 @@
     "integrations",
     "api",
     "errors",
-    "account",
+    "settings",
     "...",
     "contributing"
   ]

@@ -29,16 +29,17 @@ describe("buildConsoleNav", () => {
     expect(buildConsoleNav("/acme/web/api-keys").map((g) => g.title)).toEqual(["Project"]);
     expect(buildConsoleNav("/acme/projects").map((g) => g.title)).toEqual(["Organization"]);
     expect(buildConsoleNav("/acme").map((g) => g.title)).toEqual(["Organization"]);
-    expect(buildConsoleNav("/account/settings").map((g) => g.title)).toEqual(["Account"]);
+    expect(buildConsoleNav("/settings/account").map((g) => g.title)).toEqual(["Settings"]);
   });
 
   it("builds each run against its own segment", () => {
-    const [account] = buildConsoleNav("/account/settings");
+    const [account] = buildConsoleNav("/settings/account");
     expect(account?.items.map((i) => i.url)).toEqual([
-      "/account/settings",
-      "/account/notifications",
-      "/account/accessibility",
-      "/account/privacy",
+      "/settings/general",
+      "/settings/account",
+      "/settings/notifications",
+      "/settings/accessibility",
+      "/settings/privacy",
     ]);
     const [organization] = buildConsoleNav("/acme");
     for (const item of organization?.items ?? []) {
@@ -50,13 +51,13 @@ describe("buildConsoleNav", () => {
   });
 
   it("keeps the person's rail out of the organization's, and the reverse", () => {
-    const account = buildConsoleNav("/account/notifications");
-    expect(account.map((g) => g.title)).toEqual(["Account"]);
+    const account = buildConsoleNav("/settings/notifications");
+    expect(account.map((g) => g.title)).toEqual(["Settings"]);
     expect(account.flatMap((g) => g.items.map((i) => i.url))).not.toContain("/acme/settings");
 
     const organization = buildConsoleNav("/acme/settings");
     expect(organization.flatMap((g) => g.items.map((i) => i.url))).not.toContain(
-      "/account/settings",
+      "/settings/account",
     );
   });
 
@@ -157,13 +158,13 @@ describe("buildConsoleNav", () => {
   // The title is the heading drawn over the run, so the two have to stay the
   // same string: a group renamed for the switcher and not for the rail would
   // head the Organization list with the word Project. Project and
-  // Organization carry the same row names, and Account is headed the same way
+  // Organization carry the same row names, and Settings is headed the same way
   // so the three rails read as one kind of list.
   it("heads every run with the level's own name", () => {
     for (const [pathname, title] of [
       ["/acme/web/api-keys", "Project"],
       ["/acme/projects", "Organization"],
-      ["/account/settings", "Account"],
+      ["/settings/account", "Settings"],
     ] as const) {
       const [group] = buildConsoleNav(pathname);
       expect(group?.title).toBe(title);
@@ -251,9 +252,9 @@ describe("the blocks of a run", () => {
       [undefined, ["Overview"]],
       ["Organization", ["Projects", "Members", "Audit log", "Settings"]],
     ]);
-    const [account] = buildConsoleNav("/account/settings");
+    const [account] = buildConsoleNav("/settings/account");
     expect(navBlocks(account?.items ?? []).map((b) => [b.heading, b.items.length])).toEqual([
-      [undefined, 4],
+      [undefined, 5],
     ]);
   });
 });
@@ -290,7 +291,7 @@ describe("the whole destination set", () => {
       [
         ...buildConsoleNav("/acme/web/api-keys"),
         ...buildConsoleNav("/acme/settings"),
-        ...buildConsoleNav("/account/settings"),
+        ...buildConsoleNav("/settings/account"),
       ].flatMap((g) => g.items.map((i) => i.url)),
     ).toEqual([
       "/acme/web",
@@ -310,10 +311,11 @@ describe("the whole destination set", () => {
       "/acme/members",
       "/acme/audit-log",
       "/acme/settings",
-      "/account/settings",
-      "/account/notifications",
-      "/account/accessibility",
-      "/account/privacy",
+      "/settings/general",
+      "/settings/account",
+      "/settings/notifications",
+      "/settings/accessibility",
+      "/settings/privacy",
     ]);
   });
 });
@@ -323,7 +325,7 @@ describe("rootSegment", () => {
     expect(rootSegment("/acme/web/api-keys")).toBe("acme");
     expect(rootSegment("/acme")).toBe("acme");
     expect(rootSegment("/acme/members")).toBe("acme");
-    expect(rootSegment("/account/settings")).toBe("account");
+    expect(rootSegment("/settings/account")).toBe("settings");
   });
 
   it("is empty for the root and for nothing", () => {
@@ -337,7 +339,7 @@ describe("rootSegment", () => {
     for (const [pathname, root] of [
       ["/acme/web/api-keys", "acme"],
       ["/acme/settings", "acme"],
-      ["/account/settings", "account"],
+      ["/settings/account", "settings"],
     ] as const) {
       for (const group of buildConsoleNav(pathname)) {
         for (const item of group.items) {
@@ -349,16 +351,16 @@ describe("rootSegment", () => {
 });
 
 describe("isAccountPath", () => {
-  it("covers the account root and everything under it", () => {
-    expect(isAccountPath("/account")).toBe(true);
-    expect(isAccountPath("/account/settings")).toBe(true);
-    expect(isAccountPath("/account/")).toBe(true);
+  it("covers the settings root and everything under it", () => {
+    expect(isAccountPath("/settings")).toBe(true);
+    expect(isAccountPath("/settings/account")).toBe(true);
+    expect(isAccountPath("/settings/")).toBe(true);
   });
 
   // A sibling whose name begins with the word is a different place.
   it("does not claim a path that merely starts with the word", () => {
-    expect(isAccountPath("/accounting")).toBe(false);
-    expect(isAccountPath("/acme/account")).toBe(false);
+    expect(isAccountPath("/settings-2")).toBe(false);
+    expect(isAccountPath("/acme/settings")).toBe(false);
     expect(isAccountPath("/")).toBe(false);
   });
 });
@@ -430,9 +432,9 @@ describe("consolePlace", () => {
     }
   });
 
-  it("reads Account as a place of its own, and nothing off the console's paths", () => {
-    expect(consolePlace("/account/settings")).toEqual({ kind: "account" });
-    expect(consolePlace("/account")).toEqual({ kind: "account" });
+  it("reads Settings as a place of its own, and nothing off the console's paths", () => {
+    expect(consolePlace("/settings/account")).toEqual({ kind: "account" });
+    expect(consolePlace("/settings")).toEqual({ kind: "account" });
     for (const pathname of [
       "/",
       "",
@@ -465,7 +467,7 @@ describe("projectAt", () => {
   it("finds none off a project's pages", () => {
     expect(projectAt("/acme", "acme", projects)).toBeNull();
     expect(projectAt("/acme/settings", "acme", projects)).toBeNull();
-    expect(projectAt("/account/settings", "acme", projects)).toBeNull();
+    expect(projectAt("/settings/account", "acme", projects)).toBeNull();
     expect(projectAt("/acme/gone", "acme", projects)).toBeNull();
   });
 
@@ -492,7 +494,7 @@ describe("staleShellOrganization", () => {
   });
 
   it("is quiet on a path that names no organization", () => {
-    expect(staleShellOrganization("/account/settings", "acme", organizations)).toBeNull();
+    expect(staleShellOrganization("/settings/account", "acme", organizations)).toBeNull();
     expect(staleShellOrganization("/console", "acme", organizations)).toBeNull();
   });
 
@@ -520,7 +522,7 @@ describe("movedPath", () => {
 
   it("leaves a path that is not spelled with the slug", () => {
     expect(movedPath("/globex/web", { from: "acme", to: "acme-robotics" })).toBeNull();
-    expect(movedPath("/account/settings", { from: "account", to: "acme" })).toBeNull();
+    expect(movedPath("/settings/account", { from: "settings", to: "acme" })).toBeNull();
     expect(movedPath("/console", { from: "console", to: "acme" })).toBeNull();
   });
 
@@ -552,8 +554,8 @@ describe("organizationToRemember", () => {
   // Account names none, so the cookie keeps following the organization this
   // tab stands in — and not the one another tab moved it to since.
   it("remembers the one the console stands in on a path that names none", () => {
-    expect(organizationToRemember("/account/settings", organizations, "org_acme")).toBe("org_acme");
-    expect(organizationToRemember("/account/settings", organizations, null)).toBeNull();
+    expect(organizationToRemember("/settings/account", organizations, "org_acme")).toBe("org_acme");
+    expect(organizationToRemember("/settings/account", organizations, null)).toBeNull();
   });
 
   // A path that answers 404 opened nothing.

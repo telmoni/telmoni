@@ -55,7 +55,7 @@ describe("this tab's trail", () => {
   });
 
   it("records nothing for a path it would refuse", () => {
-    recordPath("/account/settings");
+    recordPath("/settings/account");
     expect(window.sessionStorage.getItem(CONSOLE_TRAIL_KEY)).toBeNull();
   });
 
@@ -95,13 +95,13 @@ describe("the console across a visit", () => {
 
   it("records where you stood, then hands it to the back arrow", () => {
     standAt(CONNECTORS).unmount();
-    const trail = standAt("/account/settings").result.current;
+    const trail = standAt("/settings/account").result.current;
     expect(resolveReturnUrl(trail, LIVE, OVERVIEW)).toBe(CONNECTORS);
   });
 
   it("holds the page while you move around Account", () => {
     standAt(CONNECTORS).unmount();
-    const account = standAt("/account/settings");
+    const account = standAt("/settings/account");
     account.rerender();
     expect(resolveReturnUrl(account.result.current, LIVE, OVERVIEW)).toBe(CONNECTORS);
   });
@@ -117,7 +117,7 @@ describe("the console across a visit", () => {
   });
 
   it("offers the fallback to a tab that opened on an account page", () => {
-    const trail = standAt("/account/notifications").result.current;
+    const trail = standAt("/settings/notifications").result.current;
     expect(resolveReturnUrl(trail, LIVE, OVERVIEW)).toBe(OVERVIEW);
   });
 

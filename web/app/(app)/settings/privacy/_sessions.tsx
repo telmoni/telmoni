@@ -100,7 +100,7 @@ export function ActiveSessions({
   const others = sessions.some((session) => session.id !== currentId);
 
   return (
-    <div className="grid gap-3">
+    <div className="grid gap-gutter">
       {others && (
         <div>
           <Button

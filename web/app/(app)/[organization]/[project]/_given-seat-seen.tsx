@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 
-import { markSeatSeenAction } from "@/app/(app)/account/notifications/seat-actions";
+import { markSeatSeenAction } from "@/app/(app)/settings/notifications/seat-actions";
 import { useGivenSeats, useRemoveGivenSeat } from "@/lib/store";
 
 // A seat given is seen once its project is open, however it was reached: the

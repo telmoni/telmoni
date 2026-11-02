@@ -9,8 +9,8 @@ import type { GivenSeat } from "@/lib/types/given-seat";
 const markSeatSeenAction = vi.hoisted(() =>
   vi.fn<(projectId: string) => Promise<ActionResult>>(async () => ({ ok: true })),
 );
-vi.mock("@/app/(app)/account/notifications/seat-actions", () => ({ markSeatSeenAction }));
-vi.mock("@/app/(app)/account/notifications/invite-actions", () => ({
+vi.mock("@/app/(app)/settings/notifications/seat-actions", () => ({ markSeatSeenAction }));
+vi.mock("@/app/(app)/settings/notifications/invite-actions", () => ({
   acceptIncomingInviteAction: vi.fn(),
   declineIncomingInviteAction: vi.fn(),
 }));

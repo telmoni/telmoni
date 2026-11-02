@@ -51,8 +51,8 @@ import { cn } from "@/lib/utils";
 import {
   acceptIncomingInviteAction,
   declineIncomingInviteAction,
-} from "@/app/(app)/account/notifications/invite-actions";
-import { useGivenSeat } from "@/app/(app)/account/notifications/use-given-seat";
+} from "@/app/(app)/settings/notifications/invite-actions";
+import { useGivenSeat } from "@/app/(app)/settings/notifications/use-given-seat";
 
 export function NotificationsBell() {
   useAuditExportsWatcher();
@@ -87,7 +87,7 @@ export function NotificationsBell() {
             : "Notifications"
         }
         className={cn(
-          "relative flex size-9 shrink-0 items-center justify-center",
+          "relative flex size-7 shrink-0 items-center justify-center",
           "rounded-md text-muted-foreground hover:text-foreground",
           "outline-none focus-visible:ring-2 focus-visible:ring-ring",
           "hover:bg-sidebar-accent/50",
@@ -98,7 +98,7 @@ export function NotificationsBell() {
           <span
             aria-hidden
             data-testid="notifications-bell-count"
-            className="absolute top-1 right-1 flex size-3.5 items-center justify-center rounded-full bg-primary text-[9px] font-medium text-primary-foreground ring-2 ring-background"
+            className="absolute -top-0.5 -right-0.5 flex size-3.5 items-center justify-center rounded-full bg-primary text-[9px] font-medium text-primary-foreground ring-2 ring-background"
           >
             {badge}
           </span>
@@ -116,12 +116,12 @@ export function NotificationsBell() {
         align="end"
         // Right under the header's rule, as the switchers' menus open
         // (`resource-selector.tsx`).
-        sideOffset={12.5}
+        sideOffset={12}
         data-testid="notifications-menu"
       >
-        {/* The head is the account menu's: one 36px line in the label's small
+        {/* The head is the account menu's: one 28px line in the label's small
             muted type, then the rule, so the header's menus open alike. */}
-        <DropdownMenuLabel className="flex h-9 items-center justify-between gap-2 px-2 py-0 text-xs font-normal text-muted-foreground">
+        <DropdownMenuLabel className="flex h-7 items-center justify-between gap-2 px-2 py-0 text-xs font-normal text-muted-foreground">
           <span>Notifications</span>
           {count > 0 && (
             <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
@@ -168,10 +168,10 @@ export function NotificationsBell() {
         )}
 
         {/* The foot is every header menu's foot (`nav-user.tsx`,
-            `resource-selector.tsx`): a rule, then one 36px row, its icon
+            `resource-selector.tsx`): a rule, then one 28px row, its icon
             first. The rows above drop their last rule for it. */}
         <DropdownMenuSeparator />
-        <DropdownMenuItem asChild className="h-9 cursor-pointer gap-2 px-2">
+        <DropdownMenuItem asChild className="h-7 cursor-pointer gap-2 px-2">
           <Link href={NOTIFICATIONS_HREF} data-testid="notifications-menu-all">
             <Bell className="size-4 shrink-0 text-muted-foreground" />
             Go to notifications
@@ -191,7 +191,7 @@ function ExportReadyRow({ entry, organization }: { entry: AuditExport; organizat
   const [now] = useState(() => new Date());
   return (
     <DropdownMenuItem
-      className="h-auto cursor-pointer rounded-none border-b border-border px-3 py-3 last:border-b-0"
+      className="h-auto cursor-pointer rounded-none border-b border-border px-gutter py-gutter last:border-b-0"
       data-testid="notifications-menu-export"
       onSelect={() => take(organization, entry.id)}
     >
@@ -214,7 +214,7 @@ function ExportBuildingRow({ entry, organization }: { entry: AuditExport; organi
   return (
     <DropdownMenuItem
       asChild
-      className="h-auto rounded-none border-b border-border px-3 py-3 last:border-b-0"
+      className="h-auto rounded-none border-b border-border px-gutter py-gutter last:border-b-0"
     >
       <Link
         href={organizationPath(organization, "/audit-log")}
@@ -235,12 +235,12 @@ function ExportBuildingRow({ entry, organization }: { entry: AuditExport; organi
 // ⚠ **An offer is answered on the page, not from here.** Taking an
 // organization over hands you its roster and its deletion, and the page says
 // so before the button that does it; the bell only points there.
-// `h-auto` undoes the menu item's fixed `h-9`: these rows hold two lines, and
+// `h-auto` undoes the menu item's fixed height: these rows hold two lines, and
 // a row clipped to one line's height overflowed the list into a scrollbar.
 // The last row drops its rule, which would double the one above the foot.
 function OfferRow({ offer }: { offer: OrganizationEntry }) {
   return (
-    <DropdownMenuItem asChild className="h-auto rounded-none border-b border-border px-3 py-3 last:border-b-0">
+    <DropdownMenuItem asChild className="h-auto rounded-none border-b border-border px-gutter py-gutter last:border-b-0">
       <Link href={NOTIFICATIONS_HREF} data-testid="notifications-menu-offer">
         <span className="grid flex-1 gap-0.5">
           <span className="truncate text-sm font-medium">{organizationLabel(offer)}</span>
@@ -258,7 +258,7 @@ function OfferRow({ offer }: { offer: OrganizationEntry }) {
 // yours, with its keys, and the page says what comes with it first.
 function ProjectOfferRow({ offer }: { offer: ProjectOffer }) {
   return (
-    <DropdownMenuItem asChild className="h-auto rounded-none border-b border-border px-3 py-3 last:border-b-0">
+    <DropdownMenuItem asChild className="h-auto rounded-none border-b border-border px-gutter py-gutter last:border-b-0">
       <Link href={NOTIFICATIONS_HREF} data-testid="notifications-menu-project-offer">
         <span className="grid flex-1 gap-0.5">
           <span className="truncate text-sm font-medium">{offer.name}</span>
@@ -289,7 +289,7 @@ function GivenSeatRow({ seat, onLeave }: { seat: GivenSeat; onLeave: () => void 
   return (
     <div
       ref={row}
-      className="grid gap-2 border-b border-border px-3 py-3 last:border-b-0"
+      className="grid gap-2 border-b border-border px-gutter py-gutter last:border-b-0"
       data-testid="notifications-menu-seat"
     >
       {/* `min-w-0`, or the grid sizes the row to its longest line and a long
@@ -308,7 +308,7 @@ function GivenSeatRow({ seat, onLeave }: { seat: GivenSeat; onLeave: () => void 
         </p>
       )}
 
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-gutter">
         <DropdownMenuItem
           asChild
           className={cn(
@@ -379,7 +379,7 @@ function InviteRow({ invite }: { invite: IncomingInvite }) {
 
   return (
     <div
-      className="grid gap-2 border-b border-border px-3 py-3 last:border-b-0"
+      className="grid gap-2 border-b border-border px-gutter py-gutter last:border-b-0"
       data-testid="notifications-menu-invite"
     >
       <div className="grid min-w-0 gap-0.5">
@@ -400,7 +400,7 @@ function InviteRow({ invite }: { invite: IncomingInvite }) {
         </p>
       )}
 
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-gutter">
         <Button
           size="sm"
           className="h-7 flex-1 gap-1 text-xs"

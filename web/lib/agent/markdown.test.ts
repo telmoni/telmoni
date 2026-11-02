@@ -214,7 +214,7 @@ describe("opensInConsole", () => {
     expect(opensInConsole("/acme/web/members")).toBe(true);
     expect(opensInConsole("/acme/audit-log?page=2")).toBe(true);
     expect(opensInConsole("/acme#top")).toBe(true);
-    expect(opensInConsole("/account/privacy")).toBe(true);
+    expect(opensInConsole("/settings/privacy")).toBe(true);
     expect(opensInConsole("/docs/integrations/webhooks#verifying-signatures")).toBe(false);
     expect(opensInConsole("/docs")).toBe(false);
   });

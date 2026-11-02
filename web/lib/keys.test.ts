@@ -12,7 +12,7 @@ import {
 } from "./keys";
 
 // One path on each rail: a project's, an organization's, the person's.
-const RAILS = ["/acme/web/api-keys", "/acme/settings", "/account/settings"];
+const RAILS = ["/acme/web/api-keys", "/acme/settings", "/settings/account"];
 
 describe("the go sequences", () => {
   it("reaches every row of every rail, and promises nothing the rail lacks", () => {
@@ -55,10 +55,11 @@ describe("the go sequences", () => {
     expect(resolveSequence("p", "/acme")).toBe("/acme/projects");
     expect(resolveSequence("m", "/acme")).toBe("/acme/members");
     expect(resolveSequence(",", "/acme/members")).toBe("/acme/settings");
-    expect(resolveSequence(",", "/account/settings")).toBe("/account/settings");
-    expect(resolveSequence("n", "/account/settings")).toBe("/account/notifications");
-    expect(resolveSequence("p", "/account/settings")).toBe("/account/privacy");
-    expect(resolveSequence("a", "/account/privacy")).toBe("/account/accessibility");
+    expect(resolveSequence(",", "/settings/account")).toBe("/settings/general");
+    expect(resolveSequence("u", "/settings/general")).toBe("/settings/account");
+    expect(resolveSequence("n", "/settings/account")).toBe("/settings/notifications");
+    expect(resolveSequence("p", "/settings/account")).toBe("/settings/privacy");
+    expect(resolveSequence("a", "/settings/privacy")).toBe("/settings/accessibility");
     expect(resolveSequence("z", "/acme/web")).toBeNull();
     expect(resolveSequence("X", "/acme/web")).toBeNull();
   });
@@ -69,18 +70,18 @@ describe("the go sequences", () => {
     expect(resolveSequence("O", "/acme/web")).toBe("/acme");
     expect(resolveSequence("O", "/acme/settings")).toBe("/acme");
     expect(resolveSequence("O", "/globex/web", "acme")).toBe("/globex");
-    expect(resolveSequence("O", "/account/settings", "acme")).toBe("/acme");
+    expect(resolveSequence("O", "/settings/account", "acme")).toBe("/acme");
     expect(resolveSequence("O", "/console", "acme")).toBe("/acme");
-    expect(resolveSequence("O", "/account/settings")).toBeNull();
-    expect(resolveSequence("O", "/account/settings", null)).toBeNull();
+    expect(resolveSequence("O", "/settings/account")).toBeNull();
+    expect(resolveSequence("O", "/settings/account", null)).toBeNull();
   });
 
-  it("goes to Notifications from every page of the console, once on Account's rail", () => {
+  it("goes to Notifications from every page of the console, once on Settings' rail", () => {
     for (const pathname of ["/acme/web", "/acme/web/traces", "/acme", "/acme/members", ...RAILS]) {
-      expect(resolveSequence("n", pathname, "acme"), pathname).toBe("/account/notifications");
+      expect(resolveSequence("n", pathname, "acme"), pathname).toBe("/settings/notifications");
       const notifications = goSequences(pathname, "acme").filter((s) => s.key === "n");
       expect(notifications, pathname).toEqual([
-        { key: "n", label: "Notifications", href: "/account/notifications" },
+        { key: "n", label: "Notifications", href: "/settings/notifications" },
       ]);
     }
   });

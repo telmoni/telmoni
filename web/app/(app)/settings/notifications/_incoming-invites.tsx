@@ -28,7 +28,7 @@ export function IncomingInvitesSection({
   if (invites.length === 0) return null;
 
   return (
-    <section className="grid gap-3" id="pending-invitations" data-testid="pending-invitations">
+    <section className="grid gap-gutter" id="pending-invitations" data-testid="pending-invitations">
       <div className="flex items-center gap-2">
         <h2 className="text-sm font-medium">Pending invitations</h2>
         <Badge variant="secondary" className="text-xs">
@@ -68,7 +68,7 @@ function IncomingInviteRow({ invite }: { invite: IncomingInvite }) {
   return (
     <tr>
       <Td className="font-medium">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-gutter">
           <span>{invite.targetName}</span>
           <Badge variant="secondary" className="text-[10px] font-normal uppercase tracking-wider">
             {invite.scope}
@@ -90,11 +90,11 @@ function IncomingInviteRow({ invite }: { invite: IncomingInvite }) {
         <LocalTime iso={invite.expiresAt} mode="date" />
       </Td>
       <Td className="text-right whitespace-nowrap">
-        <div className="flex items-center justify-end gap-3">
+        <div className="flex items-center justify-end gap-gutter">
           {error && <span className="text-xs text-destructive mr-2">{error}</span>}
           <Button
             size="sm"
-            className="h-9 text-xs gap-1"
+            className="gap-1"
             disabled={pending}
             onClick={() => settle(() => acceptIncomingInviteAction(invite.id))}
           >
@@ -106,7 +106,7 @@ function IncomingInviteRow({ invite }: { invite: IncomingInvite }) {
               <Button
                 variant="outline"
                 size="sm"
-                className="h-9 text-xs gap-1 text-muted-foreground hover:text-foreground"
+                className="gap-1 text-muted-foreground hover:text-foreground"
                 disabled={pending}
               >
                 <X className="size-3.5" />

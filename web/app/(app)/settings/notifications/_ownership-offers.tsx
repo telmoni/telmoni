@@ -20,7 +20,7 @@ export function OwnershipOffersSection({
 }) {
   if (offers.length === 0) return null;
   return (
-    <section className="grid gap-3" data-testid="ownership-offers">
+    <section className="grid gap-gutter" data-testid="ownership-offers">
       <div className="flex items-center gap-2">
         <h2 className="text-sm font-medium">Ownership offers</h2>
         <Badge variant="secondary" className="text-xs">
@@ -43,7 +43,7 @@ function OwnershipOffer({ offer }: { offer: OrganizationEntry }) {
     : "The owner";
 
   return (
-    <Card className="grid gap-3">
+    <Card className="grid gap-gutter">
       <div className="grid gap-1">
         <p className="text-sm font-medium">
           {owner} wants to hand you {label}
@@ -64,7 +64,7 @@ function OwnershipOffer({ offer }: { offer: OrganizationEntry }) {
           {error}
         </p>
       )}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-gutter">
         <ConfirmDialog
           trigger={
             <Button size="sm" disabled={pending}>

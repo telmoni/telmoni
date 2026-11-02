@@ -18,7 +18,7 @@ import { useGivenSeat } from "./use-given-seat";
 export function GivenSeatsSection({ seats }: { seats: readonly GivenSeat[] }) {
   if (seats.length === 0) return null;
   return (
-    <section className="grid gap-3" id="given-seats" data-testid="given-seats">
+    <section className="grid gap-gutter" id="given-seats" data-testid="given-seats">
       <div className="flex items-center gap-2">
         <h2 className="text-sm font-medium">Projects you were added to</h2>
         <Badge variant="secondary" className="text-xs">
@@ -68,8 +68,8 @@ function GivenSeatRow({ seat }: { seat: GivenSeat }) {
             {error}
           </span>
         )}
-        <div className="inline-flex items-center gap-3">
-          <Button asChild size="sm" className="h-9 text-xs">
+        <div className="inline-flex items-center gap-gutter">
+          <Button asChild size="sm">
             <Link
               href={href}
               onClick={open}
@@ -81,7 +81,6 @@ function GivenSeatRow({ seat }: { seat: GivenSeat }) {
           <Button
             variant="outline"
             size="sm"
-            className="h-9 text-xs"
             disabled={pending}
             onClick={dismiss}
             aria-label={`Dismiss ${named}`}

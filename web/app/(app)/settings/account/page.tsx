@@ -19,9 +19,9 @@ import { DefaultOrganization } from "./_default-organization";
 import { ChangeEmail } from "./_email";
 import { PasswordReset } from "./_password";
 
-export const metadata = { title: "Settings" };
+export const metadata = { title: "Account" };
 
-export default async function AccountSettingsPage() {
+export default async function AccountPage() {
   const session = await getServerSession();
   if (!session) notFound();
 
@@ -35,7 +35,7 @@ export default async function AccountSettingsPage() {
 
   return (
     <>
-      <PageHeader title="Settings" />
+      <PageHeader title="Account" />
       <div className="grid gap-6">
         <Section
           title="Profile"

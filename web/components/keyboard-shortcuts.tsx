@@ -256,7 +256,7 @@ export function KeyboardShortcuts() {
               ? "Use voice control or a screen reader? Letter-key shortcuts can be turned off in "
               : "Letter-key shortcuts are off, so only the shortcuts above work. Turn them on in "}
             <Link
-              href="/account/accessibility"
+              href="/settings/accessibility"
               onClick={() => setSheetOpen(false)}
               className="underline underline-offset-2 hover:text-foreground"
             >

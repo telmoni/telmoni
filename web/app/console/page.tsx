@@ -36,5 +36,5 @@ export default async function ConsoleEntry() {
   // moved under an open tab. Somebody in no organization has no overview to
   // land on; their account names what is there for them.
   const organization = activeOrganization(ctx);
-  redirect(organization ? organizationPath(organization.slug) : "/account/notifications");
+  redirect(organization ? organizationPath(organization.slug) : "/settings/notifications");
 }

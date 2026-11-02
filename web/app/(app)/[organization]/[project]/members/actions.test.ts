@@ -88,7 +88,7 @@ import { getServerSession } from "@/lib/server/session";
 import {
   acceptIncomingInviteAction,
   declineIncomingInviteAction,
-} from "@/app/(app)/account/notifications/invite-actions";
+} from "@/app/(app)/settings/notifications/invite-actions";
 
 import {
   addMemberAction,

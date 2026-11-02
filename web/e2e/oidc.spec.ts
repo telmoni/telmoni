@@ -92,7 +92,7 @@ test.describe("Sign-in through an OpenID Connect provider", () => {
     // invitation by, and which accepting it in the console needs.
     await throughDex(page, ADA);
     await expect(page).not.toHaveURL(/\/auth\//);
-    await page.goto("/account/notifications");
+    await page.goto("/settings/notifications");
     const invitation = page.getByRole("row", { name });
     await invitation.getByRole("button", { name: "Accept" }).click();
     await expect(invitation).toHaveCount(0);

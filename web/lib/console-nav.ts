@@ -30,9 +30,9 @@ import {
 
 export const NAV_COLLAPSED_COOKIE = "telmoni-nav-collapsed";
 
-export const ACCOUNT_SEGMENT = "account";
+export const ACCOUNT_SEGMENT = "settings";
 
-export const NOTIFICATIONS_HREF = "/account/notifications";
+export const NOTIFICATIONS_HREF = "/settings/notifications";
 
 export function rootSegment(pathname: string): string {
   return pathname.split("/")[1] ?? "";
@@ -193,7 +193,7 @@ interface GroupSpec {
 // `key` is the letter after `g` that reaches a row, so the `g` sequences are
 // the rail itself and a row added here is reached the day it lands. Single,
 // unique within a rail (two rails may share one: `p` is Projects on an
-// organization's and Privacy on a project's and on Account's), never `g`, `?` or shift-`O`, the
+// organization's and Privacy on a project's and on Settings'), never `g`, `?` or shift-`O`, the
 // one sequence that crosses rails (`lib/keys.ts`). `,` reaches Settings on
 // every rail, as `⌘,` opens preferences on a Mac; `c` is Connectors and also
 // the page's action, which `lib/keys.ts` explains is no collision.
@@ -236,10 +236,11 @@ const CORE_GROUPS: GroupSpec[] = [
     ],
   },
   {
-    title: "Account",
+    title: "Settings",
     // One unheaded block: the way back above it says what this rail is.
     items: [
-      { title: "Settings", path: "/settings", icon: User, key: "," },
+      { title: "General", path: "/general", icon: Settings, key: "," },
+      { title: "Account", path: "/account", icon: User, key: "u" },
       { title: "Notifications", path: "/notifications", icon: Bell, key: "n" },
       { title: "Accessibility", path: "/accessibility", icon: Accessibility, key: "a" },
       { title: "Privacy", path: "/privacy", icon: ShieldCheck, key: "p" },
@@ -275,7 +276,7 @@ export function withExtraItems(
 const GROUPS = withExtraItems(CORE_GROUPS, EXTRA_NAV_ITEMS);
 
 const GROUP_OF: Record<ConsolePlace["kind"], string> = {
-  account: "Account",
+  account: "Settings",
   organization: "Organization",
   project: "Project",
 };

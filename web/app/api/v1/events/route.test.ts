@@ -400,7 +400,7 @@ describe("GET /api/v1/events (SSE)", () => {
     const reader = res.body!.getReader();
     await reader.read();
 
-    for (const to of ["/evil.example", "acme/../account", "Acme", ""]) {
+    for (const to of ["/evil.example", "acme/../settings", "Acme", ""]) {
       messageListener?.(
         organizationChannel("org_own"),
         JSON.stringify({

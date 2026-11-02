@@ -112,6 +112,6 @@ describe("ConsoleEntry", () => {
   it("sends somebody in no organization to their account first", async () => {
     mockContext = { activeOrganizationId: null, organizations: [] };
     await ConsoleEntry();
-    expect(mockRedirect).toHaveBeenNthCalledWith(1, "/account/notifications");
+    expect(mockRedirect).toHaveBeenNthCalledWith(1, "/settings/notifications");
   });
 });

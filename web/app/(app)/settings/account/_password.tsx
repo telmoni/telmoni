@@ -31,7 +31,7 @@ export function PasswordReset({ method }: { method: string | null }) {
   if (posture !== "reset") return null;
 
   return (
-    <div className="grid gap-3">
+    <div className="grid gap-gutter">
       <p className="text-muted-foreground">
         The link works once and expires within the hour. Every signed-in
         session ends when you use it, this one included.

@@ -10,7 +10,7 @@ vi.mock("@/components/paper-shell", () => ({
 vi.mock("@/components/session-heartbeat", () => ({
   SessionHeartbeat: () => <div data-testid="heartbeat" />,
 }));
-vi.mock("./account/privacy/_delete-account", () => ({
+vi.mock("./settings/privacy/_delete-account", () => ({
   DeleteAccountForm: ({
     email,
     ownedOrganizations,
@@ -21,13 +21,13 @@ vi.mock("./account/privacy/_delete-account", () => ({
     <div data-testid="delete-account" data-email={email} data-owned={ownedOrganizations} />
   ),
 }));
-vi.mock("./account/notifications/_incoming-invites", () => ({
+vi.mock("./settings/notifications/_incoming-invites", () => ({
   IncomingInvitesSection: ({ invites }: { invites: readonly IncomingInvite[] }) => (
     <div data-testid="invitations" data-count={invites.length} />
   ),
 }));
 
-vi.mock("./account/privacy/_sessions", () => ({
+vi.mock("./settings/privacy/_sessions", () => ({
   ActiveSessions: ({
     sessions,
     currentId,
@@ -43,15 +43,15 @@ vi.mock("./account/privacy/_sessions", () => ({
   ),
 }));
 
-vi.mock("./account/settings/_email", () => ({
+vi.mock("./settings/account/_email", () => ({
   ChangeEmail: ({ email }: { email: string }) => (
     <div data-testid="change-email" data-email={email} />
   ),
 }));
-vi.mock("./account/settings/_password", () => ({
+vi.mock("./settings/account/_password", () => ({
   PasswordReset: () => <div data-testid="password-reset" />,
 }));
-vi.mock("./account/privacy/_analytics", () => ({
+vi.mock("./settings/privacy/_analytics", () => ({
   AnalyticsPreference: ({ optIn }: { optIn: boolean }) => (
     <div data-testid="analytics" data-opt-in={String(optIn)} />
   ),

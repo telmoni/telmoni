@@ -23,7 +23,7 @@ const OVERVIEW = "/acme/web";
 const CONNECTORS = `${OVERVIEW}/connectors`;
 const KEYS = `${OVERVIEW}/api-keys`;
 const ORG_MEMBERS = "/acme/members";
-const ACCOUNT = "/account/settings";
+const ACCOUNT = "/settings/account";
 
 // What the console is drawing: one organization and its two projects.
 const LIVE = liveResources(
@@ -55,8 +55,8 @@ describe("which paths the console may be sent back to", () => {
   });
 
   it("refuses the mode the back arrow leaves", () => {
-    expect(isReturnablePath("/account")).toBe(false);
-    expect(isReturnablePath("/account/settings")).toBe(false);
+    expect(isReturnablePath("/settings")).toBe(false);
+    expect(isReturnablePath("/settings/account")).toBe(false);
   });
 
   // `/console` is a door: it asks for a name or resolves to a first page,
@@ -108,7 +108,7 @@ describe("arriving somewhere", () => {
     ]);
     expect(trailResource("/acme/web/connectors")).toBe("/acme/web");
     expect(trailResource("/acme/members")).toBe("/acme");
-    expect(trailResource("/account/settings")).toBe("");
+    expect(trailResource("/settings/account")).toBe("");
   });
 
   // The store compares snapshots by identity, so an unchanged trail has to be
@@ -116,7 +116,7 @@ describe("arriving somewhere", () => {
   it("hands back the same trail when nothing would change", () => {
     const trail = walk(CONNECTORS);
     expect(pushPath(trail, CONNECTORS)).toBe(trail);
-    expect(pushPath(trail, "/account/settings")).toBe(trail);
+    expect(pushPath(trail, "/settings/account")).toBe(trail);
     expect(pushPath(trail, "//evil.example.com")).toBe(trail);
   });
 });
@@ -140,7 +140,7 @@ describe("a trail read back out of storage", () => {
   // Storage is writable by anything else on the origin, and these land in hrefs.
   it("drops entries it would not have written", () => {
     expect(
-      parseTrail(JSON.stringify(["//evil.example.com", "/account", CONNECTORS])),
+      parseTrail(JSON.stringify(["//evil.example.com", "/settings", CONNECTORS])),
     ).toEqual([CONNECTORS]);
   });
 

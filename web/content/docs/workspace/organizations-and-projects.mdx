@@ -33,7 +33,7 @@ the switcher. API keys and connectors belong to a project, so there is little
 else to do until one exists.
 
 A sign-in opens the Overview of your
-[default organization](/docs/account/settings#default-organization), or returns
+[default organization](/docs/settings/account#default-organization), or returns
 you to the page that sent you to sign in. Within a session, opening the
 console (`/console`) returns to the Overview of the organization you were last
 in.
@@ -93,8 +93,9 @@ URL](#name-and-url)). On these pages,
   then, how long its data is kept and where, and the
   [field inventory](/docs/api/field-inventory), every attribute Telmoni reads
   from a span and what becomes of it — and `/settings` under it.
-- **Account pages** live under `/account`, including `/account/settings`,
-  `/account/notifications`, `/account/accessibility`, and `/account/privacy`.
+- **Your settings** live under `/settings`: `/settings/general`,
+  `/settings/account`, `/settings/notifications`, `/settings/accessibility`,
+  and `/settings/privacy`.
 - **Switch between projects and organizations** using the switcher in the
   console header: two menus side by side. The organization's name opens your
   organizations, ending with **New organization**. Beside it, the project's
@@ -166,9 +167,10 @@ Windows and Linux):
   the history lists the ones you asked from the project you are on, and each
   can be reopened or deleted. A conversation stays open on the organization's
   own pages; another project's pages start a new one.
-- **Account menu (`⌘⇧K`)**: Opens the user menu: your account, the home
-  page, the documentation, the keyboard shortcuts sheet, theme and corners,
-  the platform's GitHub repository, and sign out.
+- **Account menu (`⌘⇧K`)**: Opens the user menu: your settings, the home
+  page, the documentation, the keyboard shortcuts sheet, the platform's GitHub
+  repository, and sign out. The theme and corners are set on the
+  [General](/docs/settings/general) settings page.
 - **Primary action (`c`)**: Triggers the primary action of the current page:
   **New project**, **Mint key**, **Invite member** (on a project's **Members**
   page, **Add member**), **New alert** on a project's **Alerts** page, or
@@ -200,7 +202,7 @@ Windows and Linux):
   - `g` `O` (shift): The organization's overview
 - **Keyboard shortcuts cheat sheet (`?`, `Shift` `/` on a US keyboard)**: Opens the full shortcuts sheet.
   Letter-key shortcuts can be turned off on the
-  [Accessibility](/docs/account/accessibility) page; the sheet then lists the
+  [Accessibility](/docs/settings/accessibility) page; the sheet then lists the
   `⌘` shortcuts alone.
 
 A panel over the whole page, such as a new alert or a trace at full size,
@@ -311,7 +313,7 @@ An organization Owner can hand a project to one of the project's Admins:
    first.
 2. The Admin is emailed, and the offer appears in their console bell and under
    **Project offers** on their account's **Notifications** page
-   (`/account/notifications`). It stands for **7 days**, and a project has one
+   (`/settings/notifications`). It stands for **7 days**, and a project has one
    live offer at a time: a new offer withdraws the earlier one, and whoever
    held it is told. The Owner can withdraw it with **Withdraw offer** on the
    same row; removing the Admin from the project, or their leaving it, ends the
@@ -379,7 +381,7 @@ its **Owner**:
    payment is confirmed.
 
 There is no limit on how many organizations you create or own. Creating one
-leaves your [default organization](/docs/account/settings#default-organization),
+leaves your [default organization](/docs/settings/account#default-organization),
 the one a sign-in opens, as it was. An operator who has [closed new
 organizations](/docs/self-host/production#closing-new-organizations) closes this
 too: the switcher offers no **New organization**. On the hosted service, one you
@@ -405,7 +407,7 @@ Admin who owns no organization on it
    organization's **Members** page (`/{organization}/members`) and confirms
    with **Send offer**.
 2. The Admin is emailed, and the offer appears in their console bell and on
-   their account's **Notifications** page (`/account/notifications`). It stands
+   their account's **Notifications** page (`/settings/notifications`). It stands
    for **7 days**, and an organization has one live offer at a time: a new
    offer withdraws the earlier one, and whoever held it is told. The Owner may
    withdraw the offer at any time before it is accepted; removing the Admin

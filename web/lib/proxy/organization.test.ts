@@ -22,7 +22,7 @@ describe("namedOrganization", () => {
   // Account, `/console` and every other route handler: the cookie stands in.
   it.each([
     "/",
-    "/account/settings",
+    "/settings/account",
     "/console",
     "/api/v1/events",
     "/api/v1/organizations",
@@ -146,7 +146,7 @@ describe("the proxy and the organization a request acts in", () => {
   // the server as if the path had named an organization, nor as the path a
   // layout redirects from.
   it("drops a client's own copy of the organization header", async () => {
-    const res = await visit("/account/settings", {
+    const res = await visit("/settings/account", {
       headers: { "x-telmoni-organization": "globex" },
     });
     expect(res.headers.get(forwarded("x-telmoni-organization"))).toBeNull();
@@ -167,7 +167,7 @@ describe("the proxy and the organization a request acts in", () => {
   // so a cookie written here would follow a link nobody followed. The
   // console writes it in the browser instead.
   it("never writes the cookie that remembers an organization", async () => {
-    for (const path of ["/acme/web", "/globex/members", "/account/settings"]) {
+    for (const path of ["/acme/web", "/globex/members", "/settings/account"]) {
       const res = await visit(path, { cookie: `${COOKIE}=acme` });
       expect(res.cookies.get(COOKIE), path).toBeUndefined();
     }

@@ -217,7 +217,7 @@ test.describe("Console content containers", () => {
       ...rows(`/${organization}`),
       // Not in the rail — it hangs off the account menu — but it is where the
       // active-sessions table lives, which is what this spec seeds a session for.
-      "/account/privacy",
+      "/settings/privacy",
     ];
     expect(routes.length).toBeGreaterThan(8);
     // As in accessibility.spec.ts: the way in above, then a share per route,
@@ -234,10 +234,10 @@ test.describe("Console content containers", () => {
       const at = (what: string) => `${route}: ${what}`;
 
       if (s.children > 0) {
-        // <main> is `flex flex-col gap-3` (console-shell.tsx), and every page
+        // <main> is `flex flex-col gap-2` (console-shell.tsx), and every page
         // draws an optional `PageHeader` title row followed by one content
         // wrapper. The row is a sibling rather than a child of the wrapper so
-        // the gap above the content stays main's gap-3, and so the header's
+        // the gap above the content stays main's gap-2, and so the header's
         // action lines up with the cards — which console-shell.spec.ts pins.
         expect(s.wrappers, at("one content wrapper under <main>")).toBe(1);
         expect(s.wrapper?.tag, at("the wrapper is a div")).toBe("DIV");
@@ -297,7 +297,7 @@ test.describe("Console content containers", () => {
       settings.tables.length,
       "organization settings: no table — the name, the URL, the id row and the danger zone",
     ).toBe(0);
-    const privacy = seen.get("/account/privacy")!;
+    const privacy = seen.get("/settings/privacy")!;
     expect(privacy.tables.map((t) => t.rows), "privacy: the recorded session").toEqual([1]);
     const members = seen.get(`${landing}/members`)!;
     expect(members.tables.map((t) => t.rows), "members: the roster, with its owner on it").toEqual([1]);

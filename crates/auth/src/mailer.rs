@@ -996,7 +996,7 @@ mod tests {
                 "ada@example.com",
                 "Grace Hopper",
                 "Acme",
-                "https://telmoni.com/account/notifications",
+                "https://telmoni.com/settings/notifications",
             )
             .await
             .expect("recorded");
@@ -1026,7 +1026,7 @@ mod tests {
                 "Grace Hopper",
                 "Payments",
                 "Acme",
-                "https://telmoni.com/account/notifications",
+                "https://telmoni.com/settings/notifications",
             )
             .await
             .expect("recorded");
@@ -1362,7 +1362,7 @@ mod tests {
                 "ada@example.com",
                 "Grace Hopper",
                 "Acme",
-                "https://telmoni.com/account/notifications",
+                "https://telmoni.com/settings/notifications",
             )
             .await
             .expect("recorded");
@@ -1384,7 +1384,7 @@ mod tests {
         );
         assert!(
             mail.text
-                .contains("https://telmoni.com/account/notifications"),
+                .contains("https://telmoni.com/settings/notifications"),
             "{}",
             mail.text
         );
@@ -1447,7 +1447,7 @@ mod tests {
                 "Grace Hopper",
                 "Payments",
                 "Acme",
-                "https://telmoni.com/account/notifications",
+                "https://telmoni.com/settings/notifications",
             )
             .await
             .expect("recorded");
@@ -1465,7 +1465,7 @@ mod tests {
         );
         assert!(
             mail.text
-                .contains("https://telmoni.com/account/notifications"),
+                .contains("https://telmoni.com/settings/notifications"),
             "{}",
             mail.text
         );

@@ -7,12 +7,12 @@ import type { ActiveSession } from "@/lib/server/data";
 import { canChangeEmail, canResetPassword } from "@/lib/sign-in-method";
 import type { IncomingInvite } from "@/lib/types/incoming-invite";
 
-import { AnalyticsPreference } from "./account/privacy/_analytics";
-import { DeleteAccountForm } from "./account/privacy/_delete-account";
-import { ActiveSessions } from "./account/privacy/_sessions";
-import { ChangeEmail } from "./account/settings/_email";
-import { PasswordReset } from "./account/settings/_password";
-import { IncomingInvitesSection } from "./account/notifications/_incoming-invites";
+import { AnalyticsPreference } from "./settings/privacy/_analytics";
+import { DeleteAccountForm } from "./settings/privacy/_delete-account";
+import { ActiveSessions } from "./settings/privacy/_sessions";
+import { ChangeEmail } from "./settings/account/_email";
+import { PasswordReset } from "./settings/account/_password";
+import { IncomingInvitesSection } from "./settings/notifications/_incoming-invites";
 
 export function AccountOnly({
   email,
@@ -64,14 +64,14 @@ export function AccountOnly({
         )}
 
         {canChangeEmail(authMethod) && (
-          <Card className="grid gap-3 text-sm">
+          <Card className="grid gap-gutter text-sm">
             <h2 className="text-base font-medium">Email</h2>
             <ChangeEmail method={authMethod} email={email} />
           </Card>
         )}
 
         {canResetPassword(authMethod) && (
-          <Card className="grid gap-3 text-sm">
+          <Card className="grid gap-gutter text-sm">
             <h2 className="text-base font-medium">Password</h2>
             <PasswordReset method={authMethod} />
           </Card>
@@ -79,7 +79,7 @@ export function AccountOnly({
 
         {/* As on the privacy page: no provider, no switch. */}
         {analyticsConfigured() && (
-          <Card className="grid gap-3 text-sm">
+          <Card className="grid gap-gutter text-sm">
             <h2 className="text-base font-medium">Data collection</h2>
             <AnalyticsPreference optIn={analyticsOptIn} />
           </Card>
@@ -90,7 +90,7 @@ export function AccountOnly({
           <ActiveSessions sessions={sessions} currentId={currentSessionId} />
         </div>
 
-        <Card className="grid gap-3 bg-destructive/5 text-sm">
+        <Card className="grid gap-gutter bg-destructive/5 text-sm">
           <h2 className="text-base font-medium">Delete your account</h2>
           <DeleteAccountForm email={email} ownedOrganizations={ownedOrganizations} />
         </Card>

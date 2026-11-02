@@ -202,7 +202,7 @@ export function RealtimeListener({
         const data = payload(e, "membership:removed");
         if (!data) return;
 
-        const isAccountPage = standing().pathname.startsWith("/account");
+        const isAccountPage = standing().pathname.startsWith("/settings");
         const isCurrentProject = Boolean(
           data.projectId && data.projectId === standing().projectId,
         );

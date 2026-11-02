@@ -192,7 +192,7 @@ A hosted model also needs its key in the `server-secrets` Secret, beside `AGENT_
 
 ### Option 3: Hosted LLM with local embeddings (Hybrid)
 
-You can run embeddings locally while a hosted model (Anthropic Claude or OpenAI) writes the answers. Search queries and the indexed text then go to Ollama alone, while each question, the conversation and every tool result, members' addresses included, go to the model's API (see [Console agent data](/docs/account/privacy#console-agent-data)). The Ollama container and the embeddings model come from Option 1—its `--profile agent` start, the `nomic-embed-text` pull and the recreate—and only the model lines change:
+You can run embeddings locally while a hosted model (Anthropic Claude or OpenAI) writes the answers. Search queries and the indexed text then go to Ollama alone, while each question, the conversation and every tool result, members' addresses included, go to the model's API (see [Console agent data](/docs/settings/privacy#console-agent-data)). The Ollama container and the embeddings model come from Option 1—its `--profile agent` start, the `nomic-embed-text` pull and the recreate—and only the model lines change:
 
 <Tabs items={['Anthropic Claude', 'OpenAI']}>
   <Tab value="Anthropic Claude">

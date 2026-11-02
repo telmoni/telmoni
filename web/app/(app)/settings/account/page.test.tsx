@@ -80,25 +80,25 @@ beforeEach(() => {
   context.value = null;
 });
 
-import AccountSettingsPage from "./page";
+import AccountPage from "./page";
 
-describe("AccountSettingsPage", () => {
+describe("AccountPage", () => {
   it("shows who you are", async () => {
-    render(await AccountSettingsPage());
-    expect(screen.getByTestId("page-header")).toHaveTextContent("Settings");
+    render(await AccountPage());
+    expect(screen.getByTestId("page-header")).toHaveTextContent("Account");
     expect(screen.getByText("k@example.com")).toBeInTheDocument();
     expect(screen.getByText("user_1")).toBeInTheDocument();
   });
 
   it("names how you signed in", async () => {
-    render(await AccountSettingsPage());
+    render(await AccountPage());
     expect(screen.getByText("Sign-in method")).toBeInTheDocument();
     expect(screen.getByText("Google")).toBeInTheDocument();
   });
 
   it("draws no row at all when the provider said nothing", async () => {
     session.value = { ...session.value, authMethod: null };
-    render(await AccountSettingsPage());
+    render(await AccountPage());
     expect(screen.queryByText("Sign-in method")).toBeNull();
     // The closed default has to survive the PAGE, not only the component. A
     // null method may well be a provider sign-up, so it gets what one gets:
@@ -111,7 +111,7 @@ describe("AccountSettingsPage", () => {
   // offered nothing else — no Email section, no Password section, and no card
   // explaining the absence of either. Restoring the prose means deleting this.
   it("offers a provider account neither control, and no prose about it", async () => {
-    render(await AccountSettingsPage());
+    render(await AccountPage());
     expect(screen.queryByTestId("email")).toBeNull();
     expect(screen.queryByTestId("password")).toBeNull();
     const headings = screen
@@ -124,7 +124,7 @@ describe("AccountSettingsPage", () => {
 
   it("offers the password control to an email-and-password account", async () => {
     session.value = { ...session.value, authMethod: "password" };
-    render(await AccountSettingsPage());
+    render(await AccountPage());
     expect(screen.getByTestId("password")).toHaveTextContent("password");
   });
 
@@ -135,14 +135,14 @@ describe("AccountSettingsPage", () => {
   // each ask it themselves.
   it("hands the email control the method and address it was given", async () => {
     session.value = { ...session.value, authMethod: "password" };
-    render(await AccountSettingsPage());
+    render(await AccountPage());
     expect(screen.getByTestId("email")).toHaveTextContent(
       "password:k@example.com",
     );
   });
 
   it("offers no way to edit the name the provider owns", async () => {
-    render(await AccountSettingsPage());
+    render(await AccountPage());
     // Scoped to Profile on purpose. The email control is stubbed here, so a
     // page-wide textbox count is vacuously zero and would protect nothing once
     // this page has a form on it at all.
@@ -155,7 +155,7 @@ describe("AccountSettingsPage", () => {
 
   it("holds who you are and how you get in — no sessions, no erasure", async () => {
     session.value = { ...session.value, authMethod: "password" };
-    render(await AccountSettingsPage());
+    render(await AccountPage());
     const headings = screen
       .getAllByRole("heading", { level: 2 })
       .map((h) => h.textContent?.toLowerCase() ?? "");
@@ -178,7 +178,7 @@ describe("AccountSettingsPage", () => {
       ],
       defaultOrganizationId: "org_2",
     };
-    render(await AccountSettingsPage());
+    render(await AccountPage());
     const headings = screen
       .getAllByRole("heading", { level: 2 })
       .map((h) => h.textContent?.toLowerCase() ?? "");
@@ -191,7 +191,7 @@ describe("AccountSettingsPage", () => {
 
   it("leaves the default out for somebody in no organization", async () => {
     context.value = { organizations: [], defaultOrganizationId: null };
-    render(await AccountSettingsPage());
+    render(await AccountPage());
     expect(screen.queryByTestId("default-organization")).toBeNull();
     expect(screen.getByText("k@example.com")).toBeInTheDocument();
   });

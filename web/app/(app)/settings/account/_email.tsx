@@ -95,7 +95,7 @@ export function ChangeEmail({
 
   if (changedTo) {
     return (
-      <div className="grid gap-3">
+      <div className="grid gap-gutter">
         <p className="text-muted-foreground">
           Your address is now <span className="font-medium">{changedTo}</span>.
           Sign in with that from now on &mdash; your password has not changed.
@@ -121,7 +121,7 @@ export function ChangeEmail({
   }
 
   return (
-    <div className="grid gap-3">
+    <div className="grid gap-gutter">
       {sentTo === null ? (
         <form
           className="grid gap-4"
@@ -185,7 +185,7 @@ export function ChangeEmail({
             disabled={confirming}
             autoFill={false}
           />
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-gutter">
             <Button type="submit" disabled={!canConfirm}>
               {confirming ? "Changing…" : "Change my email"}
             </Button>

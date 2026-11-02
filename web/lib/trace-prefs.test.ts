@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_COLUMNS } from "@/lib/traces";
 
 import { DEFAULT_LAYOUT } from "./layout";
-import { DEFAULT_PREFS, readPrefs, refreshLabel } from "./trace-prefs";
+import { DEFAULT_PREFS, readPrefs } from "./trace-prefs";
 
 /** The default customized to steps and calls, as a kept layout might be. */
 const COMPLEX = { ...DEFAULT_LAYOUT, depth: "calls" as const, open: "failed" as const, timeline: true };
@@ -30,7 +30,6 @@ describe("what a browser kept of the trace list's look", () => {
       sessionColumns: ["user", "last_seen"],
       userColumns: [],
       density: "compact",
-      refresh: 60,
       filters: false,
       peekFull: true,
       peekWidth: 720,
@@ -68,12 +67,7 @@ describe("what a browser kept of the trace list's look", () => {
       columns: DEFAULT_COLUMNS,
       density: "compact",
     });
-  });
-
-  it("says how often the page reads itself again", () => {
-    expect(refreshLabel(0)).toBe("Off");
-    expect(refreshLabel(30)).toBe("30 s");
-    expect(refreshLabel(60)).toBe("1 min");
-    expect(refreshLabel(900)).toBe("15 min");
+    // The refresh interval is gone: an older build's is forgotten.
+    expect(readPrefs(JSON.stringify({ refresh: 60 }))).toEqual(DEFAULT_PREFS);
   });
 });
