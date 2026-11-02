@@ -23,10 +23,10 @@ no run, which are dropped.
 Send to the lane with OpenTelemetry's own OTLP exporter over HTTP, set from the
 environment, with a [key](/docs/api/api-keys) holding the **ingest** scope:
 
-```bash
-export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=https://api.telmoni.com/otlp/v1/traces
-export OTEL_EXPORTER_OTLP_TRACES_HEADERS="Authorization=Bearer%20tm_..."
-export OTEL_SERVICE_NAME=support-bot
+```console
+$ export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=https://api.telmoni.com/otlp/v1/traces
+$ export OTEL_EXPORTER_OTLP_TRACES_HEADERS="Authorization=Bearer%20tm_..."
+$ export OTEL_SERVICE_NAME=support-bot
 ```
 
 The header's value is URL-encoded, so its space is `%20`. On your own
@@ -189,11 +189,11 @@ import litellm
 litellm.callbacks = ["otel"]
 ```
 
-```bash
-export OTEL_EXPORTER=otlp_http
-export OTEL_ENDPOINT=https://api.telmoni.com/otlp/v1/traces
-export OTEL_HEADERS="Authorization=Bearer tm_..."
-export OTEL_SEMCONV_STABILITY_OPT_IN=gen_ai_latest_experimental
+```console
+$ export OTEL_EXPORTER=otlp_http
+$ export OTEL_ENDPOINT=https://api.telmoni.com/otlp/v1/traces
+$ export OTEL_HEADERS="Authorization=Bearer tm_..."
+$ export OTEL_SEMCONV_STABILITY_OPT_IN=gen_ai_latest_experimental
 ```
 
 The last line is needed: without it, LiteLLM names each span's operation by its
