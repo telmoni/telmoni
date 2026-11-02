@@ -127,7 +127,7 @@ pub async fn example(
     rule: &RuleRow,
     now: DateTime<Utc>,
 ) -> Result<Option<ExampleRun>, Unread> {
-    let window = Window::ending(now, rule.definition.window.duration());
+    let window = Window::of(now, rule.definition.window);
     let filters = &rule.definition.filters;
     let pick = Pick::of(rule.definition.measure);
     let projects = Projects::one(rule.project_id.clone());

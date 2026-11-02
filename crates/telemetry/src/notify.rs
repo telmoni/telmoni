@@ -402,6 +402,7 @@ fn traces_link(state: &AppState, rule: &RuleRow) -> Option<String> {
             match rule.definition.window {
                 RuleWindow::Hour | RuleWindow::Day => "1",
                 RuleWindow::Week => "7",
+                RuleWindow::Month => "30",
             },
         );
         for (facet, values) in [
@@ -646,6 +647,15 @@ fn words(rule: &RuleRow, value: Option<f64>, told: &Told) -> (String, String) {
             past("alert", threshold(rule.definition.alert_threshold)),
         ),
     };
+    let body = match (told.change, told.severity, value) {
+        (Move::Opened, Severity::Warning, Some(v)) => {
+            format!(
+                "{body}{}",
+                forecast(&rule.definition, v, Utc::now()).unwrap_or_default()
+            )
+        }
+        _ => body,
+    };
     let lead = if told.telling == Telling::Reminder {
         "Still: "
     } else {
@@ -675,7 +685,7 @@ fn metric(rule: &RuleRow) -> String {
                 RuleAggregation::Avg => "The average a run spent",
                 _ => "What the runs spent",
             };
-            return format!("{spent} over the last {}", rule.definition.window);
+            return format!("{spent} {}", over(rule.definition.window));
         }
     };
     let of = match rule.definition.kind {
@@ -685,7 +695,63 @@ fn metric(rule: &RuleRow) -> String {
         SpanKind::ToolCall => "tool calls",
         SpanKind::Span => "spans",
     };
-    format!("{folded} of {of} over the last {}", rule.definition.window)
+    format!("{folded} of {of} {}", over(rule.definition.window))
+}
+
+/// How far back an alert's window reaches, in words.
+fn over(window: RuleWindow) -> String {
+    match window {
+        RuleWindow::Month => "so far this month".to_owned(),
+        trailing => format!("over the last {trailing}"),
+    }
+}
+
+/// Where a budget is headed at its burn so far: the day this month what the
+/// runs spent reaches the alert threshold, or that it stays under it. A
+/// budget is a cost alert summed over the month; none for any other alert.
+fn forecast(
+    definition: &crate::rules::Definition,
+    value: f64,
+    now: DateTime<Utc>,
+) -> Option<String> {
+    if !(definition.measure == RuleMeasure::Cost
+        && definition.aggregation == RuleAggregation::Sum
+        && definition.window == RuleWindow::Month)
+    {
+        return None;
+    }
+    let threshold = definition.alert_threshold;
+    if value <= 0.0 || value >= threshold {
+        return None;
+    }
+    let window = crate::rules::evaluate::Window::of(now, RuleWindow::Month);
+    let elapsed = (now - window.from).num_seconds();
+    if elapsed <= 0 {
+        return None;
+    }
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "a month's seconds are exact in f64"
+    )]
+    let reached_in = (threshold / value) * elapsed as f64;
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "a forecast is to the second"
+    )]
+    let reached = window.from + chrono::Duration::seconds(reached_in as i64);
+    let next_month = window
+        .from
+        .checked_add_months(chrono::Months::new(1))
+        .unwrap_or(window.from);
+    let at = amount(definition.measure, definition.aggregation, threshold);
+    Some(if reached < next_month {
+        format!(
+            " At this rate it reaches {at} on {}.",
+            reached.format("%B %-d")
+        )
+    } else {
+        format!(" At this rate it stays under {at} this month.")
+    })
 }
 
 /// A value as a notice writes it: durations in milliseconds, a share as a
@@ -822,6 +888,59 @@ async fn tell_resolved(state: &AppState, incident: &IncidentRow, links: &[Link],
 
 #[cfg(test)]
 mod tests {
+    use telmoni_shared::{MissingData, RuleOperator};
+
+    use crate::rules::{RuleFilters, RuleInput};
+
+    /// A budget: what the runs spent this month, warned at 80 and alerting at 100.
+    fn budget() -> crate::rules::Definition {
+        RuleInput {
+            name: "Budget".into(),
+            kind: SpanKind::Run,
+            measure: RuleMeasure::Cost,
+            aggregation: RuleAggregation::Sum,
+            filters: RuleFilters::default(),
+            window: RuleWindow::Month,
+            operator: RuleOperator::Gt,
+            alert_threshold: 100.0,
+            warning_threshold: Some(80.0),
+            missing_data: MissingData::Zero,
+            renotify_minutes: None,
+            connectors: Vec::new(),
+        }
+        .checked()
+        .expect("a budget")
+        .definition
+    }
+
+    /// A budget's warning says the day its burn so far reaches the alert,
+    /// or that it stays under it this month; no other alert forecasts.
+    #[test]
+    fn a_budget_forecasts_the_day_its_burn_reaches_the_alert() {
+        let at = |day: u32| {
+            chrono::NaiveDate::from_ymd_opt(2026, 11, day)
+                .and_then(|d| d.and_hms_opt(0, 0, 0))
+                .expect("a day")
+                .and_utc()
+        };
+        // $80 in ten days reaches $100 on the 13th, at 12:00.
+        assert_eq!(
+            forecast(&budget(), 80.0, at(11)).as_deref(),
+            Some(" At this rate it reaches $100.00 on November 13.")
+        );
+        // $10 in ten days stays under $100 in November.
+        assert_eq!(
+            forecast(&budget(), 10.0, at(11)).as_deref(),
+            Some(" At this rate it stays under $100.00 this month.")
+        );
+        assert_eq!(forecast(&budget(), 120.0, at(11)), None, "already past");
+        let trailing = crate::rules::Definition {
+            window: RuleWindow::Week,
+            ..budget()
+        };
+        assert_eq!(forecast(&trailing, 80.0, at(11)), None);
+    }
+
     use super::*;
 
     #[test]

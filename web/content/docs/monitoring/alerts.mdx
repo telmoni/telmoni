@@ -99,8 +99,8 @@ lists nothing when all is well.
 | Reads | Runs, steps, model calls or tool calls |
 | Measure | **Count**, how many there were; **Failures**, those that ended in error; **Duration**; **Tokens**, on model calls; **Cost**, on runs: what each run's model calls cost, read from the calls as they land, so an alert on it tells while the run is still going ([what a call cost](/docs/api/ingest#what-a-call-cost)) |
 | Folded as | How the measure is read over the window: a count; failures as how many or as the share that failed; a duration's p95, p99, p90, p50, average or total; tokens' average or total; and a run's cost as the most a run spent — a cost cap — the average a run spent, or what the runs spent in all |
-| Window | The last hour, day or week |
-| Filters | Agent, environment and release on every kind; model and provider on model calls, and on a run's cost, read from its calls; tool on tool calls; and the status a span ended with, on all but a cost. Separate a field's values with commas, and put a value that holds one between double quotes: a span passes a field it carries any of the values of, and passes the alert when it passes every field filled |
+| Window | The last hour, day or week, or the calendar month so far, from its first at midnight UTC |
+| Filters | Agent, environment and release on every kind; model and provider on model calls, and on a run's cost, read from its calls; tag, each `key:value`, on a run's cost alone, a run passing where any of its spans carries it; tool on tool calls; and the status a span ended with, on all but a cost. Separate a field's values with commas, and put a value that holds one between double quotes: a span passes a field it carries any of the values of, and passes the alert when it passes every field filled |
 | Compared as | How the value is compared: above, at or above, below, at or below, equal to, or not equal to |
 | Alert when | The alert threshold under that comparison: in milliseconds for a duration, as a percentage for the share failed, and in US dollars for a cost |
 | Warn when | A warning threshold under the same comparison, met before the alert's: below it for above, above it for below. Optional, and none for equal to or not equal to |
@@ -113,6 +113,16 @@ webhook hears an alert's incidents only if it takes `incident_opened` and
 `incident_resolved` ([choosing events](/docs/integrations/webhooks#choosing-events)).
 Saving an alert over forgets its last value, which answered another
 question, and it is evaluated again within a minute.
+
+### A budget
+
+A budget is an alert on what the runs spent in all over **This month**: on
+runs, measured as **Cost**, folded as what the runs spent, its alert
+threshold the budget and its warning threshold where you want to hear first,
+80% of it say, for the project or, with a tag filter, for the runs one team's
+tag names. Its warning says where the month is headed at its burn so far: the
+day it reaches the alert threshold, or that it stays under it this month. A
+budget opens its month again on the first, at midnight UTC.
 
 ## Maintenance windows
 

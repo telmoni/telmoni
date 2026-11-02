@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-use chrono::{DateTime, DurationRound as _, SubsecRound as _, TimeDelta, Utc};
+use chrono::{DateTime, Datelike as _, DurationRound as _, SubsecRound as _, TimeDelta, Utc};
 use clickhouse::Row;
 use serde::Deserialize;
 use uuid::Uuid;
@@ -22,7 +22,7 @@ use uuid::Uuid;
 use telmoni_shared::AlertCeilings;
 use telmoni_shared::db::tenant_session::maintenance_scope;
 use telmoni_shared::{
-    MissingData, OrganizationId, RuleAggregation, RuleMeasure, Severity, TelmoniError,
+    MissingData, OrganizationId, RuleAggregation, RuleMeasure, RuleWindow, Severity, TelmoniError,
 };
 
 use crate::AppState;
@@ -154,12 +154,35 @@ pub struct Window {
 }
 
 impl Window {
+    /// An alert's window at `now`: the last hour, day or week, or the month
+    /// so far from its first at midnight UTC.
+    #[must_use]
+    pub fn of(now: DateTime<Utc>, window: RuleWindow) -> Self {
+        match window {
+            RuleWindow::Month => {
+                let to = now.trunc_subsecs(6);
+                let first = to
+                    .date_naive()
+                    .with_day(1)
+                    .and_then(|day| day.and_hms_opt(0, 0, 0))
+                    .map_or(to, |at| at.and_utc());
+                Self::between(first, to)
+            }
+            trailing => Self::ending(now, trailing.duration()),
+        }
+    }
+
     /// The `length` of time that ends at `now`, to the microsecond a span's
     /// arrival is kept to.
     #[must_use]
     pub fn ending(now: DateTime<Utc>, length: Duration) -> Self {
         let to = now.trunc_subsecs(6);
         let from = to - TimeDelta::from_std(length).unwrap_or(TimeDelta::zero());
+        Self::between(from, to)
+    }
+
+    /// From `from` to `to`, its full hours between apart.
+    fn between(from: DateTime<Utc>, to: DateTime<Utc>) -> Self {
         let hour = TimeDelta::hours(1);
         let floor = |at: DateTime<Utc>| at.duration_trunc(hour).unwrap_or(at);
         let full_from = if floor(from) == from {
@@ -183,7 +206,7 @@ pub async fn totals(
     rule: &RuleRow,
     now: DateTime<Utc>,
 ) -> clickhouse::error::Result<Totals> {
-    let window = Window::ending(now, rule.definition.window.duration());
+    let window = Window::of(now, rule.definition.window);
     let read = state
         .store
         .read(&Projects::one(rule.project_id.clone()), TOTALS_SQL)
@@ -437,7 +460,7 @@ pub async fn value_of(
     now: DateTime<Utc>,
 ) -> Result<Option<f64>, Unread> {
     if rule.definition.measure == RuleMeasure::Cost {
-        let window = Window::ending(now, rule.definition.window.duration());
+        let window = Window::of(now, rule.definition.window);
         let projects = Projects::one(rule.project_id.clone());
         let spent = spend::runs(state, &projects, window, &rule.definition.filters).await?;
         return Ok(spent.value(rule.definition.aggregation));

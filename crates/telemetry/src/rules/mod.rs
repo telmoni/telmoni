@@ -197,6 +197,10 @@ pub struct RuleFilters {
     pub environment: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub release: Vec<String>,
+    /// Tags, each `key:value`, that a run carries where any of its spans
+    /// does: a cost alert's alone, read from the spans that keep them.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub tag: Vec<String>,
 }
 
 /// The filters on `telemetry.spans` a run's cost takes too: all but its
@@ -262,6 +266,7 @@ impl RuleFilters {
             status,
             environment: values("environment", &self.environment, ENVIRONMENT_MAX)?,
             release: values("release", &self.release, RELEASE_MAX)?,
+            tag: crate::handler::traces::tag_values(&self.tag)?,
         })
     }
 }
@@ -358,9 +363,12 @@ impl RuleInput {
             if !(filters.status.is_empty() && filters.tool.is_empty()) {
                 return Err(bad(
                     "a run's cost is read from its model calls as they land: filter it by \
-                     agent, model, provider, environment or release",
+                     agent, model, provider, environment, release or tag",
                 ));
             }
+        } else if !filters.tag.is_empty() {
+            // The hourly totals other measures read keep no tags.
+            return Err(bad("a tag narrows a cost alert or a budget alone"));
         }
         // A field its spans never carry would hold the alert at nothing for ever.
         let calls = self.kind == SpanKind::ModelCall || self.measure == RuleMeasure::Cost;

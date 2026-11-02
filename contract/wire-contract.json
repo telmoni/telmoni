@@ -193,7 +193,8 @@
     "RuleWindow": [
       "hour",
       "day",
-      "week"
+      "week",
+      "month"
     ],
     "SessionColumn": [
       "user",

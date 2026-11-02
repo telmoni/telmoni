@@ -114,6 +114,10 @@ describe("what an alert measures", () => {
     expect(amount(RuleMeasure.Failures, RuleAggregation.Avg, 0.125)).toBe("12.5%");
     expect(amount(RuleMeasure.Failures, RuleAggregation.Count, 3)).toBe("3");
     expect(amount(RuleMeasure.Cost, RuleAggregation.Max, 3.45)).toBe("$3.45");
+    expect(
+      metricWords({ kind: SpanKind.Run, measure: RuleMeasure.Cost, aggregation: RuleAggregation.Sum, window: RuleWindow.Month }),
+      "a budget",
+    ).toBe("What the runs spent so far this month");
     expect(thresholdWords(ALERT)).toEqual({ alert: "> 5,000 ms", warning: "> 3,000 ms" });
   });
 });
@@ -174,6 +178,15 @@ describe("the form", () => {
       agent: ["triage", "support"],
       status: [SpanStatus.Error],
     });
+    expect(filterFieldsFor(SpanKind.Run, RuleMeasure.Cost), "a budget by its tag").toEqual([
+      "agent",
+      "model",
+      "provider",
+      "environment",
+      "release",
+      "tag",
+    ]);
+    expect(filterFieldsFor(SpanKind.Run, RuleMeasure.Count)).not.toContain("tag");
     expect(filterFieldsFor(SpanKind.ToolCall, RuleMeasure.Count)).toEqual([
       "agent",
       "tool",

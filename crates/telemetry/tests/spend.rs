@@ -5,12 +5,12 @@
 
 mod common;
 
-use chrono::{DateTime, NaiveDate, TimeDelta, Utc};
+use chrono::{DateTime, Datelike as _, NaiveDate, TimeDelta, Timelike as _, Utc};
 use sqlx::PgPool;
 use uuid::Uuid;
 
 use common::{AuthStub, clickhouse_or_skip};
-use telmoni_shared::{ProjectId, SpanKind};
+use telmoni_shared::{ProjectId, RuleWindow, SpanKind};
 use telmoni_telemetry::prices::{PriceBook, Usage};
 use telmoni_telemetry::rules::RuleFilters;
 use telmoni_telemetry::rules::evaluate::Window;
@@ -251,6 +251,60 @@ async fn a_projects_own_price_comes_before_the_tables(pool: PgPool) {
         [("openai".to_owned(), "ft:gpt-4o:acme".to_owned())],
         "our price is no other project's"
     );
+}
+
+/// A budget reads the month so far, from its first at midnight UTC, and a
+/// tag takes the runs whose own span carries it, its calls among the month's.
+#[sqlx::test]
+async fn a_budget_reads_the_month_so_far_of_the_runs_its_tag_names(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let state = common::state_with_stores(&pool, AuthStub::new());
+    let project = ProjectId::new();
+    let at = Utc::now() - TimeDelta::seconds(30);
+    let (team, other) = (Uuid::new_v4(), Uuid::new_v4());
+    let gpt = ("openai", "gpt-4o");
+    let tagged = |run: Uuid, team_tag: &str| SpanRow {
+        run_id: run,
+        tags: vec![("team".into(), team_tag.into())],
+        ..common::received(&project, SpanKind::Run, "nightly-report", 100, at)
+    };
+    ch.store
+        .insert_spans(&[
+            call(&project, team, gpt, usage(0, 0, 0, 0), Some(2.0), at),
+            call(&project, team, gpt, usage(0, 0, 0, 0), Some(1.5), at),
+            tagged(team, "search"),
+            call(&project, other, gpt, usage(0, 0, 0, 0), Some(7.0), at),
+            tagged(other, "billing"),
+        ])
+        .await
+        .expect("the runs");
+
+    let month = Window::of(Utc::now(), RuleWindow::Month);
+    assert_eq!(
+        (month.from.day(), month.from.hour(), month.from.minute()),
+        (1, 0, 0),
+        "the month from its first"
+    );
+    let filters = RuleFilters {
+        tag: vec!["team:search".into()],
+        ..RuleFilters::default()
+    };
+    let read = spend::runs(&state, &Projects::one(project.clone()), month, &filters)
+        .await
+        .expect("the month's spend");
+    assert_eq!(read.runs, 1, "{read:?}");
+    assert!((read.total - 3.5).abs() < 1e-12, "{read:?}");
+    let all = spend::runs(
+        &state,
+        &Projects::one(project.clone()),
+        month,
+        &RuleFilters::default(),
+    )
+    .await
+    .expect("the month's spend");
+    assert!((all.total - 10.5).abs() < 1e-12, "{all:?}");
 }
 
 /// What each run spent over a window, folded: the window's calls alone,

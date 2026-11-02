@@ -219,7 +219,7 @@ CREATE TABLE telemetry.rules (
     CONSTRAINT rules_aggregation_check
         CHECK (aggregation IN ('count', 'avg', 'sum', 'max', 'p50', 'p90', 'p95', 'p99')),
     CONSTRAINT rules_filters_check CHECK (jsonb_typeof(filters) = 'object'),
-    CONSTRAINT rules_lookback_check CHECK (lookback IN ('hour', 'day', 'week')),
+    CONSTRAINT rules_lookback_check CHECK (lookback IN ('hour', 'day', 'week', 'month')),
     CONSTRAINT rules_operator_check CHECK (operator IN ('gt', 'gte', 'lt', 'lte', 'eq', 'ne')),
     CONSTRAINT rules_missing_data_check
         CHECK (missing_data IN ('zero', 'keep', 'no_data', 'notify_no_data')),

@@ -130,6 +130,7 @@ export const WINDOW_LABEL: Record<RuleWindow, string> = {
   [RuleWindow.Hour]: "Last hour",
   [RuleWindow.Day]: "Last day",
   [RuleWindow.Week]: "Last week",
+  [RuleWindow.Month]: "This month",
 };
 
 type Metric = Pick<Alert, "kind" | "measure" | "aggregation" | "window">;
@@ -137,7 +138,7 @@ type Metric = Pick<Alert, "kind" | "measure" | "aggregation" | "window">;
 /** An alert's metric in its notices' own words: "The p95 duration of model
  *  calls over the last hour", "The most a run spent over the last day". */
 export function metricWords(alert: Metric): string {
-  const over = `over the last ${alert.window}`;
+  const over = alert.window === RuleWindow.Month ? "so far this month" : `over the last ${alert.window}`;
   if (alert.measure === RuleMeasure.Cost) {
     const spent =
       alert.aggregation === RuleAggregation.Max
@@ -280,7 +281,7 @@ export const LEVEL_LABEL: Record<RuleLevel, string> = {
 // ── Filters ──────────────────────────────────────────────────────────────────
 
 /** The text fields an alert filters by, each any of its values. */
-export const FILTER_FIELDS = ["agent", "model", "provider", "tool", "environment", "release"] as const;
+export const FILTER_FIELDS = ["agent", "model", "provider", "tool", "environment", "release", "tag"] as const;
 export type FilterField = (typeof FILTER_FIELDS)[number];
 
 export const FILTER_LABEL: Record<FilterField, string> = {
@@ -290,11 +291,13 @@ export const FILTER_LABEL: Record<FilterField, string> = {
   tool: "Tool",
   environment: "Environment",
   release: "Release",
+  tag: "Tag",
 };
 
 /** The fields an alert's spans carry, so the ones its filters can name: a
  *  model call's model and provider, a tool call's tool, and a run's cost by
- *  its calls' model and provider. */
+ *  its calls' model and provider, and by its tags (`key:value`), which only
+ *  the spans keep, never the hourly totals. */
 export function filterFieldsFor(kind: AlertKind, measure: RuleMeasure): FilterField[] {
   const own: FilterField[] =
     measure === RuleMeasure.Cost || kind === SpanKind.ModelCall
@@ -302,7 +305,8 @@ export function filterFieldsFor(kind: AlertKind, measure: RuleMeasure): FilterFi
       : kind === SpanKind.ToolCall
         ? ["tool"]
         : [];
-  return ["agent", ...own, "environment", "release"];
+  const tag: FilterField[] = measure === RuleMeasure.Cost ? ["tag"] : [];
+  return ["agent", ...own, "environment", "release", ...tag];
 }
 
 /** Whether an alert filters by status: a run's cost does not, since it is
@@ -526,6 +530,7 @@ const NO_FILTERS: Record<FilterField, string> = {
   tool: "",
   environment: "",
   release: "",
+  tag: "",
 };
 
 /** A new alert's form: the share of runs that failed over the last hour,

@@ -357,7 +357,7 @@ fn values_up_to(
 
 /// A tag filter's values, each `key:value` as ingest keeps a tag: the key 1
 /// to [`TAG_KEY_MAX`] characters, the value up to [`TAG_VALUE_MAX`].
-fn tag_values(given: &[String]) -> Result<Vec<String>, TelmoniError> {
+pub(crate) fn tag_values(given: &[String]) -> Result<Vec<String>, TelmoniError> {
     let pairs = values("tag", given, FILTER_VALUE_MAX.tag)?;
     for pair in &pairs {
         let well_formed = pair.split_once(':').is_some_and(|(key, value)| {

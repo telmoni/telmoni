@@ -184,7 +184,9 @@ async fn an_alert_that_reads_two_ways_is_refused(pool: PgPool) {
         ("kind", json!("span")),
         ("kind", json!("step")),
         ("filters", json!({ "tool": ["search_docs"] })),
-        ("window", json!("month")),
+        ("window", json!("year")),
+        // The hourly totals a duration reads keep no tags.
+        ("filters", json!({ "tag": ["team:search"] })),
         ("renotify_minutes", json!(0)),
     ] {
         let mut body = slow_calls("Refused");

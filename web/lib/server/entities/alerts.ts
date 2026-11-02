@@ -46,6 +46,7 @@ const RuleFiltersSchema = z.object({
   status: z.array(z.enum(SpanStatus)).optional(),
   environment: z.array(z.string()).optional(),
   release: z.array(z.string()).optional(),
+  tag: z.array(z.string()).optional(),
 });
 export type RuleFilters = z.infer<typeof RuleFiltersSchema>;
 

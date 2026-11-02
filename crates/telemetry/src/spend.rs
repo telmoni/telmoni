@@ -74,6 +74,13 @@ macro_rules! window_calls {
             "AND received_at < {to:DateTime64(6, 'UTC')} ",
             "AND kind = 'model_call' ",
             $crate::rules::calls_admitted!(),
+            // A run's tags ride on its own span, which lands as it ends: its
+            // runs are found from a day before the window, to no end.
+            "AND (empty({tags:Array(String)}) OR run_id IN (SELECT run_id FROM telemetry.spans ",
+            "WHERE project_id IN {projects:Array(String)} ",
+            "AND received_at >= {from:DateTime64(6, 'UTC')} - INTERVAL 1 DAY ",
+            "AND hasAny(arrayMap((k, v) -> concat(k, ':', v), mapKeys(tags), mapValues(tags)), ",
+            "{tags:Array(String)}))) ",
         )
     };
 }
@@ -284,10 +291,12 @@ fn pairs(names: Vec<Name>) -> Vec<(String, String)> {
 
 /// `read` bound to `window` and to the filters a run's cost takes.
 fn windowed(read: Read, window: Window, filters: &RuleFilters) -> Read {
-    filters.bind_calls(
-        read.param("from", micros(window.from))
-            .param("to", micros(window.to)),
-    )
+    filters
+        .bind_calls(
+            read.param("from", micros(window.from))
+                .param("to", micros(window.to)),
+        )
+        .param("tags", &filters.tag)
 }
 
 /// `read` handed `book`'s prices: each name's rows in the order they take

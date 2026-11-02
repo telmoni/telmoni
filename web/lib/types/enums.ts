@@ -245,6 +245,7 @@ export const RuleWindow = {
   Hour: "hour",
   Day:  "day",
   Week: "week",
+  Month: "month",
 } as const;
 export type RuleWindow = typeof RuleWindow[keyof typeof RuleWindow];
 
