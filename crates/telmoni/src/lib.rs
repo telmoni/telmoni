@@ -309,6 +309,20 @@ impl App {
     }
 }
 
+/// Load `.env` if there is one. dotenvy loads nothing past a line it cannot
+/// parse, so that line stops the binary here, not on a later variable, and
+/// stays out of the message: it may hold a secret.
+pub fn load_dotenv() -> anyhow::Result<()> {
+    match dotenvy::dotenv() {
+        Ok(_) => Ok(()),
+        Err(e) if e.not_found() => Ok(()),
+        Err(dotenvy::Error::LineParse(..)) => {
+            anyhow::bail!(".env has a line dotenvy cannot parse; quote a value that holds spaces")
+        }
+        Err(e) => Err(anyhow::anyhow!(".env: {e}")),
+    }
+}
+
 /// Run one command over the process `build` assembles: a binary's whole
 /// `main` once the arguments are parsed. `migrate` and `rotate` never build
 /// the process — they run as the migrator, against Postgres and ClickHouse

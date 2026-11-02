@@ -29,17 +29,7 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // dotenvy loads nothing past a line it cannot parse, so a half-read `.env`
-    // would fail on some later variable with no hint why. The line stays out
-    // of the message: it may hold a secret.
-    match dotenvy::dotenv() {
-        Ok(_) => {}
-        Err(e) if e.not_found() => {}
-        Err(dotenvy::Error::LineParse(..)) => {
-            anyhow::bail!(".env has a line dotenvy cannot parse; quote a value that holds spaces")
-        }
-        Err(e) => return Err(anyhow::anyhow!(".env: {e}")),
-    }
+    telmoni_server::load_dotenv()?;
 
     telmoni_shared::logging::init().map_err(|e| anyhow::anyhow!("logging: {e}"))?;
 
