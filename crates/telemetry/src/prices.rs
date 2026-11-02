@@ -17,7 +17,11 @@ use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 
+use telmoni_shared::ProjectId;
+use telmoni_shared::db::tenant_session::maintenance_scope;
+
 use crate::contract::{MODEL_MAX, PROVIDER_MAX};
+use crate::db::TelemetryLane;
 
 /// The price file, embedded so `migrate` writes the prices the binary was
 /// built with.
@@ -203,11 +207,57 @@ pub async fn load(pool: &PgPool, file: &PriceFile) -> anyhow::Result<usize> {
     Ok(usize::try_from(written)?)
 }
 
+/// A project's own price as its row keeps it: one provider's models by
+/// every name they answer as.
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct OwnPrice {
+    pub project_id: ProjectId,
+    pub provider: String,
+    pub models: Vec<String>,
+    pub effective_from: Option<NaiveDate>,
+    pub input: f64,
+    pub output: f64,
+    pub cache_read: f64,
+    pub cache_write: f64,
+}
+
+impl OwnPrice {
+    /// One row of the book for each name it answers as.
+    fn rows(self) -> impl Iterator<Item = (ProjectId, ModelPrice)> {
+        let Self {
+            project_id,
+            provider,
+            models,
+            effective_from,
+            input,
+            output,
+            cache_read,
+            cache_write,
+        } = self;
+        models.into_iter().map(move |model| {
+            (
+                project_id.clone(),
+                ModelPrice {
+                    provider: provider.clone(),
+                    model,
+                    effective_from,
+                    input,
+                    output,
+                    cache_read,
+                    cache_write,
+                },
+            )
+        })
+    }
+}
+
 /// The prices, by provider and model, each name's in the order they take
-/// effect.
+/// effect; and the projects' own (`telemetry.project_prices`), which a read
+/// of spend takes before the table's for its project alone.
 #[derive(Debug, Clone, Default)]
 pub struct PriceBook {
     prices: HashMap<String, HashMap<String, Vec<ModelPrice>>>,
+    own: Vec<(ProjectId, ModelPrice)>,
 }
 
 impl PriceBook {
@@ -240,11 +290,35 @@ impl PriceBook {
     }
 
     /// The prices `telemetry.model_prices` holds for `names`, each a provider
-    /// and a model, from every day; none for a name no row holds.
-    pub async fn read_for(pool: &PgPool, names: &[(String, String)]) -> sqlx::Result<Self> {
+    /// and a model, from every day, and every price `projects` set of their
+    /// own; none for a name no row holds.
+    pub async fn read_for(
+        pool: &PgPool,
+        projects: &[ProjectId],
+        names: &[(String, String)],
+    ) -> sqlx::Result<Self> {
         if names.is_empty() {
             return Ok(Self::default());
         }
+        let mut book = Self::table_for(pool, names).await?;
+        let mut lane = maintenance_scope(pool, TelemetryLane).await?;
+        let own: Vec<OwnPrice> = sqlx::query_as(
+            "SELECT project_id, provider, models, effective_from, input, output,
+                    cache_read, cache_write
+               FROM telemetry.project_prices
+              WHERE project_id = ANY($1)
+              ORDER BY project_id, effective_from NULLS FIRST, position",
+        )
+        .bind(projects)
+        .fetch_all(lane.conn())
+        .await?;
+        lane.commit().await?;
+        book.own = own.into_iter().flat_map(OwnPrice::rows).collect();
+        Ok(book)
+    }
+
+    /// [`Self::read_for`]'s table rows alone.
+    async fn table_for(pool: &PgPool, names: &[(String, String)]) -> sqlx::Result<Self> {
         let rows: Vec<ModelPrice> = sqlx::query_as(
             "SELECT provider, model, effective_from, input, output, cache_read, cache_write
                FROM telemetry.model_prices
@@ -257,9 +331,16 @@ impl PriceBook {
         Ok(Self::new(rows))
     }
 
-    /// Every row, each name's in the order they take effect.
-    pub fn rows(&self) -> impl Iterator<Item = &ModelPrice> {
-        self.prices.values().flat_map(HashMap::values).flatten()
+    /// Every row, each name's in the order they take effect: the table's,
+    /// for every project, then each project's own, so the last in force for
+    /// a call is its project's where it set one.
+    pub fn rows(&self) -> impl Iterator<Item = (Option<&ProjectId>, &ModelPrice)> {
+        self.prices
+            .values()
+            .flat_map(HashMap::values)
+            .flatten()
+            .map(|row| (None, row))
+            .chain(self.own.iter().map(|(project, row)| (Some(project), row)))
     }
 
     /// The price in force for a call of `provider`'s `model` at `at`: the

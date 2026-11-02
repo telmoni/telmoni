@@ -2037,6 +2037,91 @@ async fn held_content_switched_off_lands_without_it(pool: PgPool) {
     .await;
 }
 
+/// A project's own prices: every role reads them, its owners and admins set
+/// them whole, per million tokens, held to their rules, each change audited.
+#[sqlx::test]
+async fn a_projects_prices_are_read_by_all_and_set_by_its_admins(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let door = door_over(&pool, ContentMode::Off, false).await;
+    door.auth
+        .seat(
+            "admin-1",
+            &door.organization,
+            &door.project,
+            OrganizationRole::Owner,
+            None,
+        )
+        .seat(
+            "member-1",
+            &door.organization,
+            &door.project,
+            OrganizationRole::Member,
+            Some(Role::Member),
+        );
+    let (status, empty) = door.lane("GET", "/prices", "member-1", None).await;
+    assert_eq!(status, StatusCode::OK, "{empty}");
+    assert_eq!(empty, json!({ "prices": [] }));
+
+    let prices = json!({ "prices": [{
+        "provider": "openai", "models": ["ft:gpt-5:acme", " gpt-5 "],
+        "input": 1.25, "output": 10.0, "cache_read": 0.125, "cache_write": 0.0,
+    }]});
+    let (status, _) = door
+        .lane("PUT", "/prices", "member-1", Some(prices.clone()))
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "a member reads, never sets");
+    let (status, set) = door
+        .lane("PUT", "/prices", "admin-1", Some(prices.clone()))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{set}");
+    assert_eq!(
+        set["prices"][0]["models"],
+        json!(["ft:gpt-5:acme", "gpt-5"])
+    );
+    let stored: f64 = sqlx::query_scalar("SELECT input FROM telemetry.project_prices")
+        .fetch_one(&pool)
+        .await
+        .expect("stored");
+    assert!(
+        (stored - 1.25e-6).abs() < 1e-15,
+        "a token's, as the table keeps it"
+    );
+    let (_, read) = door.lane("GET", "/prices", "member-1", None).await;
+    assert_eq!(read["prices"][0]["input"], 1.25);
+
+    let changes: Vec<String> = sqlx::query_scalar(
+        "SELECT metadata::text FROM audit.events WHERE action = 'updated' ORDER BY seq",
+    )
+    .fetch_all(&pool)
+    .await
+    .expect("the chain");
+    assert_eq!(changes.len(), 1, "{changes:?}");
+    assert!(
+        changes[0].contains(r#""prices": {"to": 1, "from": 0}"#),
+        "{}",
+        changes[0]
+    );
+    let (status, _) = door.lane("PUT", "/prices", "admin-1", Some(prices)).await;
+    assert_eq!(status, StatusCode::OK);
+    let again: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM audit.events WHERE action = 'updated'")
+            .fetch_one(&pool)
+            .await
+            .expect("the chain");
+    assert_eq!(again, 1, "the same list again records nothing");
+
+    let (status, _) = door
+        .lane(
+            "PUT",
+            "/prices",
+            "admin-1",
+            Some(json!({ "prices": [{ "provider": "openai", "models": ["a"],
+                "input": -1.0, "output": 0.0, "cache_read": 0.0, "cache_write": 0.0 }] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
 /// A `read` key reads the traces, a trace's content only when it asks, each
 /// such read filed as the key's, the rollup and the incidents; an ingest key
 /// reads none.

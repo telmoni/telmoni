@@ -592,6 +592,12 @@ async fn the_maintenance_lanes_narrowed_grants_hold_in_every_tier() {
             "telemetry.media_names",
             &["SELECT", "DELETE"],
         ),
+        // Spend reads a window's projects' prices; the purges delete them.
+        (
+            "telemetry_maintenance",
+            "telemetry.project_prices",
+            &["SELECT", "DELETE"],
+        ),
         // The loop lands another exporter's held spans and marks each with
         // its run; the purges delete a project's.
         (

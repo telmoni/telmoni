@@ -173,6 +173,86 @@ async fn a_run_is_priced_as_the_price_book_prices_it(pool: PgPool) {
     );
 }
 
+/// A project's own price comes before the table's, for its calls alone: a
+/// fine-tune the table does not list is priced, and a listed model at the
+/// project's price; another project's same calls keep the table's.
+#[sqlx::test]
+async fn a_projects_own_price_comes_before_the_tables(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let at = Utc::now() - TimeDelta::seconds(30);
+    price(&pool, at.date_naive()).await;
+    let state = common::state_with_stores(&pool, AuthStub::new());
+    let (ours, theirs) = (ProjectId::new(), ProjectId::new());
+    sqlx::query(
+        "INSERT INTO telemetry.project_prices
+             (project_id, position, provider, models, effective_from,
+              input, output, cache_read, cache_write)
+         VALUES ($1, 0, 'openai', ARRAY['gpt-4o', 'ft:gpt-4o:acme'], NULL, 1e-6, 2e-6, 0, 0)",
+    )
+    .bind(&ours)
+    .execute(&pool)
+    .await
+    .expect("our price");
+    let (our_run, their_run) = (Uuid::new_v4(), Uuid::new_v4());
+    let calls = |project: &ProjectId, run: Uuid| {
+        vec![
+            call(
+                project,
+                run,
+                ("openai", "gpt-4o"),
+                usage(1_000, 100, 0, 0),
+                None,
+                at,
+            ),
+            call(
+                project,
+                run,
+                ("openai", "ft:gpt-4o:acme"),
+                usage(500, 50, 0, 0),
+                None,
+                at,
+            ),
+        ]
+    };
+    let rows: Vec<SpanRow> = calls(&ours, our_run)
+        .into_iter()
+        .chain(calls(&theirs, their_run))
+        .collect();
+    ch.store.insert_spans(&rows).await.expect("the calls");
+
+    let mine = spend::run(&state, &Projects::one(ours.clone()), our_run)
+        .await
+        .expect("our run's spend");
+    let expected = (1_000.0 + 500.0) * 1e-6 + (100.0 + 50.0) * 2e-6;
+    assert!(
+        (mine.spent - expected).abs() < 1e-12,
+        "{} against {expected}",
+        mine.spent
+    );
+    assert!(mine.unpriced.is_empty(), "{:?}", mine.unpriced);
+
+    let book = PriceBook::read(&pool).await.expect("the prices");
+    let table = book
+        .price("openai", "gpt-4o", at)
+        .expect("the table's")
+        .cost(usage(1_000, 100, 0, 0));
+    let yours = spend::run(&state, &Projects::one(theirs.clone()), their_run)
+        .await
+        .expect("their run's spend");
+    assert!(
+        (yours.spent - table).abs() < 1e-12,
+        "{} against {table}",
+        yours.spent
+    );
+    assert_eq!(
+        yours.unpriced,
+        [("openai".to_owned(), "ft:gpt-4o:acme".to_owned())],
+        "our price is no other project's"
+    );
+}
+
 /// What each run spent over a window, folded: the window's calls alone,
 /// those the filters admit, and the run that spent the most.
 #[sqlx::test]

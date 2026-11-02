@@ -130,10 +130,18 @@ run spent, for one — and the price is never written beside it, so a price
 corrected later corrects every read after it: its input tokens less the
 cache's at the input price, each cache count at its own, and its output at the
 output price, all at the price in force the day the call arrived for its
-provider and its model as they arrived, whole, from LiteLLM's table of model
-prices, which each Telmoni release carries. A name the table does not hold is
-unpriced, never guessed: such a call adds nothing to what its run spent, and
-an alert's notice names its model.
+provider and its model as they arrived, whole: the project's own price for it
+where one is set, else LiteLLM's table of model prices, which each Telmoni
+release carries. A name neither holds is unpriced, never guessed: such a call
+adds nothing to what its run spent, and an alert's notice names its model.
+
+A project's owners and admins set its own prices under **Model prices** on its
+**Settings** page — private pricing, a model it serves itself, a fine-tune the
+table does not list — each for a provider's model by every name it answers
+with, in US dollars per million tokens, from the day it takes effect, or
+always; every role reads them, each change is recorded in the
+[audit log](/docs/workspace/audit-log), and a project's prices are no other's.
+A project sets up to 100, each naming up to 20 models.
 
 The [field inventory](/docs/api/field-inventory) names, on a span, `gen_ai.response.id`,
 `gen_ai.response.finish_reasons`, `gen_ai.response.status`,

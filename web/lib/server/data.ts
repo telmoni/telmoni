@@ -68,6 +68,8 @@ export { fetchTokens } from "./entities/token";
 export type { ApiToken, TokenAccess } from "./entities/token";
 
 export { fetchContentMode } from "./entities/content-mode";
+export { fetchModelPrices } from "./entities/model-prices";
+export type { ModelPrice } from "./entities/model-prices";
 export type { ContentModeSetting } from "./entities/content-mode";
 
 export { fetchFieldInventory } from "./entities/field-inventory";

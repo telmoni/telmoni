@@ -4,7 +4,7 @@ import { Section } from "@/components/section";
 import { SettingsRow } from "@/components/settings-row";
 import { ServiceUnavailable } from "@/components/service-unavailable";
 import { Card } from "@/components/ui/card";
-import { fetchContentMode } from "@/lib/server/data";
+import { fetchContentMode, fetchModelPrices } from "@/lib/server/data";
 import { projectPage } from "@/lib/server/project-page";
 import { administers } from "@/lib/roles";
 import { getServerSession } from "@/lib/server/session";
@@ -12,6 +12,7 @@ import { Role } from "@/lib/types/enums";
 
 import { ContentModeForm } from "./_content-mode";
 import { DeleteProjectForm } from "./_delete-project";
+import { ModelPricesForm } from "./_model-prices";
 import { RenameProjectForm } from "./_rename-project";
 
 export const metadata = {
@@ -26,8 +27,9 @@ export default async function SettingsPage({
   const resolved = await projectPage(slug);
   if (resolved.kind === "unavailable") return <ServiceUnavailable />;
   const { project } = resolved;
-  const [contentMode, session] = await Promise.all([
+  const [contentMode, prices, session] = await Promise.all([
     fetchContentMode(project.id),
+    fetchModelPrices(project.id),
     getServerSession(),
   ]);
 
@@ -84,6 +86,26 @@ export default async function SettingsPage({
             ) : (
               <p className="text-sm text-muted-foreground">
                 This project&apos;s content mode could not be read. Reload to try again.
+              </p>
+            )}
+          </Card>
+        </Section>
+
+        <Section
+          title="Model prices"
+          description="This project's own prices for the models it calls, which spend reads before the price table's: private pricing, a model it serves itself, or a fine-tune the table does not list. A call that reports its own cost keeps it. Each price is US dollars per million tokens, for a provider's model by every name it answers with, from the day it takes effect, or always."
+        >
+          <Card>
+            {prices ? (
+              <ModelPricesForm
+                key={JSON.stringify(prices)}
+                projectId={project.id}
+                prices={prices}
+                canEdit={canEdit}
+              />
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                This project&apos;s prices could not be read. Reload to try again.
               </p>
             )}
           </Card>

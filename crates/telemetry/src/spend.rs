@@ -9,7 +9,7 @@ use clickhouse::Row;
 use serde::Deserialize;
 use uuid::Uuid;
 
-use telmoni_shared::RuleAggregation;
+use telmoni_shared::{ProjectId, RuleAggregation};
 
 use crate::AppState;
 use crate::prices::PriceBook;
@@ -18,15 +18,17 @@ use crate::rules::evaluate::Window;
 use crate::store::{Projects, Read, micros};
 
 /// Each call's spend, priced by the parameters' row for its provider and
-/// model that took effect last by its day, as [`PriceBook::price`] picks one,
-/// at [`crate::prices::ModelPrice::cost`]'s sum; and whether it is unpriced:
-/// no cost reported, no row, and tokens to price.
+/// model that took effect last by its day, its project's own after the
+/// table's ([`PriceBook::rows`]), at [`crate::prices::ModelPrice::cost`]'s
+/// sum; and whether it is unpriced: no cost reported, no row, and tokens to
+/// price.
 macro_rules! priced {
     () => {
         concat!(
-            "arrayLastIndex((p, m, f) -> p = provider AND m = model AND f <= toDate(received_at), ",
-            "{price_providers:Array(String)}, {price_models:Array(String)}, ",
-            "{price_from:Array(Date)}) AS price_row, ",
+            "arrayLastIndex((j, p, m, f) -> (j = '' OR j = project_id) AND p = provider ",
+            "AND m = model AND f <= toDate(received_at), ",
+            "{price_projects:Array(String)}, {price_providers:Array(String)}, ",
+            "{price_models:Array(String)}, {price_from:Array(Date)}) AS price_row, ",
             "ifNull(cost, if(price_row = 0, 0, ",
             "toFloat64(if(input_tokens > cache_read_input_tokens + cache_write_input_tokens, ",
             "input_tokens - cache_read_input_tokens - cache_write_input_tokens, 0)) ",
@@ -190,7 +192,7 @@ pub async fn runs(
     )
     .fetch_all()
     .await?;
-    let book = PriceBook::read_for(&state.db, &pairs(names)).await?;
+    let book = PriceBook::read_for(&state.db, projects.as_slice(), &pairs(names)).await?;
     Ok(priced_by(
         windowed(state.store.read(projects, RUNS_SQL), window, filters),
         &book,
@@ -211,7 +213,7 @@ pub async fn run(state: &AppState, projects: &Projects, run_id: Uuid) -> Result<
         .param("run", run_id)
         .fetch_all()
         .await?;
-    let book = PriceBook::read_for(&state.db, &pairs(names)).await?;
+    let book = PriceBook::read_for(&state.db, projects.as_slice(), &pairs(names)).await?;
     let spent: Spent = priced_by(
         state.store.read(projects, RUN_SQL).param("run", run_id),
         &book,
@@ -240,38 +242,42 @@ fn windowed(read: Read, window: Window, filters: &RuleFilters) -> Read {
 }
 
 /// `read` handed `book`'s prices: each name's rows in the order they take
-/// effect, since its `price_row` is the last in force, and a price for
-/// always from the epoch's first day.
+/// effect, since its `price_row` is the last in force, the table's for every
+/// project as `''`, and a price for always from the epoch's first day.
 fn priced_by(read: Read, book: &PriceBook) -> Read {
-    let rows: Vec<_> = book.rows().collect();
+    let (projects, rows): (Vec<&str>, Vec<_>) = book
+        .rows()
+        .map(|(project, row)| (project.map_or("", ProjectId::as_str), row))
+        .unzip();
     let column = |price: fn(&crate::prices::ModelPrice) -> f64| {
         rows.iter().map(|row| price(row)).collect::<Vec<f64>>()
     };
-    read.param(
-        "price_providers",
-        rows.iter()
-            .map(|row| row.provider.as_str())
-            .collect::<Vec<_>>(),
-    )
-    .param(
-        "price_models",
-        rows.iter()
-            .map(|row| row.model.as_str())
-            .collect::<Vec<_>>(),
-    )
-    .param(
-        "price_from",
-        rows.iter()
-            .map(|row| {
-                row.effective_from
-                    .map_or_else(|| "1970-01-01".to_owned(), |day| day.to_string())
-            })
-            .collect::<Vec<_>>(),
-    )
-    .param("price_input", column(|row| row.input))
-    .param("price_output", column(|row| row.output))
-    .param("price_cache_read", column(|row| row.cache_read))
-    .param("price_cache_write", column(|row| row.cache_write))
+    read.param("price_projects", projects)
+        .param(
+            "price_providers",
+            rows.iter()
+                .map(|row| row.provider.as_str())
+                .collect::<Vec<_>>(),
+        )
+        .param(
+            "price_models",
+            rows.iter()
+                .map(|row| row.model.as_str())
+                .collect::<Vec<_>>(),
+        )
+        .param(
+            "price_from",
+            rows.iter()
+                .map(|row| {
+                    row.effective_from
+                        .map_or_else(|| "1970-01-01".to_owned(), |day| day.to_string())
+                })
+                .collect::<Vec<_>>(),
+        )
+        .param("price_input", column(|row| row.input))
+        .param("price_output", column(|row| row.output))
+        .param("price_cache_read", column(|row| row.cache_read))
+        .param("price_cache_write", column(|row| row.cache_write))
 }
 
 #[cfg(test)]
@@ -301,6 +307,7 @@ mod tests {
     fn the_reads_name_the_prices_they_are_handed() {
         for sql in [RUNS_SQL, RUN_SQL] {
             for price in [
+                "{price_projects:Array(String)}",
                 "{price_providers:Array(String)}",
                 "{price_models:Array(String)}",
                 "{price_from:Array(Date)}",

@@ -246,6 +246,12 @@ impl Projects {
         (!project_ids.is_empty()).then_some(Self(project_ids))
     }
 
+    /// The projects, as Postgres binds them.
+    #[must_use]
+    pub fn as_slice(&self) -> &[ProjectId] {
+        &self.0
+    }
+
     /// The ids, as the query's own parameter binds them.
     fn ids(&self) -> Vec<&str> {
         self.0.iter().map(ProjectId::as_str).collect()

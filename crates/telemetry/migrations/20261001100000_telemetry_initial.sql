@@ -546,6 +546,44 @@ CREATE POLICY maintenance_access ON telemetry.plain_content
 -- The purges delete a project's content, and a transfer counts it.
 GRANT SELECT, DELETE ON telemetry.plain_content TO telemetry_maintenance;
 
+-- A project's own prices for the models it calls (`handler/prices.rs`):
+-- private pricing, a model it serves itself, a fine-tune the table does not
+-- list. Each row, a token's four prices in US dollars from the day it takes
+-- effect, for a provider's models by every name they answer as; spend reads
+-- them before the table's (`spend.rs`). Replaced whole by each change.
+CREATE TABLE telemetry.project_prices (
+    project_id     TEXT             NOT NULL,
+    position       INTEGER          NOT NULL,
+    provider       TEXT             NOT NULL,
+    models         TEXT[]           NOT NULL,
+    effective_from DATE,
+    input          DOUBLE PRECISION NOT NULL,
+    output         DOUBLE PRECISION NOT NULL,
+    cache_read     DOUBLE PRECISION NOT NULL,
+    cache_write    DOUBLE PRECISION NOT NULL,
+    PRIMARY KEY (project_id, position),
+    CONSTRAINT project_prices_check CHECK (
+        input >= 0 AND output >= 0 AND cache_read >= 0 AND cache_write >= 0
+        AND cardinality(models) > 0
+    )
+);
+
+ALTER TABLE telemetry.project_prices ENABLE ROW LEVEL SECURITY;
+ALTER TABLE telemetry.project_prices FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY tenant_isolation ON telemetry.project_prices
+    USING      (project_id = current_setting('app.project_id', true))
+    WITH CHECK (project_id = current_setting('app.project_id', true));
+
+CREATE POLICY maintenance_access ON telemetry.project_prices
+    TO telemetry_maintenance
+    USING      (current_user = 'telemetry_maintenance')
+    WITH CHECK (current_user = 'telemetry_maintenance');
+
+-- Spend reads a window's projects' prices, the alerts' loop among them; the
+-- purges delete a project's.
+GRANT SELECT, DELETE ON telemetry.project_prices TO telemetry_maintenance;
+
 -- Another exporter's spans, held until their trace's tree places them in a
 -- run (`foreign.rs`), their content sealed as `plain_content`'s; landed, a
 -- span keeps only its run, for a day, for a child arriving later.

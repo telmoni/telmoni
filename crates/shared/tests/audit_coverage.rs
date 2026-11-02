@@ -124,6 +124,13 @@ const MUTATIONS: &[Mutation] = &[
         resource_kind: "Project",
         actor_id: ActorPattern::Variable,
     },
+    Mutation {
+        file: "crates/telemetry/src/handler/prices.rs",
+        fn_name: "put_prices",
+        action: "Updated",
+        resource_kind: "Project",
+        actor_id: ActorPattern::Variable,
+    },
     // A member's changes to alerts, windows and incidents, filed by `chain::file`.
     Mutation {
         file: "crates/telemetry/src/handler/rules.rs",

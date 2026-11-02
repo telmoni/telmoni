@@ -78,6 +78,7 @@ vi.mock("@/lib/server/data", () => ({
   getServerContext: async () => mockContext,
   fetchProjectBySlug: async () => mockProject,
   fetchContentMode: async () => mockContentMode,
+  fetchModelPrices: async () => [],
 }));
 
 vi.mock("@/lib/server/session", () => ({

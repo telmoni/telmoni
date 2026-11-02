@@ -13,6 +13,7 @@ import { checkProjectName } from "@/lib/names";
 import { admitProject } from "@/lib/server/admit";
 import { activeOrganization, getServerContext } from "@/lib/server/entities/organization";
 import { ProjectRenamedSchema, fetchProject } from "@/lib/server/entities/projects";
+import { ModelPricesSchema } from "@/lib/server/entities/model-prices";
 import { canonicalPath } from "@/lib/server/path";
 import { ContentMode } from "@/lib/types/enums";
 
@@ -169,4 +170,27 @@ export async function deleteProjectAction(projectId: string): Promise<ActionResu
   // comes with this answer — `replace`, so Back does not return to it.
   revalidatePath("/", "layout");
   redirect("/console", RedirectType.replace);
+}
+
+/// The project's own model prices replaced whole, as its Settings section
+/// holds them; the server holds each to its rules and records the change.
+export async function saveModelPricesAction(
+  projectId: string,
+  input: unknown,
+): Promise<ActionResult> {
+  const gate = await admitProject({ call: "project:prices", limit: 10 }, projectId);
+  if (!gate.ok) return refused(gate.error);
+  const asked = ModelPricesSchema.safeParse(input);
+  if (!asked.success) return refused("Those prices could not be read.");
+
+  const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/v1/telemetry/prices`, {
+    method: "PUT",
+    headers: { ...gate.headers, "content-type": "application/json" },
+    body: JSON.stringify(asked.data),
+  });
+  if (!res) return refused("The prices could not be saved. Try again.");
+  if (!res.ok) return refused((await extractProblem(res)).message);
+
+  revalidatePath("/(app)/[organization]/[project]/settings", "page");
+  return { ok: true };
 }
