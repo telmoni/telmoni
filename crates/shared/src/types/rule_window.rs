@@ -51,7 +51,7 @@ mod tests {
 
     #[test]
     fn from_str_rejects_the_rest() {
-        for given in ["1h", "month", ""] {
+        for given in ["1h", "year", ""] {
             assert!(given.parse::<RuleWindow>().is_err(), "parsed: {given:?}");
         }
     }
