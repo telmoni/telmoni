@@ -24,6 +24,7 @@ use tower::ServiceExt;
 use common::{AuthStub, clickhouse_or_skip};
 use telmoni_shared::audit::{Actor, lock_chain};
 use telmoni_shared::envelope::SealedRef;
+use telmoni_shared::middleware::api_key::{ApiKeyGate, refuse_as_problem, require_api_key};
 use telmoni_shared::middleware::service_auth::SERVICE_SECRET_HEADER;
 use telmoni_shared::seam::Telemetry as _;
 use telmoni_shared::test_util::{apply_audit_migrations, captured_logs};
@@ -33,9 +34,13 @@ use telmoni_shared::{
 use telmoni_telemetry::ingest::batch::SpanContent;
 use telmoni_telemetry::seam::TelemetrySeam;
 use telmoni_telemetry::store::Projects;
-use telmoni_telemetry::{AppState, content, contract, otlp_router, retention, router, v1_router};
+use telmoni_telemetry::{
+    AppState, content, contract, otlp_router, retention, router, v1_reads, v1_router,
+};
 
 const KEY: &str = "tm_content_key";
+/// A key holding `read` alone, on the same project.
+const READ_KEY: &str = "tm_content_read_key";
 const RUN: &str = "0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01";
 const SPAN: &str = "00f067aa0ba902b7";
 const TRACE: &str = "4bf92f3577b34da6a3ce929d0e0e4736";
@@ -65,6 +70,7 @@ async fn door_over(pool: &PgPool, mode: ContentMode, stores: bool) -> Door {
     let (organization, project) = (OrganizationId::new(), ProjectId::new());
     let auth = AuthStub::new();
     auth.key(KEY, &organization, &project, &[ApiKeyScope::Ingest]);
+    auth.key(READ_KEY, &organization, &project, &[ApiKeyScope::Read]);
     sqlx::query(
         "INSERT INTO telemetry.project_settings (project_id, organization_id, content_mode) \
          VALUES ($1, $2, $3)",
@@ -80,10 +86,18 @@ async fn door_over(pool: &PgPool, mode: ContentMode, stores: bool) -> Door {
     } else {
         common::state(pool, auth.clone())
     };
+    // The read lanes behind the `read` gate auth's `/v1` router gives them.
+    let gate = ApiKeyGate {
+        auth: state.auth.clone(),
+        scope: ApiKeyScope::Read,
+        refuse: refuse_as_problem,
+    };
+    let reads = v1_reads(state.clone())
+        .route_layer(axum::middleware::from_fn_with_state(gate, require_api_key));
     Door {
         app: router(state.clone())
             .nest("/otlp", otlp_router(state.clone()))
-            .nest("/v1", v1_router(state.clone())),
+            .nest("/v1", v1_router(state.clone()).merge(reads)),
         state,
         auth,
         organization,
@@ -220,6 +234,27 @@ impl Door {
             .header("x-project-id", self.project.as_str())
             .header(header::CONTENT_TYPE, "application/json")
             .body(body.map_or_else(Body::empty, |body| Body::from(body.to_string())))
+            .expect("a request");
+        let response = self.app.clone().oneshot(request).await.expect("an answer");
+        let status = response.status();
+        let bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("a body")
+            .to_bytes();
+        (
+            status,
+            serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+        )
+    }
+
+    /// A `/v1` read with `key`.
+    async fn read(&self, path: &str, key: &str) -> (StatusCode, Value) {
+        let request = Request::builder()
+            .uri(format!("/v1{path}"))
+            .header(header::AUTHORIZATION, format!("Bearer {key}"))
+            .body(Body::empty())
             .expect("a request");
         let response = self.app.clone().oneshot(request).await.expect("an answer");
         let status = response.status();
@@ -1882,6 +1917,116 @@ async fn the_trace_and_session_pages_carry_content_each_read_filed(pool: PgPool)
         dropped.viewed(&pool).await.is_empty(),
         "nothing read, nothing filed"
     );
+}
+
+/// A `read` key reads the traces, a trace's content only when it asks, each
+/// such read filed as the key's, the rollup and the incidents; an ingest key
+/// reads none.
+#[sqlx::test]
+async fn a_read_key_reads_traces_content_metrics_and_incidents(pool: PgPool) {
+    let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    apply_audit_migrations(&pool).await;
+    let door = door(&pool, ContentMode::On).await;
+    door.auth.seat(
+        "admin-1",
+        &door.organization,
+        &door.project,
+        OrganizationRole::Owner,
+        None,
+    );
+    door.send(turn_of("conv-1")).await;
+    common::eventually("the trace is read", || found(&door, RUN)).await;
+
+    let (status, list) = door.read("/traces", READ_KEY).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(list["traces"][0]["run_id"], RUN);
+    assert_eq!(list["total"], 1);
+
+    let (status, _) = door.read("/traces?q=hi", READ_KEY).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "a search is the console's");
+
+    let (status, trace) = door.read(&format!("/traces/{RUN}"), READ_KEY).await;
+    assert_eq!(status, StatusCode::OK, "{trace}");
+    assert_eq!(trace["spans"].as_array().map(Vec::len), Some(2));
+    let head = Request::builder()
+        .method("HEAD")
+        .uri(format!("/v1/traces/{RUN}?content=true"))
+        .header(header::AUTHORIZATION, format!("Bearer {READ_KEY}"))
+        .body(Body::empty())
+        .expect("a request");
+    let response = door.app.clone().oneshot(head).await.expect("an answer");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(trace["content"], Value::Null, "content only when asked");
+    assert!(
+        door.viewed(&pool).await.is_empty(),
+        "nothing read, nothing filed"
+    );
+
+    let (status, trace) = door
+        .read(&format!("/traces/{RUN}?content=true"), READ_KEY)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{trace}");
+    assert_eq!(
+        trace["content"][0]["fields"]["gen_ai.input.messages"],
+        MESSAGES
+    );
+    let viewed = door.viewed(&pool).await;
+    assert_eq!(viewed.len(), 1, "the read, filed");
+    assert!(viewed[0].0.starts_with("key:"), "{}", viewed[0].0);
+
+    let (status, metrics) = door.read("/metrics?group=agent&step=hour", READ_KEY).await;
+    assert_eq!(status, StatusCode::OK, "{metrics}");
+    assert_eq!(metrics["group"], "agent");
+    assert_eq!(metrics["points"][0]["value"], "nightly-report");
+    assert_eq!(metrics["points"][0]["spans"], 2);
+    let (status, daily) = door.read("/metrics", READ_KEY).await;
+    assert_eq!(status, StatusCode::OK, "{daily}");
+    assert_eq!(
+        (daily["step"].as_str(), daily["group"].as_str()),
+        (Some("day"), None)
+    );
+    let day = Utc::now().format("%Y-%m-%dT00:00:00Z").to_string();
+    assert_eq!(
+        daily["points"],
+        json!([daily["points"][0].clone()]),
+        "one day, ungrouped"
+    );
+    assert_eq!(daily["points"][0]["at"], day);
+    assert_eq!(daily["points"][0].get("value"), None);
+    let (status, _) = door.read("/metrics?step=week", READ_KEY).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (status, _) = door.read("/metrics?group=name", READ_KEY).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    let (status, incidents) = door.read("/incidents", READ_KEY).await;
+    assert_eq!(status, StatusCode::OK, "{incidents}");
+    assert_eq!(incidents["incidents"], json!([]));
+    let (status, _) = door
+        .read(&format!("/incidents/{}", uuid::Uuid::now_v7()), READ_KEY)
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    door.auth.key(
+        "tm_other_project",
+        &door.organization,
+        &ProjectId::new(),
+        &[ApiKeyScope::Read],
+    );
+    let (status, _) = door
+        .read(&format!("/traces/{RUN}"), "tm_other_project")
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "another project's run");
+
+    for path in ["/traces", "/metrics", "/incidents"] {
+        let (status, _) = door.read(path, KEY).await;
+        assert_eq!(
+            status,
+            StatusCode::FORBIDDEN,
+            "{path}: an ingest key reads nothing"
+        );
+    }
 }
 
 /// A moved project's content still opens, filed in the new organization's

@@ -1,8 +1,9 @@
-//! Telemetry's `/v1` lanes, behind a project API key holding the `ingest`
-//! scope: the files an SDK lifts out of a span's messages before it exports
-//! the span, each kept once by the hash of its bytes. The binary merges this
-//! module's [`router`] into the one it nests at `/v1`, whose fallback answers
-//! every path no lane here serves.
+//! Telemetry's `/v1` lanes: behind a project API key holding the `ingest`
+//! scope, the files an SDK lifts out of a span's messages before it exports
+//! the span, each kept once by the hash of its bytes ([`router`]); behind one
+//! holding `read`, the project's traces, its rollups and its incidents, as
+//! the console reads them ([`reads`]), which auth's `/v1` router puts behind
+//! its own gate, the organization's switch and the day's data out.
 
 use std::sync::Arc;
 
@@ -13,23 +14,34 @@ use axum::extract::{DefaultBodyLimit, Path, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::middleware;
 use axum::response::Response;
+use axum::routing::get;
 use axum::routing::put;
+use chrono::{DateTime, DurationRound as _, TimeDelta, Utc};
+use clickhouse::Row;
+use serde::{Deserialize, Serialize};
 
 use telmoni_shared::TelmoniError;
 use telmoni_shared::acting::ActingKey;
 use telmoni_shared::digest::sha256_hex;
+use telmoni_shared::extract::{Json, Query};
 use telmoni_shared::middleware::api_key::{ApiKeyGate, refuse_as_problem, require_api_key};
 use telmoni_shared::middleware::problem;
-use telmoni_shared::openapi::{Answer, Method, Param, Route};
+use telmoni_shared::openapi::{Answer, Method, NO_READ_SCOPE, Param, Route};
 use telmoni_shared::types::ApiKeyScope;
 
 use crate::AppState;
 use crate::content::{self, MEDIA_MAX};
+use crate::handler::incidents::{self, IncidentList, IncidentQuery};
+use crate::handler::traces::{self, Reader, TraceDetail, TraceList, read_failed};
+use crate::rules::incidents::IncidentRow;
+use crate::store::{Projects, seconds};
 
 /// One `/v1` lane this module serves: what it is, and which handler answers.
 pub struct V1Lane {
     /// Which handler answers.
     pub op: V1Op,
+    /// The scope its key must hold.
+    pub scope: ApiKeyScope,
     /// What a customer is told about it.
     pub route: Route,
 }
@@ -39,43 +51,264 @@ pub struct V1Lane {
 pub enum V1Op {
     /// [`put_media`]
     Media,
+    /// [`list_traces`]
+    Traces,
+    /// [`get_trace`]
+    Trace,
+    /// [`get_metrics`]
+    Metrics,
+    /// [`list_incidents`]
+    Incidents,
+    /// [`get_incident`]
+    Incident,
 }
 
 /// Every lane this module serves under `/v1`.
-pub const V1_LANES: &[V1Lane] = &[V1Lane {
-    op: V1Op::Media,
-    route: Route {
-        method: Method::Put,
-        bearer: true,
-        path: "/v1/media/{sha256}",
-        summary: "Keep a file a message carried",
-        description: "An image, audio or a file a span's message carried, sent \
+pub const V1_LANES: &[V1Lane] = &[
+    V1Lane {
+        op: V1Op::Media,
+        scope: ApiKeyScope::Ingest,
+        route: Route {
+            method: Method::Put,
+            bearer: true,
+            path: "/v1/media/{sha256}",
+            summary: "Keep a file a message carried",
+            description: "An image, audio or a file a span's message carried, sent \
                       once by the SHA-256 of its bytes, which its message then \
                       names as `telmoni:` and the hash. Kept, sealed, for a \
                       project that keeps content, and nothing for one that \
                       does not; sent again, it changes nothing.",
-        params: &[Param {
-            name: "sha256",
-            in_query: false,
-            required: true,
-            description: "The SHA-256 of the body, in lowercase hex.",
-        }],
-        answers: &[
-            Answer {
-                status: 204,
-                description: "Kept, kept already, or nothing kept for a project that keeps no content or an organization that holds the content its plan does.",
-            },
-            Answer {
-                status: 400,
-                description: "A hash that is not the body's.",
-            },
-            Answer {
-                status: 413,
-                description: "A body past 5 MiB.",
-            },
-        ],
+            params: &[Param {
+                name: "sha256",
+                in_query: false,
+                required: true,
+                description: "The SHA-256 of the body, in lowercase hex.",
+            }],
+            answers: &[
+                Answer {
+                    status: 204,
+                    description: "Kept, kept already, or nothing kept for a project that keeps no content or an organization that holds the content its plan does.",
+                },
+                Answer {
+                    status: 400,
+                    description: "A hash that is not the body's.",
+                },
+                Answer {
+                    status: 413,
+                    description: "A body past 5 MiB.",
+                },
+            ],
+        },
     },
-}];
+    V1Lane {
+        op: V1Op::Traces,
+        scope: ApiKeyScope::Read,
+        route: Route {
+            method: Method::Get,
+            bearer: true,
+            path: "/v1/traces",
+            summary: "The project's traces",
+            description: "A page of the project's traces in the window, \
+                          filtered and sorted by the same query the console's \
+                          Traces page sends, with how many the filter admits: \
+                          each filter is a parameter of its own, repeated for \
+                          more than one value, as the API reference lists. The \
+                          window reaches back no further than the plan keeps \
+                          spans.",
+            params: &[
+                Param {
+                    name: "days",
+                    in_query: true,
+                    required: false,
+                    description: "How many days back: 1 to 360, 7 when left out.",
+                },
+                Param {
+                    name: "sort",
+                    in_query: true,
+                    required: false,
+                    description: "The column to sort by, as the Traces page sorts.",
+                },
+                Param {
+                    name: "dir",
+                    in_query: true,
+                    required: false,
+                    description: "`asc` or `desc`; the column's own when left out.",
+                },
+                Param {
+                    name: "limit",
+                    in_query: true,
+                    required: false,
+                    description: "The most traces a page holds.",
+                },
+                Param {
+                    name: "page",
+                    in_query: true,
+                    required: false,
+                    description: "Which page, from 1.",
+                },
+            ],
+            answers: &[
+                Answer {
+                    status: 200,
+                    description: "A page of traces.",
+                },
+                Answer {
+                    status: 400,
+                    description: "A filter, a sort or a page that does not parse, or a search, which is the console's alone.",
+                },
+                NO_READ_SCOPE,
+            ],
+        },
+    },
+    V1Lane {
+        op: V1Op::Trace,
+        scope: ApiKeyScope::Read,
+        route: Route {
+            method: Method::Get,
+            bearer: true,
+            path: "/v1/traces/{run_id}",
+            summary: "One trace's spans",
+            description: "One trace's spans, the run's own among them, in the \
+                          order they started, and what the run spent. With \
+                          `content=true`, each span's content too, where the \
+                          project keeps it: every such read is filed in the \
+                          organization's audit log as the key's.",
+            params: &[
+                Param {
+                    name: "run_id",
+                    in_query: false,
+                    required: true,
+                    description: "The run's id, a UUID.",
+                },
+                Param {
+                    name: "content",
+                    in_query: true,
+                    required: false,
+                    description: "`true` for each span's content where the project keeps it.",
+                },
+            ],
+            answers: &[
+                Answer {
+                    status: 200,
+                    description: "The trace.",
+                },
+                Answer {
+                    status: 400,
+                    description: "A run id that is not a UUID.",
+                },
+                NO_READ_SCOPE,
+                Answer {
+                    status: 404,
+                    description: "No such run in the project, or one older than the plan keeps.",
+                },
+            ],
+        },
+    },
+    V1Lane {
+        op: V1Op::Metrics,
+        scope: ApiKeyScope::Read,
+        route: Route {
+            method: Method::Get,
+            bearer: true,
+            path: "/v1/metrics",
+            summary: "The project's totals by the hour or the day",
+            description: "The project's spans, failures, tokens and durations \
+                          over the window, by the hour or the day, from the \
+                          totals kept an hour at a time, and grouped, if asked, \
+                          by one of agent, model, provider, tool, status, \
+                          environment or release.",
+            params: &[
+                Param {
+                    name: "days",
+                    in_query: true,
+                    required: false,
+                    description: "The window, in days back from now: 1 to 360, 7 when left out, no further than the plan keeps spans.",
+                },
+                Param {
+                    name: "step",
+                    in_query: true,
+                    required: false,
+                    description: "`hour`, or `day`, the default, each in UTC.",
+                },
+                Param {
+                    name: "group",
+                    in_query: true,
+                    required: false,
+                    description: "One of `agent`, `model`, `provider`, `tool`, `status`, `environment` or `release`.",
+                },
+            ],
+            answers: &[
+                Answer {
+                    status: 200,
+                    description: "The totals, oldest first.",
+                },
+                Answer {
+                    status: 400,
+                    description: "A window, a step or a group it does not take.",
+                },
+                NO_READ_SCOPE,
+            ],
+        },
+    },
+    V1Lane {
+        op: V1Op::Incidents,
+        scope: ApiKeyScope::Read,
+        route: Route {
+            method: Method::Get,
+            bearer: true,
+            path: "/v1/incidents",
+            summary: "The project's incidents",
+            description: "The project's incidents, those not resolved first, \
+                          then the newest, 200 at most; with `run`, those whose \
+                          notices showed that run.",
+            params: &[Param {
+                name: "run",
+                in_query: true,
+                required: false,
+                description: "A run's id, a UUID.",
+            }],
+            answers: &[
+                Answer {
+                    status: 200,
+                    description: "The incidents.",
+                },
+                Answer {
+                    status: 400,
+                    description: "A run that is not a UUID.",
+                },
+                NO_READ_SCOPE,
+            ],
+        },
+    },
+    V1Lane {
+        op: V1Op::Incident,
+        scope: ApiKeyScope::Read,
+        route: Route {
+            method: Method::Get,
+            bearer: true,
+            path: "/v1/incidents/{id}",
+            summary: "One incident",
+            description: "One of the project's incidents.",
+            params: &[Param {
+                name: "id",
+                in_query: false,
+                required: true,
+                description: "The incident's id, a UUID.",
+            }],
+            answers: &[
+                Answer {
+                    status: 200,
+                    description: "The incident.",
+                },
+                NO_READ_SCOPE,
+                Answer {
+                    status: 404,
+                    description: "No such incident in the project.",
+                },
+            ],
+        },
+    },
+];
 
 /// This module's `/v1` lanes, the `/v1` taken off, behind the ingest key's
 /// gate. A method none takes is a problem document outside the gate, as
@@ -86,8 +319,25 @@ pub fn router(state: Arc<AppState>) -> Router {
         scope: ApiKeyScope::Ingest,
         refuse: refuse_as_problem,
     };
+    lanes(ApiKeyScope::Ingest)
+        .layer(DefaultBodyLimit::max(MEDIA_MAX))
+        .route_layer(middleware::from_fn_with_state(gate, require_api_key))
+        .method_not_allowed_fallback(method_not_allowed)
+        .with_state(state)
+}
+
+/// This module's read lanes, the `/v1` taken off and no gate of their own:
+/// auth's `/v1` router puts them behind its key gate, the organization's
+/// switch and the day's data out, as it does its own.
+pub fn reads(state: Arc<AppState>) -> Router {
+    lanes(ApiKeyScope::Read).with_state(state)
+}
+
+/// Every lane under `scope`, the `/v1` taken off.
+fn lanes(scope: ApiKeyScope) -> Router<Arc<AppState>> {
     V1_LANES
         .iter()
+        .filter(|lane| lane.scope == scope)
         .fold(Router::new(), |router, lane| {
             let path = lane
                 .route
@@ -98,13 +348,266 @@ pub fn router(state: Arc<AppState>) -> Router {
                 path,
                 match lane.op {
                     V1Op::Media => put(put_media),
+                    V1Op::Traces => get(list_traces),
+                    V1Op::Trace => get(get_trace),
+                    V1Op::Metrics => get(get_metrics),
+                    V1Op::Incidents => get(list_incidents),
+                    V1Op::Incident => get(get_incident),
                 },
             )
         })
-        .layer(DefaultBodyLimit::max(MEDIA_MAX))
-        .route_layer(middleware::from_fn_with_state(gate, require_api_key))
-        .method_not_allowed_fallback(method_not_allowed)
-        .with_state(state)
+}
+
+/// `GET /v1/traces` — a page of the key's project's traces, as the console's
+/// Traces page reads one, but for a search of kept content: answered from its
+/// hashes and filed nowhere, a script could probe what the content holds.
+pub async fn list_traces(
+    State(state): State<Arc<AppState>>,
+    key: ActingKey,
+    Query(pairs): Query<Vec<(String, String)>>,
+) -> Result<Json<TraceList>, TelmoniError> {
+    if pairs.iter().any(|(name, _)| name == "q") {
+        return Err(TelmoniError::BadRequest(
+            "a search of kept content is the console's alone".into(),
+        ));
+    }
+    Ok(Json(
+        traces::trace_list(&state, &key.project_id, pairs).await?,
+    ))
+}
+
+/// What one trace's lane takes.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TraceAsked {
+    #[serde(default)]
+    pub content: bool,
+}
+
+/// `GET /v1/traces/{run_id}` — one trace of the key's project, its content
+/// opened and filed as the key's read where a `GET` asks: a `HEAD` sends no
+/// body, so it opens none.
+pub async fn get_trace(
+    State(state): State<Arc<AppState>>,
+    key: ActingKey,
+    method: axum::http::Method,
+    Path(run_id): Path<String>,
+    Query(asked): Query<TraceAsked>,
+) -> Result<Json<TraceDetail>, TelmoniError> {
+    let reader = Reader::key(&key);
+    let with_content = asked.content && method != axum::http::Method::HEAD;
+    Ok(Json(
+        traces::trace_detail(&state, &reader, &run_id, with_content).await?,
+    ))
+}
+
+/// `GET /v1/incidents` — the key's project's incidents.
+pub async fn list_incidents(
+    State(state): State<Arc<AppState>>,
+    key: ActingKey,
+    Query(query): Query<IncidentQuery>,
+) -> Result<Json<IncidentList>, TelmoniError> {
+    Ok(Json(
+        incidents::incident_list(&state, &key.project_id, query).await?,
+    ))
+}
+
+/// `GET /v1/incidents/{id}` — one of the key's project's incidents.
+pub async fn get_incident(
+    State(state): State<Arc<AppState>>,
+    key: ActingKey,
+    Path(id): Path<String>,
+) -> Result<Json<IncidentRow>, TelmoniError> {
+    Ok(Json(
+        incidents::incident(&state, &key.project_id, &id).await?,
+    ))
+}
+
+/// The most points `/v1/metrics` answers.
+pub const METRICS_MAX: usize = 10_000;
+
+/// What `/v1/metrics` takes.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MetricsAsked {
+    #[serde(default)]
+    pub days: Option<String>,
+    #[serde(default)]
+    pub step: Option<String>,
+    #[serde(default)]
+    pub group: Option<String>,
+}
+
+/// The columns `/v1/metrics` may group by, each as the rollup names it.
+const GROUPS: [&str; 7] = [
+    "agent",
+    "model",
+    "provider",
+    "tool",
+    "status",
+    "environment",
+    "release",
+];
+
+/// The rollup over the window, by the hour or the day and, where asked, by
+/// one column: both chosen by a bound value from a closed set, never an
+/// identifier.
+const METRICS_SQL: &str = concat!(
+    // Each column by the table's name: bare, `spans` in `sumIf` reads the sum's alias.
+    "SELECT if({daily:UInt8} = 1, toStartOfDay(h.hour), h.hour) AS at, ",
+    "toString(multiIf({group:String} = 'agent', h.agent, {group:String} = 'model', h.model, ",
+    "{group:String} = 'provider', h.provider, {group:String} = 'tool', h.tool, ",
+    "{group:String} = 'status', h.status, {group:String} = 'environment', h.environment, ",
+    "{group:String} = 'release', h.release, '')) AS key, ",
+    "toUInt64(sum(h.spans)) AS spans, toUInt64(sumIf(h.spans, h.status = 'error')) AS failed, ",
+    "toUInt64(sum(h.input_tokens)) AS input_tokens, ",
+    "toUInt64(sum(h.output_tokens)) AS output_tokens, ",
+    "toUInt64(sum(h.cache_read_input_tokens)) AS cache_read_input_tokens, ",
+    "toUInt64(sum(h.cache_write_input_tokens)) AS cache_write_input_tokens, ",
+    "sum(h.duration_ms_sum) AS duration_ms_sum, ",
+    "CAST(quantilesTDigestMerge(0.5, 0.9, 0.99)(h.duration_ms) AS Array(Float64)) AS quantiles ",
+    "FROM telemetry.spans_hourly AS h ",
+    "WHERE h.project_id IN {projects:Array(String)} AND h.hour >= {from:DateTime('UTC')} ",
+    "GROUP BY at, key ORDER BY at, key LIMIT {max:UInt32}"
+);
+
+/// One point of the rollup as ClickHouse answers it.
+#[derive(Debug, Row, Deserialize)]
+struct MetricRow {
+    #[serde(deserialize_with = "clickhouse::serde::chrono::datetime::deserialize")]
+    at: DateTime<Utc>,
+    key: String,
+    spans: u64,
+    failed: u64,
+    input_tokens: u64,
+    output_tokens: u64,
+    cache_read_input_tokens: u64,
+    cache_write_input_tokens: u64,
+    duration_ms_sum: f64,
+    quantiles: Vec<f64>,
+}
+
+/// What `/v1/metrics` answers.
+#[derive(Debug, Serialize)]
+pub struct Metrics {
+    pub days: u16,
+    pub step: &'static str,
+    pub group: Option<&'static str>,
+    /// Oldest first, each hour or day only where it holds a span.
+    pub points: Vec<MetricPoint>,
+    /// Whether the window held more than [`METRICS_MAX`] points.
+    pub truncated: bool,
+}
+
+/// One hour's or day's totals, of one group's value where grouped.
+#[derive(Debug, Serialize)]
+pub struct MetricPoint {
+    pub at: DateTime<Utc>,
+    /// The group's value; empty where its spans carry none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
+    pub spans: u64,
+    pub failed: u64,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cache_read_input_tokens: u64,
+    pub cache_write_input_tokens: u64,
+    /// In milliseconds: the mean and the 50th, 90th and 99th percentiles.
+    pub duration_ms: Durations,
+}
+
+/// A point's durations, in milliseconds.
+#[derive(Debug, Serialize)]
+pub struct Durations {
+    pub avg: f64,
+    pub p50: Option<f64>,
+    pub p90: Option<f64>,
+    pub p99: Option<f64>,
+}
+
+/// `GET /v1/metrics` — the key's project's rollup over the window.
+pub async fn get_metrics(
+    State(state): State<Arc<AppState>>,
+    key: ActingKey,
+    Query(asked): Query<MetricsAsked>,
+) -> Result<Json<Metrics>, TelmoniError> {
+    let days = traces::parse_days(asked.days.as_deref())?;
+    let days = crate::capacity::visible_days(&state, &key.project_id, days).await;
+    let (step, daily) = match asked.step.as_deref() {
+        None | Some("day") => ("day", true),
+        Some("hour") => ("hour", false),
+        Some(_) => return Err(TelmoniError::BadRequest("step is `hour` or `day`".into())),
+    };
+    let group = match asked.group.as_deref() {
+        None => None,
+        Some(given) => Some(GROUPS.into_iter().find(|g| *g == given).ok_or_else(|| {
+            TelmoniError::BadRequest(format!("group is one of {}", GROUPS.join(", ")))
+        })?),
+    };
+    let unit = if daily {
+        TimeDelta::days(1)
+    } else {
+        TimeDelta::hours(1)
+    };
+    // Up to the next whole step, so no hour or day reaches past the plan.
+    let back = Utc::now() - TimeDelta::days(i64::from(days));
+    let from = match back.duration_trunc(unit) {
+        Ok(start) if start < back => start + unit,
+        _ => back,
+    };
+    let projects = Projects::one(key.project_id.clone());
+    let mut rows: Vec<MetricRow> = state
+        .store
+        .read(&projects, METRICS_SQL)
+        .param("daily", u8::from(daily))
+        .param("group", group.unwrap_or(""))
+        .param("from", seconds(from))
+        .param("max", u32::try_from(METRICS_MAX + 1).unwrap_or(u32::MAX))
+        .fetch_all()
+        .await
+        .map_err(read_failed)?;
+    let truncated = rows.len() > METRICS_MAX;
+    rows.truncate(METRICS_MAX);
+    Ok(Json(Metrics {
+        days,
+        step,
+        group,
+        points: rows
+            .into_iter()
+            .map(|row| point(row, group.is_some()))
+            .collect(),
+        truncated,
+    }))
+}
+
+/// A rollup row as `/v1/metrics` publishes it.
+fn point(row: MetricRow, grouped: bool) -> MetricPoint {
+    let at = |n: usize| row.quantiles.get(n).copied().filter(|q| q.is_finite());
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "a count past 2^53 spans is no hour's"
+    )]
+    let avg = if row.spans == 0 {
+        0.0
+    } else {
+        row.duration_ms_sum / row.spans as f64
+    };
+    MetricPoint {
+        at: row.at,
+        value: grouped.then(|| row.key.clone()),
+        spans: row.spans,
+        failed: row.failed,
+        input_tokens: row.input_tokens,
+        output_tokens: row.output_tokens,
+        cache_read_input_tokens: row.cache_read_input_tokens,
+        cache_write_input_tokens: row.cache_write_input_tokens,
+        duration_ms: Durations {
+            avg,
+            p50: at(0),
+            p90: at(1),
+            p99: at(2),
+        },
+    }
 }
 
 /// A method the upload does not take: `405` with `Allow`.

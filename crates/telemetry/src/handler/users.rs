@@ -27,7 +27,9 @@ use crate::AppState;
 use crate::contract::USER_ID_MAX;
 use crate::erasure::{self, Erase};
 use crate::handler::chain;
-use crate::handler::traces::{Facets, Reading, download, export_rows, facets_page, list_page};
+use crate::handler::traces::{
+    Facets, Reading, download, export_rows, facets_page, list_page, reading,
+};
 use crate::hashing;
 use crate::traces::ListSort;
 use crate::users::{UserRow, Users};
@@ -93,7 +95,7 @@ pub async fn list_users(
     headers: HeaderMap,
     Query(pairs): Query<Vec<(String, String)>>,
 ) -> Result<Json<UserList>, TelmoniError> {
-    let listed = list_page::<Users>(&state, &headers, pairs).await?;
+    let listed = list_page::<Users>(&state, &reading(&state, &headers).await?, pairs).await?;
     Ok(Json(UserList {
         more: listed.more(),
         users: listed.rows,

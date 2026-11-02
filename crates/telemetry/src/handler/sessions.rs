@@ -26,7 +26,7 @@ use telmoni_shared::{
 use crate::contract::{NAME_MAX, SESSION_ID_MAX};
 use crate::handler::traces::{
     Facets, Reading, SpanFields, content_of, download, export_rows, facets_page, list_page,
-    parse_days, parse_limit, read_failed, reader, values,
+    parse_days, parse_limit, read_failed, reader, reading, values,
 };
 use crate::handler::views::LayoutOptions;
 use crate::sessions::{SessionRow, Sessions};
@@ -241,7 +241,7 @@ pub async fn list_sessions(
     headers: HeaderMap,
     Query(pairs): Query<Vec<(String, String)>>,
 ) -> Result<Json<SessionList>, TelmoniError> {
-    let listed = list_page::<Sessions>(&state, &headers, pairs).await?;
+    let listed = list_page::<Sessions>(&state, &reading(&state, &headers).await?, pairs).await?;
     Ok(Json(SessionList {
         more: listed.more(),
         sessions: listed.rows,

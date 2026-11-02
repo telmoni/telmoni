@@ -288,7 +288,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .with_state(state)
 }
 
-pub use handler::v1::router as v1_router;
+pub use handler::v1::{reads as v1_reads, router as v1_router};
 
 /// Ingest, for the binary to nest at `/otlp` behind the machine door:
 /// `POST /v1/traces` behind a project API key holding the ingest scope and

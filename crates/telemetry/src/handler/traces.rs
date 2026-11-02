@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use uuid::Uuid;
 
-use telmoni_shared::acting::Acting;
+use telmoni_shared::acting::{Acting, ActingKey};
 use telmoni_shared::audit::Actor;
 use telmoni_shared::csv;
 use telmoni_shared::db::tenant_session::{ProjectAndOrganization, Scoped};
@@ -799,7 +799,31 @@ impl From<SpanRow> for TraceSpan {
 /// Who reads a project's traces, and the project.
 pub(crate) struct Reader {
     pub(crate) project_id: ProjectId,
-    pub(crate) user_id: UserId,
+    pub(crate) by: ReadBy,
+}
+
+/// A person in the console, or a project API key on `/v1`.
+pub(crate) enum ReadBy {
+    User(UserId),
+    Key(String),
+}
+
+impl Reader {
+    /// A key's read of its own project, as `/v1` makes one.
+    pub(crate) fn key(key: &ActingKey) -> Self {
+        Self {
+            project_id: key.project_id.clone(),
+            by: ReadBy::Key(key.token_id.to_string()),
+        }
+    }
+
+    /// Who a read of content is filed as.
+    pub(crate) fn actor(&self) -> Actor<'_> {
+        match &self.by {
+            ReadBy::User(user_id) => Actor::User(user_id.as_str()),
+            ReadBy::Key(token_id) => Actor::Key(token_id),
+        }
+    }
 }
 
 /// The caller, once they may read the project's traces.
@@ -811,7 +835,7 @@ pub(crate) async fn reader(state: &AppState, headers: &HeaderMap) -> Result<Read
         .clone();
     Ok(Reader {
         project_id,
-        user_id: acting.user_id,
+        by: ReadBy::User(acting.user_id),
     })
 }
 
@@ -837,9 +861,8 @@ pub async fn get_media(
             "a file is named by the SHA-256 of its bytes".into(),
         ));
     }
-    let actor = Actor::User(reader.user_id.as_str());
     let Some((mime_type, body)) =
-        content::open_media(&state, actor, &reader.project_id, &sha256).await?
+        content::open_media(&state, reader.actor(), &reader.project_id, &sha256).await?
     else {
         return Err(AuthError::NotFound("the project keeps no such file".into()).into());
     };
@@ -881,8 +904,7 @@ pub(crate) async fn content_of(
     runs: &[Uuid],
     spans: Option<&[String]>,
 ) -> Option<Vec<SpanFields>> {
-    let actor = Actor::User(reader.user_id.as_str());
-    match content::open(state, actor, &reader.project_id, runs, spans).await {
+    match content::open(state, reader.actor(), &reader.project_id, runs, spans).await {
         Ok(opened) => Some(opened.into_iter().map(SpanFields::from).collect()),
         Err(error) => {
             tracing::warn!(
@@ -955,13 +977,12 @@ impl<L: Listing> Listed<L> {
 /// sorted as the query says, with how many the filter admits.
 pub(crate) async fn list_page<L: Listing>(
     state: &AppState,
-    headers: &HeaderMap,
+    project_id: &ProjectId,
     pairs: Vec<(String, String)>,
 ) -> Result<Listed<L>, TelmoniError> {
-    let project_id = reading(state, headers).await?;
     let projects = Projects::one(project_id.clone());
     let query = TraceQuery::read(pairs, Reading::List)?;
-    let filter = filter_of(state, &project_id, &query).await?;
+    let filter = filter_of(state, project_id, &query).await?;
     let (sort, dir) = query.sort_for::<L>()?;
     let paging = query.paging()?;
     let (rows, total) = tokio::try_join!(
@@ -1039,8 +1060,18 @@ pub async fn list_traces(
     headers: HeaderMap,
     Query(pairs): Query<Vec<(String, String)>>,
 ) -> Result<Json<TraceList>, TelmoniError> {
-    let listed = list_page::<Traces>(&state, &headers, pairs).await?;
-    Ok(Json(TraceList {
+    let project_id = reading(&state, &headers).await?;
+    Ok(Json(trace_list(&state, &project_id, pairs).await?))
+}
+
+/// A page of the project's traces, as the console's lane and `/v1` answer it.
+pub(crate) async fn trace_list(
+    state: &AppState,
+    project_id: &ProjectId,
+    pairs: Vec<(String, String)>,
+) -> Result<TraceList, TelmoniError> {
+    let listed = list_page::<Traces>(state, project_id, pairs).await?;
+    Ok(TraceList {
         more: listed.more(),
         traces: listed.rows,
         days: listed.days,
@@ -1049,7 +1080,7 @@ pub async fn list_traces(
         total: listed.total,
         sort: listed.sort,
         dir: listed.dir,
-    }))
+    })
 }
 
 /// `GET /internal/v1/telemetry/traces/facets` — each filter's values among the
@@ -1108,9 +1139,8 @@ pub async fn export_traces(
     // One read of every run's content, filed once; a download that cannot
     // open it fails rather than leaving it out unsaid.
     let runs: Vec<Uuid> = rows.iter().map(|row| row.run_id).collect();
-    let actor = Actor::User(reader.user_id.as_str());
     let mut kept: HashMap<Uuid, Vec<SpanFields>> = HashMap::new();
-    for span in content::open(&state, actor, &reader.project_id, &runs, None).await? {
+    for span in content::open(&state, reader.actor(), &reader.project_id, &runs, None).await? {
         kept.entry(span.run_id).or_default().push(span.into());
     }
     let rows: Vec<TraceDownload> = rows
@@ -1413,6 +1443,17 @@ pub async fn get_trace(
     Path(run_id): Path<String>,
 ) -> Result<Json<TraceDetail>, TelmoniError> {
     let reader = reader(&state, &headers).await?;
+    Ok(Json(trace_detail(&state, &reader, &run_id, true).await?))
+}
+
+/// One trace as the console's lane and `/v1` answer it, its content opened
+/// and filed as the reader's read where `with_content` asks for it.
+pub(crate) async fn trace_detail(
+    state: &AppState,
+    reader: &Reader,
+    run_id: &str,
+    with_content: bool,
+) -> Result<TraceDetail, TelmoniError> {
     let projects = Projects::one(reader.project_id.clone());
     let run_id: Uuid = run_id
         .parse()
@@ -1428,7 +1469,7 @@ pub async fn get_trace(
     .map_err(read_failed)?;
     // A run older than the organization's retention reaches is not there,
     // as the list would not name it: held, it is hidden until it goes.
-    let reach = crate::capacity::visible_days(&state, &reader.project_id, u16::MAX).await;
+    let reach = crate::capacity::visible_days(state, &reader.project_id, u16::MAX).await;
     let past = reach < u16::MAX
         && rows
             .iter()
@@ -1438,13 +1479,18 @@ pub async fn get_trace(
     }
     let shown = traces::shown(rows.iter().map(|row| row.units), SPANS_MAX, TRACE_UNITS_MAX);
     let truncated = shown < rows.len();
-    Ok(Json(TraceDetail {
+    let content = if with_content {
+        content_of(state, reader, &[run_id], None).await
+    } else {
+        None
+    };
+    Ok(TraceDetail {
         run_id,
         spans: rows.into_iter().take(shown).map(TraceSpan::from).collect(),
         truncated,
-        spend: spend_of(&state, &projects, run_id).await,
-        content: content_of(&state, &reader, &[run_id], None).await,
-    }))
+        spend: spend_of(state, &projects, run_id).await,
+        content,
+    })
 }
 
 /// What the run has spent; none, logged by the error's kind, where a store

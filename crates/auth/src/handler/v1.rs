@@ -27,7 +27,7 @@ use telmoni_shared::db::tenant_session::{maintenance_scope, project_scope};
 use telmoni_shared::extract::Json;
 use telmoni_shared::middleware::api_key::{ApiKeyGate, refuse_as_problem, require_api_key};
 use telmoni_shared::middleware::problem;
-use telmoni_shared::openapi::{Answer, Method, Route};
+use telmoni_shared::openapi::{Answer, Method, NO_READ_SCOPE, Route};
 use telmoni_shared::slug::Slug;
 use telmoni_shared::types::{API_TOKEN_PREFIX, ApiKeyScope, CONNECTION_BYTES};
 use telmoni_shared::{AuthError, Flag, OrganizationId, Role, TelmoniError, TenantError, UserId};
@@ -75,10 +75,7 @@ pub const V1_LANES: &[V1Lane] = &[
                     status: 200,
                     description: "The organization.",
                 },
-                Answer {
-                    status: 403,
-                    description: "A live key without the `read` scope.",
-                },
+                NO_READ_SCOPE,
             ],
         },
     },
@@ -100,10 +97,7 @@ pub const V1_LANES: &[V1Lane] = &[
                     status: 200,
                     description: "The members: the owner, then the project's seats.",
                 },
-                Answer {
-                    status: 403,
-                    description: "A live key without the `read` scope.",
-                },
+                NO_READ_SCOPE,
             ],
         },
     },
@@ -121,8 +115,9 @@ const ALLOW: &str = "GET, HEAD, OPTIONS";
 /// OpenAPI document is generated from, split on `bearer`, so a future lane
 /// without one does not silently inherit the gates. A path no lane serves,
 /// and a method no lane takes, are problem documents too, outside the gates,
-/// so they name no organization and cost no database round trip.
-pub fn router(state: Arc<AppState>) -> Router {
+/// so they name no organization and cost no database round trip. `reads`
+/// are another module's read lanes, put behind the same gates as these.
+pub fn router(state: Arc<AppState>, reads: Router) -> Router {
     let mount = |router: Router<Arc<AppState>>, lane: &V1Lane| {
         let path = lane
             .route
@@ -148,6 +143,8 @@ pub fn router(state: Arc<AppState>) -> Router {
         .iter()
         .filter(|lane| lane.route.bearer)
         .fold(Router::new(), mount)
+        .with_state(state.clone())
+        .merge(reads)
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             meter_data_out,
@@ -160,12 +157,12 @@ pub fn router(state: Arc<AppState>) -> Router {
     let open = V1_LANES
         .iter()
         .filter(|lane| !lane.route.bearer)
-        .fold(Router::new(), mount);
+        .fold(Router::new(), mount)
+        .with_state(state);
     keyed
         .merge(open)
         .method_not_allowed_fallback(method_not_allowed)
         .fallback(not_found)
-        .with_state(state)
 }
 
 /// The organization's own switch, `Flag::PublicApi`: off, every lane is a

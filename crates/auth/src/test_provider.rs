@@ -35,7 +35,7 @@ use crate::provider::{
 /// the CLI's under `/cli/v1`, without the binary's door.
 pub fn full_router(state: Arc<crate::AppState>) -> axum::Router {
     crate::router(state.clone())
-        .nest("/v1", crate::v1_router(state.clone()))
+        .nest("/v1", crate::v1_router(state.clone(), axum::Router::new()))
         .nest("/cli/v1", crate::cli_router(state))
 }
 

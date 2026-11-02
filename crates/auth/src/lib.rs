@@ -583,8 +583,9 @@ pub fn router(state: Arc<AppState>) -> Router {
 /// `tm_` key opens ([`handler::v1::router`]): on the machine host, behind
 /// the door the binary puts in front of it, and never behind the service
 /// secret, since a machine reaches it straight and its key is its gate.
-pub fn v1_router(state: Arc<AppState>) -> Router {
-    handler::v1::router(state)
+/// `reads` are another module's read lanes, behind the same gates.
+pub fn v1_router(state: Arc<AppState>, reads: Router) -> Router {
+    handler::v1::router(state, reads)
 }
 
 /// The CLI's session lanes, which the binary nests under `/cli/v1` on the

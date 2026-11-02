@@ -44,6 +44,150 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/v1/incidents": {
+      "get": {
+        "description": "The project's incidents, those not resolved first, then the newest, 200 at most; with `run`, those whose notices showed that run.",
+        "parameters": [
+          {
+            "description": "A run's id, a UUID.",
+            "in": "query",
+            "name": "run",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The incidents."
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A run that is not a UUID."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No live `tm_` API key was presented. A revoked, expired or unknown key answers the same way."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A live key without the `read` scope."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too many requests. The server meters by source address and by key before the request reaches a lane, and says when to come back in `Retry-After`."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The lane is switched off, or something it needs did not answer. A switched-off lane says when to try again in `Retry-After`."
+          }
+        },
+        "summary": "The project's incidents"
+      }
+    },
+    "/v1/incidents/{id}": {
+      "get": {
+        "description": "One of the project's incidents.",
+        "parameters": [
+          {
+            "description": "The incident's id, a UUID.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The incident."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No live `tm_` API key was presented. A revoked, expired or unknown key answers the same way."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A live key without the `read` scope."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No such incident in the project."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too many requests. The server meters by source address and by key before the request reaches a lane, and says when to come back in `Retry-After`."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The lane is switched off, or something it needs did not answer. A switched-off lane says when to try again in `Retry-After`."
+          }
+        },
+        "summary": "One incident"
+      }
+    },
     "/v1/media/{sha256}": {
       "put": {
         "description": "An image, audio or a file a span's message carried, sent once by the SHA-256 of its bytes, which its message then names as `telmoni:` and the hash. Kept, sealed, for a project that keeps content, and nothing for one that does not; sent again, it changes nothing.",
@@ -174,6 +318,96 @@
         "summary": "Who is on the project"
       }
     },
+    "/v1/metrics": {
+      "get": {
+        "description": "The project's spans, failures, tokens and durations over the window, by the hour or the day, from the totals kept an hour at a time, and grouped, if asked, by one of agent, model, provider, tool, status, environment or release.",
+        "parameters": [
+          {
+            "description": "The window, in days back from now: 1 to 360, 7 when left out, no further than the plan keeps spans.",
+            "in": "query",
+            "name": "days",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "`hour`, or `day`, the default, each in UTC.",
+            "in": "query",
+            "name": "step",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "One of `agent`, `model`, `provider`, `tool`, `status`, `environment` or `release`.",
+            "in": "query",
+            "name": "group",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The totals, oldest first."
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A window, a step or a group it does not take."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No live `tm_` API key was presented. A revoked, expired or unknown key answers the same way."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A live key without the `read` scope."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too many requests. The server meters by source address and by key before the request reaches a lane, and says when to come back in `Retry-After`."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The lane is switched off, or something it needs did not answer. A switched-off lane says when to try again in `Retry-After`."
+          }
+        },
+        "summary": "The project's totals by the hour or the day"
+      }
+    },
     "/v1/organization": {
       "get": {
         "description": "The organization the key belongs to — its id, its slug, its name and its owner's address and name. The slug is what the console's URLs name it by: set from the name it was created under, when that reads as one, and moved only when the URL is changed in Settings; the id never moves. A key is minted on one project of one organization, so this answers for the caller's organization and for no other.",
@@ -223,6 +457,205 @@
           }
         },
         "summary": "Who this key is"
+      }
+    },
+    "/v1/traces": {
+      "get": {
+        "description": "A page of the project's traces in the window, filtered and sorted by the same query the console's Traces page sends, with how many the filter admits: each filter is a parameter of its own, repeated for more than one value, as the API reference lists. The window reaches back no further than the plan keeps spans.",
+        "parameters": [
+          {
+            "description": "How many days back: 1 to 360, 7 when left out.",
+            "in": "query",
+            "name": "days",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The column to sort by, as the Traces page sorts.",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "`asc` or `desc`; the column's own when left out.",
+            "in": "query",
+            "name": "dir",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The most traces a page holds.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Which page, from 1.",
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of traces."
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A filter, a sort or a page that does not parse, or a search, which is the console's alone."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No live `tm_` API key was presented. A revoked, expired or unknown key answers the same way."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A live key without the `read` scope."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too many requests. The server meters by source address and by key before the request reaches a lane, and says when to come back in `Retry-After`."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The lane is switched off, or something it needs did not answer. A switched-off lane says when to try again in `Retry-After`."
+          }
+        },
+        "summary": "The project's traces"
+      }
+    },
+    "/v1/traces/{run_id}": {
+      "get": {
+        "description": "One trace's spans, the run's own among them, in the order they started, and what the run spent. With `content=true`, each span's content too, where the project keeps it: every such read is filed in the organization's audit log as the key's.",
+        "parameters": [
+          {
+            "description": "The run's id, a UUID.",
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "`true` for each span's content where the project keeps it.",
+            "in": "query",
+            "name": "content",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The trace."
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A run id that is not a UUID."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No live `tm_` API key was presented. A revoked, expired or unknown key answers the same way."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A live key without the `read` scope."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No such run in the project, or one older than the plan keeps."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too many requests. The server meters by source address and by key before the request reaches a lane, and says when to come back in `Retry-After`."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The lane is switched off, or something it needs did not answer. A switched-off lane says when to try again in `Retry-After`."
+          }
+        },
+        "summary": "One trace's spans"
       }
     }
   },

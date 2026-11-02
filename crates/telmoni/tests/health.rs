@@ -147,9 +147,14 @@ async fn liveness_ignores_the_databases() {
 /// Every module's routes answer under one listener, each behind its own
 /// gate: auth's `/me`, notifications' feed and telemetry's content mode all
 /// refuse a request with no bearer, and the log-level lane refuses one with
-/// no service secret — before any of them reaches a table it could not.
+/// no service secret — before any of them reaches a table it could not;
+/// telemetry's `/v1` reads stand behind auth's key gate.
 #[tokio::test]
 async fn the_modules_are_mounted_behind_their_gates() {
+    for path in ["/v1/traces", "/v1/metrics", "/v1/incidents"] {
+        assert_eq!(status(get(path)).await, StatusCode::UNAUTHORIZED, "{path}");
+    }
+
     let me = Request::post("/internal/v1/me")
         .header("x-service-secret", SECRET)
         .header("content-type", "application/json")

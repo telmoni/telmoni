@@ -33,6 +33,8 @@ pub enum Actor<'a> {
     Service(&'a str),
     /// An external system acting on the project's behalf (e.g. a vendor's webhook).
     External(&'a str),
+    /// A project API key, by its row's id. Renders `key:<id>`.
+    Key(&'a str),
 }
 
 impl std::fmt::Display for Actor<'_> {
@@ -41,6 +43,7 @@ impl std::fmt::Display for Actor<'_> {
             Actor::User(sub) => f.write_str(sub),
             Actor::Service(name) => write!(f, "service:{name}"),
             Actor::External(name) => write!(f, "external:{name}"),
+            Actor::Key(id) => write!(f, "key:{id}"),
         }
     }
 }
@@ -345,5 +348,6 @@ mod tests {
         assert_eq!(Actor::Service("migrator").to_string(), "service:migrator");
         assert_eq!(Actor::Service("auth").to_string(), "service:auth");
         assert_eq!(Actor::External("slack").to_string(), "external:slack");
+        assert_eq!(Actor::Key("019a").to_string(), "key:019a");
     }
 }

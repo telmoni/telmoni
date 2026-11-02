@@ -70,9 +70,11 @@ const client = new Telmoni({ apiKey: process.env.TELMONI_API_KEY });
 
 A key is minted in a project, is deleted with it, and follows it if the project
 is transferred to another organization. On `/v1` it reads its project's
-organization (`GET /v1/organization`) and its project's roster
-(`GET /v1/members`), never the organization's whole roster: a key reads no more
-than the project Admin who minted it can see. A key remains active regardless
+organization (`GET /v1/organization`), its project's roster
+(`GET /v1/members`), and its project's traces, totals and incidents
+([API reference](/docs/api/reference)), never the organization's whole roster
+nor another project's: a key reads no more than the project Admin who minted
+it can see. A key remains active regardless
 of whether the individual user who created it leaves the project.
 
 ## Who can see keys

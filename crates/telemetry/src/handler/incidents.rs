@@ -20,7 +20,9 @@ use telmoni_shared::acting::Acting;
 use telmoni_shared::db::tenant_session::{ProjectAndOrganization, Scoped, project_scope};
 use telmoni_shared::extract::{Json, Query};
 use telmoni_shared::rbac::{Resource, Verb};
-use telmoni_shared::{AuditAction, AuthError, IncidentStatus, TelmoniError, TelmoniResourceKind};
+use telmoni_shared::{
+    AuditAction, AuthError, IncidentStatus, ProjectId, TelmoniError, TelmoniResourceKind,
+};
 
 use crate::AppState;
 use crate::handler::chain::{self, Change};
@@ -63,6 +65,15 @@ pub async fn list_incidents(
     let project_id = &acting
         .require_project(Verb::Read, Resource::Alert)?
         .project_id;
+    Ok(Json(incident_list(&state, project_id, query).await?))
+}
+
+/// The project's incidents, as the console's lane and `/v1` answer them.
+pub(crate) async fn incident_list(
+    state: &AppState,
+    project_id: &ProjectId,
+    query: IncidentQuery,
+) -> Result<IncidentList, TelmoniError> {
     let run = match query.run.as_deref() {
         None => None,
         Some(given) => Some(
@@ -77,7 +88,7 @@ pub async fn list_incidents(
         None => incidents::incidents(&mut tx, project_id, INCIDENTS_MAX).await?,
     };
     tx.commit().await?;
-    Ok(Json(IncidentList { incidents: rows }))
+    Ok(IncidentList { incidents: rows })
 }
 
 /// `POST /internal/v1/telemetry/incidents/{id}/acknowledge` — one of the
@@ -195,11 +206,20 @@ pub async fn get_incident(
     let project_id = &acting
         .require_project(Verb::Read, Resource::Alert)?
         .project_id;
-    let id = incident_id(&id)?;
+    Ok(Json(incident(&state, project_id, &id).await?))
+}
+
+/// One of the project's incidents, as the console's lane and `/v1` answer it.
+pub(crate) async fn incident(
+    state: &AppState,
+    project_id: &ProjectId,
+    id: &str,
+) -> Result<IncidentRow, TelmoniError> {
+    let id = incident_id(id)?;
     let mut tx = project_scope(&state.db, project_id).await?;
     let row = incidents::one(&mut tx, project_id, id)
         .await?
         .ok_or_else(not_found)?;
     tx.commit().await?;
-    Ok(Json(row))
+    Ok(row)
 }

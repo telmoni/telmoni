@@ -62,6 +62,12 @@ pub struct Answer {
     pub description: &'static str,
 }
 
+/// What every `/v1` read lane answers a key without the `read` scope.
+pub const NO_READ_SCOPE: Answer = Answer {
+    status: 403,
+    description: "A live key without the `read` scope.",
+};
+
 /// One `/v1` lane.
 #[derive(Debug, Clone, Copy)]
 pub struct Route {
