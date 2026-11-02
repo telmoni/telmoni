@@ -15,7 +15,7 @@ import { activeOrganization, getServerContext } from "@/lib/server/entities/orga
 import { ProjectRenamedSchema, fetchProject } from "@/lib/server/entities/projects";
 import { ModelPricesSchema } from "@/lib/server/entities/model-prices";
 import { canonicalPath } from "@/lib/server/path";
-import { ContentMode } from "@/lib/types/enums";
+import { ContentMode, ModelProvider } from "@/lib/types/enums";
 
 const Mode = z.enum(ContentMode);
 
@@ -191,6 +191,51 @@ export async function saveModelPricesAction(
   if (!res) return refused("The prices could not be saved. Try again.");
   if (!res.ok) return refused((await extractProblem(res)).message);
 
+  revalidatePath("/(app)/[organization]/[project]/settings", "page");
+  return { ok: true };
+}
+
+/** What a model connection's save sends, before the server checks its every rule. */
+const ConnectionInputSchema = z.object({
+  id: z.guid().optional(),
+  name: z.string().min(1).max(60),
+  provider: z.enum(ModelProvider),
+  base_url: z.string().max(2048).optional(),
+  region: z.string().max(32).optional(),
+  models: z.array(z.string().max(128)).min(1).max(20),
+  is_default: z.boolean(),
+  secret: z.string().max(16_384).optional(),
+});
+
+/** A model connection made or changed, proved by one small request first: the provider's refusal is the answer. */
+export async function saveModelConnectionAction(projectId: string, input: unknown): Promise<ActionResult> {
+  const gate = await admitProject({ call: "project:model-connections", limit: 10 }, projectId);
+  if (!gate.ok) return refused(gate.error);
+  const asked = ConnectionInputSchema.safeParse(input);
+  if (!asked.success) return refused("That connection could not be read.");
+  // A request to the provider stands in front of the save: a minute at most.
+  const res = await tryFetchWithTimeout(
+    `${env.SERVER_URL}/internal/v1/telemetry/model-connections`,
+    { method: "PUT", headers: { ...gate.headers, "content-type": "application/json" }, body: JSON.stringify(asked.data) },
+    75_000,
+  );
+  if (!res) return refused("The connection could not be saved. Try again.");
+  if (!res.ok) return refused((await extractProblem(res)).message);
+  revalidatePath("/(app)/[organization]/[project]/settings", "page");
+  return { ok: true };
+}
+
+/** A model connection deleted, its key with it. */
+export async function deleteModelConnectionAction(projectId: string, id: string): Promise<ActionResult> {
+  if (!z.guid().safeParse(id).success) return refused("Invalid connection id.");
+  const gate = await admitProject({ call: "project:model-connections", limit: 10 }, projectId);
+  if (!gate.ok) return refused(gate.error);
+  const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/v1/telemetry/model-connections/${id}`, {
+    method: "DELETE",
+    headers: gate.headers,
+  });
+  if (!res) return refused("The connection could not be deleted. Try again.");
+  if (!res.ok) return refused((await extractProblem(res)).message);
   revalidatePath("/(app)/[organization]/[project]/settings", "page");
   return { ok: true };
 }

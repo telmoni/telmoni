@@ -23,6 +23,7 @@ pub mod http;
 pub mod logging;
 pub mod mail;
 pub mod middleware;
+pub mod model;
 pub mod net_guard;
 pub mod oidc;
 pub mod openapi;
@@ -48,10 +49,10 @@ pub use extract::correlation_id;
 pub use types::{
     AlertCeilings, Allowance, ApiKeyScope, AuditAction, Capacity, ContentMode, Email, EmailError,
     Flag, FlagSet, Grants, IncidentStatus, LaneCeilings, LayoutDepth, LayoutOpen, MemberCeiling,
-    MissingData, NotificationKind, OrganizationAction, OrganizationId, OrganizationIdError,
-    OrganizationRole, OrganizationStatus, ParseEnumError, Paused, ProjectId, ProjectIdError,
-    Redacted, Role, RuleAggregation, RuleLevel, RuleMeasure, RuleOperator, RuleWindow, ScoreSource,
-    ScoreTarget, ScoreType, SessionColumn, SessionId, SessionIdError, SessionSort, Severity,
-    SortDirection, SpanKind, SpanStatus, TelmoniResourceKind, TraceColumn, TraceSort, UserColumn,
-    UserId, UserIdError, UserSort, ViewKind,
+    MissingData, ModelProvider, NotificationKind, OrganizationAction, OrganizationId,
+    OrganizationIdError, OrganizationRole, OrganizationStatus, ParseEnumError, Paused, ProjectId,
+    ProjectIdError, Redacted, Role, RuleAggregation, RuleLevel, RuleMeasure, RuleOperator,
+    RuleWindow, ScoreSource, ScoreTarget, ScoreType, SessionColumn, SessionId, SessionIdError,
+    SessionSort, Severity, SortDirection, SpanKind, SpanStatus, TelmoniResourceKind, TraceColumn,
+    TraceSort, UserColumn, UserId, UserIdError, UserSort, ViewKind,
 };

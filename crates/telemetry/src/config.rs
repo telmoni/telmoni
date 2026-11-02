@@ -24,6 +24,10 @@ pub struct Config {
     /// content key makes its content unreadable, but in a backup taken before. Required,
     /// since every binary ingests.
     pub content_kek: Redacted,
+    /// The key that seals each model connection's key (`MODEL_CONNECTION_KEK`),
+    /// spelt as the others are and never the same key; unset, no project
+    /// connects a model.
+    pub model_connection_kek: Option<Redacted>,
     /// Cloud KMS's origin (`KMS_API_BASE`); the tests point it at a mock.
     pub kms_api_base: String,
     /// The instance metadata server (`METADATA_API_BASE`), where the KMS
@@ -46,6 +50,8 @@ impl Config {
             clickhouse_url: require("TELEMETRY_CLICKHOUSE_URL")?.into(),
             telemetry_kek: require("TELEMETRY_KEK")?.into(),
             content_kek: require("CONTENT_KEK")?.into(),
+            model_connection_kek: telmoni_shared::config::optional("MODEL_CONNECTION_KEK")
+                .map(Into::into),
             kms_api_base: optional_base_url("KMS_API_BASE")
                 .unwrap_or_else(|| "https://cloudkms.googleapis.com".to_owned()),
             metadata_api_base: optional_base_url("METADATA_API_BASE")

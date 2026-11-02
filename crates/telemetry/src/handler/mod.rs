@@ -9,6 +9,7 @@ pub mod field_inventory;
 pub mod health;
 pub mod incidents;
 pub mod ingest;
+pub mod model_connections;
 pub mod mutes;
 pub mod prices;
 pub mod privacy;

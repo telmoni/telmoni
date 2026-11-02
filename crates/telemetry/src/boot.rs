@@ -21,6 +21,10 @@ use crate::{AppState, Config, hashing, store::Store};
 /// The longest one call to the key service may take, its token included.
 const KEY_SERVICE_WAIT: Duration = Duration::from_secs(15);
 
+/// How long a model connection's request is waited for: a judgement is a
+/// model writing a short answer, a minute at most.
+const MODEL_WAIT: Duration = Duration::from_secs(60);
+
 /// The module's pool, opened as its own database role.
 pub async fn open_pool(config: &Config) -> anyhow::Result<sqlx::PgPool> {
     let db_ca = telmoni_shared::db::database_ca_from_env().map_err(anyhow::Error::msg)?;
@@ -53,6 +57,13 @@ pub fn state(
     one_key_a_purpose(&config)?;
     let kek = key("TELEMETRY_KEK", &config.telemetry_kek)?;
     let content_kek = key("CONTENT_KEK", &config.content_kek)?;
+    let model_kek = config
+        .model_connection_kek
+        .as_ref()
+        .map(|value| key("MODEL_CONNECTION_KEK", value))
+        .transpose()?;
+    let egress = telmoni_shared::net_guard::Egress::guarded(MODEL_WAIT, "telmoni-evaluator")
+        .context("the model connections' client")?;
     // Bounded, so an export that keys its project ends inside an
     // organization's deletion grace.
     let http = telmoni_shared::http::client("telmoni-telemetry", KEY_SERVICE_WAIT)?;
@@ -75,6 +86,8 @@ pub fn state(
         vault: Vault::new(),
         kek,
         content_kek,
+        model_kek,
+        egress,
         hashing_keys: hashing::Cache::default(),
         content_keys: hashing::Cache::default(),
         settling: std::sync::Mutex::default(),
@@ -93,8 +106,17 @@ pub fn state(
 /// Refuses one key named for both purposes, so that disabling or deleting one
 /// leaves the other's rows readable.
 fn one_key_a_purpose(config: &Config) -> anyhow::Result<()> {
-    if config.telemetry_kek.expose().trim() == config.content_kek.expose().trim() {
-        anyhow::bail!("TELEMETRY_KEK and CONTENT_KEK name one key; each takes a key of its own");
+    let mut keys = vec![
+        ("TELEMETRY_KEK", config.telemetry_kek.expose().trim()),
+        ("CONTENT_KEK", config.content_kek.expose().trim()),
+    ];
+    if let Some(model) = &config.model_connection_kek {
+        keys.push(("MODEL_CONNECTION_KEK", model.expose().trim()));
+    }
+    for (i, (one, key)) in keys.iter().enumerate() {
+        if let Some((other, _)) = keys.iter().skip(i + 1).find(|(_, k)| k == key) {
+            anyhow::bail!("{one} and {other} name one key; each takes a key of its own");
+        }
     }
     Ok(())
 }
@@ -109,6 +131,7 @@ mod tests {
             clickhouse_url: "".into(),
             telemetry_kek: telemetry_kek.into(),
             content_kek: content_kek.into(),
+            model_connection_kek: None,
             kms_api_base: String::new(),
             metadata_api_base: String::new(),
             redis_url: "".into(),
@@ -133,5 +156,22 @@ mod tests {
             assert!(!refused.contains(same), "a key's value in the refusal");
         }
         one_key_a_purpose(&config(&local, &format!("local:{}", "1".repeat(64)))).expect("two keys");
+    }
+
+    /// The model connections' key is one of its own too, where it is set.
+    #[test]
+    fn the_model_connections_key_is_one_of_its_own() {
+        let local = format!("local:{}", "0".repeat(64));
+        let shared = Config {
+            model_connection_kek: Some(local.clone().into()),
+            ..config(&format!("local:{}", "1".repeat(64)), &local)
+        };
+        let refused = one_key_a_purpose(&shared)
+            .expect_err("one key for two")
+            .to_string();
+        assert!(
+            refused.contains("CONTENT_KEK") && refused.contains("MODEL_CONNECTION_KEK"),
+            "{refused}"
+        );
     }
 }

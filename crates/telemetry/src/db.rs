@@ -185,6 +185,12 @@ pub async fn purge_organization(
         .execute(tx.conn())
         .await?
         .rows_affected();
+    let connections =
+        sqlx::query("DELETE FROM telemetry.model_connections WHERE project_id = ANY($1)")
+            .bind(&projects)
+            .execute(tx.conn())
+            .await?
+            .rows_affected();
     let content = purge_project_content(tx, &projects).await?;
     let held = sqlx::query("DELETE FROM telemetry.content_held WHERE organization_id = $1")
         .bind(organization_id)
@@ -196,7 +202,7 @@ pub async fn purge_organization(
         .execute(tx.conn())
         .await?
         .rows_affected();
-    Ok(rules + mutes + views + prices + content + held + settings)
+    Ok(rules + mutes + views + prices + connections + content + held + settings)
 }
 
 /// How long a purge waits for any lock: one left queued for a project's lock
@@ -244,13 +250,18 @@ pub async fn purge_project(
         .execute(tx.conn())
         .await?
         .rows_affected();
+    let connections = sqlx::query("DELETE FROM telemetry.model_connections WHERE project_id = $1")
+        .bind(project_id)
+        .execute(tx.conn())
+        .await?
+        .rows_affected();
     let content = purge_project_content(tx, std::slice::from_ref(project_id)).await?;
     let settings = sqlx::query("DELETE FROM telemetry.project_settings WHERE project_id = $1")
         .bind(project_id)
         .execute(tx.conn())
         .await?
         .rows_affected();
-    Ok(rules + mutes + views + prices + content + settings)
+    Ok(rules + mutes + views + prices + connections + content + settings)
 }
 
 /// A saved view as its row keeps it: a view of the trace list, or a layout

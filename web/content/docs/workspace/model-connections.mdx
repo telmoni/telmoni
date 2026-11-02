@@ -1,0 +1,41 @@
+---
+title: "Model connections"
+description: "A project's own keys to the models its evaluators judge with: OpenAI, Anthropic, Google AI Studio, Vertex AI, Azure OpenAI, Amazon Bedrock, or any endpoint speaking OpenAI's protocol, each sealed when saved and proved by one small request first."
+---
+
+A **model connection** is a project's own key to a model: what its
+evaluators judge with, never a model of Telmoni's. A project's owners and
+admins connect one under **Model connections** on its **Settings** page;
+everyone on the project sees them, never a key.
+
+| Provider | What it takes |
+|---|---|
+| OpenAI | An API key |
+| Anthropic | An API key |
+| Google AI Studio | An API key |
+| Google Vertex AI | A service account's JSON key, and a location (`global` where none is given) |
+| Azure OpenAI | The resource's key and its endpoint (`https://<resource>.openai.azure.com`); each model is a deployment's name |
+| Amazon Bedrock | An access key id and its secret, and a region |
+| OpenAI-compatible endpoint | A base URL, and the key it asks for, if any: a gateway such as LiteLLM or OpenRouter, Mistral, or a model you serve yourself |
+
+Each connection names the models it offers, up to twenty, by the provider's
+own names, and a project holds up to ten. One is the project's default, the
+first saved unless another is chosen.
+
+Saving asks the first model one small question, in the JSON its answers
+will take, and a connection it does not answer is not saved: the provider's
+refusal is what the page shows, a key it refuses or a model it does not
+know. Editing a connection keeps its key unless a new one is typed, and asks
+again.
+
+A key is sealed when it is saved, under a data key of its own wrapped by
+the deployment's `MODEL_CONNECTION_KEK`
+([Configuration](/docs/self-host/configuration)), never answered back: the
+page shows its last four characters, a service account's address, or an
+access key id's last four. It is sent only to its own provider, its requests
+leaving through the same guard a webhook's do, so no connection reaches an
+address inside the deployment's network; a base URL is `https` on a deployed
+tier. Each connection made, changed or deleted is filed in the
+organization's [audit log](/docs/workspace/audit-log) by its provider, never
+its key, and deleting a connection, or its project or organization, deletes
+its key.

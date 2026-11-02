@@ -8,6 +8,7 @@
     "audit-log",
     "data-retention",
     "data-deletion",
+    "model-connections",
     "..."
   ]
 }

@@ -104,6 +104,12 @@ pub struct AppState {
     pub kek: telmoni_shared::envelope::Kek,
     /// What wraps each project's content key: `CONTENT_KEK`.
     pub content_kek: telmoni_shared::envelope::Kek,
+    /// What seals each model connection's key (`MODEL_CONNECTION_KEK`); none
+    /// where it is unset, and a connection is refused.
+    pub model_kek: Option<telmoni_shared::envelope::Kek>,
+    /// The client a model connection's requests leave by: guarded, since the
+    /// customer names the host.
+    pub egress: telmoni_shared::net_guard::Egress,
     /// Each project's hashing key, opened once per process ([`hashing`]).
     pub hashing_keys: hashing::Cache,
     /// Each project's content key, opened once per process and kept beside
@@ -177,6 +183,15 @@ pub fn router(state: Arc<AppState>) -> Router {
             post(handler::content_mode::request_content_mode_code),
         )
         .route("/telemetry/retention", put(handler::privacy::put_retention))
+        .route(
+            "/telemetry/model-connections",
+            get(handler::model_connections::get_connections)
+                .put(handler::model_connections::put_connection),
+        )
+        .route(
+            "/telemetry/model-connections/{id}",
+            axum::routing::delete(handler::model_connections::delete_connection),
+        )
         .route(
             "/telemetry/scores",
             get(handler::scores::get_scores).put(handler::scores::put_score),

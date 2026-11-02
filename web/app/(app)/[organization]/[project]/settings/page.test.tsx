@@ -81,6 +81,23 @@ vi.mock("@/lib/server/data", () => ({
   fetchModelPrices: async () => [],
 }));
 
+vi.mock("@/lib/server/entities/model-connections", () => ({
+  fetchModelConnections: async () => [
+    {
+      id: "5d4f5c68-0000-4000-8000-0000000000c1",
+      name: "Gateway",
+      provider: "openai_compatible",
+      base_url: "https://gw.example/v1",
+      region: null,
+      models: ["judge-1", "judge-2"],
+      is_default: true,
+      secret_hint: "WXYZ",
+      created_at: "2026-11-02T00:00:00Z",
+      updated_at: "2026-11-02T00:00:00Z",
+    },
+  ],
+}));
+
 vi.mock("@/lib/server/session", () => ({
   getServerSession: async () => ({
     userId: "user_1",
@@ -128,6 +145,17 @@ describe("SettingsPage", () => {
       expect(screen.getByTestId("page-header")).toHaveTextContent("Settings");
       expect(screen.getByTestId("rename-form")).toHaveTextContent("My Project");
       expect(screen.getByTestId("rename-form")).toHaveTextContent("editable");
+    });
+
+    // Each connection by its provider, its models and its key's last four, never the key.
+    it("lists the model connections, the default marked, and offers to connect another", async () => {
+      render(await SettingsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+      expect(screen.getByText("Gateway")).toBeInTheDocument();
+      expect(screen.getByText("Default")).toBeInTheDocument();
+      expect(
+        screen.getByText("OpenAI-compatible endpoint · judge-1, judge-2", { exact: false }),
+      ).toHaveTextContent("key …WXYZ");
+      expect(screen.getByRole("button", { name: "Connect a model" })).toBeInTheDocument();
     });
 
     // The id is what an API request and an SDK are configured with; the slug

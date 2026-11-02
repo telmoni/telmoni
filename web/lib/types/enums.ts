@@ -123,6 +123,18 @@ export const TraceColumn = {
 } as const;
 export type TraceColumn = typeof TraceColumn[keyof typeof TraceColumn];
 
+/** Wire vocabulary of the Rust `ModelProvider`: whose model a connection reaches. */
+export const ModelProvider = {
+  Openai:           "openai",
+  Anthropic:        "anthropic",
+  GoogleAiStudio:   "google_ai_studio",
+  VertexAi:         "vertex_ai",
+  AzureOpenai:      "azure_openai",
+  Bedrock:          "bedrock",
+  OpenaiCompatible: "openai_compatible",
+} as const;
+export type ModelProvider = typeof ModelProvider[keyof typeof ModelProvider];
+
 /** Wire vocabulary of the Rust `ScoreType`: what a score's value is. */
 export const ScoreType = {
   Number:   "number",
@@ -351,6 +363,7 @@ export const ResourceKind = {
   Incident:          "incident",
   Trace:             "trace",
   EndUser:           "end_user",
+  ModelConnection:   "model_connection",
 } as const;
 export type ResourceKind = typeof ResourceKind[keyof typeof ResourceKind];
 

@@ -1045,12 +1045,13 @@ fn module_at(
         // machine, and name no KMS.
         telemetry_kek: format!("local:{}", "0".repeat(64)).into(),
         content_kek: format!("local:{}", "1".repeat(64)).into(),
+        model_connection_kek: Some(format!("local:{}", "2".repeat(64)).into()),
         kms_api_base: "http://127.0.0.1:1".into(),
         metadata_api_base: "http://127.0.0.1:1".into(),
         redis_url: redis_url.into(),
         app_url: None,
     };
-    telmoni_telemetry::boot::state(
+    let mut state = telmoni_telemetry::boot::state(
         config,
         service_pool(pool, ServiceRole::Telemetry),
         ServiceSecrets::new(SECRET, None::<String>),
@@ -1058,7 +1059,10 @@ fn module_at(
         entitlements,
         notifications,
     )
-    .expect("the module's state over a laptop's key")
+    .expect("the module's state over a laptop's key");
+    // A suite's model providers are mocks on loopback, which the guard refuses.
+    state.egress = telmoni_shared::net_guard::Egress::unguarded(reqwest::Client::new());
+    state
 }
 
 /// ClickHouse as both of the users a tier runs it with.

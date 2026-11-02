@@ -76,6 +76,7 @@ fn assemble() -> App {
             clickhouse_url: "http://telemetry:telemetry@127.0.0.1:1".into(),
             telemetry_kek: format!("local:{}", "0".repeat(64)).into(),
             content_kek: format!("local:{}", "1".repeat(64)).into(),
+            model_connection_kek: None,
             kms_api_base: "http://127.0.0.1:1".into(),
             metadata_api_base: "http://127.0.0.1:1".into(),
             redis_url: "redis://127.0.0.1:1".into(),

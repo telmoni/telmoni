@@ -121,6 +121,15 @@
       "no_data",
       "notify_no_data"
     ],
+    "ModelProvider": [
+      "openai",
+      "anthropic",
+      "google_ai_studio",
+      "vertex_ai",
+      "azure_openai",
+      "bedrock",
+      "openai_compatible"
+    ],
     "NotificationKind": [
       "organization_alert",
       "member_added",
@@ -154,7 +163,8 @@
       "maintenance_window",
       "incident",
       "trace",
-      "end_user"
+      "end_user",
+      "model_connection"
     ],
     "Role": [
       "owner",

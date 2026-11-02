@@ -131,6 +131,28 @@ const MUTATIONS: &[Mutation] = &[
         resource_kind: "Project",
         actor_id: ActorPattern::Variable,
     },
+    // A project's model connection, made, changed or deleted by an owner or admin.
+    Mutation {
+        file: "crates/telemetry/src/handler/model_connections.rs",
+        fn_name: "put_connection",
+        action: "Created",
+        resource_kind: "ModelConnection",
+        actor_id: ActorPattern::Variable,
+    },
+    Mutation {
+        file: "crates/telemetry/src/handler/model_connections.rs",
+        fn_name: "put_connection",
+        action: "Updated",
+        resource_kind: "ModelConnection",
+        actor_id: ActorPattern::Variable,
+    },
+    Mutation {
+        file: "crates/telemetry/src/handler/model_connections.rs",
+        fn_name: "delete_connection",
+        action: "Deleted",
+        resource_kind: "ModelConnection",
+        actor_id: ActorPattern::Variable,
+    },
     // A member's score, given or taken back, filed as a change to its trace.
     Mutation {
         file: "crates/telemetry/src/handler/scores.rs",

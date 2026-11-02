@@ -3626,3 +3626,200 @@ async fn the_list_and_a_session_carry_their_scores_and_filter_by_one(pool: PgPoo
         "its runs' three: {session}"
     );
 }
+
+/// A Chat Completions endpoint on loopback: it answers the key `sk-good` with
+/// a judgement and any other with a 401, counting what it was asked.
+async fn mock_provider() -> (String, Arc<std::sync::atomic::AtomicUsize>) {
+    use axum::routing::post;
+    let asked = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counted = Arc::clone(&asked);
+    let app = Router::new().route(
+        "/v1/chat/completions",
+        post(move |headers: axum::http::HeaderMap| {
+            let counted = Arc::clone(&counted);
+            async move {
+                counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let good = headers
+                    .get(header::AUTHORIZATION)
+                    .and_then(|v| v.to_str().ok())
+                    == Some("Bearer sk-good");
+                if good {
+                    (
+                        StatusCode::OK,
+                        axum::Json(json!({
+                            "choices": [{ "message": { "content": "{\"ok\": true}" } }],
+                            "usage": { "prompt_tokens": 9, "completion_tokens": 3 },
+                        })),
+                    )
+                } else {
+                    (
+                        StatusCode::UNAUTHORIZED,
+                        axum::Json(json!({ "error": { "message": "Incorrect API key provided" } })),
+                    )
+                }
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("a port");
+    let at = listener.local_addr().expect("an address");
+    tokio::spawn(async move { axum::serve(listener, app).await.ok() });
+    (format!("http://{at}/v1"), asked)
+}
+
+/// An owner connects a model on their own key, proved by one small request:
+/// a key the provider refuses saves nothing, naming its answer; the key is
+/// sealed, never answered back nor filed, its last four alone shown; a member
+/// reads the connections and changes none.
+#[sqlx::test]
+async fn an_owner_connects_a_model_on_their_own_key_proved_first(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let door = door(&pool, ContentMode::Off).await;
+    door.auth
+        .seat(
+            "admin-1",
+            &door.organization,
+            &door.project,
+            OrganizationRole::Owner,
+            None,
+        )
+        .seat(
+            "member-1",
+            &door.organization,
+            &door.project,
+            OrganizationRole::Member,
+            Some(Role::Member),
+        );
+    let (base, asked) = mock_provider().await;
+    let body = |secret: &str| {
+        json!({
+            "name": "Gateway", "provider": "openai_compatible", "base_url": base,
+            "models": ["judge-1"], "secret": secret,
+        })
+    };
+
+    let (status, refused) = door
+        .lane("PUT", "/model-connections", "admin-1", Some(body("sk-bad")))
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{refused}");
+    assert!(
+        refused.to_string().contains("Incorrect API key provided"),
+        "{refused}"
+    );
+    let (status, members) = door
+        .lane(
+            "PUT",
+            "/model-connections",
+            "member-1",
+            Some(body("sk-good")),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{members}");
+
+    let (status, saved) = door
+        .lane(
+            "PUT",
+            "/model-connections",
+            "admin-1",
+            Some(body("sk-good")),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(saved["secret_hint"], "good");
+    assert_eq!(
+        saved["is_default"], true,
+        "a project's first is its default"
+    );
+    assert_eq!(
+        asked.load(std::sync::atomic::Ordering::SeqCst),
+        2,
+        "each save asked once; the member's not at all"
+    );
+
+    let (status, listed) = door
+        .lane("GET", "/model-connections", "member-1", None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{listed}");
+    assert_eq!(listed["connections"][0]["name"], "Gateway");
+    assert!(
+        !listed.to_string().contains("sk-good"),
+        "no key answered back: {listed}"
+    );
+
+    let sealed: Vec<u8> =
+        sqlx::query_scalar("SELECT secret_ciphertext FROM telemetry.model_connections")
+            .fetch_one(&pool)
+            .await
+            .expect("the row");
+    assert!(
+        !sealed.windows(7).any(|w| w == b"sk-good"),
+        "sealed, never its text"
+    );
+    let id: uuid::Uuid = saved["id"]
+        .as_str()
+        .expect("an id")
+        .parse()
+        .expect("a uuid");
+    let opened =
+        telmoni_telemetry::handler::model_connections::open(&door.state, &door.project, id)
+            .await
+            .expect("opened");
+    assert!(
+        matches!(&opened.credentials, telmoni_shared::model::Credentials::ApiKey(key) if key.expose() == "sk-good")
+    );
+
+    // Renamed with no new key, the kept one is proved again.
+    let (status, renamed) = door
+        .lane(
+            "PUT",
+            "/model-connections",
+            "admin-1",
+            Some(json!({ "id": id, "name": "Judge", "provider": "openai_compatible", "base_url": base, "models": ["judge-2"] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{renamed}");
+    assert_eq!(
+        (renamed["name"].clone(), renamed["secret_hint"].clone()),
+        (json!("Judge"), json!("good"))
+    );
+
+    let (status, _) = door
+        .lane(
+            "DELETE",
+            &format!("/model-connections/{id}"),
+            "admin-1",
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, _) = door
+        .lane(
+            "DELETE",
+            &format!("/model-connections/{id}"),
+            "admin-1",
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    let filed: Vec<(String, Value)> = sqlx::query_as(
+        "SELECT action, metadata FROM audit.events WHERE resource_kind = 'model_connection' ORDER BY seq",
+    )
+    .fetch_all(&pool)
+    .await
+    .expect("the chain");
+    assert_eq!(
+        filed
+            .iter()
+            .map(|(action, _)| action.as_str())
+            .collect::<Vec<_>>(),
+        ["created", "updated", "deleted"]
+    );
+    assert!(
+        filed
+            .iter()
+            .all(|(_, m)| !m.to_string().contains("sk-good")),
+        "{filed:?}"
+    );
+}

@@ -584,6 +584,55 @@ CREATE POLICY maintenance_access ON telemetry.project_prices
 -- purges delete a project's.
 GRANT SELECT, DELETE ON telemetry.project_prices TO telemetry_maintenance;
 
+-- A project's connections to models on the customer's own keys, which its
+-- evaluators judge with: each key sealed under its own data key, wrapped by
+-- MODEL_CONNECTION_KEK, never answered back; its last four characters alone
+-- shown. One connection a project is its default.
+CREATE TABLE telemetry.model_connections (
+    id                UUID        PRIMARY KEY,
+    project_id        TEXT        NOT NULL,
+    name              TEXT        NOT NULL,
+    provider          TEXT        NOT NULL,
+    base_url          TEXT,
+    region            TEXT,
+    models            TEXT[]      NOT NULL,
+    is_default        BOOLEAN     NOT NULL DEFAULT false,
+    secret_hint       TEXT        NOT NULL,
+    secret_ciphertext BYTEA       NOT NULL,
+    secret_nonce      BYTEA       NOT NULL,
+    wrapped_dek       BYTEA       NOT NULL,
+    key_version       SMALLINT    NOT NULL,
+    created_by        TEXT        NOT NULL,
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT model_connections_name_key UNIQUE (project_id, name),
+    CONSTRAINT model_connections_provider_check CHECK (provider IN (
+        'openai', 'anthropic', 'google_ai_studio', 'vertex_ai', 'azure_openai', 'bedrock',
+        'openai_compatible'
+    )),
+    CONSTRAINT model_connections_check CHECK (
+        char_length(name) BETWEEN 1 AND 60 AND cardinality(models) BETWEEN 1 AND 20
+    )
+);
+
+CREATE UNIQUE INDEX model_connections_one_default
+    ON telemetry.model_connections (project_id) WHERE is_default;
+
+ALTER TABLE telemetry.model_connections ENABLE ROW LEVEL SECURITY;
+ALTER TABLE telemetry.model_connections FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY tenant_isolation ON telemetry.model_connections
+    USING      (project_id = current_setting('app.project_id', true))
+    WITH CHECK (project_id = current_setting('app.project_id', true));
+
+CREATE POLICY maintenance_access ON telemetry.model_connections
+    TO telemetry_maintenance
+    USING      (current_user = 'telemetry_maintenance')
+    WITH CHECK (current_user = 'telemetry_maintenance');
+
+-- The evaluation loop opens a project's connections; the purges delete them.
+GRANT SELECT, DELETE ON telemetry.model_connections TO telemetry_maintenance;
+
 -- Another exporter's spans, held until their trace's tree places them in a
 -- run (`foreign.rs`), their content sealed as `plain_content`'s; landed, a
 -- span keeps only its run, for a day, for a child arriving later.

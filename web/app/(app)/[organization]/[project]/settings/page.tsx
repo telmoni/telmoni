@@ -5,6 +5,7 @@ import { SettingsRow } from "@/components/settings-row";
 import { ServiceUnavailable } from "@/components/service-unavailable";
 import { Card } from "@/components/ui/card";
 import { fetchContentMode, fetchModelPrices } from "@/lib/server/data";
+import { fetchModelConnections } from "@/lib/server/entities/model-connections";
 import { projectPage } from "@/lib/server/project-page";
 import { administers } from "@/lib/roles";
 import { getServerSession } from "@/lib/server/session";
@@ -12,6 +13,7 @@ import { Role } from "@/lib/types/enums";
 
 import { ContentModeForm } from "./_content-mode";
 import { DeleteProjectForm } from "./_delete-project";
+import { ModelConnections } from "./_model-connections";
 import { ModelPricesForm } from "./_model-prices";
 import { RenameProjectForm } from "./_rename-project";
 
@@ -27,9 +29,10 @@ export default async function SettingsPage({
   const resolved = await projectPage(slug);
   if (resolved.kind === "unavailable") return <ServiceUnavailable />;
   const { project } = resolved;
-  const [contentMode, prices, session] = await Promise.all([
+  const [contentMode, prices, connections, session] = await Promise.all([
     fetchContentMode(project.id),
     fetchModelPrices(project.id),
+    fetchModelConnections(project.id),
     getServerSession(),
   ]);
 
@@ -86,6 +89,21 @@ export default async function SettingsPage({
             ) : (
               <p className="text-sm text-muted-foreground">
                 This project&apos;s content mode could not be read. Reload to try again.
+              </p>
+            )}
+          </Card>
+        </Section>
+
+        <Section
+          title="Model connections"
+          description="This project's own keys to the models its evaluators judge with: OpenAI, Anthropic, Google AI Studio or Vertex AI, Azure OpenAI, Amazon Bedrock, or any endpoint speaking OpenAI's protocol. A key is sealed when it is saved, never shown again but by its last four characters, and sent to its provider alone. Saving asks the first model one small question first."
+        >
+          <Card>
+            {connections ? (
+              <ModelConnections projectId={project.id} connections={connections} canEdit={canEdit} />
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                This project&apos;s model connections could not be read. Reload to try again.
               </p>
             )}
           </Card>
