@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { SpanKind, SpanStatus } from "@/lib/types/enums";
+import { ScoreType, SpanKind, SpanStatus } from "@/lib/types/enums";
 
 // A trace as the server answers it, parsed on the server by its entity
 // (`lib/server/entities/traces.ts`) and in the browser by the peeks.
@@ -62,6 +62,17 @@ export const TagSortSchema = z.custom<TagSort>(
   (value) => typeof value === "string" && readTagSort(value) !== undefined,
 );
 
+// One score name of a run or a session: its mean, how many, and a
+// category's values, which have no mean.
+export const ScoreSummarySchema = z.object({
+  name: z.string(),
+  data_type: z.enum(ScoreType),
+  mean: z.number().nullable(),
+  count: z.number(),
+  categories: z.array(z.string()).default([]),
+});
+export type ScoreSummary = z.infer<typeof ScoreSummarySchema>;
+
 // One trace of the list: a run's spans summed by the server, which reads the
 // project's spans and no other's. `user_id` is as stored, hashed, and
 // `ended` says whether the run's own span has
@@ -102,6 +113,8 @@ export const TraceSchema = z.object({
   releases: z.array(z.string()),
   /** Its tags, each `key:value` once, in order. */
   tags: z.array(z.string()),
+  /** Its own scores by name, where the list read them. */
+  scores: z.array(ScoreSummarySchema).default([]),
 });
 export type Trace = z.infer<typeof TraceSchema>;
 

@@ -3132,6 +3132,11 @@ async fn an_end_user_is_erased_by_the_id_their_spans_carry(pool: PgPool) {
 
 /// An export whose spans each carry OpenTelemetry's evaluation events.
 fn scored_export(run: &str) -> Vec<u8> {
+    scored_export_in(run, TRACE)
+}
+
+/// [`scored_export`] under its own trace.
+fn scored_export_in(run: &str, trace: &str) -> Vec<u8> {
     let text = |key: &str, value: &str| json!({ "key": key, "value": { "stringValue": value } });
     let event = |attributes: Value| {
         json!({
@@ -3141,7 +3146,7 @@ fn scored_export(run: &str) -> Vec<u8> {
     };
     json!({ "resourceSpans": [{ "scopeSpans": [{ "scope": { "name": contract::SCOPE }, "spans": [
         {
-            "traceId": TRACE, "spanId": SPAN, "name": "nightly-report",
+            "traceId": trace, "spanId": SPAN, "name": "nightly-report",
             "startTimeUnixNano": "1760000000000000000", "endTimeUnixNano": "1760000002000000000",
             "attributes": [
                 text(contract::RUN_ID, run), text(contract::AGENT, "nightly-report"),
@@ -3153,7 +3158,7 @@ fn scored_export(run: &str) -> Vec<u8> {
             ]))],
         },
         {
-            "traceId": TRACE, "spanId": "01f067aa0ba902b8", "parentSpanId": SPAN, "name": "chat",
+            "traceId": trace, "spanId": "01f067aa0ba902b8", "parentSpanId": SPAN, "name": "chat",
             "startTimeUnixNano": "1760000000000000000", "endTimeUnixNano": "1760000001000000000",
             "attributes": [
                 text(contract::RUN_ID, run), text(contract::AGENT, "nightly-report"),
@@ -3542,4 +3547,82 @@ async fn another_exporters_score_lands_with_its_run(pool: PgPool) {
     assert_eq!(scores[0]["name"], "relevance");
     assert_eq!(scores[0]["target"], "span");
     assert_eq!(scores[0]["run_id"], run.to_string());
+}
+
+/// The trace list answers each run's own scores by name and keeps only the
+/// runs a score's bounds admit; a session's page is headed by its scores.
+#[sqlx::test]
+async fn the_list_and_a_session_carry_their_scores_and_filter_by_one(pool: PgPool) {
+    let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    apply_audit_migrations(&pool).await;
+    let door = door(&pool, ContentMode::Off).await;
+    door.auth.seat(
+        "admin-1",
+        &door.organization,
+        &door.project,
+        OrganizationRole::Owner,
+        None,
+    );
+    let other = "0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f09";
+    door.send(scored_export(RUN)).await;
+    door.send(scored_export_in(other, TRACE_B)).await;
+    let (status, _) = door
+        .lane("PUT", "/scores", "admin-1", Some(json!({ "run_id": other, "name": "relevance", "data_type": "number", "value": 0.25 })))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, list) = door.lane("GET", "/traces", "admin-1", None).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    let relevance = |run: &str| {
+        list["scores"][run]
+            .as_array()
+            .and_then(|names| names.iter().find(|s| s["name"] == "relevance").cloned())
+    };
+    assert_eq!(
+        relevance(RUN).map(|s| (s["mean"].clone(), s["count"].clone())),
+        Some((json!(0.75), json!(1)))
+    );
+    assert_eq!(
+        relevance(other).map(|s| (s["mean"].clone(), s["count"].clone())),
+        Some((json!(0.5), json!(2))),
+        "the application's and a member's, together"
+    );
+
+    let (status, high) = door
+        .lane(
+            "GET",
+            "/traces?score=relevance&score_max=0.5",
+            "admin-1",
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{high}");
+    let runs: Vec<&str> = high["traces"]
+        .as_array()
+        .expect("traces")
+        .iter()
+        .filter_map(|t| t["run_id"].as_str())
+        .collect();
+    assert_eq!(runs, [other], "a run any score of the name admits: {high}");
+    let (status, _) = door
+        .lane("GET", "/traces?score_min=0.6", "admin-1", None)
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "bounds name their score");
+
+    let (status, session) = door.lane("GET", "/sessions/conv-1", "admin-1", None).await;
+    assert_eq!(status, StatusCode::OK, "{session}");
+    let head = session["scores"].as_array().expect("scores");
+    let named = head
+        .iter()
+        .find(|s| s["name"] == "relevance")
+        .unwrap_or_else(|| panic!("relevance: {session}"));
+    assert_eq!(named["count"], 3, "{session}");
+    assert!(
+        named["mean"]
+            .as_f64()
+            .is_some_and(|mean| (mean - 1.75 / 3.0).abs() < 1e-9),
+        "its runs' three: {session}"
+    );
 }

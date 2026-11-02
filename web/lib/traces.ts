@@ -151,9 +151,18 @@ export function parseListQuery<S extends string>(
   const page = whole(searchParams.page, MAX_PAGE);
   const q = one(searchParams.q)?.trim();
   const sort = one(searchParams.sort);
+  const score = one(searchParams.score)?.trim();
+  const named = score && [...score].length <= SCORE_NAME_MAX ? score : undefined;
+  const bound = (given: string | string[] | undefined) => {
+    const n = Number(one(given));
+    return named && one(given) !== undefined && Number.isFinite(n) ? n : undefined;
+  };
   return compact({
     ...parseFilters(searchParams),
     q: q && [...q].length <= SEARCH_MAX ? q : undefined,
+    score: named,
+    score_min: bound(searchParams.score_min),
+    score_max: bound(searchParams.score_max),
     sort: oneOf(searchParams.sort, sorts) ?? (sort === undefined ? undefined : readSort?.(sort)),
     dir: oneOf(searchParams.dir, SortDirection),
     days: whole(searchParams.days, MAX_DAYS),
@@ -262,10 +271,13 @@ export function toggled<Q extends ListQuery<string>>(query: Q, filter: FilterKey
  *  value is named, from the first page again. */
 export function without<Q extends ListQuery<string>>(
   query: Q,
-  filter: FilterKey | "q",
+  filter: FilterKey | "q" | "score",
   value?: string,
 ): Q {
   if (filter === "q") return compact({ ...query, q: undefined, page: undefined });
+  if (filter === "score") {
+    return compact({ ...query, score: undefined, score_min: undefined, score_max: undefined, page: undefined });
+  }
   const kept = value === undefined ? [] : (query[filter] ?? []).filter((v) => v !== value);
   return compact({ ...query, [filter]: some(kept as string[]), page: undefined } as Q);
 }
@@ -277,17 +289,28 @@ export function unfiltered<Q extends ListQuery<string>>(query: Q): Q {
 
 /** One value of one filter in force, as the page shows it: a facet's, or
  *  the search's. */
-export type ActiveFilter = { filter: FilterKey | "q"; label: string; value: string; text: string };
+export type ActiveFilter = { filter: FilterKey | "q" | "score"; label: string; value: string; text: string };
 
 /** The longest search the server takes, in characters. */
 export const SEARCH_MAX = 200;
+
+/** The longest score name the server keeps, in characters. */
+export const SCORE_NAME_MAX = 64;
 
 /** The filters in force, a value at a time, in the sidebar's order, the
  *  search first. */
 export function activeFilters(query: ListQuery<string>): ActiveFilter[] {
   const searched: ActiveFilter[] =
     query.q === undefined ? [] : [{ filter: "q", label: "Search", value: query.q, text: query.q }];
-  return searched.concat(
+  const bounds = [
+    query.score_min === undefined ? null : `≥ ${query.score_min}`,
+    query.score_max === undefined ? null : `≤ ${query.score_max}`,
+  ].filter(Boolean);
+  const scored: ActiveFilter[] =
+    query.score === undefined
+      ? []
+      : [{ filter: "score", label: "Score", value: query.score, text: [query.score, ...bounds].join(" ") }];
+  return searched.concat(scored).concat(
     FILTERS.flatMap((filter) =>
       (query[filter] ?? []).map((value) => ({
         filter,
@@ -498,6 +521,11 @@ export const TRACE_COLUMNS: readonly ColumnSpec[] = [
     byTag: true,
     hint: "The run's tags, each key:value. The heading sorts the list by one key's value, the runs without it last.",
   },
+  {
+    key: TraceColumn.Scores,
+    label: "Scores",
+    hint: "The run's own scores, each name's mean, or a category's values: from your code, a member or an evaluator.",
+  },
 ];
 
 /** A row of the columns menu: a column, or a group of them under a heading
@@ -689,6 +717,7 @@ export const DEFAULT_COLUMNS: readonly TraceColumn[] = [
   TraceColumn.Steps,
   TraceColumn.Tokens,
   TraceColumn.Duration,
+  TraceColumn.Scores,
 ];
 
 /** The trace list's columns menu. */

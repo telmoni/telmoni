@@ -194,6 +194,7 @@ function detail(over: Record<string, unknown> = {}) {
       limit: 100,
       more: false,
       content: [],
+      scores: [{ name: "resolved", data_type: "boolean", mean: 0.5, count: 2, categories: [] }],
       ...over,
     },
   };
@@ -293,6 +294,8 @@ describe("SessionPage", () => {
     expect(screen.getByText("1 with failed spans", { exact: false })).toBeInTheDocument();
     expect(screen.getByText("1,515")).toBeInTheDocument();
     expect(screen.getByText("(1,210 in, 305 out)")).toBeInTheDocument();
+    // Headed by its scores, each name's across its runs and itself.
+    expect(screen.getByTitle("resolved: 2 scores")).toHaveTextContent("resolved 50% yes");
 
     const runs = screen.getAllByRole("link", { name: /^[0-9a-f]{8}$/ });
     expect(runs.map((a) => a.getAttribute("href"))).toEqual([

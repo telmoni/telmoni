@@ -59,6 +59,8 @@ pub enum TraceColumn {
     Tools,
     /// Its tags, as `key:value`.
     Tags,
+    /// Its own scores, each name's mean, or a category's values.
+    Scores,
 }
 
 // The list's own columns, left to right.
@@ -88,6 +90,7 @@ crate::wire_enum!(TraceColumn {
     Models => "models",
     Tools => "tools",
     Tags => "tags",
+    Scores => "scores",
 });
 
 #[cfg(test)]

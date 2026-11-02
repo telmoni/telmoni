@@ -21,6 +21,7 @@ import {
 import {
   FILTER_KEYS,
   ListFiltersSchema,
+  ScoreSummarySchema,
   TagSortSchema,
   TraceDetailSchema,
   TraceSchema,
@@ -55,16 +56,23 @@ const TraceSortSchema = z.union([z.enum(TraceSort), TagSortSchema]);
 export const SessionSortSchema = z.union([z.enum(SessionSort), TagSortSchema]);
 
 // A page of the list, and how many traces the filters admit on every page.
-export const TraceListSchema = z.object({
-  traces: z.array(TraceSchema),
-  days: z.number(),
-  limit: z.number(),
-  page: z.number(),
-  total: z.number(),
-  more: z.boolean(),
-  sort: TraceSortSchema,
-  dir: z.enum(SortDirection),
-});
+export const TraceListSchema = z
+  .object({
+    traces: z.array(TraceSchema),
+    days: z.number(),
+    limit: z.number(),
+    page: z.number(),
+    total: z.number(),
+    more: z.boolean(),
+    sort: TraceSortSchema,
+    dir: z.enum(SortDirection),
+    /** Each run's own scores by name, keyed by its id: put on its trace. */
+    scores: z.record(z.string(), z.array(ScoreSummarySchema)).default({}),
+  })
+  .transform(({ scores, ...list }) => ({
+    ...list,
+    traces: list.traces.map((trace) => ({ ...trace, scores: scores[trace.run_id] ?? [] })),
+  }));
 export type TraceList = z.infer<typeof TraceListSchema>;
 
 // A run's tags as a change to them answers: its own span's, after it.
@@ -219,6 +227,10 @@ export const TraceLayoutListSchema = z.object({ views: z.array(TraceLayoutSchema
 export type ListQuery<S extends string> = ListFilters & {
   /** Words or a phrase the runs' kept content holds. */
   q?: string;
+  /** A score the runs carry, by its name, and its value's least and most. */
+  score?: string;
+  score_min?: number;
+  score_max?: number;
   sort?: S;
   dir?: SortDirection;
   days?: number;
@@ -230,8 +242,17 @@ export type TraceQuery = ListQuery<TraceSort | TagSort>;
 
 /** The filters and the window alone: what the facets and the histogram take,
  *  each lane refusing a parameter it has no use for. */
-export function filtersOf(query: ListFilters & { days?: number; q?: string }) {
-  return { ...filtersIn(query), q: query.q, days: query.days };
+export function filtersOf(
+  query: ListFilters & { days?: number; q?: string; score?: string; score_min?: number; score_max?: number },
+) {
+  return {
+    ...filtersIn(query),
+    q: query.q,
+    score: query.score,
+    score_min: query.score_min,
+    score_max: query.score_max,
+    days: query.days,
+  };
 }
 
 /** The two shapes a download comes in. */

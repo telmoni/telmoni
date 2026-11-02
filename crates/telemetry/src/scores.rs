@@ -323,6 +323,107 @@ pub async fn place_waiting(
     }
 }
 
+/// Some runs' own scores, a row a run a name: their mean, how many, and a
+/// category's every value.
+const RUN_SUMMARIES_SQL: &str = "SELECT run_id, name, any(data_type) AS data_type,
+            avg(value) AS mean, count() AS n, arraySort(groupUniqArrayArray(categories)) AS categories
+       FROM telemetry.scores FINAL
+      WHERE project_id IN {projects:Array(String)} AND has({runs:Array(UUID)}, run_id)
+        AND target = 'run'
+      GROUP BY run_id, name ORDER BY name";
+
+/// A session's scores, its runs' own and its own, a row a name; each column
+/// read by the table's name, since the nil `run_id` would shadow it.
+const SESSION_SUMMARY_SQL: &str = "SELECT toUUID('00000000-0000-0000-0000-000000000000') AS run_id,
+            name, any(data_type) AS data_type, avg(value) AS mean, count() AS n,
+            arraySort(groupUniqArrayArray(categories)) AS categories
+       FROM telemetry.scores AS s FINAL
+      WHERE s.project_id IN {projects:Array(String)}
+        AND ((has({runs:Array(UUID)}, s.run_id) AND s.target = 'run')
+          OR (s.target = 'session' AND s.session_id = {session:String}))
+      GROUP BY name ORDER BY name";
+
+#[derive(Row, Deserialize)]
+struct SummaryRow {
+    #[serde(with = "clickhouse::serde::uuid")]
+    run_id: Uuid,
+    name: String,
+    #[serde(with = "text")]
+    data_type: ScoreType,
+    mean: f64,
+    n: u64,
+    categories: Vec<String>,
+}
+
+/// What a list or a session's head shows of one score name: its mean, but
+/// a category's, how many, and a category's values.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Summary {
+    pub name: String,
+    pub data_type: ScoreType,
+    pub mean: Option<f64>,
+    pub count: u64,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub categories: Vec<String>,
+}
+
+impl From<SummaryRow> for Summary {
+    fn from(row: SummaryRow) -> Self {
+        Self {
+            mean: (row.data_type != ScoreType::Category).then_some(row.mean),
+            name: row.name,
+            data_type: row.data_type,
+            count: row.n,
+            categories: row.categories,
+        }
+    }
+}
+
+/// Each of `runs`' own scores, summed by name.
+///
+/// # Errors
+///
+/// ClickHouse did not answer, or refused the read.
+pub async fn of_runs(
+    store: &crate::store::Store,
+    projects: &crate::store::Projects,
+    runs: &[Uuid],
+) -> clickhouse::error::Result<std::collections::BTreeMap<Uuid, Vec<Summary>>> {
+    let mut by_run = std::collections::BTreeMap::<Uuid, Vec<Summary>>::new();
+    if runs.is_empty() {
+        return Ok(by_run);
+    }
+    let rows: Vec<SummaryRow> = store
+        .read(projects, RUN_SUMMARIES_SQL)
+        .param("runs", runs)
+        .fetch_all()
+        .await?;
+    for row in rows {
+        by_run.entry(row.run_id).or_default().push(row.into());
+    }
+    Ok(by_run)
+}
+
+/// A session's scores, its runs' own and its own, summed by name.
+///
+/// # Errors
+///
+/// ClickHouse did not answer, or refused the read.
+pub async fn of_session(
+    store: &crate::store::Store,
+    projects: &crate::store::Projects,
+    session: &str,
+    runs: &[Uuid],
+) -> clickhouse::error::Result<Vec<Summary>> {
+    let rows: Vec<SummaryRow> = store
+        .read(projects, SESSION_SUMMARY_SQL)
+        .param("runs", runs)
+        .param("session", session)
+        .fetch_all()
+        .await?;
+    Ok(rows.into_iter().map(Summary::from).collect())
+}
+
 /// A run's scores, and its spans' and its session's, newest first, each
 /// once as given last; those taken back left out.
 pub const RUN_SQL: &str = "SELECT * FROM telemetry.scores FINAL

@@ -56,6 +56,32 @@ const fetchRunIncidents = vi.fn<(projectId: string, runId: string) => Promise<un
   async () => mockIncidents,
 );
 
+const SCORES = vi.hoisted(() => [
+  {
+    score_id: "5d4f5c68-0000-4000-8000-0000000000a1",
+    target: "run",
+    name: "helpful",
+    data_type: "number",
+    value: 0.8,
+    categories: [],
+    source: "member",
+    scorer: "user_1",
+    given_at: "2026-11-02T00:00:00Z",
+  },
+  {
+    score_id: "5d4f5c68-0000-4000-8000-0000000000a2",
+    target: "run",
+    name: "grounded",
+    data_type: "boolean",
+    value: 1,
+    categories: [],
+    source: "sdk",
+    given_at: "2026-11-02T00:00:00Z",
+  },
+]);
+vi.mock("@/lib/server/entities/scores", () => ({
+  fetchScores: async () => ({ kind: "ok", scores: SCORES }),
+}));
 vi.mock("@/lib/server/data", () => ({
   activeOrganization: () => null,
   getServerContext: async () => mockContext,
@@ -277,6 +303,16 @@ describe("TracePage", () => {
     expect(within(run).getByText("(1,200 in, 300 out)")).toBeInTheDocument();
     expect(within(run).getAllByText("team=search").length).toBeGreaterThan(0);
     expect(within(run).getByText(RUN)).toBeInTheDocument();
+  });
+
+  it("shows the run's scores on its line, the person's own theirs to take back", async () => {
+    render(await TracePage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+    const scores = within(screen.getByRole("group", { name: "Scores" }));
+    expect(scores.getByTitle("helpful, by a member")).toHaveTextContent("helpful 0.80");
+    expect(scores.getByTitle("grounded, from your code")).toHaveTextContent("grounded yes");
+    expect(scores.getByRole("button", { name: "Take back score helpful" })).toBeInTheDocument();
+    expect(scores.queryByRole("button", { name: "Take back score grounded" })).toBeNull();
+    expect(scores.getByRole("button", { name: "Score" })).toBeInTheDocument();
   });
 
   it("takes a tag off the run at its ×, and adds one from the form, each through the action", async () => {

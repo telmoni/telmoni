@@ -112,6 +112,16 @@ pub struct TraceFilter {
     /// The window's prices for the spend the rows show and sort by; none prices
     /// only what calls reported.
     pub prices: crate::prices::PriceBook,
+    /// A score the runs carry, within its bounds.
+    pub score: Option<ScoreFilter>,
+}
+
+/// A run admitted by a score of `name` it carries, `min` to `max` where given.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ScoreFilter {
+    pub name: String,
+    pub min: Option<f64>,
+    pub max: Option<f64>,
 }
 
 impl Default for TraceFilter {
@@ -130,6 +140,7 @@ impl Default for TraceFilter {
             runs: Vec::new(),
             days: DEFAULT_DAYS,
             prices: crate::prices::PriceBook::default(),
+            score: None,
         }
     }
 }
@@ -438,7 +449,11 @@ macro_rules! window {
             "FROM telemetry.spans ",
             "WHERE project_id IN {projects:Array(String)} ",
             "AND received_at >= now64(6) - toIntervalDay({days:UInt16}) ",
-            "AND (empty({runs:Array(UUID)}) OR has({runs:Array(UUID)}, run_id)) "
+            "AND (empty({runs:Array(UUID)}) OR has({runs:Array(UUID)}, run_id)) ",
+            // A run carrying a score of that name, within its bounds, on itself or a span.
+            "AND ({score:String} = '' OR run_id IN (SELECT run_id FROM telemetry.scores FINAL ",
+            "WHERE project_id IN {projects:Array(String)} AND name = {score:String} ",
+            "AND value >= {score_min:Float64} AND value <= {score_max:Float64})) "
         )
     };
 }
@@ -769,6 +784,26 @@ pub(crate) fn filtered(read: Read, filter: &TraceFilter) -> Read {
         .param("tags", &filter.tags)
         .param("prompts", &filter.prompts)
         .param("runs", &filter.runs)
+        .param(
+            "score",
+            filter.score.as_ref().map_or("", |s| s.name.as_str()),
+        )
+        .param(
+            "score_min",
+            filter
+                .score
+                .as_ref()
+                .and_then(|s| s.min)
+                .unwrap_or(f64::MIN),
+        )
+        .param(
+            "score_max",
+            filter
+                .score
+                .as_ref()
+                .and_then(|s| s.max)
+                .unwrap_or(f64::MAX),
+        )
 }
 
 /// One list over a window's runs — the traces, the sessions or the users —

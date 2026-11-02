@@ -44,6 +44,7 @@ function trace(ended_at: string): SessionTrace {
     environments: [],
     releases: [],
     tags: [],
+    scores: [],
     pinned: [],
   };
 }

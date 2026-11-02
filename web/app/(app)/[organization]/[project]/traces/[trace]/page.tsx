@@ -9,6 +9,7 @@ import { LayoutControls } from "@/components/traces/layout-controls";
 import { TraceLayoutBody } from "@/components/traces/trace-layout";
 import { LayoutProvider } from "@/components/traces/use-layout";
 import { TraceMeta } from "@/components/traces/trace-view";
+import { TraceScores } from "@/components/traces/trace-scores";
 import { Card } from "@/components/ui/card";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { MediaProjectProvider } from "@/components/traces/span-content";
@@ -21,6 +22,7 @@ import {
   fetchTrace,
   fetchTraceLayouts,
 } from "@/lib/server/data";
+import { fetchScores } from "@/lib/server/entities/scores";
 import { projectPage } from "@/lib/server/project-page";
 import { projectPath } from "@/lib/slug";
 import { summarizeTrace } from "@/lib/trace-tree";
@@ -44,11 +46,12 @@ export default async function TracePage({
   const { gate, project } = resolved;
 
   const list = tracesHref(organization, slug, {});
-  const [access, setting, layouts, incidents] = await Promise.all([
+  const [access, setting, layouts, incidents, scores] = await Promise.all([
     fetchTrace(project.id, runId),
     fetchSessionLayout(project.id),
     fetchTraceLayouts(project.id),
     fetchRunIncidents(project.id, runId),
+    fetchScores(project.id, runId),
   ]);
   if (access.kind === "unavailable") return <ServiceUnavailable />;
   if (access.kind === "forbidden") {
@@ -110,6 +113,19 @@ export default async function TracePage({
               projectId={project.id}
               incidents={incidents}
             />
+            {/* Its scores, and a member's own to give: none drawn where they could not be read. */}
+            {scores.kind === "ok" && (
+              <div aria-label="Scores" role="group" className="mt-gutter flex flex-wrap items-center gap-1">
+                <TraceScores
+                  projectId={project.id}
+                  runId={trace.run_id}
+                  scores={scores.scores}
+                  spanNames={Object.fromEntries(trace.spans.map((span) => [span.span_id, span.name]))}
+                  me={gate.person.userId}
+                  administers={administers(project.role)}
+                />
+              </div>
+            )}
           </div>
           <MediaProjectProvider projectId={project.id}>
             <TraceLayoutBody trace={trace} organization={organization} slug={slug} />

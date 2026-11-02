@@ -119,8 +119,33 @@ export const TraceColumn = {
   Models:           "models",
   Tools:            "tools",
   Tags:             "tags",
+  Scores:           "scores",
 } as const;
 export type TraceColumn = typeof TraceColumn[keyof typeof TraceColumn];
+
+/** Wire vocabulary of the Rust `ScoreType`: what a score's value is. */
+export const ScoreType = {
+  Number:   "number",
+  Boolean:  "boolean",
+  Category: "category",
+} as const;
+export type ScoreType = typeof ScoreType[keyof typeof ScoreType];
+
+/** Wire vocabulary of the Rust `ScoreSource`: who gave a score. */
+export const ScoreSource = {
+  Sdk:       "sdk",
+  Member:    "member",
+  Evaluator: "evaluator",
+} as const;
+export type ScoreSource = typeof ScoreSource[keyof typeof ScoreSource];
+
+/** Wire vocabulary of the Rust `ScoreTarget`: what a score judges. */
+export const ScoreTarget = {
+  Run:     "run",
+  Span:    "span",
+  Session: "session",
+} as const;
+export type ScoreTarget = typeof ScoreTarget[keyof typeof ScoreTarget];
 
 /** Wire vocabulary of the Rust `UserSort`: a column of the users page, named in the URL. */
 export const UserSort = {

@@ -140,15 +140,28 @@ fn incident() -> IncidentRow {
 fn the_trace_list_answers_as_the_console_reads() {
     pin(
         "traces",
-        &TraceList {
-            traces: vec![trace()],
-            days: 7,
-            limit: 50,
-            page: 1,
-            total: 1,
-            more: false,
-            sort: ListSort::Column(TraceSort::Started),
-            dir: SortDirection::Desc,
+        &telmoni_telemetry::handler::traces::ScoredTraceList {
+            list: TraceList {
+                traces: vec![trace()],
+                days: 7,
+                limit: 50,
+                page: 1,
+                total: 1,
+                more: false,
+                sort: ListSort::Column(TraceSort::Started),
+                dir: SortDirection::Desc,
+            },
+            scores: [(
+                RUN,
+                vec![telmoni_telemetry::scores::Summary {
+                    name: "helpful".into(),
+                    data_type: telmoni_shared::ScoreType::Number,
+                    mean: Some(0.8),
+                    count: 1,
+                    categories: Vec::new(),
+                }],
+            )]
+            .into(),
         },
     );
 }
@@ -351,6 +364,13 @@ fn a_session_answers_as_the_console_reads() {
             limit: 50,
             more: false,
             content: Some(turn()),
+            scores: vec![telmoni_telemetry::scores::Summary {
+                name: "resolved".into(),
+                data_type: telmoni_shared::ScoreType::Boolean,
+                mean: Some(0.5),
+                count: 2,
+                categories: Vec::new(),
+            }],
         },
     );
 }

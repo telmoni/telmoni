@@ -6,6 +6,8 @@ import { LocalTime } from "@/components/local-time";
 import { TraceStatusBadge } from "@/components/trace-status-badge";
 import { Badge } from "@/components/ui/badge";
 import type { Trace, TraceQuery } from "@/lib/server/entities/traces";
+import { scoreTitle, scoreWords } from "@/lib/scores";
+import type { ScoreSummary } from "@/lib/types/traces";
 import { formatCost, formatCount, formatDuration, type ColumnSpec, type FilterKey } from "@/lib/traces";
 import { TraceColumn } from "@/lib/types/enums";
 
@@ -34,6 +36,7 @@ export function cellClass(column: ColumnSpec): string {
     case TraceColumn.Tools:
       return "max-w-64 truncate text-xs";
     case TraceColumn.Tags:
+    case TraceColumn.Scores:
       return "max-w-64 text-xs";
     default:
       return "whitespace-nowrap";
@@ -63,6 +66,8 @@ export function titleOf(column: ColumnSpec, trace: Trace): string | undefined {
       return trace.releases.join(", ") || undefined;
     case TraceColumn.Tags:
       return trace.tags.join(", ") || undefined;
+    case TraceColumn.Scores:
+      return trace.scores.map((score) => `${score.name}: ${scoreWords(score)}`).join(", ") || undefined;
     default:
       return undefined;
   }
@@ -171,7 +176,25 @@ export function cellOf(
           href={narrowedTo ? (v) => narrowedTo("tag", v) : null}
         />
       );
+    case TraceColumn.Scores:
+      return <ScoreChips scores={trace.scores} />;
   }
+}
+
+/** A run's or a session's scores, each name and what it says a chip; a dash where it has none. */
+export function ScoreChips({ scores }: { scores: readonly ScoreSummary[] }) {
+  if (scores.length === 0) return <span className="text-muted-foreground">—</span>;
+  return (
+    <span className="flex flex-wrap gap-1">
+      {scores.map((score) => (
+        <Badge key={score.name} variant="outline" className="max-w-full font-normal" title={scoreTitle(score)}>
+          <span className="truncate">
+            {score.name} <span className="tabular-nums text-muted-foreground">{scoreWords(score)}</span>
+          </span>
+        </Badge>
+      ))}
+    </span>
+  );
 }
 
 /** A row's tags, each `key:value` a chip, and a filter where the page offers

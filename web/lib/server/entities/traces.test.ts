@@ -65,6 +65,8 @@ const LIST = {
   sort: "started",
   dir: "desc",
 };
+// What the console makes of it: each run's own scores put on its trace.
+const LISTED = { ...LIST, traces: [{ ...TRACE, scores: [] }] };
 
 const FACET = { values: [{ value: "nightly-report", count: 1 }], more: false };
 const FACETS = {
@@ -188,13 +190,20 @@ beforeEach(() => {
 });
 
 describe("fetchTraces", () => {
+  it("puts each run's own scores on its trace", async () => {
+    const helpful = { name: "helpful", data_type: "number", mean: 0.8, count: 1, categories: [] };
+    answer(200, { ...LIST, scores: { [TRACE.run_id]: [helpful] } });
+    const read = await fetchTraces(PROJECT, {});
+    expect(read.kind === "ok" && read.list.traces[0]?.scores).toEqual([helpful]);
+  });
+
   it("reads a page of the list from telemetry's lane, as the project, a filter's values given again", async () => {
     answer(200, LIST);
     expect(
       await fetchTraces(PROJECT, { agent: ["nightly-report", "zeta"], sort: "user", limit: 50, page: 2 }),
     ).toEqual({
       kind: "ok",
-      list: LIST,
+      list: LISTED,
     });
     const [url, init] = fetchWithTimeout.mock.calls[0]!;
     expect(url).toBe(
@@ -218,7 +227,7 @@ describe("fetchTraces", () => {
     answer(200, { ...LIST, sort: "tag:repo", dir: "asc" });
     expect(await fetchTraces(PROJECT, { sort: "tag:repo" })).toEqual({
       kind: "ok",
-      list: { ...LIST, sort: "tag:repo", dir: "asc" },
+      list: { ...LISTED, sort: "tag:repo", dir: "asc" },
     });
     expect(fetchWithTimeout.mock.calls[0]![0]).toBe(
       "http://server/internal/v1/telemetry/traces?sort=tag%3Arepo",

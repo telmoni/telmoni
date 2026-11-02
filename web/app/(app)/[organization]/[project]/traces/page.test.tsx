@@ -124,6 +124,7 @@ const TRACE_A = {
   environments: ["production"],
   releases: ["2026.10.18"],
   tags: ["repo:telmoni", "team:core"],
+  scores: [],
 };
 const TRACE_B = {
   ...TRACE_A,
@@ -139,6 +140,7 @@ const TRACE_B = {
   duration_ms: 500,
   time_to_first_token_ms: null,
   tags: [],
+  scores: [],
 };
 
 function list(over: Record<string, unknown> = {}) {
@@ -285,10 +287,11 @@ describe("TracesPage", () => {
     expect(table.getByText("1,500")).toBeInTheDocument();
     expect(table.getByText("2 s")).toBeInTheDocument();
     expect(table.getByText("500 ms")).toBeInTheDocument();
-    // Columns past the first eight are offered, not shown; the count holds the
+    // Columns past the first nine are offered, not shown; the count holds the
     // trace's id, which always shows.
     expect(table.queryByRole("columnheader", { name: /Model calls/ })).toBeNull();
-    expect(screen.getByRole("button", { name: /Columns/ })).toHaveTextContent("9/26");
+    expect(table.getByRole("columnheader", { name: /Scores/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Columns/ })).toHaveTextContent("10/27");
     // The window, the refresh and the columns stand on the title's row.
     const header = within(screen.getByTestId("page-header"));
     expect(header.getByRole("combobox", { name: "Window" })).toHaveTextContent("Last 7 days");

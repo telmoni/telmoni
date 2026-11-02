@@ -224,6 +224,8 @@ pub struct SessionDetail {
     /// for the reader and filed as their read: empty where the runs kept
     /// none, none where it could not be opened.
     pub content: Option<Vec<SpanFields>>,
+    /// Each score name of its runs and of itself: the mean and how many.
+    pub scores: Vec<crate::scores::Summary>,
 }
 
 /// One trace of a session's page: the list's sums, and the spans a layout
@@ -368,6 +370,9 @@ pub async fn get_session(
         .await
         .map_err(read_failed)?;
     let content = content_of(&state, &reader, &runs, Some(&own)).await;
+    let scores = crate::scores::of_session(&state.store, &projects, &session_id, &runs)
+        .await
+        .map_err(read_failed)?;
     Ok(Json(SessionDetail {
         session_id,
         traces: rows
@@ -382,6 +387,7 @@ pub async fn get_session(
         limit: window.limit,
         more,
         content,
+        scores,
     }))
 }
 

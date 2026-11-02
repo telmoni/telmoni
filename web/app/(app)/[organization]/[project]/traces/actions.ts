@@ -24,7 +24,7 @@ import {
   type TraceLayout,
 } from "@/lib/server/entities/traces";
 import { pathAndQuery, requestUrl } from "@/lib/server/path";
-import { SessionColumn, TraceColumn, UserColumn, ViewKind } from "@/lib/types/enums";
+import { ScoreType, SessionColumn, TraceColumn, UserColumn, ViewKind } from "@/lib/types/enums";
 
 // A project's saved views and layouts, saved, saved over and deleted; the
 // layout it opens in; a run's tags and its deletion; an end user's erasure:
@@ -315,4 +315,39 @@ export async function eraseEndUserAction(projectId: string, userId: unknown): Pr
   const erased = ErasedSchema.safeParse(await sent.res.json().catch(() => null));
   if (!erased.success) return refused("Unexpected response from telemetry.");
   return { ok: true, traces: erased.data.traces };
+}
+
+/** A person's scores a minute, given and taken back, as tags are. */
+const SCORINGS: Ceiling = { call: "traces:scores", limit: 30 };
+
+/** What a member's score sends: what it scores and what it says, before the
+ *  server checks its every rule. */
+const ScoreInputSchema = z.object({
+  run_id: z.guid().optional(),
+  span_id: z.string().max(64).optional(),
+  session_id: z.string().max(200).optional(),
+  name: z.string().min(1).max(64),
+  data_type: z.enum(ScoreType),
+  value: z.number().finite().optional(),
+  categories: z.array(z.string().max(64)).max(10).optional(),
+});
+
+/** A member's score of a run, one of its spans or a session, given again
+ *  replacing their last of that name. */
+export async function putScoreAction(projectId: string, score: unknown): Promise<ActionResult> {
+  const parsed = ScoreInputSchema.safeParse(score);
+  if (!parsed.success) return refused("That score could not be read.");
+  const sent = await call("PUT", "/scores", projectId, parsed.data, SCORINGS);
+  if (!sent.ok) return sent;
+  refresh();
+  return { ok: true };
+}
+
+/** A member's score taken back: their own, or anyone's by an owner or admin. */
+export async function deleteScoreAction(projectId: string, scoreId: string): Promise<ActionResult> {
+  if (!z.guid().safeParse(scoreId).success) return refused("Invalid score id.");
+  const sent = await call("DELETE", `/scores/${scoreId}`, projectId, undefined, SCORINGS);
+  if (!sent.ok) return sent;
+  refresh();
+  return { ok: true };
 }

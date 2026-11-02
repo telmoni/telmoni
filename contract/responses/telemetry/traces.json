@@ -4,6 +4,16 @@
   "limit": 50,
   "more": false,
   "page": 1,
+  "scores": {
+    "0192f3a1-7c2e-7b4d-9a61-3c5e8f0d2b17": [
+      {
+        "count": 1,
+        "data_type": "number",
+        "mean": 0.8,
+        "name": "helpful"
+      }
+    ]
+  },
   "sort": "started",
   "total": 1,
   "traces": [

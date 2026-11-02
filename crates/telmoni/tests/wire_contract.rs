@@ -23,9 +23,9 @@ use telmoni_shared::types::email::MAX_EMAIL_LEN;
 use telmoni_shared::{
     ApiKeyScope, ContentMode, Flag, IncidentStatus, LayoutDepth, LayoutOpen, MissingData,
     NotificationKind, OrganizationRole, OrganizationStatus, Role, RuleAggregation, RuleLevel,
-    RuleMeasure, RuleOperator, RuleWindow, SessionColumn, SessionSort, Severity, SortDirection,
-    SpanKind, SpanStatus, TelmoniResourceKind, TraceColumn, TraceSort, UserColumn, UserSort,
-    ViewKind, slug,
+    RuleMeasure, RuleOperator, RuleWindow, ScoreSource, ScoreTarget, ScoreType, SessionColumn,
+    SessionSort, Severity, SortDirection, SpanKind, SpanStatus, TelmoniResourceKind, TraceColumn,
+    TraceSort, UserColumn, UserSort, ViewKind, slug,
 };
 use telmoni_telemetry::content::FILE_ID_PREFIX;
 use telmoni_telemetry::contract::{CONTENT, UTC_OFFSET_RANGE};
@@ -103,6 +103,9 @@ fn generated_contract() -> Value {
             "RuleMeasure": wire::<RuleMeasure>(),
             "RuleAggregation": wire::<RuleAggregation>(),
             "RuleWindow": wire::<RuleWindow>(),
+            "ScoreSource": wire::<ScoreSource>(),
+            "ScoreTarget": wire::<ScoreTarget>(),
+            "ScoreType": wire::<ScoreType>(),
             "RuleOperator": wire::<RuleOperator>(),
             "MissingData": wire::<MissingData>(),
             "Severity": wire::<Severity>(),

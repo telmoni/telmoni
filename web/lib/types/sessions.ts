@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { SpanKind, SpanStatus } from "@/lib/types/enums";
-import { SpanFieldsSchema, TraceSchema } from "@/lib/types/traces";
+import { ScoreSummarySchema, SpanFieldsSchema, TraceSchema } from "@/lib/types/traces";
 
 // A session's page as the server answers it, parsed on the server by its
 // entity (`lib/server/entities/sessions.ts`) and in the browser by the peek.
@@ -41,5 +41,7 @@ export const SessionDetailSchema = z.object({
   /** Each run's own span's content, its read filed: empty where the runs
    *  kept none, null where it could not be opened. */
   content: z.array(SpanFieldsSchema).nullable(),
+  /** Each score name of its runs and of itself: the mean and how many. */
+  scores: z.array(ScoreSummarySchema).default([]),
 });
 export type SessionDetail = z.infer<typeof SessionDetailSchema>;

@@ -121,6 +121,10 @@ pub struct TraceQuery {
     pub prompt: Vec<String>,
     /// Runs by id: a download's chosen rows.
     pub run: Vec<String>,
+    /// A score the runs carry, by its name, and the least and most of its value.
+    pub score: Option<String>,
+    pub score_min: Option<String>,
+    pub score_max: Option<String>,
     /// The column to sort by ([`TraceSort`]).
     pub sort: Option<String>,
     /// Which way ([`SortDirection`]); the column's own default when unset.
@@ -168,6 +172,9 @@ impl TraceQuery {
                 ("utc_offset", Histogram) => &mut query.utc_offset,
                 ("format", Export | TraceExport) => &mut query.format,
                 ("q", _) => &mut query.q,
+                ("score", _) => &mut query.score,
+                ("score_min", _) => &mut query.score_min,
+                ("score_max", _) => &mut query.score_max,
                 _ => {
                     return Err(TelmoniError::BadRequest(
                         "the lane takes no parameter by that name".into(),
@@ -197,6 +204,51 @@ impl TraceQuery {
             Facet::Tag => &mut self.tag,
             Facet::Prompt => &mut self.prompt,
         }
+    }
+
+    /// The score the runs must carry: its name, and its value's bounds.
+    fn score_filter(&self) -> Result<Option<crate::traces::ScoreFilter>, TelmoniError> {
+        let bound = |given: &Option<String>, what: &str| -> Result<Option<f64>, TelmoniError> {
+            given
+                .as_deref()
+                .map(|v| {
+                    v.parse::<f64>()
+                        .ok()
+                        .filter(|v| v.is_finite())
+                        .ok_or_else(|| {
+                            TelmoniError::BadRequest(format!("{what} is a finite number"))
+                        })
+                })
+                .transpose()
+        };
+        let (min, max) = (
+            bound(&self.score_min, "score_min")?,
+            bound(&self.score_max, "score_max")?,
+        );
+        let Some(name) = self
+            .score
+            .as_deref()
+            .map(str::trim)
+            .filter(|n| !n.is_empty())
+        else {
+            if min.is_some() || max.is_some() {
+                return Err(TelmoniError::BadRequest(
+                    "score_min and score_max bound a score named by score".into(),
+                ));
+            }
+            return Ok(None);
+        };
+        if name.chars().count() > crate::scores::NAME_MAX {
+            return Err(TelmoniError::BadRequest(format!(
+                "a score's name is up to {} characters",
+                crate::scores::NAME_MAX
+            )));
+        }
+        Ok(Some(crate::traces::ScoreFilter {
+            name: name.to_owned(),
+            min,
+            max,
+        }))
     }
 
     /// The filter the query asks for, each value checked.
@@ -240,6 +292,7 @@ impl TraceQuery {
             runs,
             days: parse_days(self.days.as_deref())?,
             prices: crate::prices::PriceBook::default(),
+            score: self.score_filter()?,
         })
     }
 
@@ -1089,9 +1142,22 @@ pub async fn list_traces(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Query(pairs): Query<Vec<(String, String)>>,
-) -> Result<Json<TraceList>, TelmoniError> {
+) -> Result<Json<ScoredTraceList>, TelmoniError> {
     let project_id = reading(&state, &headers).await?;
-    Ok(Json(trace_list(&state, &project_id, pairs).await?))
+    let list = trace_list(&state, &project_id, pairs).await?;
+    let runs: Vec<Uuid> = list.traces.iter().map(|t| t.run_id).collect();
+    let scores = crate::scores::of_runs(&state.store, &Projects::one(project_id), &runs)
+        .await
+        .map_err(read_failed)?;
+    Ok(Json(ScoredTraceList { list, scores }))
+}
+
+/// The console's page of traces, and each run's own scores by name.
+#[derive(Debug, Serialize)]
+pub struct ScoredTraceList {
+    #[serde(flatten)]
+    pub list: TraceList,
+    pub scores: std::collections::BTreeMap<Uuid, Vec<crate::scores::Summary>>,
 }
 
 /// A page of the project's traces, as the console's lane and `/v1` answer it.

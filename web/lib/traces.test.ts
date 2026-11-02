@@ -85,6 +85,17 @@ const VIEW: TraceView = {
 };
 
 describe("the URL as the list's state", () => {
+  it("reads a score and its bounds, a chip that clears them together, and bounds alone as none", () => {
+    const query = parseTraceQuery({ score: " relevance ", score_min: "0.5", score_max: "x" });
+    expect(query).toMatchObject({ score: "relevance", score_min: 0.5 });
+    expect(query.score_max).toBeUndefined();
+    expect(parseTraceQuery({ score_min: "0.5" })).toEqual({});
+    expect(parseTraceQuery({ score: "x".repeat(65) })).toEqual({});
+    const chips = activeFilters({ score: "relevance", score_min: 0.5, score_max: 0.9 });
+    expect(chips).toEqual([{ filter: "score", label: "Score", value: "relevance", text: "relevance ≥ 0.5 ≤ 0.9" }]);
+    expect(without({ score: "relevance", score_min: 0.5, agent: ["a"] }, "score")).toEqual({ agent: ["a"] });
+  });
+
   it("reads each filter's values, the sort, the window and the page, and drops what the server would refuse", () => {
     expect(
       parseTraceQuery({
@@ -292,7 +303,7 @@ describe("the URL as the list's state", () => {
     expect(tagValues(pairs, "")).toEqual([]);
   });
 
-  it("offers every column the server names, and shows the list's first eight until a person picks", () => {
+  it("offers every column the server names, and shows the list's first nine until a person picks", () => {
     expect(TRACE_COLUMNS.map((c) => c.key).sort()).toEqual(Object.values(TraceColumn).sort());
     expect(DEFAULT_COLUMNS).toEqual([
       "started",
@@ -303,6 +314,7 @@ describe("the URL as the list's state", () => {
       "steps",
       "tokens",
       "duration",
+      "scores",
     ]);
     for (const column of TRACE_COLUMNS) {
       expect(Boolean(column.sort) === Boolean(column.first), column.key).toBe(true);
@@ -515,6 +527,7 @@ describe("a run's time to first token in the list", () => {
     environments: [],
     releases: [],
     tags: [],
+    scores: [],
   });
 
   it("reads as a duration, and as a dash where none of its calls reported one", () => {

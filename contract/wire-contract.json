@@ -196,6 +196,21 @@
       "week",
       "month"
     ],
+    "ScoreSource": [
+      "sdk",
+      "member",
+      "evaluator"
+    ],
+    "ScoreTarget": [
+      "run",
+      "span",
+      "session"
+    ],
+    "ScoreType": [
+      "number",
+      "boolean",
+      "category"
+    ],
     "SessionColumn": [
       "user",
       "traces",
@@ -273,7 +288,8 @@
       "time_to_first_token",
       "models",
       "tools",
-      "tags"
+      "tags",
+      "scores"
     ],
     "TraceSort": [
       "started",

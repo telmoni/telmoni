@@ -1,0 +1,44 @@
+---
+title: "Scores"
+description: "Scores on a run, a span or a session: from your code as OpenTelemetry's evaluation event, or from a member on a trace's page; each a number, a yes or no, or categories, shown on the trace, in the trace list's Scores column and at the head of a session."
+---
+
+A **score** judges a run, one of its spans or a session: a name, 1 to 64
+characters, and a value of one of three types.
+
+| Type | Value |
+|---|---|
+| Number | Any finite number, on a range where the score names one |
+| Yes or no | 1 or 0 |
+| Category | One to ten categories, each up to 64 characters |
+
+A score is metadata, kept in every
+[content mode](/docs/workspace/organizations-and-projects#a-projects-content-mode)
+for as long as the spans it judges, and it leaves with them: a trace deleted,
+an end user erased, a project deleted, or its days past retention.
+
+## Where scores come from
+
+- **Your code**, on any project: OpenTelemetry's `gen_ai.evaluation.result`
+  event on the span it judges, the run's where the event is on the run's own
+  span ([Scores](/docs/api/ingest#scores) on the ingest page). Any exporter
+  sends it, another exporter's spans' scores landing with their run.
+- **A member**, on a trace's page: **Score** under the trace's line takes a
+  name, a type and a value. A member's score of one name replaces their last
+  of that name on the trace, and their **×** takes it back; a project's owners
+  and admins take back any member's. Each is filed in the organization's
+  [audit log](/docs/workspace/audit-log) as a change to the trace, by its
+  name, never its value.
+
+## Where they show
+
+- **A trace's page**: every score of the run and of its spans under the
+  trace's line, a span's named by its span, each saying who gave it.
+- **The trace list**: the **Scores** column, on in the default columns, gives
+  each run's own scores by name, a number's mean where there are several, a
+  yes or no's share of yeses, and a category's values. `?score=` and a name
+  narrows the list to runs carrying that score, `score_min` and `score_max`
+  bounding its value; a run passes where any score of the name falls within
+  them.
+- **A session's page**: its head gives each score name's mean and how many,
+  across the session's runs and the session itself.

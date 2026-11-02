@@ -15,6 +15,14 @@
   "pinned": [
     "plan"
   ],
+  "scores": [
+    {
+      "count": 2,
+      "data_type": "boolean",
+      "mean": 0.5,
+      "name": "resolved"
+    }
+  ],
   "session_id": "s_9c2e",
   "traces": [
     {

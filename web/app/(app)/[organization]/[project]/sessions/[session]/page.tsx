@@ -9,6 +9,7 @@ import { Section } from "@/components/section";
 import { ServiceUnavailable } from "@/components/service-unavailable";
 import { LayoutControls } from "@/components/traces/layout-controls";
 import { SessionRuns } from "@/components/traces/session-runs";
+import { ScoreChips } from "@/components/traces/cells";
 import { TagEveryTrace } from "@/components/traces/tags";
 import { LayoutProvider } from "@/components/traces/use-layout";
 import { WindowPicker } from "@/components/window-picker";
@@ -164,6 +165,9 @@ export default async function SessionPage({
               <span className="text-sm text-muted-foreground">
                 <LocalTime iso={lastEnded} />
               </span>
+            </Row>
+            <Row label="Scores" hint="Each name's mean across its runs and the session itself.">
+              <ScoreChips scores={session.scores} />
             </Row>
           </Rows>
         </Section>
