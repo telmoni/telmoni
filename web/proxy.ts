@@ -162,6 +162,6 @@ export const proxy: NextProxy = async (request) => {
 // organization may go by, and its pages skipped everything above.
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon\\.ico|icon\\.svg|apple-icon\\.png|opengraph-image\\.png|twitter-image\\.png).*)',
+    '/((?!_next/static|_next/image|favicon\\.ico|icon\\.svg|icon\\.png|apple-icon\\.png|opengraph-image\\.png|twitter-image\\.png).*)',
   ],
 };
