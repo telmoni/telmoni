@@ -163,10 +163,10 @@ fn cut(lines: impl Iterator<Item = String>, total: usize) -> String {
 
 fn refused_line(refused: &Refused) -> String {
     let why = match &refused.reason {
-        Refusal::NotARun => {
-            "no telmoni.run_id and telmoni.agent; a span outside a Telmoni run is refused"
-                .to_owned()
-        }
+        Refusal::Waiting => format!(
+            "the project holds {} spans waiting for their trace; sent again later, it is kept",
+            crate::foreign::HELD_MAX
+        ),
         Refusal::Invalid(field) => format!("invalid {field}"),
         Refusal::OverCap(field) => format!("{field} over its cap"),
     };
@@ -240,7 +240,7 @@ mod tests {
         let report = Report {
             refused: vec![Refused {
                 span_id: "0f0f0f0f0f0f0f0f".into(),
-                reason: Refusal::NotARun,
+                reason: Refusal::Invalid("trace_id"),
             }],
             dropped: dropped(1..2),
             sampled_out: None,
@@ -249,7 +249,7 @@ mod tests {
         assert_eq!(partial.rejected_spans, 1);
         let lines: Vec<&str> = partial.error_message.lines().collect();
         assert_eq!(lines.len(), 2);
-        assert!(lines[0].starts_with("span 0f0f0f0f0f0f0f0f refused: no telmoni.run_id"));
+        assert_eq!(lines[0], "span 0f0f0f0f0f0f0f0f refused: invalid trace_id");
         assert_eq!(
             lines[1],
             "span 00f067aa0ba902b7 dropped gen_ai.input.messages.1: content; the project's \

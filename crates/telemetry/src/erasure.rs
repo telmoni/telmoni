@@ -183,12 +183,25 @@ pub async fn carry_out(
     found: Found,
     to: &UserId,
 ) -> Result<u64, TelmoniError> {
-    let run = match erase {
-        Erase::Trace(run) => Some(run),
-        Erase::EndUser(_) => None,
+    let (run, user) = match erase {
+        Erase::Trace(run) => (Some(run), None),
+        Erase::EndUser(user) => (None, Some(user.to_owned())),
     };
     let (state, project_id, to) = (Arc::clone(state), project_id.clone(), to.clone());
     tokio::spawn(async move {
+        // Theirs still held for their trace goes too, before it can land.
+        if let Some(user) = &user {
+            let mut tx = maintenance_scope(&state.db, TelemetryLane).await?;
+            sqlx::query(
+                "DELETE FROM telemetry.held_spans
+                  WHERE project_id = $1 AND landed_at IS NULL AND row->>'user_id' = $2",
+            )
+            .bind(&project_id)
+            .bind(user)
+            .execute(tx.conn())
+            .await?;
+            tx.commit().await?;
+        }
         let fields = delete(&state, &project_id, &found.runs).await?;
         let receipt = match run {
             Some(run_id) => Receipt::Trace {

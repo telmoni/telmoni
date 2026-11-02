@@ -34,11 +34,13 @@ use telmoni_shared::acting::ActingKey;
 use telmoni_shared::db::tenant_session::project_scope;
 use telmoni_shared::middleware::problem;
 use telmoni_shared::{
-    ContentMode, OrInternal, ProblemDetails, ProjectId, TelemetryError, TelmoniError,
+    ContentMode, OrInternal, OrganizationId, ProblemDetails, ProjectId, TelemetryError,
+    TelmoniError,
 };
 
 use crate::contract::{self, BATCH_MAX_BYTES, BATCH_SPANS_MAX};
-use crate::ingest::batch::{self, BatchError, SenderClock};
+use crate::hashing::UserIdStorage;
+use crate::ingest::batch::{self, Batch, BatchError, SenderClock};
 use crate::ingest::cardinality;
 use crate::ingest::claims::{self, Claim, Guard};
 use crate::ingest::decode::{self, DecodeError, Encoding};
@@ -246,54 +248,20 @@ async fn write(
     )
     .await;
 
-    // A run deleted as it still runs sends on: what it sends is not kept.
-    let runs = erasure::drop_deleted(state, &key.project_id, &mut batch).await;
-    if runs > 0 {
-        tracing::debug!(project_id = %key.project_id, runs, "ingest: spans of deleted runs dropped");
-    }
-    // Past the plan's month, what is not kept is counted in the answer, and
-    // past its content, the spans keep their metadata alone.
-    let (month, sampled) = crate::capacity::hold_spans(
+    // Another exporter's spans wait for their trace's tree, kept before the
+    // answer so a failure is retried.
+    let refused = crate::foreign::hold(state, key, std::mem::take(&mut batch.held)).await?;
+    batch.report.refused.extend(refused);
+    let held = land(
         state,
         &key.organization_id,
-        &mut batch,
+        &key.project_id,
         &storage,
         received_at,
+        &mut batch,
+        token,
     )
-    .await;
-    let held = crate::capacity::Held {
-        sampled,
-        content_full: crate::capacity::hold_content(state, &key.organization_id, &mut batch).await,
-    };
-    if let Err(error) = state.store.insert_spans_once(&batch.rows, token).await {
-        // ClickHouse may finish an insert the client stopped waiting for, as
-        // late as its own wait: settled once that has passed.
-        if matches!(error, clickhouse::error::Error::TimedOut) && !batch.rows.is_empty() {
-            settle_later(state, &key.project_id, ASYNC_INSERT_WAIT);
-        }
-        return Err(store_failed(error));
-    }
-    erasure::mark_late(state, &key.project_id, &mut batch).await;
-    // After the spans, so no content outlives or precedes its span: a write
-    // that fails lets the claim go, and the retry's spans land once under the
-    // token while its content is kept, each field once. A purge that took
-    // the settings row refuses the content, and the spans are settled all
-    // the same.
-    let kept = content::keep(
-        state,
-        &key.project_id,
-        received_at,
-        std::mem::take(&mut batch.content),
-    )
-    .await;
-    let here = !batch.rows.is_empty() && settle_written(state, &key.project_id).await;
-    kept?;
-    // What was written and kept, counted against the month once the whole
-    // export is, so a retry of one that failed is counted once.
-    if let Some(month) = month {
-        crate::capacity::count_spans(state, month, &batch.rows).await;
-    }
-
+    .await?;
     tracing::debug!(
         project_id = %key.project_id,
         token_id = %key.token_id,
@@ -302,19 +270,76 @@ async fn write(
         dropped = batch.report.dropped.len(),
         "ingest: export kept"
     );
+    let body = response_body(encoding, &batch.report, content_mode)?;
+    Ok((content_mode, body, held))
+}
+
+/// A batch's spans written and its content kept, as an export lands them
+/// and as [`crate::foreign`] lands another exporter's once placed: deleted
+/// runs dropped, the plan's month and content held, the month counted once
+/// the whole batch is kept, and the organization's consoles told.
+pub(crate) async fn land(
+    state: &Arc<AppState>,
+    organization_id: &OrganizationId,
+    project_id: &ProjectId,
+    storage: &UserIdStorage,
+    received_at: DateTime<Utc>,
+    batch: &mut Batch,
+    token: &str,
+) -> Result<crate::capacity::Held, TelmoniError> {
+    // A run deleted as it still runs sends on: what it sends is not kept.
+    let runs = erasure::drop_deleted(state, project_id, batch).await;
+    if runs > 0 {
+        tracing::debug!(project_id = %project_id, runs, "ingest: spans of deleted runs dropped");
+    }
+    // Past the plan's month, what is not kept is counted in the answer, and
+    // past its content, the spans keep their metadata alone.
+    let (month, sampled) =
+        crate::capacity::hold_spans(state, organization_id, batch, storage, received_at).await;
+    let held = crate::capacity::Held {
+        sampled,
+        content_full: crate::capacity::hold_content(state, organization_id, batch).await,
+    };
+    if let Err(error) = state.store.insert_spans_once(&batch.rows, token).await {
+        // ClickHouse may finish an insert the client stopped waiting for, as
+        // late as its own wait: settled once that has passed.
+        if matches!(error, clickhouse::error::Error::TimedOut) && !batch.rows.is_empty() {
+            settle_later(state, project_id, ASYNC_INSERT_WAIT);
+        }
+        return Err(store_failed(error));
+    }
+    erasure::mark_late(state, project_id, batch).await;
+    // After the spans, so no content outlives or precedes its span: a write
+    // that fails lets the claim go, and the retry's spans land once under the
+    // token while its content is kept, each field once. A purge that took
+    // the settings row refuses the content, and the spans are settled all
+    // the same.
+    let kept = content::keep(
+        state,
+        project_id,
+        received_at,
+        std::mem::take(&mut batch.content),
+    )
+    .await;
+    let here = !batch.rows.is_empty() && settle_written(state, project_id).await;
+    kept?;
+    // What was written and kept, counted against the month once the whole
+    // export is, so a retry of one that failed is counted once.
+    if let Some(month) = month {
+        crate::capacity::count_spans(state, month, &batch.rows).await;
+    }
     // The organization's open consoles are told, so a page reading this
     // project's spans draws itself again — unless nothing was kept or the
     // project is gone. The answer waits for the check, not the telling.
     if here {
         live::spans_ingested(
             Arc::clone(state),
-            key.organization_id.as_str(),
-            key.project_id.as_str(),
+            organization_id.as_str(),
+            project_id.as_str(),
             batch.rows.iter().map(|row| row.run_id),
         );
     }
-    let body = response_body(encoding, &batch.report, content_mode)?;
-    Ok((content_mode, body, held))
+    Ok(held)
 }
 
 /// The answer to an export sent again: its own bytes, the first copy's by

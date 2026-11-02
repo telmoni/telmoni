@@ -50,6 +50,7 @@ pub mod content;
 pub mod contract;
 pub mod db;
 pub mod erasure;
+pub mod foreign;
 pub mod handler;
 pub mod hashing;
 pub mod ingest;

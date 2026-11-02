@@ -546,6 +546,58 @@ CREATE POLICY maintenance_access ON telemetry.plain_content
 -- The purges delete a project's content, and a transfer counts it.
 GRANT SELECT, DELETE ON telemetry.plain_content TO telemetry_maintenance;
 
+-- Another exporter's spans, held until their trace's tree places them in a
+-- run (`foreign.rs`), their content sealed as `plain_content`'s; landed, a
+-- span keeps only its run, for a day, for a child arriving later.
+CREATE TABLE telemetry.held_spans (
+    project_id      TEXT        NOT NULL,
+    trace_id        TEXT        NOT NULL,
+    span_id         TEXT        NOT NULL,
+    parent_span_id  TEXT        NOT NULL,
+    received_at     TIMESTAMPTZ NOT NULL,
+    -- The row as ingest read it, under the nil run; none once landed.
+    row             JSONB,
+    fields          TEXT[]      NOT NULL DEFAULT '{}',
+    ciphertexts     BYTEA[]     NOT NULL DEFAULT '{}',
+    nonces          BYTEA[]     NOT NULL DEFAULT '{}',
+    -- Its run and the run's agent, once landed.
+    run_id          UUID,
+    agent           TEXT,
+    landed_at       TIMESTAMPTZ,
+    -- The token of a landing begun, which a retry lands it under again.
+    landing         TEXT,
+    -- When it was last left waiting for a parent not yet arrived.
+    tried_at        TIMESTAMPTZ,
+    PRIMARY KEY (project_id, trace_id, span_id),
+    CONSTRAINT held_spans_state_check CHECK (
+        (landed_at IS NULL AND row IS NOT NULL AND run_id IS NULL)
+        OR (landed_at IS NOT NULL AND row IS NULL AND run_id IS NOT NULL
+            AND agent IS NOT NULL AND cardinality(fields) = 0)
+    )
+);
+
+-- The loop finds the traces gone quiet by it, and the landed ones a day old.
+CREATE INDEX held_spans_waiting_idx ON telemetry.held_spans (received_at)
+    WHERE landed_at IS NULL;
+CREATE INDEX held_spans_landed_idx ON telemetry.held_spans (landed_at)
+    WHERE landed_at IS NOT NULL;
+
+ALTER TABLE telemetry.held_spans ENABLE ROW LEVEL SECURITY;
+ALTER TABLE telemetry.held_spans FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY tenant_isolation ON telemetry.held_spans
+    USING      (project_id = current_setting('app.project_id', true))
+    WITH CHECK (project_id = current_setting('app.project_id', true));
+
+CREATE POLICY maintenance_access ON telemetry.held_spans
+    TO telemetry_maintenance
+    USING      (current_user = 'telemetry_maintenance')
+    WITH CHECK (current_user = 'telemetry_maintenance');
+
+-- The loop lands each trace's spans, marks what it placed, drops what no run
+-- holds and the day-old marks; the purges delete a project's.
+GRANT SELECT, INSERT, UPDATE, DELETE ON telemetry.held_spans TO telemetry_maintenance;
+
 -- An image, audio or a file a message carried, kept once a project however
 -- many spans send it: sealed under the project's content key, the hash of
 -- its bytes as associated data, its bytes counted on `content_held`.

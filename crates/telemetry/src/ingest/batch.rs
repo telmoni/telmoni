@@ -28,6 +28,9 @@ pub struct Batch {
     pub rows: Vec<SpanRow>,
     /// The content of each kept span that carries any, on a project that keeps it.
     pub content: Vec<SpanContent>,
+    /// Another exporter's spans, each with its content, held until its
+    /// trace's tree places it in a run ([`crate::foreign`]).
+    pub held: Vec<(SpanRow, Vec<(String, String)>)>,
     /// The spans refused and the attributes dropped.
     pub report: Report,
 }
@@ -152,7 +155,36 @@ pub fn read(
             }
         }
     }
+    hold_foreign(&mut batch);
     Ok(batch)
+}
+
+/// Every span under the nil run, another exporter's, moved to `held` with
+/// its content, once its clock is read as its export's.
+fn hold_foreign(batch: &mut Batch) {
+    if batch.rows.iter().all(|row| !row.run_id.is_nil()) {
+        return;
+    }
+    let (held, rows): (Vec<SpanRow>, Vec<SpanRow>) = std::mem::take(&mut batch.rows)
+        .into_iter()
+        .partition(|row| row.run_id.is_nil());
+    batch.rows = rows;
+    let (mut theirs, ours): (Vec<SpanContent>, Vec<SpanContent>) =
+        std::mem::take(&mut batch.content)
+            .into_iter()
+            .partition(|content| content.run_id.is_nil());
+    batch.content = ours;
+    batch.held = held
+        .into_iter()
+        .map(|row| {
+            let fields = theirs
+                .iter()
+                .position(|c| c.trace_id == row.trace_id && c.span_id == row.span_id)
+                .map(|at| theirs.swap_remove(at).fields)
+                .unwrap_or_default();
+            (row, fields)
+        })
+        .collect();
 }
 
 /// Where no clock is believed, a trace ending over [`CLOCK_DRIFT_MAX_SECS`] past arrival
@@ -287,7 +319,7 @@ mod tests {
                 ("02".repeat(8), SpanKind::Step),
                 ("03".repeat(8), SpanKind::Span),
             ],
-            "the foreign span is refused"
+            "the foreign span is held"
         );
         assert!(batch.rows.iter().all(|row| row.received_at == now));
         assert_eq!(
@@ -304,12 +336,28 @@ mod tests {
         assert!(
             batch.rows[2].attributes.is_empty() || batch.rows[2].attributes[0].0 == "service.name"
         );
-        assert_eq!(batch.report.refused.len(), 1);
-        assert_eq!(batch.report.refused[0].span_id, "05".repeat(8));
-        assert!(
-            batch.report.dropped.is_empty(),
-            "{:?}",
-            batch.report.dropped
+        assert!(batch.report.refused.is_empty());
+        let held: Vec<&str> = batch
+            .held
+            .iter()
+            .map(|(row, _)| row.span_id.as_str())
+            .collect();
+        assert_eq!(
+            held,
+            ["05".repeat(8)],
+            "another exporter's span waits for its tree"
+        );
+        let dropped: Vec<(&str, &str)> = batch
+            .report
+            .dropped
+            .named()
+            .iter()
+            .map(|d| (d.span_id.as_str(), d.attribute.as_str()))
+            .collect();
+        assert_eq!(
+            dropped,
+            [("0505050505050505", "vendor.prompt")],
+            "kept, its unlisted text is dropped as any span's"
         );
     }
 
@@ -478,9 +526,13 @@ mod tests {
                 .collect(),
             ..span
         };
-        let not_a_run = Span {
-            attributes: Vec::new(),
-            ..ours(2, None)
+        // Refused once its attributes are read: it ends before it starts.
+        let refused = {
+            let span = ours(2, None);
+            Span {
+                end_time_unix_nano: span.start_time_unix_nano - 1,
+                ..span
+            }
         };
         let request = ExportTraceServiceRequest {
             resource_spans: vec![ResourceSpans {
@@ -488,7 +540,7 @@ mod tests {
                     contract::SCOPE,
                     vec![
                         with_unlisted(ours(1, None), 0, DROPS_NAMED_MAX - 3),
-                        with_unlisted(not_a_run, 0, 7),
+                        with_unlisted(refused, 0, 7),
                         with_unlisted(ours(3, None), 0, 5),
                     ],
                 )],

@@ -50,7 +50,7 @@ pub fn field_aad(span_id: &str, field: &str) -> String {
 
 /// `text` compressed and sealed under `key`, bound to `aad`: a ciphertext does
 /// not compress, so a field is compressed before it is sealed.
-fn seal_field(
+pub(crate) fn seal_field(
     vault: &Vault,
     key: &Dek,
     text: &Redacted,

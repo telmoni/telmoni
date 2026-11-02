@@ -1919,6 +1919,124 @@ async fn the_trace_and_session_pages_carry_content_each_read_filed(pool: PgPool)
     );
 }
 
+/// Another exporter's content waits sealed, never as text, and is kept under
+/// its run once its trace lands, readable as any run's.
+#[sqlx::test]
+async fn another_exporters_content_waits_sealed_and_lands_with_its_run(pool: PgPool) {
+    let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    apply_audit_migrations(&pool).await;
+    let door = door(&pool, ContentMode::On).await;
+    let attribute =
+        |key: &str, value: &str| json!({ "key": key, "value": { "stringValue": value } });
+    let body = json!({ "resourceSpans": [{
+        "resource": { "attributes": [attribute("service.name", "checkout")] },
+        "scopeSpans": [{ "scope": { "name": "openllmetry" }, "spans": [{
+            "traceId": TRACE, "spanId": SPAN, "name": "chat gpt-5",
+            "startTimeUnixNano": "1760000000000000000",
+            "endTimeUnixNano": "1760000001000000000",
+            "attributes": [
+                attribute(contract::OPERATION, "chat"),
+                attribute("gen_ai.input.messages", MESSAGES),
+            ],
+        }]}],
+    }]});
+    let (mode, _) = door.send(body.to_string().into_bytes()).await;
+    assert_eq!(mode, "on");
+    let waiting: Vec<(Vec<String>, Vec<Vec<u8>>)> =
+        sqlx::query_as("SELECT fields, ciphertexts FROM telemetry.held_spans")
+            .fetch_all(&pool)
+            .await
+            .expect("held");
+    assert_eq!(waiting.len(), 1);
+    assert_eq!(waiting[0].0, ["gen_ai.input.messages"]);
+    assert!(
+        !waiting[0].1[0].windows(2).any(|w| w == b"hi"),
+        "held as ciphertext, never as its text"
+    );
+    assert!(door.kept(&pool).await.is_empty(), "kept only once it lands");
+
+    sqlx::query("UPDATE telemetry.held_spans SET received_at = now() - interval '2 minutes'")
+        .execute(&pool)
+        .await
+        .expect("quiet");
+    telmoni_telemetry::foreign::land_quiet(&door.state)
+        .await
+        .expect("a pass");
+    let kept = door.kept(&pool).await;
+    assert_eq!(kept.len(), 1, "{kept:?}");
+    assert_eq!(kept[0].0, "gen_ai.input.messages");
+    let run = telmoni_telemetry::foreign::run_of_trace(&door.project, TRACE);
+    let opened = content::open(
+        &door.state,
+        Actor::Service("test"),
+        &door.project,
+        &[run],
+        None,
+    )
+    .await
+    .expect("opened");
+    assert_eq!(opened.len(), 1);
+    assert_eq!(
+        opened[0].fields,
+        [("gen_ai.input.messages".to_owned(), MESSAGES.to_owned())]
+    );
+    let left: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM telemetry.held_spans WHERE cardinality(ciphertexts) > 0",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("held");
+    assert_eq!(left, 0, "landed, it keeps no content of its own");
+}
+
+/// Content switched off while another exporter's spans wait: they land with
+/// their metadata and none of it, rather than wait on a key for good.
+#[sqlx::test]
+async fn held_content_switched_off_lands_without_it(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let door = door(&pool, ContentMode::On).await;
+    let attribute =
+        |key: &str, value: &str| json!({ "key": key, "value": { "stringValue": value } });
+    let body = json!({ "resourceSpans": [{ "scopeSpans": [{ "scope": { "name": "x" }, "spans": [{
+        "traceId": TRACE, "spanId": SPAN, "name": "chat gpt-5",
+        "startTimeUnixNano": "1760000000000000000",
+        "endTimeUnixNano": "1760000001000000000",
+        "attributes": [
+            attribute(contract::OPERATION, "chat"),
+            attribute("gen_ai.input.messages", MESSAGES),
+        ],
+    }]}]}]});
+    door.send(body.to_string().into_bytes()).await;
+    for sql in [
+        "UPDATE telemetry.project_settings SET content_mode = 'off'",
+        "UPDATE telemetry.held_spans SET received_at = now() - interval '2 minutes'",
+    ] {
+        sqlx::query(sql)
+            .execute(&pool)
+            .await
+            .expect("off, and quiet");
+    }
+    telmoni_telemetry::foreign::land_quiet(&door.state)
+        .await
+        .expect("a pass");
+    assert!(door.kept(&pool).await.is_empty(), "no content kept");
+    common::eventually("the span lands", || async {
+        ch.store
+            .read(
+                &Projects::one(door.project.clone()),
+                "SELECT count() FROM telemetry.spans WHERE project_id IN {projects:Array(String)}",
+            )
+            .fetch_one::<u64>()
+            .await
+            .is_ok_and(|spans| spans == 2)
+    })
+    .await;
+}
+
 /// A `read` key reads the traces, a trace's content only when it asks, each
 /// such read filed as the key's, the rollup and the incidents; an ingest key
 /// reads none.

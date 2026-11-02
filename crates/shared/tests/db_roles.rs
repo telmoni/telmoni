@@ -135,6 +135,7 @@ const LANE_DRAINED: &[&str] = &[
     "telemetry.plain_content",
     "telemetry.media",
     "telemetry.media_names",
+    "telemetry.held_spans",
 ];
 
 /// The runtime roles that write audit rows, each auditing its own writes on
@@ -590,6 +591,13 @@ async fn the_maintenance_lanes_narrowed_grants_hold_in_every_tier() {
             "telemetry_maintenance",
             "telemetry.media_names",
             &["SELECT", "DELETE"],
+        ),
+        // The loop lands another exporter's held spans and marks each with
+        // its run; the purges delete a project's.
+        (
+            "telemetry_maintenance",
+            "telemetry.held_spans",
+            &["SELECT", "INSERT", "UPDATE", "DELETE"],
         ),
         // The purges take a project's bytes off, or delete the organization's
         // row; a transfer moves a project's bytes, making the row it lands on.

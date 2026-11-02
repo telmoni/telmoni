@@ -131,6 +131,11 @@ BEGIN
     IF to_regclass('telemetry.plain_content') IS NOT NULL THEN
         EXECUTE 'REVOKE UPDATE, DELETE ON telemetry.plain_content FROM telemetry';
     END IF;
+    -- Another exporter's spans are held at the door and landed by the lane:
+    -- a request adds them and rewrites or removes none.
+    IF to_regclass('telemetry.held_spans') IS NOT NULL THEN
+        EXECUTE 'REVOKE UPDATE, DELETE ON telemetry.held_spans FROM telemetry';
+    END IF;
     IF to_regclass('telemetry.media') IS NOT NULL THEN
         EXECUTE 'REVOKE UPDATE, DELETE ON telemetry.media FROM telemetry';
     END IF;

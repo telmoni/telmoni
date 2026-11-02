@@ -4,10 +4,10 @@
   "body": {
     "partialSuccess": {
       "rejectedSpans": 1,
-      "errorMessage": "span 5b8aa5a2d2c872e8 refused: no telmoni.run_id and telmoni.agent; a span outside a Telmoni run is refused"
+      "errorMessage": "span 5b8aa5a2d2c872e8 refused: invalid end_time"
     }
   },
   "expect": "one warning carrying the server's line; the export is not retried",
-  "warning": "telmoni: the server refused a span: no telmoni.run_id and telmoni.agent; a span outside a Telmoni run is refused",
+  "warning": "telmoni: the server refused a span: invalid end_time",
   "fields": { "kind": "span_refused" }
 }

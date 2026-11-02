@@ -1132,5 +1132,11 @@ async fn purge_project_content(
     tx: &mut Scoped<'_, Maintenance<TelemetryLane>>,
     project_ids: &[ProjectId],
 ) -> sqlx::Result<u64> {
-    delete_content(tx.conn(), project_ids, None, i64::MAX).await
+    // Another exporter's spans still held go with their project too.
+    let held = sqlx::query("DELETE FROM telemetry.held_spans WHERE project_id = ANY($1)")
+        .bind(project_ids)
+        .execute(tx.conn())
+        .await?
+        .rows_affected();
+    Ok(held + delete_content(tx.conn(), project_ids, None, i64::MAX).await?)
 }

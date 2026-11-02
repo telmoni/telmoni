@@ -36,12 +36,37 @@ key without the ingest scope answers `403` `/errors/authz/forbidden`.
 
 ## What a span must carry
 
-Spans are kept inside a **run**: one execution of an agent. Every span of a
-run carries the run's id, `telmoni.run_id`, a UUID minted as the run starts
-and the same on each of its spans, and the run's agent, `telmoni.agent`, up to
-128 characters. A span without both is refused, one by one, and named in the
-answer, so a stock OpenTelemetry exporter sends nothing that is kept unless the
-application sets both on every span itself.
+Spans are kept inside a **run**: one execution of an agent. Our SDKs mark
+every span of a run with the run's id, `telmoni.run_id`, a UUID minted as the
+run starts and the same on each of its spans, and the run's agent,
+`telmoni.agent`, up to 128 characters, and those spans are kept as they arrive.
+
+A span without both, from any other OpenTelemetry exporter, is kept too, once
+its trace says which run it is of. It is answered as kept and held until its
+trace has sent nothing for a minute, or for five minutes while it still sends,
+then placed. A span ends before its parent, so one whose parent has not
+arrived waits for it, up to an hour: an agent's own span comes last.
+
+- An `invoke_agent` or `invoke_workflow` span with neither above it is a run,
+  its id derived from the trace's and span's ids, its agent its
+  `gen_ai.agent.name` (or `gen_ai.workflow.name`, else its own name), cut to
+  128 characters. Every span under it is of that run; one more agent under it
+  is a plain span of it.
+- The model and tool calls of a trace with no run above them, as from an
+  application instrumented at its model client alone, are one run of their
+  own, its id derived from the trace's id and its agent the resource's
+  `service.name` (`unknown_service` where it names none), with a span of its
+  own from the first call's start to the last one's end.
+- Every other span, in no run, is dropped: Telmoni keeps agents' runs, not
+  every request a service handles.
+
+A span arriving after its trace was placed joins the run its parent did, for a
+day; the span of a run of calls alone is written once, so a call arriving later
+does not move its end. Every other rule on this page holds for it as for ours —
+content, the inventory, the caps, the plan — but applied as it lands, after
+the answer: a span dropped or sampled out then is not named in it. A project
+holds up to 100,000 such spans waiting at once; past it, each is refused,
+named in the answer, and kept when sent again later.
 
 What a span is, its **kind**, follows `gen_ai.operation.name`: `invoke_agent`
 or `invoke_workflow` is the run itself; `chat`, `generate_content`,
@@ -198,7 +223,7 @@ then a count of the rest:
 {
   "partialSuccess": {
     "rejectedSpans": 1,
-    "errorMessage": "span 0202020202020202 refused: no telmoni.run_id and telmoni.agent; a span outside a Telmoni run is refused\nspan 00f067aa0ba902b7 dropped gen_ai.input.messages: content; the project's content mode is off"
+    "errorMessage": "span 0202020202020202 refused: invalid end_time\nspan 00f067aa0ba902b7 dropped gen_ai.input.messages: content; the project's content mode is off"
   }
 }
 ```

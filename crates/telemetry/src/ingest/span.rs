@@ -43,9 +43,9 @@ pub struct Context<'a> {
 /// Why a span was refused whole.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Refusal {
-    /// No `telmoni.run_id` and `telmoni.agent`: a span from an exporter other
-    /// than ours, refused until a run can be read out of any trace.
-    NotARun,
+    /// Another exporter's span past the spans its project holds waiting for
+    /// their trace ([`crate::foreign::HELD_MAX`]).
+    Waiting,
     /// A field whose value is not what its rule asks: the field's name.
     Invalid(&'static str),
     /// A field past its cap: the field's name.
@@ -261,8 +261,11 @@ pub fn map(
     }
     fields.read_failure(span, &span_id, dropped);
 
-    let (Some(run_id), Some(agent)) = (fields.run_id, fields.agent.take()) else {
-        return Err(refuse(Refusal::NotARun));
+    // Without both, a span from another exporter: held under the nil run until
+    // its trace's tree says which run it is of ([`crate::foreign`]).
+    let (run_id, agent) = match (fields.run_id, fields.agent.take()) {
+        (Some(run_id), Some(agent)) => (run_id, agent),
+        _ => (Uuid::nil(), String::new()),
     };
     let kind = match fields
         .operation
@@ -278,7 +281,13 @@ pub fn map(
             .agent_name
             .take()
             .or_else(|| fields.workflow_name.take())
-            .unwrap_or_else(|| agent.clone()),
+            .unwrap_or_else(|| {
+                if agent.is_empty() {
+                    span.name.clone()
+                } else {
+                    agent.clone()
+                }
+            }),
         SpanKind::ToolCall => fields.tool_name.take().unwrap_or_else(|| span.name.clone()),
         SpanKind::Step | SpanKind::ModelCall | SpanKind::Span => span.name.clone(),
     };
@@ -1205,24 +1214,26 @@ mod tests {
         assert_eq!(row.kind, SpanKind::Span);
     }
 
-    /// ⚠ For now a span with no run is another exporter's: refused, the
-    /// rest of its batch kept.
+    /// A span with no run is another exporter's: kept under the nil run, its
+    /// operation naming its kind, for its trace's tree to place.
     #[test]
-    fn a_span_outside_a_run_is_refused() {
+    fn a_span_outside_a_run_is_held_under_the_nil_run() {
         let project = ProjectId::new();
         let keep = |id: &str| id.to_owned();
         let foreign = Span {
             attributes: vec![kv(contract::OPERATION, s("chat"))],
             ..call()
         };
-        let refused = map(
+        let (row, _) = map(
             &foreign,
             &context(&project, &[], &keep),
             &mut Drops::default(),
         )
-        .unwrap_err();
-        assert_eq!(refused.reason, Refusal::NotARun);
-        assert_eq!(refused.span_id, "0f".repeat(8));
+        .expect("held");
+        assert!(row.run_id.is_nil());
+        assert_eq!(row.agent, "");
+        assert_eq!(row.kind, SpanKind::ModelCall);
+        assert_eq!(row.span_id, "0f".repeat(8));
     }
 
     #[test]
