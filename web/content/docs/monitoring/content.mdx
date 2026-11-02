@@ -1,0 +1,94 @@
+---
+title: "Content"
+description: "What a run said, kept in full when both locks are on: the project's content mode and the SDK's capture switch. What is kept — messages, tool payloads, images and files, failures and metadata — where it is read, searched and recorded, and how long it stays."
+---
+
+**Content** is what a person or a model wrote during a run: the prompts and
+completions of its model calls, the inputs and outputs of its tool calls, the
+images and files a message carried, a failure's message and stack trace, and
+any metadata your code attaches beyond what the
+[field inventory](/docs/api/field-inventory) names. Everything else a span
+carries is **metadata** — its name, timings, status, tokens, model and tool
+names, tags, a user id, an error's type — which Telmoni keeps on every project,
+whatever its mode.
+
+## The two locks
+
+Content leaves your code only when both of these are on, and with either off
+the span is sent and kept without it:
+
+1. **Your switch, in the SDK.** A client sends content only when it is built
+   with `capture_content` on (`captureContent` in TypeScript, `CaptureContent`
+   in Go), or from the environment with `TELMONI_CAPTURE_CONTENT=1`
+   ([SDKs](/docs/api/sdks#content)). Each coding-agent plugin has the same
+   switch beside its key ([Coding agents](/docs/api/coding-agents#a-turns-conversation)).
+2. **The project's content mode**, `off` until the organization's Owner turns
+   it `on` on the project's **Settings** page, with a code mailed to them
+   ([A project's content mode](/docs/workspace/organizations-and-projects#a-projects-content-mode)).
+   The SDK asks the server for the mode before the first content it would
+   send, and learns it again from every answer. Ingest reads it on every
+   export too, and drops content at the door on a project left `off`
+   ([Ingest](/docs/api/ingest#what-is-dropped-at-the-door)).
+
+## What is kept
+
+On a project that keeps content, ingest keeps each piece whole, past the 1,024
+characters an attribute is otherwise held to, sealed under a key of the
+project's own, in Postgres alone, never in the span store:
+
+- **Messages**: a model call's system instructions, the tools it was offered,
+  and its input and output messages; and a run's own input and output, its
+  turn of a conversation.
+- **Tool payloads**: a tool call's arguments and result; a retrieval's query
+  and documents.
+- **Images and files**: a part of a message holding a file's bytes is lifted
+  out by the SDK before export and sent once, by its SHA-256, to
+  `PUT /v1/media/{sha256}`, up to 5 MiB a file, and the message names it
+  ([SDKs](/docs/api/sdks#content)). The trace page draws a PNG, JPEG, GIF or
+  WebP image, plays audio, and offers any other file as a download.
+- **Failures**: a failed span's status message, its `exception` event with
+  the stack trace, and every event your code adds to a span. With either lock
+  off, a failure keeps its `error.type` and its error status alone.
+- **Metadata**: any text, list or map attribute of a span the field inventory
+  does not name. One on the resource is dropped in every mode, since a
+  resource is copied onto every span of its export.
+
+A field an SDK cut to fit an export is not kept, and the trace says so.
+
+## Where it is read
+
+- **The trace's page** and its view beside the list show each span's content
+  in full ([Traces](/docs/monitoring/traces#content)).
+- **The session's page** shows each run's own turn, so the session reads as
+  its conversation ([Sessions](/docs/monitoring/sessions)).
+- **A download** of the trace list carries every run's content.
+- **The API** answers a trace's content with `content=true`
+  ([API reference](/docs/api/reference#get-v1tracesrun_id)).
+
+Each read is recorded in the organization's
+[audit log](/docs/workspace/audit-log) as `viewed` before the content is sent,
+naming the traces read and never what they hold, and the project's
+**Privacy** page lists who read it. The console agent reads none of it, in any
+mode.
+
+## Searching it
+
+The trace list's search finds the traces whose kept content holds every word
+you type, without opening any of it: each field keeps its words only as keyed
+hashes ([Searching kept content](/docs/monitoring/traces#searching-kept-content)).
+
+## How long it stays
+
+Content is kept as long as its span, the project's retention
+([Data retention](/docs/workspace/data-retention)), and deleted with it, with
+its trace, with the project, and by an end user's erasure
+([Data deletion](/docs/workspace/data-deletion)). Turning the mode back to
+`off` takes in no more, and keeps what was sent until its retention ends,
+unless the Owner also ticks **Also delete what this project kept**, which
+deletes its key at once and its rows right after
+([Deleting a project's content](/docs/workspace/data-deletion#deleting-a-projects-content)).
+On a deployment that sells plans, an organization past its plan's content
+ceiling keeps each new span's metadata alone, each field named
+`content_full`, and keeps no file uploaded apart
+([Ingest](/docs/api/ingest)); a self-hosted installation has no plans and no
+ceiling.

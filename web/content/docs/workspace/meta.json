@@ -3,10 +3,6 @@
   "defaultOpen": true,
   "pages": [
     "organizations-and-projects",
-    "traces",
-    "sessions",
-    "users",
-    "alerts",
     "members",
     "roles",
     "audit-log",

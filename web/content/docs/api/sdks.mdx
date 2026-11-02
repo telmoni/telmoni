@@ -784,7 +784,7 @@ SDK's name, language and version) and, where you set them, the deployment:
 `TELMONI_ENVIRONMENT` (`production`, `staging`), and `service.version` from
 `release` or `TELMONI_RELEASE` (a version or a commit), which Telmoni keeps as
 the `environment` and `release` of every span and the trace list
-[filters](/docs/workspace/traces#filters) by. Either past 128 characters, which
+[filters](/docs/monitoring/traces#filters) by. Either past 128 characters, which
 Telmoni would read as no deployment, is left off with one warning. A step is a span named as you named it; a model call is
 `<operation> <model>`, the operation `chat` unless you gave `generate_content`,
 `text_completion` or `embeddings`, with the model asked for, the

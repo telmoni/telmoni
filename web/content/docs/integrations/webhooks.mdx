@@ -181,9 +181,9 @@ change applies from the next notice. The body's `kind` is one of:
 Slack channels receive every kind. An alert's incidents, though, go only to
 the connectors each alert links, Slack channels and webhooks alike, at the
 level and in the hours it sets for each and outside its
-[maintenance windows](/docs/workspace/alerts#maintenance-windows), save that
+[maintenance windows](/docs/monitoring/alerts#maintenance-windows), save that
 one which heard an incident hears it resolve whenever it does
-([making an alert](/docs/workspace/alerts#making-an-alert)); a webhook it
+([making an alert](/docs/monitoring/alerts#making-an-alert)); a webhook it
 links hears them only if it takes their kind.
 
 **Send test** on the webhook's row posts one signed `connector_connected` body

@@ -1,0 +1,12 @@
+{
+  "title": "Monitoring",
+  "defaultOpen": true,
+  "pages": [
+    "traces",
+    "sessions",
+    "users",
+    "alerts",
+    "content",
+    "..."
+  ]
+}

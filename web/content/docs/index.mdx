@@ -5,9 +5,10 @@ description: "What Telmoni is today, core architecture, and navigation guide."
 
 Telmoni is privacy-first telemetry and monitoring for AI agents. Its SDKs
 record an agent's runs, ingest keeps them as metadata with content dropped at
-the door, and the console reads them as [traces](/docs/workspace/traces),
-[sessions](/docs/workspace/sessions) and
-[users](/docs/workspace/users), and [alerts](/docs/workspace/alerts) on them.
+the door, or kept in full where a project turns it on
+([Content](/docs/monitoring/content)), and the console reads them as [traces](/docs/monitoring/traces),
+[sessions](/docs/monitoring/sessions) and
+[users](/docs/monitoring/users), and [alerts](/docs/monitoring/alerts) on them.
 Underneath is a foundation for organizations and their projects: members and
 roles, API keys, notifications and a hash-chained audit log, with a CLI and an
 HTTP API. The console's Dashboards page is not built yet. These documentation pages describe the open core
@@ -39,7 +40,7 @@ platform deployed on your own infrastructure:
   and organization notices, and fan-out delivery to
   [Slack](/docs/integrations/slack) and signed
   [Webhooks](/docs/integrations/webhooks).
-- **[Alerts](/docs/workspace/alerts)**: A measure of a project's runs, steps,
+- **[Alerts](/docs/monitoring/alerts)**: A measure of a project's runs, steps,
   model calls or tool calls over the last hour, day or week against an alert
   threshold and an optional warning one, evaluated every minute; each incident
   told to the feed and the connectors an alert links, and acknowledged or
