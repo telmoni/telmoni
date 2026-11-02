@@ -47,7 +47,7 @@ COPY crates/ crates/
 COPY sdk/rust/ sdk/rust/
 RUN cargo build --release --locked --target x86_64-unknown-linux-musl -p telmoni-server
 
-FROM gcr.io/distroless/static-debian13:nonroot@sha256:18f4cc26c9ffa7f20a359298be7deadac5c607c8e03a02b8119f1a5fc2f82c99
+FROM gcr.io/distroless/static-debian13:nonroot@sha256:25ac8f0c3b2334a9eb05452266bd4697864a8c8ef0ef71e5e6480d7f92868329
 COPY --from=builder /app/target/x86_64-unknown-linux-musl/release/telmoni-server /app/telmoni-server
 # `telmoni-server migrate` reads /app/migrations/<schema>, every directory there,
 # `audit` first — every module's `emit_audit` needs `audit.events` to exist.
