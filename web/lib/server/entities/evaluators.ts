@@ -1,10 +1,10 @@
 import { cache } from "react";
 import { z } from "zod";
 
-import { ScoreType } from "@/lib/types/enums";
+import { EvaluationTarget, ScoreType, SpanKind } from "@/lib/types/enums";
 
 import { valueOf } from "./read";
-import { readLane } from "./traces";
+import { ViewQuerySchema, readLane } from "./traces";
 
 // An evaluator as the lanes answer it: its prompt, the score it gives with
 // each end or category described for the model, and the model it judges with.
@@ -102,4 +102,45 @@ export const fetchEvaluatorVersions = cache(
       ? (valueOf(await readLane("fetchEvaluatorVersions", projectId, `/evaluators/${id}`, VersionsSchema))
           ?.versions ?? null)
       : null,
+);
+
+// A rule: what its evaluators judge, under the trace list's own filters,
+// and the share of it they judge.
+export const EvaluationRuleSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  target: z.enum(EvaluationTarget),
+  span_kind: z.enum(SpanKind).nullable(),
+  span_name: z.string().nullable(),
+  query: ViewQuerySchema,
+  sample_rate: z.number(),
+  pointers: z.record(z.string(), z.string()),
+  enabled: z.boolean(),
+  backfill_from: z.string().nullable(),
+  evaluators: z.array(z.string()),
+  created_by: z.string(),
+  created_at: z.string(),
+  updated_at: z.string(),
+});
+export type EvaluationRule = z.infer<typeof EvaluationRuleSchema>;
+
+export const EvaluationRulesSchema = z.object({
+  rules: z.array(EvaluationRuleSchema),
+  session_idle_minutes: z.number().int(),
+});
+export type EvaluationRules = z.infer<typeof EvaluationRulesSchema>;
+
+export const RulePreviewSchema = z.object({
+  days: z.number().int(),
+  targets: z.number(),
+  judged: z.number(),
+  evaluators: z.array(
+    z.object({ id: z.string(), name: z.string(), model: z.string(), cost: z.number().nullable() }),
+  ),
+});
+export type RulePreview = z.infer<typeof RulePreviewSchema>;
+
+export const fetchEvaluationRules = cache(
+  async (projectId: string): Promise<EvaluationRules | null> =>
+    valueOf(await readLane("fetchEvaluationRules", projectId, "/evaluation-rules", EvaluationRulesSchema)) ?? null,
 );

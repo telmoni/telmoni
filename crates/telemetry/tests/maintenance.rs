@@ -55,6 +55,8 @@ impl Entitlements for Ceiling {
             deliveries_per_day: 1_000,
             entitlement: "teams".into(),
             detail: "The plan holds fewer alerts.".into(),
+            evaluation_rules: 2,
+            evaluation_rules_detail: "This organization's plan holds two evaluation rules.".into(),
         }))
     }
 }

@@ -40,6 +40,8 @@ pub enum TelmoniResourceKind {
     ModelConnection,
     /// A project's evaluator: a version saved, or the evaluator deleted.
     Evaluator,
+    /// A project's evaluation rule: made, changed or deleted.
+    EvaluationRule,
 }
 
 crate::wire_enum!(TelmoniResourceKind {
@@ -56,6 +58,7 @@ crate::wire_enum!(TelmoniResourceKind {
     EndUser => "end_user",
     ModelConnection => "model_connection",
     Evaluator => "evaluator",
+    EvaluationRule => "evaluation_rule",
 });
 
 #[cfg(test)]

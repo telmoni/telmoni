@@ -175,6 +175,28 @@ const MUTATIONS: &[Mutation] = &[
         resource_kind: "Evaluator",
         actor_id: ActorPattern::Variable,
     },
+    // A project's evaluation rule, made, changed or deleted by an owner or admin.
+    Mutation {
+        file: "crates/telemetry/src/handler/evaluation_rules.rs",
+        fn_name: "put_rule",
+        action: "Created",
+        resource_kind: "EvaluationRule",
+        actor_id: ActorPattern::Variable,
+    },
+    Mutation {
+        file: "crates/telemetry/src/handler/evaluation_rules.rs",
+        fn_name: "put_rule",
+        action: "Updated",
+        resource_kind: "EvaluationRule",
+        actor_id: ActorPattern::Variable,
+    },
+    Mutation {
+        file: "crates/telemetry/src/handler/evaluation_rules.rs",
+        fn_name: "delete_rule",
+        action: "Deleted",
+        resource_kind: "EvaluationRule",
+        actor_id: ActorPattern::Variable,
+    },
     // A member's score, given or taken back, filed as a change to its trace.
     Mutation {
         file: "crates/telemetry/src/handler/scores.rs",

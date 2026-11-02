@@ -610,6 +610,17 @@ async fn the_maintenance_lanes_narrowed_grants_hold_in_every_tier() {
             "telemetry.evaluators",
             &["SELECT", "DELETE"],
         ),
+        // The evaluation loop reads every project's rules; the purges delete them.
+        (
+            "telemetry_maintenance",
+            "telemetry.evaluation_rules",
+            &["SELECT", "DELETE"],
+        ),
+        (
+            "telemetry_maintenance",
+            "telemetry.evaluation_rule_evaluators",
+            &["SELECT", "DELETE"],
+        ),
         // The loop lands another exporter's held spans and marks each with
         // its run; the purges delete a project's.
         (

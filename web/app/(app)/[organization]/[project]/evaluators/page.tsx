@@ -5,15 +5,18 @@ import { ServiceUnavailable } from "@/components/service-unavailable";
 import { Card } from "@/components/ui/card";
 import { administers } from "@/lib/roles";
 import {
+  fetchEvaluationRules,
   fetchEvaluatorTemplates,
   fetchEvaluatorVersions,
   fetchEvaluators,
 } from "@/lib/server/entities/evaluators";
+import { fetchTraceViews } from "@/lib/server/entities/traces";
 import { fetchModelConnections } from "@/lib/server/entities/model-connections";
 import { projectPage } from "@/lib/server/project-page";
 import { projectPath } from "@/lib/slug";
 
 import { Evaluators } from "./_evaluators";
+import { Rules } from "./_rules";
 
 export const metadata = { title: "Evaluators" };
 
@@ -30,14 +33,20 @@ export default async function EvaluatorsPage({
   const { project } = resolved;
   const named = typeof query.versions === "string" ? query.versions : null;
 
-  const [listing, templates, connections, versions] = await Promise.all([
+  const [listing, templates, connections, rules, views, versions] = await Promise.all([
     fetchEvaluators(project.id),
     fetchEvaluatorTemplates(project.id),
     fetchModelConnections(project.id),
+    fetchEvaluationRules(project.id),
+    fetchTraceViews(project.id),
     named ? fetchEvaluatorVersions(project.id, named) : null,
   ]);
-  if (!listing || !templates || !connections) return <ServiceUnavailable />;
+  if (!listing || !templates || !connections || !rules) return <ServiceUnavailable />;
   const here = projectPath(organization, slug, "/evaluators");
+  const rulesOf: Record<string, string[]> = {};
+  for (const rule of rules.rules) {
+    for (const id of rule.evaluators) (rulesOf[id] ??= []).push(rule.name);
+  }
 
   return (
     <>
@@ -46,12 +55,24 @@ export default async function EvaluatorsPage({
         evaluators={listing.evaluators}
         templates={templates}
         connections={connections}
+        rulesOf={rulesOf}
         contentKept={listing.content_kept}
         canEdit={administers(project.role)}
         here={here}
         privacyHref={projectPath(organization, slug, "/privacy")}
         settingsHref={projectPath(organization, slug, "/settings")}
       />
+      <div className="mt-gutter">
+        <Rules
+          projectId={project.id}
+          rules={rules.rules}
+          evaluators={listing.evaluators}
+          views={views.kind === "ok" ? views.views : []}
+          idleMinutes={rules.session_idle_minutes}
+          canEdit={administers(project.role)}
+          contentKept={listing.content_kept}
+        />
+      </div>
       {versions && versions.length > 0 && (
         <Card className="mt-gutter grid gap-gutter p-gutter text-sm" role="region" aria-label="Versions">
           <div className="flex items-center justify-between gap-gutter">

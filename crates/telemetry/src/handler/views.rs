@@ -139,7 +139,7 @@ pub struct ViewQuery {
 impl ViewQuery {
     /// The query checked by `kind`'s list's own rules, and kept as they leave
     /// it: each value trimmed and given once.
-    fn checked(self, kind: ViewKind) -> Result<Self, TelmoniError> {
+    pub(crate) fn checked(self, kind: ViewKind) -> Result<Self, TelmoniError> {
         let sort = match self.sort.as_deref() {
             None => None,
             Some(given) => Some(sort_of(kind, given).ok_or_else(|| {
@@ -181,6 +181,33 @@ impl ViewQuery {
             days: self.days.map(check_days).transpose()?,
             limit: self.limit.map(check_limit).transpose()?,
         })
+    }
+}
+
+impl ViewQuery {
+    /// The trace list's filter the query holds, over the last `days`: what
+    /// an evaluation rule finds its targets with.
+    ///
+    /// # Errors
+    ///
+    /// A value the list does not take, as [`TraceQuery::filter`] names it.
+    pub(crate) fn filter(&self, days: u16) -> Result<crate::traces::TraceFilter, TelmoniError> {
+        let mut filter = TraceQuery {
+            agent: self.agent.clone(),
+            user: self.user.clone(),
+            session: self.session.clone(),
+            model: self.model.clone(),
+            tool: self.tool.clone(),
+            environment: self.environment.clone(),
+            release: self.release.clone(),
+            tag: self.tag.clone(),
+            prompt: self.prompt.clone(),
+            ..TraceQuery::default()
+        }
+        .filter()?;
+        filter.statuses.clone_from(&self.status);
+        filter.days = days;
+        Ok(filter)
     }
 }
 

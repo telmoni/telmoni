@@ -135,6 +135,14 @@ export const ModelProvider = {
 } as const;
 export type ModelProvider = typeof ModelProvider[keyof typeof ModelProvider];
 
+/** Wire vocabulary of the Rust `EvaluationTarget`: what an evaluation rule judges. */
+export const EvaluationTarget = {
+  Run:     "run",
+  Span:    "span",
+  Session: "session",
+} as const;
+export type EvaluationTarget = typeof EvaluationTarget[keyof typeof EvaluationTarget];
+
 /** Wire vocabulary of the Rust `ScoreType`: what a score's value is. */
 export const ScoreType = {
   Number:   "number",
@@ -365,6 +373,7 @@ export const ResourceKind = {
   EndUser:           "end_user",
   ModelConnection:   "model_connection",
   Evaluator:         "evaluator",
+  EvaluationRule:    "evaluation_rule",
 } as const;
 export type ResourceKind = typeof ResourceKind[keyof typeof ResourceKind];
 

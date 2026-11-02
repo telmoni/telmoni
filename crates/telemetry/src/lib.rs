@@ -194,6 +194,22 @@ pub fn router(state: Arc<AppState>) -> Router {
             axum::routing::delete(handler::model_connections::delete_connection),
         )
         .route(
+            "/telemetry/evaluation-rules",
+            get(handler::evaluation_rules::get_rules).put(handler::evaluation_rules::put_rule),
+        )
+        .route(
+            "/telemetry/evaluation-rules/preview",
+            post(handler::evaluation_rules::preview_rule),
+        )
+        .route(
+            "/telemetry/evaluation-rules/session-idle",
+            put(handler::evaluation_rules::put_session_idle),
+        )
+        .route(
+            "/telemetry/evaluation-rules/{id}",
+            axum::routing::delete(handler::evaluation_rules::delete_rule),
+        )
+        .route(
             "/telemetry/evaluators",
             get(handler::evaluators::get_evaluators).put(handler::evaluators::put_evaluator),
         )

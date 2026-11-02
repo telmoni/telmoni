@@ -55,6 +55,8 @@ impl Entitlements for Holds {
             deliveries_per_day: 500,
             entitlement: "pro".into(),
             detail: "This organization's plan holds two alerts.".into(),
+            evaluation_rules: 2,
+            evaluation_rules_detail: "This organization's plan holds two evaluation rules.".into(),
         }))
     }
 }

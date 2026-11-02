@@ -75,6 +75,11 @@
       "delivered",
       "failed"
     ],
+    "EvaluationTarget": [
+      "run",
+      "span",
+      "session"
+    ],
     "ExportFailure": [
       "too_large",
       "error"
@@ -165,7 +170,8 @@
       "trace",
       "end_user",
       "model_connection",
-      "evaluator"
+      "evaluator",
+      "evaluation_rule"
     ],
     "Role": [
       "owner",

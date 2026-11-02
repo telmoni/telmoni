@@ -63,9 +63,13 @@ CREATE TABLE telemetry.project_settings (
     -- How long the project's spans and content are kept, in days, where an
     -- owner or admin chose fewer than the longest sold; none for the longest.
     retention_days          SMALLINT,
+    -- How long a session is quiet before its evaluation rules judge it, in
+    -- minutes; none for ten.
+    session_idle_minutes    SMALLINT,
     created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT project_settings_content_mode_check CHECK (content_mode IN ('off', 'on')),
     CONSTRAINT project_settings_retention_days_check CHECK (retention_days BETWEEN 1 AND 360),
+    CONSTRAINT project_settings_session_idle_minutes_check CHECK (session_idle_minutes BETWEEN 2 AND 1440),
     -- The key is there whole or not at all.
     CONSTRAINT project_settings_hashing_key_check CHECK (
         (hashing_key_ciphertext IS NULL) = (hashing_key_nonce IS NULL)
@@ -675,6 +679,90 @@ CREATE POLICY maintenance_access ON telemetry.evaluators
 
 -- The evaluation loop reads a project's evaluators; the purges delete them.
 GRANT SELECT, DELETE ON telemetry.evaluators TO telemetry_maintenance;
+
+-- What a project's evaluators judge: its runs, its spans of a kind and name,
+-- or its sessions once quiet, under the trace list's own filters (a saved
+-- view's query), sampled by a hash of the target's id. Several evaluators
+-- share one rule; a rule may reach back to targets since a date.
+CREATE TABLE telemetry.evaluation_rules (
+    id              UUID             PRIMARY KEY,
+    project_id      TEXT             NOT NULL,
+    organization_id TEXT             NOT NULL,
+    name            TEXT             NOT NULL,
+    target          TEXT             NOT NULL,
+    -- A span rule's kind, and its name where it names one.
+    span_kind       TEXT,
+    span_name       TEXT,
+    query           JSONB            NOT NULL DEFAULT '{}',
+    sample_rate     DOUBLE PRECISION NOT NULL DEFAULT 1,
+    -- Each variable a JSON Pointer narrows, by its name.
+    pointers        JSONB            NOT NULL DEFAULT '{}',
+    enabled         BOOLEAN          NOT NULL DEFAULT true,
+    backfill_from   TIMESTAMPTZ,
+    created_by      TEXT             NOT NULL,
+    created_at      TIMESTAMPTZ      NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ      NOT NULL DEFAULT now(),
+    CONSTRAINT evaluation_rules_name_key UNIQUE (project_id, name),
+    CONSTRAINT evaluation_rules_target_check CHECK (target IN ('run', 'span', 'session')),
+    CONSTRAINT evaluation_rules_span_check CHECK (
+        (target = 'span') = (span_kind IS NOT NULL)
+        AND (span_name IS NULL OR target = 'span')
+        AND (span_kind IS NULL OR span_kind IN ('step', 'model_call', 'tool_call', 'span'))
+    ),
+    CONSTRAINT evaluation_rules_check CHECK (
+        char_length(name) BETWEEN 1 AND 60 AND sample_rate > 0 AND sample_rate <= 1
+    )
+);
+
+-- The organization's purge deletes by it, and its plan counts by it.
+CREATE INDEX evaluation_rules_organization_idx ON telemetry.evaluation_rules (organization_id);
+
+-- The evaluators a rule runs, each by its stable id: its newest version judges.
+CREATE TABLE telemetry.evaluation_rule_evaluators (
+    rule_id      UUID NOT NULL REFERENCES telemetry.evaluation_rules (id) ON DELETE CASCADE,
+    evaluator_id UUID NOT NULL,
+    project_id   TEXT NOT NULL,
+    PRIMARY KEY (rule_id, evaluator_id)
+);
+
+CREATE INDEX evaluation_rule_evaluators_evaluator_idx
+    ON telemetry.evaluation_rule_evaluators (project_id, evaluator_id);
+
+ALTER TABLE telemetry.evaluation_rules ENABLE ROW LEVEL SECURITY;
+ALTER TABLE telemetry.evaluation_rules FORCE ROW LEVEL SECURITY;
+ALTER TABLE telemetry.evaluation_rule_evaluators ENABLE ROW LEVEL SECURITY;
+ALTER TABLE telemetry.evaluation_rule_evaluators FORCE ROW LEVEL SECURITY;
+
+-- A write names the organization too, which `organization_read` trusts, as
+-- an alert's does.
+CREATE POLICY tenant_isolation ON telemetry.evaluation_rules
+    USING      (project_id = current_setting('app.project_id', true))
+    WITH CHECK (project_id = current_setting('app.project_id', true)
+                AND organization_id = current_setting('app.organization_id', true));
+
+-- An organization counts its rules across its projects, and writes none of
+-- another project's.
+CREATE POLICY organization_read ON telemetry.evaluation_rules
+    FOR SELECT
+    USING (organization_id = current_setting('app.organization_id', true));
+
+CREATE POLICY maintenance_access ON telemetry.evaluation_rules
+    TO telemetry_maintenance
+    USING      (current_user = 'telemetry_maintenance')
+    WITH CHECK (current_user = 'telemetry_maintenance');
+
+CREATE POLICY tenant_isolation ON telemetry.evaluation_rule_evaluators
+    USING      (project_id = current_setting('app.project_id', true))
+    WITH CHECK (project_id = current_setting('app.project_id', true));
+
+CREATE POLICY maintenance_access ON telemetry.evaluation_rule_evaluators
+    TO telemetry_maintenance
+    USING      (current_user = 'telemetry_maintenance')
+    WITH CHECK (current_user = 'telemetry_maintenance');
+
+-- The evaluation loop reads every project's rules; the purges delete them.
+GRANT SELECT, DELETE ON telemetry.evaluation_rules TO telemetry_maintenance;
+GRANT SELECT, DELETE ON telemetry.evaluation_rule_evaluators TO telemetry_maintenance;
 
 -- Another exporter's spans, held until their trace's tree places them in a
 -- run (`foreign.rs`), their content sealed as `plain_content`'s; landed, a

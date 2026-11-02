@@ -575,6 +575,15 @@ pub async fn delete_evaluator(
                 )
                 .into());
             }
+            // Its rules stay, judging with the evaluators they still name.
+            sqlx::query(
+                "DELETE FROM telemetry.evaluation_rule_evaluators
+                  WHERE project_id = $1 AND evaluator_id = $2",
+            )
+            .bind(&project_id)
+            .bind(id)
+            .execute(tx.conn())
+            .await?;
             emit_audit(
                 tx,
                 AuditEvent::new(

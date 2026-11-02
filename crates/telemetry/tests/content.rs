@@ -4042,3 +4042,164 @@ async fn an_owner_tries_an_evaluator_on_a_trace_then_saves_its_versions(pool: Pg
     let (_, listed) = off.lane("GET", "/evaluators", "admin-2", None).await;
     assert_eq!(listed["content_kept"], false);
 }
+
+/// An owner makes a rule over the project's runs for an evaluator, previews
+/// it against the last seven days, and changes and deletes it, each filed; a
+/// member reads the rules and changes none; a name is the project's once, and
+/// sessions are judged after the idle time an owner sets.
+#[sqlx::test]
+async fn an_owner_makes_and_previews_an_evaluation_rule(pool: PgPool) {
+    let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    apply_audit_migrations(&pool).await;
+    let kept = door(&pool, ContentMode::On).await;
+    kept.auth
+        .seat(
+            "admin-1",
+            &kept.organization,
+            &kept.project,
+            OrganizationRole::Owner,
+            None,
+        )
+        .seat(
+            "member-1",
+            &kept.organization,
+            &kept.project,
+            OrganizationRole::Member,
+            Some(Role::Member),
+        );
+    let (base, _) = mock_judge(json!({ "reasoning": "r", "score": true })).await;
+    let (status, _) = kept
+        .lane(
+            "PUT",
+            "/model-connections",
+            "admin-1",
+            Some(json!({
+                "name": "Gateway", "provider": "openai_compatible", "base_url": base,
+                "models": ["judge-1"], "secret": "sk-good",
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, evaluator) = kept
+        .lane(
+            "PUT",
+            "/evaluators",
+            "admin-1",
+            Some(json!({
+                "name": "Relevant",
+                "messages": [{ "role": "user", "content": "{{input}} / {{output}}" }],
+                "score": { "name": "relevant", "data_type": "boolean", "low_means": "no", "high_means": "yes" },
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{evaluator}");
+    kept.send(turn_of("conv-1")).await;
+    common::eventually("the trace is read", || found(&kept, RUN)).await;
+
+    let rule = json!({
+        "name": "Every run", "target": "run", "query": { "agent": ["nightly-report"] },
+        "pointers": { "input": "/0" }, "evaluators": [evaluator["id"]],
+    });
+    let (status, preview) = kept
+        .lane(
+            "POST",
+            "/evaluation-rules/preview",
+            "member-1",
+            Some(rule.clone()),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{preview}");
+    assert_eq!(
+        (preview["targets"].clone(), preview["judged"].clone()),
+        (json!(1), json!(1))
+    );
+    assert_eq!(preview["evaluators"][0]["model"], "judge-1");
+    assert_eq!(
+        preview["evaluators"][0]["cost"],
+        Value::Null,
+        "no price for a gateway's model"
+    );
+
+    let (status, _) = kept
+        .lane("PUT", "/evaluation-rules", "member-1", Some(rule.clone()))
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, saved) = kept
+        .lane("PUT", "/evaluation-rules", "admin-1", Some(rule.clone()))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(saved["evaluators"], json!([evaluator["id"]]));
+    let (status, _) = kept
+        .lane("PUT", "/evaluation-rules", "admin-1", Some(rule.clone()))
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT, "a name is the project's once");
+    let mut stranger = rule.clone();
+    stranger["name"] = json!("Stranger");
+    stranger["evaluators"] = json!([uuid::Uuid::new_v4()]);
+    let (status, _) = kept
+        .lane("PUT", "/evaluation-rules", "admin-1", Some(stranger))
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "another project's evaluator, or none"
+    );
+
+    let mut changed = rule.clone();
+    changed["id"] = saved["id"].clone();
+    changed["sample_rate"] = json!(0.5);
+    changed["enabled"] = json!(false);
+    let (status, changed) = kept
+        .lane("PUT", "/evaluation-rules", "admin-1", Some(changed))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{changed}");
+    assert_eq!(
+        (changed["sample_rate"].clone(), changed["enabled"].clone()),
+        (json!(0.5), json!(false))
+    );
+
+    let (status, _) = kept
+        .lane(
+            "PUT",
+            "/evaluation-rules/session-idle",
+            "admin-1",
+            Some(json!({ "minutes": 1 })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "two minutes at least");
+    let (status, _) = kept
+        .lane(
+            "PUT",
+            "/evaluation-rules/session-idle",
+            "admin-1",
+            Some(json!({ "minutes": 30 })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, listed) = kept
+        .lane("GET", "/evaluation-rules", "member-1", None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{listed}");
+    assert_eq!(listed["session_idle_minutes"], 30);
+    assert_eq!(listed["rules"][0]["pointers"], json!({ "input": "/0" }));
+
+    let id = saved["id"].as_str().expect("an id").to_owned();
+    let (status, _) = kept
+        .lane(
+            "DELETE",
+            &format!("/evaluation-rules/{id}"),
+            "admin-1",
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let filed: Vec<String> = sqlx::query_scalar(
+        "SELECT action FROM audit.events WHERE resource_kind = 'evaluation_rule' ORDER BY seq",
+    )
+    .fetch_all(&pool)
+    .await
+    .expect("the chain");
+    assert_eq!(filed, ["created", "updated", "deleted"]);
+}

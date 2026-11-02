@@ -21,11 +21,11 @@ use telmoni_shared::test_util::pin_contract;
 use telmoni_shared::types::WireEnum;
 use telmoni_shared::types::email::MAX_EMAIL_LEN;
 use telmoni_shared::{
-    ApiKeyScope, ContentMode, Flag, IncidentStatus, LayoutDepth, LayoutOpen, MissingData,
-    ModelProvider, NotificationKind, OrganizationRole, OrganizationStatus, Role, RuleAggregation,
-    RuleLevel, RuleMeasure, RuleOperator, RuleWindow, ScoreSource, ScoreTarget, ScoreType,
-    SessionColumn, SessionSort, Severity, SortDirection, SpanKind, SpanStatus, TelmoniResourceKind,
-    TraceColumn, TraceSort, UserColumn, UserSort, ViewKind, slug,
+    ApiKeyScope, ContentMode, EvaluationTarget, Flag, IncidentStatus, LayoutDepth, LayoutOpen,
+    MissingData, ModelProvider, NotificationKind, OrganizationRole, OrganizationStatus, Role,
+    RuleAggregation, RuleLevel, RuleMeasure, RuleOperator, RuleWindow, ScoreSource, ScoreTarget,
+    ScoreType, SessionColumn, SessionSort, Severity, SortDirection, SpanKind, SpanStatus,
+    TelmoniResourceKind, TraceColumn, TraceSort, UserColumn, UserSort, ViewKind, slug,
 };
 use telmoni_telemetry::content::FILE_ID_PREFIX;
 use telmoni_telemetry::contract::{CONTENT, UTC_OFFSET_RANGE};
@@ -104,6 +104,7 @@ fn generated_contract() -> Value {
             "RuleAggregation": wire::<RuleAggregation>(),
             "RuleWindow": wire::<RuleWindow>(),
             "ModelProvider": wire::<ModelProvider>(),
+            "EvaluationTarget": wire::<EvaluationTarget>(),
             "ScoreSource": wire::<ScoreSource>(),
             "ScoreTarget": wire::<ScoreTarget>(),
             "ScoreType": wire::<ScoreType>(),

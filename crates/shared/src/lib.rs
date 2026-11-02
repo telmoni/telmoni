@@ -48,11 +48,12 @@ pub use error_schema::ProblemDetails;
 pub use extract::correlation_id;
 pub use types::{
     AlertCeilings, Allowance, ApiKeyScope, AuditAction, Capacity, ContentMode, Email, EmailError,
-    Flag, FlagSet, Grants, IncidentStatus, LaneCeilings, LayoutDepth, LayoutOpen, MemberCeiling,
-    MissingData, ModelProvider, NotificationKind, OrganizationAction, OrganizationId,
-    OrganizationIdError, OrganizationRole, OrganizationStatus, ParseEnumError, Paused, ProjectId,
-    ProjectIdError, Redacted, Role, RuleAggregation, RuleLevel, RuleMeasure, RuleOperator,
-    RuleWindow, ScoreSource, ScoreTarget, ScoreType, SessionColumn, SessionId, SessionIdError,
-    SessionSort, Severity, SortDirection, SpanKind, SpanStatus, TelmoniResourceKind, TraceColumn,
-    TraceSort, UserColumn, UserId, UserIdError, UserSort, ViewKind,
+    EvaluationTarget, Flag, FlagSet, Grants, IncidentStatus, LaneCeilings, LayoutDepth, LayoutOpen,
+    MemberCeiling, MissingData, ModelProvider, NotificationKind, OrganizationAction,
+    OrganizationId, OrganizationIdError, OrganizationRole, OrganizationStatus, ParseEnumError,
+    Paused, ProjectId, ProjectIdError, Redacted, Role, RuleAggregation, RuleLevel, RuleMeasure,
+    RuleOperator, RuleWindow, ScoreSource, ScoreTarget, ScoreType, SessionColumn, SessionId,
+    SessionIdError, SessionSort, Severity, SortDirection, SpanKind, SpanStatus,
+    TelmoniResourceKind, TraceColumn, TraceSort, UserColumn, UserId, UserIdError, UserSort,
+    ViewKind,
 };

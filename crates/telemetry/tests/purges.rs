@@ -27,8 +27,8 @@ use telmoni_telemetry::sweep::{self, Swept};
 
 const OWNER: &str = "user_owner";
 
-/// A settings row of `project` filed under `organization`, and a view and a
-/// model connection saved on it.
+/// A settings row of `project` filed under `organization`, and a view, a
+/// model connection, an evaluator and an evaluation rule saved on it.
 async fn settings_and_a_view(pool: &PgPool, project: &ProjectId, organization: &OrganizationId) {
     sqlx::query(
         "INSERT INTO telemetry.project_settings (project_id, organization_id) VALUES ($1, $2)",
@@ -67,6 +67,16 @@ async fn settings_and_a_view(pool: &PgPool, project: &ProjectId, organization: &
     .execute(pool)
     .await
     .expect("an evaluator");
+    sqlx::query(
+        "INSERT INTO telemetry.evaluation_rules (id, project_id, organization_id, name, target, created_by)
+         SELECT $1, $2, organization_id, 'Every run', 'run', 'u'
+           FROM telemetry.project_settings WHERE project_id = $2",
+    )
+    .bind(Uuid::now_v7())
+    .bind(project)
+    .execute(pool)
+    .await
+    .expect("an evaluation rule");
 }
 
 /// The tables a purge empties in which the project has a row still.
@@ -238,8 +248,8 @@ async fn an_organizations_purge_holds_every_project_its_rows_name(pool: PgPool) 
     );
     assert!(held.is_empty(), "held in place beside the purge: {held:?}");
     assert_eq!(
-        purged, 8,
-        "a view, a model connection, an evaluator and a settings row of each project"
+        purged, 10,
+        "a view, a model connection, an evaluator, an evaluation rule and a settings row of each project"
     );
     for project in &ours {
         assert!(left_of(&pool, project).await.is_empty(), "{project}");

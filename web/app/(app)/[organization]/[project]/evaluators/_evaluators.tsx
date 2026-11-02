@@ -146,6 +146,7 @@ export function Evaluators({
   evaluators,
   templates,
   connections,
+  rulesOf = {},
   contentKept,
   canEdit,
   here,
@@ -156,6 +157,8 @@ export function Evaluators({
   evaluators: readonly Evaluator[];
   templates: readonly EvaluatorTemplate[];
   connections: readonly ModelConnection[];
+  /** The names of the rules each evaluator runs under, by its id. */
+  rulesOf?: Readonly<Record<string, readonly string[]>>;
   contentKept: boolean;
   canEdit: boolean;
   /** The page's own path, which `?versions=` opens one evaluator's versions under. */
@@ -258,7 +261,10 @@ export function Evaluators({
                     </span>
                     <span className="truncate text-muted-foreground">
                       {scoreWords(evaluator.score)} · {evaluator.model ?? "its connection's first model"} on{" "}
-                      {connectionName(evaluator.connection_id)} · no rules yet
+                      {connectionName(evaluator.connection_id)} ·{" "}
+                      {(rulesOf[evaluator.id] ?? []).length === 0
+                        ? "under no rule"
+                        : `under ${(rulesOf[evaluator.id] ?? []).join(", ")}`}
                     </span>
                   </div>
                   <div className="flex gap-gutter">
