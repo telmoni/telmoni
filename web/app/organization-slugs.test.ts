@@ -28,7 +28,7 @@ function ownSegments(dir: string): string[] {
 describe("the console's own paths", () => {
   it("are words no organization may go by", () => {
     const segments = ownSegments(APP);
-    expect(segments).toContain("account");
+    expect(segments).toContain("settings");
     for (const segment of segments.filter(isSlug)) {
       expect(
         RESERVED_ORGANIZATION_SLUGS.has(segment),
