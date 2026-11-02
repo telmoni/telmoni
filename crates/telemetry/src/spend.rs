@@ -63,6 +63,55 @@ macro_rules! spent_of {
 
 pub(crate) use spent_of;
 
+/// One row of the hourly totals' spend, `h` the table: its costs as
+/// reported where they were, else its tokens at its price row by its day.
+macro_rules! rollup_spent_of {
+    () => {
+        concat!(
+            "if(h.cost_reported, h.cost, if((arrayLastIndex((j, p, m, f) -> ",
+            "(j = '' OR j = h.project_id) AND p = h.provider AND m = h.model AND f <= toDate(h.hour), ",
+            "{price_projects:Array(String)}, {price_providers:Array(String)}, ",
+            "{price_models:Array(String)}, {price_from:Array(Date)}) AS rollup_priced) = 0, 0, ",
+            "toFloat64(if(h.input_tokens > h.cache_read_input_tokens + h.cache_write_input_tokens, ",
+            "h.input_tokens - h.cache_read_input_tokens - h.cache_write_input_tokens, 0)) ",
+            "* {price_input:Array(Float64)}[rollup_priced] ",
+            "+ toFloat64(h.cache_read_input_tokens) * {price_cache_read:Array(Float64)}[rollup_priced] ",
+            "+ toFloat64(h.cache_write_input_tokens) * {price_cache_write:Array(Float64)}[rollup_priced] ",
+            "+ toFloat64(h.output_tokens) * {price_output:Array(Float64)}[rollup_priced]))"
+        )
+    };
+}
+
+pub(crate) use rollup_spent_of;
+
+/// The names the hourly totals from `from` price: their rows of calls that
+/// reported no cost.
+pub(crate) const ROLLUP_NAMES_SQL: &str = concat!(
+    "SELECT DISTINCT h.provider AS provider, h.model AS model FROM telemetry.spans_hourly AS h ",
+    "WHERE h.project_id IN {projects:Array(String)} AND h.hour >= {from:DateTime('UTC')} ",
+    "AND NOT h.cost_reported AND h.provider != '' AND h.model != ''"
+);
+
+/// The prices the hourly totals from `from` are read at, `projects`' own
+/// among them.
+///
+/// # Errors
+///
+/// ClickHouse or Postgres did not answer, or refused the read.
+pub async fn book_for_rollups(
+    state: &AppState,
+    projects: &Projects,
+    from: chrono::DateTime<chrono::Utc>,
+) -> Result<PriceBook, Unread> {
+    let names: Vec<Name> = state
+        .store
+        .read(projects, ROLLUP_NAMES_SQL)
+        .param("from", crate::store::seconds(from))
+        .fetch_all()
+        .await?;
+    Ok(PriceBook::read_for(&state.db, projects.as_slice(), &pairs(names)).await?)
+}
+
 /// The model calls a window holds that an alert's filters admit, which take
 /// no tool or status for a run's cost.
 macro_rules! window_calls {

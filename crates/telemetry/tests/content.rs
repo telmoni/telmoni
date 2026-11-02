@@ -2038,6 +2038,81 @@ async fn held_content_switched_off_lands_without_it(pool: PgPool) {
     .await;
 }
 
+/// The hourly totals price their calls as the spans do — as reported, else
+/// at the project's own price — and count runs and failed runs.
+#[sqlx::test]
+async fn the_hourly_totals_price_their_calls_and_count_runs(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let door = door_over(&pool, ContentMode::Off, true).await;
+    door.auth.seat(
+        "admin-1",
+        &door.organization,
+        &door.project,
+        OrganizationRole::Owner,
+        None,
+    );
+    sqlx::query(
+        "INSERT INTO telemetry.project_prices
+             (project_id, position, provider, models, input, output, cache_read, cache_write)
+         VALUES ($1, 0, 'self', ARRAY['ours-1'], 1e-6, 0, 0, 0)",
+    )
+    .bind(&door.project)
+    .execute(&pool)
+    .await
+    .expect("our price");
+    let at = Utc::now() - chrono::Duration::seconds(30);
+    let reported = telmoni_telemetry::store::SpanRow {
+        provider: "openai".into(),
+        model: "gpt-5".into(),
+        cost: Some(1.5),
+        ..common::received(&door.project, SpanKind::ModelCall, "chat", 500, at)
+    };
+    let priced = telmoni_telemetry::store::SpanRow {
+        provider: "self".into(),
+        model: "ours-1".into(),
+        input_tokens: 2_000_000,
+        ..common::received(&door.project, SpanKind::ModelCall, "chat", 500, at)
+    };
+    let failed = telmoni_telemetry::store::SpanRow {
+        status: telmoni_shared::SpanStatus::Error,
+        ..common::received(&door.project, SpanKind::Run, "nightly-report", 900, at)
+    };
+    let rows = [
+        reported,
+        priced.clone(),
+        priced,
+        common::received(&door.project, SpanKind::Run, "nightly-report", 900, at),
+        failed,
+    ];
+    ch.store.insert_spans(&rows).await.expect("the spans");
+
+    let (status, totals) = door
+        .lane("GET", "/rollups?days=1&group=model", "admin-1", None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{totals}");
+    let points = totals["points"].as_array().expect("points");
+    let spend = |model: &str| {
+        points
+            .iter()
+            .filter(|p| p["value"] == model)
+            .map(|p| p["spend"].as_f64().unwrap_or(0.0))
+            .sum::<f64>()
+    };
+    assert!((spend("gpt-5") - 1.5).abs() < 1e-9, "{totals}");
+    assert!(
+        (spend("ours-1") - 4.0).abs() < 1e-9,
+        "two calls at $1 a million: {totals}"
+    );
+    let runs: u64 = points.iter().map(|p| p["runs"].as_u64().unwrap_or(0)).sum();
+    let failed: u64 = points
+        .iter()
+        .map(|p| p["failed_runs"].as_u64().unwrap_or(0))
+        .sum();
+    assert_eq!((runs, failed), (2, 1));
+}
+
 /// An organization's spend this month, project by project against its
 /// budget, to its owners and admins alone.
 #[sqlx::test]

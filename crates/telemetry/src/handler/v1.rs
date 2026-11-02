@@ -16,9 +16,7 @@ use axum::middleware;
 use axum::response::Response;
 use axum::routing::get;
 use axum::routing::put;
-use chrono::{DateTime, DurationRound as _, TimeDelta, Utc};
-use clickhouse::Row;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 use telmoni_shared::TelmoniError;
 use telmoni_shared::acting::ActingKey;
@@ -32,9 +30,9 @@ use telmoni_shared::types::ApiKeyScope;
 use crate::AppState;
 use crate::content::{self, MEDIA_MAX};
 use crate::handler::incidents::{self, IncidentList, IncidentQuery};
-use crate::handler::traces::{self, Reader, TraceDetail, TraceList, read_failed};
+use crate::handler::traces::{self, Reader, TraceDetail, TraceList};
+use crate::rollups::{Metrics, MetricsAsked};
 use crate::rules::incidents::IncidentRow;
-use crate::store::{Projects, seconds};
 
 /// One `/v1` lane this module serves: what it is, and which handler answers.
 pub struct V1Lane {
@@ -212,7 +210,7 @@ pub const V1_LANES: &[V1Lane] = &[
             bearer: true,
             path: "/v1/metrics",
             summary: "The project's totals by the hour or the day",
-            description: "The project's spans, failures, tokens and durations \
+            description: "The project's spans, runs, failures, tokens, spend and durations \
                           over the window, by the hour or the day, from the \
                           totals kept an hour at a time, and grouped, if asked, \
                           by one of agent, model, provider, tool, status, \
@@ -423,191 +421,15 @@ pub async fn get_incident(
     ))
 }
 
-/// The most points `/v1/metrics` answers.
-pub const METRICS_MAX: usize = 10_000;
-
-/// What `/v1/metrics` takes.
-#[derive(Debug, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct MetricsAsked {
-    #[serde(default)]
-    pub days: Option<String>,
-    #[serde(default)]
-    pub step: Option<String>,
-    #[serde(default)]
-    pub group: Option<String>,
-}
-
-/// The columns `/v1/metrics` may group by, each as the rollup names it.
-const GROUPS: [&str; 7] = [
-    "agent",
-    "model",
-    "provider",
-    "tool",
-    "status",
-    "environment",
-    "release",
-];
-
-/// The rollup over the window, by the hour or the day and, where asked, by
-/// one column: both chosen by a bound value from a closed set, never an
-/// identifier.
-const METRICS_SQL: &str = concat!(
-    // Each column by the table's name: bare, `spans` in `sumIf` reads the sum's alias.
-    "SELECT if({daily:UInt8} = 1, toStartOfDay(h.hour), h.hour) AS at, ",
-    "toString(multiIf({group:String} = 'agent', h.agent, {group:String} = 'model', h.model, ",
-    "{group:String} = 'provider', h.provider, {group:String} = 'tool', h.tool, ",
-    "{group:String} = 'status', h.status, {group:String} = 'environment', h.environment, ",
-    "{group:String} = 'release', h.release, '')) AS key, ",
-    "toUInt64(sum(h.spans)) AS spans, toUInt64(sumIf(h.spans, h.status = 'error')) AS failed, ",
-    "toUInt64(sum(h.input_tokens)) AS input_tokens, ",
-    "toUInt64(sum(h.output_tokens)) AS output_tokens, ",
-    "toUInt64(sum(h.cache_read_input_tokens)) AS cache_read_input_tokens, ",
-    "toUInt64(sum(h.cache_write_input_tokens)) AS cache_write_input_tokens, ",
-    "sum(h.duration_ms_sum) AS duration_ms_sum, ",
-    "CAST(quantilesTDigestMerge(0.5, 0.9, 0.99)(h.duration_ms) AS Array(Float64)) AS quantiles ",
-    "FROM telemetry.spans_hourly AS h ",
-    "WHERE h.project_id IN {projects:Array(String)} AND h.hour >= {from:DateTime('UTC')} ",
-    "GROUP BY at, key ORDER BY at, key LIMIT {max:UInt32}"
-);
-
-/// One point of the rollup as ClickHouse answers it.
-#[derive(Debug, Row, Deserialize)]
-struct MetricRow {
-    #[serde(deserialize_with = "clickhouse::serde::chrono::datetime::deserialize")]
-    at: DateTime<Utc>,
-    key: String,
-    spans: u64,
-    failed: u64,
-    input_tokens: u64,
-    output_tokens: u64,
-    cache_read_input_tokens: u64,
-    cache_write_input_tokens: u64,
-    duration_ms_sum: f64,
-    quantiles: Vec<f64>,
-}
-
-/// What `/v1/metrics` answers.
-#[derive(Debug, Serialize)]
-pub struct Metrics {
-    pub days: u16,
-    pub step: &'static str,
-    pub group: Option<&'static str>,
-    /// Oldest first, each hour or day only where it holds a span.
-    pub points: Vec<MetricPoint>,
-    /// Whether the window held more than [`METRICS_MAX`] points.
-    pub truncated: bool,
-}
-
-/// One hour's or day's totals, of one group's value where grouped.
-#[derive(Debug, Serialize)]
-pub struct MetricPoint {
-    pub at: DateTime<Utc>,
-    /// The group's value; empty where its spans carry none.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub value: Option<String>,
-    pub spans: u64,
-    pub failed: u64,
-    pub input_tokens: u64,
-    pub output_tokens: u64,
-    pub cache_read_input_tokens: u64,
-    pub cache_write_input_tokens: u64,
-    /// In milliseconds: the mean and the 50th, 90th and 99th percentiles.
-    pub duration_ms: Durations,
-}
-
-/// A point's durations, in milliseconds.
-#[derive(Debug, Serialize)]
-pub struct Durations {
-    pub avg: f64,
-    pub p50: Option<f64>,
-    pub p90: Option<f64>,
-    pub p99: Option<f64>,
-}
-
-/// `GET /v1/metrics` — the key's project's rollup over the window.
+/// `GET /v1/metrics` — the key's project's hourly totals over the window.
 pub async fn get_metrics(
     State(state): State<Arc<AppState>>,
     key: ActingKey,
     Query(asked): Query<MetricsAsked>,
 ) -> Result<Json<Metrics>, TelmoniError> {
-    let days = traces::parse_days(asked.days.as_deref())?;
-    let days = crate::capacity::visible_days(&state, &key.project_id, days).await;
-    let (step, daily) = match asked.step.as_deref() {
-        None | Some("day") => ("day", true),
-        Some("hour") => ("hour", false),
-        Some(_) => return Err(TelmoniError::BadRequest("step is `hour` or `day`".into())),
-    };
-    let group = match asked.group.as_deref() {
-        None => None,
-        Some(given) => Some(GROUPS.into_iter().find(|g| *g == given).ok_or_else(|| {
-            TelmoniError::BadRequest(format!("group is one of {}", GROUPS.join(", ")))
-        })?),
-    };
-    let unit = if daily {
-        TimeDelta::days(1)
-    } else {
-        TimeDelta::hours(1)
-    };
-    // Up to the next whole step, so no hour or day reaches past the plan.
-    let back = Utc::now() - TimeDelta::days(i64::from(days));
-    let from = match back.duration_trunc(unit) {
-        Ok(start) if start < back => start + unit,
-        _ => back,
-    };
-    let projects = Projects::one(key.project_id.clone());
-    let mut rows: Vec<MetricRow> = state
-        .store
-        .read(&projects, METRICS_SQL)
-        .param("daily", u8::from(daily))
-        .param("group", group.unwrap_or(""))
-        .param("from", seconds(from))
-        .param("max", u32::try_from(METRICS_MAX + 1).unwrap_or(u32::MAX))
-        .fetch_all()
-        .await
-        .map_err(read_failed)?;
-    let truncated = rows.len() > METRICS_MAX;
-    rows.truncate(METRICS_MAX);
-    Ok(Json(Metrics {
-        days,
-        step,
-        group,
-        points: rows
-            .into_iter()
-            .map(|row| point(row, group.is_some()))
-            .collect(),
-        truncated,
-    }))
-}
-
-/// A rollup row as `/v1/metrics` publishes it.
-fn point(row: MetricRow, grouped: bool) -> MetricPoint {
-    let at = |n: usize| row.quantiles.get(n).copied().filter(|q| q.is_finite());
-    #[expect(
-        clippy::cast_precision_loss,
-        reason = "a count past 2^53 spans is no hour's"
-    )]
-    let avg = if row.spans == 0 {
-        0.0
-    } else {
-        row.duration_ms_sum / row.spans as f64
-    };
-    MetricPoint {
-        at: row.at,
-        value: grouped.then(|| row.key.clone()),
-        spans: row.spans,
-        failed: row.failed,
-        input_tokens: row.input_tokens,
-        output_tokens: row.output_tokens,
-        cache_read_input_tokens: row.cache_read_input_tokens,
-        cache_write_input_tokens: row.cache_write_input_tokens,
-        duration_ms: Durations {
-            avg,
-            p50: at(0),
-            p90: at(1),
-            p99: at(2),
-        },
-    }
+    Ok(Json(
+        crate::rollups::read(&state, &key.project_id, &asked).await?,
+    ))
 }
 
 /// A method the upload does not take: `405` with `Allow`.

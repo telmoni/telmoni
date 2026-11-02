@@ -276,11 +276,15 @@ totals Telmoni keeps an hour at a time.
       "value": "claude-sonnet-5-5",
       "spans": 412,
       "failed": 3,
+      "runs": 40,
+      "failed_runs": 1,
       "input_tokens": 512000,
       "output_tokens": 98000,
       "cache_read_input_tokens": 120000,
       "cache_write_input_tokens": 4000,
-      "duration_ms": { "avg": 1840.5, "p50": 1500, "p90": 3100, "p99": 7400 }
+      "spend": 2.34,
+      "duration_ms": { "avg": 1840.5, "p50": 1500, "p90": 3100, "p99": 7400 },
+      "run_duration_ms": { "p50": 9200, "p95": 21000, "p99": 30500 }
     }
   ],
   "truncated": false
@@ -289,8 +293,12 @@ totals Telmoni keeps an hour at a time.
 
 Points come oldest first, and only for an hour or a day that holds a span.
 `value` is the group's value, left out without `group`. `failed` counts the
-spans that ended in error. The durations are in milliseconds, and a
-percentile is `null` where none can be read. `truncated` is `true` past 10,000
+spans that ended in error, `runs` and `failed_runs` the runs that ended and
+those that failed. `spend` is what the model calls cost in US dollars, each as
+it reported, else its tokens at the project's own price or the price table's,
+priced as it is read ([What a call cost](/docs/api/ingest#what-a-call-cost)).
+`duration_ms` is every span's, `run_duration_ms` the runs' alone. The durations
+are in milliseconds, and a percentile is `null` where none can be read. `truncated` is `true` past 10,000
 points: ask for a shorter window, or a day at a time.
 
 ## `GET /v1/incidents`

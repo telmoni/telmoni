@@ -60,6 +60,7 @@ pub mod prices;
 pub mod rate_limit;
 pub mod replica;
 pub mod retention;
+pub mod rollups;
 pub mod rules;
 pub mod schema;
 pub mod seam;
@@ -187,6 +188,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/telemetry/privacy", get(handler::privacy::get_privacy))
         .route("/telemetry/usage", get(handler::usage::get_usage))
         .route("/telemetry/traces", get(handler::traces::list_traces))
+        .route("/telemetry/rollups", get(handler::traces::get_rollups))
         .route("/telemetry/traces/facets", get(handler::traces::get_facets))
         .route(
             "/telemetry/traces/histogram",

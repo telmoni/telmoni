@@ -1,0 +1,25 @@
+---
+title: "Dashboards"
+description: "A project's Dashboards page: its spend, tokens, runs and their failures, latency and time to first token over a window, from the hourly totals, its budgets this month above, and each model's, agent's, provider's, environment's or release's totals below."
+---
+
+A project's **Dashboards** page (`/{organization}/{project}/dashboards`) charts
+its runs over the window the picker beside the title chooses — the last day,
+week, 30 or 90 days, by the hour for a day and by the day for longer — from
+the totals Telmoni keeps an hour at a time:
+
+| Chart | What it draws |
+|---|---|
+| Spend | What the model calls cost, each as it reported, else its tokens at the project's own price or the price table's ([What a call cost](/docs/api/ingest#what-a-call-cost)) |
+| Tokens | The model calls' input and output tokens |
+| Runs | The runs that ended, those that ended well and those that failed |
+| Latency | The runs' durations at the median, the 95th and the 99th percentile |
+| Time to first token | How soon the runs' first model calls began to answer, at the median and the 95th percentile, read from the spans, which alone keep it, so within the project's retention |
+
+Above them, each of the project's [budgets](/docs/monitoring/alerts#a-budget):
+what the month has spent of it so far. **Group** beside the window splits the
+window's totals by model, agent, provider, environment or release, the
+costliest first, each with its tokens, runs and failures.
+
+Everyone on the project reads the page. The same totals, by the hour or the
+day and grouped, are [`GET /v1/metrics`](/docs/api/reference#get-v1metrics).

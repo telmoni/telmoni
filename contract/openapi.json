@@ -320,7 +320,7 @@
     },
     "/v1/metrics": {
       "get": {
-        "description": "The project's spans, failures, tokens and durations over the window, by the hour or the day, from the totals kept an hour at a time, and grouped, if asked, by one of agent, model, provider, tool, status, environment or release.",
+        "description": "The project's spans, runs, failures, tokens, spend and durations over the window, by the hour or the day, from the totals kept an hour at a time, and grouped, if asked, by one of agent, model, provider, tool, status, environment or release.",
         "parameters": [
           {
             "description": "The window, in days back from now: 1 to 360, 7 when left out, no further than the plan keeps spans.",

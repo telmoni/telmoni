@@ -1102,6 +1102,20 @@ pub(crate) async fn trace_list(
     })
 }
 
+/// `GET /internal/v1/telemetry/rollups` — the project's hourly totals over
+/// the window, by the hour or the day, grouped where asked: what the
+/// dashboards page draws, read under the trace list's role.
+pub async fn get_rollups(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(asked): Query<crate::rollups::MetricsAsked>,
+) -> Result<Json<crate::rollups::Metrics>, TelmoniError> {
+    let project_id = reading(&state, &headers).await?;
+    Ok(Json(
+        crate::rollups::read(&state, &project_id, &asked).await?,
+    ))
+}
+
 /// `GET /internal/v1/telemetry/traces/facets` — each filter's values among the
 /// project's traces in the window, and how many runs carry each under every
 /// other filter.
