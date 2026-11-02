@@ -44,6 +44,7 @@ const HISTOGRAM = {
       error: 1,
       cancelled: 0,
       tokens: 1200,
+      spend: 0.25,
       duration_p50_ms: 1500,
       duration_p95_ms: 4000,
       time_to_first_token_p50_ms: 320,
@@ -67,5 +68,14 @@ describe("TraceCharts", () => {
       .getAllByTestId("series")
       .map((line) => line.textContent);
     expect(series).toEqual(["p50", "p95"]);
+  });
+
+  it("draws the cost beside the tokens, each bar what its runs spent", () => {
+    render(<TraceCharts histogram={HISTOGRAM} />);
+    const cost = within(screen.getByRole("region", { name: "Cost" }));
+    expect(JSON.parse(cost.getByTestId("bars").dataset.rows ?? "null")).toEqual([
+      expect.objectContaining({ cost: 0.25 }),
+    ]);
+    expect(cost.getAllByTestId("series").map((bar) => bar.textContent)).toEqual(["cost"]);
   });
 });

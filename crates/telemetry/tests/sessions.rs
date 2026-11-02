@@ -668,8 +668,8 @@ async fn the_download_holds_every_session_the_filters_admit(pool: PgPool) {
     let lines: Vec<&str> = csv.trim_start_matches('\u{feff}').lines().collect();
     assert_eq!(
         lines[0],
-        "session_id,user_id,traces,errors,steps,input_tokens,output_tokens,duration_ms,first_seen,\
-         last_seen,tags"
+        "session_id,user_id,traces,errors,steps,input_tokens,output_tokens,spend,duration_ms,\
+         first_seen,last_seen,tags"
     );
     assert_eq!(lines.len(), 4, "a header and three sessions: {csv}");
     assert!(lines[1].starts_with("chat/42 b,user-c,1,0,1,7,7,"), "{csv}");

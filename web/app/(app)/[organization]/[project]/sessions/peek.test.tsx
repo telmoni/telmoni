@@ -60,6 +60,7 @@ function detail(id: string) {
         output_tokens: 300,
         cache_read_input_tokens: 0,
         cache_write_input_tokens: 0,
+        spend: 0.25,
         models: ["claude-sonnet-5-5"],
         tools: ["search_docs"],
         environments: [],

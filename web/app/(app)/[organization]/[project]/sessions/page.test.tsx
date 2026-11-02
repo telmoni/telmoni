@@ -88,6 +88,7 @@ const SESSION_A = {
   steps: 9,
   input_tokens: 1200,
   output_tokens: 300,
+  spend: 0.25,
   duration_ms: 1500,
   first_seen: "2026-10-11T03:00:00Z",
   last_seen: "2026-10-11T03:04:02Z",
@@ -102,6 +103,7 @@ const SESSION_B = {
   steps: 2,
   input_tokens: 10,
   output_tokens: 5,
+  spend: 0.25,
   duration_ms: 1500,
   first_seen: "2026-10-10T03:00:00Z",
   last_seen: "2026-10-10T03:00:01Z",
@@ -224,7 +226,7 @@ describe("SessionsPage", () => {
     );
     // The tokens' halves are offered, not shown; the count holds the session's id, which always shows.
     expect(table.queryByRole("columnheader", { name: /Input tokens/ })).toBeNull();
-    expect(screen.getByRole("button", { name: /Columns/ })).toHaveTextContent("9/12");
+    expect(screen.getByRole("button", { name: /Columns/ })).toHaveTextContent("9/13");
     // The window, the refresh and the columns stand on the title's row.
     const header = within(screen.getByTestId("page-header"));
     expect(header.getByRole("combobox", { name: "Window" })).toHaveTextContent("Last 7 days");

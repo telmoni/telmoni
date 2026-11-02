@@ -104,6 +104,7 @@ const TRACE_A = {
   output_tokens: 300,
   cache_read_input_tokens: 100,
   cache_write_input_tokens: 50,
+  spend: 0.25,
   models: ["claude-sonnet-5-5"],
   tools: ["search_docs"],
   environments: [],

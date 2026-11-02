@@ -118,6 +118,7 @@ const TRACE_A = {
   output_tokens: 300,
   cache_read_input_tokens: 100,
   cache_write_input_tokens: 50,
+  spend: 0.25,
   models: ["claude-sonnet-5-5"],
   tools: ["search_docs"],
   environments: ["production"],
@@ -287,7 +288,7 @@ describe("TracesPage", () => {
     // Columns past the first eight are offered, not shown; the count holds the
     // trace's id, which always shows.
     expect(table.queryByRole("columnheader", { name: /Model calls/ })).toBeNull();
-    expect(screen.getByRole("button", { name: /Columns/ })).toHaveTextContent("9/25");
+    expect(screen.getByRole("button", { name: /Columns/ })).toHaveTextContent("9/26");
     // The window, the refresh and the columns stand on the title's row.
     const header = within(screen.getByTestId("page-header"));
     expect(header.getByRole("combobox", { name: "Window" })).toHaveTextContent("Last 7 days");

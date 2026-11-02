@@ -44,7 +44,7 @@ describe("what a browser kept of the trace list's look", () => {
     expect(
       readPrefs(
         JSON.stringify({
-          columns: ["spend", 7, "agent"],
+          columns: ["price", 7, "agent"],
           sessionColumns: "user",
           userColumns: ["user", "tokens"],
           density: "airy",

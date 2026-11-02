@@ -70,6 +70,14 @@ export const USER_COLUMNS: readonly ColumnSpec<UserColumn, UserSort>[] = [
     hint: "Input and output tokens, summed.",
   },
   {
+    key: "spend",
+    label: "Spend",
+    sort: UserSort.Spend,
+    first: SortDirection.Desc,
+    numeric: true,
+    hint: "What their runs' model calls cost, each run counted for the runs its sample rate stands for.",
+  },
+  {
     key: "duration",
     label: "Duration",
     sort: UserSort.Duration,

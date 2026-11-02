@@ -239,6 +239,7 @@ impl TraceQuery {
             prompts: values("prompt", &self.prompt, FILTER_VALUE_MAX.prompt)?,
             runs,
             days: parse_days(self.days.as_deref())?,
+            prices: crate::prices::PriceBook::default(),
         })
     }
 
@@ -530,7 +531,7 @@ pub struct TraceList {
 }
 
 /// A download's header row: the list's fields, in its order.
-const CSV_HEADER: [&str; 25] = [
+const CSV_HEADER: [&str; 26] = [
     "run_id",
     "agent",
     "user_id",
@@ -551,6 +552,7 @@ const CSV_HEADER: [&str; 25] = [
     "output_tokens",
     "cache_read_input_tokens",
     "cache_write_input_tokens",
+    "spend",
     "models",
     "tools",
     "environments",
@@ -562,7 +564,7 @@ impl TraceRow {
     /// The row a download writes for it, under [`CSV_HEADER`]: its times as
     /// RFC 3339, and its models, tools, environments, releases and tags each
     /// one cell, `; ` between them.
-    fn cells(&self) -> [String; 25] {
+    fn cells(&self) -> [String; 26] {
         let time = |t: &DateTime<Utc>| t.to_rfc3339_opts(SecondsFormat::Micros, true);
         [
             self.run_id.to_string(),
@@ -587,6 +589,7 @@ impl TraceRow {
             self.output_tokens.to_string(),
             self.cache_read_input_tokens.to_string(),
             self.cache_write_input_tokens.to_string(),
+            self.spend.to_string(),
             self.models.join("; "),
             self.tools.join("; "),
             self.environments.join("; "),
@@ -926,6 +929,22 @@ async fn filter_of(
 ) -> Result<TraceFilter, TelmoniError> {
     let mut filter = query.filter()?;
     filter.days = crate::capacity::visible_days(state, project_id, filter.days).await;
+    // Without the prices, the rows show what calls reported alone.
+    filter.prices =
+        crate::spend::book_for_days(state, &Projects::one(project_id.clone()), filter.days)
+            .await
+            .unwrap_or_else(|unread| {
+                if let crate::spend::Unread::Store(error) = &unread {
+                    tracing::warn!(
+                        project_id = %project_id,
+                        kind = crate::store::Fault::of(error).as_str(),
+                        "traces: the window's prices could not be read; spend shows what was reported"
+                    );
+                } else {
+                    tracing::warn!(project_id = %project_id, "traces: the window's prices could not be read; spend shows what was reported");
+                }
+                crate::prices::PriceBook::default()
+            });
     let Some(q) = query.q.as_deref().map(str::trim).filter(|q| !q.is_empty()) else {
         return Ok(filter);
     };
@@ -1150,7 +1169,7 @@ pub async fn export_traces(
             row,
         })
         .collect();
-    let header: [&str; 26] =
+    let header: [&str; 27] =
         std::array::from_fn(|i| CSV_HEADER.get(i).copied().unwrap_or("content"));
     download(format, &rows, &header, TraceDownload::cells, "trace")
 }
@@ -1166,7 +1185,7 @@ pub struct TraceDownload {
 
 impl TraceDownload {
     /// The row's cells and its content as one JSON cell.
-    fn cells(&self) -> [String; 26] {
+    fn cells(&self) -> [String; 27] {
         let row = self.row.cells();
         let content = serde_json::to_string(&self.content).unwrap_or_default();
         std::array::from_fn(|i| row.get(i).cloned().unwrap_or_else(|| content.clone()))
@@ -1685,7 +1704,7 @@ mod tests {
         let refusals: Vec<TelmoniError> = [
             read(Reading::List, &[("status", "maybe<script>")])
                 .and_then(|q| q.filter().map(|_| ())),
-            read(Reading::List, &[("sort", "spend")]).and_then(|q| q.sort().map(|_| ())),
+            read(Reading::List, &[("sort", "price")]).and_then(|q| q.sort().map(|_| ())),
             read(Reading::List, &[("dir", "sideways")]).and_then(|q| q.sort().map(|_| ())),
             read(Reading::List, &[("days", "0")]).and_then(|q| q.filter().map(|_| ())),
             read(Reading::List, &[("days", "361")]).and_then(|q| q.filter().map(|_| ())),
@@ -1748,7 +1767,7 @@ mod tests {
             assert!(
                 !detail.contains("script")
                     && !detail.contains("sideways")
-                    && !detail.contains("spend")
+                    && !detail.contains("price")
                     && !detail.contains("nonsense")
                     && !detail.contains("nameless"),
                 "the value was echoed: {detail}"
@@ -1831,6 +1850,7 @@ mod tests {
             output_tokens: 5,
             cache_read_input_tokens: 0,
             cache_write_input_tokens: 0,
+            spend: 0.25,
             models: vec!["a".into(), "b".into()],
             tools: vec![],
             environments: vec!["production".into()],

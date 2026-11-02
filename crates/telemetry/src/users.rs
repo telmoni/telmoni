@@ -15,7 +15,7 @@ use telmoni_shared::{SortDirection, UserSort};
 use crate::traces::{Listing, facets_sql, run_rows};
 
 /// One user as the page reads it: a user id's runs, summed.
-#[derive(Debug, Clone, PartialEq, Eq, Row, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Row, Serialize, Deserialize)]
 pub struct UserRow {
     /// The end user, as stored.
     pub user_id: String,
@@ -29,6 +29,9 @@ pub struct UserRow {
     pub input_tokens: u64,
     /// Their model calls' output tokens, summed.
     pub output_tokens: u64,
+    /// What their runs' model calls cost in US dollars, each run scaled by
+    /// its sample rate.
+    pub spend: f64,
     /// How long their runs took, summed, in milliseconds.
     pub duration_ms: i64,
     /// When their first run in the window started.
@@ -49,6 +52,8 @@ macro_rules! users {
             "count() AS user_traces, countIf(errors > 0) AS user_errors, ",
             "sum(steps) AS user_steps, sum(input_total) AS user_input, ",
             "sum(output_total) AS user_output, user_input + user_output AS user_tokens, ",
+            // Each run stands for the runs its rate sampled out.
+            "sum(run_spent / run_rate) AS user_spend, ",
             "sum(greatest(dateDiff('millisecond', first_started_at, last_ended_at), 0)) ",
             "AS user_duration, ",
             "min(first_started_at) AS user_first, max(last_ended_at) AS user_last ",
@@ -69,6 +74,7 @@ macro_rules! list_sql {
         concat!(
             "SELECT user_id, user_traces AS traces, user_errors AS errors, ",
             "user_steps AS steps, user_input AS input_tokens, user_output AS output_tokens, ",
+            "user_spend AS spend, ",
             "user_duration AS duration_ms, user_first AS first_seen, user_last AS last_seen ",
             "FROM (",
             users!(),
@@ -98,6 +104,8 @@ const fn list_sql(sort: UserSort, direction: SortDirection) -> &'static str {
         (UserSort::OutputTokens, Desc) => list_sql!("output_tokens DESC"),
         (UserSort::Tokens, Asc) => list_sql!("user_tokens ASC"),
         (UserSort::Tokens, Desc) => list_sql!("user_tokens DESC"),
+        (UserSort::Spend, Asc) => list_sql!("spend ASC"),
+        (UserSort::Spend, Desc) => list_sql!("spend DESC"),
         (UserSort::Duration, Asc) => list_sql!("duration_ms ASC"),
         (UserSort::Duration, Desc) => list_sql!("duration_ms DESC"),
         (UserSort::FirstSeen, Asc) => list_sql!("first_seen ASC"),
@@ -142,6 +150,7 @@ impl Listing for Users {
             | UserSort::InputTokens
             | UserSort::OutputTokens
             | UserSort::Tokens
+            | UserSort::Spend
             | UserSort::Duration
             | UserSort::LastSeen => SortDirection::Desc,
         }
@@ -171,6 +180,7 @@ mod tests {
                     UserSort::InputTokens => "input_tokens",
                     UserSort::OutputTokens => "output_tokens",
                     UserSort::Tokens => "user_tokens",
+                    UserSort::Spend => "spend",
                     UserSort::Duration => "duration_ms",
                     UserSort::FirstSeen => "first_seen",
                     UserSort::LastSeen => "last_seen",

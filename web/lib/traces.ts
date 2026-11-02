@@ -467,6 +467,14 @@ export const TRACE_COLUMNS: readonly ColumnSpec[] = [
     hint: "Input and output tokens, summed.",
   },
   {
+    key: TraceColumn.Spend,
+    label: "Spend",
+    sort: TraceSort.Spend,
+    first: SortDirection.Desc,
+    numeric: true,
+    hint: "What the run's model calls cost: each as it reported, else its tokens at the project's price or the price table's.",
+  },
+  {
     key: TraceColumn.Duration,
     label: "Duration",
     sort: TraceSort.Duration,

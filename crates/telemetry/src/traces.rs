@@ -80,7 +80,7 @@ impl Default for Window {
 /// What narrows the list, and its count, facets, histogram and download with
 /// it. Each filter admits a run matching any of its values; an empty one
 /// admits every run.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TraceFilter {
     /// The runs' agents.
     pub agents: Vec<String>,
@@ -109,6 +109,10 @@ pub struct TraceFilter {
     pub runs: Vec<Uuid>,
     /// How many days back, by the day each span arrived.
     pub days: u16,
+    /// The prices each call of the window is priced at, for the spend the
+    /// rows show and sort by ([`crate::spend::book_for_days`]); none prices
+    /// only what calls reported.
+    pub prices: crate::prices::PriceBook,
 }
 
 impl Default for TraceFilter {
@@ -126,6 +130,7 @@ impl Default for TraceFilter {
             prompts: Vec::new(),
             runs: Vec::new(),
             days: DEFAULT_DAYS,
+            prices: crate::prices::PriceBook::default(),
         }
     }
 }
@@ -180,6 +185,9 @@ pub struct TraceRow {
     pub cache_read_input_tokens: u64,
     /// Its model calls' cache writes, summed.
     pub cache_write_input_tokens: u64,
+    /// What its model calls cost in US dollars, each as reported, else at
+    /// its price ([`crate::spend`]); its own, never scaled by a sample rate.
+    pub spend: f64,
     /// The models its calls answered with, each once, sorted.
     pub models: Vec<String>,
     /// The tools its calls ran, each once, sorted.
@@ -290,6 +298,8 @@ pub struct BucketRow {
     pub cancelled: u64,
     /// Their input and output tokens, summed.
     pub token_total: u64,
+    /// What their model calls cost, in US dollars.
+    pub spend_total: f64,
     /// Their durations' median, in milliseconds.
     pub duration_p50_ms: f64,
     /// And 95th percentile.
@@ -314,6 +324,8 @@ pub struct Bar {
     pub cancelled: u64,
     /// Their input and output tokens, summed.
     pub tokens: u64,
+    /// What their model calls cost, in US dollars, each run its own.
+    pub spend: f64,
     /// Their durations' median, in milliseconds, where it had runs.
     pub duration_p50_ms: Option<f64>,
     /// And 95th percentile.
@@ -409,6 +421,9 @@ macro_rules! run_sums {
             "sumIf(cache_read_input_tokens, kind = 'model_call') AS cache_read_total, ",
             "sumIf(cache_write_input_tokens, kind = 'model_call') AS cache_write_total, ",
             "input_total + output_total AS tokens, ",
+            "sumIf(",
+            $crate::spend::spent_of!(),
+            ", kind = 'model_call') AS spent, ",
             "arraySort(groupUniqArrayIf(model, kind = 'model_call' AND model != '')) AS models, ",
             "arraySort(groupUniqArrayIf(name, kind = 'tool_call')) AS tools, ",
             run_carries!()
@@ -476,6 +491,11 @@ macro_rules! run_rows {
             "countIf(kind = 'step') AS steps, countIf(status = 'error') AS errors, ",
             "sumIf(input_tokens, kind = 'model_call') AS input_total, ",
             "sumIf(output_tokens, kind = 'model_call') AS output_total, ",
+            "sumIf(",
+            $crate::spend::spent_of!(),
+            ", kind = 'model_call') AS run_spent, ",
+            // A run not yet ended has no own span to name its rate: whole.
+            "ifNull(anyIf(sample_rate, kind = 'run'), 1) AS run_rate, ",
             "arraySort(groupUniqArrayArray(arrayMap((k, v) -> concat(k, ':', v), ",
             "mapKeys(tags), mapValues(tags)))) AS run_tag_pairs, ",
             "toUInt8((empty({agents:Array(String)}) OR has({agents:Array(String)}, any(agent))) ",
@@ -523,7 +543,7 @@ macro_rules! list_sql {
             "spans, steps, model_calls, tool_calls, errors, ",
             "input_total AS input_tokens, output_total AS output_tokens, ",
             "cache_read_total AS cache_read_input_tokens, ",
-            "cache_write_total AS cache_write_input_tokens, models, tools, ",
+            "cache_write_total AS cache_write_input_tokens, spent AS spend, models, tools, ",
             "environments, releases, tag_pairs AS tags ",
             "FROM (",
             runs!(),
@@ -581,6 +601,8 @@ const fn list_sql(sort: TraceSort, direction: SortDirection) -> &'static str {
         (TraceSort::OutputTokens, Desc) => list_sql!("output_tokens DESC"),
         (TraceSort::Tokens, Asc) => list_sql!("tokens ASC"),
         (TraceSort::Tokens, Desc) => list_sql!("tokens DESC"),
+        (TraceSort::Spend, Asc) => list_sql!("spend ASC"),
+        (TraceSort::Spend, Desc) => list_sql!("spend DESC"),
         (TraceSort::Duration, Asc) => list_sql!("duration_ms ASC"),
         (TraceSort::Duration, Desc) => list_sql!("duration_ms DESC"),
         (TraceSort::TimeToFirstToken, Asc) => list_sql!("time_to_first_token_ms ASC"),
@@ -605,6 +627,7 @@ const HISTOGRAM_SQL: &str = concat!(
     "* {bucket:Int64} - {shift:Int64} AS at_ms, ",
     "countIf(run_status = 'ok') AS ok, countIf(run_status = 'error') AS error, ",
     "countIf(run_status = 'cancelled') AS cancelled, sum(tokens) AS token_total, ",
+    "sum(spent) AS spend_total, ",
     "quantile(0.5)(duration_ms) AS duration_p50_ms, ",
     "quantile(0.95)(duration_ms) AS duration_p95_ms, ",
     "quantile(0.5)(time_to_first_token_ms) AS time_to_first_token_p50_ms, ",
@@ -734,7 +757,8 @@ const RUN_SPANS_SQL: &str = "SELECT span_id FROM telemetry.spans \
 /// since each names them all.
 pub(crate) fn filtered(read: Read, filter: &TraceFilter) -> Read {
     let statuses: Vec<String> = filter.statuses.iter().map(ToString::to_string).collect();
-    read.param("days", filter.days)
+    crate::spend::priced_by(read, &filter.prices)
+        .param("days", filter.days)
         .param("agents", &filter.agents)
         .param("users", &filter.user_ids)
         .param("sessions", &filter.session_ids)
@@ -840,6 +864,7 @@ impl Listing for Traces {
             | TraceSort::InputTokens
             | TraceSort::OutputTokens
             | TraceSort::Tokens
+            | TraceSort::Spend
             | TraceSort::Duration
             | TraceSort::TimeToFirstToken => SortDirection::Desc,
             TraceSort::Agent | TraceSort::User | TraceSort::Session | TraceSort::Status => {
@@ -985,6 +1010,7 @@ pub fn bars(
                     error: row.error,
                     cancelled: row.cancelled,
                     tokens: row.token_total,
+                    spend: row.spend_total,
                     duration_p50_ms: Some(row.duration_p50_ms),
                     duration_p95_ms: Some(row.duration_p95_ms),
                     time_to_first_token_p50_ms: row.time_to_first_token_p50_ms,
@@ -996,6 +1022,7 @@ pub fn bars(
                     error: 0,
                     cancelled: 0,
                     tokens: 0,
+                    spend: 0.0,
                     duration_p50_ms: None,
                     duration_p95_ms: None,
                     time_to_first_token_p50_ms: None,
@@ -1182,6 +1209,7 @@ mod tests {
                     TraceSort::InputTokens => "input_tokens",
                     TraceSort::OutputTokens => "output_tokens",
                     TraceSort::Tokens => "tokens",
+                    TraceSort::Spend => "spend",
                     TraceSort::Duration => "duration_ms",
                     TraceSort::TimeToFirstToken => "time_to_first_token_ms",
                 };
@@ -1346,6 +1374,7 @@ mod tests {
             error: 1,
             cancelled: 0,
             token_total: 10,
+            spend_total: 0.0,
             duration_p50_ms: 5.0,
             duration_p95_ms: 9.0,
             time_to_first_token_p50_ms: None,

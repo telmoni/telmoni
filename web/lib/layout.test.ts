@@ -185,7 +185,7 @@ describe("what the browser kept", () => {
     expect(
       readLayoutOptions({
         ...COMPLEX,
-        columns: ["spend", "tokens", "started"],
+        columns: ["price", "tokens", "started"],
         filter: { kind: ["call", "step"], status: ["maybe"], name: [" a ", "a", 3] },
       }),
     ).toEqual({

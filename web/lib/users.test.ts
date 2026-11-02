@@ -32,7 +32,7 @@ describe("the users list's URL", () => {
       limit: 25,
       page: 2,
     });
-    expect(parseUserQuery({ sort: "spend", dir: "sideways", days: "0", limit: "500" })).toEqual({});
+    expect(parseUserQuery({ sort: "price", dir: "sideways", days: "0", limit: "500" })).toEqual({});
     // No tag sorts the users list: the server refuses one.
     expect(parseUserQuery({ sort: "tag:team" })).toEqual({});
     expect(parseUserQuery({ user: "someone" })).toEqual({ user: ["someone"] });
@@ -100,6 +100,7 @@ describe("the users table's columns", () => {
     ).toEqual([
       "Counts: traces,errors,steps",
       "Tokens: input_tokens,output_tokens,tokens",
+      "spend",
       "duration",
       "first_seen",
       "last_seen",

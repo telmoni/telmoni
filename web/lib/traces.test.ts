@@ -124,7 +124,7 @@ describe("the URL as the list's state", () => {
     expect(
       parseTraceQuery({
         status: "maybe",
-        sort: "spend",
+        sort: "price",
         dir: "sideways",
         days: "0",
         limit: "500",
@@ -509,6 +509,7 @@ describe("a run's time to first token in the list", () => {
     output_tokens: 5,
     cache_read_input_tokens: 0,
     cache_write_input_tokens: 0,
+    spend: 0,
     models: [],
     tools: [],
     environments: [],

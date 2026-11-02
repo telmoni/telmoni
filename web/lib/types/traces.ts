@@ -90,6 +90,9 @@ export const TraceSchema = z.object({
   output_tokens: z.number(),
   cache_read_input_tokens: z.number(),
   cache_write_input_tokens: z.number(),
+  /** What its model calls cost in US dollars, reported or priced: its own,
+   *  never scaled by a sample rate. */
+  spend: z.number(),
   models: z.array(z.string()),
   tools: z.array(z.string()),
   /** The deployments its spans were sent from, each once: one, unless the

@@ -22,6 +22,8 @@ pub enum UserSort {
     OutputTokens,
     /// Their runs' input and output tokens, summed: the default.
     Tokens,
+    /// What its runs' model calls cost, each run scaled by its sample rate.
+    Spend,
     /// How long their runs took, summed.
     Duration,
     /// When their first run in the window started.
@@ -38,6 +40,7 @@ crate::wire_enum!(UserSort {
     InputTokens => "input_tokens",
     OutputTokens => "output_tokens",
     Tokens => "tokens",
+    Spend => "spend",
     Duration => "duration",
     FirstSeen => "first_seen",
     LastSeen => "last_seen",

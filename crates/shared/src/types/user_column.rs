@@ -21,6 +21,8 @@ pub enum UserColumn {
     OutputTokens,
     /// Input and output tokens, summed.
     Tokens,
+    /// What its model calls cost, reported or priced.
+    Spend,
     /// How long their runs took, summed.
     Duration,
     /// When their first run in the window started.
@@ -37,6 +39,7 @@ crate::wire_enum!(UserColumn {
     InputTokens => "input_tokens",
     OutputTokens => "output_tokens",
     Tokens => "tokens",
+    Spend => "spend",
     Duration => "duration",
     FirstSeen => "first_seen",
     LastSeen => "last_seen",

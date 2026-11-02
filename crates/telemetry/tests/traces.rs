@@ -1094,7 +1094,7 @@ async fn a_query_a_parameter_does_not_take_is_a_400_that_echoes_nothing(pool: Pg
         "?status=maybe%3Cscript%3E",
         "?tag=untagged%3Cscript%3E",
         "?tag=%3Anameless",
-        "?sort=spend",
+        "?sort=price",
         "?sort=agent&sort=user",
         "?dir=sideways",
         "?nonsense=1",
@@ -1131,7 +1131,7 @@ async fn a_query_a_parameter_does_not_take_is_a_400_that_echoes_nothing(pool: Pg
         assert!(
             !body.contains("script")
                 && !body.contains("sideways")
-                && !body.contains("spend")
+                && !body.contains("price")
                 && !body.contains("nameless"),
             "{query} was echoed: {body}"
         );

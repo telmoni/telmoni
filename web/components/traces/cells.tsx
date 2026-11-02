@@ -6,7 +6,7 @@ import { LocalTime } from "@/components/local-time";
 import { TraceStatusBadge } from "@/components/trace-status-badge";
 import { Badge } from "@/components/ui/badge";
 import type { Trace, TraceQuery } from "@/lib/server/entities/traces";
-import { formatCount, formatDuration, type ColumnSpec, type FilterKey } from "@/lib/traces";
+import { formatCost, formatCount, formatDuration, type ColumnSpec, type FilterKey } from "@/lib/traces";
 import { TraceColumn } from "@/lib/types/enums";
 
 // One trace's cells, as the trace list draws them (`table.tsx`) and a
@@ -121,6 +121,8 @@ export function cellOf(
       return formatCount(trace.cache_write_input_tokens);
     case TraceColumn.Tokens:
       return formatCount(trace.input_tokens + trace.output_tokens);
+    case TraceColumn.Spend:
+      return formatCost(trace.spend);
     case TraceColumn.Duration:
       return formatDuration(trace.duration_ms);
     case TraceColumn.TimeToFirstToken:

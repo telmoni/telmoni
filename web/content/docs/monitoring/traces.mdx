@@ -36,7 +36,10 @@ version or a commit), each once where a run crossed services deployed apart,
 the class of the error it ended on (**Error**: `TimeoutError`,
 `RateLimitError` — never its message), its model calls, tool calls, errors
 and spans, its input, output and cached tokens, how soon the first of its
-model calls that said began to answer (**Time to first token**), the
+model calls that said began to answer (**Time to first token**), what its
+model calls cost (**Spend**: each as it reported, else its tokens at the
+project's own price or the price table's, the run's own and never scaled by
+a sample rate; [What a call cost](/docs/api/ingest#what-a-call-cost)), the
 models and tools its calls used, and its [tags](#tags), each `key:value`
 (**Tags**).
 The counts and the tokens are each a group that opens under its heading,
@@ -91,10 +94,11 @@ thousand pages is reached by narrowing the window or the filters.
 days, by the day each span arrived. A window of more runs than the store
 reads at once, about a hundred thousand, shows the page as unavailable; a
 shorter one reads. Above the rows, its runs stand as bars by when they started — how
-they ended, or their tokens, or the median and 95th percentile of their
-durations or of their times to first token, as the menu above the bars picks
-— each bar an hour, a few hours, a day or a week, starting on your own clock.
-**Chart** shows the four as charts in the table's place, two by two.
+they ended, or their tokens, or what they cost (**Cost**, each run's own
+spend), or the median and 95th percentile of their durations or of their
+times to first token, as the menu above the bars picks — each bar an hour, a
+few hours, a day or a week, starting on your own clock. **Chart** shows the
+five as charts in the table's place, two to a row.
 
 As the project's runs land, a bar above the list counts the new traces rather
 than moving the rows under your hand; **Show** reads the list again, with them

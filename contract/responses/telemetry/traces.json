@@ -31,6 +31,7 @@
       "run_id": "0192f3a1-7c2e-7b4d-9a61-3c5e8f0d2b17",
       "session_id": "s_9c2e",
       "spans": 6,
+      "spend": 0.0042,
       "started_at": "2027-01-15T08:00:00Z",
       "status": "error",
       "steps": 2,

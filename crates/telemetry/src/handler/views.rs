@@ -797,7 +797,7 @@ mod tests {
             kind,
             name: "Old".into(),
             query,
-            columns: vec!["started".into(), "spend".into()],
+            columns: vec!["started".into(), "price".into()],
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };

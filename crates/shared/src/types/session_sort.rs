@@ -25,6 +25,8 @@ pub enum SessionSort {
     OutputTokens,
     /// Its runs' input and output tokens, summed.
     Tokens,
+    /// What its runs' model calls cost, each run scaled by its sample rate.
+    Spend,
     /// How long its runs took, summed.
     Duration,
     /// When its first run in the window started.
@@ -42,6 +44,7 @@ crate::wire_enum!(SessionSort {
     InputTokens => "input_tokens",
     OutputTokens => "output_tokens",
     Tokens => "tokens",
+    Spend => "spend",
     Duration => "duration",
     FirstSeen => "first_seen",
     LastSeen => "last_seen",

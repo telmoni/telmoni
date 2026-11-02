@@ -7,6 +7,7 @@
       "duration_p95_ms": 4000.0,
       "error": 1,
       "ok": 10,
+      "spend": 0.063,
       "time_to_first_token_p50_ms": 400.0,
       "time_to_first_token_p95_ms": 1100.0,
       "tokens": 18000
@@ -18,6 +19,7 @@
       "duration_p95_ms": null,
       "error": 0,
       "ok": 0,
+      "spend": 0.0,
       "time_to_first_token_p50_ms": null,
       "time_to_first_token_p95_ms": null,
       "tokens": 0

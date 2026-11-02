@@ -13,6 +13,7 @@
       "last_seen": "2027-01-15T08:01:30Z",
       "output_tokens": 680,
       "session_id": "s_9c2e",
+      "spend": 0.0084,
       "steps": 4,
       "tags": [
         "repo:telmoni"

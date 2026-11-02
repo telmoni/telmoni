@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 
 import { LocalTime } from "@/components/local-time";
 import type { UserRow } from "@/lib/server/entities/users";
-import { formatCount, formatDuration } from "@/lib/traces";
+import { formatCost, formatCount, formatDuration } from "@/lib/traces";
 import type { UserColumn } from "@/lib/users";
 import { cn } from "@/lib/utils";
 
@@ -44,6 +44,8 @@ export function sumCell(column: SumColumn, row: Sums): ReactNode {
   switch (column) {
     case "tokens":
       return formatCount(row.input_tokens + row.output_tokens);
+    case "spend":
+      return formatCost(row.spend);
     case "duration":
       return formatDuration(row.duration_ms);
     case "first_seen":

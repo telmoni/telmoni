@@ -42,6 +42,27 @@ macro_rules! priced {
     };
 }
 
+/// One span's spend as an expression, for a sum over many: its cost as
+/// reported, else its tokens at its price row, else 0, as [`priced!`]'s.
+macro_rules! spent_of {
+    () => {
+        concat!(
+            "ifNull(cost, if((arrayLastIndex((j, p, m, f) -> (j = '' OR j = project_id) ",
+            "AND p = provider AND m = model AND f <= toDate(received_at), ",
+            "{price_projects:Array(String)}, {price_providers:Array(String)}, ",
+            "{price_models:Array(String)}, {price_from:Array(Date)}) AS row_priced) = 0, 0, ",
+            "toFloat64(if(input_tokens > cache_read_input_tokens + cache_write_input_tokens, ",
+            "input_tokens - cache_read_input_tokens - cache_write_input_tokens, 0)) ",
+            "* {price_input:Array(Float64)}[row_priced] ",
+            "+ toFloat64(cache_read_input_tokens) * {price_cache_read:Array(Float64)}[row_priced] ",
+            "+ toFloat64(cache_write_input_tokens) * {price_cache_write:Array(Float64)}[row_priced] ",
+            "+ toFloat64(output_tokens) * {price_output:Array(Float64)}[row_priced]))"
+        )
+    };
+}
+
+pub(crate) use spent_of;
+
 /// The model calls a window holds that an alert's filters admit, which take
 /// no tool or status for a run's cost.
 macro_rules! window_calls {
@@ -226,6 +247,34 @@ pub async fn run(state: &AppState, projects: &Projects, run_id: Uuid) -> Result<
     })
 }
 
+/// The names a list's window prices: its calls that reported no cost.
+const LIST_NAMES_SQL: &str = concat!(
+    "SELECT DISTINCT provider, model FROM telemetry.spans ",
+    "WHERE project_id IN {projects:Array(String)} ",
+    "AND received_at >= now64(6) - toIntervalDay({days:UInt16}) ",
+    "AND kind = 'model_call' AND isNull(cost) AND provider != '' AND model != ''"
+);
+
+/// The prices a list over the last `days` reads its spend at, its projects'
+/// own among them.
+///
+/// # Errors
+///
+/// ClickHouse or Postgres did not answer, or refused the read.
+pub async fn book_for_days(
+    state: &AppState,
+    projects: &Projects,
+    days: u16,
+) -> Result<PriceBook, Unread> {
+    let names: Vec<Name> = state
+        .store
+        .read(projects, LIST_NAMES_SQL)
+        .param("days", days)
+        .fetch_all()
+        .await?;
+    Ok(PriceBook::read_for(&state.db, projects.as_slice(), &pairs(names)).await?)
+}
+
 fn pairs(names: Vec<Name>) -> Vec<(String, String)> {
     names
         .into_iter()
@@ -244,7 +293,7 @@ fn windowed(read: Read, window: Window, filters: &RuleFilters) -> Read {
 /// `read` handed `book`'s prices: each name's rows in the order they take
 /// effect, since its `price_row` is the last in force, the table's for every
 /// project as `''`, and a price for always from the epoch's first day.
-fn priced_by(read: Read, book: &PriceBook) -> Read {
+pub(crate) fn priced_by(read: Read, book: &PriceBook) -> Read {
     let (projects, rows): (Vec<&str>, Vec<_>) = book
         .rows()
         .map(|(project, row)| (project.map_or("", ProjectId::as_str), row))

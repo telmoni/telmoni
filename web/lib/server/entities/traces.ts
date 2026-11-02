@@ -99,6 +99,8 @@ const HistogramBarSchema = z.object({
   error: z.number(),
   cancelled: z.number(),
   tokens: z.number(),
+  /** What its runs' model calls cost, each run its own. */
+  spend: z.number(),
   duration_p50_ms: z.number().nullable(),
   duration_p95_ms: z.number().nullable(),
   time_to_first_token_p50_ms: z.number().nullable(),

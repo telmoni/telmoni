@@ -254,7 +254,7 @@ impl OwnPrice {
 /// The prices, by provider and model, each name's in the order they take
 /// effect; and the projects' own (`telemetry.project_prices`), which a read
 /// of spend takes before the table's for its project alone.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct PriceBook {
     prices: HashMap<String, HashMap<String, Vec<ModelPrice>>>,
     own: Vec<(ProjectId, ModelPrice)>,

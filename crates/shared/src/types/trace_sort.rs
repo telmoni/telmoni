@@ -32,6 +32,8 @@ pub enum TraceSort {
     OutputTokens,
     /// Its input and output tokens, summed.
     Tokens,
+    /// What its model calls cost, reported or priced.
+    Spend,
     /// How long it ran.
     Duration,
     /// How soon its first model call's answer began.
@@ -52,6 +54,7 @@ crate::wire_enum!(TraceSort {
     InputTokens => "input_tokens",
     OutputTokens => "output_tokens",
     Tokens => "tokens",
+    Spend => "spend",
     Duration => "duration",
     TimeToFirstToken => "time_to_first_token",
 });

@@ -82,6 +82,14 @@ export const SESSION_COLUMNS: readonly ColumnSpec<SessionColumn, SessionSort>[] 
     hint: "Input and output tokens, summed.",
   },
   {
+    key: "spend",
+    label: "Spend",
+    sort: SessionSort.Spend,
+    first: SortDirection.Desc,
+    numeric: true,
+    hint: "What its runs' model calls cost, each run counted for the runs its sample rate stands for.",
+  },
+  {
     key: "duration",
     label: "Duration",
     sort: SessionSort.Duration,

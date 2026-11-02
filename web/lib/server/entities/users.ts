@@ -25,6 +25,8 @@ const UserRowSchema = z.object({
   steps: z.number(),
   input_tokens: z.number(),
   output_tokens: z.number(),
+  /** What their runs' model calls cost, each run scaled by its sample rate. */
+  spend: z.number(),
   duration_ms: z.number(),
   first_seen: z.string(),
   last_seen: z.string(),

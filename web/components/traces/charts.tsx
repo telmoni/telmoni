@@ -19,18 +19,19 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { TraceHistogram } from "@/lib/server/entities/traces";
-import { formatCount, formatDuration } from "@/lib/traces";
+import { formatCost, formatCount, formatDuration } from "@/lib/traces";
 import { useInBrowser } from "@/lib/in-browser";
 import { isOneOf } from "@/lib/one-of";
 import { cn } from "@/lib/utils";
 
 /** What a chart of the list draws. */
-const METRICS = ["runs", "tokens", "duration", "first_token"] as const;
+const METRICS = ["runs", "tokens", "cost", "duration", "first_token"] as const;
 type Metric = (typeof METRICS)[number];
 
 const METRIC_LABEL: Record<Metric, string> = {
   runs: "Runs",
   tokens: "Tokens",
+  cost: "Cost",
   duration: "Duration",
   first_token: "Time to first token",
 };
@@ -45,6 +46,9 @@ const RUNS: ChartConfig = {
 };
 const TOKENS: ChartConfig = {
   tokens: { label: "Tokens", color: "var(--muted-foreground)" },
+};
+const COST: ChartConfig = {
+  cost: { label: "Cost", color: "var(--muted-foreground)" },
 };
 const DURATION: ChartConfig = {
   p50: { label: "Median", color: "var(--muted-foreground)" },
@@ -86,6 +90,7 @@ function rows(histogram: TraceHistogram, metric: Metric) {
     error: bar.error,
     cancelled: bar.cancelled,
     tokens: bar.tokens,
+    cost: bar.spend,
     p50: metric === "first_token" ? bar.time_to_first_token_p50_ms : bar.duration_p50_ms,
     p95: metric === "first_token" ? bar.time_to_first_token_p95_ms : bar.duration_p95_ms,
   }));
@@ -109,8 +114,10 @@ function MetricChart({
   const data = rows(histogram, metric);
   const seconds = histogram.bucket_seconds;
   const lines = metric === "duration" || metric === "first_token";
-  const config = metric === "runs" ? RUNS : metric === "tokens" ? TOKENS : DURATION;
-  const value = (v: number) => (lines ? formatDuration(v) : formatCount(v));
+  const config =
+    metric === "runs" ? RUNS : metric === "tokens" ? TOKENS : metric === "cost" ? COST : DURATION;
+  const value = (v: number) =>
+    lines ? formatDuration(v) : metric === "cost" ? formatCost(v) : formatCount(v);
   // A longer window's bars narrower than a day are labelled where a day
   // starts alone, so its dates step along the axis rather than repeat.
   const dayStarts =
@@ -161,7 +168,7 @@ function MetricChart({
       width="auto"
       tickLine={false}
       axisLine={false}
-      allowDecimals={false}
+      allowDecimals={metric === "cost"}
       tickFormatter={(v: number) => value(v)}
     />
   );
@@ -185,8 +192,8 @@ function MetricChart({
           {yAxis}
           {tooltip}
           {legend && <ChartLegend content={<ChartLegendContent />} />}
-          {metric === "tokens" ? (
-            <Bar dataKey="tokens" fill="var(--color-tokens)" radius={2} />
+          {metric === "tokens" || metric === "cost" ? (
+            <Bar dataKey={metric} fill={`var(--color-${metric})`} radius={2} />
           ) : (
             <>
               <Bar dataKey="ok" stackId="runs" fill="var(--color-ok)" />
@@ -256,7 +263,7 @@ export function TraceCharts({ histogram }: { histogram: TraceHistogram }) {
               {perBar(histogram.bucket_seconds)}
             </span>
           </h2>
-          <MetricChart histogram={histogram} metric={metric} className="h-56" legend={metric !== "tokens"} />
+          <MetricChart histogram={histogram} metric={metric} className="h-56" legend={metric !== "tokens" && metric !== "cost"} />
         </div>
       ))}
     </div>

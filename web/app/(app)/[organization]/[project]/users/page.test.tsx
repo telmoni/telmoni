@@ -71,6 +71,7 @@ const USER_A = {
   steps: 40,
   input_tokens: 1200,
   output_tokens: 300,
+  spend: 0.25,
   duration_ms: 1500,
   first_seen: "2026-10-04T03:00:00Z",
   last_seen: "2026-10-11T03:00:02Z",
@@ -82,6 +83,7 @@ const USER_B = {
   steps: 3,
   input_tokens: 10,
   output_tokens: 5,
+  spend: 0.25,
   duration_ms: 1500,
   first_seen: "2026-10-10T03:00:00Z",
   last_seen: "2026-10-10T03:00:01Z",
@@ -181,7 +183,7 @@ describe("UsersPage", () => {
       "href",
       "/acme/web/users?sort=last_seen&dir=desc",
     );
-    expect(screen.getByRole("button", { name: /Columns/ })).toHaveTextContent("8/10");
+    expect(screen.getByRole("button", { name: /Columns/ })).toHaveTextContent("8/11");
     // The window, the refresh and the columns stand on the title's row.
     const header = within(screen.getByTestId("page-header"));
     expect(header.getByRole("combobox", { name: "Window" })).toHaveTextContent("Last 7 days");

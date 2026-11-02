@@ -29,7 +29,8 @@ use telmoni_shared::middleware::service_auth::SERVICE_SECRET_HEADER;
 use telmoni_shared::seam::Telemetry as _;
 use telmoni_shared::test_util::{apply_audit_migrations, captured_logs};
 use telmoni_shared::{
-    ApiKeyScope, ContentMode, OrganizationId, OrganizationRole, ProjectId, Role, TelmoniError,
+    ApiKeyScope, ContentMode, OrganizationId, OrganizationRole, ProjectId, Role, SpanKind,
+    TelmoniError,
 };
 use telmoni_telemetry::ingest::batch::SpanContent;
 use telmoni_telemetry::seam::TelemetrySeam;
@@ -2035,6 +2036,101 @@ async fn held_content_switched_off_lands_without_it(pool: PgPool) {
             .is_ok_and(|spans| spans == 2)
     })
     .await;
+}
+
+/// The trace list shows and sorts by each run's own spend, never scaled; a
+/// session's spend counts each run once for every run its rate stands for.
+#[sqlx::test]
+async fn the_lists_show_spend_each_run_its_own_a_session_scaled(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let door = door_over(&pool, ContentMode::Off, true).await;
+    door.auth.seat(
+        "admin-1",
+        &door.organization,
+        &door.project,
+        OrganizationRole::Owner,
+        None,
+    );
+    let at = Utc::now() - chrono::Duration::seconds(30);
+    let run = |rate: Option<f64>, cost: f64, span: &str| {
+        let run_id = uuid::Uuid::new_v4();
+        let own = telmoni_telemetry::store::SpanRow {
+            run_id,
+            span_id: format!("{span:0<16}"),
+            session_id: "s1".into(),
+            sample_rate: rate,
+            ..common::received(&door.project, SpanKind::Run, "nightly-report", 900, at)
+        };
+        let call = telmoni_telemetry::store::SpanRow {
+            run_id,
+            span_id: format!("{span}1{:0<14}", ""),
+            parent_span_id: own.span_id.clone(),
+            session_id: "s1".into(),
+            cost: Some(cost),
+            ..common::received(&door.project, SpanKind::ModelCall, "chat", 500, at)
+        };
+        (run_id, [own, call])
+    };
+    let (sampled, sampled_rows) = run(Some(0.5), 1.0, "a");
+    let (whole, whole_rows) = run(None, 3.0, "b");
+    // A call that reported no cost, at the project's own price: $2.
+    let (priced, mut priced_rows) = run(None, 0.0, "c");
+    priced_rows[1].cost = None;
+    priced_rows[1].provider = "self".into();
+    priced_rows[1].model = "ours-1".into();
+    priced_rows[1].input_tokens = 1_000_000;
+    sqlx::query(
+        "INSERT INTO telemetry.project_prices
+             (project_id, position, provider, models, input, output, cache_read, cache_write)
+         VALUES ($1, 0, 'self', ARRAY['ours-1'], 2e-6, 0, 0, 0)",
+    )
+    .bind(&door.project)
+    .execute(&pool)
+    .await
+    .expect("our price");
+    let rows: Vec<_> = sampled_rows
+        .into_iter()
+        .chain(whole_rows)
+        .chain(priced_rows)
+        .collect();
+    ch.store.insert_spans(&rows).await.expect("the runs");
+
+    let (status, list) = door
+        .lane("GET", "/traces?sort=spend&dir=desc", "admin-1", None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    let spends: Vec<(String, f64)> = list["traces"]
+        .as_array()
+        .expect("traces")
+        .iter()
+        .map(|t| {
+            (
+                t["run_id"].as_str().unwrap_or_default().to_owned(),
+                t["spend"].as_f64().unwrap_or(-1.0),
+            )
+        })
+        .collect();
+    assert_eq!(
+        spends,
+        [
+            (whole.to_string(), 3.0),
+            (priced.to_string(), 2.0),
+            (sampled.to_string(), 1.0)
+        ],
+        "each run its own, the costliest first"
+    );
+
+    let (status, sessions) = door
+        .lane("GET", "/sessions?sort=spend", "admin-1", None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{sessions}");
+    assert_eq!(
+        sessions["sessions"][0]["spend"].as_f64(),
+        Some(1.0 / 0.5 + 3.0 + 2.0),
+        "the sampled run stands for two"
+    );
 }
 
 /// A project's own prices: every role reads them, its owners and admins set
