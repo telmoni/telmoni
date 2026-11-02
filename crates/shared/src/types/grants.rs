@@ -115,6 +115,51 @@ impl AlertCeilings {
     }
 }
 
+/// What an organization's plan holds of what it spends, as the deployment
+/// that sells plans answers it ([`crate::seam::Entitlements::capacity`]): the
+/// span units its agents may send a month, the console agent's questions a
+/// month, and the days its spans are kept.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Capacity {
+    /// Span units a month; past them, spans are sampled and flagged.
+    pub spans: Allowance,
+    /// How many days spans past [`Capacity::spans`] are still kept whole
+    /// while the owner is asked to lift it; none is sampled from the first.
+    pub spans_grace_days: u32,
+    /// The console agent's questions a month; past them, a question is refused.
+    pub agent_questions: Allowance,
+    /// How many days its spans are kept.
+    pub retention_days: u32,
+}
+
+/// One limit of a [`Capacity`]: how much, and the refusal that names the one
+/// thing that lifts it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Allowance {
+    /// How much a month.
+    pub limit: u64,
+    /// The one thing that lifts it, the 402's `entitlement`.
+    pub entitlement: String,
+    /// The sentence a person reads, which names nobody.
+    pub detail: String,
+}
+
+impl Allowance {
+    /// Whether `used` leaves room for one more.
+    pub const fn has_room(&self, used: u64) -> bool {
+        used < self.limit
+    }
+
+    /// Whether one more may be taken with `used` already taken. Refused, as a
+    /// 402, once it is spent.
+    pub fn admit(&self, used: u64) -> Result<(), TelmoniError> {
+        if self.has_room(used) {
+            return Ok(());
+        }
+        Err(limit_reached(&self.entitlement, &self.detail))
+    }
+}
+
 /// What an answer to an organization's machines costs on top of its bytes:
 /// the TLS connection a script opens for each request, measured at 6.5 KB.
 pub const CONNECTION_BYTES: u64 = 6_500;
@@ -162,6 +207,25 @@ mod tests {
                 .and_then(serde_json::Value::as_str),
             Some("pro")
         );
+    }
+
+    #[test]
+    fn an_allowance_admits_until_it_is_spent_and_refuses_in_the_deployments_words() {
+        let questions = Allowance {
+            limit: 5,
+            entitlement: "pro".into(),
+            detail: "Hobby asks five a month.".into(),
+        };
+        assert!(questions.admit(4).is_ok());
+        let pd = questions
+            .admit(5)
+            .expect_err("the sixth of five")
+            .to_problem_details();
+        assert_eq!(
+            (pd.status, pd.type_uri.as_str()),
+            (402, "/errors/plan/limit-reached")
+        );
+        assert_eq!(pd.detail.as_deref(), Some("Hobby asks five a month."));
     }
 
     #[test]

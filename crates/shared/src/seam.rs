@@ -19,7 +19,7 @@ use uuid::Uuid;
 use crate::acting::{Acting, ActingKey};
 use crate::slug::Slug;
 use crate::{
-    AlertCeilings, AuditAction, AuthError, AuthzError, FlagSet, Grants, LaneCeilings,
+    AlertCeilings, AuditAction, AuthError, AuthzError, Capacity, FlagSet, Grants, LaneCeilings,
     MemberCeiling, NotificationKind, OrganizationId, OrganizationStatus, ProjectId, Role,
     TelmoniError, UserId,
 };
@@ -971,6 +971,19 @@ pub trait Entitlements: Send + Sync {
         let _ = organization_id;
         Ok(None)
     }
+
+    /// What the organization's plan holds of what it spends — span units and
+    /// agent questions a month, and the days its spans are kept; `None` is
+    /// no limit on any. Asked as spans arrive and questions are put, so its
+    /// callers keep the answer a minute, and it may read the deployment's own
+    /// rows.
+    async fn capacity(
+        &self,
+        organization_id: &OrganizationId,
+    ) -> Result<Option<Capacity>, TelmoniError> {
+        let _ = organization_id;
+        Ok(None)
+    }
 }
 
 /// A binary that sells nothing: every organization holds everything.
@@ -1049,6 +1062,21 @@ pub async fn alert_ceilings(
         organization_id,
         "the alert ceilings",
         entitlements.alert_ceilings(organization_id),
+    )
+    .await
+}
+
+/// What spends the plan's capacity asks: the organization's capacity. An
+/// answer that cannot be had is no limit, logged, as [`admit_new`] lets in
+/// what it cannot decide.
+pub async fn capacity(
+    entitlements: &dyn Entitlements,
+    organization_id: &OrganizationId,
+) -> Option<Capacity> {
+    or_none(
+        organization_id,
+        "the capacity",
+        entitlements.capacity(organization_id),
     )
     .await
 }

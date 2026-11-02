@@ -41,7 +41,10 @@ pub use audit_action::AuditAction;
 pub use content_mode::ContentMode;
 pub use email::{Email, EmailError};
 pub use flag::{Flag, FlagSet};
-pub use grants::{AlertCeilings, CONNECTION_BYTES, Grants, LaneCeilings, MemberCeiling, Paused};
+pub use grants::{
+    AlertCeilings, Allowance, CONNECTION_BYTES, Capacity, Grants, LaneCeilings, MemberCeiling,
+    Paused,
+};
 pub use incident_status::IncidentStatus;
 pub use layout_depth::LayoutDepth;
 pub use layout_open::LayoutOpen;
