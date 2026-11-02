@@ -2038,6 +2038,64 @@ async fn held_content_switched_off_lands_without_it(pool: PgPool) {
     .await;
 }
 
+/// An organization's spend this month, project by project against its
+/// budget, to its owners and admins alone.
+#[sqlx::test]
+async fn an_organizations_spend_is_its_projects_this_month_against_their_budgets(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    apply_audit_migrations(&pool).await;
+    let door = door_over(&pool, ContentMode::Off, true).await;
+    door.auth
+        .seat(
+            "admin-1",
+            &door.organization,
+            &door.project,
+            OrganizationRole::Owner,
+            None,
+        )
+        .seat(
+            "member-1",
+            &door.organization,
+            &door.project,
+            OrganizationRole::Member,
+            Some(Role::Member),
+        );
+    let at = Utc::now() - chrono::Duration::seconds(30);
+    let call = |cost: f64| telmoni_telemetry::store::SpanRow {
+        cost: Some(cost),
+        ..common::received(&door.project, SpanKind::ModelCall, "chat", 500, at)
+    };
+    ch.store
+        .insert_spans(&[call(2.0), call(0.5)])
+        .await
+        .expect("the calls");
+    let (status, saved) = door
+        .lane(
+            "POST",
+            "/rules",
+            "admin-1",
+            Some(json!({
+                "name": "Budget", "kind": "run", "measure": "cost", "aggregation": "sum",
+                "window": "month", "operator": "gt", "alert_threshold": 100,
+                "warning_threshold": 80
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{saved}");
+
+    let path = format!("/organizations/{}/spend", door.organization);
+    let (status, spend) = door.lane("GET", &path, "admin-1", None).await;
+    assert_eq!(status, StatusCode::OK, "{spend}");
+    assert_eq!(spend["total"].as_f64(), Some(2.5));
+    assert_eq!(spend["projects"][0]["project"]["id"], door.project.as_str());
+    assert_eq!(spend["projects"][0]["spent"].as_f64(), Some(2.5));
+    assert_eq!(spend["projects"][0]["budget"].as_f64(), Some(100.0));
+    let (status, _) = door.lane("GET", &path, "member-1", None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "a member reads no spend");
+}
+
 /// The trace list shows and sorts by each run's own spend, never scaled; a
 /// session's spend counts each run once for every run its rate stands for.
 #[sqlx::test]

@@ -1,6 +1,7 @@
-//! An organization's health, on its Overview: its incidents still open on the
-//! projects the person can open, which auth answers, read under the
-//! organization's binding and narrowed to those projects here.
+//! An organization's health and spend, on its Overview: its incidents still
+//! open on the projects the person can open, which auth answers, read under
+//! the organization's binding and narrowed to those projects here; and, to
+//! its owners and admins, what each project spent this period.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -14,7 +15,7 @@ use telmoni_shared::extract::Json;
 use telmoni_shared::rbac::{Resource, Verb, can};
 use telmoni_shared::seam::ReadableProject;
 use telmoni_shared::slug::Slug;
-use telmoni_shared::{AuthzError, ProjectId, TelmoniError};
+use telmoni_shared::{AuthzError, OrganizationRole, ProjectId, TelmoniError};
 
 use crate::AppState;
 use crate::handler::incidents::INCIDENTS_MAX;
@@ -87,5 +88,146 @@ pub async fn organization_health(
                 })
             })
             .collect(),
+    }))
+}
+
+/// One project's spend this period, against its budget where it set one.
+#[derive(Debug, Serialize)]
+pub struct ProjectSpend {
+    pub project: HealthProject,
+    /// In US dollars, each call reported or priced.
+    pub spent: f64,
+    /// Its calls with neither a cost nor a price, which `spent` leaves out.
+    pub unpriced_calls: u64,
+    /// The alert threshold of its budget, a cost alert summed over the month
+    /// with no filter; none where it set none.
+    pub budget: Option<f64>,
+}
+
+/// What the Overview's spend answers: the period and each project with a
+/// model call in it, the costliest first.
+#[derive(Debug, Serialize)]
+pub struct Spend {
+    pub period_start: chrono::DateTime<chrono::Utc>,
+    pub period_end: chrono::DateTime<chrono::Utc>,
+    pub total: f64,
+    pub projects: Vec<ProjectSpend>,
+}
+
+/// The period an organization's spend is read over: its plan's month where a
+/// plan holds it, else the calendar month in UTC.
+async fn period(
+    state: &AppState,
+    acting: &telmoni_shared::acting::Acting,
+) -> (chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>) {
+    if let Some(capacity) = state
+        .capacities
+        .of(state.entitlements.as_ref(), &acting.organization_id)
+        .await
+    {
+        return (capacity.period_start, capacity.period_end);
+    }
+    let now = chrono::Utc::now();
+    let month = crate::rules::evaluate::Window::of(now, telmoni_shared::RuleWindow::Month);
+    let end = month
+        .from
+        .checked_add_months(chrono::Months::new(1))
+        .unwrap_or(now);
+    (month.from, end)
+}
+
+/// `GET /internal/v1/telemetry/organizations/{id}/spend` — what each of the
+/// acting organization's projects spent this period, to its owners and
+/// admins alone, each against its budget.
+pub async fn organization_spend(
+    State(state): State<Arc<AppState>>,
+    Path(organization): Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<Spend>, TelmoniError> {
+    let acting = state.auth.resolve(&headers).await?;
+    if organization != acting.organization_id.as_str() {
+        return Err(AuthzError::Forbidden("not the acting organization".into()).into());
+    }
+    if !matches!(
+        acting.organization_role,
+        Some(OrganizationRole::Owner | OrganizationRole::Admin)
+    ) {
+        return Err(AuthzError::Forbidden(
+            "an organization's spend is its owners' and admins'".into(),
+        )
+        .into());
+    }
+    let projects: HashMap<ProjectId, ReadableProject> = state
+        .auth
+        .readable_projects(&acting)
+        .await?
+        .into_iter()
+        .map(|project| (project.project_id.clone(), project))
+        .collect();
+    let (period_start, period_end) = period(&state, &acting).await;
+    let Some(read) = crate::store::Projects::of(projects.keys().cloned()) else {
+        return Ok(Json(Spend {
+            period_start,
+            period_end,
+            total: 0.0,
+            projects: Vec::new(),
+        }));
+    };
+    let spent = crate::spend::projects(
+        &state,
+        &read,
+        period_start,
+        chrono::Utc::now().min(period_end),
+    )
+    .await
+    .map_err(|unread| match unread {
+        crate::spend::Unread::Store(error) => crate::store::failed(
+            &error,
+            "an organization's spend",
+            "the span store did not answer; try again",
+        ),
+        crate::spend::Unread::Db(error) => error.into(),
+    })?;
+    let ids: Vec<ProjectId> = projects.keys().cloned().collect();
+    let mut tx = organization_scope(&state.db, &acting.organization_id).await?;
+    let budgets: Vec<(String, f64)> = sqlx::query_as(
+        "SELECT project_id, min(alert_threshold)
+           FROM telemetry.rules
+          WHERE organization_id = $1 AND project_id = ANY($2)
+            AND kind = 'run' AND measure = 'cost' AND aggregation = 'sum'
+            AND lookback = 'month' AND filters = '{}'::jsonb
+          GROUP BY project_id",
+    )
+    .bind(&acting.organization_id)
+    .bind(&ids)
+    .fetch_all(tx.conn())
+    .await?;
+    tx.commit().await?;
+    let budgets: HashMap<String, f64> = budgets.into_iter().collect();
+    let by_id: HashMap<&str, &ReadableProject> = projects
+        .values()
+        .map(|project| (project.project_id.as_str(), project))
+        .collect();
+    let rows: Vec<ProjectSpend> = spent
+        .into_iter()
+        .filter_map(|row| {
+            let project = by_id.get(row.project_id.as_str())?;
+            Some(ProjectSpend {
+                project: HealthProject {
+                    id: project.project_id.clone(),
+                    slug: project.slug.clone(),
+                    name: project.name.clone(),
+                },
+                spent: row.spent,
+                unpriced_calls: row.unpriced_calls,
+                budget: budgets.get(&row.project_id).copied(),
+            })
+        })
+        .collect();
+    Ok(Json(Spend {
+        period_start,
+        period_end,
+        total: rows.iter().map(|row| row.spent).sum(),
+        projects: rows,
     }))
 }

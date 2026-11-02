@@ -10,6 +10,7 @@ import type {
   HealthIncident,
   OrganizationHealth,
 } from "@/lib/server/entities/organization-health";
+import type { OrganizationSpend } from "@/lib/server/entities/organization-spend";
 
 // The action, not its effects: which organization the page hands it is the
 // assertion, and the action refuses any other.
@@ -55,6 +56,15 @@ const fetchNotifications = vi.hoisted(() =>
 const fetchOrganizationHealth = vi.hoisted(() =>
   vi.fn<() => Promise<OrganizationHealth>>(async () => ({ kind: "ok", incidents: [] })),
 );
+const fetchOrganizationSpend = vi.hoisted(() =>
+  vi.fn<() => Promise<OrganizationSpend>>(async () => ({
+    kind: "ok",
+    period_start: "2026-11-01T00:00:00Z",
+    period_end: "2026-12-01T00:00:00Z",
+    total: 0,
+    projects: [],
+  })),
+);
 
 
 type FeedItem = {
@@ -75,6 +85,7 @@ vi.mock("@/lib/server/data", async () => {
     activeOrganization,
     fetchNotifications,
     fetchOrganizationHealth,
+    fetchOrganizationSpend,
     getServerContext: async () => mockContext,
   };
 });
@@ -245,6 +256,45 @@ describe("OrganizationOverviewPage", () => {
     };
     await renderPage();
     expect(fetchNotifications).not.toHaveBeenCalled();
+  });
+
+  // What the projects spent is the owner's and admins' to read, each project
+  // linking to its dashboards against its budget.
+  it("shows the owner the period's spend by project, and asks for nobody else's", async () => {
+    fetchOrganizationSpend.mockResolvedValue({
+      kind: "ok",
+      period_start: "2026-11-01T00:00:00Z",
+      period_end: "2026-12-01T00:00:00Z",
+      total: 92.5,
+      projects: [
+        {
+          project: { id: "project_1", slug: "web", name: "Web" },
+          spent: 90,
+          unpriced_calls: 0,
+          budget: 100,
+        },
+        {
+          project: { id: "project_2", slug: "batch", name: "Batch" },
+          spent: 2.5,
+          unpriced_calls: 3,
+          budget: null,
+        },
+      ],
+    });
+    await renderPage();
+    const spend = within(screen.getByRole("region", { name: "Spend" }));
+    expect(spend.getByText("$92.50")).toBeInTheDocument();
+    expect(spend.getByRole("link", { name: "Web" })).toHaveAttribute("href", "/ada-works/web/dashboards");
+    expect(spend.getByText("90% of its $100.00 budget")).toBeInTheDocument();
+    expect(spend.getByText("3 unpriced calls")).toBeInTheDocument();
+
+    vi.clearAllMocks();
+    mockContext = {
+      organizations: [{ ...OWNED, role: "member" }],
+      activeOrganizationId: "org_1",
+    };
+    await renderPage();
+    expect(fetchOrganizationSpend).not.toHaveBeenCalled();
   });
 
   // A project is made on the Projects page or from the switcher; the overview

@@ -9,6 +9,7 @@ import {
   activeOrganization,
   fetchNotifications,
   fetchOrganizationHealth,
+  fetchOrganizationSpend,
   getServerContext,
 } from "@/lib/server/data";
 
@@ -16,6 +17,7 @@ import { Notices } from "../../_notices";
 import { Overview } from "../../_overview";
 import { LeaveOrganization } from "../_leave-organization";
 import { OpenIncidents } from "../_open-incidents";
+import { OrganizationSpendSection } from "../_organization-spend";
 import { markOrganizationReadAction } from "../notice-actions";
 
 // In a route group of its own so that whatever stands in for a page while it
@@ -49,9 +51,11 @@ export default async function OrganizationOverviewPage() {
   // The organization's own feed — the notices that name no project, such as
   // an `organization_alert` a service beside this one raises — answers its
   // owner and admins, so nobody else is sent to ask for it.
-  const [health, notices] = await Promise.all([
+  const [health, notices, spend] = await Promise.all([
     fetchOrganizationHealth(),
     isAdmin ? fetchNotifications() : null,
+    // What its projects spent is the owner's and admins' to read.
+    isAdmin ? fetchOrganizationSpend() : null,
   ]);
 
   // Anybody but the owner may leave. The owner hands the organization to an
@@ -75,6 +79,7 @@ export default async function OrganizationOverviewPage() {
       sections={
         <>
           <OpenIncidents organization={organization.slug} health={health} />
+          {spend && <OrganizationSpendSection organization={organization.slug} spend={spend} />}
           {notices && notices.items.length > 0 && (
             <Notices label="Organization notices" feed={notices} />
           )}

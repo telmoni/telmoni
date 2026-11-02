@@ -124,6 +124,60 @@ const RUN_SQL: &str = concat!(
     "AND kind = 'model_call')"
 );
 
+/// The names a period's calls that reported no cost are priced by.
+const PERIOD_NAMES_SQL: &str = concat!(
+    "SELECT DISTINCT provider, model FROM telemetry.spans ",
+    "WHERE project_id IN {projects:Array(String)} ",
+    "AND received_at >= {from:DateTime64(6, 'UTC')} AND received_at < {to:DateTime64(6, 'UTC')} ",
+    "AND kind = 'model_call' AND isNull(cost) AND provider != '' AND model != ''"
+);
+
+/// What each project's calls spent over a period, a project with none left
+/// out: what an organization's Overview shows.
+const PROJECTS_SQL: &str = concat!(
+    "SELECT project_id, sum(spent) AS spent, toUInt64(countIf(unpriced)) AS unpriced_calls ",
+    "FROM (SELECT project_id, ",
+    priced!(),
+    " FROM telemetry.spans ",
+    "WHERE project_id IN {projects:Array(String)} ",
+    "AND received_at >= {from:DateTime64(6, 'UTC')} AND received_at < {to:DateTime64(6, 'UTC')} ",
+    "AND kind = 'model_call') GROUP BY project_id ORDER BY spent DESC, project_id"
+);
+
+/// One project's spend over a period.
+#[derive(Debug, Clone, PartialEq, Row, Deserialize)]
+pub struct ProjectSpent {
+    pub project_id: String,
+    /// In US dollars, each call reported or priced.
+    pub spent: f64,
+    /// Its calls with neither a cost nor a price.
+    pub unpriced_calls: u64,
+}
+
+/// What each of `projects`' calls spent from `from` to `to`, the costliest
+/// first, a project that made no model call left out.
+///
+/// # Errors
+///
+/// ClickHouse or Postgres did not answer, or refused the read.
+pub async fn projects(
+    state: &AppState,
+    projects: &Projects,
+    from: chrono::DateTime<chrono::Utc>,
+    to: chrono::DateTime<chrono::Utc>,
+) -> Result<Vec<ProjectSpent>, Unread> {
+    let between = |read: Read| read.param("from", micros(from)).param("to", micros(to));
+    let names: Vec<Name> = between(state.store.read(projects, PERIOD_NAMES_SQL))
+        .fetch_all()
+        .await?;
+    let book = PriceBook::read_for(&state.db, projects.as_slice(), &pairs(names)).await?;
+    Ok(
+        priced_by(between(state.store.read(projects, PROJECTS_SQL)), &book)
+            .fetch_all()
+            .await?,
+    )
+}
+
 /// Why a read of spend went unanswered: ClickHouse, whose error a caller
 /// logs by its kind alone ([`crate::store`]), or Postgres, which holds the
 /// prices.

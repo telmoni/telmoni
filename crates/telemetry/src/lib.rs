@@ -284,6 +284,10 @@ pub fn router(state: Arc<AppState>) -> Router {
             "/telemetry/organizations/{id}/health",
             get(handler::health::organization_health),
         )
+        .route(
+            "/telemetry/organizations/{id}/spend",
+            get(handler::health::organization_spend),
+        )
         .layer(middleware::from_fn_with_state(
             state.service_secrets.clone(),
             require_service_secret,
