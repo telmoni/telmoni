@@ -17,11 +17,8 @@ use crate::rules::RuleFilters;
 use crate::rules::evaluate::Window;
 use crate::store::{Projects, Read, micros};
 
-/// Each call's spend, priced by the parameters' row for its provider and
-/// model that took effect last by its day, its project's own after the
-/// table's ([`PriceBook::rows`]), at [`crate::prices::ModelPrice::cost`]'s
-/// sum; and whether it is unpriced: no cost reported, no row, and tokens to
-/// price.
+/// Each call's spend at the row for its name last in force by its day, its project's
+/// own first ([`PriceBook::rows`]); unpriced where no cost, no row, and tokens to price.
 macro_rules! priced {
     () => {
         concat!(
@@ -123,8 +120,7 @@ macro_rules! window_calls {
             "AND received_at < {to:DateTime64(6, 'UTC')} ",
             "AND kind = 'model_call' ",
             $crate::rules::calls_admitted!(),
-            // A run's tags ride on its own span, which lands as it ends: its
-            // runs are found from a day before the window, to no end.
+            // A run's tags ride on its own span, landing as it ends: found from a day before.
             "AND (empty({tags:Array(String)}) OR run_id IN (SELECT run_id FROM telemetry.spans ",
             "WHERE project_id IN {projects:Array(String)} ",
             "AND received_at >= {from:DateTime64(6, 'UTC')} - INTERVAL 1 DAY ",
@@ -404,9 +400,8 @@ fn windowed(read: Read, window: Window, filters: &RuleFilters) -> Read {
         .param("tags", &filters.tag)
 }
 
-/// `read` handed `book`'s prices: each name's rows in the order they take
-/// effect, since its `price_row` is the last in force, the table's for every
-/// project as `''`, and a price for always from the epoch's first day.
+/// `read` handed `book`'s prices in the order they take effect, the table's as
+/// project `''`, a price for always from the epoch's first day.
 pub(crate) fn priced_by(read: Read, book: &PriceBook) -> Read {
     let (projects, rows): (Vec<&str>, Vec<_>) = book
         .rows()

@@ -289,9 +289,8 @@ impl PriceBook {
         Ok(Self::new(rows))
     }
 
-    /// The prices `telemetry.model_prices` holds for `names`, each a provider
-    /// and a model, from every day, and every price `projects` set of their
-    /// own; none for a name no row holds.
+    /// The table's prices for `names` from every day, and every price `projects`
+    /// set of their own.
     pub async fn read_for(
         pool: &PgPool,
         projects: &[ProjectId],
@@ -331,9 +330,8 @@ impl PriceBook {
         Ok(Self::new(rows))
     }
 
-    /// Every row, each name's in the order they take effect: the table's,
-    /// for every project, then each project's own, so the last in force for
-    /// a call is its project's where it set one.
+    /// Every row in the order they take effect, the table's then each project's,
+    /// so a call's last in force is its project's where it set one.
     pub fn rows(&self) -> impl Iterator<Item = (Option<&ProjectId>, &ModelPrice)> {
         self.prices
             .values()
@@ -343,9 +341,8 @@ impl PriceBook {
             .chain(self.own.iter().map(|(project, row)| (Some(project), row)))
     }
 
-    /// The price in force for a call of `provider`'s `model` at `at`: the
-    /// last to take effect by its day. None for a name no row holds, or a
-    /// call before its first price.
+    /// The table's price in force for `provider`'s `model` at `at`, never a project's own;
+    /// none for a name no row holds or a call before its first price.
     #[must_use]
     pub fn price(&self, provider: &str, model: &str, at: DateTime<Utc>) -> Option<&ModelPrice> {
         let day = at.date_naive();

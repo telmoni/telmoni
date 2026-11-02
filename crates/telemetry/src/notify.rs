@@ -397,14 +397,13 @@ fn traces_link(state: &AppState, rule: &RuleRow) -> Option<String> {
     };
     {
         let mut query = url.query_pairs_mut();
-        query.append_pair(
-            "days",
-            match rule.definition.window {
-                RuleWindow::Hour | RuleWindow::Day => "1",
-                RuleWindow::Week => "7",
-                RuleWindow::Month => "30",
-            },
-        );
+        // The month's days so far, back to its first, which no fixed count covers.
+        let days = match rule.definition.window {
+            RuleWindow::Hour | RuleWindow::Day => 1,
+            RuleWindow::Week => 7,
+            RuleWindow::Month => chrono::Datelike::day(&Utc::now()),
+        };
+        query.append_pair("days", &days.to_string());
         for (facet, values) in [
             (Facet::Agent, &filters.agent),
             (Facet::Model, &filters.model),
@@ -706,9 +705,8 @@ fn over(window: RuleWindow) -> String {
     }
 }
 
-/// Where a budget is headed at its burn so far: the day this month what the
-/// runs spent reaches the alert threshold, or that it stays under it. A
-/// budget is a cost alert summed over the month; none for any other alert.
+/// The day this month a budget's burn so far reaches its alert threshold, or that it
+/// stays under; none for an alert that is no budget.
 fn forecast(
     definition: &crate::rules::Definition,
     value: f64,
@@ -913,8 +911,7 @@ mod tests {
         .definition
     }
 
-    /// A budget's warning says the day its burn so far reaches the alert,
-    /// or that it stays under it this month; no other alert forecasts.
+    /// A budget's warning names the day its burn reaches the alert; no other alert forecasts.
     #[test]
     fn a_budget_forecasts_the_day_its_burn_reaches_the_alert() {
         let at = |day: u32| {

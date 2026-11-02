@@ -31,6 +31,12 @@ pub const MODELS_MAX: usize = 20;
 /// A token's price in the row, per million on the wire.
 const PER_MILLION: f64 = 1_000_000.0;
 
+/// A row's price per million, to twelve figures, so a price saved reads back as typed.
+fn per_million(per_token: f64) -> f64 {
+    let price = per_token * PER_MILLION;
+    format!("{price:.11e}").parse().unwrap_or(price)
+}
+
 /// The most a price is, per million tokens: a typo past it is refused.
 const PRICE_MAX: f64 = 10_000.0;
 
@@ -86,10 +92,10 @@ async fn read(
                     provider,
                     models,
                     effective_from,
-                    input: input * PER_MILLION,
-                    output: output * PER_MILLION,
-                    cache_read: cache_read * PER_MILLION,
-                    cache_write: cache_write * PER_MILLION,
+                    input: per_million(input),
+                    output: per_million(output),
+                    cache_read: per_million(cache_read),
+                    cache_write: per_million(cache_write),
                 }
             },
         )
@@ -244,8 +250,7 @@ mod tests {
         }
     }
 
-    /// A price list is held to its caps, a name priced twice from one day
-    /// and a price that is no amount among them.
+    /// A price list is held to its caps, one name priced twice a day and no amount among them.
     #[test]
     fn a_price_list_is_held_to_its_rules() {
         assert!(checked(&[price(&["ft:gpt-5:acme"], 3.0)]).is_ok());
@@ -263,5 +268,13 @@ mod tests {
             "a new price from a day"
         );
         assert!(checked(&vec![price(&["a"], 1.0); PRICES_MAX + 1]).is_err());
+    }
+
+    /// A price per million reads back from its row as it was written.
+    #[test]
+    fn a_price_reads_back_as_written() {
+        for typed in [0.061, 0.15, 2.5, 3.0, 0.0, 1e-3, 75.0] {
+            assert_eq!(per_million(typed / PER_MILLION), typed);
+        }
     }
 }

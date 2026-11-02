@@ -109,8 +109,7 @@ pub struct TraceFilter {
     pub runs: Vec<Uuid>,
     /// How many days back, by the day each span arrived.
     pub days: u16,
-    /// The prices each call of the window is priced at, for the spend the
-    /// rows show and sort by ([`crate::spend::book_for_days`]); none prices
+    /// The window's prices for the spend the rows show and sort by; none prices
     /// only what calls reported.
     pub prices: crate::prices::PriceBook,
 }

@@ -1,7 +1,7 @@
 //! Alerts, built as Langfuse's are: each a metric — a measure of the
 //! project's spans of one kind, filtered by the fields the hourly totals
-//! keep, folded over the last hour, day or week — against an alert threshold
-//! and an optional warning one under one operator. Kept in `telemetry.rules`
+//! keep, folded over the last hour, day or week, a run's cost over the month —
+//! against an alert threshold and an optional warning one under one operator. Kept in `telemetry.rules`
 //! ([`db`]), made, edited, paused and deleted by any member of the project
 //! ([`crate::handler::rules`]), and each evaluated a minute after the last by
 //! a loop every replica runs ([`evaluate`]). An organization's alerts,
