@@ -19,12 +19,15 @@ export function PlaintextTokenDialog({
   description,
   closeLabel = "Done",
   onClose,
+  children,
 }: {
   token: string;
   title: string;
   description: React.ReactNode;
   closeLabel?: string;
   onClose: () => void;
+  /** What the secret is for, drawn under it. */
+  children?: React.ReactNode;
 }) {
   const { copied, copy } = useCopyToClipboard();
 
@@ -39,6 +42,7 @@ export function PlaintextTokenDialog({
           <pre className="break-all rounded-md bg-muted p-gutter font-mono text-xs select-all">
             {token}
           </pre>
+          {children}
         </DialogBody>
         <DialogFooter>
           <Button variant="secondary" onClick={() => copy(token)}>

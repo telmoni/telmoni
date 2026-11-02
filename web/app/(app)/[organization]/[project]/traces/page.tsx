@@ -20,6 +20,7 @@ import {
   fetchTraceViews,
 } from "@/lib/server/data";
 import { projectPage } from "@/lib/server/project-page";
+import { projectPath } from "@/lib/slug";
 import { DEFAULT_ROWS, parseTraceQuery, parseTraceUi } from "@/lib/traces";
 import { UTC_OFFSET_COOKIE, parseUtcOffset } from "@/lib/utc-offset";
 
@@ -110,8 +111,15 @@ export default async function TracesPage({
               coding-agent plugin
             </Link>{" "}
             for Claude Code, Codex, OpenCode or Cursor, and each run&rsquo;s trace lists here
-            within a minute of ending. Runs from the last {days} {days === 1 ? "day" : "days"} are
-            shown.
+            within a minute of ending. A key minted on{" "}
+            <Link
+              href={`${projectPath(organization, slug)}/api-keys`}
+              className="underline underline-offset-4"
+            >
+              API keys
+            </Link>{" "}
+            to send spans comes with a first run to paste. Runs from the last {days}{" "}
+            {days === 1 ? "day" : "days"} are shown.
           </>
         )}
         // What landed since this render, counted rather than drawn in: the

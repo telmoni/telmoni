@@ -10,7 +10,14 @@ export type InstallTab = { label: string; command: string };
 // The install box: a row of tabs, one per way in, and under the one chosen
 // its command, with a copy button. The arrow keys move between the tabs, as a
 // tablist's do, and only the chosen one is in the tab order.
-export function InstallTabs({ tabs }: { tabs: readonly InstallTab[] }) {
+export function InstallTabs({
+  tabs,
+  name = "Install",
+}: {
+  tabs: readonly InstallTab[];
+  /** What the tabs are, for a screen reader. */
+  name?: string;
+}) {
   const [at, setAt] = useState(0);
   const id = useId();
   const tab = tabs[at];
@@ -38,7 +45,7 @@ export function InstallTabs({ tabs }: { tabs: readonly InstallTab[] }) {
     <div className="rounded-md border border-border font-mono text-sm lg:text-base">
       <div
         role="tablist"
-        aria-label="Install"
+        aria-label={name}
         onKeyDown={onKeyDown}
         className="flex flex-wrap border-b border-border"
       >
@@ -71,7 +78,7 @@ export function InstallTabs({ tabs }: { tabs: readonly InstallTab[] }) {
         <code className="block min-w-0 flex-1 overflow-x-auto whitespace-pre text-foreground">
           {tab.command}
         </code>
-        <CopyButton value={tab.command} label="the command" />
+        <CopyButton value={tab.command} label={`the ${tab.label} command`} />
       </div>
     </div>
   );

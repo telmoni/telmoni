@@ -1,10 +1,12 @@
 "use client";
 
+import Link from "next/link";
 import { startTransition, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { KeyRound } from "lucide-react";
 
 import { useConsoleShell } from "@/components/console-shell";
+import { InstallTabs } from "@/components/install-tabs";
 import { PageAction } from "@/components/page-action";
 import { PlaintextTokenDialog } from "@/components/plaintext-token-dialog";
 import {
@@ -25,9 +27,10 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { API_KEY_SCOPES } from "@/lib/api-key-scopes";
+import { firstTraceSnippets } from "@/lib/first-trace";
 import { MAX_API_KEY_DESCRIPTION, MAX_API_KEY_NAME, typedBound } from "@/lib/names";
 import { PRODUCT_NAME } from "@/lib/site";
-import type { ApiKeyScope } from "@/lib/types/enums";
+import { ApiKeyScope } from "@/lib/types/enums";
 import { useAction } from "@/lib/use-action";
 
 import { mintTokenAction, type MintedKey } from "./actions";
@@ -41,14 +44,20 @@ import { mintTokenAction, type MintedKey } from "./actions";
  *  the control the focus goes back to as it shuts. */
 type Opening = { at: number; returnTo: HTMLElement | null };
 
+/** A key just minted, and whether it sends spans. */
+type NewKey = MintedKey & { ingest: boolean };
+
 export function KeysActions({
   projectId,
+  tracesHref,
 }: {
   /// The project this page rendered; a key is minted on it or on nothing.
   projectId: string;
+  /// Its Traces page, where a key's first trace lists.
+  tracesHref: string;
 }) {
   const [opening, setOpening] = useState<Opening | null>(null);
-  const [minted, setMinted] = useState<MintedKey | null>(null);
+  const [minted, setMinted] = useState<NewKey | null>(null);
   const openings = useRef(0);
   const { element } = useConsoleShell();
 
@@ -90,8 +99,34 @@ export function KeysActions({
           }
           closeLabel="I've saved it"
           onClose={() => setMinted(null)}
-        />
+        >
+          {minted.ingest && <FirstTrace token={minted.token} tracesHref={tracesHref} />}
+        </PlaintextTokenDialog>
       )}
+    </div>
+  );
+}
+
+/** A key that sends spans, a paste away from its first trace: each SDK's
+ *  smallest run with the key in it. */
+function FirstTrace({ token, tracesHref }: { token: string; tracesHref: string }) {
+  return (
+    <div className="flex flex-col gap-gutter">
+      <p className="text-sm text-muted-foreground">
+        Send a first trace: paste one into a terminal. Its run lists on the{" "}
+        {/* A tab of its own: leaving the page would take the key off the screen. */}
+        <Link
+          href={tracesHref}
+          target="_blank"
+          rel="noopener"
+          className="underline underline-offset-4"
+        >
+          Traces
+        </Link>{" "}
+        page within a minute. On your own deployment, set <code>TELMONI_ENDPOINT</code> to its
+        machine host first, on the line each holds for it.
+      </p>
+      <InstallTabs name="First run" tabs={firstTraceSnippets(token)} />
     </div>
   );
 }
@@ -106,7 +141,7 @@ function MintKeyPanel({
 }: {
   projectId: string;
   onClose: () => void;
-  onMinted: (r: MintedKey) => void;
+  onMinted: (r: NewKey) => void;
   returnFocus?: () => HTMLElement | null;
 }) {
   const titleId = useId();
@@ -131,7 +166,7 @@ function MintKeyPanel({
       // In the transition, with the list the action drew again: after the
       // `await` it would be an update of its own, and the panel would shut a
       // frame before the new key is listed.
-      (r) => startTransition(() => onMinted(r)),
+      (r) => startTransition(() => onMinted({ ...r, ingest: scopes.includes(ApiKeyScope.Ingest) })),
     );
   }
 

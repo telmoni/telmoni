@@ -47,7 +47,12 @@ export default async function ApiKeysPage({
       <PageHeader
         title="API keys"
         action={
-          canManage ? <KeysActions projectId={project.id} /> : undefined
+          canManage ? (
+            <KeysActions
+              projectId={project.id}
+              tracesHref={`${projectPath(organization, slug)}/traces`}
+            />
+          ) : undefined
         }
       />
       <div className="grid gap-6">
