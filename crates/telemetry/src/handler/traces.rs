@@ -920,31 +920,42 @@ pub(crate) async fn content_of(
     }
 }
 
-/// The filter `query` asks for, narrowed to the runs its search finds: to a
-/// run no span carries where it finds none, so every read answers nothing.
+/// The prices each call of the window is priced at; none where they could not
+/// be read, so spend shows what calls reported alone.
+pub(crate) async fn window_prices(
+    state: &AppState,
+    project_id: &ProjectId,
+    days: u16,
+) -> crate::prices::PriceBook {
+    crate::spend::book_for_days(state, &Projects::one(project_id.clone()), days)
+        .await
+        .unwrap_or_else(|unread| {
+            let kind = match &unread {
+                crate::spend::Unread::Store(error) => crate::store::Fault::of(error).as_str(),
+                crate::spend::Unread::Db(_) => "postgres",
+            };
+            tracing::warn!(
+                project_id = %project_id,
+                kind,
+                "traces: the window's prices could not be read; spend shows what was reported"
+            );
+            crate::prices::PriceBook::default()
+        })
+}
+
+/// The filter `query` asks for, priced where its rows show spend, narrowed to
+/// the runs its search finds: to none where it finds none.
 async fn filter_of(
     state: &AppState,
     project_id: &ProjectId,
     query: &TraceQuery,
+    priced: bool,
 ) -> Result<TraceFilter, TelmoniError> {
     let mut filter = query.filter()?;
     filter.days = crate::capacity::visible_days(state, project_id, filter.days).await;
-    // Without the prices, the rows show what calls reported alone.
-    filter.prices =
-        crate::spend::book_for_days(state, &Projects::one(project_id.clone()), filter.days)
-            .await
-            .unwrap_or_else(|unread| {
-                if let crate::spend::Unread::Store(error) = &unread {
-                    tracing::warn!(
-                        project_id = %project_id,
-                        kind = crate::store::Fault::of(error).as_str(),
-                        "traces: the window's prices could not be read; spend shows what was reported"
-                    );
-                } else {
-                    tracing::warn!(project_id = %project_id, "traces: the window's prices could not be read; spend shows what was reported");
-                }
-                crate::prices::PriceBook::default()
-            });
+    if priced {
+        filter.prices = window_prices(state, project_id, filter.days).await;
+    }
     let Some(q) = query.q.as_deref().map(str::trim).filter(|q| !q.is_empty()) else {
         return Ok(filter);
     };
@@ -1001,7 +1012,7 @@ pub(crate) async fn list_page<L: Listing>(
 ) -> Result<Listed<L>, TelmoniError> {
     let projects = Projects::one(project_id.clone());
     let query = TraceQuery::read(pairs, Reading::List)?;
-    let filter = filter_of(state, project_id, &query).await?;
+    let filter = filter_of(state, project_id, &query, true).await?;
     let (sort, dir) = query.sort_for::<L>()?;
     let paging = query.paging()?;
     let (rows, total) = tokio::try_join!(
@@ -1037,7 +1048,7 @@ pub(crate) async fn facets_page<L: Listing>(
     let project_id = reading(state, headers).await?;
     let projects = Projects::one(project_id.clone());
     let query = TraceQuery::read(pairs, Reading::Facets)?;
-    let filter = filter_of(state, &project_id, &query).await?;
+    let filter = filter_of(state, &project_id, &query, false).await?;
     let rows = traces::facets::<L>(&state.store, &projects, &filter)
         .await
         .map_err(read_failed)?;
@@ -1055,7 +1066,7 @@ pub(crate) async fn export_rows<L: Listing>(
     let reader = reader(state, headers).await?;
     let projects = Projects::one(reader.project_id.clone());
     let query = TraceQuery::read(pairs, reading)?;
-    let filter = filter_of(state, &reader.project_id, &query).await?;
+    let filter = filter_of(state, &reader.project_id, &query, true).await?;
     let (sort, dir) = query.sort_for::<L>()?;
     let format = parse_format(query.format.as_deref())?;
     let rows = traces::list::<L>(
@@ -1138,7 +1149,7 @@ pub async fn get_histogram(
     let project_id = reading(&state, &headers).await?;
     let projects = Projects::one(project_id.clone());
     let query = TraceQuery::read(pairs, Reading::Histogram)?;
-    let filter = filter_of(&state, &project_id, &query).await?;
+    let filter = filter_of(&state, &project_id, &query, true).await?;
     let utc_offset = parse_utc_offset(query.utc_offset.as_deref())?;
     let bucket_seconds = traces::bucket_seconds(filter.days);
     let rows = traces::histogram(&state.store, &projects, &filter, bucket_seconds, utc_offset)

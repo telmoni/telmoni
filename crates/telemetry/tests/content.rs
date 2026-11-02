@@ -2169,8 +2169,8 @@ async fn the_hourly_totals_price_their_calls_and_count_runs(pool: PgPool) {
     assert_eq!((runs, failed), (2, 1));
 }
 
-/// An organization's spend this month, project by project against its
-/// budget, to its owners and admins alone.
+/// An organization's spend this month, project by project, scaled by each call's
+/// sample rate, against its budget, to its owners and admins alone.
 #[sqlx::test]
 async fn an_organizations_spend_is_its_projects_this_month_against_their_budgets(pool: PgPool) {
     let Some(ch) = clickhouse_or_skip(module_path!()).await else {
@@ -2198,8 +2198,13 @@ async fn an_organizations_spend_is_its_projects_this_month_against_their_budgets
         cost: Some(cost),
         ..common::received(&door.project, SpanKind::ModelCall, "chat", 500, at)
     };
+    // Kept one in two past the grant, the half stands for a whole.
+    let sampled = telmoni_telemetry::store::SpanRow {
+        sample_rate: Some(0.5),
+        ..call(0.25)
+    };
     ch.store
-        .insert_spans(&[call(2.0), call(0.5)])
+        .insert_spans(&[call(2.0), sampled])
         .await
         .expect("the calls");
     let (status, saved) = door
@@ -2319,6 +2324,20 @@ async fn the_lists_show_spend_each_run_its_own_a_session_scaled(pool: PgPool) {
         sessions["sessions"][0]["spend"].as_f64(),
         Some(1.0 / 0.5 + 3.0 + 2.0),
         "the sampled run stands for two"
+    );
+
+    let (status, session) = door.lane("GET", "/sessions/s1", "admin-1", None).await;
+    assert_eq!(status, StatusCode::OK, "{session}");
+    let of = |run: uuid::Uuid| {
+        session["traces"]
+            .as_array()
+            .and_then(|traces| traces.iter().find(|t| t["run_id"] == run.to_string()))
+            .and_then(|t| t["spend"].as_f64())
+    };
+    assert_eq!(
+        of(priced),
+        Some(2.0),
+        "the session's page prices as the list does"
     );
 }
 

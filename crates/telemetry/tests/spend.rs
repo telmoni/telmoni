@@ -253,8 +253,8 @@ async fn a_projects_own_price_comes_before_the_tables(pool: PgPool) {
     );
 }
 
-/// A budget reads the month so far, from its first at midnight UTC, and a
-/// tag takes the runs whose own span carries it, its calls among the month's.
+/// A budget reads the month so far from its first at midnight UTC, scaled by each call's
+/// sample rate; a tag takes the runs whose own span carries it.
 #[sqlx::test]
 async fn a_budget_reads_the_month_so_far_of_the_runs_its_tag_names(pool: PgPool) {
     let Some(ch) = clickhouse_or_skip(module_path!()).await else {
@@ -275,7 +275,11 @@ async fn a_budget_reads_the_month_so_far_of_the_runs_its_tag_names(pool: PgPool)
             call(&project, team, gpt, usage(0, 0, 0, 0), Some(2.0), at),
             call(&project, team, gpt, usage(0, 0, 0, 0), Some(1.5), at),
             tagged(team, "search"),
-            call(&project, other, gpt, usage(0, 0, 0, 0), Some(7.0), at),
+            // Kept one in two past the grant: the month's sum counts it twice.
+            SpanRow {
+                sample_rate: Some(0.5),
+                ..call(&project, other, gpt, usage(0, 0, 0, 0), Some(7.0), at)
+            },
             tagged(other, "billing"),
         ])
         .await
@@ -304,7 +308,11 @@ async fn a_budget_reads_the_month_so_far_of_the_runs_its_tag_names(pool: PgPool)
     )
     .await
     .expect("the month's spend");
-    assert!((all.total - 10.5).abs() < 1e-12, "{all:?}");
+    assert!((all.total - 17.5).abs() < 1e-12, "{all:?}");
+    assert!(
+        (all.most - 7.0).abs() < 1e-12,
+        "a run's own never scaled: {all:?}"
+    );
 }
 
 /// What each run spent over a window, folded: the window's calls alone,

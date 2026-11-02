@@ -334,6 +334,7 @@ pub async fn get_session(
     let filter = TraceFilter {
         session_ids: vec![session_id.clone()],
         days: window.days,
+        prices: crate::handler::traces::window_prices(&state, &project_id, window.days).await,
         ..TraceFilter::default()
     };
     // One past the limit, so the answer can say whether there were more.

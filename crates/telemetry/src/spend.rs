@@ -141,13 +141,14 @@ const WINDOW_NAMES_SQL: &str = concat!(
     " AND isNull(cost) AND provider != '' AND model != ''"
 );
 
-/// Each run's spend over a window, folded: how many runs, the most one
-/// spent, their average and their sum, and the run that spent the most.
+/// Each run's spend over a window, folded: how many runs, the most one spent,
+/// their average, their sum scaled by each call's sample rate, and the costliest.
 const RUNS_SQL: &str = concat!(
     "SELECT count() AS runs, max(run_spent) AS most, avg(run_spent) AS mean, ",
-    "sum(run_spent) AS total, argMax(run_id, run_spent) AS costliest ",
-    "FROM (SELECT run_id, sum(spent) AS run_spent ",
-    "FROM (SELECT run_id, ",
+    "sum(run_scaled) AS total, argMax(run_id, run_spent) AS costliest ",
+    "FROM (SELECT run_id, sum(spent) AS run_spent, ",
+    "sum(spent / ifNull(sample_rate, 1)) AS run_scaled ",
+    "FROM (SELECT run_id, sample_rate, ",
     priced!(),
     " ",
     window_calls!(),
@@ -181,11 +182,12 @@ const PERIOD_NAMES_SQL: &str = concat!(
     "AND kind = 'model_call' AND isNull(cost) AND provider != '' AND model != ''"
 );
 
-/// What each project's calls spent over a period, a project with none left
-/// out: what an organization's Overview shows.
+/// What each project's calls spent over a period, each scaled by its sample
+/// rate, a project with none left out: what an organization's Overview shows.
 const PROJECTS_SQL: &str = concat!(
-    "SELECT project_id, sum(spent) AS spent, toUInt64(countIf(unpriced)) AS unpriced_calls ",
-    "FROM (SELECT project_id, ",
+    "SELECT project_id, sum(spent / ifNull(sample_rate, 1)) AS spent, ",
+    "toUInt64(countIf(unpriced)) AS unpriced_calls ",
+    "FROM (SELECT project_id, sample_rate, ",
     priced!(),
     " FROM telemetry.spans ",
     "WHERE project_id IN {projects:Array(String)} ",
