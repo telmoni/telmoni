@@ -153,7 +153,7 @@ async fn handle(
         let key = key.clone();
         async move {
             let _slot = slot;
-            match write(&state, &key, encoding, &bytes, sender, &token).await {
+            match write(&state, &key, encoding, &bytes, sender, &token, None).await {
                 Ok((content_mode, body, held)) => {
                     guard.answer(&state.redis, content_mode, &held).await;
                     Ok((content_mode, body))
@@ -213,14 +213,16 @@ async fn admit(
 
 /// The claimed body, written: the spans read by the contract, the rows put
 /// in ClickHouse under `token` and settled ([`settle_written`]), and the
-/// console told of them; the answer's mode and body on success.
-async fn write(
+/// console told of them; the answer's mode and body on success. `own` is
+/// the environment Telmoni writes its own spans under, which no export names.
+pub(crate) async fn write(
     state: &Arc<AppState>,
     key: &ActingKey,
     encoding: Encoding,
     bytes: &[u8],
     sender: Option<SenderClock>,
     token: &str,
+    own: Option<&str>,
 ) -> Result<(ContentMode, Vec<u8>, crate::capacity::Held), TelmoniError> {
     let request = decode::request(bytes, encoding).map_err(decode_error)?;
     // Made and sealed on the project's first export, which also files its
@@ -239,6 +241,11 @@ async fn write(
         content_mode == ContentMode::On,
     )
     .map_err(batch_error)?;
+    if let Some(own) = own {
+        for row in &mut batch.rows {
+            own.clone_into(&mut row.environment);
+        }
+    }
     cardinality::hold(
         &state.redis,
         &key.project_id,

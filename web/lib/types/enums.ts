@@ -135,6 +135,15 @@ export const ModelProvider = {
 } as const;
 export type ModelProvider = typeof ModelProvider[keyof typeof ModelProvider];
 
+/** Wire vocabulary of the Rust `EvaluationStatus`: where an evaluation stands. */
+export const EvaluationStatus = {
+  Pending: "pending",
+  Delayed: "delayed",
+  Done:    "done",
+  Failed:  "failed",
+} as const;
+export type EvaluationStatus = typeof EvaluationStatus[keyof typeof EvaluationStatus];
+
 /** Wire vocabulary of the Rust `EvaluationTarget`: what an evaluation rule judges. */
 export const EvaluationTarget = {
   Run:     "run",

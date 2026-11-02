@@ -56,6 +56,7 @@ const EVALUATOR: Evaluator = {
   connection_id: null,
   model: null,
   temperature: 0,
+  weekly_limit: null,
   created_by: "u",
   created_at: "2026-11-02T00:00:00Z",
   versions: 2,
@@ -70,6 +71,8 @@ const CONNECTION = {
   models: ["judge-1"],
   is_default: true,
   secret_hint: "WXYZ",
+  refused_at: null,
+  refused_reason: null,
   created_at: "2026-11-02T00:00:00Z",
   updated_at: "2026-11-02T00:00:00Z",
 };
@@ -107,8 +110,8 @@ describe("Evaluators", () => {
   it("lists each evaluator's version and versions, and offers a member no change", () => {
     page({ canEdit: false });
     expect(screen.getByText("v2")).toBeTruthy();
-    expect(screen.getByRole("link", { name: "2 versions" }).getAttribute("href")).toBe(
-      `/acme/web/evaluators?versions=${EVALUATOR.id}`,
+    expect(screen.getByRole("link", { name: "Evaluations · 2 versions" }).getAttribute("href")).toBe(
+      `/acme/web/evaluators?evaluator=${EVALUATOR.id}`,
     );
     expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
     expect(screen.queryByRole("button", { name: /New evaluator/ })).toBeNull();

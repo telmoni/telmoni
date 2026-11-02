@@ -196,6 +196,11 @@ pub async fn purge_organization(
         .execute(tx.conn())
         .await?
         .rows_affected();
+    let evaluations = sqlx::query("DELETE FROM telemetry.evaluations WHERE organization_id = $1")
+        .bind(organization_id)
+        .execute(tx.conn())
+        .await?
+        .rows_affected();
     let evaluation_rules =
         sqlx::query("DELETE FROM telemetry.evaluation_rules WHERE organization_id = $1")
             .bind(organization_id)
@@ -220,6 +225,7 @@ pub async fn purge_organization(
         + connections
         + evaluators
         + evaluation_rules
+        + evaluations
         + content
         + held
         + settings)
@@ -280,6 +286,11 @@ pub async fn purge_project(
         .execute(tx.conn())
         .await?
         .rows_affected();
+    let evaluations = sqlx::query("DELETE FROM telemetry.evaluations WHERE project_id = $1")
+        .bind(project_id)
+        .execute(tx.conn())
+        .await?
+        .rows_affected();
     let evaluation_rules =
         sqlx::query("DELETE FROM telemetry.evaluation_rules WHERE project_id = $1")
             .bind(project_id)
@@ -299,6 +310,7 @@ pub async fn purge_project(
         + connections
         + evaluators
         + evaluation_rules
+        + evaluations
         + content
         + settings)
 }
@@ -1032,6 +1044,20 @@ async fn delete_content_of(
     .fetch_one(&mut *conn)
     .await?;
     delete_media_of(conn, project_ids, before, runs, key).await?;
+    // The record of what each evaluation read goes with what it read.
+    if key.is_none() && (before.is_some() || runs.is_some()) {
+        sqlx::query(
+            "DELETE FROM telemetry.evaluations
+              WHERE project_id = ANY($1)
+                AND ($2::timestamptz IS NULL OR created_at < $2)
+                AND ($3::uuid[] IS NULL OR run_id = ANY($3))",
+        )
+        .bind(project_ids)
+        .bind(before)
+        .bind(runs)
+        .execute(&mut *conn)
+        .await?;
+    }
     Ok(gone.unsigned_abs())
 }
 

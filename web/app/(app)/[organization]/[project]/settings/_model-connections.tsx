@@ -75,6 +75,11 @@ export function ModelConnections({
                   {PROVIDER_LABEL[connection.provider]} · {connection.models.join(", ")}
                   {connection.secret_hint && <> · key …{connection.secret_hint}</>}
                 </span>
+                {connection.refused_at && (
+                  <span className="text-destructive">
+                    Its key was refused, so its evaluators are paused: save it again with a key the provider takes.
+                  </span>
+                )}
               </div>
               {canEdit && (
                 <div className="flex gap-gutter">

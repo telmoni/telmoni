@@ -69,6 +69,7 @@ export type Draft = {
   connection_id: string | null;
   model: string;
   temperature: string;
+  weeklyLimit: string;
 };
 
 const BLANK: Draft = {
@@ -91,6 +92,7 @@ const BLANK: Draft = {
   connection_id: null,
   model: "",
   temperature: "",
+  weeklyLimit: "",
 };
 
 /** A template or a saved version, as a draft to change. */
@@ -105,6 +107,7 @@ export function draftOf(from: Evaluator | EvaluatorTemplate): Draft {
     connection_id: saved ? from.connection_id : null,
     model: saved ? (from.model ?? "") : "",
     temperature: saved && from.temperature !== null ? String(from.temperature) : "",
+    weeklyLimit: saved && from.weekly_limit !== null ? String(from.weekly_limit) : "",
   };
 }
 
@@ -112,6 +115,7 @@ export function draftOf(from: Evaluator | EvaluatorTemplate): Draft {
 export function inputOf(draft: Draft) {
   const { data_type } = draft.score;
   const temperature = draft.temperature.trim() === "" ? null : Number(draft.temperature);
+  const weekly = draft.weeklyLimit.trim() === "" ? null : Number(draft.weeklyLimit);
   return {
     id: draft.id,
     name: draft.name.trim(),
@@ -129,6 +133,7 @@ export function inputOf(draft: Draft) {
     connection_id: draft.connection_id,
     model: draft.model.trim() || null,
     temperature: temperature !== null && Number.isFinite(temperature) ? temperature : null,
+    weekly_limit: weekly !== null && Number.isFinite(weekly) && weekly > 0 ? weekly : null,
   };
 }
 
@@ -161,7 +166,7 @@ export function Evaluators({
   rulesOf?: Readonly<Record<string, readonly string[]>>;
   contentKept: boolean;
   canEdit: boolean;
-  /** The page's own path, which `?versions=` opens one evaluator's versions under. */
+  /** The page's own path, which `?evaluator=` opens one evaluator's evaluations and versions under. */
   here: string;
   privacyHref: string;
   settingsHref: string;
@@ -268,11 +273,11 @@ export function Evaluators({
                     </span>
                   </div>
                   <div className="flex gap-gutter">
-                    {(evaluator.versions ?? 1) > 1 && (
-                      <Button variant="outline" size="sm" asChild>
-                        <Link href={`${here}?versions=${evaluator.id}`}>{evaluator.versions} versions</Link>
-                      </Button>
-                    )}
+                    <Button variant="outline" size="sm" asChild>
+                      <Link href={`${here}?evaluator=${evaluator.id}`}>
+                        Evaluations{(evaluator.versions ?? 1) > 1 ? ` · ${evaluator.versions} versions` : ""}
+                      </Link>
+                    </Button>
                     {canEdit && (
                       <>
                         <Button
@@ -593,7 +598,7 @@ function EvaluatorForm({
         </label>
       </fieldset>
 
-      <fieldset className="grid gap-gutter sm:grid-cols-3">
+      <fieldset className="grid gap-gutter sm:grid-cols-4">
         <legend className="mb-2 font-medium">Model</legend>
         <div className="grid gap-2">
           <Label htmlFor={`${id}connection`}>Connection</Label>
@@ -626,6 +631,16 @@ function EvaluatorForm({
             value={draft.temperature}
             onChange={(e) => set({ temperature: e.target.value })}
             placeholder="The provider's own"
+            inputMode="decimal"
+          />
+        </div>
+        <div className="grid gap-2">
+          <Label htmlFor={`${id}weekly`}>Weekly spend limit, $</Label>
+          <Input
+            id={`${id}weekly`}
+            value={draft.weeklyLimit}
+            onChange={(e) => set({ weeklyLimit: e.target.value })}
+            placeholder="None"
             inputMode="decimal"
           />
         </div>

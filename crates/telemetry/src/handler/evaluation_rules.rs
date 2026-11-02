@@ -67,6 +67,10 @@ pub struct EvaluationRule {
     pub pointers: Jsonb<BTreeMap<String, String>>,
     pub enabled: bool,
     pub backfill_from: Option<DateTime<Utc>>,
+    /// How many targets its reach back has looked over, newest first, and
+    /// when it finished.
+    pub backfill_seen: i32,
+    pub backfill_done_at: Option<DateTime<Utc>>,
     /// The evaluators it runs, each by its stable id.
     pub evaluators: Vec<Uuid>,
     pub created_by: String,
@@ -225,7 +229,8 @@ fn content_kept(mode: ContentMode) -> Result<(), TelmoniError> {
 
 const SELECT: &str =
     "SELECT r.id, r.name, r.target, r.span_kind, r.span_name, r.query, r.sample_rate,
-        r.pointers, r.enabled, r.backfill_from, r.created_by, r.created_at, r.updated_at,
+        r.pointers, r.enabled, r.backfill_from, r.backfill_seen, r.backfill_done_at,
+        r.created_by, r.created_at, r.updated_at,
         COALESCE(array_agg(e.evaluator_id ORDER BY e.evaluator_id)
                  FILTER (WHERE e.evaluator_id IS NOT NULL), '{}') AS evaluators
    FROM telemetry.evaluation_rules r
@@ -354,8 +359,10 @@ pub async fn put_rule(
             sqlx::query(
                 "UPDATE telemetry.evaluation_rules
                     SET name = $3, target = $4, span_kind = $5, span_name = $6, query = $7,
-                        sample_rate = $8, pointers = $9, enabled = $10, backfill_from = $11,
-                        updated_at = now()
+                        sample_rate = $8, pointers = $9, enabled = $10,
+                        backfill_seen = CASE WHEN backfill_from IS DISTINCT FROM $11 THEN 0 ELSE backfill_seen END,
+                        backfill_done_at = CASE WHEN backfill_from IS DISTINCT FROM $11 THEN NULL ELSE backfill_done_at END,
+                        backfill_from = $11, updated_at = now()
                   WHERE id = $1 AND project_id = $2",
             )
             .bind(id)

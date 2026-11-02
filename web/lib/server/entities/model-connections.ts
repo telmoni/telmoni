@@ -17,6 +17,8 @@ export const ModelConnectionSchema = z.object({
   models: z.array(z.string()),
   is_default: z.boolean(),
   secret_hint: z.string(),
+  refused_at: z.string().nullable(),
+  refused_reason: z.string().nullable(),
   created_at: z.string(),
   updated_at: z.string(),
 });

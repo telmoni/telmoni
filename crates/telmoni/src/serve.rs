@@ -117,6 +117,9 @@ impl App {
             self.telemetry.clone(),
         ));
         let foreign = tokio::spawn(telmoni_telemetry::foreign::run(self.telemetry.clone()));
+        let evaluations = tokio::spawn(telmoni_telemetry::evaluators::run::run(
+            self.telemetry.clone(),
+        ));
         // Told as the shutdown comes, so a pass stops between alerts while
         // the server drains.
         tokio::spawn({
@@ -167,6 +170,7 @@ impl App {
             ended = usage => return died("the plans' usage count", ended),
             ended = alerts => return died("the alerts' evaluation", ended),
             ended = foreign => return died("another exporter's spans landing", ended),
+            ended = evaluations => return died("the evaluation loop", ended),
         }
         // The alert in hand is settled and told before the process ends.
         self.telemetry.alerts_stopping.stop(ALERTS_STOP_WAIT).await;

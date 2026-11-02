@@ -286,6 +286,11 @@ pub const INVENTORY_SPAN: &[&str] = &[
 /// The deployment a span was sent from, on its resource: our SDKs set it
 /// from their `environment` option or `TELMONI_ENVIRONMENT`.
 pub const ENVIRONMENT: &str = "deployment.environment.name";
+/// The environments Telmoni writes its own spans under; one sent from
+/// outside beginning so is read as none.
+pub const OWN_ENVIRONMENT_PREFIX: &str = "telmoni-";
+/// The environment each evaluation's own trace is written under.
+pub const EVALUATOR_ENVIRONMENT: &str = "telmoni-evaluator";
 /// The deployment's release, on the resource: the SDKs' `release` option or
 /// `TELMONI_RELEASE`.
 pub const RELEASE: &str = "service.version";

@@ -4,6 +4,7 @@ pub mod api_key_scope;
 pub mod audit_action;
 pub mod content_mode;
 pub mod email;
+pub mod evaluation_status;
 pub mod evaluation_target;
 pub mod flag;
 pub mod grants;
@@ -45,6 +46,7 @@ pub use api_key_scope::ApiKeyScope;
 pub use audit_action::AuditAction;
 pub use content_mode::ContentMode;
 pub use email::{Email, EmailError};
+pub use evaluation_status::EvaluationStatus;
 pub use evaluation_target::EvaluationTarget;
 pub use flag::{Flag, FlagSet};
 pub use grants::{

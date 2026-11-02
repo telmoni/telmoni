@@ -170,6 +170,12 @@ export function Rules({
                     {judgedWords(rule)} · {Math.round(rule.sample_rate * 1000) / 10}% ·{" "}
                     {rule.evaluators.map(nameOf).join(", ")}
                   </span>
+                  {rule.backfill_from && (
+                    <span className="text-muted-foreground">
+                      Reaching back to {rule.backfill_from.slice(0, 10)}:{" "}
+                      {rule.backfill_done_at ? "done" : "under way"}, {rule.backfill_seen} looked over
+                    </span>
+                  )}
                 </div>
                 {canEdit && (
                   <div className="flex gap-gutter">

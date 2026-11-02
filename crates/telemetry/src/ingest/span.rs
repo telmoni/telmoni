@@ -177,6 +177,13 @@ pub fn read_resource(resource: Option<&Resource>) -> ResourceFields {
         match kv.key.as_str() {
             contract::ENVIRONMENT => {
                 fields.environment = resource_text(value, contract::ENVIRONMENT_MAX);
+                // Telmoni's own, its evaluations' among them: sent from outside, none.
+                if fields
+                    .environment
+                    .starts_with(contract::OWN_ENVIRONMENT_PREFIX)
+                {
+                    fields.environment.clear();
+                }
                 continue;
             }
             contract::RELEASE => {

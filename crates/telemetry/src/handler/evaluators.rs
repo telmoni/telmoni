@@ -55,6 +55,8 @@ pub struct Evaluator {
     /// None is its connection's first model.
     pub model: Option<String>,
     pub temperature: Option<f64>,
+    /// The most it spends a week, in US dollars; none for no limit.
+    pub weekly_limit: Option<f64>,
     pub created_by: String,
     pub created_at: DateTime<Utc>,
     /// How many versions it has; on its newest alone.
@@ -100,6 +102,8 @@ pub struct EvaluatorChange {
     pub model: Option<String>,
     #[serde(default)]
     pub temperature: Option<f64>,
+    #[serde(default)]
+    pub weekly_limit: Option<f64>,
 }
 
 const fn yes() -> bool {
@@ -151,6 +155,12 @@ fn checked(mut change: EvaluatorChange) -> Result<(EvaluatorChange, Prompt), Tel
         .is_some_and(|t| !t.is_finite() || !(0.0..=2.0).contains(&t))
     {
         return refuse("a temperature is from 0 to 2");
+    }
+    if change
+        .weekly_limit
+        .is_some_and(|l| !l.is_finite() || l <= 0.0 || l > 1_000_000.0)
+    {
+        return refuse("a weekly spend limit is more than $0, up to $1,000,000");
     }
     let prompt = Prompt {
         messages: std::mem::take(&mut change.messages),
@@ -225,7 +235,7 @@ pub async fn get_evaluators(
     let mut tx = project_scope(&state.db, &project_id).await?;
     let evaluators = sqlx::query_as(
         "SELECT DISTINCT ON (id) id, version, name, kind, messages, score, reasoning, connection_id,
-                model, temperature, created_by, created_at,
+                model, temperature, weekly_limit, created_by, created_at,
                 count(*) OVER (PARTITION BY id) AS versions
            FROM telemetry.evaluators WHERE project_id = $1
           ORDER BY id, version DESC",
@@ -270,7 +280,7 @@ pub async fn get_versions(
     let mut tx = project_scope(&state.db, &project_id).await?;
     let versions: Vec<Evaluator> = sqlx::query_as(
         "SELECT id, version, name, kind, messages, score, reasoning, connection_id, model,
-                temperature, created_by, created_at
+                temperature, weekly_limit, created_by, created_at
            FROM telemetry.evaluators WHERE project_id = $1 AND id = $2
           ORDER BY version DESC",
     )
@@ -357,10 +367,10 @@ pub async fn put_evaluator(
             let mut row: Evaluator = sqlx::query_as(
                 "INSERT INTO telemetry.evaluators
                  (id, version, project_id, name, messages, score, reasoning, connection_id, model,
-                  temperature, created_by)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                  temperature, weekly_limit, created_by)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
              RETURNING id, version, name, kind, messages, score, reasoning, connection_id, model,
-                       temperature, created_by, created_at",
+                       temperature, weekly_limit, created_by, created_at",
             )
             .bind(id)
             .bind(version)
@@ -372,6 +382,7 @@ pub async fn put_evaluator(
             .bind(change.connection_id)
             .bind(&change.model)
             .bind(change.temperature)
+            .bind(change.weekly_limit)
             .bind(acting.user_id.as_str())
             .fetch_one(tx.conn())
             .await?;
@@ -541,6 +552,94 @@ pub async fn try_evaluator(
     Ok(Json(tried))
 }
 
+/// One evaluation as an evaluator's page lists it: what it judged, where it
+/// stands, and what it read and spent.
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct EvaluationRow {
+    pub id: Uuid,
+    pub evaluator_version: i32,
+    pub rule_id: Option<Uuid>,
+    pub target: telmoni_shared::EvaluationTarget,
+    pub run_id: Option<Uuid>,
+    pub span_id: Option<String>,
+    pub session_id: Option<String>,
+    pub status: telmoni_shared::EvaluationStatus,
+    pub attempts: i16,
+    pub reason: Option<String>,
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub read_at: Option<DateTime<Utc>>,
+    pub cut: bool,
+    pub score_id: Option<Uuid>,
+    pub trace_run_id: Option<Uuid>,
+    pub input_tokens: Option<i64>,
+    pub output_tokens: Option<i64>,
+    pub cost: Option<f64>,
+    pub created_at: DateTime<Utc>,
+    pub settled_at: Option<DateTime<Utc>>,
+}
+
+/// An evaluator's newest evaluations, its counts by where each stands, and
+/// what it spent since Monday 00:00 UTC.
+#[derive(Debug, Serialize)]
+pub struct Evaluations {
+    pub evaluations: Vec<EvaluationRow>,
+    pub pending: i64,
+    pub delayed: i64,
+    pub done: i64,
+    pub failed: i64,
+    pub spent_this_week: f64,
+}
+
+/// The newest an evaluator's page lists.
+const EVALUATIONS_SHOWN: i64 = 50;
+
+/// `GET /internal/v1/telemetry/evaluators/{id}/evaluations` — an
+/// evaluator's newest evaluations and its counts, every member's to read.
+pub async fn get_evaluations(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Evaluations>, TelmoniError> {
+    let acting = state.auth.resolve(&headers).await?;
+    let project_id = acting
+        .require_project(Verb::Read, Resource::Project)?
+        .project_id
+        .clone();
+    let mut tx = project_scope(&state.db, &project_id).await?;
+    let evaluations = sqlx::query_as(
+        "SELECT id, evaluator_version, rule_id, target, run_id, span_id, session_id, status,
+                attempts, reason, provider, model, read_at, cut, score_id, trace_run_id,
+                input_tokens, output_tokens, cost, created_at, settled_at
+           FROM telemetry.evaluations WHERE project_id = $1 AND evaluator_id = $2
+          ORDER BY created_at DESC LIMIT $3",
+    )
+    .bind(&project_id)
+    .bind(id)
+    .bind(EVALUATIONS_SHOWN)
+    .fetch_all(tx.conn())
+    .await?;
+    let (pending, delayed, done, failed, spent): (i64, i64, i64, i64, Option<f64>) = sqlx::query_as(
+        "SELECT count(*) FILTER (WHERE status = 'pending'), count(*) FILTER (WHERE status = 'delayed'),
+                count(*) FILTER (WHERE status = 'done'), count(*) FILTER (WHERE status = 'failed'),
+                sum(cost) FILTER (WHERE settled_at >= date_trunc('week', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')
+           FROM telemetry.evaluations WHERE project_id = $1 AND evaluator_id = $2",
+    )
+    .bind(&project_id)
+    .bind(id)
+    .fetch_one(tx.conn())
+    .await?;
+    tx.commit().await?;
+    Ok(Json(Evaluations {
+        evaluations,
+        pending,
+        delayed,
+        done,
+        failed,
+        spent_this_week: spent.unwrap_or(0.0),
+    }))
+}
+
 /// `DELETE /internal/v1/telemetry/evaluators/{id}` — an evaluator and every
 /// version gone, by an owner or admin, filed in the chain. The scores it gave
 /// stay, naming it and their version.
@@ -622,6 +721,7 @@ mod tests {
             connection_id: None,
             model: Some("  ".into()),
             temperature,
+            weekly_limit: None,
         };
         let (kept, prompt) = checked(change(Some(0.0))).expect("kept");
         assert_eq!(

@@ -12,6 +12,8 @@ use serde_json::{Value, json};
 use telmoni_shared::model::Role;
 use telmoni_shared::{ScoreType, SpanKind, TelmoniError};
 
+pub mod run;
+
 use crate::ingest::batch::SpanContent;
 use crate::scores::{CATEGORIES_MAX, CATEGORY_MAX, Judgement, NAME_MAX as SCORE_NAME_MAX};
 use crate::store::SpanRow;
@@ -605,6 +607,138 @@ pub fn of_run(spans: &[SpanRow], content: &[SpanContent]) -> BTreeMap<&'static s
     ])
 }
 
+/// One field of one span's opened content.
+fn field_of(content: &[SpanContent], span_id: &str, name: &str) -> Option<String> {
+    content
+        .iter()
+        .find(|c| c.span_id == span_id)
+        .and_then(|c| c.fields.iter().find(|(f, _)| f == name))
+        .map(|(_, text)| text.clone())
+}
+
+/// The variables a span fills: its input and output — a tool call's
+/// arguments and result — its metadata, and the tool calls it made or is.
+pub fn of_span(span: &SpanRow, content: &[SpanContent]) -> BTreeMap<&'static str, String> {
+    let field = |name: &str| field_of(content, &span.span_id, name);
+    let tool = span.kind == SpanKind::ToolCall;
+    let input = if tool {
+        field("gen_ai.tool.call.arguments")
+    } else {
+        field("gen_ai.input.messages")
+    }
+    .unwrap_or_default();
+    let output = if tool {
+        field("gen_ai.tool.call.result")
+    } else {
+        field("gen_ai.output.messages")
+    }
+    .unwrap_or_default();
+    let tool_calls: Vec<Value> = if tool {
+        vec![json!({ "name": span.name, "arguments": field("gen_ai.tool.call.arguments") })]
+    } else {
+        // The calls a model's answer asked for, as its output's parts name them.
+        serde_json::from_str::<Value>(&output)
+            .ok()
+            .and_then(|messages| messages.as_array().cloned())
+            .unwrap_or_default()
+            .iter()
+            .flat_map(|m| {
+                m.get("parts")
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_default()
+            })
+            .filter(|part| part.get("type").and_then(Value::as_str) == Some("tool_call"))
+            .collect()
+    };
+    let metadata = json!({
+        "name": span.name,
+        "kind": span.kind.to_string(),
+        "status": span.status.to_string(),
+        "error_type": span.error_type,
+        "model": span.model,
+        "seconds": (span.ended_at - span.started_at).as_seconds_f64(),
+        "input_tokens": span.input_tokens,
+        "output_tokens": span.output_tokens,
+        "attributes": span.attributes.iter().cloned().collect::<BTreeMap<_, _>>(),
+    });
+    BTreeMap::from([
+        ("input", bounded(input)),
+        ("output", bounded(output)),
+        (
+            "metadata",
+            serde_json::to_string_pretty(&metadata).unwrap_or_default(),
+        ),
+        (
+            "tool_calls",
+            bounded(serde_json::to_string_pretty(&tool_calls).unwrap_or_default()),
+        ),
+    ])
+}
+
+/// The variables a session fills, from each of its runs in order, its spans
+/// and opened content: every message, the person's and the agent's in
+/// pairs, and the first prompt with the last answer.
+pub fn of_session(runs: &[(Vec<SpanRow>, Vec<SpanContent>)]) -> BTreeMap<&'static str, String> {
+    let turns: Vec<(String, String)> = runs
+        .iter()
+        .map(|(spans, content)| {
+            let filled = of_run(spans, content);
+            (
+                filled.get("input").cloned().unwrap_or_default(),
+                filled.get("output").cloned().unwrap_or_default(),
+            )
+        })
+        .collect();
+    let messages: Vec<Value> = turns
+        .iter()
+        .flat_map(|(person, agent)| {
+            [
+                json!({ "role": "user", "content": person }),
+                json!({ "role": "assistant", "content": agent }),
+            ]
+        })
+        .collect();
+    let exchanges: Vec<Value> = turns
+        .iter()
+        .map(|(person, agent)| json!({ "person": person, "agent": agent }))
+        .collect();
+    let first_and_last = json!({
+        "first_prompt": turns.first().map(|(person, _)| person.clone()).unwrap_or_default(),
+        "last_answer": turns.last().map(|(_, agent)| agent.clone()).unwrap_or_default(),
+    });
+    let written = |value: &Value| serde_json::to_string_pretty(value).unwrap_or_default();
+    BTreeMap::from([
+        ("messages", bounded(written(&Value::Array(messages)))),
+        ("exchanges", bounded(written(&Value::Array(exchanges)))),
+        ("first_and_last", bounded(written(&first_and_last))),
+    ])
+}
+
+/// Each variable `pointers` names narrowed to what its JSON Pointer finds:
+/// a string as its text, anything else as JSON; nothing where the variable
+/// is no JSON or the pointer finds nothing.
+pub fn narrowed(
+    mut filled: BTreeMap<&'static str, String>,
+    pointers: &BTreeMap<String, String>,
+) -> BTreeMap<&'static str, String> {
+    for (variable, text) in &mut filled {
+        let Some(pointer) = pointers.get(*variable) else {
+            continue;
+        };
+        *text = match serde_json::from_str::<Value>(text)
+            .ok()
+            .as_ref()
+            .and_then(|value| value.pointer(pointer))
+        {
+            Some(Value::String(found)) => found.clone(),
+            Some(found) => serde_json::to_string_pretty(found).unwrap_or_default(),
+            None => String::new(),
+        };
+    }
+    filled
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -637,6 +771,23 @@ mod tests {
             categories: Vec::new(),
             multiple: false,
         }
+    }
+
+    /// A pointer narrows a variable holding JSON to what it finds, and one
+    /// that finds nothing leaves it empty.
+    #[test]
+    fn a_pointer_narrows_a_variable() {
+        let filled = BTreeMap::from([
+            ("input", r#"[{"role":"user","content":"hi"}]"#.to_owned()),
+            ("output", "plain".to_owned()),
+        ]);
+        let pointers = BTreeMap::from([
+            ("input".to_owned(), "/0/content".to_owned()),
+            ("output".to_owned(), "/0".to_owned()),
+        ]);
+        let narrowed = narrowed(filled, &pointers);
+        assert_eq!(narrowed["input"], "hi");
+        assert_eq!(narrowed["output"], "");
     }
 
     /// Every template reads, holds to an evaluator's rules, and is named once.

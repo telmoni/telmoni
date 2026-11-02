@@ -445,7 +445,7 @@ CREATE TABLE telemetry.heartbeats (
     name           TEXT        PRIMARY KEY,
     period_seconds INTEGER     NOT NULL,
     beat_at        TIMESTAMPTZ NOT NULL,
-    CONSTRAINT heartbeats_name_check CHECK (name IN ('purges', 'refusals', 'alerts', 'capacity', 'usage')),
+    CONSTRAINT heartbeats_name_check CHECK (name IN ('purges', 'refusals', 'alerts', 'capacity', 'usage', 'foreign', 'evaluations')),
     CONSTRAINT heartbeats_period_check CHECK (period_seconds > 0)
 );
 
@@ -606,6 +606,10 @@ CREATE TABLE telemetry.model_connections (
     secret_nonce      BYTEA       NOT NULL,
     wrapped_dek       BYTEA       NOT NULL,
     key_version       SMALLINT    NOT NULL,
+    -- When its provider last refused its key (401, 403), and its words: its
+    -- evaluators wait until a save proves it again.
+    refused_at        TIMESTAMPTZ,
+    refused_reason    TEXT,
     created_by        TEXT        NOT NULL,
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -634,8 +638,9 @@ CREATE POLICY maintenance_access ON telemetry.model_connections
     USING      (current_user = 'telemetry_maintenance')
     WITH CHECK (current_user = 'telemetry_maintenance');
 
--- The evaluation loop opens a project's connections; the purges delete them.
-GRANT SELECT, DELETE ON telemetry.model_connections TO telemetry_maintenance;
+-- The evaluation loop opens a project's connections and marks one its
+-- provider refuses; the purges delete them.
+GRANT SELECT, UPDATE, DELETE ON telemetry.model_connections TO telemetry_maintenance;
 
 -- A project's evaluators, LLM-as-a-judge: a row a version under the
 -- evaluator's stable id, each change a new version, each score naming the one
@@ -655,6 +660,8 @@ CREATE TABLE telemetry.evaluators (
     connection_id UUID,
     model         TEXT,
     temperature   DOUBLE PRECISION,
+    -- The most it spends a week, Monday 00:00 UTC to the next, in US dollars.
+    weekly_limit  DOUBLE PRECISION,
     created_by    TEXT             NOT NULL,
     created_at    TIMESTAMPTZ      NOT NULL DEFAULT now(),
     PRIMARY KEY (project_id, id, version),
@@ -662,6 +669,7 @@ CREATE TABLE telemetry.evaluators (
     CONSTRAINT evaluators_check CHECK (
         version >= 1 AND char_length(name) BETWEEN 1 AND 60
         AND (temperature IS NULL OR temperature BETWEEN 0 AND 2)
+        AND (weekly_limit IS NULL OR weekly_limit > 0)
     )
 );
 
@@ -699,6 +707,9 @@ CREATE TABLE telemetry.evaluation_rules (
     pointers        JSONB            NOT NULL DEFAULT '{}',
     enabled         BOOLEAN          NOT NULL DEFAULT true,
     backfill_from   TIMESTAMPTZ,
+    -- How far the reach back has looked, newest first, and when it finished.
+    backfill_seen   INTEGER          NOT NULL DEFAULT 0,
+    backfill_done_at TIMESTAMPTZ,
     created_by      TEXT             NOT NULL,
     created_at      TIMESTAMPTZ      NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ      NOT NULL DEFAULT now(),
@@ -760,9 +771,78 @@ CREATE POLICY maintenance_access ON telemetry.evaluation_rule_evaluators
     USING      (current_user = 'telemetry_maintenance')
     WITH CHECK (current_user = 'telemetry_maintenance');
 
--- The evaluation loop reads every project's rules; the purges delete them.
+-- The evaluation loop reads every project's rules and moves each reach back;
+-- the purges delete them.
 GRANT SELECT, DELETE ON telemetry.evaluation_rules TO telemetry_maintenance;
+GRANT UPDATE (backfill_seen, backfill_done_at) ON telemetry.evaluation_rules TO telemetry_maintenance;
 GRANT SELECT, DELETE ON telemetry.evaluation_rule_evaluators TO telemetry_maintenance;
+
+-- One evaluator's judgement of one target, found by a rule: pending until
+-- the loop leases it, delayed while a provider's rate limit or the
+-- evaluator's weekly limit holds, then done, its score written, or failed
+-- with its reason. The row is also the record of the content it read — the
+-- evaluator, the target, the time, the provider — never a chain row each.
+CREATE TABLE telemetry.evaluations (
+    id                UUID             PRIMARY KEY,
+    project_id        TEXT             NOT NULL,
+    organization_id   TEXT             NOT NULL,
+    rule_id           UUID             REFERENCES telemetry.evaluation_rules (id) ON DELETE SET NULL,
+    evaluator_id      UUID             NOT NULL,
+    evaluator_version INTEGER          NOT NULL,
+    target            TEXT             NOT NULL,
+    -- `run/<id>`, `span/<run>/<span>` or `session/<id>`: one judgement an
+    -- evaluator a target, whichever rule found it.
+    target_key        TEXT             NOT NULL,
+    run_id            UUID,
+    span_id           TEXT,
+    session_id        TEXT,
+    status            TEXT             NOT NULL DEFAULT 'pending',
+    attempts          SMALLINT         NOT NULL DEFAULT 0,
+    due_at            TIMESTAMPTZ      NOT NULL DEFAULT now(),
+    lease_id          UUID,
+    reason            TEXT,
+    provider          TEXT,
+    model             TEXT,
+    read_at           TIMESTAMPTZ,
+    -- A field it read was cut to fit an export, and judged as cut.
+    cut               BOOLEAN          NOT NULL DEFAULT false,
+    score_id          UUID,
+    -- The evaluation's own trace, in the environment `telmoni-evaluator`.
+    trace_run_id      UUID,
+    input_tokens      BIGINT,
+    output_tokens     BIGINT,
+    cost              DOUBLE PRECISION,
+    created_at        TIMESTAMPTZ      NOT NULL DEFAULT now(),
+    settled_at        TIMESTAMPTZ,
+    CONSTRAINT evaluations_target_key UNIQUE (project_id, evaluator_id, target_key),
+    CONSTRAINT evaluations_target_check CHECK (target IN ('run', 'span', 'session')),
+    CONSTRAINT evaluations_status_check CHECK (status IN ('pending', 'delayed', 'done', 'failed')),
+    CONSTRAINT evaluations_settled_check CHECK ((status IN ('done', 'failed')) = (settled_at IS NOT NULL))
+);
+
+-- What the loop leases: the longest due first.
+CREATE INDEX evaluations_due_idx ON telemetry.evaluations (due_at) WHERE status IN ('pending', 'delayed');
+-- The organization's purge deletes by it.
+CREATE INDEX evaluations_organization_idx ON telemetry.evaluations (organization_id);
+-- An evaluator's page lists its newest, and its week's spend sums them.
+CREATE INDEX evaluations_evaluator_idx ON telemetry.evaluations (project_id, evaluator_id, created_at DESC);
+-- The rule a cascade sets to none.
+CREATE INDEX evaluations_rule_idx ON telemetry.evaluations (rule_id);
+
+ALTER TABLE telemetry.evaluations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE telemetry.evaluations FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY tenant_isolation ON telemetry.evaluations
+    USING      (project_id = current_setting('app.project_id', true))
+    WITH CHECK (project_id = current_setting('app.project_id', true));
+
+CREATE POLICY maintenance_access ON telemetry.evaluations
+    TO telemetry_maintenance
+    USING      (current_user = 'telemetry_maintenance')
+    WITH CHECK (current_user = 'telemetry_maintenance');
+
+-- The evaluation loop writes and settles them; the purges and retention delete them.
+GRANT SELECT, INSERT, UPDATE, DELETE ON telemetry.evaluations TO telemetry_maintenance;
 
 -- Another exporter's spans, held until their trace's tree places them in a
 -- run (`foreign.rs`), their content sealed as `plain_content`'s; landed, a

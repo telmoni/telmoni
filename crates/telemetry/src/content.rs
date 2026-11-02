@@ -213,6 +213,40 @@ pub async fn open(
         return Ok(Vec::new());
     }
 
+    opened(state, project_id, kept).await
+}
+
+/// The runs' content, or that of the spans `spans` names, opened for an
+/// evaluation: its read recorded on the evaluation's own row by the caller,
+/// never a chain row each, which a machine's load would hold the
+/// organization's chain under.
+///
+/// # Errors
+///
+/// As [`keep`].
+pub async fn open_for_evaluation(
+    state: &AppState,
+    project_id: &ProjectId,
+    runs: &[Uuid],
+    spans: Option<&[String]>,
+) -> Result<Vec<SpanContent>, TelmoniError> {
+    let Some((mut tx, _)) = held_if_kept(state, project_id).await? else {
+        return Ok(Vec::new());
+    };
+    let kept = db::read_content(&mut tx, project_id, runs, spans).await?;
+    tx.commit().await?;
+    if kept.is_empty() {
+        return Ok(Vec::new());
+    }
+    opened(state, project_id, kept).await
+}
+
+/// `kept`, each field opened under the project's key, grouped by span.
+async fn opened(
+    state: &AppState,
+    project_id: &ProjectId,
+    kept: Vec<db::KeptField>,
+) -> Result<Vec<SpanContent>, TelmoniError> {
     let key = key_for(state, project_id).await?;
     let mut opened: Vec<SpanContent> = Vec::new();
     for (run_id, trace_id, span_id, field, ciphertext, nonce) in kept {

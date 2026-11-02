@@ -598,11 +598,18 @@ async fn the_maintenance_lanes_narrowed_grants_hold_in_every_tier() {
             "telemetry.project_prices",
             &["SELECT", "DELETE"],
         ),
-        // The evaluation loop opens a project's model connections; the purges delete them.
+        // The evaluation loop opens a project's model connections and marks one
+        // its provider refuses; the purges delete them.
         (
             "telemetry_maintenance",
             "telemetry.model_connections",
-            &["SELECT", "DELETE"],
+            &["SELECT", "UPDATE", "DELETE"],
+        ),
+        // The evaluation loop writes and settles evaluations; the purges and retention delete them.
+        (
+            "telemetry_maintenance",
+            "telemetry.evaluations",
+            &["SELECT", "INSERT", "UPDATE", "DELETE"],
         ),
         // The evaluation loop reads a project's evaluators; the purges delete them.
         (

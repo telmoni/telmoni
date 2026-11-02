@@ -35,6 +35,7 @@ const EvaluatorInputSchema = z.object({
   connection_id: z.guid().nullable(),
   model: z.string().max(128).nullable(),
   temperature: z.number().min(0).max(2).nullable(),
+  weekly_limit: z.number().positive().max(1_000_000).nullable(),
 });
 
 const PAGE = "/(app)/[organization]/[project]/evaluators";

@@ -1,7 +1,7 @@
 import { cache } from "react";
 import { z } from "zod";
 
-import { EvaluationTarget, ScoreType, SpanKind } from "@/lib/types/enums";
+import { EvaluationStatus, EvaluationTarget, ScoreType, SpanKind } from "@/lib/types/enums";
 
 import { valueOf } from "./read";
 import { ViewQuerySchema, readLane } from "./traces";
@@ -37,6 +37,7 @@ export const EvaluatorSchema = z.object({
   connection_id: z.string().nullable(),
   model: z.string().nullable(),
   temperature: z.number().nullable(),
+  weekly_limit: z.number().nullable(),
   created_by: z.string(),
   created_at: z.string(),
   versions: z.number().int().optional(),
@@ -117,6 +118,8 @@ export const EvaluationRuleSchema = z.object({
   pointers: z.record(z.string(), z.string()),
   enabled: z.boolean(),
   backfill_from: z.string().nullable(),
+  backfill_seen: z.number().int(),
+  backfill_done_at: z.string().nullable(),
   evaluators: z.array(z.string()),
   created_by: z.string(),
   created_at: z.string(),
@@ -143,4 +146,48 @@ export type RulePreview = z.infer<typeof RulePreviewSchema>;
 export const fetchEvaluationRules = cache(
   async (projectId: string): Promise<EvaluationRules | null> =>
     valueOf(await readLane("fetchEvaluationRules", projectId, "/evaluation-rules", EvaluationRulesSchema)) ?? null,
+);
+
+// One evaluation: what it judged, where it stands, what it read and spent.
+export const EvaluationSchema = z.object({
+  id: z.string(),
+  evaluator_version: z.number().int(),
+  rule_id: z.string().nullable(),
+  target: z.enum(EvaluationTarget),
+  run_id: z.string().nullable(),
+  span_id: z.string().nullable(),
+  session_id: z.string().nullable(),
+  status: z.enum(EvaluationStatus),
+  attempts: z.number().int(),
+  reason: z.string().nullable(),
+  provider: z.string().nullable(),
+  model: z.string().nullable(),
+  read_at: z.string().nullable(),
+  cut: z.boolean(),
+  score_id: z.string().nullable(),
+  trace_run_id: z.string().nullable(),
+  input_tokens: z.number().nullable(),
+  output_tokens: z.number().nullable(),
+  cost: z.number().nullable(),
+  created_at: z.string(),
+  settled_at: z.string().nullable(),
+});
+export type Evaluation = z.infer<typeof EvaluationSchema>;
+
+export const EvaluationsSchema = z.object({
+  evaluations: z.array(EvaluationSchema),
+  pending: z.number(),
+  delayed: z.number(),
+  done: z.number(),
+  failed: z.number(),
+  spent_this_week: z.number(),
+});
+export type Evaluations = z.infer<typeof EvaluationsSchema>;
+
+export const fetchEvaluations = cache(
+  async (projectId: string, id: string): Promise<Evaluations | null> =>
+    z.guid().safeParse(id).success
+      ? (valueOf(await readLane("fetchEvaluations", projectId, `/evaluators/${id}/evaluations`, EvaluationsSchema)) ??
+        null)
+      : null,
 );

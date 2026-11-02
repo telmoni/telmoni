@@ -4203,3 +4203,239 @@ async fn an_owner_makes_and_previews_an_evaluation_rule(pool: PgPool) {
     .expect("the chain");
     assert_eq!(filed, ["created", "updated", "deleted"]);
 }
+
+/// A provider that answers `answer` until `refuse` is set, then refuses the key.
+async fn mock_judge_until(answer: Value, refuse: Arc<std::sync::atomic::AtomicBool>) -> String {
+    use axum::routing::post;
+    let app = Router::new().route(
+        "/v1/chat/completions",
+        post(move || {
+            let answer = answer.clone();
+            let refuse = Arc::clone(&refuse);
+            async move {
+                if refuse.load(std::sync::atomic::Ordering::SeqCst) {
+                    return (
+                        StatusCode::UNAUTHORIZED,
+                        axum::Json(json!({ "error": { "message": "Incorrect API key provided" } })),
+                    );
+                }
+                (
+                    StatusCode::OK,
+                    axum::Json(json!({
+                        "choices": [{ "message": { "content": answer.to_string() } }],
+                        "usage": { "prompt_tokens": 120, "completion_tokens": 20 },
+                    })),
+                )
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("a port");
+    let at = listener.local_addr().expect("an address");
+    tokio::spawn(async move { axum::serve(listener, app).await.ok() });
+    format!("http://{at}/v1")
+}
+
+/// The loop finds a rule's run, judges it once with no chain row for the
+/// read, writes its score as the evaluator's and its own trace under
+/// `telmoni-evaluator`, and records the read on the evaluation's row; a key
+/// the provider then refuses pauses the connection's evaluators.
+#[sqlx::test]
+async fn the_loop_judges_a_rules_run_once_and_a_refused_key_pauses_it(pool: PgPool) {
+    let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    apply_audit_migrations(&pool).await;
+    let kept = door(&pool, ContentMode::On).await;
+    kept.auth.seat(
+        "admin-1",
+        &kept.organization,
+        &kept.project,
+        OrganizationRole::Owner,
+        None,
+    );
+    let refuse = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let base = mock_judge_until(
+        json!({ "reasoning": "It answers.", "score": true }),
+        Arc::clone(&refuse),
+    )
+    .await;
+    let (status, connection) = kept
+        .lane(
+            "PUT",
+            "/model-connections",
+            "admin-1",
+            Some(json!({
+                "name": "Gateway", "provider": "openai_compatible", "base_url": base,
+                "models": ["judge-1"], "secret": "sk-good",
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{connection}");
+    let evaluator = |name: &str| {
+        json!({
+            "name": name,
+            "messages": [{ "role": "user", "content": "Asked: {{input}}\nAnswered: {{output}}" }],
+            "score": { "name": "relevant", "data_type": "boolean", "low_means": "no", "high_means": "yes" },
+        })
+    };
+    let (_, first) = kept
+        .lane("PUT", "/evaluators", "admin-1", Some(evaluator("Relevant")))
+        .await;
+    let id = first["id"].clone();
+    let (status, rule) = kept
+        .lane(
+            "PUT",
+            "/evaluation-rules",
+            "admin-1",
+            Some(json!({
+                "name": "Every run", "target": "run", "evaluators": [id],
+                "backfill_from": Utc::now() - chrono::Duration::days(1),
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{rule}");
+    kept.send(turn_of("conv-1")).await;
+    common::eventually("the trace is read", || found(&kept, RUN)).await;
+
+    let settled = telmoni_telemetry::evaluators::run::pass(&kept.state)
+        .await
+        .expect("a pass");
+    assert_eq!(settled, 1);
+    let (status, provider, read, trace_run): (String, Option<String>, bool, Option<uuid::Uuid>) =
+        sqlx::query_as(
+            "SELECT status, provider, read_at IS NOT NULL, trace_run_id FROM telemetry.evaluations",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("its row");
+    assert_eq!(
+        (status.as_str(), provider.as_deref(), read),
+        ("done", Some("openai_compatible"), true)
+    );
+    assert!(
+        kept.viewed(&pool).await.is_empty(),
+        "a machine's read is the row's, never the chain's"
+    );
+    let (seen, done): (i32, bool) = sqlx::query_as(
+        "SELECT backfill_seen, backfill_done_at IS NOT NULL FROM telemetry.evaluation_rules",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("the rule");
+    assert_eq!(
+        (seen, done),
+        (1, true),
+        "its reach back looked over the day, judging the run once"
+    );
+
+    let (_, scores) = kept
+        .lane("GET", &format!("/scores?run_id={RUN}"), "admin-1", None)
+        .await;
+    let by_evaluator: Vec<&Value> = scores["scores"]
+        .as_array()
+        .expect("scores")
+        .iter()
+        .filter(|s| s["source"] == "evaluator")
+        .collect();
+    assert_eq!(by_evaluator.len(), 1, "{scores}");
+    assert_eq!(
+        (
+            by_evaluator[0]["name"].clone(),
+            by_evaluator[0]["value"].clone()
+        ),
+        (json!("relevant"), json!(1.0))
+    );
+    assert_eq!(by_evaluator[0]["scorer_version"], "1");
+
+    let trace_run = trace_run.expect("its own trace").to_string();
+    common::eventually("the evaluation's own trace is read", || async {
+        let (status, _) = kept
+            .lane("GET", &format!("/traces/{trace_run}"), "admin-1", None)
+            .await;
+        status == StatusCode::OK
+    })
+    .await;
+    let (_, own) = kept
+        .lane("GET", &format!("/traces/{trace_run}"), "admin-1", None)
+        .await;
+    assert_eq!(own["spans"][0]["environment"], "telmoni-evaluator", "{own}");
+    assert_eq!(own["spans"].as_array().map(Vec::len), Some(2));
+    assert!(
+        found(&kept, RUN).await && !found(&kept, &trace_run).await,
+        "left out of the list"
+    );
+    let (_, named) = kept
+        .lane(
+            "GET",
+            "/traces?environment=telmoni-evaluator",
+            "admin-1",
+            None,
+        )
+        .await;
+    assert_eq!(
+        named["traces"][0]["run_id"],
+        json!(trace_run),
+        "unless a filter names it"
+    );
+
+    assert_eq!(
+        telmoni_telemetry::evaluators::run::pass(&kept.state)
+            .await
+            .expect("a pass"),
+        0,
+        "judged once"
+    );
+    let (_, listed) = kept
+        .lane(
+            "GET",
+            &format!("/evaluators/{}/evaluations", id.as_str().expect("an id")),
+            "admin-1",
+            None,
+        )
+        .await;
+    assert_eq!(listed["done"], 1, "{listed}");
+
+    // A second evaluator under the rule, its key refused: paused, and the connection marked.
+    let (_, second) = kept
+        .lane("PUT", "/evaluators", "admin-1", Some(evaluator("Again")))
+        .await;
+    let mut both = rule.clone();
+    both["evaluators"] = json!([id, second["id"]]);
+    if let Some(fields) = both.as_object_mut() {
+        fields.retain(|k, _| ["id", "name", "target", "evaluators"].contains(&k.as_str()));
+    }
+    let (status, _) = kept
+        .lane("PUT", "/evaluation-rules", "admin-1", Some(both))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    refuse.store(true, std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(
+        telmoni_telemetry::evaluators::run::pass(&kept.state)
+            .await
+            .expect("a pass"),
+        0
+    );
+    let (status, reason): (String, Option<String>) =
+        sqlx::query_as("SELECT status, reason FROM telemetry.evaluations WHERE evaluator_id = $1")
+            .bind(
+                second["id"]
+                    .as_str()
+                    .expect("an id")
+                    .parse::<uuid::Uuid>()
+                    .expect("a uuid"),
+            )
+            .fetch_one(&pool)
+            .await
+            .expect("its row");
+    assert_eq!(status, "pending");
+    assert!(reason.is_some_and(|r| r.contains("refused")));
+    let (_, connections) = kept
+        .lane("GET", "/model-connections", "admin-1", None)
+        .await;
+    assert!(
+        connections["connections"][0]["refused_at"].is_string(),
+        "{connections}"
+    );
+}

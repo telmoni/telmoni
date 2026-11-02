@@ -47,6 +47,10 @@ pub struct ModelConnection {
     pub is_default: bool,
     /// The key's last four characters, as an API key's are shown.
     pub secret_hint: String,
+    /// When its provider last refused its key, and its words: its evaluators
+    /// wait until a save proves it again.
+    pub refused_at: Option<DateTime<Utc>>,
+    pub refused_reason: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -279,7 +283,7 @@ async fn list(
 ) -> Result<Vec<ModelConnection>, TelmoniError> {
     let mut tx = project_scope(&state.db, project_id).await?;
     let rows = sqlx::query_as(
-        "SELECT id, name, provider, base_url, region, models, is_default, secret_hint, created_at, updated_at
+        "SELECT id, name, provider, base_url, region, models, is_default, secret_hint, refused_at, refused_reason, created_at, updated_at
            FROM telemetry.model_connections WHERE project_id = $1
           ORDER BY is_default DESC, name",
     )
@@ -415,9 +419,10 @@ pub async fn put_connection(
                      region = excluded.region, models = excluded.models, is_default = excluded.is_default,
                      secret_hint = excluded.secret_hint, secret_ciphertext = excluded.secret_ciphertext,
                      secret_nonce = excluded.secret_nonce, wrapped_dek = excluded.wrapped_dek,
-                     key_version = excluded.key_version, updated_at = now()
+                     key_version = excluded.key_version, refused_at = NULL, refused_reason = NULL,
+                     updated_at = now()
                  WHERE telemetry.model_connections.project_id = excluded.project_id
-                 RETURNING id, name, provider, base_url, region, models, is_default, secret_hint, created_at, updated_at",
+                 RETURNING id, name, provider, base_url, region, models, is_default, secret_hint, refused_at, refused_reason, created_at, updated_at",
             )
             .bind(id)
             .bind(&project_id)
@@ -437,9 +442,10 @@ pub async fn put_connection(
             .await?,
             None => sqlx::query_as(
                 "UPDATE telemetry.model_connections
-                    SET name = $3, base_url = $4, region = $5, models = $6, is_default = $7, updated_at = now()
+                    SET name = $3, base_url = $4, region = $5, models = $6, is_default = $7,
+                        refused_at = NULL, refused_reason = NULL, updated_at = now()
                   WHERE project_id = $1 AND id = $2
-              RETURNING id, name, provider, base_url, region, models, is_default, secret_hint, created_at, updated_at",
+              RETURNING id, name, provider, base_url, region, models, is_default, secret_hint, refused_at, refused_reason, created_at, updated_at",
             )
             .bind(&project_id)
             .bind(id)

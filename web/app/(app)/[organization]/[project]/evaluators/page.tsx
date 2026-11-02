@@ -1,11 +1,8 @@
-import Link from "next/link";
-
-import { LocalTime } from "@/components/local-time";
 import { ServiceUnavailable } from "@/components/service-unavailable";
-import { Card } from "@/components/ui/card";
 import { administers } from "@/lib/roles";
 import {
   fetchEvaluationRules,
+  fetchEvaluations,
   fetchEvaluatorTemplates,
   fetchEvaluatorVersions,
   fetchEvaluators,
@@ -15,13 +12,14 @@ import { fetchModelConnections } from "@/lib/server/entities/model-connections";
 import { projectPage } from "@/lib/server/project-page";
 import { projectPath } from "@/lib/slug";
 
+import { EvaluatorDetails } from "./_details";
 import { Evaluators } from "./_evaluators";
 import { Rules } from "./_rules";
 
 export const metadata = { title: "Evaluators" };
 
-// The project's evaluators, each its newest version, and one's every version
-// where the URL names it; owners and admins make and change them.
+// The project's evaluators, each its newest version, and one's evaluations
+// and every version where the URL names it; owners and admins change them.
 export default async function EvaluatorsPage({
   params,
   searchParams,
@@ -31,15 +29,16 @@ export default async function EvaluatorsPage({
   const resolved = await projectPage(slug);
   if (resolved.kind === "unavailable") return <ServiceUnavailable />;
   const { project } = resolved;
-  const named = typeof query.versions === "string" ? query.versions : null;
+  const named = typeof query.evaluator === "string" ? query.evaluator : null;
 
-  const [listing, templates, connections, rules, views, versions] = await Promise.all([
+  const [listing, templates, connections, rules, views, versions, evaluations] = await Promise.all([
     fetchEvaluators(project.id),
     fetchEvaluatorTemplates(project.id),
     fetchModelConnections(project.id),
     fetchEvaluationRules(project.id),
     fetchTraceViews(project.id),
     named ? fetchEvaluatorVersions(project.id, named) : null,
+    named ? fetchEvaluations(project.id, named) : null,
   ]);
   if (!listing || !templates || !connections || !rules) return <ServiceUnavailable />;
   const here = projectPath(organization, slug, "/evaluators");
@@ -74,28 +73,13 @@ export default async function EvaluatorsPage({
         />
       </div>
       {versions && versions.length > 0 && (
-        <Card className="mt-gutter grid gap-gutter p-gutter text-sm" role="region" aria-label="Versions">
-          <div className="flex items-center justify-between gap-gutter">
-            <p className="font-medium">{versions[0]?.name}: every version</p>
-            <Link className="underline" href={here}>
-              Close
-            </Link>
-          </div>
-          <ul className="grid gap-gutter">
-            {versions.map((version) => (
-              <li key={version.version} className="grid gap-1">
-                <span>
-                  <span className="font-medium">v{version.version}</span> ·{" "}
-                  <LocalTime iso={version.created_at} /> ·{" "}
-                  {version.score.name} · {version.model ?? "its connection's first model"}
-                </span>
-                <pre className="line-clamp-3 whitespace-pre-wrap font-mono text-xs text-muted-foreground">
-                  {version.messages.map((m) => m.content).join("\n\n")}
-                </pre>
-              </li>
-            ))}
-          </ul>
-        </Card>
+        <EvaluatorDetails
+          versions={versions}
+          evaluations={evaluations}
+          here={here}
+          tracesHref={projectPath(organization, slug, "/traces")}
+          sessionsHref={projectPath(organization, slug, "/sessions")}
+        />
       )}
     </>
   );

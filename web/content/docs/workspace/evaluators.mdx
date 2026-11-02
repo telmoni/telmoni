@@ -1,6 +1,6 @@
 ---
 title: "Evaluators"
-description: "LLM-as-a-judge on a project's own model key: a prompt whose variables are filled from what is judged, the score it gives, and the model that gives it, each change a new version, tried on a real trace before it is saved."
+description: "LLM-as-a-judge on a project's own model key: a prompt, the score it gives and the model that gives it, each change a new version, tried on a real trace before it is saved, then run by rules over the project's runs, spans and sessions."
 ---
 
 An **evaluator** asks a model to judge what an agent did and give a
@@ -29,11 +29,20 @@ example. Each `{{variable}}` is filled from what is judged:
 | `{{tool_calls}}` | Each tool it called, in order, with the arguments |
 | `{{trajectory}}` | Each tool call with its arguments, result and status, in order |
 
+A span fills the same four but the trajectory: its own input and output
+— a tool call's arguments and result — its metadata, and the tool calls it
+made or is. A session fills its own:
+
+| Variable | What fills it |
+|---|---|
+| `{{messages}}` | Each run's input and output, in order, as the person's and the agent's messages |
+| `{{exchanges}}` | Each run as a pair, the person's message and the agent's answer |
+| `{{first_and_last}}` | The session's first prompt and its last answer |
+
 A variable is filled with up to 60,000 characters of what it reads, and
-says where the rest was cut. The names `{{messages}}`, `{{exchanges}}`,
-`{{first_and_last}}` and `{{examples}}` are kept for a session's
-conversation and members' corrections: a trace fills none of them, so a
-draft naming one is not tried on a trace.
+says where the rest was cut. A draft is tried on a trace, so one naming a
+session's variables, or `{{examples}}`, which a later release fills, is not
+tried.
 
 ## The score
 
@@ -79,11 +88,71 @@ trace's content as its page does, so the read is filed in the
 [audit log](/docs/workspace/audit-log) as the member's, and it keeps
 nothing.
 
+## Rules
+
+A **rule** says what its evaluators judge, under **Rules** on the same
+page; several evaluators share one, and owners and admins make, change and
+delete them:
+
+- **Runs**, each once its own span has arrived and a minute has passed.
+- **Spans** of one kind — model calls, tool calls, steps or other spans —
+  and of one name where the rule names one.
+- **Sessions**, each once quiet for the project's idle time, ten minutes
+  unless an owner or admin sets two to 1,440 under the rules.
+
+A rule takes a saved view's filters from the [trace list](/docs/monitoring/traces),
+never its sort or window, and judges a share of what they admit, from
+0.1% to all of it, chosen by a hash of each target's id so the same target
+is always chosen alike. Each variable may be narrowed by a
+[JSON Pointer](https://datatracker.ietf.org/doc/html/rfc6901), `/0/content`
+for the first message's text: a variable that holds no JSON, or a pointer
+that finds nothing, is sent empty. Before a rule is saved, **Preview the
+last 7 days** counts what it would have found and judged, and what each
+evaluator would have cost at its model's price, where the
+[price table](/docs/monitoring/dashboards) holds one; a span rule's count
+reads the filters a span carries itself — its agent, deployment, release,
+model and status. A plan holds as many rules as it holds
+[alerts](/docs/monitoring/alerts), across its projects, and a rule off judges nothing.
+
+## Evaluations
+
+Each minute Telmoni looks over every rule's newest targets and writes one
+**evaluation** for each evaluator and target, whichever rule found it, then
+judges each, five at a time an organization:
+
+- **Done**: the model answered in the score's form, and its score is on
+  the target, its source the evaluator and its version. Each evaluation is
+  also a trace of its own in the project — a run and its one model call,
+  the prompt sent and the answer, with its tokens, latency and cost — under
+  the environment `telmoni-evaluator`, which the trace list leaves out
+  unless its environment filter names it, and which counts against the
+  plan's spans and its spend as any call does.
+- **Delayed**: the provider's rate limit holds, until its `Retry-After` or
+  a backoff from a minute to an hour; or the evaluator's weekly spend
+  limit, set on its form, is reached, until Monday 00:00 UTC.
+- **Pending**: waiting, or paused — while the project keeps no content,
+  while its connection is deleted, and while the provider refuses its key,
+  which pauses every evaluator on that connection and tells the
+  organization's owners and admins in the feed until the connection is
+  saved again with a key it takes.
+- **Failed**: the answer was outside the score's form, the target is no
+  longer kept, or the provider failed five times; the reason is shown.
+
+An evaluator reads only what its project keeps, and sends it only to its
+connection's provider; a field an SDK cut to fit an export is judged as
+cut, and the evaluation says so. Its reads are not filed in the audit log,
+which a machine's load would crowd: each evaluation's row is their record,
+naming the evaluator, the target, the time and the provider, kept as long
+as what it read. **Evaluations** on an evaluator's row opens its newest,
+each linked to what it judged and to its own trace, its counts, and what it
+spent since Monday.
+
 ## Versions
 
 Every save is a new version under the evaluator's same id, and each score an
-evaluator gives names the version that gave it; the page shows the newest
-and opens every version. Each version saved and each evaluator deleted is
+evaluator gives names the version that gave it; a target judged once is not
+judged again by a later version. The page shows the newest and opens every
+version. Each version saved and each evaluator deleted is
 filed in the audit log by its score's name and type, never its prompt, and
 deleting one takes every version, leaving the scores it gave. A project
 holds up to 50 evaluators.

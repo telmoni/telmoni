@@ -190,6 +190,16 @@ pub fn sdk_score_id(
     )
 }
 
+/// An evaluator's score's id: one an evaluator a target, so a version that
+/// judges it again replaces the last.
+#[must_use]
+pub fn evaluator_score_id(project_id: &ProjectId, target: &TargetKey, evaluator: Uuid) -> Uuid {
+    Uuid::new_v5(
+        &NAMESPACE,
+        format!("evaluator/{project_id}/{}/{evaluator}", target.key()).as_bytes(),
+    )
+}
+
 /// What a score is of, by its ids.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TargetKey {
@@ -199,6 +209,16 @@ pub enum TargetKey {
 }
 
 impl TargetKey {
+    /// What it is of.
+    #[must_use]
+    pub const fn kind(&self) -> ScoreTarget {
+        match self {
+            Self::Run(_) => ScoreTarget::Run,
+            Self::Span(..) => ScoreTarget::Span,
+            Self::Session(_) => ScoreTarget::Session,
+        }
+    }
+
     fn key(&self) -> String {
         match self {
             Self::Run(run) => format!("run/{run}"),

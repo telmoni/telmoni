@@ -40,6 +40,7 @@ const EVALUATOR = {
   connection_id: null,
   model: null,
   temperature: null,
+  weekly_limit: null,
   created_by: "u",
   created_at: "2026-11-02T00:00:00Z",
 } satisfies Evaluator;
@@ -54,7 +55,9 @@ const RULE: EvaluationRule = {
   sample_rate: 0.25,
   pointers: {},
   enabled: false,
-  backfill_from: null,
+  backfill_from: "2026-10-30T00:00:00Z",
+  backfill_seen: 120,
+  backfill_done_at: null,
   evaluators: [EVALUATOR.id],
   created_by: "u",
   created_at: "2026-11-02T00:00:00Z",
@@ -88,6 +91,7 @@ describe("Rules", () => {
     );
     expect(screen.getByText(/Tool calls named search · 25% · Relevant/)).toBeTruthy();
     expect(screen.getByText("Off")).toBeTruthy();
+    expect(screen.getByText(/Reaching back to 2026-10-30: under way, 120 looked over/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "New rule" }));
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Every run" } });
     fireEvent.click(screen.getByRole("checkbox", { name: "Relevant" }));

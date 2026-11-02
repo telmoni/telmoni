@@ -373,8 +373,10 @@ macro_rules! admits {
     (tool) => {
         "(empty({tools:Array(String)}) OR hasAny(tools, {tools:Array(String)}))"
     };
+    // An evaluation's own run is left out unless a filter names its environment.
     (environment) => {
-        "(empty({environments:Array(String)}) \
+        "((empty({environments:Array(String)}) \
+           AND NOT has(environments, {evaluator_environment:String})) \
          OR hasAny(environments, {environments:Array(String)}))"
     };
     (release) => {
@@ -522,7 +524,8 @@ macro_rules! run_rows {
             "OR countIf(kind = 'model_call' AND has({models:Array(String)}, model)) > 0) ",
             "AND (empty({tools:Array(String)}) ",
             "OR countIf(kind = 'tool_call' AND has({tools:Array(String)}, name)) > 0) ",
-            "AND (empty({environments:Array(String)}) ",
+            "AND ((empty({environments:Array(String)}) ",
+            "AND countIf(environment = {evaluator_environment:String}) = 0) ",
             "OR countIf(has({environments:Array(String)}, environment)) > 0) ",
             "AND (empty({releases:Array(String)}) ",
             "OR countIf(has({releases:Array(String)}, release)) > 0) ",
@@ -780,6 +783,10 @@ pub(crate) fn filtered(read: Read, filter: &TraceFilter) -> Read {
         .param("models", &filter.models)
         .param("tools", &filter.tools)
         .param("environments", &filter.environments)
+        .param(
+            "evaluator_environment",
+            crate::contract::EVALUATOR_ENVIRONMENT,
+        )
         .param("releases", &filter.releases)
         .param("tags", &filter.tags)
         .param("prompts", &filter.prompts)
