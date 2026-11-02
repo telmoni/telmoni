@@ -1,0 +1,223 @@
+---
+title: "Frameworks"
+description: "The OpenAI and Anthropic SDKs, LangChain and LangGraph, the OpenAI Agents SDK, CrewAI, LiteLLM and the Vercel AI SDK, reporting their runs to Telmoni through each one's own OpenTelemetry instrumentation, with no SDK of ours: what to install, the exporter's two settings, and the one setting that sends content."
+---
+
+A framework that already speaks OpenTelemetry's GenAI conventions reports its
+runs to Telmoni through an exporter you configure, with no SDK of ours and no
+package of ours per framework: an instrumentation somebody else maintains is
+one we do not. Its spans go to [ingest](/docs/api/ingest) like any exporter's,
+and each trace is placed in its runs as
+[What a span must carry](/docs/api/ingest#what-a-span-must-carry) says: under
+its topmost agent or workflow, or, where only the model client is
+instrumented, as one run of its calls named by your `service.name`. They show
+on the **Traces** page a minute or so after the trace goes quiet.
+
+Each instrumentation below sets `gen_ai.operation.name` on its spans, which is
+what Telmoni reads them by. One that writes a convention of its own instead —
+OpenInference's `openinference.span.kind`, say — reaches Telmoni as spans in
+no run, which are dropped.
+
+## The exporter
+
+Send to the lane with OpenTelemetry's own OTLP exporter over HTTP, set from the
+environment, with a [key](/docs/api/api-keys) holding the **ingest** scope:
+
+```bash
+export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=https://api.telmoni.com/otlp/v1/traces
+export OTEL_EXPORTER_OTLP_TRACES_HEADERS="Authorization=Bearer%20tm_..."
+export OTEL_SERVICE_NAME=support-bot
+```
+
+The header's value is URL-encoded, so its space is `%20`. On your own
+deployment, the endpoint is its machine host's. `OTEL_SERVICE_NAME` names the
+runs of an application whose model client alone is instrumented.
+
+In Python, install `opentelemetry-sdk` and `opentelemetry-exporter-otlp-proto-http`,
+and set the provider up once, before the framework is imported:
+
+```python
+from opentelemetry import trace
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
+provider = TracerProvider()
+provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
+trace.set_tracer_provider(provider)
+```
+
+In TypeScript, install `@opentelemetry/sdk-node` and
+`@opentelemetry/exporter-trace-otlp-proto`, and start the SDK with the
+instrumentation the framework's section names:
+
+```ts
+import { NodeSDK } from '@opentelemetry/sdk-node';
+import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-proto';
+
+const sdk = new NodeSDK({ traceExporter: new OTLPTraceExporter(), instrumentations: [/* … */] });
+sdk.start();
+```
+
+A short-lived process shuts the provider down before it exits
+(`provider.shutdown()`, `await sdk.shutdown()`), which sends what is left.
+
+## Content
+
+Content leaves your process only where the instrumentation is set to send it,
+and is kept only on a project whose content mode is `on`
+([Content](/docs/monitoring/content)); elsewhere ingest drops it at the door.
+The instrumentations disagree on their default, so each section names the one
+setting. Telmoni reads content from the span's own attributes
+(`gen_ai.input.messages`, `gen_ai.output.messages`,
+`gen_ai.system_instructions`), never from events or logs.
+
+OpenTelemetry's Python instrumentations, the `opentelemetry-instrumentation-genai-*`
+packages, send none until
+`OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=SPAN_ONLY` (or
+`SPAN_AND_EVENT`). Any other value, `true` among them, is read as
+`NO_CONTENT`, with a warning. They are pre-releases, installed by name as
+below.
+
+## OpenAI SDK
+
+**Python.** `pip install opentelemetry-instrumentation-genai-openai`, then:
+
+```python
+from opentelemetry.instrumentation.genai.openai import OpenAIInstrumentor
+
+OpenAIInstrumentor().instrument()
+```
+
+Each call is a `chat` or `embeddings` span with its model, provider and
+tokens. With no agent above them, an application's calls are one run per
+trace, named by `OTEL_SERVICE_NAME`. Content: the setting above.
+
+**TypeScript.** `npm install @opentelemetry/instrumentation-openai`, and
+`new OpenAIInstrumentation()` in the SDK's `instrumentations`. Its calls are
+model calls with their tokens; it writes messages to log events, not to the
+span, so Telmoni keeps none of them, whatever the project's mode, but a
+Responses call's instructions, which it puts on the span unasked.
+
+## Anthropic SDK
+
+**Python.** `pip install opentelemetry-instrumentation-genai-anthropic`, then
+`AnthropicInstrumentor().instrument()`, imported from
+`opentelemetry.instrumentation.genai.anthropic`. Its calls are `chat` spans.
+Content: the setting above.
+
+**TypeScript.** OpenTelemetry publishes no instrumentation for it. Traceloop's
+`@traceloop/instrumentation-anthropic` writes the conventions' attributes on
+the span, content among them **by default**: give it `traceContent: false`
+unless the project keeps content.
+
+## LangChain and LangGraph
+
+**Python.** `pip install opentelemetry-instrumentation-genai-langchain`
+alongside `langchain` 0.3.22 or later (LangGraph's own nodes from 0.3.18), then:
+
+```python
+from opentelemetry.instrumentation.genai.langchain import LangChainInstrumentor
+
+LangChainInstrumentor().instrument()
+```
+
+An agent is an `invoke_agent` span named by the agent's `name`, its model calls
+`chat` and its tools `execute_tool` spans under it: one run, named by the
+agent. Content: the setting above.
+
+**TypeScript.** OpenTelemetry publishes none for LangChain.js yet. Traceloop's
+`@traceloop/instrumentation-langchain` marks an agent `invoke_agent`, its
+model calls `chat` and its tools `execute_tool`, so each agent is a run; a
+plain chain it marks `workflow`, which is a plain span to Telmoni. It sends
+content **by default**: give it `traceContent: false` unless the project keeps
+content.
+
+## OpenAI Agents SDK
+
+**Python.** `pip install opentelemetry-instrumentation-genai-openai-agents
+opentelemetry-instrumentation-genai-openai`; the first records the workflow,
+its agents and their tools, the second each model call:
+
+```python
+from agents import RunConfig, Runner
+from opentelemetry.instrumentation.genai.openai import OpenAIInstrumentor
+from opentelemetry.instrumentation.genai.openai_agents import OpenAIAgentsInstrumentor
+
+OpenAIInstrumentor().instrument()
+OpenAIAgentsInstrumentor().instrument(disable_openai_trace_export=True)
+
+Runner.run_sync(agent, question, run_config=RunConfig(workflow_name="support-bot"))
+```
+
+The workflow is the run, its agents and calls under it, named by
+`workflow_name`, which is `Agent workflow` when you give none.
+`disable_openai_trace_export=True` stops the SDK sending its traces to OpenAI
+as well. Content: the setting above.
+
+**TypeScript.** No instrumentation that speaks the conventions is published for
+it; its model calls reach Telmoni through `@opentelemetry/instrumentation-openai`
+as above, in traces of their own.
+
+## CrewAI
+
+**Python.** OpenTelemetry's instrumentation is not released yet. Traceloop's
+`opentelemetry-instrumentation-crewai` marks the crew's kickoff, its agents and
+its tasks as `invoke_agent` and its model calls as `chat`: the kickoff, the
+topmost, is the run, its agents and tasks spans of it.
+
+```python
+from opentelemetry.instrumentation.crewai import CrewAIInstrumentor
+
+CrewAIInstrumentor().instrument()
+```
+
+It has no content switch: it writes each task's result and each agent's
+settings as `crewai.*` attributes, text the
+[field inventory](/docs/api/field-inventory) does not name, which ingest drops
+on a project left `off` and keeps as content on one that is `on`.
+
+## LiteLLM
+
+**Python.** LiteLLM exports OpenTelemetry itself. With `opentelemetry-sdk` and
+`opentelemetry-exporter-otlp` installed:
+
+```python
+import litellm
+
+litellm.callbacks = ["otel"]
+```
+
+```bash
+export OTEL_EXPORTER=otlp_http
+export OTEL_ENDPOINT=https://api.telmoni.com/otlp/v1/traces
+export OTEL_HEADERS="Authorization=Bearer tm_..."
+export OTEL_SEMCONV_STABILITY_OPT_IN=gen_ai_latest_experimental
+```
+
+The last line is needed: without it, LiteLLM names each span's operation by its
+own call, `acompletion` say, which is no model call to Telmoni. `OTEL_HEADERS`
+is read as written, so its space stays a space. LiteLLM sends content **by
+default**, and its switch, `litellm.turn_off_message_logging`, takes each span's
+operation off with the content, which leaves Telmoni no call to read: leave
+it, and keep content out with the project's content mode, which drops it at
+the door.
+
+## Vercel AI SDK
+
+**TypeScript.** Version 7 records the GenAI conventions through
+`@ai-sdk/otel`, registered once at startup beside the Node SDK:
+
+```ts
+import { OpenTelemetry } from '@ai-sdk/otel';
+import { registerTelemetry } from 'ai';
+
+registerTelemetry(new OpenTelemetry());
+```
+
+`generateText`, `streamText` and the rest are then each an `invoke_agent` run,
+its model calls `chat` and its tools `execute_tool` spans. It records inputs
+and outputs **by default**: pass `telemetry: { recordInputs: false,
+recordOutputs: false }` on a call unless the project keeps content.
+`LegacyOpenTelemetry` writes the older `ai.*` attributes, which Telmoni does
+not read.

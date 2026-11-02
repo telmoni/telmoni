@@ -57,6 +57,10 @@ platform deployed on your own infrastructure:
   OpenTelemetry spans, with content taken off before it leaves the process,
   and hold a run to the caps on its steps and spend you give it, in the
   agent's own process; each installed with its language's own tool.
+- **[Frameworks](/docs/api/frameworks)**: The OpenAI and Anthropic SDKs,
+  LangChain and LangGraph, the OpenAI Agents SDK, CrewAI, LiteLLM and the
+  Vercel AI SDK, reporting their runs through their own OpenTelemetry
+  instrumentation, with no SDK of ours.
 - **[Coding-agent plugins](/docs/api/coding-agents)**: Each turn of Claude Code,
   Codex, OpenCode or Cursor recorded as a run, with no code: metadata alone,
   unless you turn its content on.
