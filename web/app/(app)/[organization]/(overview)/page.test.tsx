@@ -259,31 +259,33 @@ describe("OrganizationOverviewPage", () => {
   });
 
   // What the projects spent is the owner's and admins' to read, each project
-  // linking to its dashboards against its budget.
+  // linking to its dashboards, its budget against the month its budget read.
   it("shows the owner the period's spend by project, and asks for nobody else's", async () => {
     fetchOrganizationSpend.mockResolvedValue({
       kind: "ok",
       period_start: "2026-11-01T00:00:00Z",
       period_end: "2026-12-01T00:00:00Z",
-      total: 92.5,
+      total: 97.5,
       projects: [
         {
           project: { id: "project_1", slug: "web", name: "Web" },
-          spent: 90,
+          spent: 95,
           unpriced_calls: 0,
           budget: 100,
+          budget_spent: 90,
         },
         {
           project: { id: "project_2", slug: "batch", name: "Batch" },
           spent: 2.5,
           unpriced_calls: 3,
           budget: null,
+          budget_spent: null,
         },
       ],
     });
     await renderPage();
     const spend = within(screen.getByRole("region", { name: "Spend" }));
-    expect(spend.getByText("$92.50")).toBeInTheDocument();
+    expect(spend.getByText("$97.50")).toBeInTheDocument();
     expect(spend.getByRole("link", { name: "Web" })).toHaveAttribute("href", "/ada-works/web/dashboards");
     expect(spend.getByText("90% of its $100.00 budget")).toBeInTheDocument();
     expect(spend.getByText("3 unpriced calls")).toBeInTheDocument();

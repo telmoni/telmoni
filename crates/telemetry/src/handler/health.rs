@@ -15,7 +15,7 @@ use telmoni_shared::extract::Json;
 use telmoni_shared::rbac::{Resource, Verb, can};
 use telmoni_shared::seam::ReadableProject;
 use telmoni_shared::slug::Slug;
-use telmoni_shared::{AuthzError, OrganizationRole, ProjectId, TelmoniError};
+use telmoni_shared::{AuthzError, ProjectId, TelmoniError};
 
 use crate::AppState;
 use crate::handler::incidents::INCIDENTS_MAX;
@@ -99,9 +99,12 @@ pub struct ProjectSpend {
     pub spent: f64,
     /// Its calls with neither a cost nor a price, which `spent` leaves out.
     pub unpriced_calls: u64,
-    /// The alert threshold of its budget, a cost alert summed over the month
-    /// with no filter; none where it set none.
+    /// The alert threshold of its budget, a running cost alert summed over the
+    /// month with no filter; none where it set none.
     pub budget: Option<f64>,
+    /// What its budget read of the calendar month when last evaluated, which
+    /// a plan's period need not match; none until it is.
+    pub budget_spent: Option<f64>,
 }
 
 /// What the Overview's spend answers: the period and each project with a
@@ -148,15 +151,7 @@ pub async fn organization_spend(
     if organization != acting.organization_id.as_str() {
         return Err(AuthzError::Forbidden("not the acting organization".into()).into());
     }
-    if !matches!(
-        acting.organization_role,
-        Some(OrganizationRole::Owner | OrganizationRole::Admin)
-    ) {
-        return Err(AuthzError::Forbidden(
-            "an organization's spend is its owners' and admins'".into(),
-        )
-        .into());
-    }
+    acting.require_organization_admin()?;
     let projects: HashMap<ProjectId, ReadableProject> = state
         .auth
         .readable_projects(&acting)
@@ -190,20 +185,24 @@ pub async fn organization_spend(
     })?;
     let ids: Vec<ProjectId> = projects.keys().cloned().collect();
     let mut tx = organization_scope(&state.db, &acting.organization_id).await?;
-    let budgets: Vec<(String, f64)> = sqlx::query_as(
-        "SELECT project_id, min(alert_threshold)
+    // Each project's tightest running budget, with its own month so far as last read.
+    let budgets: Vec<(String, f64, Option<f64>)> = sqlx::query_as(
+        "SELECT DISTINCT ON (project_id) project_id, alert_threshold, value
            FROM telemetry.rules
-          WHERE organization_id = $1 AND project_id = ANY($2)
+          WHERE organization_id = $1 AND project_id = ANY($2) AND paused IS NULL
             AND kind = 'run' AND measure = 'cost' AND aggregation = 'sum'
             AND lookback = 'month' AND filters = '{}'::jsonb
-          GROUP BY project_id",
+          ORDER BY project_id, alert_threshold",
     )
     .bind(&acting.organization_id)
     .bind(&ids)
     .fetch_all(tx.conn())
     .await?;
     tx.commit().await?;
-    let budgets: HashMap<String, f64> = budgets.into_iter().collect();
+    let budgets: HashMap<String, (f64, Option<f64>)> = budgets
+        .into_iter()
+        .map(|(project, threshold, value)| (project, (threshold, value)))
+        .collect();
     let by_id: HashMap<&str, &ReadableProject> = projects
         .values()
         .map(|project| (project.project_id.as_str(), project))
@@ -220,7 +219,8 @@ pub async fn organization_spend(
                 },
                 spent: row.spent,
                 unpriced_calls: row.unpriced_calls,
-                budget: budgets.get(&row.project_id).copied(),
+                budget: budgets.get(&row.project_id).map(|budget| budget.0),
+                budget_spent: budgets.get(&row.project_id).and_then(|budget| budget.1),
             })
         })
         .collect();

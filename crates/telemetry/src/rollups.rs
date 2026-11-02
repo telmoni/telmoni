@@ -64,7 +64,8 @@ const METRICS_SQL: &str = concat!(
     "AS Array(Float64)) AS run_quantiles ",
     "FROM telemetry.spans_hourly AS h ",
     "WHERE h.project_id IN {projects:Array(String)} AND h.hour >= {from:DateTime('UTC')} ",
-    "GROUP BY at, key ORDER BY at, key LIMIT {max:UInt32}"
+    // Newest first, so a window past the limit loses its oldest points.
+    "GROUP BY at, key ORDER BY at DESC, key DESC LIMIT {max:UInt32}"
 );
 
 /// One point of the rollup as ClickHouse answers it.
@@ -95,7 +96,7 @@ pub struct Metrics {
     pub group: Option<&'static str>,
     /// Oldest first, each hour or day only where it holds a span.
     pub points: Vec<MetricPoint>,
-    /// Whether the window held more than [`METRICS_MAX`] points.
+    /// Whether the window held more than [`METRICS_MAX`] points, its oldest left out.
     pub truncated: bool,
 }
 
@@ -145,7 +146,7 @@ pub struct RunDurations {
 
 /// The project's totals over the window `asked` names: up to 360 days back,
 /// 7 when it names none and no further than the plan keeps spans; by the
-/// day, unless by the hour; grouped where it names a group.
+/// day, unless by the hour or a day's window; grouped where it names a group.
 ///
 /// # Errors
 ///
@@ -159,6 +160,8 @@ pub async fn read(
     let days = traces::parse_days(asked.days.as_deref())?;
     let days = crate::capacity::visible_days(state, project_id, days).await;
     let (step, daily) = match asked.step.as_deref() {
+        // A day by the day would be the UTC day so far alone.
+        None if days == 1 => ("hour", false),
         None | Some("day") => ("day", true),
         Some("hour") => ("hour", false),
         Some(_) => return Err(TelmoniError::BadRequest("step is `hour` or `day`".into())),
@@ -200,6 +203,7 @@ pub async fn read(
         .map_err(read_failed)?;
     let truncated = rows.len() > METRICS_MAX;
     rows.truncate(METRICS_MAX);
+    rows.reverse();
     Ok(Metrics {
         days,
         step,

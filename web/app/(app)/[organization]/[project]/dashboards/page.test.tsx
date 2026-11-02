@@ -59,9 +59,9 @@ const point = (value: string | undefined, spend: number) => ({
   run_duration_ms: { p50: 1, p95: 2, p99: 3 },
 });
 
-const rollups = (points: unknown[], group: string | null = null) => ({
+const rollups = (points: unknown[], group: string | null = null, truncated = false, days = 7) => ({
   kind: "ok",
-  rollups: { days: 7, step: "day", group, points, truncated: false },
+  rollups: { days, step: "day", group, points, truncated },
 });
 
 beforeEach(() => {
@@ -81,6 +81,29 @@ beforeEach(() => {
         window: "month",
         alert_threshold: 100,
         value: 42.5,
+        paused: null,
+      },
+      {
+        id: "a3",
+        name: "Unread budget",
+        kind: "run",
+        measure: "cost",
+        aggregation: "sum",
+        window: "month",
+        alert_threshold: 50,
+        value: null,
+        paused: null,
+      },
+      {
+        id: "a4",
+        name: "Paused budget",
+        kind: "run",
+        measure: "cost",
+        aggregation: "sum",
+        window: "month",
+        alert_threshold: 10,
+        value: 3,
+        paused: "person",
       },
       { id: "a2", name: "Slow", kind: "model_call", measure: "duration", aggregation: "p95", window: "hour", alert_threshold: 5, value: 1 },
     ],
@@ -96,20 +119,29 @@ describe("DashboardsPage", () => {
     expect(fetchRollups).toHaveBeenCalledWith("project_1", 7, null);
     expect(fetchRollups).toHaveBeenCalledWith("project_1", 7, "model");
 
-    const budgets = within(screen.getByRole("region", { name: "Budgets" }));
+    const budgets = within(screen.getByRole("region", { name: "Budgets this month" }));
     expect(budgets.getByText("Monthly budget")).toBeInTheDocument();
     expect(budgets.getByText("$42.50 of $100.00")).toBeInTheDocument();
+    expect(budgets.getByText("Not read yet of $50.00")).toBeInTheDocument();
+    expect(budgets.queryByText("Paused budget")).toBeNull();
     expect(budgets.queryByText("Slow")).toBeNull();
+    expect(screen.queryByText("The window holds more than one read answers.")).toBeNull();
 
-    const byModel = screen.getByRole("region", { name: "By group" });
+    const byModel = screen.getByRole("region", { name: "By model" });
     expect(within(byModel).getAllByText(/^\$/).map((cell) => cell.textContent)).toEqual(["$4.00", "$1.00"]);
   });
 
-  it("says nothing has landed in an empty window, and draws no chart", async () => {
-    fetchRollups.mockResolvedValue(rollups([]));
-    render(await DashboardsPage({ params: PARAMS, searchParams: Promise.resolve({ days: "30" }) }));
+  it("says nothing has landed in the window the plan let it read, and draws no chart", async () => {
+    fetchRollups.mockResolvedValue(rollups([], null, false, 30));
+    render(await DashboardsPage({ params: PARAMS, searchParams: Promise.resolve({ days: "90" }) }));
     expect(screen.getByText("Nothing to show yet.")).toBeInTheDocument();
     expect(screen.getByText("No run has landed in the last 30 days.")).toBeInTheDocument();
     expect(screen.queryByTestId("charts")).toBeNull();
+  });
+
+  it("says when a read left the window's oldest points out", async () => {
+    fetchRollups.mockResolvedValue(rollups([point(undefined, 5)], null, true));
+    render(await DashboardsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+    expect(screen.getByText("The window holds more than one read answers.")).toBeInTheDocument();
   });
 });

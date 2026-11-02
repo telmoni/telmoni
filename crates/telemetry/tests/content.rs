@@ -2148,7 +2148,16 @@ async fn the_hourly_totals_price_their_calls_and_count_runs(pool: PgPool) {
         .lane("GET", "/rollups?days=1&group=model", "admin-1", None)
         .await;
     assert_eq!(status, StatusCode::OK, "{totals}");
+    assert_eq!(totals["step"], "hour", "a day's window is read by the hour");
     let points = totals["points"].as_array().expect("points");
+    let order: Vec<(String, String)> = points
+        .iter()
+        .map(|p| (p["at"].to_string(), p["value"].to_string()))
+        .collect();
+    assert!(
+        order.is_sorted(),
+        "oldest first, each hour's values in order: {order:?}"
+    );
     let spend = |model: &str| {
         points
             .iter()
@@ -2220,6 +2229,22 @@ async fn an_organizations_spend_is_its_projects_this_month_against_their_budgets
         )
         .await;
     assert_eq!(status, StatusCode::CREATED, "{saved}");
+    // A tighter budget paused stands for nothing; the running one read its month at $1.75.
+    sqlx::query("UPDATE telemetry.rules SET value = 1.75 WHERE name = 'Budget'")
+        .execute(&pool)
+        .await
+        .expect("read");
+    sqlx::query(
+        "INSERT INTO telemetry.rules
+             (id, organization_id, project_id, name, kind, measure, aggregation, lookback,
+              operator, alert_threshold, filters, paused, paused_at, severity)
+         SELECT gen_random_uuid(), organization_id, project_id, 'Paused', kind, measure,
+                aggregation, lookback, operator, 10, filters, 'person', now(), 'paused'
+           FROM telemetry.rules WHERE name = 'Budget'",
+    )
+    .execute(&pool)
+    .await
+    .expect("paused");
 
     let path = format!("/organizations/{}/spend", door.organization);
     let (status, spend) = door.lane("GET", &path, "admin-1", None).await;
@@ -2228,6 +2253,7 @@ async fn an_organizations_spend_is_its_projects_this_month_against_their_budgets
     assert_eq!(spend["projects"][0]["project"]["id"], door.project.as_str());
     assert_eq!(spend["projects"][0]["spent"].as_f64(), Some(2.5));
     assert_eq!(spend["projects"][0]["budget"].as_f64(), Some(100.0));
+    assert_eq!(spend["projects"][0]["budget_spent"].as_f64(), Some(1.75));
     let (status, _) = door.lane("GET", &path, "member-1", None).await;
     assert_eq!(status, StatusCode::FORBIDDEN, "a member reads no spend");
 }

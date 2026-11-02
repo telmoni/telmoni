@@ -1,5 +1,6 @@
 "use client";
 
+import { useId } from "react";
 import { Bar, BarChart, CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
 
 import {
@@ -41,16 +42,17 @@ const FIRST_TOKEN: ChartConfig = {
   firstTokenP95: { label: "95th percentile", color: "var(--foreground)" },
 };
 
-/** An axis tick: the hour for a day's window, the date for a longer one. */
+/** An axis tick: the hour for a day's window, else the UTC day its bar starts. */
 function tick(iso: string, hourly: boolean): string {
   const at = new Date(iso);
   return hourly
     ? at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-    : at.toLocaleDateString([], { month: "short", day: "numeric" });
+    : at.toLocaleDateString([], { month: "short", day: "numeric", timeZone: "UTC" });
 }
 
 function Chart({
   title,
+  summary,
   config,
   bars,
   hourly,
@@ -58,6 +60,8 @@ function Chart({
   kind,
 }: {
   title: string;
+  /** What the chart shows, in words, for a reader who cannot see it. */
+  summary: string;
   config: ChartConfig;
   bars: readonly object[];
   hourly: boolean;
@@ -82,9 +86,13 @@ function Chart({
       {keys.length > 1 && <ChartLegend content={<ChartLegendContent />} />}
     </>
   );
+  const heading = useId();
   return (
-    <section aria-label={title} className="grid gap-gutter rounded-md border border-border p-gutter">
-      <h2 className="text-sm font-medium">{title}</h2>
+    <section aria-labelledby={heading} className="grid gap-gutter rounded-md border border-border p-gutter">
+      <h2 id={heading} className="text-sm font-medium">
+        {title}
+      </h2>
+      <p className="sr-only">{summary}</p>
       {inBrowser ? (
         <ChartContainer config={config} className="aspect-auto h-48 w-full">
           {kind === "lines" ? (
@@ -129,22 +137,69 @@ export function DashboardCharts({
   bars,
   firstToken,
   hourly,
+  firstTokenHourly,
 }: {
   bars: DashboardBar[];
   firstToken: FirstTokenBar[];
   hourly: boolean;
+  /** Whether the spans' bars, which the histogram sizes to the window, are under a day. */
+  firstTokenHourly: boolean;
 }) {
+  const sum = (of: (bar: DashboardBar) => number) => bars.reduce((total, bar) => total + of(bar), 0);
+  const last = <T,>(rows: readonly T[], of: (row: T) => number | null) =>
+    rows.findLast((row) => of(row) !== null) ?? null;
+  const latency = last(bars, (bar) => bar.p95);
+  const firstTokenLast = last(firstToken, (bar) => bar.firstTokenP95);
+  const lastly = (value: number | null | undefined) =>
+    value == null ? "None read in the window." : `Latest 95th percentile ${formatDuration(value)}.`;
   return (
     <div className="grid gap-gutter lg:grid-cols-2">
-      <Chart title="Spend" config={SPEND} bars={bars} hourly={hourly} format={formatCost} kind="bars" />
-      <Chart title="Tokens" config={TOKENS} bars={bars} hourly={hourly} format={formatCount} kind="stacked" />
-      <Chart title="Runs" config={RUNS} bars={bars} hourly={hourly} format={formatCount} kind="stacked" />
-      <Chart title="Latency" config={LATENCY} bars={bars} hourly={hourly} format={formatDuration} kind="lines" />
+      <Chart
+        title="Spend"
+        summary={`${formatCost(sum((bar) => bar.spend))} over the window.`}
+        config={SPEND}
+        bars={bars}
+        hourly={hourly}
+        format={formatCost}
+        kind="bars"
+      />
+      <Chart
+        title="Tokens"
+        summary={`${formatCount(sum((bar) => bar.input))} input and ${formatCount(
+          sum((bar) => bar.output),
+        )} output over the window.`}
+        config={TOKENS}
+        bars={bars}
+        hourly={hourly}
+        format={formatCount}
+        kind="stacked"
+      />
+      <Chart
+        title="Runs"
+        summary={`${formatCount(sum((bar) => bar.ok + bar.failed))} runs, ${formatCount(
+          sum((bar) => bar.failed),
+        )} failed, over the window.`}
+        config={RUNS}
+        bars={bars}
+        hourly={hourly}
+        format={formatCount}
+        kind="stacked"
+      />
+      <Chart
+        title="Latency"
+        summary={lastly(latency?.p95)}
+        config={LATENCY}
+        bars={bars}
+        hourly={hourly}
+        format={formatDuration}
+        kind="lines"
+      />
       <Chart
         title="Time to first token"
+        summary={lastly(firstTokenLast?.firstTokenP95)}
         config={FIRST_TOKEN}
         bars={firstToken}
-        hourly={hourly}
+        hourly={firstTokenHourly}
         format={formatDuration}
         kind="lines"
       />

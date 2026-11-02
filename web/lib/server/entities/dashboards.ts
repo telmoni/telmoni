@@ -1,6 +1,8 @@
 import { cache } from "react";
 import { z } from "zod";
 
+import type { RollupGroup } from "@/lib/dashboards";
+
 import { readLane } from "./traces";
 
 // One hour's or day's totals, of one group's value where grouped, as
@@ -33,8 +35,6 @@ export const RollupsSchema = z.object({
   truncated: z.boolean(),
 });
 export type Rollups = z.infer<typeof RollupsSchema>;
-
-import type { RollupGroup } from "@/lib/dashboards";
 
 export type RollupsAccess =
   | { kind: "ok"; rollups: Rollups }

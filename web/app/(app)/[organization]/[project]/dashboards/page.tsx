@@ -49,6 +49,8 @@ export default async function DashboardsPage({
     fetchTraceHistogram(project.id, parseTraceQuery({ days: String(days) }), 0),
     fetchAlerts(project.id),
   ]);
+  const truncated =
+    (totals.kind === "ok" && totals.rollups.truncated) || (grouped?.kind === "ok" && grouped.rollups.truncated);
   const budgets =
     alerts.kind === "ok"
       ? alerts.alerts.filter(
@@ -56,7 +58,8 @@ export default async function DashboardsPage({
             alert.kind === SpanKind.Run &&
             alert.measure === RuleMeasure.Cost &&
             alert.aggregation === RuleAggregation.Sum &&
-            alert.window === RuleWindow.Month,
+            alert.window === RuleWindow.Month &&
+            alert.paused === null,
         )
       : [];
 
@@ -64,7 +67,7 @@ export default async function DashboardsPage({
     <>
       <PageHeader
         title="Dashboards"
-        info="This project's spend, tokens, runs, latency and time to first token over the window, from the hourly totals and, for time to first token, the spans; spend priced as it is read, the project's own prices first."
+        info="This project's spend, tokens, runs, latency and time to first token over the window, by the UTC day or, for a day, the hour, from the hourly totals and, for time to first token, the spans; spend priced as it is read, the project's own prices first."
         action={
           <div className="flex items-center gap-gutter">
             <GroupPicker group={group} />
@@ -74,13 +77,16 @@ export default async function DashboardsPage({
       />
       <div className="grid gap-gutter">
         {budgets.length > 0 && (
-          <section aria-label="Budgets" className="grid gap-gutter">
-            <h2 className="text-sm font-medium">Budgets this month</h2>
+          <section aria-labelledby="budgets" className="grid gap-gutter">
+            <h2 id="budgets" className="text-sm font-medium">
+              Budgets this month
+            </h2>
             <Rows>
               {budgets.map((budget) => (
                 <Row key={budget.id} keep label={budget.name}>
                   <span className="tabular-nums">
-                    {formatCost(budget.value ?? 0)} of {formatCost(budget.alert_threshold)}
+                    {budget.value === null ? "Not read yet" : formatCost(budget.value)} of{" "}
+                    {formatCost(budget.alert_threshold)}
                   </span>
                 </Row>
               ))}
@@ -95,7 +101,9 @@ export default async function DashboardsPage({
         ) : totals.rollups.points.length === 0 ? (
           <NoticeCard
             title="Nothing to show yet."
-            body={`No run has landed in the last ${days === 1 ? "day" : `${days} days`}.`}
+            body={`No run has landed in the last ${
+              totals.rollups.days === 1 ? "day" : `${totals.rollups.days} days`
+            }.`}
           />
         ) : (
           <DashboardCharts
@@ -110,11 +118,20 @@ export default async function DashboardsPage({
                 : []
             }
             hourly={totals.rollups.step === "hour"}
+            firstTokenHourly={histogram.kind === "ok" && histogram.histogram.bucket_seconds < 86_400}
+          />
+        )}
+        {truncated && (
+          <NoticeCard
+            title="The window holds more than one read answers."
+            body="Its oldest days are left out. Choose a shorter window to see them all."
           />
         )}
         {grouped?.kind === "ok" && grouped.rollups.points.length > 0 && (
-          <section aria-label="By group" className="grid gap-gutter">
-            <h2 className="text-sm font-medium">By {group}</h2>
+          <section aria-labelledby="by-group" className="grid gap-gutter">
+            <h2 id="by-group" className="text-sm font-medium">
+              By {group}
+            </h2>
             <Rows>
               {groupTotals(grouped.rollups.points).map((row) => (
                 <Row

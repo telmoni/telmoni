@@ -6,13 +6,14 @@ import { env } from "@/lib/env";
 import { identityContext, organizationHeaders } from "./identity-context";
 import { readJson } from "./read";
 
-// One project's spend this period, against its budget where it set one: a
-// cost alert summed over the month with no filter.
+// One project's spend this period, and its budget where it set one: a running
+// cost alert summed over the month with no filter, and what it last read of it.
 const ProjectSpendSchema = z.object({
   project: z.object({ id: z.string(), slug: z.string(), name: z.string() }),
   spent: z.number(),
   unpriced_calls: z.number(),
   budget: z.number().nullable(),
+  budget_spent: z.number().nullable(),
 });
 export type ProjectSpend = z.infer<typeof ProjectSpendSchema>;
 

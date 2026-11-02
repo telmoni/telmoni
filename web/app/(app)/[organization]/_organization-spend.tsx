@@ -7,10 +7,9 @@ import type { OrganizationSpend } from "@/lib/server/data";
 import { formatCost, formatCount } from "@/lib/traces";
 import { cn } from "@/lib/utils";
 
-/** A project's spend against its budget: past it in red, past four fifths
- *  of it muted no more. */
-function budgetWords(spent: number, budget: number | null): { text: string; over: boolean } | null {
-  if (budget === null || budget <= 0) return null;
+/** A budget's month so far against it, past it in red; none until it is read. */
+function budgetWords(spent: number | null, budget: number | null): { text: string; over: boolean } | null {
+  if (spent === null || budget === null || budget <= 0) return null;
   const share = Math.round((spent / budget) * 100);
   return { text: `${share}% of its ${formatCost(budget)} budget`, over: spent >= budget };
 }
@@ -47,7 +46,7 @@ export function OrganizationSpendSection({
       ) : (
         <Rows>
           {spend.projects.map((row) => {
-            const against = budgetWords(row.spent, row.budget);
+            const against = budgetWords(row.budget_spent, row.budget);
             return (
               <Row
                 key={row.project.id}

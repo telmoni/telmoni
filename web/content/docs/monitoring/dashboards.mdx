@@ -5,19 +5,20 @@ description: "A project's Dashboards page: its spend, tokens, runs and their fai
 
 A project's **Dashboards** page (`/{organization}/{project}/dashboards`) charts
 its runs over the window the picker beside the title chooses — the last day,
-week, 30 or 90 days, by the hour for a day and by the day for longer — from
-the totals Telmoni keeps an hour at a time:
+week, 30 or 90 days, by the hour for a day and by the UTC day for longer —
+from the totals Telmoni keeps an hour at a time:
 
 | Chart | What it draws |
 |---|---|
 | Spend | What the model calls cost, each as it reported, else its tokens at the project's own price or the price table's ([What a call cost](/docs/api/ingest#what-a-call-cost)) |
 | Tokens | The model calls' input and output tokens |
-| Runs | The runs that ended, those that ended well and those that failed |
+| Runs | The runs, each in the hour its own span arrived, those that ended well and those that failed |
 | Latency | The runs' durations at the median, the 95th and the 99th percentile |
 | Time to first token | How soon the runs' first model calls began to answer, at the median and the 95th percentile, read from the spans, which alone keep it, so within the project's retention |
 
-Above them, each of the project's [budgets](/docs/monitoring/alerts#a-budget):
-what the month has spent of it so far. **Group** beside the window splits the
+Above them, each of the project's running [budgets](/docs/monitoring/alerts#a-budget):
+what the month had spent of it when the budget last read it, or **Not read
+yet** for one that has not. **Group** beside the window splits the
 window's totals by model, agent, provider, environment or release, the
 costliest first, each with its tokens, runs and failures.
 
