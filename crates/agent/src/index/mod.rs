@@ -264,6 +264,61 @@ pub async fn index_source(state: &AppState, paged: Paged) -> Result<usize, Telmo
     Ok(taken)
 }
 
+/// A page of notices held to each organization's month: one already indexed
+/// is kept, to follow its changes, and a new one only while the month has
+/// room; the rest are passed over, the cursor moving past them, and never
+/// indexed. An organization with no capacity keeps every one.
+async fn within_month(state: &AppState, entries: &mut Vec<Entry>) -> Result<(), TelmoniError> {
+    let ids: Vec<&str> = entries.iter().map(|e| e.source_id.as_str()).collect();
+    let indexed: HashSet<String> = db::in_lane(&state.db, |tx| {
+        Box::pin(db::indexed(tx, Source::Feed, &ids))
+    })
+    .await?
+    .into_iter()
+    .map(|i| i.source_id)
+    .collect();
+    let mut room: HashMap<OrganizationId, u64> = HashMap::new();
+    let mut keep = Vec::with_capacity(entries.len());
+    for entry in entries.drain(..) {
+        let Some(organization_id) = entry.organization_id.clone() else {
+            keep.push(entry);
+            continue;
+        };
+        if indexed.contains(&entry.source_id) {
+            keep.push(entry);
+            continue;
+        }
+        if !room.contains_key(&organization_id) {
+            let left =
+                match telmoni_shared::seam::capacity(state.entitlements.as_ref(), &organization_id)
+                    .await
+                {
+                    Some(capacity) => {
+                        let mut lane = maintenance_scope(&state.db, AgentLane).await?;
+                        let held = db::notices_indexed_since(
+                            &mut lane,
+                            &organization_id,
+                            capacity.period_start,
+                        )
+                        .await?;
+                        lane.commit().await?;
+                        capacity.indexed_notices.saturating_sub(held)
+                    }
+                    None => u64::MAX,
+                };
+            room.insert(organization_id.clone(), left);
+        }
+        if let Some(left) = room.get_mut(&organization_id)
+            && *left > 0
+        {
+            *left -= 1;
+            keep.push(entry);
+        }
+    }
+    *entries = keep;
+    Ok(())
+}
+
 /// What one leased page came to.
 enum Page {
     /// Nothing new, or the lease ran out and another replica's work stands.
@@ -298,7 +353,13 @@ async fn index_page(
     };
     let full = i64::try_from(page.len()).is_ok_and(|n| n >= PAGE);
     let rows = page.len();
-    let entries: Vec<Entry> = page.into_iter().map(Entry::from).collect();
+    let mut entries: Vec<Entry> = page.into_iter().map(Entry::from).collect();
+    if paged == Paged::Feed
+        && let Err(e) = within_month(state, &mut entries).await
+    {
+        release(state, source, lease.lease_id).await;
+        return Err(e);
+    }
 
     let written = holding(state, source, lease.lease_id, async {
         let prepared = prepare(&state.db, embedder, source, &entries).await?;

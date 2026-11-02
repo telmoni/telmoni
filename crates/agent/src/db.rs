@@ -196,6 +196,24 @@ pub async fn indexed(
     .await
 }
 
+/// How many of the organization's notices the index holds that arrived
+/// since `since`: what its plan's month is held to.
+pub async fn notices_indexed_since(
+    tx: &mut Scoped<'_, Maintenance<AgentLane>>,
+    organization_id: &OrganizationId,
+    since: DateTime<Utc>,
+) -> sqlx::Result<u64> {
+    let held: i64 = sqlx::query_scalar(
+        "SELECT count(DISTINCT source_id) FROM agent.chunks
+          WHERE source = 'feed' AND organization_id = $1 AND source_created_at >= $2",
+    )
+    .bind(organization_id)
+    .bind(since)
+    .fetch_one(tx.conn())
+    .await?;
+    Ok(held.unsigned_abs())
+}
+
 /// Drop each row's passages past its last, after it shrank: `parts[i]` is
 /// how many `source_ids[i]` has now. One statement for a page of rows.
 pub async fn drop_parts_past(

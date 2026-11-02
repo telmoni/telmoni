@@ -144,6 +144,9 @@ pub struct Capacity {
     /// Until when a move to a plan holding less is held: nothing past the
     /// plan before it is purged before then.
     pub held_until: Option<DateTime<Utc>>,
+    /// How many of its notices a month the console agent's search index
+    /// takes; those past it are passed over.
+    pub indexed_notices: u64,
 }
 
 /// One limit of a [`Capacity`]: how much, and the refusal that names the one

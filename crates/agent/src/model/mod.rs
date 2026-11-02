@@ -252,6 +252,38 @@ pub trait Model: Send + Sync {
         tools: &[ToolSpec],
         on_text: TextSink<'_>,
     ) -> Result<ModelTurn, TelmoniError>;
+
+    /// [`Model::stream`], its reply held to `max_tokens` where the endpoint
+    /// takes a cap below its own; one that cannot is asked as it is.
+    async fn stream_capped(
+        &self,
+        system: &str,
+        messages: &[Message],
+        tools: &[ToolSpec],
+        on_text: TextSink<'_>,
+        max_tokens: u32,
+    ) -> Result<ModelTurn, TelmoniError> {
+        let _ = max_tokens;
+        self.stream(system, messages, tools, on_text).await
+    }
+}
+
+/// How long `messages` are, in the four characters a token comes to: what a
+/// call is reckoned to cost before it is sent, where no usage says.
+#[must_use]
+pub fn estimated_tokens(system: &str, messages: &[Message]) -> u64 {
+    let chars = messages.iter().fold(system.len(), |chars, message| {
+        chars.saturating_add(match message {
+            Message::User(text) => text.len(),
+            Message::Assistant {
+                text, tool_calls, ..
+            } => tool_calls.iter().fold(text.len(), |n, call| {
+                n.saturating_add(call.name.len() + call.input.to_string().len())
+            }),
+            Message::ToolResults(results) => results.iter().map(|r| r.content.len()).sum(),
+        })
+    });
+    u64::try_from(chars.div_ceil(4)).unwrap_or(u64::MAX)
 }
 
 /// A client for one of the operator's endpoints. `timeout` bounds a whole

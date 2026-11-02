@@ -139,6 +139,7 @@ fn state_with(pool: &PgPool, embedder: Arc<SameVector>, auth: Arc<dyn Auth>) -> 
         api_key: None,
         max_tokens: 1,
         timeout_secs: 1,
+        reasoning_effort: None,
     };
     AppState {
         db: service_pool(pool, ServiceRole::Agent),
@@ -982,6 +983,7 @@ impl telmoni_shared::seam::Entitlements for OneQuestion {
             retention_days: 30,
             content_bytes: 25_000_000,
             held_until: None,
+            indexed_notices: 1_000,
         }))
     }
 }
@@ -1034,4 +1036,110 @@ async fn a_question_past_the_plans_month_is_refused_until_it_renews(pool: PgPool
     .await
     .expect("the questions kept");
     assert_eq!(asked, 0, "the refused question was never kept");
+}
+
+/// Notifications holding three notices of `org_a`, all after no cursor.
+struct ThreeNotices;
+
+#[async_trait]
+impl Notifications for ThreeNotices {
+    async fn emit(
+        &self,
+        _: &OrganizationId,
+        _: &ProjectId,
+        _: Notice<'_>,
+    ) -> Result<Emitted, TelmoniError> {
+        Err(TelmoniError::Internal("not here".into()))
+    }
+    async fn alert_organization(
+        &self,
+        _: &OrganizationId,
+        _: telmoni_shared::seam::OrganizationAlert<'_>,
+    ) -> Result<Emitted, TelmoniError> {
+        Err(TelmoniError::Internal("not here".into()))
+    }
+    async fn purge_organization(&self, _: &OrganizationId) -> Result<u64, TelmoniError> {
+        Ok(0)
+    }
+    async fn purge_project(&self, _: &ProjectId) -> Result<u64, TelmoniError> {
+        Ok(0)
+    }
+    async fn purge_project_for_move(&self, _: &ProjectId) -> Result<u64, TelmoniError> {
+        Ok(0)
+    }
+    async fn redact_person(&self, _: &UserId) -> Result<u64, TelmoniError> {
+        Ok(0)
+    }
+    async fn activity_documents(
+        &self,
+        source: telmoni_shared::seam::ActivitySource,
+        after: Option<&telmoni_shared::seam::DocumentCursor>,
+        _: i64,
+    ) -> Result<Vec<telmoni_shared::seam::SourceDocument>, TelmoniError> {
+        if after.is_some() || source != telmoni_shared::seam::ActivitySource::Feed {
+            return Ok(Vec::new());
+        }
+        let now = Utc::now();
+        Ok((0..3_u128)
+            .map(|n| telmoni_shared::seam::SourceDocument {
+                organization_id: OrganizationId::try_new("org_a").unwrap(),
+                project_id: Some(ProjectId::try_new("proj_a").unwrap()),
+                subject_user_id: None,
+                audience: telmoni_shared::seam::Audience::OrganizationAdmin,
+                title: format!("Notice {n}"),
+                body: "An alert fired.".into(),
+                url: "/org-a/notifications".into(),
+                created_at: now,
+                cursor: telmoni_shared::seam::DocumentCursor {
+                    at: now,
+                    id: uuid::Uuid::from_u128(n + 1),
+                },
+            })
+            .collect())
+    }
+}
+
+/// A plan whose month takes two of an organization's notices into the index.
+struct TwoNotices;
+
+#[async_trait]
+impl telmoni_shared::seam::Entitlements for TwoNotices {
+    async fn grants(&self, _: &OrganizationId) -> Result<telmoni_shared::Grants, TelmoniError> {
+        Ok(telmoni_shared::Grants::unlimited())
+    }
+    async fn capacity(
+        &self,
+        id: &OrganizationId,
+    ) -> Result<Option<telmoni_shared::Capacity>, TelmoniError> {
+        Ok(OneQuestion
+            .capacity(id)
+            .await?
+            .map(|capacity| telmoni_shared::Capacity {
+                indexed_notices: 2,
+                ..capacity
+            }))
+    }
+}
+
+/// The index takes as many of an organization's notices a month as its plan
+/// holds; the rest are passed over, and the cursor moves past them.
+#[sqlx::test]
+async fn the_index_takes_the_notices_a_plans_month_holds(pool: PgPool) {
+    let mut state = state_with(
+        &pool,
+        Arc::new(SameVector(AtomicUsize::new(0))),
+        Arc::new(Homes),
+    );
+    state.notifications = Arc::new(ThreeNotices);
+    state.entitlements = Arc::new(TwoNotices);
+    index::index_source(&state, index::Paged::Feed)
+        .await
+        .expect("the page is indexed");
+    let indexed: i64 = sqlx::query_scalar(
+        "SELECT count(DISTINCT source_id) FROM agent.chunks WHERE source = 'feed'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("the index is read");
+    assert_eq!(indexed, 2, "two of the three, as the month holds");
 }

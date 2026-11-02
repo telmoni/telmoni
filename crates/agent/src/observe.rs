@@ -291,6 +291,23 @@ impl Model for RecordingModel<'_> {
         call.finish(&answered);
         answered
     }
+
+    async fn stream_capped(
+        &self,
+        system: &str,
+        transcript: &[Message],
+        tools: &[ToolSpec],
+        on_text: TextSink<'_>,
+        max_tokens: u32,
+    ) -> Result<ModelTurn, TelmoniError> {
+        let mut call = PendingGeneration::new(self);
+        let answered = self
+            .inner
+            .stream_capped(system, transcript, tools, on_text, max_tokens)
+            .await;
+        call.finish(&answered);
+        answered
+    }
 }
 
 /// How a model call the loop gave up on — past the turn's deadline, or with
@@ -499,6 +516,7 @@ mod tests {
             api_key: None,
             max_tokens: 8192,
             timeout_secs: 60,
+            reasoning_effort: None,
         }
     }
 

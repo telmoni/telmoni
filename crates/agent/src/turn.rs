@@ -10,13 +10,23 @@ use telmoni_shared::TelmoniError;
 use tokio::time::Instant;
 
 use crate::model::{
-    Message, Model, StopReason, TextSink, ToolCall, ToolResult, ToolSpec, unavailable,
+    Message, Model, StopReason, TextSink, ToolCall, ToolResult, ToolSpec, estimated_tokens,
+    unavailable,
 };
 
 /// The most rounds of tool calls one question may take. A model that is
 /// still calling tools after this many is looping, and the person gets what
 /// it wrote so far with a note, rather than a bill for a hundred calls.
 pub const MAX_TOOL_ROUNDS: usize = 8;
+
+/// The most input tokens one question's model calls may take together: a
+/// call that would cross it is never sent, so the dearest question costs a
+/// known amount.
+pub const AGENT_TURN_INPUT_TOKENS: u64 = 20_000;
+
+/// The most output tokens one question's model calls may write together,
+/// each call held to what is left.
+pub const AGENT_TURN_OUTPUT_TOKENS: u64 = 3_000;
 
 /// How long one turn may run, every model call and tool included: nine model
 /// calls can take far longer, and a turn the console cut off mid-reply saved
@@ -55,6 +65,10 @@ const INTERRUPTED_NOTE: &str = "\n\nThe model stopped answering before it finish
 /// What the person is told when the cap cut the turn short.
 const CAPPED_NOTE: &str = "\n\nI stopped after looking things up 8 times without reaching an \
                            answer. Try a narrower question.";
+
+/// What the person is told when the question's budget ran out.
+const BUDGET_NOTE: &str = "\n\nI reached what one question may spend before finishing. Ask \
+                           again, or try a narrower question.";
 
 /// What the person is told when the reply ran past `AGENT_MAX_TOKENS`.
 const TRUNCATED_NOTE: &str = "\n\nThat reply ran out of room and was cut off. Ask for the rest, \
@@ -101,6 +115,9 @@ pub enum StoppedShort {
     TimedOut,
     /// The model's stream broke off after it had written something.
     Interrupted,
+    /// The question's tokens ran out: [`AGENT_TURN_INPUT_TOKENS`] or
+    /// [`AGENT_TURN_OUTPUT_TOKENS`].
+    Budget,
 }
 
 impl StoppedShort {
@@ -112,6 +129,7 @@ impl StoppedShort {
             Self::Truncated => TRUNCATED_NOTE,
             Self::TimedOut => TIMED_OUT_NOTE,
             Self::Interrupted => INTERRUPTED_NOTE,
+            Self::Budget => BUDGET_NOTE,
         }
     }
 
@@ -123,6 +141,7 @@ impl StoppedShort {
             Self::Truncated => "truncated",
             Self::TimedOut => "timed_out",
             Self::Interrupted => "interrupted",
+            Self::Budget => "budget",
         }
     }
 }
@@ -161,6 +180,26 @@ pub async fn converse(
     let text = || written.lock().map(|w| w.clone()).unwrap_or_default();
     let written_len = || written.lock().map_or(0, |w| w.len());
     let mut round = 0;
+    // What the question's calls have spent, as each response's usage says,
+    // or as reckoned from what was sent and written where it says nothing.
+    let (mut spent_in, mut spent_out) = (0_u64, 0_u64);
+    // The last call's input as the provider counted it, and the transcript's
+    // length then: the next call sends all of it again, and what came since.
+    let mut last_call: Option<(u64, usize)> = None;
+    // The tools' schemas ride on every call that offers them.
+    let tools_tokens = tools.iter().fold(0_u64, |n, tool| {
+        let chars = tool.name.len() + tool.description.len() + tool.parameters.to_string().len();
+        n.saturating_add(u64::try_from(chars.div_ceil(4)).unwrap_or(u64::MAX))
+    });
+    // A conversation long enough to take half the budget before a word of
+    // it is read drops its oldest exchanges, a question and its answer at a
+    // time, so it can always be answered again.
+    while transcript.len() > 2
+        && estimated_tokens(system, transcript).saturating_add(tools_tokens)
+            > AGENT_TURN_INPUT_TOKENS / 2
+    {
+        transcript.drain(..2);
+    }
     loop {
         let ended = |ending| Outcome {
             text: text(),
@@ -180,13 +219,31 @@ pub async fn converse(
                 return Ok(ended(Ending::Cancelled));
             }
         }
+        // A call that would cross the question's budget is never sent, and
+        // the one the budget leaves room for alone is offered no tools, so it
+        // answers from what was read.
+        let sent = match last_call {
+            Some((input, len)) => {
+                input.saturating_add(estimated_tokens("", transcript.get(len..).unwrap_or(&[])))
+            }
+            None => estimated_tokens(system, transcript).saturating_add(tools_tokens),
+        };
+        let left_out = AGENT_TURN_OUTPUT_TOKENS.saturating_sub(spent_out);
+        if left_out == 0 || spent_in.saturating_add(sent) > AGENT_TURN_INPUT_TOKENS {
+            return Ok(ended(Ending::Short(StoppedShort::Budget)));
+        }
+        let last = spent_in.saturating_add(sent.saturating_mul(2)) > AGENT_TURN_INPUT_TOKENS;
+        let offered = if last { &[][..] } else { tools };
+        let cap = u32::try_from(left_out).unwrap_or(u32::MAX);
         let before = written_len();
         // ⚠ **Watched while it streams.** One call can write for a minute
         // and more; an asker gone meanwhile — signed out everywhere, taken
         // off the project, the panel closed — has it dropped within
         // `RECHECK_EVERY`, not read to its end.
-        let streamed =
-            tokio::time::timeout_at(deadline, model.stream(system, transcript, tools, &sink));
+        let streamed = tokio::time::timeout_at(
+            deadline,
+            model.stream_capped(system, transcript, offered, &sink, cap),
+        );
         let watching = async {
             let mut every = tokio::time::interval(RECHECK_EVERY);
             every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -216,7 +273,22 @@ pub async fn converse(
         // error, even after an earlier round's "let me check": that
         // preamble is no answer to save.
         let turn = match turn {
-            Ok(turn) => turn,
+            Ok(turn) => {
+                match turn.usage {
+                    Some(usage) => {
+                        spent_in = spent_in.saturating_add(usage.input_tokens);
+                        spent_out = spent_out.saturating_add(usage.output_tokens);
+                        last_call = Some((usage.input_tokens, transcript.len()));
+                    }
+                    None => {
+                        let wrote =
+                            u64::try_from(written_len().saturating_sub(before)).unwrap_or(u64::MAX);
+                        spent_in = spent_in.saturating_add(sent);
+                        spent_out = spent_out.saturating_add(wrote.div_ceil(4));
+                    }
+                }
+                turn
+            }
             Err(e) if written_len() > before => {
                 tracing::warn!(error = %e, "the model broke off mid-answer; keeping what it wrote");
                 return Ok(ended(Ending::Short(StoppedShort::Interrupted)));
@@ -241,6 +313,9 @@ pub async fn converse(
         }
         if turn.tool_calls.is_empty() {
             let ending = match turn.stop_reason {
+                StopReason::MaxTokens if spent_out >= AGENT_TURN_OUTPUT_TOKENS => {
+                    Ending::Short(StoppedShort::Budget)
+                }
                 StopReason::MaxTokens => Ending::Short(StoppedShort::Truncated),
                 // A refusal with text is the model saying why it would not;
                 // that is its answer.
@@ -349,6 +424,183 @@ mod tests {
                 ..ModelTurn::default()
             })
         }
+    }
+
+    /// A model that calls a tool on every call it is offered one, and
+    /// answers on one it is offered none, each call counted as using `input`
+    /// and `output` tokens, and each cap it was handed kept, with how many
+    /// tools it was offered.
+    struct Spending {
+        input: u64,
+        output: u64,
+        caps: Mutex<Vec<(u32, usize)>>,
+    }
+
+    #[async_trait]
+    impl Model for Spending {
+        async fn stream(
+            &self,
+            system: &str,
+            messages: &[Message],
+            tools: &[ToolSpec],
+            on_text: TextSink<'_>,
+        ) -> Result<ModelTurn, TelmoniError> {
+            self.stream_capped(system, messages, tools, on_text, u32::MAX)
+                .await
+        }
+
+        async fn stream_capped(
+            &self,
+            _system: &str,
+            _messages: &[Message],
+            tools: &[ToolSpec],
+            on_text: TextSink<'_>,
+            max_tokens: u32,
+        ) -> Result<ModelTurn, TelmoniError> {
+            let mut caps = self.caps.lock().unwrap();
+            caps.push((max_tokens, tools.len()));
+            on_text(".");
+            let tool_calls = if tools.is_empty() {
+                Vec::new()
+            } else {
+                vec![ToolCall {
+                    id: format!("call_{}", caps.len()),
+                    name: "search".into(),
+                    input: json!({"query": "again"}),
+                }]
+            };
+            Ok(ModelTurn {
+                text: ".".into(),
+                stop_reason: if tool_calls.is_empty() {
+                    StopReason::Finished
+                } else {
+                    StopReason::ToolUse
+                },
+                tool_calls,
+                usage: Some(crate::model::TokenUsage {
+                    input_tokens: self.input,
+                    output_tokens: self.output,
+                    ..crate::model::TokenUsage::default()
+                }),
+                ..ModelTurn::default()
+            })
+        }
+    }
+
+    fn search() -> ToolSpec {
+        ToolSpec {
+            name: "search",
+            description: "Search.",
+            parameters: json!({"type": "object"}),
+        }
+    }
+
+    async fn spend(model: &Spending) -> Outcome {
+        let mut runner = Counting::default();
+        let mut transcript = vec![Message::User("why?".into())];
+        converse(
+            model,
+            "sys",
+            &mut transcript,
+            &[search()],
+            &mut runner,
+            &|_| {},
+            unhurried(),
+        )
+        .await
+        .unwrap()
+    }
+
+    /// A question's model calls take 20,000 tokens in at most: the call
+    /// that would cross it is never sent.
+    #[tokio::test]
+    async fn a_call_that_would_cross_the_input_budget_is_never_sent() {
+        let model = Spending {
+            input: 8_000,
+            output: 10,
+            caps: Mutex::new(Vec::new()),
+        };
+        let outcome = spend(&model).await;
+        assert_eq!(
+            outcome.ending,
+            Ending::Answered,
+            "the last call the budget holds answers from what was read"
+        );
+        assert_eq!(
+            model
+                .caps
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|(_, tools)| *tools)
+                .collect::<Vec<_>>(),
+            vec![1, 0],
+            "8,000 twice, the second offered no tools since a third would cross"
+        );
+        assert!(
+            StoppedShort::Budget
+                .note()
+                .contains("what one question may spend")
+        );
+    }
+
+    /// And 3,000 out across its calls, each call held to what is left.
+    #[tokio::test]
+    async fn each_call_is_held_to_the_output_budget_left() {
+        let model = Spending {
+            input: 10,
+            output: 2_000,
+            caps: Mutex::new(Vec::new()),
+        };
+        let outcome = spend(&model).await;
+        assert_eq!(outcome.ending, Ending::Short(StoppedShort::Budget));
+        assert_eq!(
+            model
+                .caps
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|(cap, _)| *cap)
+                .collect::<Vec<_>>(),
+            vec![3_000, 1_000]
+        );
+    }
+
+    /// A conversation too long for the budget drops its oldest exchanges
+    /// until it fits, so its next question is still answered.
+    #[tokio::test]
+    async fn a_long_conversation_drops_its_oldest_exchanges_to_fit() {
+        let model = Spending {
+            input: 10,
+            output: 10,
+            caps: Mutex::new(Vec::new()),
+        };
+        let old = "a word ".repeat(2_000);
+        let mut transcript = Vec::new();
+        for _ in 0..10 {
+            transcript.push(Message::User(old.clone()));
+            transcript.push(Message::Assistant {
+                text: old.clone(),
+                tool_calls: Vec::new(),
+                raw: None,
+            });
+        }
+        transcript.push(Message::User("and now?".into()));
+        let mut runner = Counting::default();
+        let outcome = converse(
+            &model,
+            "sys",
+            &mut transcript,
+            &[],
+            &mut runner,
+            &|_| {},
+            unhurried(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(outcome.ending, Ending::Answered);
+        assert!(transcript.len() < 21, "the oldest exchanges went");
+        assert!(matches!(transcript.first(), Some(Message::User(_))));
     }
 
     /// A turn with all the time it needs.

@@ -47,4 +47,5 @@ data:
   RERANK_MODEL: {{ .rerankModel | quote }}
   DOCS_CORPUS_URL: {{ .docsCorpusUrl | default "http://web:3000/llms-full.txt" | quote }}
   AGENT_MESSAGES_PER_HOUR: {{ .messagesPerHour | quote }}
+  AGENT_REASONING_EFFORT: {{ .reasoningEffort | quote }}
   {{- end }}

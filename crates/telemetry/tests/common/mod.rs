@@ -662,6 +662,7 @@ impl Entitlements for PlanMonth {
             retention_days: 30,
             content_bytes: self.content_bytes,
             held_until: None,
+            indexed_notices: 1_000,
         }))
     }
 }

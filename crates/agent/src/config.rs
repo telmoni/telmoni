@@ -106,6 +106,11 @@ pub struct ModelConfig {
     /// How long one model call may go without sending anything: before its
     /// first byte, or between two pieces of its answer.
     pub timeout_secs: u64,
+    /// `AGENT_REASONING_EFFORT`, what an OpenAI-compatible endpoint is asked to
+    /// think at, as its `reasoning_effort`; none sent unless set, since a model
+    /// that does not reason refuses the field. Anthropic's endpoint thinks only
+    /// when asked, and is never asked.
+    pub reasoning_effort: Option<String>,
 }
 
 /// An OpenAI-compatible `/embeddings` endpoint.
@@ -249,6 +254,7 @@ fn model_from_env(provider: Provider) -> anyhow::Result<ModelConfig> {
         api_key: optional("AGENT_MODEL_API_KEY").map(Into::into),
         max_tokens: env_parse("AGENT_MAX_TOKENS", 8192)?,
         timeout_secs: env_parse("AGENT_MODEL_TIMEOUT_SECS", 60)?,
+        reasoning_effort: optional("AGENT_REASONING_EFFORT"),
     };
     if config.api_key.is_none() && hosted(&config.url) {
         anyhow::bail!(
@@ -363,6 +369,7 @@ mod tests {
             api_key: None,
             max_tokens: 8192,
             timeout_secs: 60,
+            reasoning_effort: None,
         };
         for (provider, url, name) in [
             (

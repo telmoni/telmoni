@@ -105,6 +105,8 @@ config:
     # `off` indexes no docs.
     docsCorpusUrl: ""
     messagesPerHour: 60
+    # An OpenAI-compatible model's `reasoning_effort`; empty sends none.
+    reasoningEffort: ""
 
 # An Ollama serving the agent's embedding model inside the cluster, for a
 # tier that keeps embeddings off a vendor. It pulls the model at start into

@@ -391,9 +391,21 @@ impl Model for OpenAi {
         tools: &[ToolSpec],
         on_text: TextSink<'_>,
     ) -> Result<ModelTurn, TelmoniError> {
-        let body = json!({
+        self.stream_capped(system, transcript, tools, on_text, self.config.max_tokens)
+            .await
+    }
+
+    async fn stream_capped(
+        &self,
+        system: &str,
+        transcript: &[Message],
+        tools: &[ToolSpec],
+        on_text: TextSink<'_>,
+        max_tokens: u32,
+    ) -> Result<ModelTurn, TelmoniError> {
+        let mut body = json!({
             "model": self.config.model,
-            "max_tokens": self.config.max_tokens,
+            "max_tokens": max_tokens.min(self.config.max_tokens),
             "messages": messages(system, transcript),
             "tools": tools.iter().map(|t| json!({
                 "type": "function",
@@ -408,6 +420,10 @@ impl Model for OpenAi {
             // servers that count anyway take the field as given.
             "stream_options": { "include_usage": true },
         });
+        if let (Some(effort), Some(fields)) = (&self.config.reasoning_effort, body.as_object_mut())
+        {
+            fields.insert("reasoning_effort".to_owned(), json!(effort));
+        }
         let request = with_key(
             self.http
                 .post(format!("{}/chat/completions", self.config.url))

@@ -440,9 +440,21 @@ impl Model for Anthropic {
         tools: &[ToolSpec],
         on_text: TextSink<'_>,
     ) -> Result<ModelTurn, TelmoniError> {
+        self.stream_capped(system, transcript, tools, on_text, self.config.max_tokens)
+            .await
+    }
+
+    async fn stream_capped(
+        &self,
+        system: &str,
+        transcript: &[Message],
+        tools: &[ToolSpec],
+        on_text: TextSink<'_>,
+        max_tokens: u32,
+    ) -> Result<ModelTurn, TelmoniError> {
         let body = json!({
             "model": self.config.model,
-            "max_tokens": self.config.max_tokens,
+            "max_tokens": max_tokens.min(self.config.max_tokens),
             "system": system,
             "messages": messages(transcript),
             "tools": tools.iter().map(|t| json!({
