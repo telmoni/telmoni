@@ -688,6 +688,36 @@ async fn the_usage_pass_counts_the_month_and_tells_of_the_content_held(pool: PgP
     assert!(used >= 1, "the export's span units: {used}");
 }
 
+/// A read reaches back no further than its organization's retention, so what
+/// a move to a plan holding less keeps for its hold is hidden; a binary that
+/// sells nothing reads every day asked.
+#[sqlx::test]
+async fn a_read_reaches_back_no_further_than_the_plans_retention(pool: PgPool) {
+    let door = door_over(&pool, ContentMode::Off, false).await;
+    assert_eq!(
+        telmoni_telemetry::capacity::visible_days(&door.state, &door.project, 90).await,
+        90,
+        "no plan holds it"
+    );
+    let state = common::state_with_entitlements(
+        &pool,
+        door.auth.clone(),
+        Arc::new(common::PlanMonth {
+            spans: 1_000_000,
+            grace_days: 0,
+            content_bytes: 25_000_000,
+        }),
+    );
+    assert_eq!(
+        telmoni_telemetry::capacity::visible_days(&state, &door.project, 90).await,
+        30
+    );
+    assert_eq!(
+        telmoni_telemetry::capacity::visible_days(&state, &door.project, 7).await,
+        7
+    );
+}
+
 #[sqlx::test]
 async fn a_project_left_off_keeps_no_content_and_makes_no_key(pool: PgPool) {
     let Some(_ch) = clickhouse_or_skip(module_path!()).await else {

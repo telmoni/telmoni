@@ -106,6 +106,31 @@ pub fn kept_past_the_grant(storage: &UserIdStorage, run_id: Uuid) -> bool {
         .is_some_and(|n| n.is_multiple_of(SAMPLE_ONE_IN))
 }
 
+/// The days back a read of the project may reach: what was asked, held to
+/// its organization's retention, so what a move to a plan holding less keeps
+/// for its hold is hidden until it goes. A count that cannot be read holds
+/// nothing back.
+pub async fn visible_days(state: &AppState, project_id: &ProjectId, days: u16) -> u16 {
+    let filed = async {
+        let mut tx =
+            telmoni_shared::db::tenant_session::project_scope(&state.db, project_id).await?;
+        let organization = db::filed_under(&mut tx, project_id).await?;
+        tx.commit().await?;
+        Ok::<_, sqlx::Error>(organization)
+    };
+    let Ok(Some(organization_id)) = filed.await else {
+        return days;
+    };
+    match state
+        .capacities
+        .of(state.entitlements.as_ref(), &organization_id)
+        .await
+    {
+        Some(capacity) => days.min(u16::try_from(capacity.retention_days).unwrap_or(u16::MAX)),
+        None => days,
+    }
+}
+
 /// The month's count an export's kept spans go on once written, by
 /// [`count_spans`].
 pub struct Month {

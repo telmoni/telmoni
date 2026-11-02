@@ -741,6 +741,19 @@ pub async fn oldest_content(
     .await
 }
 
+/// The organization a project's settings row is filed under, if it has one.
+pub async fn filed_under(
+    tx: &mut Scoped<'_, impl HasProject>,
+    project_id: &ProjectId,
+) -> sqlx::Result<Option<OrganizationId>> {
+    sqlx::query_scalar(
+        "SELECT organization_id FROM telemetry.project_settings WHERE project_id = $1",
+    )
+    .bind(project_id)
+    .fetch_optional(tx.conn())
+    .await
+}
+
 /// The sealed bytes of content the organization's projects hold.
 pub async fn content_held(
     tx: &mut Scoped<'_, Organization>,

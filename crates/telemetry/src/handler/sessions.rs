@@ -323,7 +323,8 @@ pub async fn get_session(
             "a session is named by its id, up to {SESSION_ID_MAX} characters"
         )));
     }
-    let (window, pinning) = SessionQuery::read(pairs)?.into_parts()?;
+    let (mut window, pinning) = SessionQuery::read(pairs)?.into_parts()?;
+    window.days = crate::capacity::visible_days(&state, &project_id, window.days).await;
     let pinned = match pinning {
         Pinning::Named(names) => names,
         Pinning::Layout(layout) => layout_pins(&state, &project_id, layout).await?,

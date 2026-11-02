@@ -903,6 +903,7 @@ async fn filter_of(
     query: &TraceQuery,
 ) -> Result<TraceFilter, TelmoniError> {
     let mut filter = query.filter()?;
+    filter.days = crate::capacity::visible_days(state, project_id, filter.days).await;
     let Some(q) = query.q.as_deref().map(str::trim).filter(|q| !q.is_empty()) else {
         return Ok(filter);
     };
@@ -1425,7 +1426,14 @@ pub async fn get_trace(
     )
     .await
     .map_err(read_failed)?;
-    if rows.is_empty() {
+    // A run older than the organization's retention reaches is not there,
+    // as the list would not name it: held, it is hidden until it goes.
+    let reach = crate::capacity::visible_days(&state, &reader.project_id, u16::MAX).await;
+    let past = reach < u16::MAX
+        && rows
+            .iter()
+            .all(|row| row.received_at < Utc::now() - chrono::Duration::days(i64::from(reach)));
+    if rows.is_empty() || past {
         return Err(AuthError::NotFound("no trace with that run id in this project".into()).into());
     }
     let shown = traces::shown(rows.iter().map(|row| row.units), SPANS_MAX, TRACE_UNITS_MAX);
