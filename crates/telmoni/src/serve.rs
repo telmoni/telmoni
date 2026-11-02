@@ -107,6 +107,9 @@ impl App {
         let purges = tokio::spawn(telmoni_telemetry::sweep::run(self.telemetry.clone()));
         let refusals = tokio::spawn(telmoni_telemetry::ceilings::run(self.telemetry.clone()));
         let capacity = tokio::spawn(telmoni_telemetry::capacity::run(self.telemetry.clone()));
+        let usage = tokio::spawn(telmoni_telemetry::capacity::run_usage(
+            self.telemetry.clone(),
+        ));
         let alerts = tokio::spawn(telmoni_telemetry::rules::evaluate::run(
             self.telemetry.clone(),
         ));
@@ -157,6 +160,7 @@ impl App {
             ended = purges => return died("telemetry's purge sweep", ended),
             ended = refusals => return died("the plan refusals' notices", ended),
             ended = capacity => return died("the night's pass over the plans", ended),
+            ended = usage => return died("the plans' usage count", ended),
             ended = alerts => return died("the alerts' evaluation", ended),
         }
         // The alert in hand is settled and told before the process ends.

@@ -8,8 +8,8 @@ use axum::http::HeaderMap;
 use telmoni_shared::acting::{Acting, ActingKey};
 use telmoni_shared::seam::{
     AuditEventsQuery, Auth, Closing, Confirmation, DocumentCursor, FoundedOrganization,
-    MovedProject, OrganizationFounding, OwnedOrganization, ProjectHome, ReadableProject, Receipt,
-    SourceDocument,
+    MovedProject, OrganizationFounding, OwnedOrganization, OwnerNotice, ProjectHome,
+    ReadableProject, Receipt, SourceDocument,
 };
 use telmoni_shared::{
     AuthError, FlagSet, OrganizationId, OrganizationStatus, ProjectId, TelmoniError, UserId,
@@ -88,6 +88,12 @@ impl Auth for LateAuth {
         user_id: &UserId,
     ) -> Result<Vec<OwnedOrganization>, TelmoniError> {
         self.get()?.organizations_owned_by(user_id).await
+    }
+
+    async fn mail_owner(&self, organization_id: &OrganizationId, notice: OwnerNotice<'_>) {
+        if let Ok(auth) = self.get() {
+            auth.mail_owner(organization_id, notice).await;
+        }
     }
 
     async fn founded(

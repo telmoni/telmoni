@@ -190,6 +190,19 @@ impl Allowance {
     }
 }
 
+/// The share of `limit` that `used` has reached which an organization's
+/// owners are told of: 100 once it is spent, 80 from four fifths, none below.
+#[must_use]
+pub fn share_told(used: u64, limit: u64) -> Option<u8> {
+    if used >= limit {
+        Some(100)
+    } else if used.saturating_mul(5) >= limit.saturating_mul(4) {
+        Some(80)
+    } else {
+        None
+    }
+}
+
 /// What an answer to an organization's machines costs on top of its bytes:
 /// the TLS connection a script opens for each request, measured at 6.5 KB.
 pub const CONNECTION_BYTES: u64 = 6_500;
@@ -237,6 +250,15 @@ mod tests {
                 .and_then(serde_json::Value::as_str),
             Some("pro")
         );
+    }
+
+    #[test]
+    fn the_owners_are_told_at_four_fifths_and_when_spent() {
+        assert_eq!(share_told(79, 100), None);
+        assert_eq!(share_told(80, 100), Some(80));
+        assert_eq!(share_told(99, 100), Some(80));
+        assert_eq!(share_told(100, 100), Some(100));
+        assert_eq!(share_told(4, 5), Some(80));
     }
 
     #[test]

@@ -421,6 +421,14 @@ pub trait Auth: Send + Sync {
         Err(not_linked("audit events"))
     }
 
+    /// What a module raised for an organization, mailed to its owner: the
+    /// organization named, `title` its subject, `body` its text, and the
+    /// console's page at `path` linked. Best effort: a mail that fails is
+    /// logged. Nothing by default.
+    async fn mail_owner(&self, organization_id: &OrganizationId, notice: OwnerNotice<'_>) {
+        let _ = (organization_id, notice);
+    }
+
     /// A deletion's receipt, mailed to the person who asked for it once it
     /// is done. Best effort: a mail that fails is logged, never the
     /// deletion's failure. Nothing by default.
@@ -463,6 +471,47 @@ pub trait Auth: Send + Sync {
 pub enum Confirmation<'a> {
     /// A project's content mode leaving `off`.
     ContentMode(&'a ProjectId),
+}
+
+/// What [`Auth::mail_owner`] mails an organization's owner.
+#[derive(Debug, Clone, Copy)]
+pub struct OwnerNotice<'a> {
+    /// One line, the mail's subject.
+    pub title: &'a str,
+    /// The text, which names nobody.
+    pub body: &'a str,
+    /// The console's page it is about, from its root (`/acme/billing`).
+    pub path: &'a str,
+}
+
+/// An organization's owner and admins told on its feed, and its owner by
+/// mail as well, the first time `dedup_key` is told: what a module tells
+/// them of the organization's plan as it is spent. Answers whether they
+/// were told, now or before; one that failed is logged.
+pub async fn tell_owners(
+    notifications: &dyn Notifications,
+    auth: &dyn Auth,
+    organization_id: &OrganizationId,
+    alert: OrganizationAlert<'_>,
+    path: &str,
+) -> bool {
+    let (title, body) = (alert.title, alert.body);
+    match notifications
+        .alert_organization(organization_id, alert)
+        .await
+    {
+        Ok(Emitted::Fresh { .. }) => {
+            auth.mail_owner(organization_id, OwnerNotice { title, body, path })
+                .await;
+            true
+        }
+        Ok(Emitted::Replayed { .. }) => true,
+        Err(e) => {
+            tracing::warn!(organization_id = %organization_id, error = %e,
+                "the owners could not be told of the plan; the next pass tells them");
+            false
+        }
+    }
 }
 
 /// A deletion done, as its receipt names it. Never an end user's id: the

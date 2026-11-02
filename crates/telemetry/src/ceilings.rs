@@ -135,6 +135,20 @@ pub async fn admit_data_out(
     .into())
 }
 
+/// What the organization's machines have been sent today, and what its plan
+/// holds a day; `None` where no plan holds it to one.
+pub async fn data_out_today(
+    state: &AppState,
+    organization_id: &OrganizationId,
+) -> Option<(u64, u64)> {
+    let plan = state
+        .ceilings
+        .of(state.entitlements.as_ref(), organization_id)
+        .await?;
+    let sent = spent(state, organization_id, Utc::now().date_naive()).await;
+    Some((sent, plan.data_out_per_day))
+}
+
 /// `bytes` handed to the organization, counted against its day; nothing is
 /// counted for an organization no plan holds to a ceiling.
 pub async fn spend_data_out(state: &AppState, organization_id: &OrganizationId, bytes: u64) {

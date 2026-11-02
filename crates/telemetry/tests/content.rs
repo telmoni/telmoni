@@ -634,6 +634,60 @@ async fn the_nightly_pass_takes_the_oldest_content_past_the_ceiling(pool: PgPool
     assert_eq!(spans, 1, "the span within retention stays");
 }
 
+/// The usage pass counts the month's spans as the door did and tells the
+/// owners once the content held reaches the plan's ceiling.
+#[sqlx::test]
+async fn the_usage_pass_counts_the_month_and_tells_of_the_content_held(pool: PgPool) {
+    let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let mut door = door(&pool, ContentMode::On).await;
+    let notices = common::NoticeLog::new();
+    let month = common::PlanMonth {
+        spans: 1_000_000,
+        grace_days: 0,
+        content_bytes: 100,
+    };
+    let state = common::state_with_stores_noticed(
+        &pool,
+        door.auth.clone(),
+        Arc::new(month),
+        notices.clone(),
+    );
+    door.app = router(state.clone()).nest("/otlp", otlp_router(state.clone()));
+    door.state = state;
+    door.send(export(&"r".repeat(400))).await;
+
+    telmoni_telemetry::capacity::tell_usage(&door.state)
+        .await
+        .expect("the pass runs");
+    let keys: Vec<String> = notices
+        .notices()
+        .into_iter()
+        .filter_map(|n| n.dedup_key)
+        .collect();
+    assert!(
+        keys.iter()
+            .any(|key| key.contains(":content:") && key.ends_with(":100")),
+        "{keys:?}"
+    );
+    let capacity = telmoni_shared::seam::capacity(
+        &common::PlanMonth {
+            spans: 1_000_000,
+            grace_days: 0,
+            content_bytes: 100,
+        },
+        &door.organization,
+    )
+    .await
+    .expect("a month");
+    let used =
+        telmoni_telemetry::capacity::spans_used(&door.state, &door.organization, &capacity, true)
+            .await
+            .expect("the month is counted");
+    assert!(used >= 1, "the export's span units: {used}");
+}
+
 #[sqlx::test]
 async fn a_project_left_off_keeps_no_content_and_makes_no_key(pool: PgPool) {
     let Some(_ch) = clickhouse_or_skip(module_path!()).await else {

@@ -722,18 +722,36 @@ pub async fn recent_questions<B: AuthorBinding>(
     .await
 }
 
+/// How many questions the organization's people have asked in the month
+/// that began at `month_start`.
+pub async fn asked_in_month(
+    tx: &mut Scoped<'_, Maintenance<AgentLane>>,
+    organization_id: &OrganizationId,
+    month_start: DateTime<Utc>,
+) -> sqlx::Result<u64> {
+    let asked: Option<i32> = sqlx::query_scalar(
+        "SELECT asked FROM agent.questions_asked
+          WHERE organization_id = $1 AND month_start = $2",
+    )
+    .bind(organization_id)
+    .bind(month_start)
+    .fetch_optional(tx.conn())
+    .await?;
+    Ok(asked.map_or(0, i32::unsigned_abs).into())
+}
+
 /// One more question counted against the organization's month that began
-/// at `month_start`, unless it has asked `most` already: answers whether it
-/// was counted. One statement, so two asked at once cannot both take the
-/// last.
+/// at `month_start`, unless it has asked `most` already: answers how many it
+/// has asked with this one, or `None` where it was not counted. One
+/// statement, so two asked at once cannot both take the last.
 pub async fn ask_in_month(
     tx: &mut Scoped<'_, Maintenance<AgentLane>>,
     organization_id: &OrganizationId,
     month_start: DateTime<Utc>,
     most: u64,
-) -> sqlx::Result<bool> {
+) -> sqlx::Result<Option<u64>> {
     if most == 0 {
-        return Ok(false);
+        return Ok(None);
     }
     let counted: Option<i32> = sqlx::query_scalar(
         "INSERT INTO agent.questions_asked (organization_id, month_start, asked)
@@ -748,7 +766,7 @@ pub async fn ask_in_month(
     .bind(i64::try_from(most).unwrap_or(i64::MAX))
     .fetch_optional(tx.conn())
     .await?;
-    Ok(counted.is_some())
+    Ok(counted.map(|asked| u64::from(asked.unsigned_abs())))
 }
 
 /// Who a conversation and its messages belong to: the person, asking in a

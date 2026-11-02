@@ -140,6 +140,14 @@ pub enum AuthMail<'a> {
         receipt: Receipt<'a>,
         project: &'a str,
     },
+    /// Tell an organization's owner what a module raised for it — its plan
+    /// as it is spent — with the way to the page it is about.
+    OwnerNotice {
+        organization: &'a str,
+        title: &'a str,
+        body: &'a str,
+        link: &'a str,
+    },
 }
 
 /// Writes auth's mails and hands each to a transport.
@@ -304,6 +312,19 @@ impl ComposingMailer {
             AuthMail::NewAddressCode { code } => self.send_new_address_code(to, code).await,
             AuthMail::DeletionReceipt { receipt, project } => {
                 self.send_deletion_receipt(to, receipt, project).await
+            }
+            AuthMail::OwnerNotice {
+                organization,
+                title,
+                body,
+                link,
+            } => {
+                self.send(
+                    to,
+                    format!("{title}: {organization}"),
+                    format!("{body}\n\nSee it in the console: {link}"),
+                )
+                .await
             }
         }
     }

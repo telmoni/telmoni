@@ -18,8 +18,8 @@ use telmoni_shared::extract::header;
 use telmoni_shared::rbac::{Resource, Verb};
 use telmoni_shared::seam::{
     Audience, AuditEventsQuery, Auth, Closing, Confirmation, DocumentCursor, FoundedOrganization,
-    MovedProject, OrganizationFounding, OwnedOrganization, ProjectHome, ReadableProject, Receipt,
-    SourceDocument,
+    MovedProject, OrganizationFounding, OwnedOrganization, OwnerNotice, ProjectHome,
+    ReadableProject, Receipt, SourceDocument,
 };
 use telmoni_shared::slug::Slug;
 use telmoni_shared::{
@@ -351,6 +351,36 @@ impl Auth for AppState {
 
     async fn mail_receipt(&self, to: &UserId, receipt: Receipt<'_>) {
         crate::handler::deletion::mail_receipt(self, to, receipt).await;
+    }
+
+    async fn mail_owner(&self, organization_id: &OrganizationId, notice: OwnerNotice<'_>) {
+        let found = crate::db::lane(&self.db, async |tx| {
+            organizations::summary_with_owner(tx, organization_id).await
+        })
+        .await;
+        let summary = match found {
+            Ok(Some(summary)) => summary,
+            Ok(None) => return,
+            Err(e) => {
+                tracing::warn!(organization_id = %organization_id, error = %e,
+                    "a notice was not mailed to the owner: their address could not be read");
+                return;
+            }
+        };
+        let Some(to) = summary.owner_email else {
+            return;
+        };
+        let link = format!("{}{}", self.config.app_url, notice.path);
+        let mail = AuthMail::OwnerNotice {
+            organization: &summary.name,
+            title: notice.title,
+            body: notice.body,
+            link: &link,
+        };
+        if let Err(e) = self.mailer.send_mail(to.as_str(), mail).await {
+            tracing::warn!(organization_id = %organization_id, error = %e,
+                "a notice was not mailed to the owner");
+        }
     }
 
     async fn mail_confirmation(

@@ -43,7 +43,7 @@ pub use email::{Email, EmailError};
 pub use flag::{Flag, FlagSet};
 pub use grants::{
     AlertCeilings, Allowance, CONNECTION_BYTES, Capacity, Grants, LaneCeilings, MemberCeiling,
-    Paused,
+    Paused, share_told,
 };
 pub use incident_status::IncidentStatus;
 pub use layout_depth::LayoutDepth;

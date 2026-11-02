@@ -117,6 +117,7 @@ pub fn router(state: Arc<AppState>) -> Router {
     let lanes = Router::new()
         .route("/agent/status", get(handler::status))
         .route("/agent/turns", post(handler::post_turn))
+        .route("/agent/usage", get(handler::get_usage))
         .route("/agent/conversations", get(handler::list_conversations))
         .route(
             "/agent/conversations/{id}",
@@ -135,6 +136,7 @@ pub fn absent_router(service_secrets: ServiceSecrets) -> Router {
     let lanes = Router::new()
         .route("/agent/status", get(handler::absent_status))
         .route("/agent/turns", post(handler::absent))
+        .route("/agent/usage", get(handler::absent))
         .route("/agent/conversations", get(handler::absent))
         .route(
             "/agent/conversations/{id}",

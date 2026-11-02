@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, DurationRound as _, Utc};
 use redis::AsyncCommands;
 use serde_json::json;
 use uuid::Uuid;
@@ -138,8 +138,12 @@ pub async fn hold_spans(
         return (None, None);
     };
     let month = capacity.period_start.timestamp();
-    let keys = |what: &str| format!("telemetry:{what}:{organization_id}:{month}");
-    let (used_key, over_key, told_key) = (keys("spans"), keys("spans-over"), keys("spans-told"));
+    // The grace and its telling are the allowance's: an add-on that raises it
+    // starts both again.
+    let limit = capacity.spans.limit;
+    let used_key = format!("telemetry:spans:{organization_id}:{month}");
+    let over_key = format!("telemetry:spans-over:{organization_id}:{month}:{limit}");
+    let told_key = format!("telemetry:spans-told:{organization_id}:{month}:{limit}");
     let used: Result<Option<u64>, redis::RedisError> = connection.get(&used_key).await;
     let used = match used {
         Ok(used) => used.unwrap_or(0),
@@ -299,6 +303,7 @@ fn tell_over(
     let organization_id = organization_id.clone();
     let month = capacity.period_start;
     let grace = capacity.spans_grace_days;
+    let limit = capacity.spans.limit;
     let detail = capacity.spans.detail.clone();
     tokio::spawn(async move {
         if !chain::open(state.auth.as_ref(), &organization_id).await {
@@ -316,8 +321,9 @@ fn tell_over(
             )
         };
         let dedup_key = format!(
-            "telemetry:spans-over:{organization_id}:{}",
-            month.timestamp()
+            "telemetry:spans-over:{organization_id}:{}:{}",
+            month.timestamp(),
+            limit
         );
         let alert = OrganizationAlert {
             title: "Spans past the plan's month",
@@ -325,19 +331,224 @@ fn tell_over(
             metadata: json!({ "lane": "spans", "month": month, "grace_days": grace }),
             dedup_key: Some(&dedup_key),
         };
-        if let Err(error) = state
-            .notifications
-            .alert_organization(&organization_id, alert)
-            .await
-        {
-            tracing::warn!(organization_id = %organization_id, error = %error,
-                "telemetry: the owners could not be told the spans are past the plan; a later \
-                 export tells them");
-            if let Some(mut connection) = state.redis.connection().await {
-                let _: Result<(), redis::RedisError> = connection.del(&told_key).await;
-            }
+        let path = organization_path(&state, &organization_id).await;
+        let told = seam::tell_owners(
+            state.notifications.as_ref(),
+            state.auth.as_ref(),
+            &organization_id,
+            alert,
+            &path,
+        )
+        .await;
+        // A telling that failed gives up its claim, so a later export tells.
+        if !told && let Some(mut connection) = state.redis.connection().await {
+            let _: Result<(), redis::RedisError> = connection.del(&told_key).await;
         }
     });
+}
+
+/// The usage pass's name in `telemetry.heartbeats`.
+pub const USAGE_HEARTBEAT: &str = "usage";
+
+/// How often the month's spans are counted again from the hourly totals.
+const USAGE_EVERY: Duration = Duration::from_secs(60 * 60);
+
+/// The span units `projects` landed in the hours from one to another, from the
+/// hourly totals.
+const MONTH_UNITS: &str = "SELECT toUInt64(sum(units)) FROM telemetry.spans_hourly \
+     WHERE project_id IN {projects:Array(String)} AND hour >= {since:DateTime('UTC')} \
+       AND hour < {until:DateTime('UTC')}";
+
+/// The organization's span units this month: the door's count, or the hourly
+/// totals of the hours wholly past where they hold more, as after Redis lost
+/// its count. With `raise`, the count is set to theirs in one step that never
+/// lowers it; an export landing this hour is counted by the door alone, so
+/// none is counted twice.
+pub async fn spans_used(
+    state: &AppState,
+    organization_id: &OrganizationId,
+    capacity: &Capacity,
+    raise: bool,
+) -> Result<u64, telmoni_shared::TelmoniError> {
+    let mut lane = maintenance_scope(&state.db, TelemetryLane).await?;
+    let projects = db::projects_filed(&mut lane, organization_id).await?;
+    lane.commit().await?;
+    let since = capacity.period_start;
+    let this_hour = Utc::now()
+        .duration_trunc(chrono::Duration::hours(1))
+        .unwrap_or_else(|_| Utc::now());
+    let totals = match store::Projects::of(projects) {
+        Some(read) => state
+            .store
+            .read(&read, MONTH_UNITS)
+            .param("since", store::seconds(since))
+            .param("until", store::seconds(this_hour))
+            .fetch_one::<u64>()
+            .await
+            .map_err(|error| {
+                telmoni_shared::TelmoniError::Internal(format!(
+                    "the month's spans could not be read ({})",
+                    store::Fault::of(&error).as_str()
+                ))
+            })?,
+        None => 0,
+    };
+    let key = format!("telemetry:spans:{organization_id}:{}", since.timestamp());
+    let Some(mut connection) = state.redis.connection().await else {
+        return Ok(totals);
+    };
+    let counted: Result<Option<u64>, redis::RedisError> = connection.get(&key).await;
+    let counted = counted
+        .unwrap_or_else(|error| {
+            state.redis.stood_in("the month's spans", &error);
+            None
+        })
+        .unwrap_or(0);
+    if raise && totals > counted {
+        let raised: Result<(), redis::RedisError> = redis::Script::new(RAISE)
+            .key(&key)
+            .arg(totals)
+            .arg(COUNTS_KEPT_S)
+            .invoke_async(&mut connection)
+            .await;
+        if let Err(error) = raised {
+            state.redis.stood_in("the month's spans", &error);
+        }
+    }
+    Ok(counted.max(totals))
+}
+
+/// A count set to `ARGV[1]` where it holds less, never lowered.
+const RAISE: &str = "local held = tonumber(redis.call('GET', KEYS[1]) or '0') \
+     if held < tonumber(ARGV[1]) then redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2]) end \
+     return 1";
+
+/// [`tell_usage`], every hour, forever.
+pub async fn run_usage(state: Arc<AppState>) {
+    state
+        .heartbeats
+        .every(&state.db, USAGE_HEARTBEAT, START_DELAY, USAGE_EVERY, || {
+            let state = state.clone();
+            async move { tell_usage(&state).await }
+        })
+        .await;
+}
+
+/// Each organization's month counted again, and its owners told, on its feed
+/// and by mail, once its spans reach four fifths of the month and once its
+/// content fills its ceiling; the month's spans spent are told at the door
+/// ([`hold_spans`]). One organization that cannot be read holds up no other.
+pub async fn tell_usage(state: &AppState) -> Result<(), telmoni_shared::TelmoniError> {
+    let mut lane = maintenance_scope(&state.db, TelemetryLane).await?;
+    let filed = db::organizations_filed(&mut lane).await?;
+    lane.commit().await?;
+    for (organization_id, _) in filed {
+        let Some(capacity) = seam::capacity(state.entitlements.as_ref(), &organization_id).await
+        else {
+            continue;
+        };
+        let month = capacity.period_start.timestamp();
+        let renews = capacity.period_end.format("%-d %B");
+        let limit = capacity.spans.limit;
+        match spans_used(state, &organization_id, &capacity, true).await {
+            Ok(used) if seam_share(used, limit) == Some(80) => {
+                if !chain::open(state.auth.as_ref(), &organization_id).await {
+                    continue;
+                }
+                let body = format!(
+                    "This organization has sent four fifths of the spans its plan holds this \
+                     month, which renews on {renews}. {}",
+                    capacity
+                        .spans
+                        .detail
+                        .split_once(". ")
+                        .map_or("", |(_, cure)| cure)
+                );
+                tell(
+                    state,
+                    &organization_id,
+                    "Spans at four fifths of the month",
+                    &body,
+                    &format!("telemetry:usage:{organization_id}:spans:{month}:{limit}:80"),
+                )
+                .await;
+            }
+            Ok(_) => {}
+            Err(error) => tracing::warn!(organization_id = %organization_id, error = %error,
+                "telemetry: an organization's month could not be counted; the next hour tries"),
+        }
+        // Content held is not a month's: told once it is full, until the
+        // ceiling it was full against changes.
+        match content_held(state, &organization_id).await {
+            Ok(held) if held >= capacity.content_bytes => {
+                if !chain::open(state.auth.as_ref(), &organization_id).await {
+                    continue;
+                }
+                let ceiling = capacity.content_bytes;
+                tell(
+                    state,
+                    &organization_id,
+                    "Content held",
+                    "This organization holds all the content its plan does: a span arriving \
+                     keeps its metadata alone, and each night the oldest content goes first, \
+                     until a tenth is free.",
+                    &format!("telemetry:usage:{organization_id}:content:{ceiling}:100"),
+                )
+                .await;
+            }
+            Ok(_) => {}
+            Err(error) => tracing::warn!(organization_id = %organization_id, error = %error,
+                "telemetry: an organization's content held could not be read"),
+        }
+    }
+    Ok(())
+}
+
+/// The share told of `used` out of `limit`.
+fn seam_share(used: u64, limit: u64) -> Option<u8> {
+    telmoni_shared::types::share_told(used, limit)
+}
+
+/// The owners told once by `dedup_key`, on the feed and by mail, the
+/// organization's own page linked.
+async fn tell(
+    state: &AppState,
+    organization_id: &OrganizationId,
+    title: &str,
+    body: &str,
+    dedup_key: &str,
+) {
+    let path = organization_path(state, organization_id).await;
+    let alert = OrganizationAlert {
+        title,
+        body,
+        metadata: json!({ "lane": "usage" }),
+        dedup_key: Some(dedup_key),
+    };
+    seam::tell_owners(
+        state.notifications.as_ref(),
+        state.auth.as_ref(),
+        organization_id,
+        alert,
+        &path,
+    )
+    .await;
+}
+
+/// The organization's page in the console, by its slug; the console's root
+/// where auth cannot say it.
+async fn organization_path(state: &AppState, organization_id: &OrganizationId) -> String {
+    match state
+        .auth
+        .organization_slugs(std::slice::from_ref(organization_id))
+        .await
+    {
+        Ok(slugs) => slugs
+            .into_iter()
+            .next()
+            .map_or_else(|| "/".to_owned(), |(_, slug)| format!("/{slug}")),
+        Err(_) => "/".to_owned(),
+    }
 }
 
 /// The projects among those read that hold a span before the cutoff.
@@ -487,7 +698,7 @@ async fn hold(
 }
 
 /// The organization's content held, in sealed bytes.
-async fn content_held(
+pub(crate) async fn content_held(
     state: &AppState,
     organization_id: &OrganizationId,
 ) -> Result<u64, telmoni_shared::TelmoniError> {

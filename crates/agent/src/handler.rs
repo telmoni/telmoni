@@ -108,6 +108,101 @@ pub struct TurnRequest {
     message: String,
 }
 
+/// The owners told, on the feed and by mail, the moment the organization's
+/// questions reach four fifths of the month and all of it; once each, by its
+/// key.
+fn tell_when_crossed(
+    state: &Arc<AppState>,
+    organization_id: &telmoni_shared::OrganizationId,
+    capacity: &telmoni_shared::Capacity,
+    asked: u64,
+) {
+    let limit = capacity.agent_questions.limit;
+    let share = telmoni_shared::types::share_told(asked, limit);
+    if share.is_none() || share == telmoni_shared::types::share_told(asked.saturating_sub(1), limit)
+    {
+        return;
+    }
+    let Some(share) = share else {
+        return;
+    };
+    let state = Arc::clone(state);
+    let organization_id = organization_id.clone();
+    let month = capacity.period_start.timestamp();
+    let renews = capacity.period_end.format("%-d %B");
+    let detail = capacity.agent_questions.detail.clone();
+    tokio::spawn(async move {
+        let body = if share == 100 {
+            format!("{detail} It renews on {renews}.")
+        } else {
+            format!(
+                "This organization has asked the agent four fifths of the questions its plan \
+                 holds this month, which renews on {renews}."
+            )
+        };
+        let dedup_key = format!("agent:usage:{organization_id}:{month}:{limit}:{share}");
+        let alert = telmoni_shared::seam::OrganizationAlert {
+            title: "Agent questions this month",
+            body: &body,
+            metadata: serde_json::json!({ "lane": "agent_questions", "share": share }),
+            dedup_key: Some(&dedup_key),
+        };
+        let path = match state
+            .auth
+            .organization_slugs(std::slice::from_ref(&organization_id))
+            .await
+        {
+            Ok(slugs) => slugs
+                .into_iter()
+                .next()
+                .map_or_else(|| "/".to_owned(), |(_, slug)| format!("/{slug}")),
+            Err(_) => "/".to_owned(),
+        };
+        telmoni_shared::seam::tell_owners(
+            state.notifications.as_ref(),
+            state.auth.as_ref(),
+            &organization_id,
+            alert,
+            &path,
+        )
+        .await;
+    });
+}
+
+/// What `GET /internal/v1/agent/usage` answers: the questions asked this
+/// month against what the plan holds.
+#[derive(Debug, Serialize)]
+pub struct Usage {
+    pub period_start: chrono::DateTime<Utc>,
+    pub period_end: chrono::DateTime<Utc>,
+    pub used: u64,
+    pub limit: u64,
+}
+
+/// `GET /internal/v1/agent/usage`, the organization's owner's and admins'
+/// alone; none where no plan holds its questions.
+pub async fn get_usage(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<Json<Option<Usage>>, TelmoniError> {
+    let acting = state.auth.resolve(&headers).await?;
+    let organization_id = &acting.require_organization_admin()?.organization_id;
+    let Some(capacity) =
+        telmoni_shared::seam::capacity(state.entitlements.as_ref(), organization_id).await
+    else {
+        return Ok(Json(None));
+    };
+    let mut lane = maintenance_scope(&state.db, db::AgentLane).await?;
+    let used = db::asked_in_month(&mut lane, organization_id, capacity.period_start).await?;
+    lane.commit().await?;
+    Ok(Json(Some(Usage {
+        period_start: capacity.period_start,
+        period_end: capacity.period_end,
+        used,
+        limit: capacity.agent_questions.limit,
+    })))
+}
+
 /// `POST /internal/v1/agent/turns`.
 pub async fn post_turn(
     State(state): State<Arc<AppState>>,
@@ -151,11 +246,14 @@ pub async fn post_turn(
         )
         .await?;
         lane.commit().await?;
-        if !counted {
-            capacity
+        let Some(asked) = counted else {
+            return Err(capacity
                 .agent_questions
-                .admit_until(capacity.agent_questions.limit, capacity.period_end)?;
-        }
+                .admit_until(capacity.agent_questions.limit, capacity.period_end)
+                .err()
+                .unwrap_or_else(|| TelmoniError::Internal("the month holds no question".into())));
+        };
+        tell_when_crossed(&state, &acting.organization_id, &capacity, asked);
     }
     let author = db::Author {
         organization_id: &acting.organization_id,

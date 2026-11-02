@@ -948,6 +948,29 @@ impl Auth for OneAsker {
     }
 }
 
+/// Auth that reads every bearer as an admin of `org_a`.
+struct AnAdmin;
+
+#[async_trait]
+impl Auth for AnAdmin {
+    async fn resolve(&self, _: &HeaderMap) -> Result<Acting, TelmoniError> {
+        Ok(acting(
+            "user_admin",
+            Role::Admin,
+            Some(OrganizationRole::Admin),
+        ))
+    }
+    async fn global_flags(&self) -> Result<FlagSet, TelmoniError> {
+        Err(AuthError::IdentityUnavailable.into())
+    }
+    async fn organization_standing(
+        &self,
+        _: &OrganizationId,
+    ) -> Result<Option<OrganizationStatus>, TelmoniError> {
+        Ok(Some(OrganizationStatus::Active))
+    }
+}
+
 /// A plan's month that holds one question, begun a day ago.
 struct OneQuestion;
 
@@ -1036,6 +1059,98 @@ async fn a_question_past_the_plans_month_is_refused_until_it_renews(pool: PgPool
     .await
     .expect("the questions kept");
     assert_eq!(asked, 0, "the refused question was never kept");
+}
+
+/// Notifications that keep the key of every notice an organization is told.
+#[derive(Default)]
+struct Told(std::sync::Mutex<Vec<String>>);
+
+#[async_trait]
+impl Notifications for Told {
+    async fn emit(
+        &self,
+        _: &OrganizationId,
+        _: &ProjectId,
+        _: Notice<'_>,
+    ) -> Result<Emitted, TelmoniError> {
+        Err(TelmoniError::Internal("not here".into()))
+    }
+    async fn alert_organization(
+        &self,
+        _: &OrganizationId,
+        alert: telmoni_shared::seam::OrganizationAlert<'_>,
+    ) -> Result<Emitted, TelmoniError> {
+        self.0
+            .lock()
+            .unwrap()
+            .push(alert.dedup_key.unwrap_or_default().to_owned());
+        Ok(Emitted::Fresh {
+            feed_id: uuid::Uuid::now_v7(),
+        })
+    }
+    async fn purge_organization(&self, _: &OrganizationId) -> Result<u64, TelmoniError> {
+        Ok(0)
+    }
+    async fn purge_project(&self, _: &ProjectId) -> Result<u64, TelmoniError> {
+        Ok(0)
+    }
+    async fn purge_project_for_move(&self, _: &ProjectId) -> Result<u64, TelmoniError> {
+        Ok(0)
+    }
+    async fn redact_person(&self, _: &UserId) -> Result<u64, TelmoniError> {
+        Ok(0)
+    }
+}
+
+/// The question that spends the month tells the owners once, and the
+/// usage lane answers the month's questions against what the plan holds.
+#[sqlx::test]
+async fn the_owners_are_told_when_the_months_questions_are_spent(pool: PgPool) {
+    let told = Arc::new(Told::default());
+    let mut state = state_with(
+        &pool,
+        Arc::new(SameVector(AtomicUsize::new(0))),
+        Arc::new(OneAsker),
+    );
+    state.entitlements = Arc::new(OneQuestion);
+    state.notifications = told.clone();
+    let state = Arc::new(state);
+    telmoni_agent::handler::post_turn(
+        axum::extract::State(state.clone()),
+        HeaderMap::new(),
+        telmoni_shared::extract::Json(
+            serde_json::from_value(serde_json::json!({ "message": "how are my runs?" }))
+                .expect("a turn"),
+        ),
+    )
+    .await
+    .expect("the month's one question is asked");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while told.0.lock().unwrap().is_empty() && std::time::Instant::now() < deadline {
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    let keys = told.0.lock().unwrap().clone();
+    assert!(
+        keys.iter()
+            .any(|key| key.starts_with("agent:usage:org_a:") && key.ends_with(":100")),
+        "{keys:?}"
+    );
+    let refused = telmoni_agent::handler::get_usage(axum::extract::State(state), HeaderMap::new())
+        .await
+        .expect_err("a member reads no usage");
+    assert_eq!(refused.to_problem_details().status, 403);
+    let mut admin = state_with(
+        &pool,
+        Arc::new(SameVector(AtomicUsize::new(0))),
+        Arc::new(AnAdmin),
+    );
+    admin.entitlements = Arc::new(OneQuestion);
+    let telmoni_shared::extract::Json(usage) =
+        telmoni_agent::handler::get_usage(axum::extract::State(Arc::new(admin)), HeaderMap::new())
+            .await
+            .expect("the usage is read");
+    let usage = usage.expect("a plan holds the questions");
+    assert_eq!((usage.used, usage.limit), (1, 1));
 }
 
 /// Notifications holding three notices of `org_a`, all after no cursor.

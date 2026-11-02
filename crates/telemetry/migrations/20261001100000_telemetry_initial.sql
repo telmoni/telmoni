@@ -441,7 +441,7 @@ CREATE TABLE telemetry.heartbeats (
     name           TEXT        PRIMARY KEY,
     period_seconds INTEGER     NOT NULL,
     beat_at        TIMESTAMPTZ NOT NULL,
-    CONSTRAINT heartbeats_name_check CHECK (name IN ('purges', 'refusals', 'alerts', 'capacity')),
+    CONSTRAINT heartbeats_name_check CHECK (name IN ('purges', 'refusals', 'alerts', 'capacity', 'usage')),
     CONSTRAINT heartbeats_period_check CHECK (period_seconds > 0)
 );
 

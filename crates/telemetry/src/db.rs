@@ -713,6 +713,20 @@ pub async fn organizations_filed(
     .await
 }
 
+/// The projects filed under the organization, across tenants.
+pub async fn projects_filed(
+    tx: &mut Scoped<'_, Maintenance<TelemetryLane>>,
+    organization_id: &OrganizationId,
+) -> sqlx::Result<Vec<ProjectId>> {
+    sqlx::query_scalar(
+        "SELECT project_id FROM telemetry.project_settings
+          WHERE organization_id = $1 ORDER BY project_id",
+    )
+    .bind(organization_id)
+    .fetch_all(tx.conn())
+    .await
+}
+
 /// When the oldest content of `projects` landed, across tenants; `None`
 /// where they hold none.
 pub async fn oldest_content(

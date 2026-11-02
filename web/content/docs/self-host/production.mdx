@@ -269,7 +269,8 @@ telmoni-server sweep audit-exports
 
 Each loop inside `telmoni-server serve` — the delivery loop, the sweeps above,
 the purges, the lanes' refusals, the alerts' evaluation, the night's pass
-over the plans (which holds nothing where none is sold) and the agent's
+over the plans and the hourly count of what each spends (both of which hold
+nothing where none is sold) and the agent's
 indexer and retention — beats in its
 module's own `heartbeats` table each time a tick ends, from whichever replica
 ran it. `GET /heartbeat`,
