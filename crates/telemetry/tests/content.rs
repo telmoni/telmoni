@@ -3129,3 +3129,417 @@ async fn an_end_user_is_erased_by_the_id_their_spans_carry(pool: PgPool) {
         ]
     );
 }
+
+/// An export whose spans each carry OpenTelemetry's evaluation events.
+fn scored_export(run: &str) -> Vec<u8> {
+    let text = |key: &str, value: &str| json!({ "key": key, "value": { "stringValue": value } });
+    let event = |attributes: Value| {
+        json!({
+            "name": "gen_ai.evaluation.result", "timeUnixNano": "1760000001000000000",
+            "attributes": attributes,
+        })
+    };
+    json!({ "resourceSpans": [{ "scopeSpans": [{ "scope": { "name": contract::SCOPE }, "spans": [
+        {
+            "traceId": TRACE, "spanId": SPAN, "name": "nightly-report",
+            "startTimeUnixNano": "1760000000000000000", "endTimeUnixNano": "1760000002000000000",
+            "attributes": [
+                text(contract::RUN_ID, run), text(contract::AGENT, "nightly-report"),
+                text(contract::OPERATION, "invoke_agent"), text(contract::SESSION_ID, "conv-1"),
+            ],
+            "events": [event(json!([
+                text("gen_ai.evaluation.name", "relevance"),
+                { "key": "gen_ai.evaluation.score.value", "value": { "doubleValue": 0.75 } },
+            ]))],
+        },
+        {
+            "traceId": TRACE, "spanId": "01f067aa0ba902b8", "parentSpanId": SPAN, "name": "chat",
+            "startTimeUnixNano": "1760000000000000000", "endTimeUnixNano": "1760000001000000000",
+            "attributes": [
+                text(contract::RUN_ID, run), text(contract::AGENT, "nightly-report"),
+                text(contract::OPERATION, "chat"),
+            ],
+            "events": [
+                event(json!([
+                    text("gen_ai.evaluation.name", "grounded"), text("telmoni.score.type", "boolean"),
+                    { "key": "gen_ai.evaluation.score.value", "value": { "intValue": "1" } },
+                ])),
+                event(json!([text("gen_ai.evaluation.name", "tone"), text("gen_ai.evaluation.score.label", "polite")])),
+                // No name: no score.
+                event(json!([{ "key": "gen_ai.evaluation.score.value", "value": { "doubleValue": 3.0 } }])),
+            ],
+        },
+    ]}]}]})
+    .to_string()
+    .into_bytes()
+}
+
+/// The application's evaluation events land as its spans' scores, the run's
+/// own span's the run's, each once however often its export is sent.
+#[sqlx::test]
+async fn the_applications_evaluation_events_land_once_as_its_spans_scores(pool: PgPool) {
+    let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let door = door(&pool, ContentMode::Off).await;
+    door.auth.seat(
+        "admin-1",
+        &door.organization,
+        &door.project,
+        OrganizationRole::Owner,
+        None,
+    );
+    door.send(scored_export(RUN)).await;
+    door.send(scored_export(RUN)).await;
+    let (status, scores) = door
+        .lane("GET", &format!("/scores?run_id={RUN}"), "admin-1", None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{scores}");
+    let mut got: Vec<(String, String, String, Value, Value)> = scores["scores"]
+        .as_array()
+        .expect("scores")
+        .iter()
+        .map(|s| {
+            assert_eq!(s["source"], "sdk");
+            (
+                s["name"].as_str().unwrap_or_default().to_owned(),
+                s["target"].as_str().unwrap_or_default().to_owned(),
+                s["data_type"].as_str().unwrap_or_default().to_owned(),
+                s["value"].clone(),
+                s["categories"].clone(),
+            )
+        })
+        .collect();
+    got.sort_by(|a, b| a.0.cmp(&b.0));
+    assert_eq!(
+        got,
+        [
+            (
+                "grounded".into(),
+                "span".into(),
+                "boolean".into(),
+                json!(1.0),
+                json!([])
+            ),
+            (
+                "relevance".into(),
+                "run".into(),
+                "number".into(),
+                json!(0.75),
+                json!([])
+            ),
+            (
+                "tone".into(),
+                "span".into(),
+                "category".into(),
+                Value::Null,
+                json!(["polite"])
+            ),
+        ],
+        "{scores}"
+    );
+}
+
+/// A member scores a run, a span and a session, a second score of one name
+/// replacing their first, takes one back, and may not take another's; each
+/// filed in the chain by its name, never its value.
+#[sqlx::test]
+async fn a_member_scores_a_run_a_span_and_a_session_each_filed(pool: PgPool) {
+    let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    apply_audit_migrations(&pool).await;
+    let door = door(&pool, ContentMode::Off).await;
+    door.auth
+        .seat(
+            "member-1",
+            &door.organization,
+            &door.project,
+            OrganizationRole::Member,
+            Some(Role::Member),
+        )
+        .seat(
+            "member-2",
+            &door.organization,
+            &door.project,
+            OrganizationRole::Member,
+            Some(Role::Member),
+        );
+    door.send(scored_export(RUN)).await;
+    let put = |user: &'static str, body: Value| {
+        let door = &door;
+        async move { door.lane("PUT", "/scores", user, Some(body)).await }
+    };
+    let (status, first) = put("member-1", json!({ "run_id": RUN, "name": "useful", "data_type": "number", "value": 2, "range_min": 0, "range_max": 5 })).await;
+    assert_eq!(status, StatusCode::OK, "{first}");
+    let (status, again) = put("member-1", json!({ "run_id": RUN, "name": "useful", "data_type": "number", "value": 4, "range_min": 0, "range_max": 5 })).await;
+    assert_eq!(status, StatusCode::OK, "{again}");
+    assert_eq!(
+        first["score_id"], again["score_id"],
+        "the same name again replaces it"
+    );
+    let (status, span) = put("member-1", json!({ "run_id": RUN, "span_id": SPAN, "name": "on topic", "data_type": "category", "categories": ["yes"] })).await;
+    assert_eq!(status, StatusCode::OK, "{span}");
+    let (status, session) = put(
+        "member-2",
+        json!({ "session_id": "conv-1", "name": "resolved", "data_type": "boolean", "value": 1 }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{session}");
+
+    for (body, want) in [
+        (
+            json!({ "run_id": "00000000-0000-4000-8000-000000000000", "name": "x", "data_type": "boolean", "value": 1 }),
+            StatusCode::NOT_FOUND,
+        ),
+        (
+            json!({ "session_id": "nobody's", "name": "x", "data_type": "boolean", "value": 1 }),
+            StatusCode::NOT_FOUND,
+        ),
+        (
+            json!({ "run_id": RUN, "name": "x", "data_type": "number", "value": 9, "range_max": 5 }),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            json!({ "run_id": RUN, "session_id": "conv-1", "name": "x", "data_type": "boolean", "value": 1 }),
+            StatusCode::BAD_REQUEST,
+        ),
+    ] {
+        let (status, answer) = put("member-1", body).await;
+        assert_eq!(status, want, "{answer}");
+    }
+
+    let read = || async {
+        let (status, scores) = door
+            .lane(
+                "GET",
+                &format!("/scores?run_id={RUN}&session_id=conv-1"),
+                "member-1",
+                None,
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "{scores}");
+        let mut names: Vec<(String, Value)> = scores["scores"]
+            .as_array()
+            .expect("scores")
+            .iter()
+            .filter(|s| s["source"] == "member")
+            .map(|s| {
+                (
+                    s["name"].as_str().unwrap_or_default().to_owned(),
+                    s["value"].clone(),
+                )
+            })
+            .collect();
+        names.sort_by(|a, b| a.0.cmp(&b.0));
+        names
+    };
+    assert_eq!(
+        read().await,
+        [
+            ("on topic".to_owned(), Value::Null),
+            ("resolved".to_owned(), json!(1.0)),
+            ("useful".to_owned(), json!(4.0)),
+        ]
+    );
+
+    let take = |user: &'static str, id: &Value| {
+        let door = &door;
+        let id = id.as_str().unwrap_or_default().to_owned();
+        async move {
+            door.lane("DELETE", &format!("/scores/{id}"), user, None)
+                .await
+                .0
+        }
+    };
+    assert_eq!(
+        take("member-1", &session["score_id"]).await,
+        StatusCode::FORBIDDEN,
+        "another's score"
+    );
+    assert_eq!(
+        take("member-1", &span["score_id"]).await,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        take("member-1", &span["score_id"]).await,
+        StatusCode::NOT_FOUND,
+        "taken back once"
+    );
+    assert_eq!(
+        read()
+            .await
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect::<Vec<_>>(),
+        ["resolved", "useful"]
+    );
+
+    let filed: Vec<Value> = sqlx::query_scalar(
+        "SELECT metadata FROM audit.events WHERE metadata ? 'score' ORDER BY seq",
+    )
+    .fetch_all(&pool)
+    .await
+    .expect("the chain");
+    assert_eq!(filed.len(), 5, "{filed:?}");
+    assert!(
+        filed
+            .iter()
+            .all(|d| d.to_string().find("4.0").is_none() && !d.to_string().contains("conv-1")),
+        "names a score, never its value or a session: {filed:?}"
+    );
+}
+
+/// A run's scores go with it, a project's with its purge, and every score
+/// past retention with the spans, as the night's purge and a shorter one take them.
+#[sqlx::test]
+async fn scores_leave_with_their_runs_their_project_and_their_days(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let door = door(&pool, ContentMode::Off).await;
+    door.auth.seat(
+        "admin-1",
+        &door.organization,
+        &door.project,
+        OrganizationRole::Owner,
+        None,
+    );
+    door.send(scored_export(RUN)).await;
+    let count = |sql: &'static str| {
+        let ch = &ch;
+        let door = &door;
+        async move {
+            ch.store
+                .read(&Projects::one(door.project.clone()), sql)
+                .fetch_one::<u64>()
+                .await
+                .expect("counted")
+        }
+    };
+    const SCORES: &str =
+        "SELECT count() FROM telemetry.scores FINAL WHERE project_id IN {projects:Array(String)}";
+    assert_eq!(count(SCORES).await, 3);
+    ch.store
+        .delete_runs(&door.project, &[RUN.parse().expect("a run")])
+        .await
+        .expect("deleted");
+    assert_eq!(count(SCORES).await, 0, "the run's scores went with it");
+
+    door.send(scored_export("0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f02"))
+        .await;
+    assert_eq!(count(SCORES).await, 3);
+    ch.store
+        .delete_before(&door.project, Utc::now() + chrono::Duration::seconds(5))
+        .await
+        .expect("deleted");
+    assert_eq!(count(SCORES).await, 0, "past the project's retention");
+
+    // A score given past the longest retention, beside today's: the night's
+    // purge, at today's date so no other suite's rows go, takes it alone.
+    door.send(scored_export("0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f03"))
+        .await;
+    let old = telmoni_telemetry::scores::ScoreRow {
+        project_id: door.project.clone(),
+        received_at: Utc::now() - chrono::Duration::days(400),
+        score_id: uuid::Uuid::new_v4(),
+        target: telmoni_shared::ScoreTarget::Run,
+        run_id: uuid::Uuid::new_v4(),
+        trace_id: String::new(),
+        span_id: String::new(),
+        session_id: String::new(),
+        name: "old".into(),
+        data_type: telmoni_shared::ScoreType::Boolean,
+        value: 1.0,
+        categories: Vec::new(),
+        range_min: None,
+        range_max: None,
+        source: telmoni_shared::ScoreSource::Sdk,
+        scorer: String::new(),
+        scorer_version: String::new(),
+        is_deleted: 0,
+    };
+    ch.store
+        .insert_scores_once(&[old], &uuid::Uuid::new_v4().to_string())
+        .await
+        .expect("an old score");
+    assert_eq!(count(SCORES).await, 4);
+    retention::purge(&ch.migrator, Utc::now(), &[])
+        .await
+        .expect("the night's purge");
+    common::eventually("the night's purge took the old score alone", || async {
+        count(SCORES).await == 3
+    })
+    .await;
+    ch.store
+        .delete_runs(&door.project, &[RUN_C.parse().expect("a run")])
+        .await
+        .expect("deleted");
+
+    door.send(scored_export("0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f04"))
+        .await;
+    ch.store
+        .delete_project(&door.project)
+        .await
+        .expect("purged");
+    common::eventually("the purge took the scores", || async {
+        count(SCORES).await == 0
+    })
+    .await;
+}
+
+/// Another exporter's span's score waits with its span, and lands under its
+/// run once its trace is placed.
+#[sqlx::test]
+async fn another_exporters_score_lands_with_its_run(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let door = door(&pool, ContentMode::Off).await;
+    door.auth.seat(
+        "admin-1",
+        &door.organization,
+        &door.project,
+        OrganizationRole::Owner,
+        None,
+    );
+    let text = |key: &str, value: &str| json!({ "key": key, "value": { "stringValue": value } });
+    let body = json!({ "resourceSpans": [{ "scopeSpans": [{ "scope": { "name": "x" }, "spans": [{
+        "traceId": TRACE, "spanId": SPAN, "name": "chat gpt-5",
+        "startTimeUnixNano": "1760000000000000000", "endTimeUnixNano": "1760000001000000000",
+        "attributes": [text(contract::OPERATION, "chat")],
+        "events": [{ "name": "gen_ai.evaluation.result", "timeUnixNano": "1760000001000000000",
+            "attributes": [text("gen_ai.evaluation.name", "relevance"),
+                { "key": "gen_ai.evaluation.score.value", "value": { "doubleValue": 0.5 } }] }],
+    }]}]}]});
+    door.send(body.to_string().into_bytes()).await;
+    let waiting: u64 = ch
+        .store
+        .read(
+            &Projects::one(door.project.clone()),
+            "SELECT count() FROM telemetry.scores FINAL WHERE project_id IN {projects:Array(String)} \
+             AND run_id = toUUID('00000000-0000-0000-0000-000000000000')",
+        )
+        .fetch_one()
+        .await
+        .expect("counted");
+    assert_eq!(waiting, 1, "the score waits with its span");
+
+    sqlx::query("UPDATE telemetry.held_spans SET received_at = now() - interval '2 minutes'")
+        .execute(&pool)
+        .await
+        .expect("quiet");
+    telmoni_telemetry::foreign::land_quiet(&door.state)
+        .await
+        .expect("a pass");
+    let run = telmoni_telemetry::foreign::run_of_trace(&door.project, TRACE);
+    let (status, scores) = door
+        .lane("GET", &format!("/scores?run_id={run}"), "admin-1", None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{scores}");
+    let scores = scores["scores"].as_array().expect("scores");
+    assert_eq!(scores.len(), 1, "{scores:?}");
+    assert_eq!(scores[0]["name"], "relevance");
+    assert_eq!(scores[0]["target"], "span");
+    assert_eq!(scores[0]["run_id"], run.to_string());
+}

@@ -683,6 +683,15 @@ async fn land_trace(
         &token,
     )
     .await?;
+    crate::scores::place_waiting(
+        &state.store,
+        project_id,
+        trace_id,
+        &batch.rows,
+        &placed.dropped,
+        &token,
+    )
+    .await;
 
     let mut lane = maintenance_scope(&state.db, TelemetryLane).await?;
     let (mut spans, mut runs, mut agents) = (Vec::new(), Vec::new(), Vec::new());

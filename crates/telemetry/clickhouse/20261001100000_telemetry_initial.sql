@@ -1,4 +1,4 @@
--- The telemetry module's ClickHouse store: the spans and their hourly rollup.
+-- The telemetry module's ClickHouse store: the spans, their hourly rollup and their scores.
 -- `telmoni migrate` applies this file after the Postgres sets, as the user
 -- MIGRATOR_CLICKHOUSE_URL names, one statement per request — the HTTP
 -- interface takes one at a time — and applies all of it on every run, so
@@ -176,6 +176,45 @@ FROM telemetry.spans
 GROUP BY project_id, hour, agent, kind, model, provider, tool, status, environment, release,
     cost_reported;
 
+-- One row per score: of a run, one of its spans, or a session, from the
+-- application or its exporter, from a member on a trace's page, or from an
+-- evaluator. Metadata alone: a score's reasoning is content, kept as a span's.
+-- A score given again under its id replaces it, and one taken back is marked
+-- `is_deleted`, so every read is FINAL; no partition, since one id's rows must
+-- meet to replace each other, and the nightly purge deletes by age instead.
+CREATE TABLE IF NOT EXISTS telemetry.scores
+(
+    project_id     String,
+    received_at    DateTime64(6, 'UTC'),
+    score_id       UUID,
+    -- What it scores: `run`, `span` or `session`. A session's names no run;
+    -- another exporter's span its run once its trace is placed.
+    target         LowCardinality(String),
+    run_id         UUID,
+    trace_id       String,
+    span_id        String,
+    session_id     String,
+    name           String,
+    -- `number`, on its range where it names one, `boolean`, 0 or 1, or
+    -- `category`, one or several of `categories`.
+    data_type      LowCardinality(String),
+    value          Float64,
+    categories     Array(String),
+    range_min      Nullable(Float64),
+    range_max      Nullable(Float64),
+    -- `sdk`, `member` or `evaluator`; the member's user id or the
+    -- evaluator's id, and the evaluator's version.
+    source         LowCardinality(String),
+    scorer         String,
+    scorer_version String,
+    is_deleted     UInt8,
+    INDEX run_id_idx run_id TYPE bloom_filter GRANULARITY 1,
+    INDEX session_id_idx session_id TYPE bloom_filter GRANULARITY 1
+)
+ENGINE = ReplacingMergeTree(received_at, is_deleted)
+ORDER BY (project_id, score_id)
+SETTINGS non_replicated_deduplication_window = 10000;
+
 -- ⚠ Tenancy: a read sees only the projects its query's setting
 -- `SQL_telmoni_projects` names, a JSON array the one query module sets on
 -- every read; a read naming none fails on the unknown setting, never answers
@@ -191,6 +230,10 @@ CREATE ROW POLICY IF NOT EXISTS tenant_isolation ON telemetry.spans_hourly
     USING has(JSONExtract(getSetting('SQL_telmoni_projects'), 'Array(String)'), project_id)
     TO ALL EXCEPT CURRENT_USER;
 
+CREATE ROW POLICY IF NOT EXISTS tenant_isolation ON telemetry.scores
+    USING has(JSONExtract(getSetting('SQL_telmoni_projects'), 'Array(String)'), project_id)
+    TO ALL EXCEPT CURRENT_USER;
+
 -- The one this file runs as reads every row by a policy of its own: the
 -- nightly purge lists the partitions it drops from the rows, and the view
 -- runs as the same user. A user no policy names reads rows only while the
@@ -202,5 +245,9 @@ CREATE ROW POLICY IF NOT EXISTS migrator_reads_all ON telemetry.spans
     TO CURRENT_USER;
 
 CREATE ROW POLICY IF NOT EXISTS migrator_reads_all ON telemetry.spans_hourly
+    USING 1
+    TO CURRENT_USER;
+
+CREATE ROW POLICY IF NOT EXISTS migrator_reads_all ON telemetry.scores
     USING 1
     TO CURRENT_USER;

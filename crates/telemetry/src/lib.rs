@@ -63,6 +63,7 @@ pub mod retention;
 pub mod rollups;
 pub mod rules;
 pub mod schema;
+pub mod scores;
 pub mod seam;
 pub mod sessions;
 pub mod spend;
@@ -176,6 +177,14 @@ pub fn router(state: Arc<AppState>) -> Router {
             post(handler::content_mode::request_content_mode_code),
         )
         .route("/telemetry/retention", put(handler::privacy::put_retention))
+        .route(
+            "/telemetry/scores",
+            get(handler::scores::get_scores).put(handler::scores::put_score),
+        )
+        .route(
+            "/telemetry/scores/{score_id}",
+            axum::routing::delete(handler::scores::delete_score),
+        )
         .route(
             "/telemetry/prices",
             get(handler::prices::get_prices).put(handler::prices::put_prices),

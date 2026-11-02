@@ -131,6 +131,21 @@ const MUTATIONS: &[Mutation] = &[
         resource_kind: "Project",
         actor_id: ActorPattern::Variable,
     },
+    // A member's score, given or taken back, filed as a change to its trace.
+    Mutation {
+        file: "crates/telemetry/src/handler/scores.rs",
+        fn_name: "put_score",
+        action: "Updated",
+        resource_kind: "Trace",
+        actor_id: ActorPattern::Variable,
+    },
+    Mutation {
+        file: "crates/telemetry/src/handler/scores.rs",
+        fn_name: "delete_score",
+        action: "Updated",
+        resource_kind: "Trace",
+        actor_id: ActorPattern::Variable,
+    },
     // A member's changes to alerts, windows and incidents, filed by `chain::file`.
     Mutation {
         file: "crates/telemetry/src/handler/rules.rs",

@@ -13,6 +13,7 @@ pub mod mutes;
 pub mod prices;
 pub mod privacy;
 pub mod rules;
+pub mod scores;
 pub mod session_layout;
 pub mod sessions;
 pub mod traces;

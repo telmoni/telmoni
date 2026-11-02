@@ -80,6 +80,18 @@ const READ_TIMEOUT: Duration = Duration::from_secs(10);
 const DELETE_SPANS: &str = "DELETE FROM telemetry.spans WHERE project_id = {project:String}";
 const DELETE_ROLLUP: &str =
     "DELETE FROM telemetry.spans_hourly WHERE project_id = {project:String}";
+/// A project's scores marked deleted with its spans.
+const DELETE_SCORES: &str = "DELETE FROM telemetry.scores WHERE project_id = {project:String}";
+/// The scores of some runs, deleted with them.
+const DELETE_RUN_SCORES: &str = "DELETE FROM telemetry.scores
+     WHERE project_id = {project:String} AND has({runs:Array(UUID)}, run_id)";
+/// The scores of some sessions, deleted with an end user's runs of them.
+const DELETE_SESSION_SCORES: &str = "DELETE FROM telemetry.scores
+     WHERE project_id = {project:String} AND target = 'session'
+       AND has({sessions:Array(String)}, session_id)";
+/// A project's scores given before a cutoff, past its retention, as its spans go.
+pub(crate) const DELETE_SCORES_BEFORE: &str = "DELETE FROM telemetry.scores
+     WHERE project_id = {project:String} AND received_at < {cutoff:DateTime64(6, 'UTC')}";
 /// A project's spans that landed before a cutoff, past its retention: what
 /// [`Store::delete_before`] sends, and `rotate` for a project's own shorter
 /// one. The hourly totals keep their counts.
@@ -420,6 +432,39 @@ impl Store {
         insert.end().await
     }
 
+    /// Write scores as [`Self::insert_spans_once`] writes spans, under `token`:
+    /// sent again under it, none is written twice.
+    ///
+    /// ⚠ An error's text can carry ClickHouse's own message: log its kind.
+    pub async fn insert_scores_once(
+        &self,
+        scores: &[crate::scores::ScoreRow],
+        token: &str,
+    ) -> clickhouse::error::Result<()> {
+        if scores.is_empty() {
+            return Ok(());
+        }
+        let insert = within(
+            INSERT_SEND_TIMEOUT,
+            self.client.insert::<crate::scores::ScoreRow>("scores"),
+        )
+        .await?;
+        let mut insert = insert
+            .with_setting("async_insert", "1")
+            .with_setting("wait_for_async_insert", "1")
+            .with_setting(
+                "wait_for_async_insert_timeout",
+                ASYNC_INSERT_WAIT.as_secs().to_string(),
+            )
+            .with_setting("async_insert_deduplicate", "1")
+            .with_setting("insert_deduplication_token", token)
+            .with_timeouts(Some(INSERT_SEND_TIMEOUT), Some(self.insert_wait));
+        for score in scores {
+            insert.write(score).await?;
+        }
+        insert.end().await
+    }
+
     /// Write finished spans as [`Self::insert_spans_once`] does, under a
     /// token of their own, so no other insert is taken for their copy.
     pub async fn insert_spans(&self, spans: &[SpanRow]) -> clickhouse::error::Result<()> {
@@ -438,7 +483,7 @@ impl Store {
     /// ⚠ An error's text can carry ClickHouse's own message: log its kind,
     /// never the text.
     pub async fn delete_project(&self, project: &ProjectId) -> clickhouse::error::Result<()> {
-        for statement in [DELETE_SPANS, DELETE_ROLLUP] {
+        for statement in [DELETE_SPANS, DELETE_ROLLUP, DELETE_SCORES] {
             within(
                 DELETE_TIMEOUT,
                 self.delete(project, statement, false).execute(),
@@ -461,7 +506,26 @@ impl Store {
     ) -> clickhouse::error::Result<()> {
         // A parameter travels in the URL, which ClickHouse caps at 1 MiB.
         for some in runs.chunks(RUNS_PER_DELETE) {
-            let delete = self.delete(project, DELETE_RUNS, true).param("runs", some);
+            for statement in [DELETE_RUNS, DELETE_RUN_SCORES] {
+                let delete = self.delete(project, statement, true).param("runs", some);
+                within(DELETE_TIMEOUT, delete.execute()).await?;
+            }
+        }
+        Ok(())
+    }
+
+    /// The scores of `sessions` of `project`, deleted as [`Store::delete_runs`] deletes.
+    ///
+    /// ⚠ An error's text can carry ClickHouse's own message: log its kind.
+    pub async fn delete_session_scores(
+        &self,
+        project: &ProjectId,
+        sessions: &[String],
+    ) -> clickhouse::error::Result<()> {
+        for some in sessions.chunks(RUNS_PER_DELETE) {
+            let delete = self
+                .delete(project, DELETE_SESSION_SCORES, true)
+                .param("sessions", some);
             within(DELETE_TIMEOUT, delete.execute()).await?;
         }
         Ok(())
@@ -475,10 +539,13 @@ impl Store {
         project: &ProjectId,
         cutoff: DateTime<Utc>,
     ) -> clickhouse::error::Result<()> {
-        let delete = self
-            .delete(project, DELETE_BEFORE, true)
-            .param("cutoff", micros(cutoff));
-        within(DELETE_TIMEOUT, delete.execute()).await
+        for statement in [DELETE_BEFORE, DELETE_SCORES_BEFORE] {
+            let delete = self
+                .delete(project, statement, true)
+                .param("cutoff", micros(cutoff));
+            within(DELETE_TIMEOUT, delete.execute()).await?;
+        }
+        Ok(())
     }
 
     /// `run`'s tags changed on its every span: `removed` taken off, then

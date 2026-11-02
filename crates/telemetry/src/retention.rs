@@ -9,7 +9,8 @@
 //! the next night's run ([`rewrite_deleted`]). The content an `on` project
 //! keeps in Postgres follows its span's day ([`purge_content`]). A project
 //! that chose fewer days than the longest sold has its older spans deleted
-//! the same night, and their content with them ([`shortened`]).
+//! the same night, and their content with them ([`shortened`]). Scores go by
+//! the same days, deleted rather than dropped.
 
 use anyhow::Context;
 use chrono::{DateTime, Datelike, Duration, Months, NaiveDate, TimeZone, Utc};
@@ -48,6 +49,13 @@ const LIST_MAX_EXECUTION_SECS: &str = "50";
 const APPLY_SPAN_MASK: &str = "ALTER TABLE telemetry.spans APPLY DELETED MASK";
 
 const APPLY_ROLLUP_MASK: &str = "ALTER TABLE telemetry.spans_hourly APPLY DELETED MASK";
+
+const APPLY_SCORE_MASK: &str = "ALTER TABLE telemetry.scores APPLY DELETED MASK";
+
+/// Every project's scores given before the cutoff: the table has no day to
+/// drop, since one score's rows must meet to replace each other.
+const DELETE_OLD_SCORES: &str =
+    "DELETE FROM telemetry.scores WHERE received_at < {cutoff:DateTime64(6, 'UTC')}";
 
 /// What one purge dropped.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -148,6 +156,16 @@ pub async fn purge(
     )
     .await
     .context("dropping months of hourly totals past retention");
+    let scores = within(
+        STATEMENT_TIMEOUT,
+        client
+            .query_raw(DELETE_OLD_SCORES)
+            .with_setting("lightweight_deletes_sync", "1")
+            .param("cutoff", micros(span_cutoff(now)))
+            .execute(),
+    )
+    .await
+    .context("deleting the scores past retention");
     let cut = delete_shortened(client, shortened, now)
         .await
         .context("deleting the spans past a project's own retention");
@@ -158,6 +176,7 @@ pub async fn purge(
         span_days: span_days?,
         rollup_months: rollup_months?,
     };
+    scores?;
     cut?;
     rewritten?;
     Ok(purged)
@@ -172,20 +191,25 @@ async fn delete_shortened(
 ) -> anyhow::Result<()> {
     let mut first_failure = None;
     for (project, days) in shortened {
-        let deleted = within(
-            STATEMENT_TIMEOUT,
-            client
-                .query_raw(crate::store::DELETE_BEFORE)
-                .with_setting("lightweight_deletes_sync", "1")
-                .param("project", project.as_str())
-                .param("cutoff", micros(cutoff_after(now, *days)))
-                .execute(),
-        )
-        .await;
-        if let Err(e) = deleted {
-            tracing::error!(project_id = %project, days, error = %e,
-                "rotate: a project's spans past its own retention could not be deleted");
-            first_failure.get_or_insert(e);
+        for statement in [
+            crate::store::DELETE_BEFORE,
+            crate::store::DELETE_SCORES_BEFORE,
+        ] {
+            let deleted = within(
+                STATEMENT_TIMEOUT,
+                client
+                    .query_raw(statement)
+                    .with_setting("lightweight_deletes_sync", "1")
+                    .param("project", project.as_str())
+                    .param("cutoff", micros(cutoff_after(now, *days)))
+                    .execute(),
+            )
+            .await;
+            if let Err(e) = deleted {
+                tracing::error!(project_id = %project, days, error = %e,
+                    "rotate: a project's spans or scores past its own retention could not be deleted");
+                first_failure.get_or_insert(e);
+            }
         }
     }
     first_failure.map_or(Ok(()), |e| Err(e.into()))
@@ -269,6 +293,7 @@ pub async fn rewrite_deleted(client: &clickhouse::Client) -> anyhow::Result<()> 
     for (table, statement) in [
         ("spans", APPLY_SPAN_MASK),
         ("spans_hourly", APPLY_ROLLUP_MASK),
+        ("scores", APPLY_SCORE_MASK),
     ] {
         match within(
             STATEMENT_TIMEOUT,

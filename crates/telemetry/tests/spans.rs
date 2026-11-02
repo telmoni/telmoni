@@ -227,9 +227,40 @@ async fn a_read_naming_one_project_sees_no_other() {
         ])
         .await
         .expect("insert both projects' spans");
+    let score = |project: &ProjectId| telmoni_telemetry::scores::ScoreRow {
+        project_id: project.clone(),
+        received_at: Utc::now(),
+        score_id: uuid::Uuid::new_v4(),
+        target: telmoni_shared::ScoreTarget::Run,
+        run_id: uuid::Uuid::new_v4(),
+        trace_id: String::new(),
+        span_id: String::new(),
+        session_id: String::new(),
+        name: "helpful".into(),
+        data_type: telmoni_shared::ScoreType::Boolean,
+        value: 1.0,
+        categories: Vec::new(),
+        range_min: None,
+        range_max: None,
+        source: telmoni_shared::ScoreSource::Sdk,
+        scorer: String::new(),
+        scorer_version: String::new(),
+        is_deleted: 0,
+    };
+    ch.store
+        .insert_scores_once(
+            &[score(&mine), score(&theirs)],
+            &uuid::Uuid::new_v4().to_string(),
+        )
+        .await
+        .expect("insert both projects' scores");
 
     // The policy alone: SQL with no tenant in it, sent round the module.
-    for table in ["telemetry.spans", "telemetry.spans_hourly"] {
+    for table in [
+        "telemetry.spans",
+        "telemetry.spans_hourly",
+        "telemetry.scores",
+    ] {
         let seen: Vec<String> = ch
             .telemetry
             .query_raw(&format!("SELECT DISTINCT project_id FROM {table}"))
@@ -311,7 +342,11 @@ async fn a_read_naming_no_project_fails() {
     );
     // ClickHouse masks the setting's name in its error, as every quoted
     // literal, so the refusal is known by its code.
-    for table in ["telemetry.spans", "telemetry.spans_hourly"] {
+    for table in [
+        "telemetry.spans",
+        "telemetry.spans_hourly",
+        "telemetry.scores",
+    ] {
         let refused = ch
             .telemetry
             .query_raw(&format!("SELECT count() FROM {table}"))

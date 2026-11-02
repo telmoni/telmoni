@@ -250,7 +250,27 @@ async fn write(
 
     // Another exporter's spans wait for their trace's tree, kept before the
     // answer so a failure is retried.
+    let held_spans: std::collections::HashSet<(String, String)> = batch
+        .held
+        .iter()
+        .map(|(row, _)| (row.trace_id.clone(), row.span_id.clone()))
+        .collect();
     let refused = crate::foreign::hold(state, key, std::mem::take(&mut batch.held)).await?;
+    // Their scores wait under the nil run, as the spans do, until placed.
+    let waiting: Vec<crate::scores::ScoreRow> = batch
+        .scores
+        .iter()
+        .filter(|score| {
+            held_spans.contains(&(score.trace_id.clone(), score.span_id.clone()))
+                && !refused.iter().any(|r| r.span_id == score.span_id)
+        })
+        .cloned()
+        .collect();
+    state
+        .store
+        .insert_scores_once(&waiting, &format!("{token}/held-scores"))
+        .await
+        .map_err(store_failed)?;
     batch.report.refused.extend(refused);
     let held = land(
         state,
@@ -306,6 +326,26 @@ pub(crate) async fn land(
         if matches!(error, clickhouse::error::Error::TimedOut) && !batch.rows.is_empty() {
             settle_later(state, project_id, ASYNC_INSERT_WAIT);
         }
+        return Err(store_failed(error));
+    }
+    // Before the late runs are marked again, so their scores go with them;
+    // a score whose span was not kept, refused, sampled out or held, is not.
+    let kept: std::collections::HashSet<(&str, &str)> = batch
+        .rows
+        .iter()
+        .map(|row| (row.trace_id.as_str(), row.span_id.as_str()))
+        .collect();
+    let scores: Vec<crate::scores::ScoreRow> = batch
+        .scores
+        .iter()
+        .filter(|score| kept.contains(&(score.trace_id.as_str(), score.span_id.as_str())))
+        .cloned()
+        .collect();
+    if let Err(error) = state
+        .store
+        .insert_scores_once(&scores, &format!("{token}/scores"))
+        .await
+    {
         return Err(store_failed(error));
     }
     erasure::mark_late(state, project_id, batch).await;

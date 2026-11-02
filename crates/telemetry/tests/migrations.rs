@@ -140,7 +140,11 @@ fn the_clickhouse_file_runs_on_one_node_anywhere() {
 #[test]
 fn every_reader_but_the_migrator_is_held_and_the_view_runs_as_its_definer() {
     let all = statements(MIGRATION);
-    for table in ["telemetry.spans", "telemetry.spans_hourly"] {
+    for table in [
+        "telemetry.spans",
+        "telemetry.spans_hourly",
+        "telemetry.scores",
+    ] {
         let policy = all
             .iter()
             .find(|s| {
@@ -183,7 +187,7 @@ fn every_reader_but_the_migrator_is_held_and_the_view_runs_as_its_definer() {
         .iter()
         .filter(|s| s.to_ascii_uppercase().contains("ROW POLICY"))
         .count();
-    assert_eq!(policies, 4, "a row policy beside each table's two");
+    assert_eq!(policies, 6, "a row policy beside each table's two");
     let view = all
         .iter()
         .find(|s| s.contains("MATERIALIZED VIEW"))

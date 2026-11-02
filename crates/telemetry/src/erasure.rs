@@ -92,6 +92,8 @@ pub struct Found {
     pub runs: Vec<Uuid>,
     /// Their spans.
     pub spans: u64,
+    /// An end user's sessions, whose own scores go with them.
+    pub sessions: Vec<String>,
 }
 
 /// The runs `erase` names in the project: a run whole, an end user's those
@@ -114,6 +116,7 @@ pub async fn find(
             "the span store did not answer; try again",
         )
     };
+    let mut found_sessions = Vec::new();
     let (candidates, user) = match erase {
         Erase::Trace(run) => (vec![run], ""),
         Erase::EndUser(user) => {
@@ -132,6 +135,7 @@ pub async fn find(
                 .collect::<HashSet<_>>()
                 .into_iter()
                 .collect();
+            found_sessions = sessions.clone();
             for some in sessions.chunks(PER_STATEMENT) {
                 let shared: Vec<SessionRun> = state
                     .store
@@ -145,7 +149,10 @@ pub async fn find(
             (runs.into_iter().collect(), user)
         }
     };
-    let mut found = Found::default();
+    let mut found = Found {
+        sessions: found_sessions,
+        ..Found::default()
+    };
     for some in candidates.chunks(PER_STATEMENT) {
         let counted: Vec<RunCount> = state
             .store
@@ -206,6 +213,17 @@ pub async fn carry_out(
             tx.commit().await?;
         }
         let fields = delete(&state, &project_id, &found.runs).await?;
+        state
+            .store
+            .delete_session_scores(&project_id, &found.sessions)
+            .await
+            .map_err(|e| {
+                store::failed(
+                    &e,
+                    "a deletion's mark",
+                    "the span store did not answer; try again",
+                )
+            })?;
         let receipt = match run {
             Some(run_id) => Receipt::Trace {
                 project_id: &project_id,

@@ -156,6 +156,21 @@ the resource `service.name` and every `telemetry.sdk.*` and
 `service.version` are the `environment` and `release` columns above, never
 attributes.
 
+### Scores
+
+A span carries a score as OpenTelemetry's evaluation event,
+`gen_ai.evaluation.result`, on the span it judges: `gen_ai.evaluation.name`,
+1 to 64 characters, and `gen_ai.evaluation.score.value`, a number, or
+`gen_ai.evaluation.score.label`, a category, where it has no value. A value
+of 1 or 0 with `telmoni.score.type` set to `boolean`, or a boolean value, is
+a yes or no. The score is kept as metadata in every content mode, of the run
+where the event is on the run's own span and of the span otherwise, beside
+its trace; an event of another exporter's span waits with it and lands with
+its run. An event without a name, or with a value that is no number, is no
+score. `gen_ai.evaluation.explanation` is free text, so content, kept with
+the span's events where the project keeps content. An export sent again
+keeps each score once, by its span, its name and the event's time.
+
 ## What is dropped at the door
 
 **Content** — `gen_ai.input.messages`, `gen_ai.output.messages`,

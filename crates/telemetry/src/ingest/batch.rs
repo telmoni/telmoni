@@ -31,6 +31,9 @@ pub struct Batch {
     /// Another exporter's spans, each with its content, held until its
     /// trace's tree places it in a run ([`crate::foreign`]).
     pub held: Vec<(SpanRow, Vec<(String, String)>)>,
+    /// The scores the spans' evaluation events gave, each naming its span;
+    /// another exporter's under the nil run until its trace is placed.
+    pub scores: Vec<crate::scores::ScoreRow>,
     /// The spans refused and the attributes dropped.
     pub report: Report,
 }
@@ -109,6 +112,9 @@ pub fn read(
                 let dropped_before = batch.report.dropped.len();
                 match span::map(one, &context, &mut batch.report.dropped) {
                     Ok((row, fields)) => {
+                        batch
+                            .scores
+                            .extend(scores_of(one, &row, project_id, received_at));
                         if !fields.is_empty() {
                             batch.content.push(SpanContent {
                                 run_id: row.run_id,
@@ -157,6 +163,50 @@ pub fn read(
     }
     hold_foreign(&mut batch);
     Ok(batch)
+}
+
+/// A kept span's scores, from its evaluation events: the run's own scores the
+/// run, any other span itself.
+fn scores_of(
+    span: &opentelemetry_proto::tonic::trace::v1::Span,
+    row: &SpanRow,
+    project_id: &ProjectId,
+    received_at: DateTime<Utc>,
+) -> Vec<crate::scores::ScoreRow> {
+    use telmoni_shared::{ScoreSource, ScoreTarget, SpanKind};
+    crate::scores::of_span(span)
+        .into_iter()
+        .map(|(judgement, at)| crate::scores::ScoreRow {
+            project_id: project_id.clone(),
+            received_at,
+            score_id: crate::scores::sdk_score_id(
+                project_id,
+                &row.trace_id,
+                &row.span_id,
+                &judgement.name,
+                at,
+            ),
+            target: if row.kind == SpanKind::Run {
+                ScoreTarget::Run
+            } else {
+                ScoreTarget::Span
+            },
+            run_id: row.run_id,
+            trace_id: row.trace_id.clone(),
+            span_id: row.span_id.clone(),
+            session_id: row.session_id.clone(),
+            value: judgement.stored_value(),
+            name: judgement.name,
+            data_type: judgement.data_type,
+            categories: judgement.categories,
+            range_min: judgement.range_min,
+            range_max: judgement.range_max,
+            source: ScoreSource::Sdk,
+            scorer: String::new(),
+            scorer_version: String::new(),
+            is_deleted: 0,
+        })
+        .collect()
 }
 
 /// Every span under the nil run, another exporter's, moved to `held` with
