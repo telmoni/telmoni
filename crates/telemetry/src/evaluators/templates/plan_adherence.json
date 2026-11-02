@@ -1,0 +1,25 @@
+{
+  "key": "plan_adherence",
+  "group": "agents",
+  "name": "Plan adherence",
+  "description": "Whether the agent followed the plan it stated or was given.",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You judge whether an AI agent followed its plan: the steps its instructions or its own first answer set out, against the tool calls it made and the answer it gave."
+    },
+    {
+      "role": "user",
+      "content": "The request:\n{{input}}\n\nThe answer:\n{{output}}\n\nThe tool calls and their results, in order:\n{{trajectory}}"
+    }
+  ],
+  "score": {
+    "name": "plan_adherence",
+    "data_type": "number",
+    "range_min": 0,
+    "range_max": 1,
+    "low_means": "it ignored the plan",
+    "high_means": "it followed the plan, or changed it for good reason"
+  },
+  "reasoning": true
+}

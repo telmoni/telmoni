@@ -102,6 +102,7 @@ describe("buildConsoleNav", () => {
       "/acme/web/users",
       "/acme/web/alerts",
       "/acme/web/dashboards",
+      "/acme/web/evaluators",
       "/acme/web/api-keys",
       "/acme/web/connectors",
       "/acme/web/members",
@@ -206,6 +207,7 @@ describe("buildConsoleNav", () => {
       "/acme/web/users",
       "/acme/web/alerts",
       "/acme/web/dashboards",
+      "/acme/web/evaluators",
       "/acme/web/api-keys",
       "/acme/web/connectors",
       "/acme/web/members",
@@ -236,13 +238,14 @@ describe("the blocks of a run", () => {
   // and its housekeeping rows because they are the project's own; an
   // organization's own rows are headed the same way under its Overview; the
   // person's rail is one unheaded block, its way back saying what it is.
-  it("heads a project's observability and housekeeping rows and the organization's own rows, and nothing else", () => {
+  it("heads a project's observability, evaluation and housekeeping rows and the organization's own rows, and nothing else", () => {
     const [project] = buildConsoleNav("/acme/web/api-keys");
     expect(
       navBlocks(project?.items ?? []).map((b) => [b.heading, b.items.map((i) => i.title)]),
     ).toEqual([
       [undefined, ["Overview"]],
       ["Observability", ["Traces", "Sessions", "Users", "Alerts", "Dashboards"]],
+      ["Evaluation", ["Evaluators"]],
       ["Project", ["API keys", "Connectors", "Members", "Audit log", "Privacy", "Settings"]],
     ]);
     const [organization] = buildConsoleNav("/acme/settings");
@@ -300,6 +303,7 @@ describe("the whole destination set", () => {
       "/acme/web/users",
       "/acme/web/alerts",
       "/acme/web/dashboards",
+      "/acme/web/evaluators",
       "/acme/web/api-keys",
       "/acme/web/connectors",
       "/acme/web/members",

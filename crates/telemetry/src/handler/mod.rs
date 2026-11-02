@@ -5,6 +5,7 @@
 
 pub(crate) mod chain;
 pub mod content_mode;
+pub mod evaluators;
 pub mod field_inventory;
 pub mod health;
 pub mod incidents;

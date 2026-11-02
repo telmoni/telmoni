@@ -58,12 +58,26 @@ async fn settings_and_a_view(pool: &PgPool, project: &ProjectId, organization: &
     .execute(pool)
     .await
     .expect("a model connection");
+    sqlx::query(
+        "INSERT INTO telemetry.evaluators (id, version, project_id, name, messages, score, created_by)
+         VALUES ($1, 1, $2, 'Relevant', '[]', '{}', 'u')",
+    )
+    .bind(Uuid::now_v7())
+    .bind(project)
+    .execute(pool)
+    .await
+    .expect("an evaluator");
 }
 
 /// The tables a purge empties in which the project has a row still.
 async fn left_of(pool: &PgPool, project: &ProjectId) -> Vec<&'static str> {
     let mut left = Vec::new();
-    for table in ["model_connections", "project_settings", "trace_views"] {
+    for table in [
+        "evaluators",
+        "model_connections",
+        "project_settings",
+        "trace_views",
+    ] {
         let rows: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
             "SELECT count(*) FROM telemetry.{table} WHERE project_id = $1"
         )))
@@ -177,7 +191,12 @@ async fn a_purge_waits_two_seconds_at_most_for_a_project_held_in_place(pool: PgP
     in_place.rollback().await.expect("the export ends");
     assert_eq!(
         left_of(&pool, &project).await,
-        ["model_connections", "project_settings", "trace_views"]
+        [
+            "evaluators",
+            "model_connections",
+            "project_settings",
+            "trace_views"
+        ]
     );
 }
 
@@ -219,15 +238,20 @@ async fn an_organizations_purge_holds_every_project_its_rows_name(pool: PgPool) 
     );
     assert!(held.is_empty(), "held in place beside the purge: {held:?}");
     assert_eq!(
-        purged, 6,
-        "a view, a model connection and a settings row of each project"
+        purged, 8,
+        "a view, a model connection, an evaluator and a settings row of each project"
     );
     for project in &ours {
         assert!(left_of(&pool, project).await.is_empty(), "{project}");
     }
     assert_eq!(
         left_of(&pool, &theirs).await,
-        ["model_connections", "project_settings", "trace_views"]
+        [
+            "evaluators",
+            "model_connections",
+            "project_settings",
+            "trace_views"
+        ]
     );
 }
 
@@ -272,7 +296,12 @@ async fn a_projects_purge_cut_short_is_finished_by_the_sweep(pool: PgPool) {
     let left = left_of(&pool, &gone).await;
     assert_eq!(
         left,
-        ["model_connections", "project_settings", "trace_views"]
+        [
+            "evaluators",
+            "model_connections",
+            "project_settings",
+            "trace_views"
+        ]
     );
 
     // A pass auth cannot answer, and one ClickHouse does not: nothing goes.
@@ -303,7 +332,12 @@ async fn a_projects_purge_cut_short_is_finished_by_the_sweep(pool: PgPool) {
     .await;
     assert_eq!(
         left_of(&pool, &kept).await,
-        ["model_connections", "project_settings", "trace_views"]
+        [
+            "evaluators",
+            "model_connections",
+            "project_settings",
+            "trace_views"
+        ]
     );
     assert_eq!(common::rows_of(&clickhouse.store, &kept).await, (1, 1));
     assert_eq!(
@@ -349,7 +383,12 @@ async fn a_purge_the_sweep_cannot_finish_now_waits_for_the_next_pass(pool: PgPoo
     assert!(left_of(&pool, other).await.is_empty());
     assert_eq!(
         left_of(&pool, held).await,
-        ["model_connections", "project_settings", "trace_views"]
+        [
+            "evaluators",
+            "model_connections",
+            "project_settings",
+            "trace_views"
+        ]
     );
     in_place.rollback().await.expect("the export ends");
     assert_eq!(

@@ -1,0 +1,25 @@
+{
+  "key": "tool_selection",
+  "group": "agents",
+  "name": "Tool selection",
+  "description": "Whether the agent called the right tools, with the right arguments.",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You judge an AI agent's choice of tools for its request: whether each call was needed, whether a better tool was skipped, and whether the arguments fit the request."
+    },
+    {
+      "role": "user",
+      "content": "The request:\n{{input}}\n\nThe tool calls, in order:\n{{tool_calls}}"
+    }
+  ],
+  "score": {
+    "name": "tool_selection",
+    "data_type": "number",
+    "range_min": 0,
+    "range_max": 1,
+    "low_means": "the wrong tools, or needed ones skipped",
+    "high_means": "every call the right one, with the right arguments"
+  },
+  "reasoning": true
+}

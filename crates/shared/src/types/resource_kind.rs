@@ -38,6 +38,8 @@ pub enum TelmoniResourceKind {
     /// A project's connection to a model on the customer's own key: made,
     /// changed or deleted, named by its provider, never its key.
     ModelConnection,
+    /// A project's evaluator: a version saved, or the evaluator deleted.
+    Evaluator,
 }
 
 crate::wire_enum!(TelmoniResourceKind {
@@ -53,6 +55,7 @@ crate::wire_enum!(TelmoniResourceKind {
     Trace => "trace",
     EndUser => "end_user",
     ModelConnection => "model_connection",
+    Evaluator => "evaluator",
 });
 
 #[cfg(test)]

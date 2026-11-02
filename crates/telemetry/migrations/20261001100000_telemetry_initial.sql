@@ -633,6 +633,49 @@ CREATE POLICY maintenance_access ON telemetry.model_connections
 -- The evaluation loop opens a project's connections; the purges delete them.
 GRANT SELECT, DELETE ON telemetry.model_connections TO telemetry_maintenance;
 
+-- A project's evaluators, LLM-as-a-judge: a row a version under the
+-- evaluator's stable id, each change a new version, each score naming the one
+-- that gave it. Its connection is the project's default where none is named;
+-- one deleted leaves the evaluator unable to judge until it names another.
+CREATE TABLE telemetry.evaluators (
+    id            UUID             NOT NULL,
+    version       INTEGER          NOT NULL,
+    project_id    TEXT             NOT NULL,
+    name          TEXT             NOT NULL,
+    kind          TEXT             NOT NULL DEFAULT 'prompt',
+    -- The system message, then the user's and assistant's, as {role, content}.
+    messages      JSONB            NOT NULL,
+    -- The score it gives: its name, type, range or categories, each described.
+    score         JSONB            NOT NULL,
+    reasoning     BOOLEAN          NOT NULL DEFAULT true,
+    connection_id UUID,
+    model         TEXT,
+    temperature   DOUBLE PRECISION,
+    created_by    TEXT             NOT NULL,
+    created_at    TIMESTAMPTZ      NOT NULL DEFAULT now(),
+    PRIMARY KEY (project_id, id, version),
+    CONSTRAINT evaluators_kind_check CHECK (kind IN ('prompt', 'code')),
+    CONSTRAINT evaluators_check CHECK (
+        version >= 1 AND char_length(name) BETWEEN 1 AND 60
+        AND (temperature IS NULL OR temperature BETWEEN 0 AND 2)
+    )
+);
+
+ALTER TABLE telemetry.evaluators ENABLE ROW LEVEL SECURITY;
+ALTER TABLE telemetry.evaluators FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY tenant_isolation ON telemetry.evaluators
+    USING      (project_id = current_setting('app.project_id', true))
+    WITH CHECK (project_id = current_setting('app.project_id', true));
+
+CREATE POLICY maintenance_access ON telemetry.evaluators
+    TO telemetry_maintenance
+    USING      (current_user = 'telemetry_maintenance')
+    WITH CHECK (current_user = 'telemetry_maintenance');
+
+-- The evaluation loop reads a project's evaluators; the purges delete them.
+GRANT SELECT, DELETE ON telemetry.evaluators TO telemetry_maintenance;
+
 -- Another exporter's spans, held until their trace's tree places them in a
 -- run (`foreign.rs`), their content sealed as `plain_content`'s; landed, a
 -- span keeps only its run, for a day, for a child arriving later.

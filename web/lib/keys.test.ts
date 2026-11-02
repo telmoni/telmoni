@@ -49,6 +49,7 @@ describe("the go sequences", () => {
     expect(resolveSequence("k", "/acme/web")).toBe("/acme/web/api-keys");
     expect(resolveSequence("t", "/acme/web/members")).toBe("/acme/web/traces");
     expect(resolveSequence("d", "/acme/web")).toBe("/acme/web/dashboards");
+    expect(resolveSequence("e", "/acme/web")).toBe("/acme/web/evaluators");
     expect(resolveSequence(",", "/acme/web")).toBe("/acme/web/settings");
     expect(resolveSequence("p", "/acme/web")).toBe("/acme/web/privacy");
     expect(resolveSequence("k", "/acme/members")).toBeNull();

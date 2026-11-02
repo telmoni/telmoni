@@ -1,0 +1,25 @@
+{
+  "key": "conciseness",
+  "group": "quality",
+  "name": "Conciseness",
+  "description": "Whether the answer says what it needs to without padding.",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You judge how concise an AI agent's answer is: whether it says what the request needs without repetition, filler or detail nobody asked for. Do not penalize length the request calls for."
+    },
+    {
+      "role": "user",
+      "content": "The request:\n{{input}}\n\nThe answer:\n{{output}}"
+    }
+  ],
+  "score": {
+    "name": "conciseness",
+    "data_type": "number",
+    "range_min": 0,
+    "range_max": 1,
+    "low_means": "padded, repetitive or rambling",
+    "high_means": "says what is needed and no more"
+  },
+  "reasoning": true
+}

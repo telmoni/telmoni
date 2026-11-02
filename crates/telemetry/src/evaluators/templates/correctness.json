@@ -1,0 +1,25 @@
+{
+  "key": "correctness",
+  "group": "quality",
+  "name": "Correctness",
+  "description": "Whether the answer does what its request asks, and does it right.",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You judge whether an AI agent's answer is correct: whether it does what the request asks, and whether what it says is true. A correct answer may be short; an incomplete one is less correct."
+    },
+    {
+      "role": "user",
+      "content": "The request:\n{{input}}\n\nThe answer:\n{{output}}"
+    }
+  ],
+  "score": {
+    "name": "correctness",
+    "data_type": "number",
+    "range_min": 0,
+    "range_max": 1,
+    "low_means": "wrong, or does not do what was asked",
+    "high_means": "fully correct and complete"
+  },
+  "reasoning": true
+}

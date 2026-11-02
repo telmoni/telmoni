@@ -50,6 +50,7 @@ pub mod content;
 pub mod contract;
 pub mod db;
 pub mod erasure;
+pub mod evaluators;
 pub mod foreign;
 pub mod handler;
 pub mod hashing;
@@ -191,6 +192,22 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route(
             "/telemetry/model-connections/{id}",
             axum::routing::delete(handler::model_connections::delete_connection),
+        )
+        .route(
+            "/telemetry/evaluators",
+            get(handler::evaluators::get_evaluators).put(handler::evaluators::put_evaluator),
+        )
+        .route(
+            "/telemetry/evaluators/templates",
+            get(handler::evaluators::get_templates),
+        )
+        .route(
+            "/telemetry/evaluators/try",
+            post(handler::evaluators::try_evaluator),
+        )
+        .route(
+            "/telemetry/evaluators/{id}",
+            get(handler::evaluators::get_versions).delete(handler::evaluators::delete_evaluator),
         )
         .route(
             "/telemetry/scores",

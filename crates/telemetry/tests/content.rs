@@ -3823,3 +3823,222 @@ async fn an_owner_connects_a_model_on_their_own_key_proved_first(pool: PgPool) {
         "{filed:?}"
     );
 }
+
+/// A provider that answers every judgement `answer`, keeping each request's body.
+async fn mock_judge(answer: Value) -> (String, Arc<std::sync::Mutex<Vec<Value>>>) {
+    use axum::routing::post;
+    let asked = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let kept = Arc::clone(&asked);
+    let app = Router::new().route(
+        "/v1/chat/completions",
+        post(move |axum::Json(body): axum::Json<Value>| {
+            let kept = Arc::clone(&kept);
+            let answer = answer.clone();
+            async move {
+                kept.lock().expect("the requests").push(body);
+                axum::Json(json!({
+                    "choices": [{ "message": { "content": answer.to_string() } }],
+                    "usage": { "prompt_tokens": 120, "completion_tokens": 20 },
+                }))
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("a port");
+    let at = listener.local_addr().expect("an address");
+    tokio::spawn(async move { axum::serve(listener, app).await.ok() });
+    (format!("http://{at}/v1"), asked)
+}
+
+/// An owner tries an evaluator on a real trace, its content filed as their
+/// read, then saves it, the model asked for the score's schema first; each
+/// change is a version, filed; a member reads them and changes none; and a
+/// project that keeps no content saves none.
+#[sqlx::test]
+async fn an_owner_tries_an_evaluator_on_a_trace_then_saves_its_versions(pool: PgPool) {
+    let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    apply_audit_migrations(&pool).await;
+    let kept = door(&pool, ContentMode::On).await;
+    kept.auth
+        .seat(
+            "admin-1",
+            &kept.organization,
+            &kept.project,
+            OrganizationRole::Owner,
+            None,
+        )
+        .seat(
+            "member-1",
+            &kept.organization,
+            &kept.project,
+            OrganizationRole::Member,
+            Some(Role::Member),
+        );
+    let (base, asked) =
+        mock_judge(json!({ "reasoning": "It answers the question.", "score": true })).await;
+    let (status, connected) = kept
+        .lane(
+            "PUT",
+            "/model-connections",
+            "admin-1",
+            Some(json!({
+                "name": "Gateway", "provider": "openai_compatible", "base_url": base,
+                "models": ["judge-1"], "secret": "sk-good",
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{connected}");
+    kept.send(turn_of("conv-1")).await;
+    common::eventually("the trace is read", || found(&kept, RUN)).await;
+
+    let (status, templates) = kept
+        .lane("GET", "/evaluators/templates", "member-1", None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{templates}");
+    assert_eq!(templates["templates"].as_array().map(Vec::len), Some(16));
+    let draft = json!({
+        "name": "Relevant",
+        "messages": [
+            { "role": "system", "content": "You judge answers." },
+            { "role": "user", "content": "Asked: {{input}}\nAnswered: {{output}}" },
+        ],
+        "score": { "name": "relevant", "data_type": "boolean", "low_means": "off topic", "high_means": "on topic" },
+    });
+
+    let (status, tried) = kept
+        .lane(
+            "POST",
+            "/evaluators/try",
+            "admin-1",
+            Some(json!({ "evaluator": draft, "run_id": RUN })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{tried}");
+    assert_eq!(tried["judgement"]["value"], 1.0);
+    assert_eq!(tried["reasoning"], "It answers the question.");
+    assert!(
+        tried["messages"][0]["content"]
+            .as_str()
+            .is_some_and(|m| m.contains(MESSAGES)),
+        "the run's input, as sent: {tried}"
+    );
+    assert!(
+        tried["system"]
+            .as_str()
+            .is_some_and(|s| s.contains("true means on topic"))
+    );
+    assert_eq!(
+        kept.viewed(&pool).await.len(),
+        1,
+        "the try's read, filed as the owner's"
+    );
+    let sent = asked
+        .lock()
+        .expect("the requests")
+        .last()
+        .cloned()
+        .expect("a request");
+    assert_eq!(
+        sent["response_format"]["json_schema"]["schema"]["properties"]["score"],
+        json!({ "type": "boolean" })
+    );
+
+    let (status, refused) = kept
+        .lane("PUT", "/evaluators", "member-1", Some(draft.clone()))
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{refused}");
+    let (status, saved) = kept
+        .lane("PUT", "/evaluators", "admin-1", Some(draft.clone()))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(saved["version"], 1);
+    let id = saved["id"].as_str().expect("an id").to_owned();
+    let mut changed = draft.clone();
+    changed["id"] = json!(id);
+    changed["temperature"] = json!(0);
+    let (status, again) = kept
+        .lane("PUT", "/evaluators", "admin-1", Some(changed))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{again}");
+    assert_eq!(
+        (again["id"].clone(), again["version"].clone()),
+        (json!(id), json!(2))
+    );
+
+    let (status, listed) = kept.lane("GET", "/evaluators", "member-1", None).await;
+    assert_eq!(status, StatusCode::OK, "{listed}");
+    assert_eq!(listed["content_kept"], true);
+    assert_eq!(
+        (
+            listed["evaluators"][0]["version"].clone(),
+            listed["evaluators"][0]["versions"].clone()
+        ),
+        (json!(2), json!(2))
+    );
+    let (status, versions) = kept
+        .lane("GET", &format!("/evaluators/{id}"), "member-1", None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{versions}");
+    assert_eq!(versions["versions"].as_array().map(Vec::len), Some(2));
+
+    // An answer outside the score's schema saves nothing.
+    let (other, _) = mock_judge(json!({ "reasoning": "r", "score": "maybe" })).await;
+    let (status, loose) = kept
+        .lane(
+            "PUT",
+            "/model-connections",
+            "admin-1",
+            Some(json!({
+                "name": "Loose", "provider": "openai_compatible", "base_url": other,
+                "models": ["judge-2"], "secret": "sk-good",
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{loose}");
+    let mut on_loose = draft.clone();
+    on_loose["connection_id"] = loose["id"].clone();
+    let (status, refused) = kept
+        .lane("PUT", "/evaluators", "admin-1", Some(on_loose))
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{refused}");
+    assert!(
+        refused.to_string().contains("outside the score's schema"),
+        "{refused}"
+    );
+
+    let (status, _) = kept
+        .lane("DELETE", &format!("/evaluators/{id}"), "admin-1", None)
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, _) = kept
+        .lane("GET", &format!("/evaluators/{id}"), "member-1", None)
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let filed: Vec<String> = sqlx::query_scalar(
+        "SELECT action FROM audit.events WHERE resource_kind = 'evaluator' ORDER BY seq",
+    )
+    .fetch_all(&pool)
+    .await
+    .expect("the chain");
+    assert_eq!(filed, ["created", "updated", "deleted"]);
+
+    let off = door(&pool, ContentMode::Off).await;
+    off.auth.seat(
+        "admin-2",
+        &off.organization,
+        &off.project,
+        OrganizationRole::Owner,
+        None,
+    );
+    let (status, refused) = off.lane("PUT", "/evaluators", "admin-2", Some(draft)).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{refused}");
+    assert!(
+        refused.to_string().contains("keeps no content"),
+        "{refused}"
+    );
+    let (_, listed) = off.lane("GET", "/evaluators", "admin-2", None).await;
+    assert_eq!(listed["content_kept"], false);
+}

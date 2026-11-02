@@ -1,0 +1,25 @@
+{
+  "key": "helpfulness",
+  "group": "quality",
+  "name": "Helpfulness",
+  "description": "Whether the answer helps the person who asked.",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You judge how helpful an AI agent's answer is to the person who sent the request: whether it moves them forward, is clear, and anticipates the obvious next question."
+    },
+    {
+      "role": "user",
+      "content": "The request:\n{{input}}\n\nThe answer:\n{{output}}"
+    }
+  ],
+  "score": {
+    "name": "helpfulness",
+    "data_type": "number",
+    "range_min": 0,
+    "range_max": 1,
+    "low_means": "of no help",
+    "high_means": "as helpful as it could be"
+  },
+  "reasoning": true
+}

@@ -1,0 +1,89 @@
+---
+title: "Evaluators"
+description: "LLM-as-a-judge on a project's own model key: a prompt whose variables are filled from what is judged, the score it gives, and the model that gives it, each change a new version, tried on a real trace before it is saved."
+---
+
+An **evaluator** asks a model to judge what an agent did and give a
+[score](/docs/monitoring/scores): a prompt, the score it gives, and the model
+on one of the project's own [model connections](/docs/workspace/model-connections),
+never a model of Telmoni's. A project's evaluators are on its **Evaluators**
+page, under **Evaluation** in the project's rail; owners and admins make,
+change and delete them, and everyone on the project reads them.
+
+An evaluator reads the prompts and answers it judges, so it runs only on a
+project that keeps [content](/docs/monitoring/content): on a project
+that keeps none the page says so, and none is made.
+
+## The prompt
+
+A prompt is a system message, saying who the judge is and what it looks
+for, then a user's message holding what is judged; an assistant's answer
+after a user's message, and another user's message after it, is a worked
+example. Each `{{variable}}` is filled from what is judged:
+
+| Variable | What fills it |
+|---|---|
+| `{{input}}` | A run's input: its own span's input messages, else its first model call's |
+| `{{output}}` | A run's output: its own span's output messages, else its last model call's |
+| `{{metadata}}` | Its agent, status, duration, models, tokens, deployment and tags |
+| `{{tool_calls}}` | Each tool it called, in order, with the arguments |
+| `{{trajectory}}` | Each tool call with its arguments, result and status, in order |
+
+A variable is filled with up to 60,000 characters of what it reads, and
+says where the rest was cut. The names `{{messages}}`, `{{exchanges}}`,
+`{{first_and_last}}` and `{{examples}}` are kept for a session's
+conversation and members' corrections: a trace fills none of them, so a
+draft naming one is not tried on a trace.
+
+## The score
+
+The score is a [score](/docs/monitoring/scores)'s name and type, each end
+or category described for the model:
+
+- **A number on a range**: its least and its most, and what each means.
+- **Yes or no**: what yes means, and what no means.
+- **Categories**: two to ten, each named and described, one or several at once.
+
+The model is asked for JSON in the score's own form, with its reasoning
+first where the evaluator asks for it; an answer outside that form, a
+number off the range or a category it does not name, gives no score. The
+reasoning becomes the score's comment.
+
+## The model
+
+An evaluator judges with the project's default connection, or one it names,
+and the connection's first model, or one it names, at the provider's own
+temperature or one from 0 to 2. Saving asks the model once for an answer
+in the score's form, and a model that cannot give one, or a connection the
+provider refuses, saves nothing: the page shows why.
+
+## Templates
+
+**New evaluator** starts from a blank prompt or a template, copied, never
+linked, so a change to one changes nothing else:
+
+| Group | Templates |
+|---|---|
+| Quality | Hallucination, Correctness, Answer relevance, Conciseness, Helpfulness |
+| Safety | Toxicity, Bias |
+| Security | PII leakage, Prompt injection |
+| Conversation | Task completion, User satisfaction, Tone, Perceived error |
+| Agents | Tool selection, Plan adherence, Trajectory accuracy |
+
+## Trying one
+
+Before it is saved, an evaluator is tried on one of the project's traces,
+by its run id: the page shows the score and the reasoning the model gave,
+the tokens it used, and the prompt exactly as it was sent. A try reads the
+trace's content as its page does, so the read is filed in the
+[audit log](/docs/workspace/audit-log) as the member's, and it keeps
+nothing.
+
+## Versions
+
+Every save is a new version under the evaluator's same id, and each score an
+evaluator gives names the version that gave it; the page shows the newest
+and opens every version. Each version saved and each evaluator deleted is
+filed in the audit log by its score's name and type, never its prompt, and
+deleting one takes every version, leaving the scores it gave. A project
+holds up to 50 evaluators.

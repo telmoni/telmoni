@@ -153,6 +153,28 @@ const MUTATIONS: &[Mutation] = &[
         resource_kind: "ModelConnection",
         actor_id: ActorPattern::Variable,
     },
+    // A project's evaluator: a version saved, or the evaluator deleted, by an owner or admin.
+    Mutation {
+        file: "crates/telemetry/src/handler/evaluators.rs",
+        fn_name: "put_evaluator",
+        action: "Created",
+        resource_kind: "Evaluator",
+        actor_id: ActorPattern::Variable,
+    },
+    Mutation {
+        file: "crates/telemetry/src/handler/evaluators.rs",
+        fn_name: "put_evaluator",
+        action: "Updated",
+        resource_kind: "Evaluator",
+        actor_id: ActorPattern::Variable,
+    },
+    Mutation {
+        file: "crates/telemetry/src/handler/evaluators.rs",
+        fn_name: "delete_evaluator",
+        action: "Deleted",
+        resource_kind: "Evaluator",
+        actor_id: ActorPattern::Variable,
+    },
     // A member's score, given or taken back, filed as a change to its trace.
     Mutation {
         file: "crates/telemetry/src/handler/scores.rs",

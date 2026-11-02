@@ -1,0 +1,23 @@
+{
+  "key": "perceived_error",
+  "group": "conversation",
+  "name": "Perceived error",
+  "description": "Whether the person thinks the agent got something wrong.",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You judge whether the person in a conversation with an AI agent signals that the agent made a mistake: correcting it, repeating the request, saying it misunderstood or that something does not work."
+    },
+    {
+      "role": "user",
+      "content": "The conversation, in order:\n{{messages}}"
+    }
+  ],
+  "score": {
+    "name": "perceived_error",
+    "data_type": "boolean",
+    "low_means": "the person signals no mistake",
+    "high_means": "the person signals a mistake"
+  },
+  "reasoning": true
+}

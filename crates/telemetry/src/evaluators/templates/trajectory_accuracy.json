@@ -1,0 +1,25 @@
+{
+  "key": "trajectory_accuracy",
+  "group": "agents",
+  "name": "Trajectory accuracy",
+  "description": "Whether the steps the agent took were a sensible path to its answer.",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You judge an AI agent's trajectory: whether its tool calls, in order, were a sensible and efficient path from the request to the answer, without loops, wasted calls or skipped checks."
+    },
+    {
+      "role": "user",
+      "content": "The request:\n{{input}}\n\nThe answer:\n{{output}}\n\nThe tool calls and their results, in order:\n{{trajectory}}"
+    }
+  ],
+  "score": {
+    "name": "trajectory_accuracy",
+    "data_type": "number",
+    "range_min": 0,
+    "range_max": 1,
+    "low_means": "a confused or wasteful path",
+    "high_means": "a direct and sensible path"
+  },
+  "reasoning": true
+}

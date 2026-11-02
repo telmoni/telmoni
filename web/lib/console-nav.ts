@@ -9,6 +9,7 @@ import {
   ListTree,
   MessagesSquare,
   Plug,
+  Scale,
   Settings,
   ShieldCheck,
   SquareStack,
@@ -205,9 +206,9 @@ const CORE_GROUPS: GroupSpec[] = [
     // shows the product's shape while the rest is built: it opens a
     // placeholder that the real page replaces, as Traces, Sessions, Users and
     // Alerts did until theirs landed. The Observability block is headed
-    // because its five rows are the product, and the Project block because
-    // the rest of the rail is the project's own housekeeping; Overview
-    // stands alone above both.
+    // because its five rows are the product, Evaluation because its rows
+    // judge what those record, and the Project block because the rest of
+    // the rail is the project's own housekeeping; Overview stands alone above.
     items: [
       { title: "Overview", path: "", icon: Activity, key: "o" },
       { title: "Traces", path: "/traces", icon: ListTree, block: { heading: "Observability" }, key: "t" },
@@ -215,6 +216,7 @@ const CORE_GROUPS: GroupSpec[] = [
       { title: "Users", path: "/users", icon: UsersRound, key: "u" },
       { title: "Alerts", path: "/alerts", icon: BellRing, key: "a" },
       { title: "Dashboards", path: "/dashboards", icon: LayoutDashboard, key: "d" },
+      { title: "Evaluators", path: "/evaluators", icon: Scale, block: { heading: "Evaluation" }, key: "e" },
       { title: "API keys", path: "/api-keys", icon: KeyRound, block: { heading: "Project" }, key: "k" },
       { title: "Connectors", path: "/connectors", icon: Plug, key: "c" },
       { title: "Members", path: "/members", icon: Users, key: "m" },

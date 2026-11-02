@@ -364,6 +364,7 @@ export const ResourceKind = {
   Trace:             "trace",
   EndUser:           "end_user",
   ModelConnection:   "model_connection",
+  Evaluator:         "evaluator",
 } as const;
 export type ResourceKind = typeof ResourceKind[keyof typeof ResourceKind];
 

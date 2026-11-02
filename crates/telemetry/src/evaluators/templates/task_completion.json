@@ -1,0 +1,23 @@
+{
+  "key": "task_completion",
+  "group": "conversation",
+  "name": "Task completion",
+  "description": "Whether the conversation achieved what the person came for.",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You judge whether a conversation between a person and an AI agent completed the person's task: what they came to do, as their messages show it, done by the end."
+    },
+    {
+      "role": "user",
+      "content": "The conversation, in order:\n{{messages}}"
+    }
+  ],
+  "score": {
+    "name": "task_completed",
+    "data_type": "boolean",
+    "low_means": "the task was not completed",
+    "high_means": "the task was completed"
+  },
+  "reasoning": true
+}

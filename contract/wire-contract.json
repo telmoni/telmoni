@@ -164,7 +164,8 @@
       "incident",
       "trace",
       "end_user",
-      "model_connection"
+      "model_connection",
+      "evaluator"
     ],
     "Role": [
       "owner",
