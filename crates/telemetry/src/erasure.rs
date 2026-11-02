@@ -189,12 +189,15 @@ pub async fn carry_out(
     };
     let (state, project_id, to) = (Arc::clone(state), project_id.clone(), to.clone());
     tokio::spawn(async move {
-        // Theirs still held for their trace goes too, before it can land.
+        // Each held trace they are in goes whole, so its children cannot land later as a run.
         if let Some(user) = &user {
             let mut tx = maintenance_scope(&state.db, TelemetryLane).await?;
             sqlx::query(
                 "DELETE FROM telemetry.held_spans
-                  WHERE project_id = $1 AND landed_at IS NULL AND row->>'user_id' = $2",
+                  WHERE project_id = $1 AND landed_at IS NULL
+                    AND trace_id IN (SELECT trace_id FROM telemetry.held_spans
+                                      WHERE project_id = $1 AND landed_at IS NULL
+                                        AND row->>'user_id' = $2)",
             )
             .bind(&project_id)
             .bind(user)

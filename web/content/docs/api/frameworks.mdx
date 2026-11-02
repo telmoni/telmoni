@@ -68,9 +68,10 @@ Content leaves your process only where the instrumentation is set to send it,
 and is kept only on a project whose content mode is `on`
 ([Content](/docs/monitoring/content)); elsewhere ingest drops it at the door.
 The instrumentations disagree on their default, so each section names the one
-setting. Telmoni reads content from the span's own attributes
+setting. Telmoni reads the messages from the span's own attributes
 (`gen_ai.input.messages`, `gen_ai.output.messages`,
-`gen_ai.system_instructions`), never from events or logs.
+`gen_ai.system_instructions`); a span's events are kept whole, as one field,
+and logs not at all.
 
 OpenTelemetry's Python instrumentations, the `opentelemetry-instrumentation-genai-*`
 packages, send none until

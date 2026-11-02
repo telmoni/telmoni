@@ -726,6 +726,105 @@ async fn a_long_agents_children_wait_for_its_own_span(pool: PgPool) {
     assert_eq!(runs, [run.to_string()], "one run, its plain span kept");
 }
 
+/// A landing another replica began is left to it, then retried under its token once overdue.
+#[sqlx::test]
+async fn a_landing_begun_elsewhere_is_retried_only_once_overdue(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let lane = lane(&pool, true);
+    let text = |key: &str, value: &str| json!({ "key": key, "value": { "stringValue": value } });
+    let body = json!({ "resourceSpans": [{ "scopeSpans": [{ "scope": { "name": "x" }, "spans": [{
+        "traceId": "dd".repeat(16), "spanId": "0d".repeat(8), "parentSpanId": "", "name": "chat",
+        "startTimeUnixNano": "1760000000000000000", "endTimeUnixNano": "1760000000100000000",
+        "attributes": [text(contract::OPERATION, "chat")],
+    }]}]}]});
+    let (status, _, _) = lane
+        .send(
+            Some(INGEST_KEY),
+            "application/json",
+            None,
+            body.to_string().into_bytes(),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    sqlx::query(
+        "UPDATE telemetry.held_spans SET received_at = now() - interval '2 minutes', \
+         landing = 'held/elsewhere', tried_at = now()",
+    )
+    .execute(&pool)
+    .await
+    .expect("begun elsewhere");
+    let count = || async {
+        ch.store
+            .read(
+                &Projects::one(lane.project.clone()),
+                "SELECT count() FROM telemetry.spans WHERE project_id IN {projects:Array(String)}",
+            )
+            .fetch_one::<u64>()
+            .await
+            .expect("counted")
+    };
+    telmoni_telemetry::foreign::land_quiet(&lane.state)
+        .await
+        .expect("a pass");
+    assert_eq!(count().await, 0, "its replica may still be writing");
+
+    sqlx::query("UPDATE telemetry.held_spans SET tried_at = now() - interval '10 minutes'")
+        .execute(&pool)
+        .await
+        .expect("overdue");
+    telmoni_telemetry::foreign::land_quiet(&lane.state)
+        .await
+        .expect("a pass");
+    common::eventually("the overdue landing lands", || async { count().await == 2 }).await;
+    let waiting: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM telemetry.held_spans WHERE landed_at IS NULL")
+            .fetch_one(&pool)
+            .await
+            .expect("held");
+    assert_eq!(waiting, 0);
+}
+
+/// Spans held as their project's purge ran are deleted, not tried forever.
+#[sqlx::test]
+async fn spans_held_for_a_project_gone_are_deleted(pool: PgPool) {
+    let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let lane = lane(&pool, true);
+    let body = json!({ "resourceSpans": [{ "scopeSpans": [{ "scope": { "name": "x" }, "spans": [{
+        "traceId": "ee".repeat(16), "spanId": "0e".repeat(8), "parentSpanId": "", "name": "work",
+        "startTimeUnixNano": "1760000000000000000", "endTimeUnixNano": "1760000000100000000",
+    }]}]}]});
+    let (status, _, _) = lane
+        .send(
+            Some(INGEST_KEY),
+            "application/json",
+            None,
+            body.to_string().into_bytes(),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    sqlx::query("UPDATE telemetry.held_spans SET received_at = now() - interval '2 minutes'")
+        .execute(&pool)
+        .await
+        .expect("quiet");
+    sqlx::query("DELETE FROM telemetry.project_settings WHERE project_id = $1")
+        .bind(lane.project.as_str())
+        .execute(&pool)
+        .await
+        .expect("purged");
+    telmoni_telemetry::foreign::land_quiet(&lane.state)
+        .await
+        .expect("a pass");
+    let held: i64 = sqlx::query_scalar("SELECT count(*) FROM telemetry.held_spans")
+        .fetch_one(&pool)
+        .await
+        .expect("held");
+    assert_eq!(held, 0);
+}
+
 /// A run's spans from two services — a worker continuing the orchestrator's
 /// run under its span, from another deployment — land as one run, under
 /// keys of one project; the same run id under another project's key is that

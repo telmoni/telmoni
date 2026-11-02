@@ -45,6 +45,9 @@ pub const ORPHAN_MAX_SECS: i64 = 3600;
 /// [`ORPHAN_MAX_SECS`] as an interval's seconds.
 const ORPHAN_MAX_INTERVAL: f64 = 3600.0;
 
+/// How long a landing begun is left to its replica before another retries it.
+const LANDING_RETRY_SECS: f64 = 300.0;
+
 /// The traces one pass lands, oldest first.
 const TRACES_A_PASS: i64 = 200;
 
@@ -199,11 +202,8 @@ enum Place {
     Wait,
 }
 
-/// Each of a project's trace's held spans placed in its run, by walking up
-/// through the held spans and the ones landed before: under the topmost
-/// `invoke_agent` or `invoke_workflow`, else, for a call, in the trace's run
-/// of calls, named by `service.name`; else dropped. A span whose walk stops
-/// at a parent not yet arrived waits, unless it arrived before `waited`.
+/// A trace's held spans placed under their topmost agent, else a call in the trace's
+/// run of calls, else dropped; one whose parent has not arrived waits until `waited`.
 #[must_use]
 pub fn place(
     project_id: &ProjectId,
@@ -432,10 +432,8 @@ pub async fn run(state: Arc<AppState>) {
         .await;
 }
 
-/// Each trace with spans to land placed and landed, oldest first: one quiet a
-/// minute or waiting five, unless all it holds waits for a parent and nothing
-/// arrived since it was last tried; and one a landing began. The marks of
-/// spans landed a day ago go. One trace that cannot land holds up no other.
+/// Each trace quiet a minute or waiting five landed, oldest first, and each landing
+/// overdue retried; the day-old marks go. One trace that cannot land holds up no other.
 ///
 /// # Errors
 ///
@@ -450,7 +448,7 @@ pub async fn land_quiet(state: &Arc<AppState>) -> Result<(), TelmoniError> {
            FROM telemetry.held_spans
           WHERE landed_at IS NULL
           GROUP BY project_id, trace_id
-         HAVING bool_or(landing IS NOT NULL)
+         HAVING bool_or(landing IS NOT NULL AND tried_at < now() - make_interval(secs => $5))
              OR ((max(received_at) < now() - make_interval(secs => $1)
                   OR min(received_at) < now() - make_interval(secs => $2))
                  AND (max(tried_at) IS NULL OR max(received_at) > max(tried_at)
@@ -462,6 +460,7 @@ pub async fn land_quiet(state: &Arc<AppState>) -> Result<(), TelmoniError> {
     .bind(WAITED_MAX_SECS)
     .bind(ORPHAN_MAX_INTERVAL)
     .bind(TRACES_A_PASS)
+    .bind(LANDING_RETRY_SECS)
     .fetch_all(lane.conn())
     .await?;
     lane.commit().await?;
@@ -490,6 +489,7 @@ type HeldRow = (
     Option<Uuid>,
     Option<String>,
     Option<String>,
+    bool,
 );
 
 /// The trace's held spans under the lock no other replica takes at once.
@@ -510,22 +510,22 @@ async fn locked(
         return Ok(None);
     }
     let held = sqlx::query_as(
-        "SELECT span_id, row::text, fields, ciphertexts, nonces, run_id, agent, landing
+        "SELECT span_id, row::text, fields, ciphertexts, nonces, run_id, agent, landing,
+                landing IS NOT NULL AND tried_at > now() - make_interval(secs => $3)
            FROM telemetry.held_spans
           WHERE project_id = $1 AND trace_id = $2
           ORDER BY span_id",
     )
     .bind(project_id)
     .bind(trace_id)
+    .bind(LANDING_RETRY_SECS)
     .fetch_all(lane.conn())
     .await?;
     Ok(Some(held))
 }
 
-/// One trace's held spans placed and landed. The spans placed are first
-/// marked with their landing's token, so a retry lands the same spans under
-/// it and the store keeps one copy; only once written are they marked with
-/// their runs.
+/// One trace's held spans placed and landed, marked first with their landing's token
+/// so a retry lands the same spans under it and the store keeps one copy.
 async fn land_trace(
     state: &Arc<AppState>,
     project_id: &ProjectId,
@@ -542,19 +542,29 @@ async fn land_trace(
     .fetch_optional(lane.conn())
     .await?;
     let Some((organization_id, mode)) = settings else {
-        // A project its purge has not reached yet: it takes them.
+        // Its project gone: what an export held as the purge ran goes too.
+        sqlx::query("DELETE FROM telemetry.held_spans WHERE project_id = $1 AND trace_id = $2")
+            .bind(project_id)
+            .bind(trace_id)
+            .execute(lane.conn())
+            .await?;
+        lane.commit().await?;
         return Ok(());
     };
     let Some(held) = locked(&mut lane, project_id, trace_id).await? else {
         return Ok(());
     };
+    // The lock goes with the token's commit: a landing still writing is its replica's.
+    if held.iter().any(|one| one.8) {
+        return Ok(());
+    }
 
     let mut waiting = Vec::new();
     let mut landed = Vec::new();
     let mut sealed: HashMap<String, SealedFields> = HashMap::new();
     let mut unreadable = Vec::new();
     let mut token = None;
-    for (span_id, row, fields, ciphertexts, nonces, run_id, agent, landing) in held {
+    for (span_id, row, fields, ciphertexts, nonces, run_id, agent, landing, _) in held {
         match (row, run_id, agent) {
             (_, Some(run_id), Some(agent)) => landed.push(Landed {
                 span_id,
@@ -620,14 +630,25 @@ async fn land_trace(
     }
     taken.sort();
     let token = match token {
-        Some(token) => token,
+        Some(token) => {
+            sqlx::query(
+                "UPDATE telemetry.held_spans SET tried_at = now()
+                  WHERE project_id = $1 AND trace_id = $2 AND landing = $3",
+            )
+            .bind(project_id)
+            .bind(trace_id)
+            .bind(&token)
+            .execute(lane.conn())
+            .await?;
+            token
+        }
         None => {
             let token = format!(
                 "held/{}",
                 sha256_hex(format!("{project_id}/{trace_id}/{}", taken.join(",")).as_bytes())
             );
             sqlx::query(
-                "UPDATE telemetry.held_spans SET landing = $4
+                "UPDATE telemetry.held_spans SET landing = $4, tried_at = now()
                   WHERE project_id = $1 AND trace_id = $2 AND span_id = ANY($3)",
             )
             .bind(project_id)
@@ -891,8 +912,7 @@ mod tests {
             assert_eq!(call.run_id, run.run_id);
         }
 
-        // A call arriving after its trace landed joins the same run, whose
-        // span is not written again.
+        // A late call, its parent waited out, joins the same run; its span is not written again.
         let later = place(
             &project,
             &trace,

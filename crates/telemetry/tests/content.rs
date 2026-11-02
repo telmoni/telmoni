@@ -2038,6 +2038,62 @@ async fn held_content_switched_off_lands_without_it(pool: PgPool) {
     .await;
 }
 
+/// An end user's erasure takes every held span of their trace, so its children never land later.
+#[sqlx::test]
+async fn an_end_users_held_trace_goes_whole_with_them(pool: PgPool) {
+    let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    apply_audit_migrations(&pool).await;
+    let door = door(&pool, ContentMode::On).await;
+    door.auth.seat(
+        "admin-1",
+        &door.organization,
+        &door.project,
+        OrganizationRole::Owner,
+        None,
+    );
+    let attribute =
+        |key: &str, value: &str| json!({ "key": key, "value": { "stringValue": value } });
+    let body = json!({ "resourceSpans": [{ "scopeSpans": [{ "scope": { "name": "x" }, "spans": [
+        {
+            "traceId": TRACE, "spanId": SPAN, "name": "planner",
+            "startTimeUnixNano": "1760000000000000000",
+            "endTimeUnixNano": "1760000001000000000",
+            "attributes": [
+                attribute(contract::OPERATION, "invoke_agent"),
+                attribute(contract::USER_ID, "acme-42"),
+            ],
+        },
+        {
+            "traceId": TRACE, "spanId": SPAN_B, "parentSpanId": SPAN, "name": "chat gpt-5",
+            "startTimeUnixNano": "1760000000000000000",
+            "endTimeUnixNano": "1760000001000000000",
+            "attributes": [
+                attribute(contract::OPERATION, "chat"),
+                attribute("gen_ai.input.messages", MESSAGES),
+            ],
+        },
+    ]}]}]});
+    door.send(body.to_string().into_bytes()).await;
+    let (status, answer) = door
+        .lane(
+            "POST",
+            "/users/erase",
+            "admin-1",
+            Some(json!({ "user_id": "acme-42" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{answer}");
+    common::eventually("the held trace goes whole", || async {
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM telemetry.held_spans")
+            .fetch_one(&pool)
+            .await
+            .is_ok_and(|held| held == 0)
+    })
+    .await;
+}
+
 /// The hourly totals price their calls as the spans do — as reported, else
 /// at the project's own price — and count runs and failed runs.
 #[sqlx::test]

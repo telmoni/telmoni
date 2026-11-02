@@ -60,13 +60,13 @@ arrived waits for it, up to an hour: an agent's own span comes last.
 - Every other span, in no run, is dropped: Telmoni keeps agents' runs, not
   every request a service handles.
 
-A span arriving after its trace was placed joins the run its parent did, for a
-day; the span of a run of calls alone is written once, so a call arriving later
+A span arriving after its trace was placed joins the run its parent landed in,
+for a day, or waits for its parent as any other span does; the span of a run of calls alone is written once, so a call arriving later
 does not move its end. Every other rule on this page holds for it as for ours —
 content, the inventory, the caps, the plan — but applied as it lands, after
 the answer: a span dropped or sampled out then is not named in it. A project
-holds up to 100,000 such spans waiting at once; past it, each is refused,
-named in the answer, and kept when sent again later.
+holds up to 100,000 such spans waiting at once; past it, each is refused and
+named in the answer, and an exporter does not send it again.
 
 What a span is, its **kind**, follows `gen_ai.operation.name`: `invoke_agent`
 or `invoke_workflow` is the run itself; `chat`, `generate_content`,

@@ -164,7 +164,7 @@ fn cut(lines: impl Iterator<Item = String>, total: usize) -> String {
 fn refused_line(refused: &Refused) -> String {
     let why = match &refused.reason {
         Refusal::Waiting => format!(
-            "the project holds {} spans waiting for their trace; sent again later, it is kept",
+            "the project holds {} spans waiting for their trace",
             crate::foreign::HELD_MAX
         ),
         Refusal::Invalid(field) => format!("invalid {field}"),
