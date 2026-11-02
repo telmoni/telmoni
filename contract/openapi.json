@@ -67,7 +67,7 @@
         },
         "responses": {
           "204": {
-            "description": "Kept, kept already, or nothing kept for a project that keeps no content."
+            "description": "Kept, kept already, or nothing kept for a project that keeps no content or an organization that holds the content its plan does."
           },
           "400": {
             "content": {

@@ -69,6 +69,9 @@ pub enum DropReason {
     Unlisted,
     /// Past a cap: which.
     OverCap(Cap),
+    /// Content past its organization's ceiling ([`crate::capacity`]): the
+    /// span keeps its metadata alone.
+    ContentFull,
     /// A tag past its project's cap for the day ([`crate::ingest::cardinality`]):
     /// which.
     Cardinality(Cap),

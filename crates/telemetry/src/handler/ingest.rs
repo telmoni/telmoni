@@ -132,12 +132,13 @@ async fn handle(
             )
             .into());
         }
-        Claim::Answered(content_mode) => {
+        Claim::Answered(content_mode, held) => {
             tracing::debug!(
                 project_id = %key.project_id,
                 "ingest: an export sent again, answered as it was"
             );
-            return answer_again(state, encoding, &key.project_id, &bytes, content_mode).await;
+            return answer_again(state, encoding, &key.project_id, &bytes, content_mode, held)
+                .await;
         }
     };
 
@@ -151,8 +152,8 @@ async fn handle(
         async move {
             let _slot = slot;
             match write(&state, &key, encoding, &bytes, sender, &token).await {
-                Ok((content_mode, body)) => {
-                    guard.answer(&state.redis, content_mode).await;
+                Ok((content_mode, body, held)) => {
+                    guard.answer(&state.redis, content_mode, &held).await;
                     Ok((content_mode, body))
                 }
                 // Whatever became of its rows, ClickHouse writes them once
@@ -218,7 +219,7 @@ async fn write(
     bytes: &[u8],
     sender: Option<SenderClock>,
     token: &str,
-) -> Result<(ContentMode, Vec<u8>), TelmoniError> {
+) -> Result<(ContentMode, Vec<u8>, crate::capacity::Held), TelmoniError> {
     let request = decode::request(bytes, encoding).map_err(decode_error)?;
     // Made and sealed on the project's first export, which also files its
     // settings row, so the purges find every project with spans.
@@ -250,6 +251,20 @@ async fn write(
     if runs > 0 {
         tracing::debug!(project_id = %key.project_id, runs, "ingest: spans of deleted runs dropped");
     }
+    // Past the plan's month, what is not kept is counted in the answer, and
+    // past its content, the spans keep their metadata alone.
+    let (month, sampled) = crate::capacity::hold_spans(
+        state,
+        &key.organization_id,
+        &mut batch,
+        &storage,
+        received_at,
+    )
+    .await;
+    let held = crate::capacity::Held {
+        sampled,
+        content_full: crate::capacity::hold_content(state, &key.organization_id, &mut batch).await,
+    };
     if let Err(error) = state.store.insert_spans_once(&batch.rows, token).await {
         // ClickHouse may finish an insert the client stopped waiting for, as
         // late as its own wait: settled once that has passed.
@@ -273,6 +288,11 @@ async fn write(
     .await;
     let here = !batch.rows.is_empty() && settle_written(state, &key.project_id).await;
     kept?;
+    // What was written and kept, counted against the month once the whole
+    // export is, so a retry of one that failed is counted once.
+    if let Some(month) = month {
+        crate::capacity::count_spans(state, month, &batch.rows).await;
+    }
 
     tracing::debug!(
         project_id = %key.project_id,
@@ -294,19 +314,22 @@ async fn write(
         );
     }
     let body = response_body(encoding, &batch.report, content_mode)?;
-    Ok((content_mode, body))
+    Ok((content_mode, body, held))
 }
 
 /// The answer to an export sent again: its own bytes, the first copy's by
 /// their digest, read by the contract again under the mode the first answer
 /// named, its tags held to the cap again, which keeps the values its first
-/// copy did. Nothing is kept, so no user id is hashed and no content sealed.
+/// copy did, and held to what its plan held the first copy to: the same runs
+/// sampled out, by the project's key, and its content past the ceiling. Nothing
+/// is kept, so no user id is hashed and no content sealed.
 async fn answer_again(
     state: &AppState,
     encoding: Encoding,
     project_id: &ProjectId,
     bytes: &[u8],
     content_mode: ContentMode,
+    held: crate::capacity::Held,
 ) -> Result<Response, TelmoniError> {
     let request = decode::request(bytes, encoding).map_err(decode_error)?;
     let now = Utc::now();
@@ -327,6 +350,13 @@ async fn answer_again(
         &mut batch.report.dropped,
     )
     .await;
+    if let Some(detail) = &held.sampled {
+        let storage = hashing::storage_for_project(state, project_id).await?;
+        crate::capacity::sample(&mut batch, detail, &storage);
+    }
+    if held.content_full {
+        crate::capacity::drop_content(&mut batch);
+    }
     let body = response_body(encoding, &batch.report, content_mode)?;
     Ok(answer(encoding, content_mode, body))
 }

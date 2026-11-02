@@ -1379,3 +1379,172 @@ async fn a_body_that_cannot_be_read_is_invalid_not_too_large(pool: PgPool) {
     );
     assert_eq!(auth.homes_asked(), 0, "nothing keyed");
 }
+
+/// The `n`th export of two runs, a span each, each its own trace, so none is
+/// answered as one sent again: past a plan's month, the first is kept and the
+/// second sampled out, where `runs` were picked so ([`picked`]).
+fn two_runs(n: u32, runs: &[String; 2]) -> Vec<u8> {
+    let mut export = export_json(&["kept", "sampled"]);
+    for (span, run) in runs.iter().enumerate() {
+        let at = |field: &str| format!("/resourceSpans/0/scopeSpans/0/spans/{span}/{field}");
+        *export
+            .pointer_mut(&at("traceId"))
+            .expect("the span's trace") = json!(format!("4bf92f3577b34da6a3ce929d0e0e{n:04x}"));
+        *export
+            .pointer_mut(&at("attributes/0/value/stringValue"))
+            .expect("the span's run") = json!(run);
+    }
+    export.to_string().into_bytes()
+}
+
+/// Two runs, the first kept past a plan's month and the second sampled out
+/// under the project's key (`capacity::kept_past_the_grant`), once the key
+/// exists.
+async fn picked(lane: &Lane) -> [String; 2] {
+    let storage = telmoni_telemetry::hashing::storage_for_project(&lane.state, &lane.project)
+        .await
+        .expect("the project's key");
+    let pick = |kept: bool| {
+        (1..u128::MAX)
+            .map(uuid::Uuid::from_u128)
+            .find(|run| telmoni_telemetry::capacity::kept_past_the_grant(&storage, *run) == kept)
+            .expect("a run")
+            .to_string()
+    };
+    [pick(true), pick(false)]
+}
+
+/// A lane over the stores, under a plan's month, and the notices it hands on.
+fn lane_for_a_month(pool: &PgPool, month: common::PlanMonth) -> (Lane, Arc<common::NoticeLog>) {
+    let (organization, project) = (OrganizationId::new(), ProjectId::new());
+    let auth = AuthStub::new();
+    auth.key(INGEST_KEY, &organization, &project, &[ApiKeyScope::Ingest]);
+    let notices = common::NoticeLog::new();
+    let state =
+        common::state_with_stores_noticed(pool, auth.clone(), Arc::new(month), notices.clone());
+    let lane = Lane {
+        app: lanes(state.clone()),
+        project,
+        other: ProjectId::new(),
+        state,
+        auth,
+    };
+    (lane, notices)
+}
+
+/// Past a month with no grace, one run in ten is kept, flagged with its
+/// rate, and the rest are counted in the answer in the plan's words; the
+/// owners are told once.
+#[sqlx::test]
+async fn spans_past_the_month_are_sampled_and_counted_in_the_answer(pool: PgPool) {
+    let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let (lane, notices) = lane_for_a_month(
+        &pool,
+        common::PlanMonth {
+            spans: 1,
+            grace_days: 0,
+            content_bytes: 25_000_000,
+        },
+    );
+    let any = [RUN.to_owned(), RUN.to_owned()];
+    let (status, _, answer) = lane
+        .send(
+            Some(INGEST_KEY),
+            "application/json",
+            None,
+            two_runs(1, &any),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let answer = json_body(&answer);
+    assert_eq!(
+        answer["partialSuccess"]["rejectedSpans"], 0,
+        "the month had room: {answer}"
+    );
+
+    let runs = picked(&lane).await;
+    let send = |n| {
+        lane.send(
+            Some(INGEST_KEY),
+            "application/json",
+            None,
+            two_runs(n, &runs),
+        )
+    };
+    let (status, _, first) = send(2).await;
+    assert_eq!(status, StatusCode::OK);
+    let answer = json_body(&first);
+    assert_eq!(answer["partialSuccess"]["rejectedSpans"], 1, "{answer}");
+    let message = answer["partialSuccess"]["errorMessage"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(
+        message
+            .starts_with("1 spans sampled out: Move to Pro for $20 a month on its billing page.\n"),
+        "{message}"
+    );
+    assert!(
+        message.contains("span 00f067aa0ba902b0 dropped"),
+        "the kept span: {message}"
+    );
+    assert!(
+        !message.contains("00f067aa0ba902b1"),
+        "the sampled one went whole: {message}"
+    );
+    let told = || {
+        notices
+            .notices()
+            .into_iter()
+            .filter(|n| n.title == "Spans past the plan's month")
+            .count()
+    };
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while told() == 0 && Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    // The same export sent again is answered as it was: its sampled run
+    // still counted, not told it was kept.
+    let (_, _, again) = send(2).await;
+    assert_eq!(
+        json_body(&again),
+        json_body(&first),
+        "answered as it first was"
+    );
+    send(3).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(told(), 1, "told once a month");
+}
+
+/// Past a month with a grace, every span is kept while it lasts.
+#[sqlx::test]
+async fn spans_past_the_month_are_kept_whole_through_the_grace(pool: PgPool) {
+    let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let (lane, _) = lane_for_a_month(
+        &pool,
+        common::PlanMonth {
+            spans: 1,
+            grace_days: 7,
+            content_bytes: 25_000_000,
+        },
+    );
+    for n in 0..2 {
+        let (status, _, answer) = lane
+            .send(
+                Some(INGEST_KEY),
+                "application/json",
+                None,
+                two_runs(n, &[RUN.to_owned(), RUN.to_owned()]),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        let answer = json_body(&answer);
+        assert_eq!(
+            answer["partialSuccess"]["rejectedSpans"], 0,
+            "kept through the grace: {answer}"
+        );
+    }
+}

@@ -22,7 +22,9 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use telmoni_shared::acting::Acting;
-use telmoni_shared::db::tenant_session::{PersonAndOrganization, Scoped, person_scope};
+use telmoni_shared::db::tenant_session::{
+    PersonAndOrganization, Scoped, maintenance_scope, person_scope,
+};
 use telmoni_shared::extract::Json;
 use telmoni_shared::{AuthError, AuthzError, ProblemDetails, ProjectId, TelmoniError};
 
@@ -123,7 +125,6 @@ pub async fn post_turn(
     // A paused organization asks nothing new; its conversations stay open
     // to read.
     telmoni_shared::seam::admit_new(state.entitlements.as_ref(), &acting.organization_id).await?;
-
     let mut tx = author_scope(&state, &acting).await?;
     let (asked, oldest) = db::recent_questions(&mut tx, &acting.user_id).await?;
     if asked >= state.config.messages_per_hour {
@@ -134,6 +135,27 @@ pub async fn post_turn(
         return Err(TelmoniError::AgentRateLimited {
             retry_after_secs: u64::try_from(next).unwrap_or(0).max(1),
         });
+    }
+    // Past the plan's questions for the month, refused until it renews;
+    // counted once the hour has let it through, so a question it refuses
+    // spends none.
+    if let Some(capacity) =
+        telmoni_shared::seam::capacity(state.entitlements.as_ref(), &acting.organization_id).await
+    {
+        let mut lane = maintenance_scope(&state.db, db::AgentLane).await?;
+        let counted = db::ask_in_month(
+            &mut lane,
+            &acting.organization_id,
+            capacity.period_start,
+            capacity.agent_questions.limit,
+        )
+        .await?;
+        lane.commit().await?;
+        if !counted {
+            capacity
+                .agent_questions
+                .admit_until(capacity.agent_questions.limit, capacity.period_end)?;
+        }
     }
     let author = db::Author {
         organization_id: &acting.organization_id,

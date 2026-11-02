@@ -43,6 +43,7 @@ use telmoni_shared::middleware::api_key::{ApiKeyGate, require_api_key};
 use telmoni_shared::middleware::service_auth::{ServiceSecrets, require_service_secret};
 
 pub mod boot;
+pub mod capacity;
 pub mod ceilings;
 pub mod config;
 pub mod content;
@@ -118,6 +119,9 @@ pub struct AppState {
     /// The machine lanes' ceilings each organization's plan sets, and the
     /// day's counts held to them ([`ceilings`]).
     pub ceilings: ceilings::Ceilings,
+    /// What each organization's plan holds of what it spends, kept a minute
+    /// ([`capacity`]).
+    pub capacities: capacity::Capacities,
     /// The module's loops this replica runs, and their beats, which the
     /// external watchdog reads ([`AppState::stale`]).
     pub heartbeats: telmoni_shared::heartbeat::Heartbeats<db::TelemetryLane>,

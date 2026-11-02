@@ -3,12 +3,13 @@
 //! bytes is answered as the first was. Pending for a minute while they are
 //! written, and let go where the write fails, since the insert's token, the
 //! same digest, keeps ClickHouse from writing a copy twice; then for an hour
-//! the answer's mode alone, some 200 bytes whatever it said, the retry's own
-//! bytes giving the rest. Without Redis, no claim.
+//! the answer's mode, and what its plan held it to, some 200 bytes whatever
+//! it said, the retry's own bytes giving the rest. Without Redis, no claim.
 
 use telmoni_shared::digest::sha256_hex;
 use telmoni_shared::{ContentMode, ProjectId};
 
+use crate::capacity::Held;
 use crate::contract::{CLAIM_ANSWER_SECS, CLAIM_PENDING_SECS};
 use crate::replica::Redis;
 
@@ -16,15 +17,28 @@ use crate::replica::Redis;
 const PENDING: &[u8] = b"pending";
 /// What an answer is held under, before its mode.
 const ANSWERED: &str = "answered:";
+/// The line after it where spans were sampled out past the plan, before the
+/// sentence they were told with.
+const SAMPLED: &str = "sampled:";
+/// The line after it where content was past the ceiling.
+const CONTENT_FULL: &str = "content_full";
 
 /// The key a body's claim is held under.
 fn key(project_id: &ProjectId, digest: &str) -> String {
     format!("telemetry:ingest:body:{}:{digest}", project_id.as_str())
 }
 
-/// What a claim holds once its body is written.
-fn answered(content_mode: ContentMode) -> String {
-    format!("{ANSWERED}{content_mode}")
+/// What a claim holds once its body is written: its mode, then a line for
+/// each thing its plan held it to.
+fn answered(content_mode: ContentMode, held: &Held) -> String {
+    let mut value = format!("{ANSWERED}{content_mode}");
+    if let Some(detail) = &held.sampled {
+        value.push_str(&format!("\n{SAMPLED}{}", detail.replace('\n', " ")));
+    }
+    if held.content_full {
+        value.push_str(&format!("\n{CONTENT_FULL}"));
+    }
+    value
 }
 
 /// What the claim found.
@@ -36,8 +50,9 @@ pub enum Claim {
     /// A copy of this body is being written now: answer `503`, retry in a
     /// second.
     Pending,
-    /// This body was written within the hour, answered under this mode.
-    Answered(ContentMode),
+    /// This body was written within the hour, answered under this mode and
+    /// held to this.
+    Answered(ContentMode, Held),
 }
 
 /// A claim held on a body, to be answered or released.
@@ -48,7 +63,7 @@ pub struct Guard {
 
 impl Guard {
     /// The rows are written: hold the answer's mode for the hour.
-    pub async fn answer(self, redis: &Redis, content_mode: ContentMode) {
+    pub async fn answer(self, redis: &Redis, content_mode: ContentMode, held: &Held) {
         let Some(key) = self.key else {
             return;
         };
@@ -57,7 +72,7 @@ impl Guard {
         };
         let stored: Result<(), redis::RedisError> = redis::cmd("SET")
             .arg(&key)
-            .arg(answered(content_mode))
+            .arg(answered(content_mode, held))
             .arg("EX")
             .arg(CLAIM_ANSWER_SECS)
             .query_async(&mut connection)
@@ -113,7 +128,9 @@ pub async fn claim(redis: &Redis, project_id: &ProjectId, digest: &str) -> Claim
                 .query_async(&mut connection)
                 .await;
             match held {
-                Ok(Some(value)) => parse(&value).map_or(Claim::Pending, Claim::Answered),
+                Ok(Some(value)) => {
+                    parse(&value).map_or(Claim::Pending, |(mode, held)| Claim::Answered(mode, held))
+                }
                 // Expired between the two calls: the first copy's minute ran
                 // out with no answer, so this copy is the one to write.
                 Ok(None) => Claim::Fresh(Guard { key: None }),
@@ -130,27 +147,44 @@ pub async fn claim(redis: &Redis, project_id: &ProjectId, digest: &str) -> Claim
     }
 }
 
-/// A held value as the mode its answer named, or `None` for the pending
-/// marker.
-fn parse(value: &[u8]) -> Option<ContentMode> {
-    std::str::from_utf8(value)
-        .ok()?
-        .strip_prefix(ANSWERED)?
-        .parse()
-        .ok()
+/// A held value as the mode its answer named and what it was held to, or
+/// `None` for the pending marker.
+fn parse(value: &[u8]) -> Option<(ContentMode, Held)> {
+    let mut lines = std::str::from_utf8(value).ok()?.lines();
+    let mode = lines.next()?.strip_prefix(ANSWERED)?.parse().ok()?;
+    let mut held = Held::default();
+    for line in lines {
+        if let Some(detail) = line.strip_prefix(SAMPLED) {
+            held.sampled = Some(detail.to_owned());
+        } else if line == CONTENT_FULL {
+            held.content_full = true;
+        }
+    }
+    Some((mode, held))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// A claim holds the answer's mode and no byte of its body.
+    /// A claim holds the answer's mode, and what its plan held it to, and
+    /// no byte of its body.
     #[test]
-    fn an_answer_is_held_as_its_mode_alone() {
+    fn an_answer_is_held_as_its_mode_and_what_it_was_held_to() {
+        let plain = Held::default();
         for mode in ContentMode::all() {
-            assert_eq!(answered(mode), format!("answered:{mode}"));
-            assert_eq!(parse(answered(mode).as_bytes()), Some(mode));
+            assert_eq!(answered(mode, &plain), format!("answered:{mode}"));
+            assert_eq!(
+                parse(answered(mode, &plain).as_bytes()),
+                Some((mode, plain.clone()))
+            );
         }
+        let held = Held {
+            sampled: Some("Move to Pro for $20 a month on its billing page.".into()),
+            content_full: true,
+        };
+        let value = answered(ContentMode::On, &held);
+        assert_eq!(parse(value.as_bytes()), Some((ContentMode::On, held)));
         assert_eq!(parse(PENDING), None);
         assert_eq!(parse(b"answered:"), None, "no mode, no answer");
     }

@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use axum::http::HeaderMap;
-use chrono::{DateTime, SubsecRound, Utc};
+use chrono::{DateTime, DurationRound as _, SubsecRound, Utc};
 use sqlx::PgPool;
 use tokio::sync::OnceCell;
 use uuid::Uuid;
@@ -618,6 +618,50 @@ impl Entitlements for DataOut {
     ) -> Result<Option<LaneCeilings>, TelmoniError> {
         Ok(Some(LaneCeilings {
             data_out_per_day: self.0,
+        }))
+    }
+}
+
+/// A plan's month for every organization, begun a day ago: `spans` span
+/// units, `grace_days` past them, and `content_bytes` of content, what
+/// billing answers for one on a plan; each refusal in Hobby's words.
+pub(crate) struct PlanMonth {
+    pub(crate) spans: u64,
+    pub(crate) grace_days: u32,
+    pub(crate) content_bytes: u64,
+}
+
+#[async_trait]
+impl Entitlements for PlanMonth {
+    async fn grants(&self, _organization_id: &OrganizationId) -> Result<Grants, TelmoniError> {
+        Ok(Grants::unlimited())
+    }
+
+    async fn capacity(
+        &self,
+        _organization_id: &OrganizationId,
+    ) -> Result<Option<telmoni_shared::Capacity>, TelmoniError> {
+        let allowance = |limit| telmoni_shared::Allowance {
+            limit,
+            entitlement: "pro".into(),
+            detail: "Move to Pro for $20 a month on its billing page.".into(),
+        };
+        let today = chrono::Utc::now();
+        // A month begun yesterday at midnight: the same start on every
+        // answer, as a deployment's month has.
+        let month = today
+            .duration_trunc(chrono::Duration::days(1))
+            .expect("a day")
+            - chrono::Duration::days(1);
+        Ok(Some(telmoni_shared::Capacity {
+            period_start: month,
+            period_end: month + chrono::Duration::days(30),
+            spans: allowance(self.spans),
+            spans_grace_days: self.grace_days,
+            agent_questions: allowance(5),
+            retention_days: 30,
+            content_bytes: self.content_bytes,
+            held_until: None,
         }))
     }
 }

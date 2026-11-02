@@ -106,6 +106,7 @@ impl App {
         ));
         let purges = tokio::spawn(telmoni_telemetry::sweep::run(self.telemetry.clone()));
         let refusals = tokio::spawn(telmoni_telemetry::ceilings::run(self.telemetry.clone()));
+        let capacity = tokio::spawn(telmoni_telemetry::capacity::run(self.telemetry.clone()));
         let alerts = tokio::spawn(telmoni_telemetry::rules::evaluate::run(
             self.telemetry.clone(),
         ));
@@ -146,14 +147,16 @@ impl App {
             telmoni_shared::shutdown::shutdown_signal(),
         );
         // ⚠ These loops are raced against the server: a dead one would leave
-        // a Ready pod that quietly stops delivering, finishing purges or
-        // telling owners of their plan's refusals, so the process exits and
+        // a Ready pod that quietly stops delivering, finishing purges,
+        // holding organizations to their plans or telling owners of their
+        // plan's refusals, so the process exits and
         // the restart is the recovery.
         tokio::select! {
             () = serve => {},
             ended = delivery => return died("the delivery loop", ended),
             ended = purges => return died("telemetry's purge sweep", ended),
             ended = refusals => return died("the plan refusals' notices", ended),
+            ended = capacity => return died("the night's pass over the plans", ended),
             ended = alerts => return died("the alerts' evaluation", ended),
         }
         // The alert in hand is settled and told before the process ends.

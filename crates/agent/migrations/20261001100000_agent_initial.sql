@@ -327,6 +327,37 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON agent.erasures TO agent_maintenance;
 
 
 -- ══════════════════════════════════════════════════════════════════════════════
+-- 5b. QUESTIONS ASKED
+-- ══════════════════════════════════════════════════════════════════════════════
+-- How many questions an organization's people have asked in a month of its
+-- plan, the month its deployment names by its start: kept apart from the
+-- messages, so a conversation deleted gives none back, and counted in one
+-- statement, so two asked at once cannot both take the last. Written by the
+-- maintenance lane alone, which every person's questions share; gone with the
+-- organization, and thirty days after its month ends.
+CREATE TABLE agent.questions_asked (
+    organization_id TEXT        NOT NULL,
+    month_start     TIMESTAMPTZ NOT NULL,
+    asked           INTEGER     NOT NULL DEFAULT 0,
+    PRIMARY KEY (organization_id, month_start),
+    CONSTRAINT questions_asked_asked_check CHECK (asked >= 0)
+);
+
+ALTER TABLE agent.questions_asked ENABLE ROW LEVEL SECURITY;
+ALTER TABLE agent.questions_asked FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY tenant_isolation ON agent.questions_asked
+    USING      (organization_id = current_setting('app.organization_id', true))
+    WITH CHECK (organization_id = current_setting('app.organization_id', true));
+
+CREATE POLICY maintenance_access ON agent.questions_asked
+    TO agent_maintenance
+    USING      (current_user = 'agent_maintenance')
+    WITH CHECK (current_user = 'agent_maintenance');
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON agent.questions_asked TO agent_maintenance;
+
+-- ══════════════════════════════════════════════════════════════════════════════
 -- 6. HEARTBEATS
 -- ══════════════════════════════════════════════════════════════════════════════
 -- The indexer and the retention sweep, each as the last replica to finish a

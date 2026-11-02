@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use telmoni_shared::db::project_move;
 use telmoni_shared::db::tenant_session::{
-    HasProject, Lane, Maintenance, MaintenanceLane, ProjectAndOrganization, Scoped,
+    HasProject, Lane, Maintenance, MaintenanceLane, Organization, ProjectAndOrganization, Scoped,
 };
 use telmoni_shared::{ContentMode, OrganizationId, ProjectId, ViewKind};
 
@@ -697,6 +697,47 @@ pub struct SealedFields {
     pub words: Vec<String>,
     /// Each field's hashed pairs of neighbouring words, the same way.
     pub pairs: Vec<String>,
+}
+
+/// Every organization with a project filed here, and those projects, across
+/// tenants: what each night's pass holds to its plan.
+pub async fn organizations_filed(
+    tx: &mut Scoped<'_, Maintenance<TelemetryLane>>,
+) -> sqlx::Result<Vec<(OrganizationId, Vec<ProjectId>)>> {
+    sqlx::query_as(
+        "SELECT organization_id, array_agg(project_id ORDER BY project_id)
+           FROM telemetry.project_settings
+          GROUP BY organization_id ORDER BY organization_id",
+    )
+    .fetch_all(tx.conn())
+    .await
+}
+
+/// When the oldest content of `projects` landed, across tenants; `None`
+/// where they hold none.
+pub async fn oldest_content(
+    tx: &mut Scoped<'_, Maintenance<TelemetryLane>>,
+    projects: &[ProjectId],
+) -> sqlx::Result<Option<DateTime<Utc>>> {
+    sqlx::query_scalar(
+        "SELECT min(received_at) FROM telemetry.plain_content WHERE project_id = ANY($1)",
+    )
+    .bind(projects)
+    .fetch_one(tx.conn())
+    .await
+}
+
+/// The sealed bytes of content the organization's projects hold.
+pub async fn content_held(
+    tx: &mut Scoped<'_, Organization>,
+    organization_id: &OrganizationId,
+) -> sqlx::Result<u64> {
+    let held: Option<i64> =
+        sqlx::query_scalar("SELECT bytes FROM telemetry.content_held WHERE organization_id = $1")
+            .bind(organization_id)
+            .fetch_optional(tx.conn())
+            .await?;
+    Ok(held.map_or(0, i64::unsigned_abs))
 }
 
 /// Content kept, its bytes added to the organization's count. A field

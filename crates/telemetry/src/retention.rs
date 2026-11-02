@@ -102,11 +102,6 @@ pub async fn shortened(pool: &sqlx::PgPool) -> anyhow::Result<Vec<Shortened>> {
         .collect())
 }
 
-/// A shortened project's spans before its cutoff, a lightweight delete
-/// awaited until marked, so the night's rewrite takes them off the disk.
-const DELETE_SHORTENED: &str = "DELETE FROM telemetry.spans \
-     WHERE project_id = {project:String} AND received_at < {cutoff:DateTime64(6, 'UTC')}";
-
 /// The first instant `spans_hourly` keeps at `now`: the first of the month
 /// [`ROLLUP_RETENTION_MONTHS`] before. Each month's partition wholly before
 /// it goes. A date out of range keeps everything, as above.
@@ -120,7 +115,7 @@ pub fn rollup_cutoff(now: DateTime<Utc>) -> DateTime<Utc> {
     )
 }
 
-fn midnight(day: NaiveDate) -> DateTime<Utc> {
+pub(crate) fn midnight(day: NaiveDate) -> DateTime<Utc> {
     Utc.from_utc_datetime(&day.and_time(chrono::NaiveTime::MIN))
 }
 
@@ -180,7 +175,7 @@ async fn delete_shortened(
         let deleted = within(
             STATEMENT_TIMEOUT,
             client
-                .query_raw(DELETE_SHORTENED)
+                .query_raw(crate::store::DELETE_BEFORE)
                 .with_setting("lightweight_deletes_sync", "1")
                 .param("project", project.as_str())
                 .param("cutoff", micros(cutoff_after(now, *days)))

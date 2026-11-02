@@ -63,7 +63,7 @@ pub const V1_LANES: &[V1Lane] = &[V1Lane {
         answers: &[
             Answer {
                 status: 204,
-                description: "Kept, kept already, or nothing kept for a project that keeps no content.",
+                description: "Kept, kept already, or nothing kept for a project that keeps no content or an organization that holds the content its plan does.",
             },
             Answer {
                 status: 400,
@@ -138,7 +138,11 @@ pub async fn put_media(
         .and_then(|v| v.to_str().ok())
         .filter(|v| is_mime_type(v))
         .unwrap_or("application/octet-stream");
-    content::keep_media(&state, &key.project_id, (&sha256, mime_type), &body).await?;
+    // Past the organization's content ceiling a file is not kept, as its
+    // span's content is not.
+    if crate::capacity::has_room_for_content(&state, &key.organization_id).await {
+        content::keep_media(&state, &key.project_id, (&sha256, mime_type), &body).await?;
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 

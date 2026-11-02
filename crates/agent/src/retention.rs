@@ -25,6 +25,10 @@ use crate::db::{self, AgentLane, Source};
 /// in the privacy policy beside the rest of what a person's account holds.
 pub const CONVERSATION_RETENTION_DAYS: i32 = 90;
 
+/// How long a month's count of questions is kept after it began: the longest
+/// month and thirty days.
+const QUESTION_MONTHS_KEPT_DAYS: i32 = 61;
+
 /// How long an erasure's fence is kept: past any retry of the erasure that
 /// still needs to know where it reached, and long past any turn it fences.
 const ERASURE_FENCE_DAYS: i32 = 30;
@@ -121,6 +125,7 @@ pub async fn sweep_once(state: &AppState) -> Result<u64, TelmoniError> {
         Box::pin(async move {
             if db::try_retention_lock(tx).await? {
                 db::forget_fences(tx, ERASURE_FENCE_DAYS).await?;
+                db::forget_months(tx, QUESTION_MONTHS_KEPT_DAYS).await?;
             }
             Ok::<_, sqlx::Error>(())
         })

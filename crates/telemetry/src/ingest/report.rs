@@ -17,6 +17,9 @@ pub struct Report {
     /// The attributes dropped from spans that were kept, in the order they
     /// came, the tags past the cardinality cap after the rest.
     pub dropped: Drops,
+    /// The spans sampled out past the organization's plan, and the sentence
+    /// that names what lifts it ([`crate::capacity`]).
+    pub sampled_out: Option<(usize, String)>,
 }
 
 /// How many drops are kept by name: each line names its span's sixteen hex
@@ -63,6 +66,12 @@ impl Drops {
         self.counted = self.counted.min(len.saturating_sub(self.named.len()));
     }
 
+    /// The named drops of the spans `kept` keeps alone: a span sampled out
+    /// went whole, and what it dropped goes unsaid with it.
+    pub fn retain_spans(&mut self, kept: impl Fn(&str) -> bool) {
+        self.named.retain(|dropped| kept(&dropped.span_id));
+    }
+
     /// The drops kept by name, in the order they came.
     #[must_use]
     pub fn named(&self) -> &[Dropped] {
@@ -71,10 +80,23 @@ impl Drops {
 }
 
 impl Report {
-    /// Whether no span was refused and no attribute dropped.
+    /// `spans` sampled out past the plan, told with `detail`.
+    pub fn sample_out(&mut self, spans: usize, detail: &str) {
+        if spans > 0 {
+            self.sampled_out = Some((spans, detail.to_owned()));
+        }
+    }
+
+    /// Whether no span was refused or sampled out and no attribute dropped.
     #[must_use]
     pub fn is_clean(&self) -> bool {
-        self.refused.is_empty() && self.dropped.is_empty()
+        self.refused.is_empty() && self.dropped.is_empty() && self.sampled_out.is_none()
+    }
+
+    /// The spans the answer counts as rejected: those refused, and those
+    /// sampled out past the plan.
+    fn rejected(&self) -> usize {
+        self.refused.len() + self.sampled_out.as_ref().map_or(0, |(spans, _)| *spans)
     }
 
     /// OTLP's `partial_success`: `None` when nothing was refused or dropped.
@@ -84,7 +106,7 @@ impl Report {
             return None;
         }
         Some(ExportTracePartialSuccess {
-            rejected_spans: i64::try_from(self.refused.len()).unwrap_or(i64::MAX),
+            rejected_spans: i64::try_from(self.rejected()).unwrap_or(i64::MAX),
             error_message: self.message(content_mode),
         })
     }
@@ -92,13 +114,23 @@ impl Report {
     /// The lines, refusals first, cut at [`ERROR_MESSAGE_MAX`] with a count
     /// of what was left out.
     fn message(&self, content_mode: ContentMode) -> String {
-        let lines = self.refused.iter().map(refused_line).chain(
-            self.dropped
-                .named()
-                .iter()
-                .map(|d| dropped_line(d, content_mode)),
-        );
-        cut(lines, self.refused.len() + self.dropped.len())
+        let sampled = self
+            .sampled_out
+            .as_ref()
+            .map(|(spans, detail)| format!("{spans} spans sampled out: {detail}"));
+        let lines = sampled
+            .into_iter()
+            .chain(self.refused.iter().map(refused_line))
+            .chain(
+                self.dropped
+                    .named()
+                    .iter()
+                    .map(|d| dropped_line(d, content_mode)),
+            );
+        cut(
+            lines,
+            usize::from(self.sampled_out.is_some()) + self.refused.len() + self.dropped.len(),
+        )
     }
 }
 
@@ -151,6 +183,9 @@ fn dropped_line(dropped: &Dropped, content_mode: ContentMode) -> String {
         }
         DropReason::OverCap(cap) => format!("over_cap; {cap}"),
         DropReason::Cardinality(cap) => format!("cardinality; {cap}"),
+        DropReason::ContentFull => "content_full; the organization holds the content its plan \
+                                    does, so the span keeps its metadata alone"
+            .to_owned(),
     };
     format!(
         "span {} dropped {}: {why}",
@@ -161,6 +196,22 @@ fn dropped_line(dropped: &Dropped, content_mode: ContentMode) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Spans sampled out past the plan are rejected in the answer, the
+    /// plan's sentence first, so nothing is dropped unsaid.
+    #[test]
+    fn spans_sampled_out_are_counted_and_named_first() {
+        let mut report = Report::default();
+        report.sample_out(0, "never said");
+        assert!(report.is_clean(), "nothing sampled out is nothing to say");
+        report.sample_out(9, "Move to Pro for $20 a month on its billing page.");
+        let partial = report.partial_success(ContentMode::Off).expect("not clean");
+        assert_eq!(partial.rejected_spans, 9);
+        assert_eq!(
+            partial.error_message,
+            "9 spans sampled out: Move to Pro for $20 a month on its billing page."
+        );
+    }
 
     /// Content dropped as `gen_ai.input.messages.<n>`, for each `n`.
     fn dropped(numbers: std::ops::Range<usize>) -> Drops {
@@ -192,6 +243,7 @@ mod tests {
                 reason: Refusal::NotARun,
             }],
             dropped: dropped(1..2),
+            sampled_out: None,
         };
         let partial = report.partial_success(ContentMode::Off).expect("not clean");
         assert_eq!(partial.rejected_spans, 1);
@@ -212,6 +264,7 @@ mod tests {
         let report = Report {
             refused: Vec::new(),
             dropped: dropped(0..200),
+            sampled_out: None,
         };
         let partial = report.partial_success(ContentMode::Off).expect("not clean");
         assert_eq!(partial.rejected_spans, 0);
@@ -259,6 +312,7 @@ mod tests {
         let report = Report {
             refused: Vec::new(),
             dropped: dropped(0..100_000),
+            sampled_out: None,
         };
         assert_eq!(
             (report.dropped.named().len(), report.dropped.len()),
@@ -286,6 +340,7 @@ mod tests {
         let message = Report {
             refused: Vec::new(),
             dropped: drops,
+            sampled_out: None,
         }
         .partial_success(ContentMode::Off)
         .expect("not clean")

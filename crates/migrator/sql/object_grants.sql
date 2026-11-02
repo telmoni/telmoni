@@ -92,6 +92,11 @@ BEGIN
     IF to_regclass('agent.erasures') IS NOT NULL THEN
         EXECUTE 'REVOKE INSERT, UPDATE, DELETE ON agent.erasures FROM agent';
     END IF;
+    -- A question's count is the maintenance lane's alone: a request that
+    -- could write it could give its organization's month back.
+    IF to_regclass('agent.questions_asked') IS NOT NULL THEN
+        EXECUTE 'REVOKE INSERT, UPDATE, DELETE ON agent.questions_asked FROM agent';
+    END IF;
 EXCEPTION
     WHEN invalid_schema_name THEN
         RAISE NOTICE 'agent schema not yet created — agent own-schema grants land on next re-apply';

@@ -540,6 +540,100 @@ async fn a_read_that_cannot_be_recorded_opens_nothing(pool: PgPool) {
 
 /// Off: the content is dropped and named, and no key is made for content the
 /// project never keeps.
+/// Past its organization's content ceiling, an export's spans keep their
+/// metadata alone, each field named `content_full` in the answer, and
+/// nothing is sealed or counted.
+#[sqlx::test]
+async fn content_past_the_organizations_ceiling_is_dropped_and_named(pool: PgPool) {
+    let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let mut door = door(&pool, ContentMode::On).await;
+    let state = common::state_with_stores_under(
+        &pool,
+        door.auth.clone(),
+        Arc::new(common::PlanMonth {
+            spans: 1_000_000,
+            grace_days: 0,
+            content_bytes: 100,
+        }),
+    );
+    door.app = router(state.clone()).nest("/otlp", otlp_router(state.clone()));
+    door.state = state;
+    sqlx::query("INSERT INTO telemetry.content_held (organization_id, bytes) VALUES ($1, 100)")
+        .bind(&door.organization)
+        .execute(&pool)
+        .await
+        .expect("seed the bytes held");
+
+    let (_, answer) = door.send(export("short")).await;
+    let message = answer["partialSuccess"]["errorMessage"]
+        .as_str()
+        .unwrap_or_default();
+    for field in [
+        "gen_ai.input.messages",
+        "gen_ai.tool.call.result",
+        "app.ticket",
+    ] {
+        assert!(
+            message.contains(&format!("span {SPAN} dropped {field}: content_full;")),
+            "{field}: {message}"
+        );
+    }
+    assert_eq!(
+        answer["partialSuccess"]["rejectedSpans"], 0,
+        "the span is kept: {answer}"
+    );
+    assert!(door.kept(&pool).await.is_empty(), "nothing sealed");
+}
+
+/// Each night an organization past its content ceiling loses its oldest
+/// content, a day at a time, until a tenth of the ceiling is free, its bytes
+/// taken off the count; what its retention keeps of its spans stays.
+#[sqlx::test]
+async fn the_nightly_pass_takes_the_oldest_content_past_the_ceiling(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let mut door = door(&pool, ContentMode::On).await;
+    let state = common::state_with_stores_under(
+        &pool,
+        door.auth.clone(),
+        Arc::new(common::PlanMonth {
+            spans: 1_000_000,
+            grace_days: 0,
+            content_bytes: 10,
+        }),
+    );
+    door.app = router(state.clone()).nest("/otlp", otlp_router(state.clone()));
+    door.state = state;
+    door.send(export("short")).await;
+    assert!(!door.kept(&pool).await.is_empty(), "kept under the ceiling");
+
+    let purged = telmoni_telemetry::capacity::purge(&door.state, chrono::Utc::now())
+        .await
+        .expect("the pass runs");
+    assert!(purged.content > 0, "{purged:?}");
+    assert!(door.kept(&pool).await.is_empty(), "the oldest content went");
+    let held: i64 =
+        sqlx::query_scalar("SELECT bytes FROM telemetry.content_held WHERE organization_id = $1")
+            .bind(&door.organization)
+            .fetch_one(&pool)
+            .await
+            .expect("the count");
+    assert_eq!(held, 0, "its bytes came off the count");
+    let spans: u64 = ch
+        .store
+        .read(
+            &Projects::one(door.project.clone()),
+            "SELECT count() FROM telemetry.spans WHERE project_id IN {projects:Array(String)}",
+        )
+        .fetch_one()
+        .await
+        .expect("the spans are read");
+    assert_eq!(spans, 1, "the span within retention stays");
+}
+
 #[sqlx::test]
 async fn a_project_left_off_keeps_no_content_and_makes_no_key(pool: PgPool) {
     let Some(_ch) = clickhouse_or_skip(module_path!()).await else {

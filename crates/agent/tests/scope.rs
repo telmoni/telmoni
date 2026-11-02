@@ -19,7 +19,7 @@ use async_trait::async_trait;
 use axum::http::HeaderMap;
 use sqlx::PgPool;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, DurationRound as _, Utc};
 use telmoni_agent::config::{
     Config, EMBEDDING_DIMENSIONS, EmbeddingsConfig, ModelConfig, Provider,
 };
@@ -922,4 +922,116 @@ async fn the_index_embeds_only_what_changed(pool: PgPool) {
         .await,
         1
     );
+}
+
+/// Auth that reads every bearer as one member of `org_a` asking in `proj_a`.
+struct OneAsker;
+
+#[async_trait]
+impl Auth for OneAsker {
+    async fn resolve(&self, _: &HeaderMap) -> Result<Acting, TelmoniError> {
+        Ok(acting(
+            "user_ask",
+            Role::Member,
+            Some(OrganizationRole::Member),
+        ))
+    }
+    async fn global_flags(&self) -> Result<FlagSet, TelmoniError> {
+        Err(AuthError::IdentityUnavailable.into())
+    }
+    async fn organization_standing(
+        &self,
+        _: &OrganizationId,
+    ) -> Result<Option<OrganizationStatus>, TelmoniError> {
+        Ok(Some(OrganizationStatus::Active))
+    }
+}
+
+/// A plan's month that holds one question, begun a day ago.
+struct OneQuestion;
+
+#[async_trait]
+impl telmoni_shared::seam::Entitlements for OneQuestion {
+    async fn grants(&self, _: &OrganizationId) -> Result<telmoni_shared::Grants, TelmoniError> {
+        Ok(telmoni_shared::Grants::unlimited())
+    }
+    async fn capacity(
+        &self,
+        _: &OrganizationId,
+    ) -> Result<Option<telmoni_shared::Capacity>, TelmoniError> {
+        let allowance = |limit| telmoni_shared::Allowance {
+            limit,
+            entitlement: "pro".into(),
+            detail: "Your organization has asked the agent the questions its plan holds this \
+                     month. Move to Pro for $20 a month on its billing page."
+                .into(),
+        };
+        let today = Utc::now();
+        // A month begun yesterday at midnight: the same start on every
+        // answer, as a deployment's month has.
+        let month = today
+            .duration_trunc(chrono::Duration::days(1))
+            .unwrap_or(today)
+            - chrono::Duration::days(1);
+        Ok(Some(telmoni_shared::Capacity {
+            period_start: month,
+            period_end: month + chrono::Duration::days(30),
+            spans: allowance(50_000),
+            spans_grace_days: 0,
+            agent_questions: allowance(1),
+            retention_days: 30,
+            content_bytes: 25_000_000,
+            held_until: None,
+        }))
+    }
+}
+
+/// Past the questions a plan's month holds, the organization's next is
+/// refused with a `402` naming what lifts it and the day the month renews,
+/// before anything of it is kept, a deleted conversation giving none back.
+#[sqlx::test]
+async fn a_question_past_the_plans_month_is_refused_until_it_renews(pool: PgPool) {
+    let mut state = state_with(
+        &pool,
+        Arc::new(SameVector(AtomicUsize::new(0))),
+        Arc::new(OneAsker),
+    );
+    state.entitlements = Arc::new(OneQuestion);
+    let state = Arc::new(state);
+    let ask = || {
+        telmoni_agent::handler::post_turn(
+            axum::extract::State(state.clone()),
+            HeaderMap::new(),
+            telmoni_shared::extract::Json(
+                serde_json::from_value(serde_json::json!({ "message": "how are my runs?" }))
+                    .expect("a turn"),
+            ),
+        )
+    };
+    assert!(ask().await.is_ok(), "the month's one question is asked");
+    // Deleting the conversation gives the month nothing back.
+    sqlx::query("DELETE FROM agent.conversations WHERE organization_id = 'org_a'")
+        .execute(&pool)
+        .await
+        .expect("delete the conversation");
+    let refused = ask()
+        .await
+        .expect_err("the second of one")
+        .to_problem_details();
+    assert_eq!(
+        (refused.status, refused.type_uri.as_str()),
+        (402, "/errors/plan/limit-reached")
+    );
+    let detail = refused.detail.unwrap_or_default();
+    assert!(
+        detail.contains("Move to Pro") && detail.contains("It renews on"),
+        "{detail}"
+    );
+    let asked: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM agent.messages WHERE organization_id = 'org_a' AND role = 'user'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("the questions kept");
+    assert_eq!(asked, 0, "the refused question was never kept");
 }

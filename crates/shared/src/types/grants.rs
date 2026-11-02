@@ -138,6 +138,12 @@ pub struct Capacity {
     pub agent_questions: Allowance,
     /// How many days its spans are kept.
     pub retention_days: u32,
+    /// The content it may hold, in sealed bytes: never sold, so past it a
+    /// span keeps its metadata alone and the oldest content goes each night.
+    pub content_bytes: u64,
+    /// Until when a move to a plan holding less is held: nothing past the
+    /// plan before it is purged before then.
+    pub held_until: Option<DateTime<Utc>>,
 }
 
 /// One limit of a [`Capacity`]: how much, and the refusal that names the one
@@ -165,6 +171,19 @@ impl Allowance {
             return Ok(());
         }
         Err(limit_reached(&self.entitlement, &self.detail))
+    }
+
+    /// [`Allowance::admit`], the refusal naming the day the month renews.
+    pub fn admit_until(&self, used: u64, renews: DateTime<Utc>) -> Result<(), TelmoniError> {
+        if self.has_room(used) {
+            return Ok(());
+        }
+        let detail = format!(
+            "{} It renews on {}.",
+            self.detail,
+            renews.format("%-d %B %Y")
+        );
+        Err(limit_reached(&self.entitlement, &detail))
     }
 }
 
@@ -234,6 +253,15 @@ mod tests {
             (402, "/errors/plan/limit-reached")
         );
         assert_eq!(pd.detail.as_deref(), Some("Hobby asks five a month."));
+        let renews = DateTime::from_timestamp(1_801_872_000, 0).expect("a day");
+        let pd = questions
+            .admit_until(5, renews)
+            .expect_err("the sixth of five")
+            .to_problem_details();
+        assert_eq!(
+            pd.detail.as_deref(),
+            Some("Hobby asks five a month. It renews on 6 February 2027.")
+        );
     }
 
     #[test]

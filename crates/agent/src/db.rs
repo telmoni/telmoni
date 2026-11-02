@@ -704,6 +704,35 @@ pub async fn recent_questions<B: AuthorBinding>(
     .await
 }
 
+/// One more question counted against the organization's month that began
+/// at `month_start`, unless it has asked `most` already: answers whether it
+/// was counted. One statement, so two asked at once cannot both take the
+/// last.
+pub async fn ask_in_month(
+    tx: &mut Scoped<'_, Maintenance<AgentLane>>,
+    organization_id: &OrganizationId,
+    month_start: DateTime<Utc>,
+    most: u64,
+) -> sqlx::Result<bool> {
+    if most == 0 {
+        return Ok(false);
+    }
+    let counted: Option<i32> = sqlx::query_scalar(
+        "INSERT INTO agent.questions_asked (organization_id, month_start, asked)
+         VALUES ($1, $2, 1)
+         ON CONFLICT (organization_id, month_start) DO UPDATE
+            SET asked = agent.questions_asked.asked + 1
+          WHERE agent.questions_asked.asked < $3
+      RETURNING asked",
+    )
+    .bind(organization_id)
+    .bind(month_start)
+    .bind(i64::try_from(most).unwrap_or(i64::MAX))
+    .fetch_optional(tx.conn())
+    .await?;
+    Ok(counted.is_some())
+}
+
 /// Who a conversation and its messages belong to: the person, asking in a
 /// project of an organization.
 #[derive(Debug, Clone, Copy)]
@@ -1056,6 +1085,20 @@ pub async fn sweep_conversations(
     )
     .bind(days)
     .bind(chunk)
+    .execute(tx.conn())
+    .await?
+    .rows_affected())
+}
+
+/// Every month's count of questions begun more than `days` ago, forgotten.
+pub async fn forget_months(
+    tx: &mut Scoped<'_, Maintenance<AgentLane>>,
+    days: i32,
+) -> sqlx::Result<u64> {
+    Ok(sqlx::query(
+        "DELETE FROM agent.questions_asked WHERE month_start < now() - make_interval(days => $1)",
+    )
+    .bind(days)
     .execute(tx.conn())
     .await?
     .rows_affected())
@@ -1534,6 +1577,9 @@ pub async fn purge_organization(
           WHERE id IN (SELECT id FROM agent.conversations WHERE organization_id = $1 LIMIT $2)",
         "DELETE FROM agent.chunks
           WHERE id IN (SELECT id FROM agent.chunks WHERE organization_id = $1 LIMIT $2)",
+        "DELETE FROM agent.questions_asked
+          WHERE (organization_id, month_start) IN (SELECT organization_id, month_start
+              FROM agent.questions_asked WHERE organization_id = $1 LIMIT $2)",
     ] {
         gone += sqlx::query(sql)
             .bind(organization_id)

@@ -138,6 +138,16 @@ The span is kept, and the answer names the field. On a project whose mode is
 Postgres alone, for as long as its span: free of an attribute's 1,024
 characters, held only by the 1 MiB an export may be.
 
+**Past a plan's capacity**, on a deployment that sells plans: once an
+organization's spans pass what its plan holds for the month, every span is
+kept through the plan's grace, if it has one; after it, one run in ten is kept
+whole, its spans' `sample_rate` taken to a tenth of what it was, and the rest
+are counted in `partialSuccess.rejectedSpans`, the message's first line saying
+how many and what lifts it. Its owner and admins are told once a month. Past
+its plan's content ceiling, a span keeps its metadata alone, each field named
+`content_full`, and a file uploaded apart is not kept. A self-hosted
+installation has no plans, and keeps everything.
+
 Only the organization's **Owner** switches a project's mode, on its
 **Settings** page. Leaving `off` takes a code mailed to them; going back to
 `off` asks nothing, and may delete what the project kept, its key first

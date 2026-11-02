@@ -112,8 +112,12 @@ const OPERATOR_ONLY: &[&str] = &[
 /// row. The delivery log is the record of what a project told the outside
 /// world; its rows go with their delivery by cascade, which needs no grant.
 /// An erasure's fence is read by every answer's save, and lifted or forged
-/// by nothing a request does.
-const LANE_WRITTEN: &[&str] = &["notifications.delivery_attempts", "agent.erasures"];
+/// by nothing a request does; a month's questions are counted by it alone.
+const LANE_WRITTEN: &[&str] = &[
+    "notifications.delivery_attempts",
+    "agent.erasures",
+    "agent.questions_asked",
+];
 
 /// The tables the runtime role writes but never deletes from: its
 /// maintenance lane purges them with their project or organization. A
@@ -546,6 +550,13 @@ async fn the_maintenance_lanes_narrowed_grants_hold_in_every_tier() {
         (
             "agent_maintenance",
             "agent.erasures",
+            &["SELECT", "INSERT", "UPDATE", "DELETE"],
+        ),
+        // A question counts against its organization's month; retention and
+        // the purges forget the month.
+        (
+            "agent_maintenance",
+            "agent.questions_asked",
             &["SELECT", "INSERT", "UPDATE", "DELETE"],
         ),
         // The purges delete a project's or an organization's settings; the

@@ -80,6 +80,11 @@ const READ_TIMEOUT: Duration = Duration::from_secs(10);
 const DELETE_SPANS: &str = "DELETE FROM telemetry.spans WHERE project_id = {project:String}";
 const DELETE_ROLLUP: &str =
     "DELETE FROM telemetry.spans_hourly WHERE project_id = {project:String}";
+/// A project's spans that landed before a cutoff, past its retention: what
+/// [`Store::delete_before`] sends, and `rotate` for a project's own shorter
+/// one. The hourly totals keep their counts.
+pub(crate) const DELETE_BEFORE: &str = "DELETE FROM telemetry.spans
+     WHERE project_id = {project:String} AND received_at < {cutoff:DateTime64(6, 'UTC')}";
 /// Some of a project's runs marked deleted: what [`Store::delete_runs`] sends.
 /// The hourly totals keep their counts, since they name no run.
 const DELETE_RUNS: &str = "DELETE FROM telemetry.spans
@@ -454,6 +459,20 @@ impl Store {
             within(DELETE_TIMEOUT, delete.execute()).await?;
         }
         Ok(())
+    }
+
+    /// The project's spans that landed before `cutoff`, deleted, its hourly
+    /// totals kept: what its organization's retention no longer holds. ⚠ An
+    /// error's text can carry ClickHouse's own message: log its kind.
+    pub async fn delete_before(
+        &self,
+        project: &ProjectId,
+        cutoff: DateTime<Utc>,
+    ) -> clickhouse::error::Result<()> {
+        let delete = self
+            .delete(project, DELETE_BEFORE, true)
+            .param("cutoff", micros(cutoff));
+        within(DELETE_TIMEOUT, delete.execute()).await
     }
 
     /// `run`'s tags changed on its every span: `removed` taken off, then
