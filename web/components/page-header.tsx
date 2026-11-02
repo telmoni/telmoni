@@ -5,6 +5,7 @@ import { ArrowLeft, InfoIcon } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
+import { ButtonGroup } from "@/components/ui/button-group";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 import { recordVisit } from "@/lib/search-recent";
@@ -15,6 +16,7 @@ export function PageHeader({
   headingId,
   info,
   action,
+  toolbar,
   backHref,
   backLabel,
 }: {
@@ -26,6 +28,8 @@ export function PageHeader({
    *  leaves no room for a sentence. */
   info?: string;
   action?: ReactNode;
+  /** A list's toolbar, at the title row's end (`ListToolbar`). */
+  toolbar?: ReactNode;
   /** Where the page's way back leads, drawn above its title as `← backLabel`:
    *  a page of one trace or one session, back to its list. Both or none. */
   backHref?: string;
@@ -50,18 +54,19 @@ export function PageHeader({
     }
   }, []);
 
-  if (!title && !action) return null;
-  // As tall as a page action, 36px, so a page with one and a page without
-  // start their content at the same height and nothing jumps between them.
+  if (!title && !action && !toolbar) return null;
+  // At least as tall as the rail rows (28px), so the page title sits on the
+  // Overview icon link's axis whether the rail is closed or open; a toolbar
+  // the row cannot hold scrolls beside the title rather than wrapping.
   const row = (
-    <div className="flex min-h-9 w-full min-w-0 items-center gap-3">
+    <div className="flex min-h-7 w-full min-w-0 items-center gap-gutter">
       {title && (
         <div className="flex min-w-0 items-center gap-2">
           <h1
             ref={heading}
             id={headingId}
             tabIndex={-1}
-            className="min-w-0 truncate text-base font-medium outline-none"
+            className="min-w-0 truncate text-base font-medium leading-7 outline-none"
           >
             {title}
           </h1>
@@ -83,7 +88,12 @@ export function PageHeader({
           )}
         </div>
       )}
-      {action && <div className="ml-auto shrink-0">{action}</div>}
+      {toolbar}
+      {action && (
+        <ButtonGroup className="ml-auto shrink-0">
+          {action}
+        </ButtonGroup>
+      )}
     </div>
   );
   if (!backHref || !backLabel) return row;

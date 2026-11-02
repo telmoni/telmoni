@@ -100,19 +100,18 @@ export function FacetsPanel({ list, organization, slug, query, ui = {}, facets }
     return facets?.[filter].values.some((v) => v.value.toLowerCase().includes(needle)) ?? false;
   });
 
-  // As wide as the console's rail rows until dragged (`w-filters`, `globals.css`),
-  // and never past half the row, so the list keeps its room; `gap-3` is the
-  // page's own above it, so the toggle has as much room under it as over it.
+  // As wide as the main sidebar's links until dragged (`w-filters`, `globals.css`),
+  // and never past half the row, so the list keeps its room.
   return (
     <aside
       ref={panel}
       style={{ "--filters-width": width === null ? undefined : `${width}px` } as CSSProperties}
-      className="relative grid w-full shrink-0 content-start gap-3 md:w-filters md:max-w-1/2"
+      className="relative grid w-full shrink-0 content-start gap-gutter md:w-filters md:max-w-1/2"
       aria-label="Filters"
       aria-busy={pending}
       data-pending={pending ? "" : undefined}
     >
-      <div className="flex h-9 items-center gap-2">
+      <div className="flex h-7 items-center gap-2">
         <PanelButton shown />
         <h2 className="text-sm font-medium">Filters</h2>
         {ticked > 0 && (
@@ -140,7 +139,7 @@ export function FacetsPanel({ list, organization, slug, query, ui = {}, facets }
       </div>
       <div className="relative">
         <SearchIcon
-          className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
+          className="pointer-events-none absolute top-1/2 left-1.5 size-4 -translate-y-1/2 text-muted-foreground"
           aria-hidden="true"
         />
         <Input
@@ -149,7 +148,7 @@ export function FacetsPanel({ list, organization, slug, query, ui = {}, facets }
           onChange={(event) => setSearch(event.target.value)}
           placeholder="Search filters"
           aria-label="Search filters"
-          className="pl-8"
+          className="pl-7"
         />
       </div>
       {facets === null ? (
@@ -237,12 +236,12 @@ function FacetSection({
     filter === "status" && isOneOf(STATUSES, value) ? STATUS_LABEL[value] : value;
 
   return (
-    <Collapsible open={open} onOpenChange={setChosen} className="border-b border-border py-1">
-      {/* The header's contents sit 8px in, as a value's do, and its Clear is
-          an X: a word at the panel's edge stretched the row. */}
-      <div className="flex items-center gap-1">
+    <Collapsible open={open} onOpenChange={setChosen} className="border-b border-border">
+      {/* The header's contents sit 6px in (px-1.5), matching rail and icon buttons,
+          and its Clear is an X: a word at the panel's edge stretched the row. */}
+      <div className="flex items-center gap-gutter">
         <CollapsibleTrigger asChild>
-          <Button variant="ghost" size="sm" className="flex-1 justify-start px-2 has-[>svg]:px-2">
+          <Button variant="ghost" size="sm" className="flex-1 justify-start">
             <ChevronRightIcon
               className={cn("text-muted-foreground transition-transform", open && "rotate-90")}
               aria-hidden="true"
@@ -297,7 +296,7 @@ function FacetSection({
         {mode === "text" ? (
           <TypedValue filter={filter} label={label} onAdd={onToggle} />
         ) : values.length === 0 ? (
-          <p className="px-2 text-xs text-muted-foreground">
+          <p className="px-1.5 text-xs text-muted-foreground">
             No {label.toLowerCase()} among the window&rsquo;s runs.
           </p>
         ) : (
@@ -306,7 +305,7 @@ function FacetSection({
               <CommandInput placeholder={`Search ${label.toLowerCase()}s`} />
             )}
             <CommandList className="max-h-64">
-              <CommandEmpty className="py-3 text-center text-xs text-muted-foreground">
+              <CommandEmpty className="py-gutter text-center text-xs text-muted-foreground">
                 No {label.toLowerCase()} matches.
               </CommandEmpty>
               {values.map((v) => {
@@ -334,7 +333,7 @@ function FacetSection({
           </Command>
         )}
         {facet.more && mode === "select" && (
-          <p className="px-2 text-xs text-muted-foreground">
+          <p className="px-1.5 text-xs text-muted-foreground">
             The {FACET_VALUES_MAX} with the most {rows}
             {typed ? "; type one in to find another" : ""}.
           </p>

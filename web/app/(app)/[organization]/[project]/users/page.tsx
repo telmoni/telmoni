@@ -47,9 +47,10 @@ export default async function UsersPage({
       access={access}
       facets={facets.kind === "ok" ? facets.facets : null}
       rows={(list) => list.users.length}
-      toolbar={(list) => (
+      toolbar={(list, days) => (
         <ListToolbar
           list="users"
+          days={days}
           organization={organization}
           slug={slug}
           projectId={project.id}

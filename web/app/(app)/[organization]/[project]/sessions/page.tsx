@@ -59,9 +59,10 @@ export default async function SessionsPage({
       access={access}
       facets={facets.kind === "ok" ? facets.facets : null}
       rows={(list) => list.sessions.length}
-      toolbar={(list) => (
+      toolbar={(list, days) => (
         <ListToolbar
           list="sessions"
+          days={days}
           organization={organization}
           slug={slug}
           projectId={project.id}

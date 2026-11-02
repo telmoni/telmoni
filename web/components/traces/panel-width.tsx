@@ -172,9 +172,9 @@ export function FiltersEdge({ edge }: { edge: FiltersEdgeProps }) {
       data-testid="filters-resize"
       {...handlers}
       className={cn(
-        // The whole gap takes the pointer; the line drawn is 3px, centred in it.
+        // The whole gap takes the pointer; the line drawn is 4px, centred in it.
         "absolute inset-y-0 -right-gutter z-10 hidden w-gutter cursor-ew-resize touch-none outline-none md:block",
-        "after:absolute after:inset-y-0 after:left-1/2 after:w-0.75 after:-translate-x-1/2 after:rounded-full",
+        "after:absolute after:inset-y-0 after:left-1/2 after:w-1 after:-translate-x-1/2 after:rounded-full",
         "hover:after:bg-foreground/10 focus-visible:after:bg-foreground/20",
         dragging && "after:bg-foreground/10",
       )}

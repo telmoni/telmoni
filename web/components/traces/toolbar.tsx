@@ -1,16 +1,14 @@
 "use client";
 
-import { Fragment, type ReactNode, useEffect, useId, useState, useTransition } from "react";
+import { Fragment, type ReactNode, useId, useState, useTransition } from "react";
 import {
   ChartColumnIcon,
-  ChevronDownIcon,
   ChevronRightIcon,
   CircleXIcon,
   CoinsIcon,
   Columns3Icon,
   DownloadIcon,
   RefreshCwIcon,
-  Rows3Icon,
   TableIcon,
   TimerIcon,
   type LucideIcon,
@@ -21,14 +19,13 @@ import { ViewsMenu } from "@/components/traces/views-menu";
 import { useListNavigation } from "@/components/traces/navigate";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ButtonGroup } from "@/components/ui/button-group";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -53,10 +50,6 @@ import type {
 import { SESSIONS, SESSION_COLUMN_MENU, SESSION_TABLE } from "@/lib/sessions";
 import {
   COLUMNS_PREF,
-  DENSITIES,
-  REFRESH_INTERVALS,
-  refreshLabel,
-  type Density,
   type TracePrefs,
 } from "@/lib/trace-prefs";
 import {
@@ -81,7 +74,6 @@ import { toggled } from "@/lib/trace-tree";
 import { setTracePrefs, useTracePrefs } from "@/lib/use-trace-prefs";
 import { USERS, USER_COLUMN_MENU, USER_TABLE } from "@/lib/users";
 import type { UserSort } from "@/lib/types/enums";
-import { isOneOf } from "@/lib/one-of";
 import { cn } from "@/lib/utils";
 
 type Common = {
@@ -91,6 +83,8 @@ type Common = {
   ui: TraceUi;
   /** How many rows the filters admit. */
   total: number;
+  /** The window's days, the toolbar's first control. */
+  days: number;
   canSave: boolean;
 };
 
@@ -158,14 +152,13 @@ type ListToolbarProps = Common &
     extra?: (go: (href: string) => void) => ReactNode;
   };
 
-// A list's toolbar, on one row of shadcn controls: the ready-made queries,
-// the saved views and the list's own on the left; on the right what every
-// list has (`ListControls`). The window and the refresh stand on the title's
-// row (`ListHeaderControls`). A control that changes what the list holds
-// changes its URL, and one that changes only how it looks is kept in the
-// browser (`lib/trace-prefs.ts`).
+// A list's toolbar, one row of shadcn controls at the title row's end: the
+// refresh and the window, the ready-made queries, the saved views and the
+// list's own, then what every list has (`ListControls`). A
+// control that changes what the list holds changes its URL, and one that
+// changes only how it looks is kept in the browser (`lib/trace-prefs.ts`).
 export function ListToolbar({ extra, total, ...props }: ListToolbarProps) {
-  const { organization, slug, ui } = props;
+  const { organization, slug, ui, days } = props;
   const { go, pending } = useListNavigation();
   const presets = (() => {
     switch (props.list) {
@@ -179,11 +172,16 @@ export function ListToolbar({ extra, total, ...props }: ListToolbarProps) {
   })();
 
   return (
-    <div
-      className="flex flex-wrap items-center gap-gutter"
+    // The room the title leaves, its controls at its end; too narrow for them,
+    // it scrolls from the first (a safe end, so none is pushed out of reach),
+    // its padding keeping the focus rings from being clipped.
+    <ButtonGroup
+      className="-m-1 min-w-0 flex-1 justify-end-safe overflow-x-auto p-1 [&>*]:shrink-0"
       aria-busy={pending}
       data-pending={pending ? "" : undefined}
     >
+      <RefreshControl />
+      <WindowPicker days={days} />
       {presets}
       <ViewsMenu {...props} />
       {extra?.((href) => go(href))}
@@ -194,7 +192,7 @@ export function ListToolbar({ extra, total, ...props }: ListToolbarProps) {
         query={props.query}
         total={total}
       />
-    </div>
+    </ButtonGroup>
   );
 }
 
@@ -241,86 +239,37 @@ type ListControlsProps = {
   total: number;
 };
 
-/** A list's columns, its rows' density and its download. */
+/** A list's columns and its download; its rows' density is the General
+ *  settings page's. */
 function ListControls({ list, organization, slug, query, total }: ListControlsProps) {
   return (
-    <div className="ml-auto flex items-center gap-gutter">
+    <ButtonGroup>
       <ColumnsMenu list={list} />
-      <DensityMenu />
       <DownloadMenu list={list} organization={organization} slug={slug} query={query} total={total} />
-    </div>
+    </ButtonGroup>
   );
 }
 
-// The window a list reads and its refresh, on the title's row.
-export function ListHeaderControls({ days }: { days: number }) {
-  return (
-    <div className="flex items-center gap-gutter">
-      <WindowPicker days={days} />
-      <RefreshControl />
-    </div>
-  );
-}
-
-/** A refresh now, and how often the page reads itself again: only while it
- *  is in view, so a tab left open asks nothing of the server. The list
- *  counts the runs that land in a bar above itself (`NewTraces`) and is
- *  drawn when asked, so the interval is for a console whose live events are
- *  paused. */
+/** A refresh now. The list counts the runs that land in a bar above itself
+ *  (`NewTraces`) and draws them when asked, so it needs no timer. */
 function RefreshControl() {
   const router = useRouter();
-  const { refresh } = useTracePrefs();
   const [refreshing, start] = useTransition();
 
-  useEffect(() => {
-    if (refresh === 0) return;
-    const timer = window.setInterval(() => {
-      if (document.visibilityState === "visible") start(() => router.refresh());
-    }, refresh * 1_000);
-    return () => window.clearInterval(timer);
-  }, [refresh, router]);
-
   return (
-    <div className="flex items-center">
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            variant="outline"
-            size="icon"
-            className="rounded-r-none"
-            aria-label="Refresh"
-            onClick={() => start(() => router.refresh())}
-          >
-            <RefreshCwIcon className={cn(refreshing && "animate-spin")} />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>Refresh</TooltipContent>
-      </Tooltip>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="outline" className="-ml-px rounded-l-none" aria-label="Refresh every">
-            {refreshLabel(refresh)}
-            <ChevronDownIcon className="text-muted-foreground" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuLabel>Refresh every</DropdownMenuLabel>
-          <DropdownMenuRadioGroup
-            value={String(refresh)}
-            onValueChange={(value) => {
-              const refresh = Number(value);
-              if (isOneOf(REFRESH_INTERVALS, refresh)) setTracePrefs({ refresh });
-            }}
-          >
-            {REFRESH_INTERVALS.map((seconds) => (
-              <DropdownMenuRadioItem key={seconds} value={String(seconds)}>
-                {seconds === 0 ? "Never" : refreshLabel(seconds)}
-              </DropdownMenuRadioItem>
-            ))}
-          </DropdownMenuRadioGroup>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </div>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant="outline"
+          size="icon"
+          aria-label="Refresh"
+          onClick={() => start(() => router.refresh())}
+        >
+          <RefreshCwIcon className={cn(refreshing && "animate-spin")} />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>Refresh</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -453,44 +402,6 @@ function ColumnItem({
   );
 }
 
-const DENSITY_LABEL: Record<Density, string> = {
-  comfortable: "Comfortable",
-  compact: "Compact",
-};
-
-/** How tightly the rows sit. */
-function DensityMenu() {
-  const { density } = useTracePrefs();
-  return (
-    <DropdownMenu>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="icon" aria-label="Row density">
-              <Rows3Icon />
-            </Button>
-          </DropdownMenuTrigger>
-        </TooltipTrigger>
-        <TooltipContent>Row density</TooltipContent>
-      </Tooltip>
-      <DropdownMenuContent align="end">
-        <DropdownMenuLabel>Rows</DropdownMenuLabel>
-        <DropdownMenuRadioGroup
-          value={density}
-          onValueChange={(value) => {
-            if (isOneOf(DENSITIES, value)) setTracePrefs({ density: value });
-          }}
-        >
-          {DENSITIES.map((d) => (
-            <DropdownMenuRadioItem key={d} value={d}>
-              {DENSITY_LABEL[d]}
-            </DropdownMenuRadioItem>
-          ))}
-        </DropdownMenuRadioGroup>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
 
 /** The list as a file: every row its filters admit, sorted as it is, up to
  *  the server's cap, which the menu names when the list is past it. */

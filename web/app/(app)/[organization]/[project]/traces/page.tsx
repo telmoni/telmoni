@@ -86,8 +86,9 @@ export default async function TracesPage({
             />
           ) : undefined
         }
-        toolbar={(list) => (
+        toolbar={(list, days) => (
           <TraceToolbar
+            days={days}
             organization={organization}
             slug={slug}
             projectId={project.id}

@@ -17,9 +17,10 @@ export function draggedPanelWidth(start: number, startX: number, x: number, boun
   return Math.round(Math.min(Math.max(start + moved, bounds.min), Math.max(bounds.max, bounds.min)));
 }
 
-/** The filters' own width: `--spacing-sidebar-inner` (`globals.css`), the
- *  console's rail rows', in pixels: the 192px rail less two gutters. */
-export const FILTERS_WIDTH_DEFAULT = 192 - 2 * GUTTER_PX;
+/** The filters' own width, in pixels: the main sidebar's links', the 168px rail
+ *  (`--spacing-sidebar`) less two gutters (`--spacing-sidebar-inner`, which
+ *  `w-filters` reads). */
+export const FILTERS_WIDTH_DEFAULT = 168 - 2 * GUTTER_PX;
 
 /** The narrowest the filters are dragged to, and the widest. */
 export const FILTERS_WIDTH_MIN = 128;

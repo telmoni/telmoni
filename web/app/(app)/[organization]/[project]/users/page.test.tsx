@@ -7,13 +7,16 @@ vi.mock("@/components/page-header", () => ({
     title,
     info,
     action,
+    toolbar,
   }: {
     title: string;
     info?: string;
     action?: React.ReactNode;
+    toolbar?: React.ReactNode;
   }) => (
     <div data-testid="page-header" data-info={info}>
       {title}
+      {toolbar}
       {action}
     </div>
   ),
@@ -179,10 +182,11 @@ describe("UsersPage", () => {
       "/acme/web/users?sort=last_seen&dir=desc",
     );
     expect(screen.getByRole("button", { name: /Columns/ })).toHaveTextContent("8/10");
-    // The window and the refresh stand on the title's row, as on the traces page.
+    // The window, the refresh and the columns stand on the title's row.
     const header = within(screen.getByTestId("page-header"));
     expect(header.getByRole("combobox", { name: "Window" })).toHaveTextContent("Last 7 days");
     expect(header.getByRole("button", { name: "Refresh" })).toBeInTheDocument();
+    expect(header.getByRole("button", { name: /Columns/ })).toBeInTheDocument();
   });
 
   it("reads the URL's filters, sort, window and page, hands them to the server, and shows them", async () => {
@@ -212,9 +216,7 @@ describe("UsersPage", () => {
       "href",
       "/acme/web/users?model=claude-sonnet-5-5&sort=first_seen&days=30&dir=desc",
     );
-    expect(
-      within(screen.getByTestId("page-header")).getByRole("combobox", { name: "Window" }),
-    ).toHaveTextContent("Last 30 days");
+    expect(screen.getByRole("combobox", { name: "Window" })).toHaveTextContent("Last 30 days");
     const bar = within(screen.getByLabelText("Filters in force"));
     expect(bar.getByRole("link", { name: "Clear all" })).toHaveAttribute(
       "href",

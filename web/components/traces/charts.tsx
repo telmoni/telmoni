@@ -242,12 +242,12 @@ export function TraceHistogramStrip({ histogram }: { histogram: TraceHistogram }
 // same width.
 export function TraceCharts({ histogram }: { histogram: TraceHistogram }) {
   return (
-    <div className="grid gap-4 lg:grid-cols-2">
+    <div className="grid gap-gutter lg:grid-cols-2">
       {METRICS.map((metric) => (
         <div
           key={metric}
           role="region"
-          className="grid gap-2 rounded-xl border border-border p-4"
+          className="grid gap-2 rounded-xl border border-border p-gutter"
           aria-label={METRIC_LABEL[metric]}
         >
           <h2 className="text-sm font-medium">

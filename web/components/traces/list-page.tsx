@@ -9,7 +9,6 @@ import { ServiceUnavailable } from "@/components/service-unavailable";
 import { FacetsPanel } from "@/components/traces/facets";
 import { FilterBar } from "@/components/traces/filter-bar";
 import { ListPagination } from "@/components/traces/pagination";
-import { ListHeaderControls } from "@/components/traces/toolbar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ownerContact } from "@/lib/identity";
 import { LIST_DIMS_WHILE_PENDING } from "@/lib/list-pending";
@@ -70,7 +69,7 @@ export function ListPage<L extends ListWindow>({
   facets: Facets | null;
   /** How many rows this page holds. */
   rows: (list: L) => number;
-  toolbar: (list: L) => ReactNode;
+  toolbar: (list: L, days: number) => ReactNode;
   /** What the page says when the window holds nothing at all. */
   nothingYet: (days: number) => ReactNode;
   /** Drawn under the filter bar, before the rows. */
@@ -129,10 +128,9 @@ export function ListPage<L extends ListWindow>({
   return (
     <TooltipProvider>
       <div className="group/list contents">
-        <PageHeader title={title} info={info} action={<ListHeaderControls days={days} />} />
+        <PageHeader title={title} info={info} toolbar={toolbar(listed, days)} />
         <div className="grid gap-6">
           <section className="grid gap-gutter">
-            {toolbar(listed)}
             <div className="flex flex-col gap-gutter md:flex-row md:items-start">
               <FacetsPanel
                 list={list}
@@ -142,7 +140,7 @@ export function ListPage<L extends ListWindow>({
                 ui={ui}
                 facets={facets}
               />
-              <div className={cn("grid min-w-0 flex-1 gap-3", LIST_DIMS_WHILE_PENDING)}>
+              <div className={cn("grid min-w-0 flex-1 gap-gutter", LIST_DIMS_WHILE_PENDING)}>
                 <FilterBar
                   list={list}
                   organization={organization}

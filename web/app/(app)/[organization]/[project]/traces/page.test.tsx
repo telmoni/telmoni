@@ -3,9 +3,18 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/components/page-header", () => ({
-  PageHeader: ({ title, action }: { title: string; action?: React.ReactNode }) => (
+  PageHeader: ({
+    title,
+    action,
+    toolbar,
+  }: {
+    title: string;
+    action?: React.ReactNode;
+    toolbar?: React.ReactNode;
+  }) => (
     <div data-testid="page-header">
       {title}
+      {toolbar}
       {action}
     </div>
   ),
@@ -279,10 +288,11 @@ describe("TracesPage", () => {
     // trace's id, which always shows.
     expect(table.queryByRole("columnheader", { name: /Model calls/ })).toBeNull();
     expect(screen.getByRole("button", { name: /Columns/ })).toHaveTextContent("9/25");
-    // The window and the refresh stand on the title's row.
+    // The window, the refresh and the columns stand on the title's row.
     const header = within(screen.getByTestId("page-header"));
     expect(header.getByRole("combobox", { name: "Window" })).toHaveTextContent("Last 7 days");
     expect(header.getByRole("button", { name: "Refresh" })).toBeInTheDocument();
+    expect(header.getByRole("button", { name: /Columns/ })).toBeInTheDocument();
     expect(screen.getByTestId("histogram")).toBeInTheDocument();
   });
 

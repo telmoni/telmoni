@@ -7,13 +7,16 @@ vi.mock("@/components/page-header", () => ({
     title,
     info,
     action,
+    toolbar,
   }: {
     title: string;
     info?: string;
     action?: React.ReactNode;
+    toolbar?: React.ReactNode;
   }) => (
     <div data-testid="page-header" data-info={info}>
       {title}
+      {toolbar}
       {action}
     </div>
   ),
@@ -222,10 +225,11 @@ describe("SessionsPage", () => {
     // The tokens' halves are offered, not shown; the count holds the session's id, which always shows.
     expect(table.queryByRole("columnheader", { name: /Input tokens/ })).toBeNull();
     expect(screen.getByRole("button", { name: /Columns/ })).toHaveTextContent("9/12");
-    // The window and the refresh stand on the title's row, as on the traces page.
+    // The window, the refresh and the columns stand on the title's row.
     const header = within(screen.getByTestId("page-header"));
     expect(header.getByRole("combobox", { name: "Window" })).toHaveTextContent("Last 7 days");
     expect(header.getByRole("button", { name: "Refresh" })).toBeInTheDocument();
+    expect(header.getByRole("button", { name: /Columns/ })).toBeInTheDocument();
   });
 
   it("opens a session from anywhere on its row, and marks the row while it is open", async () => {
@@ -281,9 +285,7 @@ describe("SessionsPage", () => {
       "aria-sort",
       "descending",
     );
-    expect(
-      within(screen.getByTestId("page-header")).getByRole("combobox", { name: "Window" }),
-    ).toHaveTextContent("Last 90 days");
+    expect(screen.getByRole("combobox", { name: "Window" })).toHaveTextContent("Last 90 days");
     // The filter stands above the rows, and its × takes it off from the first page.
     const bar = within(screen.getByLabelText("Filters in force"));
     expect(bar.getByRole("link", { name: "Clear status Error" })).toHaveAttribute(
