@@ -176,6 +176,19 @@ impl Auth for AppState {
         Ok(status)
     }
 
+    async fn founded(
+        &self,
+        organization_id: &OrganizationId,
+    ) -> Result<Option<OwnedOrganization>, TelmoniError> {
+        let mut tx = organization_scope(&self.db, organization_id).await?;
+        let founded = organizations::founded_at(&mut tx, organization_id).await?;
+        tx.commit().await?;
+        Ok(founded.map(|created_at| OwnedOrganization {
+            organization_id: organization_id.clone(),
+            created_at,
+        }))
+    }
+
     async fn organizations_owned_by(
         &self,
         user_id: &UserId,

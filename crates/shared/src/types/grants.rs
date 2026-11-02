@@ -1,6 +1,8 @@
 //! [`Grants`] — what an organization may take in, as a deployment that sells
 //! plans answers it through [`crate::seam::Entitlements`].
 
+use chrono::{DateTime, Utc};
+
 use crate::error::{PlanError, TelmoniError};
 
 /// What an organization may take in, as the deployment that sells plans
@@ -118,9 +120,15 @@ impl AlertCeilings {
 /// What an organization's plan holds of what it spends, as the deployment
 /// that sells plans answers it ([`crate::seam::Entitlements::capacity`]): the
 /// span units its agents may send a month, the console agent's questions a
-/// month, and the days its spans are kept.
+/// month, and the days its spans are kept. A month is the organization's
+/// own, the period its plan renews on, so what it spends is counted from
+/// [`Capacity::period_start`] and starts again at [`Capacity::period_end`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Capacity {
+    /// When the month being counted began.
+    pub period_start: DateTime<Utc>,
+    /// When it ends, and the count starts again.
+    pub period_end: DateTime<Utc>,
     /// Span units a month; past them, spans are sampled and flagged.
     pub spans: Allowance,
     /// How many days spans past [`Capacity::spans`] are still kept whole

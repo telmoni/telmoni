@@ -230,6 +230,19 @@ pub async fn status<B: Binding>(
     .await
 }
 
+/// When the organization was founded, in any status.
+pub async fn founded_at<B: Binding>(
+    tx: &mut Scoped<'_, B>,
+    external_id: &OrganizationId,
+) -> sqlx::Result<Option<DateTime<Utc>>> {
+    sqlx::query_scalar::<_, DateTime<Utc>>(
+        "SELECT created_at FROM auth.organizations WHERE external_id = $1",
+    )
+    .bind(external_id)
+    .fetch_optional(tx.conn())
+    .await
+}
+
 /// An organization already `pending_deletion` — its owner deleted it, or an
 /// operator terminated it — taken by its owner's account deletion: the kind
 /// becomes `account`, so its chain says what took it, and the take never

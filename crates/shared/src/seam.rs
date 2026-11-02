@@ -316,6 +316,16 @@ pub trait Auth: Send + Sync {
         Err(not_linked("the organizations a person owns"))
     }
 
+    /// The organization and when it was founded, in any status; `None` for
+    /// one that does not exist.
+    async fn founded(
+        &self,
+        organization_id: &OrganizationId,
+    ) -> Result<Option<OwnedOrganization>, TelmoniError> {
+        let _ = organization_id;
+        Err(not_linked("when an organization was founded"))
+    }
+
     /// Who owns the organization now, in any status: one waiting out its
     /// deletion still has its owner. `None` for one that does not exist.
     async fn owner_of(

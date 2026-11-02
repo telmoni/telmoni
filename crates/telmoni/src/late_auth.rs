@@ -90,6 +90,13 @@ impl Auth for LateAuth {
         self.get()?.organizations_owned_by(user_id).await
     }
 
+    async fn founded(
+        &self,
+        organization_id: &OrganizationId,
+    ) -> Result<Option<OwnedOrganization>, TelmoniError> {
+        self.get()?.founded(organization_id).await
+    }
+
     async fn owner_of(
         &self,
         organization_id: &OrganizationId,

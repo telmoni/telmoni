@@ -406,6 +406,30 @@ fn addressed(sent: &[Mail]) -> Vec<(String, String)> {
         .collect()
 }
 
+/// An organization's founding is answered by its id, once its owner has
+/// signed in and been given it, and none for one auth never founded.
+#[sqlx::test]
+async fn an_organization_is_answered_with_the_day_it_was_founded(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let before = chrono::Utc::now() - chrono::Duration::seconds(5);
+    let organization = OrganizationId::from_trusted(&sign_in(&pool, OWNER).await);
+    let state = state_mailing(pool, Arc::new(NoopSender));
+    let founded = state
+        .founded(&organization)
+        .await
+        .unwrap()
+        .expect("the organization auth founded");
+    assert_eq!(founded.organization_id, organization);
+    assert!(founded.created_at >= before, "{}", founded.created_at);
+    assert_eq!(
+        state
+            .founded(&OrganizationId::from_trusted("org_never"))
+            .await
+            .unwrap(),
+        None
+    );
+}
+
 #[sqlx::test]
 async fn only_the_owner_offers_and_only_to_an_admin(pool: PgPool) {
     let organization = organization_with_staff(&pool).await;
