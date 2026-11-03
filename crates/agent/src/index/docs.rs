@@ -89,10 +89,8 @@ pub async fn refresh(state: &AppState) -> Result<(), TelmoniError> {
 }
 
 async fn fetch(url: &str) -> Result<String, TelmoniError> {
-    let http = reqwest::Client::builder()
-        .timeout(Duration::from_secs(30))
-        .user_agent("telmoni-agent")
-        .build()
+    // Never redirected: a moved corpus answers its 3xx, which names the move.
+    let http = telmoni_shared::http::client("telmoni-agent", Duration::from_secs(30))
         .or_internal("docs client")?;
     let mut response = http
         .get(url)
@@ -105,7 +103,7 @@ async fn fetch(url: &str) -> Result<String, TelmoniError> {
             response.status().as_u16()
         )));
     }
-    // The corpus is plain text; an HTML page is a URL that moved somewhere else.
+    // The corpus is plain text; an HTML page is some other page's answer.
     let html = response
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
