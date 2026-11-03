@@ -104,21 +104,6 @@ pub fn mint_signing_secret() -> Result<Redacted, TelmoniError> {
     )))
 }
 
-/// The `t=<unix>,v1=<hex>` signature for `body` at `timestamp`: every
-/// attempt is signed when sent, so a retry after a long backoff still lands
-/// inside the receiver's window.
-#[must_use]
-pub fn sign(secret: &str, body: &[u8], timestamp: i64) -> String {
-    sign_timestamped(&[secret], body, timestamp)
-}
-
-/// One `v1` per secret, in the order given, behind one `t=`: the header a
-/// rotation's overlap sends.
-#[must_use]
-pub fn sign_all(secrets: &[&str], body: &[u8], timestamp: i64) -> String {
-    sign_timestamped(secrets, body, timestamp)
-}
-
 /// The body a receiver gets: the notice as emitted, plus the delivery id and
 /// send time, and no fact the event did not carry.
 #[must_use]
@@ -166,10 +151,12 @@ pub async fn deliver(
             format!("payload would not serialise: {e}"),
         )
     })?;
-    let signature = match prior {
-        Some(prior) => sign_all(&[secret.expose(), prior.expose()], &body, now.timestamp()),
-        None => sign(secret.expose(), &body, now.timestamp()),
-    };
+    // Signed as sent, so a retry after a long backoff lands inside the
+    // receiver's window; a rotation's overlap adds the prior secret's `v1`.
+    let secrets: Vec<&str> = std::iter::once(secret.expose())
+        .chain(prior.map(Redacted::expose))
+        .collect();
+    let signature = sign_timestamped(&secrets, &body, now.timestamp());
     let resp = http
         .post(url.expose())
         .map_err(refused)?
@@ -214,14 +201,14 @@ mod tests {
         const T: i64 = 1_800_000_000;
         const EXPECTED: &str =
             "t=1800000000,v1=396556d0e74d35a762e7d75d387e1a7dcb4c728ffcc9bc857830a03f13dd740f";
-        assert_eq!(sign(SECRET, BODY, T), EXPECTED);
+        assert_eq!(sign_timestamped(&[SECRET], BODY, T), EXPECTED);
         assert!(verify(SECRET, EXPECTED, BODY));
     }
 
     #[test]
     fn a_signature_round_trips_and_a_tampered_body_or_wrong_secret_fails() {
         let body = br#"{"kind":"member_added"}"#;
-        let header = sign("whsec_project_secret", body, 1_800_000_000);
+        let header = sign_timestamped(&["whsec_project_secret"], body, 1_800_000_000);
         assert!(header.starts_with("t=1800000000,v1="));
         assert!(verify("whsec_project_secret", &header, body));
         assert!(!verify("whsec_project_secret", &header, b"tampered"));
@@ -233,10 +220,10 @@ mod tests {
     #[test]
     fn an_overlap_header_verifies_under_either_secret_and_no_other() {
         let body = br#"{"kind":"member_added"}"#;
-        let header = sign_all(&["whsec_new", "whsec_prior"], body, 1_800_000_000);
+        let header = sign_timestamped(&["whsec_new", "whsec_prior"], body, 1_800_000_000);
         assert_eq!(header.matches(",v1=").count(), 2);
         assert!(
-            header.starts_with(&sign("whsec_new", body, 1_800_000_000)),
+            header.starts_with(&sign_timestamped(&["whsec_new"], body, 1_800_000_000)),
             "the new secret's signature comes first"
         );
         assert!(verify("whsec_new", &header, body));
