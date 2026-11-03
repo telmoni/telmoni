@@ -1,7 +1,6 @@
 "use client";
 
-import { startTransition, useState, useTransition } from "react";
-import { toast } from "sonner";
+import { startTransition, useState } from "react";
 
 import { DataTable, THead, Th, Td } from "@/components/data-table";
 import { LocalTime } from "@/components/local-time";
@@ -9,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import type { ActiveSession } from "@/lib/server/data";
+import { useToastAction } from "@/lib/use-action";
 
 import { revokeOtherSessionsAction, revokeSessionAction } from "./actions";
 
@@ -56,35 +56,33 @@ export function ActiveSessions({
   sessions: ActiveSession[] | null;
   currentId: string | null;
 }) {
-  const [pending, start] = useTransition();
+  const { pending, run } = useToastAction();
   const [busyId, setBusyId] = useState<string | null>(null);
+
+  // Not busy once the action settles, however: in the transition, with the
+  // list the action drew again, so the row goes as it stops being busy.
+  const settle = <T,>(action: () => Promise<T>) => async () => {
+    try {
+      return await action();
+    } finally {
+      startTransition(() => setBusyId(null));
+    }
+  };
 
   const revoke = (id: string) => {
     setBusyId(id);
-    start(async () => {
-      const r = await revokeSessionAction(id);
-      // In the transition, with the list the action drew again: the row goes
-      // as it stops being busy, rather than a frame after.
-      startTransition(() => setBusyId(null));
-      if (!r.ok) {
-        toast.error(r.error);
-        return;
-      }
-      toast.success("Session ended. That device signs out within a few minutes.");
-    });
+    run(
+      settle(() => revokeSessionAction(id)),
+      "Session ended. That device signs out within a few minutes.",
+    );
   };
 
   const revokeOthers = () => {
     setBusyId("others");
-    start(async () => {
-      const r = await revokeOtherSessionsAction();
-      startTransition(() => setBusyId(null));
-      if (!r.ok) {
-        toast.error(r.error);
-        return;
-      }
-      toast.success("Every other session ended. Those devices sign out within a few minutes.");
-    });
+    run(
+      settle(() => revokeOtherSessionsAction()),
+      "Every other session ended. Those devices sign out within a few minutes.",
+    );
   };
 
   if (sessions === null) {
