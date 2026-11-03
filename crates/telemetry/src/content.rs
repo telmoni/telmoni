@@ -573,10 +573,7 @@ pub async fn keep_media(
     (sha256, mime_type): (&str, &str),
     body: &[u8],
 ) -> Result<(), TelmoniError> {
-    let mut tx = project_scope(&state.db, project_id).await?;
-    let mode = db::content_mode(&mut tx, project_id).await?;
-    tx.commit().await?;
-    if mode != telmoni_shared::ContentMode::On {
+    if db::content_mode_of(&state.db, project_id).await? != telmoni_shared::ContentMode::On {
         return Ok(());
     }
     let (wrapped, key) = opened_key(state, project_id).await?;

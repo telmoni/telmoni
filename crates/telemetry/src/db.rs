@@ -32,6 +32,17 @@ pub async fn content_mode<B: HasProject>(
     Ok(mode.unwrap_or_default())
 }
 
+/// The project's content mode, read in its own scope.
+pub async fn content_mode_of(
+    pool: &sqlx::PgPool,
+    project_id: &ProjectId,
+) -> Result<ContentMode, telmoni_shared::TelmoniError> {
+    let mut tx = telmoni_shared::db::tenant_session::project_scope(pool, project_id).await?;
+    let mode = content_mode(&mut tx, project_id).await?;
+    tx.commit().await?;
+    Ok(mode)
+}
+
 /// A project's row, locked for the change about to be written: the
 /// organization it is filed under and its mode, or `None` where it has none.
 pub async fn settings_for_update(

@@ -24,3 +24,18 @@ pub mod usage;
 pub mod users;
 pub mod v1;
 pub mod views;
+
+/// Refused where the project keeps no content, `why` saying what that leaves
+/// undone and how to go on.
+pub(crate) fn content_kept(
+    mode: telmoni_shared::ContentMode,
+    why: &str,
+) -> Result<(), telmoni_shared::TelmoniError> {
+    if mode == telmoni_shared::ContentMode::On {
+        Ok(())
+    } else {
+        Err(telmoni_shared::TelmoniError::BadRequest(format!(
+            "this project keeps no content, {why}"
+        )))
+    }
+}

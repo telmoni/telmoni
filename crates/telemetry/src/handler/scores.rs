@@ -233,17 +233,10 @@ pub async fn put_score(
                 "a session's score takes no comment: comment on one of its runs".into(),
             ));
         }
-        let mut tx =
-            telmoni_shared::db::tenant_session::project_scope(&state.db, &project_id).await?;
-        let mode = crate::db::content_mode(&mut tx, &project_id).await?;
-        tx.commit().await?;
-        if mode != telmoni_shared::ContentMode::On {
-            return Err(TelmoniError::BadRequest(
-                "this project keeps no content, and a score's comment is content: score it \
-                 without one"
-                    .into(),
-            ));
-        }
+        super::content_kept(
+            crate::db::content_mode_of(&state.db, &project_id).await?,
+            "and a score's comment is content: score it without one",
+        )?;
         if !crate::capacity::has_room_for_content(&state, &acting.organization_id).await {
             return Err(TelmoniError::BadRequest(
                 "this organization holds the content its plan does, and a score's comment is \

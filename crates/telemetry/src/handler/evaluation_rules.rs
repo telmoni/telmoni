@@ -22,14 +22,14 @@ use telmoni_shared::extract::Json;
 use telmoni_shared::rbac::{Resource, Verb};
 use telmoni_shared::seam;
 use telmoni_shared::{
-    AuditAction, AuthError, ContentMode, EvaluationTarget, ModelProvider, ProjectId, SpanKind,
-    TelmoniError, TelmoniResourceKind, ViewKind,
+    AuditAction, AuthError, EvaluationTarget, ModelProvider, ProjectId, SpanKind, TelmoniError,
+    TelmoniResourceKind, ViewKind,
 };
 
 use crate::AppState;
 use crate::evaluators::{self, VARIABLES};
-use crate::handler::chain;
 use crate::handler::views::ViewQuery;
+use crate::handler::{chain, content_kept};
 use crate::prices::{PriceBook, Usage};
 use crate::sessions::Sessions;
 use crate::store::{self, Projects};
@@ -215,17 +215,6 @@ fn checked(mut change: RuleChange) -> Result<RuleChange, TelmoniError> {
     Ok(change)
 }
 
-/// Refused where the project keeps no content: nothing for its evaluators to read.
-fn content_kept(mode: ContentMode) -> Result<(), TelmoniError> {
-    if mode == ContentMode::On {
-        Ok(())
-    } else {
-        Err(TelmoniError::BadRequest(
-            "this project keeps no content, so a rule has nothing to judge: switch content on first".into(),
-        ))
-    }
-}
-
 const SELECT: &str =
     "SELECT r.id, r.name, r.target, r.span_kind, r.span_name, r.query, r.sample_rate,
         r.pointers, r.enabled, r.backfill_from, r.backfill_seen, r.backfill_done_at,
@@ -310,7 +299,10 @@ pub async fn put_rule(
     let auth = &*state.auth;
     let written = chain::write(&state.db, &acting, &project_id, "an evaluation rule", async |tx| {
         chain::held(auth, &acting, tx, Verb::Update, Resource::Project).await?;
-        content_kept(db::content_mode(tx, &project_id).await?)?;
+        content_kept(
+            db::content_mode(tx, &project_id).await?,
+            "so a rule has nothing to judge: switch content on first",
+        )?;
         let known: i64 = sqlx::query_scalar(
             "SELECT count(DISTINCT id) FROM telemetry.evaluators WHERE project_id = $1 AND id = ANY($2)",
         )

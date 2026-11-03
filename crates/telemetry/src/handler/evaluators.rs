@@ -32,8 +32,8 @@ use crate::evaluators::{
     self, Judging, Message, NAME_MAX, Prompt, RUN_VARIABLES, ScoreSpec, TEMPLATES, TYPED_TEMPLATES,
     Template, TypedTemplate, VARIABLES, misfit,
 };
-use crate::handler::chain;
 use crate::handler::model_connections::{self, MODEL_MAX};
+use crate::handler::{chain, content_kept};
 use crate::scores::Judgement;
 use crate::store::{self, Projects};
 use crate::{content, db, traces};
@@ -46,6 +46,8 @@ pub const ANSWER_TOKENS_MAX: u32 = 1_024;
 pub const TEMPERATURE_MAX: f64 = 2.0;
 /// The highest weekly spend limit, in dollars.
 pub const WEEKLY_LIMIT_MAX: f64 = 1_000_000.0;
+/// What a project keeping no content leaves an evaluator.
+const EVALUATOR_READS: &str = "so an evaluator has nothing to read: switch content on first";
 /// The most spans of a run a try reads.
 const TRY_SPANS_MAX: u32 = 500;
 
@@ -292,24 +294,6 @@ async fn judge_with(
     Ok((model_connections::open(state, project_id, id).await?, model))
 }
 
-/// Refused where the project keeps no content: nothing for an evaluator to read.
-fn content_kept(mode: ContentMode) -> Result<(), TelmoniError> {
-    if mode == ContentMode::On {
-        Ok(())
-    } else {
-        Err(TelmoniError::BadRequest(
-            "this project keeps no content, so an evaluator has nothing to read: switch content on first".into(),
-        ))
-    }
-}
-
-async fn mode_of(state: &AppState, project_id: &ProjectId) -> Result<ContentMode, TelmoniError> {
-    let mut tx = project_scope(&state.db, project_id).await?;
-    let mode = db::content_mode(&mut tx, project_id).await?;
-    tx.commit().await?;
-    Ok(mode)
-}
-
 /// `GET /internal/v1/telemetry/evaluators` — each evaluator's newest version
 /// with its count, every member's to read.
 pub async fn get_evaluators(
@@ -516,7 +500,10 @@ pub async fn saved(
     change: EvaluatorChange,
 ) -> Result<Evaluator, TelmoniError> {
     let (change, judging) = checked(change)?;
-    content_kept(mode_of(state, project_id).await?)?;
+    content_kept(
+        db::content_mode_of(&state.db, project_id).await?,
+        EVALUATOR_READS,
+    )?;
     let (connection, model) = judge_with(state, project_id, &change, &judging).await?;
     let filled: BTreeMap<&str, String> = VARIABLES
         .iter()
@@ -545,7 +532,7 @@ pub async fn saved(
     let token = changer.token();
     let organization_id = changer.organization_id().clone();
     let written = changing(state, &changer, project_id, async |tx| {
-        content_kept(db::content_mode(tx, project_id).await?)?;
+        content_kept(db::content_mode(tx, project_id).await?, EVALUATOR_READS)?;
         let (count, last): (i64, Option<i32>) = sqlx::query_as(
             "SELECT count(DISTINCT id), max(version) FILTER (WHERE id = $2)
                FROM telemetry.evaluators WHERE project_id = $1",
@@ -798,7 +785,10 @@ pub async fn try_evaluator(
             "{{{{{other}}}}} is no trace's to fill, so this draft is not tried on a trace"
         )));
     }
-    content_kept(mode_of(&state, &project_id).await?)?;
+    content_kept(
+        db::content_mode_of(&state.db, &project_id).await?,
+        EVALUATOR_READS,
+    )?;
     let (connection, model) = judge_with(&state, &project_id, &change, &judging).await?;
     let projects = Projects::one(project_id.clone());
     let spans = traces::spans(
