@@ -1,12 +1,14 @@
 ---
 title: "Alerts"
-description: "A project's Alerts page: every alert — a measure of the project's runs, steps or calls over a window against its thresholds — with where its notices go, its maintenance windows and the incidents it opened, made, edited, paused, muted and deleted there, its incidents acknowledged or resolved by any member."
+description: "A project's Alerts page: every alert — a measure of the project's runs, steps or calls, or of its scores, over a window against its thresholds, or its change from the window before — with where its notices go, its maintenance windows and the incidents it opened, made, edited, paused, muted and deleted there, its incidents acknowledged or resolved by any member."
 ---
 
 An **alert** watches a measure of a project's spans over the last hour, day
 or week against an alert threshold and, if you give one, a warning threshold
 met first: the share of runs that failed, the p95 duration of model calls,
-the tokens they used, the most a run spent. It is evaluated every minute.
+the tokens they used, the most a run spent, the average of a
+[score](/docs/monitoring/scores) — or its change from the window before, so a
+drop opens an incident. It is evaluated every minute.
 When its value crosses a threshold it opens an **incident**, told in the
 project's feed and to the connectors the alert links; when the value comes
 back inside its thresholds the incident resolves, and that is told too. A
@@ -99,14 +101,15 @@ project's feed alone.
 |---|---|
 | Name | 1 to 60 characters; a project holds one alert of a name, whatever its case |
 | Reads | Runs, steps, model calls or tool calls |
-| Measure | **Count**, how many there were; **Failures**, those that ended in error; **Duration**; **Tokens**, on model calls; **Cost**, on runs: what each run's model calls cost, read from the calls as they land, so an alert on it tells while the run is still going ([what a call cost](/docs/api/ingest#what-a-call-cost)) |
-| Folded as | How the measure is read over the window: a count; failures as how many or as the share that failed; a duration's p95, p99, p90, p50, average or total; tokens' average or total; and a run's cost as the most a run spent — a cost cap — the average a run spent, or what the runs spent in all |
+| Measure | **Count**, how many there were; **Failures**, those that ended in error; **Duration**; **Tokens**, on model calls; **Cost**, on runs: what each run's model calls cost, read from the calls as they land, so an alert on it tells while the run is still going ([what a call cost](/docs/api/ingest#what-a-call-cost)); **Score**, on runs: every [score](/docs/monitoring/scores) of the name you give, 1 to 64 characters, the project holds — your code's, its members' and its evaluators' — a number's value, a yes as 1 and a no as 0, each once as it stands, counted in the window its last change landed in — a score given again or taken back moves to then — one taken back left out and a category never read |
+| Folded as | How the measure is read over the window: a count; failures as how many or as the share that failed; a duration's p95, p99, p90, p50, average or total; tokens' average or total; a run's cost as the most a run spent — a cost cap — the average a run spent, or what the runs spent in all; and scores' average, p50, p90, p95, p99, highest, or how many |
 | Window | The last hour, day or week, or the calendar month so far, from its first at midnight UTC |
-| Filters | Agent, environment and release on every kind; model and provider on model calls, and on a run's cost, read from its calls; tag, each `key:value`, on a run's cost alone, a run passing where any of its spans carries it; tool on tool calls; and the status a span ended with, on all but a cost. Separate a field's values with commas, and put a value that holds one between double quotes: a span passes a field it carries any of the values of, and passes the alert when it passes every field filled |
+| Read as | Its value; or its change from the window of the same length before it, in percent of that window's value, so a drop is below 0 — the average relevance score down a fifth on the day before is −20% — and none where either window held nothing, or the one before 0; a count of an empty window is 0, so a stream that stops reads as −100%. Not on **This month**, which has no window of its length before it |
+| Filters | Agent, environment and release on every kind; model and provider on model calls, and on a run's cost, read from its calls; tag, each `key:value`, on a run's cost alone, a run passing where any of its spans carries it; tool on tool calls; and the status a span ended with, on all but a cost. None on a score, which names no agent, model or status of its own. Separate a field's values with commas, and put a value that holds one between double quotes: a span passes a field it carries any of the values of, and passes the alert when it passes every field filled |
 | Compared as | How the value is compared: above, at or above, below, at or below, equal to, or not equal to |
-| Alert when | The alert threshold under that comparison: in milliseconds for a duration, as a percentage for the share failed, and in US dollars for a cost |
+| Alert when | The alert threshold under that comparison: in milliseconds for a duration, as a percentage for the share failed, in US dollars for a cost, and as a percentage for a change, below 0 for a drop: **Below** −20 alerts on a fall of more than a fifth |
 | Warn when | A warning threshold under the same comparison, met before the alert's: below it for above, above it for below. Optional, and none for equal to or not equal to |
-| No data | A window holding no span is read as 0; keeps the alert's last severity; is shown as **No data**; or is shown so and told once a whole window has passed with none |
+| No data | A window holding nothing to read is read as 0; keeps the alert's last severity; is shown as **No data**; or is shown so and told once a whole window has passed with none. A window of no score, and a change with nothing to compare, is no 0, so neither takes **Read as 0** unless the alert counts |
 | Notify again | Every 1 to 10,080 minutes while an incident holds at one severity and nobody has acknowledged it; empty for never |
 | Connectors | The project's Slack channels and webhooks it tells, up to 20, each hearing its warnings and alerts or its alerts alone, at any hour or in set hours: days, a start and an end, at an offset from UTC that stays put, so a change of the clocks moves the hours by its own. An end before the start runs past midnight; the same time at both ends is the whole day. A connector out of its hours when an incident was told hears it once they begin, if it is still open and not acknowledged, and one that heard an incident hears it resolve at any hour. An incident of **No data** reaches only those hearing warnings and alerts |
 
@@ -150,8 +153,9 @@ one early.
 
 A notice that opens, reopens or raises an incident names the run that best
 shows it — the latest that failed, the slowest call, the one with the most
-tokens or the one that spent the most, as the alert measures, and the latest
-for a count — and links its trace. That trace's page links back, beside its
+tokens, the one that spent the most, or the one scored lowest for an alert
+below its threshold and highest above it, as the alert measures, and the
+latest for a count — and links its trace. That trace's page links back, beside its
 tags, to each incident whose notices showed it, under its alert on the Alerts
 page, even an incident too old for the page's 200. An incident keeps the last
 twenty runs its notices showed, so a run shown before those links back no

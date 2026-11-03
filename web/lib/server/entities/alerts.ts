@@ -6,6 +6,7 @@ import {
   MissingData,
   PausedBy,
   RuleAggregation,
+  RuleBaseline,
   RuleLevel,
   RuleMeasure,
   RuleOperator,
@@ -64,6 +65,10 @@ const AlertSchema = z.object({
   warning_threshold: z.number().nullable(),
   missing_data: z.enum(MissingData),
   renotify_minutes: z.number().int().nullable(),
+  /** A score alert's score, by its name; none for any other. */
+  score_name: z.string().nullable(),
+  /** Read as it is, or as its change in percent from the window before. */
+  baseline: z.enum(RuleBaseline),
   /** A member, by hand, or its plan, past the organization's number. */
   paused: z.enum(PausedBy).nullable(),
   paused_at: z.string().nullable(),

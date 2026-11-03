@@ -108,6 +108,8 @@ const SLOW = {
   warning_threshold: 3000,
   missing_data: "zero",
   renotify_minutes: 30,
+  score_name: null,
+  baseline: "none",
   paused: null,
   paused_at: null,
   value: 6200,
@@ -137,6 +139,8 @@ const CAP = {
   alert_threshold: 5,
   warning_threshold: null,
   renotify_minutes: null,
+  score_name: null,
+  baseline: "none",
   paused: "plan",
   paused_at: "2026-10-26T10:00:00Z",
   value: null,
@@ -439,7 +443,7 @@ describe("AlertsPage", () => {
     };
     let shown = await standing(kept);
     expect(shown.now).toHaveTextContent(
-      /^Its window has held no span yet, so it has no severity to keep; read \S.*\.$/,
+      /^Its window has held nothing to read yet, so it has no severity to keep; read \S.*\.$/,
     );
     expect(shown.now.querySelector("time")).toHaveAttribute("datetime", "2026-10-26T11:59:00Z");
     expect(shown.badge).toHaveTextContent(/^No severity$/);

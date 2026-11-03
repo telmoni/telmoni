@@ -213,6 +213,10 @@
       "p95",
       "p99"
     ],
+    "RuleBaseline": [
+      "none",
+      "previous"
+    ],
     "RuleLevel": [
       "warning",
       "alert"
@@ -222,7 +226,8 @@
       "failures",
       "duration",
       "tokens",
-      "cost"
+      "cost",
+      "score"
     ],
     "RuleOperator": [
       "gt",
@@ -463,6 +468,15 @@
         "count",
         "avg"
       ],
+      "score": [
+        "count",
+        "avg",
+        "max",
+        "p50",
+        "p90",
+        "p95",
+        "p99"
+      ],
       "tokens": [
         "avg",
         "sum"
@@ -479,7 +493,8 @@
         "count",
         "failures",
         "duration",
-        "cost"
+        "cost",
+        "score"
       ],
       "step": [
         "count",

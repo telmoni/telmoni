@@ -52,7 +52,7 @@ import {
 import { projectPage } from "@/lib/server/project-page";
 import { projectPath } from "@/lib/slug";
 import { shortId, traceHref } from "@/lib/traces";
-import { IncidentStatus, Severity } from "@/lib/types/enums";
+import { IncidentStatus, RuleBaseline, RuleMeasure, Severity } from "@/lib/types/enums";
 import { cn } from "@/lib/utils";
 
 import { AlertActions, HearAgain } from "./_alert-actions";
@@ -566,7 +566,7 @@ function Standing({ alert, read }: { alert: Alert; read: string | null }) {
   if (alert.severity === Severity.Unknown) {
     return (
       <>
-        Its window has held no span yet, so it has no severity to keep; read{" "}
+        Its window has held nothing to read yet, so it has no severity to keep; read{" "}
         <LocalTime iso={read} />.
       </>
     );
@@ -574,10 +574,17 @@ function Standing({ alert, read }: { alert: Alert; read: string | null }) {
   return (
     <>
       {alert.value === null
-        ? "No span in its window"
-        : amount(alert.measure, alert.aggregation, alert.value)}
+        ? emptyWords(alert)
+        : amount(alert.measure, alert.aggregation, alert.value, alert.baseline)}
       , read <LocalTime iso={read} />; {SEVERITY_LABEL[alert.severity]} since{" "}
       <LocalTime iso={alert.severity_since} />.
     </>
   );
+}
+
+/** What an alert with no value read: no span, no score, or no change. */
+function emptyWords(alert: Alert): string {
+  if (alert.baseline === RuleBaseline.Previous) return "No change to read: it or the window before held nothing";
+  if (alert.measure === RuleMeasure.Score) return "No score in its window";
+  return "No span in its window";
 }

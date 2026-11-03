@@ -22,7 +22,8 @@ use uuid::Uuid;
 use telmoni_shared::AlertCeilings;
 use telmoni_shared::db::tenant_session::maintenance_scope;
 use telmoni_shared::{
-    MissingData, OrganizationId, RuleAggregation, RuleMeasure, RuleWindow, Severity, TelmoniError,
+    MissingData, OrganizationId, RuleAggregation, RuleBaseline, RuleMeasure, RuleWindow, Severity,
+    TelmoniError,
 };
 
 use crate::AppState;
@@ -97,6 +98,62 @@ const TOTALS_SQL: &str = concat!(
     "))"
 );
 
+/// A score alert's window: each score of its name once, as its last row in
+/// the window has it, a number's value or a yes or no's 1 or 0, taken back
+/// ones left out. Scores are kept by their id, so the window's are found by
+/// a scan of the project's: bounded by retention and the plan's alerts.
+const SCORES_SQL: &str = concat!(
+    "SELECT count() AS scores, avg(v) AS mean, max(v) AS top, ",
+    "CAST(quantiles(0.5, 0.9, 0.95, 0.99)(v) AS Array(Float64)) AS quantiles ",
+    "FROM (SELECT argMax(value, received_at) AS v, argMax(is_deleted, received_at) AS gone ",
+    "FROM telemetry.scores ",
+    "WHERE project_id IN {projects:Array(String)} AND name = {name:String} ",
+    "AND data_type IN ('number', 'boolean') ",
+    "AND received_at >= {from:DateTime64(6, 'UTC')} AND received_at < {to:DateTime64(6, 'UTC')} ",
+    "GROUP BY score_id) ",
+    "WHERE gone = 0"
+);
+
+/// What a score alert's window holds: how many scores, their mean, the
+/// largest, and their 50th, 90th, 95th and 99th percentiles.
+#[derive(Debug, Clone, Default, PartialEq, Row, Deserialize)]
+pub struct ScoreTotals {
+    pub scores: u64,
+    pub mean: f64,
+    pub top: f64,
+    pub quantiles: Vec<f64>,
+}
+
+impl ScoreTotals {
+    /// The alert's value over these scores, none where there are none.
+    #[must_use]
+    pub fn value(&self, aggregation: RuleAggregation) -> Option<f64> {
+        if self.scores == 0 {
+            return None;
+        }
+        let value = match aggregation {
+            #[expect(
+                clippy::cast_precision_loss,
+                reason = "a count past 2^53 is no alert's"
+            )]
+            RuleAggregation::Count => self.scores as f64,
+            RuleAggregation::Avg => self.mean,
+            RuleAggregation::Max | RuleAggregation::Sum => self.top,
+            percentile => quantile(&self.quantiles, percentile)?,
+        };
+        value.is_finite().then_some(value)
+    }
+}
+
+/// `quantiles`' value at `percentile`, read by its place in [`LEVELS`].
+fn quantile(quantiles: &[f64], percentile: RuleAggregation) -> Option<f64> {
+    LEVELS
+        .iter()
+        .position(|level| *level == percentile)
+        .and_then(|n| quantiles.get(n).copied())
+        .filter(|q| q.is_finite())
+}
+
 /// What an alert's window holds: its spans, those that failed, their
 /// durations summed, their tokens, and their durations at the 50th, 90th,
 /// 95th and 99th percentiles.
@@ -121,13 +178,7 @@ impl Totals {
             reason = "a count past 2^53 spans is no alert's"
         )]
         let (spans, failed, tokens) = (self.spans as f64, self.failed as f64, self.tokens as f64);
-        let at = |percentile: RuleAggregation| {
-            LEVELS
-                .iter()
-                .position(|level| *level == percentile)
-                .and_then(|n| self.quantiles.get(n).copied())
-                .filter(|q| q.is_finite())
-        };
+        let at = |percentile: RuleAggregation| quantile(&self.quantiles, percentile);
         match (measure, aggregation) {
             (RuleMeasure::Count, _) => Some(spans),
             (RuleMeasure::Failures, RuleAggregation::Avg) => Some(failed / spans),
@@ -137,8 +188,9 @@ impl Totals {
             (RuleMeasure::Duration, percentile) => at(percentile),
             (RuleMeasure::Tokens, RuleAggregation::Avg) => Some(tokens / spans),
             (RuleMeasure::Tokens, _) => Some(tokens),
-            // Read run by run ([`crate::spend`]), which the totals cannot.
-            (RuleMeasure::Cost, _) => None,
+            // Read run by run ([`crate::spend`]), and from the scores, which
+            // the totals cannot.
+            (RuleMeasure::Cost | RuleMeasure::Score, _) => None,
         }
     }
 }
@@ -449,10 +501,9 @@ async fn defer(state: &AppState, rule: &RuleRow, lease_id: Uuid) -> Result<(), T
     Ok(())
 }
 
-/// The alert's value over its window ending at `now`: a run's cost summed
-/// with no tag as the totals are read, the full hours from the hourly totals;
-/// folded any other way, or narrowed by a tag, from what each run spent;
-/// every other measure from the totals.
+/// The alert's value at `now`: over its window, or, read against the
+/// window before, its change from it in percent, none where that window held
+/// nothing or 0.
 ///
 /// # Errors
 ///
@@ -462,6 +513,64 @@ pub async fn value_of(
     rule: &RuleRow,
     now: DateTime<Utc>,
 ) -> Result<Option<f64>, Unread> {
+    let value = value_at(state, rule, now).await?;
+    if rule.definition.baseline == RuleBaseline::None {
+        return Ok(value);
+    }
+    // A count of an empty window is 0, so traffic that stops reads as -100%.
+    let counted = |value: Option<f64>| match counts(&rule.definition) {
+        true => value.or(Some(0.0)),
+        false => value,
+    };
+    let Some(value) = counted(value) else {
+        return Ok(None);
+    };
+    let length = TimeDelta::from_std(rule.definition.window.duration()).unwrap_or_default();
+    let previous = counted(value_at(state, rule, now - length).await?);
+    Ok(change(value, previous))
+}
+
+/// Whether the alert counts, so an empty window is a 0 rather than nothing.
+fn counts(definition: &crate::rules::Definition) -> bool {
+    definition.measure == RuleMeasure::Count
+        || (definition.aggregation == RuleAggregation::Count
+            && matches!(
+                definition.measure,
+                RuleMeasure::Failures | RuleMeasure::Score
+            ))
+}
+
+/// `value`'s change from `previous`, in percent of it: below 0 for a drop.
+fn change(value: f64, previous: Option<f64>) -> Option<f64> {
+    previous
+        .filter(|previous| *previous != 0.0 && previous.is_finite())
+        .map(|previous| (value - previous) / previous.abs() * 100.0)
+}
+
+/// The alert's value over its window ending at `now`: a run's cost summed
+/// with no tag as the totals are read, the full hours from the hourly totals;
+/// folded any other way, or narrowed by a tag, from what each run spent; a
+/// score's from the scores; every other measure from the totals.
+async fn value_at(
+    state: &AppState,
+    rule: &RuleRow,
+    now: DateTime<Utc>,
+) -> Result<Option<f64>, Unread> {
+    if rule.definition.measure == RuleMeasure::Score {
+        let window = Window::of(now, rule.definition.window);
+        let scores: ScoreTotals = state
+            .store
+            .read(&Projects::one(rule.project_id.clone()), SCORES_SQL)
+            .param(
+                "name",
+                rule.definition.score_name.as_deref().unwrap_or_default(),
+            )
+            .param("from", micros(window.from))
+            .param("to", micros(window.to))
+            .fetch_one()
+            .await?;
+        return Ok(scores.value(rule.definition.aggregation));
+    }
     if rule.definition.measure == RuleMeasure::Cost {
         let window = Window::of(now, rule.definition.window);
         let projects = Projects::one(rule.project_id.clone());
@@ -561,6 +670,46 @@ mod tests {
             (at("2026-10-26T10:00:00Z"), at("2026-10-26T11:00:00Z")),
             "an hour on the hour is the totals' whole"
         );
+    }
+
+    /// Scores fold as their aggregation says, none where there are none.
+    #[test]
+    fn a_score_alerts_value_is_its_scores_folded() {
+        let scores = ScoreTotals {
+            scores: 4,
+            mean: 0.6,
+            top: 1.0,
+            quantiles: vec![0.5, 0.9, 0.95, 0.99],
+        };
+        assert_eq!(scores.value(RuleAggregation::Count), Some(4.0));
+        assert_eq!(scores.value(RuleAggregation::Avg), Some(0.6));
+        assert_eq!(scores.value(RuleAggregation::Max), Some(1.0));
+        assert_eq!(scores.value(RuleAggregation::P90), Some(0.9));
+        assert_eq!(ScoreTotals::default().value(RuleAggregation::Avg), None);
+        let empty_mean = ScoreTotals {
+            mean: f64::NAN,
+            ..scores
+        };
+        assert_eq!(
+            empty_mean.value(RuleAggregation::Avg),
+            None,
+            "no NaN is a value"
+        );
+    }
+
+    /// A change from the window before is in percent of it, below 0 for a
+    /// drop; none against a window that held nothing or 0.
+    #[test]
+    fn a_change_is_in_percent_of_the_window_before() {
+        let near = |got: Option<f64>, want: f64| got.is_some_and(|got| (got - want).abs() < 1e-9);
+        assert!(near(change(0.6, Some(0.8)), -25.0));
+        assert!(near(change(1.2, Some(0.8)), 50.0));
+        assert!(
+            near(change(-1.0, Some(-2.0)), 50.0),
+            "of the before's size, whatever its sign"
+        );
+        assert_eq!(change(0.6, None), None);
+        assert_eq!(change(0.6, Some(0.0)), None);
     }
 
     #[test]

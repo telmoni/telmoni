@@ -23,8 +23,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use telmoni_shared::{
-    MissingData, RuleAggregation, RuleLevel, RuleMeasure, RuleOperator, RuleWindow, SpanKind,
-    SpanStatus, TelmoniError,
+    MissingData, RuleAggregation, RuleBaseline, RuleLevel, RuleMeasure, RuleOperator, RuleWindow,
+    SpanKind, SpanStatus, TelmoniError,
 };
 
 use crate::contract::{
@@ -35,6 +35,9 @@ use crate::store::Read;
 
 /// The longest an alert's name is, in characters, as the table's CHECK has it.
 pub const RULE_NAME_MAX: usize = 60;
+
+/// The longest score name a score alert reads, as a score's own.
+pub const SCORE_NAME_MAX: usize = crate::scores::NAME_MAX;
 
 /// The longest re-notification period, in minutes: a week.
 pub const RENOTIFY_MAX_MINUTES: i32 = 10_080;
@@ -292,12 +295,18 @@ pub struct RuleInput {
     /// How often a severity held is told again, in minutes; never if none.
     #[serde(default)]
     pub renotify_minutes: Option<i32>,
+    /// A score alert's score, by its name.
+    #[serde(default)]
+    pub score_name: Option<String>,
+    /// What its value is read against: itself, or the window before.
+    #[serde(default)]
+    pub baseline: RuleBaseline,
     /// The project's connectors its notices go to; none, the feed alone.
     #[serde(default)]
     pub connectors: Vec<Link>,
 }
 
-/// What an alert is: the eleven fields the table keeps, a person writes and
+/// What an alert is: the thirteen fields the table keeps, a person writes and
 /// the lanes answer, spelled once. The row and the answer embed it.
 #[derive(Debug, Clone, PartialEq, Serialize, sqlx::FromRow)]
 pub struct Definition {
@@ -317,6 +326,10 @@ pub struct Definition {
     pub missing_data: MissingData,
     /// How often a severity held is told again, in minutes; never if none.
     pub renotify_minutes: Option<i32>,
+    /// A score alert's score, by its name; none for any other.
+    pub score_name: Option<String>,
+    /// What its value is read against: itself, or the window before.
+    pub baseline: RuleBaseline,
 }
 
 /// An alert checked whole, as the table keeps it.
@@ -347,17 +360,58 @@ impl RuleInput {
         if !self.measure.folds(self.aggregation) {
             return Err(bad(&format!(
                 "{} is not folded by {}: count takes count; failures count or avg; duration \
-                 avg, sum or a percentile; tokens avg or sum; cost avg, sum or max",
+                 avg, sum or a percentile; tokens avg or sum; cost avg, sum or max; score \
+                 count, avg, max or a percentile",
                 self.measure, self.aggregation
             )));
         }
         if !self.measure.measured_on(self.kind) {
             return Err(bad(match self.measure {
                 RuleMeasure::Tokens => "tokens are counted on model calls alone",
+                RuleMeasure::Score => "a score alert is a run's: it reads every score of its name",
                 _ => "cost is counted per run, from its model calls",
             }));
         }
         let filters = self.filters.checked()?;
+        let score_name = self.score_name.map(|given| given.trim().to_owned());
+        if self.measure == RuleMeasure::Score {
+            if !score_name
+                .as_deref()
+                .is_some_and(|given| (1..=SCORE_NAME_MAX).contains(&given.chars().count()))
+            {
+                return Err(bad(&format!(
+                    "a score alert names its score, 1 to {SCORE_NAME_MAX} characters"
+                )));
+            }
+            // A score keeps no agent, model or status of its own.
+            if filters != RuleFilters::default() {
+                return Err(bad(
+                    "a score alert reads every score of its name: it takes no filter",
+                ));
+            }
+        } else if score_name.is_some() {
+            return Err(bad("a score's name is a score alert's alone"));
+        }
+        // An empty window of scores is no score of 0, nor is a change read where
+        // a window holds nothing a change of 0: either would open an incident
+        // for what never happened.
+        let counted =
+            self.aggregation == RuleAggregation::Count || self.measure == RuleMeasure::Count;
+        if self.missing_data == MissingData::Zero
+            && !counted
+            && (self.measure == RuleMeasure::Score || self.baseline == RuleBaseline::Previous)
+        {
+            return Err(bad(
+                "a window with no score, or no change to read, is no 0: show it as no data, or \
+                 keep the alert's last severity",
+            ));
+        }
+        if self.baseline == RuleBaseline::Previous && self.window == RuleWindow::Month {
+            return Err(bad(
+                "a month so far has no window of its length before it: read the hour, day or \
+                 week against the one before",
+            ));
+        }
         if self.measure == RuleMeasure::Cost {
             // Read from the calls as they land, before the run's own status is known.
             if !(filters.status.is_empty() && filters.tool.is_empty()) {
@@ -431,6 +485,8 @@ impl RuleInput {
                 warning_threshold: self.warning_threshold,
                 missing_data: self.missing_data,
                 renotify_minutes: self.renotify_minutes,
+                score_name,
+                baseline: self.baseline,
             },
         })
     }
@@ -466,8 +522,94 @@ mod tests {
             warning_threshold: Some(3_000.0),
             missing_data: MissingData::Zero,
             renotify_minutes: None,
+            score_name: None,
+            baseline: RuleBaseline::None,
             connectors: Vec::new(),
         }
+    }
+
+    /// A score alert names its score and takes no filter, a run's; a name
+    /// is a score alert's alone; and a month has no window before it.
+    #[test]
+    fn a_score_alert_names_its_score_and_a_baseline_a_trailing_window() {
+        let score = |name: Option<&str>| RuleInput {
+            kind: SpanKind::Run,
+            measure: RuleMeasure::Score,
+            aggregation: RuleAggregation::Avg,
+            filters: RuleFilters::default(),
+            operator: RuleOperator::Lt,
+            alert_threshold: 0.5,
+            warning_threshold: Some(0.7),
+            score_name: name.map(str::to_owned),
+            missing_data: MissingData::NoData,
+            ..input()
+        };
+        let kept = score(Some(" relevance ")).checked().expect("a score alert");
+        assert_eq!(kept.definition.score_name.as_deref(), Some("relevance"));
+        assert!(score(None).checked().is_err(), "names its score");
+        assert!(score(Some("  ")).checked().is_err());
+        assert!(
+            score(Some(&"n".repeat(SCORE_NAME_MAX + 1)))
+                .checked()
+                .is_err()
+        );
+        let filtered = RuleInput {
+            filters: RuleFilters {
+                agent: vec!["bot".into()],
+                ..RuleFilters::default()
+            },
+            ..score(Some("relevance"))
+        };
+        assert!(filtered.checked().is_err(), "a score keeps no agent");
+        let of_calls = RuleInput {
+            kind: SpanKind::ModelCall,
+            ..score(Some("relevance"))
+        };
+        assert!(of_calls.checked().is_err(), "a run's");
+        let summed = RuleInput {
+            aggregation: RuleAggregation::Sum,
+            ..score(Some("relevance"))
+        };
+        assert!(summed.checked().is_err(), "a sum of scores says nothing");
+        let named = RuleInput {
+            score_name: Some("relevance".into()),
+            ..input()
+        };
+        assert!(named.checked().is_err(), "a name is a score alert's alone");
+        let dropped = RuleInput {
+            baseline: RuleBaseline::Previous,
+            window: RuleWindow::Day,
+            operator: RuleOperator::Lt,
+            alert_threshold: -20.0,
+            warning_threshold: Some(-10.0),
+            ..score(Some("relevance"))
+        };
+        assert!(
+            dropped.clone().checked().is_ok(),
+            "a drop of a fifth against the day before"
+        );
+        let monthly = RuleInput {
+            window: RuleWindow::Month,
+            ..dropped
+        };
+        assert!(
+            monthly.checked().is_err(),
+            "a month has no window of its length before it"
+        );
+        let zeroed = RuleInput {
+            missing_data: MissingData::Zero,
+            ..score(Some("relevance"))
+        };
+        assert!(
+            zeroed.checked().is_err(),
+            "an empty window of scores is no score of 0"
+        );
+        let counted = RuleInput {
+            missing_data: MissingData::Zero,
+            aggregation: RuleAggregation::Count,
+            ..score(Some("relevance"))
+        };
+        assert!(counted.checked().is_ok(), "a count of none is 0");
     }
 
     /// A status given again, wherever in the list, is kept once.

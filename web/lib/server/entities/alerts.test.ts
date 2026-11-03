@@ -51,6 +51,8 @@ const ALERT = {
   warning_threshold: 3000,
   missing_data: "zero",
   renotify_minutes: null,
+  score_name: null,
+  baseline: "none",
   paused: null,
   paused_at: null,
   value: 6200,

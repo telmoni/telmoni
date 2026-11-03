@@ -109,6 +109,7 @@ fn generated_contract() -> Value {
             "RuleMeasure": wire::<RuleMeasure>(),
             "RuleAggregation": wire::<RuleAggregation>(),
             "RuleWindow": wire::<RuleWindow>(),
+            "RuleBaseline": wire::<RuleBaseline>(),
             "ModelProvider": wire::<ModelProvider>(),
             "EvaluationTarget": wire::<EvaluationTarget>(),
             "EvaluationStatus": wire::<EvaluationStatus>(),

@@ -41,6 +41,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
   ALERTS_HEADING,
   ALERT_KINDS,
+  BASELINE_LABEL,
   DAYS,
   FILTER_LABEL,
   FILTER_STATUSES,
@@ -63,6 +64,7 @@ import {
   inputOf,
   measuresFor,
   offsetWords,
+  readsNothingAsNoData,
   takesWarning,
   unitOf,
   withKind,
@@ -74,7 +76,9 @@ import {
 import { STATUS_LABEL } from "@/lib/traces";
 import {
   MissingData,
+  RuleBaseline,
   RuleLevel,
+  RuleMeasure,
   RuleOperator,
   RuleWindow,
   SpanStatus,
@@ -229,7 +233,7 @@ function AlertPanel({
     setDraft(next);
     setError(null);
   };
-  const unit = unitOf(draft.measure, draft.aggregation);
+  const unit = unitOf(draft.measure, draft.aggregation, draft.baseline);
   const suffix = UNIT_SUFFIX[unit];
 
   function submit() {
@@ -311,13 +315,32 @@ function AlertPanel({
               disabled={pending}
             />
           </SidePanelRow>
+          {draft.measure === RuleMeasure.Score && (
+            <SidePanelRow label="Score" htmlFor={`${id}-score`}>
+              <Input
+                id={`${id}-score`}
+                value={draft.scoreName}
+                onChange={(e) => change({ ...draft, scoreName: e.target.value })}
+                placeholder="e.g. relevance"
+                autoComplete="off"
+                spellCheck={false}
+                disabled={pending}
+                className="max-w-md"
+                aria-describedby={`${id}-score-hint`}
+              />
+              <p id={`${id}-score-hint`} className="mt-1.5 text-muted-foreground">
+                Every score of this name the project holds — your code&rsquo;s, its members&rsquo;
+                and its evaluators&rsquo; — a number&rsquo;s value, a yes as 1 and a no as 0.
+              </p>
+            </SidePanelRow>
+          )}
           <SidePanelRow label="Folded as" htmlFor={`${id}-aggregation`}>
             <EnumSelect
               id={`${id}-aggregation`}
               value={draft.aggregation}
               options={aggregationsFor(draft.measure)}
               label={(aggregation) => aggregationLabel(draft.measure, aggregation)}
-              onChange={(aggregation) => change({ ...draft, aggregation })}
+              onChange={(aggregation) => change(readsNothingAsNoData({ ...draft, aggregation }))}
               disabled={pending}
             />
           </SidePanelRow>
@@ -327,65 +350,88 @@ function AlertPanel({
               value={draft.window}
               options={Object.values(RuleWindow)}
               label={(window) => WINDOW_LABEL[window]}
-              onChange={(window) => change({ ...draft, window })}
+              onChange={(window) =>
+                change({
+                  ...draft,
+                  window,
+                  // A month so far has no window of its length before it.
+                  baseline: window === RuleWindow.Month ? RuleBaseline.None : draft.baseline,
+                })
+              }
               disabled={pending}
             />
           </SidePanelRow>
-          <SidePanelRow label="Filters">
-            <div className="grid max-w-md gap-2">
-              {filterFieldsFor(draft.kind, draft.measure).map((name) => (
-                <div key={name} className="grid gap-1 sm:grid-cols-[7rem_minmax(0,1fr)] sm:items-center sm:gap-3">
-                  <Label htmlFor={`${id}-filter-${name}`} className="font-normal text-muted-foreground">
-                    {FILTER_LABEL[name]}
-                  </Label>
-                  <Input
-                    id={`${id}-filter-${name}`}
-                    value={draft.filters[name]}
-                    onChange={(e) =>
-                      change({ ...draft, filters: { ...draft.filters, [name]: e.target.value } })
-                    }
-                    placeholder={`Any ${FILTER_LABEL[name].toLowerCase()}`}
-                    autoComplete="off"
-                    spellCheck={false}
-                    disabled={pending}
-                    aria-describedby={`${id}-filters-hint`}
-                  />
-                </div>
-              ))}
-              {filtersStatus(draft.measure) && (
-                <fieldset className="grid gap-1 sm:grid-cols-[7rem_minmax(0,1fr)] sm:items-center sm:gap-3">
-                  <legend className="sr-only">Status</legend>
-                  <span aria-hidden="true" className="text-sm text-muted-foreground">
-                    Status
-                  </span>
-                  <div className="flex min-h-9 flex-wrap items-center gap-x-gutter gap-y-1.5">
-                    {FILTER_STATUSES.map((status) => (
-                      <Label key={status} className="font-normal">
-                        <Checkbox
-                          checked={draft.statuses.includes(status)}
-                          onCheckedChange={(on) =>
-                            change({
-                              ...draft,
-                              statuses:
-                                on === true
-                                  ? [...draft.statuses, status]
-                                  : draft.statuses.filter((s: SpanStatus) => s !== status),
-                            })
-                          }
-                          disabled={pending}
-                        />
-                        {STATUS_LABEL[status]}
-                      </Label>
-                    ))}
-                  </div>
-                </fieldset>
-              )}
-              <p id={`${id}-filters-hint`} className="text-muted-foreground">
-                Separate values with commas, a value that holds one between double quotes; an
-                empty field admits every value, and no status ticked admits every status.
-              </p>
-            </div>
+          <SidePanelRow label="Read as" htmlFor={`${id}-baseline`}>
+            <EnumSelect
+              id={`${id}-baseline`}
+              value={draft.baseline}
+              options={
+                draft.window === RuleWindow.Month
+                  ? [RuleBaseline.None]
+                  : Object.values(RuleBaseline)
+              }
+              label={(baseline) => BASELINE_LABEL[baseline]}
+              onChange={(baseline) => change(readsNothingAsNoData({ ...draft, baseline }))}
+              disabled={pending}
+            />
           </SidePanelRow>
+          {filterFieldsFor(draft.kind, draft.measure).length > 0 && (
+            <SidePanelRow label="Filters">
+              <div className="grid max-w-md gap-2">
+                {filterFieldsFor(draft.kind, draft.measure).map((name) => (
+                  <div key={name} className="grid gap-1 sm:grid-cols-[7rem_minmax(0,1fr)] sm:items-center sm:gap-3">
+                    <Label htmlFor={`${id}-filter-${name}`} className="font-normal text-muted-foreground">
+                      {FILTER_LABEL[name]}
+                    </Label>
+                    <Input
+                      id={`${id}-filter-${name}`}
+                      value={draft.filters[name]}
+                      onChange={(e) =>
+                        change({ ...draft, filters: { ...draft.filters, [name]: e.target.value } })
+                      }
+                      placeholder={`Any ${FILTER_LABEL[name].toLowerCase()}`}
+                      autoComplete="off"
+                      spellCheck={false}
+                      disabled={pending}
+                      aria-describedby={`${id}-filters-hint`}
+                    />
+                  </div>
+                ))}
+                {filtersStatus(draft.measure) && (
+                  <fieldset className="grid gap-1 sm:grid-cols-[7rem_minmax(0,1fr)] sm:items-center sm:gap-3">
+                    <legend className="sr-only">Status</legend>
+                    <span aria-hidden="true" className="text-sm text-muted-foreground">
+                      Status
+                    </span>
+                    <div className="flex min-h-9 flex-wrap items-center gap-x-gutter gap-y-1.5">
+                      {FILTER_STATUSES.map((status) => (
+                        <Label key={status} className="font-normal">
+                          <Checkbox
+                            checked={draft.statuses.includes(status)}
+                            onCheckedChange={(on) =>
+                              change({
+                                ...draft,
+                                statuses:
+                                  on === true
+                                    ? [...draft.statuses, status]
+                                    : draft.statuses.filter((s: SpanStatus) => s !== status),
+                              })
+                            }
+                            disabled={pending}
+                          />
+                          {STATUS_LABEL[status]}
+                        </Label>
+                      ))}
+                    </div>
+                  </fieldset>
+                )}
+                <p id={`${id}-filters-hint`} className="text-muted-foreground">
+                  Separate values with commas, a value that holds one between double quotes; an
+                  empty field admits every value, and no status ticked admits every status.
+                </p>
+              </div>
+            </SidePanelRow>
+          )}
           <SidePanelRow label="Compared as" htmlFor={`${id}-operator`}>
             <EnumSelect
               id={`${id}-operator`}
@@ -438,7 +484,8 @@ function AlertPanel({
               describedBy={`${id}-missing-hint`}
             />
             <p id={`${id}-missing-hint`} className="text-muted-foreground">
-              What a window holding no span means.
+              What a window holding nothing to read means: no span, no score, or no change from
+              the window before.
             </p>
           </SidePanelRow>
           <SidePanelRow label="Notify again" htmlFor={`${id}-renotify`}>

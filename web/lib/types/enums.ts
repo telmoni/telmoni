@@ -305,6 +305,7 @@ export const RuleMeasure = {
   Duration: "duration",
   Tokens:   "tokens",
   Cost:     "cost",
+  Score:    "score",
 } as const;
 export type RuleMeasure = typeof RuleMeasure[keyof typeof RuleMeasure];
 
@@ -330,6 +331,14 @@ export const RuleWindow = {
   Month: "month",
 } as const;
 export type RuleWindow = typeof RuleWindow[keyof typeof RuleWindow];
+
+/** Wire vocabulary of the Rust `RuleBaseline`: what an alert's value is
+ *  read against, itself or its change from the window before. */
+export const RuleBaseline = {
+  None:     "none",
+  Previous: "previous",
+} as const;
+export type RuleBaseline = typeof RuleBaseline[keyof typeof RuleBaseline];
 
 /** Wire vocabulary of the Rust `RuleOperator`: how an alert's value is
  *  compared with its thresholds. */

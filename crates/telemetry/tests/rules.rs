@@ -769,3 +769,131 @@ async fn an_alert_the_plan_lets_run_again_reads_as_never_evaluated(pool: PgPool)
             .expect("the alert");
     assert_eq!((paused, value, evaluated), (None, None, None));
 }
+
+/// A score alert reads its scores of the window, each once as it stands — a
+/// score taken back and a category left out — and against the day before
+/// reads its change in percent, so a drop opens an incident.
+#[sqlx::test]
+async fn a_score_alert_reads_its_scores_and_a_drop_against_the_day_before(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let (auth, organization, project, _) = seated();
+    let state = common::state_with_stores_under(&pool, auth, Arc::new(NoLimits));
+    let app = router(state.clone());
+    let now = Utc::now();
+    let score =
+        |name: &str, value: f64, at: DateTime<Utc>, id: Uuid| telmoni_telemetry::scores::ScoreRow {
+            project_id: project.clone(),
+            received_at: at,
+            score_id: id,
+            target: telmoni_shared::ScoreTarget::Run,
+            run_id: Uuid::new_v4(),
+            trace_id: String::new(),
+            span_id: String::new(),
+            session_id: String::new(),
+            name: name.into(),
+            data_type: telmoni_shared::ScoreType::Number,
+            value,
+            categories: Vec::new(),
+            range_min: None,
+            range_max: None,
+            source: telmoni_shared::ScoreSource::Evaluator,
+            scorer: String::new(),
+            scorer_version: String::new(),
+            is_deleted: 0,
+            answer: String::new(),
+        };
+    let today = now - TimeDelta::hours(1);
+    let yesterday = now - TimeDelta::hours(30);
+    let taken_back = Uuid::new_v4();
+    let lowest = score("relevance", 0.4, today, Uuid::new_v4());
+    let mut rows = vec![
+        lowest.clone(),
+        score("relevance", 0.6, today, Uuid::new_v4()),
+        score("relevance", 0.0, today - TimeDelta::minutes(5), taken_back),
+        telmoni_telemetry::scores::ScoreRow {
+            is_deleted: 1,
+            ..score("relevance", 0.0, today, taken_back)
+        },
+        score("other", 0.0, today, Uuid::new_v4()),
+        score("relevance", 0.8, yesterday, Uuid::new_v4()),
+        score("relevance", 1.0, yesterday, Uuid::new_v4()),
+        score("gone", 0.5, yesterday, Uuid::new_v4()),
+    ];
+    rows.push(telmoni_telemetry::scores::ScoreRow {
+        data_type: telmoni_shared::ScoreType::Category,
+        categories: vec!["polite".into()],
+        ..score("relevance", 0.0, today, Uuid::new_v4())
+    });
+    ch.store
+        .insert_scores_once(&rows, &Uuid::new_v4().to_string())
+        .await
+        .expect("the scores are kept");
+    for body in [
+        json!({ "name": "Relevance", "kind": "run", "measure": "score", "score_name": "relevance",
+            "aggregation": "avg", "window": "day", "operator": "lt", "alert_threshold": 0.3,
+            "missing_data": "no_data" }),
+        json!({ "name": "Relevance dropped", "kind": "run", "measure": "score",
+            "score_name": "relevance", "aggregation": "avg", "window": "day",
+            "baseline": "previous", "operator": "lt", "alert_threshold": -20,
+            "warning_threshold": -10, "missing_data": "no_data" }),
+        json!({ "name": "Gone quiet", "kind": "run", "measure": "score", "score_name": "gone",
+            "aggregation": "count", "window": "day", "baseline": "previous", "operator": "lt",
+            "alert_threshold": -50 }),
+    ] {
+        let made = request(
+            "POST",
+            LANE,
+            "user_member",
+            &organization,
+            &project,
+            Some(&body),
+        );
+        let (status, made) = answer(&app, made).await;
+        assert_eq!(status, StatusCode::CREATED, "{made}");
+    }
+    assert_eq!(evaluate::pass(&state).await.expect("a pass"), 3);
+    let (_, listed) = answer(
+        &app,
+        request("GET", LANE, "user_member", &organization, &project, None),
+    )
+    .await;
+    let of = |name: &str| {
+        listed["rules"]
+            .as_array()
+            .and_then(|rules| rules.iter().find(|rule| rule["name"] == name))
+            .cloned()
+            .expect("the alert")
+    };
+    let plain = of("Relevance");
+    assert_eq!(
+        plain["value"].as_f64().map(|v| (v * 1e9).round() / 1e9),
+        Some(0.5),
+        "{plain}"
+    );
+    assert_eq!(plain["severity"], "ok");
+    let dropped = of("Relevance dropped");
+    let change = dropped["value"].as_f64().expect("a value");
+    assert!((change - (-44.444_444_444)).abs() < 1e-6, "{dropped}");
+    assert_eq!(dropped["severity"], "alert", "{dropped}");
+    assert_eq!(dropped["score_name"], "relevance");
+    assert_eq!(dropped["baseline"], "previous");
+    let quiet = of("Gone quiet");
+    assert_eq!(
+        quiet["value"],
+        json!(-100.0),
+        "a count that stopped fell by all of it: {quiet}"
+    );
+    assert_eq!(quiet["severity"], "alert");
+    // Its notice showed the run scored lowest in the window.
+    let shown: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT unnest(i.runs) FROM telemetry.incidents i JOIN telemetry.rules r ON r.id = i.rule_id
+          WHERE r.name = 'Relevance dropped'",
+    )
+        .fetch_all(&pool)
+        .await
+        .expect("the incident's runs");
+    assert_eq!(shown, [lowest.run_id]);
+}

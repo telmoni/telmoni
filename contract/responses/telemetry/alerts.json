@@ -3,6 +3,7 @@
     {
       "aggregation": "p95",
       "alert_threshold": 30000.0,
+      "baseline": "none",
       "connectors": [
         {
           "connection_id": "0192f3a1-7c2e-7b4d-9a61-3c5e8f0d2b1a",
@@ -41,6 +42,7 @@
       "paused": null,
       "paused_at": null,
       "renotify_minutes": 60,
+      "score_name": null,
       "severity": "alert",
       "severity_since": "2027-01-15T08:01:00Z",
       "updated_at": "2027-01-15T08:00:30Z",
@@ -51,6 +53,7 @@
     {
       "aggregation": "count",
       "alert_threshold": 30000.0,
+      "baseline": "none",
       "connectors": [
         {
           "connection_id": "0192f3a1-7c2e-7b4d-9a61-3c5e8f0d2b1a",
@@ -71,6 +74,7 @@
       "paused": "plan",
       "paused_at": "2027-01-15T08:01:30Z",
       "renotify_minutes": null,
+      "score_name": null,
       "severity": "paused",
       "severity_since": "2027-01-15T08:01:30Z",
       "updated_at": "2027-01-15T08:01:30Z",

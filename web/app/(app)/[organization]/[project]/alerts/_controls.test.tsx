@@ -75,6 +75,8 @@ const ALERT: Alert = {
   warning_threshold: 3000,
   missing_data: "zero",
   renotify_minutes: null,
+  score_name: null,
+  baseline: "none",
   paused: null,
   paused_at: null,
   value: null,
@@ -145,6 +147,8 @@ describe("the alert's form", { timeout: 15_000 }, () => {
       warning_threshold: 0.05,
       missing_data: "zero",
       renotify_minutes: 60,
+      score_name: null,
+      baseline: "none",
       connectors: [{ connection_id: SLACK, level: "warning", hours: null }],
     });
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
@@ -226,7 +230,7 @@ describe("the alert's form", { timeout: 15_000 }, () => {
     fireEvent.click(within(panel).getByRole("switch", { name: "hooks.example.com" }));
     pick(within(panel).getByRole("combobox", { name: "When" }), "set");
     const selects = within(panel).getAllByRole("combobox");
-    expect(selects).toHaveLength(9);
+    expect(selects).toHaveLength(10);
     for (const select of selects) {
       expect(select).not.toHaveAttribute("aria-label");
       expect(panel.querySelector(`label[for="${select.id}"]`), select.textContent ?? "").not.toBeNull();

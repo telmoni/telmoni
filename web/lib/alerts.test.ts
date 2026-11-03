@@ -7,6 +7,7 @@ import {
   connectionChoices,
   draftOf,
   filterFieldsFor,
+  filtersStatus,
   hoursWords,
   incidentHref,
   incidentKindsLabel,
@@ -30,6 +31,7 @@ import {
   MissingData,
   NotificationKind,
   RuleAggregation,
+  RuleBaseline,
   RuleLevel,
   RuleMeasure,
   RuleOperator,
@@ -52,6 +54,8 @@ const ALERT: Alert = {
   warning_threshold: 3000,
   missing_data: MissingData.Keep,
   renotify_minutes: 30,
+  score_name: null,
+  baseline: RuleBaseline.None,
   paused: null,
   paused_at: null,
   value: 6200,
@@ -140,6 +144,8 @@ describe("the form", () => {
         warning_threshold: 3000,
         missing_data: MissingData.Keep,
         renotify_minutes: 30,
+        score_name: null,
+        baseline: RuleBaseline.None,
         connectors: [
           {
             connection_id: "3c4e2a74-0000-4000-8000-000000000004",
@@ -304,6 +310,74 @@ describe("the form", () => {
     const quoted: Alert = { ...ALERT, filters: { agent: ["support, tier 2", "triage"] } };
     const checked = inputOf(draftOf(quoted));
     expect(checked.ok && checked.input.filters).toEqual({ agent: ["support, tier 2", "triage"] });
+  });
+});
+
+describe("a score alert", () => {
+  const SCORED: AlertDraft = {
+    ...NEW_ALERT,
+    name: "Relevance dropped",
+    measure: RuleMeasure.Score,
+    scoreName: " relevance ",
+    missingData: MissingData.NoData,
+    window: RuleWindow.Day,
+    baseline: RuleBaseline.Previous,
+    operator: RuleOperator.Lt,
+    alertThreshold: "-20",
+    warningThreshold: "-10",
+    filters: { ...NEW_ALERT.filters, agent: "bot" },
+  };
+
+  it("names its score, takes no filter, and sends a change in percent as typed", () => {
+    const checked = inputOf(SCORED);
+    expect(checked.ok && checked.input).toMatchObject({
+      measure: RuleMeasure.Score,
+      score_name: "relevance",
+      baseline: RuleBaseline.Previous,
+      filters: {},
+      alert_threshold: -20,
+      warning_threshold: -10,
+    });
+    expect(filterFieldsFor(SpanKind.Run, RuleMeasure.Score)).toEqual([]);
+    expect(filtersStatus(RuleMeasure.Score)).toBe(false);
+  });
+
+  it("reads an empty window as no data, where it is no 0, and refuses a 0 there", () => {
+    const scored = withMeasure({ ...NEW_ALERT, kind: SpanKind.Run }, RuleMeasure.Score);
+    expect(scored.missingData).toBe(MissingData.NoData);
+    expect(withMeasure({ ...scored, aggregation: RuleAggregation.Count }, RuleMeasure.Score).missingData).toBe(
+      MissingData.NoData,
+    );
+    expect(inputOf({ ...SCORED, missingData: MissingData.Zero }).ok).toBe(false);
+    expect(inputOf({ ...SCORED, aggregation: RuleAggregation.Count, missingData: MissingData.Zero }).ok).toBe(true);
+  });
+
+  it("refuses one with no score, or a month against the one before", () => {
+    expect(inputOf({ ...SCORED, scoreName: "  " }).ok).toBe(false);
+    expect(inputOf({ ...SCORED, scoreName: "n".repeat(65) }).ok).toBe(false);
+    expect(inputOf({ ...SCORED, window: RuleWindow.Month }).ok).toBe(false);
+  });
+
+  it("sends no score's name for any other measure", () => {
+    const checked = inputOf({ ...SCORED, measure: RuleMeasure.Count, aggregation: RuleAggregation.Count });
+    expect(checked.ok && checked.input.score_name).toBeNull();
+  });
+
+  it("reads in its notices' words, and a change as a signed percentage", () => {
+    const metric = {
+      kind: SpanKind.Run,
+      measure: RuleMeasure.Score,
+      aggregation: RuleAggregation.Avg,
+      window: RuleWindow.Day,
+      score_name: "relevance",
+      baseline: RuleBaseline.Previous,
+    };
+    expect(metricWords(metric)).toBe("The average relevance score over the last day, against the day before");
+    expect(metricWords({ ...metric, aggregation: RuleAggregation.P90, baseline: RuleBaseline.None })).toBe(
+      "The p90 relevance score over the last day",
+    );
+    expect(amount(RuleMeasure.Score, RuleAggregation.Avg, -12.5, RuleBaseline.Previous)).toBe("-12.5%");
+    expect(amount(RuleMeasure.Score, RuleAggregation.Avg, 0.8125)).toBe("0.81");
   });
 });
 

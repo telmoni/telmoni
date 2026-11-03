@@ -202,6 +202,10 @@ CREATE TABLE telemetry.rules (
     warning_threshold DOUBLE PRECISION,
     missing_data      TEXT             NOT NULL DEFAULT 'zero',
     renotify_minutes  INTEGER,
+    -- A score alert's score, by name; read against the window before where
+    -- `baseline` is `previous`, its value then its change in percent.
+    score_name        TEXT,
+    baseline          TEXT             NOT NULL DEFAULT 'none',
     paused            TEXT,
     paused_at         TIMESTAMPTZ,
     value             DOUBLE PRECISION,
@@ -220,7 +224,13 @@ CREATE TABLE telemetry.rules (
     CONSTRAINT rules_name_check CHECK (char_length(name) BETWEEN 1 AND 60),
     CONSTRAINT rules_kind_check CHECK (kind IN ('run', 'step', 'model_call', 'tool_call')),
     CONSTRAINT rules_measure_check
-        CHECK (measure IN ('count', 'failures', 'duration', 'tokens', 'cost')),
+        CHECK (measure IN ('count', 'failures', 'duration', 'tokens', 'cost', 'score')),
+    CONSTRAINT rules_score_name_check
+        CHECK ((measure = 'score') = (score_name IS NOT NULL)
+               AND (score_name IS NULL OR char_length(score_name) BETWEEN 1 AND 64)),
+    CONSTRAINT rules_baseline_check CHECK (baseline IN ('none', 'previous')),
+    -- A month so far has no window of its length before it.
+    CONSTRAINT rules_baseline_lookback_check CHECK (baseline = 'none' OR lookback <> 'month'),
     CONSTRAINT rules_aggregation_check
         CHECK (aggregation IN ('count', 'avg', 'sum', 'max', 'p50', 'p90', 'p95', 'p99')),
     CONSTRAINT rules_filters_check CHECK (jsonb_typeof(filters) = 'object'),

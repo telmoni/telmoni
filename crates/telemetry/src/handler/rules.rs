@@ -346,6 +346,8 @@ fn changed(before: &Definition, linked: &[Link], rule: &Rule) -> Vec<&'static st
         warning_threshold,
         missing_data,
         renotify_minutes,
+        score_name,
+        baseline,
     } = &rule.definition;
     let relinked = linked.len() != rule.connectors.len()
         || !linked.iter().all(|link| rule.connectors.contains(link));
@@ -366,6 +368,8 @@ fn changed(before: &Definition, linked: &[Link], rule: &Rule) -> Vec<&'static st
             bits(before.warning_threshold) != bits(*warning_threshold),
         ),
         ("missing_data", before.missing_data != *missing_data),
+        ("score_name", before.score_name != *score_name),
+        ("baseline", before.baseline != *baseline),
         (
             "renotify_minutes",
             before.renotify_minutes != *renotify_minutes,

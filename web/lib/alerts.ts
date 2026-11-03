@@ -15,7 +15,7 @@ import type {
   RuleFilters,
 } from "@/lib/server/data";
 import { projectPath } from "@/lib/slug";
-import { formatCost } from "@/lib/traces";
+import { SCORE_NAME_MAX, formatCost } from "@/lib/traces";
 import { UTC_OFFSET_EAST, UTC_OFFSET_WEST } from "@/lib/utc-offset";
 import {
   type ConnectionStatus,
@@ -23,6 +23,7 @@ import {
   MissingData,
   NotificationKind,
   RuleAggregation,
+  RuleBaseline,
   RuleLevel,
   RuleMeasure,
   RuleOperator,
@@ -61,14 +62,15 @@ export const LINKS_MAX = 20;
 export const INCIDENTS_MAX = 200;
 
 /** What an alert of `kind` measures: tokens on model calls alone, and cost on
- *  runs alone, from their calls. */
+ *  runs alone, from their calls; a score alert, reading every score of its
+ *  name, is a run's. */
 export function measuresFor(kind: AlertKind): RuleMeasure[] {
   return [
     RuleMeasure.Count,
     RuleMeasure.Failures,
     RuleMeasure.Duration,
     ...(kind === SpanKind.ModelCall ? [RuleMeasure.Tokens] : []),
-    ...(kind === SpanKind.Run ? [RuleMeasure.Cost] : []),
+    ...(kind === SpanKind.Run ? [RuleMeasure.Cost, RuleMeasure.Score] : []),
   ];
 }
 
@@ -93,6 +95,16 @@ export function aggregationsFor(measure: RuleMeasure): readonly [RuleAggregation
       return [RuleAggregation.Avg, RuleAggregation.Sum];
     case RuleMeasure.Cost:
       return [RuleAggregation.Max, RuleAggregation.Avg, RuleAggregation.Sum];
+    case RuleMeasure.Score:
+      return [
+        RuleAggregation.Avg,
+        RuleAggregation.P50,
+        RuleAggregation.P90,
+        RuleAggregation.P95,
+        RuleAggregation.P99,
+        RuleAggregation.Max,
+        RuleAggregation.Count,
+      ];
   }
 }
 
@@ -102,6 +114,7 @@ export const MEASURE_LABEL: Record<RuleMeasure, string> = {
   [RuleMeasure.Duration]: "Duration",
   [RuleMeasure.Tokens]: "Tokens",
   [RuleMeasure.Cost]: "Cost",
+  [RuleMeasure.Score]: "Score",
 };
 
 /** How an aggregation of `measure` reads in the form. */
@@ -111,6 +124,14 @@ export function aggregationLabel(measure: RuleMeasure, aggregation: RuleAggregat
       return "How many";
     case RuleMeasure.Failures:
       return aggregation === RuleAggregation.Avg ? "Share failed" : "How many failed";
+    case RuleMeasure.Score:
+      return aggregation === RuleAggregation.Count
+        ? "How many scores"
+        : aggregation === RuleAggregation.Max
+          ? "Highest"
+          : aggregation === RuleAggregation.Avg
+            ? "Average"
+            : aggregation;
     case RuleMeasure.Cost:
       return aggregation === RuleAggregation.Max
         ? "Most a run spent (a cost cap)"
@@ -126,6 +147,11 @@ export function aggregationLabel(measure: RuleMeasure, aggregation: RuleAggregat
   }
 }
 
+export const BASELINE_LABEL: Record<RuleBaseline, string> = {
+  [RuleBaseline.None]: "Its value",
+  [RuleBaseline.Previous]: "Its change from the window before",
+};
+
 export const WINDOW_LABEL: Record<RuleWindow, string> = {
   [RuleWindow.Hour]: "Last hour",
   [RuleWindow.Day]: "Last day",
@@ -133,12 +159,31 @@ export const WINDOW_LABEL: Record<RuleWindow, string> = {
   [RuleWindow.Month]: "This month",
 };
 
-type Metric = Pick<Alert, "kind" | "measure" | "aggregation" | "window">;
+type Metric = Pick<Alert, "kind" | "measure" | "aggregation" | "window"> &
+  Partial<Pick<Alert, "score_name" | "baseline">>;
 
 /** An alert's metric in its notices' own words: "The p95 duration of model
- *  calls over the last hour", "The most a run spent over the last day". */
+ *  calls over the last hour", "The most a run spent over the last day", and
+ *  against the window before, "…, against the day before". */
 export function metricWords(alert: Metric): string {
+  const what = measuredWords(alert);
+  return alert.baseline === RuleBaseline.Previous ? `${what}, against the ${alert.window} before` : what;
+}
+
+function measuredWords(alert: Metric): string {
   const over = alert.window === RuleWindow.Month ? "so far this month" : `over the last ${alert.window}`;
+  if (alert.measure === RuleMeasure.Score) {
+    const name = alert.score_name ?? "";
+    const folded =
+      alert.aggregation === RuleAggregation.Count
+        ? `The count of ${name} scores`
+        : alert.aggregation === RuleAggregation.Avg
+          ? `The average ${name} score`
+          : alert.aggregation === RuleAggregation.Max
+            ? `The highest ${name} score`
+            : `The ${alert.aggregation} ${name} score`;
+    return `${folded} ${over}`;
+  }
   if (alert.measure === RuleMeasure.Cost) {
     const spent =
       alert.aggregation === RuleAggregation.Max
@@ -168,24 +213,44 @@ export function metricWords(alert: Metric): string {
   return `${folded} of ${of} ${over}`;
 }
 
-/** The unit a value is typed and read in: milliseconds for a duration, a
- *  percentage for the share failed, US dollars for a cost, else a number. */
-export type Unit = "ms" | "percent" | "dollars" | "number";
+/** The unit a value is typed and read in: a change from the window before in
+ *  percent, as the lane keeps it; milliseconds for a duration, a percentage
+ *  of a share for the share failed, US dollars for a cost, else a number. */
+export type Unit = "change" | "ms" | "percent" | "dollars" | "number";
 
-export function unitOf(measure: RuleMeasure, aggregation: RuleAggregation): Unit {
+export function unitOf(
+  measure: RuleMeasure,
+  aggregation: RuleAggregation,
+  baseline: RuleBaseline = RuleBaseline.None,
+): Unit {
+  if (baseline === RuleBaseline.Previous) return "change";
   if (measure === RuleMeasure.Duration) return "ms";
   if (measure === RuleMeasure.Cost) return "dollars";
   if (measure === RuleMeasure.Failures && aggregation === RuleAggregation.Avg) return "percent";
   return "number";
 }
 
-export const UNIT_SUFFIX: Record<Unit, string> = { ms: "ms", percent: "%", dollars: "USD", number: "" };
+export const UNIT_SUFFIX: Record<Unit, string> = {
+  change: "%",
+  ms: "ms",
+  percent: "%",
+  dollars: "USD",
+  number: "",
+};
 
 const NUMBER = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
 
-/** A value in its unit, as the page reads it: `6,200 ms`, `25%`, `$3.45`. */
-export function amount(measure: RuleMeasure, aggregation: RuleAggregation, value: number): string {
-  switch (unitOf(measure, aggregation)) {
+/** A value in its unit, as the page reads it: `6,200 ms`, `25%`, `$3.45`,
+ *  and a change `-12.5%`. */
+export function amount(
+  measure: RuleMeasure,
+  aggregation: RuleAggregation,
+  value: number,
+  baseline: RuleBaseline = RuleBaseline.None,
+): string {
+  switch (unitOf(measure, aggregation, baseline)) {
+    case "change":
+      return `${NUMBER.format(value)}%`;
     case "ms":
       return `${NUMBER.format(value)} ms`;
     case "percent":
@@ -217,10 +282,11 @@ export const OPERATOR_LABEL: Record<RuleOperator, string> = {
 
 /** An alert's thresholds in words: `> 5,000 ms`, and its warning's. */
 export function thresholdWords(
-  alert: Pick<Alert, "measure" | "aggregation" | "operator" | "alert_threshold" | "warning_threshold">,
+  alert: Pick<Alert, "measure" | "aggregation" | "operator" | "alert_threshold" | "warning_threshold"> &
+    Partial<Pick<Alert, "baseline">>,
 ): { alert: string; warning: string | null } {
   const at = (value: number) =>
-    `${OPERATOR_SYMBOL[alert.operator]} ${amount(alert.measure, alert.aggregation, value)}`;
+    `${OPERATOR_SYMBOL[alert.operator]} ${amount(alert.measure, alert.aggregation, value, alert.baseline)}`;
   return {
     alert: at(alert.alert_threshold),
     warning: alert.warning_threshold === null ? null : at(alert.warning_threshold),
@@ -299,6 +365,8 @@ export const FILTER_LABEL: Record<FilterField, string> = {
  *  its calls' model and provider, and by its tags (`key:value`), which only
  *  the spans keep, never the hourly totals. */
 export function filterFieldsFor(kind: AlertKind, measure: RuleMeasure): FilterField[] {
+  // A score keeps no agent, model or release of its own.
+  if (measure === RuleMeasure.Score) return [];
   const own: FilterField[] =
     measure === RuleMeasure.Cost || kind === SpanKind.ModelCall
       ? ["model", "provider"]
@@ -312,7 +380,7 @@ export function filterFieldsFor(kind: AlertKind, measure: RuleMeasure): FilterFi
 /** Whether an alert filters by status: a run's cost does not, since it is
  *  read from the calls as they land, before the run's own status is known. */
 export function filtersStatus(measure: RuleMeasure): boolean {
-  return measure !== RuleMeasure.Cost;
+  return measure !== RuleMeasure.Cost && measure !== RuleMeasure.Score;
 }
 
 export const FILTER_STATUSES = [SpanStatus.Ok, SpanStatus.Error, SpanStatus.Cancelled] as const;
@@ -502,6 +570,8 @@ export type AlertDraft = {
   warningThreshold: string;
   missingData: MissingData;
   renotifyMinutes: string;
+  scoreName: string;
+  baseline: RuleBaseline;
   filters: Record<FilterField, string>;
   statuses: SpanStatus[];
   connectors: LinkDraft[];
@@ -520,6 +590,8 @@ export type RuleInput = {
   warning_threshold: number | null;
   missing_data: MissingData;
   renotify_minutes: number | null;
+  score_name: string | null;
+  baseline: RuleBaseline;
   connectors: { connection_id: string; level: RuleLevel; hours: Hours | null }[];
 };
 
@@ -546,6 +618,8 @@ export const NEW_ALERT: AlertDraft = {
   warningThreshold: "",
   missingData: MissingData.Zero,
   renotifyMinutes: "",
+  scoreName: "",
+  baseline: RuleBaseline.None,
   filters: NO_FILTERS,
   statuses: [],
   connectors: [],
@@ -560,7 +634,7 @@ function shown(value: number, unit: Unit): string {
 
 /** The form for an alert saved before: its values as the form types them. */
 export function draftOf(alert: Alert): AlertDraft {
-  const unit = unitOf(alert.measure, alert.aggregation);
+  const unit = unitOf(alert.measure, alert.aggregation, alert.baseline);
   const filters = { ...NO_FILTERS };
   for (const field of FILTER_FIELDS) filters[field] = joinValues(alert.filters[field] ?? []);
   return {
@@ -574,6 +648,8 @@ export function draftOf(alert: Alert): AlertDraft {
     warningThreshold: alert.warning_threshold === null ? "" : shown(alert.warning_threshold, unit),
     missingData: alert.missing_data,
     renotifyMinutes: alert.renotify_minutes === null ? "" : String(alert.renotify_minutes),
+    scoreName: alert.score_name ?? "",
+    baseline: alert.baseline,
     filters,
     statuses: alert.filters.status ?? [],
     connectors: alert.connectors.map((link) => ({
@@ -595,7 +671,23 @@ export function withKind(draft: AlertDraft, kind: AlertKind): AlertDraft {
 export function withMeasure(draft: AlertDraft, measure: RuleMeasure): AlertDraft {
   const folds = aggregationsFor(measure);
   const aggregation = folds.includes(draft.aggregation) ? draft.aggregation : folds[0];
-  return { ...draft, measure, aggregation };
+  return readsNothingAsNoData({ ...draft, measure, aggregation });
+}
+
+/** Whether an empty window is no 0 for the alert: one of scores, or one read
+ *  against the window before, unless it counts, as the lane holds it. */
+export function emptyIsNoZero(
+  alert: Pick<AlertDraft, "measure" | "aggregation" | "baseline">,
+): boolean {
+  const counted = alert.measure === RuleMeasure.Count || alert.aggregation === RuleAggregation.Count;
+  return !counted && (alert.measure === RuleMeasure.Score || alert.baseline === RuleBaseline.Previous);
+}
+
+/** The form with an empty window read as no data where it is no 0. */
+export function readsNothingAsNoData(draft: AlertDraft): AlertDraft {
+  return emptyIsNoZero(draft) && draft.missingData === MissingData.Zero
+    ? { ...draft, missingData: MissingData.NoData }
+    : draft;
 }
 
 /** A comma that groups thousands, which a number may carry; any other is a
@@ -628,7 +720,17 @@ export function inputOf(
   if (!aggregationsFor(draft.measure).includes(draft.aggregation)) {
     return fail("Choose how the measure is folded over the window.");
   }
-  const unit = unitOf(draft.measure, draft.aggregation);
+  const scoreName = draft.scoreName.trim();
+  if (draft.measure === RuleMeasure.Score && (!scoreName || [...scoreName].length > SCORE_NAME_MAX)) {
+    return fail(`Name the score the alert reads: 1 to ${SCORE_NAME_MAX} characters.`);
+  }
+  if (emptyIsNoZero(draft) && draft.missingData === MissingData.Zero) {
+    return fail("A window with no score, or no change to read, is no 0: show it as no data, or keep its last severity.");
+  }
+  if (draft.baseline === RuleBaseline.Previous && draft.window === RuleWindow.Month) {
+    return fail("A month so far has no window of its length before it: read the hour, day or week.");
+  }
+  const unit = unitOf(draft.measure, draft.aggregation, draft.baseline);
   const alert = parsed(draft.alertThreshold, unit);
   if (alert === null) return fail("The alert threshold is a number, its decimals after a point.");
   let warning: number | null = null;
@@ -686,6 +788,8 @@ export function inputOf(
       warning_threshold: warning,
       missing_data: draft.missingData,
       renotify_minutes: renotify,
+      score_name: draft.measure === RuleMeasure.Score ? scoreName : null,
+      baseline: draft.baseline,
       connectors: draft.connectors.map((link) => ({
         connection_id: link.connectionId,
         level: link.level,

@@ -37,7 +37,7 @@ pub struct RuleRow {
     pub updated_at: DateTime<Utc>,
 }
 
-/// The definition's eleven columns bound, in the order the insert and the
+/// The definition's thirteen columns bound, in the order the insert and the
 /// update name them after their own.
 trait BindDefinition<'q> {
     fn bind_definition(self, definition: &'q Definition) -> Self;
@@ -58,14 +58,16 @@ impl<'q> BindDefinition<'q>
             .bind(definition.warning_threshold)
             .bind(definition.missing_data)
             .bind(definition.renotify_minutes)
+            .bind(&definition.score_name)
+            .bind(definition.baseline)
     }
 }
 
 /// The columns a [`RuleRow`] is read from, in its order.
 const RULE_COLUMNS: &str = "id, project_id, organization_id, name, kind, measure, aggregation, \
     filters, lookback, operator, alert_threshold, warning_threshold, missing_data, \
-    renotify_minutes, paused, paused_at, value, evaluated_at, severity, severity_since, told_at, \
-    told_to, created_at, updated_at";
+    renotify_minutes, score_name, baseline, paused, paused_at, value, evaluated_at, severity, \
+    severity_since, told_at, told_to, created_at, updated_at";
 
 /// Who paused an alert: a member, by hand, or its plan, on a fall past its
 /// number, which lifts its own once there is room again.
@@ -153,8 +155,8 @@ pub async fn insert(
     sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "INSERT INTO telemetry.rules (id, project_id, organization_id, name, kind, measure,
              aggregation, filters, lookback, operator, alert_threshold, warning_threshold,
-             missing_data, renotify_minutes)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+             missing_data, renotify_minutes, score_name, baseline)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
          RETURNING {RULE_COLUMNS}"
     )))
     .bind(id)
@@ -178,7 +180,8 @@ pub async fn update<B: HasProject>(
         "UPDATE telemetry.rules
             SET name = $3, kind = $4, measure = $5, aggregation = $6, filters = $7,
                 lookback = $8, operator = $9, alert_threshold = $10, warning_threshold = $11,
-                missing_data = $12, renotify_minutes = $13, value = NULL, evaluated_at = NULL,
+                missing_data = $12, renotify_minutes = $13, score_name = $14, baseline = $15,
+                value = NULL, evaluated_at = NULL,
                 lease_id = NULL, leased_until = NULL, updated_at = now()
           WHERE project_id = $1 AND id = $2
          RETURNING {RULE_COLUMNS}"

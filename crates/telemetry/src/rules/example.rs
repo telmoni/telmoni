@@ -1,7 +1,8 @@
 //! The run a notice shows, picked from the spans its alert counted over its
 //! window: the latest that failed for failures, the slowest for a duration,
 //! the one with the most tokens for tokens, the one that spent the most for
-//! a cost, else the latest; and that run as its spans so far tell it, its
+//! a cost, the one scored lowest or highest for a score, as it crosses, else
+//! the latest; and that run as its spans so far tell it, its
 //! spend among them. Names and counts alone, never a content field.
 
 use chrono::{DateTime, Utc};
@@ -9,7 +10,7 @@ use clickhouse::Row;
 use serde::Deserialize;
 use uuid::Uuid;
 
-use telmoni_shared::RuleMeasure;
+use telmoni_shared::{RuleMeasure, RuleOperator};
 
 use crate::AppState;
 use crate::rules::db::RuleRow;
@@ -24,18 +25,25 @@ pub enum Pick {
     Slowest,
     MostTokens,
     MostSpent,
+    LowestScored,
+    HighestScored,
     Latest,
 }
 
 impl Pick {
-    /// The span that best shows an alert on `measure` crossing.
+    /// The span that best shows an alert on `measure` crossing as `operator`
+    /// compares: a score's lowest where it falls below, its highest above.
     #[must_use]
-    pub const fn of(measure: RuleMeasure) -> Self {
+    pub const fn of(measure: RuleMeasure, operator: RuleOperator) -> Self {
         match measure {
+            RuleMeasure::Score if matches!(operator, RuleOperator::Gt | RuleOperator::Gte) => {
+                Self::HighestScored
+            }
             RuleMeasure::Failures => Self::LatestFailed,
             RuleMeasure::Duration => Self::Slowest,
             RuleMeasure::Tokens => Self::MostTokens,
             RuleMeasure::Cost => Self::MostSpent,
+            RuleMeasure::Score => Self::LowestScored,
             RuleMeasure::Count => Self::Latest,
         }
     }
@@ -46,6 +54,8 @@ impl Pick {
             Self::Slowest => "slowest",
             Self::MostTokens => "most_tokens",
             Self::MostSpent => "most_spent",
+            Self::LowestScored => "lowest_scored",
+            Self::HighestScored => "highest_scored",
             Self::Latest => "latest",
         }
     }
@@ -86,6 +96,20 @@ const PICK_SQL: &str = concat!(
     "{pick:String} = 'most_tokens', toInt64(input_tokens + output_tokens), ",
     "toInt64(0)) DESC, received_at DESC ",
     "LIMIT 1"
+);
+
+/// The run scored lowest, or highest, by the score alert's name over its
+/// window, of the scores a run's or its spans', each as its last row has it.
+const SCORED_SQL: &str = concat!(
+    "SELECT run AS run_id FROM (SELECT argMax(run_id, received_at) AS run, ",
+    "argMax(value, received_at) AS v, argMax(is_deleted, received_at) AS gone ",
+    "FROM telemetry.scores ",
+    "WHERE project_id IN {projects:Array(String)} AND name = {name:String} ",
+    "AND data_type IN ('number', 'boolean') ",
+    "AND received_at >= {from:DateTime64(6, 'UTC')} AND received_at < {to:DateTime64(6, 'UTC')} ",
+    "GROUP BY score_id) ",
+    "WHERE gone = 0 AND run != toUUID('00000000-0000-0000-0000-000000000000') ",
+    "ORDER BY if({pick:String} = 'highest_scored', -v, v) ASC LIMIT 1"
 );
 
 /// One run's spans so far, summed.
@@ -129,11 +153,25 @@ pub async fn example(
 ) -> Result<Option<ExampleRun>, Unread> {
     let window = Window::of(now, rule.definition.window);
     let filters = &rule.definition.filters;
-    let pick = Pick::of(rule.definition.measure);
+    let pick = Pick::of(rule.definition.measure, rule.definition.operator);
     let projects = Projects::one(rule.project_id.clone());
     let run_id = if pick == Pick::MostSpent {
         let spent = spend::runs(state, &projects, window, filters).await?;
         (spent.runs > 0).then_some(spent.costliest)
+    } else if matches!(pick, Pick::LowestScored | Pick::HighestScored) {
+        let picked: Option<Picked> = state
+            .store
+            .read(&projects, SCORED_SQL)
+            .param(
+                "name",
+                rule.definition.score_name.as_deref().unwrap_or_default(),
+            )
+            .param("pick", pick.as_str())
+            .param("from", micros(window.from))
+            .param("to", micros(window.to))
+            .fetch_optional()
+            .await?;
+        picked.map(|Picked { run_id }| run_id)
     } else {
         let read = state
             .store
@@ -176,11 +214,35 @@ mod tests {
     /// Each measure picks the span that shows it, and the read names each pick.
     #[test]
     fn each_measure_picks_the_span_that_shows_it() {
-        assert_eq!(Pick::of(RuleMeasure::Failures), Pick::LatestFailed);
-        assert_eq!(Pick::of(RuleMeasure::Duration), Pick::Slowest);
-        assert_eq!(Pick::of(RuleMeasure::Tokens), Pick::MostTokens);
-        assert_eq!(Pick::of(RuleMeasure::Cost), Pick::MostSpent);
-        assert_eq!(Pick::of(RuleMeasure::Count), Pick::Latest);
+        assert_eq!(
+            Pick::of(RuleMeasure::Failures, RuleOperator::Lt),
+            Pick::LatestFailed
+        );
+        assert_eq!(
+            Pick::of(RuleMeasure::Duration, RuleOperator::Lt),
+            Pick::Slowest
+        );
+        assert_eq!(
+            Pick::of(RuleMeasure::Tokens, RuleOperator::Lt),
+            Pick::MostTokens
+        );
+        assert_eq!(
+            Pick::of(RuleMeasure::Cost, RuleOperator::Lt),
+            Pick::MostSpent
+        );
+        assert_eq!(
+            Pick::of(RuleMeasure::Score, RuleOperator::Lt),
+            Pick::LowestScored
+        );
+        assert_eq!(
+            Pick::of(RuleMeasure::Score, RuleOperator::Gte),
+            Pick::HighestScored
+        );
+        assert_eq!(
+            Pick::of(RuleMeasure::Duration, RuleOperator::Gt),
+            Pick::Slowest
+        );
+        assert_eq!(Pick::of(RuleMeasure::Count, RuleOperator::Lt), Pick::Latest);
         for pick in [Pick::LatestFailed, Pick::Slowest, Pick::MostTokens] {
             assert!(PICK_SQL.contains(&format!("'{}'", pick.as_str())));
         }

@@ -15,8 +15,8 @@ use chrono::{DateTime, Utc};
 use telmoni_shared::db::tenant_session::{maintenance_scope, project_scope};
 use telmoni_shared::seam::{Notice, Route};
 use telmoni_shared::{
-    IncidentStatus, NotificationKind, OrganizationId, ProjectId, RuleAggregation, RuleMeasure,
-    RuleWindow, Severity, SpanKind, SpanStatus, TelmoniError,
+    IncidentStatus, NotificationKind, OrganizationId, ProjectId, RuleAggregation, RuleBaseline,
+    RuleMeasure, RuleWindow, Severity, SpanKind, SpanStatus, TelmoniError,
 };
 
 use crate::AppState;
@@ -525,6 +525,8 @@ fn picked(kind: SpanKind, pick: Pick) -> String {
         (Pick::MostTokens, SpanKind::Run) => "The run with the most tokens".to_owned(),
         (Pick::MostTokens, _) => format!("The run of the {one} with the most tokens"),
         (Pick::MostSpent, _) => "The run that spent the most".to_owned(),
+        (Pick::LowestScored, _) => "The run scored lowest".to_owned(),
+        (Pick::HighestScored, _) => "The run scored highest".to_owned(),
         (Pick::Latest, SpanKind::Run) => "The latest run".to_owned(),
         (Pick::Latest, _) => format!("The run of the latest {one}"),
     }
@@ -604,11 +606,8 @@ async fn told<'a>(
 /// span's content.
 fn words(rule: &RuleRow, value: Option<f64>, told: &Told) -> (String, String) {
     let what = metric(rule);
-    let shown = value.map_or_else(
-        || "no value".to_owned(),
-        |v| amount(rule.definition.measure, rule.definition.aggregation, v),
-    );
-    let threshold = |t: f64| amount(rule.definition.measure, rule.definition.aggregation, t);
+    let shown = value.map_or_else(|| "no value".to_owned(), |v| amount(&rule.definition, v));
+    let threshold = |t: f64| amount(&rule.definition, t);
     // An incident held through a window with no span has no value to give.
     let past = |level: &str, at: String| match value {
         Some(_) => format!("{what} is {shown}, past the {level} threshold of {at}."),
@@ -623,7 +622,15 @@ fn words(rule: &RuleRow, value: Option<f64>, told: &Told) -> (String, String) {
         ),
         (Move::Opened, Severity::NoData) => (
             "no data",
-            format!("{what} has had no span to read for as long as its window."),
+            match (rule.definition.baseline, rule.definition.measure) {
+                (RuleBaseline::Previous, _) => format!(
+                    "{what} has no change to read: it or the window before held nothing to compare."
+                ),
+                (_, RuleMeasure::Score) => {
+                    format!("{what} has had no score to read for as long as its window.")
+                }
+                _ => format!("{what} has had no span to read for as long as its window."),
+            },
         ),
         (Move::Opened, Severity::Warning) => (
             "warning",
@@ -667,8 +674,28 @@ fn words(rule: &RuleRow, value: Option<f64>, told: &Told) -> (String, String) {
 }
 
 /// The alert's metric in words: "The p95 duration of model calls over the
-/// last hour", "The most a run spent over the last day".
+/// last hour", "The most a run spent over the last day", and against the
+/// window before, "…, against the day before".
 fn metric(rule: &RuleRow) -> String {
+    let what = measured(rule);
+    match (rule.definition.baseline, rule.definition.window) {
+        (RuleBaseline::Previous, window) => format!("{what}, against the {window} before"),
+        (RuleBaseline::None, _) => what,
+    }
+}
+
+/// The alert's measure folded over its window, in words.
+fn measured(rule: &RuleRow) -> String {
+    if rule.definition.measure == RuleMeasure::Score {
+        let name = rule.definition.score_name.as_deref().unwrap_or_default();
+        let folded = match rule.definition.aggregation {
+            RuleAggregation::Count => format!("The count of {name} scores"),
+            RuleAggregation::Avg => format!("The average {name} score"),
+            RuleAggregation::Max | RuleAggregation::Sum => format!("The highest {name} score"),
+            percentile => format!("The {percentile} {name} score"),
+        };
+        return format!("{folded} {}", over(rule.definition.window));
+    }
     let folded = match (rule.definition.measure, rule.definition.aggregation) {
         (RuleMeasure::Count, _) => "The count".to_owned(),
         (RuleMeasure::Failures, RuleAggregation::Avg) => "The share failed".to_owned(),
@@ -686,6 +713,8 @@ fn metric(rule: &RuleRow) -> String {
             };
             return format!("{spent} {}", over(rule.definition.window));
         }
+        // Worded above, by its score's name.
+        (RuleMeasure::Score, _) => String::new(),
     };
     let of = match rule.definition.kind {
         SpanKind::Run => "runs",
@@ -741,7 +770,7 @@ fn forecast(
         .from
         .checked_add_months(chrono::Months::new(1))
         .unwrap_or(window.from);
-    let at = amount(definition.measure, definition.aggregation, threshold);
+    let at = amount(definition, threshold);
     Some(if reached < next_month {
         format!(
             " At this rate it reaches {at} on {}.",
@@ -752,14 +781,18 @@ fn forecast(
     })
 }
 
-/// A value as a notice writes it: durations in milliseconds, a share as a
-/// percentage, a cost in dollars, the rest as numbers, to two places at most.
-fn amount(measure: RuleMeasure, aggregation: RuleAggregation, value: f64) -> String {
+/// A value as a notice writes it: a change from the window before as a
+/// percentage, durations in milliseconds, a share as a percentage, a cost in
+/// dollars, the rest as numbers, to two places at most.
+fn amount(definition: &crate::rules::Definition, value: f64) -> String {
     let number = |v: f64| {
         let text = format!("{v:.2}");
         text.trim_end_matches('0').trim_end_matches('.').to_owned()
     };
-    match (measure, aggregation) {
+    if definition.baseline == RuleBaseline::Previous {
+        return format!("{}%", number(value));
+    }
+    match (definition.measure, definition.aggregation) {
         (RuleMeasure::Duration, _) => format!("{} ms", number(value)),
         (RuleMeasure::Failures, RuleAggregation::Avg) => format!("{}%", number(value * 100.0)),
         (RuleMeasure::Cost, _) => dollars(value),
@@ -904,6 +937,8 @@ mod tests {
             warning_threshold: Some(80.0),
             missing_data: MissingData::Zero,
             renotify_minutes: None,
+            score_name: None,
+            baseline: telmoni_shared::RuleBaseline::None,
             connectors: Vec::new(),
         }
         .checked()
@@ -942,21 +977,37 @@ mod tests {
 
     #[test]
     fn amounts_read_as_their_measure() {
+        let of = |measure, aggregation, value| {
+            amount(
+                &crate::rules::Definition {
+                    measure,
+                    aggregation,
+                    ..budget()
+                },
+                value,
+            )
+        };
         assert_eq!(
-            amount(RuleMeasure::Duration, RuleAggregation::P95, 6_200.0),
+            of(RuleMeasure::Duration, RuleAggregation::P95, 6_200.0),
             "6200 ms"
         );
+        assert_eq!(of(RuleMeasure::Failures, RuleAggregation::Avg, 0.25), "25%");
         assert_eq!(
-            amount(RuleMeasure::Failures, RuleAggregation::Avg, 0.25),
-            "25%"
-        );
-        assert_eq!(
-            amount(RuleMeasure::Tokens, RuleAggregation::Avg, 101.333),
+            of(RuleMeasure::Tokens, RuleAggregation::Avg, 101.333),
             "101.33"
         );
+        assert_eq!(of(RuleMeasure::Cost, RuleAggregation::Max, 5.0), "$5.00");
+        assert_eq!(of(RuleMeasure::Score, RuleAggregation::Avg, 0.8125), "0.81");
+        let changed = crate::rules::Definition {
+            measure: RuleMeasure::Duration,
+            baseline: RuleBaseline::Previous,
+            window: RuleWindow::Day,
+            ..budget()
+        };
         assert_eq!(
-            amount(RuleMeasure::Cost, RuleAggregation::Max, 5.0),
-            "$5.00"
+            amount(&changed, -12.5),
+            "-12.5%",
+            "a change reads in percent, whatever its measure"
         );
     }
 
