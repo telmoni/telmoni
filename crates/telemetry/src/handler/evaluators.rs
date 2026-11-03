@@ -34,7 +34,7 @@ use crate::evaluators::{
 };
 use crate::handler::model_connections::{self, MODEL_MAX};
 use crate::handler::{chain, content_kept};
-use crate::scores::Judgement;
+use crate::scores::Checked;
 use crate::store::{self, Projects};
 use crate::{content, db, traces};
 
@@ -169,7 +169,7 @@ pub struct Tried {
     pub system: String,
     pub messages: Vec<Message>,
     pub model: String,
-    pub judgement: Option<Judgement>,
+    pub judgement: Option<Checked>,
     /// A typed evaluator's scores, one a question, each with its answer.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub answers: Vec<Answered>,
@@ -183,7 +183,7 @@ pub struct Tried {
 #[derive(Debug, Serialize)]
 pub struct Answered {
     #[serde(flatten)]
-    pub judgement: Judgement,
+    pub judgement: Checked,
     pub answer: serde_json::Value,
 }
 

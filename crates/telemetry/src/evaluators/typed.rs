@@ -13,7 +13,7 @@ use telmoni_shared::{ScoreType, TelmoniError};
 
 use super::{MEANS_MAX, MESSAGE_MAX, VARIABLES, fill, named};
 use crate::handler::model_connections::MODEL_MAX;
-use crate::scores::{CATEGORY_MAX, Judgement, NAME_MAX as SCORE_NAME_MAX};
+use crate::scores::{CATEGORY_MAX, Checked, Judgement, NAME_MAX as SCORE_NAME_MAX};
 
 /// The most questions a typed evaluator asks, levels a score's question
 /// has, and options a choice's.
@@ -210,7 +210,7 @@ impl Typed {
     /// # Errors
     ///
     /// A question left unanswered, or an answer outside its question, named.
-    pub fn judgements(&self, decided: &Decided) -> Result<Vec<(Judgement, Value)>, String> {
+    pub fn judgements(&self, decided: &Decided) -> Result<Vec<(Checked, Value)>, String> {
         self.questions
             .iter()
             .map(|question| {

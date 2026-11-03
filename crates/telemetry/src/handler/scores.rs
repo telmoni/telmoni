@@ -433,6 +433,7 @@ pub async fn post_scores(
                 )))
             })?;
             let (run_id, span_id, session_id) = target.ids();
+            let judgement = judgement.into_inner();
             Ok(ScoreRow {
                 project_id: key.project_id.clone(),
                 received_at: now,

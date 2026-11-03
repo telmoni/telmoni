@@ -18,7 +18,7 @@ pub mod run;
 pub mod typed;
 
 use crate::ingest::batch::SpanContent;
-use crate::scores::{CATEGORIES_MAX, CATEGORY_MAX, Judgement, NAME_MAX as SCORE_NAME_MAX};
+use crate::scores::{CATEGORIES_MAX, CATEGORY_MAX, Checked, Judgement, NAME_MAX as SCORE_NAME_MAX};
 use crate::store::SpanRow;
 
 /// The longest name an evaluator goes by, the most messages its prompt holds,
@@ -405,7 +405,7 @@ impl Prompt {
     /// # Errors
     ///
     /// An answer outside the score's schema, named.
-    pub fn judgement(&self, answer: &Value) -> Result<(Judgement, Option<String>), String> {
+    pub fn judgement(&self, answer: &Value) -> Result<(Checked, Option<String>), String> {
         let outside = |why: &str| format!("the model answered outside the score's schema: {why}");
         let reasoning = answer
             .get("reasoning")

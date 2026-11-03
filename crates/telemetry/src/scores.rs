@@ -112,7 +112,7 @@ impl Judgement {
     /// # Errors
     ///
     /// A 400 naming the rule broken.
-    pub fn checked(mut self) -> Result<Self, TelmoniError> {
+    pub fn checked(mut self) -> Result<Checked, TelmoniError> {
         let refuse = |why: String| Err(TelmoniError::BadRequest(why));
         self.name = self.name.trim().to_owned();
         if self.name.is_empty() || self.name.chars().count() > NAME_MAX {
@@ -173,13 +173,35 @@ impl Judgement {
                 }
             }
         }
-        Ok(self)
+        Ok(Checked(self))
     }
 
     /// The value a row keeps: a category's is 0, its categories are what it says.
     #[must_use]
     pub fn stored_value(&self) -> f64 {
         self.value.unwrap_or(0.0)
+    }
+}
+
+/// A judgement held to a score's rules: only [`Judgement::checked`] makes
+/// one, so no row is written from a judgement that was not.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(transparent)]
+pub struct Checked(Judgement);
+
+impl Checked {
+    /// The judgement, its fields to move into a row.
+    #[must_use]
+    pub fn into_inner(self) -> Judgement {
+        self.0
+    }
+}
+
+impl std::ops::Deref for Checked {
+    type Target = Judgement;
+
+    fn deref(&self) -> &Judgement {
+        &self.0
     }
 }
 
@@ -311,7 +333,7 @@ impl TargetKey {
 /// the event's time.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EventScore {
-    pub judgement: Judgement,
+    pub judgement: Checked,
     pub version: String,
     pub at: u64,
     /// Its place among the span's evaluation events.
@@ -619,7 +641,7 @@ mod tests {
             member_score_id(&project, &run, "helpful", "u2")
         );
         let event = |at, place| EventScore {
-            judgement: judgement(ScoreType::Boolean),
+            judgement: Checked(judgement(ScoreType::Boolean)),
             version: String::new(),
             at,
             place,

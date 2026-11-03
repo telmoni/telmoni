@@ -872,6 +872,7 @@ async fn judge(state: &Arc<AppState>, leased: &Leased) -> Result<Outcome, Telmon
     let rows: Vec<ScoreRow> = answered
         .scores
         .into_iter()
+        .map(|(judgement, answer, question)| (judgement.into_inner(), answer, question))
         .map(|(judgement, answer, question)| ScoreRow {
             project_id: project_id.clone(),
             received_at,
@@ -889,9 +890,9 @@ async fn judge(state: &Arc<AppState>, leased: &Leased) -> Result<Outcome, Telmon
             trace_id: trace.clone(),
             span_id: span.clone(),
             session_id: session.clone(),
+            value: judgement.stored_value(),
             name: judgement.name,
             data_type: judgement.data_type,
-            value: judgement.value.unwrap_or(0.0),
             categories: judgement.categories,
             range_min: judgement.range_min,
             range_max: judgement.range_max,
@@ -968,7 +969,7 @@ struct Answered {
     messages: Vec<(model::Role, String)>,
     answer: Value,
     usage: model::Usage,
-    scores: Vec<(crate::scores::Judgement, String, Option<String>)>,
+    scores: Vec<(crate::scores::Checked, String, Option<String>)>,
     reasoning: Option<String>,
     cut: bool,
 }
