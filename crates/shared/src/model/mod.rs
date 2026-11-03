@@ -384,12 +384,7 @@ async fn send(
             })
         })?;
     let status = response.status().as_u16();
-    let retry_after = response
-        .headers()
-        .get(reqwest::header::RETRY_AFTER)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.trim().parse::<u64>().ok())
-        .map(Duration::from_secs);
+    let retry_after = crate::http::retry_after(response.headers());
     let body = response
         .bytes()
         .await

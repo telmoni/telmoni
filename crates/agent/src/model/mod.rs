@@ -434,7 +434,7 @@ pub(crate) async fn send(
         attempt += 1;
         let wait = pause(
             attempt,
-            response.headers().get(reqwest::header::RETRY_AFTER),
+            telmoni_shared::http::retry_after(response.headers()),
         );
         tracing::info!(
             endpoint = endpoint.as_str(),
@@ -446,16 +446,11 @@ pub(crate) async fn send(
     }
 }
 
-/// The endpoint's own `retry-after` in seconds when it gives one, else 1s
-/// then 2s; capped either way.
-fn pause(attempt: u32, retry_after: Option<&reqwest::header::HeaderValue>) -> std::time::Duration {
+/// The endpoint's own `retry-after` when it gives one, else 1s then 2s;
+/// capped either way.
+fn pause(attempt: u32, retry_after: Option<std::time::Duration>) -> std::time::Duration {
     retry_after
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.trim().parse::<u64>().ok())
-        .map_or_else(
-            || std::time::Duration::from_secs(1 << (attempt - 1)),
-            std::time::Duration::from_secs,
-        )
+        .unwrap_or_else(|| std::time::Duration::from_secs(1 << (attempt - 1)))
         .min(MAX_PAUSE)
 }
 
@@ -598,14 +593,11 @@ mod tests {
 
     #[test]
     fn the_pause_backs_off_and_is_capped() {
-        use reqwest::header::HeaderValue;
-        assert_eq!(pause(1, None), std::time::Duration::from_secs(1));
-        assert_eq!(pause(2, None), std::time::Duration::from_secs(2));
-        assert_eq!(
-            pause(1, Some(&HeaderValue::from_static("0"))),
-            std::time::Duration::ZERO
-        );
-        assert_eq!(pause(1, Some(&HeaderValue::from_static("600"))), MAX_PAUSE);
+        use std::time::Duration;
+        assert_eq!(pause(1, None), Duration::from_secs(1));
+        assert_eq!(pause(2, None), Duration::from_secs(2));
+        assert_eq!(pause(1, Some(Duration::ZERO)), Duration::ZERO);
+        assert_eq!(pause(1, Some(Duration::from_secs(600))), MAX_PAUSE);
     }
 
     async fn post(server: &wiremock::MockServer) -> Result<reqwest::Response, TelmoniError> {

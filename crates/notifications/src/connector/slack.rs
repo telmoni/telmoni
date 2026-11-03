@@ -14,8 +14,8 @@ use telmoni_shared::net_guard::Egress;
 use telmoni_shared::{OrInternal, Redacted, TelmoniError};
 
 use super::{
-    DeliveryError, Event, Grant, Installed, Retirement, TearDownError, Terminal, parse_retry_after,
-    refused, short_body, truncate, undialable,
+    DeliveryError, Event, Grant, Installed, Retirement, TearDownError, Terminal, refused,
+    short_body, truncate, undialable,
 };
 
 /// Slack's header block limit.
@@ -318,7 +318,8 @@ pub async fn deliver(
     if status.is_success() {
         return Ok(status.as_u16());
     }
-    let retry_after = parse_retry_after(resp.headers());
+    let retry_after = telmoni_shared::http::retry_after(resp.headers())
+        .map(|wait| i64::try_from(wait.as_secs()).unwrap_or(i64::MAX));
     let body = short_body(resp).await;
     Err(classify(status, &body, retry_after).answered(status))
 }

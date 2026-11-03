@@ -376,21 +376,6 @@ impl Connectors {
     }
 }
 
-/// The far end's own instruction for when to come back, from `Retry-After`.
-pub(crate) fn parse_retry_after(headers: &reqwest::header::HeaderMap) -> Option<i64> {
-    let raw = headers
-        .get(reqwest::header::RETRY_AFTER)?
-        .to_str()
-        .ok()?
-        .trim()
-        .to_owned();
-    if let Ok(secs) = raw.parse::<i64>() {
-        return Some(secs.max(0));
-    }
-    let when = chrono::DateTime::parse_from_rfc2822(&raw).ok()?;
-    Some((when.timestamp() - chrono::Utc::now().timestamp()).max(0))
-}
-
 /// A far end's response body, bounded for a log line, and never a URL: a body
 /// echoing the request would echo the credential. Read to a cap in chunks,
 /// because a customer's server can send a body that never ends.
@@ -454,32 +439,6 @@ mod tests {
         assert!(connectors.grant(Provider::Webhook).is_none());
         assert!(!connectors.enabled(Provider::Slack));
         assert!(connectors.grant(Provider::Slack).is_none());
-    }
-
-    fn headers(value: &str) -> reqwest::header::HeaderMap {
-        let mut h = reqwest::header::HeaderMap::new();
-        h.insert(
-            reqwest::header::RETRY_AFTER,
-            reqwest::header::HeaderValue::from_str(value).unwrap(),
-        );
-        h
-    }
-
-    #[test]
-    fn retry_after_reads_both_forms_the_rfc_allows() {
-        assert_eq!(parse_retry_after(&headers("30")), Some(30));
-        assert_eq!(parse_retry_after(&headers("  7 ")), Some(7));
-        let soon = (chrono::Utc::now() + chrono::Duration::seconds(120)).to_rfc2822();
-        let parsed = parse_retry_after(&headers(&soon)).expect("an http-date parses");
-        assert!((100..=120).contains(&parsed), "got {parsed}");
-    }
-
-    #[test]
-    fn an_unreadable_retry_after_is_no_instruction_rather_than_no_wait() {
-        assert_eq!(parse_retry_after(&reqwest::header::HeaderMap::new()), None);
-        assert_eq!(parse_retry_after(&headers("later")), None);
-        assert_eq!(parse_retry_after(&headers("")), None);
-        assert_eq!(parse_retry_after(&headers("-30")), Some(0));
     }
 
     #[test]
