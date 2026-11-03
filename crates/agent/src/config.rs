@@ -268,6 +268,12 @@ impl ModelConfig {
     pub fn provider_name(&self) -> &'static str {
         vendor(&self.url).unwrap_or_else(|| self.provider.as_str())
     }
+
+    /// Whether its URL is OpenAI's own API, not a server of its protocol.
+    #[must_use]
+    pub fn is_openai(&self) -> bool {
+        vendor(&self.url) == Some("openai")
+    }
 }
 
 /// The vendors' APIs, by host, each under the GenAI conventions' name for it.

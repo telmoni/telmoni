@@ -403,27 +403,7 @@ impl Model for OpenAi {
         on_text: TextSink<'_>,
         max_tokens: u32,
     ) -> Result<ModelTurn, TelmoniError> {
-        let mut body = json!({
-            "model": self.config.model,
-            "max_tokens": max_tokens.min(self.config.max_tokens),
-            "messages": messages(system, transcript),
-            "tools": tools.iter().map(|t| json!({
-                "type": "function",
-                "function": {
-                    "name": t.name,
-                    "description": t.description,
-                    "parameters": t.parameters,
-                },
-            })).collect::<Vec<_>>(),
-            "stream": true,
-            // OpenAI counts a streamed reply's tokens only when asked; the
-            // servers that count anyway take the field as given.
-            "stream_options": { "include_usage": true },
-        });
-        if let (Some(effort), Some(fields)) = (&self.config.reasoning_effort, body.as_object_mut())
-        {
-            fields.insert("reasoning_effort".to_owned(), json!(effort));
-        }
+        let body = body(&self.config, system, transcript, tools, max_tokens);
         let request = with_key(
             self.http
                 .post(format!("{}/chat/completions", self.config.url))
@@ -434,10 +414,76 @@ impl Model for OpenAi {
     }
 }
 
+/// One turn's request: its token limit under the field its endpoint takes.
+fn body(
+    config: &ModelConfig,
+    system: &str,
+    transcript: &[Message],
+    tools: &[ToolSpec],
+    max_tokens: u32,
+) -> Value {
+    let limit = telmoni_shared::model::openai::limit_field(config.is_openai());
+    let mut body = json!({
+        "model": config.model,
+        "messages": messages(system, transcript),
+        "tools": tools.iter().map(|t| json!({
+            "type": "function",
+            "function": {
+                "name": t.name,
+                "description": t.description,
+                "parameters": t.parameters,
+            },
+        })).collect::<Vec<_>>(),
+        "stream": true,
+        // OpenAI counts a streamed reply's tokens only when asked; the
+        // servers that count anyway take the field as given.
+        "stream_options": { "include_usage": true },
+    });
+    if let Some(fields) = body.as_object_mut() {
+        fields.insert(limit.to_owned(), json!(max_tokens.min(config.max_tokens)));
+        if let Some(effort) = &config.reasoning_effort {
+            fields.insert("reasoning_effort".to_owned(), json!(effort));
+        }
+    }
+    body
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::Provider;
     use crate::model::ToolResult;
+
+    /// OpenAI's own API is sent `max_completion_tokens`, which its reasoning
+    /// models need; a compatible server `max_tokens`.
+    #[test]
+    fn the_token_limit_goes_by_the_field_its_endpoint_takes() {
+        for (url, field, other) in [
+            (
+                "https://api.openai.com/v1",
+                "max_completion_tokens",
+                "max_tokens",
+            ),
+            (
+                "http://localhost:11434/v1",
+                "max_tokens",
+                "max_completion_tokens",
+            ),
+        ] {
+            let config = ModelConfig {
+                provider: Provider::OpenAi,
+                url: url.to_owned(),
+                model: "m".to_owned(),
+                api_key: None,
+                max_tokens: 100,
+                timeout_secs: 60,
+                reasoning_effort: None,
+            };
+            let sent = body(&config, "s", &[], &[], 500);
+            assert_eq!(sent[field], 100, "{url}");
+            assert!(sent.get(other).is_none(), "{url}");
+        }
+    }
 
     #[test]
     fn tool_call_fragments_are_joined_by_index() {

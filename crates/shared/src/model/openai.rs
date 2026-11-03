@@ -12,6 +12,18 @@ use crate::ModelProvider;
 /// OpenAI's own endpoint.
 const OPENAI_BASE: &str = "https://api.openai.com/v1";
 
+/// The field a request's token limit goes by: OpenAI's own API takes
+/// `max_completion_tokens` alone, its reasoning models refusing the other;
+/// every compatible endpoint `max_tokens`.
+#[must_use]
+pub const fn limit_field(official: bool) -> &'static str {
+    if official {
+        "max_completion_tokens"
+    } else {
+        "max_tokens"
+    }
+}
+
 /// The Azure OpenAI API version structured outputs need, generally available.
 pub const AZURE_API_VERSION: &str = "2024-10-21";
 
@@ -48,12 +60,7 @@ pub fn request(connection: &Connection, ask: &Ask<'_>) -> Result<Prepared, Refus
             "json_schema": { "name": SCHEMA_NAME, "schema": ask.schema, "strict": true },
         },
     });
-    // OpenAI's newer models take `max_completion_tokens` alone; others `max_tokens`.
-    let limit = if connection.provider == ModelProvider::Openai {
-        "max_completion_tokens"
-    } else {
-        "max_tokens"
-    };
+    let limit = limit_field(connection.provider == ModelProvider::Openai);
     super::set(&mut body, limit, json!(ask.max_tokens));
     if let Some(temperature) = ask.temperature {
         super::set(&mut body, "temperature", json!(temperature));
