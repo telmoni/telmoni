@@ -510,8 +510,9 @@ macro_rules! run_rows {
             "sumIf(",
             $crate::spend::spent_of!(),
             ", kind = 'model_call') AS run_spent, ",
-            // A run not yet ended has no own span to name its rate: whole.
-            "ifNull(anyIf(sample_rate, kind = 'run'), 1) AS run_rate, ",
+            // The run's own span's rate, else any of its spans', since every one
+            // names it: a run not yet ended from an SDK that sets it on the run alone is whole.
+            "ifNull(anyIf(sample_rate, kind = 'run'), ifNull(any(sample_rate), 1)) AS run_rate, ",
             "arraySort(groupUniqArrayArray(arrayMap((k, v) -> concat(k, ':', v), ",
             "mapKeys(tags), mapValues(tags)))) AS run_tag_pairs, ",
             "toUInt8((empty({agents:Array(String)}) OR has({agents:Array(String)}, any(agent))) ",

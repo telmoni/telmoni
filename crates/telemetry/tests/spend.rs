@@ -315,6 +315,179 @@ async fn a_budget_reads_the_month_so_far_of_the_runs_its_tag_names(pool: PgPool)
     );
 }
 
+/// ⚠ A sum over runs reads the full hours from the hourly totals, which
+/// outlive the spans, and the rest from the spans, each call scaled by its
+/// run's sample rate: the spans of an hour gone, its spend stands; the
+/// filters hold on both; a run's own spend is never scaled.
+#[sqlx::test]
+async fn a_sum_over_runs_reads_the_hours_the_spans_no_longer_keep(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let state = common::state_with_stores(&pool, AuthStub::new());
+    let project = ProjectId::new();
+    let (sampled, whole) = (Uuid::new_v4(), Uuid::new_v4());
+    let gpt = ("openai", "gpt-4o");
+    let now = Utc::now();
+    let earlier = now - TimeDelta::hours(3);
+    let at = now - TimeDelta::seconds(30);
+    let rated = |row: SpanRow, rate: f64| SpanRow {
+        sample_rate: Some(rate),
+        ..row
+    };
+    ch.store
+        .insert_spans(&[
+            // One run in four sent: it stands for four.
+            rated(
+                call(
+                    &project,
+                    sampled,
+                    gpt,
+                    usage(0, 0, 0, 0),
+                    Some(2.0),
+                    earlier,
+                ),
+                0.25,
+            ),
+            rated(
+                call(&project, sampled, gpt, usage(0, 0, 0, 0), Some(1.0), at),
+                0.25,
+            ),
+            call(&project, whole, gpt, usage(0, 0, 0, 0), Some(0.5), at),
+            SpanRow {
+                agent: "other-agent".into(),
+                ..call(&project, whole, gpt, usage(0, 0, 0, 0), Some(9.0), earlier)
+            },
+        ])
+        .await
+        .expect("the calls");
+    let projects = Projects::one(project.clone());
+    let window = Window::between(now - TimeDelta::hours(6), now);
+    let filters = RuleFilters {
+        agent: vec!["nightly-report".into()],
+        ..RuleFilters::default()
+    };
+    let expected = 2.0 * 4.0 + 1.0 * 4.0 + 0.5;
+    let summed = spend::summed(&state, &projects, window, &filters)
+        .await
+        .expect("the window's sum")
+        .expect("calls landed");
+    assert!((summed - expected).abs() < 1e-12, "{summed}");
+    let runs = spend::runs(&state, &projects, window, &filters)
+        .await
+        .expect("each run's spend");
+    assert!(
+        (runs.total - expected).abs() < 1e-12,
+        "both reads agree: {runs:?}"
+    );
+    assert!(
+        (runs.most - 3.0).abs() < 1e-12,
+        "a run's own never scaled: {runs:?}"
+    );
+
+    // The hour's spans purged, as a short retention purges them: the totals keep it.
+    ch.migrator
+        .query(
+            "DELETE FROM telemetry.spans WHERE project_id = ? \
+             AND received_at < fromUnixTimestamp64Micro(?)",
+        )
+        .bind(project.as_str())
+        .bind((earlier + TimeDelta::minutes(1)).timestamp_micros())
+        .execute()
+        .await
+        .expect("the earlier spans purged");
+    let after = spend::summed(&state, &projects, window, &filters)
+        .await
+        .expect("the window's sum")
+        .expect("calls landed");
+    assert!((after - expected).abs() < 1e-12, "{after}");
+    let runs = spend::runs(&state, &projects, window, &filters)
+        .await
+        .expect("each run's spend");
+    assert!(
+        (runs.total - (1.0 * 4.0 + 0.5)).abs() < 1e-12,
+        "the spans hold what is left: {runs:?}"
+    );
+
+    let empty = spend::summed(
+        &state,
+        &Projects::one(ProjectId::new()),
+        window,
+        &RuleFilters::default(),
+    )
+    .await
+    .expect("an empty window");
+    assert_eq!(empty, None, "no call, no sum");
+}
+
+/// The Overview's spend by project reads the period as a budget does: the full
+/// hours from the totals, the rest from the spans, scaled, a call with neither
+/// a cost nor a price counted on both sides.
+#[sqlx::test]
+async fn each_projects_spend_reads_the_period_from_the_totals_and_the_spans(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let state = common::state_with_stores(&pool, AuthStub::new());
+    let (ours, theirs) = (ProjectId::new(), ProjectId::new());
+    let now = Utc::now();
+    let earlier = now - TimeDelta::hours(3);
+    let at = now - TimeDelta::seconds(30);
+    let gpt = ("openai", "gpt-4o");
+    let unknown = ("openai", "ft:gpt-4o:acme");
+    ch.store
+        .insert_spans(&[
+            SpanRow {
+                sample_rate: Some(0.5),
+                ..call(
+                    &ours,
+                    Uuid::new_v4(),
+                    gpt,
+                    usage(0, 0, 0, 0),
+                    Some(3.0),
+                    earlier,
+                )
+            },
+            call(&ours, Uuid::new_v4(), gpt, usage(0, 0, 0, 0), Some(1.0), at),
+            call(
+                &ours,
+                Uuid::new_v4(),
+                unknown,
+                usage(10, 1, 0, 0),
+                None,
+                earlier,
+            ),
+            call(&ours, Uuid::new_v4(), unknown, usage(10, 1, 0, 0), None, at),
+            call(
+                &theirs,
+                Uuid::new_v4(),
+                gpt,
+                usage(0, 0, 0, 0),
+                Some(20.0),
+                at,
+            ),
+        ])
+        .await
+        .expect("the calls");
+    let both = Projects::of([ours.clone(), theirs.clone()]).expect("two projects");
+    let spent = spend::projects(&state, &both, now - TimeDelta::hours(6), now)
+        .await
+        .expect("each project's spend");
+    let read: Vec<(String, f64, u64)> = spent
+        .into_iter()
+        .map(|p| (p.project_id, p.spent, p.unpriced_calls))
+        .collect();
+    assert_eq!(read.len(), 2, "{read:?}");
+    assert_eq!(read[0].0, theirs.as_str(), "the costliest first: {read:?}");
+    assert!((read[0].1 - 20.0).abs() < 1e-12, "{read:?}");
+    assert_eq!(read[1].0, ours.as_str(), "{read:?}");
+    assert!((read[1].1 - (3.0 * 2.0 + 1.0)).abs() < 1e-12, "{read:?}");
+    assert_eq!(
+        read[1].2, 2,
+        "an unpriced call in the totals and one in the spans: {read:?}"
+    );
+}
+
 /// What each run spent over a window, folded: the window's calls alone,
 /// those the filters admit, and the run that spent the most.
 #[sqlx::test]

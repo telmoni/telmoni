@@ -4,6 +4,7 @@ import { SortDirection, SpanStatus } from "@/lib/types/enums";
 
 import {
   FILTER_VALUES_MAX,
+  TOTALS_WINDOWS,
   compact,
   isUuid,
   listHref,
@@ -18,7 +19,20 @@ import {
   sortInForce,
   whole,
   windowReaching,
+  windowsOffered,
 } from "./list-query";
+
+describe("the windows a page offers", () => {
+  it("offers a list's four, and the year where the totals are read", () => {
+    expect(windowsOffered(7)).toEqual([1, 7, 30, 90]);
+    expect(windowsOffered(7, TOTALS_WINDOWS)).toEqual([1, 7, 30, 90, 360]);
+  });
+
+  it("offers a window the URL asked for by hand beside them", () => {
+    expect(windowsOffered(14)).toEqual([1, 7, 14, 30, 90]);
+    expect(windowsOffered(360)).toEqual([1, 7, 30, 90, 360]);
+  });
+});
 
 describe("a window that reaches a run", () => {
   const now = Date.parse("2026-10-11T12:00:00Z");

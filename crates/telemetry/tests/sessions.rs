@@ -22,8 +22,9 @@ use common::{
     AuthStub, FILTER_QUERIES, SECRET, clickhouse_or_skip, run_of, state_with_stores, varied_runs,
 };
 use telmoni_shared::middleware::service_auth::SERVICE_SECRET_HEADER;
-use telmoni_shared::{OrganizationId, OrganizationRole, ProjectId, Role};
+use telmoni_shared::{OrganizationId, OrganizationRole, ProjectId, Role, SpanKind};
 use telmoni_telemetry::router;
+use telmoni_telemetry::store::SpanRow;
 
 const LANE: &str = "/internal/v1/telemetry/sessions";
 const MEMBER: &str = "user_member";
@@ -350,6 +351,39 @@ async fn the_page_sums_each_sessions_runs_latest_first(pool: PgPool) {
         ["conv-9"],
         "theirs sees their one, and none of ours"
     );
+}
+
+/// A session's spend counts each run as the runs its sample rate stands for,
+/// read off any of its spans: a run whose own span has yet to land is scaled
+/// by its calls' rate, every span of it carrying it.
+#[sqlx::test]
+async fn a_sessions_spend_scales_a_run_not_yet_ended_by_its_calls_rate(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let p = projects(&pool);
+    let at = Utc::now() - Duration::seconds(30);
+    let (open, ended) = (Uuid::new_v4(), Uuid::new_v4());
+    let span = |run: Uuid, kind: SpanKind, cost: Option<f64>, rate: Option<f64>| SpanRow {
+        run_id: run,
+        session_id: "conv-rated".into(),
+        cost,
+        sample_rate: rate,
+        ..common::received(&p.ours, kind, "work", 100, at)
+    };
+    ch.store
+        .insert_spans(&[
+            // One run in two sent, still running: its own span yet to land.
+            span(open, SpanKind::ModelCall, Some(1.0), Some(0.5)),
+            span(ended, SpanKind::Run, None, Some(1.0)),
+            span(ended, SpanKind::ModelCall, Some(0.5), None),
+        ])
+        .await
+        .expect("the session's spans");
+    let list = p.list("").await;
+    let rated = session(&list, "conv-rated");
+    assert_eq!(rated["traces"], 2, "{rated}");
+    assert_eq!(rated["spend"].as_f64(), Some(1.0 / 0.5 + 0.5), "{rated}");
 }
 
 #[sqlx::test]

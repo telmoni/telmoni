@@ -681,6 +681,59 @@ async fn an_empty_window_read_as_zero_is_told_as_zero(pool: PgPool) {
     assert_eq!(notices[0].metadata["value"], json!(0.0));
 }
 
+/// ⚠ A budget with no tag sums its window's full hours from the hourly
+/// totals, each call scaled by its run's sample rate, so an hour whose spans
+/// a short retention purged still counts.
+#[sqlx::test]
+async fn a_budget_counts_the_hours_whose_spans_are_gone(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let project = Project::new(&pool, &ch).await;
+    let earlier = Utc::now() - TimeDelta::hours(3);
+    ch.store
+        .insert_spans(&[SpanRow {
+            model: "claude-sonnet-5-5".into(),
+            cost: Some(2.0),
+            sample_rate: Some(0.25),
+            ..common::received(
+                &project.project,
+                SpanKind::ModelCall,
+                "chat claude-sonnet-5-5",
+                1_200,
+                earlier,
+            )
+        }])
+        .await
+        .expect("the call is kept");
+    ch.migrator
+        .query(
+            "DELETE FROM telemetry.spans WHERE project_id = ? \
+             AND received_at < fromUnixTimestamp64Micro(?)",
+        )
+        .bind(project.project.as_str())
+        .bind((earlier + TimeDelta::minutes(1)).timestamp_micros())
+        .execute()
+        .await
+        .expect("the hour's spans purged");
+    let body = json!({
+        "name": "Daily budget", "kind": "run", "measure": "cost", "aggregation": "sum",
+        "window": "day", "operator": "gt", "alert_threshold": 5,
+    });
+    let (status, made) = project
+        .send("POST", "/internal/v1/telemetry/rules", Some(&body))
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{made}");
+    project.evaluate(&pool).await;
+    let notices = project.notices.notices();
+    assert_eq!(notices.len(), 1, "the budget breached");
+    assert_eq!(
+        notices[0].metadata["value"],
+        json!(8.0),
+        "one run in four, $2 each"
+    );
+}
+
 /// ⚠ An organization being erased has its alerts neither evaluated nor told.
 #[sqlx::test]
 async fn an_organization_being_erased_tells_nothing(pool: PgPool) {

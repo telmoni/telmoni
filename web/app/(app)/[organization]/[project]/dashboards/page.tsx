@@ -8,7 +8,7 @@ import { fetchAlerts } from "@/lib/server/entities/alerts";
 import { fetchRollups } from "@/lib/server/entities/dashboards";
 import { fetchTraceHistogram } from "@/lib/server/entities/traces";
 import { projectPage } from "@/lib/server/project-page";
-import { OPENING_DAYS } from "@/lib/list-query";
+import { OPENING_DAYS, TOTALS_WINDOWS } from "@/lib/list-query";
 import { formatCost, formatCount, parseTraceQuery } from "@/lib/traces";
 import { RuleAggregation, RuleMeasure, RuleWindow, SpanKind } from "@/lib/types/enums";
 
@@ -71,7 +71,7 @@ export default async function DashboardsPage({
         action={
           <div className="flex items-center gap-gutter">
             <GroupPicker group={group} />
-            <WindowPicker days={days} />
+            <WindowPicker days={days} windows={TOTALS_WINDOWS} />
           </div>
         }
       />

@@ -131,7 +131,7 @@ describe("DashboardsPage", () => {
     expect(within(byModel).getAllByText(/^\$/).map((cell) => cell.textContent)).toEqual(["$4.00", "$1.00"]);
   });
 
-  it("says nothing has landed in the window the plan let it read, and draws no chart", async () => {
+  it("says nothing has landed in the window the totals read, and draws no chart", async () => {
     fetchRollups.mockResolvedValue(rollups([], null, false, 30));
     render(await DashboardsPage({ params: PARAMS, searchParams: Promise.resolve({ days: "90" }) }));
     expect(screen.getByText("Nothing to show yet.")).toBeInTheDocument();

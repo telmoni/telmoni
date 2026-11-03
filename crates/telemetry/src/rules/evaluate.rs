@@ -2,8 +2,8 @@
 //! replica leases it first: its value read over the window that ends then —
 //! the full hours from `spans_hourly`, and from `spans` the part of an hour
 //! at either end, so a window that holds no full hour reads `spans` alone;
-//! a run's cost from `spans` alone, each run's model calls as they landed
-//! ([`crate::spend`]) — and settled in a transaction of its own with the
+//! a run's cost summed with no tag the same way, any other from `spans`
+//! alone, each run's model calls as they landed ([`crate::spend`]) — and settled in a transaction of its own with the
 //! severity it sets and the incident that moves with it ([`incidents`]),
 //! told once that commits. Before a pass evaluates an organization's alerts
 //! it holds them to its plan's number, the oldest running and the rest
@@ -182,7 +182,8 @@ impl Window {
     }
 
     /// From `from` to `to`, its full hours between apart.
-    fn between(from: DateTime<Utc>, to: DateTime<Utc>) -> Self {
+    #[must_use]
+    pub fn between(from: DateTime<Utc>, to: DateTime<Utc>) -> Self {
         let hour = TimeDelta::hours(1);
         let floor = |at: DateTime<Utc>| at.duration_trunc(hour).unwrap_or(at);
         let full_from = if floor(from) == from {
@@ -448,8 +449,10 @@ async fn defer(state: &AppState, rule: &RuleRow, lease_id: Uuid) -> Result<(), T
     Ok(())
 }
 
-/// The alert's value over its window ending at `now`: a run's cost from
-/// what each run spent, every other measure from the totals.
+/// The alert's value over its window ending at `now`: a run's cost summed
+/// with no tag as the totals are read, the full hours from the hourly totals;
+/// folded any other way, or narrowed by a tag, from what each run spent;
+/// every other measure from the totals.
 ///
 /// # Errors
 ///
@@ -462,7 +465,12 @@ pub async fn value_of(
     if rule.definition.measure == RuleMeasure::Cost {
         let window = Window::of(now, rule.definition.window);
         let projects = Projects::one(rule.project_id.clone());
-        let spent = spend::runs(state, &projects, window, &rule.definition.filters).await?;
+        let filters = &rule.definition.filters;
+        // The totals keep no tag, nor a run's own spend to fold another way.
+        if rule.definition.aggregation == RuleAggregation::Sum && filters.tag.is_empty() {
+            return spend::summed(state, &projects, window, filters).await;
+        }
+        let spent = spend::runs(state, &projects, window, filters).await?;
         return Ok(spent.value(rule.definition.aggregation));
     }
     Ok(totals(state, rule, now)

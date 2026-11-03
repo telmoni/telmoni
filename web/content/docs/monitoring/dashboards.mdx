@@ -5,12 +5,13 @@ description: "A project's Dashboards page: its spend, tokens, runs and their fai
 
 A project's **Dashboards** page (`/{organization}/{project}/dashboards`) charts
 its runs over the window the picker beside the title chooses — the last day,
-week, 30 or 90 days, by the hour for a day and by the UTC day for longer —
-from the totals Telmoni keeps an hour at a time:
+week, 30, 90 or 360 days, by the hour for a day and by the UTC day for longer —
+from the totals Telmoni keeps an hour at a time, thirteen months on every plan
+whatever it keeps of the spans:
 
 | Chart | What it draws |
 |---|---|
-| Spend | What the model calls cost, each as it reported, else its tokens at the project's own price or the price table's ([What a call cost](/docs/api/ingest#what-a-call-cost)) |
+| Spend | What the model calls cost, each as it reported, else its tokens at the project's own price or the price table's ([What a call cost](/docs/api/ingest#what-a-call-cost)), scaled by its run's [sample rate](/docs/api/sdks#sampling) |
 | Tokens | The model calls' input and output tokens |
 | Runs | The runs, each in the hour its own span arrived, those that ended well and those that failed |
 | Latency | The runs' durations at the median, the 95th and the 99th percentile |

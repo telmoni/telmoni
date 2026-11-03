@@ -98,7 +98,7 @@ current ones (`gen_ai.system`, `gen_ai.usage.prompt_tokens`,
 | `session_id` | `gen_ai.conversation.id` | 1 to 200 characters, kept as sent |
 | `environment`, `release` | the resource's `deployment.environment.name` and `service.version`, on every span of the export | up to 128 characters each, as sent; empty where the resource names none, or past the cap, and an environment beginning `telmoni-`, which Telmoni keeps for its own [evaluations](/docs/workspace/evaluators), is read as none |
 | `tags` | each `telmoni.tag.<key>` | up to 32; a key up to 64 characters, a value up to 256; in a project, up to 64 keys a UTC day, each taking up to 500 values (below) |
-| `sample_rate` | `telmoni.sample_rate` | on a run; above 0, up to 1 |
+| `sample_rate` | `telmoni.sample_rate` | on every span of a run; above 0, up to 1 |
 | `attributes` | the attributes the field inventory names, and any other whose value is a number or a boolean, except a name under `telmoni.`, which is dropped as `unlisted` | up to 64, the resource's among them, which keep at most 2 KiB together since every span of the export carries them; a key up to 128 characters, a value up to 1,024; a named array as its JSON |
 
 A field whose value breaks its rule refuses the span whole; an attribute past

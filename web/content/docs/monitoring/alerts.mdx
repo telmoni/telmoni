@@ -15,6 +15,10 @@ each alert's incidents under it. Everything on it is metadata — names and
 numbers, never a prompt, a completion or a tool payload — and so is every
 notice.
 
+A project with no alert opens **Alerts** on its first run: where its alerts
+go first, Slack or a webhook on the **Connectors** page, ticked once the project
+has one, and then what to watch, made with **New alert**.
+
 Any member of the project, whatever their role, makes, edits, pauses, mutes
 and deletes its alerts, and acknowledges and resolves its incidents, each
 change recorded in the organization's [audit log](/docs/workspace/audit-log).
@@ -84,14 +88,12 @@ opens one incident an hour at most, and a rise from warning to alert follows
 the incident it is in. What each notice says is on
 [Notifications](/docs/integrations/notifications#notice-types).
 
-The organization's **Overview** lists the incidents still open, acknowledged
-or not, on the projects you can open, the newest 200 at most, each naming its
-alert, its project, its severity and when it opened, and linking here; it
-lists nothing when all is well.
-
 ## Making an alert
 
-**New alert** opens the form over the page.
+**New alert** opens the form over the page. On a project with no connector it
+asks first: **Add a connector** leads its owners and admins to the Connectors
+page, and **Continue with the feed** makes an alert whose incidents reach the
+project's feed alone.
 
 | Field | What it takes |
 |---|---|
@@ -120,7 +122,10 @@ A budget is an alert on what the runs spent in all over **This month**: on
 runs, measured as **Cost**, folded as what the runs spent, its alert
 threshold the budget and its warning threshold where you want to hear first,
 80% of it say, for the project or, with a tag filter, for the runs one team's
-tag names. Its warning says where the month is headed at its burn so far: the
+tag names, each run counted as the runs its [sample
+rate](/docs/api/sdks#sampling) stands for. Without a tag it reads the month
+from the hourly totals, which outlive a retention shorter than a month. Its
+warning says where the month is headed at its burn so far: the
 day it reaches the alert threshold, or that it stays under it this month. A
 budget opens its month again on the first, at midnight UTC.
 

@@ -592,10 +592,11 @@ pub const INVENTORY: &[InventoryRow] = &[
     ),
     row(
         SAMPLE_RATE,
-        ReadOn::Run,
+        ReadOn::EverySpan,
         "the column sample_rate",
         Needs::AnyMode,
-        "above 0, up to 1: the share of runs the SDK sends",
+        "above 0, up to 1: the share of runs the SDK sends, the same on every span of a run; \
+         a sum of spend over runs scales each span by it",
     ),
     row(
         CANCELLED,

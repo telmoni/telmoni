@@ -17,6 +17,10 @@ export const MAX_LIMIT = 500;
 /** The windows a page offers, in days. */
 export const WINDOWS = [1, 7, 30, 90] as const;
 
+/** The windows the hourly totals are read over: theirs reach the year, kept
+ *  thirteen months on every plan whatever it keeps of the spans. */
+export const TOTALS_WINDOWS = [...WINDOWS, 360] as const;
+
 /** A window of days as a page names it. */
 export function windowLabel(days: number): string {
   return days === 1 ? "Last day" : `Last ${days} days`;
@@ -24,10 +28,8 @@ export function windowLabel(days: number): string {
 
 /** The windows a page offers, and the one in force among them: a window the
  *  URL asked for by hand is offered too, so the picker says what is shown. */
-export function windowsOffered(days: number): number[] {
-  return (WINDOWS as readonly number[]).includes(days)
-    ? [...WINDOWS]
-    : [...WINDOWS, days].sort((a, b) => a - b);
+export function windowsOffered(days: number, windows: readonly number[] = WINDOWS): number[] {
+  return windows.includes(days) ? [...windows] : [...windows, days].sort((a, b) => a - b);
 }
 /** The week a list opens on when its URL names no window, as the server's. */
 export const OPENING_DAYS = 7;

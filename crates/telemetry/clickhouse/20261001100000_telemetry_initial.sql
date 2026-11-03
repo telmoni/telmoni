@@ -78,7 +78,8 @@ CREATE TABLE IF NOT EXISTS telemetry.spans
     environment              LowCardinality(String),
     release                  LowCardinality(String),
     tags                     Map(LowCardinality(String), String),
-    -- A run's sample rate, NULL where it set none and on every other kind.
+    -- The share of its runs sampled in that the span's run stands for, which
+    -- the SDKs set on every span of a run: NULL where none was set.
     sample_rate              Nullable(Float64),
     -- The attributes the field inventory names, and any other whose value is
     -- a number or a boolean; an array is kept as its JSON.
@@ -102,9 +103,10 @@ SETTINGS non_replicated_deduplication_window = 10000,
          enable_block_offset_column = 1;
 
 -- Each hour's totals, by project, agent, kind, model, provider, a tool call's
--- name, status, the deployment's environment and release, and whether the
--- spans reported their cost: no user and no tag, so it outlives the spans,
--- kept thirteen months. `tool` is empty on every kind but a tool call, so the
+-- name, status, the deployment's environment and release, the run's sample
+-- rate (1 where none was set), which a spend read scales each row by, and
+-- whether the spans reported their cost: no user and no tag, so it outlives
+-- the spans, kept thirteen months. `tool` is empty on every kind but a tool call, so the
 -- names an application gives its steps never multiply the rows. A row of
 -- spans that reported none sums no cost, so a read prices its tokens alone.
 -- Durations are a t-digest in milliseconds, which merges across hours and
@@ -121,6 +123,7 @@ CREATE TABLE IF NOT EXISTS telemetry.spans_hourly
     status                   LowCardinality(String),
     environment              LowCardinality(String),
     release                  LowCardinality(String),
+    sample_rate              Float64,
     cost_reported            Bool,
     spans                    SimpleAggregateFunction(sum, UInt64),
     units                    SimpleAggregateFunction(sum, UInt64),
@@ -135,7 +138,7 @@ CREATE TABLE IF NOT EXISTS telemetry.spans_hourly
 ENGINE = AggregatingMergeTree
 PARTITION BY toYYYYMM(hour)
 ORDER BY (project_id, hour, agent, kind, model, provider, tool, status, environment, release,
-          cost_reported)
+          sample_rate, cost_reported)
 -- As long as `spans` keeps its tokens: the totals of a copy it drops are
 -- dropped with it, where without them they would count it again.
 SETTINGS non_replicated_deduplication_window = 10000;
@@ -160,6 +163,7 @@ AS SELECT
     status,
     environment,
     release,
+    ifNull(spans.sample_rate, 1) AS sample_rate,
     isNotNull(spans.cost) AS cost_reported,
     count() AS spans,
     sum(units) AS units,
@@ -174,7 +178,7 @@ AS SELECT
     ) AS duration_ms
 FROM telemetry.spans
 GROUP BY project_id, hour, agent, kind, model, provider, tool, status, environment, release,
-    cost_reported;
+    sample_rate, cost_reported;
 
 -- One row per score: of a run, one of its spans, or a session, from the
 -- application or its exporter, from a member on a trace's page, or from an

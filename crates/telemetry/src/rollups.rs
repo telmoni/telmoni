@@ -1,6 +1,7 @@
 //! A project's hourly totals over a window, by the hour or the day and, where
 //! asked, by one column: what `/v1/metrics` publishes and the dashboards page
-//! draws. Spend is priced as it is read ([`crate::spend`]), never written.
+//! draws. Spend is priced as it is read ([`crate::spend`]), never written, and
+//! scaled by each row's sample rate, a sum over runs.
 
 use chrono::{DateTime, DurationRound as _, TimeDelta, Utc};
 use clickhouse::Row;
@@ -55,9 +56,9 @@ const METRICS_SQL: &str = concat!(
     "toUInt64(sum(h.output_tokens)) AS output_tokens, ",
     "toUInt64(sum(h.cache_read_input_tokens)) AS cache_read_input_tokens, ",
     "toUInt64(sum(h.cache_write_input_tokens)) AS cache_write_input_tokens, ",
-    "sum(",
+    "sum((",
     crate::spend::rollup_spent_of!(),
-    ") AS spend, ",
+    ") / h.sample_rate) AS spend, ",
     "sum(h.duration_ms_sum) AS duration_ms_sum, ",
     "CAST(quantilesTDigestMerge(0.5, 0.9, 0.99)(h.duration_ms) AS Array(Float64)) AS quantiles, ",
     "CAST(quantilesTDigestMergeIf(0.5, 0.95, 0.99)(h.duration_ms, h.kind = 'run') ",
@@ -117,7 +118,8 @@ pub struct MetricPoint {
     pub cache_read_input_tokens: u64,
     pub cache_write_input_tokens: u64,
     /// What its model calls cost, in US dollars: each as reported, else its
-    /// tokens at the project's price or the table's.
+    /// tokens at the project's price or the table's, scaled by its run's
+    /// sample rate.
     pub spend: f64,
     /// Every span's, in milliseconds: the mean and the 50th, 90th and 99th
     /// percentiles.
@@ -145,8 +147,9 @@ pub struct RunDurations {
 }
 
 /// The project's totals over the window `asked` names: up to 360 days back,
-/// 7 when it names none and no further than the plan keeps spans; by the
-/// day, unless by the hour or a day's window; grouped where it names a group.
+/// 7 when it names none, whatever the plan keeps of the spans, since the
+/// totals are kept thirteen months on every plan; by the day, unless by the
+/// hour or a day's window; grouped where it names a group.
 ///
 /// # Errors
 ///
@@ -158,7 +161,6 @@ pub async fn read(
     asked: &MetricsAsked,
 ) -> Result<Metrics, TelmoniError> {
     let days = traces::parse_days(asked.days.as_deref())?;
-    let days = crate::capacity::visible_days(state, project_id, days).await;
     let (step, daily) = match asked.step.as_deref() {
         // A day by the day would be the UTC day so far alone.
         None if days == 1 => ("hour", false),

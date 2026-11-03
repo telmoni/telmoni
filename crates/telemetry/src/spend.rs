@@ -15,7 +15,7 @@ use crate::AppState;
 use crate::prices::PriceBook;
 use crate::rules::RuleFilters;
 use crate::rules::evaluate::Window;
-use crate::store::{Projects, Read, micros};
+use crate::store::{Projects, Read, micros, seconds};
 
 /// Each call's spend at the row for its name last in force by its day, its project's
 /// own first ([`PriceBook::rows`]); unpriced where no cost, no row, and tokens to price.
@@ -170,25 +170,80 @@ const RUN_SQL: &str = concat!(
     "AND kind = 'model_call')"
 );
 
-/// The names a period's calls that reported no cost are priced by.
-const PERIOD_NAMES_SQL: &str = concat!(
-    "SELECT DISTINCT provider, model FROM telemetry.spans ",
-    "WHERE project_id IN {projects:Array(String)} ",
-    "AND received_at >= {from:DateTime64(6, 'UTC')} AND received_at < {to:DateTime64(6, 'UTC')} ",
-    "AND kind = 'model_call' AND isNull(cost) AND provider != '' AND model != ''"
+/// A window's full hours in the hourly totals, `h`, which outlive the spans.
+macro_rules! full_hours {
+    () => {
+        concat!(
+            "FROM telemetry.spans_hourly AS h ",
+            "WHERE h.project_id IN {projects:Array(String)} ",
+            "AND h.hour >= {full_from:DateTime('UTC')} AND h.hour < {full_to:DateTime('UTC')} ",
+            "AND h.kind = 'model_call' ",
+        )
+    };
+}
+
+/// The rest of a window, outside its full hours, in the spans.
+macro_rules! window_edges {
+    () => {
+        concat!(
+            "FROM telemetry.spans ",
+            "WHERE project_id IN {projects:Array(String)} ",
+            "AND received_at >= {from:DateTime64(6, 'UTC')} AND received_at < {to:DateTime64(6, 'UTC')} ",
+            "AND (received_at < {full_from:DateTime('UTC')} OR received_at >= {full_to:DateTime('UTC')}) ",
+            "AND kind = 'model_call' ",
+        )
+    };
+}
+
+/// The names a window's calls that reported no cost are priced by, its full
+/// hours' and its edges'.
+const SUMMED_NAMES_SQL: &str = concat!(
+    "SELECT DISTINCT provider, model FROM (",
+    "SELECT h.provider AS provider, h.model AS model ",
+    full_hours!(),
+    "AND NOT h.cost_reported AND h.provider != '' AND h.model != '' ",
+    "UNION ALL SELECT provider, model ",
+    window_edges!(),
+    "AND isNull(cost) AND provider != '' AND model != '')"
 );
 
-/// What each project's calls spent over a period, each scaled by its sample
-/// rate, a project with none left out: what an organization's Overview shows.
+/// What a window's calls that an alert's filters admit spent, each scaled by
+/// its run's sample rate: the full hours from the totals, the rest from the
+/// spans, so a month's sum outlives a retention shorter than it.
+const SUMMED_SQL: &str = concat!(
+    "SELECT toUInt64(sum(n)) AS calls, sum(s) AS total FROM (",
+    "SELECT sum(h.spans) AS n, sum((",
+    rollup_spent_of!(),
+    ") / h.sample_rate) AS s ",
+    full_hours!(),
+    crate::rules::calls_admitted!(),
+    "UNION ALL SELECT count() AS n, sum((",
+    spent_of!(),
+    ") / ifNull(sample_rate, 1)) AS s ",
+    window_edges!(),
+    crate::rules::calls_admitted!(),
+    ")"
+);
+
+/// What each project's calls spent over a period, each scaled by its run's
+/// sample rate, a project with none left out: what an organization's
+/// Overview shows, the full hours from the totals and the rest from the spans.
 const PROJECTS_SQL: &str = concat!(
-    "SELECT project_id, sum(spent / ifNull(sample_rate, 1)) AS spent, ",
-    "toUInt64(countIf(unpriced)) AS unpriced_calls ",
+    "SELECT project_id, sum(s) AS spent, toUInt64(sum(u)) AS unpriced_calls FROM (",
+    "SELECT h.project_id AS project_id, sum((",
+    rollup_spent_of!(),
+    ") / h.sample_rate) AS s, ",
+    "sumIf(h.spans, NOT h.cost_reported AND rollup_priced = 0 AND (h.input_tokens > 0 ",
+    "OR h.output_tokens > 0 OR h.cache_read_input_tokens > 0 OR h.cache_write_input_tokens > 0)) AS u ",
+    full_hours!(),
+    "GROUP BY h.project_id ",
+    "UNION ALL SELECT project_id, sum(spent / ifNull(sample_rate, 1)) AS s, countIf(unpriced) AS u ",
     "FROM (SELECT project_id, sample_rate, ",
     priced!(),
-    " FROM telemetry.spans ",
-    "WHERE project_id IN {projects:Array(String)} ",
-    "AND received_at >= {from:DateTime64(6, 'UTC')} AND received_at < {to:DateTime64(6, 'UTC')} ",
-    "AND kind = 'model_call') GROUP BY project_id ORDER BY spent DESC, project_id"
+    " ",
+    window_edges!(),
+    ") GROUP BY project_id",
+    ") GROUP BY project_id ORDER BY spent DESC, project_id"
 );
 
 /// One project's spend over a period.
@@ -213,16 +268,59 @@ pub async fn projects(
     from: chrono::DateTime<chrono::Utc>,
     to: chrono::DateTime<chrono::Utc>,
 ) -> Result<Vec<ProjectSpent>, Unread> {
-    let between = |read: Read| read.param("from", micros(from)).param("to", micros(to));
-    let names: Vec<Name> = between(state.store.read(projects, PERIOD_NAMES_SQL))
+    let window = Window::between(from, to);
+    let book = book_for_window(state, projects, window).await?;
+    Ok(priced_by(
+        spanned(state.store.read(projects, PROJECTS_SQL), window),
+        &book,
+    )
+    .fetch_all()
+    .await?)
+}
+
+/// What the calls of `projects` that `filters` admit spent over `window`,
+/// each scaled by its run's sample rate: a budget's sum where it names no
+/// tag, which the totals keep no column for; none where no call landed.
+///
+/// # Errors
+///
+/// ClickHouse or Postgres did not answer, or refused the read.
+pub async fn summed(
+    state: &AppState,
+    projects: &Projects,
+    window: Window,
+    filters: &RuleFilters,
+) -> Result<Option<f64>, Unread> {
+    let book = book_for_window(state, projects, window).await?;
+    let read = filters.bind_calls(spanned(state.store.read(projects, SUMMED_SQL), window));
+    let summed: Summed = priced_by(read, &book).fetch_one().await?;
+    Ok((summed.calls > 0).then_some(summed.total))
+}
+
+#[derive(Row, Deserialize)]
+struct Summed {
+    calls: u64,
+    total: f64,
+}
+
+/// The prices a window's full hours and edges are read at.
+async fn book_for_window(
+    state: &AppState,
+    projects: &Projects,
+    window: Window,
+) -> Result<PriceBook, Unread> {
+    let names: Vec<Name> = spanned(state.store.read(projects, SUMMED_NAMES_SQL), window)
         .fetch_all()
         .await?;
-    let book = PriceBook::read_for(&state.db, projects.as_slice(), &pairs(names)).await?;
-    Ok(
-        priced_by(between(state.store.read(projects, PROJECTS_SQL)), &book)
-            .fetch_all()
-            .await?,
-    )
+    Ok(PriceBook::read_for(&state.db, projects.as_slice(), &pairs(names)).await?)
+}
+
+/// `read` bound to `window`, its edges and its full hours.
+fn spanned(read: Read, window: Window) -> Read {
+    read.param("from", micros(window.from))
+        .param("to", micros(window.to))
+        .param("full_from", seconds(window.full_from))
+        .param("full_to", seconds(window.full_to))
 }
 
 /// Why a read of spend went unanswered: ClickHouse, whose error a caller

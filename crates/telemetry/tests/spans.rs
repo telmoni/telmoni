@@ -209,6 +209,48 @@ async fn the_rollup_keeps_reported_costs_apart_from_the_tokens_to_price() {
     );
 }
 
+/// Each hour's totals are kept apart by the run's sample rate, 1 where a span
+/// named none, so a spend read can scale each row by its own.
+#[tokio::test]
+async fn the_rollup_keeps_each_sample_rate_apart() {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let project = ProjectId::new();
+    let call = |sample_rate: Option<f64>| SpanRow {
+        model: "gpt-4o".into(),
+        provider: "openai".into(),
+        cost: Some(0.5),
+        sample_rate,
+        ..span(&project, SpanKind::ModelCall, "chat gpt-4o", 900)
+    };
+    ch.store
+        .insert_spans(&[
+            call(Some(0.25)),
+            call(Some(0.25)),
+            call(None),
+            call(Some(1.0)),
+        ])
+        .await
+        .expect("insert the calls");
+    let rollup: Vec<(f64, u64, f64)> = ch
+        .store
+        .read(
+            &Projects::one(project.clone()),
+            "SELECT sample_rate, sum(spans), sum(cost) FROM telemetry.spans_hourly \
+             WHERE project_id IN {projects:Array(String)} \
+             GROUP BY sample_rate ORDER BY sample_rate",
+        )
+        .fetch_all()
+        .await
+        .expect("read the rollup");
+    assert_eq!(
+        rollup,
+        [(0.25, 2, 1.0), (1.0, 2, 1.0)],
+        "a span with no rate counts at 1, beside one that named it"
+    );
+}
+
 /// ⚠ **Two locks, each enough on its own.** The row policy holds the
 /// module's user to the projects a read's setting names, whatever the SQL;
 /// the read's own `WHERE` holds a user the policy does not, as the Compose

@@ -253,8 +253,9 @@ content, so it files nothing.
 The project's totals over the window, by the hour or the day, read from the
 totals Telmoni keeps an hour at a time.
 
-- `days`: The window, 1 to 360 days back from now; 7 when left out, and no
-  further than your plan keeps spans.
+- `days`: The window, 1 to 360 days back from now; 7 when left out. The
+  totals are kept thirteen months on every plan, so the window reaches past
+  what your plan keeps of the spans.
 - `step`: `day`, the default, or `hour`, the default for a day's window, each
   starting on the hour or at midnight UTC.
 - `group`: Splits each step by one of `agent`, `model`, `provider`, `tool`,
@@ -296,7 +297,9 @@ Points come oldest first, and only for an hour or a day that holds a span.
 spans that ended in error, `runs` and `failed_runs` the runs that ended and
 those that failed. `spend` is what the model calls cost in US dollars, each as
 it reported, else its tokens at the project's own price or the price table's,
-priced as it is read ([What a call cost](/docs/api/ingest#what-a-call-cost)).
+priced as it is read ([What a call cost](/docs/api/ingest#what-a-call-cost)),
+and scaled by its run's [sample rate](/docs/api/sdks#sampling), so a run in
+four sent counts four times.
 `duration_ms` is every span's, `run_duration_ms` the runs' alone. The durations
 are in milliseconds, and a percentile is `null` where none can be read. `truncated` is `true` past 10,000
 points, the oldest left out: ask for a shorter window, or a day at a time.

@@ -23,7 +23,7 @@ import { windowLabel, windowsOffered } from "@/lib/list-query";
 // in the meantime is only another navigation. The window picked shows at once
 // and gives way to the server's when the list lands; until then the trigger
 // is marked pending, which dims the list it heads (`group/list`).
-export function WindowPicker({ days }: { days: number }) {
+export function WindowPicker({ days, windows }: { days: number; windows?: readonly number[] }) {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
@@ -51,7 +51,7 @@ export function WindowPicker({ days }: { days: number }) {
         <SelectValue />
       </SelectTrigger>
       <SelectContent position="popper" align="end">
-        {windowsOffered(days).map((w) => (
+        {windowsOffered(days, windows).map((w) => (
           <SelectItem key={w} value={String(w)}>
             {windowLabel(w)}
           </SelectItem>
