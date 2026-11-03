@@ -606,13 +606,13 @@ async fn record(state: &Arc<AppState>, outcomes: Vec<Outcome>) -> Result<(), Tel
                     failure: Failure::Retry { after_secs: wait },
                 });
                 if let Some(limit) = breaker_limit {
-                    let entry = breaker.entry(connection_id).or_insert_with(|| Breaker {
-                        failures: 0,
-                        limit,
-                        last: String::new(),
-                    });
-                    entry.failures += 1;
-                    entry.last = message;
+                    breaker.insert(
+                        connection_id,
+                        Breaker {
+                            limit,
+                            last: message,
+                        },
+                    );
                 }
             }
             Outcome::Held { id, message } => held.entry(message).or_default().push(id),
@@ -650,10 +650,7 @@ async fn record(state: &Arc<AppState>, outcomes: Vec<Outcome>) -> Result<(), Tel
         note_rows_held(why);
     }
 
-    let tallies: Vec<(Uuid, i32)> = breaker
-        .iter()
-        .map(|(&id, breaker)| (id, breaker.failures))
-        .collect();
+    let tallies: Vec<Uuid> = breaker.keys().copied().collect();
 
     let batch = Bookkeeping {
         delivered: &delivered,
@@ -683,13 +680,13 @@ async fn record(state: &Arc<AppState>, outcomes: Vec<Outcome>) -> Result<(), Tel
     }
 
     for (connection_id, count) in counts {
-        if let Some(Breaker { limit, last, .. }) = breaker.get(&connection_id)
+        if let Some(Breaker { limit, last }) = breaker.get(&connection_id)
             && count >= *limit
         {
             retires.push(Retiring {
                 connection_id,
                 to: Retirement::Errored,
-                reason: format!("{count} deliveries in a row failed; the last answer was: {last}"),
+                reason: format!("{count} attempts in a row failed; the last answer was: {last}"),
             });
         }
     }
@@ -702,9 +699,8 @@ async fn record(state: &Arc<AppState>, outcomes: Vec<Outcome>) -> Result<(), Tel
     Ok(())
 }
 
-/// A connection's failed sends in one batch, against its breaker.
+/// A connection a batch failed to send to, against its breaker.
 struct Breaker {
-    failures: i32,
     limit: i32,
     /// The last answer, kept for the retirement's reason.
     last: String,
@@ -717,6 +713,10 @@ struct Retiring {
     reason: String,
 }
 
+/// How far apart two failures on one connection must be for its breaker to
+/// count both: notices failing together are one moment its endpoint was down.
+const FAILURE_MOMENT_SECS: i32 = 30;
+
 /// How many times a batch's bookkeeping is written before a deadlock is the
 /// tick's error.
 const BOOKKEEPING_TRIES: u32 = 3;
@@ -728,7 +728,7 @@ struct Bookkeeping<'a> {
     touched: &'a [Uuid],
     failures: &'a [FailedAttempt],
     held: &'a HashMap<String, Vec<Uuid>>,
-    tallies: &'a [(Uuid, i32)],
+    tallies: &'a [Uuid],
 }
 
 impl Bookkeeping<'_> {
@@ -737,7 +737,8 @@ impl Bookkeeping<'_> {
     async fn write(&self, state: &AppState) -> sqlx::Result<Vec<(Uuid, i32)>> {
         let mut tx = maintenance_scope(&state.db, NotificationsLane).await?;
         db::touch_connections(&mut tx, self.touched).await?;
-        let counts = db::record_consecutive_failures(&mut tx, self.tallies).await?;
+        let counts =
+            db::record_consecutive_failures(&mut tx, self.tallies, FAILURE_MOMENT_SECS).await?;
         db::mark_delivered(&mut tx, self.delivered).await?;
         db::fail_deliveries(
             &mut tx,

@@ -780,7 +780,7 @@ pub async fn reconnect_connection(
                 wrapped_dek = $7, token_ciphertext = $8, token_nonce = $9,
                 scopes = $10, installed_by = $11,
                 status = $12, last_error = NULL, revoked_at = NULL,
-                consecutive_failures = 0
+                consecutive_failures = 0, failure_counted_at = NULL
           WHERE id = $1
       RETURNING {SUMMARY_COLUMNS}"
     )))
@@ -1136,7 +1136,7 @@ pub async fn touch_connections(
     }
     sqlx::query(
         "UPDATE notifications.connections
-            SET last_delivery_at = now(), consecutive_failures = 0
+            SET last_delivery_at = now(), consecutive_failures = 0, failure_counted_at = NULL
           WHERE id = ANY($1)",
     )
     .bind(ids)
@@ -1145,27 +1145,28 @@ pub async fn touch_connections(
     Ok(())
 }
 
-/// Add a batch's failures to each connection's breaker and return the new
-/// counts, for the caller to compare with the connector's limit.
+/// Count one failure on each connection whose last counted one is at least
+/// `moment_secs` old, and return the new counts, for the caller to compare
+/// with the connector's limit; a connection counted within the moment is left.
 pub async fn record_consecutive_failures(
     tx: &mut Scoped<'_, Maintenance<NotificationsLane>>,
-    tallies: &[(Uuid, i32)],
+    ids: &[Uuid],
+    moment_secs: i32,
 ) -> sqlx::Result<Vec<(Uuid, i32)>> {
-    if tallies.is_empty() {
+    if ids.is_empty() {
         return Ok(Vec::new());
     }
-    let ids: Vec<Uuid> = tallies.iter().map(|&(id, _)| id).collect();
-    let counts: Vec<i32> = tallies.iter().map(|&(_, n)| n).collect();
     let rows: Vec<(Uuid, i32)> = sqlx::query_as(
         "UPDATE notifications.connections c
-            SET consecutive_failures = c.consecutive_failures + f.n
-           FROM unnest($1::uuid[], $2::int4[]) AS f(id, n)
-          WHERE c.id = f.id AND c.status = $3
+            SET consecutive_failures = c.consecutive_failures + 1, failure_counted_at = now()
+          WHERE c.id = ANY($1) AND c.status = $2
+            AND (c.failure_counted_at IS NULL
+                 OR c.failure_counted_at <= now() - make_interval(secs => $3))
       RETURNING c.id, c.consecutive_failures",
     )
-    .bind(&ids)
-    .bind(&counts)
+    .bind(ids)
     .bind(ConnectionStatus::Active)
+    .bind(f64::from(moment_secs))
     .fetch_all(tx.conn())
     .await?;
     Ok(rows)
@@ -1195,7 +1196,7 @@ pub async fn reseal_webhook_secret(
                 prior_token_expires_at = CASE WHEN $8 > 0
                     THEN now() + make_interval(hours => $8) END,
                 status = $9, last_error = NULL, revoked_at = NULL,
-                consecutive_failures = 0
+                consecutive_failures = 0, failure_counted_at = NULL
           WHERE id = $1 AND project_id = $2 AND provider = $3 AND token_ciphertext = $4
       RETURNING {SUMMARY_COLUMNS}"
     )))

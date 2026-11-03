@@ -36,8 +36,9 @@ pub const DELIVERY_ID_HEADER: &str = "telmoni-delivery-id";
 /// What the row's `scopes` column records: the scheme a receiver verifies.
 pub const SCHEME: &str = "telmoni-signature-v1";
 
-/// Consecutive failed POSTs before the connection is `errored`. Ten, because a
-/// notice spends at most five: one bad hour cannot trip it, two lost notices can.
+/// Failed attempts in a row, each at least 30 seconds after the last counted,
+/// before the connection is `errored`: a notice spends at most five, so one
+/// bad hour cannot trip it, two lost notices can, and a burst counts once.
 pub const BREAKER_AFTER: i32 = 10;
 
 /// The longest endpoint URL accepted. A URL is an address, not a payload.

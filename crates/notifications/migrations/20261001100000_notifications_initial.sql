@@ -113,6 +113,9 @@ CREATE TABLE notifications.connections (
     last_error               TEXT,
     last_delivery_at         TIMESTAMPTZ,
     consecutive_failures     INTEGER     NOT NULL DEFAULT 0,
+    -- When the breaker last counted a failure: a burst of notices failing
+    -- together is one moment the endpoint was down, not one per notice.
+    failure_counted_at       TIMESTAMPTZ,
     shard_key                UUID        NOT NULL DEFAULT gen_random_uuid(),
     created_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
     revoked_at               TIMESTAMPTZ,

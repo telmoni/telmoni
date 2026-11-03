@@ -425,6 +425,19 @@ fn verify_signature(secret: &str, header: &str, body: &[u8]) -> bool {
     telmoni_shared::digest::verify_timestamped(secret, header, body, now).is_ok()
 }
 
+/// The breaker's last counted failure moved a minute back, as if the next
+/// attempt came after the moment it was counted in.
+async fn after_the_moment(pool: &PgPool, id: Uuid) {
+    sqlx::query(
+        "UPDATE notifications.connections
+            SET failure_counted_at = failure_counted_at - interval '1 minute' WHERE id = $1",
+    )
+    .bind(id)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
 async fn breaker_count(pool: &PgPool, id: Uuid) -> i32 {
     sqlx::query_scalar("SELECT consecutive_failures FROM notifications.connections WHERE id = $1")
         .bind(id)
@@ -4360,7 +4373,7 @@ async fn a_webhook_delivery_is_signed_over_the_bytes_it_sends_and_names_its_deli
 }
 
 /// A 404 is retried and the connection stands; only the breaker — ten failed
-/// sends in a row — retires a customer's endpoint.
+/// moments in a row — retires a customer's endpoint.
 #[sqlx::test]
 async fn a_refusing_endpoint_is_retried_to_its_budget_and_ten_in_a_row_trip_the_breaker(
     pool: PgPool,
@@ -4388,6 +4401,7 @@ async fn a_refusing_endpoint_is_retried_to_its_budget_and_ten_in_a_row_trip_the_
             .execute(&pool)
             .await
             .unwrap();
+        after_the_moment(&pool, connection).await;
         assert_eq!(delivery::tick_once(&st).await.unwrap(), 1);
         let (status, attempts, error) = delivery_status(&pool, first).await;
         assert_eq!(attempts, attempt);
@@ -4407,14 +4421,27 @@ async fn a_refusing_endpoint_is_retried_to_its_budget_and_ten_in_a_row_trip_the_
         }
         ids
     };
-    assert_eq!(delivery::tick_once(&st).await.unwrap(), 5);
+    for moment in 6..=10 {
+        sqlx::query(
+            "UPDATE notifications.deliveries SET next_attempt_at = now(), lease_until = NULL
+              WHERE id = ANY($1)",
+        )
+        .bind(&more)
+        .execute(&pool)
+        .await
+        .unwrap();
+        after_the_moment(&pool, connection).await;
+        assert_eq!(delivery::tick_once(&st).await.unwrap(), 5);
+        if moment < 10 {
+            assert_eq!(breaker_count(&pool, connection).await, moment);
+        }
+    }
     let (status, error) = connection_status(&pool, connection).await;
     assert_eq!(status, "errored");
     let error = error.unwrap();
     assert!(
-        error.starts_with(
-            "10 deliveries in a row failed; the last answer was: endpoint returned 404"
-        ),
+        error
+            .starts_with("10 attempts in a row failed; the last answer was: endpoint returned 404"),
         "{error}"
     );
     for id in more {
@@ -4428,6 +4455,40 @@ async fn a_refusing_endpoint_is_retried_to_its_budget_and_ten_in_a_row_trip_the_
     let posted_before = posts_to(&mocks, "/hooks/dead").await.len();
     assert_eq!(delivery::tick_once(&st).await.unwrap(), 0);
     assert_eq!(posts_to(&mocks, "/hooks/dead").await.len(), posted_before);
+}
+
+/// Ten notices failing together through a short outage are one moment, so a
+/// burst raised at once never trips the breaker.
+#[sqlx::test]
+async fn a_burst_failing_together_counts_once(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let mocks = MockServer::start().await;
+    let connection = seed_webhook(
+        &pool,
+        ORGANIZATION,
+        &format!("{}/hooks/deploying", mocks.uri()),
+        "whsec_deploying",
+    )
+    .await;
+    Mock::given(method("POST"))
+        .and(path("/hooks/deploying"))
+        .respond_with(ResponseTemplate::new(503))
+        .mount(&mocks)
+        .await;
+    let st = state(pool.clone(), &mocks, None);
+
+    let mut burst = Vec::new();
+    for _ in 0..10 {
+        burst.push(seed_delivery(&pool, ORGANIZATION, connection).await);
+    }
+    for id in &burst {
+        delivery::first_attempt(&st, *id).await.unwrap();
+    }
+    assert_eq!(breaker_count(&pool, connection).await, 1);
+    assert_eq!(connection_status(&pool, connection).await.0, "active");
+    for id in burst {
+        assert_eq!(delivery_status(&pool, id).await.0, "pending", "{id}");
+    }
 }
 
 /// One success closes the count, so a merely flaky endpoint is never retired.
@@ -4458,7 +4519,11 @@ async fn a_success_closes_the_breakers_count(pool: PgPool) {
     seed_delivery(&pool, ORGANIZATION, connection).await;
     seed_delivery(&pool, ORGANIZATION, connection).await;
     assert_eq!(delivery::tick_once(&st).await.unwrap(), 2);
-    assert_eq!(breaker_count(&pool, connection).await, 2);
+    assert_eq!(
+        breaker_count(&pool, connection).await,
+        1,
+        "two failing together are one moment"
+    );
 
     let ok = seed_delivery(&pool, ORGANIZATION, connection).await;
     assert_eq!(delivery::tick_once(&st).await.unwrap(), 1);
