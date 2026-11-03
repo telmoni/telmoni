@@ -94,6 +94,10 @@
       "span",
       "session"
     ],
+    "EvaluatorKind": [
+      "prompt",
+      "typed"
+    ],
     "ExportFailure": [
       "too_large",
       "error"

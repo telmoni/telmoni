@@ -24,14 +24,15 @@ use telmoni_shared::model::systemone::{Decide, Question};
 use telmoni_shared::model::{self, Ask, Refused};
 use telmoni_shared::seam::{self, OrganizationAlert};
 use telmoni_shared::{
-    ContentMode, EvaluationTarget, ModelProvider, OrganizationId, ProjectId, ScoreSource,
-    SortDirection, SpanKind, TelmoniError, TraceSort,
+    ContentMode, EvaluationStatus, EvaluationTarget, ModelProvider, OrganizationId, ProjectId,
+    ScoreSource, SortDirection, SpanKind, TelmoniError, TraceSort,
 };
 
 use crate::db::{self, TelemetryLane};
 use crate::evaluators::typed::Typed;
 use crate::evaluators::{self, Judging, Message, Prompt, ScoreSpec};
 use crate::handler::evaluation_rules::{priced_as, session_idle};
+use crate::handler::evaluators::EvaluatorKind;
 use crate::handler::views::ViewQuery;
 use crate::ingest::decode::Encoding;
 use crate::prices::{PriceBook, Usage};
@@ -447,7 +448,7 @@ enum Outcome {
     /// Looked at again at `until`, its reason kept.
     Wait {
         until: DateTime<Utc>,
-        status: &'static str,
+        status: EvaluationStatus,
         reason: String,
         tried: bool,
     },
@@ -468,7 +469,7 @@ async fn settle(state: &Arc<AppState>, leased: Leased) -> Result<bool, TelmoniEr
                 "telemetry: an evaluation could not be worked; tried again shortly");
             Outcome::Wait {
                 until: backoff(leased.attempts),
-                status: "pending",
+                status: EvaluationStatus::Pending,
                 reason: "it could not be worked; tried again shortly".into(),
                 tried: true,
             }
@@ -577,7 +578,7 @@ fn this_monday(now: DateTime<Utc>) -> DateTime<Utc> {
 #[derive(sqlx::FromRow)]
 struct Judge {
     name: String,
-    kind: String,
+    kind: EvaluatorKind,
     messages: Option<Jsonb<Vec<Message>>>,
     score: Option<Jsonb<ScoreSpec>>,
     state: Option<String>,
@@ -642,7 +643,7 @@ async fn judge(state: &Arc<AppState>, leased: &Leased) -> Result<Outcome, Telmon
             tx.commit().await?;
             return Ok(Outcome::Wait {
                 until: next_monday(Utc::now()),
-                status: "delayed",
+                status: EvaluationStatus::Delayed,
                 reason: "its evaluator's weekly spend limit is reached".into(),
                 tried: false,
             });
@@ -667,17 +668,17 @@ async fn judge(state: &Arc<AppState>, leased: &Leased) -> Result<Outcome, Telmon
         .or_else(|| judge.models.as_ref().and_then(|m| m.first().cloned()))
         .unwrap_or_default();
     let judging = match (
-        judge.kind.as_str(),
+        judge.kind,
         judge.messages,
         judge.score,
         judge.state,
         judge.questions,
     ) {
-        ("typed", _, _, Some(state), Some(questions)) => Judging::Typed(Typed {
+        (EvaluatorKind::Typed, _, _, Some(state), Some(questions)) => Judging::Typed(Typed {
             state,
             questions: questions.0,
         }),
-        ("prompt", Some(messages), Some(score), _, _) => Judging::Prompt(Prompt {
+        (EvaluatorKind::Prompt, Some(messages), Some(score), _, _) => Judging::Prompt(Prompt {
             messages: messages.0,
             score: score.0,
             reasoning: judge.reasoning,
@@ -991,7 +992,7 @@ async fn still_leased(state: &AppState, leased: &Leased) -> bool {
 fn paused(why: &str) -> Outcome {
     Outcome::Wait {
         until: Utc::now() + chrono::Duration::seconds(PAUSED_SECS),
-        status: "pending",
+        status: EvaluationStatus::Pending,
         reason: format!("paused: {why}"),
         tried: false,
     }
@@ -1034,7 +1035,7 @@ async fn refusal(
                 || backoff(leased.attempts),
                 |wait| Utc::now() + chrono::Duration::from_std(wait).unwrap_or_default(),
             ),
-            status: "delayed",
+            status: EvaluationStatus::Delayed,
             reason: refused.sentence(),
             tried: true,
         }),
@@ -1044,7 +1045,7 @@ async fn refusal(
         }),
         other => Ok(Outcome::Wait {
             until: backoff(leased.attempts),
-            status: "pending",
+            status: EvaluationStatus::Pending,
             reason: other.sentence(),
             tried: true,
         }),

@@ -686,7 +686,7 @@ CREATE TABLE telemetry.evaluators (
     created_by    TEXT             NOT NULL,
     created_at    TIMESTAMPTZ      NOT NULL DEFAULT now(),
     PRIMARY KEY (project_id, id, version),
-    CONSTRAINT evaluators_kind_check CHECK (kind IN ('prompt', 'code', 'typed')),
+    CONSTRAINT evaluators_kind_check CHECK (kind IN ('prompt', 'typed')),
     CONSTRAINT evaluators_shape_check CHECK (
         (kind = 'typed') = (state IS NOT NULL AND questions IS NOT NULL)
         AND (kind = 'prompt') = (messages IS NOT NULL AND score IS NOT NULL)

@@ -545,6 +545,13 @@ export const PromptRole = {
 } as const;
 export type PromptRole = typeof PromptRole[keyof typeof PromptRole];
 
+/** Wire vocabulary of the Rust `EvaluatorKind`: a prompt to any model, or typed questions. */
+export const EvaluatorKind = {
+  Prompt: "prompt",
+  Typed:  "typed",
+} as const;
+export type EvaluatorKind = typeof EvaluatorKind[keyof typeof EvaluatorKind];
+
 /** Wire vocabulary of the Rust agent `MessageRole`: who wrote a message. */
 export const AgentMessageRole = {
   User:      "user",

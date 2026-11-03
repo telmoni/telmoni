@@ -1,7 +1,7 @@
 import { cache } from "react";
 import { z } from "zod";
 
-import { EvaluationStatus, EvaluationTarget, PromptRole, ScoreType, SpanKind } from "@/lib/types/enums";
+import { EvaluationStatus, EvaluationTarget, EvaluatorKind, PromptRole, ScoreType, SpanKind } from "@/lib/types/enums";
 
 import { valueOf } from "./read";
 import { ViewQuerySchema, readLane } from "./traces";
@@ -50,7 +50,7 @@ export const EvaluatorSchema = z.object({
   id: z.string(),
   version: z.number().int(),
   name: z.string(),
-  kind: z.enum(["prompt", "typed", "code"]),
+  kind: z.enum(EvaluatorKind),
   messages: z.array(PromptMessageSchema).nullable(),
   score: ScoreSpecSchema.nullable(),
   state: z.string().nullable(),

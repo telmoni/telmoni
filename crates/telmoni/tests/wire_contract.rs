@@ -40,7 +40,7 @@ use telmoni_telemetry::evaluators::{
 use telmoni_telemetry::handler::evaluation_rules::{
     EVALUATORS_MAX as RULE_EVALUATORS_MAX, NAME_MAX as EVALUATION_RULE_NAME_MAX, POINTER_MAX,
 };
-use telmoni_telemetry::handler::evaluators::{TEMPERATURE_MAX, WEEKLY_LIMIT_MAX};
+use telmoni_telemetry::handler::evaluators::{EvaluatorKind, TEMPERATURE_MAX, WEEKLY_LIMIT_MAX};
 use telmoni_telemetry::handler::incidents::INCIDENTS_MAX;
 use telmoni_telemetry::handler::model_connections::{
     MODEL_MAX, MODELS_MAX, NAME_MAX as CONNECTION_NAME_MAX, SECRET_MAX,
@@ -154,6 +154,7 @@ fn generated_contract() -> Value {
             "AgentTurnEvent": wire::<TurnEventKind>(),
             "ContentField": CONTENT,
             "PromptRole": wire::<PromptRole>(),
+            "EvaluatorKind": wire::<EvaluatorKind>(),
         },
         "flags": {
             "global_only": Flag::all().iter().filter(|f| f.is_global_only())

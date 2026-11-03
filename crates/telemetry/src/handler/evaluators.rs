@@ -55,7 +55,7 @@ pub struct Evaluator {
     pub id: Uuid,
     pub version: i32,
     pub name: String,
-    pub kind: String,
+    pub kind: EvaluatorKind,
     /// A prompt one's messages and score; none on a typed one.
     pub messages: Option<Jsonb<Vec<Message>>>,
     pub score: Option<Jsonb<ScoreSpec>>,
@@ -138,13 +138,19 @@ const fn yes() -> bool {
 
 /// The kinds of evaluator a change saves: a prompt to any model, or typed
 /// questions to one speaking System One.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
 pub enum EvaluatorKind {
     #[default]
     Prompt,
     Typed,
 }
+
+telmoni_shared::wire_enum!(EvaluatorKind {
+    Prompt => "prompt",
+    Typed => "typed",
+});
 
 /// A try: the draft, and the trace it judges.
 #[derive(Debug, Deserialize)]
@@ -560,8 +566,8 @@ pub async fn saved(
         }
         let version = last.unwrap_or(0) + 1;
         let (kind, prompt, typed) = match &judging {
-            Judging::Prompt(prompt) => ("prompt", Some(prompt), None),
-            Judging::Typed(typed) => ("typed", None, Some(typed)),
+            Judging::Prompt(prompt) => (EvaluatorKind::Prompt, Some(prompt), None),
+            Judging::Typed(typed) => (EvaluatorKind::Typed, None, Some(typed)),
         };
         let mut row: Evaluator = sqlx::query_as(
             "INSERT INTO telemetry.evaluators
