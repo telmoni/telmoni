@@ -325,7 +325,7 @@ pub async fn judge(
             ));
         }
     };
-    let (status, retry_after, body) = send(egress, &prepared).await?;
+    let (status, retry_after, body) = send(egress, prepared).await?;
     read(status, retry_after, &body, answered)
 }
 
@@ -355,7 +355,7 @@ pub async fn decide(
         ));
     }
     let prepared = systemone::request(connection, decide)?;
-    let (status, retry_after, body) = send(egress, &prepared).await?;
+    let (status, retry_after, body) = send(egress, prepared).await?;
     read(status, retry_after, &body, |body| {
         systemone::answer(body, decide.model)
     })
@@ -364,25 +364,22 @@ pub async fn decide(
 /// The answer of a request, sent: its status, its `Retry-After`, its body.
 async fn send(
     egress: &Egress,
-    prepared: &Prepared,
+    prepared: Prepared,
 ) -> Result<(u16, Option<Duration>, Vec<u8>), Refused> {
+    let Prepared { url, headers, body } = prepared;
     let mut request = egress
-        .post(&prepared.url)
+        .post(&url)
         .map_err(|rejected: HostRejection| Refused::Unreached(rejected.reason().into()))?;
-    for (name, value) in &prepared.headers {
+    for (name, value) in &headers {
         request = request.header(name.as_str(), value.expose());
     }
-    let response = request
-        .body(prepared.body.clone())
-        .send()
-        .await
-        .map_err(|e| {
-            Refused::Unreached(if e.is_timeout() {
-                "it did not answer in time".into()
-            } else {
-                "no connection".into()
-            })
-        })?;
+    let response = request.body(body).send().await.map_err(|e| {
+        Refused::Unreached(if e.is_timeout() {
+            "it did not answer in time".into()
+        } else {
+            "no connection".into()
+        })
+    })?;
     let status = response.status().as_u16();
     let retry_after = crate::http::retry_after(response.headers());
     let body = response
