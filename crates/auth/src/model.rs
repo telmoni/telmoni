@@ -57,7 +57,7 @@ pub enum AuditKind {
     AutoProvision,
     /// An organization its founder asked for, and its owner.
     OnRequest,
-    /// A project invitation sent.
+    /// An invitation sent, to a project or the organization as its scope says.
     Invited,
     /// A project invitation withdrawn.
     InviteRevoked,

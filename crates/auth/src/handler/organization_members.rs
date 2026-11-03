@@ -344,6 +344,7 @@ pub async fn create_organization_invite(
         )
         .on(invite_id.to_string().as_str())
         .details(json!({
+            "kind": AuditKind::Invited,
             "email": email,
             "role": role,
             "scope": InviteScope::Organization,
