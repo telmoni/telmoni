@@ -37,14 +37,31 @@ pub enum Actor<'a> {
     Key(&'a str),
 }
 
+/// The prefixes a machine's rendered `actor_id` begins with; a person's has none.
+const SERVICE: &str = "service:";
+const EXTERNAL: &str = "external:";
+const KEY: &str = "key:";
+
 impl std::fmt::Display for Actor<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Actor::User(sub) => f.write_str(sub),
-            Actor::Service(name) => write!(f, "service:{name}"),
-            Actor::External(name) => write!(f, "external:{name}"),
-            Actor::Key(id) => write!(f, "key:{id}"),
+            Actor::Service(name) => write!(f, "{SERVICE}{name}"),
+            Actor::External(name) => write!(f, "{EXTERNAL}{name}"),
+            Actor::Key(id) => write!(f, "{KEY}{id}"),
         }
+    }
+}
+
+impl Actor<'_> {
+    /// The person a rendered `actor_id` names; none for every machine's form.
+    #[must_use]
+    pub fn person_of(rendered: &str) -> Option<UserId> {
+        [SERVICE, EXTERNAL, KEY]
+            .iter()
+            .all(|prefix| !rendered.starts_with(prefix))
+            .then(|| UserId::try_new(rendered).ok())
+            .flatten()
     }
 }
 
@@ -182,8 +199,7 @@ pub async fn requested_by(
     .fetch_optional(conn)
     .await?;
     Ok(row.and_then(|(actor, metadata)| {
-        let person = !actor.starts_with("service:") && !actor.starts_with("external:");
-        let user = UserId::try_new(actor).ok().filter(|_| person)?;
+        let user = Actor::person_of(&actor)?;
         Some((user, metadata.unwrap_or(Value::Null)))
     }))
 }
@@ -338,6 +354,20 @@ pub async fn emit_audit(conn: &mut PgConnection, evt: AuditEvent<'_>) -> sqlx::R
 #[cfg(test)]
 mod tests {
     use super::Actor;
+
+    /// Every machine's form reads back as nobody, a person's as them.
+    #[test]
+    fn only_a_person_reads_back_as_one() {
+        for machine in [
+            Actor::Service("sweep"),
+            Actor::External("stripe"),
+            Actor::Key("019a0000-0000-7000-8000-000000000000"),
+        ] {
+            assert_eq!(Actor::person_of(&machine.to_string()), None, "{machine}");
+        }
+        let person = Actor::person_of(&Actor::User("user_1").to_string());
+        assert_eq!(person.as_ref().map(crate::UserId::as_str), Some("user_1"));
+    }
 
     /// The rendered actor string is a hash-chain input, so `Display` must
     /// reproduce today's exact wire form; changing it would silently invalidate
