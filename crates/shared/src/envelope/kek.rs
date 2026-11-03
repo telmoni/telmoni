@@ -532,7 +532,7 @@ pub struct LocalKek {
 impl LocalKek {
     /// From 64 hex characters, which is what `openssl rand -hex 32` prints.
     pub fn from_hex(hex_key: &str) -> Result<Self, String> {
-        let bytes = decode_hex(hex_key.trim()).map_err(|e| format!("local key is not hex: {e}"))?;
+        let bytes = crate::digest::hex_decode(hex_key.trim()).ok_or("local key is not hex")?;
         if bytes.len() != DEK_LEN {
             return Err(format!(
                 "local key is {} bytes; AES-256 needs {DEK_LEN}",
@@ -596,29 +596,6 @@ impl LocalKek {
         })?;
         Ok(Dek::from_bytes(dek))
     }
-}
-
-/// Hex to bytes, wiped on drop. Hand-rolled: this crate has no other hex
-/// reader, and the spelling is a laptop's only.
-fn decode_hex(hex: &str) -> Result<Zeroizing<Vec<u8>>, String> {
-    let digits = hex.as_bytes();
-    if !digits.len().is_multiple_of(2) {
-        return Err("odd number of digits".to_owned());
-    }
-    let nibble = |c: u8| match c {
-        b'0'..=b'9' => Ok(c - b'0'),
-        b'a'..=b'f' => Ok(c - b'a' + 10),
-        b'A'..=b'F' => Ok(c - b'A' + 10),
-        _ => Err(format!("`{}` is not a hex digit", char::from(c))),
-    };
-    let mut out = Zeroizing::new(Vec::with_capacity(digits.len() / 2));
-    for pair in digits.chunks(2) {
-        let &[hi, lo] = pair else {
-            return Err("odd number of digits".to_owned());
-        };
-        out.push((nibble(hi)? << 4) | nibble(lo)?);
-    }
-    Ok(out)
 }
 
 #[cfg(test)]
@@ -808,15 +785,6 @@ mod tests {
         assert!(format!("{kek:?}").contains("connector-kek"));
         assert_eq!(local().kind(), "local");
         assert!(local().is_local());
-    }
-
-    #[test]
-    fn hex_decodes_both_cases_and_refuses_the_rest() {
-        assert_eq!(decode_hex("00ff").unwrap().as_slice(), &[0x00, 0xff]);
-        assert_eq!(decode_hex("0AfE").unwrap().as_slice(), &[0x0a, 0xfe]);
-        assert_eq!(decode_hex("").unwrap().len(), 0);
-        assert!(decode_hex("abc").unwrap_err().contains("odd"));
-        assert!(decode_hex("zz").unwrap_err().contains("not a hex digit"));
     }
 
     /// Any pod is a deployed tier; a laptop sets no Kubernetes variable.

@@ -13,7 +13,7 @@ use std::sync::{Arc, RwLock};
 
 use telmoni_shared::acting::ActingKey;
 use telmoni_shared::db::tenant_session::project_scope;
-use telmoni_shared::digest::{HmacKey, hex_lower};
+use telmoni_shared::digest::{HmacKey, hex_decode, hex_lower};
 use telmoni_shared::envelope::{KEK_VERSION, KekError, Sealed};
 use telmoni_shared::{AuthError, ProjectId, Redacted, TelemetryError, TelmoniError};
 
@@ -191,7 +191,7 @@ async fn open_key(
         },
         aad,
     )?;
-    let bytes = hex_bytes(secret.expose()).ok_or_else(|| {
+    let bytes = hex_decode(secret.expose()).ok_or_else(|| {
         TelmoniError::Internal("telemetry: a hashing key opened to something other than hex".into())
     })?;
     Ok(HmacKey::new(&bytes))
@@ -215,21 +215,6 @@ pub(crate) fn kek_refused(error: &KekError, what: &str) -> TelmoniError {
     }
 }
 
-/// Hex back into bytes, or `None` for anything that is not hex.
-fn hex_bytes(hex: &str) -> Option<Vec<u8>> {
-    if !hex.len().is_multiple_of(2) {
-        return None;
-    }
-    hex.as_bytes()
-        .chunks(2)
-        .map(|pair| {
-            std::str::from_utf8(pair)
-                .ok()
-                .and_then(|digits| u8::from_str_radix(digits, 16).ok())
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -248,15 +233,6 @@ mod tests {
             two.store("acme-42"),
             "another project's key, another hash"
         );
-    }
-
-    #[test]
-    fn hex_round_trips_and_refuses_what_is_not_hex() {
-        let bytes: Vec<u8> = (0..=255).collect();
-        assert_eq!(hex_bytes(&hex_lower(&bytes)), Some(bytes));
-        assert_eq!(hex_bytes("abc"), None, "an odd length");
-        assert_eq!(hex_bytes("zz"), None);
-        assert_eq!(hex_bytes(""), Some(Vec::new()));
     }
 
     #[test]

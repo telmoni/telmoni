@@ -3,6 +3,7 @@
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq as _;
+use zeroize::Zeroizing;
 
 /// SHA-256 of `data`, lowercase hex (64 chars).
 #[must_use]
@@ -41,22 +42,20 @@ pub fn canonical_json(v: &Value) -> String {
     }
 }
 
-/// The bytes `hex` spells, in either case; `None` for anything else.
+/// The bytes `hex` spells, in either case, wiped on drop, since a key is
+/// among what it reads; `None` for anything else.
 #[must_use]
-pub fn hex_decode(hex: &str) -> Option<Vec<u8>> {
+pub fn hex_decode(hex: &str) -> Option<Zeroizing<Vec<u8>>> {
     if !hex.len().is_multiple_of(2) {
         return None;
     }
-    hex.as_bytes()
-        .chunks(2)
-        .map(|pair| match pair {
-            [hi, lo] => {
-                let byte = (char::from(*hi).to_digit(16)? << 4) | char::from(*lo).to_digit(16)?;
-                u8::try_from(byte).ok()
-            }
-            _ => None,
-        })
-        .collect()
+    let mut out = Zeroizing::new(Vec::with_capacity(hex.len() / 2));
+    for pair in hex.as_bytes().chunks(2) {
+        let [hi, lo] = pair else { return None };
+        let byte = (char::from(*hi).to_digit(16)? << 4) | char::from(*lo).to_digit(16)?;
+        out.push(u8::try_from(byte).ok()?);
+    }
+    Some(out)
 }
 
 /// Lowercase hex, inlined to avoid a one-line crate dependency.
@@ -174,7 +173,7 @@ pub fn verify_timestamped(
     now: i64,
 ) -> Result<(), SignatureError> {
     let mut t: Option<i64> = None;
-    let mut candidates: Vec<Vec<u8>> = Vec::new();
+    let mut candidates: Vec<Zeroizing<Vec<u8>>> = Vec::new();
     for part in header.split(',') {
         match part.trim().split_once('=') {
             Some(("t", v)) => t = v.parse().ok(),
@@ -233,9 +232,15 @@ mod hmac_tests {
         let tag = hex_decode(&key.hex(data)).expect("hex");
         assert!(key.verify(data, &tag));
         assert!(!key.verify(b"what do ya want for something?", &tag));
-        assert_eq!(hex_decode("5BdC"), Some(vec![0x5b, 0xdc]));
-        for bad in ["5", "zz", "5bd", "5b "] {
-            assert_eq!(hex_decode(bad), None, "{bad:?}");
+        assert_eq!(
+            hex_decode("5BdC").as_deref().map(Vec::as_slice),
+            Some(&[0x5b, 0xdc][..])
+        );
+        assert_eq!(hex_decode("").map(|b| b.len()), Some(0));
+        let every: Vec<u8> = (0..=255).collect();
+        assert_eq!(hex_decode(&hex_lower(&every)).as_deref(), Some(&every));
+        for bad in ["5", "zz", "5bd", "5b ", "+f+f"] {
+            assert!(hex_decode(bad).is_none(), "{bad:?}");
         }
     }
 
