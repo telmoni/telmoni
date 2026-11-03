@@ -7,7 +7,6 @@
 //! every real read goes through [`Redacted::expose`], which grep can find.
 
 use std::fmt;
-use std::sync::Arc;
 
 use serde::{Deserialize, Deserializer};
 use zeroize::Zeroizing;
@@ -52,12 +51,6 @@ impl From<&str> for Redacted {
 impl From<Redacted> for String {
     fn from(r: Redacted) -> Self {
         (*r.0).clone()
-    }
-}
-
-impl From<Redacted> for Arc<str> {
-    fn from(r: Redacted) -> Self {
-        Self::from(r.0.as_str())
     }
 }
 
@@ -140,8 +133,6 @@ mod tests {
     fn owned_conversions_round_trip_the_plaintext() {
         let s: String = Redacted::from("sk-live-owned").into();
         assert_eq!(s, "sk-live-owned");
-        let a: Arc<str> = Redacted::from("tm_owned").into();
-        assert_eq!(&*a, "tm_owned");
     }
 
     #[test]

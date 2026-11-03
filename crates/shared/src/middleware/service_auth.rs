@@ -10,34 +10,27 @@ use axum::{
 };
 use subtle::{Choice, ConstantTimeEq};
 
+use crate::Redacted;
 use crate::error::{AuthError, TelmoniError};
 
 /// HTTP header carrying the shared service secret between Telmoni services.
 pub const SERVICE_SECRET_HEADER: &str = "x-service-secret";
 
-/// Primary service secret plus an optional secondary for rotation windows.
-#[derive(Clone)]
+/// Primary service secret plus an optional secondary for rotation windows,
+/// each held as `Redacted`: wiped on drop and masked in a log.
+#[derive(Clone, Debug)]
 pub struct ServiceSecrets {
-    primary: Arc<str>,
-    next: Option<Arc<str>>,
-}
-
-impl std::fmt::Debug for ServiceSecrets {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ServiceSecrets")
-            .field("primary", &"***")
-            .field("next", &self.next.as_ref().map(|_| "***"))
-            .finish()
-    }
+    primary: Arc<Redacted>,
+    next: Option<Arc<Redacted>>,
 }
 
 impl ServiceSecrets {
     /// Build a secrets bundle. `primary` is always required; `next` is
     /// `Some` only during a rotation window.
-    pub fn new(primary: impl Into<Arc<str>>, next: Option<impl Into<Arc<str>>>) -> Self {
+    pub fn new(primary: impl Into<Redacted>, next: Option<impl Into<Redacted>>) -> Self {
         Self {
-            primary: primary.into(),
-            next: next.map(Into::into),
+            primary: Arc::new(primary.into()),
+            next: next.map(|n| Arc::new(n.into())),
         }
     }
 
@@ -46,11 +39,11 @@ impl ServiceSecrets {
     /// secret matched. The length short-circuit is harmless: the length is fixed.
     #[must_use]
     pub fn matches(&self, presented: &[u8]) -> bool {
-        let primary_match = self.primary.as_bytes().ct_eq(presented);
+        let primary_match = self.primary.expose().as_bytes().ct_eq(presented);
         let next_match = self
             .next
             .as_ref()
-            .map_or(Choice::from(0), |n| n.as_bytes().ct_eq(presented));
+            .map_or(Choice::from(0), |n| n.expose().as_bytes().ct_eq(presented));
         bool::from(primary_match | next_match)
     }
 }
