@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { EVALUATION_RULE_NAME_MAX } from "@/lib/evaluators";
 import type { EvaluationRule, Evaluator, RulePreview } from "@/lib/server/entities/evaluators";
 import type { TraceView } from "@/lib/server/entities/traces";
 import { formatCost } from "@/lib/traces";
@@ -301,7 +302,7 @@ function RuleForm({
       <div className="grid gap-gutter sm:grid-cols-2">
         <div className="grid gap-2">
           <Label htmlFor={`${id}name`}>Name</Label>
-          <Input id={`${id}name`} value={draft.name} onChange={(e) => set({ name: e.target.value })} maxLength={60} />
+          <Input id={`${id}name`} value={draft.name} onChange={(e) => set({ name: e.target.value })} maxLength={EVALUATION_RULE_NAME_MAX} />
         </div>
         <div className="grid gap-2">
           <Label htmlFor={`${id}target`}>Judges</Label>

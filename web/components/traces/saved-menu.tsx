@@ -43,14 +43,12 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { ActionResult } from "@/lib/action-result";
+import { VIEW_NAME_MAX } from "@/lib/traces";
 import { cn } from "@/lib/utils";
 
 // The project's saved views, layouts and dashboards are rows of one table,
 // kept through one menu: picked, each a link; saved as new, saved over, renamed
 // and deleted by owners and admins, for everyone on the project.
-
-/** The longest a saved view's or layout's name is, as the server takes it. */
-const NAME_MAX = 60;
 
 /** What the menu's rows share: a saved view of any kind. */
 type Saved = { id: string; name: string };
@@ -305,7 +303,7 @@ function NameDialog({
               <Input
                 id={nameId}
                 value={name}
-                maxLength={NAME_MAX}
+                maxLength={VIEW_NAME_MAX}
                 autoComplete="off"
                 autoFocus
                 aria-invalid={error !== null}

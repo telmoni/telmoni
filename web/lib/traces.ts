@@ -297,6 +297,12 @@ export const SEARCH_MAX = 200;
 /** The longest score name the server keeps, in characters. */
 export const SCORE_NAME_MAX = 64;
 
+/** The longest name a saved view, layout or dashboard goes by. */
+export const VIEW_NAME_MAX = 60;
+
+/** The longest span name the server keeps: an operation, a space and a model. */
+export const SPAN_NAME_MAX = 145;
+
 /** The filters in force, a value at a time, in the sidebar's order, the
  *  search first. */
 export function activeFilters(query: ListQuery<string>): ActiveFilter[] {

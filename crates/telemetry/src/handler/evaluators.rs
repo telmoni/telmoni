@@ -42,6 +42,10 @@ use crate::{content, db, traces};
 pub const EVALUATORS_MAX: i64 = 50;
 /// The most an answer may run to, reasoning and score.
 pub const ANSWER_TOKENS_MAX: u32 = 1_024;
+/// The highest temperature an evaluator asks its model for.
+pub const TEMPERATURE_MAX: f64 = 2.0;
+/// The highest weekly spend limit, in dollars.
+pub const WEEKLY_LIMIT_MAX: f64 = 1_000_000.0;
 /// The most spans of a run a try reads.
 const TRY_SPANS_MAX: u32 = 500;
 
@@ -195,13 +199,13 @@ fn checked(mut change: EvaluatorChange) -> Result<(EvaluatorChange, Judging), Te
     }
     if change
         .temperature
-        .is_some_and(|t| !t.is_finite() || !(0.0..=2.0).contains(&t))
+        .is_some_and(|t| !t.is_finite() || !(0.0..=TEMPERATURE_MAX).contains(&t))
     {
         return refuse("a temperature is from 0 to 2");
     }
     if change
         .weekly_limit
-        .is_some_and(|l| !l.is_finite() || l <= 0.0 || l > 1_000_000.0)
+        .is_some_and(|l| !l.is_finite() || l <= 0.0 || l > WEEKLY_LIMIT_MAX)
     {
         return refuse("a weekly spend limit is more than $0, up to $1,000,000");
     }

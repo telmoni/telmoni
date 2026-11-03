@@ -185,6 +185,11 @@
       "person",
       "plan"
     ],
+    "PromptRole": [
+      "system",
+      "user",
+      "assistant"
+    ],
     "ResourceKind": [
       "organization",
       "project",
@@ -415,6 +420,15 @@
     "confirmation_code_length": 6,
     "dashboard_charts_max": 12,
     "email_max": 254,
+    "evaluation_rule_evaluators_max": 10,
+    "evaluation_rule_name_max": 60,
+    "evaluation_rule_pointer_max": 200,
+    "evaluator_means_max": 500,
+    "evaluator_message_max": 20000,
+    "evaluator_messages_max": 20,
+    "evaluator_name_max": 60,
+    "evaluator_temperature_max": 2.0,
+    "evaluator_weekly_limit_max": 1000000.0,
     "filter_value_max": {
       "agent": 128,
       "environment": 128,
@@ -434,15 +448,29 @@
     "list_max_limit": 500,
     "list_max_page": 1000,
     "list_runs_max": 100,
+    "model_connection_model_max": 128,
+    "model_connection_models_max": 20,
+    "model_connection_name_max": 60,
+    "model_connection_secret_max": 16384,
     "mute_days_max": 30,
     "organization_name_max": 80,
     "pinned_max": 8,
     "pinned_per_run": 32,
     "project_name_max": 100,
     "rollup_group_top": 10,
+    "score_categories_max": 10,
+    "score_category_max": 64,
+    "score_comment_max": 4000,
+    "score_name_max": 64,
+    "span_name_max": 145,
     "trace_question_max": 500,
+    "typed_instructions_max": 4000,
+    "typed_levels_max": 10,
+    "typed_options_max": 255,
+    "typed_questions_max": 16,
     "utc_offset_east": 840,
-    "utc_offset_west": -720
+    "utc_offset_west": -720,
+    "view_name_max": 60
   },
   "live": {
     "organization_channel": "bfev:organization:",

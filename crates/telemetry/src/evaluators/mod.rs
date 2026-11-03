@@ -58,6 +58,12 @@ pub enum PromptRole {
     Assistant,
 }
 
+telmoni_shared::wire_enum!(PromptRole {
+    System => "system",
+    User => "user",
+    Assistant => "assistant",
+});
+
 /// One message of a prompt.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

@@ -26,7 +26,8 @@ import {
   type TraceLayout,
 } from "@/lib/server/entities/traces";
 import { pathAndQuery, requestUrl } from "@/lib/server/path";
-import { COMMENT_MAX } from "@/lib/scores";
+import { COMMENT_MAX, SCORE_CATEGORIES_MAX, SCORE_CATEGORY_MAX } from "@/lib/scores";
+import { FILTER_VALUE_MAX, SCORE_NAME_MAX, VIEW_NAME_MAX } from "@/lib/traces";
 import { ScoreType, SessionColumn, TraceColumn, UserColumn, ViewKind } from "@/lib/types/enums";
 
 // A project's saved views, layouts and dashboards, saved, saved over and deleted; the
@@ -36,7 +37,7 @@ import { ScoreType, SessionColumn, TraceColumn, UserColumn, ViewKind } from "@/l
 
 export type ViewResult = ActionResult<{ view?: ListView | TraceLayout | DashboardView }>;
 
-const name = z.string().max(200);
+const name = z.string().max(VIEW_NAME_MAX);
 const columns = z.array(z.enum(TraceColumn)).max(64);
 
 /** What a view's save sends: what the browser could send, before the server
@@ -334,11 +335,11 @@ const SCORINGS: Ceiling = { call: "traces:scores", limit: 30 };
 const ScoreInputSchema = z.object({
   run_id: z.guid().optional(),
   span_id: z.string().max(64).optional(),
-  session_id: z.string().max(200).optional(),
-  name: z.string().min(1).max(64),
+  session_id: z.string().max(FILTER_VALUE_MAX.session).optional(),
+  name: z.string().min(1).max(SCORE_NAME_MAX),
   data_type: z.enum(ScoreType),
   value: z.number().finite().optional(),
-  categories: z.array(z.string().max(64)).max(10).optional(),
+  categories: z.array(z.string().max(SCORE_CATEGORY_MAX)).max(SCORE_CATEGORIES_MAX).optional(),
   comment: z.string().max(COMMENT_MAX).optional(),
 });
 

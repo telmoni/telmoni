@@ -31,6 +31,10 @@ export function scoreTitle(score: ScoreSummary): string {
 /** The longest comment a score keeps, the lane's. */
 export const COMMENT_MAX = 4_000;
 
+/** The most categories a category score holds, and the longest each is. */
+export const SCORE_CATEGORIES_MAX = 10;
+export const SCORE_CATEGORY_MAX = 64;
+
 /** Where a score's comment is kept: under its run's content, as a span the
  *  score's id names, which no span's 16 hex digits can be. */
 const COMMENT_SPAN = "score/";

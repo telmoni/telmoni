@@ -36,6 +36,7 @@ import {
   OrganizationRole,
   OrganizationStatus,
   PausedBy,
+  PromptRole,
   ResourceKind,
   Role,
   RuleAggregation,
@@ -73,6 +74,25 @@ import {
 } from "../alerts";
 import { CONFIRMATION_CODE_LENGTH } from "../confirmation-code";
 import { DASHBOARD_CHARTS_MAX, ROLLUP_GROUP_TOP } from "../dashboards";
+import {
+  EVALUATION_RULE_EVALUATORS_MAX,
+  EVALUATION_RULE_NAME_MAX,
+  EVALUATION_RULE_POINTER_MAX,
+  EVALUATOR_MEANS_MAX,
+  EVALUATOR_MESSAGE_MAX,
+  EVALUATOR_MESSAGES_MAX,
+  EVALUATOR_NAME_MAX,
+  EVALUATOR_TEMPERATURE_MAX,
+  EVALUATOR_WEEKLY_LIMIT_MAX,
+  MODEL_CONNECTION_MODEL_MAX,
+  MODEL_CONNECTION_MODELS_MAX,
+  MODEL_CONNECTION_NAME_MAX,
+  MODEL_CONNECTION_SECRET_MAX,
+  TYPED_INSTRUCTIONS_MAX,
+  TYPED_LEVELS_MAX,
+  TYPED_OPTIONS_MAX,
+  TYPED_QUESTIONS_MAX,
+} from "../evaluators";
 import { PINNED_MAX, PINNED_PER_TRACE } from "../layout";
 import { FILTER_VALUES_MAX, MAX_DAYS, MAX_LIMIT, OPENING_DAYS } from "../list-query";
 import {
@@ -83,7 +103,8 @@ import {
   MAX_PROJECT_NAME,
 } from "../names";
 import { RESERVED_ORGANIZATION_SLUGS, RESERVED_PROJECT_SLUGS, SLUG_MAX_LENGTH } from "../slug";
-import { DOWNLOAD_MAX, FILTER_VALUE_MAX, MAX_PAGE, RUNS_MAX } from "../traces";
+import { COMMENT_MAX, SCORE_CATEGORIES_MAX, SCORE_CATEGORY_MAX } from "../scores";
+import { DOWNLOAD_MAX, FILTER_VALUE_MAX, MAX_PAGE, RUNS_MAX, SCORE_NAME_MAX, SPAN_NAME_MAX, VIEW_NAME_MAX } from "../traces";
 import { UTC_OFFSET_EAST, UTC_OFFSET_WEST } from "../utc-offset";
 
 const contract = JSON.parse(
@@ -136,6 +157,7 @@ const CONSOLE: Record<string, Record<string, string>> = {
   OrganizationRole,
   OrganizationStatus,
   PausedBy,
+  PromptRole,
   ResourceKind,
   Role,
   RuleAggregation,
@@ -222,6 +244,29 @@ describe("wire contract", () => {
       trace_question_max: TRACE_QUESTION_MAX,
       audit_export_kept_days: AUDIT_EXPORT_KEPT_DAYS,
       confirmation_code_length: CONFIRMATION_CODE_LENGTH,
+      view_name_max: VIEW_NAME_MAX,
+      span_name_max: SPAN_NAME_MAX,
+      score_name_max: SCORE_NAME_MAX,
+      score_comment_max: COMMENT_MAX,
+      score_categories_max: SCORE_CATEGORIES_MAX,
+      score_category_max: SCORE_CATEGORY_MAX,
+      evaluator_name_max: EVALUATOR_NAME_MAX,
+      evaluator_messages_max: EVALUATOR_MESSAGES_MAX,
+      evaluator_message_max: EVALUATOR_MESSAGE_MAX,
+      evaluator_means_max: EVALUATOR_MEANS_MAX,
+      evaluator_temperature_max: EVALUATOR_TEMPERATURE_MAX,
+      evaluator_weekly_limit_max: EVALUATOR_WEEKLY_LIMIT_MAX,
+      typed_questions_max: TYPED_QUESTIONS_MAX,
+      typed_levels_max: TYPED_LEVELS_MAX,
+      typed_options_max: TYPED_OPTIONS_MAX,
+      typed_instructions_max: TYPED_INSTRUCTIONS_MAX,
+      evaluation_rule_name_max: EVALUATION_RULE_NAME_MAX,
+      evaluation_rule_evaluators_max: EVALUATION_RULE_EVALUATORS_MAX,
+      evaluation_rule_pointer_max: EVALUATION_RULE_POINTER_MAX,
+      model_connection_name_max: MODEL_CONNECTION_NAME_MAX,
+      model_connection_model_max: MODEL_CONNECTION_MODEL_MAX,
+      model_connection_models_max: MODEL_CONNECTION_MODELS_MAX,
+      model_connection_secret_max: MODEL_CONNECTION_SECRET_MAX,
     }).toEqual(LIMITS);
   });
 

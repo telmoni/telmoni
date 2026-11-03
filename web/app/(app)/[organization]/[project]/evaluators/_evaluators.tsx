@@ -19,7 +19,6 @@ import type {
   Evaluator,
   EvaluatorTemplate,
   PromptMessage,
-  PromptRole,
   Question,
   QuestionType,
   ScoreSpec,
@@ -28,8 +27,19 @@ import type {
   TypedTemplate,
 } from "@/lib/server/entities/evaluators";
 import type { ModelConnection } from "@/lib/server/entities/model-connections";
-import { formatScoreValue } from "@/lib/scores";
-import { ModelProvider, ScoreType } from "@/lib/types/enums";
+import {
+  EVALUATOR_MEANS_MAX,
+  EVALUATOR_MESSAGES_MAX,
+  EVALUATOR_NAME_MAX,
+  MODEL_CONNECTION_MODEL_MAX,
+  TYPED_INSTRUCTIONS_MAX,
+  TYPED_LEVELS_MAX,
+  TYPED_OPTIONS_MAX,
+  TYPED_QUESTIONS_MAX,
+} from "@/lib/evaluators";
+import { SCORE_CATEGORIES_MAX, SCORE_CATEGORY_MAX, formatScoreValue } from "@/lib/scores";
+import { SCORE_NAME_MAX } from "@/lib/traces";
+import { ModelProvider, type PromptRole, ScoreType } from "@/lib/types/enums";
 import { useAction } from "@/lib/use-action";
 
 import { deleteEvaluatorAction, saveEvaluatorAction, tryEvaluatorAction } from "./actions";
@@ -549,7 +559,7 @@ function EvaluatorForm({
     >
       <div className="grid gap-2">
         <Label htmlFor={`${id}name`}>Name</Label>
-        <Input id={`${id}name`} value={draft.name} onChange={(e) => set({ name: e.target.value })} maxLength={60} />
+        <Input id={`${id}name`} value={draft.name} onChange={(e) => set({ name: e.target.value })} maxLength={EVALUATOR_NAME_MAX} />
       </div>
 
       {typed ? (
@@ -599,7 +609,7 @@ function EvaluatorForm({
                 type="button"
                 variant="outline"
                 size="sm"
-                disabled={draft.messages.length > 18}
+                disabled={draft.messages.length + 2 > EVALUATOR_MESSAGES_MAX}
                 onClick={() =>
                   setDraft((d) => ({
                     ...d,
@@ -617,7 +627,7 @@ function EvaluatorForm({
             <div className="grid gap-gutter sm:grid-cols-2">
               <div className="grid gap-2">
                 <Label htmlFor={`${id}score`}>Score name</Label>
-                <Input id={`${id}score`} value={score.name} onChange={(e) => setScore({ name: e.target.value })} maxLength={64} spellCheck={false} />
+                <Input id={`${id}score`} value={score.name} onChange={(e) => setScore({ name: e.target.value })} maxLength={SCORE_NAME_MAX} spellCheck={false} />
               </div>
               <div className="grid gap-2">
                 <Label htmlFor={`${id}type`}>Type</Label>
@@ -664,11 +674,11 @@ function EvaluatorForm({
               <div className="grid gap-gutter sm:grid-cols-2">
                 <div className="grid gap-2">
                   <Label htmlFor={`${id}yes`}>Yes means</Label>
-                  <Input id={`${id}yes`} value={score.high_means} onChange={(e) => setScore({ high_means: e.target.value })} maxLength={500} />
+                  <Input id={`${id}yes`} value={score.high_means} onChange={(e) => setScore({ high_means: e.target.value })} maxLength={EVALUATOR_MEANS_MAX} />
                 </div>
                 <div className="grid gap-2">
                   <Label htmlFor={`${id}no`}>No means</Label>
-                  <Input id={`${id}no`} value={score.low_means} onChange={(e) => setScore({ low_means: e.target.value })} maxLength={500} />
+                  <Input id={`${id}no`} value={score.low_means} onChange={(e) => setScore({ low_means: e.target.value })} maxLength={EVALUATOR_MEANS_MAX} />
                 </div>
               </div>
             )}
@@ -681,7 +691,7 @@ function EvaluatorForm({
                       <Input
                         id={`${id}cat${at}`}
                         value={category.name}
-                        maxLength={64}
+                        maxLength={SCORE_CATEGORY_MAX}
                         spellCheck={false}
                         onChange={(e) =>
                           setScore({ categories: score.categories.map((c, i) => (i === at ? { ...c, name: e.target.value } : c)) })
@@ -693,7 +703,7 @@ function EvaluatorForm({
                       <Input
                         id={`${id}means${at}`}
                         value={category.means}
-                        maxLength={500}
+                        maxLength={EVALUATOR_MEANS_MAX}
                         onChange={(e) =>
                           setScore({ categories: score.categories.map((c, i) => (i === at ? { ...c, means: e.target.value } : c)) })
                         }
@@ -715,7 +725,7 @@ function EvaluatorForm({
                     type="button"
                     variant="outline"
                     size="sm"
-                    disabled={score.categories.length >= 10}
+                    disabled={score.categories.length >= SCORE_CATEGORIES_MAX}
                     onClick={() => setScore({ categories: [...score.categories, { name: "", means: "" }] })}
                   >
                     Add a category
@@ -762,7 +772,7 @@ function EvaluatorForm({
             value={draft.model}
             onChange={(e) => set({ model: e.target.value })}
             placeholder="The connection's first"
-            maxLength={128}
+            maxLength={MODEL_CONNECTION_MODEL_MAX}
             spellCheck={false}
           />
         </div>
@@ -874,7 +884,7 @@ function Ends({
             onValue(e.target.value.trim() === "" || !Number.isFinite(n) ? null : n);
           }}
         />
-        <Input aria-label={`What the ${label.toLowerCase()} means`} value={means} onChange={(e) => onMeans(e.target.value)} maxLength={500} />
+        <Input aria-label={`What the ${label.toLowerCase()} means`} value={means} onChange={(e) => onMeans(e.target.value)} maxLength={EVALUATOR_MEANS_MAX} />
       </div>
     </div>
   );
@@ -928,7 +938,7 @@ function TypedFields({ id, draft, set }: { id: string; draft: Draft; set: (chang
             type="button"
             variant="outline"
             size="sm"
-            disabled={draft.questions.length >= 16}
+            disabled={draft.questions.length >= TYPED_QUESTIONS_MAX}
             onClick={() => set({ questions: [...draft.questions, blankQuestion("noul")] })}
           >
             Add a question
@@ -961,7 +971,7 @@ function QuestionFields({
           <Input
             id={`${id}name`}
             value={question.name}
-            maxLength={64}
+            maxLength={SCORE_NAME_MAX}
             spellCheck={false}
             onChange={(e) => onChange({ ...question, name: e.target.value })}
           />
@@ -987,7 +997,7 @@ function QuestionFields({
         <Input
           id={`${id}instructions`}
           value={question.instructions}
-          maxLength={4000}
+          maxLength={TYPED_INSTRUCTIONS_MAX}
           onChange={(e) => onChange({ ...question, instructions: e.target.value })}
         />
       </div>
@@ -996,11 +1006,11 @@ function QuestionFields({
           <p className="text-muted-foreground sm:col-span-2">What yes and no mean: both, or neither.</p>
           <div className="grid gap-2">
             <Label htmlFor={`${id}yes`}>Yes means</Label>
-            <Input id={`${id}yes`} value={question.yes_means} maxLength={500} onChange={(e) => onChange({ ...question, yes_means: e.target.value })} />
+            <Input id={`${id}yes`} value={question.yes_means} maxLength={EVALUATOR_MEANS_MAX} onChange={(e) => onChange({ ...question, yes_means: e.target.value })} />
           </div>
           <div className="grid gap-2">
             <Label htmlFor={`${id}no`}>No means</Label>
-            <Input id={`${id}no`} value={question.no_means} maxLength={500} onChange={(e) => onChange({ ...question, no_means: e.target.value })} />
+            <Input id={`${id}no`} value={question.no_means} maxLength={EVALUATOR_MEANS_MAX} onChange={(e) => onChange({ ...question, no_means: e.target.value })} />
           </div>
         </div>
       )}
@@ -1013,7 +1023,7 @@ function QuestionFields({
                 <Input
                   id={`${id}level${at}`}
                   value={level}
-                  maxLength={500}
+                  maxLength={EVALUATOR_MEANS_MAX}
                   onChange={(e) => onChange({ ...question, levels: question.levels.map((l, i) => (i === at ? e.target.value : l)) })}
                 />
               </div>
@@ -1033,7 +1043,7 @@ function QuestionFields({
               type="button"
               variant="outline"
               size="sm"
-              disabled={question.levels.length >= 10}
+              disabled={question.levels.length >= TYPED_LEVELS_MAX}
               onClick={() => onChange({ ...question, levels: [...question.levels, ""] })}
             >
               Add a level
@@ -1050,7 +1060,7 @@ function QuestionFields({
                 <Input
                   id={`${id}option${at}`}
                   value={option.name}
-                  maxLength={64}
+                  maxLength={SCORE_CATEGORY_MAX}
                   spellCheck={false}
                   onChange={(e) =>
                     onChange({ ...question, options: question.options.map((o, i) => (i === at ? { ...o, name: e.target.value } : o)) })
@@ -1062,7 +1072,7 @@ function QuestionFields({
                 <Input
                   id={`${id}optionMeans${at}`}
                   value={option.means}
-                  maxLength={500}
+                  maxLength={EVALUATOR_MEANS_MAX}
                   onChange={(e) =>
                     onChange({ ...question, options: question.options.map((o, i) => (i === at ? { ...o, means: e.target.value } : o)) })
                   }
@@ -1084,7 +1094,7 @@ function QuestionFields({
               type="button"
               variant="outline"
               size="sm"
-              disabled={question.options.length >= 255}
+              disabled={question.options.length >= TYPED_OPTIONS_MAX}
               onClick={() => onChange({ ...question, options: [...question.options, { name: "", means: "" }] })}
             >
               Add an option

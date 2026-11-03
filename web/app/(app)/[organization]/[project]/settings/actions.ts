@@ -8,6 +8,12 @@ import { type ActionResult, refused } from "@/lib/action-result";
 import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
 import { NOT_A_CODE, isConfirmationCode } from "@/lib/confirmation-code";
 import { env } from "@/lib/env";
+import {
+  MODEL_CONNECTION_MODEL_MAX,
+  MODEL_CONNECTION_MODELS_MAX,
+  MODEL_CONNECTION_NAME_MAX,
+  MODEL_CONNECTION_SECRET_MAX,
+} from "@/lib/evaluators";
 import { organizationChannel, publishEvent } from "@/lib/events/publisher";
 import { checkProjectName } from "@/lib/names";
 import { admitProject } from "@/lib/server/admit";
@@ -198,13 +204,13 @@ export async function saveModelPricesAction(
 /** What a model connection's save sends, before the server checks its every rule. */
 const ConnectionInputSchema = z.object({
   id: z.guid().optional(),
-  name: z.string().min(1).max(60),
+  name: z.string().min(1).max(MODEL_CONNECTION_NAME_MAX),
   provider: z.enum(ModelProvider),
   base_url: z.string().max(2048).optional(),
   region: z.string().max(32).optional(),
-  models: z.array(z.string().max(128)).min(1).max(20),
+  models: z.array(z.string().max(MODEL_CONNECTION_MODEL_MAX)).min(1).max(MODEL_CONNECTION_MODELS_MAX),
   is_default: z.boolean(),
-  secret: z.string().max(16_384).optional(),
+  secret: z.string().max(MODEL_CONNECTION_SECRET_MAX).optional(),
 });
 
 /** A model connection made or changed, proved by one small request first: the provider's refusal is the answer. */

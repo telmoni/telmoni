@@ -30,15 +30,31 @@ use telmoni_shared::{
     TraceColumn, TraceSort, UserColumn, UserSort, ViewKind, slug,
 };
 use telmoni_telemetry::content::FILE_ID_PREFIX;
-use telmoni_telemetry::contract::{CONTENT, UTC_OFFSET_RANGE};
+use telmoni_telemetry::contract::{CONTENT, NAME_MAX as SPAN_NAME_MAX, UTC_OFFSET_RANGE};
+use telmoni_telemetry::evaluators::typed::{
+    INSTRUCTIONS_MAX, LEVELS_MAX, OPTIONS_MAX, QUESTIONS_MAX,
+};
+use telmoni_telemetry::evaluators::{
+    MEANS_MAX, MESSAGE_MAX, MESSAGES_MAX, NAME_MAX as EVALUATOR_NAME_MAX, PromptRole,
+};
+use telmoni_telemetry::handler::evaluation_rules::{
+    EVALUATORS_MAX as RULE_EVALUATORS_MAX, NAME_MAX as EVALUATION_RULE_NAME_MAX, POINTER_MAX,
+};
+use telmoni_telemetry::handler::evaluators::{TEMPERATURE_MAX, WEEKLY_LIMIT_MAX};
 use telmoni_telemetry::handler::incidents::INCIDENTS_MAX;
+use telmoni_telemetry::handler::model_connections::{
+    MODEL_MAX, MODELS_MAX, NAME_MAX as CONNECTION_NAME_MAX, SECRET_MAX,
+};
 use telmoni_telemetry::handler::traces::FILTER_VALUE_MAX;
-use telmoni_telemetry::handler::views::DASHBOARD_CHARTS_MAX;
+use telmoni_telemetry::handler::views::{DASHBOARD_CHARTS_MAX, VIEW_NAME_MAX};
 use telmoni_telemetry::live;
 use telmoni_telemetry::rollups::GROUP_TOP;
 use telmoni_telemetry::rules::db::PausedBy;
 use telmoni_telemetry::rules::mutes::MUTE_DAYS_MAX;
 use telmoni_telemetry::rules::{LINKS_MAX, RENOTIFY_MAX_MINUTES, RULE_NAME_MAX};
+use telmoni_telemetry::scores::{
+    CATEGORIES_MAX, CATEGORY_MAX, COMMENT_MAX, NAME_MAX as SCORE_NAME_MAX,
+};
 use telmoni_telemetry::traces::{
     DEFAULT_DAYS, EXPORT_MAX, FILTER_VALUES_MAX, MAX_DAYS, MAX_LIMIT, MAX_PAGE, PINNED_MAX,
     PINNED_PER_RUN, RUNS_MAX,
@@ -137,6 +153,7 @@ fn generated_contract() -> Value {
             "AgentMessageRole": wire::<MessageRole>(),
             "AgentTurnEvent": wire::<TurnEventKind>(),
             "ContentField": CONTENT,
+            "PromptRole": wire::<PromptRole>(),
         },
         "flags": {
             "global_only": Flag::all().iter().filter(|f| f.is_global_only())
@@ -188,6 +205,29 @@ fn generated_contract() -> Value {
             "trace_question_max": SENTENCE_MAX_CHARS,
             "audit_export_kept_days": KEEP_FOR_SECS / 86_400,
             "confirmation_code_length": CODE_DIGITS,
+            "view_name_max": VIEW_NAME_MAX,
+            "span_name_max": SPAN_NAME_MAX,
+            "score_name_max": SCORE_NAME_MAX,
+            "score_comment_max": COMMENT_MAX,
+            "score_categories_max": CATEGORIES_MAX,
+            "score_category_max": CATEGORY_MAX,
+            "evaluator_name_max": EVALUATOR_NAME_MAX,
+            "evaluator_messages_max": MESSAGES_MAX,
+            "evaluator_message_max": MESSAGE_MAX,
+            "evaluator_means_max": MEANS_MAX,
+            "evaluator_temperature_max": TEMPERATURE_MAX,
+            "evaluator_weekly_limit_max": WEEKLY_LIMIT_MAX,
+            "typed_questions_max": QUESTIONS_MAX,
+            "typed_levels_max": LEVELS_MAX,
+            "typed_options_max": OPTIONS_MAX,
+            "typed_instructions_max": INSTRUCTIONS_MAX,
+            "evaluation_rule_name_max": EVALUATION_RULE_NAME_MAX,
+            "evaluation_rule_evaluators_max": RULE_EVALUATORS_MAX,
+            "evaluation_rule_pointer_max": POINTER_MAX,
+            "model_connection_name_max": CONNECTION_NAME_MAX,
+            "model_connection_model_max": MODEL_MAX,
+            "model_connection_models_max": MODELS_MAX,
+            "model_connection_secret_max": SECRET_MAX,
         },
         "rules": { "folds": rule_folds(), "measures": rule_measures() },
     })

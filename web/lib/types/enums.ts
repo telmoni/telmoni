@@ -537,6 +537,14 @@ export const ContentField = {
 } as const;
 export type ContentField = typeof ContentField[keyof typeof ContentField];
 
+/** Wire vocabulary of the Rust `PromptRole`: who says a prompt evaluator's message. */
+export const PromptRole = {
+  System:    "system",
+  User:      "user",
+  Assistant: "assistant",
+} as const;
+export type PromptRole = typeof PromptRole[keyof typeof PromptRole];
+
 /** Wire vocabulary of the Rust agent `MessageRole`: who wrote a message. */
 export const AgentMessageRole = {
   User:      "user",

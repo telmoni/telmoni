@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { MODEL_CONNECTION_NAME_MAX } from "@/lib/evaluators";
 import type { ModelConnection } from "@/lib/server/entities/model-connections";
 import { ModelProvider } from "@/lib/types/enums";
 import { useAction } from "@/lib/use-action";
@@ -190,7 +191,7 @@ function ConnectionForm({
     >
       <div className="grid gap-2">
         <Label htmlFor={`${id}name`}>Name</Label>
-        <Input id={`${id}name`} value={name} onChange={(e) => setName(e.target.value)} maxLength={60} />
+        <Input id={`${id}name`} value={name} onChange={(e) => setName(e.target.value)} maxLength={MODEL_CONNECTION_NAME_MAX} />
       </div>
       <div className="grid gap-2">
         <Label htmlFor={`${id}provider`}>Provider</Label>

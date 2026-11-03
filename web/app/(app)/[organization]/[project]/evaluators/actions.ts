@@ -14,53 +14,79 @@ import {
   type Tried,
   TriedSchema,
 } from "@/lib/server/entities/evaluators";
+import {
+  EVALUATION_RULE_EVALUATORS_MAX,
+  EVALUATION_RULE_NAME_MAX,
+  EVALUATION_RULE_POINTER_MAX,
+  EVALUATOR_MEANS_MAX as MEANS,
+  EVALUATOR_MESSAGE_MAX,
+  EVALUATOR_MESSAGES_MAX,
+  EVALUATOR_NAME_MAX,
+  EVALUATOR_TEMPERATURE_MAX,
+  EVALUATOR_WEEKLY_LIMIT_MAX,
+  MODEL_CONNECTION_MODEL_MAX,
+  TYPED_INSTRUCTIONS_MAX,
+  TYPED_LEVELS_MAX,
+  TYPED_OPTIONS_MAX,
+  TYPED_QUESTIONS_MAX,
+} from "@/lib/evaluators";
+import { SCORE_CATEGORIES_MAX, SCORE_CATEGORY_MAX } from "@/lib/scores";
 import { ViewQuerySchema } from "@/lib/server/entities/traces";
+import { SCORE_NAME_MAX, SPAN_NAME_MAX } from "@/lib/traces";
 import { EvaluationTarget, ScoreType, SpanKind } from "@/lib/types/enums";
 
 const Common = {
   id: z.guid().optional(),
-  name: z.string().min(1).max(60),
+  name: z.string().min(1).max(EVALUATOR_NAME_MAX),
   connection_id: z.guid().nullable(),
-  model: z.string().max(128).nullable(),
-  weekly_limit: z.number().positive().max(1_000_000).nullable(),
+  model: z.string().max(MODEL_CONNECTION_MODEL_MAX).nullable(),
+  weekly_limit: z.number().positive().max(EVALUATOR_WEEKLY_LIMIT_MAX).nullable(),
 };
 
-const Asked = { name: z.string().min(1).max(64), instructions: z.string().min(1).max(4_000) };
+const Asked = { name: z.string().min(1).max(SCORE_NAME_MAX), instructions: z.string().min(1).max(TYPED_INSTRUCTIONS_MAX) };
 
 const QuestionInputSchema = z.discriminatedUnion("type", [
-  z.object({ ...Asked, type: z.literal("noul"), yes_means: z.string().max(500), no_means: z.string().max(500) }),
-  z.object({ ...Asked, type: z.literal("score"), levels: z.array(z.string().min(1).max(500)).min(2).max(10) }),
+  z.object({ ...Asked, type: z.literal("noul"), yes_means: z.string().max(MEANS), no_means: z.string().max(MEANS) }),
+  z.object({ ...Asked, type: z.literal("score"), levels: z.array(z.string().min(1).max(MEANS)).min(2).max(TYPED_LEVELS_MAX) }),
   z.object({
     ...Asked,
     type: z.literal("choice"),
-    options: z.array(z.object({ name: z.string().min(1).max(64), means: z.string().max(500) })).min(2).max(255),
+    options: z
+      .array(z.object({ name: z.string().min(1).max(SCORE_CATEGORY_MAX), means: z.string().max(MEANS) }))
+      .min(2)
+      .max(TYPED_OPTIONS_MAX),
   }),
 ]);
 
 const TypedInputSchema = z.object({
   ...Common,
   kind: z.literal("typed"),
-  state: z.string().min(1).max(20_000),
-  questions: z.array(QuestionInputSchema).min(1).max(16),
+  state: z.string().min(1).max(EVALUATOR_MESSAGE_MAX),
+  questions: z.array(QuestionInputSchema).min(1).max(TYPED_QUESTIONS_MAX),
 });
 
 const PromptInputSchema = z.object({
   ...Common,
   kind: z.literal("prompt"),
-  messages: z.array(PromptMessageSchema.extend({ content: z.string().max(20_000) })).min(1).max(20),
+  messages: z
+    .array(PromptMessageSchema.extend({ content: z.string().max(EVALUATOR_MESSAGE_MAX) }))
+    .min(1)
+    .max(EVALUATOR_MESSAGES_MAX),
   score: z.object({
-    name: z.string().min(1).max(64),
+    name: z.string().min(1).max(SCORE_NAME_MAX),
     data_type: z.enum(ScoreType),
     range_min: z.number().nullable(),
     range_max: z.number().nullable(),
-    low_means: z.string().max(500),
-    high_means: z.string().max(500),
-    categories: z.array(z.object({ name: z.string().max(64), means: z.string().max(500) })).max(10),
+    low_means: z.string().max(MEANS),
+    high_means: z.string().max(MEANS),
+    categories: z
+      .array(z.object({ name: z.string().max(SCORE_CATEGORY_MAX), means: z.string().max(MEANS) }))
+      .max(SCORE_CATEGORIES_MAX),
     multiple: z.boolean(),
   }),
   reasoning: z.boolean(),
   media: z.boolean(),
-  temperature: z.number().min(0).max(2).nullable(),
+  temperature: z.number().min(0).max(EVALUATOR_TEMPERATURE_MAX).nullable(),
 });
 
 const EvaluatorInputSchema = z.discriminatedUnion("kind", [PromptInputSchema, TypedInputSchema]);
@@ -130,14 +156,14 @@ export async function deleteEvaluatorAction(projectId: string, id: string): Prom
 
 const RuleInputSchema = z.object({
   id: z.guid().optional(),
-  name: z.string().min(1).max(60),
+  name: z.string().min(1).max(EVALUATION_RULE_NAME_MAX),
   target: z.enum(EvaluationTarget),
   span_kind: z.enum(SpanKind).nullable(),
-  span_name: z.string().max(200).nullable(),
+  span_name: z.string().max(SPAN_NAME_MAX).nullable(),
   query: ViewQuerySchema,
   sample_rate: z.number().gt(0).max(1),
-  pointers: z.record(z.string(), z.string().max(200)),
-  evaluators: z.array(z.guid()).min(1).max(10),
+  pointers: z.record(z.string(), z.string().max(EVALUATION_RULE_POINTER_MAX)),
+  evaluators: z.array(z.guid()).min(1).max(EVALUATION_RULE_EVALUATORS_MAX),
   enabled: z.boolean(),
   backfill_from: z.iso.datetime().nullable(),
 });

@@ -1,15 +1,14 @@
 import { cache } from "react";
 import { z } from "zod";
 
-import { EvaluationStatus, EvaluationTarget, ScoreType, SpanKind } from "@/lib/types/enums";
+import { EvaluationStatus, EvaluationTarget, PromptRole, ScoreType, SpanKind } from "@/lib/types/enums";
 
 import { valueOf } from "./read";
 import { ViewQuerySchema, readLane } from "./traces";
 
 // An evaluator as the lanes answer it: its prompt, the score it gives with
 // each end or category described for the model, and the model it judges with.
-export const PromptRoleSchema = z.enum(["system", "user", "assistant"]);
-export type PromptRole = z.infer<typeof PromptRoleSchema>;
+export const PromptRoleSchema = z.enum(PromptRole);
 
 export const PromptMessageSchema = z.object({ role: PromptRoleSchema, content: z.string() });
 export type PromptMessage = z.infer<typeof PromptMessageSchema>;
