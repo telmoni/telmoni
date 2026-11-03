@@ -99,6 +99,7 @@ fn call_from(spec: &Value) -> Result<CallRecord, Failure> {
             output_messages: None,
             error_type: optional_text(call, "error_type")?,
             cancelled: flag(call, "cancelled")?,
+            scores: Vec::new(),
         }));
     }
     let tool = field(spec, "tool_call")?;
@@ -110,6 +111,7 @@ fn call_from(spec: &Value) -> Result<CallRecord, Failure> {
         end: at(text(tool, "end")?)?,
         error_type: optional_text(tool, "error_type")?,
         cancelled: flag(tool, "cancelled")?,
+        scores: Vec::new(),
     }))
 }
 
@@ -137,6 +139,7 @@ fn record_from(spec: &Value) -> Result<RunRecord, Failure> {
             calls,
             error_type: optional_text(step, "error_type")?,
             cancelled: flag(step, "cancelled")?,
+            scores: Vec::new(),
         }));
     }
     let tags = spec
@@ -159,6 +162,7 @@ fn record_from(spec: &Value) -> Result<RunRecord, Failure> {
         inside,
         error_type: optional_text(spec, "error_type")?,
         cancelled: flag(spec, "cancelled")?,
+        scores: Vec::new(),
     })
 }
 

@@ -3,8 +3,8 @@
 It takes content off every span unless the code asked and the project's mode
 allows, puts each image or file a message carries to
 ``PUT {endpoint}/v1/media/{sha256}`` where it sends content, sends to
-``POST {endpoint}/otlp/v1/traces``, waits out a
-``Retry-After``, and reads ``Telmoni-Content-Mode`` and the partial success
+``POST {endpoint}/otlp/v1/traces``, posts the late scores the batch carries
+to ``POST {endpoint}/v1/scores``, waits out a ``Retry-After``, and reads ``Telmoni-Content-Mode`` and the partial success
 from each answer, warning once for each attribute an answer names dropped.
 """
 
@@ -340,6 +340,7 @@ class Exporter:
         self._sleep = sleep or self._wait_out
         self._url = f"{config.endpoint}/otlp/v1/traces"
         self._media_url = f"{config.endpoint}{contract.MEDIA_PATH}"
+        self._scores_url = f"{config.endpoint}{contract.SCORES_PATH}"
         # Only the worker exports, so the set needs no lock.
         self._uploaded: set[str] = set()
         self._content_mode: str | None = None
@@ -398,6 +399,11 @@ class Exporter:
     def export(self, spans: Sequence[ReadableSpan]) -> bool:
         """Sends the spans, halved past ingest's caps; false once they failed for a
         reason not their own, which the rest of a batch they are part of would meet."""
+        # Late scores first, never spans: no mask, lift or ask sees them.
+        sent = [text for span in spans if (text := _score_sent(span)) is not None]
+        if sent:
+            spans = [s for s in spans if _score_sent(s) is None]
+            self._send_scores(sent)
         if not spans:
             return True
         # Yet to hear the project's mode, a client asks it first, so a process
@@ -510,7 +516,8 @@ class Exporter:
         for event in span.events:
             kept: dict[str, Any] = {}
             for key, value in (event.attributes or {}).items():
-                value = self._masked(key, value)
+                if not _is_score_key(event, key):
+                    value = self._masked(key, value)
                 if value is not _MASKED_OUT:
                     kept[key] = value
             events.append(Event(event.name, kept, event.timestamp))
@@ -691,17 +698,37 @@ class Exporter:
             self._read(answer)
 
     def _send(self, body: bytes) -> bool:
+        answer = self._post(self._url, body, "export", "the batch was dropped")
+        if answer is None:
+            return False
+        if 200 <= answer.status < 300:
+            self._read(answer)
+            return True
+        # Refused for what it holds, the rest of a batch may still go.
+        return answer.status in (400, 413)
+
+    def _send_scores(self, sent: Sequence[str]) -> None:
+        """Posts each item, in order, in bodies of up to ``SCORES_SENT_MAX``."""
+        for at in range(0, len(sent), contract.SCORES_SENT_MAX):
+            items = ",".join(sent[at : at + contract.SCORES_SENT_MAX])
+            body = replace_surrogates(f'{{"scores":[{items}]}}').encode()
+            self._post(self._scores_url, body, "scores", "they were dropped")
+
+    def _post(self, url: str, body: bytes, what: str, lost: str) -> Answer | None:
+        """``body`` posted up to ``ATTEMPTS`` times, each retried status waited
+        out: the answer that ended it, a 2xx or a refusal warned of, else None
+        once given up or failed, warned of in ``what``'s and ``lost``'s words."""
         headers = self._headers()
         failure = ""
         # The last attempt's, as its words name it: none after a transport fault.
         last = WarningInfo("failed")
         for attempt in range(ATTEMPTS):
             if self._given_up.is_set():
-                return False
+                return None
             # This clock as the attempt leaves, the spans' own.
             sent = {**headers, contract.SENT_AT_HEADER: str(time.time_ns())}
             try:
-                answer = self._transport("POST", self._url, sent, body)
+                answer = self._transport("POST", url, sent, body)
             except (OSError, http.client.HTTPException) as error:
                 # No status came: a transport fault the next attempt may not meet.
                 failure = type(error).__name__
@@ -709,8 +736,7 @@ class Exporter:
                 self._wait(None, attempt)
                 continue
             if 200 <= answer.status < 300:
-                self._read(answer)
-                return True
+                return answer
             problem = _problem_type(answer.body)
             if answer.status in _RETRIED:
                 failure = _named(answer.status, problem)
@@ -718,20 +744,18 @@ class Exporter:
                 self._wait(answer.header("Retry-After"), attempt)
                 continue
             self.warn_once(
-                f"status:{answer.status}",
-                f"telmoni: export refused with {_named(answer.status, problem)}; "
-                "the batch was dropped",
+                f"{what}:status:{answer.status}",
+                f"telmoni: {what} refused with {_named(answer.status, problem)}; "
+                f"{lost}",
                 WarningInfo("refused", answer.status, problem or None),
             )
-            # Refused for what it holds, the rest of a batch may still go.
-            return answer.status in (400, 413)
+            return answer
         self.warn_once(
-            f"failed:{failure}",
-            f"telmoni: export failed after {ATTEMPTS} attempts ({failure}); "
-            "the batch was dropped",
+            f"{what}:failed:{failure}",
+            f"telmoni: {what} failed after {ATTEMPTS} attempts ({failure}); {lost}",
             last,
         )
-        return False
+        return None
 
     def encode(
         self,
@@ -796,18 +820,22 @@ class Exporter:
         # Events and the status message carry an exception's message and stack
         # trace: content, and the first to go from a span trimmed to fit.
         events = keep_content and not trimmed
-        if events and span.events:
-            encoded["events"] = [
-                {
-                    "timeUnixNano": _nanos(event.timestamp),
-                    "name": event.name,
-                    "attributes": [
-                        _attribute(key, value)
-                        for key, value in (event.attributes or {}).items()
-                    ],
-                }
-                for event in span.events
-            ]
+        # A score's own keys are no content: its event goes with them alone.
+        sent = [
+            {
+                "timeUnixNano": _nanos(event.timestamp),
+                "name": event.name,
+                "attributes": [
+                    _attribute(key, value)
+                    for key, value in (event.attributes or {}).items()
+                    if events or _is_score_key(event, key)
+                ],
+            }
+            for event in span.events
+            if events or event.name == contract.EVALUATION_EVENT
+        ]
+        if sent:
+            encoded["events"] = sent
         if span.status.status_code is StatusCode.ERROR:
             encoded["status"] = {"code": 2}
             if events and span.status.description:
@@ -911,12 +939,22 @@ _ASK = b'{"resourceSpans":[]}'
 
 def _holds_content(span: ReadableSpan) -> bool:
     """Whether a span holds anything the content lock decides on: a content
-    field, an event or a status message."""
+    field, an event's attribute but a score's own, or a status message."""
     return (
         any(key in contract.CONTENT for key in span.attributes or {})
-        or bool(span.events)
+        or any(
+            not _is_score_key(event, key)
+            for event in span.events
+            for key in (event.attributes or {}) or ("",)
+        )
         or bool(span.status.description)
     )
+
+
+def _is_score_key(event: Event, key: str) -> bool:
+    """Whether ``key`` is a score's own on an evaluation event, which ingest
+    reads the score from and which leaves under no lock."""
+    return event.name == contract.EVALUATION_EVENT and key in contract.SCORE_KEYS
 
 
 def _named(status: int, problem: str) -> str:
@@ -979,3 +1017,12 @@ def _attribute(key: str, value: object) -> dict[str, Any]:
     else:
         encoded = {"stringValue": str(value)}
     return {"key": key, "value": encoded}
+
+
+def _score_sent(span: ReadableSpan) -> str | None:
+    """The ``/v1/scores`` item a late score's span carries: the client's own
+    root span, so no application's attribute diverts a span."""
+    if span.name != contract.SCORE_SPAN or span.parent is not None:
+        return None
+    text = (span.attributes or {}).get(contract.SCORE_SENT)
+    return text if isinstance(text, str) else None

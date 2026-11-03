@@ -51,6 +51,7 @@ pub enum ContentMode {
 pub(crate) struct Exporter {
     url: String,
     media_url: String,
+    scores_url: String,
     /// Why nothing is sent to the endpoint ([`refusal`]), which the first
     /// export says.
     refusal: Option<String>,
@@ -81,6 +82,7 @@ impl Exporter {
         Self {
             url: format!("{}/otlp/v1/traces", config.endpoint),
             media_url: format!("{}{}", config.endpoint, contract::MEDIA_PATH),
+            scores_url: format!("{}{}", config.endpoint, contract::SCORES_PATH),
             refusal: refusal(&config.endpoint),
             bearer: config.api_key.clone(),
             capture_content: config.capture_content,
@@ -115,6 +117,18 @@ impl Exporter {
     pub(crate) fn export(&self, spans: &[SpanData]) -> bool {
         if spans.is_empty() {
             return true;
+        }
+        // A score sent once its span ended rides the queue on a span of its
+        // own, which leaves as `/v1/scores`' item and never as a span.
+        if self.refusal.is_none() && spans.iter().any(|span| score_sent(span).is_some()) {
+            let items: Vec<&str> = spans.iter().filter_map(score_sent).collect();
+            let rest: Vec<SpanData> = spans
+                .iter()
+                .filter(|span| score_sent(span).is_none())
+                .cloned()
+                .collect();
+            self.send_scores(&items);
+            return self.export(&rest);
         }
         if let Some(refusal) = &self.refusal {
             self.warner.once(
@@ -233,13 +247,47 @@ impl Exporter {
                 }
             }
         }
+        match self.post(&self.url, &body) {
+            Posted::Kept(answer) => {
+                self.read(&answer);
+                true
+            }
+            Posted::GaveUp => false,
+            Posted::Refused(status, problem) => {
+                self.warner.once(
+                    format!("status:{status}"),
+                    &format!(
+                        "telmoni: export refused with {}; the batch was dropped",
+                        named(status, &problem),
+                    ),
+                    answered(WarningKind::Refused, Some((status, problem))),
+                );
+                // Refused for what it holds, the rest of a batch may still go.
+                status == 400 || status == 413
+            }
+            Posted::Failed(failure, last) => {
+                self.warner.once(
+                    format!("failed:{failure}"),
+                    &format!(
+                        "telmoni: export failed after {ATTEMPTS} attempts ({failure}); the batch was dropped"
+                    ),
+                    answered(WarningKind::Failed, last),
+                );
+                false
+            }
+        }
+    }
+
+    /// Posts `body` to `url` as JSON, each attempt stamped with this clock,
+    /// retrying what a busy or restarting platform answers.
+    fn post(&self, url: &str, body: &[u8]) -> Posted {
         let headers = self.headers();
         let mut failure = String::new();
         // The last attempt's alone, as the line names it.
         let mut last: Option<(u16, String)> = None;
         for attempt in 0..ATTEMPTS {
             if self.gave_up() {
-                return false;
+                return Posted::GaveUp;
             }
             // This clock as the attempt leaves, the spans' own.
             let mut sent = headers.clone();
@@ -247,7 +295,7 @@ impl Exporter {
                 contract::SENT_AT_HEADER.to_owned(),
                 nanos(std::time::SystemTime::now()),
             ));
-            let answer = match self.transport.send(Method::Post, &self.url, &sent, &body) {
+            let answer = match self.transport.send(Method::Post, url, &sent, body) {
                 Ok(answer) => answer,
                 Err(error) => {
                     failure = error.name;
@@ -257,8 +305,7 @@ impl Exporter {
                 }
             };
             if (200..300).contains(&answer.status) {
-                self.read(&answer);
-                return true;
+                return Posted::Kept(answer);
             }
             let problem = problem_type(&answer.body);
             if RETRIED.contains(&answer.status) {
@@ -267,25 +314,42 @@ impl Exporter {
                 self.wait(answer.header("Retry-After"), attempt);
                 continue;
             }
-            self.warner.once(
-                format!("status:{}", answer.status),
-                &format!(
-                    "telmoni: export refused with {}; the batch was dropped",
-                    named(answer.status, &problem),
-                ),
-                answered(WarningKind::Refused, Some((answer.status, problem))),
-            );
-            // Refused for what it holds, the rest of a batch may still go.
-            return answer.status == 400 || answer.status == 413;
+            return Posted::Refused(answer.status, problem);
         }
-        self.warner.once(
-            format!("failed:{failure}"),
-            &format!(
-                "telmoni: export failed after {ATTEMPTS} attempts ({failure}); the batch was dropped"
-            ),
-            answered(WarningKind::Failed, last),
-        );
-        false
+        Posted::Failed(failure, last)
+    }
+
+    /// Sends the scores `items` hold to `/v1/scores`, a hundred a body; a
+    /// body refused or failed is dropped with one warning, and the rest go.
+    fn send_scores(&self, items: &[&str]) {
+        for chunk in items.chunks(contract::SCORES_SENT_MAX) {
+            let scores: Vec<serde_json::Value> = chunk
+                .iter()
+                .filter_map(|item| serde_json::from_str(item).ok())
+                .collect();
+            let Ok(body) = serde_json::to_vec(&json!({ "scores": scores })) else {
+                continue;
+            };
+            match self.post(&self.scores_url, &body) {
+                Posted::Kept(_) => {}
+                Posted::GaveUp => return,
+                Posted::Refused(status, problem) => self.warner.once(
+                    format!("scores-status:{status}"),
+                    &format!(
+                        "telmoni: scores refused with {}; they were dropped",
+                        named(status, &problem),
+                    ),
+                    answered(WarningKind::Refused, Some((status, problem))),
+                ),
+                Posted::Failed(failure, last) => self.warner.once(
+                    format!("scores-failed:{failure}"),
+                    &format!(
+                        "telmoni: scores failed after {ATTEMPTS} attempts ({failure}); they were dropped"
+                    ),
+                    answered(WarningKind::Failed, last),
+                ),
+            }
+        }
     }
 
     /// Exports each half of `spans`, the second only where the first went.
@@ -316,9 +380,16 @@ impl Exporter {
                     })
                     .collect();
                 for event in &mut span.events.events {
+                    let score = is_score(event);
                     event.attributes = std::mem::take(&mut event.attributes)
                         .into_iter()
-                        .filter_map(|attribute| self.masked(mask, attribute))
+                        .filter_map(|attribute| {
+                            if score && is_score_key(&attribute) {
+                                Some(attribute)
+                            } else {
+                                self.masked(mask, attribute)
+                            }
+                        })
                         .collect();
                 }
                 if let Status::Error { description } = &span.status
@@ -592,27 +663,27 @@ impl Exporter {
             });
         }
         // Events and the status message carry an exception's message: content,
-        // and the first to go from a span trimmed to fit.
+        // and the first to go from a span trimmed to fit. A score's own keys
+        // are metadata, sent in every mode.
         let kept = keep_content && !trimmed;
-        let events = if kept {
-            span.events
-                .iter()
-                .map(|event| OtlpEvent {
-                    time_unix_nano: nanos(event.timestamp),
-                    name: &event.name,
-                    attributes: event
-                        .attributes
-                        .iter()
-                        .map(|attribute| OtlpAttribute {
-                            key: attribute.key.as_str(),
-                            value: any_value(&attribute.value),
-                        })
-                        .collect(),
-                })
-                .collect()
-        } else {
-            Vec::new()
-        };
+        let events = span
+            .events
+            .iter()
+            .filter(|event| kept || is_score(event))
+            .map(|event| OtlpEvent {
+                time_unix_nano: nanos(event.timestamp),
+                name: &event.name,
+                attributes: event
+                    .attributes
+                    .iter()
+                    .filter(|attribute| kept || is_score_key(attribute))
+                    .map(|attribute| OtlpAttribute {
+                        key: attribute.key.as_str(),
+                        value: any_value(&attribute.value),
+                    })
+                    .collect(),
+            })
+            .collect();
         let status = match &span.status {
             Status::Error { description } => Some(ErrorStatus {
                 code: 2,
@@ -712,6 +783,41 @@ impl Exporter {
             .unwrap_or(1u64 << attempt);
         (self.sleep)(Duration::from_secs(seconds.min(RETRY_AFTER_MAX_SECS)));
     }
+}
+
+/// What a post came to: kept with its answer, refused with its status and
+/// problem type, failed past its attempts, or given up for a shutdown.
+enum Posted {
+    Kept(Answer),
+    Refused(u16, String),
+    Failed(String, Option<(u16, String)>),
+    GaveUp,
+}
+
+/// Whether `event` is a score, whose own keys are metadata where every other
+/// event attribute is content.
+fn is_score(event: &opentelemetry::trace::Event) -> bool {
+    event.name == contract::EVALUATION_EVENT
+}
+
+/// Whether `attribute` is one of a score's own keys.
+fn is_score_key(attribute: &KeyValue) -> bool {
+    contract::SCORE_KEYS.contains(&attribute.key.as_str())
+}
+
+/// The `/v1/scores` item a score's span carries, where it is one: the
+/// client's own root span, so no application's attribute diverts a span.
+fn score_sent(span: &SpanData) -> Option<&str> {
+    if span.name != contract::SCORE_SPAN || span.parent_span_id != SpanId::INVALID {
+        return None;
+    }
+    span.attributes
+        .iter()
+        .find(|attribute| attribute.key.as_str() == contract::SCORE_SENT)
+        .and_then(|attribute| match &attribute.value {
+            Value::String(item) => Some(item.as_str()),
+            _ => None,
+        })
 }
 
 /// `span <id> dropped <attribute>: <reason>; <rest>`, the rest optional:
@@ -817,7 +923,10 @@ fn holds_content(span: &SpanData) -> bool {
     span.attributes
         .iter()
         .any(|kv| contract::is_content(kv.key.as_str()))
-        || !span.events.is_empty()
+        || span
+            .events
+            .iter()
+            .any(|event| !is_score(event) || event.attributes.iter().any(|kv| !is_score_key(kv)))
         || matches!(&span.status, Status::Error { description } if !description.is_empty())
 }
 

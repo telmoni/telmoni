@@ -57,7 +57,8 @@ var (
 //
 // It takes content off every span unless the code asked and the project's
 // mode allows, puts each image or file a message carries to
-// PUT {endpoint}/v1/media/{sha256} where it sends content, sends to
+// PUT {endpoint}/v1/media/{sha256} where it sends content, posts each late
+// score's carrier to POST {endpoint}/v1/scores instead of as a span, sends to
 // POST {endpoint}/otlp/v1/traces, waits out a
 // Retry-After, and reads Telmoni-Content-Mode and the partial success from
 // each answer, warning once for each attribute an answer names dropped.
@@ -68,6 +69,7 @@ type exporter struct {
 	logger    *slog.Logger
 	url       string
 	mediaURL  string
+	scoresURL string
 	resource  []keyValue
 	// givenUp is done once a shutdown gives up: the request in flight is
 	// cancelled, the wait for a retry ends and no attempt follows.
@@ -98,6 +100,7 @@ func newExporter(cfg Config, transport Transport, sleep func(time.Duration), log
 		logger:    logger,
 		url:       cfg.Endpoint + "/otlp/v1/traces",
 		mediaURL:  cfg.Endpoint + mediaPath,
+		scoresURL: cfg.Endpoint + scoresPath,
 		resource:  resource,
 		givenUp:   givenUp,
 		giveUp:    giveUp,
@@ -161,6 +164,7 @@ type answer struct {
 // export sends spans, halved past ingest's caps; false once they failed for
 // a reason not their own, which the rest of a batch they are part of would meet.
 func (e *exporter) export(spans []sdktrace.ReadOnlySpan) bool {
+	spans = e.sendScores(spans)
 	if len(spans) == 0 {
 		return true
 	}
@@ -196,10 +200,21 @@ func (e *exporter) ask() {
 }
 
 // holdsContent reports whether a span holds anything the content lock decides
-// on: a content field, an event or a status message.
+// on: a content field, an event beyond a score's own keys or a status message.
 func holdsContent(span sdktrace.ReadOnlySpan) bool {
 	return slices.ContainsFunc(span.Attributes(), func(kv attribute.KeyValue) bool { return content[string(kv.Key)] }) ||
-		len(span.Events()) > 0 || span.Status().Description != ""
+		slices.ContainsFunc(span.Events(), eventHoldsContent) ||
+		span.Status().Description != ""
+}
+
+func eventHoldsContent(event sdktrace.Event) bool {
+	return event.Name != eventEvaluation || slices.ContainsFunc(event.Attributes, func(kv attribute.KeyValue) bool { return !scoreKeys[string(kv.Key)] })
+}
+
+// scoreKey is whether an event's attribute is a score's own: metadata, sent in
+// every mode, never masked and kept when its span is trimmed.
+func scoreKey(event sdktrace.Event, kv attribute.KeyValue) bool {
+	return event.Name == eventEvaluation && scoreKeys[string(kv.Key)]
 }
 
 func (e *exporter) exportLifted(spans []sdktrace.ReadOnlySpan, keep bool) bool {
@@ -233,13 +248,27 @@ func (e *exporter) exportLifted(spans []sdktrace.ReadOnlySpan, keep bool) bool {
 			e.warnOnce("trimmed", WarningTrimmed, "telmoni: a span past the 1 MiB an export may hold was sent without the attributes ingest drops for their length")
 		}
 	}
+	got, ok := e.deliver(func() (answer, error) { return e.send(body) }, "export", "the batch was dropped")
+	if ok {
+		e.read(got)
+		return true
+	}
+	// Refused for what it holds, the rest of a batch may still go.
+	return got.status == http.StatusBadRequest || got.status == http.StatusRequestEntityTooLarge
+}
+
+// deliver sends through send until an answer is kept, as many attempts as
+// an export makes, waiting out each retried: the answer and true once kept;
+// false once refused, its answer returned for its status, or failed or given
+// up. A refusal or failure is warned of as what's, its words ending in dropped.
+func (e *exporter) deliver(send func() (answer, error), what, dropped string) (answer, bool) {
 	var failure, problem string
 	var status int
 	for attempt := 0; attempt < attempts; attempt++ {
 		if e.gaveUp() {
-			return false
+			return answer{}, false
 		}
-		got, err := e.send(body)
+		got, err := send()
 		if err != nil {
 			// The fields follow the words, which name the last attempt alone.
 			failure, status, problem = failureName(err), 0, ""
@@ -247,8 +276,7 @@ func (e *exporter) exportLifted(spans []sdktrace.ReadOnlySpan, keep bool) bool {
 			continue
 		}
 		if got.status >= 200 && got.status < 300 {
-			e.read(got)
-			return true
+			return got, true
 		}
 		if retried(got.status) {
 			status, problem = got.status, problemType(got.body)
@@ -257,16 +285,63 @@ func (e *exporter) exportLifted(spans []sdktrace.ReadOnlySpan, keep bool) bool {
 			continue
 		}
 		problem = problemType(got.body)
-		e.warnOnce("status:"+strconv.Itoa(got.status), WarningRefused,
-			fmt.Sprintf("telmoni: export refused with %s; the batch was dropped", answerName(got.status, problem)),
+		e.warnOnce(what+":status:"+strconv.Itoa(got.status), WarningRefused,
+			fmt.Sprintf("telmoni: %s refused with %s; %s", what, answerName(got.status, problem), dropped),
 			answerAttrs(got.status, problem)...)
-		// Refused for what it holds, the rest of a batch may still go.
-		return got.status == http.StatusBadRequest || got.status == http.StatusRequestEntityTooLarge
+		return got, false
 	}
-	e.warnOnce("failed:"+failure, WarningFailed,
-		fmt.Sprintf("telmoni: export failed after %d attempts (%s); the batch was dropped", attempts, failure),
+	e.warnOnce(what+":failed:"+failure, WarningFailed,
+		fmt.Sprintf("telmoni: %s failed after %d attempts (%s); %s", what, attempts, failure, dropped),
 		answerAttrs(status, problem)...)
-	return false
+	return answer{}, false
+}
+
+// sendScores posts the items of every late score's carrier in spans, in
+// order, a hundred a body, and is the rest: a carrier is never sent, masked
+// or lifted as a span, nor asks the project's mode.
+func (e *exporter) sendScores(spans []sdktrace.ReadOnlySpan) []sdktrace.ReadOnlySpan {
+	var items [][]byte
+	rest := spans
+	for i, span := range spans {
+		item, ok := scoreSent(span)
+		if !ok {
+			if items != nil {
+				rest = append(rest, span)
+			}
+			continue
+		}
+		if items == nil {
+			rest = slices.Clone(spans[:i])
+		}
+		items = append(items, item)
+	}
+	for len(items) > 0 {
+		n := min(len(items), scoresSentMax)
+		body := slices.Concat([]byte(`{"scores":[`), bytes.Join(items[:n], []byte(",")), []byte("]}"))
+		items = items[n:]
+		e.deliver(func() (answer, error) {
+			req, err := e.newRequest(http.MethodPost, e.scoresURL, "application/json", body)
+			if err != nil {
+				return answer{}, err
+			}
+			return e.do(req)
+		}, "scores", "they were dropped")
+	}
+	return rest
+}
+
+// scoreSent is the item a late score's carrier holds; false for any other
+// span: the client's own root span, so no application's attribute diverts one.
+func scoreSent(span sdktrace.ReadOnlySpan) ([]byte, bool) {
+	if span.Name() != scoreSpanName || span.Parent().IsValid() {
+		return nil, false
+	}
+	for _, kv := range span.Attributes() {
+		if string(kv.Key) == attrScoreSent && kv.Value.Type() == attribute.STRING {
+			return []byte(kv.Value.AsString()), true
+		}
+	}
+	return nil, false
 }
 
 // retried reports whether status is one of OTLP's retryable statuses: a 502
@@ -343,8 +418,8 @@ func (s maskedSpan) Attributes() []attribute.KeyValue { return s.attributes }
 func (s maskedSpan) Events() []sdktrace.Event         { return s.events }
 func (s maskedSpan) Status() sdktrace.Status          { return s.status }
 
-// mask is spans with every content field, event attribute and status message
-// as Config.Mask answers it, before a part it takes out could be put.
+// mask is spans with every content field, event attribute but a score's own
+// and status message as Config.Mask answers it, before a part it takes out could be put.
 func (e *exporter) mask(spans []sdktrace.ReadOnlySpan) []sdktrace.ReadOnlySpan {
 	if e.config.Mask == nil {
 		return spans
@@ -365,6 +440,10 @@ func (e *exporter) mask(spans []sdktrace.ReadOnlySpan) []sdktrace.ReadOnlySpan {
 		for _, event := range span.Events() {
 			kept := make([]attribute.KeyValue, 0, len(event.Attributes))
 			for _, kv := range event.Attributes {
+				if scoreKey(event, kv) {
+					kept = append(kept, kv)
+					continue
+				}
 				if masked, ok := e.masked(kv); ok {
 					kept = append(kept, masked)
 				}
@@ -940,16 +1019,20 @@ func encodeSpan(span sdktrace.ReadOnlySpan, keepContent, trimmed bool, cut []str
 		out.ParentSpanID = parent.SpanID().String()
 	}
 	// Events and the status message carry an exception's message: content,
-	// and the first to go from a span trimmed to fit.
+	// and the first to go from a span trimmed to fit; a score's own keys are
+	// neither, and its event leaves with them alone.
 	events := keepContent && !trimmed
-	if events {
-		for _, event := range span.Events() {
-			attributes := make([]keyValue, 0, len(event.Attributes))
-			for _, kv := range event.Attributes {
+	for _, event := range span.Events() {
+		if !events && event.Name != eventEvaluation {
+			continue
+		}
+		attributes := make([]keyValue, 0, len(event.Attributes))
+		for _, kv := range event.Attributes {
+			if events || scoreKey(event, kv) {
 				attributes = append(attributes, keyValue{Key: string(kv.Key), Value: encodeValue(kv.Value)})
 			}
-			out.Events = append(out.Events, otlpEvent{TimeUnixNano: nanos(event.Time), Name: event.Name, Attributes: attributes})
 		}
+		out.Events = append(out.Events, otlpEvent{TimeUnixNano: nanos(event.Time), Name: event.Name, Attributes: attributes})
 	}
 	if status := span.Status(); status.Code == codes.Error {
 		out.Status = &otlpStatus{Code: 2}

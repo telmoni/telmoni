@@ -1,0 +1,616 @@
+{
+  "limits": {
+    "name_max": 64,
+    "category_max": 64,
+    "version_max": 64,
+    "session_max": 200,
+    "per_span_max": 16,
+    "sent_max": 100
+  },
+  "scores": [
+    {
+      "case": "a number",
+      "name": "relevance",
+      "type": "number",
+      "value": 0.75,
+      "kept": {
+        "name": "relevance",
+        "value": 0.75,
+        "version": ""
+      }
+    },
+    {
+      "case": "a number on its range, at its top",
+      "name": "relevance",
+      "type": "number",
+      "value": 1,
+      "range": [
+        0,
+        1
+      ],
+      "kept": {
+        "name": "relevance",
+        "value": 1,
+        "version": ""
+      }
+    },
+    {
+      "case": "a number past its range",
+      "name": "relevance",
+      "type": "number",
+      "value": 2,
+      "range": [
+        0,
+        1
+      ],
+      "refused": true
+    },
+    {
+      "case": "a number below its range",
+      "name": "relevance",
+      "type": "number",
+      "value": -0.5,
+      "range": [
+        0,
+        1
+      ],
+      "refused": true
+    },
+    {
+      "case": "a range of one point",
+      "name": "relevance",
+      "type": "number",
+      "value": 1,
+      "range": [
+        1,
+        1
+      ],
+      "refused": true
+    },
+    {
+      "case": "a range upside down",
+      "name": "relevance",
+      "type": "number",
+      "value": 0.5,
+      "range": [
+        1,
+        0
+      ],
+      "refused": true
+    },
+    {
+      "case": "a range with no top",
+      "name": "relevance",
+      "type": "number",
+      "value": 0.5,
+      "range": [
+        0,
+        "Infinity"
+      ],
+      "refused": true
+    },
+    {
+      "case": "not a number",
+      "name": "relevance",
+      "type": "number",
+      "value": "NaN",
+      "refused": true
+    },
+    {
+      "case": "an infinity",
+      "name": "relevance",
+      "type": "number",
+      "value": "Infinity",
+      "refused": true
+    },
+    {
+      "case": "a negative infinity",
+      "name": "relevance",
+      "type": "number",
+      "value": "-Infinity",
+      "refused": true
+    },
+    {
+      "case": "a large finite number",
+      "name": "relevance",
+      "type": "number",
+      "value": 1e+308,
+      "kept": {
+        "name": "relevance",
+        "value": 1e+308,
+        "version": ""
+      }
+    },
+    {
+      "case": "a yes",
+      "name": "grounded",
+      "type": "boolean",
+      "value": true,
+      "kept": {
+        "name": "grounded",
+        "value": 1,
+        "version": ""
+      }
+    },
+    {
+      "case": "a no",
+      "name": "grounded",
+      "type": "boolean",
+      "value": false,
+      "kept": {
+        "name": "grounded",
+        "value": 0,
+        "version": ""
+      }
+    },
+    {
+      "case": "a category",
+      "name": "tone",
+      "type": "category",
+      "value": "polite",
+      "kept": {
+        "name": "tone",
+        "label": "polite",
+        "version": ""
+      }
+    },
+    {
+      "case": "a category trimmed",
+      "name": "tone",
+      "type": "category",
+      "value": " polite　",
+      "kept": {
+        "name": "tone",
+        "label": "polite",
+        "version": ""
+      }
+    },
+    {
+      "case": "a blank category",
+      "name": "tone",
+      "type": "category",
+      "value": "   ",
+      "refused": true
+    },
+    {
+      "case": "a category of 64 characters",
+      "name": "tone",
+      "type": "category",
+      "value": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "kept": {
+        "name": "tone",
+        "label": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "version": ""
+      }
+    },
+    {
+      "case": "a category of 65 characters",
+      "name": "tone",
+      "type": "category",
+      "value": "ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "refused": true
+    },
+    {
+      "case": "a category of 64 characters outside UTF-16's first plane",
+      "name": "tone",
+      "type": "category",
+      "value": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+      "kept": {
+        "name": "tone",
+        "label": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+        "version": ""
+      }
+    },
+    {
+      "case": "a category of 65 characters outside UTF-16's first plane",
+      "name": "tone",
+      "type": "category",
+      "value": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+      "refused": true
+    },
+    {
+      "case": "a blank name",
+      "name": " \t ",
+      "type": "number",
+      "value": 0.5,
+      "refused": true
+    },
+    {
+      "case": "a name trimmed of Unicode's White_Space",
+      "name": " relevance　",
+      "type": "number",
+      "value": 0.5,
+      "kept": {
+        "name": "relevance",
+        "value": 0.5,
+        "version": ""
+      }
+    },
+    {
+      "case": "a byte order mark, which is no White_Space, kept",
+      "name": "﻿relevance",
+      "type": "number",
+      "value": 0.5,
+      "kept": {
+        "name": "﻿relevance",
+        "value": 0.5,
+        "version": ""
+      }
+    },
+    {
+      "case": "a name of 64 characters",
+      "name": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn",
+      "type": "number",
+      "value": 0.5,
+      "kept": {
+        "name": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn",
+        "value": 0.5,
+        "version": ""
+      }
+    },
+    {
+      "case": "a name of 65 characters",
+      "name": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn",
+      "type": "number",
+      "value": 0.5,
+      "refused": true
+    },
+    {
+      "case": "a name of 64 characters outside UTF-16's first plane",
+      "name": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+      "type": "number",
+      "value": 0.5,
+      "kept": {
+        "name": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+        "value": 0.5,
+        "version": ""
+      }
+    },
+    {
+      "case": "a name of 65 characters outside UTF-16's first plane",
+      "name": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+      "type": "number",
+      "value": 0.5,
+      "refused": true
+    },
+    {
+      "case": "a version",
+      "name": "relevance",
+      "type": "number",
+      "value": 0.5,
+      "version": "judge-2",
+      "kept": {
+        "name": "relevance",
+        "value": 0.5,
+        "version": "judge-2"
+      }
+    },
+    {
+      "case": "a version trimmed",
+      "name": "relevance",
+      "type": "number",
+      "value": 0.5,
+      "version": " judge-2 ",
+      "kept": {
+        "name": "relevance",
+        "value": 0.5,
+        "version": "judge-2"
+      }
+    },
+    {
+      "case": "a blank version, none",
+      "name": "relevance",
+      "type": "number",
+      "value": 0.5,
+      "version": "  ",
+      "kept": {
+        "name": "relevance",
+        "value": 0.5,
+        "version": ""
+      }
+    },
+    {
+      "case": "a version of 64 characters",
+      "name": "relevance",
+      "type": "number",
+      "value": 0.5,
+      "version": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv",
+      "kept": {
+        "name": "relevance",
+        "value": 0.5,
+        "version": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+      }
+    },
+    {
+      "case": "a version of 65 characters",
+      "name": "relevance",
+      "type": "number",
+      "value": 0.5,
+      "version": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv",
+      "refused": true
+    }
+  ],
+  "targets": [
+    {
+      "case": "a run",
+      "run_id": "5b7e1c2a-9d4f-4e8b-a6c3-1f2e3d4c5b6a",
+      "kept": {
+        "run_id": "5b7e1c2a-9d4f-4e8b-a6c3-1f2e3d4c5b6a"
+      }
+    },
+    {
+      "case": "a run in capitals, sent lowercase",
+      "run_id": "5B7E1C2A-9D4F-4E8B-A6C3-1F2E3D4C5B6A",
+      "kept": {
+        "run_id": "5b7e1c2a-9d4f-4e8b-a6c3-1f2e3d4c5b6a"
+      }
+    },
+    {
+      "case": "a span of a run",
+      "run_id": "5b7e1c2a-9d4f-4e8b-a6c3-1f2e3d4c5b6a",
+      "span_id": "00f067aa0ba902b7",
+      "kept": {
+        "run_id": "5b7e1c2a-9d4f-4e8b-a6c3-1f2e3d4c5b6a",
+        "span_id": "00f067aa0ba902b7"
+      }
+    },
+    {
+      "case": "a span in capitals, sent lowercase",
+      "run_id": "5b7e1c2a-9d4f-4e8b-a6c3-1f2e3d4c5b6a",
+      "span_id": "00F067AA0CD902B7",
+      "kept": {
+        "run_id": "5b7e1c2a-9d4f-4e8b-a6c3-1f2e3d4c5b6a",
+        "span_id": "00f067aa0cd902b7"
+      }
+    },
+    {
+      "case": "a span of 15 digits",
+      "run_id": "5b7e1c2a-9d4f-4e8b-a6c3-1f2e3d4c5b6a",
+      "span_id": "00f067aa0ba902b",
+      "refused": true
+    },
+    {
+      "case": "a span that is no hex",
+      "run_id": "5b7e1c2a-9d4f-4e8b-a6c3-1f2e3d4c5b6a",
+      "span_id": "00f067aa0cd902bz",
+      "refused": true
+    },
+    {
+      "case": "a blank span, which names no run in its place",
+      "run_id": "5b7e1c2a-9d4f-4e8b-a6c3-1f2e3d4c5b6a",
+      "span_id": "  ",
+      "refused": true
+    },
+    {
+      "case": "a span with spaces round it",
+      "run_id": "5b7e1c2a-9d4f-4e8b-a6c3-1f2e3d4c5b6a",
+      "span_id": " 00f067aa0ba902b7 ",
+      "refused": true
+    },
+    {
+      "case": "a span with no run",
+      "span_id": "00f067aa0ba902b7",
+      "refused": true
+    },
+    {
+      "case": "a run that is no UUID",
+      "run_id": "run-1",
+      "refused": true
+    },
+    {
+      "case": "the nil run",
+      "run_id": "00000000-0000-0000-0000-000000000000",
+      "refused": true
+    },
+    {
+      "case": "a session",
+      "session_id": "conv-1",
+      "kept": {
+        "session_id": "conv-1"
+      }
+    },
+    {
+      "case": "a session trimmed",
+      "session_id": " conv-1 ",
+      "kept": {
+        "session_id": "conv-1"
+      }
+    },
+    {
+      "case": "a session of 200 characters",
+      "session_id": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+      "kept": {
+        "session_id": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
+      }
+    },
+    {
+      "case": "a session of 201 characters",
+      "session_id": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+      "refused": true
+    },
+    {
+      "case": "a blank session",
+      "session_id": "  ",
+      "refused": true
+    },
+    {
+      "case": "a run and a session",
+      "run_id": "5b7e1c2a-9d4f-4e8b-a6c3-1f2e3d4c5b6a",
+      "session_id": "conv-1",
+      "refused": true
+    },
+    {
+      "case": "nothing",
+      "refused": true
+    }
+  ],
+  "late": {
+    "scores": [
+      {
+        "target": {
+          "run_id": "5b7e1c2a-9d4f-4e8b-a6c3-1f2e3d4c5b6a"
+        },
+        "name": "thumbs",
+        "type": "boolean",
+        "value": true
+      },
+      {
+        "target": {
+          "run_id": "5b7e1c2a-9d4f-4e8b-a6c3-1f2e3d4c5b6a",
+          "span_id": "00f067aa0ba902b7"
+        },
+        "name": "relevance",
+        "type": "number",
+        "value": 0.5,
+        "range": [
+          0,
+          1
+        ],
+        "version": "judge-2"
+      },
+      {
+        "target": {
+          "session_id": "conv-1"
+        },
+        "name": "outcome",
+        "type": "category",
+        "value": "resolved"
+      }
+    ],
+    "sent": {
+      "scores": [
+        {
+          "id": "<uuid>",
+          "run_id": "5b7e1c2a-9d4f-4e8b-a6c3-1f2e3d4c5b6a",
+          "name": "thumbs",
+          "data_type": "boolean",
+          "value": 1
+        },
+        {
+          "id": "<uuid>",
+          "run_id": "5b7e1c2a-9d4f-4e8b-a6c3-1f2e3d4c5b6a",
+          "span_id": "00f067aa0ba902b7",
+          "name": "relevance",
+          "data_type": "number",
+          "value": 0.5,
+          "range_min": 0,
+          "range_max": 1,
+          "version": "judge-2"
+        },
+        {
+          "id": "<uuid>",
+          "session_id": "conv-1",
+          "name": "outcome",
+          "data_type": "category",
+          "categories": [
+            "resolved"
+          ]
+        }
+      ]
+    }
+  },
+  "live": {
+    "scores": [
+      {
+        "name": "relevance",
+        "type": "number",
+        "value": 0.5,
+        "range": [
+          0,
+          1
+        ],
+        "version": "judge-2"
+      },
+      {
+        "name": "grounded",
+        "type": "boolean",
+        "value": false
+      },
+      {
+        "name": "tone",
+        "type": "category",
+        "value": "polite"
+      }
+    ],
+    "events": [
+      {
+        "timeUnixNano": "<time>",
+        "name": "gen_ai.evaluation.result",
+        "attributes": [
+          {
+            "key": "gen_ai.evaluation.name",
+            "value": {
+              "stringValue": "relevance"
+            }
+          },
+          {
+            "key": "gen_ai.evaluation.score.value",
+            "value": {
+              "doubleValue": 0.5
+            }
+          },
+          {
+            "key": "telmoni.score.range_max",
+            "value": {
+              "doubleValue": 1
+            }
+          },
+          {
+            "key": "telmoni.score.range_min",
+            "value": {
+              "doubleValue": 0
+            }
+          },
+          {
+            "key": "telmoni.score.version",
+            "value": {
+              "stringValue": "judge-2"
+            }
+          }
+        ]
+      },
+      {
+        "timeUnixNano": "<time>",
+        "name": "gen_ai.evaluation.result",
+        "attributes": [
+          {
+            "key": "gen_ai.evaluation.name",
+            "value": {
+              "stringValue": "grounded"
+            }
+          },
+          {
+            "key": "gen_ai.evaluation.score.value",
+            "value": {
+              "doubleValue": 0
+            }
+          },
+          {
+            "key": "telmoni.score.type",
+            "value": {
+              "stringValue": "boolean"
+            }
+          }
+        ]
+      },
+      {
+        "timeUnixNano": "<time>",
+        "name": "gen_ai.evaluation.result",
+        "attributes": [
+          {
+            "key": "gen_ai.evaluation.name",
+            "value": {
+              "stringValue": "tone"
+            }
+          },
+          {
+            "key": "gen_ai.evaluation.score.label",
+            "value": {
+              "stringValue": "polite"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

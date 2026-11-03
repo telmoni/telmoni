@@ -36,7 +36,7 @@ from opentelemetry.trace import (
     StatusCode,
 )
 
-from . import contract, guard, ids
+from . import contract, guard, ids, scores
 from .models import (
     CallRecord,
     ModelCallRecord,
@@ -77,6 +77,42 @@ class Handle:
         self._client = client
         self._token: Token[context.Context] | None = None
         self._ended = False
+        self._scored = 0
+        self._scoring = threading.Lock()
+
+    @property
+    def span_id(self) -> str:
+        """Its span's id, 16 lowercase hex digits, which a late score names."""
+        return format(self._span.get_span_context().span_id, "016x")
+
+    def score(
+        self,
+        name: str,
+        value: bool | float | str,
+        *,
+        range: Sequence[float] | None = None,
+        version: str | None = None,
+    ) -> None:
+        """Score its span now: a number, within ``range`` where given, a yes or
+        no, or a category, by the scorer's ``version``. One breaking a score's
+        rules is not sent, with one warning."""
+        warn_once = self._client.exporter.warn_once
+        judgement = scores.judged(name, value, range, version, warn_once)
+        if judgement is None:
+            return
+        # Under the lock the end takes, so no score lands once the span ended.
+        with self._scoring:
+            why = None
+            if self._ended:
+                why = scores.ENDED
+            elif self._scored >= contract.SCORES_PER_SPAN_MAX:
+                why = scores.FULL
+            else:
+                self._scored += 1
+                self._span.add_event(contract.EVALUATION_EVENT, judgement.event())
+        # Warned once the lock is let go: the sink is the application's.
+        if why is not None:
+            scores.refused(why, warn_once)
 
     def _attach(self, ctx: context.Context) -> None:
         """Make ``ctx`` current until ``_end``, so spans opened inside nest."""
@@ -124,7 +160,8 @@ class Handle:
 
     def _ending(self) -> bool:
         """Whether this end is its first; a second does nothing."""
-        ended, self._ended = self._ended, True
+        with self._scoring:
+            ended, self._ended = self._ended, True
         return not ended
 
 
@@ -459,6 +496,10 @@ class Nothing:
 
     run_id = ""
     agent = ""
+    span_id = ""
+
+    def score(self, name: str, value: object, **kwargs: object) -> None:
+        return None
 
     def fail(self, error_type: str | BaseException | type[BaseException]) -> None:
         return None
@@ -680,12 +721,8 @@ class Opener:
             raise TypeError("a recorded run's tags must map str to str")
         if _blank(record.agent):
             raise ValueError("a run needs its agent's name")
-        try:
-            run_uuid = uuid.UUID(record.run_id)
-        except ValueError:
-            raise ValueError("a recorded run's id must be a UUID") from None
-        # uuid also takes int()'s signs, underscores and spaces: another id.
-        if record.run_id.lower() not in (str(run_uuid), run_uuid.hex):
+        run_uuid = ids.run_uuid(record.run_id)
+        if run_uuid is None:
             raise ValueError("a recorded run's id must be a UUID")
         # The run's id is its trace's, and a trace id of zeros is no trace at all.
         if run_uuid.int == 0:
@@ -744,6 +781,7 @@ class Opener:
             for item, calls in items
             for each in (item, *calls)
         }
+        judged = {id(each): _recorded_scores(each, warn_once) for each in spans}
         places = itertools.count()
 
         def open_span(
@@ -768,7 +806,11 @@ class Opener:
                 name, own = _tool_call_opening(item.name)
                 kind = SpanKind.INTERNAL
             attributes = {**inherited, **own, **contents[id(item)]}
-            _close(open_span(name, parent, attributes, kind, item.start), item)
+            _close(
+                open_span(name, parent, attributes, kind, item.start),
+                item,
+                judged[id(item)],
+            )
 
         with self._client.processor.hold(run_uuid.int, need):
             root = context.Context()
@@ -788,10 +830,10 @@ class Opener:
                     inner = trace.set_span_in_context(step, ctx)
                     for each in calls:
                         call(each, inner)
-                    _close(step, item)
+                    _close(step, item, judged[id(item)])
                 else:
                     call(item, ctx)
-            _close(span, record)
+            _close(span, record, judged[id(record)])
 
     def _outside(self, what: str) -> Run | None:
         run = current_run()
@@ -1207,12 +1249,17 @@ def _check(item: RunRecord | StepRecord | CallRecord) -> None:
         **fields,
         "error_type": _UNSET_OR_TEXT,
         "cancelled": (bool,),
+        "scores": (Sequence,),
     }.items():
         if not isinstance(getattr(item, field), kinds):
             names = " or ".join(
                 "None" if kind is _NONE else kind.__name__ for kind in kinds
             )
             raise TypeError(f"a recorded {what}'s {field} must be {names}")
+    if not all(isinstance(score, Mapping) for score in item.scores):
+        raise TypeError(
+            f"a recorded {what}'s scores must each map name, value, range and version"
+        )
     # Ingest refuses a step or a model named nothing; a tool's it reads as none.
     named = "model" if isinstance(item, ModelCallRecord) else "name"
     if isinstance(item, (StepRecord, ModelCallRecord)) and getattr(item, named) == "":
@@ -1245,15 +1292,44 @@ def _record_content(item: StepRecord | CallRecord) -> dict[str, str]:
     return {key: _as_json(value) for key, value in fields if value is not None}
 
 
+def _recorded_scores(
+    item: RunRecord | StepRecord | CallRecord,
+    warn_once: Callable[[str, str, WarningInfo], None],
+) -> list[dict[str, Any]]:
+    """A recorded span's scores as their events, each held to a score's rules;
+    one breaking them, or past the span's cap, is left off with one warning."""
+    events: list[dict[str, Any]] = []
+    for given in item.scores:
+        judgement = scores.judged(
+            given.get("name"),
+            given.get("value"),
+            given.get("range"),
+            given.get("version"),
+            warn_once,
+        )
+        if judgement is None:
+            continue
+        if len(events) == contract.SCORES_PER_SPAN_MAX:
+            scores.refused(scores.FULL, warn_once)
+            continue
+        events.append(judgement.event())
+    return events
+
+
 def _close(
-    span: Span, item: RunRecord | StepRecord | ModelCallRecord | ToolCallRecord
+    span: Span,
+    item: RunRecord | StepRecord | ModelCallRecord | ToolCallRecord,
+    events: Sequence[Mapping[str, Any]],
 ) -> None:
+    end = _nanos(item.end)
+    for attributes in events:
+        span.add_event(contract.EVALUATION_EVENT, attributes, end)
     if item.error_type:
         span.set_attribute(contract.ERROR_TYPE, item.error_type)
         span.set_status(Status(StatusCode.ERROR))
     if item.cancelled:
         span.set_attribute(contract.CANCELLED, True)
-    span.end(end_time=_nanos(item.end))
+    span.end(end_time=end)
 
 
 # What ingest takes: a token count from 0 that fits 64 bits.

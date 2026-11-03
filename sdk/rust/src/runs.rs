@@ -9,7 +9,7 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -24,6 +24,7 @@ use crate::error::Error;
 use crate::guard::{self, Guard, Opening, Tokens};
 use crate::lock;
 use crate::propagation::Continued;
+use crate::scores::{self, Score};
 use crate::warnings::{Warner, WarningKind};
 
 /// The run a context is inside, carried by every span opened under it: what
@@ -229,6 +230,8 @@ struct Handle {
     /// The run's caps, and what it has used of them.
     guard: Arc<Guard>,
     failed: AtomicBool,
+    /// How many scores the span holds, held to [`contract::SCORES_PER_SPAN_MAX`].
+    scores: AtomicUsize,
     ended: bool,
     /// What a caller may set again, an answer, a result or a mark, by key, set
     /// once as the span ends: OpenTelemetry's Rust span keeps every set, a key
@@ -254,6 +257,7 @@ impl Handle {
             inherited: Arc::clone(&self.inherited),
             guard: Arc::clone(&self.guard),
             failed: AtomicBool::new(false),
+            scores: AtomicUsize::new(0),
             ended: false,
             last: Mutex::new(Vec::new()),
         }
@@ -404,6 +408,21 @@ impl Handle {
         self.set_last([cancelled_attribute()]);
     }
 
+    fn score(&self, score: &Score) {
+        let span = self.cx.span();
+        let warner = &self.client.warner;
+        // Another service's run, continued here, sends nothing from this side.
+        if !span.is_recording() {
+            return;
+        }
+        let held = self.scores.fetch_add(1, Ordering::Relaxed);
+        if let Some(attributes) = scores::event(score, held, warner) {
+            span.add_event(contract::EVALUATION_EVENT, attributes);
+        } else {
+            self.scores.fetch_sub(1, Ordering::Relaxed);
+        }
+    }
+
     fn finish(&mut self) {
         if self.ended {
             return;
@@ -482,6 +501,19 @@ macro_rules! handle_methods {
             /// which is neither ok nor an error.
             pub fn cancel(&self) {
                 self.handle.cancel();
+            }
+
+            /// Scores the span, as OpenTelemetry's evaluation event on it; a
+            /// score breaking a score's rules is not sent, with one warning.
+            pub fn score(&self, score: Score) {
+                self.handle.score(&score);
+            }
+
+            /// The span's id, 16 lowercase hex digits: what the client's
+            /// [`score`](crate::Telmoni::score) names it by once it ended.
+            #[must_use]
+            pub fn span_id(&self) -> String {
+                self.handle.cx.span().span_context().span_id().to_string()
             }
 
             /// The context with this span set: for
@@ -901,6 +933,7 @@ pub(crate) fn open(inner: &Arc<Inner>, agent: &str, options: RunOptions) -> Resu
             inherited: Arc::from(inherited),
             guard: Arc::new(Guard::new(options.max_steps, options.max_spend)),
             failed: AtomicBool::new(false),
+            scores: AtomicUsize::new(0),
             ended: false,
             last: Mutex::new(Vec::new()),
         },
@@ -936,6 +969,7 @@ pub(crate) fn continued(inner: &Arc<Inner>, read: Continued) -> Run {
             inherited: Arc::from(inherited),
             guard: Arc::new(Guard::default()),
             failed: AtomicBool::new(false),
+            scores: AtomicUsize::new(0),
             ended: false,
             last: Mutex::new(Vec::new()),
         },

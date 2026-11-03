@@ -160,6 +160,30 @@ holds, 2,048 unless the `processor` hook's `maxQueueSize` raises it, is never
 taken, and its error says so. One made once the client is shut down throws
 `ShutdownError`.
 
+## Scores
+
+A score is a name and a number, a yes or no, or a category. On a handle still
+open, `run.score('relevance', 0.75, { range: [0, 1], version: 'judge-2' })`
+adds it to that span, timed now; `true` or `false` is a yes or no, and text a
+category. Once it has ended, the client's `score` sends it, naming what it
+scores — a run, a run and one of its spans (`run.runId`, `step.spanId`), or a
+session:
+
+```ts
+telmoni.score('thumbs', true, { runId });
+telmoni.score('relevance', 0.5, { runId, spanId, range: [0, 1] });
+telmoni.score('outcome', 'resolved', { sessionId: 'conv_7' });
+```
+
+It goes with the next export, through the same queue, so `flush` and
+`shutdown` hold it. A recorded run, and each step and call in it, takes
+`scores: [{ name, value, range?, version? }]`, each timed at that span's end. A
+name, a category or a version is trimmed and up to 64 characters; a number is
+finite and within its range; a span holds up to 16. A score that breaks a rule
+is never thrown: it is not sent, with one warning. A score is no content: it
+is sent whatever `captureContent` and the project's mode say, and never handed
+to the mask.
+
 ## The guard
 
 `telmoni.run('support-bot', { maxSteps: 20, maxSpend: 0.5 }, callback)` holds
@@ -220,7 +244,8 @@ Prompts, completions, system instructions, tool arguments and tool results —
 `returned(...)`, and a run's own `inputMessages` and
 `run.answered({ outputMessages })` — are content, and so are a failure's message
 and stack, its `exception` event and its status's message, and every event the
-application adds to a span through OpenTelemetry: without them, a failed span
+application adds to a span through OpenTelemetry, a score's own keys apart
+([Scores](#scores)): without them, a failed span
 goes with its `error.type` and an error status alone. They leave the process only when
 `captureContent: true`, or `TELMONI_CAPTURE_CONTENT=1` under `Telmoni.fromEnv()`,
 **and** the project's content mode is `on`, which the

@@ -187,6 +187,31 @@ export interface RecordOutcome {
   errorType?: string | undefined;
   /** Cancelled by the agent, which is neither ok nor an error. */
   cancelled?: boolean | undefined;
+  /** Its scores, each timed at its end; one refused is left off with one warning. */
+  scores?: readonly RecordedScore[] | undefined;
+}
+
+/** A score's value: a number, a yes or no, or a category's label. */
+export type ScoreValue = number | boolean | string;
+
+export interface ScoreOptions {
+  /** A number score's range, its ends included. */
+  range?: readonly [min: number, max: number] | undefined;
+  /** The version of what scored, up to 64 characters. */
+  version?: string | undefined;
+}
+
+/** What a score of something ended scores: a run, a run and one of its spans, or a session. */
+export interface ScoreTarget {
+  runId?: string | undefined;
+  spanId?: string | undefined;
+  sessionId?: string | undefined;
+}
+
+/** A score in a record, held to the rules a live one is. */
+export interface RecordedScore extends ScoreOptions {
+  name: string;
+  value: ScoreValue;
 }
 
 /** A model call that has ended: its model, its times and its tokens. */

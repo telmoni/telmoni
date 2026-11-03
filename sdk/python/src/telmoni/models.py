@@ -425,6 +425,8 @@ class ModelCallRecord:
     output_messages: object | None = None
     error_type: str | None = None
     cancelled: bool = False
+    # Each ``score()``'s arguments by name, sent timed at the span's end.
+    scores: Sequence[Mapping[str, object]] = ()
 
 
 @dataclass(frozen=True)
@@ -439,6 +441,8 @@ class ToolCallRecord:
     result: object | None = None
     error_type: str | None = None
     cancelled: bool = False
+    # Each ``score()``'s arguments by name, sent timed at the span's end.
+    scores: Sequence[Mapping[str, object]] = ()
 
 
 CallRecord = ModelCallRecord | ToolCallRecord
@@ -458,6 +462,8 @@ class StepRecord:
     calls: Sequence[CallRecord] = ()
     error_type: str | None = None
     cancelled: bool = False
+    # Each ``score()``'s arguments by name, sent timed at the span's end.
+    scores: Sequence[Mapping[str, object]] = ()
 
 
 @dataclass(frozen=True)
@@ -479,3 +485,5 @@ class RunRecord:
     inside: Sequence[StepRecord | CallRecord] = ()
     error_type: str | None = None
     cancelled: bool = False
+    # Each ``score()``'s arguments by name, sent timed at the span's end.
+    scores: Sequence[Mapping[str, object]] = ()

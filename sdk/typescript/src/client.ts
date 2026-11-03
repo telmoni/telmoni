@@ -13,7 +13,17 @@ import { readHeaders, writeHeaders } from './propagation.js';
 import { type Handle, Opener, Run, checkedRate, currentRun, split, within } from './runs.js';
 import { WHITE_SPACE, trimEnds } from './whitespace.js';
 import { RecordingSampler } from './sampler.js';
-import type { Config, HeaderCarrier, Hooks, ResolvedConfig, RunOptions, RunRecord } from './types.js';
+import type {
+  Config,
+  HeaderCarrier,
+  Hooks,
+  ResolvedConfig,
+  RunOptions,
+  RunRecord,
+  ScoreOptions,
+  ScoreTarget,
+  ScoreValue,
+} from './types.js';
 import { VERSION } from './version.js';
 
 /** The machine host; the console's, `https://telmoni.com`, serves people. */
@@ -297,6 +307,15 @@ export class Telmoni {
    */
   recordRun(record: RunRecord): void {
     this.#opener.record(record);
+  }
+
+  /**
+   * Score what has ended — a run, by `runId`; one of its spans, by `runId` and
+   * the handle's `spanId`; or a session, by `sessionId` — sent to `/v1/scores`
+   * with the next export. One refused is not sent, with one warning.
+   */
+  score(name: string, value: ScoreValue, options: ScoreTarget & ScoreOptions): void {
+    this.#opener.score(name, value, options ?? {});
   }
 
   /**

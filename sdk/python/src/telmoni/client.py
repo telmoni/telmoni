@@ -1,14 +1,15 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, MutableMapping
+from collections.abc import Callable, Mapping, MutableMapping, Sequence
 
 from opentelemetry import trace
+from opentelemetry.context import Context
 from opentelemetry.metrics import NoOpMeterProvider
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import SpanLimits, TracerProvider
 from opentelemetry.trace import Tracer
 
-from . import contract, guard
+from . import contract, guard, scores
 from ._version import __version__
 from .exporter import Exporter, Transport
 from .ids import Ids
@@ -186,6 +187,35 @@ class Telmoni:
         """Send a run that has already ended, as the live calls would have; a
         field of the wrong type or value raises, sending nothing."""
         self._opener.record(record)
+
+    def score(
+        self,
+        name: str,
+        value: bool | float | str,
+        *,
+        run_id: str | None = None,
+        span_id: str | None = None,
+        session_id: str | None = None,
+        range: Sequence[float] | None = None,
+        version: str | None = None,
+    ) -> None:
+        """Score what has ended: a run by its id, one of its spans by its
+        ``span_id`` too, or a session, posted to ``/v1/scores`` with the next
+        export. One breaking a score's rules is not sent, with one warning."""
+        warn_once = self.exporter.warn_once
+        judgement = scores.judged(name, value, range, version, warn_once)
+        if judgement is None:
+            return
+        target = scores.target(run_id, span_id, session_id, warn_once)
+        if target is None:
+            return
+        # A span of a trace of its own, through the queue, so no second queue
+        # holds what flush and shutdown drain; never sent as a span.
+        self.tracer.start_span(
+            contract.SCORE_SPAN,
+            context=Context(),
+            attributes={contract.SCORE_SENT: judgement.sent(target)},
+        ).end()
 
     def inject(self, headers: MutableMapping[str, str]) -> None:
         """Write into ``headers`` what the next service continues the run

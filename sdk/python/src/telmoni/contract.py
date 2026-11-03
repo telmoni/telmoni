@@ -99,6 +99,43 @@ EXCEPTION_STACKTRACE = "exception.stacktrace"
 STATUS_DESCRIPTION = "otel.status_description"
 """The key a status message is handed to the mask by."""
 
+# A score, as the conventions' evaluation event carries it, Telmoni's own
+# beside: a yes or no's type, a number's range and the scorer's version.
+EVALUATION_EVENT = "gen_ai.evaluation.result"
+EVALUATION_NAME = "gen_ai.evaluation.name"
+EVALUATION_VALUE = "gen_ai.evaluation.score.value"
+EVALUATION_LABEL = "gen_ai.evaluation.score.label"
+SCORE_TYPE = "telmoni.score.type"
+SCORE_RANGE_MIN = "telmoni.score.range_min"
+SCORE_RANGE_MAX = "telmoni.score.range_max"
+SCORE_VERSION = "telmoni.score.version"
+SCORE_KEYS = frozenset(
+    {
+        EVALUATION_NAME,
+        EVALUATION_VALUE,
+        EVALUATION_LABEL,
+        SCORE_TYPE,
+        SCORE_RANGE_MIN,
+        SCORE_RANGE_MAX,
+        SCORE_VERSION,
+    }
+)
+"""An evaluation event's metadata, which leaves whatever the content lock says
+and is never masked: ingest reads a score from it alone."""
+SCORE_SPAN = "telmoni.score"
+SCORE_SENT = "telmoni.score.sent"
+"""A late score's carrier span, and the attribute holding its item as JSON: the
+exporter takes it out of the batch and posts the item to ``SCORES_PATH``."""
+SCORES_PATH = "/v1/scores"
+SCORE_NAME_MAX = 64
+SCORE_CATEGORY_MAX = 64
+SCORE_VERSION_MAX = 64
+"""A score's longest name, category and version, in characters."""
+SCORES_PER_SPAN_MAX = 16
+"""The most scores one span carries: a span holds 32 events, the exception's among them."""
+SCORES_SENT_MAX = 100
+"""The most scores one ``POST /v1/scores`` carries."""
+
 CONTENT = frozenset(
     {
         INPUT_MESSAGES,

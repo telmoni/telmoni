@@ -9,7 +9,7 @@
 //! whatever else is sent meanwhile.
 
 use std::borrow::Cow;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::time::SystemTime;
 
 use opentelemetry::trace::{SpanKind, TraceContextExt as _, TraceId, Tracer as _};
@@ -22,6 +22,8 @@ use crate::contract;
 use crate::error::{Error, Text};
 use crate::ids;
 use crate::runs::{self, Content, Usage};
+use crate::scores::{self, Score};
+use crate::warnings::Warner;
 
 /// A run that has ended, as [`Telmoni::record_run`](crate::Telmoni::record_run)
 /// sends it: its id, a UUID the caller gives, and everything in it, each with
@@ -62,6 +64,9 @@ pub struct RunRecord {
     pub error_type: Option<String>,
     /// Whether the agent cancelled the run, which is neither ok nor an error.
     pub cancelled: bool,
+    /// Scores of the span, each sent as its live handle's `score` sends one,
+    /// at the span's end.
+    pub scores: Vec<Score>,
 }
 
 /// What a run record holds: a step, with its own calls, or a call made in
@@ -109,6 +114,9 @@ pub struct StepRecord {
     pub error_type: Option<String>,
     /// Whether the agent cancelled the step.
     pub cancelled: bool,
+    /// Scores of the span, each sent as its live handle's `score` sends one,
+    /// at the span's end.
+    pub scores: Vec<Score>,
 }
 
 /// A model call that has ended: its model, its times and its tokens.
@@ -136,10 +144,13 @@ pub struct ModelCallRecord {
     pub error_type: Option<String>,
     /// Whether the agent cancelled the call.
     pub cancelled: bool,
+    /// Scores of the span, each sent as its live handle's `score` sends one,
+    /// at the span's end.
+    pub scores: Vec<Score>,
 }
 
 /// A tool call that has ended: its name and its times.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ToolCallRecord {
     /// The tool's name; the span is named `execute_tool <name>`.
     pub name: String,
@@ -157,6 +168,9 @@ pub struct ToolCallRecord {
     pub error_type: Option<String>,
     /// Whether the agent cancelled the call.
     pub cancelled: bool,
+    /// Scores of the span, each sent as its live handle's `score` sends one,
+    /// at the span's end.
+    pub scores: Vec<Score>,
 }
 
 impl RunRecord {
@@ -183,6 +197,7 @@ impl RunRecord {
             inside: Vec::new(),
             error_type: None,
             cancelled: false,
+            scores: Vec::new(),
         }
     }
 }
@@ -201,6 +216,7 @@ impl StepRecord {
             calls: Vec::new(),
             error_type: None,
             cancelled: false,
+            scores: Vec::new(),
         }
     }
 }
@@ -220,6 +236,7 @@ impl ModelCallRecord {
             output_messages: None,
             error_type: None,
             cancelled: false,
+            scores: Vec::new(),
         }
     }
 }
@@ -237,6 +254,7 @@ impl ToolCallRecord {
             end,
             error_type: None,
             cancelled: false,
+            scores: Vec::new(),
         }
     }
 }
@@ -312,6 +330,7 @@ pub(crate) fn send(inner: &Inner, record: RunRecord) -> Result<(), Error> {
         mut inside,
         error_type,
         cancelled,
+        scores,
         ..
     } = record;
     let run_id = run_uuid.to_string();
@@ -341,9 +360,11 @@ pub(crate) fn send(inner: &Inner, record: RunRecord) -> Result<(), Error> {
     // Queued whole or not at all: a record that outgrows the queue's room
     // would lose its tail, the run's own span first.
     let trace_id = ids::trace_id(&run_uuid);
+    let judged = judged(&scores, &inside, &inner.warner);
     let hold = inner.processor.hold(trace_id, need)?;
     let mut spans = Spans {
         tracer: &inner.tracer,
+        scores: judged,
         run_id: run_uuid,
         trace_id,
         place: 0,
@@ -370,15 +391,50 @@ pub(crate) fn send(inner: &Inner, record: RunRecord) -> Result<(), Error> {
                 for call in step.calls {
                     spans.call(call, &opened, &inherited);
                 }
-                close(&opened, step.error_type, step.cancelled, step.end);
+                spans.close(&opened, step.error_type, step.cancelled, step.end);
             }
             RecordItem::ModelCall(call) => spans.call(CallRecord::Model(call), &run, &inherited),
             RecordItem::ToolCall(call) => spans.call(CallRecord::Tool(call), &run, &inherited),
         }
     }
-    close(&run, error_type, cancelled, end);
+    spans.close(&run, error_type, cancelled, end);
     hold.queue();
     Ok(())
+}
+
+/// Each span's scores as its events, in the order [`Spans::close`] closes the
+/// spans — a step's calls before it, the run last — judged before the hold,
+/// since a refusal's warning goes to a sink of the application's, which may
+/// record a run of its own.
+fn judged(run: &[Score], inside: &[RecordItem], warner: &Warner) -> VecDeque<Vec<Vec<KeyValue>>> {
+    let events = |scores: &[Score]| {
+        let mut held = 0;
+        scores
+            .iter()
+            .filter_map(|score| {
+                let attributes = scores::event(score, held, warner)?;
+                held += 1;
+                Some(attributes)
+            })
+            .collect::<Vec<_>>()
+    };
+    let call = |call: &CallRecord| match call {
+        CallRecord::Model(call) => events(&call.scores),
+        CallRecord::Tool(call) => events(&call.scores),
+    };
+    let mut judged = VecDeque::new();
+    for item in inside {
+        match item {
+            RecordItem::Step(step) => {
+                judged.extend(step.calls.iter().map(call));
+                judged.push_back(events(&step.scores));
+            }
+            RecordItem::ModelCall(c) => judged.push_back(events(&c.scores)),
+            RecordItem::ToolCall(c) => judged.push_back(events(&c.scores)),
+        }
+    }
+    judged.push_back(events(run));
+    judged
 }
 
 /// How many spans `record` queues: the run, then each step and each call.
@@ -577,6 +633,8 @@ fn model_calls(inside: &mut [RecordItem]) -> Vec<&mut ModelCallRecord> {
 /// derives, in the trace the run's id names.
 struct Spans<'a> {
     tracer: &'a SdkTracer,
+    /// Each span's scores as events, in the order the spans close.
+    scores: VecDeque<Vec<Vec<KeyValue>>>,
     run_id: Uuid,
     trace_id: TraceId,
     /// The next span's place: `0` the run, then each step and call from `1`
@@ -609,6 +667,29 @@ impl Spans<'_> {
         parent.with_span(span)
     }
 
+    /// Scores the span `cx` holds with its record's next judged scores and
+    /// marks it failed or cancelled, as its record says, then ends it when its
+    /// record says it ended.
+    fn close(
+        &mut self,
+        cx: &Context,
+        error_type: Option<String>,
+        cancelled: bool,
+        end: SystemTime,
+    ) {
+        let span = cx.span();
+        for attributes in self.scores.pop_front().unwrap_or_default() {
+            span.add_event_with_timestamp(contract::EVALUATION_EVENT, end, attributes);
+        }
+        if let Some(error_type) = error_type.filter(|error_type| !error_type.is_empty()) {
+            runs::mark_failed(&span, error_type);
+        }
+        if cancelled {
+            runs::mark_cancelled(&span);
+        }
+        span.end_with_timestamp(end);
+    }
+
     /// A call under `parent`, closed as soon as it opens, as a call holds
     /// nothing.
     fn call(&mut self, call: CallRecord, parent: &Context, inherited: &[KeyValue]) {
@@ -621,7 +702,7 @@ impl Spans<'_> {
                 attributes.extend(call.usage.into_iter().flat_map(runs::usage_attributes));
                 attributes.extend(content([(contract::OUTPUT_MESSAGES, call.output_messages)]));
                 let opened = self.open(name, parent, SpanKind::Client, attributes, call.start);
-                close(&opened, call.error_type, call.cancelled, call.end);
+                self.close(&opened, call.error_type, call.cancelled, call.end);
             }
             CallRecord::Tool(call) => {
                 let (name, own) = runs::tool_call_opening(&call.name);
@@ -631,7 +712,7 @@ impl Spans<'_> {
                     (contract::TOOL_CALL_RESULT, call.result),
                 ]));
                 let opened = self.open(name, parent, SpanKind::Internal, attributes, call.start);
-                close(&opened, call.error_type, call.cancelled, call.end);
+                self.close(&opened, call.error_type, call.cancelled, call.end);
             }
         }
     }
@@ -645,17 +726,4 @@ fn content<const N: usize>(
     fields.into_iter().filter_map(|(key, value)| {
         value.map(|value| KeyValue::new(key, String::from(value.as_str())))
     })
-}
-
-/// Marks the span `cx` holds failed or cancelled, as its record says, and
-/// ends it when its record says it ended.
-fn close(cx: &Context, error_type: Option<String>, cancelled: bool, end: SystemTime) {
-    let span = cx.span();
-    if let Some(error_type) = error_type.filter(|error_type| !error_type.is_empty()) {
-        runs::mark_failed(&span, error_type);
-    }
-    if cancelled {
-        runs::mark_cancelled(&span);
-    }
-    span.end_with_timestamp(end);
 }

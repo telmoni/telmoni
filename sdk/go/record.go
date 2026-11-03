@@ -42,6 +42,10 @@ type RunRecord struct {
 	ErrorType string
 	// Cancelled marks the run cancelled by the agent, as Cancel does.
 	Cancelled bool
+	// Scores score the run, each sent at its end; one the rules refuse is left
+	// off with one warning, the record still sent. A step's or call's score its
+	// own span the same way.
+	Scores []RecordedScore
 }
 
 // RecordItem is what a recorded run holds: a StepRecord, a ModelCallRecord or
@@ -70,6 +74,7 @@ type StepRecord struct {
 	Calls          []CallRecord
 	ErrorType      string
 	Cancelled      bool
+	Scores         []RecordedScore
 }
 
 // ModelCallRecord is a model call that has ended: its model, its times and its
@@ -87,6 +92,7 @@ type ModelCallRecord struct {
 	OutputMessages any
 	ErrorType      string
 	Cancelled      bool
+	Scores         []RecordedScore
 }
 
 // ToolCallRecord is a tool call that has ended: its name and its times.
@@ -100,6 +106,7 @@ type ToolCallRecord struct {
 	End       time.Time
 	ErrorType string
 	Cancelled bool
+	Scores    []RecordedScore
 }
 
 func (StepRecord) recordItem()      {}
@@ -191,6 +198,7 @@ func (c *Client) RecordRun(ctx context.Context, record RunRecord) error {
 	// After the draw, as Python and TypeScript warn, and before the hold: a
 	// logger that records a run would wait on it for good.
 	c.warnUsage(record)
+	scores := c.recordScores(record)
 	// Before the hold too: a MarshalJSON of the caller's may record a run.
 	contents := recordContents(record)
 	// Queued whole or not at all: a record that outgrows the queue's room
@@ -201,26 +209,26 @@ func (c *Client) RecordRun(ctx context.Context, record RunRecord) error {
 	}
 	built := false
 	defer func() { release(built) }()
-	r := &recorder{tracer: c.tracer, runID: runUUID, inherited: inherited, contents: contents}
+	r := &recorder{tracer: c.tracer, runID: runUUID, inherited: inherited, contents: contents, scores: scores}
 	// No span in it: whatever span ctx carries, the record's trace is its
 	// own.
 	root := trace.ContextWithSpanContext(ctx, trace.SpanContext{})
-	run := r.open(root, name, trace.SpanKindInternal, attrs, record.Start)
+	run, runScores := r.open(root, name, trace.SpanKindInternal, attrs, record.Start)
 	inRun := trace.ContextWithSpan(root, run)
 	for _, item := range record.Inside {
 		switch item := itemValue(item).(type) {
 		case StepRecord:
-			step := r.open(inRun, item.Name, trace.SpanKindInternal, inherited, item.Start)
+			step, stepScores := r.open(inRun, item.Name, trace.SpanKindInternal, inherited, item.Start)
 			inStep := trace.ContextWithSpan(root, step)
 			for _, call := range item.Calls {
 				r.call(inStep, call)
 			}
-			endRecorded(step, item.End, item.ErrorType, item.Cancelled)
+			endRecorded(step, stepScores, item.End, item.ErrorType, item.Cancelled)
 		case CallRecord:
 			r.call(inRun, item)
 		}
 	}
-	endRecorded(run, record.End, record.ErrorType, record.Cancelled)
+	endRecorded(run, runScores, record.End, record.ErrorType, record.Cancelled)
 	built = true
 	return nil
 }
@@ -233,19 +241,22 @@ type recorder struct {
 	runID     [16]byte
 	inherited []attribute.KeyValue
 	contents  [][]attribute.KeyValue
+	scores    [][][]attribute.KeyValue
 	place     int
 }
 
-func (r *recorder) open(parent context.Context, name string, kind trace.SpanKind, attrs []attribute.KeyValue, start time.Time) trace.Span {
+// open starts the span at the next place, and is the scores it ends with.
+func (r *recorder) open(parent context.Context, name string, kind trace.SpanKind, attrs []attribute.KeyValue, start time.Time) (trace.Span, [][]attribute.KeyValue) {
 	ctx := withIDs(parent, trace.TraceID(r.runID), recordedSpanID(r.runID, r.place))
 	attrs = slices.Concat(attrs, r.contents[r.place])
+	scores := r.scores[r.place]
 	r.place++
 	_, span := r.tracer.Start(ctx, name,
 		trace.WithSpanKind(kind),
 		trace.WithAttributes(attrs...),
 		trace.WithTimestamp(start),
 	)
-	return span
+	return span, scores
 }
 
 // recordContents is each span's content by its place in the record: none for
@@ -262,6 +273,33 @@ func recordContents(record RunRecord) [][]attribute.KeyValue {
 		}
 	}
 	return contents
+}
+
+// recordScores is each span's scores by its place in the record, as
+// recordContents places content, each refused one warned of.
+func (c *Client) recordScores(record RunRecord) [][][]attribute.KeyValue {
+	scores := [][][]attribute.KeyValue{c.recordedScores(record.Scores)}
+	for _, item := range record.Inside {
+		scores = append(scores, c.recordedScores(scoresOf(item)))
+		if step, ok := itemValue(item).(StepRecord); ok {
+			for _, call := range step.Calls {
+				scores = append(scores, c.recordedScores(scoresOf(call)))
+			}
+		}
+	}
+	return scores
+}
+
+func scoresOf(item RecordItem) []RecordedScore {
+	switch item := itemValue(item).(type) {
+	case StepRecord:
+		return item.Scores
+	case ModelCallRecord:
+		return item.Scores
+	case ToolCallRecord:
+		return item.Scores
+	}
+	return nil
 }
 
 // contentOf is a recorded step's or call's content as JSON, which the
@@ -295,18 +333,21 @@ func (r *recorder) call(parent context.Context, call CallRecord) {
 		name, own := modelCallOpening(call.Model, operation, call.Provider)
 		// No warning under the hold: RecordRun gave it before.
 		attrs := slices.Concat(r.inherited, own, usageAttributes(call.Usage, nil))
-		span := r.open(parent, name, trace.SpanKindClient, attrs, call.Start)
-		endRecorded(span, call.End, call.ErrorType, call.Cancelled)
+		span, scores := r.open(parent, name, trace.SpanKindClient, attrs, call.Start)
+		endRecorded(span, scores, call.End, call.ErrorType, call.Cancelled)
 	case ToolCallRecord:
 		name, own := toolCallOpening(call.Name)
-		span := r.open(parent, name, trace.SpanKindInternal, slices.Concat(r.inherited, own), call.Start)
-		endRecorded(span, call.End, call.ErrorType, call.Cancelled)
+		span, scores := r.open(parent, name, trace.SpanKindInternal, slices.Concat(r.inherited, own), call.Start)
+		endRecorded(span, scores, call.End, call.ErrorType, call.Cancelled)
 	}
 }
 
-// endRecorded marks a span as its record says it ended, and ends it at the
-// record's end.
-func endRecorded(span trace.Span, end time.Time, errorType string, cancelled bool) {
+// endRecorded marks a span as its record says it ended, its scores timed at
+// its end so the same record is the same bytes, and ends it there.
+func endRecorded(span trace.Span, scores [][]attribute.KeyValue, end time.Time, errorType string, cancelled bool) {
+	for _, attrs := range scores {
+		span.AddEvent(eventEvaluation, trace.WithTimestamp(end), trace.WithAttributes(attrs...))
+	}
 	if errorType != "" {
 		span.SetAttributes(attribute.String(attrErrorType, errorType))
 		span.SetStatus(codes.Error, "")

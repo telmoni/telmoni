@@ -154,6 +154,46 @@ const (
 	attrExceptionMessage = "exception.message"
 )
 
+// A score, as the conventions' evaluation event carries it, with ours beside.
+const (
+	eventEvaluation     = "gen_ai.evaluation.result"
+	attrEvaluationName  = "gen_ai.evaluation.name"
+	attrEvaluationValue = "gen_ai.evaluation.score.value"
+	attrEvaluationLabel = "gen_ai.evaluation.score.label"
+	attrScoreType       = "telmoni.score.type"
+	attrScoreRangeMin   = "telmoni.score.range_min"
+	attrScoreRangeMax   = "telmoni.score.range_max"
+	attrScoreVersion    = "telmoni.score.version"
+	// scoreSpanName and attrScoreSent are a late score's carrier, never sent:
+	// the exporter takes it out of the batch and posts its item to scoresPath.
+	scoreSpanName = "telmoni.score"
+	attrScoreSent = "telmoni.score.sent"
+	scoresPath    = "/v1/scores"
+)
+
+// scoreKeys are an evaluation event's metadata: any other key on one is
+// content.
+var scoreKeys = map[string]bool{
+	attrEvaluationName:  true,
+	attrEvaluationValue: true,
+	attrEvaluationLabel: true,
+	attrScoreType:       true,
+	attrScoreRangeMin:   true,
+	attrScoreRangeMax:   true,
+	attrScoreVersion:    true,
+}
+
+const (
+	// A score's longest name, category and version, in characters, scores.rs's.
+	scoreNameMax     = 64
+	scoreCategoryMax = 64
+	scoreVersionMax  = 64
+	// scoresPerSpanMax leaves the exception event room among a span's 32.
+	scoresPerSpanMax = 16
+	// scoresSentMax is the most scores one POST to scoresPath holds.
+	scoresSentMax = 100
+)
+
 // attrStatusDescription is the key a status message is handed to the mask by.
 const attrStatusDescription = "otel.status_description"
 

@@ -98,6 +98,10 @@ type handle struct {
 	span   trace.Span
 	client *Client
 	once   sync.Once
+	// mu holds ended and the scores the span holds, so none lands past its end.
+	mu     sync.Mutex
+	ended  bool
+	scored int
 }
 
 // End ends the span; a second End does nothing.
@@ -105,7 +109,12 @@ func (h *handle) End() {
 	if h.span == nil {
 		return
 	}
-	h.once.Do(func() { h.span.End() })
+	h.once.Do(func() {
+		h.mu.Lock()
+		h.ended = true
+		h.mu.Unlock()
+		h.span.End()
+	})
 }
 
 // Fail marks the span failed with err's Go type; its message is content, kept

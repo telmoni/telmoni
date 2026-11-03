@@ -13,6 +13,16 @@ const MediaMaxBytes = mediaMaxBytes
 // The names the exporter holds back as content, which content.json names too.
 var Content = content
 
+// The score limits, which scores.json names too.
+var ScoreLimits = map[string]int{
+	"name_max":     scoreNameMax,
+	"category_max": scoreCategoryMax,
+	"version_max":  scoreVersionMax,
+	"session_max":  sessionIDMax,
+	"per_span_max": scoresPerSpanMax,
+	"sent_max":     scoresSentMax,
+}
+
 // The hooks the tests reach for: the sample rate's random source, a record's
 // hold, the W3C grammar's helpers and a time as sent.
 var (

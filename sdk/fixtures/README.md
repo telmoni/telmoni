@@ -61,6 +61,17 @@ Where `masks`, the mask was handed `handed`, each key once — Python and TypeSc
 
 The rest each suite proves on its own: a mask that fails on a field is warned of once however many exports it fails in, and is asked again each export; Python's and TypeScript's mask answering anything but a string, or none, fails as a raise does, TypeScript's `Promise` among them; and a mask that is no function is refused as the client is built, in the two languages that could be handed one.
 
+
+## `scores.json`
+
+Scores, held to the server's own rules, which its tests read from this file too (`crates/telemetry/src/handler/scores.rs`). `limits` are the caps every SDK holds: a name, a category and a version in characters, Unicode code points after Unicode's White_Space is trimmed from the ends; a session's id; scores a span (`per_span_max`, half the 32 events a span holds, so a failure's event still fits); and scores a body of `/v1/scores`.
+
+- `scores`: each case a score given to a live run's `score`, on a client whose content stays home. `value` is a number, a word for one JSON has none for (`NaN`, `Infinity`, `-Infinity`), `true` or `false` for a yes or no, or a category's label; `range` and `version` where given. Where `kept`, the run's span carries one `gen_ai.evaluation.result` event naming `kept`'s `name`, its `value` (as a double; 1 or 0 for a yes or no, with `telmoni.score.type` `boolean`) or its `label`, its range where given, and `telmoni.score.version` where `kept.version` is not empty; where `refused`, none, and one warning of kind `input`.
+- `targets`: each case a number score sent with the client's `score` naming what it scores. Where `kept`, one `POST /v1/scores` whose one item holds exactly `kept`'s ids, in lowercase; where `refused`, no request and one `input` warning.
+- `late`: three scores sent with the client's `score`, then a flush: exactly one request, a `POST` to `/v1/scores` with the export's headers and no OTLP export at all, whose body is `sent` once each `id` is checked to be a UUID v4 and replaced by `<uuid>`, numbers compared as numbers.
+- `live`: three scores on one run, its span's events, each attributes array sorted by `key` and each `timeUnixNano` checked to fall within the span, then replaced by `<time>`, being `events`.
+
+A score's own keys are metadata, sent in every content mode and never handed to the mask; any other attribute of an evaluation event, an application's `gen_ai.evaluation.explanation` say, is content.
 ## `ask.json`
 
 A client asks the project's content mode before the first content it would send, so a process that sends once, a hook's, still sends its content. For each of `cases`, a client keyed `k` is built with its `capture_content`; its fake transport answers each request in turn from `answers` — a word, `200` with `Telmoni-Content-Mode` naming it and a body of `{}`; a number, that status with no header and no body — then as `kept.json` does. The client runs two runs of `agent`, each flushed, each holding one model call of `model`, opened with `input_messages` where `content` is true and with none where it is false.

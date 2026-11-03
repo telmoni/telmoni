@@ -80,6 +80,7 @@ mod propagation;
 mod records;
 mod runs;
 mod sampler;
+mod scores;
 pub mod transport;
 mod warnings;
 
@@ -94,6 +95,7 @@ pub use runs::{
     Content, ModelCall, ModelCallOptions, Reply, Run, RunOptions, RunReply, Step, ToolCall,
     ToolCallOptions, Usage,
 };
+pub use scores::{Score, ScoreTarget};
 pub use warnings::{Warning, WarningKind};
 
 /// The OpenTelemetry a run joins and hands its context to: nest your own spans

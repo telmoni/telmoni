@@ -173,6 +173,30 @@ from a clone, since `record_run` takes the record. One of more spans than the
 queue holds, 2,048 unless `Hooks::batching` raises it, is never taken, and its
 error says so. One made once the client is shut down is `Error::Shutdown`.
 
+## Scores
+
+A score is a name and a number, a yes or no, or a category. On a handle still
+open, `run.score(Score::number("relevance", 0.75).range(0.0, 1.0).version("judge-2"))`
+adds it to that span, timed now; `Score::boolean` is a yes or no, and
+`Score::category` a category. Once it has ended, the client's `score` sends
+it, naming what it scores — a run, a run and one of its spans (`run.run_id()`,
+`step.span_id()`), or a session:
+
+```rust
+telmoni.score(&ScoreTarget::run(&run_id), Score::boolean("thumbs", true));
+telmoni.score(&ScoreTarget::span(&run_id, &span_id), Score::number("relevance", 0.5));
+telmoni.score(&ScoreTarget::session("conv_7"), Score::category("outcome", "resolved"));
+```
+
+It goes with the next export, through the same queue, so `flush` and
+`shutdown` hold it. A recorded run, and each step and call in it, takes
+`scores: Vec<Score>`, each timed at that span's end. A name, a category or a
+version is trimmed and up to 64 characters; a number is finite and within its
+range; a span holds up to 16. A score that breaks a rule never panics or
+errs: it is not sent, with one warning. A score is no content: it is sent
+whatever `capture_content` and the project's mode say, and never handed to
+the mask.
+
 ## The guard
 
 `RunOptions { max_steps: Some(20), max_spend: Some(0.50), .. }` holds a run
@@ -245,7 +269,7 @@ Prompts, completions, tool arguments and results are content, and so are a
 run's own messages: `RunOptions::input_messages` and
 `run.answered(RunReply { output_messages })`, a failure's message, its
 `exception` event and its status's message, and every event the application
-adds to a span through OpenTelemetry. They are set on
+adds to a span through OpenTelemetry, a score's own keys apart ([Scores](#scores)). They are set on
 the span, and the exporter takes them off every span before it leaves the
 process unless `capture_content` is on, in code or by `TELMONI_CAPTURE_CONTENT=1`
 under `Config::from_env()`, **and** the project's content mode,

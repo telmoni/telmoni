@@ -4,7 +4,8 @@
  * It takes content off every span unless the code asked and the project's mode
  * allows, puts each image or file a message carries to
  * `PUT {endpoint}/v1/media/{sha256}` where it sends content, sends to
- * `POST {endpoint}/otlp/v1/traces`, waits out a
+ * `POST {endpoint}/otlp/v1/traces`, and each score carried to it to
+ * `POST {endpoint}/v1/scores`, waits out a
  * `Retry-After`, and reads `Telmoni-Content-Mode` and the partial success
  * from each answer, warning once for each attribute an answer names dropped.
  */
@@ -42,7 +43,7 @@ export const UPLOADED_MAX = 4096;
 /** Where a dropped content field's warning sends the reader. */
 const CONTENT_DOCS = 'https://telmoni.com/docs/api/ingest#what-is-dropped-at-the-door';
 
-const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g;
+export const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g;
 const DROPPED = /^span (\S+) dropped (\S+): (\w+)(?:; (.*))?$/;
 const REFUSED = /^span (\S+) refused: (.*)$/;
 const SECONDS = /^[ \t]*([+-]?)([0-9]+)[ \t]*$/;
@@ -74,6 +75,19 @@ const DOUBLES: ReadonlySet<string> = new Set([
   contract.REQUEST_TOP_K,
   contract.REQUEST_FREQUENCY_PENALTY,
   contract.REQUEST_PRESENCE_PENALTY,
+  contract.EVALUATION_VALUE,
+  contract.SCORE_RANGE_MIN,
+  contract.SCORE_RANGE_MAX,
+]);
+/** What a score's event carries: no content, so sent whatever the lock says, and never masked. */
+const SCORE_KEYS: ReadonlySet<string> = new Set([
+  contract.EVALUATION_NAME,
+  contract.EVALUATION_VALUE,
+  contract.EVALUATION_LABEL,
+  contract.SCORE_TYPE,
+  contract.SCORE_RANGE_MIN,
+  contract.SCORE_RANGE_MAX,
+  contract.SCORE_VERSION,
 ]);
 const INTEGERS: ReadonlySet<string> = new Set([
   contract.INPUT_TOKENS,
@@ -254,6 +268,7 @@ export class Exporter {
   readonly #warn: (message: string, warning: Warning) => void;
   readonly #url: string;
   readonly #mediaUrl: string;
+  readonly #scoresUrl: string;
   readonly #uploaded = new Set<string>();
   readonly #warned = new Set<string>();
   readonly #resource: KeyValue[];
@@ -267,6 +282,7 @@ export class Exporter {
     this.#warn = hooks.warn;
     this.#url = `${config.endpoint}/otlp/v1/traces`;
     this.#mediaUrl = `${config.endpoint}${contract.MEDIA_PATH}`;
+    this.#scoresUrl = `${config.endpoint}${contract.SCORES_PATH}`;
     this.#resource = [
       attribute(contract.DISTRO_NAME, contract.DISTRO),
       attribute('telemetry.distro.version', VERSION),
@@ -313,6 +329,13 @@ export class Exporter {
    */
   async export(spans: readonly ReadableSpan[]): Promise<boolean> {
     if (spans.length === 0) return true;
+    // Scores first, posted apart: never sent, masked or lifted as spans, nor a reason to ask.
+    const scores = spans.filter(carriesScore);
+    if (scores.length > 0) {
+      await this.#sendScores(scores.map((span) => span.attributes[contract.SCORE_SENT] as string));
+      spans = spans.filter((span) => !carriesScore(span));
+      if (spans.length === 0) return true;
+    }
     // Yet to hear the project's mode, a client asks it first, so a process
     // that sends once, as a hook does, still sends its content.
     if (this.#config.captureContent && this.#contentMode === undefined && spans.some(holdsContent)) {
@@ -380,7 +403,8 @@ export class Exporter {
       const events = span.events.map((event) => {
         const kept: Attributes = {};
         for (const [key, value] of Object.entries(event.attributes ?? {})) {
-          const answer = value === undefined ? undefined : this.#masked(key, value);
+          const score = event.name === contract.EVALUATION_EVENT && SCORE_KEYS.has(key);
+          const answer = value === undefined || score ? value : this.#masked(key, value);
           if (answer !== undefined) kept[key] = answer;
         }
         return { ...event, attributes: kept };
@@ -563,51 +587,84 @@ export class Exporter {
 
   async #send(body: string): Promise<boolean> {
     const headers = this.#headers();
+    // This clock as each attempt leaves, the spans' own.
+    const posted = await this.#post(this.#url, body, () => ({ ...headers, [contract.SENT_AT_HEADER]: sentAtNow() }));
+    switch (posted.kind) {
+      case 'answered':
+        await this.#read(posted.answer);
+        return true;
+      case 'refused':
+        this.warnOnce(
+          `status:${posted.status}`,
+          `telmoni: export refused with ${nameOf(posted.status, posted.named)}; the batch was dropped`,
+          answered('refused', posted.status, posted.named),
+        );
+        // Refused for what it holds, the rest of a batch may still go.
+        return posted.status === 400 || posted.status === 413;
+      case 'failed':
+        this.warnOnce(
+          `failed:${posted.failure}`,
+          `telmoni: export failed after ${ATTEMPTS} attempts (${posted.failure}); the batch was dropped`,
+          posted.warning,
+        );
+        return false;
+      case 'given_up':
+        return false;
+    }
+  }
+
+  /** Posts the scores' items, in order, `SCORES_SENT_MAX` a body; a failure is warned of, never the spans'. */
+  async #sendScores(items: readonly string[]): Promise<void> {
+    const headers = this.#headers();
+    for (let at = 0; at < items.length; at += contract.SCORES_SENT_MAX) {
+      const body = `{"scores":[${items.slice(at, at + contract.SCORES_SENT_MAX).join(',')}]}`;
+      const posted = await this.#post(this.#scoresUrl, body, () => headers);
+      if (posted.kind === 'given_up') return;
+      if (posted.kind === 'answered') {
+        await bodyOf(posted.answer);
+      } else if (posted.kind === 'refused') {
+        this.warnOnce(
+          `scores:status:${posted.status}`,
+          `telmoni: scores refused with ${nameOf(posted.status, posted.named)}; they were dropped`,
+          answered('refused', posted.status, posted.named),
+        );
+      } else {
+        this.warnOnce(
+          `scores:failed:${posted.failure}`,
+          `telmoni: scores failed after ${ATTEMPTS} attempts (${posted.failure}); they were dropped`,
+          posted.warning,
+        );
+      }
+    }
+  }
+
+  /** Posts `body`, sent again on no answer or a retried status, `ATTEMPTS` in all, as long as nothing gave it up. */
+  async #post(url: string, body: string, headers: () => Record<string, string>): Promise<Posted> {
     let failure = '';
     // The last attempt's, for the warning's fields, as its line names them; a transport error clears it.
     let met: Warning = { kind: 'failed' };
     for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
-      if (this.#givenUp.signal.aborted) return false;
+      if (this.#givenUp.signal.aborted) return { kind: 'given_up' };
       let answer: TransportResponse;
       try {
-        answer = await this.#transport(this.#url, {
-          method: 'POST',
-          // This clock as the attempt leaves, the spans' own.
-          headers: { ...headers, [contract.SENT_AT_HEADER]: sentAtNow() },
-          body,
-        });
+        answer = await this.#transport(url, { method: 'POST', headers: headers(), body });
       } catch (error) {
         failure = errorName(error);
         met = { kind: 'failed' };
         await this.#wait(null, attempt);
         continue;
       }
-      if (answer.status >= 200 && answer.status < 300) {
-        await this.#read(answer);
-        return true;
-      }
-      const text = await bodyOf(answer);
-      const named = problemType(text);
+      if (answer.status >= 200 && answer.status < 300) return { kind: 'answered', answer };
+      const named = problemType(await bodyOf(answer));
       if (RETRIED.has(answer.status)) {
         failure = nameOf(answer.status, named);
         met = answered('failed', answer.status, named);
         await this.#wait(answer.headers.get('Retry-After'), attempt);
         continue;
       }
-      this.warnOnce(
-        `status:${answer.status}`,
-        `telmoni: export refused with ${nameOf(answer.status, named)}; the batch was dropped`,
-        answered('refused', answer.status, named),
-      );
-      // Refused for what it holds, the rest of a batch may still go.
-      return answer.status === 400 || answer.status === 413;
+      return { kind: 'refused', status: answer.status, named };
     }
-    this.warnOnce(
-      `failed:${failure}`,
-      `telmoni: export failed after ${ATTEMPTS} attempts (${failure}); the batch was dropped`,
-      met,
-    );
-    return false;
+    return { kind: 'failed', failure, warning: met };
   }
 
   /**
@@ -662,14 +719,16 @@ export class Exporter {
       attributes,
     };
     // Events and the status message carry an exception's message and stack
-    // trace: content, and the first to go from a span trimmed to fit.
+    // trace: content, and the first to go from a span trimmed to fit. A
+    // score's event goes whatever, with its score alone where content stays home.
     const events = keepContent && !trimmed;
-    if (events && span.events.length > 0) {
-      encoded.events = span.events.map((event) => ({
+    const sent = span.events.filter((event) => events || event.name === contract.EVALUATION_EVENT);
+    if (sent.length > 0) {
+      encoded.events = sent.map((event) => ({
         timeUnixNano: nanos(event.time),
         name: event.name,
         attributes: Object.entries(event.attributes ?? {})
-          .filter((entry): entry is [string, AttributeValue] => entry[1] !== undefined)
+          .filter((entry): entry is [string, AttributeValue] => entry[1] !== undefined && (events || SCORE_KEYS.has(entry[0])))
           .map(([key, value]) => attribute(key, value)),
       }));
     }
@@ -772,14 +831,33 @@ function answered(kind: 'refused' | 'failed', status: number, type: string): War
   return type === '' ? { kind, status } : { kind, status, problemType: type };
 }
 
+/** What became of a body posted: its answer, a status not retried, its attempts spent, or given up. */
+type Posted =
+  | { kind: 'answered'; answer: TransportResponse }
+  | { kind: 'refused'; status: number; named: string }
+  | { kind: 'failed'; failure: string; warning: Warning }
+  | { kind: 'given_up' };
+
+/** Whether the span is the SDK's carrier of a score bound for `/v1/scores`, opened under no parent. */
+function carriesScore(span: ReadableSpan): boolean {
+  return (
+    span.name === contract.SCORE_SPAN &&
+    span.parentSpanContext === undefined &&
+    typeof span.attributes[contract.SCORE_SENT] === 'string'
+  );
+}
+
 /** An export of no spans: how a client asks the project's content mode. */
 const ASK = '{"resourceSpans":[]}';
 
-/** Whether a span holds anything the content lock decides on: a content field, an event or a status message. */
+/** Whether a span holds anything the content lock decides on: a content field, an event beyond a score's keys, or a status message. */
 function holdsContent(span: ReadableSpan): boolean {
   return (
     Object.keys(span.attributes).some((key) => contract.CONTENT.has(key)) ||
-    span.events.length > 0 ||
+    span.events.some(
+      (event) =>
+        event.name !== contract.EVALUATION_EVENT || Object.keys(event.attributes ?? {}).some((key) => !SCORE_KEYS.has(key)),
+    ) ||
     Boolean(span.status.message)
   );
 }

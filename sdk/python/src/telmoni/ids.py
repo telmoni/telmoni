@@ -46,3 +46,14 @@ def span_id(run_id: uuid.UUID, place: int) -> int:
     the version 5 UUID (RFC 9562) named by the place, in decimal, under the
     run's id. Its version's bits are among those eight, so it is never zero."""
     return int.from_bytes(uuid.uuid5(run_id, str(place)).bytes[:8], "big")
+
+
+def run_uuid(text: str) -> uuid.UUID | None:
+    """A run's id as a UUID, written out or as 32 hex digits, any case; None for
+    anything else."""
+    try:
+        read = uuid.UUID(text)
+    except ValueError:
+        return None
+    # uuid also takes int()'s signs, underscores and spaces: another id.
+    return read if text.lower() in (str(read), read.hex) else None

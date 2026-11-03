@@ -149,6 +149,30 @@ One of more spans than the queue holds, 2,048 unless
 `Batching(max_queue_size=...)` raises it, is never taken, and its error says so.
 One made once the client is shut down raises `ShutdownError`.
 
+## Scores
+
+A score is a name and a number, a yes or no, or a category. On a handle still
+open, `run.score("relevance", 0.75, range=(0, 1), version="judge-2")` adds it
+to that span, timed now; `True` or `False` is a yes or no, and a `str` a
+category. Once it has ended, the client's `score` sends it, naming what it
+scores — a run, a run and one of its spans (`run.run_id`, `step.span_id`), or a
+session:
+
+```python
+telmoni.score("thumbs", True, run_id=run_id)
+telmoni.score("relevance", 0.5, run_id=run_id, span_id=span_id, range=(0, 1))
+telmoni.score("outcome", "resolved", session_id="conv_7")
+```
+
+It goes with the next export, through the same queue, so `flush()` and
+`shutdown()` hold it. A recorded run, and each step and call in it, takes
+`scores=[{"name": ..., "value": ..., "range": ..., "version": ...}]`, each timed
+at that span's end. A name, a category or a version is trimmed and up to 64
+characters; a number is finite and within its range; a span holds up to 16. A
+score that breaks a rule is never raised: it is not sent, with one warning. A
+score is no content: it is sent whatever `capture_content` and the project's
+mode say, and never handed to the mask.
+
 ## The guard
 
 `telmoni.run("support-bot", max_steps=20, max_spend=0.50)` holds a run to caps
@@ -176,7 +200,7 @@ only when the client is built with `Config(capture_content=True)`, or from
 project's content mode, which the SDK asks the server for before the first
 content it would send and learns again from every answer, is `on`. A failure's message and stack trace, its `exception` event and its
 status's message, and every event the application adds to a span through
-OpenTelemetry, are content too: without both, a failed span goes with its
+OpenTelemetry, a score's own keys apart ([Scores](#scores)), are content too: without both, a failed span goes with its
 `error.type` and an error status alone. A `capture_content` that is no `bool`,
 such as `"false"` from the environment, raises `TypeError`.
 

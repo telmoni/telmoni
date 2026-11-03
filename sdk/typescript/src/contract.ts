@@ -145,6 +145,28 @@ export const MEDIA_MAX_BYTES = 5 * 1024 * 1024;
 /** A file's `Content-Type` where its part names no type a header can carry. */
 export const MEDIA_DEFAULT_TYPE = 'application/octet-stream';
 
+/** A score on a span still open: OpenTelemetry's evaluation event, Telmoni's beside it. */
+export const EVALUATION_EVENT = 'gen_ai.evaluation.result';
+export const EVALUATION_NAME = 'gen_ai.evaluation.name';
+export const EVALUATION_VALUE = 'gen_ai.evaluation.score.value';
+export const EVALUATION_LABEL = 'gen_ai.evaluation.score.label';
+export const SCORE_TYPE = 'telmoni.score.type';
+export const SCORE_RANGE_MIN = 'telmoni.score.range_min';
+export const SCORE_RANGE_MAX = 'telmoni.score.range_max';
+export const SCORE_VERSION = 'telmoni.score.version';
+/** Where a score of what has ended is sent, a body of up to `SCORES_SENT_MAX`. */
+export const SCORES_PATH = '/v1/scores';
+/** Never sent as a span: one score bound for `SCORES_PATH`, through the export queue, its item's JSON in `SCORE_SENT`. */
+export const SCORE_SPAN = 'telmoni.score';
+export const SCORE_SENT = 'telmoni.score.sent';
+/** A score's longest name, category and version, in characters. */
+export const SCORE_NAME_MAX = 64;
+export const SCORE_CATEGORY_MAX = 64;
+export const SCORE_VERSION_MAX = 64;
+/** The most scores one span carries, so they never take the exception event's room among its 32. */
+export const SCORES_PER_SPAN = 16;
+export const SCORES_SENT_MAX = 100;
+
 /** The variable `Telmoni.fromEnv` reads `captureContent` from: `1` turns it on, and anything else, or nothing, leaves it off. */
 export const CAPTURE_CONTENT_ENV = 'TELMONI_CAPTURE_CONTENT';
 

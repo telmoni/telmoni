@@ -17,6 +17,7 @@ import { errorType, isAbort } from './errors.js';
 import { Guard, type OwnRates, type Tokens, ownRates, priced } from './guard.js';
 import { type Ids, spanIdAt } from './ids.js';
 import type { Processor } from './processor.js';
+import { WHY, eventOf, hyphenated, judge, lateItem, refuse, uuidHexOf } from './scores.js';
 import { isBlank } from './whitespace.js';
 import type {
   CallRecord,
@@ -29,6 +30,9 @@ import type {
   RunAnswer,
   RunOptions,
   RunRecord,
+  ScoreOptions,
+  ScoreTarget,
+  ScoreValue,
   StepRecord,
   ToolCallOptions,
   ToolCallRecord,
@@ -61,6 +65,7 @@ export class Handle {
   protected readonly span: Span;
   readonly #warnOnce: WarnOnce;
   #ended = false;
+  #scores = 0;
 
   constructor(span: Span, parent: Context, run: Run | undefined, warnOnce: WarnOnce) {
     this.span = span;
@@ -95,6 +100,24 @@ export class Handle {
   /** Mark it cancelled by the agent, which is neither ok nor an error. */
   cancel(): void {
     this.span.setAttribute(contract.CANCELLED, true);
+  }
+
+  /** Its span's id, 16 lowercase hex digits: what the client's `score` names once it has ended. */
+  get spanId(): string {
+    return this.span.spanContext().spanId;
+  }
+
+  /**
+   * Score it, timed now: a number, within `range` where given, a yes or no, or
+   * a category's label. One refused, or given once it has ended, is not sent, with one warning.
+   */
+  score(name: string, value: ScoreValue, options?: ScoreOptions): void {
+    if (this.#ended) return refuse(this.#warnOnce, WHY.ended);
+    const score = judge(name, value, options);
+    if (typeof score === 'string') return refuse(this.#warnOnce, score);
+    if (this.#scores >= contract.SCORES_PER_SPAN) return refuse(this.#warnOnce, WHY.full);
+    this.#scores += 1;
+    this.span.addEvent(contract.EVALUATION_EVENT, eventOf(score));
   }
 
   /** Whether its span has ended. */
@@ -553,13 +576,7 @@ export class Opener {
       if (later(start, end)) throw new RangeError('a recorded span cannot end before it starts');
     }
     const rate = this.#config.sampleRate;
-    const runId = [
-      runHex.slice(0, 8),
-      runHex.slice(8, 12),
-      runHex.slice(12, 16),
-      runHex.slice(16, 20),
-      runHex.slice(20),
-    ].join('-');
+    const runId = hyphenated(runHex);
     const inherited = inheritedOf(runId, record.agent, rate, record.userId, record.sessionId);
     const attributes = runAttributes(record.agent, inherited, tagsOf(tagged, this.#warnOnce));
     for (const [key, value] of messages) {
@@ -574,10 +591,16 @@ export class Opener {
     const operations = new Map<CallRecord, string>();
     // Content too, whose encoding may run the caller's `toJSON`.
     const contents = new Map<Item, Attributes>();
+    // Scores too, each refused one warned of.
+    const scored = new Map<RecordOutcome, Attributes[]>([[record, scoresOf(record, this.#warnOnce)]]);
     for (const [item, calls] of items) {
-      if (item.type === 'step') contents.set(item, contentOf(item));
+      if (item.type === 'step') {
+        contents.set(item, contentOf(item));
+        scored.set(item, scoresOf(item, this.#warnOnce));
+      }
       for (const each of item.type === 'step' ? calls : [item]) {
         contents.set(each, contentOf(each));
+        scored.set(each, scoresOf(each, this.#warnOnce));
         if (each.type !== 'model_call') continue;
         usages.set(each, usageOf(each.usage, this.#warnOnce));
         operations.set(each, operationOf(each.operation, this.#warnOnce));
@@ -593,10 +616,10 @@ export class Opener {
         const operation = operations.get(item) ?? contract.DEFAULT_MODEL_OPERATION;
         const [name, callAttributes] = modelCallOpening(inherited, item.model, operation, item.provider ?? '');
         Object.assign(callAttributes, usages.get(item), contents.get(item));
-        close(open(name, parent, callAttributes, SpanKind.CLIENT, item.start), item);
+        close(open(name, parent, callAttributes, SpanKind.CLIENT, item.start), item, scored.get(item));
       } else {
         const callAttributes = { ...toolAttributes(inherited, item.name), ...contents.get(item) };
-        close(open(toolSpanName(item.name), parent, callAttributes, SpanKind.INTERNAL, item.start), item);
+        close(open(toolSpanName(item.name), parent, callAttributes, SpanKind.INTERNAL, item.start), item, scored.get(item));
       }
     };
     // Queued whole or not at all: a record that outgrows the queue's room
@@ -609,13 +632,26 @@ export class Opener {
           const step = open(item.name, ctx, { ...inherited, ...contents.get(item) }, SpanKind.INTERNAL, item.start);
           const inner = trace.setSpan(ctx, step);
           for (const each of calls) call(each, inner);
-          close(step, item);
+          close(step, item, scored.get(item));
         } else {
           call(item, ctx);
         }
       }
-      close(span, record);
+      close(span, record, scored.get(record));
     });
+  }
+
+  /**
+   * A score of what has ended, sent to `/v1/scores`: a span of its own trace,
+   * never sent as one, carries it through the export queue, so a flush or a
+   * shutdown holds it as it holds spans.
+   */
+  score(name: string, value: ScoreValue, options: ScoreTarget & ScoreOptions): void {
+    const score = judge(name, value, options);
+    if (typeof score === 'string') return refuse(this.#warnOnce, score);
+    const sent = lateItem(options, score);
+    if (sent === undefined) return refuse(this.#warnOnce, WHY.target);
+    this.#tracer.startSpan(contract.SCORE_SPAN, { attributes: { [contract.SCORE_SENT]: sent } }, ROOT_CONTEXT).end();
   }
 
   #start(name: string, parent: Context, attributes: Attributes, kind: SpanKind): Span {
@@ -623,14 +659,10 @@ export class Opener {
   }
 }
 
-const UUID = /^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$/i;
-
 /** A run id's 32 hex digits, lowercase: the trace's id. */
 function uuidHex(runId: unknown): string {
-  if (typeof runId !== 'string' || !UUID.test(runId) || ![32, 36].includes(runId.length)) {
-    throw new TypeError("a recorded run's id must be a UUID");
-  }
-  const hex = runId.replaceAll('-', '').toLowerCase();
+  const hex = uuidHexOf(runId);
+  if (hex === undefined) throw new TypeError("a recorded run's id must be a UUID");
   // The run's id is its trace's, and a trace id of zeros is no trace at all.
   if (/^0+$/.test(hex)) throw new TypeError("a recorded run's id must be a UUID other than the nil UUID");
   return hex;
@@ -759,6 +791,23 @@ function check(item: RunRecord | Item, kind: keyof typeof FIELDS): void {
       throw new RangeError(`a recorded ${what}'s ${field} must be up to ${most} characters`);
     }
   }
+  const scores: unknown = Reflect.get(item, 'scores');
+  if (scores !== undefined && scores !== null && !Array.isArray(scores)) {
+    throw new TypeError(`a recorded ${what}'s scores must be an array`);
+  }
+}
+
+/** A recorded span's scores as its evaluation events, held to a live score's rules, its cap among them. */
+function scoresOf(outcome: RecordOutcome, warnOnce: WarnOnce): Attributes[] {
+  const given: unknown = outcome.scores;
+  const events: Attributes[] = [];
+  for (const each of Array.isArray(given) ? (given as unknown[]) : []) {
+    const score = isObject(each) ? judge(Reflect.get(each, 'name'), Reflect.get(each, 'value'), each) : WHY.value;
+    if (typeof score === 'string') refuse(warnOnce, score);
+    else if (events.length >= contract.SCORES_PER_SPAN) refuse(warnOnce, WHY.full);
+    else events.push(eventOf(score));
+  }
+  return events;
 }
 
 /** A literal or a class's instance: an array, a `Map` or a boxed primitive is of `typeof` object too. */
@@ -787,7 +836,9 @@ function contentOf(item: Item): Attributes {
   return out;
 }
 
-function close(span: Span, outcome: RecordOutcome & { end: RecordTime }): void {
+function close(span: Span, outcome: RecordOutcome & { end: RecordTime }, scores: readonly Attributes[] = []): void {
+  // At its end, so the same record sent again is the same bytes.
+  for (const score of scores) span.addEvent(contract.EVALUATION_EVENT, score, hrTimeOf(outcome.end));
   if (outcome.errorType) {
     span.setAttribute(contract.ERROR_TYPE, outcome.errorType);
     span.setStatus({ code: SpanStatusCode.ERROR });

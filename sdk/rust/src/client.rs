@@ -4,7 +4,7 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
-use opentelemetry::trace::TracerProvider as _;
+use opentelemetry::trace::{Span as _, Tracer as _, TracerProvider as _};
 use opentelemetry::{Context, InstrumentationScope, KeyValue};
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::trace::{SdkTracer, SdkTracerProvider, SpanLimits, SpanProcessor as _};
@@ -22,6 +22,7 @@ use crate::propagation::{self, Carrier};
 use crate::records::{self, RunRecord};
 use crate::runs::{self, Run, RunOptions};
 use crate::sampler::RecordingSampler;
+use crate::scores::{self, Score, ScoreTarget};
 use crate::transport::{Reqwest, Transport};
 use crate::warnings::{Sink, Warner, Warning};
 
@@ -310,6 +311,25 @@ impl Telmoni {
         records::send(&self.inner, record)
     }
 
+    /// Scores what has already ended — a run, one of its spans or a session —
+    /// sent to `/v1/scores` with the next export, as a flush or a shutdown
+    /// sends the spans queued. A score of a span still open goes on its
+    /// handle's `score` instead. One breaking a score's rules, or a target
+    /// that is none, is not sent, with one warning.
+    pub fn score(&self, target: &ScoreTarget, score: Score) {
+        let Some(sent) = scores::sent(target, &score, &self.inner.warner) else {
+            return;
+        };
+        // A span of its own trace, outside whatever run is current, so the
+        // queue carries it as it carries any span, and the exporter takes it out.
+        self.inner
+            .tracer
+            .span_builder(contract::SCORE_SPAN)
+            .with_attributes([KeyValue::new(contract::SCORE_SENT, sent)])
+            .start_with_context(&self.inner.tracer, &Context::new())
+            .end();
+    }
+
     /// Writes into `headers` what the next service continues the run from:
     /// the W3C `traceparent` of the span current inside the run, and the
     /// run's id and agent as the W3C `baggage` members `telmoni.run_id` and
@@ -369,7 +389,7 @@ impl fmt::Debug for Telmoni {
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use opentelemetry::trace::{Span as _, SpanId, TraceId, Tracer as _};
+    use opentelemetry::trace::{SpanId, TraceId};
 
     use super::*;
     use crate::ids;

@@ -80,6 +80,40 @@ pub(crate) const CONTENT_CUT: &str = "telmoni.content_cut";
 pub(crate) const EXCEPTION_EVENT: &str = "exception";
 pub(crate) const EXCEPTION_TYPE: &str = "exception.type";
 pub(crate) const EXCEPTION_MESSAGE: &str = "exception.message";
+/// A score, as OpenTelemetry's evaluation event carries it, with Telmoni's
+/// own type, range and version beside it.
+pub(crate) const EVALUATION_EVENT: &str = "gen_ai.evaluation.result";
+pub(crate) const EVALUATION_NAME: &str = "gen_ai.evaluation.name";
+pub(crate) const EVALUATION_VALUE: &str = "gen_ai.evaluation.score.value";
+pub(crate) const EVALUATION_LABEL: &str = "gen_ai.evaluation.score.label";
+pub(crate) const SCORE_TYPE: &str = "telmoni.score.type";
+pub(crate) const SCORE_RANGE_MIN: &str = "telmoni.score.range_min";
+pub(crate) const SCORE_RANGE_MAX: &str = "telmoni.score.range_max";
+pub(crate) const SCORE_VERSION: &str = "telmoni.score.version";
+/// A score's own keys: metadata, where any other attribute of its event is
+/// content, as an application's own `gen_ai.evaluation.explanation` is.
+pub(crate) const SCORE_KEYS: [&str; 7] = [
+    EVALUATION_NAME,
+    EVALUATION_VALUE,
+    EVALUATION_LABEL,
+    SCORE_TYPE,
+    SCORE_RANGE_MIN,
+    SCORE_RANGE_MAX,
+    SCORE_VERSION,
+];
+/// A score sent once its span ended rides the queue on a span of this name,
+/// holding `/v1/scores`' item, which the exporter takes out and never sends.
+pub(crate) const SCORE_SPAN: &str = "telmoni.score";
+pub(crate) const SCORE_SENT: &str = "telmoni.score.sent";
+pub(crate) const SCORES_PATH: &str = "/v1/scores";
+/// The server's caps on a score, in characters, and on what one body carries.
+pub(crate) const SCORE_NAME_MAX: usize = 64;
+pub(crate) const SCORE_CATEGORY_MAX: usize = 64;
+pub(crate) const SCORE_VERSION_MAX: usize = 64;
+pub(crate) const SCORES_SENT_MAX: usize = 100;
+/// The SDK's own cap a span, half its 32 events, so scores never crowd out
+/// the exception event or the application's own.
+pub(crate) const SCORES_PER_SPAN_MAX: usize = 16;
 /// The key a status message is handed to the mask by.
 pub(crate) const STATUS_DESCRIPTION: &str = "otel.status_description";
 
