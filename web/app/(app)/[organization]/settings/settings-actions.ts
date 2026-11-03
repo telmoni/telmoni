@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect, RedirectType } from "next/navigation";
 
 import { type ActionResult, refused } from "@/lib/action-result";
-import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
+import { extractProblem, readBody, tryFetchWithTimeout } from "@/lib/api/fetch";
 import { env } from "@/lib/env";
 import { organizationChannel, publishEvent } from "@/lib/events/publisher";
 import { checkOrganizationName, checkOrganizationUrl } from "@/lib/names";
@@ -48,17 +48,17 @@ async function patchOrganization(
   }
   if (!res.ok) return refused((await extractProblem(res)).message);
 
-  const updated = OrganizationNamedSchema.safeParse(await res.json().catch(() => null));
-  if (updated.success && was !== undefined && updated.data.slug !== was) {
+  const updated = await readBody(res, OrganizationNamedSchema);
+  if (updated && was !== undefined && updated.slug !== was) {
     await publishEvent(organizationChannel(organizationId), {
       type: "slug:moved",
-      data: { organizationId, from: was, to: updated.data.slug },
+      data: { organizationId, from: was, to: updated.slug },
     });
     // `replace`, so Back does not return to a path that names nothing.
     // Nothing is revalidated first: the new path is drawn whole with this
     // answer, and a revalidation would have the router read it all again as
     // soon as it lands.
-    redirect(await canonicalPath([updated.data.slug]), RedirectType.replace);
+    redirect(await canonicalPath([updated.slug]), RedirectType.replace);
   }
   revalidatePath("/", "layout");
   return { ok: true };

@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { env } from "@/lib/env";
-import { fetchWithTimeout } from "@/lib/api/fetch";
+import { fetchWithTimeout, readBody } from "@/lib/api/fetch";
 import { Problem } from "@/lib/api/problem";
 import { ExchangeRefused } from "@/lib/auth/refusal";
 import { logger } from "@/lib/logger";
@@ -110,8 +110,8 @@ export async function exchangeCode(
   );
   if (!res.ok) {
     // The problem's type is what tells the person why, on `/auth/refused`.
-    const problem = Problem.safeParse(await res.json().catch(() => null));
-    throw new ExchangeRefused(res.status, problem.success ? (problem.data.type ?? null) : null);
+    const problem = await readBody(res, Problem);
+    throw new ExchangeRefused(res.status, problem?.type ?? null);
   }
   return AuthnResultSchema.parse(await res.json());
 }

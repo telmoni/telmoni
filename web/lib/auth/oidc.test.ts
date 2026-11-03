@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const fetchWithTimeout = vi.hoisted(() => vi.fn());
-vi.mock("@/lib/api/fetch", () => ({
+vi.mock("@/lib/api/fetch", async (importOriginal) => ({
+  readBody: (await importOriginal<typeof import("@/lib/api/fetch")>()).readBody,
   fetchWithTimeout: (...a: unknown[]) => fetchWithTimeout(...a),
 }));
 vi.mock("@/lib/env", () => ({

@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { type ActionResult, refused } from "@/lib/action-result";
-import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
+import { extractProblem, readBody, tryFetchWithTimeout } from "@/lib/api/fetch";
 import { isNotificationKind } from "@/lib/notification-kinds";
 import {
   CONNECTORS_UNAVAILABLE,
@@ -69,10 +69,10 @@ export async function sendTestMessageAction(
   if (!res) return refused(CONNECTORS_UNAVAILABLE);
   revalidatePath("/(app)/[organization]/[project]/connectors", "page");
   if (!res.ok) return refused((await extractProblem(res)).message);
-  const sent = SendAnswerSchema.safeParse(await res.json().catch(() => null));
-  if (!sent.success) return refused(CONNECTORS_UNEXPECTED);
-  if (sent.data.delivered) return { ok: true };
-  return refused(sent.data.error || "The message was not delivered.");
+  const sent = await readBody(res, SendAnswerSchema);
+  if (!sent) return refused(CONNECTORS_UNEXPECTED);
+  if (sent.delivered) return { ok: true };
+  return refused(sent.error || "The message was not delivered.");
 }
 
 /** A signing secret, shown this once, and the host that titles its dialog. */
@@ -80,13 +80,13 @@ export type SigningSecret = { signingSecret: string; host: string };
 export type SecretResult = ActionResult<SigningSecret>;
 
 async function readSecret(res: Response): Promise<SecretResult> {
-  const parsed = SigningSecretSchema.safeParse(await res.json().catch(() => null));
-  if (!parsed.success) return refused(CONNECTORS_UNEXPECTED);
+  const parsed = await readBody(res, SigningSecretSchema);
+  if (!parsed) return refused(CONNECTORS_UNEXPECTED);
   revalidatePath("/(app)/[organization]/[project]/connectors", "page");
   return {
     ok: true,
-    signingSecret: parsed.data.signing_secret,
-    host: parsed.data.connection.channel_name,
+    signingSecret: parsed.signing_secret,
+    host: parsed.connection.channel_name,
   };
 }
 
@@ -138,8 +138,7 @@ export async function updateWebhookEventsAction(
   );
   if (!res) return refused(CONNECTORS_UNAVAILABLE);
   if (!res.ok) return refused((await extractProblem(res)).message);
-  const parsed = ConnectionAnswerSchema.safeParse(await res.json().catch(() => null));
-  if (!parsed.success) return refused(CONNECTORS_UNEXPECTED);
+  if (!(await readBody(res, ConnectionAnswerSchema))) return refused(CONNECTORS_UNEXPECTED);
   revalidatePath("/(app)/[organization]/[project]/connectors", "page");
   return { ok: true };
 }
@@ -199,8 +198,8 @@ export async function redeliverAction(
   if (!res) return refused(CONNECTORS_UNAVAILABLE);
   revalidatePath("/(app)/[organization]/[project]/connectors", "page");
   if (!res.ok) return refused((await extractProblem(res)).message);
-  const parsed = SendAnswerSchema.safeParse(await res.json().catch(() => null));
-  if (!parsed.success) return refused(CONNECTORS_UNEXPECTED);
-  if (parsed.data.delivered) return { ok: true };
-  return refused(parsed.data.error || "The delivery failed again.");
+  const parsed = await readBody(res, SendAnswerSchema);
+  if (!parsed) return refused(CONNECTORS_UNEXPECTED);
+  if (parsed.delivered) return { ok: true };
+  return refused(parsed.error || "The delivery failed again.");
 }

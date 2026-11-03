@@ -5,7 +5,7 @@ import { redirect, RedirectType } from "next/navigation";
 import { z } from "zod";
 
 import { type ActionResult, refused } from "@/lib/action-result";
-import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
+import { extractProblem, readBody, tryFetchWithTimeout } from "@/lib/api/fetch";
 import { NOT_A_CODE, isConfirmationCode } from "@/lib/confirmation-code";
 import { env } from "@/lib/env";
 import {
@@ -61,8 +61,8 @@ export async function updateProjectNameAction(
     return refused(error);
   }
 
-  const renamed = ProjectRenamedSchema.safeParse(await res.json().catch(() => null));
-  if (renamed.success && was !== undefined && renamed.data.slug !== was) {
+  const renamed = await readBody(res, ProjectRenamedSchema);
+  if (renamed && was !== undefined && renamed.slug !== was) {
     if (organization !== undefined) {
       await publishEvent(organizationChannel(gate.organizationId), {
         type: "slug:moved",
@@ -71,7 +71,7 @@ export async function updateProjectNameAction(
           organization,
           projectId,
           from: was,
-          to: renamed.data.slug,
+          to: renamed.slug,
         },
       });
     }
@@ -82,7 +82,7 @@ export async function updateProjectNameAction(
     // it all again as soon as it lands.
     redirect(
       organization !== undefined
-        ? await canonicalPath([organization, renamed.data.slug])
+        ? await canonicalPath([organization, renamed.slug])
         : "/console",
       RedirectType.replace,
     );

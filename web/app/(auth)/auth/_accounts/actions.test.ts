@@ -24,7 +24,8 @@ vi.mock("@/lib/api/rate-limit", () => ({
     `bfrl:${scope}:${headers.get("x-forwarded-for")}`,
   sessionKey: (session: { userId: string }, action: string) => `bfrl:${session.userId}:${action}`,
 }));
-vi.mock("@/lib/api/fetch", () => ({
+vi.mock("@/lib/api/fetch", async (importOriginal) => ({
+  readBody: (await importOriginal<typeof import("@/lib/api/fetch")>()).readBody,
   tryFetchWithTimeout: vi.fn(),
   extractProblem: vi.fn(async (res: Response) => {
     const body = (await res.json().catch(() => null)) as { detail?: string; title?: string } | null;

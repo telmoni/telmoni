@@ -23,7 +23,10 @@ const {
     })),
   }));
 
-vi.mock("@/lib/api/fetch", () => ({ tryFetchWithTimeout }));
+vi.mock("@/lib/api/fetch", async (importOriginal) => ({
+  readBody: (await importOriginal<typeof import("@/lib/api/fetch")>()).readBody,
+  tryFetchWithTimeout,
+}));
 vi.mock("@/lib/api/rate-limit", () => ({
   clientKey: (_request: unknown, scope: string) => `bfrl:${scope}:203.0.113.9`,
   rateLimitRetryAfter,

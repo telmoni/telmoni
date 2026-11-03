@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { z } from "zod";
 
-import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
+import { extractProblem, readBody, tryFetchWithTimeout } from "@/lib/api/fetch";
 import { privateJson, privateProblem } from "@/lib/api/respond";
 import {
   CONNECTORS_UNAVAILABLE,
@@ -49,7 +49,7 @@ export async function GET(
     const { message } = await extractProblem(res);
     return privateProblem(res.status >= 500 ? 502 : res.status, message);
   }
-  const parsed = DeliveryLogPageSchema.safeParse(await res.json().catch(() => null));
-  if (!parsed.success) return privateProblem(502, CONNECTORS_UNEXPECTED);
-  return privateJson(parsed.data);
+  const parsed = await readBody(res, DeliveryLogPageSchema);
+  if (!parsed) return privateProblem(502, CONNECTORS_UNEXPECTED);
+  return privateJson(parsed);
 }

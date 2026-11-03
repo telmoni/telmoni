@@ -4,7 +4,7 @@ import { refresh } from "next/cache";
 import { z } from "zod";
 
 import { type ActionResult, SESSION_EXPIRED, refused } from "@/lib/action-result";
-import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
+import { extractProblem, readBody, tryFetchWithTimeout } from "@/lib/api/fetch";
 import { CONFIRMATION_CODE_LENGTH, isConfirmationCode } from "@/lib/confirmation-code";
 import { blacklistSession } from "@/lib/auth/session-blacklist";
 import { sessionEndKey } from "@/lib/auth/session-end-key";
@@ -148,8 +148,8 @@ export async function confirmEmailChangeAction(
   // Auth answers with the address the identity provider reported, which is
   // authoritative. Unreadable, the page names the address the codes were sent
   // to instead.
-  const body = EmailChangedSchema.safeParse(await res.json().catch(() => null));
-  return body.success ? { ok: true, email: body.data.email } : { ok: true };
+  const body = await readBody(res, EmailChangedSchema);
+  return body ? { ok: true, email: body.email } : { ok: true };
 }
 
 // The organization a sign-in opens in. The body names it, so no organization

@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { type ActionResult, refused } from "@/lib/action-result";
-import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
+import { extractProblem, readBody, tryFetchWithTimeout } from "@/lib/api/fetch";
 import { env } from "@/lib/env";
 import { admitProject } from "@/lib/server/admit";
 import {
@@ -134,9 +134,9 @@ export async function tryEvaluatorAction(
   );
   if (!res) return refused("The try did not finish. Try again.");
   if (!res.ok) return refused((await extractProblem(res)).message);
-  const tried = TriedSchema.safeParse(await res.json().catch(() => null));
-  if (!tried.success) return refused("The try's answer could not be read.");
-  return { ok: true, tried: tried.data };
+  const tried = await readBody(res, TriedSchema);
+  if (!tried) return refused("The try's answer could not be read.");
+  return { ok: true, tried };
 }
 
 /** An evaluator and every version deleted; the scores it gave stay. */
@@ -201,9 +201,9 @@ export async function previewRuleAction(
   });
   if (!res) return refused("The preview did not finish. Try again.");
   if (!res.ok) return refused((await extractProblem(res)).message);
-  const preview = RulePreviewSchema.safeParse(await res.json().catch(() => null));
-  if (!preview.success) return refused("The preview's answer could not be read.");
-  return { ok: true, preview: preview.data };
+  const preview = await readBody(res, RulePreviewSchema);
+  if (!preview) return refused("The preview's answer could not be read.");
+  return { ok: true, preview };
 }
 
 /** A rule deleted; its evaluators stay. */

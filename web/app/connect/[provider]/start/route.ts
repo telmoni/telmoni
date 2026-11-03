@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 
-import { tryFetchWithTimeout } from "@/lib/api/fetch";
+import { readBody, tryFetchWithTimeout } from "@/lib/api/fetch";
 import { clientKey, rateLimitRetryAfter } from "@/lib/api/rate-limit";
 import { CONNECT_COOKIE, cookieOpts, getSession, sealConnect } from "@/lib/auth/session";
 import { type ConnectRefusal, connectorsPath, isOAuthProvider } from "@/lib/connect";
@@ -76,21 +76,20 @@ export async function GET(
   if (!res) return back("unavailable");
   if (res.status === 403) return back("forbidden");
   if (!res.ok) {
-    const problem = FeatureOffProblemSchema.safeParse(await res.json().catch(() => null));
-    if (problem.success) return back("off");
+    if (await readBody(res, FeatureOffProblemSchema)) return back("off");
     logger.warn({ provider, status: res.status }, "connector authorize refused");
     return back("authorize");
   }
-  const parsed = AuthorizeSchema.safeParse(await res.json().catch(() => null));
-  if (!parsed.success) return back("authorize");
+  const parsed = await readBody(res, AuthorizeSchema);
+  if (!parsed) return back("authorize");
 
   const sealed = await sealConnect({
-    state: parsed.data.state,
+    state: parsed.state,
     organizationId: project.organizationId,
     projectId,
     provider,
   });
-  const response = NextResponse.redirect(parsed.data.url);
+  const response = NextResponse.redirect(parsed.url);
   response.headers.set("cache-control", "no-store, max-age=0");
   response.cookies.set({
     name: CONNECT_COOKIE,

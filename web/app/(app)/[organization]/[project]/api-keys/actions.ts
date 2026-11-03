@@ -5,7 +5,7 @@ import { z } from "zod";
 
 import { type ActionResult, refused } from "@/lib/action-result";
 import { isApiKeyScope } from "@/lib/api-key-scopes";
-import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
+import { extractProblem, readBody, tryFetchWithTimeout } from "@/lib/api/fetch";
 import { env } from "@/lib/env";
 import { Flag } from "@/lib/flags";
 import { checkApiKeyDescription, checkApiKeyName } from "@/lib/names";
@@ -83,11 +83,10 @@ export async function mintTokenAction(projectId: string, input: unknown): Promis
   // The key exists from here on, whatever its answer reads as: the list is
   // drawn again with it.
   refresh();
-  const parsed = MintedTokenSchema.safeParse(await res.json().catch(() => null));
-  if (!parsed.success) {
+  const body = await readBody(res, MintedTokenSchema);
+  if (!body) {
     return refused("Unexpected response from the key service.");
   }
-  const body = parsed.data;
   return { ok: true, token: body.token, id: body.id };
 }
 
@@ -115,11 +114,10 @@ export async function rotateTokenAction(
     return refused(message);
   }
   refresh();
-  const parsed = MintedTokenSchema.safeParse(await res.json().catch(() => null));
-  if (!parsed.success) {
+  const body = await readBody(res, MintedTokenSchema);
+  if (!body) {
     return refused("Unexpected response from the key service.");
   }
-  const body = parsed.data;
   return { ok: true, token: body.token, id: body.id };
 }
 

@@ -21,7 +21,8 @@ vi.mock("@/lib/server/data", () => ({
     "x-project-id": projectId,
   })),
 }));
-vi.mock("@/lib/api/fetch", () => ({
+vi.mock("@/lib/api/fetch", async (importOriginal) => ({
+  readBody: (await importOriginal<typeof import("@/lib/api/fetch")>()).readBody,
   tryFetchWithTimeout: vi.fn(),
   extractProblem: vi.fn(async () => ({ message: "connection not found", problem: null })),
 }));
