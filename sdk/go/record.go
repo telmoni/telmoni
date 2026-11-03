@@ -175,8 +175,8 @@ func (c *Client) RecordRun(ctx context.Context, record RunRecord) error {
 		ctx = context.Background()
 	}
 	rate := c.config.SampleRate
-	inherited := inheritedAttributes(formatUUID(runUUID), record.Agent, record.UserID, record.SessionID)
-	name, attrs := c.runOpening(record.Agent, inherited, rate, record.Tags)
+	inherited := inheritedAttributes(formatUUID(runUUID), record.Agent, rate, record.UserID, record.SessionID)
+	name, attrs := c.runOpening(record.Agent, inherited, record.Tags)
 	if record.InputMessages != nil {
 		attrs = append(attrs, attribute.String(attrInputMessages, asJSON(record.InputMessages)))
 	}

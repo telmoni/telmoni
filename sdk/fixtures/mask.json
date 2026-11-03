@@ -1,0 +1,93 @@
+{
+  "scenario": {
+    "agent": "support-bot",
+    "user": "user-42",
+    "session": "session-7",
+    "tags": { "team": "billing" },
+    "provider": "openai",
+    "model": "gpt-4o",
+    "system_instructions": [
+      { "type": "text", "content": "Answer as briefly as you can." },
+      { "type": "blob", "modality": "image", "mime_type": "image/png", "content": "iVBORw0KGgo=" }
+    ],
+    "input_messages": [
+      {
+        "role": "user",
+        "parts": [
+          { "type": "text", "content": "My card is 4242 4242 4242 4242" },
+          { "type": "blob", "modality": "image", "mime_type": "image/png", "content": "AAE=" }
+        ]
+      }
+    ],
+    "output_messages": [
+      { "role": "assistant", "parts": [{ "type": "text", "content": "Card 4242 noted." }], "finish_reason": "stop" }
+    ],
+    "event": {
+      "name": "retrying",
+      "attributes": { "attempt": 2, "reason": "card 4242 declined" }
+    },
+    "error": "Declined",
+    "message": "card 4242 declined"
+  },
+  "mask": {
+    "gen_ai.input.messages": { "replace": "[{\"role\":\"user\",\"parts\":[{\"type\":\"text\",\"content\":\"My card is [card]\"}]}]" },
+    "gen_ai.output.messages": { "drop": true },
+    "gen_ai.system_instructions": { "fail": true },
+    "reason": { "replace": "card [card] declined" },
+    "attempt": { "replace": "2" },
+    "exception.message": { "replace": "card [card] declined" },
+    "exception.stacktrace": { "drop": true },
+    "otel.status_description": { "replace": "card [card] declined" }
+  },
+  "cases": [
+    { "capture_content": true, "content_mode": "on", "masks": true },
+    { "capture_content": true, "content_mode": "off", "masks": false },
+    { "capture_content": false, "content_mode": "on", "masks": false }
+  ],
+  "handed": [
+    "attempt",
+    "exception.message",
+    "exception.type",
+    "gen_ai.input.messages",
+    "gen_ai.output.messages",
+    "gen_ai.system_instructions",
+    "otel.status_description",
+    "reason"
+  ],
+  "handed_text": {
+    "attempt": "2",
+    "exception.message": "card 4242 declined",
+    "otel.status_description": "card 4242 declined",
+    "reason": "card 4242 declined"
+  },
+  "sent": {
+    "gen_ai.input.messages": [{ "role": "user", "parts": [{ "type": "text", "content": "My card is [card]" }] }]
+  },
+  "kept": {
+    "status": { "code": 2, "message": "card [card] declined" },
+    "events": [
+      {
+        "timeUnixNano": "<time>",
+        "name": "retrying",
+        "attributes": [
+          { "key": "attempt", "value": { "intValue": "2" } },
+          { "key": "reason", "value": { "stringValue": "card [card] declined" } }
+        ]
+      },
+      {
+        "timeUnixNano": "<time>",
+        "name": "exception",
+        "attributes": [
+          { "key": "exception.message", "value": { "stringValue": "card [card] declined" } },
+          { "key": "exception.type", "value": { "stringValue": "<error.type>" } }
+        ]
+      }
+    ]
+  },
+  "withheld": {
+    "status": { "code": 2 }
+  },
+  "warnings": [
+    "telmoni: the mask failed on gen_ai.system_instructions; the span was sent without it"
+  ]
+}

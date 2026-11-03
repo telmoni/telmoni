@@ -62,6 +62,8 @@ pub enum WarningKind {
     /// An image or file a message carried that could not be put, its span
     /// sent naming it.
     UploadFailed,
+    /// A content field the mask panicked on, its span sent without it.
+    MaskFailed,
 }
 
 impl WarningKind {
@@ -80,6 +82,7 @@ impl WarningKind {
             Self::Said => "said",
             Self::Input => "input",
             Self::UploadFailed => "upload_failed",
+            Self::MaskFailed => "mask_failed",
         }
     }
 }

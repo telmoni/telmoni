@@ -30,6 +30,11 @@ type Config struct {
 	// leave the process, once the project's content mode allows it too.
 	// Otherwise the exporter takes them off every span.
 	CaptureContent bool `json:"capture_content"`
+	// Mask is handed each content field's key and its value, a string or any
+	// other value's JSON, before it leaves, and answers what to send instead,
+	// or false to send its span without it; it is called only where content
+	// leaves, and a panic sends the span without that field.
+	Mask func(key, value string) (string, bool) `json:"-" xml:"-"`
 	// SampleRate is the share of runs sent, above 0 and up to 1; 0 means 1.
 	// A run is dropped whole, in the processor, never through the trace's
 	// sampled flag, so an application's own sampling is untouched.

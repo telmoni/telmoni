@@ -1,6 +1,6 @@
 //! A run across services: the W3C `traceparent` of the span current inside a
-//! run, and the run's id and agent as the W3C `baggage` members
-//! `telmoni.run_id` and `telmoni.agent`, written into an outgoing request's
+//! run, and the run's id, agent and sample rate as the W3C `baggage` members
+//! `telmoni.run_id`, `telmoni.agent` and `telmoni.sample_rate`, written into an outgoing request's
 //! headers and read back from an incoming one's. The SDK's own helpers,
 //! never a propagator set globally: an application's propagators are its
 //! own.
@@ -25,11 +25,13 @@ pub trait Carrier: Injector + Extractor {}
 impl<T: Injector + Extractor + ?Sized> Carrier for T {}
 
 /// What headers name: the span to continue under, and the run.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Continued {
     pub(crate) span_context: SpanContext,
     pub(crate) run_id: String,
     pub(crate) agent: String,
+    /// The run's, `None` where the headers name none above 0 and up to 1.
+    pub(crate) sample_rate: Option<f64>,
 }
 
 /// The run and the span `cx` is inside, written into `headers`; nothing
@@ -46,7 +48,7 @@ pub(crate) fn inject(cx: &Context, headers: &mut dyn Carrier) {
     if !span_context.is_valid() {
         return;
     }
-    write_headers(headers, span_context, &run.run_id, &run.agent);
+    write_headers(headers, span_context, &run.run_id, &run.agent, run.rate);
 }
 
 /// `span` and the run as the next service reads them, beside the members
@@ -56,6 +58,7 @@ pub(crate) fn write_headers(
     span: &SpanContext,
     run_id: &str,
     agent: &str,
+    rate: Option<f64>,
 ) {
     let sampled = if span.is_sampled() { "01" } else { "00" };
     headers.set(
@@ -75,6 +78,9 @@ pub(crate) fn write_headers(
         contract::AGENT,
         encode_baggage_value(agent)
     ));
+    if let Some(rate) = rate {
+        members.push(format!("{}={rate}", contract::SAMPLE_RATE));
+    }
     headers.set(contract::BAGGAGE, members.join(","));
 }
 
@@ -84,6 +90,7 @@ pub(crate) fn read_headers(headers: &dyn Carrier) -> Option<Continued> {
     let baggage = get(headers, contract::BAGGAGE).unwrap_or_default();
     let mut run_id = None;
     let mut agent = None;
+    let mut rate = None;
     for member in baggage.split(',') {
         let Some((key, rest)) = member.split_once('=') else {
             continue;
@@ -92,6 +99,7 @@ pub(crate) fn read_headers(headers: &dyn Carrier) -> Option<Continued> {
         match key.trim() {
             contract::RUN_ID => run_id = Some(value),
             contract::AGENT => agent = Some(value),
+            contract::SAMPLE_RATE => rate = value.parse::<f64>().ok(),
             _ => {}
         }
     }
@@ -102,6 +110,7 @@ pub(crate) fn read_headers(headers: &dyn Carrier) -> Option<Continued> {
         span_context,
         run_id: run_id.to_ascii_lowercase(),
         agent,
+        sample_rate: rate.filter(|rate| *rate > 0.0 && *rate <= 1.0),
     })
 }
 
@@ -187,7 +196,7 @@ fn allowed_in_baggage(byte: u8) -> bool {
 
 fn is_ours(member: &str) -> bool {
     let key = member.split('=').next().unwrap_or("").trim();
-    key == contract::RUN_ID || key == contract::AGENT
+    key == contract::RUN_ID || key == contract::AGENT || key == contract::SAMPLE_RATE
 }
 
 /// Lowercase hex of exactly `len` digits.

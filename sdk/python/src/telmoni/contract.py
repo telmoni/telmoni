@@ -96,6 +96,8 @@ EXCEPTION_TYPE = "exception.type"
 EXCEPTION_MESSAGE = "exception.message"
 EXCEPTION_STACKTRACE = "exception.stacktrace"
 """The content fields the exporter cut so a span fits an export, by name."""
+STATUS_DESCRIPTION = "otel.status_description"
+"""The key a status message is handed to the mask by."""
 
 CONTENT = frozenset(
     {
@@ -117,7 +119,7 @@ CONTENT = frozenset(
         EXCEPTION_TYPE,
         EXCEPTION_MESSAGE,
         EXCEPTION_STACKTRACE,
-        "otel.status_description",
+        STATUS_DESCRIPTION,
         "telmoni.events",
     }
 )

@@ -37,6 +37,7 @@ func TestAStepNestsUnderItsRunAndCarriesItsIDs(t *testing.T) {
 	want := map[string]any{
 		"telmoni.run_id":         run.ID(),
 		"telmoni.agent":          "bot",
+		"telmoni.sample_rate":    1.0,
 		"user.id":                "c",
 		"gen_ai.conversation.id": "v",
 	}

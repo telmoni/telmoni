@@ -31,6 +31,19 @@ the span is sent and kept without it:
    export too, and drops content at the door on a project left `off`
    ([Ingest](/docs/api/ingest#what-is-dropped-at-the-door)).
 
+## Masking what should never leave
+
+With both locks on, content is kept as your code sends it. To keep part of it
+home — a card number, an email address, a secret pasted into a prompt — give
+the SDK a mask: a function of yours that each content field passes through
+before it leaves the process, answering what to send instead, or nothing to
+send the span without that field
+([SDKs](/docs/api/sdks#masking-content)). It sees the content the SDK records —
+messages, tool payloads, failures and events — never a span's name, its tags or
+a user id, which are metadata kept on every project, nor an attribute your code
+sets on a span itself, which is kept below as metadata content: keep a person
+out of those in your own code.
+
 ## What is kept
 
 On a project that keeps content, ingest keeps each piece whole, past the 1,024

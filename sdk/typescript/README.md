@@ -205,8 +205,8 @@ it out.
 ## A run across services
 
 Before a request leaves a run, `telmoni.inject(headers, step)` writes the W3C
-`traceparent` of the step's span and the run's id and agent as `baggage`
-members into a record or a `Headers`; without a handle it writes from the
+`traceparent` of the step's span and the run's id, agent and sample rate as
+`baggage` members into a record or a `Headers`; without a handle it writes from the
 active context, where your application runs OpenTelemetry's context manager.
 In the service that answers, `telmoni.extract(req.headers)` gives the run
 back, continued there: its steps and calls nest under the caller's span and
@@ -239,6 +239,32 @@ file, and sends the part as a `file` part whose `file_id` is
 not put, and a put that fails is warned of once (`upload_failed`); either way
 the part goes as the file it names. A part whose content is no base64 goes as
 it is.
+
+To take something out of content before it leaves, a card number or an email
+address, give the client a mask. Where content is sent, and only there, the
+exporter hands it each content field's key and its value — `gen_ai.input.messages`
+as its JSON, an event's attribute under its own key, a failure's message as
+`exception.message` and its status's as `otel.status_description`; a value that is
+no string as its JSON — and sends the string it answers instead, or the span
+without that field where it answers `undefined` or `null`. It runs once a field
+each export, before any image is put, so a part it takes out is never uploaded,
+and must answer at once: a mask that throws, or answers anything but a string, a
+`Promise` among them, sends the span without that field, warned once
+(`mask_failed`) by the key alone. It sees the content the SDK records, never a
+name, an id, a tag or an attribute your code sets on a span itself, which a
+project keeping content keeps too: keep a person out of those in your own code.
+`Telmoni.fromEnv()` sets none; give it to
+the constructor.
+
+```ts
+const CARD = /\b\d(?:[ -]?\d){12,18}\b/g;
+
+const telmoni = new Telmoni({
+  apiKey: process.env.TELMONI_API_KEY,
+  captureContent: true,
+  mask: (key, value) => value.replace(CARD, '[card]'),
+});
+```
 
 ## Beside your own OpenTelemetry
 

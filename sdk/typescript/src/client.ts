@@ -153,11 +153,14 @@ function resolve(config: Config | undefined): ResolvedConfig {
   const captureContent: unknown = config?.captureContent ?? false;
   // 'false' from an environment variable is truthy, and would let content out.
   if (typeof captureContent !== 'boolean') throw new TypeError('captureContent must be a boolean');
+  const mask: unknown = config?.mask;
+  if (mask !== undefined && typeof mask !== 'function') throw new TypeError('mask must be a function');
   const resolved: ResolvedConfig = {
     endpoint,
     apiKey: unsetIfBlank(config?.apiKey),
     organizationId: unsetIfBlank(config?.organizationId),
     captureContent,
+    mask: config?.mask,
     sampleRate,
     sampler: config?.sampler,
     environment: unsetIfBlank(config?.environment),
@@ -298,9 +301,9 @@ export class Telmoni {
 
   /**
    * Writes into `headers` what the next service continues the run from: the
-   * W3C `traceparent` of the span current inside the run, and the run's id
-   * and agent as the W3C `baggage` members `telmoni.run_id` and
-   * `telmoni.agent`, beside whatever members the headers hold. The span is
+   * W3C `traceparent` of the span current inside the run, and the run's id,
+   * agent and sample rate as the W3C `baggage` members `telmoni.run_id`,
+   * `telmoni.agent` and `telmoni.sample_rate`, beside whatever members the headers hold. The span is
    * `from`'s — a run, a step or a call — or, without one, the active
    * context's, which an application running OpenTelemetry's context manager
    * carries into callbacks. Outside a run, or for a run sampled out, it
@@ -312,7 +315,7 @@ export class Telmoni {
     if (run === undefined || run.sampledOut) return;
     const span = trace.getSpanContext(ctx);
     if (span === undefined || !isSpanContextValid(span)) return;
-    writeHeaders(headers, span, run.runId, run.agent);
+    writeHeaders(headers, span, run.runId, run.agent, run.rate);
   }
 
   /**
@@ -325,7 +328,7 @@ export class Telmoni {
   extract(headers: HeaderCarrier): Run | undefined {
     const read = readHeaders(headers);
     if (read === undefined) return undefined;
-    return this.#opener.continued(read.spanContext, read.runId, read.agent);
+    return this.#opener.continued(read.spanContext, read.runId, read.agent, read.sampleRate);
   }
 
   /**

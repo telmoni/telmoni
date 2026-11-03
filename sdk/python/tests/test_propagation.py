@@ -90,6 +90,10 @@ def test_extract_reads_the_run_the_fixture_names_and_nothing_from_headers_naming
         assert isinstance(run, Run), given["name"]
         assert run.run_id == given["run"]["run_id"], given["name"]
         assert run.agent == given["run"]["agent"], given["name"]
+        assert run.rate == given["run"]["sample_rate"], given["name"]
+        assert (
+            run.inherited.get("telmoni.sample_rate") == given["run"]["sample_rate"]
+        ), given["name"]
         assert not run.sampled_out, given["name"]
         parent = run._span.get_span_context()
         assert f"{parent.trace_id:032x}" == given["run"]["trace_id"], given["name"]
@@ -137,6 +141,7 @@ def test_a_continued_runs_steps_and_calls_carry_the_callers_run_under_its_span(
         attributes = attributes_of(span)
         assert attributes["telmoni.run_id"] == run.run_id, span["name"]
         assert attributes["telmoni.agent"] == "orchestrator", span["name"]
+        assert attributes["telmoni.sample_rate"] == 1.0, span["name"]
     named = by_name(worker_transport)
     assert named["work"]["parentSpanId"] == caller["spanId"]
     assert named["execute_tool search"]["parentSpanId"] == caller["spanId"]

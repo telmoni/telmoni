@@ -202,7 +202,9 @@ as; else nothing. A call answered again counts as its span then holds it.
 | `TELMONI_CAPTURE_CONTENT` | `1` alone, its blanks about it trimmed, turns `capture_content` on; anything else, or nothing, leaves it off. A `capture_content` set in code over `Config::from_env()` stands. |
 
 Nothing in the SDK reads an `OTEL_*` variable. `Config` also holds
-`capture_content` (default `false`), `sample_rate` (default `1.0`; above 0 and
+`capture_content` (default `false`), `mask`, the code's own over content
+([Content](#content)), which no variable sets and `Debug` shows only as set or
+not, `sample_rate` (default `1.0`; above 0 and
 up to 1, decided per run and never through the trace's sampled flag),
 `sampler`, the OpenTelemetry sampler whose decision a run takes when it starts
 a trace of its own, `environment` and `release`, the deployment the
@@ -227,8 +229,8 @@ no proxy, whatever the environment names. An endpoint without a scheme gets
 
 Before a request leaves a run, `telmoni.inject(&mut headers)` writes the W3C
 `traceparent` of the span current — what a handle's `attach()` or
-`FutureExt::with_context` made so — and the run's id and agent as `baggage`
-members; `telmoni.inject_from(&step.context(), &mut headers)` writes from a
+`FutureExt::with_context` made so — and the run's id, agent and sample rate
+as `baggage` members; `telmoni.inject_from(&step.context(), &mut headers)` writes from a
 handle's context instead. In the service that answers,
 `telmoni.extract(&headers)` gives `Some(run)`, continued there: its steps and
 calls nest under the caller's span and carry the caller's run, and nothing of
@@ -263,3 +265,30 @@ not put, and a put that fails is warned of once (`WarningKind::UploadFailed`);
 either way the part goes as the file it names. A part whose content is no
 base64 goes as it is. A `Transport` of your own is handed both, by its
 `Method`: an export's `Post` and a file's `Put`.
+
+To take something out of content before it leaves, a card number or an email
+address, set `Config::mask`, a `telmoni::Mask`. Where content is sent, and only
+there, the exporter hands it each content field's key and its value —
+`gen_ai.input.messages` as its JSON, an event's attribute under its own key, a
+failure's message as `exception.message` and its status's as
+`otel.status_description`; a value that is no string as its JSON — and sends the
+string it answers instead, or the span without that field where it answers
+`None`. It runs on the processor's thread, once a field each export, before any
+image is put, so a part it takes out is never uploaded. A mask that panics sends
+the span without that field, warned once (`WarningKind::MaskFailed`) by the key
+alone; under `panic = "abort"` its panic ends the process, as any does. It sees
+the content the SDK records, never a name, an id, a tag or an attribute your
+code sets on a span itself, which a project keeping content keeps too: keep a
+person out of those in your own code.
+
+```rust
+use std::sync::Arc;
+
+let config = telmoni::Config {
+    capture_content: true,
+    mask: Some(Arc::new(|_key: &str, value: &str| {
+        Some(value.replace("4242 4242 4242 4242", "[card]"))
+    })),
+    ..telmoni::Config::from_env()
+};
+```

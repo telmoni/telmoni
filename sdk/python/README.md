@@ -190,9 +190,38 @@ not put, and a put that fails is warned of once (`upload_failed`); either way
 the part goes as the file it names. A part whose content is no base64 goes as
 it is.
 
+To take something out of content before it leaves, a card number or an email
+address, give the client a mask: `Config(capture_content=True, mask=mask)`. Where
+content is sent, and only there, the exporter hands it each content field's key
+and its value — `gen_ai.input.messages` as its JSON, an event's attribute under
+its own key, a failure's message as `exception.message` and its status's as
+`otel.status_description`; a value that is no string as its JSON — and sends the
+string it answers instead, or the span without that field where it answers
+`None`. It runs on the exporter's thread, once a field each export, before any
+image is put, so a part it takes out is never uploaded. A mask that raises, or
+answers anything but a `str`, sends the span without that field, warned once
+(`mask_failed`) by the key alone. It sees the content the SDK records, never a
+name, an id, a tag or an attribute your code sets on a span itself, which a
+project keeping content keeps too: keep a person out of those in your own code.
+
+```python
+import re
+
+CARD = re.compile(r"\b\d(?:[ -]?\d){12,18}\b")
+
+
+def mask(key: str, value: str) -> str | None:
+    return CARD.sub("[card]", value)
+
+
+config = Config.from_env()
+config.mask = mask
+telmoni = Telmoni(config)
+```
+
 ## Configuration
 
-`Config(endpoint, organization_id, api_key, capture_content, sample_rate, sampler,
+`Config(endpoint, organization_id, api_key, capture_content, mask, sample_rate, sampler,
 environment, release, prices)`, or `Config.from_env()`, which reads `TELMONI_ENDPOINT`
 (default `https://api.telmoni.com`), `TELMONI_API_KEY`, `TELMONI_ORG`,
 `TELMONI_ENVIRONMENT`, `TELMONI_RELEASE` and `TELMONI_CAPTURE_CONTENT`, a blank
@@ -222,8 +251,8 @@ an IPv4 address in four decimal parts, nor an IPv6 one in brackets.
 ## A run across services
 
 Before a request leaves a run, `telmoni.inject(headers)` writes the W3C
-`traceparent` of the span current and the run's id and agent as `baggage`
-members into any mutable mapping of headers. In the service that answers,
+`traceparent` of the span current and the run's id, agent and sample rate as
+`baggage` members into any mutable mapping of headers. In the service that answers,
 `run = telmoni.extract(request.headers)` gives the run back, continued there:
 `telmoni.step("work", run=run)` and the calls inside nest under the caller's
 span and carry the caller's run, and nothing of the run itself is sent from

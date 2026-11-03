@@ -160,6 +160,36 @@ fn extract_reads_the_run_the_fixture_names_and_nothing_from_headers_naming_none(
     Ok(())
 }
 
+/// A continued run's spans carry the rate its headers named, or none where
+/// they named none a share of runs reads as.
+#[test]
+fn a_continued_runs_spans_carry_the_rate_its_headers_named() -> Outcome {
+    let fixture = load_fixture("headers.json")?;
+    for given in field(&fixture, "extract")?.as_array().ok_or("extract")? {
+        let expected = field(given, "run")?;
+        if expected.is_null() {
+            continue;
+        }
+        let name = text(given, "name")?;
+        let harness = Harness::new()?;
+        let run = harness
+            .telmoni
+            .extract(&headers_of(field(given, "headers")?)?)
+            .ok_or_else(|| format!("{name}: no run was read"))?;
+        run.step("work")?.end();
+        harness.flush()?;
+        let spans = harness.spans()?;
+        let span = spans.first().ok_or("the step")?;
+        let attributes = attributes_of(span)?;
+        assert_eq!(
+            attributes.get("telmoni.sample_rate"),
+            expected.get("sample_rate").filter(|rate| !rate.is_null()),
+            "{name}"
+        );
+    }
+    Ok(())
+}
+
 #[test]
 fn a_continued_runs_steps_and_calls_carry_the_callers_run_under_its_span() -> Outcome {
     let caller = Harness::new()?;
@@ -214,6 +244,12 @@ fn a_continued_runs_steps_and_calls_carry_the_callers_run_under_its_span() -> Ou
             attributes["telmoni.agent"],
             "orchestrator",
             "{}",
+            name_of(span)
+        );
+        assert_eq!(
+            attributes["telmoni.sample_rate"],
+            1.0,
+            "{}: the caller's run's rate",
             name_of(span)
         );
     }

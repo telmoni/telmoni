@@ -26,6 +26,14 @@ export interface Config {
   captureContent?: boolean | undefined;
 
   /**
+   * Handed each content field's key and its value, a string or any other
+   * value's JSON, where content leaves; answers the string to send instead, or
+   * `undefined` or `null` to send its span without it. A throw, or an answer
+   * that is no string, sends the span without that field.
+   */
+  mask?: ((key: string, value: string) => string | null | undefined) | undefined;
+
+  /**
    * The share of runs sent, above 0 and up to 1 (default: 1). Decided per run,
    * never through the trace's sampled flag, so an application's own sampling
    * is untouched.
@@ -78,6 +86,7 @@ export interface ResolvedConfig {
   /** Not enumerable: `console.log`, `util.inspect` and `JSON.stringify` skip it. */
   readonly apiKey: string | undefined;
   readonly captureContent: boolean;
+  readonly mask: ((key: string, value: string) => string | null | undefined) | undefined;
   readonly sampleRate: number;
   readonly sampler: Sampler | undefined;
   readonly environment: string | undefined;
@@ -276,7 +285,8 @@ export type WarningKind =
   | 'span_refused'
   | 'said'
   | 'input'
-  | 'upload_failed';
+  | 'upload_failed'
+  | 'mask_failed';
 
 /** A warning as data, beside its line; `status` and `problemType` only for an export's own failure, `status` a failed upload's. */
 export interface Warning {

@@ -15,9 +15,9 @@ import { Agent as HttpsAgent } from 'node:https';
 import { urlToHttpOptions } from 'node:url';
 
 import { SpanKind, SpanStatusCode, isSpanContextValid } from '@opentelemetry/api';
-import type { AttributeValue, HrTime } from '@opentelemetry/api';
+import type { AttributeValue, Attributes, HrTime, SpanStatus } from '@opentelemetry/api';
 import { defaultResource } from '@opentelemetry/resources';
-import type { ReadableSpan } from '@opentelemetry/sdk-trace-base';
+import type { ReadableSpan, TimedEvent } from '@opentelemetry/sdk-trace-base';
 
 import * as contract from './contract.js';
 import { errorName } from './errors.js';
@@ -28,6 +28,8 @@ import { trimEnds } from './whitespace.js';
 /** How many times one batch is sent before it is dropped. */
 export const ATTEMPTS = 3;
 /** OTLP's retryable statuses: a 502 or a 504 is a load balancer's, a server's rollout among its causes. */
+/** What a mask that threw answered: its field goes, warned of. */
+const MASK_FAILED = Symbol('mask failed');
 const RETRIED: ReadonlySet<number> = new Set([429, 502, 503, 504]);
 export const REQUEST_TIMEOUT_MS = 10_000;
 /** How much of an answer is read: a problem's JSON is small, and an export never pays for more. */
@@ -316,20 +318,23 @@ export class Exporter {
     if (this.#config.captureContent && this.#contentMode === undefined && spans.some(holdsContent)) {
       await this.#ask();
     }
-    const lifted = this.#keepsContent() ? await this.#lift(spans) : new Map<ReadableSpan, Record<string, string>>();
-    return this.#export(spans, lifted);
+    // Decided once, so no answer met halfway sends content the mask never saw.
+    const keep = this.#keepsContent();
+    if (keep) spans = this.#mask(spans);
+    const lifted = keep ? await this.#lift(spans) : new Map<ReadableSpan, Record<string, string>>();
+    return this.#export(spans, lifted, keep);
   }
 
-  async #export(spans: readonly ReadableSpan[], lifted: Lifted): Promise<boolean> {
+  async #export(spans: readonly ReadableSpan[], lifted: Lifted, keep: boolean): Promise<boolean> {
     // Ingest refuses an export past 1,000 spans whole, as one past 1 MiB below.
-    if (spans.length > contract.BATCH_SPANS_MAX) return this.#halve(spans, lifted);
-    let body = this.#body(spans, lifted);
+    if (spans.length > contract.BATCH_SPANS_MAX) return this.#halve(spans, lifted, keep);
+    let body = this.#body(spans, lifted, keep);
     if (Buffer.byteLength(body) > contract.BATCH_MAX_BYTES) {
       // Ingest refuses it whole, its 413 maybe breaking the upload still
       // going out, which reads as no answer and is sent again: halved.
-      if (spans.length > 1) return this.#halve(spans, lifted);
+      if (spans.length > 1) return this.#halve(spans, lifted, keep);
       // Content sent goes first, the longest field first, each named.
-      const cut = this.#cut(spans[0]!, lifted);
+      const cut = this.#cut(spans[0]!, lifted, keep);
       if (cut !== undefined) {
         this.warnOnce(
           'content-cut',
@@ -340,7 +345,7 @@ export class Exporter {
       }
       // A span alone past it goes without what ingest drops for its length,
       // and then fits, unless its own name does not.
-      body = this.#body(spans, lifted, true);
+      body = this.#body(spans, lifted, keep, true);
       if (Buffer.byteLength(body) > contract.BATCH_MAX_BYTES) {
         this.warnOnce('too-large', 'telmoni: a span past the 1 MiB an export may hold was dropped', {
           kind: 'too_large',
@@ -357,9 +362,56 @@ export class Exporter {
   }
 
   /** Exports each half of the spans, the second only where the first went. */
-  async #halve(spans: readonly ReadableSpan[], lifted: Lifted): Promise<boolean> {
+  async #halve(spans: readonly ReadableSpan[], lifted: Lifted, keep: boolean): Promise<boolean> {
     const half = Math.floor(spans.length / 2);
-    return (await this.#export(spans.slice(0, half), lifted)) && this.#export(spans.slice(half), lifted);
+    return (await this.#export(spans.slice(0, half), lifted, keep)) && this.#export(spans.slice(half), lifted, keep);
+  }
+
+  /** The spans with every content field, event attribute and status message as the code's mask answers it, before a part it takes out could be put. */
+  #mask(spans: readonly ReadableSpan[]): readonly ReadableSpan[] {
+    if (this.#config.mask === undefined) return spans;
+    return spans.map((span) => {
+      const attributes: Attributes = {};
+      for (const [key, value] of Object.entries(span.attributes)) {
+        if (value === undefined) continue;
+        const kept = contract.CONTENT.has(key) && key !== contract.CONTENT_CUT ? this.#masked(key, value) : value;
+        if (kept !== undefined) attributes[key] = kept;
+      }
+      const events = span.events.map((event) => {
+        const kept: Attributes = {};
+        for (const [key, value] of Object.entries(event.attributes ?? {})) {
+          const answer = value === undefined ? undefined : this.#masked(key, value);
+          if (answer !== undefined) kept[key] = answer;
+        }
+        return { ...event, attributes: kept };
+      });
+      let status = span.status;
+      if (status.message) {
+        const message = this.#masked(contract.STATUS_DESCRIPTION, status.message);
+        status = message === undefined ? { code: status.code } : { ...status, message: message as string };
+      }
+      return maskedSpan(span, attributes, events, status);
+    });
+  }
+
+  /** One field as the mask answers it, handed as a string, any other value as its JSON; undefined to send the span without it. An answer unchanged keeps the value as it was. */
+  #masked(key: string, value: AttributeValue): AttributeValue | undefined {
+    const given = typeof value === 'string' ? value : JSON.stringify(value);
+    let answer: unknown;
+    try {
+      answer = this.#config.mask!(key, given);
+    } catch {
+      answer = MASK_FAILED;
+    }
+    if (answer === undefined || answer === null) return undefined;
+    if (typeof answer !== 'string') {
+      // The key alone: an error's words may hold the content.
+      this.warnOnce(`mask:${key}`, `telmoni: the mask failed on ${key}; the span was sent without it`, {
+        kind: 'mask_failed',
+      });
+      return undefined;
+    }
+    return answer === given ? value : answer;
   }
 
   /** Each span's messages with every `blob` part lifted out: a blob repeated in every span would bloat each, past 1 MiB maybe. */
@@ -450,8 +502,8 @@ export class Exporter {
    * past ingest's caps, which on a project that keeps content is content too; undefined where it sends no
    * content, or fits without all of it.
    */
-  #cut(span: ReadableSpan, lifted: Lifted): string | undefined {
-    if (!this.#keepsContent()) return undefined;
+  #cut(span: ReadableSpan, lifted: Lifted, keep: boolean): string | undefined {
+    if (!keep) return undefined;
     const content = Object.entries(attributesOf(span, lifted))
       .filter(
         ([key, value]) =>
@@ -462,7 +514,7 @@ export class Exporter {
     const cut: string[] = [];
     for (const [key] of content) {
       cut.push(key);
-      const body = this.#body([span], lifted, false, cut);
+      const body = this.#body([span], lifted, keep, false, cut);
       if (Buffer.byteLength(body) <= contract.BATCH_MAX_BYTES) return body;
     }
     return undefined;
@@ -472,9 +524,9 @@ export class Exporter {
     return this.#config.captureContent && this.#contentMode === 'on';
   }
 
-  #body(spans: readonly ReadableSpan[], lifted: Lifted, trimmed = false, cut: readonly string[] = []): string {
+  #body(spans: readonly ReadableSpan[], lifted: Lifted, keep: boolean, trimmed = false, cut: readonly string[] = []): string {
     // A lone surrogate is no text ingest reads, and would lose the batch.
-    return JSON.stringify(this.encode(spans, lifted, trimmed, cut), (_key, value: unknown) =>
+    return JSON.stringify(this.encode(spans, lifted, keep, trimmed, cut), (_key, value: unknown) =>
       typeof value === 'string' ? value.replace(LONE_SURROGATE, '\ufffd') : value,
     );
   }
@@ -559,13 +611,14 @@ export class Exporter {
   }
 
   /**
-   * OTLP's `ExportTraceServiceRequest`, in its JSON encoding, `lifted`'s fields in place of the spans' own; `trimmed`,
-   * without the attributes ingest drops for their length; `cut`, without those content fields, named in
-   * `telmoni.content_cut`.
+   * OTLP's `ExportTraceServiceRequest`, in its JSON encoding, `lifted`'s fields in place of the spans' own; `keep`,
+   * with their content; `trimmed`, without the attributes ingest drops for their length; `cut`, without those
+   * content fields, named in `telmoni.content_cut`.
    */
   encode(
     spans: readonly ReadableSpan[],
     lifted: Lifted,
+    keep: boolean,
     trimmed = false,
     cut: readonly string[] = [],
   ): ExportTraceServiceRequest {
@@ -576,7 +629,7 @@ export class Exporter {
           scopeSpans: [
             {
               scope: { name: contract.SCOPE, version: VERSION },
-              spans: spans.map((span) => this.#span(span, lifted, trimmed, cut)),
+              spans: spans.map((span) => this.#span(span, lifted, keep, trimmed, cut)),
             },
           ],
         },
@@ -584,8 +637,7 @@ export class Exporter {
     };
   }
 
-  #span(span: ReadableSpan, lifted: Lifted, trimmed = false, cut: readonly string[] = []): OtlpSpan {
-    const keepContent = this.#keepsContent();
+  #span(span: ReadableSpan, lifted: Lifted, keepContent: boolean, trimmed = false, cut: readonly string[] = []): OtlpSpan {
     const attributes: KeyValue[] = [];
     for (const [key, value] of Object.entries(attributesOf(span, lifted))) {
       if (value === undefined) continue;
@@ -776,6 +828,29 @@ function parseJson(text: string): unknown {
   } catch {
     return undefined;
   }
+}
+
+/** The span as the mask left it. */
+function maskedSpan(span: ReadableSpan, attributes: Attributes, events: TimedEvent[], status: SpanStatus): ReadableSpan {
+  return {
+    name: span.name,
+    kind: span.kind,
+    spanContext: () => span.spanContext(),
+    ...(span.parentSpanContext === undefined ? {} : { parentSpanContext: span.parentSpanContext }),
+    startTime: span.startTime,
+    endTime: span.endTime,
+    status,
+    attributes,
+    links: span.links,
+    events,
+    duration: span.duration,
+    ended: span.ended,
+    resource: span.resource,
+    instrumentationScope: span.instrumentationScope,
+    droppedAttributesCount: span.droppedAttributesCount,
+    droppedEventsCount: span.droppedEventsCount,
+    droppedLinksCount: span.droppedLinksCount,
+  };
 }
 
 /** The span's attributes, any of its fields lifted in their place. */

@@ -89,6 +89,8 @@ export const TOOL_CALL_RESULT = 'gen_ai.tool.call.result';
 /** What the exporter takes off a span unless asked and the project allows. */
 /** The content fields the exporter cut so a span fits an export, by name. */
 export const CONTENT_CUT = 'telmoni.content_cut';
+/** The key a status message is handed to the mask by. */
+export const STATUS_DESCRIPTION = 'otel.status_description';
 /** A failure, as the conventions' `exception` event carries it: content. */
 export const EXCEPTION_EVENT = 'exception';
 export const EXCEPTION_TYPE = 'exception.type';
@@ -114,7 +116,7 @@ export const CONTENT: ReadonlySet<string> = new Set([
   EXCEPTION_TYPE,
   EXCEPTION_MESSAGE,
   EXCEPTION_STACKTRACE,
-  'otel.status_description',
+  STATUS_DESCRIPTION,
   'telmoni.events',
 ]);
 

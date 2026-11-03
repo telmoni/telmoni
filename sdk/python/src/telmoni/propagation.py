@@ -1,6 +1,6 @@
 """A run across services: the W3C ``traceparent`` of the span current inside
-a run, and the run's id and agent as the W3C ``baggage`` members
-``telmoni.run_id`` and ``telmoni.agent``, written into an outgoing request's
+a run, and the run's id, agent and sample rate as the W3C ``baggage`` members
+``telmoni.run_id``, ``telmoni.agent`` and ``telmoni.sample_rate``, written into an outgoing request's
 headers and read back from an incoming one's. The SDK's own helpers, never a
 propagator set globally: an application's propagators are its own.
 """
@@ -29,10 +29,16 @@ class Continued:
     span_context: SpanContext
     run_id: str
     agent: str
+    sample_rate: float | None
+    """The run's, None where the headers name none above 0 and up to 1."""
 
 
 def write_headers(
-    headers: MutableMapping[str, str], span: SpanContext, run_id: str, agent: str
+    headers: MutableMapping[str, str],
+    span: SpanContext,
+    run_id: str,
+    agent: str,
+    rate: float | None,
 ) -> None:
     """``span`` and the run as the next service reads them, beside the
     members ``headers`` already hold."""
@@ -49,6 +55,10 @@ def write_headers(
     kept = [m for m in members if m and not _is_ours(m)]
     kept.append(f"{contract.RUN_ID}={run_id}")
     kept.append(f"{contract.AGENT}={encode_baggage_value(agent)}")
+    if rate is not None:
+        # The shortest decimal that reads back as it, as the other SDKs write one.
+        text = repr(float(rate))
+        kept.append(f"{contract.SAMPLE_RATE}={text.removesuffix('.0')}")
     _set_header(headers, contract.BAGGAGE, ",".join(kept))
 
 
@@ -65,7 +75,18 @@ def read_headers(headers: Mapping[str, str]) -> Continued | None:
     agent = members.get(contract.AGENT)
     if run_id is None or not _UUID.fullmatch(run_id) or not agent:
         return None
-    return Continued(span_context, run_id.lower(), agent)
+    return Continued(
+        span_context, run_id.lower(), agent, _rate(members.get(contract.SAMPLE_RATE))
+    )
+
+
+def _rate(given: str | None) -> float | None:
+    """A sample rate a header named, above 0 and up to 1, else none."""
+    try:
+        rate = float(given) if given is not None else None
+    except ValueError:
+        return None
+    return rate if rate is not None and 0 < rate <= 1 else None
 
 
 def parse_traceparent(header: str) -> SpanContext | None:
@@ -111,7 +132,7 @@ def _baggage_members(header: str) -> dict[str, str]:
 
 def _is_ours(member: str) -> bool:
     key = member.split("=", 1)[0].strip()
-    return key in (contract.RUN_ID, contract.AGENT)
+    return key in (contract.RUN_ID, contract.AGENT, contract.SAMPLE_RATE)
 
 
 def _is_hex(text: str, length: int) -> bool:

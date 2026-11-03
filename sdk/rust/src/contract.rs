@@ -80,6 +80,8 @@ pub(crate) const CONTENT_CUT: &str = "telmoni.content_cut";
 pub(crate) const EXCEPTION_EVENT: &str = "exception";
 pub(crate) const EXCEPTION_TYPE: &str = "exception.type";
 pub(crate) const EXCEPTION_MESSAGE: &str = "exception.message";
+/// The key a status message is handed to the mask by.
+pub(crate) const STATUS_DESCRIPTION: &str = "otel.status_description";
 
 const CONTENT: &[&str] = &[
     INPUT_MESSAGES,
@@ -100,7 +102,7 @@ const CONTENT: &[&str] = &[
     EXCEPTION_TYPE,
     EXCEPTION_MESSAGE,
     "exception.stacktrace",
-    "otel.status_description",
+    STATUS_DESCRIPTION,
     "telmoni.events",
 ];
 

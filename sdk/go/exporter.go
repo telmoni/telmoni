@@ -169,10 +169,12 @@ func (e *exporter) export(spans []sdktrace.ReadOnlySpan) bool {
 	if e.config.CaptureContent && e.contentMode() == "" && slices.ContainsFunc(spans, holdsContent) {
 		e.ask()
 	}
-	if e.keepsContent() {
-		spans = e.lift(spans)
+	// Decided once, so no answer met halfway sends content the mask never saw.
+	keep := e.keepsContent()
+	if keep {
+		spans = e.lift(e.mask(spans))
 	}
-	return e.exportLifted(spans)
+	return e.exportLifted(spans, keep)
 }
 
 // askBody is an export of no spans: how a client asks the project's content
@@ -200,12 +202,12 @@ func holdsContent(span sdktrace.ReadOnlySpan) bool {
 		len(span.Events()) > 0 || span.Status().Description != ""
 }
 
-func (e *exporter) exportLifted(spans []sdktrace.ReadOnlySpan) bool {
+func (e *exporter) exportLifted(spans []sdktrace.ReadOnlySpan, keep bool) bool {
 	// Ingest refuses an export past 1,000 spans whole, as one past 1 MiB below.
 	if len(spans) > batchSpansMax {
-		return e.halve(spans)
+		return e.halve(spans, keep)
 	}
-	body, err := json.Marshal(e.encode(spans, false, nil))
+	body, err := json.Marshal(e.encode(spans, keep, false, nil))
 	if err != nil {
 		e.warnOnce("encode", WarningExportError, "telmoni: an export could not be encoded; the batch was dropped")
 		return true
@@ -214,16 +216,16 @@ func (e *exporter) exportLifted(spans []sdktrace.ReadOnlySpan) bool {
 		// Ingest refuses it whole, its 413 maybe breaking the upload still
 		// going out, which reads as no answer and is sent again: halved.
 		if len(spans) > 1 {
-			return e.halve(spans)
+			return e.halve(spans, keep)
 		}
 		// Content sent goes first, the longest field first, each named.
-		if cut, ok := e.cut(spans[0]); ok {
+		if cut, ok := e.cut(spans[0], keep); ok {
 			body = cut
 			e.warnOnce("content-cut", WarningTrimmed, "telmoni: a span past the 1 MiB an export may hold was sent without its longest content, named in telmoni.content_cut")
 		} else {
 			// A span alone past it goes without what ingest drops for its length,
 			// and then fits, unless its own name does not.
-			body, err = json.Marshal(e.encode(spans, true, nil))
+			body, err = json.Marshal(e.encode(spans, keep, true, nil))
 			if err != nil || len(body) > batchMaxBytes {
 				e.warnOnce("too-large", WarningTooLarge, "telmoni: a span past the 1 MiB an export may hold was dropped")
 				return true
@@ -316,9 +318,9 @@ func failureName(err error) string {
 }
 
 // halve exports each half of spans, the second only where the first went.
-func (e *exporter) halve(spans []sdktrace.ReadOnlySpan) bool {
+func (e *exporter) halve(spans []sdktrace.ReadOnlySpan, keep bool) bool {
 	half := len(spans) / 2
-	return e.exportLifted(spans[:half]) && e.exportLifted(spans[half:])
+	return e.exportLifted(spans[:half], keep) && e.exportLifted(spans[half:], keep)
 }
 
 // liftedSpan is a span whose messages had their blob parts lifted out.
@@ -328,6 +330,95 @@ type liftedSpan struct {
 }
 
 func (s liftedSpan) Attributes() []attribute.KeyValue { return s.attributes }
+
+// maskedSpan is a span whose content the code's mask answered.
+type maskedSpan struct {
+	sdktrace.ReadOnlySpan
+	attributes []attribute.KeyValue
+	events     []sdktrace.Event
+	status     sdktrace.Status
+}
+
+func (s maskedSpan) Attributes() []attribute.KeyValue { return s.attributes }
+func (s maskedSpan) Events() []sdktrace.Event         { return s.events }
+func (s maskedSpan) Status() sdktrace.Status          { return s.status }
+
+// mask is spans with every content field, event attribute and status message
+// as Config.Mask answers it, before a part it takes out could be put.
+func (e *exporter) mask(spans []sdktrace.ReadOnlySpan) []sdktrace.ReadOnlySpan {
+	if e.config.Mask == nil {
+		return spans
+	}
+	out := make([]sdktrace.ReadOnlySpan, len(spans))
+	for i, span := range spans {
+		attributes := make([]attribute.KeyValue, 0, len(span.Attributes()))
+		for _, kv := range span.Attributes() {
+			if key := string(kv.Key); content[key] && key != attrContentCut {
+				if masked, ok := e.masked(kv); ok {
+					attributes = append(attributes, masked)
+				}
+				continue
+			}
+			attributes = append(attributes, kv)
+		}
+		events := make([]sdktrace.Event, 0, len(span.Events()))
+		for _, event := range span.Events() {
+			kept := make([]attribute.KeyValue, 0, len(event.Attributes))
+			for _, kv := range event.Attributes {
+				if masked, ok := e.masked(kv); ok {
+					kept = append(kept, masked)
+				}
+			}
+			event.Attributes = kept
+			events = append(events, event)
+		}
+		status := span.Status()
+		if status.Description != "" {
+			masked, ok := e.masked(attribute.String(attrStatusDescription, status.Description))
+			status.Description = ""
+			if ok {
+				status.Description = masked.Value.AsString()
+			}
+		}
+		out[i] = maskedSpan{span, attributes, events, status}
+	}
+	return out
+}
+
+// masked is one field as the mask answers it, handed as a string, any other
+// value as its JSON; false to send the span without it. An answer unchanged
+// keeps the value as it was.
+func (e *exporter) masked(kv attribute.KeyValue) (attribute.KeyValue, bool) {
+	key := string(kv.Key)
+	given := kv.Value.AsString()
+	if kv.Value.Type() != attribute.STRING {
+		given = asJSON(kv.Value.AsInterface())
+	}
+	answer, keep, failed := e.callMask(key, given)
+	if failed {
+		// The key alone: a panic's words may hold the content.
+		e.warnOnce("mask:"+key, WarningMaskFailed, fmt.Sprintf("telmoni: the mask failed on %s; the span was sent without it", key))
+		return kv, false
+	}
+	if !keep {
+		return kv, false
+	}
+	if answer == given {
+		return kv, true
+	}
+	return attribute.String(key, answer), true
+}
+
+// callMask is the mask's answer, failed where it panicked.
+func (e *exporter) callMask(key, value string) (answer string, keep, failed bool) {
+	defer func() {
+		if recover() != nil {
+			answer, keep, failed = "", false, true
+		}
+	}()
+	answer, keep = e.config.Mask(key, value)
+	return answer, keep, false
+}
 
 // lift is spans with every blob part of their messages lifted out: a blob
 // repeated in every span would bloat each, past 1 MiB maybe.
@@ -763,8 +854,8 @@ type arrayValue struct {
 // in an export: a content field, or any past ingest's caps, which on a project
 // that keeps content is content too; false where it sends no content, or fits
 // without all of it.
-func (e *exporter) cut(span sdktrace.ReadOnlySpan) ([]byte, bool) {
-	if !e.keepsContent() {
+func (e *exporter) cut(span sdktrace.ReadOnlySpan, keep bool) ([]byte, bool) {
+	if !keep {
 		return nil, false
 	}
 	type field struct {
@@ -782,7 +873,7 @@ func (e *exporter) cut(span sdktrace.ReadOnlySpan) ([]byte, bool) {
 	cut := make([]string, 0, len(fields))
 	for _, f := range fields {
 		cut = append(cut, f.key)
-		body, err := json.Marshal(e.encode([]sdktrace.ReadOnlySpan{span}, false, cut))
+		body, err := json.Marshal(e.encode([]sdktrace.ReadOnlySpan{span}, keep, false, cut))
 		if err == nil && len(body) <= batchMaxBytes {
 			return body, true
 		}
@@ -796,11 +887,10 @@ func (e *exporter) keepsContent() bool {
 	return e.config.CaptureContent && e.mode == "on"
 }
 
-// encode is OTLP's ExportTraceServiceRequest; trimmed, without the attributes
-// ingest drops for their length; cut, without those content fields, named in
-// telmoni.content_cut.
-func (e *exporter) encode(spans []sdktrace.ReadOnlySpan, trimmed bool, cut []string) exportRequest {
-	keepContent := e.keepsContent()
+// encode is OTLP's ExportTraceServiceRequest; keepContent, with its content;
+// trimmed, without the attributes ingest drops for their length; cut, without
+// those content fields, named in telmoni.content_cut.
+func (e *exporter) encode(spans []sdktrace.ReadOnlySpan, keepContent, trimmed bool, cut []string) exportRequest {
 	encoded := make([]otlpSpan, 0, len(spans))
 	for _, span := range spans {
 		encoded = append(encoded, encodeSpan(span, keepContent, trimmed, cut))

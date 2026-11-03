@@ -154,6 +154,9 @@ const (
 	attrExceptionMessage = "exception.message"
 )
 
+// attrStatusDescription is the key a status message is handed to the mask by.
+const attrStatusDescription = "otel.status_description"
+
 var content = map[string]bool{
 	attrInputMessages:             true,
 	attrOutputMessages:            true,
@@ -173,6 +176,6 @@ var content = map[string]bool{
 	attrExceptionType:             true,
 	attrExceptionMessage:          true,
 	"exception.stacktrace":        true,
-	"otel.status_description":     true,
+	attrStatusDescription:         true,
 	"telmoni.events":              true,
 }

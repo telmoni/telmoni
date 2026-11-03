@@ -413,6 +413,170 @@ describe('media.json', () => {
   });
 });
 
+interface MaskFixture {
+  scenario: {
+    agent: string;
+    user: string;
+    session: string;
+    tags: Record<string, string>;
+    provider: string;
+    model: string;
+    system_instructions: unknown;
+    input_messages: unknown;
+    output_messages: unknown;
+    event: { name: string; attributes: Record<string, string | number> };
+    message: string;
+  };
+  mask: Record<string, { replace?: string; drop?: boolean; fail?: boolean }>;
+  cases: Array<{ capture_content: boolean; content_mode: string; masks: boolean }>;
+  handed: string[];
+  handed_text: Record<string, string>;
+  sent: Record<string, unknown>;
+  kept: Pick<JsonSpan, 'status' | 'events'>;
+  withheld: Pick<JsonSpan, 'status' | 'events'>;
+  warnings: string[];
+}
+
+describe('mask.json', () => {
+  const fixture = loadFixture<MaskFixture>('mask.json');
+  const { scenario } = fixture;
+  class Declined extends Error {}
+  const MESSAGES = ['gen_ai.input.messages', 'gen_ai.output.messages', 'gen_ai.system_instructions'];
+
+  it.each(fixture.cases)('the mask answers each content field only under both locks: %o', async (each) => {
+    const handed: Record<string, string> = {};
+    const mask = (key: string, value: string): string | undefined => {
+      handed[key] = value;
+      const rule = fixture.mask[key];
+      if (rule === undefined) return value;
+      if (rule.fail) throw new Error(`the mask failed on ${value}`);
+      if (rule.drop) return undefined;
+      return rule.replace;
+    };
+    const mode = answer(200, { 'Telmoni-Content-Mode': each.content_mode }, '{}');
+    const h = harness({ apiKey: 'k', captureContent: each.capture_content, mask }, {}, [mode, mode]);
+    try {
+      await aRun(h);
+      expect(() =>
+        h.telmoni.run(
+          scenario.agent,
+          { userId: scenario.user, sessionId: scenario.session, tags: scenario.tags },
+          (run) => {
+            run.modelCall(
+              scenario.model,
+              {
+                provider: scenario.provider,
+                inputMessages: scenario.input_messages,
+                systemInstructions: scenario.system_instructions,
+              },
+              (call) => call.answered({ outputMessages: scenario.output_messages }),
+            );
+            trace.getSpan(run.context)!.addEvent(scenario.event.name, scenario.event.attributes);
+            throw new Declined(scenario.message);
+          },
+        ),
+      ).toThrow(Declined);
+      expect(await h.telmoni.flush()).toBe(true);
+    } finally {
+      await h.telmoni.shutdown();
+    }
+    const spans = h.transport.spans();
+    const calls = spans.filter((span) => span.name.startsWith('chat '));
+    expect(calls).toHaveLength(1);
+    expect(h.transport.uploads).toEqual([]);
+    expect(h.transport.text()).not.toContain('4242 ');
+    expect(h.warnings.join('\n')).not.toContain('4242 ');
+    const sent = Object.fromEntries(
+      calls[0]!.attributes
+        .filter((a) => MESSAGES.includes(a.key))
+        .map((a) => [a.key, JSON.parse(a.value['stringValue'] as string) as unknown]),
+    );
+    if (!each.masks) {
+      expect(handed).toEqual({});
+      expect(sent).toEqual({});
+      expect(normalizeFailure(spans.at(-1)!)).toEqual(fixture.withheld);
+      expect(h.warnings).toEqual([]);
+      return;
+    }
+    expect(sent).toEqual(fixture.sent);
+    expect(normalizeFailure(spans.at(-1)!)).toEqual(fixture.kept);
+    expect(h.warnings).toEqual(fixture.warnings);
+    expect(h.fields.map((field) => field.kind)).toEqual(['mask_failed']);
+    expect(Object.keys(handed)).toContain('exception.stacktrace');
+    expect(Object.keys(handed).filter((key) => key !== 'exception.stacktrace').sort()).toEqual(fixture.handed);
+    for (const [key, value] of Object.entries(fixture.handed_text)) expect(handed[key]).toBe(value);
+    // As the code gave them, blob parts and all: before any was put.
+    expect(JSON.parse(handed['gen_ai.input.messages']!)).toEqual(scenario.input_messages);
+    expect(JSON.parse(handed['gen_ai.output.messages']!)).toEqual(scenario.output_messages);
+    expect(JSON.parse(handed['gen_ai.system_instructions']!)).toEqual(scenario.system_instructions);
+  });
+
+  it('a mask that throws is warned of once and asked each export', async () => {
+    const asked: string[] = [];
+    const mask = (key: string, value: string): string => {
+      asked.push(key);
+      throw new Error(value);
+    };
+    const on = answer(200, { 'Telmoni-Content-Mode': 'on' }, '{}');
+    const h = harness({ apiKey: 'k', captureContent: true, mask }, {}, [on, on, on]);
+    try {
+      await aRun(h);
+      for (let i = 0; i < 2; i++) {
+        h.telmoni.run('support-bot', (run) => {
+          run.modelCall('gpt-4o', { inputMessages: 'a secret' }, () => {});
+        });
+        expect(await h.telmoni.flush()).toBe(true);
+      }
+    } finally {
+      await h.telmoni.shutdown();
+    }
+    expect(asked).toEqual(['gen_ai.input.messages', 'gen_ai.input.messages']);
+    expect(h.warnings).toEqual(['telmoni: the mask failed on gen_ai.input.messages; the span was sent without it']);
+    expect(h.transport.text()).not.toContain('a secret');
+  });
+
+  it('a mask answering no string sends the span without the field', async () => {
+    const on = answer(200, { 'Telmoni-Content-Mode': 'on' }, '{}');
+    const mask = (() => Promise.resolve('masked')) as unknown as (key: string, value: string) => string;
+    const h = harness({ apiKey: 'k', captureContent: true, mask }, {}, [on, on]);
+    try {
+      await aRun(h);
+      h.telmoni.run('support-bot', (run) => {
+        run.modelCall('gpt-4o', { inputMessages: 'a secret' }, () => {});
+      });
+      expect(await h.telmoni.flush()).toBe(true);
+    } finally {
+      await h.telmoni.shutdown();
+    }
+    expect(h.transport.text()).not.toContain('a secret');
+    expect(h.fields.map((field) => field.kind)).toEqual(['mask_failed']);
+  });
+
+  it('a mask answering a value unchanged keeps its type', async () => {
+    const on = answer(200, { 'Telmoni-Content-Mode': 'on' }, '{}');
+    const mask = (_key: string, value: string): string => (value === 'true' ? 'yes' : value);
+    const h = harness({ apiKey: 'k', captureContent: true, mask }, {}, [on, on]);
+    try {
+      await aRun(h);
+      h.telmoni.run('support-bot', (run) => {
+        trace.getSpan(run.context)!.addEvent('checked', { count: 3, found: true });
+      });
+      expect(await h.telmoni.flush()).toBe(true);
+    } finally {
+      await h.telmoni.shutdown();
+    }
+    const [event] = h.transport.spans().at(-1)!.events!;
+    expect([...event!.attributes].sort(byKey)).toEqual([
+      { key: 'count', value: { intValue: '3' } },
+      { key: 'found', value: { stringValue: 'yes' } },
+    ]);
+  });
+
+  it('a mask that is no function is refused', () => {
+    expect(() => harness({ mask: 'redact' as unknown as () => string })).toThrow('mask must be a function');
+  });
+});
+
 describe('answers/', () => {
   it('kept', async () => {
     const h = harness({ apiKey: 'k' }, {}, answers('kept'));

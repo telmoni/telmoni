@@ -6,6 +6,7 @@ mod common;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
@@ -581,6 +582,275 @@ fn images_are_lifted_out_of_messages_only_under_both_locks() -> Outcome {
         }
     }
     Ok(())
+}
+
+/// `mask.json`'s error, its type named as Rust names one.
+#[derive(Debug)]
+struct Declined(String);
+
+impl From<telmoni::Error> for Declined {
+    fn from(error: telmoni::Error) -> Self {
+        Self(error.to_string())
+    }
+}
+
+impl std::fmt::Display for Declined {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+#[test]
+fn the_mask_answers_each_content_field_only_under_both_locks() -> Outcome {
+    let fixture = load_fixture("mask.json")?;
+    let scenario = field(&fixture, "scenario")?;
+    let agent = text(scenario, "agent")?;
+    let event = field(scenario, "event")?;
+    let event_name = text(event, "name")?.to_owned();
+    let event_attributes: Vec<KeyValue> = field(event, "attributes")?
+        .as_object()
+        .ok_or("the event's attributes")?
+        .iter()
+        .map(|(key, value)| match value {
+            Value::Number(n) => KeyValue::new(key.clone(), n.as_i64().unwrap_or_default()),
+            other => KeyValue::new(key.clone(), other.as_str().unwrap_or_default().to_owned()),
+        })
+        .collect();
+    let messages = [
+        ("gen_ai.input.messages", "input_messages"),
+        ("gen_ai.output.messages", "output_messages"),
+        ("gen_ai.system_instructions", "system_instructions"),
+    ];
+    for case in field(&fixture, "cases")?.as_array().ok_or("cases")? {
+        let handed: Collected<(String, String)> = Collected::default();
+        // As `mask.json`'s rules say, keeping what it was handed.
+        let rules = field(&fixture, "mask")?.clone();
+        let kept = handed.clone();
+        let mask: telmoni::Mask = Arc::new(move |key: &str, value: &str| {
+            kept.push((key.to_owned(), value.to_owned()));
+            let Some(rule) = rules.get(key) else {
+                return Some(value.to_owned());
+            };
+            if rule.get("fail").is_some() {
+                std::panic::panic_any(format!("the mask failed on {value}"));
+            }
+            if rule.get("drop").is_some() {
+                return None;
+            }
+            rule.get("replace")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        });
+        let mode = Answer::new(
+            200,
+            vec![(
+                "Telmoni-Content-Mode".to_owned(),
+                text(case, "content_mode")?.to_owned(),
+            )],
+            b"{}".to_vec(),
+        );
+        let harness = Harness::answering(
+            Config {
+                capture_content: field(case, "capture_content")?
+                    .as_bool()
+                    .ok_or("capture_content")?,
+                mask: Some(mask),
+                ..keyed()
+            },
+            std::iter::repeat_n(Ok(mode), 2),
+        )?;
+        a_run(&harness)?;
+        let options = RunOptions {
+            user_id: Some(text(scenario, "user")?.to_owned()),
+            session_id: Some(text(scenario, "session")?.to_owned()),
+            tags: serde_json::from_value(field(scenario, "tags")?.clone())?,
+            ..RunOptions::default()
+        };
+        let model = text(scenario, "model")?;
+        let call_options = ModelCallOptions {
+            provider: Some(text(scenario, "provider")?.to_owned()),
+            input_messages: Some(field(scenario, "input_messages")?.clone().into()),
+            system_instructions: Some(field(scenario, "system_instructions")?.clone().into()),
+            ..ModelCallOptions::default()
+        };
+        let reply = Reply {
+            output_messages: Some(field(scenario, "output_messages")?.clone().into()),
+            ..Reply::default()
+        };
+        let message = text(scenario, "message")?;
+        let result: Result<(), Declined> = harness.telmoni.try_run_with(agent, options, |run| {
+            let call = run.model_call(model, call_options)?;
+            call.answered(reply);
+            call.end();
+            run.context()
+                .span()
+                .add_event(event_name.clone(), event_attributes.clone());
+            Err(Declined(message.to_owned()))
+        });
+        assert!(result.is_err(), "{case}");
+        harness.flush()?;
+        let spans = harness.spans()?;
+        let calls: Vec<&Value> = spans
+            .iter()
+            .filter(|span| name_of(span).starts_with("chat "))
+            .collect();
+        assert_eq!(calls.len(), 1, "{case}");
+        assert!(harness.transport.uploads().is_empty(), "{case}");
+        assert!(!harness.transport.text().contains("4242 "), "{case}");
+        assert!(
+            !harness.warnings.all().join("\n").contains("4242 "),
+            "{case}"
+        );
+        let attributes = attributes_of(calls.first().ok_or("the call")?)?;
+        let mut sent = serde_json::Map::new();
+        for (key, _) in messages {
+            if let Some(given) = attributes.get(key).and_then(Value::as_str) {
+                sent.insert(key.to_owned(), serde_json::from_str(given)?);
+            }
+        }
+        let failed = spans.last().ok_or("the failed run")?;
+        let handed: BTreeMap<String, String> = handed.all().into_iter().collect();
+        if field(case, "masks")? == &json!(false) {
+            assert!(handed.is_empty(), "{case}: handed {handed:?}");
+            assert!(sent.is_empty(), "{case}");
+            assert_eq!(
+                &normalize_failure(failed)?,
+                field(&fixture, "withheld")?,
+                "{case}"
+            );
+            assert!(harness.warnings.all().is_empty(), "{case}");
+            continue;
+        }
+        assert_eq!(&Value::Object(sent), field(&fixture, "sent")?, "{case}");
+        assert_eq!(
+            &normalize_failure(failed)?,
+            field(&fixture, "kept")?,
+            "{case}"
+        );
+        assert_eq!(
+            json!(harness.warnings.all()),
+            *field(&fixture, "warnings")?,
+            "{case}"
+        );
+        assert_eq!(
+            harness.warnings.fields(),
+            vec![json!({"kind": "mask_failed"})],
+            "{case}"
+        );
+        assert_eq!(
+            json!(handed.keys().collect::<Vec<_>>()),
+            *field(&fixture, "handed")?,
+            "{case}"
+        );
+        for (key, value) in field(&fixture, "handed_text")?
+            .as_object()
+            .ok_or("handed_text")?
+        {
+            assert_eq!(handed.get(key).map(String::as_str), value.as_str(), "{key}");
+        }
+        // As the code gave them, blob parts and all: before any was put.
+        for (key, given) in messages {
+            let value: Value = serde_json::from_str(handed.get(key).ok_or(key)?)?;
+            assert_eq!(&value, field(scenario, given)?, "{key}");
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn a_mask_that_panics_is_warned_of_once_and_asked_each_export() -> Outcome {
+    let asked = Collected::default();
+    let counted = asked.clone();
+    let on = Answer::new(
+        200,
+        vec![("Telmoni-Content-Mode".to_owned(), "on".to_owned())],
+        b"{}".to_vec(),
+    );
+    let harness = Harness::answering(
+        Config {
+            capture_content: true,
+            mask: Some(Arc::new(move |key: &str, value: &str| {
+                counted.push(key.to_owned());
+                std::panic::panic_any(value.to_owned())
+            })),
+            ..keyed()
+        },
+        std::iter::repeat_n(Ok(on), 3),
+    )?;
+    a_run(&harness)?;
+    for _ in 0..2 {
+        let run = harness.telmoni.run("support-bot", RunOptions::default())?;
+        let call = run.model_call(
+            "gpt-4o",
+            ModelCallOptions {
+                input_messages: Some(json!("a secret").into()),
+                ..ModelCallOptions::default()
+            },
+        )?;
+        call.end();
+        run.end();
+        harness.flush()?;
+    }
+    assert_eq!(asked.all(), vec!["gen_ai.input.messages"; 2]);
+    assert_eq!(
+        harness.warnings.all(),
+        vec!["telmoni: the mask failed on gen_ai.input.messages; the span was sent without it"]
+    );
+    assert!(!harness.transport.text().contains("a secret"));
+    Ok(())
+}
+
+#[test]
+fn a_mask_answering_a_value_unchanged_keeps_its_type() -> Outcome {
+    let on = Answer::new(
+        200,
+        vec![("Telmoni-Content-Mode".to_owned(), "on".to_owned())],
+        b"{}".to_vec(),
+    );
+    let harness = Harness::answering(
+        Config {
+            capture_content: true,
+            mask: Some(Arc::new(|_: &str, value: &str| {
+                Some(if value == "true" { "yes" } else { value }.to_owned())
+            })),
+            ..keyed()
+        },
+        std::iter::repeat_n(Ok(on), 2),
+    )?;
+    a_run(&harness)?;
+    let run = harness.telmoni.run("support-bot", RunOptions::default())?;
+    run.context().span().add_event(
+        "checked",
+        vec![KeyValue::new("count", 3_i64), KeyValue::new("found", true)],
+    );
+    run.end();
+    harness.flush()?;
+    let spans = harness.spans()?;
+    let mut attributes = spans
+        .last()
+        .and_then(|span| span.pointer("/events/0/attributes"))
+        .and_then(Value::as_array)
+        .ok_or("the event's attributes")?
+        .clone();
+    attributes.sort_by(|a, b| a["key"].as_str().cmp(&b["key"].as_str()));
+    assert_eq!(
+        Value::Array(attributes),
+        json!([
+            {"key": "count", "value": {"intValue": "3"}},
+            {"key": "found", "value": {"stringValue": "yes"}},
+        ])
+    );
+    Ok(())
+}
+
+#[test]
+fn a_configuration_says_whether_a_mask_is_set_and_nothing_of_it() {
+    let config = Config {
+        mask: Some(Arc::new(|_: &str, value: &str| Some(value.to_owned()))),
+        ..keyed()
+    };
+    assert!(format!("{config:?}").contains(r#"mask: Some("<set>")"#));
+    assert!(format!("{:?}", keyed()).contains("mask: None"));
 }
 
 /// In nanoseconds, a retry its own: ingest moves a run by it.

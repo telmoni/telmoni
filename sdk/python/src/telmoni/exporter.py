@@ -31,8 +31,8 @@ from dataclasses import dataclass
 from importlib import metadata
 from typing import Any, cast
 
-from opentelemetry.sdk.trace import ReadableSpan
-from opentelemetry.trace import SpanKind, StatusCode
+from opentelemetry.sdk.trace import Event, ReadableSpan
+from opentelemetry.trace import SpanKind, Status, StatusCode
 
 from . import contract
 from ._version import __version__
@@ -49,6 +49,8 @@ logger = logging.getLogger("telmoni")
 
 ATTEMPTS = 3
 """How many times one batch is sent before it is dropped."""
+_MASKED_OUT = object()
+"""What the mask left a field: its span is sent without it."""
 _RETRIED = frozenset({429, 502, 503, 504})
 """OTLP's retryable statuses: a 502 or a 504 is a load balancer's, a server's
 rollout among its causes."""
@@ -406,21 +408,27 @@ class Exporter:
             and any(_holds_content(span) for span in spans)
         ):
             self._ask()
-        lifted = self._lift(spans) if self._keeps_content() else {}
-        return self._export(spans, lifted)
+        # Decided once, so no answer met halfway sends content the mask never saw.
+        keep = self._keeps_content()
+        if keep:
+            spans = self._mask(spans)
+        lifted = self._lift(spans) if keep else {}
+        return self._export(spans, lifted, keep)
 
-    def _export(self, spans: Sequence[ReadableSpan], lifted: _Lifted) -> bool:
+    def _export(
+        self, spans: Sequence[ReadableSpan], lifted: _Lifted, keep: bool
+    ) -> bool:
         # Ingest refuses an export past 1,000 spans whole, as one past 1 MiB below.
         if len(spans) > contract.BATCH_SPANS_MAX:
-            return self._halve(spans, lifted)
-        body = self._body(spans, lifted)
+            return self._halve(spans, lifted, keep)
+        body = self._body(spans, lifted, keep)
         if len(body) > contract.BATCH_MAX_BYTES:
             # Ingest refuses it whole, its 413 maybe breaking the upload still
             # going out, which reads as no answer and is sent again: halved.
             if len(spans) > 1:
-                return self._halve(spans, lifted)
+                return self._halve(spans, lifted, keep)
             # Content sent goes first, the longest field first, each named.
-            cut = self._cut(spans[0], lifted)
+            cut = self._cut(spans[0], lifted, keep)
             if cut is not None:
                 self.warn_once(
                     "content-cut",
@@ -431,7 +439,7 @@ class Exporter:
                 return self._send(cut)
             # A span alone past it goes without what ingest drops for its length,
             # and then fits, unless its own name does not.
-            body = self._body(spans, lifted, trimmed=True)
+            body = self._body(spans, lifted, keep, trimmed=True)
             if len(body) > contract.BATCH_MAX_BYTES:
                 self.warn_once(
                     "too-large",
@@ -447,12 +455,12 @@ class Exporter:
             )
         return self._send(body)
 
-    def _cut(self, span: ReadableSpan, lifted: _Lifted) -> bytes | None:
+    def _cut(self, span: ReadableSpan, lifted: _Lifted, keep: bool) -> bytes | None:
         """The span's body without its longest content, as few fields as fit it in
         an export: a content field, or any past ingest's caps, which on a project
         that keeps content is content too; None where it sends no content, or fits
         without all of it."""
-        if not self._keeps_content():
+        if not keep:
             return None
         content = sorted(
             (
@@ -466,7 +474,7 @@ class Exporter:
         cut: list[str] = []
         for key, _ in content:
             cut.append(key)
-            body = self._body([span], lifted, cut=cut)
+            body = self._body([span], lifted, keep, cut=cut)
             if len(body) <= contract.BATCH_MAX_BYTES:
                 return body
         return None
@@ -474,10 +482,87 @@ class Exporter:
     def _keeps_content(self) -> bool:
         return self._config.capture_content and self._content_mode == "on"
 
-    def _halve(self, spans: Sequence[ReadableSpan], lifted: _Lifted) -> bool:
+    def _halve(
+        self, spans: Sequence[ReadableSpan], lifted: _Lifted, keep: bool
+    ) -> bool:
         """Exports each half of the spans, the second only where the first went."""
         half = len(spans) // 2
-        return self._export(spans[:half], lifted) and self._export(spans[half:], lifted)
+        return self._export(spans[:half], lifted, keep) and self._export(
+            spans[half:], lifted, keep
+        )
+
+    def _mask(self, spans: Sequence[ReadableSpan]) -> Sequence[ReadableSpan]:
+        """The spans with every content field, event attribute and status message
+        as the code's mask answers it, before a part it takes out could be put."""
+        if self._config.mask is None:
+            return spans
+        return [self._masked_span(span) for span in spans]
+
+    def _masked_span(self, span: ReadableSpan) -> ReadableSpan:
+        attributes: dict[str, Any] = {}
+        for key, value in (span.attributes or {}).items():
+            if key in contract.CONTENT and key != contract.CONTENT_CUT:
+                value = self._masked(key, value)
+                if value is _MASKED_OUT:
+                    continue
+            attributes[key] = value
+        events = []
+        for event in span.events:
+            kept: dict[str, Any] = {}
+            for key, value in (event.attributes or {}).items():
+                value = self._masked(key, value)
+                if value is not _MASKED_OUT:
+                    kept[key] = value
+            events.append(Event(event.name, kept, event.timestamp))
+        status = span.status
+        if status.description:
+            description = self._masked(contract.STATUS_DESCRIPTION, status.description)
+            status = Status(
+                status.status_code,
+                None if description is _MASKED_OUT else description,
+            )
+        return ReadableSpan(
+            name=span.name,
+            context=span.context,
+            parent=span.parent,
+            resource=span.resource,
+            attributes=attributes,
+            events=events,
+            links=span.links,
+            kind=span.kind,
+            status=status,
+            start_time=span.start_time,
+            end_time=span.end_time,
+            instrumentation_scope=span.instrumentation_scope,
+        )
+
+    def _masked(self, key: str, value: Any) -> Any:
+        """One field as the mask answers it, handed as a string, any other value as
+        its JSON; ``_MASKED_OUT`` to send the span without it. An answer unchanged
+        keeps the value as it was."""
+        given = (
+            value
+            if isinstance(value, str)
+            else json.dumps(
+                value, separators=(",", ":"), ensure_ascii=False, default=str
+            )
+        )
+        mask = cast("Callable[[str, str], object]", self._config.mask)
+        try:
+            answer = mask(key, given)
+        except Exception:  # noqa: BLE001 - the code's mask never costs the batch
+            answer = _MASKED_OUT
+        if answer is None:
+            return _MASKED_OUT
+        if not isinstance(answer, str):
+            # The key alone: an error's words may hold the content.
+            self.warn_once(
+                f"mask:{key}",
+                f"telmoni: the mask failed on {key}; the span was sent without it",
+                WarningInfo("mask_failed"),
+            )
+            return _MASKED_OUT
+        return value if answer == given else answer
 
     def _lift(self, spans: Sequence[ReadableSpan]) -> _Lifted:
         """Each span's messages with every ``blob`` part lifted out, by the span's
@@ -564,13 +649,14 @@ class Exporter:
         self,
         spans: Sequence[ReadableSpan],
         lifted: _Lifted,
+        keep: bool,
         *,
         trimmed: bool = False,
         cut: Sequence[str] = (),
     ) -> bytes:
         # Python writes NaN and Infinity, which are no JSON: refused here, never sent.
         text = json.dumps(
-            self.encode(spans, lifted, trimmed=trimmed, cut=cut),
+            self.encode(spans, lifted, keep, trimmed=trimmed, cut=cut),
             separators=(",", ":"),
             allow_nan=False,
             ensure_ascii=False,
@@ -651,12 +737,14 @@ class Exporter:
         self,
         spans: Sequence[ReadableSpan],
         lifted: _Lifted,
+        keep: bool,
         *,
         trimmed: bool = False,
         cut: Sequence[str] = (),
     ) -> dict[str, Any]:
         """OTLP's ``ExportTraceServiceRequest``, in its JSON encoding, ``lifted``'s
-        fields in place of the spans' own; ``trimmed``, without the attributes
+        fields in place of the spans' own; ``keep``, with their content;
+        ``trimmed``, without the attributes
         ingest drops for their length; ``cut``, without those content fields,
         named in ``telmoni.content_cut``."""
         return {
@@ -667,7 +755,8 @@ class Exporter:
                         {
                             "scope": {"name": contract.SCOPE, "version": __version__},
                             "spans": [
-                                self._span(span, lifted, trimmed, cut) for span in spans
+                                self._span(span, lifted, keep, trimmed, cut)
+                                for span in spans
                             ],
                         }
                     ],
@@ -679,10 +768,10 @@ class Exporter:
         self,
         span: ReadableSpan,
         lifted: _Lifted,
+        keep_content: bool,
         trimmed: bool = False,
         cut: Sequence[str] = (),
     ) -> dict[str, Any]:
-        keep_content = self._keeps_content()
         attributes = [
             _attribute(key, value)
             for key, value in _attributes(span, lifted).items()

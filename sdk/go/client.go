@@ -104,6 +104,9 @@ const (
 	// WarningUploadFailed is an image or file a message carried that could not
 	// be put, its span sent naming it.
 	WarningUploadFailed WarningKind = "upload_failed"
+	// WarningMaskFailed is a content field Config.Mask panicked on, its span
+	// sent without it.
+	WarningMaskFailed WarningKind = "mask_failed"
 )
 
 // withRandom replaces the source the sample rate is drawn against, so a test

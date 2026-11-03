@@ -33,6 +33,7 @@ def test_a_step_nests_under_its_run_and_carries_its_ids(
     assert attributes_of(plan) == {
         "telmoni.run_id": run.run_id,
         "telmoni.agent": "bot",
+        "telmoni.sample_rate": 1.0,
         "user.id": "c",
         "gen_ai.conversation.id": "v",
     }

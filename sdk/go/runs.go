@@ -168,12 +168,15 @@ func errorTypeName(err error) string {
 }
 
 // Run is a run of an agent: a span of its own in whatever trace was current.
-// Every span inside it carries the run's id, agent, user and session, so
-// ingest knows each span's run without waiting for the trace's tree.
+// Every span inside it carries the run's id, agent, sample rate, user and
+// session, so ingest knows each span's run without waiting for the trace's tree.
 type Run struct {
 	handle
-	id        string
-	agent     string
+	id    string
+	agent string
+	// rate is the run's sample rate, handed to another service; 0 for a
+	// continued run whose headers named none.
+	rate      float64
 	inherited []attribute.KeyValue
 	// sampledOut is whether the sample rate kept this run out: nothing of it
 	// is sent, nor handed to another service.
@@ -300,13 +303,13 @@ func (c *Client) Run(ctx context.Context, agent string, opts RunOptions) (contex
 	if sessionID != "" && !c.fits(sessionID, sessionIDMax, "session id") {
 		sessionID = ""
 	}
-	inherited := inheritedAttributes(runID, agent, userID, sessionID)
+	inherited := inheritedAttributes(runID, agent, rate, userID, sessionID)
 	// On every span of the run from its start, for the processor to drop: a
 	// sampler's drop would clear the flag the application's spans inherit.
 	if sampledOut {
 		inherited = append(inherited, attribute.Bool(attrSampledOut, true))
 	}
-	name, attrs := c.runOpening(agent, inherited, rate, opts.Tags)
+	name, attrs := c.runOpening(agent, inherited, opts.Tags)
 	if opts.InputMessages != nil {
 		attrs = append(attrs, attribute.String(attrInputMessages, asJSON(opts.InputMessages)))
 	}
@@ -315,7 +318,7 @@ func (c *Client) Run(ctx context.Context, agent string, opts RunOptions) (contex
 		trace.WithSpanKind(trace.SpanKindInternal),
 		trace.WithAttributes(attrs...),
 	)
-	run := &Run{handle: handle{span: span, client: c}, id: runID, agent: agent, inherited: inherited, sampledOut: sampledOut, guard: caps, displaced: displaced}
+	run := &Run{handle: handle{span: span, client: c}, id: runID, agent: agent, rate: rate, inherited: inherited, sampledOut: sampledOut, guard: caps, displaced: displaced}
 	return contextWithRun(trace.ContextWithSpan(ctx, inContext{span, displaced}), run), run
 }
 
@@ -624,11 +627,16 @@ func (r *Run) ToolCall(ctx context.Context, name string, opts ToolCallOptions) (
 }
 
 // inheritedAttributes is what every span of a run carries, live or recorded:
-// its id and agent, and its user and session where it has them.
-func inheritedAttributes(runID, agent, userID, sessionID string) []attribute.KeyValue {
+// its id and agent, its sample rate, which a sum of spend over runs scales
+// each span by, and its user and session where it has them; a rate of 0 is
+// none, as a continued run's headers may name.
+func inheritedAttributes(runID, agent string, rate float64, userID, sessionID string) []attribute.KeyValue {
 	inherited := []attribute.KeyValue{
 		attribute.String(attrRunID, runID),
 		attribute.String(attrAgent, agent),
+	}
+	if rate > 0 {
+		inherited = append(inherited, attribute.Float64(attrSampleRate, rate))
 	}
 	if userID != "" {
 		inherited = append(inherited, attribute.String(attrUserID, userID))
@@ -642,12 +650,11 @@ func inheritedAttributes(runID, agent, userID, sessionID string) []attribute.Key
 // runOpening is a run's span name and attributes, live or recorded, its tags
 // by key: a map ranges in a new order each time, and the same record must be
 // the same bytes.
-func (c *Client) runOpening(agent string, inherited []attribute.KeyValue, rate float64, tags map[string]string) (string, []attribute.KeyValue) {
+func (c *Client) runOpening(agent string, inherited []attribute.KeyValue, tags map[string]string) (string, []attribute.KeyValue) {
 	kept := c.tagAttributes(tags)
-	attrs := make([]attribute.KeyValue, 0, 3+len(inherited)+len(kept))
+	attrs := make([]attribute.KeyValue, 0, 2+len(inherited)+len(kept))
 	attrs = append(attrs, attribute.String(attrOperation, runOperation), attribute.String(attrAgentName, agent))
 	attrs = append(attrs, inherited...)
-	attrs = append(attrs, attribute.Float64(attrSampleRate, rate))
 	return runOperation + " " + agent, append(attrs, kept...)
 }
 

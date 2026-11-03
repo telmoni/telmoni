@@ -151,6 +151,8 @@ export abstract class Parent extends Handle {
 export class Run extends Parent {
   readonly runId: string;
   readonly agent: string;
+  /** The run's sample rate, handed to another service; undefined for a continued run whose headers named none. */
+  readonly rate: number | undefined;
   /** Whether the sample rate kept this run out: nothing of it is sent, nor handed to another service. */
   readonly sampledOut: boolean;
   readonly #inherited: Attributes;
@@ -163,6 +165,7 @@ export class Run extends Parent {
     parent: Context,
     runId: string,
     agent: string,
+    rate: number | undefined,
     inherited: Attributes,
     sampledOut = false,
     guard = new Guard(),
@@ -170,6 +173,7 @@ export class Run extends Parent {
     super(opener, span, parent, undefined);
     this.runId = runId;
     this.agent = agent;
+    this.rate = rate;
     this.sampledOut = sampledOut;
     this.#inherited = { ...inherited };
     this.#warnOnce = opener.warnOnce;
@@ -399,24 +403,20 @@ export class Opener {
     const inherited = inheritedOf(
       runId,
       agent,
+      rate,
       user !== undefined && fits(user, contract.USER_ID_MAX, 'user id', this.#warnOnce) ? user : undefined,
       session !== undefined && fits(session, contract.SESSION_ID_MAX, 'session id', this.#warnOnce) ? session : undefined,
     );
     // On every span of the run from its start, for the processor to drop: a
     // sampler's drop would clear the flag the application's spans inherit.
     if (sampledOut) inherited[contract.SAMPLED_OUT] = true;
-    const attributes = runAttributes(
-      agent,
-      inherited,
-      rate,
-      tagsOf(Object.entries(options.tags ?? {}), this.#warnOnce),
-    );
+    const attributes = runAttributes(agent, inherited, tagsOf(Object.entries(options.tags ?? {}), this.#warnOnce));
     if (isSet(options.inputMessages)) {
       attributes[contract.INPUT_MESSAGES] = asJson(options.inputMessages);
     }
     const parent = context.active();
     const span = this.#start(runSpanName(agent), parent, attributes, SpanKind.INTERNAL);
-    return new Run(this, span, parent, runId, agent, inherited, sampledOut, guard);
+    return new Run(this, span, parent, runId, agent, rate, inherited, sampledOut, guard);
   }
 
   /**
@@ -425,9 +425,10 @@ export class Opener {
    * steps and calls nest under it and carry the run, and nothing of it is
    * sent or ended from this side.
    */
-  continued(remote: SpanContext, runId: string, given: string): Run {
+  continued(remote: SpanContext, runId: string, given: string, rate: number | undefined): Run {
     const agent = cut(given, contract.AGENT_MAX, "run's agent", this.#warnOnce);
-    return new Run(this, trace.wrapSpanContext(remote), context.active(), runId, agent, inheritedOf(runId, agent));
+    const inherited = inheritedOf(runId, agent, rate);
+    return new Run(this, trace.wrapSpanContext(remote), context.active(), runId, agent, rate, inherited);
   }
 
   step(run: Run, parent: Context, given: string): Step {
@@ -559,8 +560,8 @@ export class Opener {
       runHex.slice(16, 20),
       runHex.slice(20),
     ].join('-');
-    const inherited = inheritedOf(runId, record.agent, record.userId, record.sessionId);
-    const attributes = runAttributes(record.agent, inherited, rate, tagsOf(tagged, this.#warnOnce));
+    const inherited = inheritedOf(runId, record.agent, rate, record.userId, record.sessionId);
+    const attributes = runAttributes(record.agent, inherited, tagsOf(tagged, this.#warnOnce));
     for (const [key, value] of messages) {
       if (isSet(value)) attributes[key] = asJson(value);
     }
@@ -889,21 +890,24 @@ export function checkedRate(rate: unknown): number {
   return rate;
 }
 
-/** What every span of a run carries, live or recorded: its id and agent, and its user and session where it has them. */
-function inheritedOf(runId: string, agent: string, user?: string, session?: string): Attributes {
+/**
+ * What every span of a run carries, live or recorded: its id and agent, its sample rate, which a sum of spend over
+ * runs scales each span by, and its user and session where it has them.
+ */
+function inheritedOf(runId: string, agent: string, rate: number | undefined, user?: string, session?: string): Attributes {
   const inherited: Attributes = { [contract.RUN_ID]: runId, [contract.AGENT]: agent };
+  if (rate !== undefined) inherited[contract.SAMPLE_RATE] = rate;
   if (user) inherited[contract.USER_ID] = user;
   if (session) inherited[contract.SESSION_ID] = session;
   return inherited;
 }
 
 /** A run's own span's attributes, live or recorded: its tags last. */
-function runAttributes(agent: string, inherited: Attributes, rate: number, tags: Attributes): Attributes {
+function runAttributes(agent: string, inherited: Attributes, tags: Attributes): Attributes {
   return {
     [contract.OPERATION]: contract.RUN_OPERATION,
     [contract.AGENT_NAME]: agent,
     ...inherited,
-    [contract.SAMPLE_RATE]: rate,
     ...tags,
   };
 }

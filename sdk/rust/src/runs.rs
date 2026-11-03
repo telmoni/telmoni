@@ -32,6 +32,9 @@ use crate::warnings::{Warner, WarningKind};
 pub(crate) struct RunInfo {
     pub(crate) run_id: String,
     pub(crate) agent: String,
+    /// The run's sample rate, handed to another service; `None` for a
+    /// continued run whose headers named none.
+    pub(crate) rate: Option<f64>,
     /// Whether the sample rate kept the run out: nothing of it is sent, nor
     /// handed to another service.
     pub(crate) sampled_out: bool,
@@ -866,13 +869,13 @@ pub(crate) fn open(inner: &Arc<Inner>, agent: &str, options: RunOptions) -> Resu
         (options.user_id).filter(|id| fits(id, contract::USER_ID_MAX, "user id", &inner.warner));
     let session_id = (options.session_id)
         .filter(|id| fits(id, contract::SESSION_ID_MAX, "session id", &inner.warner));
-    let mut inherited = inherited(&run_id, &agent, user_id, session_id);
+    let mut inherited = inherited(&run_id, &agent, Some(rate), user_id, session_id);
     // On every span of the run from its start, for the processor to drop: a
     // sampler's drop would clear the flag the application's spans inherit.
     if sampled_out {
         inherited.push(KeyValue::new(contract::SAMPLED_OUT, true));
     }
-    let mut attributes = run_attributes(&agent, &inherited, rate, options.tags, &inner.warner);
+    let mut attributes = run_attributes(&agent, &inherited, options.tags, &inner.warner);
     if let Some(messages) = options.input_messages {
         attributes.push(KeyValue::new(contract::INPUT_MESSAGES, messages.0));
     }
@@ -887,6 +890,7 @@ pub(crate) fn open(inner: &Arc<Inner>, agent: &str, options: RunOptions) -> Resu
     let cx = parent.with_span(span).with_value(RunInfo {
         run_id: run_id.clone(),
         agent: agent.clone(),
+        rate: Some(rate),
         sampled_out,
     });
 
@@ -916,12 +920,13 @@ pub(crate) fn continued(inner: &Arc<Inner>, read: Continued) -> Run {
         "run's agent",
         &inner.warner,
     );
-    let inherited = inherited(&read.run_id, &agent, None, None);
+    let inherited = inherited(&read.run_id, &agent, read.sample_rate, None, None);
     let cx = Context::current()
         .with_remote_span_context(read.span_context)
         .with_value(RunInfo {
             run_id: read.run_id.clone(),
             agent: agent.clone(),
+            rate: read.sample_rate,
             sampled_out: false,
         });
     Run {
@@ -939,11 +944,13 @@ pub(crate) fn continued(inner: &Arc<Inner>, read: Continued) -> Run {
     }
 }
 
-/// What every span inside a run carries: its id and agent, and its user and
+/// What every span inside a run carries: its id and agent, its sample rate,
+/// which a sum of spend over runs scales each span by, and its user and
 /// session when it has them.
 pub(crate) fn inherited(
     run_id: &str,
     agent: &str,
+    rate: Option<f64>,
     user_id: Option<String>,
     session_id: Option<String>,
 ) -> Vec<KeyValue> {
@@ -953,6 +960,9 @@ pub(crate) fn inherited(
         KeyValue::new(contract::RUN_ID, shared(run_id)),
         KeyValue::new(contract::AGENT, shared(agent)),
     ];
+    if let Some(rate) = rate {
+        inherited.push(KeyValue::new(contract::SAMPLE_RATE, rate));
+    }
     if let Some(user) = user_id.filter(|id| !id.is_empty()) {
         inherited.push(KeyValue::new(contract::USER_ID, shared(&user)));
     }
@@ -963,11 +973,10 @@ pub(crate) fn inherited(
 }
 
 /// The run span's own attributes: the operation and the agent, what every
-/// span inside carries, the sample rate and the tags.
+/// span inside carries and the tags.
 pub(crate) fn run_attributes(
     agent: &str,
     inherited: &[KeyValue],
-    rate: f64,
     mut tags: BTreeMap<String, String>,
     warner: &Warner,
 ) -> Vec<KeyValue> {
@@ -976,7 +985,6 @@ pub(crate) fn run_attributes(
         KeyValue::new(contract::AGENT_NAME, agent.to_owned()),
     ];
     attributes.extend_from_slice(inherited);
-    attributes.push(KeyValue::new(contract::SAMPLE_RATE, rate));
     // Ingest drops these before it counts its 32, so they take no place there.
     let given = tags.len();
     tags.retain(|key, value| {

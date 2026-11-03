@@ -717,6 +717,7 @@ describe('a span time', () => {
     const encoded = exporter.encode(
       [span([18_446_744_073, 709_551_615]), span([18_446_744_073, 709_551_616]), span([-1, 0])],
       new Map(),
+      false,
     );
     const sent = encoded.resourceSpans[0]!.scopeSpans[0]!.spans.map((each) => each.startTimeUnixNano);
     expect(sent).toEqual(['18446744073709551615', '0', '0']);

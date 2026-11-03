@@ -122,7 +122,9 @@ OpenCode, `"captureContent": true` in the plugin's `telmoni.json`; in Cursor,
 while a repository's hooks, which hold no key, leave a cloud agent to
 `TELMONI_CAPTURE_CONTENT=1` beside its `TELMONI_API_KEY`. A switch in a file
 that is neither `true` nor `false` has the file passed over, and nothing is sent
-until it is fixed, the log saying why.
+until it is fixed, the log saying why. A plugin takes no
+[mask](/docs/api/sdks#masking-content), its hook running no code of yours: with
+both locks on, a turn is sent as it was said.
 
 On, a turn carries its conversation as its agent recorded it: your prompt, with
 its images, as the run's input, and the last reply as its output; each model

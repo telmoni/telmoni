@@ -312,6 +312,176 @@ def test_images_are_lifted_out_of_messages_only_under_both_locks(
         assert sent == fixture["sent"]
 
 
+class Declined(Exception):
+    pass
+
+
+@pytest.mark.parametrize("case", load_fixture("mask.json")["cases"])
+def test_the_mask_answers_each_content_field_only_under_both_locks(
+    case: dict[str, Any], transport: FakeTransport, caplog: pytest.LogCaptureFixture
+) -> None:
+    fixture = load_fixture("mask.json")
+    scenario = fixture["scenario"]
+    handed: dict[str, str] = {}
+
+    def mask(key: str, value: str) -> str | None:
+        handed[key] = value
+        rule = fixture["mask"].get(key)
+        if rule is None:
+            return value
+        if rule.get("fail"):
+            raise ValueError(f"the mask failed on {value}")
+        if rule.get("drop"):
+            return None
+        return str(rule["replace"])
+
+    mode = Answer(200, {"Telmoni-Content-Mode": case["content_mode"]}, b"{}")
+    transport.answers = [mode]
+    client = Telmoni(
+        Config(api_key="k", capture_content=case["capture_content"], mask=mask),
+        transport=transport,
+    )
+    try:
+        a_run(client)
+        with (
+            pytest.raises(Declined),
+            client.run(
+                scenario["agent"],
+                user_id=scenario["user"],
+                session_id=scenario["session"],
+                tags=scenario["tags"],
+            ),
+        ):
+            with client.model_call(
+                scenario["model"],
+                provider=scenario["provider"],
+                input_messages=scenario["input_messages"],
+                system_instructions=scenario["system_instructions"],
+            ) as call:
+                call.answered(output_messages=scenario["output_messages"])
+            event = scenario["event"]
+            trace.get_current_span().add_event(event["name"], event["attributes"])
+            raise Declined(scenario["message"])
+        assert client.flush()
+    finally:
+        client.shutdown()
+    spans = transport.spans()
+    (call_span,) = [s for s in spans if s["name"].startswith("chat ")]
+    assert transport.uploads == []
+    assert "4242 " not in str(transport.requests)
+    assert "4242 " not in str(warnings_in(caplog))
+    sent = {
+        a["key"]: json.loads(a["value"]["stringValue"])
+        for a in call_span["attributes"]
+        if a["key"] in fixture["handed"]
+    }
+    if not case["masks"]:
+        assert handed == {}
+        assert sent == {}
+        assert normalize_failure(spans[-1]) == fixture["withheld"]
+        assert warnings_in(caplog) == []
+        return
+    assert sent == fixture["sent"]
+    assert normalize_failure(spans[-1]) == fixture["kept"]
+    assert warnings_in(caplog) == fixture["warnings"]
+    assert [f["kind"] for f in fields_in(caplog)] == ["mask_failed"]
+    assert "exception.stacktrace" in handed
+    assert sorted(set(handed) - {"exception.stacktrace"}) == fixture["handed"]
+    for key, value in fixture["handed_text"].items():
+        assert handed[key] == value
+    # As the code gave them, blob parts and all: before any was put.
+    for field, key in {
+        contract.INPUT_MESSAGES: "input_messages",
+        contract.OUTPUT_MESSAGES: "output_messages",
+        contract.SYSTEM_INSTRUCTIONS: "system_instructions",
+    }.items():
+        assert json.loads(handed[field]) == scenario[key]
+
+
+def test_a_mask_that_raises_is_warned_of_once_and_asked_each_export(
+    transport: FakeTransport, caplog: pytest.LogCaptureFixture
+) -> None:
+    asked: list[str] = []
+
+    def mask(key: str, value: str) -> str:
+        asked.append(key)
+        raise ValueError(value)
+
+    transport.answers = [Answer(200, {"Telmoni-Content-Mode": "on"}, b"{}")] * 3
+    client = Telmoni(
+        Config(api_key="k", capture_content=True, mask=mask), transport=transport
+    )
+    try:
+        a_run(client)
+        for _ in range(2):
+            with (
+                client.run("support-bot"),
+                client.model_call("gpt-4o", input_messages="a secret"),
+            ):
+                pass
+            assert client.flush()
+    finally:
+        client.shutdown()
+    assert asked == ["gen_ai.input.messages"] * 2
+    assert warnings_in(caplog) == [
+        "telmoni: the mask failed on gen_ai.input.messages; the span was sent without it"
+    ]
+    assert "a secret" not in str(transport.requests)
+
+
+def test_a_mask_answering_no_string_sends_the_span_without_the_field(
+    transport: FakeTransport, caplog: pytest.LogCaptureFixture
+) -> None:
+    transport.answers = [Answer(200, {"Telmoni-Content-Mode": "on"}, b"{}")] * 3
+    client = Telmoni(
+        Config(api_key="k", capture_content=True, mask=lambda key, value: 42),  # type: ignore[arg-type,return-value]
+        transport=transport,
+    )
+    try:
+        a_run(client)
+        with (
+            client.run("support-bot"),
+            client.model_call("gpt-4o", input_messages="a secret"),
+        ):
+            pass
+        assert client.flush()
+    finally:
+        client.shutdown()
+    assert "a secret" not in str(transport.requests)
+    assert [f["kind"] for f in fields_in(caplog)] == ["mask_failed"]
+
+
+def test_a_mask_answering_a_value_unchanged_keeps_its_type(
+    transport: FakeTransport,
+) -> None:
+    transport.answers = [Answer(200, {"Telmoni-Content-Mode": "on"}, b"{}")] * 3
+    client = Telmoni(
+        Config(
+            api_key="k",
+            capture_content=True,
+            mask=lambda key, value: "yes" if value == "true" else value,
+        ),
+        transport=transport,
+    )
+    try:
+        a_run(client)
+        with client.run("support-bot"):
+            trace.get_current_span().add_event("checked", {"count": 3, "found": True})
+        assert client.flush()
+    finally:
+        client.shutdown()
+    (event,) = transport.spans()[-1]["events"]
+    assert sorted(event["attributes"], key=lambda a: a["key"]) == [
+        {"key": "count", "value": {"intValue": "3"}},
+        {"key": "found", "value": {"stringValue": "yes"}},
+    ]
+
+
+def test_a_mask_that_is_no_function_is_refused() -> None:
+    with pytest.raises(TypeError, match="mask must be callable"):
+        Config(mask="redact")  # type: ignore[arg-type]
+
+
 def test_each_attempt_carries_this_clock_as_it_leaves() -> None:
     """In nanoseconds, a retry its own: ingest moves a run by it."""
     unavailable = answer_from(load_fixture("answers/unavailable.json"))

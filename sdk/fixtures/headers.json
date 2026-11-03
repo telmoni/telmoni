@@ -2,10 +2,10 @@
   "inject": {
     "agent": "support bot",
     "traceparent": "00-<trace>-<span>-01",
-    "baggage": "telmoni.run_id=<uuid>,telmoni.agent=support%20bot",
+    "baggage": "telmoni.run_id=<uuid>,telmoni.agent=support%20bot,telmoni.sample_rate=1",
     "beside": {
-      "given": "tenant=acme;ttl=60, telmoni.agent=old-bot , telmoni.run_id=0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01",
-      "written": "tenant=acme;ttl=60,telmoni.run_id=<uuid>,telmoni.agent=support%20bot"
+      "given": "tenant=acme;ttl=60, telmoni.agent=old-bot , telmoni.sample_rate=0.5, telmoni.run_id=0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01",
+      "written": "tenant=acme;ttl=60,telmoni.run_id=<uuid>,telmoni.agent=support%20bot,telmoni.sample_rate=1"
     }
   },
   "extract": [
@@ -20,7 +20,68 @@
         "agent": "support bot",
         "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
         "parent_span_id": "00f067aa0ba902b7",
-        "sampled": true
+        "sampled": true,
+        "sample_rate": null
+      }
+    },
+    {
+      "name": "the run's sample rate, which every span here carries",
+      "headers": {
+        "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+        "baggage": "telmoni.run_id=0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01,telmoni.agent=bot,telmoni.sample_rate=0.25"
+      },
+      "run": {
+        "run_id": "0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01",
+        "agent": "bot",
+        "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+        "parent_span_id": "00f067aa0ba902b7",
+        "sampled": true,
+        "sample_rate": 0.25
+      }
+    },
+    {
+      "name": "a sample rate of 0, read as none",
+      "headers": {
+        "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+        "baggage": "telmoni.run_id=0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01,telmoni.agent=bot,telmoni.sample_rate=0"
+      },
+      "run": {
+        "run_id": "0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01",
+        "agent": "bot",
+        "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+        "parent_span_id": "00f067aa0ba902b7",
+        "sampled": true,
+        "sample_rate": null
+      }
+    },
+    {
+      "name": "a sample rate past 1, read as none",
+      "headers": {
+        "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+        "baggage": "telmoni.run_id=0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01,telmoni.agent=bot,telmoni.sample_rate=1.5"
+      },
+      "run": {
+        "run_id": "0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01",
+        "agent": "bot",
+        "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+        "parent_span_id": "00f067aa0ba902b7",
+        "sampled": true,
+        "sample_rate": null
+      }
+    },
+    {
+      "name": "a sample rate that is no number, read as none",
+      "headers": {
+        "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+        "baggage": "telmoni.run_id=0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01,telmoni.agent=bot,telmoni.sample_rate=a-quarter"
+      },
+      "run": {
+        "run_id": "0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01",
+        "agent": "bot",
+        "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+        "parent_span_id": "00f067aa0ba902b7",
+        "sampled": true,
+        "sample_rate": null
       }
     },
     {
@@ -34,7 +95,8 @@
         "agent": "support-bot",
         "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
         "parent_span_id": "00f067aa0ba902b7",
-        "sampled": false
+        "sampled": false,
+        "sample_rate": null
       }
     },
     {
@@ -48,7 +110,8 @@
         "agent": "bot%+5",
         "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
         "parent_span_id": "00f067aa0ba902b7",
-        "sampled": true
+        "sampled": true,
+        "sample_rate": null
       }
     },
     {
@@ -62,7 +125,8 @@
         "agent": "café,bot;\"x\"\\",
         "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
         "parent_span_id": "00f067aa0ba902b7",
-        "sampled": true
+        "sampled": true,
+        "sample_rate": null
       }
     },
     {
@@ -76,7 +140,8 @@
         "agent": "ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
         "parent_span_id": "00f067aa0ba902b7",
-        "sampled": true
+        "sampled": true,
+        "sample_rate": null
       }
     },
     {
@@ -87,10 +152,11 @@
       },
       "run": {
         "run_id": "0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01",
-        "agent": "a\ufffd\ufffdb\ufffd\ufffd\ufffdc\ufffd",
+        "agent": "a��b���c�",
         "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
         "parent_span_id": "00f067aa0ba902b7",
-        "sampled": true
+        "sampled": true,
+        "sample_rate": null
       }
     },
     {
@@ -101,24 +167,26 @@
       },
       "run": {
         "run_id": "0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01",
-        "agent": "\ufeffbot",
+        "agent": "﻿bot",
         "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
         "parent_span_id": "00f067aa0ba902b7",
-        "sampled": true
+        "sampled": true,
+        "sample_rate": null
       }
     },
     {
       "name": "an agent with a character past the BMP given unescaped, taken as its UTF-8",
       "headers": {
         "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
-        "baggage": "telmoni.run_id=0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01,telmoni.agent=bot\ud83d\ude00"
+        "baggage": "telmoni.run_id=0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01,telmoni.agent=bot😀"
       },
       "run": {
         "run_id": "0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01",
-        "agent": "bot\ud83d\ude00",
+        "agent": "bot😀",
         "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
         "parent_span_id": "00f067aa0ba902b7",
-        "sampled": true
+        "sampled": true,
+        "sample_rate": null
       }
     },
     {
@@ -132,17 +200,22 @@
         "agent": "bot",
         "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
         "parent_span_id": "00f067aa0ba902b7",
-        "sampled": true
+        "sampled": true,
+        "sample_rate": null
       }
     },
     {
       "name": "no baggage",
-      "headers": { "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01" },
+      "headers": {
+        "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+      },
       "run": null
     },
     {
       "name": "no traceparent",
-      "headers": { "baggage": "telmoni.run_id=0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01,telmoni.agent=bot" },
+      "headers": {
+        "baggage": "telmoni.run_id=0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01,telmoni.agent=bot"
+      },
       "run": null
     },
     {

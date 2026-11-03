@@ -190,9 +190,9 @@ class Telmoni:
     def inject(self, headers: MutableMapping[str, str]) -> None:
         """Write into ``headers`` what the next service continues the run
         from: the W3C ``traceparent`` of the span current inside the run, and
-        the run's id and agent as the W3C ``baggage`` members
-        ``telmoni.run_id`` and ``telmoni.agent``, beside whatever members the
-        headers hold. Outside a run, or for a run sampled out, nothing is
+        the run's id, agent and sample rate as the W3C ``baggage`` members
+        ``telmoni.run_id``, ``telmoni.agent`` and ``telmoni.sample_rate``,
+        beside whatever members the headers hold. Outside a run, or for a run sampled out, nothing is
         written.
         """
         run = current_run()
@@ -201,7 +201,7 @@ class Telmoni:
         span = trace.get_current_span().get_span_context()
         if not span.is_valid:
             return
-        write_headers(headers, span, run.run_id, run.agent)
+        write_headers(headers, span, run.run_id, run.agent, run.rate)
 
     def extract(self, headers: Mapping[str, str]) -> Run | None:
         """The run ``headers`` name, continued here: its steps and calls —
@@ -214,7 +214,9 @@ class Telmoni:
         read = read_headers(headers)
         if read is None:
             return None
-        return self._opener.continued(read.span_context, read.run_id, read.agent)
+        return self._opener.continued(
+            read.span_context, read.run_id, read.agent, read.sample_rate
+        )
 
     def flush(self, timeout_s: float = 30.0) -> bool:
         """Send everything queued; True once nothing is left to send, kept or not,

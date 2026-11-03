@@ -19,7 +19,7 @@ use opentelemetry_sdk::trace::SpanData;
 use serde::Serialize;
 use serde_json::json;
 
-use crate::config::Config;
+use crate::config::{Config, Mask};
 use crate::contract;
 use crate::transport::{Answer, Method, Transport, refusal};
 use crate::warnings::{Warner, Warning, WarningKind};
@@ -56,6 +56,7 @@ pub(crate) struct Exporter {
     refusal: Option<String>,
     bearer: Option<String>,
     capture_content: bool,
+    mask: Option<Mask>,
     transport: Box<dyn Transport>,
     sleep: Box<dyn Fn(Duration) + Send + Sync>,
     warner: Arc<Warner>,
@@ -83,6 +84,7 @@ impl Exporter {
             refusal: refusal(&config.endpoint),
             bearer: config.api_key.clone(),
             capture_content: config.capture_content,
+            mask: config.mask.clone(),
             transport,
             sleep,
             warner,
@@ -128,12 +130,19 @@ impl Exporter {
         {
             self.ask();
         }
-        let spans = if self.keeps_content() {
-            self.lift(spans)
+        // Decided once, so no answer met halfway sends content the mask never saw.
+        let keep = self.keeps_content();
+        let spans = if keep {
+            let masked = self.mask(spans);
+            let lifted = match self.lift(&masked) {
+                Cow::Owned(lifted) => Some(lifted),
+                Cow::Borrowed(_) => None,
+            };
+            lifted.map_or(masked, Cow::Owned)
         } else {
             Cow::Borrowed(spans)
         };
-        self.export_lifted(&spans)
+        self.export_lifted(&spans, keep)
     }
 
     /// Asks the project's content mode with an export of no spans, which
@@ -174,12 +183,12 @@ impl Exporter {
         headers
     }
 
-    fn export_lifted(&self, spans: &[SpanData]) -> bool {
+    fn export_lifted(&self, spans: &[SpanData], keep: bool) -> bool {
         // Ingest refuses an export past 1,000 spans whole, as one past 1 MiB below.
         if spans.len() > contract::BATCH_SPANS_MAX {
-            return self.halve(spans);
+            return self.halve(spans, keep);
         }
-        let Ok(mut body) = serde_json::to_vec(&self.encode(spans, false, &[])) else {
+        let Ok(mut body) = serde_json::to_vec(&self.encode(spans, keep, false, &[])) else {
             self.warner.once(
                 "encode".to_owned(),
                 "telmoni: an export could not be encoded; the batch was dropped",
@@ -191,12 +200,12 @@ impl Exporter {
             // Ingest refuses it whole, its 413 maybe breaking the upload still
             // going out, which reads as no answer and is sent again: halved.
             if spans.len() > 1 {
-                return self.halve(spans);
+                return self.halve(spans, keep);
             }
             // Content sent goes first, the longest field first, each named; else a
             // span alone past it goes without what ingest drops for its length,
             // and then fits, unless its own name does not.
-            if let Some(cut) = self.cut(spans) {
+            if let Some(cut) = self.cut(spans, keep) {
                 self.warner.once(
                     "content-cut".to_owned(),
                     "telmoni: a span past the 1 MiB an export may hold was sent without its longest content, named in telmoni.content_cut",
@@ -204,7 +213,7 @@ impl Exporter {
                 );
                 body = cut;
             } else {
-                match serde_json::to_vec(&self.encode(spans, true, &[])) {
+                match serde_json::to_vec(&self.encode(spans, keep, true, &[])) {
                     Ok(trimmed) if trimmed.len() <= contract::BATCH_MAX_BYTES => {
                         self.warner.once(
                         "trimmed".to_owned(),
@@ -280,9 +289,75 @@ impl Exporter {
     }
 
     /// Exports each half of `spans`, the second only where the first went.
-    fn halve(&self, spans: &[SpanData]) -> bool {
+    fn halve(&self, spans: &[SpanData], keep: bool) -> bool {
         let (head, tail) = spans.split_at(spans.len() / 2);
-        self.export_lifted(head) && self.export_lifted(tail)
+        self.export_lifted(head, keep) && self.export_lifted(tail, keep)
+    }
+
+    /// `spans` with every content field, event attribute and status message as
+    /// the code's mask answers it, before a part it takes out could be put.
+    fn mask<'a>(&self, spans: &'a [SpanData]) -> Cow<'a, [SpanData]> {
+        let Some(mask) = &self.mask else {
+            return Cow::Borrowed(spans);
+        };
+        let masked = spans
+            .iter()
+            .cloned()
+            .map(|mut span| {
+                span.attributes = std::mem::take(&mut span.attributes)
+                    .into_iter()
+                    .filter_map(|attribute| {
+                        let key = attribute.key.as_str();
+                        if contract::is_content(key) && key != contract::CONTENT_CUT {
+                            self.masked(mask, attribute)
+                        } else {
+                            Some(attribute)
+                        }
+                    })
+                    .collect();
+                for event in &mut span.events.events {
+                    event.attributes = std::mem::take(&mut event.attributes)
+                        .into_iter()
+                        .filter_map(|attribute| self.masked(mask, attribute))
+                        .collect();
+                }
+                if let Status::Error { description } = &span.status
+                    && !description.is_empty()
+                {
+                    let given =
+                        KeyValue::new(contract::STATUS_DESCRIPTION, description.to_string());
+                    span.status = Status::Error {
+                        description: self
+                            .masked(mask, given)
+                            .map(|kept| kept.value.as_str().into_owned().into())
+                            .unwrap_or_default(),
+                    };
+                }
+                span
+            })
+            .collect();
+        Cow::Owned(masked)
+    }
+
+    /// One field as the mask answers it, handed as a string, any other value as
+    /// its JSON; `None` to send the span without it. An answer unchanged keeps
+    /// the value as it was.
+    fn masked(&self, mask: &Mask, attribute: KeyValue) -> Option<KeyValue> {
+        let given = as_text(&attribute.value);
+        let key = attribute.key.as_str();
+        let Ok(answer) = panic::catch_unwind(AssertUnwindSafe(|| mask(key, &given))) else {
+            // The key alone: a panic's words may hold the content.
+            self.warner.once(
+                format!("mask:{key}"),
+                &format!("telmoni: the mask failed on {key}; the span was sent without it"),
+                WarningKind::MaskFailed.into(),
+            );
+            return None;
+        };
+        match answer? {
+            same if same == given => Some(attribute),
+            changed => Some(KeyValue::new(attribute.key, changed)),
+        }
     }
 
     /// `spans` with every `blob` part of their messages lifted out: a blob
@@ -410,8 +485,8 @@ impl Exporter {
     /// in an export: a content field, or any past ingest's caps, which on a
     /// project that keeps content is content too; `None` where it sends no
     /// content, or fits without all of it.
-    fn cut(&self, spans: &[SpanData]) -> Option<Vec<u8>> {
-        if !self.keeps_content() {
+    fn cut(&self, spans: &[SpanData], keep: bool) -> Option<Vec<u8>> {
+        if !keep {
             return None;
         }
         let mut content: Vec<(&str, usize)> = spans
@@ -431,7 +506,7 @@ impl Exporter {
                 continue;
             }
             cut.push(key);
-            if let Ok(body) = serde_json::to_vec(&self.encode(spans, false, &cut))
+            if let Ok(body) = serde_json::to_vec(&self.encode(spans, keep, false, &cut))
                 && body.len() <= contract::BATCH_MAX_BYTES
             {
                 return Some(body);
@@ -441,21 +516,20 @@ impl Exporter {
     }
 
     /// Whether content leaves: the code asked, and the project's mode allows.
-    /// Only an export's answer moves the mode, on this thread: once a batch.
     fn keeps_content(&self) -> bool {
         self.capture_content && self.content_mode() == Some(ContentMode::On)
     }
 
-    /// OTLP's `ExportTraceServiceRequest`, in its JSON encoding; `trimmed`, without
-    /// the attributes ingest drops for their length; `cut`, without those content
-    /// fields, named in `telmoni.content_cut`.
+    /// OTLP's `ExportTraceServiceRequest`, in its JSON encoding; `keep_content`,
+    /// with its content; `trimmed`, without the attributes ingest drops for their
+    /// length; `cut`, without those content fields, named in `telmoni.content_cut`.
     fn encode<'a>(
         &'a self,
         spans: &'a [SpanData],
+        keep_content: bool,
         trimmed: bool,
         cut: &'a [&'a str],
     ) -> Request<'a> {
-        let keep_content = self.keeps_content();
         Request {
             resource_spans: [ResourceSpans {
                 resource: Resource {
@@ -1003,10 +1077,18 @@ fn past_caps(key: &str, value: &Value) -> bool {
         || ingest_length(value) > contract::ATTRIBUTE_VALUE_MAX
 }
 
-/// A value's length in characters as ingest writes it, a list as its JSON.
+/// A value's length in characters as ingest writes it.
 fn ingest_length(value: &Value) -> usize {
     match value {
         Value::String(text) => text.as_str().chars().count(),
+        other => as_text(other).chars().count(),
+    }
+}
+
+/// A value as ingest writes it, a list as its JSON.
+fn as_text(value: &Value) -> String {
+    match value {
+        Value::String(text) => text.as_str().to_owned(),
         Value::Array(array) => {
             let items: Vec<serde_json::Value> = match array {
                 Array::Bool(items) => items.iter().map(|item| json!(item)).collect(),
@@ -1015,9 +1097,9 @@ fn ingest_length(value: &Value) -> usize {
                 Array::String(items) => items.iter().map(|item| json!(item.as_str())).collect(),
                 _ => Vec::new(),
             };
-            serde_json::Value::Array(items).to_string().chars().count()
+            serde_json::Value::Array(items).to_string()
         }
-        other => other.to_string().chars().count(),
+        other => other.to_string(),
     }
 }
 

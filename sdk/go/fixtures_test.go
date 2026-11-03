@@ -9,14 +9,18 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net"
 	"net/url"
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -597,6 +601,210 @@ func TestImagesAreLiftedOutOfMessagesOnlyUnderBothLocks(t *testing.T) {
 				t.Errorf("%+v: sent\n%s\nwant\n%s", each, pretty(t, sent), pretty(t, fixture.Sent))
 			}
 		}
+	}
+}
+
+type maskFixture struct {
+	Scenario struct {
+		Agent              string            `json:"agent"`
+		User               string            `json:"user"`
+		Session            string            `json:"session"`
+		Tags               map[string]string `json:"tags"`
+		Provider           string            `json:"provider"`
+		Model              string            `json:"model"`
+		SystemInstructions any               `json:"system_instructions"`
+		InputMessages      any               `json:"input_messages"`
+		OutputMessages     any               `json:"output_messages"`
+		Event              struct {
+			Name       string         `json:"name"`
+			Attributes map[string]any `json:"attributes"`
+		} `json:"event"`
+		Message string `json:"message"`
+	} `json:"scenario"`
+	Mask map[string]struct {
+		Replace *string `json:"replace"`
+		Drop    bool    `json:"drop"`
+		Fail    bool    `json:"fail"`
+	} `json:"mask"`
+	Cases []struct {
+		CaptureContent bool   `json:"capture_content"`
+		ContentMode    string `json:"content_mode"`
+		Masks          bool   `json:"masks"`
+	} `json:"cases"`
+	Handed     []string          `json:"handed"`
+	HandedText map[string]string `json:"handed_text"`
+	Sent       map[string]any    `json:"sent"`
+	Kept       map[string]any    `json:"kept"`
+	Withheld   map[string]any    `json:"withheld"`
+	Warnings   []string          `json:"warnings"`
+}
+
+// Declined is mask.json's error, its type named as Go names one.
+type Declined struct{ message string }
+
+func (e *Declined) Error() string { return e.message }
+
+func TestTheMaskAnswersEachContentFieldOnlyUnderBothLocks(t *testing.T) {
+	var fixture maskFixture
+	if err := json.Unmarshal(loadFixture(t, "mask.json"), &fixture); err != nil {
+		t.Fatalf("decoding mask.json: %v", err)
+	}
+	scenario := fixture.Scenario
+	for _, each := range fixture.Cases {
+		var mu sync.Mutex
+		handed := map[string]string{}
+		mask := func(key, value string) (string, bool) {
+			mu.Lock()
+			handed[key] = value
+			mu.Unlock()
+			rule, ok := fixture.Mask[key]
+			switch {
+			case !ok:
+				return value, true
+			case rule.Fail:
+				panic("the mask failed on " + value)
+			case rule.Drop:
+				return "", false
+			}
+			return *rule.Replace, true
+		}
+		mode := scripted{status: 200, headers: map[string]string{"Telmoni-Content-Mode": each.ContentMode}, body: []byte("{}")}
+		h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k"), CaptureContent: each.CaptureContent, Mask: mask}, newFakeTransport(t, mode))
+		aRun(t, h)
+		ctx, run := h.client.Run(context.Background(), scenario.Agent, telmoni.RunOptions{UserID: scenario.User, SessionID: scenario.Session, Tags: scenario.Tags})
+		_, call := run.ModelCall(ctx, scenario.Model, telmoni.ModelCallOptions{
+			Provider:           scenario.Provider,
+			InputMessages:      scenario.InputMessages,
+			SystemInstructions: scenario.SystemInstructions,
+		})
+		call.Answered(telmoni.Answer{OutputMessages: scenario.OutputMessages})
+		call.End()
+		var attributes []attribute.KeyValue
+		for key, value := range scenario.Event.Attributes {
+			switch v := value.(type) {
+			case float64:
+				attributes = append(attributes, attribute.Int64(key, int64(v)))
+			case string:
+				attributes = append(attributes, attribute.String(key, v))
+			}
+		}
+		trace.SpanFromContext(ctx).AddEvent(scenario.Event.Name, trace.WithAttributes(attributes...))
+		run.Fail(&Declined{scenario.Message})
+		run.End()
+		h.flush()
+
+		spans := h.transport.spans(t)
+		calls := withPrefix(spans, "chat ")
+		if len(calls) != 1 {
+			t.Fatalf("%+v: %d model calls sent, want 1", each, len(calls))
+		}
+		if uploads := h.transport.allUploads(); len(uploads) != 0 {
+			t.Errorf("%+v: %d files put, want none", each, len(uploads))
+		}
+		if strings.Contains(h.transport.text(), "4242 ") || strings.Contains(strings.Join(h.logs.warnings(), "\n"), "4242 ") {
+			t.Errorf("%+v: what the mask took out left the process", each)
+		}
+		sent := map[string]any{}
+		for key, value := range attributesOf(t, calls[0]) {
+			if key == "gen_ai.input.messages" || key == "gen_ai.output.messages" || key == "gen_ai.system_instructions" {
+				var decoded any
+				if err := json.Unmarshal([]byte(value.(string)), &decoded); err != nil {
+					t.Fatalf("%s is no JSON: %v", key, err)
+				}
+				sent[key] = decoded
+			}
+		}
+		want, wantRun, wantWarnings := fixture.Sent, fixture.Kept, fixture.Warnings
+		if !each.Masks {
+			want, wantRun, wantWarnings = map[string]any{}, fixture.Withheld, nil
+		}
+		if !reflect.DeepEqual(sent, want) {
+			t.Errorf("%+v: sent\n%s\nwant\n%s", each, pretty(t, sent), pretty(t, want))
+		}
+		if got := normalizeFailure(t, spans[len(spans)-1]); !reflect.DeepEqual(got, wantRun) {
+			t.Errorf("%+v: the run sent\n%s\nwant\n%s", each, pretty(t, got), pretty(t, wantRun))
+		}
+		if got := h.logs.warnings(); !slices.Equal(got, wantWarnings) {
+			t.Errorf("%+v: warnings %q, want %q", each, got, wantWarnings)
+		}
+		keys := slices.Sorted(maps.Keys(handed))
+		if !each.Masks {
+			if len(keys) != 0 {
+				t.Errorf("%+v: the mask was handed %q, want nothing", each, keys)
+			}
+			continue
+		}
+		if !slices.Equal(keys, fixture.Handed) {
+			t.Errorf("%+v: the mask was handed %q, want %q", each, keys, fixture.Handed)
+		}
+		for key, value := range fixture.HandedText {
+			if handed[key] != value {
+				t.Errorf("%+v: %s handed as %q, want %q", each, key, handed[key], value)
+			}
+		}
+		// As the code gave them, blob parts and all: before any was put.
+		for key, value := range map[string]any{
+			"gen_ai.input.messages":      scenario.InputMessages,
+			"gen_ai.output.messages":     scenario.OutputMessages,
+			"gen_ai.system_instructions": scenario.SystemInstructions,
+		} {
+			var decoded any
+			if err := json.Unmarshal([]byte(handed[key]), &decoded); err != nil || !reflect.DeepEqual(decoded, value) {
+				t.Errorf("%+v: %s handed as %s", each, key, handed[key])
+			}
+		}
+	}
+}
+
+func TestAMaskThatPanicsIsWarnedOfOnceAndAskedEachExport(t *testing.T) {
+	var calls atomic.Int32
+	mask := func(key, value string) (string, bool) {
+		calls.Add(1)
+		panic(value)
+	}
+	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k"), CaptureContent: true, Mask: mask}, newFakeTransport(t, contentOn(), contentOn(), contentOn()))
+	aRun(t, h)
+	for range 2 {
+		ctx, run := h.client.Run(context.Background(), "support-bot", telmoni.RunOptions{})
+		_, call := run.ModelCall(ctx, "gpt-4o", telmoni.ModelCallOptions{InputMessages: "a secret"})
+		call.End()
+		run.End()
+		h.flush()
+	}
+	if got := calls.Load(); got != 2 {
+		t.Errorf("the mask was asked %d times, want once each export", got)
+	}
+	want := []string{"telmoni: the mask failed on gen_ai.input.messages; the span was sent without it"}
+	if got := h.logs.warnings(); !slices.Equal(got, want) {
+		t.Errorf("warnings %q, want %q", got, want)
+	}
+	if strings.Contains(h.transport.text(), "a secret") {
+		t.Error("a field the mask panicked on left the process")
+	}
+}
+
+func TestAMaskAnsweringAValueUnchangedKeepsItsType(t *testing.T) {
+	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k"), CaptureContent: true, Mask: func(_, value string) (string, bool) {
+		if value == "true" {
+			return "yes", true
+		}
+		return value, true
+	}}, newFakeTransport(t, contentOn(), contentOn()))
+	aRun(t, h)
+	ctx, run := h.client.Run(context.Background(), "support-bot", telmoni.RunOptions{})
+	trace.SpanFromContext(ctx).AddEvent("checked", trace.WithAttributes(attribute.Int64("count", 3), attribute.Bool("found", true)))
+	run.End()
+	h.flush()
+	spans := h.transport.spans(t)
+	events := spans[len(spans)-1]["events"].([]any)
+	attributes := events[0].(map[string]any)["attributes"].([]any)
+	sortByKey(attributes)
+	want := []any{
+		map[string]any{"key": "count", "value": map[string]any{"intValue": "3"}},
+		map[string]any{"key": "found", "value": map[string]any{"stringValue": "yes"}},
+	}
+	if !reflect.DeepEqual(attributes, want) {
+		t.Errorf("event attributes\n%s\nwant\n%s", pretty(t, attributes), pretty(t, want))
 	}
 }
 

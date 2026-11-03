@@ -136,13 +136,17 @@ class Run(Handle):
         *,
         run_id: str,
         agent: str,
-        inherited: Mapping[str, str],
+        rate: float | None,
+        inherited: Mapping[str, str | float],
         sampled_out: bool = False,
         caps: guard.Guard | None = None,
     ) -> None:
         super().__init__(span, client)
         self.run_id = run_id
         self.agent = agent
+        # The run's sample rate, handed to another service; None for a
+        # continued run whose headers named none.
+        self.rate = rate
         # Whether the sample rate kept this run out: nothing of it is sent,
         # nor handed to another service.
         self.sampled_out = sampled_out
@@ -150,7 +154,7 @@ class Run(Handle):
         self._guard = caps or guard.Guard(None, None)
 
     @property
-    def inherited(self) -> dict[str, str]:
+    def inherited(self) -> dict[str, str | float]:
         """What every span inside the run carries."""
         return dict(self._inherited)
 
@@ -512,12 +516,12 @@ class Opener:
             session, contract.SESSION_ID_MAX, "session id", warn_once
         ):
             session = ""
-        inherited = _inherited(run_id, agent, user, session)
+        inherited = _inherited(run_id, agent, rate, user, session)
         # On every span of the run from its start, for the processor to drop:
         # a sampler's drop would clear the flag the application's spans inherit.
         if sampled_out:
             inherited[contract.SAMPLED_OUT] = "true"
-        name, attributes = _run_opening(agent, inherited, rate, tags, warn_once)
+        name, attributes = _run_opening(agent, inherited, tags, warn_once)
         if input_messages is not None:
             attributes[contract.INPUT_MESSAGES] = _as_json(input_messages)
         parent = context.get_current()
@@ -528,6 +532,7 @@ class Opener:
             span,
             run_id=run_id,
             agent=agent,
+            rate=rate,
             inherited=inherited,
             sampled_out=sampled_out,
             caps=caps,
@@ -537,20 +542,22 @@ class Opener:
         run._attach(context.set_value(_RUN_KEY, run, ctx))
         return run
 
-    def continued(self, remote: SpanContext, run_id: str, agent: str) -> Run:
+    def continued(
+        self, remote: SpanContext, run_id: str, agent: str, rate: float | None
+    ) -> Run:
         """A run another service opened, continued here under the span the
         headers named: a run whose own span is the caller's, non-recording
         here, so its steps and calls nest under it and carry the run, and
         nothing of it is sent or ended from this side."""
         warn_once = self._client.exporter.warn_once
         agent = _cut(agent, contract.AGENT_MAX, "run's agent", warn_once)
-        inherited = {contract.RUN_ID: run_id, contract.AGENT: agent}
         return Run(
             self._client,
             NonRecordingSpan(remote),
             run_id=run_id,
             agent=agent,
-            inherited=inherited,
+            rate=rate,
+            inherited=_inherited(run_id, agent, rate, None, None),
         )
 
     def step(self, name: str, run: Run | None) -> Step | None:
@@ -700,10 +707,10 @@ class Opener:
                 raise ValueError("a recorded span cannot end before it starts")
         rate = self._client.config.sample_rate
         inherited = _inherited(
-            str(run_uuid), record.agent, record.user_id, record.session_id
+            str(run_uuid), record.agent, rate, record.user_id, record.session_id
         )
         run_name, attributes = _run_opening(
-            record.agent, inherited, rate, tags, self._client.exporter.warn_once
+            record.agent, inherited, tags, self._client.exporter.warn_once
         )
         for key, messages in (
             (contract.INPUT_MESSAGES, record.input_messages),
@@ -889,11 +896,18 @@ def _usage(
 
 
 def _inherited(
-    run_id: str, agent: str, user_id: str | None, session_id: str | None
-) -> dict[str, str]:
+    run_id: str,
+    agent: str,
+    rate: float | None,
+    user_id: str | None,
+    session_id: str | None,
+) -> dict[str, str | float]:
     """What every span of a run carries, live or recorded: its id and agent,
-    and its user and session where it has them."""
-    inherited = {contract.RUN_ID: run_id, contract.AGENT: agent}
+    its sample rate, which a sum of spend over runs scales each span by, and
+    its user and session where it has them."""
+    inherited: dict[str, str | float] = {contract.RUN_ID: run_id, contract.AGENT: agent}
+    if rate is not None:
+        inherited[contract.SAMPLE_RATE] = float(rate)
     if user_id:
         inherited[contract.USER_ID] = user_id
     if session_id:
@@ -903,8 +917,7 @@ def _inherited(
 
 def _run_opening(
     agent: str,
-    inherited: Mapping[str, str],
-    rate: float,
+    inherited: Mapping[str, str | float],
     tags: Mapping[str, str] | None,
     warn_once: Callable[[str, str, WarningInfo], None],
 ) -> tuple[str, dict[str, Any]]:
@@ -916,7 +929,6 @@ def _run_opening(
             contract.OPERATION: contract.RUN_OPERATION,
             contract.AGENT_NAME: agent,
             **inherited,
-            contract.SAMPLE_RATE: float(rate),
         }
     )
     return f"{contract.RUN_OPERATION} {agent}", attributes

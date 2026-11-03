@@ -26,6 +26,7 @@ def test_a_tool_call_carries_the_conventions_names(
     assert attributes_of(span) == {
         "telmoni.run_id": run.run_id,
         "telmoni.agent": "bot",
+        "telmoni.sample_rate": 1.0,
         "user.id": "user",
         "gen_ai.operation.name": "execute_tool",
         "gen_ai.tool.name": "search",

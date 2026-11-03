@@ -5,7 +5,7 @@ import math
 import os
 import re
 import string
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal
@@ -253,6 +253,10 @@ class Config:
     # Content (prompts, completions, tool arguments and results) leaves the
     # process only when the code asks here and the project's mode allows.
     capture_content: bool = False
+    # Handed each content field's key and its value, a string or any other
+    # value's JSON, where content leaves, and answers the string to send
+    # instead, or None to send its span without it.
+    mask: Callable[[str, str], str | None] | None = field(default=None, repr=False)
     # The share of runs sent, decided per run in the processor and never through
     # the trace's sampled flag, so an application's own sampling is untouched.
     sample_rate: float = 1.0
@@ -284,6 +288,8 @@ class Config:
         # "false" from an environment variable is truthy, and would let content out.
         if not isinstance(self.capture_content, bool):
             raise TypeError("capture_content must be a bool")
+        if self.mask is not None and not callable(self.mask):
+            raise TypeError("mask must be callable")
         self.environment = _unset_if_blank(self.environment)
         self.release = _unset_if_blank(self.release)
         self.prices = tuple(self.prices)
@@ -345,6 +351,7 @@ WarningKind = Literal[
     "said",
     "input",
     "upload_failed",
+    "mask_failed",
 ]
 """What became of the spans a warning is about, the same in every SDK."""
 

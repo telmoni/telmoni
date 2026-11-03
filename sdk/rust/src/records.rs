@@ -315,8 +315,8 @@ pub(crate) fn send(inner: &Inner, record: RunRecord) -> Result<(), Error> {
         ..
     } = record;
     let run_id = run_uuid.to_string();
-    let inherited = runs::inherited(&run_id, &agent, user_id, session_id);
-    let mut attributes = runs::run_attributes(&agent, &inherited, rate, tags, &inner.warner);
+    let inherited = runs::inherited(&run_id, &agent, Some(rate), user_id, session_id);
+    let mut attributes = runs::run_attributes(&agent, &inherited, tags, &inner.warner);
     attributes.extend(content([
         (contract::INPUT_MESSAGES, input_messages),
         (contract::OUTPUT_MESSAGES, output_messages),

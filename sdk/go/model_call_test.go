@@ -57,6 +57,7 @@ func TestAModelCallCarriesTheConventionsNames(t *testing.T) {
 	want := map[string]any{
 		"telmoni.run_id":                        run.ID(),
 		"telmoni.agent":                         "bot",
+		"telmoni.sample_rate":                   1.0,
 		"gen_ai.conversation.id":                "conv",
 		"gen_ai.operation.name":                 "chat",
 		"gen_ai.request.model":                  "gpt-4o-mini",
@@ -83,6 +84,7 @@ func TestAnswerWithoutUsageOrModelSetsNeither(t *testing.T) {
 	want := map[string]any{
 		"telmoni.run_id":        run.ID(),
 		"telmoni.agent":         "bot",
+		"telmoni.sample_rate":   1.0,
 		"gen_ai.operation.name": "chat",
 		"gen_ai.request.model":  "m",
 	}
@@ -109,6 +111,7 @@ func TestATokenCountBelowZeroIsLeftOffItsCallWithOneWarning(t *testing.T) {
 	want := map[string]any{
 		"telmoni.run_id":                        run.ID(),
 		"telmoni.agent":                         "bot",
+		"telmoni.sample_rate":                   1.0,
 		"gen_ai.operation.name":                 "chat",
 		"gen_ai.request.model":                  "m",
 		"gen_ai.usage.output_tokens":            int64(7),

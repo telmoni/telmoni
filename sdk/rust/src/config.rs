@@ -1,6 +1,7 @@
 //! How the SDK reaches Telmoni, and what it sends.
 
 use std::fmt;
+use std::sync::Arc;
 
 use opentelemetry_sdk::trace::ShouldSample;
 use serde::{Deserialize, Serialize};
@@ -33,6 +34,12 @@ pub struct Config {
     /// leave the process. It does so only when this is on *and* the project's
     /// content mode, learned from the platform's answers, is `on`.
     pub capture_content: bool,
+    /// Handed each content field's key and its value, a string or any other
+    /// value's JSON, where content leaves; answers what to send instead, or
+    /// `None` to send its span without it. A panic sends the span without that
+    /// field; with `panic = "abort"` it ends the process, as any panic does.
+    #[serde(skip)]
+    pub mask: Option<Mask>,
     /// The share of runs sent, above 0 and up to 1. Decided per run as it
     /// starts or its record is sent, in the SDK's own processor, never through
     /// the trace's sampled flag, so an application's own sampling is
@@ -57,6 +64,9 @@ pub struct Config {
     /// last, and one that is no price is left out with one warning.
     pub prices: Vec<Price>,
 }
+
+/// The code's mask over content: see [`Config::mask`].
+pub type Mask = Arc<dyn Fn(&str, &str) -> Option<String> + Send + Sync>;
 
 /// A project's own price for one of a provider's models, as the provider and
 /// the model are sent: each in US dollars a token, a cache price not given
@@ -86,6 +96,7 @@ impl fmt::Debug for Config {
             organization_id,
             api_key,
             capture_content,
+            mask,
             sample_rate,
             sampler,
             environment,
@@ -97,6 +108,7 @@ impl fmt::Debug for Config {
             .field("organization_id", organization_id)
             .field("api_key", &api_key.as_ref().map(|_| "<redacted>"))
             .field("capture_content", capture_content)
+            .field("mask", &mask.as_ref().map(|_| "<set>"))
             .field("sample_rate", sample_rate)
             .field("sampler", sampler)
             .field("environment", environment)
@@ -113,6 +125,7 @@ impl Default for Config {
             organization_id: None,
             api_key: None,
             capture_content: false,
+            mask: None,
             sample_rate: 1.0,
             sampler: None,
             environment: None,

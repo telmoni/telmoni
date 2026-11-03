@@ -33,11 +33,12 @@ type headersFixture struct {
 		Name    string            `json:"name"`
 		Headers map[string]string `json:"headers"`
 		Run     *struct {
-			RunID        string `json:"run_id"`
-			Agent        string `json:"agent"`
-			TraceID      string `json:"trace_id"`
-			ParentSpanID string `json:"parent_span_id"`
-			Sampled      bool   `json:"sampled"`
+			RunID        string   `json:"run_id"`
+			Agent        string   `json:"agent"`
+			TraceID      string   `json:"trace_id"`
+			ParentSpanID string   `json:"parent_span_id"`
+			Sampled      bool     `json:"sampled"`
+			SampleRate   *float64 `json:"sample_rate"`
 		} `json:"run"`
 	} `json:"extract"`
 }
@@ -192,6 +193,9 @@ func TestAContinuedRunsStepsAndCallsCarryTheCallersRunUnderItsSpan(t *testing.T)
 		if attributes["telmoni.run_id"] != run.ID() || attributes["telmoni.agent"] != "orchestrator" {
 			t.Errorf("%s carries %v %v, want the caller's run", span["name"], attributes["telmoni.run_id"], attributes["telmoni.agent"])
 		}
+		if attributes["telmoni.sample_rate"] != 1.0 {
+			t.Errorf("%s carries the rate %v, want the caller's run's 1", span["name"], attributes["telmoni.sample_rate"])
+		}
 	}
 	named := byName(spans)
 	if named["work"]["parentSpanId"] != callerSpan {
@@ -202,6 +206,33 @@ func TestAContinuedRunsStepsAndCallsCarryTheCallersRunUnderItsSpan(t *testing.T)
 	}
 	if named["chat gpt-x"]["parentSpanId"] != named["work"]["spanId"] {
 		t.Errorf("the model call sits under %v, want the step", named["chat gpt-x"]["parentSpanId"])
+	}
+}
+
+// A continued run's spans carry the rate its headers named, or none where they
+// named none a share of runs reads as.
+func TestAContinuedRunsSpansCarryTheRateItsHeadersNamed(t *testing.T) {
+	fixture := loadHeaders(t)
+	for _, given := range fixture.Extract {
+		if given.Run == nil {
+			continue
+		}
+		h := newHarness(t, testConfig(), nil)
+		ctx := h.client.Extract(context.Background(), headerOf(given.Headers))
+		_, step := telmoni.RunFromContext(ctx).Step(ctx, "work")
+		step.End()
+		h.flush()
+		spans := h.transport.spans(t)
+		if len(spans) != 1 {
+			t.Fatalf("%s: sent %d spans", given.Name, len(spans))
+		}
+		rate, carried := attributesOf(t, spans[0])["telmoni.sample_rate"]
+		switch {
+		case given.Run.SampleRate == nil && carried:
+			t.Errorf("%s: carries the rate %v, want none", given.Name, rate)
+		case given.Run.SampleRate != nil && rate != *given.Run.SampleRate:
+			t.Errorf("%s: carries the rate %v, want %v", given.Name, rate, *given.Run.SampleRate)
+		}
 	}
 }
 

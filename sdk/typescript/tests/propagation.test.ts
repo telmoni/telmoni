@@ -22,7 +22,14 @@ interface HeadersFixture {
   extract: Array<{
     name: string;
     headers: Record<string, string>;
-    run: { run_id: string; agent: string; trace_id: string; parent_span_id: string; sampled: boolean } | null;
+    run: {
+      run_id: string;
+      agent: string;
+      trace_id: string;
+      parent_span_id: string;
+      sampled: boolean;
+      sample_rate: number | null;
+    } | null;
   }>;
 }
 
@@ -112,7 +119,7 @@ describe('inject', () => {
       const step = byName(h.transport)['plan']!;
       expect(headers).toEqual({
         traceparent: `00-${step.traceId}-${step.spanId}-01`,
-        baggage: `telmoni.run_id=${runId},telmoni.agent=bot`,
+        baggage: `telmoni.run_id=${runId},telmoni.agent=bot,telmoni.sample_rate=1`,
       });
     });
   });
@@ -131,6 +138,8 @@ describe('extract', () => {
         expect(run, given.name).toBeInstanceOf(Run);
         expect(run?.runId, given.name).toBe(given.run.run_id);
         expect(run?.agent, given.name).toBe(given.run.agent);
+        expect(run?.rate, given.name).toBe(given.run.sample_rate ?? undefined);
+        expect(run?.inherited['telmoni.sample_rate'], given.name).toBe(given.run.sample_rate ?? undefined);
         expect(run?.sampledOut, given.name).toBe(false);
         const parent = trace.getSpanContext(run!.context);
         expect(parent?.traceId, given.name).toBe(given.run.trace_id);
@@ -183,6 +192,7 @@ describe('extract', () => {
       const attributes = attributesOf(span);
       expect(attributes['telmoni.run_id'], span.name).toBe(callerRun);
       expect(attributes['telmoni.agent'], span.name).toBe('orchestrator');
+      expect(attributes['telmoni.sample_rate'], span.name).toBe(1);
     }
     const named = byName(worker.transport);
     const parentOf = (span: JsonSpan | undefined) => span?.parentSpanId;

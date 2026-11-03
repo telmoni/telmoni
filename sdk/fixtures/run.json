@@ -78,6 +78,7 @@
                   { "key": "gen_ai.usage.output_tokens", "value": { "intValue": "7" } },
                   { "key": "telmoni.agent", "value": { "stringValue": "support-bot" } },
                   { "key": "telmoni.run_id", "value": { "stringValue": "<uuid>" } },
+                  { "key": "telmoni.sample_rate", "value": { "doubleValue": 1.0 } },
                   { "key": "user.id", "value": { "stringValue": "user_42" } }
                 ]
               },
@@ -96,6 +97,7 @@
                   { "key": "gen_ai.tool.name", "value": { "stringValue": "search" } },
                   { "key": "telmoni.agent", "value": { "stringValue": "support-bot" } },
                   { "key": "telmoni.run_id", "value": { "stringValue": "<uuid>" } },
+                  { "key": "telmoni.sample_rate", "value": { "doubleValue": 1.0 } },
                   { "key": "user.id", "value": { "stringValue": "user_42" } }
                 ],
                 "status": { "code": 2 }
@@ -130,6 +132,7 @@
                   { "key": "gen_ai.conversation.id", "value": { "stringValue": "conv_7" } },
                   { "key": "telmoni.agent", "value": { "stringValue": "support-bot" } },
                   { "key": "telmoni.run_id", "value": { "stringValue": "<uuid>" } },
+                  { "key": "telmoni.sample_rate", "value": { "doubleValue": 1.0 } },
                   { "key": "user.id", "value": { "stringValue": "user_42" } }
                 ]
               }
