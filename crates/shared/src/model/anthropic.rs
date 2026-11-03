@@ -9,7 +9,7 @@ use super::{
 
 const MESSAGES_URL: &str = "https://api.anthropic.com/v1/messages";
 
-/// The API version every request names.
+/// The API version every request names, the agent's and the evaluators'.
 pub const VERSION: &str = "2023-06-01";
 
 /// The request `ask` makes of `connection`.
