@@ -272,7 +272,7 @@ pub async fn create_invite(
     if let Err(e) = state
         .mailer
         .send_mail(
-            email.as_str(),
+            &email,
             AuthMail::MemberInvite {
                 inviter: &inviter,
                 organization: &label,

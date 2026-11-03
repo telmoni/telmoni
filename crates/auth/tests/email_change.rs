@@ -329,7 +329,8 @@ async fn our_code_goes_to_the_stored_address_never_the_one_in_the_body(pool: PgP
     let mails = recorder.mails();
     assert_eq!(mails.len(), 1, "{mails:?}");
     assert_eq!(
-        mails[0].to, EMAIL,
+        mails[0].to.as_str(),
+        EMAIL,
         "our code went to the address in the body — the old-inbox factor proves \
          nothing if the asker chooses its destination"
     );
@@ -460,7 +461,8 @@ async fn one_person_cannot_change_anothers_address(pool: PgPool) {
     let mails = recorder.mails();
     assert_eq!(mails.len(), 1, "{mails:?}");
     assert_eq!(
-        mails[0].to, OTHER_EMAIL,
+        mails[0].to.as_str(),
+        OTHER_EMAIL,
         "the change opened was not the bearer's"
     );
 

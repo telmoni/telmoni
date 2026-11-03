@@ -534,7 +534,7 @@ pub(crate) async fn mail_receipt(state: &AppState, to: &UserId, receipt: Receipt
     if let Err(e) = state
         .mailer
         .send_mail(
-            person.email.as_str(),
+            &person.email,
             AuthMail::DeletionReceipt {
                 receipt,
                 project: &project,

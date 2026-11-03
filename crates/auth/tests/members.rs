@@ -475,7 +475,7 @@ async fn an_owner_seats_a_member_of_the_organization_with_nothing_to_accept(pool
 
     let sent = mail.0.lock().unwrap().clone();
     assert_eq!(sent.len(), 1, "one mail, to the member: {sent:?}");
-    assert_eq!(sent[0].to, address_of("user_member"));
+    assert_eq!(sent[0].to.as_str(), address_of("user_member"));
     assert!(
         sent[0].subject.contains("added you to Platform"),
         "{}",
@@ -2141,7 +2141,8 @@ async fn an_invitation_mails_the_address_the_owner_typed(pool: PgPool) {
     let sent = mail.0.lock().unwrap().clone();
     assert_eq!(sent.len(), 1, "one invitation, one mail");
     assert_eq!(
-        sent[0].to, "stranger@example.test",
+        sent[0].to.as_str(),
+        "stranger@example.test",
         "the invitation goes to the address that was typed"
     );
     assert!(

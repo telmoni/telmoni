@@ -67,7 +67,7 @@ impl Outbox {
                 .all()
                 .into_iter()
                 .rev()
-                .find(|m| m.to == to && m.text.contains(marker))
+                .find(|m| m.to.as_str() == to && m.text.contains(marker))
             {
                 return mail;
             }

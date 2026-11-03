@@ -52,7 +52,7 @@ pub enum MailError {
 #[derive(Clone)]
 pub struct Mail {
     /// The recipient address.
-    pub to: String,
+    pub to: crate::Email,
     /// The subject line.
     pub subject: String,
     /// The plain-text body, the whole message: a terminal reader or a screen
@@ -110,7 +110,7 @@ mod tests {
 
     fn mail() -> Mail {
         Mail {
-            to: "ada@example.com".to_owned(),
+            to: crate::Email::parse("ada@example.com").unwrap(),
             subject: "Confirm your Telmoni organization deletion".to_owned(),
             text: "Your organization-deletion confirmation code is 802610.".to_owned(),
         }

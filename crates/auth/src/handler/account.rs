@@ -111,7 +111,7 @@ pub(crate) fn wrong_code(burned: bool) -> TelmoniError {
 pub(crate) async fn mail_code(
     state: &AppState,
     user_id: &UserId,
-    to: &str,
+    to: &Email,
     (act, code): (Act<'_>, &str),
     mail: AuthMail<'_>,
 ) -> Result<(), TelmoniError> {
@@ -251,7 +251,7 @@ pub async fn request_email_change(
     mail_code(
         &state,
         &user_id,
-        person.email.as_str(),
+        &person.email,
         (Act::EmailChange, &code),
         AuthMail::EmailChangeCode {
             code: &code,
@@ -498,7 +498,7 @@ pub async fn request_account_deletion_code(
     mail_code(
         &state,
         &user_id,
-        person.email.as_str(),
+        &person.email,
         (Act::AccountDeletion, &code),
         AuthMail::AccountDeletionCode { code: &code },
     )

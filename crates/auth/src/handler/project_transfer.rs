@@ -40,7 +40,6 @@ use axum::{extract::State, http::StatusCode, response::IntoResponse};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use telmoni_shared::Email;
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit, lock_chain};
 use telmoni_shared::db::project_move;
 use telmoni_shared::db::tenant_session::{
@@ -261,8 +260,8 @@ pub async fn offer(
         .mail(
             &state,
             &owner,
-            recipient_email.as_ref().map(Email::as_str),
-            withdrawn_from_email.as_ref().map(Email::as_str),
+            recipient_email.as_ref(),
+            withdrawn_from_email.as_ref(),
         )
         .await;
     }
@@ -329,7 +328,7 @@ pub async fn cancel(
         && let Err(e) = state
             .mailer
             .send_mail(
-                to.as_str(),
+                to,
                 AuthMail::ProjectOfferWithdrawn {
                     owner: &owner.display(),
                     project: &standing.name,
@@ -390,7 +389,7 @@ pub async fn decline(
         && let Err(e) = state
             .mailer
             .send_mail(
-                owner.email.as_str(),
+                &owner.email,
                 AuthMail::ProjectDeclined {
                     admin: &admin.display(),
                     project: &standing.name,
@@ -929,7 +928,7 @@ pub async fn accept(
         && let Err(e) = state
             .mailer
             .send_mail(
-                previous_contact.email.as_str(),
+                &previous_contact.email,
                 AuthMail::ProjectAccepted {
                     new_owner: &new_owner,
                     project: &standing.name,

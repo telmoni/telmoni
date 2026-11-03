@@ -377,7 +377,7 @@ impl Auth for AppState {
             body: notice.body,
             link: &link,
         };
-        if let Err(e) = self.mailer.send_mail(to.as_str(), mail).await {
+        if let Err(e) = self.mailer.send_mail(&to, mail).await {
             tracing::warn!(organization_id = %organization_id, error = %e,
                 "a notice was not mailed to the owner");
         }
@@ -407,7 +407,7 @@ impl Auth for AppState {
         crate::handler::account::mail_code(
             self,
             user_id,
-            person.email.as_str(),
+            &person.email,
             (Act::ContentMode(project_id), &code),
             AuthMail::ContentModeCode {
                 code: &code,

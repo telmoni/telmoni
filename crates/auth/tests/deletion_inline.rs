@@ -1624,7 +1624,11 @@ async fn a_code_deletes_only_the_organization_it_was_mailed_for(pool: PgPool) {
     assert_eq!(resp.status(), StatusCode::ACCEPTED);
     let mails = recorder.mails();
     assert_eq!(mails.len(), 1, "{mails:?}");
-    assert_eq!(mails[0].to, email_of(USER), "the code went to the owner");
+    assert_eq!(
+        mails[0].to.as_str(),
+        email_of(USER),
+        "the code went to the owner"
+    );
     assert!(
         mails[0].subject.contains("Alpha Robotics") && !mails[0].subject.contains("Beta Labs"),
         "the mail does not name the organization it deletes: {}",
@@ -3274,7 +3278,7 @@ async fn the_finalize_mails_the_owner_who_asked_a_receipt(pool: PgPool) {
     let mails = recorder.mails();
     assert_eq!(mails.len(), 1, "{mails:?}");
     assert_eq!(
-        mails[0].to,
+        mails[0].to.as_str(),
         email_of(USER),
         "the receipt went to the owner who asked"
     );

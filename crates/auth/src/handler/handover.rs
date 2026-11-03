@@ -65,8 +65,8 @@ impl Offered<'_> {
         &self,
         state: &AppState,
         owner: &str,
-        to: Option<&str>,
-        withdrawn_from: Option<&str>,
+        to: Option<&Email>,
+        withdrawn_from: Option<&Email>,
     ) {
         let link = state.issuer.page("/settings/notifications", &[]);
         let (offered, withdrawn) = tokio::join!(
@@ -94,7 +94,7 @@ impl Offered<'_> {
     async fn send(
         &self,
         state: &AppState,
-        to: &str,
+        to: &Email,
         owner: &str,
         link: &str,
     ) -> Result<(), MailError> {
@@ -134,7 +134,7 @@ impl Offered<'_> {
     async fn send_withdrawn(
         &self,
         state: &AppState,
-        to: &str,
+        to: &Email,
         owner: &str,
     ) -> Result<(), MailError> {
         match self {

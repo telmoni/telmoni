@@ -243,7 +243,7 @@ pub async fn give_seat(
         if let Err(e) = state
             .mailer
             .send_mail(
-                person.email.as_str(),
+                &person.email,
                 AuthMail::ProjectSeat {
                     giver: &giver,
                     project: &project.name,

@@ -124,6 +124,7 @@ impl MailSender for SmtpSender {
 fn compose(mail: &Mail, from: &Mailbox) -> Result<Message, MailError> {
     let to = mail
         .to
+        .as_str()
         .parse::<Mailbox>()
         .map_err(|_| MailError::Compose("the recipient address"))?;
     Message::builder()
@@ -162,7 +163,7 @@ mod tests {
 
     fn mail() -> Mail {
         Mail {
-            to: "ada@example.com".to_owned(),
+            to: telmoni_shared::Email::parse("ada@example.com").unwrap(),
             subject: "Confirm your email address".to_owned(),
             text: "Your code is 802610.".to_owned(),
         }
@@ -191,18 +192,11 @@ mod tests {
     /// An address that could smuggle a header in is not an address.
     #[test]
     fn a_recipient_that_does_not_parse_is_refused_before_any_connection() {
-        let from: Mailbox = "Telmoni <no-reply@example.com>".parse().unwrap();
         for bad in ["not an address", "ada@example.com\r\nBcc: eve@example.com"] {
-            let err = compose(
-                &Mail {
-                    to: bad.to_owned(),
-                    ..mail()
-                },
-                &from,
-            )
-            .unwrap_err();
-            assert!(matches!(err, MailError::Compose(_)), "{bad}: {err}");
+            assert!(telmoni_shared::Email::parse(bad).is_err(), "{bad}");
         }
+        let from: Mailbox = "Telmoni <no-reply@example.com>".parse().unwrap();
+        assert!(compose(&mail(), &from).is_ok());
     }
 
     #[test]

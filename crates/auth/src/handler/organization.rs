@@ -84,7 +84,7 @@ pub async fn request_organization_deletion_code(
     mail_code(
         &state,
         &user_id,
-        person.email.as_str(),
+        &person.email,
         (Act::OrganizationDeletion(&organization), &code),
         AuthMail::OrganizationDeletionCode {
             code: &code,

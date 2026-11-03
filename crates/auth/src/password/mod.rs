@@ -271,7 +271,7 @@ impl PasswordProvider {
             &[("uid", user_id.as_str()), ("token", token)],
         );
         self.mailer
-            .send_mail(email.as_str(), AuthMail::EmailVerification { link: &link })
+            .send_mail(email, AuthMail::EmailVerification { link: &link })
             .await
             .map_err(|e| {
                 tracing::error!(user_id = %user_id, error = %e,
@@ -559,7 +559,7 @@ impl PasswordProvider {
             .into());
         }
         self.mailer
-            .send_mail(new_email.as_str(), AuthMail::NewAddressCode { code: &code })
+            .send_mail(&new_email, AuthMail::NewAddressCode { code: &code })
             .await
             .map_err(|e| {
                 tracing::error!(user_id = %user_id, error = %e,
@@ -658,7 +658,7 @@ impl ResetSender {
             &[("uid", user_id.as_str()), ("token", &token)],
         );
         self.mailer
-            .send_mail(email.as_str(), AuthMail::PasswordReset { link: &url })
+            .send_mail(email, AuthMail::PasswordReset { link: &url })
             .await
             .map_err(|e| {
                 tracing::error!(user_id = %user_id, error = %e,

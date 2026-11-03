@@ -23,7 +23,7 @@ use std::sync::Arc;
 
 use telmoni_shared::mail::{Mail, MailSender};
 use telmoni_shared::seam::Receipt;
-use telmoni_shared::{OrganizationRole, Role};
+use telmoni_shared::{Email, OrganizationRole, Role};
 
 pub use telmoni_shared::mail::MailError;
 
@@ -184,10 +184,10 @@ impl ComposingMailer {
             .unwrap_or("whoever runs this service")
     }
 
-    async fn send(&self, to: &str, subject: String, text: String) -> Result<(), MailError> {
+    async fn send(&self, to: &Email, subject: String, text: String) -> Result<(), MailError> {
         self.sender
             .send(&Mail {
-                to: to.to_owned(),
+                to: to.clone(),
                 subject,
                 text,
             })
@@ -224,7 +224,7 @@ impl ComposingMailer {
     /// # Errors
     ///
     /// The transport's refusal.
-    pub async fn send_mail(&self, to: &str, mail: AuthMail<'_>) -> Result<(), MailError> {
+    pub async fn send_mail(&self, to: &Email, mail: AuthMail<'_>) -> Result<(), MailError> {
         match mail {
             AuthMail::OrganizationDeletionCode { code, organization } => {
                 self.send_organization_deletion_code(to, code, organization)
@@ -331,7 +331,7 @@ impl ComposingMailer {
 
     async fn send_organization_deletion_code(
         &self,
-        to: &str,
+        to: &Email,
         code: &str,
         organization: &str,
     ) -> Result<(), MailError> {
@@ -358,7 +358,7 @@ impl ComposingMailer {
 
     async fn send_content_mode_code(
         &self,
-        to: &str,
+        to: &Email,
         code: &str,
         project: &str,
     ) -> Result<(), MailError> {
@@ -385,7 +385,7 @@ impl ComposingMailer {
         .await
     }
 
-    async fn send_account_deletion_code(&self, to: &str, code: &str) -> Result<(), MailError> {
+    async fn send_account_deletion_code(&self, to: &Email, code: &str) -> Result<(), MailError> {
         self.send(
             to,
             format!(
@@ -409,7 +409,7 @@ impl ComposingMailer {
 
     async fn send_email_change_code(
         &self,
-        to: &str,
+        to: &Email,
         code: &str,
         new_email: &str,
     ) -> Result<(), MailError> {
@@ -438,7 +438,7 @@ impl ComposingMailer {
 
     async fn send_member_invite(
         &self,
-        to: &str,
+        to: &Email,
         inviter: &str,
         organization: &str,
         level: InvitedTo,
@@ -475,7 +475,7 @@ impl ComposingMailer {
 
     async fn send_project_seat(
         &self,
-        to: &str,
+        to: &Email,
         giver: &str,
         project: &str,
         organization: &str,
@@ -504,7 +504,7 @@ impl ComposingMailer {
 
     async fn send_ownership_offer(
         &self,
-        to: &str,
+        to: &Email,
         owner: &str,
         organization: &str,
         link: &str,
@@ -533,7 +533,7 @@ impl ComposingMailer {
 
     async fn send_ownership_offer_withdrawn(
         &self,
-        to: &str,
+        to: &Email,
         owner: &str,
         organization: &str,
     ) -> Result<(), MailError> {
@@ -552,7 +552,7 @@ impl ComposingMailer {
 
     async fn send_ownership_accepted(
         &self,
-        to: &str,
+        to: &Email,
         new_owner: &str,
         organization: &str,
     ) -> Result<(), MailError> {
@@ -578,7 +578,7 @@ impl ComposingMailer {
 
     async fn send_ownership_declined(
         &self,
-        to: &str,
+        to: &Email,
         admin: &str,
         organization: &str,
     ) -> Result<(), MailError> {
@@ -599,7 +599,7 @@ impl ComposingMailer {
 
     async fn send_project_offer(
         &self,
-        to: &str,
+        to: &Email,
         owner: &str,
         project: &str,
         organization: &str,
@@ -633,7 +633,7 @@ impl ComposingMailer {
 
     async fn send_project_offer_withdrawn(
         &self,
-        to: &str,
+        to: &Email,
         owner: &str,
         project: &str,
     ) -> Result<(), MailError> {
@@ -652,7 +652,7 @@ impl ComposingMailer {
 
     async fn send_project_accepted(
         &self,
-        to: &str,
+        to: &Email,
         new_owner: &str,
         project: &str,
         organization: &str,
@@ -682,7 +682,7 @@ impl ComposingMailer {
 
     async fn send_project_declined(
         &self,
-        to: &str,
+        to: &Email,
         admin: &str,
         project: &str,
     ) -> Result<(), MailError> {
@@ -701,7 +701,7 @@ impl ComposingMailer {
         .await
     }
 
-    async fn send_email_verification(&self, to: &str, link: &str) -> Result<(), MailError> {
+    async fn send_email_verification(&self, to: &Email, link: &str) -> Result<(), MailError> {
         let product = telmoni_shared::PRODUCT_NAME;
         self.send(
             to,
@@ -718,7 +718,7 @@ impl ComposingMailer {
         .await
     }
 
-    async fn send_password_reset(&self, to: &str, link: &str) -> Result<(), MailError> {
+    async fn send_password_reset(&self, to: &Email, link: &str) -> Result<(), MailError> {
         let product = telmoni_shared::PRODUCT_NAME;
         self.send(
             to,
@@ -737,7 +737,7 @@ impl ComposingMailer {
         .await
     }
 
-    async fn send_new_address_code(&self, to: &str, code: &str) -> Result<(), MailError> {
+    async fn send_new_address_code(&self, to: &Email, code: &str) -> Result<(), MailError> {
         let product = telmoni_shared::PRODUCT_NAME;
         self.send(
             to,
@@ -757,7 +757,7 @@ impl ComposingMailer {
 
     async fn send_deletion_receipt(
         &self,
-        to: &str,
+        to: &Email,
         receipt: Receipt<'_>,
         project: &str,
     ) -> Result<(), MailError> {
@@ -863,6 +863,10 @@ mod tests {
     /// The deployment's support address, as a suite configures it.
     const SUPPORT: &str = "support@example.com";
 
+    fn to(address: &str) -> telmoni_shared::Email {
+        telmoni_shared::Email::parse(address).expect("an address")
+    }
+
     async fn composed(send: impl AsyncFnOnce(ComposingMailer)) -> Mail {
         let recorder = Arc::new(Recorder::default());
         send(ComposingMailer::new(recorder.clone()).with_support_email(Some(SUPPORT.into()))).await;
@@ -876,7 +880,7 @@ mod tests {
     async fn without_a_support_address_the_reader_is_still_told_where_to_turn() {
         let recorder = Arc::new(Recorder::default());
         ComposingMailer::new(recorder.clone())
-            .send_account_deletion_code("ada@example.com", "311406")
+            .send_account_deletion_code(&to("ada@example.com"), "311406")
             .await
             .expect("recorded");
         let mail = recorder.0.lock().expect("recorder lock")[0].clone();
@@ -910,7 +914,7 @@ mod tests {
             },
         ] {
             let mail = composed(async |m| {
-                m.send_deletion_receipt("ada@example.com", receipt, "acme/web")
+                m.send_deletion_receipt(&to("ada@example.com"), receipt, "acme/web")
                     .await
                     .expect("recorded");
             })
@@ -934,7 +938,7 @@ mod tests {
                 project_id: &project_id,
                 traces: 0,
             };
-            m.send_deletion_receipt("ada@example.com", receipt, "acme/web")
+            m.send_deletion_receipt(&to("ada@example.com"), receipt, "acme/web")
                 .await
                 .expect("recorded");
         })
@@ -951,13 +955,13 @@ mod tests {
     #[tokio::test]
     async fn the_deletion_mails_tell_an_unauthorized_reader_where_to_go() {
         let organization = composed(async |m| {
-            m.send_organization_deletion_code("ada@example.com", "802610", "Acme")
+            m.send_organization_deletion_code(&to("ada@example.com"), "802610", "Acme")
                 .await
                 .expect("recorded");
         })
         .await;
         let account = composed(async |m| {
-            m.send_account_deletion_code("ada@example.com", "311406")
+            m.send_account_deletion_code(&to("ada@example.com"), "311406")
                 .await
                 .expect("recorded");
         })
@@ -983,26 +987,26 @@ mod tests {
     #[tokio::test]
     async fn each_mail_names_what_it_is_about() {
         let organization_deletion = composed(async |m| {
-            m.send_organization_deletion_code("ada@example.com", "802610", "Acme")
+            m.send_organization_deletion_code(&to("ada@example.com"), "802610", "Acme")
                 .await
                 .expect("recorded");
         })
         .await;
         let account_deletion = composed(async |m| {
-            m.send_account_deletion_code("ada@example.com", "311406")
+            m.send_account_deletion_code(&to("ada@example.com"), "311406")
                 .await
                 .expect("recorded");
         })
         .await;
         let email_change = composed(async |m| {
-            m.send_email_change_code("ada@example.com", "119284", "ada.new@example.com")
+            m.send_email_change_code(&to("ada@example.com"), "119284", "ada.new@example.com")
                 .await
                 .expect("recorded");
         })
         .await;
         let invite = composed(async |m| {
             m.send_member_invite(
-                "ada@example.com",
+                &to("ada@example.com"),
                 "Grace Hopper",
                 "Acme",
                 InvitedTo::Project(Role::Admin),
@@ -1014,7 +1018,7 @@ mod tests {
         .await;
         let offer = composed(async |m| {
             m.send_ownership_offer(
-                "ada@example.com",
+                &to("ada@example.com"),
                 "Grace Hopper",
                 "Acme",
                 "https://telmoni.com/settings/notifications",
@@ -1024,26 +1028,26 @@ mod tests {
         })
         .await;
         let withdrawn = composed(async |m| {
-            m.send_ownership_offer_withdrawn("ada@example.com", "Grace Hopper", "Acme")
+            m.send_ownership_offer_withdrawn(&to("ada@example.com"), "Grace Hopper", "Acme")
                 .await
                 .expect("recorded");
         })
         .await;
         let accepted = composed(async |m| {
-            m.send_ownership_accepted("grace@example.com", "Ada Lovelace", "Acme")
+            m.send_ownership_accepted(&to("grace@example.com"), "Ada Lovelace", "Acme")
                 .await
                 .expect("recorded");
         })
         .await;
         let declined = composed(async |m| {
-            m.send_ownership_declined("grace@example.com", "Ada Lovelace", "Acme")
+            m.send_ownership_declined(&to("grace@example.com"), "Ada Lovelace", "Acme")
                 .await
                 .expect("recorded");
         })
         .await;
         let project_offer = composed(async |m| {
             m.send_project_offer(
-                "ada@example.com",
+                &to("ada@example.com"),
                 "Grace Hopper",
                 "Payments",
                 "Acme",
@@ -1054,19 +1058,24 @@ mod tests {
         })
         .await;
         let project_withdrawn = composed(async |m| {
-            m.send_project_offer_withdrawn("ada@example.com", "Grace Hopper", "Payments")
+            m.send_project_offer_withdrawn(&to("ada@example.com"), "Grace Hopper", "Payments")
                 .await
                 .expect("recorded");
         })
         .await;
         let project_accepted = composed(async |m| {
-            m.send_project_accepted("grace@example.com", "Ada Lovelace", "Payments", "Babbage")
-                .await
-                .expect("recorded");
+            m.send_project_accepted(
+                &to("grace@example.com"),
+                "Ada Lovelace",
+                "Payments",
+                "Babbage",
+            )
+            .await
+            .expect("recorded");
         })
         .await;
         let project_declined = composed(async |m| {
-            m.send_project_declined("grace@example.com", "Ada Lovelace", "Payments")
+            m.send_project_declined(&to("grace@example.com"), "Ada Lovelace", "Payments")
                 .await
                 .expect("recorded");
         })
@@ -1167,7 +1176,7 @@ mod tests {
     #[tokio::test]
     async fn the_email_change_code_names_where_the_account_would_go() {
         let mail = composed(async |m| {
-            m.send_email_change_code("ada@example.com", "119284", "ada.new@example.com")
+            m.send_email_change_code(&to("ada@example.com"), "119284", "ada.new@example.com")
                 .await
                 .expect("recorded");
         })
@@ -1189,7 +1198,7 @@ mod tests {
             "the mail does not say the change has not happened: {}",
             mail.text
         );
-        assert_eq!(mail.to, "ada@example.com");
+        assert_eq!(mail.to.as_str(), "ada@example.com");
     }
 
     /// A seat given asks for nothing: the mail names who gave it, the project
@@ -1198,7 +1207,7 @@ mod tests {
     async fn the_seat_mail_names_who_gave_it_and_leads_to_the_project() {
         let mail = composed(async |m| {
             m.send_project_seat(
-                "dana@example.com",
+                &to("dana@example.com"),
                 "Ada Lovelace",
                 "Support agent",
                 "Acme",
@@ -1210,7 +1219,7 @@ mod tests {
         })
         .await;
 
-        assert_eq!(mail.to, "dana@example.com");
+        assert_eq!(mail.to.as_str(), "dana@example.com");
         assert!(
             mail.subject
                 .contains("Ada Lovelace added you to Support agent"),
@@ -1245,7 +1254,7 @@ mod tests {
     async fn the_invitation_carries_its_link_and_says_what_the_role_can_do() {
         let mail = composed(async |m| {
             m.send_member_invite(
-                "ada@example.com",
+                &to("ada@example.com"),
                 "grace@example.com",
                 "Acme",
                 InvitedTo::Project(Role::Member),
@@ -1290,7 +1299,7 @@ mod tests {
     async fn the_invitation_names_who_is_asking_and_where() {
         let mail = composed(async |m| {
             m.send_member_invite(
-                "ada@example.com",
+                &to("ada@example.com"),
                 "Grace Hopper",
                 "Acme",
                 InvitedTo::Project(Role::Admin),
@@ -1352,7 +1361,7 @@ mod tests {
         for (level, role, sentence) in pinned {
             let mail = composed(async |m| {
                 m.send_member_invite(
-                    "ada@example.com",
+                    &to("ada@example.com"),
                     "grace@example.com",
                     "Acme",
                     level,
@@ -1380,7 +1389,7 @@ mod tests {
     async fn the_ownership_offer_says_nothing_has_changed_and_what_it_would_hand_over() {
         let mail = composed(async |m| {
             m.send_ownership_offer(
-                "ada@example.com",
+                &to("ada@example.com"),
                 "Grace Hopper",
                 "Acme",
                 "https://telmoni.com/settings/notifications",
@@ -1417,12 +1426,12 @@ mod tests {
     #[tokio::test]
     async fn the_accepted_offer_says_what_the_previous_owner_kept_and_what_moved() {
         let mail = composed(async |m| {
-            m.send_ownership_accepted("grace@example.com", "Ada Lovelace", "Acme")
+            m.send_ownership_accepted(&to("grace@example.com"), "Ada Lovelace", "Acme")
                 .await
                 .expect("recorded");
         })
         .await;
-        assert_eq!(mail.to, "grace@example.com");
+        assert_eq!(mail.to.as_str(), "grace@example.com");
         assert!(mail.text.contains("Acme"), "{}", mail.text);
         assert!(
             mail.text.contains("admin in every one"),
@@ -1446,12 +1455,12 @@ mod tests {
     #[tokio::test]
     async fn the_withdrawn_offer_says_nothing_has_changed() {
         let mail = composed(async |m| {
-            m.send_ownership_offer_withdrawn("ada@example.com", "Grace Hopper", "Acme")
+            m.send_ownership_offer_withdrawn(&to("ada@example.com"), "Grace Hopper", "Acme")
                 .await
                 .expect("recorded");
         })
         .await;
-        assert_eq!(mail.to, "ada@example.com");
+        assert_eq!(mail.to.as_str(), "ada@example.com");
         assert!(mail.text.contains("Acme"), "{}", mail.text);
         assert!(mail.text.contains("Nothing has changed"), "{}", mail.text);
         assert!(mail.text.contains("nothing for you to do"), "{}", mail.text);
@@ -1464,7 +1473,7 @@ mod tests {
     async fn the_project_offer_says_what_comes_with_it_and_what_stays_behind() {
         let mail = composed(async |m| {
             m.send_project_offer(
-                "ada@example.com",
+                &to("ada@example.com"),
                 "Grace Hopper",
                 "Payments",
                 "Acme",
@@ -1474,7 +1483,7 @@ mod tests {
             .expect("recorded");
         })
         .await;
-        assert_eq!(mail.to, "ada@example.com");
+        assert_eq!(mail.to.as_str(), "ada@example.com");
         assert!(mail.text.contains("Nothing has changed"), "{}", mail.text);
         assert!(mail.text.contains("Payments"), "{}", mail.text);
         assert!(mail.text.contains("Acme"), "{}", mail.text);
@@ -1493,12 +1502,17 @@ mod tests {
         assert!(mail.text.contains(SUPPORT), "{}", mail.text);
 
         let accepted = composed(async |m| {
-            m.send_project_accepted("grace@example.com", "Ada Lovelace", "Payments", "Babbage")
-                .await
-                .expect("recorded");
+            m.send_project_accepted(
+                &to("grace@example.com"),
+                "Ada Lovelace",
+                "Payments",
+                "Babbage",
+            )
+            .await
+            .expect("recorded");
         })
         .await;
-        assert_eq!(accepted.to, "grace@example.com");
+        assert_eq!(accepted.to.as_str(), "grace@example.com");
         assert!(accepted.text.contains("Babbage"), "{}", accepted.text);
         assert!(
             accepted.text.contains("stay on as an admin"),
@@ -1516,12 +1530,12 @@ mod tests {
     #[tokio::test]
     async fn the_declined_offer_says_nothing_has_changed() {
         let mail = composed(async |m| {
-            m.send_ownership_declined("grace@example.com", "Ada Lovelace", "Acme")
+            m.send_ownership_declined(&to("grace@example.com"), "Ada Lovelace", "Acme")
                 .await
                 .expect("recorded");
         })
         .await;
-        assert_eq!(mail.to, "grace@example.com");
+        assert_eq!(mail.to.as_str(), "grace@example.com");
         assert!(mail.text.contains("Acme"), "{}", mail.text);
         assert!(mail.text.contains("Nothing has changed"), "{}", mail.text);
     }

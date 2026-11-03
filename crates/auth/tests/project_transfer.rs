@@ -485,7 +485,7 @@ async fn set_pending(pool: &PgPool, organization: &str, pending: bool) {
 /// Who each mail went to, and what it was about, in the order sent.
 fn addressed(sent: &[Mail]) -> Vec<(String, String)> {
     sent.iter()
-        .map(|m| (m.to.clone(), m.subject.clone()))
+        .map(|m| (m.to.as_str().to_owned(), m.subject.clone()))
         .collect()
 }
 
