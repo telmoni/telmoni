@@ -1,17 +1,22 @@
 //! A project's hourly totals over a window, by the hour or the day and, where
 //! asked, by one column: what `/v1/metrics` publishes and the dashboards page
 //! draws. Spend is priced as it is read ([`crate::spend`]), never written, and
-//! scaled by each row's sample rate, a sum over runs.
+//! scaled by each row's sample rate, a sum over runs. A tag, an end user and
+//! a session are no column of the totals, so a split by one reads the spans,
+//! within the plan's retention, its most costly values each and the rest as one.
 
 use chrono::{DateTime, DurationRound as _, TimeDelta, Utc};
 use clickhouse::Row;
 use serde::{Deserialize, Serialize};
 
-use telmoni_shared::{ProjectId, TelmoniError};
+use telmoni_shared::types::WireEnum as _;
+use telmoni_shared::{MetricsGroup, ProjectId, TelmoniError, TraceSort};
 
 use crate::AppState;
+use crate::contract::TAG_KEY_MAX;
 use crate::handler::traces::{self, read_failed};
 use crate::store::{Projects, seconds};
+use crate::traces::ListSort;
 
 /// The most points one read answers.
 pub const METRICS_MAX: usize = 10_000;
@@ -26,18 +31,23 @@ pub struct MetricsAsked {
     pub step: Option<String>,
     #[serde(default)]
     pub group: Option<String>,
+    /// The tag key a split by `tag` reads.
+    #[serde(default)]
+    pub tag: Option<String>,
 }
 
-/// The columns the totals may be grouped by, each as the rollup names it.
-pub const GROUPS: [&str; 7] = [
-    "agent",
-    "model",
-    "provider",
-    "tool",
-    "status",
-    "environment",
-    "release",
-];
+/// The most values a split read from the spans names, by what they spent;
+/// the rest are summed as one, so a project of many users stays readable.
+pub const GROUP_TOP: u32 = 10;
+
+/// Whether `group` is none of the totals' columns, so the spans are read.
+#[must_use]
+pub const fn from_spans(group: MetricsGroup) -> bool {
+    matches!(
+        group,
+        MetricsGroup::Tag | MetricsGroup::User | MetricsGroup::Session
+    )
+}
 
 /// The rollup over the window, by the hour or the day and, where asked, by
 /// one column: both chosen by a bound value from a closed set, never an
@@ -48,7 +58,7 @@ const METRICS_SQL: &str = concat!(
     "toString(multiIf({group:String} = 'agent', h.agent, {group:String} = 'model', h.model, ",
     "{group:String} = 'provider', h.provider, {group:String} = 'tool', h.tool, ",
     "{group:String} = 'status', h.status, {group:String} = 'environment', h.environment, ",
-    "{group:String} = 'release', h.release, '')) AS key, ",
+    "{group:String} = 'release', h.release, '')) AS key, toUInt8(0) AS folded, ",
     "toUInt64(sum(h.spans)) AS spans, toUInt64(sumIf(h.spans, h.status = 'error')) AS failed, ",
     "toUInt64(sumIf(h.spans, h.kind = 'run')) AS runs, ",
     "toUInt64(sumIf(h.spans, h.kind = 'run' AND h.status = 'error')) AS failed_runs, ",
@@ -69,12 +79,70 @@ const METRICS_SQL: &str = concat!(
     "GROUP BY at, key ORDER BY at DESC, key DESC LIMIT {max:UInt32}"
 );
 
+/// A span's duration in milliseconds, `s` the spans, as the hourly totals' view keeps it.
+macro_rules! span_ms {
+    () => {
+        "greatest(dateDiff('microsecond', s.started_at, s.ended_at), 0) / 1000"
+    };
+}
+
+/// The spans over the window, by the hour or the day and by their run's tag
+/// value, end user or session, each summed as the totals are. A run's value
+/// is read off its spans from a day before the window, within what the plan
+/// keeps, since a call landing after midnight belongs to a run that may have
+/// started before it; a tag off the run's own span first, so a run whose
+/// spans disagree counts once.
+/// The [`GROUP_TOP`] values that spent most are named, and the rest folded.
+const SPANS_METRICS_SQL: &str = concat!(
+    "SELECT at, if(folded = 1, '', group_key) AS key, folded, ",
+    "toUInt64(sum(n_spans)) AS spans, toUInt64(sum(fails)) AS failed, toUInt64(sum(n_runs)) AS runs, ",
+    "toUInt64(sum(n_failed_runs)) AS failed_runs, toUInt64(sum(in_tokens)) AS input_tokens, ",
+    "toUInt64(sum(out_tokens)) AS output_tokens, toUInt64(sum(cache_read)) AS cache_read_input_tokens, ",
+    "toUInt64(sum(cache_write)) AS cache_write_input_tokens, sum(spent) AS spend, ",
+    "sum(ms_sum) AS duration_ms_sum, ",
+    "CAST(quantilesTDigestMerge(0.5, 0.9, 0.99)(ms_digest) AS Array(Float64)) AS quantiles, ",
+    "CAST(quantilesTDigestMerge(0.5, 0.95, 0.99)(run_ms_digest) AS Array(Float64)) AS run_quantiles ",
+    // A run with no value is its own row, never folded, and ranks after every value.
+    "FROM (SELECT *, toUInt8(group_key != '' AND dense_rank() OVER ",
+    "(ORDER BY group_key = '', key_spend DESC, key_spans DESC, group_key) > {top:UInt32}) AS folded ",
+    "FROM (SELECT *, sum(spent) OVER (PARTITION BY group_key) AS key_spend, ",
+    "sum(n_spans) OVER (PARTITION BY group_key) AS key_spans FROM (",
+    "SELECT if({daily:UInt8} = 1, toStartOfDay(toDateTime(s.received_at, 'UTC')), ",
+    "toStartOfHour(toDateTime(s.received_at, 'UTC'))) AS at, k.group_key AS group_key, ",
+    "count() AS n_spans, countIf(s.status = 'error') AS fails, countIf(s.kind = 'run') AS n_runs, ",
+    "countIf(s.kind = 'run' AND s.status = 'error') AS n_failed_runs, sum(s.input_tokens) AS in_tokens, ",
+    "sum(s.output_tokens) AS out_tokens, sum(s.cache_read_input_tokens) AS cache_read, ",
+    "sum(s.cache_write_input_tokens) AS cache_write, sum((",
+    crate::spend::spent_of!(),
+    ") / ifNull(s.sample_rate, 1)) AS spent, ",
+    "sum(",
+    span_ms!(),
+    ") AS ms_sum, quantilesTDigestState(0.5, 0.9, 0.99)(",
+    span_ms!(),
+    ") AS ms_digest, quantilesTDigestStateIf(0.5, 0.95, 0.99)(",
+    span_ms!(),
+    ", s.kind = 'run') AS run_ms_digest ",
+    "FROM telemetry.spans AS s LEFT ANY JOIN (",
+    "SELECT run_id, multiIf({group:String} = 'user', anyIf(user_id, user_id != ''), ",
+    "{group:String} = 'session', anyIf(session_id, session_id != ''), ",
+    "if(countIf(kind = 'run' AND mapContains(tags, {tag:String})) > 0, ",
+    "anyIf(tags[{tag:String}], kind = 'run' AND mapContains(tags, {tag:String})), ",
+    "anyIf(tags[{tag:String}], mapContains(tags, {tag:String})))) AS group_key ",
+    "FROM telemetry.spans WHERE project_id IN {projects:Array(String)} ",
+    "AND received_at >= {keys_from:DateTime('UTC')} GROUP BY run_id",
+    ") AS k ON s.run_id = k.run_id ",
+    "WHERE s.project_id IN {projects:Array(String)} AND s.received_at >= {from:DateTime('UTC')} ",
+    "GROUP BY at, group_key))) ",
+    "GROUP BY at, folded, key ORDER BY at DESC, folded DESC, key DESC LIMIT {max:UInt32}"
+);
+
 /// One point of the rollup as ClickHouse answers it.
 #[derive(Debug, Row, Deserialize)]
 struct MetricRow {
     #[serde(deserialize_with = "clickhouse::serde::chrono::datetime::deserialize")]
     at: DateTime<Utc>,
     key: String,
+    folded: u8,
     spans: u64,
     failed: u64,
     runs: u64,
@@ -92,9 +160,14 @@ struct MetricRow {
 /// What a read of the totals answers.
 #[derive(Debug, Serialize)]
 pub struct Metrics {
+    /// The window read: for a split read from the spans, no more than the
+    /// plan keeps of them.
     pub days: u16,
     pub step: &'static str,
-    pub group: Option<&'static str>,
+    pub group: Option<MetricsGroup>,
+    /// The tag key a split by `tag` read.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tag: Option<String>,
     /// Oldest first, each hour or day only where it holds a span.
     pub points: Vec<MetricPoint>,
     /// Whether the window held more than [`METRICS_MAX`] points, its oldest left out.
@@ -108,6 +181,10 @@ pub struct MetricPoint {
     /// The group's value; empty where its spans carry none.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
+    /// Whether it sums every value past the [`GROUP_TOP`] that spent most,
+    /// its `value` then empty.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub others: bool,
     pub spans: u64,
     pub failed: u64,
     /// The runs that ended in it, and those that failed.
@@ -149,12 +226,13 @@ pub struct RunDurations {
 /// The project's totals over the window `asked` names: up to 360 days back,
 /// 7 when it names none, whatever the plan keeps of the spans, since the
 /// totals are kept thirteen months on every plan; by the day, unless by the
-/// hour or a day's window; grouped where it names a group.
+/// hour or a day's window; grouped where it names a group, and a split
+/// [`from_spans`] no further back than the plan keeps them.
 ///
 /// # Errors
 ///
-/// A window, a step or a group it does not take; ClickHouse or Postgres did
-/// not answer.
+/// A window, a step, a group or a tag key it does not take; ClickHouse or
+/// Postgres did not answer.
 pub async fn read(
     state: &AppState,
     project_id: &ProjectId,
@@ -170,10 +248,26 @@ pub async fn read(
     };
     let group = match asked.group.as_deref() {
         None => None,
-        Some(given) => Some(GROUPS.into_iter().find(|g| *g == given).ok_or_else(|| {
-            TelmoniError::BadRequest(format!("group is one of {}", GROUPS.join(", ")))
+        Some(given) => Some(given.parse::<MetricsGroup>().map_err(|_| {
+            TelmoniError::BadRequest(format!(
+                "group is one of {}",
+                MetricsGroup::variants()
+                    .iter()
+                    .map(|g| g.word())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ))
         })?),
     };
+    let tag = tag_of(group, asked.tag.as_deref())?;
+    let spanned = group.is_some_and(from_spans);
+    // What the plan keeps of the spans bounds a split's window and the runs it reads.
+    let kept = if spanned {
+        crate::capacity::visible_days(state, project_id, crate::traces::MAX_DAYS).await
+    } else {
+        crate::traces::MAX_DAYS
+    };
+    let days = days.min(kept);
     let unit = if daily {
         TimeDelta::days(1)
     } else {
@@ -194,10 +288,23 @@ pub async fn read(
         })?;
     let read = state
         .store
-        .read(&projects, METRICS_SQL)
+        .read(
+            &projects,
+            if spanned {
+                SPANS_METRICS_SQL
+            } else {
+                METRICS_SQL
+            },
+        )
         .param("daily", u8::from(daily))
-        .param("group", group.unwrap_or(""))
+        .param("group", group.map_or("", |g| g.word()))
+        .param("tag", tag.as_deref().unwrap_or(""))
+        .param("top", GROUP_TOP)
         .param("from", seconds(from))
+        .param(
+            "keys_from",
+            seconds((from - TimeDelta::days(1)).max(Utc::now() - TimeDelta::days(i64::from(kept)))),
+        )
         .param("max", u32::try_from(METRICS_MAX + 1).unwrap_or(u32::MAX));
     let mut rows: Vec<MetricRow> = crate::spend::priced_by(read, &book)
         .fetch_all()
@@ -210,12 +317,40 @@ pub async fn read(
         days,
         step,
         group,
+        tag,
         points: rows
             .into_iter()
             .map(|row| point(row, group.is_some()))
             .collect(),
         truncated,
     })
+}
+
+/// The tag key a split by `tag` reads, trimmed: required by it, and refused
+/// by every other.
+pub(crate) fn tag_of(
+    group: Option<MetricsGroup>,
+    given: Option<&str>,
+) -> Result<Option<String>, TelmoniError> {
+    let given = given.map(str::trim).filter(|key| !key.is_empty());
+    match (group, given) {
+        // A key as a sort by its tag takes one: the list's one rule for a key.
+        (Some(MetricsGroup::Tag), Some(key))
+            if matches!(
+                ListSort::<TraceSort>::parse(&format!("tag:{key}")),
+                Some(ListSort::Tag(_))
+            ) =>
+        {
+            Ok(Some(key.to_owned()))
+        }
+        (Some(MetricsGroup::Tag), _) => Err(TelmoniError::BadRequest(format!(
+            "a split by tag names its key in `tag`, 1 to {TAG_KEY_MAX} characters"
+        ))),
+        (_, Some(_)) => Err(TelmoniError::BadRequest(
+            "`tag` is read only with `group=tag`".into(),
+        )),
+        (_, None) => Ok(None),
+    }
 }
 
 /// A rollup row as the lanes publish it.
@@ -240,6 +375,7 @@ fn point(row: MetricRow, grouped: bool) -> MetricPoint {
     MetricPoint {
         at: row.at,
         value: grouped.then(|| row.key.clone()),
+        others: row.folded == 1,
         spans: row.spans,
         failed: row.failed,
         runs: row.runs,

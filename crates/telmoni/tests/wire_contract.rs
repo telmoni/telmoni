@@ -33,7 +33,9 @@ use telmoni_telemetry::content::FILE_ID_PREFIX;
 use telmoni_telemetry::contract::{CONTENT, UTC_OFFSET_RANGE};
 use telmoni_telemetry::handler::incidents::INCIDENTS_MAX;
 use telmoni_telemetry::handler::traces::FILTER_VALUE_MAX;
+use telmoni_telemetry::handler::views::DASHBOARD_CHARTS_MAX;
 use telmoni_telemetry::live;
+use telmoni_telemetry::rollups::GROUP_TOP;
 use telmoni_telemetry::rules::db::PausedBy;
 use telmoni_telemetry::rules::mutes::MUTE_DAYS_MAX;
 use telmoni_telemetry::rules::{LINKS_MAX, RENOTIFY_MAX_MINUTES, RULE_NAME_MAX};
@@ -102,6 +104,8 @@ fn generated_contract() -> Value {
             "LayoutDepth": wire::<LayoutDepth>(),
             "LayoutOpen": wire::<LayoutOpen>(),
             "ViewKind": wire::<ViewKind>(),
+            "MetricsGroup": wire::<MetricsGroup>(),
+            "ChartMeasure": wire::<ChartMeasure>(),
             "RuleMeasure": wire::<RuleMeasure>(),
             "RuleAggregation": wire::<RuleAggregation>(),
             "RuleWindow": wire::<RuleWindow>(),
@@ -164,6 +168,8 @@ fn generated_contract() -> Value {
             "filter_value_max": FILTER_VALUE_MAX,
             "pinned_max": PINNED_MAX,
             "pinned_per_run": PINNED_PER_RUN,
+            "dashboard_charts_max": DASHBOARD_CHARTS_MAX,
+            "rollup_group_top": GROUP_TOP,
             "utc_offset_west": *UTC_OFFSET_RANGE.start(),
             "utc_offset_east": *UTC_OFFSET_RANGE.end(),
             "alert_name_max": RULE_NAME_MAX,

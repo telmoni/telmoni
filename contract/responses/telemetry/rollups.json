@@ -1,0 +1,82 @@
+{
+  "days": 30,
+  "group": "tag",
+  "points": [
+    {
+      "at": "2027-01-15T08:00:00Z",
+      "cache_read_input_tokens": 0,
+      "cache_write_input_tokens": 0,
+      "duration_ms": {
+        "avg": 420.0,
+        "p50": 300.0,
+        "p90": 900.0,
+        "p99": 1400.0
+      },
+      "failed": 1,
+      "failed_runs": 1,
+      "input_tokens": 4000,
+      "output_tokens": 600,
+      "run_duration_ms": {
+        "p50": 2100.0,
+        "p95": 3800.0,
+        "p99": null
+      },
+      "runs": 2,
+      "spans": 12,
+      "spend": 1.25,
+      "value": "billing"
+    },
+    {
+      "at": "2027-01-15T08:00:00Z",
+      "cache_read_input_tokens": 0,
+      "cache_write_input_tokens": 0,
+      "duration_ms": {
+        "avg": 420.0,
+        "p50": 300.0,
+        "p90": 900.0,
+        "p99": 1400.0
+      },
+      "failed": 1,
+      "failed_runs": 1,
+      "input_tokens": 4000,
+      "output_tokens": 600,
+      "run_duration_ms": {
+        "p50": 2100.0,
+        "p95": 3800.0,
+        "p99": null
+      },
+      "runs": 2,
+      "spans": 12,
+      "spend": 0.5,
+      "value": ""
+    },
+    {
+      "at": "2027-01-15T08:00:00Z",
+      "cache_read_input_tokens": 0,
+      "cache_write_input_tokens": 0,
+      "duration_ms": {
+        "avg": 420.0,
+        "p50": 300.0,
+        "p90": 900.0,
+        "p99": 1400.0
+      },
+      "failed": 1,
+      "failed_runs": 1,
+      "input_tokens": 4000,
+      "others": true,
+      "output_tokens": 600,
+      "run_duration_ms": {
+        "p50": 2100.0,
+        "p95": 3800.0,
+        "p99": null
+      },
+      "runs": 2,
+      "spans": 12,
+      "spend": 0.75,
+      "value": ""
+    }
+  ],
+  "step": "day",
+  "tag": "team",
+  "truncated": false
+}

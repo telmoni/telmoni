@@ -14,12 +14,14 @@ import {
   type SessionLayoutSetting,
 } from "@/lib/server/entities/session-layout";
 import {
+  DashboardQuerySchema,
   LayoutQuerySchema,
   SavedViewOfAnyKindSchema,
   SessionViewQuerySchema,
   TraceTagsSchema,
   UserViewQuerySchema,
   ViewQuerySchema,
+  type DashboardView,
   type ListView,
   type TraceLayout,
 } from "@/lib/server/entities/traces";
@@ -31,14 +33,14 @@ import { ScoreType, SessionColumn, TraceColumn, UserColumn, ViewKind } from "@/l
 // each through its lane in telemetry, which holds the role each takes and
 // checks every value. What this checks is the shape the browser sent.
 
-export type ViewResult = ActionResult<{ view?: ListView | TraceLayout }>;
+export type ViewResult = ActionResult<{ view?: ListView | TraceLayout | DashboardView }>;
 
 const name = z.string().max(200);
 const columns = z.array(z.enum(TraceColumn)).max(64);
 
 /** What a view's save sends: what the browser could send, before the server
- *  checks its every value — a list's query and columns, or a layout's
- *  options, as its kind says. */
+ *  checks its every value — a list's query and columns, a layout's options
+ *  or a dashboard's charts, as its kind says. */
 const ViewInputSchema = z.discriminatedUnion("kind", [
   z.object({ name, kind: z.literal(ViewKind.Traces), query: ViewQuerySchema, columns }),
   z.object({
@@ -54,6 +56,12 @@ const ViewInputSchema = z.discriminatedUnion("kind", [
     columns: z.array(z.enum(UserColumn)).max(64),
   }),
   z.object({ name, kind: z.literal(ViewKind.Layout), query: LayoutQuerySchema, columns }),
+  z.object({
+    name,
+    kind: z.literal(ViewKind.Dashboard),
+    query: DashboardQuerySchema,
+    columns: z.array(z.string()).max(0),
+  }),
 ]);
 
 /** What setting the project's layout sends: a saved layout, or `null` for

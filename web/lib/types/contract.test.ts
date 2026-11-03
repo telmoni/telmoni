@@ -10,6 +10,7 @@ import {
   ApiKeyScope,
   AttemptOutcome,
   AttemptTrigger,
+  ChartMeasure,
   ConnectionStatus,
   ConnectorProvider,
   Content,
@@ -28,6 +29,7 @@ import {
   EvaluationTarget,
   LayoutOpen,
   Live,
+  MetricsGroup,
   MissingData,
   ModelProvider,
   NotificationKind,
@@ -69,6 +71,7 @@ import {
   measuresFor,
 } from "../alerts";
 import { CONFIRMATION_CODE_LENGTH } from "../confirmation-code";
+import { DASHBOARD_CHARTS_MAX, ROLLUP_GROUP_TOP } from "../dashboards";
 import { PINNED_MAX, PINNED_PER_TRACE } from "../layout";
 import { FILTER_VALUES_MAX, MAX_DAYS, MAX_LIMIT, OPENING_DAYS } from "../list-query";
 import {
@@ -109,6 +112,7 @@ const CONSOLE: Record<string, Record<string, string>> = {
   ApiKeyScope,
   AttemptOutcome,
   AttemptTrigger,
+  ChartMeasure,
   ConnectionStatus,
   ConnectorProvider,
   ContentField,
@@ -124,6 +128,7 @@ const CONSOLE: Record<string, Record<string, string>> = {
   EvaluationTarget,
   LayoutDepth,
   LayoutOpen,
+  MetricsGroup,
   MissingData,
   ModelProvider,
   NotificationKind,
@@ -197,6 +202,8 @@ describe("wire contract", () => {
       filter_value_max: FILTER_VALUE_MAX,
       pinned_max: PINNED_MAX,
       pinned_per_run: PINNED_PER_TRACE,
+      dashboard_charts_max: DASHBOARD_CHARTS_MAX,
+      rollup_group_top: ROLLUP_GROUP_TOP,
       utc_offset_west: UTC_OFFSET_WEST,
       utc_offset_east: UTC_OFFSET_EAST,
       alert_name_max: ALERT_NAME_MAX,

@@ -52,7 +52,7 @@ export default async function OverviewPage({
 
   const [notices, day, alerts, mode] = await Promise.all([
     fetchProjectNotifications(project.id),
-    fetchRollups(project.id, 1, null),
+    fetchRollups(project.id, 1),
     fetchAlerts(project.id),
     fetchContentMode(project.id),
   ]);

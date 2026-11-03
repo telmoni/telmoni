@@ -1,10 +1,10 @@
 //! A project's saved views, under [`Resource::View`]: views of its lists
-//! (`kind` = `traces`, `sessions` or `users`) and layouts of a session's page
-//! and a trace's (`layout`). `GET /internal/v1/telemetry/views?kind=`, which every role on
+//! (`kind` = `traces`, `sessions` or `users`), layouts of a session's page
+//! and a trace's (`layout`) and the dashboards page's charts (`dashboard`). `GET /internal/v1/telemetry/views?kind=`, which every role on
 //! the project reads, and `POST`, `PUT /views/{id}` and `DELETE /views/{id}`,
 //! which its owners and admins send. A view is a name, a query checked as
 //! its page would read it — the list's filters and sort, or a layout's
-//! options — and the columns shown, so a view always opens. No change to a
+//! options, or a dashboard's charts — and the columns shown, so a view always opens. No change to a
 //! view is audited: a view changes what a page opens on, never what anyone
 //! may see or what a project keeps.
 
@@ -24,9 +24,9 @@ use telmoni_shared::rbac::{Resource, Verb};
 use telmoni_shared::seam::{Auth, DroppedValue, TraceVocabulary};
 use telmoni_shared::types::WireEnum;
 use telmoni_shared::{
-    AuthError, LayoutDepth, LayoutOpen, OrInternal, ProjectId, SessionColumn, SessionSort,
-    SortDirection, SpanKind, SpanStatus, TelmoniError, TraceColumn, TraceSort, UserColumn,
-    UserSort, ViewKind,
+    AuthError, ChartMeasure, LayoutDepth, LayoutOpen, MetricsGroup, OrInternal, ProjectId,
+    SessionColumn, SessionSort, SortDirection, SpanKind, SpanStatus, TelmoniError, TraceColumn,
+    TraceSort, UserColumn, UserSort, ViewKind,
 };
 
 use crate::AppState;
@@ -58,7 +58,7 @@ fn parse_kind(text: &str) -> Result<ViewKind, TelmoniError> {
     match text.trim() {
         "" => Ok(ViewKind::Traces),
         given => given.parse().map_err(|_| {
-            TelmoniError::BadRequest("kind is traces, sessions, users or layout".into())
+            TelmoniError::BadRequest("kind is traces, sessions, users, layout or dashboard".into())
         }),
     }
 }
@@ -73,12 +73,12 @@ fn sort_of(kind: ViewKind, sort: &str) -> Option<String> {
         ViewKind::Traces => ListSort::<TraceSort>::parse(sort).map(|s| s.to_string()),
         ViewKind::Sessions => ListSort::<SessionSort>::parse(sort).map(|s| s.to_string()),
         ViewKind::Users => word::<UserSort>(sort),
-        ViewKind::Layout => None,
+        ViewKind::Layout | ViewKind::Dashboard => None,
     }
 }
 
 /// `given` as `kind`'s columns: each once, in the list's order, or `None`
-/// where one is not the list's. A layout's are a trace's.
+/// where one is not the list's. A layout's are a trace's; a dashboard has none.
 fn columns_of(kind: ViewKind, given: &[String]) -> Option<Vec<String>> {
     fn ordered<E: WireEnum>(given: &[String]) -> Option<Vec<String>> {
         let words: Vec<&str> = E::variants().iter().map(|column| column.word()).collect();
@@ -97,6 +97,7 @@ fn columns_of(kind: ViewKind, given: &[String]) -> Option<Vec<String>> {
         ViewKind::Traces | ViewKind::Layout => ordered::<TraceColumn>(given),
         ViewKind::Sessions => ordered::<SessionColumn>(given),
         ViewKind::Users => ordered::<UserColumn>(given),
+        ViewKind::Dashboard => given.is_empty().then(Vec::new),
     }
 }
 
@@ -345,8 +346,94 @@ impl LayoutOptions {
     }
 }
 
-/// What saving a view sends: its name, its kind, its query — the list's, or
-/// a layout's options — and the columns shown, by the list's words. A row's
+/// The most charts one dashboard draws, each a read of its own.
+pub const DASHBOARD_CHARTS_MAX: usize = 12;
+
+/// One of a dashboard's charts: what it draws and, for spend, what splits it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DashboardChart {
+    pub measure: ChartMeasure,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<MetricsGroup>,
+    /// The tag key a split by `tag` reads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tag: Option<String>,
+}
+
+impl DashboardChart {
+    fn checked(self) -> Result<Self, TelmoniError> {
+        if self.group.is_some() && self.measure != ChartMeasure::Spend {
+            return Err(TelmoniError::BadRequest(
+                "a chart is split by a group only where it draws spend".into(),
+            ));
+        }
+        // A tool call and a span's status carry no spend of their own.
+        if matches!(self.group, Some(MetricsGroup::Tool | MetricsGroup::Status)) {
+            return Err(TelmoniError::BadRequest(
+                "spend is split by model, agent, provider, environment, release, tag, user or \
+                 session"
+                    .into(),
+            ));
+        }
+        let tag = crate::rollups::tag_of(self.group, self.tag.as_deref())?;
+        Ok(Self { tag, ..self })
+    }
+}
+
+/// A dashboard: what a saved dashboard's `query` holds. Its charts name no
+/// user's or session's value, only what splits them, so an end user's
+/// erasure leaves none behind here.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DashboardOptions {
+    /// In the order the page draws them.
+    pub charts: Vec<DashboardChart>,
+}
+
+impl DashboardOptions {
+    /// The charts checked as the page reads them, each once: 1 to
+    /// [`DASHBOARD_CHARTS_MAX`] of them.
+    fn checked(self) -> Result<Self, TelmoniError> {
+        let charts = once(
+            self.charts
+                .into_iter()
+                .map(DashboardChart::checked)
+                .collect::<Result<Vec<_>, _>>()?,
+        );
+        if charts.is_empty() || charts.len() > DASHBOARD_CHARTS_MAX {
+            return Err(TelmoniError::BadRequest(format!(
+                "a dashboard draws 1 to {DASHBOARD_CHARTS_MAX} charts"
+            )));
+        }
+        Ok(Self { charts })
+    }
+
+    /// A saved dashboard's charts that still read, each other left out, so
+    /// one chart a later build no longer draws takes none of the rest with it.
+    fn readable(query: &Value) -> Self {
+        let charts = query
+            .get("charts")
+            .and_then(Value::as_array)
+            .map(|charts| {
+                charts
+                    .iter()
+                    .filter_map(|chart| {
+                        serde_json::from_value::<DashboardChart>(chart.clone())
+                            .ok()
+                            .and_then(|chart| chart.checked().ok())
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        Self {
+            charts: once(charts),
+        }
+    }
+}
+
+/// What saving a view sends: its name, its kind, its query — the list's, a
+/// layout's options or a dashboard's charts — and the columns shown, by the list's words. A row's
 /// own id is always shown, and is none of the columns.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -413,6 +500,15 @@ impl ViewInput {
                     })?
                     .checked()?,
             )?,
+            ViewKind::Dashboard => written(
+                &serde_json::from_value::<DashboardOptions>(given)
+                    .map_err(|_| {
+                        TelmoniError::BadRequest(
+                            "a dashboard's charts are not ones the page draws".into(),
+                        )
+                    })?
+                    .checked()?,
+            )?,
         };
         let columns = columns_of(self.kind, &self.columns).ok_or_else(|| {
             TelmoniError::BadRequest("a view's columns name one the list does not show".into())
@@ -468,6 +564,7 @@ fn readable(kind: ViewKind, id: Uuid, query: Value) -> Value {
         ViewKind::Layout => serde_json::from_value::<LayoutOptions>(query)
             .ok()
             .map(|o| written(&o)),
+        ViewKind::Dashboard => Some(written(&DashboardOptions::readable(&query))),
     };
     match read {
         Some(Ok(value)) => value,
@@ -478,6 +575,7 @@ fn readable(kind: ViewKind, id: Uuid, query: Value) -> Value {
                 ViewKind::Layout => {
                     written(&LayoutOptions::default()).unwrap_or_else(|_| json!({}))
                 }
+                ViewKind::Dashboard => json!({ "charts": [] }),
             }
         }
     }
@@ -522,6 +620,7 @@ const fn what(kind: ViewKind) -> &'static str {
     match kind {
         ViewKind::Traces | ViewKind::Sessions | ViewKind::Users => "view",
         ViewKind::Layout => "layout",
+        ViewKind::Dashboard => "dashboard",
     }
 }
 
@@ -907,11 +1006,149 @@ mod tests {
         assert_eq!(kept.query["pinned"], json!(["plan"]));
     }
 
+    fn dashboard(query: Value, columns: &[&str]) -> ViewInput {
+        serde_json::from_value(json!({
+            "name": "Spend",
+            "kind": "dashboard",
+            "query": query,
+            "columns": columns,
+        }))
+        .expect("a dashboard's body")
+    }
+
+    /// A dashboard is kept as the page draws it: each chart once, its tag
+    /// key trimmed, and no columns.
+    #[test]
+    fn a_dashboard_is_kept_as_the_page_would_draw_it() {
+        let kept = dashboard(
+            json!({ "charts": [
+                { "measure": "spend" },
+                { "measure": "spend", "group": "tag", "tag": " team " },
+                { "measure": "spend", "group": "tag", "tag": "team" },
+                { "measure": "first_token" },
+            ] }),
+            &[],
+        )
+        .checked()
+        .expect("kept");
+        assert_eq!(kept.kind, ViewKind::Dashboard);
+        assert_eq!(
+            kept.query,
+            json!({ "charts": [
+                { "measure": "spend" },
+                { "measure": "spend", "group": "tag", "tag": "team" },
+                { "measure": "first_token" },
+            ] })
+        );
+        assert!(kept.columns.is_empty());
+    }
+
+    /// ⚠ A dashboard the page would refuse is a 400 that echoes none of it:
+    /// no chart, too many, a measure or a group there is none of, a split of
+    /// anything but spend, a tag split without its key or a key on another,
+    /// a user's value, or columns.
+    #[test]
+    fn a_dashboard_the_page_would_refuse_is_refused() {
+        let many: Vec<Value> = (0..=DASHBOARD_CHARTS_MAX)
+            .map(|i| json!({ "measure": "spend", "group": "tag", "tag": format!("k{i}") }))
+            .collect();
+        for (name, query, columns) in [
+            ("None", json!({ "charts": [] }), &[][..]),
+            ("Many", json!({ "charts": many }), &[][..]),
+            (
+                "Measure",
+                json!({ "charts": [{ "measure": "cost<script>" }] }),
+                &[][..],
+            ),
+            (
+                "Group",
+                json!({ "charts": [{ "measure": "spend", "group": "name<script>" }] }),
+                &[][..],
+            ),
+            (
+                "Split",
+                json!({ "charts": [{ "measure": "latency", "group": "model" }] }),
+                &[][..],
+            ),
+            (
+                "Tool",
+                json!({ "charts": [{ "measure": "spend", "group": "tool" }] }),
+                &[][..],
+            ),
+            (
+                "Keyless",
+                json!({ "charts": [{ "measure": "spend", "group": "tag" }] }),
+                &[][..],
+            ),
+            (
+                "Stray",
+                json!({ "charts": [{ "measure": "spend", "tag": "team<script>" }] }),
+                &[][..],
+            ),
+            (
+                "Value",
+                json!({ "charts": [{ "measure": "spend", "user": "u-1<script>" }] }),
+                &[][..],
+            ),
+            ("List", json!({ "agent": ["support-bot<script>"] }), &[][..]),
+            (
+                "Columns",
+                json!({ "charts": [{ "measure": "spend" }] }),
+                &["agent"][..],
+            ),
+        ] {
+            let refused = dashboard(query, columns).checked().expect_err(name);
+            let problem = refused.to_problem_details();
+            assert_eq!(problem.status, 400, "{name}");
+            assert!(
+                !problem.detail.unwrap_or_default().contains("script"),
+                "{name}"
+            );
+        }
+    }
+
+    /// A saved dashboard's chart that no longer reads is left out, and the
+    /// rest kept.
+    #[test]
+    fn a_dashboards_chart_that_no_longer_reads_is_left_out() {
+        let read = DashboardOptions::readable(&json!({ "charts": [
+            { "measure": "spend", "group": "user" },
+            { "measure": "cost" },
+            { "measure": "tokens", "group": "model" },
+            { "measure": "spend", "group": "status" },
+            { "measure": "runs" },
+        ] }));
+        assert_eq!(
+            read.charts,
+            [
+                DashboardChart {
+                    measure: ChartMeasure::Spend,
+                    group: Some(MetricsGroup::User),
+                    tag: None
+                },
+                DashboardChart {
+                    measure: ChartMeasure::Runs,
+                    group: None,
+                    tag: None
+                },
+            ]
+        );
+        assert!(
+            DashboardOptions::readable(&json!({ "depth": "steps" }))
+                .charts
+                .is_empty()
+        );
+    }
+
     #[test]
     fn the_kind_is_the_trace_lists_unless_the_url_names_another() {
         assert_eq!(parse_kind("").expect("the default"), ViewKind::Traces);
         assert_eq!(parse_kind(" layout ").expect("a layout"), ViewKind::Layout);
         assert_eq!(parse_kind("users").expect("the users'"), ViewKind::Users);
+        assert_eq!(
+            parse_kind("dashboard").expect("a dashboard"),
+            ViewKind::Dashboard
+        );
         let refused = parse_kind("page<script>")
             .expect_err("refused")
             .to_problem_details();

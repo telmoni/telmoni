@@ -11,34 +11,72 @@ vi.mock("@/components/page-header", () => ({
   ),
 }));
 vi.mock("@/components/window-picker", () => ({ WindowPicker: () => null }));
-vi.mock("./_group-picker", () => ({ GroupPicker: () => null }));
-// Recharts measures a box jsdom has none of: the charts are their bars' count.
+vi.mock("./_charts-picker", () => ({
+  ChartsPicker: ({ tagKeys }: { tagKeys: string[] }) => <div data-testid="picker" data-tags={tagKeys.join()} />,
+}));
+const menu = vi.hoisted(() => vi.fn());
+vi.mock("./_dashboards-menu", () => ({
+  DashboardsMenu: (props: unknown) => {
+    menu(props);
+    return null;
+  },
+}));
+// Recharts measures a box jsdom has none of: the charts are their words and
+// their bars' count, and each split its read.
 vi.mock("./_charts", () => ({
-  DashboardCharts: ({ bars, firstToken }: { bars: unknown[]; firstToken: unknown[] }) => (
-    <div data-testid="charts" data-bars={bars.length} data-first-token={firstToken.length} />
+  DashboardCharts: ({
+    charts,
+    bars,
+    firstToken,
+    splits,
+  }: {
+    charts: { measure: string; group?: string; tag?: string }[];
+    bars: unknown[];
+    firstToken: unknown[];
+    splits: Record<string, { kind: string; days?: number }>;
+  }) => (
+    <div
+      data-testid="charts"
+      data-charts={charts.map((c) => [c.measure, c.group, c.tag].filter(Boolean).join(":")).join()}
+      data-bars={bars.length}
+      data-first-token={firstToken.length}
+      data-splits={JSON.stringify(splits, (key, value) => (key === "points" ? value.length : value))}
+    />
   ),
 }));
 vi.mock("@/lib/server/project-page", () => ({
-  projectPage: async () => ({ kind: "ok", project: { id: "project_1", slug: "web", name: "Web" } }),
+  projectPage: async () => ({
+    kind: "ok",
+    project: { id: "project_1", slug: "web", name: "Web", role: "member" },
+  }),
 }));
+const fetchDashboards = vi.hoisted(() => vi.fn());
 
 const fetchRollups = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/server/entities/dashboards", async (importActual) => ({
   ...(await importActual<typeof import("@/lib/server/entities/dashboards")>()),
   fetchRollups: (...args: unknown[]) => fetchRollups(...args),
+  fetchDashboards: (id: string) => fetchDashboards(id),
 }));
 const fetchAlerts = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/server/entities/alerts", () => ({ fetchAlerts: (id: string) => fetchAlerts(id) }));
+const fetchTraceHistogram = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/server/entities/traces", () => ({
-  fetchTraceHistogram: async () => ({
+  fetchTraceFacets: async () => ({
+    kind: "ok",
+    facets: { tag: { values: [{ value: "team:billing", count: 2 }, { value: "repo:core", count: 1 }], more: false } },
+  }),
+  fetchTraceHistogram: (...args: unknown[]) => fetchTraceHistogram(...args),
+}));
+const histogram = () => ({
     kind: "ok",
     histogram: {
       bars: [
         { at: "2026-11-02T00:00:00Z", time_to_first_token_p50_ms: 300, time_to_first_token_p95_ms: 900 },
       ],
+      bucket_seconds: 86_400,
     },
-  }),
-}));
+});
 
 import DashboardsPage from "./page";
 
@@ -66,9 +104,26 @@ const rollups = (points: unknown[], group: string | null = null, truncated = fal
 
 beforeEach(() => {
   vi.clearAllMocks();
-  fetchRollups.mockImplementation(async (_id: string, _days: number, group: string | null) =>
-    group ? rollups([point("gpt-5", 1), point("claude", 4)], group) : rollups([point(undefined, 5)]),
+  fetchRollups.mockImplementation(async (_id: string, days: number, group?: string) =>
+    group
+      ? rollups([point("gpt-5", 1), point("claude", 4)], group, false, group === "user" ? 30 : days)
+      : rollups([point(undefined, 5)]),
   );
+  fetchTraceHistogram.mockResolvedValue(histogram());
+  fetchDashboards.mockResolvedValue({
+    kind: "ok",
+    dashboards: [
+      {
+        id: "d-1",
+        kind: "dashboard",
+        name: "Team spend",
+        query: { charts: [{ measure: "spend", group: "tag", tag: "team" }, { measure: "spend", group: "tool" }] },
+        columns: [],
+        created_at: "2026-11-02T00:00:00Z",
+        updated_at: "2026-11-02T00:00:00Z",
+      },
+    ],
+  });
   fetchAlerts.mockResolvedValue({
     kind: "ok",
     alerts: [
@@ -111,13 +166,15 @@ beforeEach(() => {
 });
 
 describe("DashboardsPage", () => {
-  it("draws the window's charts, the month's budgets and each group's totals, the costliest first", async () => {
-    render(await DashboardsPage({ params: PARAMS, searchParams: Promise.resolve({ group: "model" }) }));
+  it("opens on the cost dashboard and the month's budgets", async () => {
+    render(await DashboardsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     const charts = screen.getByTestId("charts");
+    expect(charts.dataset.charts).toBe("spend,tokens,runs,latency,first_token");
     expect(charts.dataset.bars).toBe("1");
     expect(charts.dataset.firstToken).toBe("1");
-    expect(fetchRollups).toHaveBeenCalledWith("project_1", 7, null);
-    expect(fetchRollups).toHaveBeenCalledWith("project_1", 7, "model");
+    expect(fetchRollups).toHaveBeenCalledTimes(1);
+    expect(fetchRollups).toHaveBeenCalledWith("project_1", 7);
+    expect(screen.getByTestId("picker").dataset.tags).toBe("repo,team");
 
     const budgets = within(screen.getByRole("region", { name: "Budgets this month" }));
     expect(budgets.getByText("Monthly budget")).toBeInTheDocument();
@@ -126,9 +183,43 @@ describe("DashboardsPage", () => {
     expect(budgets.queryByText("Paused budget")).toBeNull();
     expect(budgets.queryByText("Slow")).toBeNull();
     expect(screen.queryByText("The window holds more than one read answers.")).toBeNull();
+  });
 
-    const byModel = screen.getByRole("region", { name: "By model" });
-    expect(within(byModel).getAllByText(/^\$/).map((cell) => cell.textContent)).toEqual(["$4.00", "$1.00"]);
+  it("draws the URL's charts, reading each split once, and the spans' none past their window", async () => {
+    render(
+      await DashboardsPage({
+        params: PARAMS,
+        searchParams: Promise.resolve({ days: "90", chart: ["spend:user", "spend:model", "spend:user", "runs"] }),
+      }),
+    );
+    const charts = screen.getByTestId("charts");
+    expect(charts.dataset.charts).toBe("spend:user,spend:model,runs");
+    expect(JSON.parse(charts.dataset.splits ?? "")).toEqual({
+      "spend:user": { kind: "ok", points: 2, days: 30 },
+      "spend:model": { kind: "ok", points: 2, days: 90 },
+    });
+    expect(fetchRollups).toHaveBeenCalledWith("project_1", 90, "user", undefined);
+    expect(fetchRollups).toHaveBeenCalledWith("project_1", 90, "model", undefined);
+    expect(fetchTraceHistogram).not.toHaveBeenCalled();
+  });
+
+  it("opens a saved dashboard on its charts, leaving out one the page does not draw", async () => {
+    render(await DashboardsPage({ params: PARAMS, searchParams: Promise.resolve({ view: "d-1" }) }));
+    expect(screen.getByTestId("charts").dataset.charts).toBe("spend:tag:team");
+    expect(fetchRollups).toHaveBeenCalledWith("project_1", 7, "tag", "team");
+    const props = menu.mock.calls[0]?.[0] as { current?: { id: string }; canSave: boolean };
+    expect(props.current?.id).toBe("d-1");
+    expect(props.canSave).toBe(false);
+  });
+
+  it("names a split that could not be read as unread, and draws the rest", async () => {
+    fetchRollups.mockImplementation(async (_id: string, _days: number, group?: string) =>
+      group ? { kind: "unavailable" } : rollups([point(undefined, 5)]),
+    );
+    render(await DashboardsPage({ params: PARAMS, searchParams: Promise.resolve({ chart: ["spend:session"] }) }));
+    expect(JSON.parse(screen.getByTestId("charts").dataset.splits ?? "")).toEqual({
+      "spend:session": { kind: "unread" },
+    });
   });
 
   it("says nothing has landed in the window the totals read, and draws no chart", async () => {

@@ -164,6 +164,38 @@ describe("saving a new view", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  // A dashboard saved from the dashboards page opens the page on it, its
+  // charts and window kept.
+  it("takes the dashboards page to the dashboard saved, and refuses one with columns", async () => {
+    const dashboardInput = {
+      name: "Team spend",
+      kind: "dashboard",
+      query: { charts: [{ measure: "spend", group: "tag", tag: "team" }] },
+      columns: [],
+    };
+    posted.path = "/acme/web/dashboards?days=30&chart=spend%3Atag%3Ateam";
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: NEW,
+          ...dashboardInput,
+          created_at: "2026-11-02T00:00:00Z",
+          updated_at: "2026-11-02T00:00:00Z",
+        }),
+        { status: 201 },
+      ),
+    );
+    await expect(saveTraceViewAction(PROJECT, dashboardInput)).rejects.toThrow(
+      `REDIRECT:/acme/web/dashboards?days=30&chart=spend%3Atag%3Ateam&view=${NEW}`,
+    );
+    fetchMock.mockClear();
+    expect(await saveTraceViewAction(PROJECT, { ...dashboardInput, columns: ["agent"] })).toEqual({
+      ok: false,
+      error: "That view could not be read.",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   // Saved all the same, so the menu has to list it: the page is drawn again.
   it("draws the list again when the lane's answer cannot be read", async () => {
     fetchMock.mockResolvedValue(new Response("{}", { status: 201 }));

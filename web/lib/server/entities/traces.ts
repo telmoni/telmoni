@@ -4,8 +4,10 @@ import { z } from "zod";
 import { env } from "@/lib/env";
 import { queryString } from "@/lib/list-query";
 import {
+  ChartMeasure,
   LayoutDepth,
   LayoutOpen,
+  MetricsGroup,
   SessionColumn,
   SessionSort,
   SortDirection,
@@ -208,18 +210,41 @@ export const TraceLayoutSchema = SavedViewSchema.extend({
 });
 export type TraceLayout = z.infer<typeof TraceLayoutSchema>;
 
+/** A dashboard's charts: what each draws and, for spend, what splits it. */
+export const DashboardQuerySchema = z.object({
+  charts: z
+    .array(
+      z.object({
+        measure: z.enum(ChartMeasure),
+        group: z.enum(MetricsGroup).optional(),
+        tag: z.string().optional(),
+      }),
+    )
+    .max(64),
+});
+
+// One of the project's saved dashboards: its charts, under a name.
+export const DashboardViewSchema = SavedViewSchema.extend({
+  kind: z.literal(ViewKind.Dashboard),
+  query: DashboardQuerySchema,
+  columns: z.array(z.string()).max(0),
+});
+export type DashboardView = z.infer<typeof DashboardViewSchema>;
+
 /** A saved view of any kind, as a save answers it. */
 export const SavedViewOfAnyKindSchema = z.discriminatedUnion("kind", [
   TraceViewSchema,
   SessionViewSchema,
   UserViewSchema,
   TraceLayoutSchema,
+  DashboardViewSchema,
 ]);
 
 export const TraceViewListSchema = z.object({ views: z.array(TraceViewSchema) });
 export const SessionViewListSchema = z.object({ views: z.array(SessionViewSchema) });
 export const UserViewListSchema = z.object({ views: z.array(UserViewSchema) });
 export const TraceLayoutListSchema = z.object({ views: z.array(TraceLayoutSchema) });
+export const DashboardViewListSchema = z.object({ views: z.array(DashboardViewSchema) });
 
 /** What narrows and orders a list, and which page of it shows, as the URL
  *  carries it, `S` the sorts it takes. The server checks every value; the

@@ -484,6 +484,63 @@ async fn a_list_view_is_saved_under_its_lists_kind(pool: PgPool) {
     );
 }
 
+/// A dashboard is a view of its own kind: owners and admins save it, every
+/// role reads it under `?kind=dashboard`, and it is none of a list's views.
+#[sqlx::test]
+async fn a_dashboard_is_saved_by_owners_and_admins_and_read_by_all(pool: PgPool) {
+    let p = project(&pool);
+    let spend = json!({
+        "name": "Spend",
+        "kind": "dashboard",
+        "query": { "charts": [
+            { "measure": "spend", "group": "user" },
+            { "measure": "latency" },
+        ] },
+    });
+    let (status, body) = p
+        .send(p.request("POST", LANE, MEMBER, Some(spend.clone())))
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    let (status, saved) = p.send(p.request("POST", LANE, ADMIN, Some(spend))).await;
+    assert_eq!(status, StatusCode::CREATED, "{saved}");
+    assert_eq!(saved["kind"], "dashboard");
+    assert_eq!(saved["columns"], json!([]));
+    let id = saved["id"].as_str().expect("an id").to_owned();
+
+    let (status, listed) = p
+        .send(p.request("GET", &format!("{LANE}?kind=dashboard"), MEMBER, None))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{listed}");
+    assert_eq!(
+        listed["views"][0]["query"],
+        json!({ "charts": [{ "measure": "spend", "group": "user" }, { "measure": "latency" }] })
+    );
+    assert!(p.names(MEMBER).await.is_empty(), "none of the trace list's");
+
+    let over = json!({
+        "name": "Spend by team",
+        "kind": "dashboard",
+        "query": { "charts": [{ "measure": "spend", "group": "tag", "tag": "team" }] },
+    });
+    let (status, body) = p
+        .send(p.request("PUT", &format!("{LANE}/{id}"), MEMBER, Some(over.clone())))
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    let (status, body) = p
+        .send(p.request("PUT", &format!("{LANE}/{id}"), OWNER, Some(over)))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, _) = p
+        .send(p.request("DELETE", &format!("{LANE}/{id}"), MEMBER, None))
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = p
+        .send(p.request("DELETE", &format!("{LANE}/{id}"), ADMIN, None))
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(views_of(&pool, &p.project).await, 0);
+}
+
 /// A project reads and writes its own views and no other's: the row policy
 /// and each query's own `WHERE` both name the project.
 #[sqlx::test]

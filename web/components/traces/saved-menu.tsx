@@ -45,17 +45,17 @@ import { Label } from "@/components/ui/label";
 import type { ActionResult } from "@/lib/action-result";
 import { cn } from "@/lib/utils";
 
-// The project's saved views and saved layouts are rows of one table, kept
-// through one menu: picked, each a link; saved as new, saved over, renamed
+// The project's saved views, layouts and dashboards are rows of one table,
+// kept through one menu: picked, each a link; saved as new, saved over, renamed
 // and deleted by owners and admins, for everyone on the project.
 
 /** The longest a saved view's or layout's name is, as the server takes it. */
 const NAME_MAX = 60;
 
-/** What the menu's rows share: a saved view of either kind. */
+/** What the menu's rows share: a saved view of any kind. */
 type Saved = { id: string; name: string };
 
-const PLURAL = { view: "Views", layout: "Layouts" } as const;
+const PLURAL = { view: "Views", layout: "Layouts", dashboard: "Dashboards" } as const;
 
 type Props<T extends Saved> = {
   noun: keyof typeof PLURAL;

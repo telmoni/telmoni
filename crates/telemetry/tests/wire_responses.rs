@@ -11,9 +11,9 @@ use uuid::Uuid;
 use telmoni_shared::slug::Slug;
 use telmoni_shared::test_util::pin_contract;
 use telmoni_shared::{
-    ContentMode, IncidentStatus, LayoutDepth, LayoutOpen, MissingData, OrganizationId, ProjectId,
-    RuleAggregation, RuleLevel, RuleMeasure, RuleOperator, RuleWindow, SessionSort, Severity,
-    SortDirection, SpanKind, SpanStatus, TraceSort, UserSort, ViewKind,
+    ChartMeasure, ContentMode, IncidentStatus, LayoutDepth, LayoutOpen, MetricsGroup, MissingData,
+    OrganizationId, ProjectId, RuleAggregation, RuleLevel, RuleMeasure, RuleOperator, RuleWindow,
+    SessionSort, Severity, SortDirection, SpanKind, SpanStatus, TraceSort, UserSort, ViewKind,
 };
 use telmoni_telemetry::contract::{InventoryRow, Needs, ReadOn};
 use telmoni_telemetry::handler::content_mode::{ContentModeSetting, OFFERED};
@@ -30,7 +30,9 @@ use telmoni_telemetry::handler::traces::{
     TraceSpan, TraceTags, UnpricedModel,
 };
 use telmoni_telemetry::handler::users::UserList;
-use telmoni_telemetry::handler::views::{LayoutFilter, LayoutOptions, View, ViewList, ViewQuery};
+use telmoni_telemetry::handler::views::{
+    DashboardChart, DashboardOptions, LayoutFilter, LayoutOptions, View, ViewList, ViewQuery,
+};
 use telmoni_telemetry::rules::db::PausedBy;
 use telmoni_telemetry::rules::incidents::IncidentRow;
 use telmoni_telemetry::rules::mutes::MuteRow;
@@ -462,6 +464,31 @@ fn saved_views_answer_as_the_console_reads() {
             )],
         },
     );
+    let charts = DashboardOptions {
+        charts: vec![
+            DashboardChart {
+                measure: ChartMeasure::Spend,
+                group: Some(MetricsGroup::Tag),
+                tag: Some("team".into()),
+            },
+            DashboardChart {
+                measure: ChartMeasure::Latency,
+                group: None,
+                tag: None,
+            },
+        ],
+    };
+    pin(
+        "dashboards",
+        &ViewList {
+            views: vec![view(
+                ViewKind::Dashboard,
+                "Spend by team",
+                serde_json::to_value(charts).expect("a dashboard serializes"),
+                &[],
+            )],
+        },
+    );
     pin(
         "session-views",
         &ViewList {
@@ -672,6 +699,53 @@ fn the_privacy_posture_answers_as_the_console_reads() {
                 max_span_days: 360,
                 rollup_months: 13,
             },
+        },
+    );
+}
+
+/// The dashboards page's totals split by a tag from the spans: a named
+/// value, a run carrying none, and the rest folded.
+#[test]
+fn the_rollups_answer_as_the_console_reads() {
+    use telmoni_telemetry::rollups::{Durations, MetricPoint, Metrics, RunDurations};
+    let point = |value: &str, others: bool, spend: f64| MetricPoint {
+        at: at(0),
+        value: Some(value.into()),
+        others,
+        spans: 12,
+        failed: 1,
+        runs: 2,
+        failed_runs: 1,
+        input_tokens: 4_000,
+        output_tokens: 600,
+        cache_read_input_tokens: 0,
+        cache_write_input_tokens: 0,
+        spend,
+        duration_ms: Durations {
+            avg: 420.0,
+            p50: Some(300.0),
+            p90: Some(900.0),
+            p99: Some(1_400.0),
+        },
+        run_duration_ms: RunDurations {
+            p50: Some(2_100.0),
+            p95: Some(3_800.0),
+            p99: None,
+        },
+    };
+    pin(
+        "rollups",
+        &Metrics {
+            days: 30,
+            step: "day",
+            group: Some(MetricsGroup::Tag),
+            tag: Some("team".into()),
+            points: vec![
+                point("billing", false, 1.25),
+                point("", false, 0.5),
+                point("", true, 0.75),
+            ],
+            truncated: false,
         },
     );
 }

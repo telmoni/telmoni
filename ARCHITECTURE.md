@@ -34,7 +34,7 @@ Telmoni is a privacy-first telemetry and monitoring platform for AI agents, open
 - notifications, to an in-app feed, Slack and webhooks;
 - a hash-chained audit log, exportable by range;
 - a read-only console agent that answers from the docs and a project's own data;
-- telemetry: ingest over OpenTelemetry's own protocol, behind a project API key, with every content field dropped at the door, or kept sealed in Postgres where the project's content mode is `on`; each project's settings, saved views and layouts in Postgres, its content mode set by the organization's owner and the key its user ids are hashed under; the spans and their hourly totals in ClickHouse, read back as traces, sessions and users; and alerts over them, whose incidents reach the feed and the connectors each alert links.
+- telemetry: ingest over OpenTelemetry's own protocol, behind a project API key, with every content field dropped at the door, or kept sealed in Postgres where the project's content mode is `on`; each project's settings, saved views, layouts and dashboards in Postgres, its content mode set by the organization's owner and the key its user ids are hashed under; the spans and their hourly totals in ClickHouse, read back as traces, sessions and users; and alerts over them, whose incidents reach the feed and the connectors each alert links.
 
 It is **one Rust binary**, `telmoni-server`, and **a Next.js console** beside it, deployed together with a Helm chart or Docker Compose. A deployment that needs more builds its own binary and console on these crates rather than forking them ([Extending the core](#extending-the-core)).
 
@@ -246,8 +246,8 @@ telemetry       project_settings (the content mode; the project's hashing key, s
                 and its content key, wrapped under CONTENT_KEK; the saved layout its sessions and traces open in,
                 if one), plain_content (an `on` project's content, a sealed row a field of a span),
                 content_held (the bytes of content each organization keeps),
-                trace_views (a project's saved views of its traces, sessions and users lists, and its
-                saved layouts of a session's page and a trace's: one table, a kind each), rules (a project's alerts, each
+                trace_views (a project's saved views of its traces, sessions and users lists, its
+                saved layouts of a session's page and a trace's, and its dashboards: one table, a kind each), rules (a project's alerts, each
                 filed under its organization too, its last evaluation and its severity), incidents
                 (each alert's breaches, one open at a time, with the connections their notices went
                 to and the runs they showed), rule_connectors (the connectors each

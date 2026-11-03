@@ -262,12 +262,40 @@ export type LayoutOpen = typeof LayoutOpen[keyof typeof LayoutOpen];
 
 /** Wire vocabulary of the Rust `ViewKind`: what a saved view is a view of. */
 export const ViewKind = {
-  Traces:   "traces",
-  Sessions: "sessions",
-  Users:    "users",
-  Layout:   "layout",
+  Traces:    "traces",
+  Sessions:  "sessions",
+  Users:     "users",
+  Layout:    "layout",
+  Dashboard: "dashboard",
 } as const;
 export type ViewKind = typeof ViewKind[keyof typeof ViewKind];
+
+/** Wire vocabulary of the Rust `MetricsGroup`: what a project's totals over
+ *  time are split by. */
+export const MetricsGroup = {
+  Agent:       "agent",
+  Model:       "model",
+  Provider:    "provider",
+  Tool:        "tool",
+  Status:      "status",
+  Environment: "environment",
+  Release:     "release",
+  Tag:         "tag",
+  User:        "user",
+  Session:     "session",
+} as const;
+export type MetricsGroup = typeof MetricsGroup[keyof typeof MetricsGroup];
+
+/** Wire vocabulary of the Rust `ChartMeasure`: what one of a dashboard's
+ *  charts draws. */
+export const ChartMeasure = {
+  Spend:      "spend",
+  Tokens:     "tokens",
+  Runs:       "runs",
+  Latency:    "latency",
+  FirstToken: "first_token",
+} as const;
+export type ChartMeasure = typeof ChartMeasure[keyof typeof ChartMeasure];
 
 /** Wire vocabulary of the Rust `RuleMeasure`: what an alert measures of each
  *  span it reads. */

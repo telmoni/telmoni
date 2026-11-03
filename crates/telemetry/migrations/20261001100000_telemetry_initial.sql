@@ -132,15 +132,16 @@ CREATE TABLE telemetry.trace_views (
     kind        TEXT        NOT NULL DEFAULT 'traces',
     name        TEXT        NOT NULL,
     -- A list's query, each filter's values a list (`{"agent": ["…"],
-    -- "sort": "tokens", "days": 30}`), or a layout's options (`{"depth":
-    -- "calls", "open": "failed", …}`); the lane checks each as its page
-    -- would read it.
+    -- "sort": "tokens", "days": 30}`), a layout's options (`{"depth":
+    -- "calls", "open": "failed", …}`) or a dashboard's charts (`{"charts":
+    -- [{"measure": "spend", "group": "user"}]}`); the lane checks each as
+    -- its page would read it.
     query       JSONB       NOT NULL,
     -- The columns shown, by the list's column words, in the list's order.
     columns     TEXT[]      NOT NULL,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT trace_views_kind_check CHECK (kind IN ('traces', 'sessions', 'users', 'layout')),
+    CONSTRAINT trace_views_kind_check CHECK (kind IN ('traces', 'sessions', 'users', 'layout', 'dashboard')),
     CONSTRAINT trace_views_name_check CHECK (char_length(name) BETWEEN 1 AND 60),
     CONSTRAINT trace_views_query_check CHECK (jsonb_typeof(query) = 'object')
 );

@@ -49,15 +49,15 @@ as a **Member**.
 ## Project roles
 
 Inside each project, a project role decides what you can do with project
-resources: API keys, connectors, saved views of its lists and layouts of its
-sessions, its alerts, and project audit events.
+resources: API keys, connectors, saved views of its lists, layouts of its
+sessions and dashboards, its alerts, and project audit events.
 
 | Permission | Owner | Admin | Member |
 |---|---|---|---|
 | View project overview and resources | Yes | Yes | Yes |
 | Read the project's notices on its Overview, and mark them read for everyone on it | Yes | Yes | Yes |
-| Open the project's [saved views](/docs/monitoring/traces#saved-views) of its traces, sessions and users and [saved layouts](/docs/monitoring/sessions#keeping-a-layout) of its sessions | Yes | Yes | Yes |
-| Save, rename, and delete saved views and layouts, and set the layout the project opens in | Yes | Yes | No |
+| Open the project's [saved views](/docs/monitoring/traces#saved-views) of its traces, sessions and users, [saved layouts](/docs/monitoring/sessions#keeping-a-layout) of its sessions and [saved dashboards](/docs/monitoring/dashboards#saved-dashboards) | Yes | Yes | Yes |
+| Save, rename, and delete saved views, layouts and dashboards, and set the layout the project opens in | Yes | Yes | No |
 | Make, edit, pause, mute, and delete the project's [alerts](/docs/monitoring/alerts); acknowledge and resolve its incidents | Yes | Yes | Yes |
 | Add and remove a trace's [tags](/docs/monitoring/traces#tags) | Yes | Yes | Yes |
 | View API keys (names and dates, never the raw key) | Yes | Yes | Yes |
@@ -79,14 +79,14 @@ sessions, its alerts, and project audit events.
   organization.
 - **Admin**: Operates the project: creates, rotates, and revokes API keys;
   manages Slack and webhook connectors; manages project seats; saves the
-  trace list's views and the sessions' layouts, and sets the layout the
+  trace list's views, the sessions' layouts and the dashboards, and sets the layout the
   project opens in; and reads the project audit log. Cannot change the project's content mode, or
   delete or transfer the project.
 - **Member**: Read-only access to project resources but its alerts and its
   traces' tags. Can
   inspect active connectors, delivery logs, and API key metadata (name,
-  creation date, last used date), and open the project's saved views and
-  layouts. Cannot view the project audit log, and changes nothing but the
+  creation date, last used date), and open the project's saved views,
+  layouts and dashboards. Cannot view the project audit log, and changes nothing but the
   project's alerts and their incidents and its traces' tags, as every role
   can; whether the
   project's notices are marked read, which is the same for everyone on the
@@ -111,7 +111,7 @@ do and the one you hold:
 ```
 
 Every other refusal answers `/errors/authz/forbidden`, and `detail` says what
-is refused and to whom: connectors, saved views and layouts and the audit log (decided by
+is refused and to whom: connectors, saved views, layouts and dashboards and the audit log (decided by
 the same role matrix), the console agent, a project's transfer and, on the hosted service,
 billing; and what is the organization's own, decided by your role on it, which `detail`
 names with the least role that may: its name and URL, creating a project, its roster and

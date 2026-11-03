@@ -35,6 +35,13 @@
       "scheduled",
       "manual"
     ],
+    "ChartMeasure": [
+      "spend",
+      "tokens",
+      "runs",
+      "latency",
+      "first_token"
+    ],
     "ConnectionStatus": [
       "active",
       "errored",
@@ -125,6 +132,18 @@
       "none",
       "failed",
       "all"
+    ],
+    "MetricsGroup": [
+      "agent",
+      "model",
+      "provider",
+      "tool",
+      "status",
+      "environment",
+      "release",
+      "tag",
+      "user",
+      "session"
     ],
     "MissingData": [
       "zero",
@@ -360,7 +379,8 @@
       "traces",
       "sessions",
       "users",
-      "layout"
+      "layout",
+      "dashboard"
     ]
   },
   "flags": {
@@ -385,6 +405,7 @@
     "api_key_name_max": 100,
     "audit_export_kept_days": 7,
     "confirmation_code_length": 6,
+    "dashboard_charts_max": 12,
     "email_max": 254,
     "filter_value_max": {
       "agent": 128,
@@ -410,6 +431,7 @@
     "pinned_max": 8,
     "pinned_per_run": 32,
     "project_name_max": 100,
+    "rollup_group_top": 10,
     "trace_question_max": 500,
     "utc_offset_east": 840,
     "utc_offset_west": -720

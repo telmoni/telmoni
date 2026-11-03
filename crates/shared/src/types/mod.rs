@@ -2,6 +2,7 @@
 
 pub mod api_key_scope;
 pub mod audit_action;
+pub mod chart_measure;
 pub mod content_mode;
 pub mod email;
 pub mod evaluation_status;
@@ -11,6 +12,7 @@ pub mod grants;
 pub mod incident_status;
 pub mod layout_depth;
 pub mod layout_open;
+pub mod metrics_group;
 pub mod missing_data;
 pub mod model_provider;
 pub mod notification_kind;
@@ -44,6 +46,7 @@ pub mod wire_enum;
 
 pub use api_key_scope::ApiKeyScope;
 pub use audit_action::AuditAction;
+pub use chart_measure::ChartMeasure;
 pub use content_mode::ContentMode;
 pub use email::{Email, EmailError};
 pub use evaluation_status::EvaluationStatus;
@@ -56,6 +59,7 @@ pub use grants::{
 pub use incident_status::IncidentStatus;
 pub use layout_depth::LayoutDepth;
 pub use layout_open::LayoutOpen;
+pub use metrics_group::MetricsGroup;
 pub use missing_data::MissingData;
 pub use model_provider::ModelProvider;
 pub use notification_kind::NotificationKind;

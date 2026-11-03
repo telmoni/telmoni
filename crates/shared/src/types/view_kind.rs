@@ -3,8 +3,8 @@
 use serde::{Deserialize, Serialize};
 
 /// What a saved view keeps: a list's filters, sort and columns — the
-/// traces', the sessions' or the users' — or a layout of a session's page and
-/// a trace's. A name is held once per project and kind, and each kind is
+/// traces', the sessions' or the users' — a layout of a session's page and
+/// a trace's, or a dashboard's charts. A name is held once per project and kind, and each kind is
 /// counted on its own. `[PUBLIC-API]`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "text", rename_all = "snake_case")]
@@ -19,6 +19,8 @@ pub enum ViewKind {
     Users,
     /// A layout of a session's page and a trace's.
     Layout,
+    /// A dashboard: the charts its page draws.
+    Dashboard,
 }
 
 crate::wire_enum!(ViewKind {
@@ -26,6 +28,7 @@ crate::wire_enum!(ViewKind {
     Sessions => "sessions",
     Users => "users",
     Layout => "layout",
+    Dashboard => "dashboard",
 });
 
 #[cfg(test)]

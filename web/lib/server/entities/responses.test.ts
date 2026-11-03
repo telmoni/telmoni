@@ -58,6 +58,7 @@ import {
   SigningSecretSchema,
 } from "./connectors";
 import { ContentModeSettingSchema } from "./content-mode";
+import { RollupsSchema } from "./dashboards";
 import { FieldInventorySchema } from "./field-inventory";
 import { FeedSchema } from "./notification-feed";
 import { OrganizationHealthSchema } from "./organization-health";
@@ -65,6 +66,7 @@ import { PrivacyPostureSchema } from "./privacy";
 import { SessionLayoutSettingSchema } from "./session-layout";
 import { SessionDetailSchema, SessionListSchema } from "./sessions";
 import {
+  DashboardViewListSchema,
   FacetsSchema,
   SavedViewOfAnyKindSchema,
   SessionViewListSchema,
@@ -136,6 +138,7 @@ const READERS: Record<string, z.ZodType> = {
   "notifications/signing-secret.json": SigningSecretSchema,
   "telemetry/alerts.json": AlertListSchema,
   "telemetry/content-mode.json": ContentModeSettingSchema,
+  "telemetry/dashboards.json": DashboardViewListSchema,
   "telemetry/facets.json": FacetsSchema,
   "telemetry/field-inventory.json": FieldInventorySchema,
   "telemetry/health.json": OrganizationHealthSchema,
@@ -144,6 +147,7 @@ const READERS: Record<string, z.ZodType> = {
   "telemetry/layouts.json": TraceLayoutListSchema,
   "telemetry/mutes.json": MuteListSchema,
   "telemetry/privacy.json": PrivacyPostureSchema,
+  "telemetry/rollups.json": RollupsSchema,
   "telemetry/session-layout.json": SessionLayoutSettingSchema,
   "telemetry/session-views.json": SessionViewListSchema,
   "telemetry/session.json": SessionDetailSchema,
