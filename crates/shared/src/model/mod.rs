@@ -263,7 +263,7 @@ pub struct Connection {
     /// where the provider's own host is the only one.
     pub base_url: Option<String>,
     /// Bedrock's region, or Vertex AI's location.
-    pub region: Option<String>,
+    pub region: Option<Region>,
     /// What it opens with.
     pub credentials: Credentials,
 }
@@ -476,22 +476,64 @@ pub fn base_url(given: &str) -> Result<String, String> {
     Ok(trimmed.to_owned())
 }
 
-/// Bedrock's region or Vertex AI's location: letters, digits and hyphens.
-///
-/// # Errors
-///
-/// One that is no region's name.
-pub fn region(given: &str) -> Result<String, String> {
-    let trimmed = given.trim();
-    if trimmed.is_empty()
-        || trimmed.len() > 32
-        || !trimmed
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-    {
-        return Err("a region is its name, such as us-east-1 or us-central1".into());
+/// Bedrock's region or Vertex AI's location: lowercase letters, digits and
+/// hyphens, held to that read from a row as from an input, since it is
+/// pasted into a host.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Region(String);
+
+impl Region {
+    /// `given`, trimmed, if it is a region's name.
+    ///
+    /// # Errors
+    ///
+    /// One that is no region's name.
+    pub fn try_new(given: &str) -> Result<Self, String> {
+        let trimmed = given.trim();
+        if trimmed.is_empty()
+            || trimmed.len() > 32
+            || !trimmed
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        {
+            return Err("a region is its name, such as us-east-1 or us-central1".into());
+        }
+        Ok(Self(trimmed.to_owned()))
     }
-    Ok(trimmed.to_owned())
+
+    /// The name.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl sqlx::Type<sqlx::Postgres> for Region {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        <String as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+
+    fn compatible(ty: &sqlx::postgres::PgTypeInfo) -> bool {
+        <String as sqlx::Type<sqlx::Postgres>>::compatible(ty)
+    }
+}
+
+impl<'r> sqlx::Decode<'r, sqlx::Postgres> for Region {
+    fn decode(value: sqlx::postgres::PgValueRef<'r>) -> Result<Self, sqlx::error::BoxDynError> {
+        Ok(Self::try_new(&<String as sqlx::Decode<
+            'r,
+            sqlx::Postgres,
+        >>::decode(value)?)?)
+    }
+}
+
+impl sqlx::Encode<'_, sqlx::Postgres> for Region {
+    fn encode_by_ref(
+        &self,
+        buf: &mut sqlx::postgres::PgArgumentBuffer,
+    ) -> Result<sqlx::encode::IsNull, sqlx::error::BoxDynError> {
+        <String as sqlx::Encode<'_, sqlx::Postgres>>::encode_by_ref(&self.0, buf)
+    }
 }
 
 #[cfg(test)]
@@ -541,8 +583,13 @@ mod tests {
         );
         assert!(base_url("ftp://x").is_err());
         assert!(base_url("https://u:p@gw.example").is_err());
-        assert_eq!(region(" us-east-1 ").expect("kept"), "us-east-1");
-        assert!(region("us east").is_err());
+        assert_eq!(
+            Region::try_new(" us-east-1 ").expect("kept").as_str(),
+            "us-east-1"
+        );
+        for refused in ["us east", "x@10.0.0.1:80/", "US-EAST-1", ""] {
+            assert!(Region::try_new(refused).is_err(), "{refused}");
+        }
     }
 
     /// Files ride on the last user's message as each provider's own part, and
@@ -599,7 +646,7 @@ mod tests {
         let key = |provider| Connection {
             provider,
             base_url: None,
-            region: Some("us-east-1".into()),
+            region: Some(Region::try_new("us-east-1").unwrap()),
             credentials: Credentials::ApiKey("k".to_owned().into()),
         };
         let body =

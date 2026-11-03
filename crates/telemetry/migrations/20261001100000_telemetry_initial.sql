@@ -612,7 +612,7 @@ CREATE TABLE telemetry.model_connections (
     name              TEXT        NOT NULL,
     provider          TEXT        NOT NULL,
     base_url          TEXT,
-    region            TEXT,
+    region            TEXT        CHECK (region ~ '^[a-z0-9-]{1,32}$'),
     models            TEXT[]      NOT NULL,
     is_default        BOOLEAN     NOT NULL DEFAULT false,
     secret_hint       TEXT        NOT NULL,

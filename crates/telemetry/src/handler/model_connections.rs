@@ -131,9 +131,12 @@ fn checked(mut change: ConnectionChange) -> Result<ConnectionChange, TelmoniErro
             .filter(|r| !r.is_empty()),
         change.provider,
     ) {
-        (Some(region), ModelProvider::Bedrock | ModelProvider::VertexAi) => {
-            Some(model::region(region).map_err(TelmoniError::BadRequest)?)
-        }
+        (Some(region), ModelProvider::Bedrock | ModelProvider::VertexAi) => Some(
+            model::Region::try_new(region)
+                .map_err(TelmoniError::BadRequest)?
+                .as_str()
+                .to_owned(),
+        ),
         (None, ModelProvider::Bedrock) => return refuse("a Bedrock connection names its region"),
         (None, _) => None,
         (Some(_), _) => return refuse("only Bedrock and Vertex AI connections name a region"),
@@ -245,7 +248,7 @@ fn kek(state: &AppState) -> Result<&telmoni_shared::envelope::Kek, TelmoniError>
 struct Sealed {
     provider: ModelProvider,
     base_url: Option<String>,
-    region: Option<String>,
+    region: Option<model::Region>,
     secret_ciphertext: Vec<u8>,
     secret_nonce: Vec<u8>,
     wrapped_dek: Vec<u8>,
@@ -355,6 +358,12 @@ pub async fn put_connection(
         .clone();
     let kek = kek(&state)?;
     let change = checked(change)?;
+    let region = change
+        .region
+        .as_deref()
+        .map(model::Region::try_new)
+        .transpose()
+        .map_err(TelmoniError::BadRequest)?;
     let id = change.id.unwrap_or_else(Uuid::new_v4);
     let fresh = change.id.is_none();
     let (connection, sealed) = match change.secret.as_deref() {
@@ -376,7 +385,7 @@ pub async fn put_connection(
             let connection = Connection {
                 provider: change.provider,
                 base_url: change.base_url.clone(),
-                region: change.region.clone(),
+                region: region.clone(),
                 credentials,
             };
             (connection, Some((hint, field, wrapped)))
@@ -395,7 +404,7 @@ pub async fn put_connection(
             }
             let connection = Connection {
                 base_url: change.base_url.clone(),
-                region: change.region.clone(),
+                region,
                 ..kept
             };
             (connection, None)

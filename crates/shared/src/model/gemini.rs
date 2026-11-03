@@ -54,7 +54,10 @@ pub fn request(
     let model = encode_segment(ask.model);
     let (url, auth) = match (&connection.credentials, token) {
         (Credentials::ServiceAccount(account), Some(token)) => {
-            let location = connection.region.as_deref().unwrap_or("global");
+            let location = connection
+                .region
+                .as_ref()
+                .map_or("global", super::Region::as_str);
             let host = if location == "global" {
                 "aiplatform.googleapis.com".to_owned()
             } else {

@@ -30,7 +30,8 @@ pub fn request(
     };
     let region = connection
         .region
-        .as_deref()
+        .as_ref()
+        .map(super::Region::as_str)
         .ok_or_else(|| Refused::Unreadable("a Bedrock connection names its region".into()))?;
     let with_media = super::last_user(ask.messages).filter(|_| !ask.media.is_empty());
     let messages: Vec<Value> = ask
@@ -148,7 +149,7 @@ mod tests {
         let connection = Connection {
             provider: ModelProvider::Bedrock,
             base_url: None,
-            region: Some("us-east-1".into()),
+            region: Some(crate::model::Region::try_new("us-east-1").unwrap()),
             credentials: Credentials::AccessKeys {
                 access_key_id: "AKID".into(),
                 secret_access_key: "secret".to_owned().into(),
