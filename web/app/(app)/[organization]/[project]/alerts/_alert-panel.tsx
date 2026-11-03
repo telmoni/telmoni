@@ -1,6 +1,7 @@
 "use client";
 
 import { browserUtcOffset } from "@/lib/utc-offset";
+import Link from "next/link";
 import { startTransition, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { BellPlus, BellRing } from "lucide-react";
@@ -15,6 +16,15 @@ import {
 } from "@/components/side-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -126,17 +136,59 @@ export function AlertPanelHost({
 export function NewAlert({
   projectId,
   connections,
+  connectorsHref,
+  canConnect,
 }: {
   projectId: string;
   connections: ConnectionChoice[] | null;
+  /** The project's Connectors page. */
+  connectorsHref: string;
+  /** Whether the person may add a connector there: its owners and admins. */
+  canConnect: boolean;
 }) {
   const { opening, open, close } = useOpening();
+  // With no connector, the person is asked first whether the feed alone will do.
+  const [asking, setAsking] = useState<HTMLElement | null>(null);
   return (
     <>
-      <PageAction primary="New alert" onClick={(e) => open(e.currentTarget)}>
+      <PageAction
+        primary="New alert"
+        onClick={(e) => (connections?.length === 0 ? setAsking(e.currentTarget) : open(e.currentTarget))}
+      >
         <BellPlus className="size-4" />
         New alert
       </PageAction>
+      <Dialog open={asking !== null} onOpenChange={(next) => { if (!next) setAsking(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Connect a channel first?</DialogTitle>
+          </DialogHeader>
+          <DialogBody>
+            <DialogDescription>
+              This project has no connectors, so an alert&rsquo;s incidents would reach its feed
+              alone. Connect Slack or a webhook to be told where you already are
+              {canConnect ? "." : "; the project's owners and admins add them on the Connectors page."}
+            </DialogDescription>
+          </DialogBody>
+          <DialogFooter>
+            {canConnect && (
+              <Button asChild>
+                <Link href={connectorsHref}>Add a connector</Link>
+              </Button>
+            )}
+            <Button
+              variant={canConnect ? "secondary" : "default"}
+              onClick={() => {
+                const from = asking;
+                setAsking(null);
+                open(from);
+              }}
+            >
+              Continue with the feed
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <AlertPanelHost
         opening={opening}
         onClose={close}

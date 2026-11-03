@@ -1,5 +1,7 @@
+import { PiggyBank } from "lucide-react";
 import Link from "next/link";
 
+import { OverviewCard } from "@/components/overview-card";
 import { LocalTime } from "@/components/local-time";
 import { NoticeCard } from "@/components/notice-card";
 import { Row, Rows } from "@/components/rows";
@@ -23,28 +25,26 @@ export function OrganizationSpendSection({
   spend: OrganizationSpend;
 }) {
   if (spend.kind === "forbidden") return null;
-  if (spend.kind === "ok" && spend.projects.length === 0) return null;
   return (
-    <section className="grid gap-gutter" aria-label="Spend">
-      <div className="flex items-center justify-between gap-gutter">
-        <h2 className="text-sm font-medium">Spend</h2>
-        {spend.kind === "ok" && (
-          <p className="text-sm tabular-nums">
-            {formatCost(spend.total)}
-            <span className="text-muted-foreground">
-              {" "}
-              since <LocalTime iso={spend.period_start} />
-            </span>
-          </p>
-        )}
-      </div>
-      {spend.kind === "unavailable" ? (
+    <OverviewCard title="Spend" icon={PiggyBank}>
+      {spend.kind === "ok" && (
+        <p className="tabular-nums">
+          <span className="text-xl font-medium">{formatCost(spend.total)}</span>
+          <span className="text-muted-foreground">
+            {" "}
+            since <LocalTime iso={spend.period_start} />
+          </span>
+        </p>
+      )}
+      {spend.kind === "ok" && spend.projects.length === 0 ? (
+        <p className="text-muted-foreground">No project made a model call this period.</p>
+      ) : spend.kind === "unavailable" ? (
         <NoticeCard
           title="The spend could not be read."
           body="Reload to try again. Each project’s traces show what its runs spent."
         />
       ) : (
-        <Rows>
+        <Rows className="rounded-none p-0 ring-0">
           {spend.projects.map((row) => {
             const against = budgetWords(row.budget_spent, row.budget);
             return (
@@ -76,6 +76,6 @@ export function OrganizationSpendSection({
           })}
         </Rows>
       )}
-    </section>
+    </OverviewCard>
   );
 }

@@ -49,6 +49,7 @@ export function ListPage<L extends ListWindow>({
   rows,
   toolbar,
   nothingYet,
+  firstRun,
   before,
   instead,
   table,
@@ -72,6 +73,9 @@ export function ListPage<L extends ListWindow>({
   toolbar: (list: L, days: number) => ReactNode;
   /** What the page says when the window holds nothing at all. */
   nothingYet: (days: number) => ReactNode;
+  /** In place of the filters and the list, where the page decided nothing has ever
+   *  landed for it: the way to the first. */
+  firstRun?: ReactNode;
   /** Drawn under the filter bar, before the rows. */
   before?: ReactNode;
   /** A search of the list's kept content, drawn in the filter bar. */
@@ -122,6 +126,20 @@ export function ListPage<L extends ListWindow>({
       <NoticeCard title="Nothing to show yet." body={nothingYet(days)} />
     );
 
+  // Nothing for the filters to work on yet: the page is its first run, with what
+  // stands before the rows, which redraws it once something lands.
+  if (firstRun && listed.total === 0 && !filtered) {
+    return (
+      <>
+        <PageHeader title={title} info={info} />
+        <div className="grid gap-gutter">
+          {before}
+          {firstRun}
+        </div>
+      </>
+    );
+  }
+
   // `group/list`: the header's window and every control and link below it mark
   // themselves pending while the list they asked for is on its way, and the
   // list dims under them; `contents`, so the group lays nothing out itself.
@@ -129,7 +147,7 @@ export function ListPage<L extends ListWindow>({
     <TooltipProvider>
       <div className="group/list contents">
         <PageHeader title={title} info={info} toolbar={toolbar(listed, days)} />
-        <div className="grid gap-6">
+        <div className="grid gap-gutter">
           <section className="grid gap-gutter">
             <div className="flex flex-col gap-gutter md:flex-row md:items-start">
               <FacetsPanel

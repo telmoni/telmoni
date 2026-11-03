@@ -58,7 +58,7 @@ export default async function OrganizationSettingsPage() {
   return (
     <>
       <PageHeader title="Settings" />
-      <div className="grid gap-6">
+      <div className="grid gap-gutter">
         <Section
           title="Name"
           description="Your organization's visible name within Telmoni — your company or group, not a person's name. Everyone in it sees it: the rail, the resource selector and every invitation it sends. Renaming moves nothing: its address stays as it is."

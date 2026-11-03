@@ -14,8 +14,8 @@ export function AuditTable({ events }: { events: AuditEvent[] }) {
   const switchId = useId();
 
   return (
-    <div className="grid gap-2">
-      <div className="flex items-center justify-end gap-2">
+    <div className="grid gap-gutter">
+      <div className="flex items-center justify-end gap-gutter">
         <Switch
           id={switchId}
           checked={showDetails}

@@ -24,10 +24,13 @@ export function ProjectTiles({
   organization,
   projects,
   action,
+  roles = true,
 }: {
   organization: string;
   projects: readonly ProjectTile[];
   action?: (project: ProjectTile) => ReactNode;
+  /** Whether each tile names the person's role on it; an overview's name the project alone. */
+  roles?: boolean;
 }) {
   return (
     <ul className="grid grid-cols-1 gap-gutter sm:grid-cols-2 lg:grid-cols-3">
@@ -41,7 +44,7 @@ export function ProjectTiles({
                 className="flex min-w-0 flex-1 items-center justify-between gap-gutter p-gutter text-sm transition-colors hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
               >
                 <span className="min-w-0 truncate font-medium">{project.name}</span>
-                <RoleBadge role={project.role} />
+                {roles && <RoleBadge role={project.role} />}
               </Link>
               {control && <div className="shrink-0 pr-gutter">{control}</div>}
             </Card>

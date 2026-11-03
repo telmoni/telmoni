@@ -551,10 +551,12 @@ describe("AlertsPage", () => {
     expect(within(row).getByTestId("end-mute").dataset.mute).toBe("m-all");
   });
 
-  it("says when there are no alerts yet", async () => {
+  it("draws a project with no alert as its first run, where its alerts go first", async () => {
     mockAlerts = { ...(mockAlerts as object), alerts: [], mutes: [] };
     render(await AlertsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
-    expect(screen.getByText("No alerts yet.")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Hear about it before your users do" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /Choose where alerts go/ })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Decide what to watch" })).toBeInTheDocument();
     // Nothing to mute: only New alert stands at the page's head.
     expect(screen.queryByTestId("mute")).toBeNull();
     expect(screen.getByTestId("new-alert")).toBeInTheDocument();

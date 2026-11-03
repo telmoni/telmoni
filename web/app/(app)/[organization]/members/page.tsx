@@ -117,7 +117,7 @@ export default async function OrganizationMembersPage() {
         action={full ? undefined : <AddOrganizationMember organizationId={organizationId} />}
       />
 
-      <div className="grid gap-6">
+      <div className="grid gap-gutter">
         <MemberCeilingNotice ceiling={listing.ceiling} />
         <RoleCards cards={ROLES} />
 

@@ -136,6 +136,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  fetchSessions.mockImplementation(async () => mockSessions);
   window.localStorage.clear();
   mockSearch = "";
   window.history.replaceState(null, "", "/acme/web/sessions");
@@ -422,8 +423,20 @@ describe("SessionsPage", () => {
     expect(screen.queryByRole("table")).toBeNull();
   });
 
-  it("tells a project that names no session which attribute to set", async () => {
+  it("draws a project no session ever reached as its first run, each SDK's field to paste", async () => {
     mockSessions = list({ sessions: [], total: 0 });
+    render(await SessionsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+    expect(fetchSessions).toHaveBeenCalledWith(PROJECT, expect.objectContaining({ days: 360, limit: 1 }));
+    expect(screen.getByRole("heading", { name: "Group runs into sessions" })).toBeInTheDocument();
+    expect(screen.getByRole("tablist", { name: "Session id" })).toBeInTheDocument();
+    expect(screen.getByRole("tabpanel")).toHaveTextContent('session_id="conv_7"');
+    expect(screen.queryByRole("table")).toBeNull();
+  });
+
+  it("tells a quiet window which attribute to set", async () => {
+    fetchSessions.mockImplementation(async (_id, query) =>
+      (query as { days?: number }).days === 360 ? list({ total: 1 }) : list({ sessions: [], total: 0 }),
+    );
     render(await SessionsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByText("Nothing to show yet.")).toBeInTheDocument();
     expect(screen.getByText("gen_ai.conversation.id")).toBeInTheDocument();

@@ -1,7 +1,10 @@
 import Link from "next/link";
 import { cookies } from "next/headers";
 
+import { CopyBox } from "@/components/plaintext-token-dialog";
+import { FirstRun, FirstRunStep, Listening } from "@/components/first-run";
 import { NoticeCard } from "@/components/notice-card";
+import { Button } from "@/components/ui/button";
 import { ServiceUnavailable } from "@/components/service-unavailable";
 import { TraceCharts, TraceHistogramStrip } from "@/components/traces/charts";
 import { ContentSearch } from "@/components/traces/content-search";
@@ -21,7 +24,9 @@ import {
 } from "@/lib/server/data";
 import { projectPage } from "@/lib/server/project-page";
 import { projectPath } from "@/lib/slug";
-import { DEFAULT_ROWS, parseTraceQuery, parseTraceUi } from "@/lib/traces";
+import { AGENT_PROMPT } from "@/lib/first-run";
+import { MAX_DAYS } from "@/lib/list-query";
+import { DEFAULT_ROWS, activeFilters, parseTraceQuery, parseTraceUi } from "@/lib/traces";
 import { UTC_OFFSET_COOKIE, parseUtcOffset } from "@/lib/utc-offset";
 
 export const metadata = { title: "Traces" };
@@ -59,6 +64,14 @@ export default async function TracesPage({
   // the new-traces bar reads a change in it as the list drawn again.
   const drawn = access.kind === "ok" ? access.list.traces.map((t) => t.run_id).join() : "";
   const knownTags = facets.kind === "ok" ? facets.facets.tag.values.map((v) => v.value) : [];
+  // An empty, unfiltered window is a first run only where all the plan keeps is empty too.
+  const ever =
+    access.kind === "ok" && access.list.total === 0 && activeFilters(query).length === 0
+      ? await fetchTraces(project.id, { ...parseTraceQuery({}), days: MAX_DAYS, limit: 1 })
+      : null;
+  const firstRun = ever?.kind === "ok" && ever.list.total === 0;
+  const base = projectPath(organization, slug);
+  const canMint = administers(project.role);
 
   return (
     <>
@@ -100,6 +113,60 @@ export default async function TracesPage({
             canSave={canSave}
           />
         )}
+        firstRun={
+          firstRun ? (
+            <FirstRun
+              status={<Listening>Listening for this project&rsquo;s first run</Listening>}
+              title="Send your first trace"
+              lead="Three steps, a few minutes. The first run lists here by itself as it lands, with no reload."
+            >
+              <FirstRunStep
+                n={1}
+                title="Mint an API key"
+                note={
+                  canMint
+                    ? "One with Send spans comes with a first run to paste, for each SDK."
+                    : "The project's owners and admins mint its keys; ask one for a key with Send spans."
+                }
+              >
+                {canMint && (
+                  <div className="flex flex-wrap gap-gutter">
+                    <Button asChild size="sm">
+                      <Link href={`${base}/api-keys`}>Mint a key</Link>
+                    </Button>
+                  </div>
+                )}
+              </FirstRunStep>
+              <FirstRunStep
+                n={2}
+                title="Have your coding agent add tracing"
+                note="Paste this into Claude Code, Codex, Cursor or another coding agent working in your application."
+              >
+                <CopyBox value={AGENT_PROMPT} label="the prompt" />
+                <p className="text-sm text-muted-foreground">
+                  Or by hand: an{" "}
+                  <Link href="/docs/api/sdks" className="underline underline-offset-4">
+                    SDK
+                  </Link>
+                  , a{" "}
+                  <Link href="/docs/api/frameworks" className="underline underline-offset-4">
+                    framework you already use
+                  </Link>{" "}
+                  or any OpenTelemetry exporter, and the{" "}
+                  <Link href="/docs/api/coding-agents" className="underline underline-offset-4">
+                    plugin
+                  </Link>{" "}
+                  for your coding agent&rsquo;s own sessions.
+                </p>
+              </FirstRunStep>
+              <FirstRunStep
+                n={3}
+                title="Run your agent"
+                note="Each run lists here within a minute of ending, with its steps, model calls, tokens and spend."
+              />
+            </FirstRun>
+          ) : undefined
+        }
         nothingYet={(days) => (
           <>
             Install an{" "}

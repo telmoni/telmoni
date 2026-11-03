@@ -111,7 +111,7 @@ export default async function SessionPage({
         backLabel="Sessions"
         action={<LayoutControls projectId={project.id} canSave={administers(project.role)} />}
       />
-      <div className="grid gap-6">
+      <div className="grid gap-gutter">
         <Section
           title="Session"
           description="Who it was with and what its runs added up to, from their spans alone."

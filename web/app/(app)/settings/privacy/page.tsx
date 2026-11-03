@@ -28,7 +28,7 @@ export default async function AccountPrivacyPage() {
   return (
     <>
       <PageHeader title="Privacy" />
-      <div className="grid gap-6">
+      <div className="grid gap-gutter">
         {/* Only where there is a provider to send to: a deployment without one
             collects nothing, and a switch would promise otherwise. */}
         {analyticsConfigured() && (

@@ -13,10 +13,13 @@ export type InstallTab = { label: string; command: string };
 export function InstallTabs({
   tabs,
   name = "Install",
+  compact = false,
 }: {
   tabs: readonly InstallTab[];
   /** What the tabs are, for a screen reader. */
   name?: string;
+  /** Small type and a gutter's padding, for a dialog rather than a page. */
+  compact?: boolean;
 }) {
   const [at, setAt] = useState(0);
   const id = useId();
@@ -42,7 +45,7 @@ export function InstallTabs({
   }
 
   return (
-    <div className="rounded-md border border-border font-mono text-sm lg:text-base">
+    <div className={cn("rounded-md border border-border font-mono", compact ? "text-xs" : "text-sm lg:text-base")}>
       <div
         role="tablist"
         aria-label={name}
@@ -60,7 +63,8 @@ export function InstallTabs({
             tabIndex={i === at ? 0 : -1}
             onClick={() => setAt(i)}
             className={cn(
-              "relative px-5 py-gutter text-muted-foreground transition-colors hover:text-foreground lg:px-6 lg:py-4",
+              "relative text-muted-foreground transition-colors hover:text-foreground",
+              compact ? "p-gutter" : "px-5 py-gutter lg:px-6 lg:py-4",
               i === at &&
                 "text-foreground after:absolute after:inset-x-0 after:-bottom-px after:h-px after:bg-foreground",
             )}
@@ -73,9 +77,17 @@ export function InstallTabs({
         id={`${id}-panel`}
         role="tabpanel"
         aria-labelledby={`${id}-tab-${at}`}
-        className="flex items-center justify-between gap-gutter px-5 py-5 lg:px-6 lg:py-7"
+        className={cn(
+          "flex justify-between gap-gutter",
+          compact ? "items-start bg-muted/40 p-gutter" : "items-center px-5 py-5 lg:px-6 lg:py-7",
+        )}
       >
-        <code className="block min-w-0 flex-1 overflow-x-auto whitespace-pre text-foreground">
+        <code
+          className={cn(
+            "block min-w-0 flex-1 text-foreground",
+            compact ? "break-all whitespace-pre-wrap" : "overflow-x-auto whitespace-pre",
+          )}
+        >
           {tab.command}
         </code>
         <CopyButton value={tab.command} label={`the ${tab.label} command`} />

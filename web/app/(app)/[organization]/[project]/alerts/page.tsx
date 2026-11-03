@@ -4,8 +4,9 @@ import Link from "next/link";
 import { z } from "zod";
 
 import { AccessDenied } from "@/components/access-denied";
+import { FirstRun, FirstRunStep } from "@/components/first-run";
+import { Button } from "@/components/ui/button";
 import { LocalTime } from "@/components/local-time";
-import { NoticeCard } from "@/components/notice-card";
 import { PageHeader } from "@/components/page-header";
 import { Row, Rows } from "@/components/rows";
 import { ServiceUnavailable } from "@/components/service-unavailable";
@@ -138,11 +139,16 @@ export default async function AlertsPage({
             {access.alerts.length > 0 && (
               <MuteButton projectId={project.id} ruleId={null} name={null} />
             )}
-            <NewAlert projectId={project.id} connections={connections} />
+            <NewAlert
+              projectId={project.id}
+              connections={connections}
+              connectorsHref={`/${organization}/${slug}/connectors`}
+              canConnect={administers(project.role)}
+            />
           </>
         }
       />
-      <div className="grid gap-6">
+      <div className="grid gap-gutter">
         <section className="grid gap-gutter">
           {everyAlert.length > 0 && (
             <Rows>
@@ -163,10 +169,39 @@ export default async function AlertsPage({
             </Rows>
           )}
           {access.alerts.length === 0 ? (
-            <NoticeCard
-              title="No alerts yet."
-              body="Make one with New alert: the share of runs that fail, the p95 duration of model calls, the tokens they use, or what a run spends, over the last hour, day or week."
-            />
+            <FirstRun
+              title="Hear about it before your users do"
+              lead="An alert reads a measure of this project's runs every minute and tells the channels you choose the moment it crosses its threshold."
+            >
+              <FirstRunStep
+                n={1}
+                title="Choose where alerts go"
+                done={(connections?.length ?? 0) > 0}
+                note={
+                  (connections?.length ?? 0) > 0
+                    ? "This project has a connector; each alert chooses which of its connectors hear it."
+                    : administers(project.role)
+                      ? "Every incident reaches the project's feed; connect Slack or a webhook to be told where your team already is."
+                      : "Every incident reaches the project's feed; the project's owners and admins connect Slack or a webhook."
+                }
+              >
+                {(connections?.length ?? 0) === 0 && administers(project.role) && (
+                  <div className="flex flex-wrap gap-gutter">
+                    <Button asChild variant="outline" size="sm">
+                      <Link href={`${projectPath(organization, slug)}/connectors`}>Connect Slack</Link>
+                    </Button>
+                    <Button asChild variant="outline" size="sm">
+                      <Link href={`${projectPath(organization, slug)}/connectors`}>Connect a webhook</Link>
+                    </Button>
+                  </div>
+                )}
+              </FirstRunStep>
+              <FirstRunStep
+                n={2}
+                title="Decide what to watch"
+                note="With New alert, above: the share of runs that fail, the p95 duration of model calls, the tokens they use, or a month's spend as a budget."
+              />
+            </FirstRun>
           ) : (
             access.alerts.map((alert) => (
               <AlertCard

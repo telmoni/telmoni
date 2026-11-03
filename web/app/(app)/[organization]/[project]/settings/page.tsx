@@ -44,7 +44,7 @@ export default async function SettingsPage({
     <>
       <PageHeader title="Settings" />
 
-      <div className="grid gap-6">
+      <div className="grid gap-gutter">
         <Section
           title="Project ID"
           description="This project's identifier, which never changes when its name or URL does; the audit log names the project by it."

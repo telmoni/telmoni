@@ -1,5 +1,6 @@
 "use client";
 
+import { CopyButton } from "@/components/copy-button";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -10,13 +11,48 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { cn } from "@/lib/utils";
 
-import { useCopyToClipboard } from "@/lib/use-copy-to-clipboard";
+/** One titled part of a secret's dialog, under its own heading. */
+export function DialogSection({
+  title,
+  note,
+  children,
+}: {
+  title: string;
+  note?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="grid gap-gutter">
+      <div>
+        <h3 className="text-base font-medium">{title}</h3>
+        {note && <div className="text-sm text-muted-foreground">{note}</div>}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+/** A value to copy, in a box of its own, wrapped rather than scrolled, its copy button inside. */
+export function CopyBox({ value, label, className }: { value: string; label: string; className?: string }) {
+  return (
+    <div className={cn("relative rounded-md border border-border bg-muted/40", className)}>
+      <pre className="p-gutter pr-10 font-mono text-sm break-all whitespace-pre-wrap select-all">
+        {value}
+      </pre>
+      <div className="absolute top-gutter right-gutter">
+        <CopyButton value={value} label={label} />
+      </div>
+    </div>
+  );
+}
 
 export function PlaintextTokenDialog({
   token,
   title,
   description,
+  label = "Secret",
   closeLabel = "Done",
   onClose,
   children,
@@ -24,30 +60,26 @@ export function PlaintextTokenDialog({
   token: string;
   title: string;
   description: React.ReactNode;
+  /** The secret's heading, and what its copy button names. */
+  label?: string;
   closeLabel?: string;
   onClose: () => void;
-  /** What the secret is for, drawn under it. */
+  /** What the secret is for, each a `DialogSection` under it. */
   children?: React.ReactNode;
 }) {
-  const { copied, copy } = useCopyToClipboard();
-
   return (
     <Dialog open onOpenChange={(next) => { if (!next) onClose(); }}>
-      <DialogContent>
+      <DialogContent className={cn(children && "sm:max-w-2xl")}>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
-        <DialogBody>
-          <DialogDescription>{description}</DialogDescription>
-          <pre className="break-all rounded-md bg-muted p-gutter font-mono text-xs select-all">
-            {token}
-          </pre>
+        <DialogBody className="gap-[calc(var(--spacing-gutter)*2)] pb-gutter">
+          <DialogSection title={label} note={<DialogDescription>{description}</DialogDescription>}>
+            <CopyBox value={token} label={`the ${label.toLowerCase()}`} />
+          </DialogSection>
           {children}
         </DialogBody>
         <DialogFooter>
-          <Button variant="secondary" onClick={() => copy(token)}>
-            {copied ? "Copied!" : "Copy"}
-          </Button>
           <Button onClick={onClose}>{closeLabel}</Button>
         </DialogFooter>
       </DialogContent>

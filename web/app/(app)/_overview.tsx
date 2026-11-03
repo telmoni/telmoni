@@ -19,7 +19,7 @@ export function Overview({
   return (
     <>
       <PageHeader title={title} action={action} />
-      <div className="grid gap-6">{sections}</div>
+      <div className="grid gap-gutter">{sections}</div>
     </>
   );
 }

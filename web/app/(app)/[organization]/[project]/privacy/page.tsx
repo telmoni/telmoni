@@ -69,7 +69,7 @@ export default async function PrivacyPage({
   return (
     <>
       <PageHeader title="Privacy" />
-      <div className="grid gap-6">
+      <div className="grid gap-gutter">
         <Section
           title="Content"
           description="What this project keeps of what a person or a model wrote: prompts and completions, tool inputs and outputs, a person's name or address. Metadata — timings, statuses, counts, model and tool names — is kept in every mode."

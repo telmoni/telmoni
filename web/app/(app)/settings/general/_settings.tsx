@@ -50,7 +50,7 @@ export function GeneralSettings() {
   const shown = mounted && isThemeChoice(theme) ? theme : "system";
 
   return (
-    <div className="grid gap-6">
+    <div className="grid gap-gutter">
       <Section title="Appearance" description="How the console looks. Saved in this browser.">
         <Rows>
           <Row

@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
+import type { LucideIcon } from "lucide-react";
 import Link from "next/link";
 
+import { OverviewCard } from "@/components/overview-card";
 import { LocalTime } from "@/components/local-time";
 import { Row, Rows } from "@/components/rows";
 import { incidentHref } from "@/lib/alerts";
@@ -17,30 +19,36 @@ type ProjectAt = { organization: string; slug: string };
 // answers by scope, so each overview reads its own and hands it here, and
 // the two read alike. `action` is the feed's own, Mark read, in its heading
 // row beside what it clears. A project's feed names its project too, so an
-// incident's notice links to the incident.
+// incident's notice links to the incident. A card of its own, saying so when
+// the feed is empty or could not be read (`null`).
 export function Notices({
   label,
+  icon,
   feed,
   action,
   project,
 }: {
   label: string;
-  feed: NotificationFeed;
+  icon?: LucideIcon;
+  feed: NotificationFeed | null;
   action?: ReactNode;
   project?: ProjectAt;
 }) {
   return (
-    <section className="grid gap-gutter" aria-label={label}>
-      <div className="flex items-center justify-between gap-2">
-        <h2 className="text-sm font-medium">{label}</h2>
-        {action}
-      </div>
-      <Rows>
-        {feed.items.map((item) => (
-          <NoticeRow key={item.id} item={item} project={project} />
-        ))}
-      </Rows>
-    </section>
+    <OverviewCard title={label} icon={icon} action={action}>
+      {feed === null ? (
+        <p className="text-muted-foreground">Could not be read just now. Reload to try again.</p>
+      ) : feed.items.length === 0 ? (
+        <p className="text-muted-foreground">Nothing new.</p>
+      ) : (
+        // Flush in the card: rows ruled apart, never a card in a card.
+        <Rows className="rounded-none p-0 ring-0">
+          {feed.items.map((item) => (
+            <NoticeRow key={item.id} item={item} project={project} />
+          ))}
+        </Rows>
+      )}
+    </OverviewCard>
   );
 }
 

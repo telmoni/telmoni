@@ -224,11 +224,11 @@ export function ConsoleSidebar({
           {groups.map((group, i) => (
             <div
               key={group.title}
-              className={cn(expanded && i > 0 && "mt-6")}
+              className={cn(expanded && i > 0 && "mt-gutter")}
             >
-              {/* The rows come in blocks (`navBlocks`). An unheaded block stands
-                  24px clear of the one above; a headed one 16px, under a 32px
-                  heading row whose label sits on the icons' left edge, closer to
+              {/* The rows come in blocks (`navBlocks`), each a gutter clear of the
+                  one above; a headed one under a 28px heading row, the rows'
+                  height, whose label sits on the icons' left edge, closer to
                   its rows than to the block before, which is what groups them.
                   Closed, a rule parts the blocks. The way back heads Account's
                   rail as a block of its own, and is all a page not found shows. */}
@@ -243,13 +243,13 @@ export function ConsoleSidebar({
                 <div
                   key={k}
                   className={cn(
-                    (k > 0 || steppedIn) && expanded && (block.heading ? "mt-4" : "mt-6"),
+                    (k > 0 || steppedIn) && expanded && "mt-gutter",
                     k > 0 && "group-has-[[data-console-not-found]]/console:hidden",
                   )}
                 >
                   {expanded ? (
                     block.heading && (
-                      <div className="flex h-8 items-center pl-2 text-xs font-medium text-muted-foreground group-has-[[data-console-not-found]]/console:hidden">
+                      <div className="flex h-7 items-center pl-2 text-xs font-medium text-muted-foreground group-has-[[data-console-not-found]]/console:hidden">
                         <span className="whitespace-nowrap">{block.heading}</span>
                       </div>
                     )
@@ -271,11 +271,11 @@ export function ConsoleSidebar({
         </nav>
       </ScrollArea>
       {/* The foot: the header's first cell mirrored, as tall, with its rule
-          above as the cell's is below. The version stands centred on the
-          rail's axis, 26px in, where the header's mark and every rail icon
-          do, so it rests while the rail toggles and fits it closed. */}
+          above as the cell's is below. Open, the version starts a gutter in,
+          on the rows' edge; closed, the 28px column is narrower than it, so it
+          centres on the rail's axis. */}
       <div className="flex h-13 shrink-0 items-center border-t border-sidebar-border px-gutter">
-        <div className="flex size-7 shrink-0 items-center justify-center">
+        <div className={cn("flex h-7 shrink-0 items-center", collapsed && "w-7 justify-center")}>
           <p className="whitespace-nowrap text-xs text-muted-foreground tabular-nums">
             <span className="sr-only">
               {PRODUCT_NAME} version {version}

@@ -45,6 +45,7 @@ import { IncidentActions } from "./_incident-actions";
 import { EndMute, MuteButton } from "./_mute";
 
 const PROJECT = "project_7bQx2mNv9BcK4dLp";
+const CONNECT = { connectorsHref: "/acme/web/connectors", canConnect: true };
 const RULE = "7a1c0e52-0000-4000-8000-000000000002";
 const SLACK = "3c4e2a74-0000-4000-8000-000000000004";
 const HOOK = "4d5f3b85-0000-4000-8000-000000000007";
@@ -102,7 +103,7 @@ beforeEach(() => {
 // load can hold past the default five seconds.
 describe("the alert's form", { timeout: 15_000 }, () => {
   it("opens a new alert in the side panel, full over the content area, the name focused", () => {
-    render(<NewAlert projectId={PROJECT} connections={CONNECTIONS} />);
+    render(<NewAlert {...CONNECT} projectId={PROJECT} connections={CONNECTIONS} />);
     fireEvent.click(screen.getByRole("button", { name: /New alert/ }));
     const panel = screen.getByRole("dialog");
     expect(panel).toHaveAttribute("data-mode", "full");
@@ -120,7 +121,7 @@ describe("the alert's form", { timeout: 15_000 }, () => {
   });
 
   it("makes the alert as filled in, a share sent as one, and shuts the panel", async () => {
-    render(<NewAlert projectId={PROJECT} connections={CONNECTIONS} />);
+    render(<NewAlert {...CONNECT} projectId={PROJECT} connections={CONNECTIONS} />);
     fireEvent.click(screen.getByRole("button", { name: /New alert/ }));
     const panel = screen.getByRole("dialog");
     fireEvent.change(within(panel).getByLabelText("Name"), { target: { value: "Failing trips" } });
@@ -150,7 +151,7 @@ describe("the alert's form", { timeout: 15_000 }, () => {
   });
 
   it("says what is wrong beside the form and sends nothing, and keeps the lane's refusal", async () => {
-    render(<NewAlert projectId={PROJECT} connections={CONNECTIONS} />);
+    render(<NewAlert {...CONNECT} projectId={PROJECT} connections={CONNECTIONS} />);
     fireEvent.click(screen.getByRole("button", { name: /New alert/ }));
     const panel = screen.getByRole("dialog");
     fireEvent.click(within(panel).getByRole("button", { name: "Make alert" }));
@@ -172,7 +173,7 @@ describe("the alert's form", { timeout: 15_000 }, () => {
   it("offers each connector, one that needs attention marked, and links it at its set hours", async () => {
     // The browser's clock an hour east of UTC.
     const clock = vi.spyOn(Date.prototype, "getTimezoneOffset").mockReturnValue(-60);
-    render(<NewAlert projectId={PROJECT} connections={CONNECTIONS} />);
+    render(<NewAlert {...CONNECT} projectId={PROJECT} connections={CONNECTIONS} />);
     fireEvent.click(screen.getByRole("button", { name: /New alert/ }));
     const panel = screen.getByRole("dialog");
     expect(within(panel).getByText("Needs attention")).toBeInTheDocument();
@@ -219,7 +220,7 @@ describe("the alert's form", { timeout: 15_000 }, () => {
 
   // ⚠ What voice control is told to press is what the screen shows.
   it("names each of its selects by a label on screen", () => {
-    render(<NewAlert projectId={PROJECT} connections={CONNECTIONS} />);
+    render(<NewAlert {...CONNECT} projectId={PROJECT} connections={CONNECTIONS} />);
     fireEvent.click(screen.getByRole("button", { name: /New alert/ }));
     const panel = screen.getByRole("dialog");
     fireEvent.click(within(panel).getByRole("switch", { name: "hooks.example.com" }));
@@ -243,6 +244,7 @@ describe("the alert's form", { timeout: 15_000 }, () => {
     });
     render(
       <NewAlert
+        {...CONNECT}
         projectId={PROJECT}
         connections={[
           ...CONNECTIONS,
@@ -264,10 +266,31 @@ describe("the alert's form", { timeout: 15_000 }, () => {
     }
   });
 
-  it("says the alert's incidents reach the feed alone where the project connects nothing", () => {
-    render(<NewAlert projectId={PROJECT} connections={[]} />);
+  it("asks for a connector first where the project connects nothing, then makes one for the feed", () => {
+    render(<NewAlert {...CONNECT} projectId={PROJECT} connections={[]} />);
     fireEvent.click(screen.getByRole("button", { name: /New alert/ }));
+    const asked = screen.getByRole("dialog", { name: "Connect a channel first?" });
+    expect(within(asked).getByRole("link", { name: "Add a connector" })).toHaveAttribute(
+      "href",
+      "/acme/web/connectors",
+    );
+    fireEvent.click(within(asked).getByRole("button", { name: "Continue with the feed" }));
+    expect(screen.queryByRole("dialog", { name: "Connect a channel first?" })).toBeNull();
     expect(screen.getByText(/reach the project.s feed alone/)).toBeInTheDocument();
+  });
+
+  it("tells a member who may add a connector, and offers none to add", () => {
+    render(<NewAlert {...CONNECT} canConnect={false} projectId={PROJECT} connections={[]} />);
+    fireEvent.click(screen.getByRole("button", { name: /New alert/ }));
+    const asked = screen.getByRole("dialog", { name: "Connect a channel first?" });
+    expect(asked).toHaveTextContent(/owners and admins add them/);
+    expect(within(asked).queryByRole("link")).toBeNull();
+  });
+
+  it("goes straight to the panel where the project has a connector", () => {
+    render(<NewAlert {...CONNECT} projectId={PROJECT} connections={CONNECTIONS} />);
+    fireEvent.click(screen.getByRole("button", { name: /New alert/ }));
+    expect(screen.queryByRole("dialog", { name: "Connect a channel first?" })).toBeNull();
   });
 });
 

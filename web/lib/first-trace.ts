@@ -8,8 +8,7 @@
 export type Snippet = { label: string; command: string };
 
 export function firstTraceSnippets(key: string): Snippet[] {
-  const env = `export TELMONI_API_KEY=${key}
-# export TELMONI_ENDPOINT=https://...   # on your own deployment, its machine host`;
+  const env = `export TELMONI_API_KEY=${key}`;
   const block = (lines: string) => `( set -e; cd "$(mktemp -d)"
 ${lines}
 )`;

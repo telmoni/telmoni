@@ -8,7 +8,7 @@ import { KeyRound } from "lucide-react";
 import { useConsoleShell } from "@/components/console-shell";
 import { InstallTabs } from "@/components/install-tabs";
 import { PageAction } from "@/components/page-action";
-import { PlaintextTokenDialog } from "@/components/plaintext-token-dialog";
+import { CopyBox, DialogSection, PlaintextTokenDialog } from "@/components/plaintext-token-dialog";
 import {
   SidePanel,
   SidePanelFooter,
@@ -91,15 +91,25 @@ export function KeysActions({
         <PlaintextTokenDialog
           token={minted.token}
           title="Key created"
+          label="API key"
           description={
             <>
-              Copy this key now: <strong>it will not be shown again</strong>.{" "}
-              {PRODUCT_NAME} never stores the plaintext.
+              Shown once: {PRODUCT_NAME} never stores it. You can always mint another on this page.
             </>
           }
           closeLabel="I've saved it"
           onClose={() => setMinted(null)}
         >
+          <DialogSection
+            title=".env"
+            note={
+              <>
+                On your own deployment, add <code>TELMONI_ENDPOINT</code>, its machine host.
+              </>
+            }
+          >
+            <CopyBox value={`TELMONI_API_KEY="${minted.token}"`} label="the .env line" />
+          </DialogSection>
           {minted.ingest && <FirstTrace token={minted.token} tracesHref={tracesHref} />}
         </PlaintextTokenDialog>
       )}
@@ -111,23 +121,21 @@ export function KeysActions({
  *  smallest run with the key in it. */
 function FirstTrace({ token, tracesHref }: { token: string; tracesHref: string }) {
   return (
-    <div className="flex flex-col gap-gutter">
-      <p className="text-sm text-muted-foreground">
-        Send a first trace: paste one into a terminal. Its run lists on the{" "}
-        {/* A tab of its own: leaving the page would take the key off the screen. */}
-        <Link
-          href={tracesHref}
-          target="_blank"
-          rel="noopener"
-          className="underline underline-offset-4"
-        >
-          Traces
-        </Link>{" "}
-        page within a minute. On your own deployment, set <code>TELMONI_ENDPOINT</code> to its
-        machine host first, on the line each holds for it.
-      </p>
-      <InstallTabs name="First run" tabs={firstTraceSnippets(token)} />
-    </div>
+    <DialogSection
+      title="Send a first trace"
+      note={
+        <>
+          Paste one into a terminal; its run lists on the{" "}
+          {/* A tab of its own: leaving the page would take the key off the screen. */}
+          <Link href={tracesHref} target="_blank" rel="noopener" className="underline underline-offset-4">
+            Traces
+          </Link>{" "}
+          page within a minute.
+        </>
+      }
+    >
+      <InstallTabs name="First run" tabs={firstTraceSnippets(token)} compact />
+    </DialogSection>
   );
 }
 

@@ -3,14 +3,7 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ActionResult } from "@/lib/action-result";
-
-import { incidentHref } from "@/lib/alerts";
 import type { OrganizationEntry } from "@/lib/server/entities/organization";
-import type {
-  HealthIncident,
-  OrganizationHealth,
-} from "@/lib/server/entities/organization-health";
-import type { OrganizationSpend } from "@/lib/server/entities/organization-spend";
 
 // The action, not its effects: which organization the page hands it is the
 // assertion, and the action refuses any other.
@@ -32,49 +25,16 @@ vi.mock("@/components/page-header", () => ({
 vi.mock("@/components/service-unavailable", () => ({
   ServiceUnavailable: () => <div data-testid="outage">unavailable</div>,
 }));
-
-vi.mock("../notice-actions", () => ({
-  markOrganizationReadAction: vi.fn(async () => ({ ok: true })),
-}));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: () => {} }) }));
-
-// A stand-in for the create flow, so a test can say the overview offers none.
+// The button gates itself by the store's role; here it stands where the page draws it.
 vi.mock("@/components/create-project", () => ({
-  CreateProjectAction: () => (
-    <div data-testid="create-project-action" />
-  ),
+  CreateProjectAction: () => <button type="button">New project</button>,
 }));
 
 let mockContext: {
   organizations: OrganizationEntry[];
   activeOrganizationId: string;
 } | null;
-
-const fetchNotifications = vi.hoisted(() =>
-  vi.fn<() => Promise<{ items: FeedItem[]; unread: number } | null>>(async () => null),
-);
-const fetchOrganizationHealth = vi.hoisted(() =>
-  vi.fn<() => Promise<OrganizationHealth>>(async () => ({ kind: "ok", incidents: [] })),
-);
-const fetchOrganizationSpend = vi.hoisted(() =>
-  vi.fn<() => Promise<OrganizationSpend>>(async () => ({
-    kind: "ok",
-    period_start: "2026-11-01T00:00:00Z",
-    period_end: "2026-12-01T00:00:00Z",
-    total: 0,
-    projects: [],
-  })),
-);
-
-
-type FeedItem = {
-  id: string;
-  kind: string;
-  title: string;
-  body: string;
-  read_at: string | null;
-  created_at: string;
-};
 
 // The real `activeOrganization`: which entry the page names is the assertion.
 vi.mock("@/lib/server/data", async () => {
@@ -83,35 +43,14 @@ vi.mock("@/lib/server/data", async () => {
   >("@/lib/server/entities/organization");
   return {
     activeOrganization,
-    fetchNotifications,
-    fetchOrganizationHealth,
-    fetchOrganizationSpend,
     getServerContext: async () => mockContext,
+    fetchProjectListing: async () => mockListing,
   };
 });
 
-/** An open incident on Web, as the server sends it, with the `fields` a test
- *  sets. */
-function incident(fields: Partial<HealthIncident>): HealthIncident {
-  return {
-    id: "incident_1",
-    rule_id: "rule_1",
-    rule_name: "Slow calls",
-    status: "open",
-    severity: "alert",
-    value: 6200,
-    opened_at: "2026-10-27T03:00:00Z",
-    acknowledged_at: null,
-    acknowledged_by: null,
-    resolved_at: null,
-    resolved_by: null,
-    reopened: 0,
-    told_to: [],
-    runs: [],
-    project: { id: "project_1", slug: "web", name: "Web" },
-    ...fields,
-  };
-}
+let mockListing:
+  | { kind: "ok"; projects: { id: string; slug: string; name: string; role: string }[] }
+  | { kind: "unavailable" };
 
 import OrganizationOverviewPage from "./page";
 
@@ -130,11 +69,9 @@ const OWNED: OrganizationEntry = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  fetchNotifications.mockResolvedValue(null);
-  fetchOrganizationHealth.mockResolvedValue({ kind: "ok", incidents: [] });
   mockContext = { organizations: [OWNED], activeOrganizationId: "org_1" };
+  mockListing = { kind: "ok", projects: [{ id: "project_1", slug: "web", name: "Web", role: "owner" }] };
 });
-
 
 describe("OrganizationOverviewPage", () => {
   it("shows the outage card when the context is unavailable", async () => {
@@ -149,18 +86,43 @@ describe("OrganizationOverviewPage", () => {
     expect(screen.getByTestId("outage")).toBeInTheDocument();
   });
 
-  it("names the organization, and says nothing else about it", async () => {
+  it("welcomes the person to the organization, its first actions and its pages", async () => {
     await renderPage();
 
-    // The page is titled by the organization, with no card repeating it.
-    expect(screen.getByTestId("page-header")).toHaveTextContent("Ada Works");
-    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Ada Works");
-    expect(screen.queryAllByRole("heading", { level: 2 })).toHaveLength(0);
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Welcome");
+    expect(screen.getByText(/You.re working in/)).toHaveTextContent("You’re working in Ada Works.");
+    // New project is the first of the actions, never the header's.
+    expect(within(screen.getByTestId("page-header")).queryAllByRole("button")).toHaveLength(0);
+    const around = within(screen.getByRole("region", { name: "Getting around" }));
+    expect(around.getAllByRole("button")[0]).toHaveTextContent("New project");
+    expect(around.getAllByRole("link").map((link) => [link.textContent, link.getAttribute("href")])).toEqual([
+      ["Invite a member", "/ada-works/members"],
+      ["Send a first trace", "/docs/api/sdks"],
+      ["Read the docs", "/docs"],
+    ]);
+    expect(screen.queryByRole("region", { name: "Quick access" })).toBeNull();
+    // Its projects by name alone.
+    const projects = screen.getByRole("region", { name: "Projects" });
+    expect(within(projects).getByRole("link", { name: "Web" })).toHaveAttribute("href", "/ada-works/web");
+    expect(projects).not.toHaveTextContent("Owner");
     expect(screen.queryByText("ada@example.test")).toBeNull();
-    expect(screen.queryByText("Ada")).toBeNull();
     expect(screen.queryByText("org_1")).toBeNull();
-    expect(screen.queryByText("This organization")).toBeNull();
-    expect(screen.queryAllByRole("link")).toHaveLength(0);
+  });
+
+  it.each<[string, typeof mockListing, string]>([
+    ["none", { kind: "ok", projects: [] }, "No projects yet."],
+    ["an unread listing", { kind: "unavailable" }, "The projects could not be loaded."],
+  ])("says so where it holds %s, not that it holds none it may", async (_, listing, said) => {
+    mockListing = listing;
+    await renderPage();
+    expect(screen.getByRole("region", { name: "Projects" })).toHaveTextContent(said);
+  });
+
+  it("offers a member no invitation", async () => {
+    mockContext = { organizations: [{ ...OWNED, role: "member" }], activeOrganizationId: "org_1" };
+    await renderPage();
+    expect(screen.queryByRole("link", { name: "Invite a member" })).toBeNull();
+    expect(screen.getByRole("link", { name: "Read the docs" })).toBeInTheDocument();
   });
 
   it("names the organization the caller stands in, not their own", async () => {
@@ -183,7 +145,7 @@ describe("OrganizationOverviewPage", () => {
     // ⚠ The organization's NAME, never its owner's name or address. `Alex
     // Founder` is a human; this heading names an organization, and the two are
     // only ever the same by coincidence.
-    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Founder Labs");
+    expect(screen.getByText(/You.re working in/)).toHaveTextContent("Founder Labs");
     expect(screen.queryByText("Alex Founder")).toBeNull();
     expect(screen.queryByText("alex@example.test")).toBeNull();
     expect(screen.queryByText("Ada Works")).toBeNull();
@@ -219,168 +181,6 @@ describe("OrganizationOverviewPage", () => {
       expect(
         screen.getByRole("button", { name: "Leave organization: Difference Engine" }),
       ).toBeInTheDocument();
-    },
-  );
-
-  // The organization's own notices answer its owner and admins.
-  it("shows the owner and admin the organization's notices, and asks for nobody else", async () => {
-    fetchNotifications.mockResolvedValue({
-      items: [
-        {
-          id: "n1",
-          kind: "organization_alert",
-          title: "Action needed",
-          body: "Something outside the console needs the owner.",
-          read_at: null,
-          created_at: "2026-09-28T12:00:00Z",
-        },
-      ],
-      unread: 1,
-    });
-    await renderPage();
-    expect(screen.getByText("Action needed")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Mark read (1)" })).toBeInTheDocument();
-
-    vi.clearAllMocks();
-    mockContext = {
-      organizations: [{ ...OWNED, role: "admin" }],
-      activeOrganizationId: "org_1",
-    };
-    await renderPage();
-    expect(fetchNotifications).toHaveBeenCalled();
-
-    vi.clearAllMocks();
-    mockContext = {
-      organizations: [{ ...OWNED, role: "member" }],
-      activeOrganizationId: "org_1",
-    };
-    await renderPage();
-    expect(fetchNotifications).not.toHaveBeenCalled();
-  });
-
-  // What the projects spent is the owner's and admins' to read, each project
-  // linking to its dashboards, its budget against the month its budget read.
-  it("shows the owner the period's spend by project, and asks for nobody else's", async () => {
-    fetchOrganizationSpend.mockResolvedValue({
-      kind: "ok",
-      period_start: "2026-11-01T00:00:00Z",
-      period_end: "2026-12-01T00:00:00Z",
-      total: 97.5,
-      projects: [
-        {
-          project: { id: "project_1", slug: "web", name: "Web" },
-          spent: 95,
-          unpriced_calls: 0,
-          budget: 100,
-          budget_spent: 90,
-        },
-        {
-          project: { id: "project_2", slug: "batch", name: "Batch" },
-          spent: 2.5,
-          unpriced_calls: 3,
-          budget: null,
-          budget_spent: null,
-        },
-      ],
-    });
-    await renderPage();
-    const spend = within(screen.getByRole("region", { name: "Spend" }));
-    expect(spend.getByText("$97.50")).toBeInTheDocument();
-    expect(spend.getByRole("link", { name: "Web" })).toHaveAttribute("href", "/ada-works/web/dashboards");
-    expect(spend.getByText("90% of its $100.00 budget")).toBeInTheDocument();
-    expect(spend.getByText("3 unpriced calls")).toBeInTheDocument();
-
-    vi.clearAllMocks();
-    mockContext = {
-      organizations: [{ ...OWNED, role: "member" }],
-      activeOrganizationId: "org_1",
-    };
-    await renderPage();
-    expect(fetchOrganizationSpend).not.toHaveBeenCalled();
-  });
-
-  // A project is made on the Projects page or from the switcher; the overview
-  // is for seeing the organization, so it offers nobody New project.
-  it.each(["owner", "admin"] as const)(
-    "offers an organization %s no New project here, and no card for none",
-    async (role) => {
-      mockContext = {
-        organizations: [{ ...OWNED, role }],
-        activeOrganizationId: "org_1",
-      };
-      await renderPage();
-
-      expect(screen.queryByTestId("create-project-action")).toBeNull();
-      expect(screen.queryByText(/No projects yet/)).toBeNull();
-    },
-  );
-
-  // ⚠ In the server's order, newest first, each linking to it under its alert.
-  it("lists the open incidents, each linking to it under its alert", async () => {
-    fetchOrganizationHealth.mockResolvedValue({
-      kind: "ok",
-      incidents: [
-        incident({
-          id: "incident_2",
-          rule_name: "Spend",
-          status: "acknowledged",
-          severity: "warning",
-          acknowledged_at: "2026-10-27T04:00:00Z",
-          acknowledged_by: "user_1",
-          project: { id: "project_2", slug: "payments", name: "Payments" },
-        }),
-        incident({}),
-      ],
-    });
-    await renderPage();
-
-    const section = screen.getByRole("region", { name: "Open incidents" });
-    expect(
-      within(section)
-        .getAllByRole("link")
-        .map((link) => [link.textContent, link.getAttribute("href")]),
-    ).toEqual([
-      ["Spend in Payments", incidentHref("ada-works", "payments", "incident_2")],
-      ["Slow calls in Web", incidentHref("ada-works", "web", "incident_1")],
-    ]);
-    const [spend, slow] = within(section)
-      .getAllByRole("link")
-      .map((link) => link.closest("div.flex"));
-    expect(spend).toHaveTextContent(/Payments · opened .* · acknowledged/);
-    expect(spend).toHaveTextContent("Warning");
-    expect(slow).toHaveTextContent(/Web · opened /);
-    expect(slow).not.toHaveTextContent("acknowledged");
-    expect(slow).toHaveTextContent("Alert");
-  });
-
-  it.each<[string, OrganizationHealth]>([
-    ["all is well", { kind: "ok", incidents: [] }],
-    ["the server refuses the person", { kind: "forbidden" }],
-  ])("says nothing about incidents when %s", async (_, health) => {
-    fetchOrganizationHealth.mockResolvedValue(health);
-    await renderPage();
-    expect(screen.queryByRole("region", { name: "Open incidents" })).toBeNull();
-    expect(screen.queryByText(/incident/i)).toBeNull();
-  });
-
-  // Saying nothing would read as all being well.
-  it("says the open incidents could not be read, rather than nothing", async () => {
-    fetchOrganizationHealth.mockResolvedValue({ kind: "unavailable" });
-    await renderPage();
-    expect(screen.getByRole("region", { name: "Open incidents" })).toHaveTextContent(
-      "The open incidents could not be read.",
-    );
-  });
-
-  it.each(["owner", "admin", "member"] as const)(
-    "asks an organization %s's open incidents of the server, which narrows them",
-    async (role) => {
-      mockContext = {
-        organizations: [{ ...OWNED, role }],
-        activeOrganizationId: "org_1",
-      };
-      await renderPage();
-      expect(fetchOrganizationHealth).toHaveBeenCalled();
     },
   );
 

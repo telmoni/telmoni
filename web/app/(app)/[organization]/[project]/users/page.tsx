@@ -1,5 +1,7 @@
 import Link from "next/link";
 
+import { FirstRun, FirstRunStep } from "@/components/first-run";
+import { InstallTabs } from "@/components/install-tabs";
 import { ServiceUnavailable } from "@/components/service-unavailable";
 import { ListPage } from "@/components/traces/list-page";
 import { ListToolbar } from "@/components/traces/toolbar";
@@ -7,7 +9,9 @@ import { UserTable } from "@/components/traces/user-table";
 import { administers } from "@/lib/roles";
 import { fetchUserFacets, fetchUsers, fetchUserViews } from "@/lib/server/data";
 import { projectPage } from "@/lib/server/project-page";
-import { DEFAULT_ROWS, parseListUi } from "@/lib/traces";
+import { fieldSnippets } from "@/lib/first-run";
+import { MAX_DAYS } from "@/lib/list-query";
+import { DEFAULT_ROWS, activeFilters, parseListUi } from "@/lib/traces";
 import { parseUserQuery } from "@/lib/users";
 
 export const metadata = { title: "Users" };
@@ -33,6 +37,11 @@ export default async function UsersPage({
     fetchUserFacets(project.id, query),
     fetchUserViews(project.id),
   ]);
+  // An empty, unfiltered window is a first run only where all the plan keeps is empty too.
+  const ever =
+    access.kind === "ok" && access.list.total === 0 && activeFilters(query).length === 0
+      ? await fetchUsers(project.id, { ...parseUserQuery({}), days: MAX_DAYS, limit: 1 })
+      : null;
 
   return (
     <ListPage
@@ -61,6 +70,36 @@ export default async function UsersPage({
           canSave={administers(project.role)}
         />
       )}
+      firstRun={
+        ever?.kind === "ok" && ever.list.total === 0 ? (
+          <FirstRun
+            title="See runs by the user they served"
+            lead="Name the user a run was for, and each one's runs, failures, tokens and spend gather here, so you can answer what happened to them."
+          >
+            <FirstRunStep
+              n={1}
+              title="Name the user when a run opens"
+              note={
+                <>
+                  Your own id for them, up to 128 characters. It is kept hashed under the
+                  project&rsquo;s own key, so no page names them by it (
+                  <Link href="/docs/monitoring/users" className="underline underline-offset-4">
+                    Users
+                  </Link>
+                  ).
+                </>
+              }
+            >
+              <InstallTabs name="User id" tabs={fieldSnippets("user")} compact />
+            </FirstRunStep>
+            <FirstRunStep
+              n={2}
+              title="Run your agent"
+              note="Its users list here as their runs land, with no reload."
+            />
+          </FirstRun>
+        ) : undefined
+      }
       nothingYet={(days) => (
         <>
           No run from the last {days} {days === 1 ? "day" : "days"} named the user it served.

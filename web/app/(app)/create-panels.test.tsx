@@ -25,6 +25,14 @@ const addProject = vi.fn();
 vi.mock("@/lib/store", () => ({
   useActiveOrganization: () => ({ organizationId: "org_acme", slug: "acme", name: "Acme", role }),
   useAddProject: () => addProject,
+  useUser: () => ({ id: "u1", email: "owner@acme.test" }),
+}));
+
+const requestContentModeCodeAction = vi.fn();
+const updateContentModeAction = vi.fn();
+vi.mock("@/app/(app)/[organization]/[project]/settings/actions", () => ({
+  requestContentModeCodeAction: (...args: unknown[]) => requestContentModeCodeAction(...args),
+  updateContentModeAction: (...args: unknown[]) => updateContentModeAction(...args),
 }));
 
 const createProjectAction = vi.fn();
@@ -83,6 +91,36 @@ describe("New project", () => {
     expect(createProjectAction).toHaveBeenCalledWith("Support agent", "org_acme");
     expect(addProject).toHaveBeenCalledTimes(1);
     expect(closeCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("starts with content off, and makes the project keep it once the owner's mailed code is typed", async () => {
+    createProjectAction.mockResolvedValue({
+      ok: true,
+      project: { id: "p1", slug: "support-agent", name: "Support agent", role: "owner" },
+    });
+    requestContentModeCodeAction.mockResolvedValue({ ok: true });
+    updateContentModeAction.mockResolvedValue({ ok: true });
+    panels();
+    expect(screen.getByRole("radio", { name: "Off" })).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(screen.getByRole("radio", { name: "On" }));
+    fireEvent.change(screen.getByLabelText("Project name"), { target: { value: "Support agent" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+    await waitFor(() => expect(requestContentModeCodeAction).toHaveBeenCalledWith("p1"));
+    expect(push).not.toHaveBeenCalled();
+    const code = await screen.findByLabelText(/sent to/);
+    fireEvent.change(code, { target: { value: "123456" } });
+    fireEvent.click(screen.getByRole("button", { name: "Keep content" }));
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/acme/support-agent"));
+    expect(updateContentModeAction).toHaveBeenCalledWith("p1", "on", { code: "123456" });
+  });
+
+  it("offers an admin no project that keeps content", () => {
+    role = "admin";
+    panels();
+    expect(screen.getByRole("radio", { name: "On" })).toBeDisabled();
+    expect(screen.getByRole("dialog", { name: "New project" })).toHaveTextContent(
+      "Only the organization's owner can make a project that keeps content.",
+    );
   });
 
   it("says what refused it and stays open", async () => {

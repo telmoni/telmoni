@@ -230,10 +230,13 @@ export function SidePanelFooter({ children }: { children: ReactNode }) {
 export function SidePanelRow({
   label,
   htmlFor,
+  labelId,
   children,
 }: {
   label: string;
   htmlFor?: string;
+  /** Names the label, for a group of controls it heads rather than one field. */
+  labelId?: string;
   children: ReactNode;
 }) {
   return (
@@ -243,7 +246,9 @@ export function SidePanelRow({
           {label}
         </Label>
       ) : (
-        <span className="text-sm text-muted-foreground sm:h-7 sm:flex sm:items-center">{label}</span>
+        <span id={labelId} className="text-sm text-muted-foreground sm:h-7 sm:flex sm:items-center">
+          {label}
+        </span>
       )}
       <div className="grid min-w-0 content-start gap-1.5 text-sm">{children}</div>
     </div>

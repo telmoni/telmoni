@@ -1,5 +1,7 @@
 import Link from "next/link";
 
+import { FirstRun, FirstRunStep } from "@/components/first-run";
+import { InstallTabs } from "@/components/install-tabs";
 import { ServiceUnavailable } from "@/components/service-unavailable";
 import { ListPage } from "@/components/traces/list-page";
 import { SessionPeek } from "@/components/traces/session-peek";
@@ -14,8 +16,10 @@ import {
   fetchTraceLayouts,
 } from "@/lib/server/data";
 import { projectPage } from "@/lib/server/project-page";
+import { fieldSnippets } from "@/lib/first-run";
+import { MAX_DAYS } from "@/lib/list-query";
 import { parseSessionQuery } from "@/lib/sessions";
-import { DEFAULT_ROWS, parseListUi } from "@/lib/traces";
+import { DEFAULT_ROWS, activeFilters, parseListUi } from "@/lib/traces";
 
 export const metadata = { title: "Sessions" };
 
@@ -45,6 +49,11 @@ export default async function SessionsPage({
     fetchSessionViews(project.id),
   ]);
   const canSave = administers(project.role);
+  // An empty, unfiltered window is a first run only where all the plan keeps is empty too.
+  const ever =
+    access.kind === "ok" && access.list.total === 0 && activeFilters(query).length === 0
+      ? await fetchSessions(project.id, { ...parseSessionQuery({}), days: MAX_DAYS, limit: 1 })
+      : null;
 
   return (
     <ListPage
@@ -73,6 +82,35 @@ export default async function SessionsPage({
           canSave={canSave}
         />
       )}
+      firstRun={
+        ever?.kind === "ok" && ever.list.total === 0 ? (
+          <FirstRun
+            title="Group runs into sessions"
+            lead="Name the session a run belongs to — a conversation, a ticket, a job — and the runs that share it group here, each session replayed turn by turn."
+          >
+            <FirstRunStep
+              n={1}
+              title="Name the session when a run opens"
+              note="The same id on every run of one conversation; any string up to 200 characters."
+            >
+              <InstallTabs name="Session id" tabs={fieldSnippets("session")} compact />
+            </FirstRunStep>
+            <FirstRunStep
+              n={2}
+              title="Run your agent"
+              note={
+                <>
+                  Its sessions list here as their runs land, with no reload. The{" "}
+                  <Link href="/docs/monitoring/sessions" className="underline underline-offset-4">
+                    Sessions guide
+                  </Link>{" "}
+                  shows what each one holds.
+                </>
+              }
+            />
+          </FirstRun>
+        ) : undefined
+      }
       nothingYet={(days) => (
         <>
           No run from the last {days} {days === 1 ? "day" : "days"} named the session it belonged

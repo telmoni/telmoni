@@ -115,6 +115,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  fetchUsers.mockImplementation(async () => mockUsers);
   window.localStorage.clear();
   mockContext = {
     person: { userId: "user_1", email: "ada@example.test", analyticsOptIn: false },
@@ -305,11 +306,20 @@ describe("UsersPage", () => {
     expect(headings()).toEqual(["User", "Traces", "Errors", "Steps", "Tokens", "Duration", "First seen", "Last seen"]);
   });
 
-  it("says when the filters admit no user, and tells a project that names none which attribute to set", async () => {
+  it("says when the filters admit no user, draws a first run, and tells a quiet window which attribute to set", async () => {
     mockUsers = list({ users: [], total: 0 });
     render(await UsersPage({ params: PARAMS, searchParams: Promise.resolve({ status: "error" }) }));
     expect(screen.getByText("No users match these filters.")).toBeInTheDocument();
 
+    render(await UsersPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+    expect(screen.getByRole("heading", { name: "See runs by the user they served" })).toBeInTheDocument();
+    expect(screen.getByRole("tabpanel")).toHaveTextContent('user_id="user_42"');
+
+    // Older runs make a quiet window, not a first run.
+    document.body.innerHTML = "";
+    fetchUsers.mockImplementation(async (_id, query) =>
+      (query as { days?: number }).days === 360 ? list({ total: 1 }) : list({ users: [], total: 0 }),
+    );
     render(await UsersPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByText("Nothing to show yet.")).toBeInTheDocument();
     expect(screen.getByText("user.id")).toBeInTheDocument();

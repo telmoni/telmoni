@@ -1,5 +1,7 @@
+import { BellRing } from "lucide-react";
 import Link from "next/link";
 
+import { OverviewCard } from "@/components/overview-card";
 import { LocalTime } from "@/components/local-time";
 import { NoticeCard } from "@/components/notice-card";
 import { Row, Rows } from "@/components/rows";
@@ -17,20 +19,18 @@ export function OpenIncidents({
   health: OrganizationHealth;
 }) {
   if (health.kind === "forbidden") return null;
-  if (health.kind === "ok" && health.incidents.length === 0) return null;
   return (
-    <section className="grid gap-gutter" aria-label="Open incidents">
-      <div className="flex items-center justify-between gap-2">
-        <h2 className="text-sm font-medium">Open incidents</h2>
-      </div>
+    <OverviewCard title="Open incidents" icon={BellRing}>
       {/* Saying nothing here would read as all being well. */}
-      {health.kind === "unavailable" ? (
+      {health.kind === "ok" && health.incidents.length === 0 ? (
+        <p className="text-muted-foreground">None open on any project you can open.</p>
+      ) : health.kind === "unavailable" ? (
         <NoticeCard
           title="The open incidents could not be read."
           body="Reload to try again. Each project’s Alerts page lists its own."
         />
       ) : (
-        <Rows>
+        <Rows className="rounded-none p-0 ring-0">
           {health.incidents.map((incident) => (
             <Row
               key={incident.id}
@@ -58,6 +58,6 @@ export function OpenIncidents({
           ))}
         </Rows>
       )}
-    </section>
+    </OverviewCard>
   );
 }

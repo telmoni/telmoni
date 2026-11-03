@@ -169,6 +169,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  fetchTraces.mockImplementation(async () => mockTraces);
   window.localStorage.clear();
   mockOffset = undefined;
   mockContext = {
@@ -411,16 +412,30 @@ describe("TracesPage", () => {
     );
   });
 
-  it("tells an empty project how to send its first run, and a filtered one to widen", async () => {
+  it("draws a project no run ever reached as its first run, decided on the server", async () => {
     mockTraces = list({ traces: [], total: 0 });
     render(await TracesPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
-    expect(screen.getByText("Nothing to show yet.")).toBeInTheDocument();
+    expect(fetchTraces).toHaveBeenCalledWith(PROJECT, expect.objectContaining({ days: 360, limit: 1 }));
+    expect(screen.getByRole("heading", { name: "Send your first trace" })).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Listening for this project’s first run");
+    expect(screen.getByText(/github\.com\/telmoni\/skills/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "SDK" })).toHaveAttribute("href", "/docs/api/sdks");
+    expect(screen.queryByText("Nothing to show yet.")).toBeNull();
+    expect(screen.queryByTestId("histogram")).toBeNull();
+  });
+
+  // Older runs make a quiet window, not a first run.
+  it("tells a quiet window how to send runs, and a filtered one to widen", async () => {
+    fetchTraces.mockImplementation(async (_id, query) =>
+      (query as { days?: number }).days === 360 ? list({ total: 1 }) : list({ traces: [], total: 0 }),
+    );
+    render(await TracesPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+    expect(screen.getByText("Nothing to show yet.")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Send your first trace" })).toBeNull();
     expect(screen.getByRole("link", { name: "coding-agent plugin" })).toHaveAttribute(
       "href",
       "/docs/api/coding-agents",
     );
-    expect(screen.queryByTestId("histogram")).toBeNull();
 
     render(
       await TracesPage({
@@ -435,8 +450,10 @@ describe("TracesPage", () => {
     );
   });
 
-  it("says an empty project has nothing to chart, rather than drawing empty charts", async () => {
-    mockTraces = list({ traces: [], total: 0 });
+  it("says a quiet window has nothing to chart, rather than drawing empty charts", async () => {
+    fetchTraces.mockImplementation(async (_id, query) =>
+      (query as { days?: number }).days === 360 ? list({ total: 1 }) : list({ traces: [], total: 0 }),
+    );
     render(await TracesPage({ params: PARAMS, searchParams: Promise.resolve({ display: "chart" }) }));
     expect(screen.getByText("Nothing to show yet.")).toBeInTheDocument();
     expect(screen.queryByTestId("charts")).toBeNull();

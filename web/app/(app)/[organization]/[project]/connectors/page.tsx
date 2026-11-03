@@ -86,7 +86,7 @@ export default async function ConnectorsPage({
   return (
     <>
       <PageHeader title="Connectors" />
-      <div className="grid gap-6">
+      <div className="grid gap-gutter">
         <section className="grid gap-gutter">
           <p className="text-sm text-muted-foreground">
             Connect this project to the places it already talks. A Slack channel

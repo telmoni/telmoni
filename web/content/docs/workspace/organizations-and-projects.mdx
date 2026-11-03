@@ -27,9 +27,9 @@ URL follows from it (see [Name and URL](#name-and-url)). Nothing is asked
 first: you can change both in **Settings** whenever you like.
 
 The organization starts with no projects. The console opens on its
-**Overview** (`/{organization}`), titled by the organization's name;
-[create the first project](#creating-a-project) from the **Projects** page or
-the switcher. API keys and connectors belong to a project, so there is little
+**Overview** (`/{organization}`), its welcome;
+[create the first project](#creating-a-project) with **New project** there, on
+the **Projects** page or from the switcher. API keys and connectors belong to a project, so there is little
 else to do until one exists.
 
 A sign-in opens the Overview of your
@@ -67,25 +67,20 @@ changed only in its Settings; a project's follows its name (see [Name and
 URL](#name-and-url)). On these pages,
 `{organization}` and `{project}` stand for those two slugs.
 
-- **An organization's overview** is `/{organization}`, titled by the
-  organization's name. It shows the [incidents](/docs/monitoring/alerts#incidents)
-  still open on the projects you can open, newest first, each linking to it
-  under its alert, and nothing when all is well; to its Owner and Admins,
-  **Spend**: what each project's model calls cost this period — its plan's
-  month on a deployment that sells plans, else the calendar month in UTC —
-  the costliest first, the total at its head, each project linking to its
-  dashboards and naming the share of its [budget](/docs/monitoring/alerts#a-budget)
-  its calendar month spent when last read, a project with no model call left out; the organization's notices to
-  its Owner and Admins when there are any; and **Leave organization** to
-  everyone but the Owner. Its projects are in the switcher, and on the
+- **An organization's overview** is `/{organization}`, titled **Welcome** and
+  naming the organization you are working in, with a row of first actions:
+  **New project** and **Invite a member** to its Owner and Admins, **Send a
+  first trace** and **Read the docs** to everyone. Under it are the projects
+  you can open, by name, and **Leave organization** stands at the foot for
+  everyone but the Owner. Its projects are in the switcher too, and on the
   **Projects** page for its Owner and Admins.
 - **Organization pages** sit beside its projects, at words no project goes by:
   `/{organization}/projects`, `/{organization}/members`,
   `/{organization}/audit-log`, and `/{organization}/settings`, with
   `/{organization}/billing` on the hosted service.
 - **Project pages** sit under the organization: `/{organization}/{project}` is
-  the project's [overview](#a-projects-overview), titled by the project's name
-  and showing its notices to anyone on the project when there are any, with
+  the project's [overview](#a-projects-overview), titled by the project's name,
+  its cards summing the project up for anyone on it, with
   [`/traces`](/docs/monitoring/traces) — every run
   of the project's agents, and a page for each —
   [`/sessions`](/docs/monitoring/sessions) — its runs grouped by
@@ -226,23 +221,38 @@ The foot of the sidebar shows the version of Telmoni the console runs.
 ### A project's overview
 
 A project opens on its **Overview**, `/{organization}/{project}`, titled by
-the project's name. Under the title are the project's notices when there are
-any — a member joining or leaving, a channel connected or lost — newest
-first, each unread one bold, with **Mark read** beside them.
+the project's name, its cards three to a row, each leading to the page that
+holds what it shows. Anyone on the project reads every card:
+
+| Card | What it shows |
+|---|---|
+| Project info | Its name, its ID to copy, its [content mode](#a-projects-content-mode) and your role, with links to its members and settings |
+| Last 24 hours | Its runs, failed runs, spend and tokens, from the hourly totals |
+| Open incidents | Its incidents not yet resolved, up to five, each linking to it |
+| Budgets this month | Each running [budget](/docs/monitoring/alerts#a-budget): what the month had spent of it when last read |
+| Project notices | A member joining or leaving, a channel connected or lost, newest first, each unread one bold, with **Mark read** |
+| Documentation | Where to start in this book |
 
 ### Creating a project
 
 An organization Owner or Admin can create a new project from the organization's
-**Projects** page (`/{organization}/projects`) or the switcher's project menu:
+Overview, its **Projects** page (`/{organization}/projects`) or the switcher's
+project menu:
 
-1. Select **New project** on the Projects page, or **New project** in the
+1. Select **New project** on the Overview or the Projects page, or **New project** in the
    switcher's project menu. A panel opens over the page, as a trace opens
    over its list at full size: it names the organization the project lands
-   in, the one you are in, and asks only for a name. Escape, **Cancel** or
-   its close button shuts it, and so does moving to another page.
+   in, the one you are in, and asks for a name and its
+   [content mode](#a-projects-content-mode). Escape, **Cancel** or its close
+   button shuts it, and so does moving to another page.
 2. Provide a project name: up to 100 characters, and not one another project in
    the organization already has (compared without regard to case).
-3. The project is created immediately. Its API keys and connectors are its own.
+3. Leave the content mode **Off**, as it starts, or, as the organization's
+   Owner, choose **On**.
+4. The project is created immediately. Its API keys and connectors are its own.
+   With **On** chosen, a code is mailed to the Owner, and the project keeps
+   content once it is typed in the panel; **Keep it off** opens the project
+   with content off instead.
 
 ### Renaming a project
 
@@ -261,7 +271,8 @@ you choose to send, and the content mode does not decide what happens to
 them. Everyone on the project sees the mode under **Content** on the
 project's **Settings** page (`/{organization}/{project}/settings`).
 
-- **Off**, the mode every project starts in, keeps none of it: each piece of
+- **Off**, the mode a project starts in unless its Owner chose **On** when
+  creating it, keeps none of it: each piece of
   content is dropped as its span arrives, and the span is kept without it.
 - **On** keeps it as it arrives, wherever the code asks the SDK to send it
   too: sealed under a key of the project's own, in Postgres alone, for as long

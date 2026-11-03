@@ -1,24 +1,21 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { BookOpen, Send, UserPlus } from "lucide-react";
+import Link from "next/link";
 
-import { MarkRead } from "@/components/mark-read";
+import { CreateProjectAction } from "@/components/create-project";
+import { NoticeCard } from "@/components/notice-card";
+import { ProjectTiles } from "@/components/project-tiles";
 import { ServiceUnavailable } from "@/components/service-unavailable";
+import { Button } from "@/components/ui/button";
 import { organizationLabel } from "@/lib/identity";
 import { administers, owns } from "@/lib/roles";
-import {
-  activeOrganization,
-  fetchNotifications,
-  fetchOrganizationHealth,
-  fetchOrganizationSpend,
-  getServerContext,
-} from "@/lib/server/data";
+import { activeOrganization, fetchProjectListing, getServerContext } from "@/lib/server/data";
+import { DOCS_URL } from "@/lib/site";
+import { organizationPath } from "@/lib/slug";
 
-import { Notices } from "../../_notices";
 import { Overview } from "../../_overview";
 import { LeaveOrganization } from "../_leave-organization";
-import { OpenIncidents } from "../_open-incidents";
-import { OrganizationSpendSection } from "../_organization-spend";
-import { markOrganizationReadAction } from "../notice-actions";
 
 // In a route group of its own so that whatever stands in for a page while it
 // loads can wrap the overview alone: beside the organization's layout it
@@ -33,10 +30,10 @@ export async function generateMetadata(): Promise<Metadata> {
   return { title: organization ? organizationLabel(organization) : "Overview" };
 }
 
-// Under the organization's name, only what needs somebody: its open
-// incidents, its own notices and the way out. Projects are in the switcher.
+// A welcome to the organization: where you are and what to do first, its
+// projects by name, and the way out.
 export default async function OrganizationOverviewPage() {
-  const gate = await getServerContext();
+  const [gate, listing] = await Promise.all([getServerContext(), fetchProjectListing()]);
   // The path names the organization: not found unless auth answered with it.
   if (gate?.organizationNotFound) notFound();
   const organization = gate ? activeOrganization(gate) : null;
@@ -48,41 +45,60 @@ export default async function OrganizationOverviewPage() {
 
   const isOwner = owns(organization.role);
   const isAdmin = administers(organization.role);
-  // The organization's own feed — the notices that name no project, such as
-  // an `organization_alert` a service beside this one raises — answers its
-  // owner and admins, so nobody else is sent to ask for it.
-  const [health, notices, spend] = await Promise.all([
-    fetchOrganizationHealth(),
-    isAdmin ? fetchNotifications() : null,
-    // What its projects spent is the owner's and admins' to read.
-    isAdmin ? fetchOrganizationSpend() : null,
-  ]);
-
   // Anybody but the owner may leave. The owner hands the organization to an
   // admin first — the organization cannot be left with nobody holding it.
   const canLeave = !isOwner;
-
-  // Mark read goes up to the newest notice drawn, the first of the feed.
-  const newest = notices?.items[0];
-  const markRead =
-    notices && newest && notices.unread > 0 ? (
-      <MarkRead
-        unread={notices.unread}
-        mark={markOrganizationReadAction.bind(null, organization.organizationId, newest.created_at)}
-      />
-    ) : null;
+  // An unread listing is not an empty one: "no projects yet" would invite a second of one.
+  const projects = listing.kind === "ok" ? listing.projects : null;
+  const quick = [
+    ...(isAdmin ? [{ href: organizationPath(organization.slug, "/members"), label: "Invite a member", icon: UserPlus }] : []),
+    { href: `${DOCS_URL}/api/sdks`, label: "Send a first trace", icon: Send },
+    { href: DOCS_URL, label: "Read the docs", icon: BookOpen },
+  ];
 
   return (
     <Overview
-      title={name}
-      action={markRead ?? undefined}
+      title="Welcome"
       sections={
         <>
-          <OpenIncidents organization={organization.slug} health={health} />
-          {spend && <OrganizationSpendSection organization={organization.slug} spend={spend} />}
-          {notices && notices.items.length > 0 && (
-            <Notices label="Organization notices" feed={notices} />
-          )}
+          <section aria-label="Getting around" className="grid gap-gutter">
+            <p className="text-base">
+              You&rsquo;re working in <span className="font-medium">{name}</span>.
+            </p>
+            <div className="flex flex-wrap gap-gutter">
+              {/* As the Projects page draws it, its shortcut with it. */}
+              <CreateProjectAction />
+              {quick.map(({ href, label, icon: Icon }) => (
+                <Button key={label} asChild variant="outline" size="sm">
+                  <Link href={href}>
+                    <Icon className="size-4" aria-hidden="true" />
+                    {label}
+                  </Link>
+                </Button>
+              ))}
+            </div>
+          </section>
+
+          <section aria-labelledby="overview-projects" className="grid gap-gutter">
+            <h2 id="overview-projects" className="text-base font-medium">
+              Projects
+            </h2>
+            {projects === null ? (
+              <NoticeCard title="The projects could not be loaded." body="Try again in a moment." />
+            ) : projects.length === 0 ? (
+              <NoticeCard
+                title="No projects yet."
+                body={
+                  isAdmin
+                    ? "Create the first one with New project, above."
+                    : "An owner or admin creates them."
+                }
+              />
+            ) : (
+              <ProjectTiles organization={organization.slug} projects={projects} roles={false} />
+            )}
+          </section>
+
           {canLeave && (
             <LeaveOrganization organizationId={organization.organizationId} name={name} />
           )}
