@@ -2,10 +2,10 @@
 //! service, without verifying it.
 //!
 //! Safe for what these are used for, and nothing else: the token came from
-//! our own confidential exchange over TLS. The OpenID Connect provider reads
-//! an id token's claims here once [`telmoni_shared::oidc::IdTokenVerifier`]
-//! has verified it, and an adapter for a provider with a management API
-//! reads the session id its logout page names. Nothing here decides who
+//! our own confidential exchange over TLS. An adapter for a provider with a
+//! management API reads the session id its logout page names; an id token's
+//! claims come from [`telmoni_shared::oidc::IdTokenVerifier`], which verifies
+//! and reads them at once. Nothing here decides who
 //! somebody is, and no token this service mints is read here: its own are
 //! opaque.
 
@@ -22,7 +22,7 @@ pub fn session_id_of(token: &str) -> Option<String> {
 }
 
 /// The payload segment of a JWT, decoded and parsed as `T`.
-pub(crate) fn payload<T: serde::de::DeserializeOwned>(token: &str) -> Option<T> {
+fn payload<T: serde::de::DeserializeOwned>(token: &str) -> Option<T> {
     use base64::Engine;
     let payload_b64 = token.split('.').nth(1)?;
     let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD

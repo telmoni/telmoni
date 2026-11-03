@@ -340,12 +340,10 @@ impl OidcProvider {
             );
             return Err(AuthError::InvalidToken.into());
         };
-        self.verifier.verify(&id_token).await.map_err(|e| {
+        let mut claims: IdTokenClaims = self.verifier.verify(&id_token).await.map_err(|e| {
             tracing::warn!(op, error = %e, "the id_token the provider minted does not verify");
             e
         })?;
-        let mut claims: IdTokenClaims = crate::token_claims::payload(&id_token)
-            .ok_or_else(|| TelmoniError::Internal("id_token claims unreadable".into()))?;
         // A token minted for another sign-in carries another nonce, or none:
         // the code it came with was not this browser's.
         if let Some(sent) = nonce

@@ -137,9 +137,11 @@ impl IdTokenVerifier {
 
     /// Verify one id token: by the one algorithm configured, under a key the
     /// provider publishes, from its issuer, for our client, unexpired,
-    /// naming a subject. What the token then says about the person is the
-    /// caller's to read.
-    pub async fn verify(&self, token: &str) -> Result<(), TelmoniError> {
+    /// naming a subject; answers its claims as `T` reads them, decoded once.
+    pub async fn verify<T: serde::de::DeserializeOwned>(
+        &self,
+        token: &str,
+    ) -> Result<T, TelmoniError> {
         // The signed bytes are everything before the last dot, exactly as sent.
         let Some((signing_input, signature_b64)) = token.rsplit_once('.') else {
             return Err(refuse(
@@ -227,7 +229,12 @@ impl IdTokenVerifier {
         if claims.sub.trim().is_empty() {
             return Err(refuse("no sub", AuthError::InvalidToken));
         }
-        Ok(())
+        decode_json(claims_b64).ok_or_else(|| {
+            refuse(
+                "claims are not what the caller reads",
+                AuthError::InvalidToken,
+            )
+        })
     }
 }
 
@@ -324,21 +331,36 @@ mod tests {
         use crate::test_util::id_token::{EcProvider, provider_jwks_json_any_alg, ps256_id_token};
         let ec = EcProvider::p256();
         let (_server, es256) = stub_serving(ec.jwks_json(), SigningAlg::Es256).await;
-        es256.verify(&ec.id_token(live("user_1"))).await.unwrap();
+        es256
+            .verify::<serde_json::Value>(&ec.id_token(live("user_1")))
+            .await
+            .unwrap();
         assert!(
             es256
-                .verify(&provider_id_token(live("user_1")))
+                .verify::<serde_json::Value>(&provider_id_token(live("user_1")))
                 .await
                 .is_err()
         );
         let (_server, rs256) = stub_serving(ec.jwks_json(), SigningAlg::Rs256).await;
-        assert!(rs256.verify(&ec.id_token(live("user_1"))).await.is_err());
+        assert!(
+            rs256
+                .verify::<serde_json::Value>(&ec.id_token(live("user_1")))
+                .await
+                .is_err()
+        );
 
         let (_server, ps256) = stub_serving(provider_jwks_json_any_alg(), SigningAlg::Ps256).await;
-        ps256.verify(&ps256_id_token(live("user_1"))).await.unwrap();
+        ps256
+            .verify::<serde_json::Value>(&ps256_id_token(live("user_1")))
+            .await
+            .unwrap();
         // The fixture's set says its key is for RS256 alone.
         let (_server, held) = stub_serving(provider_jwks_json(), SigningAlg::Ps256).await;
-        assert!(held.verify(&ps256_id_token(live("user_1"))).await.is_err());
+        assert!(
+            held.verify::<serde_json::Value>(&ps256_id_token(live("user_1")))
+                .await
+                .is_err()
+        );
     }
 
     /// The eight are read by name; ES512, HS256 and none are not.
@@ -357,10 +379,14 @@ mod tests {
     #[tokio::test]
     async fn a_provider_id_token_verifies() {
         let (_server, v) = provider_stub().await;
-        v.verify(&provider_id_token(live("user_1"))).await.unwrap();
+        v.verify::<serde_json::Value>(&provider_id_token(live("user_1")))
+            .await
+            .unwrap();
         let mut slashed = live("user_1");
         slashed["iss"] = json!(format!("{TEST_PROVIDER_ISSUER}/"));
-        v.verify(&provider_id_token(slashed)).await.unwrap();
+        v.verify::<serde_json::Value>(&provider_id_token(slashed))
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -371,7 +397,7 @@ mod tests {
         let mut bytes = URL_SAFE_NO_PAD.decode(sig).unwrap();
         bytes[0] ^= 0x01;
         let forged = format!("{head}.{}", URL_SAFE_NO_PAD.encode(bytes));
-        let err = v.verify(&forged).await.unwrap_err();
+        let err = v.verify::<serde_json::Value>(&forged).await.unwrap_err();
         assert_eq!(err.to_problem_details().status, 401);
     }
 
@@ -382,7 +408,11 @@ mod tests {
         let mut parts: Vec<&str> = token.split('.').collect();
         let edited = URL_SAFE_NO_PAD.encode(serde_json::to_vec(&live("user_2")).unwrap());
         parts[1] = &edited;
-        assert!(v.verify(&parts.join(".")).await.is_err());
+        assert!(
+            v.verify::<serde_json::Value>(&parts.join("."))
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]
@@ -393,7 +423,10 @@ mod tests {
                 .encode(serde_json::to_vec(&json!({ "alg": alg, "kid": PROVIDER_KID })).unwrap());
             let body = URL_SAFE_NO_PAD.encode(serde_json::to_vec(&live("user_1")).unwrap());
             let token = format!("{header}.{body}.{}", URL_SAFE_NO_PAD.encode(b"x"));
-            assert!(v.verify(&token).await.is_err(), "{alg} accepted");
+            assert!(
+                v.verify::<serde_json::Value>(&token).await.is_err(),
+                "{alg} accepted"
+            );
         }
     }
 
@@ -402,13 +435,13 @@ mod tests {
         let (_server, v) = provider_stub().await;
         let now = chrono::Utc::now().timestamp();
         assert!(
-            v.verify(&provider_id_token(claims("user_1", now - 10)))
+            v.verify::<serde_json::Value>(&provider_id_token(claims("user_1", now - 10)))
                 .await
                 .is_ok(),
             "ten seconds past exp is skew, not expiry"
         );
         let err = v
-            .verify(&provider_id_token(claims("user_1", now - 60)))
+            .verify::<serde_json::Value>(&provider_id_token(claims("user_1", now - 60)))
             .await
             .unwrap_err();
         assert_eq!(
@@ -425,8 +458,16 @@ mod tests {
         let (_server, v) = provider_stub().await;
         let mut named = live("user_1");
         named["sid"] = json!("session_1");
-        assert!(v.verify(&provider_id_token(named)).await.is_ok());
-        assert!(v.verify(&provider_id_token(live("user_1"))).await.is_ok());
+        assert!(
+            v.verify::<serde_json::Value>(&provider_id_token(named))
+                .await
+                .is_ok()
+        );
+        assert!(
+            v.verify::<serde_json::Value>(&provider_id_token(live("user_1")))
+                .await
+                .is_ok()
+        );
     }
 
     #[tokio::test]
@@ -435,7 +476,10 @@ mod tests {
         let now = chrono::Utc::now().timestamp();
         let mut c = claims("user_1", now + 600);
         c["nbf"] = json!(now + 120);
-        let err = v.verify(&provider_id_token(c)).await.unwrap_err();
+        let err = v
+            .verify::<serde_json::Value>(&provider_id_token(c))
+            .await
+            .unwrap_err();
         assert_eq!(
             err.to_problem_details().type_uri,
             "/errors/auth/invalid-token"
@@ -443,12 +487,18 @@ mod tests {
         let mut c = claims("user_1", now + 600);
         c["nbf"] = json!(now + 10);
         assert!(
-            v.verify(&provider_id_token(c)).await.is_ok(),
+            v.verify::<serde_json::Value>(&provider_id_token(c))
+                .await
+                .is_ok(),
             "ten seconds early is skew, not a future token"
         );
         let mut c = claims("user_1", now + 600);
         c["nbf"] = json!(now - 10);
-        assert!(v.verify(&provider_id_token(c)).await.is_ok());
+        assert!(
+            v.verify::<serde_json::Value>(&provider_id_token(c))
+                .await
+                .is_ok()
+        );
     }
 
     #[tokio::test]
@@ -456,7 +506,11 @@ mod tests {
         let (_server, v) = provider_stub().await;
         let mut c = live("user_1");
         c["iss"] = json!("https://someone-else.example/");
-        assert!(v.verify(&provider_id_token(c)).await.is_err());
+        assert!(
+            v.verify::<serde_json::Value>(&provider_id_token(c))
+                .await
+                .is_err()
+        );
     }
 
     /// An id token names its client in `aud`, as one string or a list, and
@@ -467,12 +521,22 @@ mod tests {
         let (_server, v) = provider_stub().await;
         let mut many = live("user_1");
         many["aud"] = json!(["another_client", TEST_CLIENT_ID]);
-        assert!(v.verify(&provider_id_token(many.clone())).await.is_ok());
+        assert!(
+            v.verify::<serde_json::Value>(&provider_id_token(many.clone()))
+                .await
+                .is_ok()
+        );
         many["azp"] = json!(TEST_CLIENT_ID);
-        assert!(v.verify(&provider_id_token(many.clone())).await.is_ok());
+        assert!(
+            v.verify::<serde_json::Value>(&provider_id_token(many.clone()))
+                .await
+                .is_ok()
+        );
         many["azp"] = json!("another_client");
         assert!(
-            v.verify(&provider_id_token(many)).await.is_err(),
+            v.verify::<serde_json::Value>(&provider_id_token(many))
+                .await
+                .is_err(),
             "issued to another client"
         );
         for refused in [
@@ -486,7 +550,10 @@ mod tests {
             } else {
                 theirs["aud"] = refused.clone();
             }
-            let err = v.verify(&provider_id_token(theirs)).await.unwrap_err();
+            let err = v
+                .verify::<serde_json::Value>(&provider_id_token(theirs))
+                .await
+                .unwrap_err();
             assert_eq!(
                 err.to_problem_details().type_uri,
                 "/errors/auth/invalid-token",
@@ -498,7 +565,11 @@ mod tests {
     #[tokio::test]
     async fn a_token_that_names_nobody_is_refused() {
         let (_server, v) = provider_stub().await;
-        assert!(v.verify(&provider_id_token(live(""))).await.is_err());
+        assert!(
+            v.verify::<serde_json::Value>(&provider_id_token(live("")))
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]
@@ -519,10 +590,14 @@ mod tests {
             TEST_PROVIDER_ISSUER,
         );
         // The provider's kid IS in the served set: the first miss fetches and finds it.
-        assert!(v.verify(&provider_id_token(live("user_1"))).await.is_ok());
+        assert!(
+            v.verify::<serde_json::Value>(&provider_id_token(live("user_1")))
+                .await
+                .is_ok()
+        );
         // A kid the set lacks does not fetch again within the minute.
         assert!(
-            v.verify(&id_token_under("nope", live("user_1")))
+            v.verify::<serde_json::Value>(&id_token_under("nope", live("user_1")))
                 .await
                 .is_err()
         );
@@ -537,7 +612,7 @@ mod tests {
             TEST_PROVIDER_ISSUER,
         );
         let err = v
-            .verify(&provider_id_token(live("user_1")))
+            .verify::<serde_json::Value>(&provider_id_token(live("user_1")))
             .await
             .unwrap_err();
         assert_eq!(err.to_problem_details().status, 503);
@@ -583,6 +658,6 @@ mod tests {
         let token = provider_id_token(
             json!({ "iss": server.uri(), "sub": "user_1", "aud": TEST_CLIENT_ID, "exp": now + 600, "iat": now }),
         );
-        assert!(v.verify(&token).await.is_ok());
+        assert!(v.verify::<serde_json::Value>(&token).await.is_ok());
     }
 }
