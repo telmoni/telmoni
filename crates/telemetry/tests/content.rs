@@ -670,6 +670,49 @@ async fn the_nightly_pass_takes_the_oldest_content_past_the_ceiling(pool: PgPool
     assert_eq!(spans, 1, "the span within retention stays");
 }
 
+/// The month's usage names each project's span units a UTC day, from the hourly totals.
+#[sqlx::test]
+async fn the_months_usage_counts_each_projects_units_by_day(pool: PgPool) {
+    let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let mut door = door(&pool, ContentMode::Off).await;
+    door.auth.seat(
+        "admin-1",
+        &door.organization,
+        &door.project,
+        OrganizationRole::Owner,
+        None,
+    );
+    let month = common::PlanMonth {
+        spans: 1_000_000,
+        grace_days: 0,
+        content_bytes: 1_000_000,
+    };
+    let state = common::state_with_stores_noticed(
+        &pool,
+        door.auth.clone(),
+        Arc::new(month),
+        common::NoticeLog::new(),
+    );
+    door.app = router(state.clone()).nest("/otlp", otlp_router(state.clone()));
+    door.state = state;
+    door.send(export("result")).await;
+
+    let (status, usage) = door.lane("GET", "/usage", "admin-1", None).await;
+    assert_eq!(status, StatusCode::OK, "{usage}");
+    let today = Utc::now().format("%Y-%m-%d").to_string();
+    let days = usage["days"].as_array().expect("days");
+    assert_eq!(days.len(), 1, "{usage}");
+    assert_eq!(days[0]["day"], today.as_str());
+    assert_eq!(days[0]["project_id"], door.project.as_str());
+    assert!(
+        days[0]["units"].as_u64().is_some_and(|units| units > 0),
+        "{usage}"
+    );
+    assert_eq!(usage["projects"][0]["id"], door.project.as_str());
+}
+
 /// The usage pass counts the month's spans as the door did and tells the
 /// owners once the content held reaches the plan's ceiling.
 #[sqlx::test]

@@ -6,6 +6,15 @@
 export { Badge } from "@/components/ui/badge";
 export { Button } from "@/components/ui/button";
 export { Card } from "@/components/ui/card";
+export {
+  ChartContainer,
+  ChartLegend,
+  ChartLegendContent,
+  ChartTooltip,
+  ChartTooltipContent,
+  type ChartConfig,
+} from "@/components/ui/chart";
+export { Figure, OverviewCard, OverviewGrid } from "@/components/overview-card";
 export { Input } from "@/components/ui/input";
 export { Label } from "@/components/ui/label";
 export {
