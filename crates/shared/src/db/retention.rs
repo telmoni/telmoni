@@ -69,8 +69,8 @@ pub const FEED_RETENTION_DAYS: i32 = 90;
 /// keeps its copies of deliveries to this window too.
 pub const DELIVERY_RETENTION_DAYS: i32 = 30;
 
-/// How long the audit chain is kept: its partitions older than this drop. The
-/// agent index keeps its copies of audit events to this window too.
+/// How long the agent index keeps its copies of audit events. The chain
+/// itself drops nothing: its registry row has `drop_enabled` off.
 pub const AUDIT_RETENTION_DAYS: i32 = 730;
 
 /// The rotation registry. Every parent must exist in the migrated schema:
