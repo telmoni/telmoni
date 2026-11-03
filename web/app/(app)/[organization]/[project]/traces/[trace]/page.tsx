@@ -9,7 +9,7 @@ import { LayoutControls } from "@/components/traces/layout-controls";
 import { TraceLayoutBody } from "@/components/traces/trace-layout";
 import { LayoutProvider } from "@/components/traces/use-layout";
 import { TraceMeta } from "@/components/traces/trace-view";
-import { TraceScores } from "@/components/traces/trace-scores";
+import { TraceScores, TraceScoresProvider } from "@/components/traces/trace-scores";
 import { Card } from "@/components/ui/card";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { MediaProjectProvider } from "@/components/traces/span-content";
@@ -22,7 +22,10 @@ import {
   fetchTrace,
   fetchTraceLayouts,
 } from "@/lib/server/data";
+import { fetchContentMode } from "@/lib/server/entities/content-mode";
+import { ContentMode } from "@/lib/types/enums";
 import { fetchScores } from "@/lib/server/entities/scores";
+import { commentsOf } from "@/lib/scores";
 import { projectPage } from "@/lib/server/project-page";
 import { projectPath } from "@/lib/slug";
 import { summarizeTrace } from "@/lib/trace-tree";
@@ -46,12 +49,13 @@ export default async function TracePage({
   const { gate, project } = resolved;
 
   const list = tracesHref(organization, slug, {});
-  const [access, setting, layouts, incidents, scores] = await Promise.all([
+  const [access, setting, layouts, incidents, scores, mode] = await Promise.all([
     fetchTrace(project.id, runId),
     fetchSessionLayout(project.id),
     fetchTraceLayouts(project.id),
     fetchRunIncidents(project.id, runId),
     fetchScores(project.id, runId),
+    fetchContentMode(project.id),
   ]);
   if (access.kind === "unavailable") return <ServiceUnavailable />;
   if (access.kind === "forbidden") {
@@ -120,15 +124,22 @@ export default async function TracePage({
                   projectId={project.id}
                   runId={trace.run_id}
                   scores={scores.scores}
+                  comments={commentsOf(trace.content)}
                   spanNames={Object.fromEntries(trace.spans.map((span) => [span.span_id, span.name]))}
                   me={gate.person.userId}
                   administers={administers(project.role)}
+                  keepsContent={mode?.content_mode === ContentMode.On}
                 />
               </div>
             )}
           </div>
           <MediaProjectProvider projectId={project.id}>
-            <TraceLayoutBody trace={trace} organization={organization} slug={slug} />
+            <TraceScoresProvider
+              scores={scores.kind === "ok" ? scores.scores : []}
+              comments={commentsOf(trace.content)}
+            >
+              <TraceLayoutBody trace={trace} organization={organization} slug={slug} />
+            </TraceScoresProvider>
           </MediaProjectProvider>
         </Card>
         </TooltipProvider>

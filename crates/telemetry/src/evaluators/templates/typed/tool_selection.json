@@ -1,0 +1,26 @@
+{
+  "key": "typed_tool_selection",
+  "group": "agents",
+  "name": "Tool selection (typed)",
+  "description": "Whether the agent called the tools the request needed, and how well it chose them.",
+  "state": "The request:\n{{input}}\n\nThe tool calls the agent made, in order:\n{{tool_calls}}\n\nIts answer:\n{{output}}",
+  "questions": [
+    {
+      "name": "tools_needed_called",
+      "type": "noul",
+      "instructions": "Did the agent call every tool the request needed, and none it did not?",
+      "yes_means": "every call was needed and none was missing",
+      "no_means": "a needed call is missing, or a call served no part of the request"
+    },
+    {
+      "name": "tool_choice",
+      "type": "score",
+      "instructions": "How well did the agent choose its tools and their arguments for the request?",
+      "levels": [
+        "the wrong tools, or the right ones with wrong arguments",
+        "partly right: some calls fit, some did not",
+        "every tool and argument fit the request"
+      ]
+    }
+  ]
+}

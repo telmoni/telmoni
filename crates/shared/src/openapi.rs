@@ -201,6 +201,16 @@ fn operation(route: &Route, universal: &[Answer]) -> Value {
                 }),
             );
         }
+        if route.method == Method::Post {
+            obj.insert(
+                "requestBody".into(),
+                json!({
+                    "required": true,
+                    "description": "A JSON body, as the description gives it.",
+                    "content": { "application/json": {} },
+                }),
+            );
+        }
     }
     op
 }

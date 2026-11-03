@@ -26,14 +26,38 @@ export const ScoreSpecSchema = z.object({
 });
 export type ScoreSpec = z.infer<typeof ScoreSpecSchema>;
 
+// A typed evaluator's question, each its own score: yes or no, one of ordered
+// levels, or one of named options, answered with its probabilities.
+export const QuestionSchema = z.discriminatedUnion("type", [
+  z.object({
+    name: z.string(),
+    instructions: z.string(),
+    type: z.literal("noul"),
+    yes_means: z.string(),
+    no_means: z.string(),
+  }),
+  z.object({ name: z.string(), instructions: z.string(), type: z.literal("score"), levels: z.array(z.string()) }),
+  z.object({
+    name: z.string(),
+    instructions: z.string(),
+    type: z.literal("choice"),
+    options: z.array(z.object({ name: z.string(), means: z.string() })),
+  }),
+]);
+export type Question = z.infer<typeof QuestionSchema>;
+export type QuestionType = Question["type"];
+
 export const EvaluatorSchema = z.object({
   id: z.string(),
   version: z.number().int(),
   name: z.string(),
-  kind: z.string(),
-  messages: z.array(PromptMessageSchema),
-  score: ScoreSpecSchema,
+  kind: z.enum(["prompt", "typed", "code"]),
+  messages: z.array(PromptMessageSchema).nullable(),
+  score: ScoreSpecSchema.nullable(),
+  state: z.string().nullable(),
+  questions: z.array(QuestionSchema).nullable(),
   reasoning: z.boolean(),
+  media: z.boolean(),
   connection_id: z.string().nullable(),
   model: z.string().nullable(),
   temperature: z.number().nullable(),
@@ -61,22 +85,48 @@ export const EvaluatorTemplateSchema = z.object({
 });
 export type EvaluatorTemplate = z.infer<typeof EvaluatorTemplateSchema>;
 
-const TemplatesSchema = z.object({ templates: z.array(EvaluatorTemplateSchema) });
+export const TypedTemplateSchema = z.object({
+  key: z.string(),
+  group: z.string(),
+  name: z.string(),
+  description: z.string(),
+  state: z.string(),
+  questions: z.array(QuestionSchema),
+});
+export type TypedTemplate = z.infer<typeof TypedTemplateSchema>;
+
+const TemplatesSchema = z.object({
+  templates: z.array(EvaluatorTemplateSchema),
+  typed: z.array(TypedTemplateSchema),
+});
+export type Templates = z.infer<typeof TemplatesSchema>;
 const VersionsSchema = z.object({ versions: z.array(EvaluatorSchema) });
 
-// A try's answer: the prompt as sent, and the score it gave or why it gave none.
+const JudgementSchema = z.object({
+  name: z.string(),
+  data_type: z.enum(ScoreType),
+  value: z.number().nullable(),
+  categories: z.array(z.string()),
+});
+
+// What a typed answer carries beside its score: the probability of yes, or
+// each level's or option's, and the model version that answered.
+export const TypedAnswerSchema = z.object({
+  noul: z.number().optional(),
+  confidence: z.number().nullable().optional(),
+  probabilities: z.record(z.string(), z.number()).optional(),
+  model: z.string(),
+});
+export type TypedAnswer = z.infer<typeof TypedAnswerSchema>;
+
+// A try's answer: the prompt or state as sent, and the score it gave — a
+// typed evaluator's, one a question — or why it gave none.
 export const TriedSchema = z.object({
   system: z.string(),
   messages: z.array(PromptMessageSchema),
   model: z.string(),
-  judgement: z
-    .object({
-      name: z.string(),
-      data_type: z.enum(ScoreType),
-      value: z.number().nullable(),
-      categories: z.array(z.string()),
-    })
-    .nullable(),
+  judgement: JudgementSchema.nullable(),
+  answers: z.array(JudgementSchema.extend({ answer: TypedAnswerSchema })).optional(),
   reasoning: z.string().nullable(),
   refused: z.string().nullable(),
   input_tokens: z.number(),
@@ -92,9 +142,8 @@ export const fetchEvaluators = cache(
 );
 
 export const fetchEvaluatorTemplates = cache(
-  async (projectId: string): Promise<EvaluatorTemplate[] | null> =>
-    valueOf(await readLane("fetchEvaluatorTemplates", projectId, "/evaluators/templates", TemplatesSchema))
-      ?.templates ?? null,
+  async (projectId: string): Promise<Templates | null> =>
+    valueOf(await readLane("fetchEvaluatorTemplates", projectId, "/evaluators/templates", TemplatesSchema)) ?? null,
 );
 
 export const fetchEvaluatorVersions = cache(
@@ -189,5 +238,31 @@ export const fetchEvaluations = cache(
     z.guid().safeParse(id).success
       ? (valueOf(await readLane("fetchEvaluations", projectId, `/evaluators/${id}/evaluations`, EvaluationsSchema)) ??
         null)
+      : null,
+);
+
+// How far an evaluator agrees with the project's members over a window, a
+// score name at a time.
+export const AgreementSchema = z.object({
+  name: z.string(),
+  days: z.number().int(),
+  data_type: z.enum(ScoreType).nullable(),
+  pairs: z.number().int(),
+  agreeing: z.number().int().nullable(),
+  share: z.number().nullable(),
+  kappa: z.number().nullable(),
+  labels: z.array(z.string()),
+  matrix: z.array(z.array(z.number().int())),
+  mean_difference: z.number().nullable(),
+});
+export type Agreement = z.infer<typeof AgreementSchema>;
+
+export const AgreementsSchema = z.object({ days: z.number().int(), scores: z.array(AgreementSchema) });
+export type Agreements = z.infer<typeof AgreementsSchema>;
+
+export const fetchAgreement = cache(
+  async (projectId: string, id: string): Promise<Agreements | null> =>
+    z.guid().safeParse(id).success
+      ? (valueOf(await readLane("fetchAgreement", projectId, `/evaluators/${id}/agreement`, AgreementsSchema)) ?? null)
       : null,
 );

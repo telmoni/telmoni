@@ -1,5 +1,21 @@
 {
   "days": 30,
+  "evaluator_reads": [
+    {
+      "day": "2026-11-02",
+      "evaluator": "Hallucination",
+      "evaluator_id": "7a1c0e52-0000-4000-8000-000000000002",
+      "provider": "anthropic",
+      "reads": 42
+    },
+    {
+      "day": "2026-11-01",
+      "evaluator": null,
+      "evaluator_id": "7a1c0e52-0000-4000-8000-000000000003",
+      "provider": "openai",
+      "reads": 3
+    }
+  ],
   "retention": {
     "max_span_days": 360,
     "rollup_months": 13,

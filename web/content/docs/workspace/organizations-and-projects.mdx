@@ -87,10 +87,12 @@ URL](#name-and-url)). On these pages,
   session, and a page for each — [`/users`](/docs/monitoring/users) — by
   the user they served — [`/alerts`](/docs/monitoring/alerts) — its alerts and
   their incidents — [`/dashboards`](/docs/monitoring/dashboards) — its spend,
-  tokens, runs, latency and time to first token over a window — and `/api-keys`, `/connectors`, `/members`,
+  tokens, runs, latency and time to first token over a window, spend split
+  by a model, an agent, a tag, a user or a session, and the dashboards saved
+  for everyone on the project — and `/api-keys`, `/connectors`, `/members`,
   `/audit-log`, `/privacy` — the project's privacy posture: its content mode,
   what its spans arrived with in the last thirty days, who read its content
-  then, how long its data is kept and where, and the
+  then and what its evaluators read, by day, how long its data is kept and where, and the
   [field inventory](/docs/api/field-inventory), every attribute Telmoni reads
   from a span and what becomes of it — and `/settings` under it.
 - **Your settings** live under `/settings`: `/settings/general`,
@@ -294,7 +296,7 @@ project's **Settings** page (`/{organization}/{project}/settings`).
 Ingest reads the mode on every export, so it acts at the door, as the span
 arrives. The project's **Privacy** page shows the mode, what its spans arrived
 with in the last thirty days, content dropped at the door among it, who read
-its content then, how long its data is kept and where, and the [field
+its content then and what its evaluators read of it, by day and provider, how long its data is kept and where, and the [field
 inventory](/docs/api/field-inventory): every attribute ingest reads, and what
 becomes of each.
 

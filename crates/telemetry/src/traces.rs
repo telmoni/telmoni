@@ -344,6 +344,10 @@ pub struct Bar {
     pub time_to_first_token_p50_ms: Option<f64>,
     /// And 95th percentile.
     pub time_to_first_token_p95_ms: Option<f64>,
+    /// The mean of the scores given in it of the score the list is narrowed
+    /// to, on the runs it admits; none where it holds none, or the list is
+    /// narrowed to no score.
+    pub score_mean: Option<f64>,
 }
 
 /// A run's status: its own span's once that has arrived, else `error` where
@@ -1013,6 +1017,103 @@ pub async fn histogram(
         .await
 }
 
+/// The mean of the narrowing score given in each bar, on the runs the filter
+/// admits, a number's value and a yes or no's 1 or 0, by when it was given.
+const SCORE_MEANS_SQL: &str = concat!(
+    "SELECT intDiv(toUnixTimestamp64Milli(received_at) + {shift:Int64}, {bucket:Int64}) ",
+    "* {bucket:Int64} - {shift:Int64} AS at_ms, avg(value) AS mean ",
+    "FROM telemetry.scores FINAL ",
+    "WHERE project_id IN {projects:Array(String)} AND name = {score:String} AND is_deleted = 0 ",
+    "AND data_type IN ('number', 'boolean') ",
+    "AND received_at >= now64(6) - toIntervalDay({days:UInt16}) ",
+    "AND run_id IN (SELECT run_id FROM (",
+    runs!(),
+    ")) GROUP BY at_ms ORDER BY at_ms"
+);
+
+/// The spans of a kind, and a name where given, in the runs the filter
+/// admits over its days: what a span rule's evaluations would judge, counted
+/// with their tokens' mean.
+const SPANS_IN_RUNS_SQL: &str = concat!(
+    "SELECT uniqExact(run_id, span_id) AS total, ",
+    "toUInt64(ifNotFinite(avg(input_tokens + output_tokens), 0)) AS tokens ",
+    "FROM telemetry.spans ",
+    "WHERE project_id IN {projects:Array(String)} ",
+    // A day more than the runs' window: an admitted run's spans may land before it.
+    "AND received_at >= now64(6) - toIntervalDay({days:UInt16} + 1) ",
+    "AND kind = {span_kind:String} AND ({span_name:String} = '' OR name = {span_name:String}) ",
+    "AND run_id IN (SELECT run_id FROM (",
+    runs!(),
+    "))"
+);
+
+/// How many spans [`SPANS_IN_RUNS_SQL`] finds, and their tokens' mean.
+#[derive(Debug, Row, Deserialize)]
+pub struct SpansCounted {
+    pub total: u64,
+    pub tokens: u64,
+}
+
+/// [`SPANS_IN_RUNS_SQL`] read.
+///
+/// # Errors
+///
+/// ClickHouse did not answer.
+pub async fn spans_in_runs(
+    store: &Store,
+    projects: &Projects,
+    filter: &TraceFilter,
+    kind: &str,
+    name: &str,
+) -> clickhouse::error::Result<SpansCounted> {
+    filtered(store.read(projects, SPANS_IN_RUNS_SQL), filter)
+        .param("span_kind", kind)
+        .param("span_name", name)
+        .fetch_one()
+        .await
+}
+
+/// One bar's mean of the narrowing score.
+#[derive(Debug, Row, Deserialize)]
+pub struct ScoreMeanRow {
+    pub at_ms: i64,
+    pub mean: f64,
+}
+
+/// [`SCORE_MEANS_SQL`]'s bars, none where the filter names no score.
+///
+/// # Errors
+///
+/// ClickHouse did not answer.
+pub async fn score_means(
+    store: &Store,
+    projects: &Projects,
+    filter: &TraceFilter,
+    bucket_seconds: u32,
+    shift_minutes: i16,
+) -> clickhouse::error::Result<Vec<ScoreMeanRow>> {
+    if filter.score.is_none() {
+        return Ok(Vec::new());
+    }
+    filtered(store.read(projects, SCORE_MEANS_SQL), filter)
+        .param("bucket", i64::from(bucket_seconds) * 1_000)
+        .param("shift", i64::from(shift_minutes) * 60_000)
+        .fetch_all()
+        .await
+}
+
+/// Each bar's mean of the narrowing score set from `means`, by its start.
+pub fn with_score_means(bars: &mut [Bar], means: &[ScoreMeanRow]) {
+    for bar in bars {
+        let at = bar.at.timestamp_millis();
+        bar.score_mean = means
+            .iter()
+            .find(|row| row.at_ms == at)
+            .map(|row| row.mean)
+            .filter(|mean| mean.is_finite());
+    }
+}
+
 /// Where the bar holding `ms` starts: as the read's `intDiv`, on the
 /// reader's clock, `shift_ms` east of UTC.
 const fn bar_start(ms: i64, bucket_ms: i64, shift_ms: i64) -> i64 {
@@ -1057,6 +1158,7 @@ pub fn bars(
                     duration_p95_ms: Some(row.duration_p95_ms),
                     time_to_first_token_p50_ms: row.time_to_first_token_p50_ms,
                     time_to_first_token_p95_ms: row.time_to_first_token_p95_ms,
+                    score_mean: None,
                 },
                 None => Bar {
                     at: start,
@@ -1069,6 +1171,7 @@ pub fn bars(
                     duration_p95_ms: None,
                     time_to_first_token_p50_ms: None,
                     time_to_first_token_p95_ms: None,
+                    score_mean: None,
                 },
             });
         }

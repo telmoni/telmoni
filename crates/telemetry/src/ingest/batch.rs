@@ -176,16 +176,10 @@ fn scores_of(
     use telmoni_shared::{ScoreSource, ScoreTarget, SpanKind};
     crate::scores::of_span(span)
         .into_iter()
-        .map(|(judgement, at)| crate::scores::ScoreRow {
+        .map(|event| crate::scores::ScoreRow {
             project_id: project_id.clone(),
             received_at,
-            score_id: crate::scores::sdk_score_id(
-                project_id,
-                &row.trace_id,
-                &row.span_id,
-                &judgement.name,
-                at,
-            ),
+            score_id: crate::scores::sdk_score_id(project_id, &row.trace_id, &row.span_id, &event),
             target: if row.kind == SpanKind::Run {
                 ScoreTarget::Run
             } else {
@@ -195,16 +189,17 @@ fn scores_of(
             trace_id: row.trace_id.clone(),
             span_id: row.span_id.clone(),
             session_id: row.session_id.clone(),
-            value: judgement.stored_value(),
-            name: judgement.name,
-            data_type: judgement.data_type,
-            categories: judgement.categories,
-            range_min: judgement.range_min,
-            range_max: judgement.range_max,
+            value: event.judgement.stored_value(),
+            name: event.judgement.name,
+            data_type: event.judgement.data_type,
+            categories: event.judgement.categories,
+            range_min: event.judgement.range_min,
+            range_max: event.judgement.range_max,
             source: ScoreSource::Sdk,
             scorer: String::new(),
-            scorer_version: String::new(),
+            scorer_version: event.version,
             is_deleted: 0,
+            answer: String::new(),
         })
         .collect()
 }

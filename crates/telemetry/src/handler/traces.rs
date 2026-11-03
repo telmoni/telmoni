@@ -757,6 +757,8 @@ pub struct TraceHistogram {
     pub bucket_seconds: u32,
     /// The reader's clock the bars start on, in minutes east of UTC.
     pub utc_offset: i16,
+    /// The score the list is narrowed to, whose mean each bar holds.
+    pub score: Option<String>,
     pub bars: Vec<Bar>,
 }
 
@@ -1263,17 +1265,22 @@ pub async fn get_histogram(
     let rows = traces::histogram(&state.store, &projects, &filter, bucket_seconds, utc_offset)
         .await
         .map_err(read_failed)?;
-    let bars = traces::bars(
+    let means = traces::score_means(&state.store, &projects, &filter, bucket_seconds, utc_offset)
+        .await
+        .map_err(read_failed)?;
+    let mut bars = traces::bars(
         rows,
         Utc::now().timestamp_millis(),
         filter.days,
         bucket_seconds,
         utc_offset,
     );
+    traces::with_score_means(&mut bars, &means);
     Ok(Json(TraceHistogram {
         days: filter.days,
         bucket_seconds,
         utc_offset,
+        score: filter.score.as_ref().map(|score| score.name.clone()),
         bars,
     }))
 }

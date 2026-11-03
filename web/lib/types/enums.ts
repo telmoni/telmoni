@@ -4,8 +4,9 @@
 
 /** Wire vocabulary of the Rust `ApiKeyScope`: what an API key opens. */
 export const ApiKeyScope = {
-  Read:   "read",
-  Ingest: "ingest",
+  Read:     "read",
+  Ingest:   "ingest",
+  Evaluate: "evaluate",
 } as const;
 export type ApiKeyScope = typeof ApiKeyScope[keyof typeof ApiKeyScope];
 
@@ -132,6 +133,8 @@ export const ModelProvider = {
   AzureOpenai:      "azure_openai",
   Bedrock:          "bedrock",
   OpenaiCompatible: "openai_compatible",
+  Typesafe:            "typesafe",
+  SystemOneCompatible: "system_one_compatible",
 } as const;
 export type ModelProvider = typeof ModelProvider[keyof typeof ModelProvider];
 

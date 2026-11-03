@@ -11,7 +11,6 @@ use std::sync::Arc;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use chrono::{DateTime, Duration, Utc};
-use clickhouse::Row;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::types::Json as Jsonb;
@@ -534,26 +533,6 @@ pub async fn put_session_idle(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// The spans of a kind and a name a rule judges, counted over a window, and
-/// their tokens' mean: the span-level filters alone, since a span is no run.
-const SPANS_SQL: &str = "SELECT count() AS total, \
-         toUInt64(ifNotFinite(avg(input_tokens + output_tokens), 0)) AS tokens \
-     FROM telemetry.spans \
-     WHERE project_id IN {projects:Array(String)} \
-       AND received_at >= now64(6) - toIntervalDay({days:UInt16}) \
-       AND kind = {kind:String} AND ({name:String} = '' OR name = {name:String}) \
-       AND (empty({agents:Array(String)}) OR has({agents:Array(String)}, agent)) \
-       AND (empty({environments:Array(String)}) OR has({environments:Array(String)}, environment)) \
-       AND (empty({releases:Array(String)}) OR has({releases:Array(String)}, release)) \
-       AND (empty({models:Array(String)}) OR has({models:Array(String)}, model)) \
-       AND (empty({statuses:Array(String)}) OR has({statuses:Array(String)}, status))";
-
-#[derive(Debug, Row, Deserialize)]
-struct SpanCount {
-    total: u64,
-    tokens: u64,
-}
-
 /// The ClickHouse provider name the price table knows a connection's
 /// provider by; none for an endpoint of the customer's own.
 #[must_use]
@@ -565,7 +544,8 @@ pub const fn priced_as(provider: ModelProvider) -> Option<&'static str> {
         ModelProvider::VertexAi => Some("gcp.vertex_ai"),
         ModelProvider::AzureOpenai => Some("azure.ai.openai"),
         ModelProvider::Bedrock => Some("aws.bedrock"),
-        ModelProvider::OpenaiCompatible => None,
+        ModelProvider::Typesafe => Some("typesafe"),
+        ModelProvider::OpenaiCompatible | ModelProvider::SystemOneCompatible => None,
     }
 }
 
@@ -635,24 +615,17 @@ pub async fn preview_rule(
             )
         }
         EvaluationTarget::Span => {
-            let statuses: Vec<String> = filter.statuses.iter().map(ToString::to_string).collect();
-            let counted: SpanCount = state
-                .store
-                .read(&projects, SPANS_SQL)
-                .param("days", PREVIEW_DAYS)
-                .param(
-                    "kind",
-                    change.span_kind.map(|k| k.to_string()).unwrap_or_default(),
-                )
-                .param("name", change.span_name.clone().unwrap_or_default())
-                .param("agents", &filter.agents)
-                .param("environments", &filter.environments)
-                .param("releases", &filter.releases)
-                .param("models", &filter.models)
-                .param("statuses", statuses)
-                .fetch_one()
-                .await
-                .map_err(failed)?;
+            // As the loop finds them: spans of the kind and name in the runs
+            // the rule's filters admit.
+            let counted = traces::spans_in_runs(
+                &state.store,
+                &projects,
+                &filter,
+                &change.span_kind.map(|k| k.to_string()).unwrap_or_default(),
+                change.span_name.as_deref().unwrap_or_default(),
+            )
+            .await
+            .map_err(failed)?;
             (counted.total, counted.tokens)
         }
     };
@@ -698,14 +671,17 @@ async fn priced(
     struct Judge {
         id: Uuid,
         name: String,
-        messages: Jsonb<Vec<evaluators::Message>>,
+        messages: Option<Jsonb<Vec<evaluators::Message>>>,
+        state: Option<String>,
+        questions: Option<Jsonb<Vec<telmoni_shared::model::systemone::Question>>>,
         model: Option<String>,
         provider: Option<ModelProvider>,
         models: Option<Vec<String>>,
     }
     let mut tx = project_scope(&state.db, project_id).await?;
     let judges: Vec<Judge> = sqlx::query_as(
-        "SELECT DISTINCT ON (e.id) e.id, e.name, e.messages, e.model, c.provider, c.models
+        "SELECT DISTINCT ON (e.id) e.id, e.name, e.messages, e.state, e.questions, e.model,
+                c.provider, c.models
            FROM telemetry.evaluators e
            LEFT JOIN telemetry.model_connections c
              ON c.project_id = e.project_id
@@ -737,11 +713,27 @@ async fn priced(
                 .clone()
                 .or_else(|| judge.models.as_ref().and_then(|m| m.first().cloned()))
                 .unwrap_or_default();
-            let prompt: usize = judge.messages.iter().map(|m| m.content.len()).sum();
+            // A typed one's questions are sent with its state, as a prompt's messages are.
+            let prompt: usize = judge
+                .messages
+                .iter()
+                .flat_map(|m| m.iter())
+                .map(|m| m.content.len())
+                .sum::<usize>()
+                + judge.state.as_ref().map_or(0, String::len)
+                + judge.questions.as_ref().map_or(0, |q| {
+                    serde_json::to_string(&q.0).map_or(0, |text| text.len())
+                });
             let usage = Usage {
                 input_tokens: (u64::try_from(prompt).unwrap_or(0) / 4 + tokens)
                     .saturating_mul(judged),
-                output_tokens: ANSWER_TOKENS.saturating_mul(judged),
+                // A typed one writes nothing.
+                output_tokens: if judge.state.is_some() {
+                    0
+                } else {
+                    ANSWER_TOKENS
+                }
+                .saturating_mul(judged),
                 ..Usage::default()
             };
             let cost = judge

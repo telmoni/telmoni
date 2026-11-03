@@ -671,7 +671,7 @@ CREATE TABLE auth.api_tokens (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     -- At least one scope, each one `ApiKeyScope` names (`crates/auth/tests/api_key_scopes.rs`).
     CONSTRAINT api_tokens_scopes_check
-        CHECK (cardinality(scopes) > 0 AND scopes <@ ARRAY['read', 'ingest']::TEXT[]),
+        CHECK (cardinality(scopes) > 0 AND scopes <@ ARRAY['read', 'ingest', 'evaluate']::TEXT[]),
     -- The pair, not each alone: a token naming another organization's project would act for this one.
     -- ON UPDATE CASCADE is what carries the keys with a project handed to
     -- another organization: the one UPDATE of `projects.organization_id`

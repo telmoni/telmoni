@@ -20,6 +20,7 @@ use uuid::Uuid;
 
 use telmoni_shared::acting::ActingKey;
 use telmoni_shared::db::tenant_session::{maintenance_scope, project_scope};
+use telmoni_shared::model::systemone::{Decide, Question};
 use telmoni_shared::model::{self, Ask, Refused};
 use telmoni_shared::seam::{self, OrganizationAlert};
 use telmoni_shared::{
@@ -28,7 +29,8 @@ use telmoni_shared::{
 };
 
 use crate::db::{self, TelemetryLane};
-use crate::evaluators::{self, Message, Prompt, ScoreSpec};
+use crate::evaluators::typed::Typed;
+use crate::evaluators::{self, Judging, Message, Prompt, ScoreSpec};
 use crate::handler::evaluation_rules::{priced_as, session_idle};
 use crate::handler::views::ViewQuery;
 use crate::ingest::decode::Encoding;
@@ -575,9 +577,13 @@ fn this_monday(now: DateTime<Utc>) -> DateTime<Utc> {
 #[derive(sqlx::FromRow)]
 struct Judge {
     name: String,
-    messages: Jsonb<Vec<Message>>,
-    score: Jsonb<ScoreSpec>,
+    kind: String,
+    messages: Option<Jsonb<Vec<Message>>>,
+    score: Option<Jsonb<ScoreSpec>>,
+    state: Option<String>,
+    questions: Option<Jsonb<Vec<Question>>>,
     reasoning: bool,
+    media: bool,
     connection_id: Option<Uuid>,
     model: Option<String>,
     temperature: Option<f64>,
@@ -599,7 +605,8 @@ async fn judge(state: &Arc<AppState>, leased: &Leased) -> Result<Outcome, Telmon
         return Ok(paused("its project keeps no content"));
     }
     let judge: Option<Judge> = sqlx::query_as(
-        "SELECT e.name, e.messages, e.score, e.reasoning, e.connection_id, e.model, e.temperature,
+        "SELECT e.name, e.kind, e.messages, e.score, e.state, e.questions, e.reasoning, e.media,
+                e.connection_id, e.model, e.temperature,
                 e.weekly_limit, c.id AS resolved, c.provider, c.models, c.refused_at, r.pointers
            FROM telemetry.evaluators e
            LEFT JOIN telemetry.model_connections c
@@ -659,12 +666,35 @@ async fn judge(state: &Arc<AppState>, leased: &Leased) -> Result<Outcome, Telmon
         .clone()
         .or_else(|| judge.models.as_ref().and_then(|m| m.first().cloned()))
         .unwrap_or_default();
-    let prompt = Prompt {
-        messages: judge.messages.0.clone(),
-        score: judge.score.0.clone(),
-        reasoning: judge.reasoning,
+    let judging = match (
+        judge.kind.as_str(),
+        judge.messages,
+        judge.score,
+        judge.state,
+        judge.questions,
+    ) {
+        ("typed", _, _, Some(state), Some(questions)) => Judging::Typed(Typed {
+            state,
+            questions: questions.0,
+        }),
+        ("prompt", Some(messages), Some(score), _, _) => Judging::Prompt(Prompt {
+            messages: messages.0,
+            score: score.0,
+            reasoning: judge.reasoning,
+        }),
+        _ => {
+            return Ok(Outcome::Failed {
+                reason: "its evaluator is of no kind the loop judges".into(),
+                read_at: None,
+            });
+        }
     };
 
+    // Before anything is read: a connection of the other kind's protocol
+    // judges nothing until the evaluator or the default moves.
+    if let Some(why) = evaluators::misfit(provider, &judging) {
+        return Ok(paused(why));
+    }
     let read_at = Utc::now();
     let Some((filled, cut, trace_id)) = filled(state, leased).await? else {
         return Ok(Outcome::Failed {
@@ -673,36 +703,127 @@ async fn judge(state: &Arc<AppState>, leased: &Leased) -> Result<Outcome, Telmon
         });
     };
     let pointers = judge.pointers.map(|p| p.0).unwrap_or_default();
-    let filled = evaluators::narrowed(filled, &pointers);
+    let mut filled = evaluators::narrowed(filled, &pointers);
+    // Its corrections, only where its prompt asks for them; its own trace
+    // keeps their count alone, since each is another run's content, which
+    // that run's deletion must take.
+    let mut kept = filled.clone();
+    if judging.variables().contains("examples") {
+        let (examples, count) =
+            evaluators::examples::rendered(state, project_id, leased.evaluator_id).await?;
+        filled.insert("examples", examples);
+        kept.insert(
+            "examples",
+            format!("({count} corrections members made, kept with the runs they correct)"),
+        );
+    }
     let connection =
         crate::handler::model_connections::open(state, project_id, connection_id).await?;
-    let (system, messages) = prompt.rendered(&filled);
-    let schema = prompt.schema();
     let started = Utc::now();
-    let ask = Ask {
-        model: &model,
-        system: &system,
-        messages: &messages,
-        schema: &schema,
-        temperature: judge.temperature,
-        max_tokens: ANSWER_TOKENS_MAX,
-    };
-    let judged = match model::judge(&state.egress, &connection, &ask).await {
-        Ok(judged) => judged,
-        Err(refused) => return refusal(state, leased, connection_id, refused, read_at).await,
-    };
-    let ended = Utc::now();
-    let cost = price(state, project_id, provider, &model, judged.usage).await;
-    // Its reasoning is content: kept in its own trace's answer, never the score.
-    let (judgement, _) = match prompt.judgement(&judged.answer) {
-        Ok(read) => read,
-        Err(why) => {
-            return Ok(Outcome::Failed {
-                reason: why,
-                read_at: Some(read_at),
-            });
+    let answered = match &judging {
+        Judging::Prompt(prompt) => {
+            let (system, mut messages) = prompt.rendered(&filled);
+            // The files its variables name, read as the rest of its target is.
+            let (files, left) = if judge.media {
+                let named = prompt.variables();
+                evaluators::files_of(
+                    state,
+                    None,
+                    project_id,
+                    // Never its corrections': each is another run's content.
+                    filled
+                        .iter()
+                        .filter(|(variable, _)| {
+                            **variable != "examples" && named.contains(**variable)
+                        })
+                        .map(|(_, text)| text.as_str()),
+                    provider,
+                )
+                .await?
+            } else {
+                (Vec::new(), 0)
+            };
+            evaluators::noted(&mut messages, left);
+            let schema = prompt.schema();
+            let ask = Ask {
+                model: &model,
+                system: &system,
+                messages: &messages,
+                schema: &schema,
+                temperature: judge.temperature,
+                max_tokens: ANSWER_TOKENS_MAX,
+                media: &files,
+            };
+            let judged = match model::judge(&state.egress, &connection, &ask).await {
+                Ok(judged) => judged,
+                Err(refused) => {
+                    return refusal(state, leased, connection_id, refused, read_at).await;
+                }
+            };
+            // Its reasoning is content: kept in its own trace's answer, and as
+            // the score's comment, never in the score.
+            let (judgement, reasoning) = match prompt.judgement(&judged.answer) {
+                Ok(read) => read,
+                Err(why) => {
+                    return Ok(Outcome::Failed {
+                        reason: why,
+                        read_at: Some(read_at),
+                    });
+                }
+            };
+            let (kept_system, mut kept_messages) = prompt.rendered(&kept);
+            evaluators::noted(&mut kept_messages, left);
+            Answered {
+                system: kept_system,
+                messages: kept_messages,
+                answer: judged.answer,
+                usage: judged.usage,
+                scores: vec![(judgement, String::new(), None)],
+                reasoning,
+                cut,
+            }
+        }
+        Judging::Typed(typed) => {
+            let (sent, cut_to_fit) = typed.rendered(&filled);
+            let decide = Decide {
+                model: &model,
+                state: &sent,
+                questions: &typed.questions,
+            };
+            let decision = match model::decide(&state.egress, &connection, &decide).await {
+                Ok(decision) => decision,
+                Err(refused) => {
+                    return refusal(state, leased, connection_id, refused, read_at).await;
+                }
+            };
+            let read = match typed.judgements(&decision) {
+                Ok(read) => read,
+                Err(why) => {
+                    return Ok(Outcome::Failed {
+                        reason: why,
+                        read_at: Some(read_at),
+                    });
+                }
+            };
+            Answered {
+                system: serde_json::to_string_pretty(&typed.questions).unwrap_or_default(),
+                messages: vec![(model::Role::User, sent)],
+                answer: json!({ "model": decision.model, "answers": decision.answers }),
+                usage: decision.usage,
+                scores: read
+                    .into_iter()
+                    .map(|(judgement, answer)| {
+                        let question = judgement.name.clone();
+                        (judgement, answer.to_string(), Some(question))
+                    })
+                    .collect(),
+                reasoning: None,
+                cut: cut || cut_to_fit,
+            }
         }
     };
+    let ended = Utc::now();
+    let cost = price(state, project_id, provider, &model, answered.usage).await;
     let target = match (
         leased.target,
         leased.run_id,
@@ -728,10 +849,10 @@ async fn judge(state: &Arc<AppState>, leased: &Leased) -> Result<Outcome, Telmon
             evaluator: &judge.name,
             provider,
             model: &model,
-            system: &system,
-            messages: &messages,
-            answer: &judged.answer,
-            usage: judged.usage,
+            system: &answered.system,
+            messages: &answered.messages,
+            answer: &answered.answer,
+            usage: answered.usage,
             started,
             ended,
         },
@@ -741,53 +862,129 @@ async fn judge(state: &Arc<AppState>, leased: &Leased) -> Result<Outcome, Telmon
         tracing::warn!(evaluation_id = %leased.id, project_id = %project_id, error = %error,
             "telemetry: an evaluation's own trace was not written; its score stands");
     }
-    let score_id = crate::scores::evaluator_score_id(project_id, &target, leased.evaluator_id);
     let (run_id, trace, span, session) = match &target {
         TargetKey::Run(run) => (*run, trace_id.clone(), String::new(), String::new()),
         TargetKey::Span(run, span) => (*run, trace_id.clone(), span.clone(), String::new()),
         TargetKey::Session(session) => (Uuid::nil(), String::new(), String::new(), session.clone()),
     };
-    let row = ScoreRow {
-        project_id: project_id.clone(),
-        received_at: Utc::now().trunc_subsecs(6),
-        score_id,
-        target: target.kind(),
-        run_id,
-        trace_id: trace,
-        span_id: span,
-        session_id: session,
-        name: judgement.name.clone(),
-        data_type: judgement.data_type,
-        value: judgement.value.unwrap_or(0.0),
-        categories: judgement.categories.clone(),
-        range_min: judgement.range_min,
-        range_max: judgement.range_max,
-        source: ScoreSource::Evaluator,
-        scorer: leased.evaluator_id.to_string(),
-        scorer_version: leased.evaluator_version.to_string(),
-        is_deleted: 0,
+    let received_at = Utc::now().trunc_subsecs(6);
+    let rows: Vec<ScoreRow> = answered
+        .scores
+        .into_iter()
+        .map(|(judgement, answer, question)| ScoreRow {
+            project_id: project_id.clone(),
+            received_at,
+            score_id: match &question {
+                None => crate::scores::evaluator_score_id(project_id, &target, leased.evaluator_id),
+                Some(question) => crate::scores::typed_score_id(
+                    project_id,
+                    &target,
+                    leased.evaluator_id,
+                    question,
+                ),
+            },
+            target: target.kind(),
+            run_id,
+            trace_id: trace.clone(),
+            span_id: span.clone(),
+            session_id: session.clone(),
+            name: judgement.name,
+            data_type: judgement.data_type,
+            value: judgement.value.unwrap_or(0.0),
+            categories: judgement.categories,
+            range_min: judgement.range_min,
+            range_max: judgement.range_max,
+            source: ScoreSource::Evaluator,
+            scorer: leased.evaluator_id.to_string(),
+            scorer_version: leased.evaluator_version.to_string(),
+            is_deleted: 0,
+            answer,
+        })
+        .collect();
+    let Some(first) = rows.first().map(|row| row.score_id) else {
+        return Ok(Outcome::Failed {
+            reason: "it gave no score".into(),
+            read_at: Some(read_at),
+        });
     };
     state
         .store
-        .insert_scores_once(
-            std::slice::from_ref(&row),
-            &format!("evaluation:{}", leased.id),
-        )
+        .insert_scores_once(&rows, &format!("evaluation:{}", leased.id))
         .await
         .map_err(|e| crate::store::failed(&e, "an evaluation's score", "tried again shortly"))?;
+    // A session's score keeps none: no run carries it through an erasure; and
+    // a typed evaluator writes no reasoning to keep.
+    if target.kind() != telmoni_shared::ScoreTarget::Session
+        && matches!(judging, Judging::Prompt(_))
+    {
+        let comment = answered
+            .reasoning
+            .map(|text| {
+                text.trim()
+                    .chars()
+                    .take(crate::scores::COMMENT_MAX)
+                    .collect::<String>()
+            })
+            .filter(|text| !text.is_empty());
+        // Past the plan's content its run keeps none, as an export's would not;
+        // and a deletion that took the evaluation's row took its target.
+        let kept = crate::capacity::has_room_for_content(state, &leased.organization_id).await
+            && still_leased(state, leased).await;
+        let comment = comment.filter(|_| kept);
+        if let Err(error) = crate::content::keep_comment(
+            state,
+            project_id,
+            (run_id, &trace),
+            first,
+            comment.as_deref(),
+        )
+        .await
+        {
+            tracing::warn!(evaluation_id = %leased.id, project_id = %project_id, error = %error,
+                "telemetry: an evaluation's reasoning was not kept as its score's comment; its score stands");
+        }
+    }
     tracing::info!(evaluation_id = %leased.id, project_id = %project_id,
         evaluator_id = %leased.evaluator_id, "telemetry: an evaluation done");
     Ok(Outcome::Done {
-        score_id,
+        score_id: first,
         trace_run_id: written.is_ok().then_some(trace_run_id),
         provider: provider.to_string(),
         model,
-        input_tokens: judged.usage.input_tokens,
-        output_tokens: judged.usage.output_tokens,
+        input_tokens: answered.usage.input_tokens,
+        output_tokens: answered.usage.output_tokens,
         cost,
-        cut,
+        cut: answered.cut,
         read_at,
     })
+}
+
+/// What a judgement of either kind gave: what its own trace keeps — the
+/// prompt or the state and questions, and the answer — what it used, each
+/// score with its typed answer and question, and its reasoning.
+struct Answered {
+    system: String,
+    messages: Vec<(model::Role, String)>,
+    answer: Value,
+    usage: model::Usage,
+    scores: Vec<(crate::scores::Judgement, String, Option<String>)>,
+    reasoning: Option<String>,
+    cut: bool,
+}
+
+/// Whether the evaluation's row is still there: a trace's deletion or an end
+/// user's erasure deletes it with the content it read.
+async fn still_leased(state: &AppState, leased: &Leased) -> bool {
+    let Ok(mut tx) = maintenance_scope(&state.db, TelemetryLane).await else {
+        return false;
+    };
+    let found: sqlx::Result<Option<i32>> =
+        sqlx::query_scalar("SELECT 1 FROM telemetry.evaluations WHERE id = $1")
+            .bind(leased.id)
+            .fetch_optional(tx.conn())
+            .await;
+    tx.commit().await.ok();
+    found.ok().flatten().is_some()
 }
 
 /// Waiting for what pauses it: looked at again in a few minutes.
@@ -905,7 +1102,33 @@ async fn filled(
     state: &AppState,
     leased: &Leased,
 ) -> Result<Option<(BTreeMap<&'static str, String>, bool, String)>, TelmoniError> {
-    let projects = Projects::one(leased.project_id.clone());
+    variables_of(
+        state,
+        &leased.project_id,
+        leased.target,
+        leased.run_id,
+        leased.span_id.as_ref(),
+        leased.session_id.as_ref(),
+    )
+    .await
+}
+
+/// The variables a target fills, read as an evaluation reads them: whether a
+/// field it read was cut to fit an export, and its trace's id; none where
+/// its spans are gone.
+///
+/// # Errors
+///
+/// ClickHouse or Postgres did not answer.
+pub(crate) async fn variables_of(
+    state: &AppState,
+    project_id: &ProjectId,
+    target: EvaluationTarget,
+    run_id: Option<Uuid>,
+    span_id: Option<&String>,
+    session_id: Option<&String>,
+) -> Result<Option<(BTreeMap<&'static str, String>, bool, String)>, TelmoniError> {
+    let projects = Projects::one(project_id.clone());
     let failed = |e: clickhouse::error::Error| {
         crate::store::failed(&e, "an evaluation's target", "tried again shortly")
     };
@@ -914,7 +1137,7 @@ async fn filled(
             .iter()
             .any(|s| s.attributes.iter().any(|(k, _)| k == contract::CONTENT_CUT))
     };
-    match (leased.target, leased.run_id, &leased.session_id) {
+    match (target, run_id, session_id) {
         (EvaluationTarget::Run | EvaluationTarget::Span, Some(run), _) => {
             let spans = traces::spans(&state.store, &projects, run, SPANS_MAX, u32::MAX)
                 .await
@@ -923,24 +1146,20 @@ async fn filled(
                 return Ok(None);
             };
             let trace_id = first.trace_id.clone();
-            if leased.target == EvaluationTarget::Run {
-                let content =
-                    content::open_for_evaluation(state, &leased.project_id, &[run], None).await?;
+            if target == EvaluationTarget::Run {
+                let content = content::open_for_evaluation(state, project_id, &[run], None).await?;
                 return Ok(Some((
                     evaluators::of_run(&spans, &content),
                     cut_in(&spans),
                     trace_id,
                 )));
             }
-            let Some(span) = spans
-                .iter()
-                .find(|s| Some(&s.span_id) == leased.span_id.as_ref())
-            else {
+            let Some(span) = spans.iter().find(|s| Some(&s.span_id) == span_id) else {
                 return Ok(None);
             };
             let content = content::open_for_evaluation(
                 state,
-                &leased.project_id,
+                project_id,
                 &[run],
                 Some(std::slice::from_ref(&span.span_id)),
             )
@@ -971,8 +1190,7 @@ async fn filled(
                 return Ok(None);
             }
             let ids: Vec<Uuid> = runs.iter().map(|r| r.run_id).collect();
-            let content =
-                content::open_for_evaluation(state, &leased.project_id, &ids, None).await?;
+            let content = content::open_for_evaluation(state, project_id, &ids, None).await?;
             let mut turns = Vec::with_capacity(runs.len());
             let mut cut = false;
             for run in &ids {

@@ -26,7 +26,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { API_KEY_SCOPES } from "@/lib/api-key-scopes";
+import { API_KEY_SCOPES, DEFAULT_SCOPES, withScope } from "@/lib/api-key-scopes";
 import { firstTraceSnippets } from "@/lib/first-trace";
 import { MAX_API_KEY_DESCRIPTION, MAX_API_KEY_NAME, typedBound } from "@/lib/names";
 import { PRODUCT_NAME } from "@/lib/site";
@@ -158,13 +158,13 @@ function MintKeyPanel({
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [ttl, setTtl] = useState("90d");
-  const [scopes, setScopes] = useState<ApiKeyScope[]>(API_KEY_SCOPES.map(({ scope }) => scope));
+  const [scopes, setScopes] = useState<ApiKeyScope[]>([...DEFAULT_SCOPES]);
   const { pending, error, setError, run } = useAction();
 
   const canSubmit = name.trim().length > 0 && scopes.length > 0 && !pending;
 
   function toggle(scope: ApiKeyScope, on: boolean) {
-    setScopes((held) => (on ? [...held, scope] : held.filter((s) => s !== scope)));
+    setScopes((held) => withScope(held, scope, on));
     setError(null);
   }
 

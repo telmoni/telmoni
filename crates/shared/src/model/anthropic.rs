@@ -23,10 +23,23 @@ pub fn request(connection: &Connection, ask: &Ask<'_>) -> Result<Prepared, Refus
             "this connection holds no API key".into(),
         ));
     };
+    let with_media = super::last_user(ask.messages).filter(|_| !ask.media.is_empty());
     let messages: Vec<Value> = ask
         .messages
         .iter()
-        .map(|(role, text)| json!({ "role": match role { Role::User => "user", Role::Assistant => "assistant" }, "content": text }))
+        .enumerate()
+        .map(|(at, (role, text))| {
+            let role = match role {
+                Role::User => "user",
+                Role::Assistant => "assistant",
+            };
+            if with_media != Some(at) {
+                return json!({ "role": role, "content": text });
+            }
+            let mut content: Vec<Value> = ask.media.iter().map(block).collect();
+            content.push(json!({ "type": "text", "text": text }));
+            json!({ "role": role, "content": content })
+        })
         .collect();
     let mut body = json!({
         "model": ask.model,
@@ -53,6 +66,19 @@ pub fn request(connection: &Connection, ask: &Ask<'_>) -> Result<Prepared, Refus
     })
 }
 
+/// A file as Messages carries it, before the text as Anthropic advises: an
+/// image, or a PDF as a document.
+fn block(media: &super::Media) -> Value {
+    let kind = if media.mime_type == "application/pdf" {
+        "document"
+    } else {
+        "image"
+    };
+    json!({
+        "type": kind,
+        "source": { "type": "base64", "media_type": media.mime_type, "data": media.base64() },
+    })
+}
 /// The judgement in a 2xx's body: the input of the tool it called.
 ///
 /// # Errors
@@ -102,6 +128,7 @@ mod tests {
             schema: &schema,
             temperature: None,
             max_tokens: 100,
+            media: &[],
         };
         let prepared = request(&connection, &ask).expect("built");
         let body: Value = serde_json::from_slice(&prepared.body).expect("json");

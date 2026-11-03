@@ -17,9 +17,36 @@ import {
 import { ViewQuerySchema } from "@/lib/server/entities/traces";
 import { EvaluationTarget, ScoreType, SpanKind } from "@/lib/types/enums";
 
-const EvaluatorInputSchema = z.object({
+const Common = {
   id: z.guid().optional(),
   name: z.string().min(1).max(60),
+  connection_id: z.guid().nullable(),
+  model: z.string().max(128).nullable(),
+  weekly_limit: z.number().positive().max(1_000_000).nullable(),
+};
+
+const Asked = { name: z.string().min(1).max(64), instructions: z.string().min(1).max(4_000) };
+
+const QuestionInputSchema = z.discriminatedUnion("type", [
+  z.object({ ...Asked, type: z.literal("noul"), yes_means: z.string().max(500), no_means: z.string().max(500) }),
+  z.object({ ...Asked, type: z.literal("score"), levels: z.array(z.string().min(1).max(500)).min(2).max(10) }),
+  z.object({
+    ...Asked,
+    type: z.literal("choice"),
+    options: z.array(z.object({ name: z.string().min(1).max(64), means: z.string().max(500) })).min(2).max(255),
+  }),
+]);
+
+const TypedInputSchema = z.object({
+  ...Common,
+  kind: z.literal("typed"),
+  state: z.string().min(1).max(20_000),
+  questions: z.array(QuestionInputSchema).min(1).max(16),
+});
+
+const PromptInputSchema = z.object({
+  ...Common,
+  kind: z.literal("prompt"),
   messages: z.array(PromptMessageSchema.extend({ content: z.string().max(20_000) })).min(1).max(20),
   score: z.object({
     name: z.string().min(1).max(64),
@@ -32,17 +59,17 @@ const EvaluatorInputSchema = z.object({
     multiple: z.boolean(),
   }),
   reasoning: z.boolean(),
-  connection_id: z.guid().nullable(),
-  model: z.string().max(128).nullable(),
+  media: z.boolean(),
   temperature: z.number().min(0).max(2).nullable(),
-  weekly_limit: z.number().positive().max(1_000_000).nullable(),
 });
+
+const EvaluatorInputSchema = z.discriminatedUnion("kind", [PromptInputSchema, TypedInputSchema]);
 
 const PAGE = "/(app)/[organization]/[project]/evaluators";
 // A model's answer stands in front of a save and a try: a minute at most.
 const JUDGED_MS = 75_000;
 
-/** An evaluator saved as a new version, its model asked for the score's form first. */
+/** An evaluator saved as a new version, its model asked for its answer's form first. */
 export async function saveEvaluatorAction(projectId: string, input: unknown): Promise<ActionResult> {
   const gate = await admitProject({ call: "project:evaluators", limit: 20 }, projectId);
   if (!gate.ok) return refused(gate.error);

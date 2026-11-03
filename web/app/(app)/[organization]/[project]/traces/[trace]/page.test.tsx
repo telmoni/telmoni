@@ -82,6 +82,9 @@ const SCORES = vi.hoisted(() => [
 vi.mock("@/lib/server/entities/scores", () => ({
   fetchScores: async () => ({ kind: "ok", scores: SCORES }),
 }));
+vi.mock("@/lib/server/entities/content-mode", () => ({
+  fetchContentMode: async () => ({ content_mode: "on", offered: ["off", "on"] }),
+}));
 vi.mock("@/lib/server/data", () => ({
   activeOrganization: () => null,
   getServerContext: async () => mockContext,

@@ -1,6 +1,6 @@
 ---
 title: "Model connections"
-description: "A project's own keys to the models its evaluators judge with: OpenAI, Anthropic, Google AI Studio, Vertex AI, Azure OpenAI, Amazon Bedrock, or any endpoint speaking OpenAI's protocol, each sealed when saved and proved by one small request first."
+description: "A project's own keys to the models its evaluators judge with: OpenAI, Anthropic, Google AI Studio, Vertex AI, Azure OpenAI, Amazon Bedrock, any endpoint speaking OpenAI's protocol, and TypeSafe's Jev or an open-weight model speaking its System One for typed evaluators, each sealed when saved and proved by one small request first."
 ---
 
 A **model connection** is a project's own key to a model: what its
@@ -17,13 +17,23 @@ everyone on the project sees them, never a key.
 | Azure OpenAI | The resource's key and its endpoint (`https://<resource>.openai.azure.com`); each model is a deployment's name |
 | Amazon Bedrock | An access key id and its secret, and a region |
 | OpenAI-compatible endpoint | A base URL, and the key it asks for, if any: a gateway such as LiteLLM or OpenRouter, Mistral, or a model you serve yourself |
+| TypeSafe (Jev) | An API key; its models are Jev's names, such as `jev-latest` |
+| System One endpoint | A base URL, and the key it asks for, if any: an open-weight model served in TypeSafe's System One shape, such as Cloudflare's Clef under SGLang or JevK5's own server, or a gateway in front of Jev |
+
+The last two answer [typed evaluators](/docs/workspace/evaluators#typed-evaluators)
+alone, and every other connection prompt evaluators alone. A System One
+endpoint's requests go to `<base URL>/v1/systemone`, the base URL given with
+its `/v1` or without; a model behind it that refuses a long state, as
+JevK5's refuses past 16,384 tokens, fails its evaluations with its own
+words.
 
 Each connection names the models it offers, up to twenty, by the provider's
 own names, and a project holds up to ten. One is the project's default, the
 first saved unless another is chosen.
 
 Saving asks the first model one small question, in the JSON its answers
-will take, and a connection it does not answer is not saved: the provider's
+will take, or a System One model one yes-or-no question, and a connection
+it does not answer is not saved: the provider's
 refusal is what the page shows, a key it refuses or a model it does not
 know. Editing a connection keeps its key unless a new one is typed, and asks
 again.

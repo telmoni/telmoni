@@ -61,8 +61,9 @@ project's own, in Postgres alone, never in the span store:
   ([SDKs](/docs/api/sdks#content)). The trace page draws a PNG, JPEG, GIF or
   WebP image, plays audio, and offers any other file as a download.
 - **Failures**: a failed span's status message, its `exception` event with
-  the stack trace, and every event your code adds to a span. With either lock
-  off, a failure keeps its `error.type` and its error status alone.
+  the stack trace, and every event your code adds to a span, a
+  [score](/docs/monitoring/scores)'s own keys apart, which are metadata. With
+  either lock off, a failure keeps its `error.type` and its error status alone.
 - **Metadata**: any text, list or map attribute of a span the field inventory
   does not name. One on the resource is dropped in every mode, since a
   resource is copied onto every span of its export.
@@ -82,8 +83,10 @@ A field an SDK cut to fit an export is not kept, and the trace says so.
 Each read is recorded in the organization's
 [audit log](/docs/workspace/audit-log) as `viewed` before the content is sent,
 naming the traces read and never what they hold, and the project's
-**Privacy** page lists who read it. The console agent reads none of it, in any
-mode.
+**Privacy** page lists who read it. An [evaluator](/docs/workspace/evaluators)'s
+read is recorded on its evaluation instead, naming the evaluator, what it read,
+when and the provider it was sent to, and the Privacy page lists those by day.
+The console agent reads none of it, in any mode.
 
 ## Searching it
 

@@ -26,9 +26,19 @@ pub fn request(connection: &Connection, ask: &Ask<'_>) -> Result<Prepared, Refus
             "this connection holds no API key".into(),
         ));
     };
+    let with_media = super::last_user(ask.messages).filter(|_| !ask.media.is_empty());
     let mut messages = vec![json!({ "role": "system", "content": ask.system })];
-    messages.extend(ask.messages.iter().map(|(role, text)| {
-        json!({ "role": match role { Role::User => "user", Role::Assistant => "assistant" }, "content": text })
+    messages.extend(ask.messages.iter().enumerate().map(|(at, (role, text))| {
+        let role = match role {
+            Role::User => "user",
+            Role::Assistant => "assistant",
+        };
+        if with_media != Some(at) {
+            return json!({ "role": role, "content": text });
+        }
+        let mut content = vec![json!({ "type": "text", "text": text })];
+        content.extend(ask.media.iter().map(part));
+        json!({ "role": role, "content": content })
     }));
     let mut body = json!({
         "model": ask.model,
@@ -88,6 +98,21 @@ pub fn request(connection: &Connection, ask: &Ask<'_>) -> Result<Prepared, Refus
     })
 }
 
+/// A file as Chat Completions carries it: an image by its data URL, a PDF as
+/// a file.
+fn part(media: &super::Media) -> Value {
+    let data = media.base64();
+    match media.mime_type.as_str() {
+        "application/pdf" => json!({
+            "type": "file",
+            "file": { "filename": "document.pdf", "file_data": format!("data:application/pdf;base64,{data}") },
+        }),
+        mime => {
+            json!({ "type": "image_url", "image_url": { "url": format!("data:{mime};base64,{data}") } })
+        }
+    }
+}
+
 /// The judgement in a 2xx's body: the first choice's message, as JSON.
 ///
 /// # Errors
@@ -137,6 +162,7 @@ mod tests {
             schema,
             temperature: Some(0.0),
             max_tokens: 64,
+            media: &[],
         }
     }
 

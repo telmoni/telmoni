@@ -23,10 +23,20 @@ pub fn request(
     ask: &Ask<'_>,
     token: Option<&Redacted>,
 ) -> Result<Prepared, Refused> {
+    let with_media = super::last_user(ask.messages).filter(|_| !ask.media.is_empty());
     let contents: Vec<Value> = ask
         .messages
         .iter()
-        .map(|(role, text)| json!({ "role": match role { Role::User => "user", Role::Assistant => "model" }, "parts": [{ "text": text }] }))
+        .enumerate()
+        .map(|(at, (role, text))| {
+            let mut parts = vec![json!({ "text": text })];
+            if with_media == Some(at) {
+                parts.extend(ask.media.iter().map(|m| {
+                    json!({ "inlineData": { "mimeType": m.mime_type, "data": m.base64() } })
+                }));
+            }
+            json!({ "role": match role { Role::User => "user", Role::Assistant => "model" }, "parts": parts })
+        })
         .collect();
     let mut config = json!({
         "maxOutputTokens": ask.max_tokens,
@@ -137,6 +147,7 @@ mod tests {
             schema: &schema,
             temperature: Some(0.2),
             max_tokens: 50,
+            media: &[],
         };
         let prepared = request(&connection, &ask, None).expect("built");
         assert_eq!(

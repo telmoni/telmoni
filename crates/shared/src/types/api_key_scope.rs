@@ -13,11 +13,14 @@ pub enum ApiKeyScope {
     Read,
     /// Sending spans to `/otlp/v1/traces`.
     Ingest,
+    /// Changing the project's evaluators under `/v1/evaluators`, beside `read`.
+    Evaluate,
 }
 
 crate::wire_enum!(ApiKeyScope {
     Read => "read",
     Ingest => "ingest",
+    Evaluate => "evaluate",
 });
 
 #[cfg(test)]

@@ -3,7 +3,8 @@
 //! application's own code, as OpenTelemetry's `gen_ai.evaluation.result`
 //! event on the span it scores; from a member on a trace's page
 //! ([`crate::handler::scores`]); or from an evaluator. Metadata alone: a
-//! score's reasoning is content, kept only where its project keeps content.
+//! score's comment, a member's or an evaluator's reasoning, is content, kept
+//! only where its project keeps content ([`crate::content::keep_comment`]).
 
 use chrono::{DateTime, Utc};
 use clickhouse::Row;
@@ -21,14 +22,35 @@ pub const EVALUATION_EVENT: &str = "gen_ai.evaluation.result";
 pub const EVALUATION_NAME: &str = "gen_ai.evaluation.name";
 pub const EVALUATION_VALUE: &str = "gen_ai.evaluation.score.value";
 pub const EVALUATION_LABEL: &str = "gen_ai.evaluation.score.label";
-/// Telmoni's own, beside OpenTelemetry's: `boolean` for a yes-or-no score.
+/// Telmoni's own, beside OpenTelemetry's: `boolean` for a yes-or-no score,
+/// a number's range, and the version of the code that scored.
 pub const SCORE_TYPE: &str = "telmoni.score.type";
+pub const SCORE_RANGE_MIN: &str = "telmoni.score.range_min";
+pub const SCORE_RANGE_MAX: &str = "telmoni.score.range_max";
+pub const SCORE_VERSION: &str = "telmoni.score.version";
 
 /// The longest score name, and the most categories one score names, each
 /// up to [`CATEGORY_MAX`] characters.
 pub const NAME_MAX: usize = 64;
 pub const CATEGORIES_MAX: usize = 10;
 pub const CATEGORY_MAX: usize = 64;
+/// The longest scorer's version the application names.
+pub const VERSION_MAX: usize = 64;
+/// A score's comment, content, as the content its project keeps holds it:
+/// under the score's run, as a field of a span named by the score's id, which
+/// no span's 16 hex digits can be, so it goes as the run's content goes.
+pub const COMMENT_FIELD: &str = "telmoni.score.comment";
+/// The longest comment, in characters.
+pub const COMMENT_MAX: usize = 4_000;
+
+/// What the span a score's comment is kept under begins with.
+pub const COMMENT_SPAN_PREFIX: &str = "score/";
+
+/// The span a score's comment is kept under, by the score's id.
+#[must_use]
+pub fn comment_span(score_id: Uuid) -> String {
+    format!("{COMMENT_SPAN_PREFIX}{score_id}")
+}
 
 /// The name scores' ids are made under, so no other id collides.
 const NAMESPACE: Uuid = Uuid::from_u128(0x2c7e_91a4_5b03_4f68_a1d2_7e40_93b5_c618);
@@ -62,6 +84,8 @@ pub struct ScoreRow {
     pub scorer: String,
     pub scorer_version: String,
     pub is_deleted: u8,
+    /// A typed evaluator's answer as JSON; empty for every other score.
+    pub answer: String,
 }
 
 /// What a score says, before it names what it scores.
@@ -174,20 +198,46 @@ pub fn member_score_id(
     )
 }
 
-/// The application's score's id: one an event, by its span and its time,
-/// so an export sent again replaces its scores with themselves.
+/// The application's score's id: one an event, by its span, its time and
+/// its place among the span's scores, so an export sent again replaces its
+/// scores with themselves, and two of one name at one time, as a record
+/// times them, stay two.
 #[must_use]
 pub fn sdk_score_id(
     project_id: &ProjectId,
     trace_id: &str,
     span_id: &str,
-    name: &str,
-    at: u64,
+    event: &EventScore,
 ) -> Uuid {
+    let EventScore {
+        judgement,
+        at,
+        place,
+        ..
+    } = event;
     Uuid::new_v5(
         &NAMESPACE,
-        format!("sdk/{project_id}/{trace_id}/{span_id}/{name}/{at}").as_bytes(),
+        format!(
+            "sdk/{project_id}/{trace_id}/{span_id}/{}/{at}/{place}",
+            judgement.name
+        )
+        .as_bytes(),
     )
+}
+
+/// A score sent to `/v1/scores` under the caller's own id: sent again, it
+/// replaces itself, and no other project's or source's id is reached.
+#[must_use]
+pub fn api_score_id(project_id: &ProjectId, id: Uuid) -> Uuid {
+    Uuid::new_v5(&NAMESPACE, format!("api/{project_id}/{id}").as_bytes())
+}
+
+/// The application's scorer's version trimmed, a blank one none; past
+/// [`VERSION_MAX`] characters, `None`.
+#[must_use]
+pub fn version_of(given: Option<&str>) -> Option<String> {
+    let version = given.unwrap_or_default().trim();
+    (version.chars().count() <= VERSION_MAX).then(|| version.to_owned())
 }
 
 /// An evaluator's score's id: one an evaluator a target, so a version that
@@ -197,6 +247,25 @@ pub fn evaluator_score_id(project_id: &ProjectId, target: &TargetKey, evaluator:
     Uuid::new_v5(
         &NAMESPACE,
         format!("evaluator/{project_id}/{}/{evaluator}", target.key()).as_bytes(),
+    )
+}
+
+/// A typed evaluator's score of `target` answering `question`, one a
+/// question, so each stands as its last answer gave it.
+#[must_use]
+pub fn typed_score_id(
+    project_id: &ProjectId,
+    target: &TargetKey,
+    evaluator: Uuid,
+    question: &str,
+) -> Uuid {
+    Uuid::new_v5(
+        &NAMESPACE,
+        format!(
+            "evaluator/{project_id}/{}/{evaluator}/{question}",
+            target.key()
+        )
+        .as_bytes(),
     )
 }
 
@@ -219,6 +288,16 @@ impl TargetKey {
         }
     }
 
+    /// Its run, span and session, as a row keeps them: nil and empty where none.
+    #[must_use]
+    pub fn ids(&self) -> (Uuid, String, String) {
+        match self {
+            Self::Run(run) => (*run, String::new(), String::new()),
+            Self::Span(run, span) => (*run, span.clone(), String::new()),
+            Self::Session(session) => (Uuid::nil(), String::new(), session.clone()),
+        }
+    }
+
     fn key(&self) -> String {
         match self {
             Self::Run(run) => format!("run/{run}"),
@@ -228,14 +307,26 @@ impl TargetKey {
     }
 }
 
+/// A score an evaluation event gave: what it says, its scorer's version and
+/// the event's time.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EventScore {
+    pub judgement: Judgement,
+    pub version: String,
+    pub at: u64,
+    /// Its place among the span's evaluation events.
+    pub place: usize,
+}
+
 /// A span's scores from its evaluation events, each held to a score's rules;
 /// one breaking them is left out. A number labelled is kept as its number.
 #[must_use]
-pub fn of_span(span: &Span) -> Vec<(Judgement, u64)> {
+pub fn of_span(span: &Span) -> Vec<EventScore> {
     span.events
         .iter()
         .filter(|event| event.name == EVALUATION_EVENT)
-        .filter_map(|event| {
+        .enumerate()
+        .filter_map(|(place, event)| {
             let attribute = |key: &str| {
                 event
                     .attributes
@@ -247,12 +338,15 @@ pub fn of_span(span: &Span) -> Vec<(Judgement, u64)> {
                 Some(Value::StringValue(s)) => Some(s.clone()),
                 _ => None,
             };
-            let number = match attribute(EVALUATION_VALUE) {
+            let float = |key: &str| match attribute(key) {
                 Some(Value::DoubleValue(v)) => Some(*v),
                 #[expect(clippy::cast_precision_loss, reason = "a score's integer is small")]
                 Some(Value::IntValue(v)) => Some(*v as f64),
-                Some(Value::BoolValue(v)) => Some(if *v { 1.0 } else { 0.0 }),
                 _ => None,
+            };
+            let number = match attribute(EVALUATION_VALUE) {
+                Some(Value::BoolValue(v)) => Some(if *v { 1.0 } else { 0.0 }),
+                _ => float(EVALUATION_VALUE),
             };
             let label = text(EVALUATION_LABEL).filter(|l| !l.trim().is_empty());
             let boolean = text(SCORE_TYPE).as_deref() == Some("boolean")
@@ -270,10 +364,15 @@ pub fn of_span(span: &Span) -> Vec<(Judgement, u64)> {
                 } else {
                     Vec::new()
                 },
-                range_min: None,
-                range_max: None,
+                range_min: float(SCORE_RANGE_MIN),
+                range_max: float(SCORE_RANGE_MAX),
             };
-            judgement.checked().ok().map(|j| (j, event.time_unix_nano))
+            Some(EventScore {
+                judgement: judgement.checked().ok()?,
+                version: version_of(text(SCORE_VERSION).as_deref())?,
+                at: event.time_unix_nano,
+                place,
+            })
         })
         .collect()
 }
@@ -519,9 +618,20 @@ mod tests {
             member_score_id(&project, &run, "helpful", "u1"),
             member_score_id(&project, &run, "helpful", "u2")
         );
+        let event = |at, place| EventScore {
+            judgement: judgement(ScoreType::Boolean),
+            version: String::new(),
+            at,
+            place,
+        };
         assert_ne!(
-            sdk_score_id(&project, "t", "s", "helpful", 1),
-            sdk_score_id(&project, "t", "s", "helpful", 2)
+            sdk_score_id(&project, "t", "s", &event(1, 0)),
+            sdk_score_id(&project, "t", "s", &event(2, 0))
+        );
+        assert_ne!(
+            sdk_score_id(&project, "t", "s", &event(1, 0)),
+            sdk_score_id(&project, "t", "s", &event(1, 1)),
+            "two of one name at one time stay two"
         );
     }
 }

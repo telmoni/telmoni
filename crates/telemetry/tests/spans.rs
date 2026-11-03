@@ -288,6 +288,7 @@ async fn a_read_naming_one_project_sees_no_other() {
         scorer: String::new(),
         scorer_version: String::new(),
         is_deleted: 0,
+        answer: String::new(),
     };
     ch.store
         .insert_scores_once(

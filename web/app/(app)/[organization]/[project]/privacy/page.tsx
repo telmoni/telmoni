@@ -209,6 +209,45 @@ export default async function PrivacyPage({
         </Section>
 
         <Section
+          title="What evaluators read"
+          description={
+            posture
+              ? `Each evaluator's reads of this project's content in the last ${posture.days} days, by day and the provider its model's connection sent it to. Each read is recorded on its evaluation, and goes with the content it read.`
+              : "Each evaluator's reads of this project's content lately."
+          }
+        >
+          {!posture ? (
+            <NoticeCard title="What evaluators read could not be read." body="Reload to try again." />
+          ) : posture.evaluator_reads.length === 0 ? (
+            <NoticeCard
+              title="No reads."
+              body={`No evaluator read this project's content in the last ${posture.days} days.`}
+            />
+          ) : (
+            <DataTable>
+              <THead>
+                <Th>Day</Th>
+                <Th>Evaluator</Th>
+                <Th>Provider</Th>
+                <Th className="text-right">Reads</Th>
+              </THead>
+              <tbody>
+                {posture.evaluator_reads.map((read) => (
+                  <tr key={`${read.day}/${read.evaluator_id}/${read.provider ?? ""}`}>
+                    <Td className="whitespace-nowrap text-xs tabular-nums">{read.day}</Td>
+                    <Td className="text-xs">{read.evaluator ?? "A deleted evaluator"}</Td>
+                    <Td className="text-xs text-muted-foreground">{read.provider ?? "—"}</Td>
+                    <Td className="whitespace-nowrap text-right text-xs tabular-nums">
+                      {formatCount(read.reads)}
+                    </Td>
+                  </tr>
+                ))}
+              </tbody>
+            </DataTable>
+          )}
+        </Section>
+
+        <Section
           title="Retention"
           description={
             <>

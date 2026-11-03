@@ -886,6 +886,85 @@ pub async fn keep_content(
     Ok(())
 }
 
+/// Which of a project's kept fields a forget takes: those of the spans
+/// named under one run, found by its index, or of every span whose id begins
+/// so under one field's name, found by that field's.
+pub enum Spans<'a> {
+    Named(Uuid, &'a [String]),
+    Prefixed(&'a str, &'a str),
+}
+
+/// The project's fields kept under `spans` deleted on the maintenance lane,
+/// which alone deletes content, their bytes given back to the organization
+/// holding the project, its settings row locked first, as
+/// [`delete_content`] locks it.
+pub async fn forget_fields(
+    conn: &mut sqlx::PgConnection,
+    project_id: &ProjectId,
+    spans: Spans<'_>,
+) -> sqlx::Result<()> {
+    let (run, named, field, prefix) = match spans {
+        Spans::Named(run, named) => (Some(run), Some(named), None, None),
+        Spans::Prefixed(field, prefix) => (None, None, Some(field), Some(prefix)),
+    };
+    sqlx::query("SELECT 1 FROM telemetry.project_settings WHERE project_id = $1 FOR UPDATE")
+        .bind(project_id)
+        .execute(&mut *conn)
+        .await?;
+    sqlx::query(
+        "WITH gone AS (
+             DELETE FROM telemetry.plain_content
+              WHERE project_id = $1
+                AND ($4::uuid IS NULL OR run_id = $4)
+                AND ($2::text[] IS NULL OR span_id = ANY($2))
+                AND ($5::text IS NULL OR field = $5)
+                AND ($3::text IS NULL OR starts_with(span_id, $3))
+             RETURNING bytes),
+         sums AS (
+             SELECT s.organization_id, sum(g.bytes) AS bytes
+               FROM gone g CROSS JOIN telemetry.project_settings s
+              WHERE s.project_id = $1
+              GROUP BY s.organization_id)
+         UPDATE telemetry.content_held h SET bytes = greatest(h.bytes - sums.bytes, 0)
+           FROM sums WHERE h.organization_id = sums.organization_id",
+    )
+    .bind(project_id)
+    .bind(named)
+    .bind(prefix)
+    .bind(run)
+    .bind(field)
+    .execute(&mut *conn)
+    .await?;
+    Ok(())
+}
+
+/// The newest `limit` of the project's fields named `field` whose span id
+/// begins with `prefix`, sealed, under the project's key now as
+/// [`read_content`] reads, newest first.
+pub(crate) async fn read_prefixed(
+    tx: &mut Scoped<'_, ProjectAndOrganization>,
+    project_id: &ProjectId,
+    field: &str,
+    prefix: &str,
+    limit: i64,
+) -> sqlx::Result<Vec<KeptField>> {
+    sqlx::query_as(
+        "SELECT run_id, trace_id, span_id, field, ciphertext, nonce
+           FROM telemetry.plain_content
+          WHERE project_id = $1 AND field = $2 AND starts_with(span_id, $3)
+            AND key_id = (SELECT content_key_id FROM telemetry.project_settings
+                           WHERE project_id = $1)
+          ORDER BY received_at DESC
+          LIMIT $4",
+    )
+    .bind(project_id)
+    .bind(field)
+    .bind(prefix)
+    .bind(limit)
+    .fetch_all(tx.conn())
+    .await
+}
+
 /// The run of each field of the project's content holding every one of
 /// `words` and of `pairs`, hashed, newest first, up to `limit` fields; nothing
 /// sealed. The words' index finds the fields, each one's pairs checked on it.
@@ -1202,6 +1281,24 @@ pub(crate) async fn read_media(
 ) -> sqlx::Result<Option<(String, Vec<u8>, Vec<u8>)>> {
     sqlx::query_as(
         "SELECT mime_type, ciphertext, nonce FROM telemetry.media
+          WHERE project_id = $1 AND sha256 = $2
+            AND key_id = (SELECT content_key_id FROM telemetry.project_settings
+                           WHERE project_id = $1)",
+    )
+    .bind(project_id)
+    .bind(sha256)
+    .fetch_optional(tx.conn())
+    .await
+}
+
+/// A kept file's type and size, read without its bytes.
+pub(crate) async fn media_kind(
+    tx: &mut Scoped<'_, ProjectAndOrganization>,
+    project_id: &ProjectId,
+    sha256: &str,
+) -> sqlx::Result<Option<(String, i32)>> {
+    sqlx::query_as(
+        "SELECT mime_type, bytes FROM telemetry.media
           WHERE project_id = $1 AND sha256 = $2
             AND key_id = (SELECT content_key_id FROM telemetry.project_settings
                            WHERE project_id = $1)",

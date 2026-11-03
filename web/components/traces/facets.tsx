@@ -26,6 +26,7 @@ import {
   FILTERS,
   FILTER_LABEL,
   ROW_NOUN,
+  SCORE_NAME_MAX,
   STATUS_LABEL,
   TYPED_FILTERS,
   activeFilters,
@@ -167,6 +168,15 @@ export function FacetsPanel({ list, organization, slug, query, ui = {}, facets }
             />
           ))}
         </div>
+      )}
+      {(!needle || "score".includes(needle)) && (
+        <ScoreSection
+          // Drawn afresh as the URL's score changes: a clear, a step back, a view.
+          key={`${query.score ?? ""}/${query.score_min ?? ""}/${query.score_max ?? ""}`}
+          query={query}
+          clearHref={href(without(query, "score"))}
+          onScore={(score) => go(href({ ...query, ...score, page: undefined }))}
+        />
       )}
       {/* Last in the panel, so Tab reaches it after the filters, between them and the list. */}
       <FiltersEdge edge={edge} />
@@ -338,6 +348,118 @@ function FacetSection({
             {typed ? "; type one in to find another" : ""}.
           </p>
         )}
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+/** A score's name and the range its value falls within, the list narrowed to
+ *  the rows carrying one, as `?score=`, `score_min` and `score_max` narrow it. */
+function ScoreSection({
+  query,
+  clearHref,
+  onScore,
+}: {
+  query: ListQuery<string>;
+  clearHref: string;
+  onScore: (score: { score: string; score_min?: number; score_max?: number }) => void;
+}) {
+  const set = query.score !== undefined;
+  const [chosen, setChosen] = useState<boolean | null>(null);
+  const open = chosen ?? set;
+  const [name, setName] = useState(query.score ?? "");
+  const [least, setLeast] = useState(query.score_min === undefined ? "" : String(query.score_min));
+  const [most, setMost] = useState(query.score_max === undefined ? "" : String(query.score_max));
+  const bound = (text: string): number | undefined | null => {
+    if (!text.trim()) return undefined;
+    const value = Number(text.trim());
+    return Number.isFinite(value) ? value : null;
+  };
+  const trimmed = name.trim();
+  const [low, high] = [bound(least), bound(most)];
+  const taken =
+    trimmed !== "" &&
+    [...trimmed].length <= SCORE_NAME_MAX &&
+    low !== null &&
+    high !== null &&
+    (low === undefined || high === undefined || low <= high);
+  return (
+    <Collapsible open={open} onOpenChange={setChosen} className="border-b border-border">
+      <div className="flex items-center gap-gutter">
+        <CollapsibleTrigger asChild>
+          <Button variant="ghost" size="sm" className="flex-1 justify-start">
+            <ChevronRightIcon
+              className={cn("text-muted-foreground transition-transform", open && "rotate-90")}
+              aria-hidden="true"
+            />
+            Score
+            {set && (
+              <Badge variant="secondary" className="px-1.5 tabular-nums">
+                1
+              </Badge>
+            )}
+          </Button>
+        </CollapsibleTrigger>
+        {set && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button asChild variant="ghost" size="icon-xs">
+                <Link href={clearHref} scroll={false} aria-label="Clear the score filter">
+                  <XIcon />
+                  <LinkPending />
+                </Link>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Clear</TooltipContent>
+          </Tooltip>
+        )}
+      </div>
+      <CollapsibleContent className="pb-gutter">
+        <form
+          className="grid gap-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!taken) return;
+            onScore({ score: trimmed, score_min: low ?? undefined, score_max: high ?? undefined });
+          }}
+        >
+          <Input
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            placeholder="A score's name"
+            aria-label="A score's name"
+            autoComplete="off"
+            spellCheck={false}
+            className="text-xs"
+          />
+          <div className="flex gap-2">
+            <Input
+              value={least}
+              onChange={(event) => setLeast(event.target.value)}
+              placeholder="At least"
+              aria-label="At least"
+              inputMode="decimal"
+              autoComplete="off"
+              className="text-xs"
+            />
+            <Input
+              value={most}
+              onChange={(event) => setMost(event.target.value)}
+              placeholder="At most"
+              aria-label="At most"
+              inputMode="decimal"
+              autoComplete="off"
+              className="text-xs"
+            />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Rows with a score of this name, any of its scores within the range given; a yes is 1
+            and a no 0.
+          </p>
+          <Button type="submit" variant="outline" disabled={!taken}>
+            Apply
+          </Button>
+        </form>
       </CollapsibleContent>
     </Collapsible>
   );

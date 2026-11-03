@@ -2,6 +2,7 @@ import { ServiceUnavailable } from "@/components/service-unavailable";
 import { administers } from "@/lib/roles";
 import {
   fetchEvaluationRules,
+  fetchAgreement,
   fetchEvaluations,
   fetchEvaluatorTemplates,
   fetchEvaluatorVersions,
@@ -31,7 +32,7 @@ export default async function EvaluatorsPage({
   const { project } = resolved;
   const named = typeof query.evaluator === "string" ? query.evaluator : null;
 
-  const [listing, templates, connections, rules, views, versions, evaluations] = await Promise.all([
+  const [listing, templates, connections, rules, views, versions, evaluations, agreement] = await Promise.all([
     fetchEvaluators(project.id),
     fetchEvaluatorTemplates(project.id),
     fetchModelConnections(project.id),
@@ -39,6 +40,7 @@ export default async function EvaluatorsPage({
     fetchTraceViews(project.id),
     named ? fetchEvaluatorVersions(project.id, named) : null,
     named ? fetchEvaluations(project.id, named) : null,
+    named ? fetchAgreement(project.id, named) : null,
   ]);
   if (!listing || !templates || !connections || !rules) return <ServiceUnavailable />;
   const here = projectPath(organization, slug, "/evaluators");
@@ -52,7 +54,8 @@ export default async function EvaluatorsPage({
       <Evaluators
         projectId={project.id}
         evaluators={listing.evaluators}
-        templates={templates}
+        templates={templates.templates}
+        typedTemplates={templates.typed}
         connections={connections}
         rulesOf={rulesOf}
         contentKept={listing.content_kept}
@@ -76,6 +79,7 @@ export default async function EvaluatorsPage({
         <EvaluatorDetails
           versions={versions}
           evaluations={evaluations}
+          agreement={agreement}
           here={here}
           tracesHref={projectPath(organization, slug, "/traces")}
           sessionsHref={projectPath(organization, slug, "/sessions")}

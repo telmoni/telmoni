@@ -7,8 +7,9 @@ vi.mock("next/navigation", () => ({
   usePathname: () => "/acme/web/traces",
   useRouter: () => ({ push: vi.fn(), refresh: vi.fn(), prefetch: vi.fn() }),
 }));
+const { go } = vi.hoisted(() => ({ go: vi.fn() }));
 vi.mock("@/components/traces/navigate", () => ({
-  useListNavigation: () => ({ go: vi.fn(), pending: false }),
+  useListNavigation: () => ({ go, pending: false }),
 }));
 
 import { FacetsPanel } from "@/components/traces/facets";
@@ -128,5 +129,32 @@ describe("the filters' edge", () => {
     panel();
     expect(screen.queryByRole("separator")).toBeNull();
     expect(screen.getByRole("button", { name: "Show the filters" })).toBeInTheDocument();
+  });
+});
+
+describe("the score filter", () => {
+  beforeEach(() => {
+    window.localStorage.removeItem(TRACE_PREFS_KEY);
+    go.mockClear();
+  });
+
+  it("narrows the list to a score's name within the range given", () => {
+    panel();
+    fireEvent.click(screen.getByRole("button", { name: "Score" }));
+    const apply = screen.getByRole("button", { name: "Apply" });
+    expect(apply).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("A score's name"), { target: { value: " relevance " } });
+    fireEvent.change(screen.getByLabelText("At least"), { target: { value: "0.8" } });
+    fireEvent.change(screen.getByLabelText("At most"), { target: { value: "0.5" } });
+    expect(apply).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("At most"), { target: { value: "1" } });
+    fireEvent.click(apply);
+    expect(go).toHaveBeenCalledTimes(1);
+    const href = new URL(String(go.mock.calls[0]?.[0]), "https://x");
+    expect([href.searchParams.get("score"), href.searchParams.get("score_min"), href.searchParams.get("score_max")]).toEqual([
+      "relevance",
+      "0.8",
+      "1",
+    ]);
   });
 });

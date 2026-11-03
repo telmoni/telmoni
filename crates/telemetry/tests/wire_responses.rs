@@ -21,7 +21,7 @@ use telmoni_telemetry::handler::field_inventory::FieldInventory;
 use telmoni_telemetry::handler::health::{Health, HealthIncident, HealthProject};
 use telmoni_telemetry::handler::incidents::IncidentList;
 use telmoni_telemetry::handler::mutes::MuteList;
-use telmoni_telemetry::handler::privacy::{Posture, Retention, Sent};
+use telmoni_telemetry::handler::privacy::{EvaluatorReads, Posture, Retention, Sent};
 use telmoni_telemetry::handler::rules::{Alert, AlertLink, AlertList};
 use telmoni_telemetry::handler::session_layout::SessionLayoutSetting;
 use telmoni_telemetry::handler::sessions::{SessionDetail, SessionList, SessionTrace};
@@ -208,6 +208,7 @@ fn the_histogram_answers_as_the_console_reads() {
             days: 7,
             bucket_seconds: 3_600,
             utc_offset: -300,
+            score: Some("relevance".into()),
             bars: vec![
                 Bar {
                     at: at(0),
@@ -220,6 +221,7 @@ fn the_histogram_answers_as_the_console_reads() {
                     duration_p95_ms: Some(4_000.0),
                     time_to_first_token_p50_ms: Some(400.0),
                     time_to_first_token_p95_ms: Some(1_100.0),
+                    score_mean: Some(0.82),
                 },
                 Bar {
                     at: at(3_600),
@@ -232,6 +234,7 @@ fn the_histogram_answers_as_the_console_reads() {
                     duration_p95_ms: None,
                     time_to_first_token_p50_ms: None,
                     time_to_first_token_p95_ms: None,
+                    score_mean: None,
                 },
             ],
         },
@@ -524,6 +527,8 @@ fn alerts_answer_as_the_console_reads() {
             warning_threshold: Some(20_000.0),
             missing_data: MissingData::Keep,
             renotify_minutes: Some(60),
+            score_name: None,
+            baseline: telmoni_shared::RuleBaseline::None,
         },
         paused: None,
         paused_at: None,
@@ -556,6 +561,8 @@ fn alerts_answer_as_the_console_reads() {
             filters: RuleFilters::default(),
             warning_threshold: None,
             renotify_minutes: None,
+            score_name: None,
+            baseline: telmoni_shared::RuleBaseline::None,
             ..alert.definition.clone()
         },
         paused: Some(PausedBy::Plan),
@@ -694,6 +701,22 @@ fn the_privacy_posture_answers_as_the_console_reads() {
                 attribute: "gen_ai.input.messages".into(),
                 spans: 400,
             }],
+            evaluator_reads: vec![
+                EvaluatorReads {
+                    day: chrono::NaiveDate::from_ymd_opt(2026, 11, 2).expect("a day"),
+                    evaluator_id: uuid::Uuid::from_u128(0x7a1c_0e52_0000_4000_8000_0000_0000_0002),
+                    evaluator: Some("Hallucination".into()),
+                    provider: Some("anthropic".into()),
+                    reads: 42,
+                },
+                EvaluatorReads {
+                    day: chrono::NaiveDate::from_ymd_opt(2026, 11, 1).expect("a day"),
+                    evaluator_id: uuid::Uuid::from_u128(0x7a1c_0e52_0000_4000_8000_0000_0000_0003),
+                    evaluator: None,
+                    provider: Some("openai".into()),
+                    reads: 3,
+                },
+            ],
             retention: Retention {
                 span_days: 90,
                 max_span_days: 360,

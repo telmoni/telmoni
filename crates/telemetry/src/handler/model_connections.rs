@@ -17,7 +17,7 @@ use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
 use telmoni_shared::db::tenant_session::project_scope;
 use telmoni_shared::envelope::{KEK_VERSION, SealedRef};
 use telmoni_shared::extract::Json;
-use telmoni_shared::model::{self, Ask, Connection, Credentials, Role};
+use telmoni_shared::model::{self, Ask, Connection, Credentials, Role, systemone};
 use telmoni_shared::rbac::{Resource, Verb};
 use telmoni_shared::{
     AuditAction, AuthError, ModelProvider, ProjectId, Redacted, TelmoniError, TelmoniResourceKind,
@@ -104,7 +104,9 @@ fn checked(mut change: ConnectionChange) -> Result<ConnectionChange, TelmoniErro
     }
     let needs_base = matches!(
         change.provider,
-        ModelProvider::AzureOpenai | ModelProvider::OpenaiCompatible
+        ModelProvider::AzureOpenai
+            | ModelProvider::OpenaiCompatible
+            | ModelProvider::SystemOneCompatible
     );
     change.base_url = match (
         change
@@ -157,7 +159,11 @@ fn hint(provider: ModelProvider, credentials: &Credentials, secret: &str) -> Str
         Credentials::ServiceAccount(account) => account.client_email.clone(),
         Credentials::AccessKeys { access_key_id, .. } => tail(access_key_id),
         Credentials::ApiKey(_)
-            if secret.trim().is_empty() && provider == ModelProvider::OpenaiCompatible =>
+            if secret.trim().is_empty()
+                && matches!(
+                    provider,
+                    ModelProvider::OpenaiCompatible | ModelProvider::SystemOneCompatible
+                ) =>
         {
             String::new()
         }
@@ -175,13 +181,39 @@ fn test_schema() -> Value {
     })
 }
 
-/// One small judgement of `connection`'s first model: the save's proof that
-/// the key, the endpoint and the model answer.
+/// One small judgement of `connection`'s first model, a System One one's a
+/// single question: the save's proof that the key, the endpoint and the
+/// model answer.
 async fn try_connection(
     state: &AppState,
     connection: &Connection,
     model: &str,
 ) -> Result<(), TelmoniError> {
+    let refused = |refused: model::Refused| {
+        TelmoniError::BadRequest(format!(
+            "the connection was not saved: {}",
+            refused.sentence()
+        ))
+    };
+    if model::speaks_system_one(connection.provider) {
+        let questions = [systemone::Question {
+            name: "ok".into(),
+            instructions: "Is this a greeting?".into(),
+            criteria: systemone::Criteria::Noul {
+                yes_means: String::new(),
+                no_means: String::new(),
+            },
+        }];
+        let decide = systemone::Decide {
+            model,
+            state: "Hello.",
+            questions: &questions,
+        };
+        return model::decide(&state.egress, connection, &decide)
+            .await
+            .map(|_| ())
+            .map_err(refused);
+    }
     let schema = test_schema();
     let messages = [(Role::User, "Answer {\"ok\": true}.".to_owned())];
     let ask = Ask {
@@ -191,16 +223,12 @@ async fn try_connection(
         schema: &schema,
         temperature: None,
         max_tokens: 64,
+        media: &[],
     };
     model::judge(&state.egress, connection, &ask)
         .await
         .map(|_| ())
-        .map_err(|refused| {
-            TelmoniError::BadRequest(format!(
-                "the connection was not saved: {}",
-                refused.sentence()
-            ))
-        })
+        .map_err(refused)
 }
 
 /// The key is refused before anything else where no `MODEL_CONNECTION_KEK` seals it.

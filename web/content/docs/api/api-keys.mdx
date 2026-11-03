@@ -18,9 +18,12 @@ Project **Owners** and **Admins** can mint, rotate, and revoke API keys.
    and optionally a description (up to 500).
 4. Choose what it opens: **Send spans**, the `ingest` scope, which opens
    [`/otlp/v1/traces`](/docs/api/ingest); **Read the API**, the `read` scope,
-   which opens [`/v1`](/docs/api/reference); or both. Both are on to start; a
-   key needs at least one. A key baked into an agent's process should send
-   alone, so a leak of it reads nothing.
+   which opens [`/v1`](/docs/api/reference); and **Change evaluators**, the
+   `evaluate` scope, which makes, versions and deletes the project's
+   [evaluators](/docs/api/reference#post-v1evaluators) for a key that reads
+   too, so ticking it ticks reading. Sending and reading are on to start, and
+   changing evaluators off; a key needs at least one. A key baked into an
+   agent's process should send alone, so a leak of it reads nothing.
 5. Choose when it expires: 30 days, 90 days (the default), 1 year, or **Never
    (not recommended)**.
 
@@ -54,10 +57,10 @@ Include the key as a bearer token in the HTTP `Authorization` header:
 $ curl -H "Authorization: Bearer $TELMONI_API_KEY" https://api.telmoni.com/v1/organization
 ```
 
-Each lane needs its scope: `/v1` the `read` scope, and
-[`/otlp/v1/traces`](/docs/api/ingest), where spans are sent, the `ingest` scope. A
-live key without the scope a lane needs is refused with `403`
-`/errors/authz/forbidden`.
+Each lane needs its scope: `/v1` the `read` scope, a change of an evaluator
+`evaluate` beside it, and [`/otlp/v1/traces`](/docs/api/ingest), where spans
+are sent, the `ingest` scope. A live key without the scope a lane needs is
+refused with `403` `/errors/authz/forbidden`.
 
 The [Telmoni CLI](/docs/api/cli) uses it from the `TELMONI_API_KEY` environment
 variable, for each command and without saving it, asking first at a terminal,

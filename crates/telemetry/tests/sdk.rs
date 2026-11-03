@@ -21,11 +21,13 @@ use tower::ServiceExt;
 use uuid::Uuid;
 
 use common::{AuthStub, SECRET, clickhouse_or_skip, state_with_stores};
-use telmoni::{Config, ModelCallRecord, RunRecord, Telmoni, ToolCallRecord, Usage};
+use telmoni::{
+    Config, ModelCallRecord, RunRecord, Score, ScoreTarget, Telmoni, ToolCallRecord, Usage,
+};
 use telmoni_shared::middleware::service_auth::SERVICE_SECRET_HEADER;
 use telmoni_shared::{ApiKeyScope, OrganizationId, OrganizationRole, ProjectId, Role};
 use telmoni_telemetry::hashing::HASH_BYTES;
-use telmoni_telemetry::{otlp_router, router};
+use telmoni_telemetry::{otlp_router, router, v1_router};
 
 /// The project's ingest key, as auth would resolve it.
 const INGEST_KEY: &str = "tm_sdk_ingest";
@@ -51,7 +53,9 @@ async fn a_run_recorded_with_the_sdk_lands_through_the_door_and_the_trace_lanes_
     .key(INGEST_KEY, &organization, &project, &[ApiKeyScope::Ingest]);
     let state = state_with_stores(&pool, auth);
     // Ingest nested as the binary mounts it.
-    let app = router(Arc::clone(&state)).nest("/otlp", otlp_router(Arc::clone(&state)));
+    let app = router(Arc::clone(&state))
+        .nest("/otlp", otlp_router(Arc::clone(&state)))
+        .nest("/v1", v1_router(Arc::clone(&state)));
 
     // The door over TCP on this machine, as the SDK reaches it: the one host
     // it sends a key to over plain HTTP.
@@ -75,6 +79,11 @@ async fn a_run_recorded_with_the_sdk_lands_through_the_door_and_the_trace_lanes_
             user_id: Some("user_42".into()),
             session_id: Some(session.clone()),
             tags: BTreeMap::from([("asked_about".to_owned(), "project".to_owned())]),
+            scores: vec![
+                Score::number("relevance", 0.8)
+                    .range(0.0, 1.0)
+                    .version("judge-1"),
+            ],
             inside: vec![
                 ModelCallRecord {
                     provider: Some("anthropic".into()),
@@ -103,6 +112,15 @@ async fn a_run_recorded_with_the_sdk_lands_through_the_door_and_the_trace_lanes_
             ..RunRecord::new(run_id.to_string(), "nightly-triage", start, at(4_000))
         })
         .expect("a record the SDK takes");
+    // Scored once the run ended, as a person's feedback comes: the run, and its session.
+    telmoni.score(
+        &ScoreTarget::run(run_id.to_string()),
+        Score::boolean("thumbs", true),
+    );
+    telmoni.score(
+        &ScoreTarget::session(session.clone()),
+        Score::category("outcome", "resolved"),
+    );
     // The flush waits on the SDK's thread, so off the runtime's.
     let client = telmoni.clone();
     let sent = tokio::task::spawn_blocking(move || client.flush())
@@ -208,4 +226,41 @@ async fn a_run_recorded_with_the_sdk_lands_through_the_door_and_the_trace_lanes_
     assert_eq!(trace["session_id"], session);
     assert_eq!(trace["environments"], serde_json::json!(["staging"]));
     assert_eq!(trace["releases"], serde_json::json!(["2026.10.18"]));
+
+    // The record's score rode on the run's span; the two sent after it, to `/v1/scores`.
+    let response = app
+        .clone()
+        .oneshot(request(format!(
+            "/internal/v1/telemetry/scores?run_id={run_id}&session_id={session}"
+        )))
+        .await
+        .expect("the router answers");
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = response
+        .into_body()
+        .collect()
+        .await
+        .expect("a body")
+        .to_bytes();
+    let scores: Value = serde_json::from_slice(&bytes).expect("a JSON body");
+    let mut got: Vec<(String, String, String)> = scores["scores"]
+        .as_array()
+        .expect("scores")
+        .iter()
+        .map(|s| {
+            assert_eq!(s["source"], "sdk");
+            let text = |key: &str| s[key].as_str().unwrap_or_default().to_owned();
+            (text("name"), text("target"), text("scorer_version"))
+        })
+        .collect();
+    got.sort();
+    assert_eq!(
+        got,
+        [
+            ("outcome".into(), "session".into(), String::new()),
+            ("relevance".into(), "run".into(), "judge-1".into()),
+            ("thumbs".into(), "run".into(), String::new()),
+        ],
+        "{scores}"
+    );
 }

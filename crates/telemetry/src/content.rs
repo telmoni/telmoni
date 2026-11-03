@@ -116,8 +116,14 @@ pub async fn keep(
     let mut sealed = SealedFields::default();
     let mut named: (Vec<String>, Vec<Uuid>) = (Vec::new(), Vec::new());
     for span in content {
+        // A comment or an example names no file: a hash in it would hold one
+        // from its sweep.
+        let names_files = !span.span_id.starts_with(crate::scores::COMMENT_SPAN_PREFIX)
+            && !span
+                .span_id
+                .starts_with(crate::evaluators::examples::SPAN_PREFIX);
         for (field, text) in span.fields {
-            for hash in files_named(&text) {
+            for hash in files_named(&text).into_iter().filter(|_| names_files) {
                 named.0.push(hash);
                 named.1.push(span.run_id);
             }
@@ -155,6 +161,141 @@ pub async fn keep(
         Ok(())
     })
     .await
+}
+
+/// A score's comment kept in place of the one it had, sealed as a span's
+/// field is under the score's run ([`crate::scores::comment_span`]), so a
+/// trace's deletion, an end user's erasure and retention take it as they take
+/// the run's content, and opened only with the run's, as its read; none kept
+/// for `None`, the last one taken back.
+///
+/// # Errors
+///
+/// As [`keep`].
+pub async fn keep_comment(
+    state: &AppState,
+    project_id: &ProjectId,
+    (run_id, trace_id): (Uuid, &str),
+    score_id: Uuid,
+    comment: Option<&str>,
+) -> Result<(), TelmoniError> {
+    forget_comments(state, project_id, run_id, &[score_id]).await?;
+    // A run deleted as it was judged or scored keeps nothing it said after.
+    let Some(comment) = comment else {
+        return Ok(());
+    };
+    if crate::erasure::was_deleted(state, project_id, run_id).await {
+        return Ok(());
+    }
+    keep(
+        state,
+        project_id,
+        Utc::now(),
+        vec![SpanContent {
+            run_id,
+            trace_id: trace_id.to_owned(),
+            span_id: crate::scores::comment_span(score_id),
+            fields: vec![(crate::scores::COMMENT_FIELD.to_owned(), comment.to_owned())],
+        }],
+    )
+    .await
+}
+
+/// The project's fields under the spans `spans` names of `run_id` deleted,
+/// their bytes given back.
+///
+/// # Errors
+///
+/// As [`keep`].
+pub async fn forget_named(
+    state: &AppState,
+    project_id: &ProjectId,
+    run_id: Uuid,
+    spans: &[String],
+) -> Result<(), TelmoniError> {
+    let mut tx =
+        telmoni_shared::db::tenant_session::maintenance_scope(&state.db, crate::db::TelemetryLane)
+            .await?;
+    db::forget_fields(tx.conn(), project_id, db::Spans::Named(run_id, spans)).await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+/// The comments of `score_ids` deleted, their bytes given back.
+///
+/// # Errors
+///
+/// As [`keep`].
+pub async fn forget_comments(
+    state: &AppState,
+    project_id: &ProjectId,
+    run_id: Uuid,
+    score_ids: &[Uuid],
+) -> Result<(), TelmoniError> {
+    let spans: Vec<String> = score_ids
+        .iter()
+        .copied()
+        .map(crate::scores::comment_span)
+        .collect();
+    forget_named(state, project_id, run_id, &spans).await
+}
+
+/// The project's fields named `field` under every span whose id begins with
+/// `prefix` deleted, their bytes given back.
+///
+/// # Errors
+///
+/// As [`keep`].
+pub async fn forget_prefixed(
+    state: &AppState,
+    project_id: &ProjectId,
+    field: &str,
+    prefix: &str,
+) -> Result<(), TelmoniError> {
+    let mut tx =
+        telmoni_shared::db::tenant_session::maintenance_scope(&state.db, crate::db::TelemetryLane)
+            .await?;
+    db::forget_fields(tx.conn(), project_id, db::Spans::Prefixed(field, prefix)).await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+/// The newest `limit` fields named `field` under spans whose id begins with
+/// `prefix`, opened for an evaluation: its read recorded on its own row, as
+/// [`open_for_evaluation`]'s is. Newest first.
+///
+/// # Errors
+///
+/// As [`keep`].
+pub async fn open_prefixed_for_evaluation(
+    state: &AppState,
+    project_id: &ProjectId,
+    field: &str,
+    prefix: &str,
+    limit: i64,
+) -> Result<Vec<String>, TelmoniError> {
+    let Some((mut tx, _)) = held_if_kept(state, project_id).await? else {
+        return Ok(Vec::new());
+    };
+    let kept = db::read_prefixed(&mut tx, project_id, field, prefix, limit).await?;
+    tx.commit().await?;
+    if kept.is_empty() {
+        return Ok(Vec::new());
+    }
+    let key = key_for(state, project_id).await?;
+    kept.into_iter()
+        .map(|(_, _, span_id, field, ciphertext, nonce)| {
+            open_field(
+                &state.vault,
+                &key,
+                SealedRef {
+                    ciphertext: &ciphertext,
+                    nonce: &nonce,
+                },
+                &field_aad(&span_id, &field),
+            )
+        })
+        .collect()
 }
 
 /// Refuses what was sealed under `wrapped` once the project's content key is
@@ -496,16 +637,69 @@ pub async fn open_media(
     let Some((mime_type, ciphertext, nonce)) = kept else {
         return Ok(None);
     };
+    unsealed_media(state, project_id, sha256, (mime_type, &ciphertext, &nonce))
+        .await
+        .map(Some)
+}
+
+/// A file the project keeps, opened for an evaluation with no chain row: the
+/// evaluation's row records the read of its target, the files it names among
+/// it, as [`open_for_evaluation`]'s.
+///
+/// # Errors
+///
+/// As [`open_for_evaluation`].
+pub async fn open_media_for_evaluation(
+    state: &AppState,
+    project_id: &ProjectId,
+    sha256: &str,
+) -> Result<Option<(String, Vec<u8>)>, TelmoniError> {
+    let Some((mut tx, _)) = held_if_kept(state, project_id).await? else {
+        return Ok(None);
+    };
+    let kept = db::read_media(&mut tx, project_id, sha256).await?;
+    tx.commit().await?;
+    let Some((mime_type, ciphertext, nonce)) = kept else {
+        return Ok(None);
+    };
+    unsealed_media(state, project_id, sha256, (mime_type, &ciphertext, &nonce))
+        .await
+        .map(Some)
+}
+
+/// A kept file's type and size, none where the project keeps no such file
+/// or no content: what a judgement weighs before it opens one.
+///
+/// # Errors
+///
+/// Postgres did not answer.
+pub async fn media_kind(
+    state: &AppState,
+    project_id: &ProjectId,
+    sha256: &str,
+) -> Result<Option<(String, usize)>, TelmoniError> {
+    let Some((mut tx, _)) = held_if_kept(state, project_id).await? else {
+        return Ok(None);
+    };
+    let kind = db::media_kind(&mut tx, project_id, sha256).await?;
+    tx.commit().await?;
+    Ok(kind.map(|(mime_type, bytes)| (mime_type, usize::try_from(bytes).unwrap_or(usize::MAX))))
+}
+
+/// A kept file's bytes opened under the project's key, its hash the associated data.
+async fn unsealed_media(
+    state: &AppState,
+    project_id: &ProjectId,
+    sha256: &str,
+    (mime_type, ciphertext, nonce): (String, &[u8], &[u8]),
+) -> Result<(String, Vec<u8>), TelmoniError> {
     let key = key_for(state, project_id).await?;
     let body = state.vault.open_bytes(
         &key,
-        SealedRef {
-            ciphertext: &ciphertext,
-            nonce: &nonce,
-        },
+        SealedRef { ciphertext, nonce },
         media_aad(sha256).as_bytes(),
     )?;
-    Ok(Some((mime_type, body)))
+    Ok((mime_type, body))
 }
 
 /// The most fields a search reads to find its runs, newest first.

@@ -12,7 +12,10 @@ use serde_json::{Value, json};
 use telmoni_shared::model::Role;
 use telmoni_shared::{ScoreType, SpanKind, TelmoniError};
 
+pub mod agreement;
+pub mod examples;
 pub mod run;
+pub mod typed;
 
 use crate::ingest::batch::SpanContent;
 use crate::scores::{CATEGORIES_MAX, CATEGORY_MAX, Judgement, NAME_MAX as SCORE_NAME_MAX};
@@ -465,6 +468,39 @@ impl Prompt {
     }
 }
 
+/// What an evaluator asks, held to its kind's rules.
+#[derive(Debug, Clone)]
+pub enum Judging {
+    Prompt(Prompt),
+    Typed(typed::Typed),
+}
+
+/// Why an evaluator of `judging`'s kind cannot judge on a connection to
+/// `provider`, if it cannot: a typed one speaks System One alone, and a
+/// prompt every other protocol.
+#[must_use]
+pub fn misfit(provider: telmoni_shared::ModelProvider, judging: &Judging) -> Option<&'static str> {
+    match (telmoni_shared::model::speaks_system_one(provider), judging) {
+        (false, Judging::Typed(_)) => Some(
+            "a typed evaluator judges on a System One connection, TypeSafe's or an endpoint's speaking its shape",
+        ),
+        (true, Judging::Prompt(_)) => Some(
+            "a prompt evaluator judges on a connection that writes, not on a System One one, which answers typed questions alone",
+        ),
+        _ => None,
+    }
+}
+
+impl Judging {
+    /// Each variable it names, once.
+    pub fn variables(&self) -> BTreeSet<String> {
+        match self {
+            Self::Prompt(prompt) => prompt.variables(),
+            Self::Typed(typed) => typed.variables(),
+        }
+    }
+}
+
 /// An evaluator to copy, never linked: a prompt and a score, in a group.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Template {
@@ -510,6 +546,118 @@ pub static TEMPLATES: LazyLock<Vec<Template>> = LazyLock::new(|| {
         })
         .collect()
 });
+
+/// A typed evaluator to copy, never linked: a state and its questions.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TypedTemplate {
+    pub key: String,
+    pub group: String,
+    pub name: String,
+    pub description: String,
+    #[serde(flatten)]
+    pub typed: typed::Typed,
+}
+
+/// The typed templates, as `templates/typed/` holds them.
+const TYPED_TEMPLATE_FILES: &[&str] = &[
+    include_str!("templates/typed/tool_selection.json"),
+    include_str!("templates/typed/task_completion.json"),
+    include_str!("templates/typed/scope_adherence.json"),
+    include_str!("templates/typed/groundedness.json"),
+    include_str!("templates/typed/prompt_injection.json"),
+    include_str!("templates/typed/pii_in_answer.json"),
+];
+
+/// Every typed template, read as [`TEMPLATES`] are.
+pub static TYPED_TEMPLATES: LazyLock<Vec<TypedTemplate>> = LazyLock::new(|| {
+    TYPED_TEMPLATE_FILES
+        .iter()
+        .filter_map(|file| match serde_json::from_str::<TypedTemplate>(file) {
+            Ok(template) => Some(template),
+            Err(error) => {
+                tracing::error!(%error, "telemetry: a typed evaluator template does not read");
+                None
+            }
+        })
+        .collect()
+});
+
+/// The most files a judgement sends, and the most bytes they hold between
+/// them, beside each provider's own limit for each kind (`model::takes`).
+pub const FILES_MAX: usize = 5;
+pub const FILES_BYTES_MAX: usize = 10 * 1024 * 1024;
+
+/// The files `texts` name as kept here, each weighed by its kind and size
+/// first, then opened — as `actor`'s read, its chain row filed, or as an
+/// evaluation's with none — where `provider` takes it, up to [`FILES_MAX`]
+/// and [`FILES_BYTES_MAX`]; and how many it named that are not sent.
+///
+/// # Errors
+///
+/// As [`content::open_media`].
+pub(crate) async fn files_of<'t>(
+    state: &crate::AppState,
+    actor: Option<telmoni_shared::audit::Actor<'_>>,
+    project_id: &telmoni_shared::ProjectId,
+    texts: impl Iterator<Item = &'t str>,
+    provider: telmoni_shared::ModelProvider,
+) -> Result<(Vec<telmoni_shared::model::Media>, usize), TelmoniError> {
+    let mut hashes: Vec<String> = Vec::new();
+    for text in texts {
+        for hash in crate::content::files_named(text) {
+            if !hashes.contains(&hash) {
+                hashes.push(hash);
+            }
+        }
+    }
+    let mut sent: Vec<telmoni_shared::model::Media> = Vec::new();
+    let mut bytes = 0;
+    let mut left = hashes.len().saturating_sub(FILES_MAX);
+    for hash in hashes.iter().take(FILES_MAX) {
+        let fits = crate::content::media_kind(state, project_id, hash)
+            .await?
+            .is_some_and(|(mime_type, size)| {
+                telmoni_shared::model::takes(provider, &mime_type, size)
+                    && bytes + size <= FILES_BYTES_MAX
+            });
+        let opened = if !fits {
+            None
+        } else if let Some(actor) = actor {
+            crate::content::open_media(state, actor, project_id, hash).await?
+        } else {
+            crate::content::open_media_for_evaluation(state, project_id, hash).await?
+        };
+        match opened {
+            Some((mime_type, body)) => {
+                bytes += body.len();
+                sent.push(telmoni_shared::model::Media {
+                    mime_type,
+                    bytes: body,
+                });
+            }
+            None => left += 1,
+        }
+    }
+    Ok((sent, left))
+}
+
+/// The last user's message told how many files it names were not sent, so
+/// the judge knows it saw part of what was judged.
+pub fn noted(messages: &mut [(Role, String)], left: usize) {
+    if left == 0 {
+        return;
+    }
+    if let Some((_, text)) = messages
+        .iter_mut()
+        .rev()
+        .find(|(role, _)| *role == Role::User)
+    {
+        text.push_str(&format!(
+            "\n\n[{left} of the files named here were not sent: past {FILES_MAX} files or {} MiB, gone, or of a kind this model's provider takes none of]",
+            FILES_BYTES_MAX / (1024 * 1024)
+        ));
+    }
+}
 
 /// `text` cut to [`FILLED_MAX`] characters, saying so.
 fn bounded(text: String) -> String {
@@ -799,6 +947,49 @@ mod tests {
         for template in TEMPLATES.iter() {
             template
                 .prompt
+                .clone()
+                .checked()
+                .unwrap_or_else(|e| panic!("{}: {e}", template.key));
+            assert!(
+                ["quality", "safety", "security", "conversation", "agents"]
+                    .contains(&template.group.as_str()),
+                "{}",
+                template.key
+            );
+        }
+    }
+
+    /// A typed evaluator judges on a System One connection alone, and a
+    /// prompt on any other.
+    #[test]
+    fn each_kind_judges_on_its_own_protocol() {
+        use telmoni_shared::ModelProvider;
+        let typed = Judging::Typed(TYPED_TEMPLATES[0].typed.clone());
+        let prompt = Judging::Prompt(TEMPLATES[0].prompt.clone());
+        assert!(misfit(ModelProvider::SystemOneCompatible, &typed).is_none());
+        assert!(misfit(ModelProvider::Openai, &typed).is_some());
+        assert!(misfit(ModelProvider::Typesafe, &prompt).is_some());
+        assert!(misfit(ModelProvider::Anthropic, &prompt).is_none());
+    }
+
+    /// Every typed template reads, holds to a typed evaluator's rules, and
+    /// shares no key with another template.
+    #[test]
+    fn every_typed_template_reads_and_holds() {
+        assert_eq!(
+            TYPED_TEMPLATES.len(),
+            TYPED_TEMPLATE_FILES.len(),
+            "each file reads"
+        );
+        let keys: BTreeSet<&str> = TEMPLATES
+            .iter()
+            .map(|t| t.key.as_str())
+            .chain(TYPED_TEMPLATES.iter().map(|t| t.key.as_str()))
+            .collect();
+        assert_eq!(keys.len(), TEMPLATES.len() + TYPED_TEMPLATES.len());
+        for template in TYPED_TEMPLATES.iter() {
+            template
+                .typed
                 .clone()
                 .checked()
                 .unwrap_or_else(|e| panic!("{}: {e}", template.key));

@@ -1,0 +1,19 @@
+{
+  "key": "typed_task_completion",
+  "group": "agents",
+  "name": "Task completion (typed)",
+  "description": "How far the agent finished what it was asked, its steps beside its answer.",
+  "state": "The task:\n{{input}}\n\nWhat the agent did, each tool call with its result:\n{{trajectory}}\n\nIts answer:\n{{output}}",
+  "questions": [
+    {
+      "name": "task_completion",
+      "type": "score",
+      "instructions": "How far did the agent complete the task it was given?",
+      "levels": [
+        "not done: it failed or did something else",
+        "partly done: a part is missing or wrong",
+        "done: everything asked was delivered"
+      ]
+    }
+  ]
+}

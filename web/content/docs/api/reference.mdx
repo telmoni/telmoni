@@ -1,18 +1,20 @@
 ---
 title: "API reference"
-description: "The Telmoni read-only API: authentication, rate limits, and the public /v1 routes."
+description: "The Telmoni API: authentication, rate limits, and the public /v1 routes, its reads and its evaluators' changes."
 ---
 
-The Telmoni API is a read-only HTTP interface under `/v1`. Authenticated by a
+The Telmoni API is an HTTP interface under `/v1`. Authenticated by a
 [project API key](/docs/api/api-keys), it reads a project as the console does:
 its organization and roster, its traces with their spans and, if asked, their
-content, its totals by the hour or the day, and its incidents, so the CLI, a
-notebook or a BI tool can work with them. The routes here write nothing and
-need the `read` scope. Spans go to a lane of their own,
+content, its totals by the hour or the day, its incidents and its evaluators,
+so the CLI, a notebook or a BI tool can work with them. The routes here need
+the `read` scope, and write nothing but a project's
+[evaluators](#post-v1evaluators), which take the `evaluate` scope beside it. Spans go to a lane of their own,
 [`/otlp/v1/traces`](/docs/api/ingest), with a key holding the `ingest` scope, as
-does the one write under `/v1`, `PUT /v1/media/{sha256}`, where our SDKs keep a
-file a message carried ([Ingest](/docs/api/ingest)). Every route under `/v1`,
-that one among them, is also described as an OpenAPI 3.1 document,
+do the two writes under `/v1`: `PUT /v1/media/{sha256}`, where our SDKs keep a
+file a message carried ([Ingest](/docs/api/ingest)), and
+[`POST /v1/scores`](#post-v1scores), the scores of what already ended. Every
+route under `/v1`, those among them, is also described as an OpenAPI 3.1 document,
 [`contract/openapi.json`](https://github.com/telmoni/telmoni/blob/main/contract/openapi.json)
 in the platform's repository, generated from the same tables the server routes by.
 
@@ -50,7 +52,8 @@ A live key without the `read` scope is refused with `403 Forbidden` and
 
 ## HTTP methods
 
-The routes here accept `GET` and `HEAD`. Any other method returns `405 Method Not
+The read routes accept `GET` and `HEAD`, `/v1/scores` `POST` alone, and an
+evaluator's changes `POST` and `DELETE`. Any other method returns `405 Method Not
 Allowed` with an `Allow` header and a problem document, except `OPTIONS`, which
 answers `204` with `Allow: GET, HEAD, OPTIONS`.
 
@@ -248,6 +251,12 @@ content, so it files nothing.
   `{ "run_id", "span_id", "fields" }`, each field by its name: empty where
   the project kept none, `null` where it could not be opened just then.
 
+Where a trace's `content` is opened, it carries beside its spans' fields the
+run's [score comments](/docs/monitoring/scores#a-scores-comment) and an
+evaluator's [corrections](/docs/workspace/evaluators#taught-by-people), each
+under a span id of its own that no span's 16 hex digits can be: `score/` and
+the score's id, `example/` and the evaluator's.
+
 ## `GET /v1/metrics`
 
 The project's totals over the window, by the hour or the day, read from the
@@ -259,8 +268,12 @@ totals Telmoni keeps an hour at a time.
 - `step`: `day`, the default, or `hour`, the default for a day's window, each
   starting on the hour or at midnight UTC.
 - `group`: Splits each step by one of `agent`, `model`, `provider`, `tool`,
-  `status`, `environment` or `release`. Only tool calls carry a `tool`; every
+  `status`, `environment` or `release`, from the totals; or by `tag`, `user`
+  or `session`, from the spans, no further back than your plan keeps them,
+  which `days` in the answer then says. Only tool calls carry a `tool`; every
   other span falls under the empty value.
+- `tag`: With `group=tag`, the tag key whose values split each step, 1 to 64
+  characters.
 
 ### Response
 
@@ -293,7 +306,11 @@ totals Telmoni keeps an hour at a time.
 ```
 
 Points come oldest first, and only for an hour or a day that holds a span.
-`value` is the group's value, left out without `group`. `failed` counts the
+`value` is the group's value, left out without `group`. A split by `tag`,
+`user` or `session` names the ten values that spent most over the window and
+sums the rest in points carrying `"others": true` and an empty `value`; a
+call counts for its run's value, a run that carries none under the empty
+value. `failed` counts the
 spans that ended in error, `runs` and `failed_runs` the runs that ended and
 those that failed. `spend` is what the model calls cost in US dollars, each as
 it reported, else its tokens at the project's own price or the price table's,
@@ -346,6 +363,97 @@ incidents whose notices showed that run.
 
 `GET /v1/incidents/{id}` answers one incident in the same shape, or `404`
 for an ID the project does not hold.
+
+## `GET /v1/evaluators`
+
+The project's [evaluators](/docs/workspace/evaluators), each at its newest
+version, by name, as the **Evaluators** page lists them: its `id`, `version`,
+`name`, its prompt's `messages`, its `score`, whether it asks for
+`reasoning`, its `connection_id` and `model` where it names its own,
+`temperature`, `weekly_limit`, `created_by` and `created_at`, and how many
+`versions`; and `content_kept`, whether the project keeps the content an
+evaluator reads. `GET /v1/evaluators/{id}` answers one evaluator's versions,
+its newest first, or `404`.
+
+## `POST /v1/evaluators`
+
+An evaluator made by a key holding both the `read` and the `evaluate` scope,
+as the console makes one: `name`, `messages` (system, user and assistant,
+each a `role` and `content`, whose `{{variables}}` a rule fills), `score`
+(its `name` and `data_type`, a number's range or a category's options, each
+described for the model), `reasoning`, and optionally `connection_id`,
+`model`, `temperature` (0 to 2) and `weekly_limit` in US dollars. Its model
+is asked once for an answer in the score's form, and one that cannot give it
+saves nothing, `400` naming why; so is a project that keeps no content. It
+answers the evaluator at version 1. `POST /v1/evaluators/{id}/versions` saves
+its next version from the same body, and `DELETE /v1/evaluators/{id}` deletes
+it and every version, its rules judging on with the evaluators they still
+name, answering `204`. Each change is filed in the organization's
+[audit log](/docs/workspace/audit-log) as the key's, by its id, never its
+prompt; a key with `read` alone is refused with `403`.
+
+## `POST /v1/scores`
+
+Scores of runs, spans or sessions that already ended, a person's thumbs-up on
+an answer, say, or a check a job ran overnight, under a key holding the
+`ingest` scope. A score of a span still open rides on it instead, as the
+[evaluation event](/docs/api/ingest#scores); our [SDKs](/docs/api/sdks#scores)
+send either, and the client's `score` sends this. One request carries 1 to 100
+scores:
+
+```json
+{
+  "scores": [
+    {
+      "id": "0b9a3f0e-6c1d-4f7a-9e2b-5d8c7a6b4e31",
+      "run_id": "0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01",
+      "name": "thumbs",
+      "data_type": "boolean",
+      "value": 1
+    },
+    {
+      "run_id": "0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01",
+      "span_id": "00f067aa0ba902b7",
+      "name": "relevance",
+      "data_type": "number",
+      "value": 0.8,
+      "range_min": 0,
+      "range_max": 1,
+      "version": "judge-2"
+    },
+    {
+      "session_id": "conv_7",
+      "name": "outcome",
+      "data_type": "category",
+      "categories": ["resolved"]
+    }
+  ]
+}
+```
+
+- What it scores: a `run_id`; a `run_id` and a `span_id`, 16 hex digits; or a
+  `session_id`, up to 200 characters. It is not looked up, since a run's spans
+  may land after its score: a score of a run that never arrives shows nowhere,
+  and leaves with retention.
+- `name`: 1 to 64 characters. `data_type`: `number`, with a finite `value`,
+  within `range_min` and `range_max` where it names them; `boolean`, with a
+  `value` of 1 or 0; or `category`, with 1 to 10 distinct `categories`, each
+  up to 64 characters.
+- `version`: Optional, what scored, up to 64 characters. `id`: Optional, a
+  UUID of yours, under which a score sent again replaces itself, so a retry
+  keeps it once; our SDKs send one with every score.
+
+A score is metadata, kept in every
+[content mode](/docs/workspace/organizations-and-projects#a-projects-content-mode).
+
+### Response
+
+`204 No Content` once every score is kept. A request with no score, more than
+100, a body past 512 KiB, or one breaking a score's rules is refused whole
+with `400`, its `detail` naming the score by its place (`scores[1]: …`), and
+nothing is kept. A request is metered as an export to
+[ingest](/docs/api/ingest) is, and an organization paused for its payment is
+refused with `402`, as its exports are.
 
 ## Errors
 

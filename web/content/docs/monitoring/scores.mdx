@@ -1,6 +1,6 @@
 ---
 title: "Scores"
-description: "Scores on a run, a span or a session: from your code as OpenTelemetry's evaluation event, or from a member on a trace's page; each a number, a yes or no, or categories, shown on the trace, in the trace list's Scores column and at the head of a session."
+description: "Scores on a run, a span or a session: from your code, through an SDK, OpenTelemetry's evaluation event or the API, or from a member on a trace's page; each a number, a yes or no, or categories, shown on the trace, in the trace list's Scores column and at the head of a session."
 ---
 
 A **score** judges a run, one of its spans or a session: a name, 1 to 64
@@ -19,10 +19,16 @@ an end user erased, a project deleted, or its days past retention.
 
 ## Where scores come from
 
-- **Your code**, on any project: OpenTelemetry's `gen_ai.evaluation.result`
-  event on the span it judges, the run's where the event is on the run's own
-  span ([Scores](/docs/api/ingest#scores) on the ingest page). Any exporter
-  sends it, another exporter's spans' scores landing with their run.
+- **Your code**, on any project: our SDKs' `score`, on a handle while its
+  span is open and on the client once it has ended
+  ([Scores](/docs/api/sdks#scores) on the SDK page). Underneath, a score of a
+  span still open is OpenTelemetry's `gen_ai.evaluation.result` event on the
+  span it judges, the run's where the event is on the run's own span
+  ([Scores](/docs/api/ingest#scores) on the ingest page), which any exporter
+  sends, another exporter's spans' scores landing with their run; and one of
+  something already ended, a session's among them, goes to
+  [`POST /v1/scores`](/docs/api/reference#post-v1scores), under its own id so
+  a retry keeps it once.
 - **A member**, on a trace's page: **Score** under the trace's line takes a
   name, a type and a value. A member's score of one name replaces their last
   of that name on the trace, and their **×** takes it back; a project's owners
@@ -30,15 +36,37 @@ an end user erased, a project deleted, or its days past retention.
   [audit log](/docs/workspace/audit-log) as a change to the trace, by its
   name, never its value.
 
+## A score's comment
+
+A member may say why, in a **Comment** of up to 4,000 characters, and an
+[evaluator](/docs/workspace/evaluators)'s reasoning becomes its score's
+comment. A comment is content, unlike its score: it is kept only on a project
+whose [content mode](/docs/workspace/organizations-and-projects#a-projects-content-mode)
+is on — a member's is refused on one that keeps none — sealed under the
+project's key with the run's own content, and opened only with it, so a
+trace's page shows it, from the score's badge, where it shows the run's
+content, and the read is filed as that content's is; a trace's download
+carries it with the run's content, and a search of content finds its words.
+Scoring again replaces it, a score given again without one takes it back, and
+it goes with its score and its run, and past the project's retention from
+when it was given. A session's score takes none: no run of the session holds
+it; nor does one given once the organization holds the content its plan does.
+
 ## Where they show
 
 - **A trace's page**: every score of the run and of its spans under the
-  trace's line, a span's named by its span, each saying who gave it.
+  trace's line, a span's named by its span, each saying who gave it, its
+  comment opened from it; and a span's beside the span when it is chosen.
 - **The trace list**: the **Scores** column, on in the default columns, gives
   each run's own scores by name, a number's mean where there are several, a
-  yes or no's share of yeses, and a category's values. `?score=` and a name
-  narrows the list to runs carrying that score, `score_min` and `score_max`
-  bounding its value; a run passes where any score of the name falls within
-  them.
+  yes or no's share of yeses, and a category's values. **Score** in the
+  filters, or `?score=` and a name, narrows the list to runs carrying that
+  score, an optional least and most (`score_min`, `score_max`) bounding its
+  value; a run passes where any score of the name falls within them. Narrowed
+  to a score, the list's charts add its mean over the window, each bar the
+  scores given in it on the runs the list admits.
 - **A session's page**: its head gives each score name's mean and how many,
   across the session's runs and the session itself.
+- **An alert**: a [score alert](/docs/monitoring/alerts#making-an-alert)
+  watches a score's average, a percentile, its highest or how many over a
+  window, or its change from the window before, so a drop opens an incident.

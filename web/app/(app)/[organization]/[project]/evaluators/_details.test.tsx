@@ -23,7 +23,10 @@ const VERSION: Evaluator = {
     categories: [],
     multiple: false,
   },
+  state: null,
+  questions: null,
   reasoning: true,
+  media: false,
   connection_id: null,
   model: "judge-1",
   temperature: null,
@@ -62,6 +65,7 @@ describe("EvaluatorDetails", () => {
       <EvaluatorDetails
         versions={[VERSION]}
         evaluations={{ evaluations: [EVALUATION], pending: 0, delayed: 0, done: 3, failed: 1, spent_this_week: 0.5 }}
+        agreement={null}
         here="/acme/web/evaluators"
         tracesHref="/acme/web/traces"
         sessionsHref="/acme/web/sessions"
@@ -76,5 +80,72 @@ describe("EvaluatorDetails", () => {
     );
     expect(region.textContent).toContain("judged as cut to fit an export");
     expect(region.textContent).toContain("outside the score's schema");
+  });
+
+  it("reads its agreement with members: a share, a kappa and a matrix, or a mean difference", () => {
+    const base = {
+      name: "relevant",
+      days: 30,
+      agreeing: null,
+      share: null,
+      kappa: null,
+      labels: [] as string[],
+      matrix: [] as number[][],
+      mean_difference: null,
+    };
+    const { unmount } = render(
+      <EvaluatorDetails
+        versions={[VERSION]}
+        evaluations={null}
+        agreement={{
+          days: 30,
+          scores: [
+            {
+              ...base,
+              data_type: "boolean",
+              pairs: 4,
+              agreeing: 3,
+              share: 0.75,
+              kappa: 0.5,
+              labels: ["yes", "no"],
+              matrix: [
+                [1, 1],
+                [0, 2],
+              ],
+            },
+          ],
+        }}
+        here="/acme/web/evaluators"
+        tracesHref="/acme/web/traces"
+        sessionsHref="/acme/web/sessions"
+      />,
+    );
+    const agreed = screen.getByRole("region", { name: "Agreement with members, the last 30 days" });
+    expect(agreed.textContent).toContain("4 pairs · 75% agree · Cohen’s kappa 0.50");
+    expect(screen.getAllByRole("row").map((row) => row.textContent)).toEqual([
+      "It, by membersyesno",
+      "yes11",
+      "no02",
+    ]);
+    unmount();
+    render(
+      <EvaluatorDetails
+        versions={[VERSION]}
+        evaluations={null}
+        agreement={{
+          days: 30,
+          scores: [
+            { ...base, name: "followed", data_type: "boolean", pairs: 0 },
+            { ...base, data_type: "number", pairs: 1, mean_difference: -0.25 },
+          ],
+        }}
+        here="/acme/web/evaluators"
+        tracesHref="/acme/web/traces"
+        sessionsHref="/acme/web/sessions"
+      />,
+    );
+    const read = screen.getByRole("region", { name: /^Agreement/ }).textContent;
+    expect(read).toContain("relevant1 pair · it scores 0.25 below its members on average");
+    expect(read).not.toContain("followed");
   });
 });

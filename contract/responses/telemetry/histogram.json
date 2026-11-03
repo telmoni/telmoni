@@ -7,6 +7,7 @@
       "duration_p95_ms": 4000.0,
       "error": 1,
       "ok": 10,
+      "score_mean": 0.82,
       "spend": 0.063,
       "time_to_first_token_p50_ms": 400.0,
       "time_to_first_token_p95_ms": 1100.0,
@@ -19,6 +20,7 @@
       "duration_p95_ms": null,
       "error": 0,
       "ok": 0,
+      "score_mean": null,
       "spend": 0.0,
       "time_to_first_token_p50_ms": null,
       "time_to_first_token_p95_ms": null,
@@ -27,5 +29,6 @@
   ],
   "bucket_seconds": 3600,
   "days": 7,
+  "score": "relevance",
   "utc_offset": -300
 }

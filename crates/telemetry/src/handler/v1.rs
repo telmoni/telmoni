@@ -11,12 +11,13 @@ use axum::Router;
 use axum::body::Bytes;
 use axum::extract::rejection::BytesRejection;
 use axum::extract::{DefaultBodyLimit, Path, State};
-use axum::http::{HeaderMap, StatusCode, header};
+use axum::http::{HeaderMap, StatusCode, Uri, header};
 use axum::middleware;
 use axum::response::Response;
 use axum::routing::get;
-use axum::routing::put;
+use axum::routing::{delete, post, put};
 use serde::Deserialize;
+use uuid::Uuid;
 
 use telmoni_shared::TelmoniError;
 use telmoni_shared::acting::ActingKey;
@@ -31,6 +32,7 @@ use crate::AppState;
 use crate::content::{self, MEDIA_MAX};
 use crate::handler::incidents::{self, IncidentList, IncidentQuery};
 use crate::handler::traces::{self, Reader, TraceDetail, TraceList};
+use crate::handler::{evaluators, scores};
 use crate::rollups::{Metrics, MetricsAsked};
 use crate::rules::incidents::IncidentRow;
 
@@ -49,6 +51,8 @@ pub struct V1Lane {
 pub enum V1Op {
     /// [`put_media`]
     Media,
+    /// [`scores::post_scores`]
+    Scores,
     /// [`list_traces`]
     Traces,
     /// [`get_trace`]
@@ -59,7 +63,40 @@ pub enum V1Op {
     Incidents,
     /// [`get_incident`]
     Incident,
+    /// [`list_evaluators`]
+    Evaluators,
+    /// [`get_evaluator`]
+    Evaluator,
+    /// [`post_evaluator`]
+    EvaluatorNew,
+    /// [`post_evaluator_version`]
+    EvaluatorVersion,
+    /// [`delete_evaluator`]
+    EvaluatorGone,
 }
+
+/// A change's refusal for a key that holds `read` without `evaluate`.
+const NO_EVALUATE_SCOPE: Answer = Answer {
+    status: 403,
+    description: "A key without both the `read` and the `evaluate` scope.",
+};
+
+/// What an evaluator's change takes, as the console's.
+const EVALUATOR_BODY: &str = "The body is an evaluator as the console saves one: \
+    `name`, `kind` (`prompt`, unless named, or `typed`) and, for a prompt, \
+    `messages` (system, user and assistant, each a `role` and `content` \
+    whose `{{variables}}` a rule fills), `score` (its `name`, `data_type` and, \
+    for a number, its range, for a category its options, each described for \
+    the model), `reasoning` and `media`, whether it sends the files its \
+    variables name; for a typed one, on a System One connection, \
+    its `state` (what is judged, its `{{variables}}` filled the same way) and \
+    1 to 16 `questions`, each a `name`, `instructions` and `type`: `noul` with \
+    optional `yes_means` and `no_means`, `score` with 2 to 10 `levels`, lowest \
+    first, or `choice` with 2 to 255 `options`, each a `name` and optionally its `means`. \
+    Optionally `connection_id`, `model`, `temperature` (0 to 2, a prompt's \
+    alone) and `weekly_limit` in US dollars. Its model is asked once for an \
+    answer in its form first, and one that cannot give it saves nothing. \
+    Refused on a project that keeps no content.";
 
 /// Every lane this module serves under `/v1`.
 pub const V1_LANES: &[V1Lane] = &[
@@ -94,6 +131,46 @@ pub const V1_LANES: &[V1Lane] = &[
                 Answer {
                     status: 413,
                     description: "A body past 5 MiB.",
+                },
+            ],
+        },
+    },
+    V1Lane {
+        op: V1Op::Scores,
+        scope: ApiKeyScope::Ingest,
+        route: Route {
+            method: Method::Post,
+            bearer: true,
+            path: "/v1/scores",
+            summary: "Score runs, spans and sessions",
+            description: "Up to 100 scores, as `{\"scores\": [...]}`, of runs, \
+                          spans or sessions that already ended; a score on a span \
+                          still open rides on it as OpenTelemetry's \
+                          `gen_ai.evaluation.result` event instead. Each names a \
+                          `run_id`, a `run_id` and a `span_id`, or a `session_id`; a \
+                          `name` of 1 to 64 characters; a `data_type` of \
+                          `number`, with a finite `value` and an optional \
+                          `range_min` and `range_max`, `boolean`, with a `value` of \
+                          1 or 0, or `category`, with 1 to 10 `categories`; and \
+                          optionally a `version` of what scored, up to 64 \
+                          characters, and an `id`, a UUID of the caller's, under \
+                          which a score sent again replaces itself. What it scores \
+                          is not looked up, since a run's spans may land after its \
+                          score. A score is metadata, kept in every content mode, \
+                          and a request is metered as an export is.",
+            params: &[],
+            answers: &[
+                Answer {
+                    status: 204,
+                    description: "Every score kept.",
+                },
+                Answer {
+                    status: 400,
+                    description: "No score, more than 100, a body past 512 KiB, or one breaking a score's rules, named by its place; none is kept.",
+                },
+                Answer {
+                    status: 402,
+                    description: "The organization is paused, and takes in nothing new.",
                 },
             ],
         },
@@ -214,7 +291,10 @@ pub const V1_LANES: &[V1Lane] = &[
                           over the window, by the hour or the day, from the \
                           totals kept an hour at a time, and grouped, if asked, \
                           by one of agent, model, provider, tool, status, \
-                          environment or release.",
+                          environment or release; or by a tag's values, the \
+                          end user or the session, from the spans the plan \
+                          keeps, the ten values that spent most each and the \
+                          rest summed as one.",
             params: &[
                 Param {
                     name: "days",
@@ -232,7 +312,13 @@ pub const V1_LANES: &[V1Lane] = &[
                     name: "group",
                     in_query: true,
                     required: false,
-                    description: "One of `agent`, `model`, `provider`, `tool`, `status`, `environment` or `release`.",
+                    description: "One of `agent`, `model`, `provider`, `tool`, `status`, `environment`, `release`, `tag`, `user` or `session`.",
+                },
+                Param {
+                    name: "tag",
+                    in_query: true,
+                    required: false,
+                    description: "With `group=tag`, the tag key whose values split the totals.",
                 },
             ],
             answers: &[
@@ -242,7 +328,7 @@ pub const V1_LANES: &[V1Lane] = &[
                 },
                 Answer {
                     status: 400,
-                    description: "A window, a step or a group it does not take.",
+                    description: "A window, a step, a group or a tag key it does not take.",
                 },
                 NO_READ_SCOPE,
             ],
@@ -306,6 +392,139 @@ pub const V1_LANES: &[V1Lane] = &[
             ],
         },
     },
+    V1Lane {
+        op: V1Op::Evaluators,
+        scope: ApiKeyScope::Read,
+        route: Route {
+            method: Method::Get,
+            bearer: true,
+            path: "/v1/evaluators",
+            summary: "The project's evaluators",
+            description: "Each of the project's evaluators at its newest version, by \
+                          name, its versions counted, and whether the project keeps \
+                          the content an evaluator reads.",
+            params: &[],
+            answers: &[
+                Answer {
+                    status: 200,
+                    description: "The evaluators.",
+                },
+                NO_READ_SCOPE,
+            ],
+        },
+    },
+    V1Lane {
+        op: V1Op::Evaluator,
+        scope: ApiKeyScope::Read,
+        route: Route {
+            method: Method::Get,
+            bearer: true,
+            path: "/v1/evaluators/{id}",
+            summary: "One evaluator's versions",
+            description: "One evaluator's versions, its newest first.",
+            params: &[Param {
+                name: "id",
+                in_query: false,
+                required: true,
+                description: "The evaluator's id, a UUID.",
+            }],
+            answers: &[
+                Answer {
+                    status: 200,
+                    description: "Its versions.",
+                },
+                NO_READ_SCOPE,
+                Answer {
+                    status: 404,
+                    description: "No evaluator with that id in the project.",
+                },
+            ],
+        },
+    },
+    V1Lane {
+        op: V1Op::EvaluatorNew,
+        scope: ApiKeyScope::Evaluate,
+        route: Route {
+            method: Method::Post,
+            bearer: true,
+            path: "/v1/evaluators",
+            summary: "Make an evaluator",
+            description: EVALUATOR_BODY,
+            params: &[],
+            answers: &[
+                Answer {
+                    status: 200,
+                    description: "The evaluator, at version 1.",
+                },
+                Answer {
+                    status: 400,
+                    description: "A change an evaluator's rules refuse, a model that cannot answer in its form, a connection of the other kind's protocol, a project that keeps no content, or one past its evaluators.",
+                },
+                NO_EVALUATE_SCOPE,
+            ],
+        },
+    },
+    V1Lane {
+        op: V1Op::EvaluatorVersion,
+        scope: ApiKeyScope::Evaluate,
+        route: Route {
+            method: Method::Post,
+            bearer: true,
+            path: "/v1/evaluators/{id}/versions",
+            summary: "Save an evaluator's next version",
+            description: EVALUATOR_BODY,
+            params: &[Param {
+                name: "id",
+                in_query: false,
+                required: true,
+                description: "The evaluator's id, a UUID.",
+            }],
+            answers: &[
+                Answer {
+                    status: 200,
+                    description: "The evaluator, at its new version.",
+                },
+                Answer {
+                    status: 400,
+                    description: "A change an evaluator's rules refuse, a model that cannot answer in its form, a connection of the other kind's protocol, or a project that keeps no content.",
+                },
+                NO_EVALUATE_SCOPE,
+                Answer {
+                    status: 404,
+                    description: "No evaluator with that id in the project.",
+                },
+            ],
+        },
+    },
+    V1Lane {
+        op: V1Op::EvaluatorGone,
+        scope: ApiKeyScope::Evaluate,
+        route: Route {
+            method: Method::Delete,
+            bearer: true,
+            path: "/v1/evaluators/{id}",
+            summary: "Delete an evaluator",
+            description: "An evaluator and every version of it, its rules judging on \
+                          with the evaluators they still name.",
+            params: &[Param {
+                name: "id",
+                in_query: false,
+                required: true,
+                description: "The evaluator's id, a UUID.",
+            }],
+            answers: &[
+                Answer {
+                    status: 204,
+                    description: "Deleted.",
+                },
+                NO_EVALUATE_SCOPE,
+                Answer {
+                    status: 404,
+                    description: "No evaluator with that id in the project.",
+                },
+            ],
+        },
+    },
 ];
 
 /// This module's `/v1` lanes, the `/v1` taken off, behind the ingest key's
@@ -328,7 +547,10 @@ pub fn router(state: Arc<AppState>) -> Router {
 /// auth's `/v1` router puts them behind its key gate, the organization's
 /// switch and the day's data out, as it does its own.
 pub fn reads(state: Arc<AppState>) -> Router {
-    lanes(ApiKeyScope::Read).with_state(state)
+    // An evaluator's change takes `read` for the gate, and `evaluate` of its own.
+    lanes(ApiKeyScope::Read)
+        .merge(lanes(ApiKeyScope::Evaluate))
+        .with_state(state)
 }
 
 /// Every lane under `scope`, the `/v1` taken off.
@@ -346,11 +568,18 @@ fn lanes(scope: ApiKeyScope) -> Router<Arc<AppState>> {
                 path,
                 match lane.op {
                     V1Op::Media => put(put_media),
+                    V1Op::Scores => post(scores::post_scores)
+                        .layer(DefaultBodyLimit::max(scores::SENT_MAX_BYTES)),
                     V1Op::Traces => get(list_traces),
                     V1Op::Trace => get(get_trace),
                     V1Op::Metrics => get(get_metrics),
                     V1Op::Incidents => get(list_incidents),
                     V1Op::Incident => get(get_incident),
+                    V1Op::Evaluators => get(list_evaluators),
+                    V1Op::Evaluator => get(get_evaluator),
+                    V1Op::EvaluatorNew => post(post_evaluator),
+                    V1Op::EvaluatorVersion => post(post_evaluator_version),
+                    V1Op::EvaluatorGone => delete(delete_evaluator),
                 },
             )
         })
@@ -432,9 +661,88 @@ pub async fn get_metrics(
     ))
 }
 
-/// A method the upload does not take: `405` with `Allow`.
-async fn method_not_allowed() -> Response {
-    problem::method_not_allowed("PUT")
+/// `GET /v1/evaluators` — the key's project's evaluators.
+pub async fn list_evaluators(
+    State(state): State<Arc<AppState>>,
+    key: ActingKey,
+) -> Result<Json<evaluators::Evaluators>, TelmoniError> {
+    Ok(Json(evaluators::listed(&state, &key.project_id).await?))
+}
+
+/// `GET /v1/evaluators/{id}` — one of its evaluators' versions.
+pub async fn get_evaluator(
+    State(state): State<Arc<AppState>>,
+    key: ActingKey,
+    Path(id): Path<Uuid>,
+) -> Result<Json<evaluators::Versions>, TelmoniError> {
+    Ok(Json(
+        evaluators::versions_of(&state, &key.project_id, id).await?,
+    ))
+}
+
+/// `POST /v1/evaluators` — a new evaluator, by a key holding `evaluate`.
+pub async fn post_evaluator(
+    State(state): State<Arc<AppState>>,
+    key: ActingKey,
+    Json(change): Json<evaluators::EvaluatorChange>,
+) -> Result<Json<evaluators::Evaluator>, TelmoniError> {
+    key.require_scope(ApiKeyScope::Evaluate)?;
+    let change = evaluators::EvaluatorChange { id: None, ..change };
+    let project_id = key.project_id.clone();
+    Ok(Json(
+        evaluators::saved(&state, evaluators::Changer::Key(&key), &project_id, change).await?,
+    ))
+}
+
+/// `POST /v1/evaluators/{id}/versions` — its next version, by a key holding `evaluate`.
+pub async fn post_evaluator_version(
+    State(state): State<Arc<AppState>>,
+    key: ActingKey,
+    Path(id): Path<Uuid>,
+    Json(change): Json<evaluators::EvaluatorChange>,
+) -> Result<Json<evaluators::Evaluator>, TelmoniError> {
+    key.require_scope(ApiKeyScope::Evaluate)?;
+    let change = evaluators::EvaluatorChange {
+        id: Some(id),
+        ..change
+    };
+    let project_id = key.project_id.clone();
+    Ok(Json(
+        evaluators::saved(&state, evaluators::Changer::Key(&key), &project_id, change).await?,
+    ))
+}
+
+/// `DELETE /v1/evaluators/{id}` — an evaluator gone, by a key holding `evaluate`.
+pub async fn delete_evaluator(
+    State(state): State<Arc<AppState>>,
+    key: ActingKey,
+    Path(id): Path<Uuid>,
+) -> Result<StatusCode, TelmoniError> {
+    key.require_scope(ApiKeyScope::Evaluate)?;
+    let project_id = key.project_id.clone();
+    evaluators::removed(&state, evaluators::Changer::Key(&key), &project_id, id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// A method an ingest lane does not take: `405` with `Allow`, the lane's own.
+async fn method_not_allowed(uri: Uri) -> Response {
+    let path = uri.path().strip_prefix("/v1").unwrap_or(uri.path());
+    let allow = V1_LANES
+        .iter()
+        .filter(|lane| lane.scope == ApiKeyScope::Ingest)
+        .find(|lane| {
+            let fixed = lane
+                .route
+                .path
+                .strip_prefix("/v1")
+                .unwrap_or(lane.route.path);
+            path.starts_with(fixed.split('{').next().unwrap_or(fixed))
+        })
+        .map_or(Method::Put, |lane| lane.route.method);
+    problem::method_not_allowed(match allow {
+        Method::Post => "POST",
+        _ => "PUT",
+    })
 }
 
 /// `PUT /v1/media/{sha256}` — keep a file for the key's project, by the hash

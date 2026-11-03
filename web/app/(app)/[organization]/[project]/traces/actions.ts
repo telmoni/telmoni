@@ -26,9 +26,10 @@ import {
   type TraceLayout,
 } from "@/lib/server/entities/traces";
 import { pathAndQuery, requestUrl } from "@/lib/server/path";
+import { COMMENT_MAX } from "@/lib/scores";
 import { ScoreType, SessionColumn, TraceColumn, UserColumn, ViewKind } from "@/lib/types/enums";
 
-// A project's saved views and layouts, saved, saved over and deleted; the
+// A project's saved views, layouts and dashboards, saved, saved over and deleted; the
 // layout it opens in; a run's tags and its deletion; an end user's erasure:
 // each through its lane in telemetry, which holds the role each takes and
 // checks every value. What this checks is the shape the browser sent.
@@ -338,6 +339,7 @@ const ScoreInputSchema = z.object({
   data_type: z.enum(ScoreType),
   value: z.number().finite().optional(),
   categories: z.array(z.string().max(64)).max(10).optional(),
+  comment: z.string().max(COMMENT_MAX).optional(),
 });
 
 /** A member's score of a run, one of its spans or a session, given again

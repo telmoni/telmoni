@@ -24,12 +24,17 @@ export const PROVIDER_LABEL: Record<ModelProvider, string> = {
   [ModelProvider.AzureOpenai]: "Azure OpenAI",
   [ModelProvider.Bedrock]: "Amazon Bedrock",
   [ModelProvider.OpenaiCompatible]: "OpenAI-compatible endpoint",
+  [ModelProvider.Typesafe]: "TypeSafe (Jev), typed evaluators",
+  [ModelProvider.SystemOneCompatible]: "System One endpoint (open-weight), typed evaluators",
 };
+
+/** An endpoint of the customer's own, which may ask for no key. */
+const OWN_ENDPOINT: ReadonlySet<ModelProvider> = new Set([ModelProvider.OpenaiCompatible, ModelProvider.SystemOneCompatible]);
 
 /** What each provider asks for beside its models. */
 function needs(provider: ModelProvider) {
   return {
-    base: provider === ModelProvider.AzureOpenai || provider === ModelProvider.OpenaiCompatible,
+    base: provider === ModelProvider.AzureOpenai || OWN_ENDPOINT.has(provider),
     region: provider === ModelProvider.Bedrock || provider === ModelProvider.VertexAi,
     pair: provider === ModelProvider.Bedrock,
     json: provider === ModelProvider.VertexAi,
@@ -155,7 +160,7 @@ function ConnectionForm({
       ? JSON.stringify({ access_key_id: accessKey.trim(), secret_access_key: secret.trim() })
       : ""
     : secret;
-  const keyNeeded = connection === null && provider !== ModelProvider.OpenaiCompatible;
+  const keyNeeded = connection === null && !OWN_ENDPOINT.has(provider);
   const ready = name.trim() && modelsOf(models).length > 0 && (!keyNeeded || typedSecret);
   return (
     <form
@@ -207,7 +212,13 @@ function ConnectionForm({
             id={`${id}base`}
             value={base}
             onChange={(e) => setBase(e.target.value)}
-            placeholder={provider === ModelProvider.AzureOpenai ? "https://your-resource.openai.azure.com" : "https://gateway.example.com/v1"}
+            placeholder={
+              provider === ModelProvider.AzureOpenai
+                ? "https://your-resource.openai.azure.com"
+                : provider === ModelProvider.SystemOneCompatible
+                  ? "https://clef.example.com"
+                  : "https://gateway.example.com/v1"
+            }
             spellCheck={false}
           />
         </div>

@@ -44,6 +44,354 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/v1/evaluators": {
+      "get": {
+        "description": "Each of the project's evaluators at its newest version, by name, its versions counted, and whether the project keeps the content an evaluator reads.",
+        "responses": {
+          "200": {
+            "description": "The evaluators."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No live `tm_` API key was presented. A revoked, expired or unknown key answers the same way."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A live key without the `read` scope."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too many requests. The server meters by source address and by key before the request reaches a lane, and says when to come back in `Retry-After`."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The lane is switched off, or something it needs did not answer. A switched-off lane says when to try again in `Retry-After`."
+          }
+        },
+        "summary": "The project's evaluators"
+      },
+      "post": {
+        "description": "The body is an evaluator as the console saves one: `name`, `kind` (`prompt`, unless named, or `typed`) and, for a prompt, `messages` (system, user and assistant, each a `role` and `content` whose `{{variables}}` a rule fills), `score` (its `name`, `data_type` and, for a number, its range, for a category its options, each described for the model), `reasoning` and `media`, whether it sends the files its variables name; for a typed one, on a System One connection, its `state` (what is judged, its `{{variables}}` filled the same way) and 1 to 16 `questions`, each a `name`, `instructions` and `type`: `noul` with optional `yes_means` and `no_means`, `score` with 2 to 10 `levels`, lowest first, or `choice` with 2 to 255 `options`, each a `name` and optionally its `means`. Optionally `connection_id`, `model`, `temperature` (0 to 2, a prompt's alone) and `weekly_limit` in US dollars. Its model is asked once for an answer in its form first, and one that cannot give it saves nothing. Refused on a project that keeps no content.",
+        "requestBody": {
+          "content": {
+            "application/json": {}
+          },
+          "description": "A JSON body, as the description gives it.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The evaluator, at version 1."
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A change an evaluator's rules refuse, a model that cannot answer in its form, a connection of the other kind's protocol, a project that keeps no content, or one past its evaluators."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No live `tm_` API key was presented. A revoked, expired or unknown key answers the same way."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A key without both the `read` and the `evaluate` scope."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too many requests. The server meters by source address and by key before the request reaches a lane, and says when to come back in `Retry-After`."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The lane is switched off, or something it needs did not answer. A switched-off lane says when to try again in `Retry-After`."
+          }
+        },
+        "summary": "Make an evaluator"
+      }
+    },
+    "/v1/evaluators/{id}": {
+      "delete": {
+        "description": "An evaluator and every version of it, its rules judging on with the evaluators they still name.",
+        "parameters": [
+          {
+            "description": "The evaluator's id, a UUID.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No live `tm_` API key was presented. A revoked, expired or unknown key answers the same way."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A key without both the `read` and the `evaluate` scope."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No evaluator with that id in the project."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too many requests. The server meters by source address and by key before the request reaches a lane, and says when to come back in `Retry-After`."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The lane is switched off, or something it needs did not answer. A switched-off lane says when to try again in `Retry-After`."
+          }
+        },
+        "summary": "Delete an evaluator"
+      },
+      "get": {
+        "description": "One evaluator's versions, its newest first.",
+        "parameters": [
+          {
+            "description": "The evaluator's id, a UUID.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Its versions."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No live `tm_` API key was presented. A revoked, expired or unknown key answers the same way."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A live key without the `read` scope."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No evaluator with that id in the project."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too many requests. The server meters by source address and by key before the request reaches a lane, and says when to come back in `Retry-After`."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The lane is switched off, or something it needs did not answer. A switched-off lane says when to try again in `Retry-After`."
+          }
+        },
+        "summary": "One evaluator's versions"
+      }
+    },
+    "/v1/evaluators/{id}/versions": {
+      "post": {
+        "description": "The body is an evaluator as the console saves one: `name`, `kind` (`prompt`, unless named, or `typed`) and, for a prompt, `messages` (system, user and assistant, each a `role` and `content` whose `{{variables}}` a rule fills), `score` (its `name`, `data_type` and, for a number, its range, for a category its options, each described for the model), `reasoning` and `media`, whether it sends the files its variables name; for a typed one, on a System One connection, its `state` (what is judged, its `{{variables}}` filled the same way) and 1 to 16 `questions`, each a `name`, `instructions` and `type`: `noul` with optional `yes_means` and `no_means`, `score` with 2 to 10 `levels`, lowest first, or `choice` with 2 to 255 `options`, each a `name` and optionally its `means`. Optionally `connection_id`, `model`, `temperature` (0 to 2, a prompt's alone) and `weekly_limit` in US dollars. Its model is asked once for an answer in its form first, and one that cannot give it saves nothing. Refused on a project that keeps no content.",
+        "parameters": [
+          {
+            "description": "The evaluator's id, a UUID.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {}
+          },
+          "description": "A JSON body, as the description gives it.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The evaluator, at its new version."
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A change an evaluator's rules refuse, a model that cannot answer in its form, a connection of the other kind's protocol, or a project that keeps no content."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No live `tm_` API key was presented. A revoked, expired or unknown key answers the same way."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A key without both the `read` and the `evaluate` scope."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No evaluator with that id in the project."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too many requests. The server meters by source address and by key before the request reaches a lane, and says when to come back in `Retry-After`."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The lane is switched off, or something it needs did not answer. A switched-off lane says when to try again in `Retry-After`."
+          }
+        },
+        "summary": "Save an evaluator's next version"
+      }
+    },
     "/v1/incidents": {
       "get": {
         "description": "The project's incidents, those not resolved first, then the newest, 200 at most; with `run`, those whose notices showed that run.",
@@ -320,7 +668,7 @@
     },
     "/v1/metrics": {
       "get": {
-        "description": "The project's spans, runs, failures, tokens, spend and durations over the window, by the hour or the day, from the totals kept an hour at a time, and grouped, if asked, by one of agent, model, provider, tool, status, environment or release.",
+        "description": "The project's spans, runs, failures, tokens, spend and durations over the window, by the hour or the day, from the totals kept an hour at a time, and grouped, if asked, by one of agent, model, provider, tool, status, environment or release; or by a tag's values, the end user or the session, from the spans the plan keeps, the ten values that spent most each and the rest summed as one.",
         "parameters": [
           {
             "description": "The window, in days back from now: 1 to 360, 7 when left out, no further than the plan keeps spans.",
@@ -341,9 +689,18 @@
             }
           },
           {
-            "description": "One of `agent`, `model`, `provider`, `tool`, `status`, `environment` or `release`.",
+            "description": "One of `agent`, `model`, `provider`, `tool`, `status`, `environment`, `release`, `tag`, `user` or `session`.",
             "in": "query",
             "name": "group",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "With `group=tag`, the tag key whose values split the totals.",
+            "in": "query",
+            "name": "tag",
             "required": false,
             "schema": {
               "type": "string"
@@ -362,7 +719,7 @@
                 }
               }
             },
-            "description": "A window, a step or a group it does not take."
+            "description": "A window, a step, a group or a tag key it does not take."
           },
           "401": {
             "content": {
@@ -457,6 +814,74 @@
           }
         },
         "summary": "Who this key is"
+      }
+    },
+    "/v1/scores": {
+      "post": {
+        "description": "Up to 100 scores, as `{\"scores\": [...]}`, of runs, spans or sessions that already ended; a score on a span still open rides on it as OpenTelemetry's `gen_ai.evaluation.result` event instead. Each names a `run_id`, a `run_id` and a `span_id`, or a `session_id`; a `name` of 1 to 64 characters; a `data_type` of `number`, with a finite `value` and an optional `range_min` and `range_max`, `boolean`, with a `value` of 1 or 0, or `category`, with 1 to 10 `categories`; and optionally a `version` of what scored, up to 64 characters, and an `id`, a UUID of the caller's, under which a score sent again replaces itself. What it scores is not looked up, since a run's spans may land after its score. A score is metadata, kept in every content mode, and a request is metered as an export is.",
+        "requestBody": {
+          "content": {
+            "application/json": {}
+          },
+          "description": "A JSON body, as the description gives it.",
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Every score kept."
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No score, more than 100, a body past 512 KiB, or one breaking a score's rules, named by its place; none is kept."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No live `tm_` API key was presented. A revoked, expired or unknown key answers the same way."
+          },
+          "402": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The organization is paused, and takes in nothing new."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too many requests. The server meters by source address and by key before the request reaches a lane, and says when to come back in `Retry-After`."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The lane is switched off, or something it needs did not answer. A switched-off lane says when to try again in `Retry-After`."
+          }
+        },
+        "summary": "Score runs, spans and sessions"
       }
     },
     "/v1/traces": {

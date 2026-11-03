@@ -335,6 +335,34 @@ async fn a_key_without_the_ingest_scope_or_no_key_is_refused_in_otlp_status(pool
     );
 }
 
+/// A paused organization's scores are refused as its exports are, a 402.
+#[sqlx::test]
+async fn a_paused_organizations_scores_are_refused(pool: PgPool) {
+    let (organization, project) = (OrganizationId::new(), ProjectId::new());
+    let auth = AuthStub::new();
+    auth.key(INGEST_KEY, &organization, &project, &[ApiKeyScope::Ingest]);
+    let state = common::state_with_entitlements(
+        &pool,
+        auth,
+        Arc::new(common::PausedOrganization(organization)),
+    );
+    let body = json!({ "scores": [{ "session_id": "conv-1", "name": "thumbs",
+        "data_type": "boolean", "value": 1 }] });
+    let answer = telmoni_telemetry::v1_router(state)
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/scores")
+                .header(header::AUTHORIZATION, format!("Bearer {INGEST_KEY}"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body.to_string()))
+                .expect("a request"),
+        )
+        .await
+        .expect("an answer");
+    assert_eq!(answer.status(), StatusCode::PAYMENT_REQUIRED);
+}
+
 /// A paused organization keeps what it holds and takes in nothing new: its
 /// export is refused whole, before its body is read, in OTLP's `Status` with
 /// the plan's own words, as a 402 an exporter drops rather than retries.

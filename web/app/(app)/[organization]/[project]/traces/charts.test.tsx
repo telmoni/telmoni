@@ -37,6 +37,7 @@ const HISTOGRAM = {
   days: 1,
   bucket_seconds: 3600,
   utc_offset: 0,
+  score: null as string | null,
   bars: [
     {
       at: "2026-10-30T09:00:00Z",
@@ -49,6 +50,7 @@ const HISTOGRAM = {
       duration_p95_ms: 4000,
       time_to_first_token_p50_ms: 320,
       time_to_first_token_p95_ms: 900,
+      score_mean: null as number | null,
     },
   ],
 };
@@ -68,6 +70,16 @@ describe("TraceCharts", () => {
       .getAllByTestId("series")
       .map((line) => line.textContent);
     expect(series).toEqual(["p50", "p95"]);
+  });
+
+  it("draws a score's mean where the list is narrowed to one, and no score chart where not", () => {
+    const { unmount } = render(<TraceCharts histogram={HISTOGRAM} />);
+    expect(screen.queryByRole("region", { name: "Score" })).toBeNull();
+    unmount();
+    const scored = { ...HISTOGRAM, score: "relevance", bars: [{ ...HISTOGRAM.bars[0]!, score_mean: 0.82 }] };
+    render(<TraceCharts histogram={scored} />);
+    expect(linesOf("Score")).toEqual([expect.objectContaining({ score: 0.82 })]);
+    expect(screen.getByRole("heading", { name: /^The mean relevance score/ })).toBeTruthy();
   });
 
   it("draws the cost beside the tokens, each bar what its runs spent", () => {

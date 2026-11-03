@@ -212,7 +212,7 @@ pub async fn carry_out(
             .await?;
             tx.commit().await?;
         }
-        let fields = delete(&state, &project_id, &found.runs).await?;
+        let fields = delete(&state, &project_id, &found.runs, &found.sessions).await?;
         state
             .store
             .delete_session_scores(&project_id, &found.sessions)
@@ -242,10 +242,11 @@ pub async fn carry_out(
     .map_err(|_| TelmoniError::Internal("telemetry: a deletion's task ended early".into()))?
 }
 
-/// `runs` remembered, their content deleted, then marked deleted in
-/// ClickHouse; answers how many content fields went. Safe to repeat: the
-/// content goes first, so a mark ClickHouse applies after its answer timed
-/// out leaves none behind.
+/// `runs` remembered, with the traces of every evaluation of them or of
+/// `sessions`, which hold a copy of what each read; their content deleted,
+/// then marked deleted in ClickHouse; answers how many content fields went.
+/// Safe to repeat: the content goes first, so a mark ClickHouse applies after
+/// its answer timed out leaves none behind.
 ///
 /// # Errors
 ///
@@ -254,10 +255,36 @@ async fn delete(
     state: &AppState,
     project_id: &ProjectId,
     runs: &[Uuid],
+    sessions: &[String],
 ) -> Result<u64, TelmoniError> {
+    let mut tx = maintenance_scope(&state.db, TelemetryLane).await?;
+    let judged: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT trace_run_id FROM telemetry.evaluations
+          WHERE project_id = $1 AND trace_run_id IS NOT NULL
+            AND (run_id = ANY($2) OR session_id = ANY($3))",
+    )
+    .bind(project_id)
+    .bind(runs)
+    .bind(sessions)
+    .fetch_all(tx.conn())
+    .await?;
+    // A session's evaluations name no run, so they go by the session.
+    sqlx::query("DELETE FROM telemetry.evaluations WHERE project_id = $1 AND session_id = ANY($2)")
+        .bind(project_id)
+        .bind(sessions)
+        .execute(tx.conn())
+        .await?;
+    tx.commit().await?;
+    let judged: Vec<Uuid> = judged
+        .into_iter()
+        .filter(|run| !runs.contains(run))
+        .collect();
+    let mut runs = runs.to_vec();
+    runs.extend(judged);
     if runs.is_empty() {
         return Ok(0);
     }
+    let runs = runs.as_slice();
     remember(state, project_id, runs).await;
     let mut tx = maintenance_scope(&state.db, TelemetryLane).await?;
     let fields = db::delete_runs_content(tx.conn(), project_id, runs).await?;
@@ -331,6 +358,23 @@ async fn deleted_of(state: &AppState, project_id: &ProjectId, batch: &Batch) -> 
             HashSet::new()
         }
     }
+}
+
+/// Whether `run` was deleted lately, as ingest's late spans are told: one ask
+/// of Redis, and not, without it.
+pub async fn was_deleted(state: &AppState, project_id: &ProjectId, run: Uuid) -> bool {
+    let Some(mut connection) = state.redis.connection().await else {
+        return false;
+    };
+    let answer: Result<bool, redis::RedisError> = redis::cmd("SISMEMBER")
+        .arg(deleted_runs(project_id))
+        .arg(run.to_string())
+        .query_async(&mut connection)
+        .await;
+    answer.unwrap_or_else(|error| {
+        state.redis.stood_in("the deleted runs", &error);
+        false
+    })
 }
 
 /// The batch's spans of `gone`, and their content, taken out.

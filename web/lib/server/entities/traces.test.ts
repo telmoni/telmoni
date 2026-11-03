@@ -87,6 +87,7 @@ const HISTOGRAM = {
   days: 1,
   bucket_seconds: 3600,
   utc_offset: 330,
+  score: null,
   bars: [
     {
       at: "2026-10-11T02:30:00Z",
@@ -99,6 +100,7 @@ const HISTOGRAM = {
       duration_p95_ms: 2000,
       time_to_first_token_p50_ms: 400,
       time_to_first_token_p95_ms: 400,
+      score_mean: null,
     },
     {
       at: "2026-10-11T03:30:00Z",
@@ -111,6 +113,7 @@ const HISTOGRAM = {
       duration_p95_ms: null,
       time_to_first_token_p50_ms: null,
       time_to_first_token_p95_ms: null,
+      score_mean: null,
     },
   ],
 };

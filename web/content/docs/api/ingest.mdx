@@ -163,13 +163,19 @@ A span carries a score as OpenTelemetry's evaluation event,
 1 to 64 characters, and `gen_ai.evaluation.score.value`, a number, or
 `gen_ai.evaluation.score.label`, a category, where it has no value. A value
 of 1 or 0 with `telmoni.score.type` set to `boolean`, or a boolean value, is
-a yes or no. The score is kept as metadata in every content mode, of the run
+a yes or no. A number may name its range, `telmoni.score.range_min` and
+`telmoni.score.range_max`, which it must fall within, and any score the
+version of what scored, `telmoni.score.version`, up to 64 characters. The
+score is kept as metadata in every content mode, of the run
 where the event is on the run's own span and of the span otherwise, beside
 its trace; an event of another exporter's span waits with it and lands with
 its run. An event without a name, or with a value that is no number, is no
 score. `gen_ai.evaluation.explanation` is free text, so content, kept with
 the span's events where the project keeps content. An export sent again
-keeps each score once, by its span, its name and the event's time.
+keeps each score once, by its span, its name and the event's time. A score
+of something that already ended, a person's feedback on a run, say, or any
+score of a session, goes to `POST /v1/scores` instead, under the same key
+([`POST /v1/scores`](/docs/api/reference#post-v1scores)).
 
 ## What is dropped at the door
 
@@ -209,7 +215,8 @@ content arrives under names no convention gave it. Bytes, and a name under
 failed span's status message and every event a span carries, a failure's
 `exception` among them, are content: kept on an `on` project, the exception's
 class, message and stack trace under their own names, and dropped on an `off`
-one, `error.type` the class every mode keeps.
+one, `error.type` the class every mode keeps. An evaluation event is read
+into its [score](#scores) first, in every mode.
 
 **A file a message carried** — an image, audio or a document, a GenAI
 message's `blob` part — is sent apart by our SDKs before the span, so a span

@@ -513,6 +513,111 @@ The [coding-agent plugins](/docs/api/coding-agents) are built on it.
 
 ---
 
+## Scores
+
+A [score](/docs/monitoring/scores) judges a run, one of its spans or a
+session: a name, 1 to 64 characters, and a number, a yes or no, or a category
+of up to 64 characters. A number may name its range, which it must fall
+within, and any score the version of what scored, up to 64 characters. A
+score is metadata, sent in every content mode and never handed to your
+[mask](#masking-content).
+
+On a handle still open — a run, a step, a model call or a tool call — `score`
+puts it on that span, as OpenTelemetry's evaluation event, and it leaves with
+the span. Once the span has ended, a person's feedback on an answer say, or
+for a session, the client's `score` names what it scores — a run by its id, a
+span by its run's id and the handle's span id, or a session — and sends it to
+[`POST /v1/scores`](/docs/api/reference#post-v1scores) with the next export,
+under the same key; a flush or a shutdown sends it as it sends the spans
+queued, and a retry keeps it once. A record's run, steps and calls take their
+scores too, each sent at its span's end.
+
+<Tabs items={['Python', 'TypeScript', 'Go', 'Rust']}>
+  <Tab value="Python">
+    ```python
+    with telmoni.run("support-bot", session_id="conv_7") as run:
+        with telmoni.model_call("gpt-4o-mini", provider="openai") as call:
+            ...
+            call.score("grounded", True)
+        run.score("relevance", 0.8, range=(0, 1), version="judge-2")
+        run_id, span_id = run.run_id, call.span_id
+
+    # Later, once the person answered:
+    telmoni.score("thumbs", True, run_id=run_id)
+    telmoni.score("outcome", "resolved", session_id="conv_7")
+    ```
+
+    `value` is a `bool`, a yes or no; an `int` or a `float`, a number; or a
+    `str`, a category. A record's run, steps and calls take
+    `scores=[{"name": "thumbs", "value": True}]`.
+  </Tab>
+  <Tab value="TypeScript">
+    ```ts
+    await telmoni.run('support-bot', { sessionId: 'conv_7' }, async (run) => {
+      await run.modelCall('gpt-4o-mini', { provider: 'openai' }, async (call) => {
+        // ...
+        call.score('grounded', true);
+      });
+      run.score('relevance', 0.8, { range: [0, 1], version: 'judge-2' });
+      runId = run.runId;
+    });
+
+    // Later, once the person answered:
+    telmoni.score('thumbs', true, { runId });
+    telmoni.score('outcome', 'resolved', { sessionId: 'conv_7' });
+    ```
+
+    `value` is a `boolean`, a yes or no; a `number`; or a `string`, a
+    category. A handle's `spanId` names its span for a later score. A record's
+    run, steps and calls take `scores: [{ name: 'thumbs', value: true }]`.
+  </Tab>
+  <Tab value="Go">
+    ```go
+    run.Score("relevance", telmoni.Number(0.8),
+        telmoni.ScoreOptions{Range: &[2]float64{0, 1}, Version: "judge-2"})
+    call.Score("grounded", telmoni.Bool(true), telmoni.ScoreOptions{})
+    runID, spanID := run.ID(), call.SpanID()
+
+    // Later, once the person answered:
+    client.Score(telmoni.ScoreTarget{RunID: runID}, "thumbs",
+        telmoni.Bool(true), telmoni.ScoreOptions{})
+    client.Score(telmoni.ScoreTarget{SessionID: "conv_7"}, "outcome",
+        telmoni.Category("resolved"), telmoni.ScoreOptions{})
+    ```
+
+    A nil handle scores nothing. A record's run, steps and calls take
+    `Scores: []telmoni.RecordedScore{{Name: "thumbs", Value: telmoni.Bool(true)}}`.
+  </Tab>
+  <Tab value="Rust">
+    ```rust
+    use telmoni::{Score, ScoreTarget};
+
+    run.score(Score::number("relevance", 0.8).range(0.0, 1.0).version("judge-2"));
+    call.score(Score::boolean("grounded", true));
+    let (run_id, span_id) = (run.run_id().to_owned(), call.span_id());
+
+    // Later, once the person answered:
+    telmoni.score(&ScoreTarget::run(&run_id), Score::boolean("thumbs", true));
+    telmoni.score(&ScoreTarget::session("conv_7"), Score::category("outcome", "resolved"));
+    ```
+
+    A record's run, steps and calls take `scores: vec![Score::boolean("thumbs", true)]`.
+  </Tab>
+</Tabs>
+
+A score that breaks these rules — a name blank or too long, a number that is
+not finite or falls outside its range, a range on a yes or no or a category, a
+blank category, a version too long, a value of another type, or a target that
+names no run, span or session — is not sent, with one warning, `input`
+([Answers and warnings](#answers-and-warnings)), and never raised into your
+code; so is one on a handle whose span has ended, which the client's `score`
+sends instead, and a span's seventeenth, since a span holds 32 events and its
+failure needs one. A body `/v1/scores` refuses is dropped with one warning,
+`refused`, one it cannot take just then is sent again as an export is, and
+one still failing after an export's attempts is dropped with one warning,
+`failed`. A score on a run continued from another service sends nothing, as
+nothing of that run is sent from this side.
+
 ## A run across services
 
 An agent whose work spans more than one service — an orchestrator handing a
@@ -829,8 +934,8 @@ Rust's `RunOptions { input_messages, .. }` and
 in TypeScript and Go. An answer given after its run ended is not sent, with
 one warning; in Rust, `end` takes the run, so none can come. A failure's
 message and stack trace — its `exception` event and its status's message —
-and every event your code adds to an SDK span through OpenTelemetry are
-content too; without both locks below, a failed span leaves with its
+and every event your code adds to an SDK span through OpenTelemetry, a
+[score](#scores)'s own keys apart, are content too; without both locks below, a failed span leaves with its
 `error.type` and an error status alone, and no event. They are sent only when the client is built with
 `capture_content` on — in code, or by `TELMONI_CAPTURE_CONTENT=1` when it is
 built from the environment — **and** the project's content mode, which the SDK

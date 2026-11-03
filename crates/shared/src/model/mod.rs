@@ -9,6 +9,7 @@ pub mod bedrock;
 pub mod gemini;
 pub mod openai;
 pub mod sigv4;
+pub mod systemone;
 pub mod vertex;
 
 use std::time::Duration;
@@ -47,6 +48,68 @@ pub struct Ask<'a> {
     pub temperature: Option<f64>,
     /// The most the answer may run to.
     pub max_tokens: u32,
+    /// Files sent beside the last user's message, each as the provider's own part.
+    pub media: &'a [Media],
+}
+
+/// A file what is judged carried, sent as the provider's own part: an image,
+/// a PDF or a recording, where [`takes`] says its provider takes it.
+#[derive(Clone, PartialEq, Eq)]
+pub struct Media {
+    /// Its type, as kept: `image/png`, `application/pdf`, `audio/wav`.
+    pub mime_type: String,
+    /// Its bytes.
+    pub bytes: Vec<u8>,
+}
+
+impl std::fmt::Debug for Media {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Media({}, {} bytes)", self.mime_type, self.bytes.len())
+    }
+}
+
+impl Media {
+    /// Its bytes in base64, as every provider's part carries them.
+    #[must_use]
+    pub fn base64(&self) -> String {
+        use base64::Engine as _;
+        base64::engine::general_purpose::STANDARD.encode(&self.bytes)
+    }
+}
+
+/// The images every provider here takes.
+const IMAGES: &[&str] = &["image/png", "image/jpeg", "image/gif", "image/webp"];
+
+/// Whether `provider` takes a file of `mime_type` and `bytes` as a part of
+/// its own, each within the provider's own limit for its kind: images
+/// everywhere a prompt is judged, PDFs on OpenAI, Anthropic, Bedrock and
+/// Gemini, recordings on Gemini alone, and nothing on a System One model.
+/// Azure OpenAI's pinned version and OpenAI's audio models, which take no
+/// strict schema, are held to images and PDFs, and images.
+#[must_use]
+pub fn takes(provider: ModelProvider, mime_type: &str, bytes: usize) -> bool {
+    const MB: usize = 1_000_000;
+    let image = IMAGES.contains(&mime_type);
+    let pdf = mime_type == "application/pdf";
+    let audio = matches!(
+        mime_type,
+        "audio/wav" | "audio/mpeg" | "audio/ogg" | "audio/flac" | "audio/aac"
+    );
+    match provider {
+        ModelProvider::Openai => (image || pdf) && bytes <= 20 * MB,
+        ModelProvider::AzureOpenai | ModelProvider::OpenaiCompatible => image && bytes <= 20 * MB,
+        ModelProvider::Anthropic => (image && bytes <= 5 * MB) || (pdf && bytes <= 32 * MB),
+        ModelProvider::Bedrock => (image && bytes <= 3_750_000) || (pdf && bytes <= 4_500_000),
+        ModelProvider::GoogleAiStudio | ModelProvider::VertexAi => {
+            (image || pdf || audio) && bytes <= 20 * MB
+        }
+        ModelProvider::Typesafe | ModelProvider::SystemOneCompatible => false,
+    }
+}
+
+/// The index of the last user's message, which a judgement's files ride on.
+fn last_user(messages: &[(Role, String)]) -> Option<usize> {
+    messages.iter().rposition(|(role, _)| *role == Role::User)
 }
 
 /// The tokens a judgement used.
@@ -182,7 +245,7 @@ impl Credentials {
                         })
                     }
                 }),
-            ModelProvider::OpenaiCompatible => {
+            ModelProvider::OpenaiCompatible | ModelProvider::SystemOneCompatible => {
                 Ok(Self::ApiKey(secret.expose().trim().to_owned().into()))
             }
             _ if secret.expose().trim().is_empty() => Err("a key is needed".to_owned()),
@@ -233,12 +296,13 @@ pub async fn judge(
     connection: &Connection,
     ask: &Ask<'_>,
 ) -> Result<Judged, Refused> {
-    let prepared = match connection.provider {
+    type Reader = fn(&Value) -> Result<Judged, Refused>;
+    let (prepared, answered): (Prepared, Reader) = match connection.provider {
         ModelProvider::Openai | ModelProvider::OpenaiCompatible | ModelProvider::AzureOpenai => {
-            openai::request(connection, ask)?
+            (openai::request(connection, ask)?, openai::answer)
         }
-        ModelProvider::Anthropic => anthropic::request(connection, ask)?,
-        ModelProvider::GoogleAiStudio => gemini::request(connection, ask, None)?,
+        ModelProvider::Anthropic => (anthropic::request(connection, ask)?, anthropic::answer),
+        ModelProvider::GoogleAiStudio => (gemini::request(connection, ask, None)?, gemini::answer),
         ModelProvider::VertexAi => {
             let Credentials::ServiceAccount(account) = &connection.credentials else {
                 return Err(Refused::Unreadable(
@@ -246,20 +310,55 @@ pub async fn judge(
                 ));
             };
             let token = vertex::token(egress, account, chrono::Utc::now()).await?;
-            gemini::request(connection, ask, Some(&token))?
+            (
+                gemini::request(connection, ask, Some(&token))?,
+                gemini::answer,
+            )
         }
-        ModelProvider::Bedrock => bedrock::request(connection, ask, chrono::Utc::now())?,
+        ModelProvider::Bedrock => (
+            bedrock::request(connection, ask, chrono::Utc::now())?,
+            bedrock::answer,
+        ),
+        ModelProvider::Typesafe | ModelProvider::SystemOneCompatible => {
+            return Err(Refused::Unreadable(
+                "a System One connection answers typed evaluators alone".into(),
+            ));
+        }
     };
     let (status, retry_after, body) = send(egress, &prepared).await?;
-    let answered = |body: &Value| match connection.provider {
-        ModelProvider::Openai | ModelProvider::OpenaiCompatible | ModelProvider::AzureOpenai => {
-            openai::answer(body)
-        }
-        ModelProvider::Anthropic => anthropic::answer(body),
-        ModelProvider::GoogleAiStudio | ModelProvider::VertexAi => gemini::answer(body),
-        ModelProvider::Bedrock => bedrock::answer(body),
-    };
     read(status, retry_after, &body, answered)
+}
+
+/// Whether `provider` speaks System One, so answers typed evaluators alone.
+#[must_use]
+pub const fn speaks_system_one(provider: ModelProvider) -> bool {
+    matches!(
+        provider,
+        ModelProvider::Typesafe | ModelProvider::SystemOneCompatible
+    )
+}
+
+/// Ask `connection`'s model, which speaks System One, `decide`, through `egress`.
+///
+/// # Errors
+///
+/// Why no decision came back ([`Refused`]), or a connection that speaks
+/// another protocol.
+pub async fn decide(
+    egress: &Egress,
+    connection: &Connection,
+    decide: &systemone::Decide<'_>,
+) -> Result<systemone::Decided, Refused> {
+    if !speaks_system_one(connection.provider) {
+        return Err(Refused::Unreadable(
+            "a typed evaluator judges with a System One connection".into(),
+        ));
+    }
+    let prepared = systemone::request(connection, decide)?;
+    let (status, retry_after, body) = send(egress, &prepared).await?;
+    read(status, retry_after, &body, |body| {
+        systemone::answer(body, decide.model)
+    })
 }
 
 /// The answer of a request, sent: its status, its `Retry-After`, its body.
@@ -300,12 +399,12 @@ async fn send(
 
 /// An answer read by its status: a judgement where it is a 2xx the provider's
 /// reader takes, else why not.
-fn read(
+fn read<T>(
     status: u16,
     retry_after: Option<Duration>,
     body: &[u8],
-    answered: impl Fn(&Value) -> Result<Judged, Refused>,
-) -> Result<Judged, Refused> {
+    answered: impl Fn(&Value) -> Result<T, Refused>,
+) -> Result<T, Refused> {
     let parsed: Option<Value> = serde_json::from_slice(body).ok();
     let detail = || {
         parsed
@@ -314,6 +413,8 @@ fn read(
                 v.pointer("/error/message")
                     .or_else(|| v.pointer("/message"))
                     .or_else(|| v.pointer("/error"))
+                    .or_else(|| v.pointer("/detail/0/msg"))
+                    .or_else(|| v.pointer("/detail"))
                     .and_then(Value::as_str)
                     .map(str::to_owned)
             })
@@ -418,6 +519,14 @@ mod tests {
             })
         );
         assert!(matches!(
+            read(422, None, br#"{"detail":[{"loc":["body"],"msg":"field required"}]}"#, never),
+            Err(Refused::Provider { status: 422, detail }) if detail == "field required"
+        ));
+        assert!(matches!(
+            read(400, None, br#"{"detail":"max_tokens_exceeded"}"#, never),
+            Err(Refused::Provider { status: 400, detail }) if detail == "max_tokens_exceeded"
+        ));
+        assert!(matches!(
             read(500, None, b"<html>", never),
             Err(Refused::Provider { status: 500, .. })
         ));
@@ -439,6 +548,106 @@ mod tests {
         assert!(base_url("https://u:p@gw.example").is_err());
         assert_eq!(region(" us-east-1 ").expect("kept"), "us-east-1");
         assert!(region("us east").is_err());
+    }
+
+    /// Files ride on the last user's message as each provider's own part, and
+    /// a provider takes only the kinds it reads.
+    #[test]
+    fn files_ride_as_each_providers_own_part() {
+        assert!(takes(ModelProvider::Anthropic, "application/pdf", 1));
+        assert!(!takes(ModelProvider::Anthropic, "audio/wav", 1));
+        assert!(
+            !takes(ModelProvider::Anthropic, "image/png", 5_242_880),
+            "past its 5 MB"
+        );
+        assert!(
+            !takes(ModelProvider::Bedrock, "image/png", 4_000_000),
+            "past its 3.75 MB"
+        );
+        assert!(takes(ModelProvider::Openai, "application/pdf", 1));
+        assert!(!takes(ModelProvider::Openai, "audio/mpeg", 1));
+        assert!(!takes(ModelProvider::AzureOpenai, "application/pdf", 1));
+        assert!(!takes(
+            ModelProvider::OpenaiCompatible,
+            "application/pdf",
+            1
+        ));
+        assert!(takes(ModelProvider::VertexAi, "audio/flac", 1));
+        assert!(!takes(ModelProvider::Typesafe, "image/png", 1));
+        assert!(!takes(ModelProvider::Openai, "image/svg+xml", 1));
+
+        let media = [
+            Media {
+                mime_type: "image/png".into(),
+                bytes: vec![1, 2],
+            },
+            Media {
+                mime_type: "application/pdf".into(),
+                bytes: vec![3],
+            },
+        ];
+        let schema = serde_json::json!({ "type": "object" });
+        let messages = [
+            (Role::User, "first".to_owned()),
+            (Role::Assistant, "an example".to_owned()),
+            (Role::User, "judge this".to_owned()),
+        ];
+        let ask = Ask {
+            model: "m",
+            system: "s",
+            messages: &messages,
+            schema: &schema,
+            temperature: None,
+            max_tokens: 10,
+            media: &media,
+        };
+        let key = |provider| Connection {
+            provider,
+            base_url: None,
+            region: Some("us-east-1".into()),
+            credentials: Credentials::ApiKey("k".to_owned().into()),
+        };
+        let body =
+            |prepared: Prepared| -> Value { serde_json::from_slice(&prepared.body).expect("json") };
+
+        let openai = body(openai::request(&key(ModelProvider::Openai), &ask).expect("built"));
+        assert_eq!(
+            openai["messages"][1]["content"], "first",
+            "only the last user's message"
+        );
+        assert_eq!(
+            openai["messages"][3]["content"][1]["image_url"]["url"],
+            "data:image/png;base64,AQI="
+        );
+        assert_eq!(openai["messages"][3]["content"][2]["type"], "file");
+
+        let anthropic =
+            body(anthropic::request(&key(ModelProvider::Anthropic), &ask).expect("built"));
+        let blocks = &anthropic["messages"][2]["content"];
+        assert_eq!(
+            (blocks[0]["type"].clone(), blocks[1]["type"].clone()),
+            (Value::from("image"), Value::from("document"))
+        );
+        assert_eq!(blocks[2]["text"], "judge this");
+
+        let gemini =
+            body(gemini::request(&key(ModelProvider::GoogleAiStudio), &ask, None).expect("built"));
+        assert_eq!(
+            gemini["contents"][2]["parts"][1]["inlineData"]["mimeType"],
+            "image/png"
+        );
+
+        let pair = Connection {
+            credentials: Credentials::AccessKeys {
+                access_key_id: "AKID".into(),
+                secret_access_key: "s".to_owned().into(),
+            },
+            ..key(ModelProvider::Bedrock)
+        };
+        let bedrock = body(bedrock::request(&pair, &ask, chrono::Utc::now()).expect("built"));
+        let content = &bedrock["messages"][2]["content"];
+        assert_eq!(content[1]["image"]["format"], "png");
+        assert_eq!(content[2]["document"]["name"], "document-2");
     }
 
     /// A secret is read as its provider takes it, a pair as JSON.

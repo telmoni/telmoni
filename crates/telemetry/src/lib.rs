@@ -226,6 +226,10 @@ pub fn router(state: Arc<AppState>) -> Router {
             get(handler::evaluators::get_evaluations),
         )
         .route(
+            "/telemetry/evaluators/{id}/agreement",
+            get(handler::evaluators::get_agreement),
+        )
+        .route(
             "/telemetry/evaluators/{id}",
             get(handler::evaluators::get_versions).delete(handler::evaluators::delete_evaluator),
         )

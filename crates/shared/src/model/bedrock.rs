@@ -32,10 +32,18 @@ pub fn request(
         .region
         .as_deref()
         .ok_or_else(|| Refused::Unreadable("a Bedrock connection names its region".into()))?;
+    let with_media = super::last_user(ask.messages).filter(|_| !ask.media.is_empty());
     let messages: Vec<Value> = ask
         .messages
         .iter()
-        .map(|(role, text)| json!({ "role": match role { Role::User => "user", Role::Assistant => "assistant" }, "content": [{ "text": text }] }))
+        .enumerate()
+        .map(|(at, (role, text))| {
+            let mut content = vec![json!({ "text": text })];
+            if with_media == Some(at) {
+                content.extend(ask.media.iter().enumerate().map(|(n, m)| block(n, m)));
+            }
+            json!({ "role": match role { Role::User => "user", Role::Assistant => "assistant" }, "content": content })
+        })
         .collect();
     let mut inference = json!({ "maxTokens": ask.max_tokens });
     if let Some(temperature) = ask.temperature {
@@ -86,6 +94,19 @@ pub fn request(
     })
 }
 
+/// A file as Converse carries it: an image by its format, or a PDF as a
+/// document, each document named once in the request as Converse asks.
+fn block(n: usize, media: &super::Media) -> Value {
+    let bytes = media.base64();
+    match media.mime_type.as_str() {
+        "application/pdf" => json!({
+            "document": { "format": "pdf", "name": format!("document-{}", n + 1), "source": { "bytes": bytes } },
+        }),
+        mime => json!({
+            "image": { "format": mime.trim_start_matches("image/"), "source": { "bytes": bytes } },
+        }),
+    }
+}
 /// The judgement in a 2xx's body: the input of the tool it used.
 ///
 /// # Errors
@@ -140,6 +161,7 @@ mod tests {
             schema: &schema,
             temperature: None,
             max_tokens: 10,
+            media: &[],
         };
         let at = Utc
             .with_ymd_and_hms(2026, 11, 2, 12, 0, 0)

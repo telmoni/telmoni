@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatScoreValue, scoreTitle, scoreWords } from "./scores";
+import { commentsOf, formatScoreValue, isSpanId, scoreTitle, scoreWords } from "./scores";
 
 const summary = (over: Partial<Parameters<typeof scoreWords>[0]>) => ({
   name: "helpful",
@@ -28,5 +28,25 @@ describe("scoreWords", () => {
     expect(scoreTitle(summary({ count: 3 }))).toBe("helpful: the mean of 3 scores");
     expect(scoreTitle(summary({}))).toBe("helpful: 1 score");
     expect(formatScoreValue(-0.5)).toBe("-0.50");
+  });
+});
+
+describe("commentsOf", () => {
+  it("reads each score's comment from the content as opened, and nothing else", () => {
+    const content: { span_id: string; fields: Record<string, string> }[] = [
+      { span_id: "score/7a1c0e52-0000-4000-8000-000000000002", fields: { "telmoni.score.comment": "Right refund." } },
+      { span_id: "00f067aa0ba902b7", fields: { "telmoni.score.comment": "a span's own field" } },
+      { span_id: "score/empty", fields: {} },
+    ];
+    expect(commentsOf(content)).toEqual({ "7a1c0e52-0000-4000-8000-000000000002": "Right refund." });
+    expect(commentsOf(null)).toEqual({});
+  });
+});
+
+describe("isSpanId", () => {
+  it("knows a span's own id from a comment's and an example's", () => {
+    expect(isSpanId("00f067aa0ba902b7")).toBe(true);
+    expect(isSpanId("score/7a1c0e52-0000-4000-8000-000000000002")).toBe(false);
+    expect(isSpanId("example/7a1c/run/5d4f")).toBe(false);
   });
 });

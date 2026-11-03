@@ -45,6 +45,8 @@ import {
 } from "@/lib/layout";
 import { incidentHref } from "@/lib/alerts";
 import { fieldsOf } from "@/lib/messages";
+import { SpanScores } from "@/components/traces/trace-scores";
+import { isSpanId } from "@/lib/scores";
 import { subscribeNever } from "@/lib/in-browser";
 import { windowReaching } from "@/lib/list-query";
 import type { Incident } from "@/lib/server/entities/alerts";
@@ -472,7 +474,7 @@ export const TraceBody = memo(function TraceBody({
         span={span}
         summary={summary}
         fields={fieldsOf(trace.content, span.span_id)}
-        keptContent={(trace.content?.length ?? 0) > 0}
+        keptContent={(trace.content ?? []).some((kept) => isSpanId(kept.span_id))}
         runId={trace.run_id}
         organization={organization}
         slug={slug}
@@ -675,6 +677,8 @@ function SpanDetail({
             </MetaLink>
           )}
         </div>
+        {/* A span's own scores beside it; the run's stand on the trace's line. */}
+        {!run && <SpanScores spanId={span.span_id} />}
       </div>
       <Tabs value={tab} onValueChange={setTab} className="min-h-0 flex-1 gap-0">
         <div className="flex shrink-0 items-center gap-2 border-b border-border px-gutter py-1.5">

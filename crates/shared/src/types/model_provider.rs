@@ -23,6 +23,12 @@ pub enum ModelProvider {
     /// Any endpoint speaking OpenAI's Chat Completions at a base URL of the
     /// customer's: a gateway, another vendor, a model they serve.
     OpenaiCompatible,
+    /// TypeSafe's Jev, by an API key: typed questions answered with their
+    /// probabilities, never written text.
+    Typesafe,
+    /// Any endpoint speaking TypeSafe's System One at a base URL of the
+    /// customer's: an open-weight model they serve, or a gateway.
+    SystemOneCompatible,
 }
 
 crate::wire_enum!(ModelProvider {
@@ -33,6 +39,8 @@ crate::wire_enum!(ModelProvider {
     AzureOpenai => "azure_openai",
     Bedrock => "bedrock",
     OpenaiCompatible => "openai_compatible",
+    Typesafe => "typesafe",
+    SystemOneCompatible => "system_one_compatible",
 });
 
 #[cfg(test)]

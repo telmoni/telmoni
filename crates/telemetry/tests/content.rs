@@ -2221,6 +2221,186 @@ async fn the_hourly_totals_price_their_calls_and_count_runs(pool: PgPool) {
     assert_eq!((runs, failed), (2, 1));
 }
 
+/// A split by a tag, an end user or a session reads the spans: each call by
+/// its run's value — the run's own span's tag first, and a run begun before
+/// the window still its own — the ten that spent most named and the rest
+/// folded as one, a run carrying none apart, the window no longer than the
+/// plan keeps the spans.
+#[sqlx::test]
+async fn a_split_by_tag_user_or_session_reads_the_spans_within_retention(pool: PgPool) {
+    use telmoni_telemetry::store::SpanRow;
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let mut door = door_over(&pool, ContentMode::Off, true).await;
+    // A plan that keeps the spans 30 days.
+    let state = common::state_with_stores_under(
+        &pool,
+        door.auth.clone(),
+        Arc::new(common::PlanMonth {
+            spans: 1_000_000,
+            grace_days: 0,
+            content_bytes: 1_000_000,
+        }),
+    );
+    door.app = router(state.clone());
+    door.state = state;
+    door.auth.seat(
+        "admin-1",
+        &door.organization,
+        &door.project,
+        OrganizationRole::Owner,
+        None,
+    );
+    let now = Utc::now() - chrono::Duration::seconds(30);
+    let run = |user: &str, session: &str, tags: &[(&str, &str)], at| SpanRow {
+        user_id: user.into(),
+        session_id: session.into(),
+        tags: tags
+            .iter()
+            .map(|(k, v)| ((*k).into(), (*v).into()))
+            .collect(),
+        ..common::received(&door.project, SpanKind::Run, "nightly-report", 900, at)
+    };
+    let call = |of: &SpanRow, cost: f64, tags: &[(&str, &str)]| SpanRow {
+        run_id: of.run_id,
+        provider: "openai".into(),
+        model: "gpt-5".into(),
+        cost: Some(cost),
+        tags: tags
+            .iter()
+            .map(|(k, v)| ((*k).into(), (*v).into()))
+            .collect(),
+        ..common::received(&door.project, SpanKind::ModelCall, "chat", 300, now)
+    };
+    // Sampled at a half, so its calls stand for twice what they cost.
+    let a = SpanRow {
+        sample_rate: Some(0.5),
+        ..run("u-a", "s-1", &[("team", "billing")], now)
+    };
+    let b = run("u-b", "", &[("team", "search")], now);
+    let c = run("", "", &[], now);
+    // Begun before a day's window, its call inside it.
+    let d = run(
+        "u-a",
+        "",
+        &[("team", "billing")],
+        now - chrono::Duration::hours(25),
+    );
+    let mut rows = vec![
+        call(&a, 1.0, &[]),
+        SpanRow {
+            sample_rate: Some(0.5),
+            ..call(&a, 2.0, &[])
+        },
+        call(&b, 1.0, &[("team", "billing")]),
+        call(&c, 0.25, &[]),
+        call(&d, 0.5, &[]),
+    ];
+    // Begun past what the plan keeps: its value is none it shows.
+    let e = run(
+        "",
+        "",
+        &[("team", "billing")],
+        now - chrono::Duration::hours(30 * 24 + 12),
+    );
+    rows.push(SpanRow {
+        received_at: now - chrono::Duration::days(2),
+        ..call(&e, 0.07, &[])
+    });
+    rows.extend([a.clone(), b.clone(), c.clone(), d.clone(), e.clone()]);
+    for i in 0..11_u32 {
+        let small = run(&format!("u-{i}"), "", &[], now);
+        rows.push(call(&small, 0.01 * f64::from(i + 1), &[]));
+        rows.push(small);
+    }
+    ch.store.insert_spans(&rows).await.expect("the spans");
+
+    let read = async |path: &str| {
+        let (status, answer) = door.lane("GET", path, "admin-1", None).await;
+        assert_eq!(status, StatusCode::OK, "{path}: {answer}");
+        answer
+    };
+    let by = |answer: &Value| {
+        let mut spent = std::collections::BTreeMap::<String, f64>::new();
+        for point in answer["points"].as_array().expect("points") {
+            let value = if point["others"] == true {
+                "(others)".to_owned()
+            } else {
+                point["value"].as_str().unwrap_or_default().to_owned()
+            };
+            *spent.entry(value).or_default() += point["spend"].as_f64().unwrap_or(0.0);
+        }
+        spent
+    };
+    let near = |spent: &std::collections::BTreeMap<String, f64>, value: &str, want: f64| {
+        let got = spent.get(value).copied().unwrap_or(f64::NAN);
+        assert!(
+            (got - want).abs() < 1e-9,
+            "{value}: {got} for {want} in {spent:?}"
+        );
+    };
+
+    let tags = read("/rollups?days=1&group=tag&tag=%20team%20").await;
+    assert_eq!(
+        (tags["group"].as_str(), tags["tag"].as_str()),
+        (Some("tag"), Some("team"))
+    );
+    let spent = by(&tags);
+    near(&spent, "billing", 1.0 + 4.0 + 0.5);
+    near(&spent, "search", 1.0);
+    near(&spent, "", 0.25 + 0.66);
+    assert!(!spent.contains_key("(others)"), "{spent:?}");
+
+    let users = by(&read("/rollups?days=1&group=user").await);
+    near(&users, "u-a", 5.5);
+    near(&users, "u-b", 1.0);
+    near(&users, "u-10", 0.11);
+    near(&users, "u-3", 0.04);
+    near(&users, "(others)", 0.03 + 0.02 + 0.01);
+    near(&users, "", 0.25);
+    assert_eq!(
+        users.len(),
+        12,
+        "ten named, the rest and nobody's: {users:?}"
+    );
+    let total: f64 = users.values().sum();
+    let whole: f64 = by(&read("/rollups?days=1").await).values().sum();
+    assert!(
+        (total - whole).abs() < 1e-9,
+        "the split sums to the totals: {total} {whole}"
+    );
+
+    let sessions = by(&read("/rollups?days=1&group=session").await);
+    near(&sessions, "s-1", 5.0);
+
+    // By the hour, the window's day before reaches past the plan's 30 days.
+    let month = by(&read("/rollups?days=30&step=hour&group=tag&tag=team").await);
+    near(&month, "billing", 5.5);
+    near(&month, "", 0.91 + 0.07);
+
+    // The spans are kept 30 days; the totals thirteen months.
+    assert_eq!(read("/rollups?days=90&group=user").await["days"], 30);
+    assert_eq!(read("/rollups?days=90&group=model").await["days"], 90);
+
+    for path in [
+        "/rollups?group=tag",
+        "/rollups?group=tag&tag=%20",
+        "/rollups?tag=team",
+        "/rollups?group=model&tag=team",
+        "/rollups?group=name",
+    ] {
+        let (status, answer) = door.lane("GET", path, "admin-1", None).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{path}: {answer}");
+    }
+    let long = format!(
+        "/rollups?group=tag&tag={}",
+        "k".repeat(contract::TAG_KEY_MAX + 1)
+    );
+    let (status, _) = door.lane("GET", &long, "admin-1", None).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
 /// An organization's spend this month, project by project, scaled by each call's
 /// sample rate, against its budget, to its owners and admins alone.
 #[sqlx::test]
@@ -3198,6 +3378,9 @@ fn scored_export_in(run: &str, trace: &str) -> Vec<u8> {
             "events": [event(json!([
                 text("gen_ai.evaluation.name", "relevance"),
                 { "key": "gen_ai.evaluation.score.value", "value": { "doubleValue": 0.75 } },
+                { "key": "telmoni.score.range_min", "value": { "doubleValue": 0.0 } },
+                { "key": "telmoni.score.range_max", "value": { "intValue": "1" } },
+                text("telmoni.score.version", "judge-1"),
             ]))],
         },
         {
@@ -3243,6 +3426,19 @@ async fn the_applications_evaluation_events_land_once_as_its_spans_scores(pool: 
         .lane("GET", &format!("/scores?run_id={RUN}"), "admin-1", None)
         .await;
     assert_eq!(status, StatusCode::OK, "{scores}");
+    let relevance = scores["scores"]
+        .as_array()
+        .and_then(|all| all.iter().find(|s| s["name"] == "relevance"))
+        .expect("relevance");
+    assert_eq!(
+        (
+            &relevance["range_min"],
+            &relevance["range_max"],
+            &relevance["scorer_version"]
+        ),
+        (&json!(0.0), &json!(1.0), &json!("judge-1")),
+        "an event's range and version ride on its score"
+    );
     let mut got: Vec<(String, String, String, Value, Value)> = scores["scores"]
         .as_array()
         .expect("scores")
@@ -3286,6 +3482,420 @@ async fn the_applications_evaluation_events_land_once_as_its_spans_scores(pool: 
         ],
         "{scores}"
     );
+}
+
+/// Two scores of one name at one time on one span, as a record times them at
+/// the span's end, stay two, and an export sent again keeps them two.
+#[sqlx::test]
+async fn two_scores_of_one_name_at_one_time_stay_two(pool: PgPool) {
+    let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let door = door(&pool, ContentMode::Off).await;
+    door.auth.seat(
+        "admin-1",
+        &door.organization,
+        &door.project,
+        OrganizationRole::Owner,
+        None,
+    );
+    let text = |key: &str, value: &str| json!({ "key": key, "value": { "stringValue": value } });
+    let event = |version: &str| {
+        json!({ "name": "gen_ai.evaluation.result", "timeUnixNano": "1760000002000000000",
+            "attributes": [
+                text("gen_ai.evaluation.name", "relevance"),
+                { "key": "gen_ai.evaluation.score.value", "value": { "doubleValue": 0.5 } },
+                text("telmoni.score.version", version),
+            ] })
+    };
+    let export = json!({ "resourceSpans": [{ "scopeSpans": [{ "scope": { "name": contract::SCOPE }, "spans": [{
+        "traceId": TRACE, "spanId": SPAN, "name": "nightly-report",
+        "startTimeUnixNano": "1760000000000000000", "endTimeUnixNano": "1760000002000000000",
+        "attributes": [
+            text(contract::RUN_ID, RUN), text(contract::AGENT, "nightly-report"),
+            text(contract::OPERATION, "invoke_agent"),
+        ],
+        "events": [event("judge-1"), event("judge-2")],
+    }]}]}]})
+    .to_string()
+    .into_bytes();
+    door.send(export.clone()).await;
+    door.send(export).await;
+    let (status, scores) = door
+        .lane("GET", &format!("/scores?run_id={RUN}"), "admin-1", None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{scores}");
+    let mut versions: Vec<&str> = scores["scores"]
+        .as_array()
+        .expect("scores")
+        .iter()
+        .filter_map(|s| s["scorer_version"].as_str())
+        .collect();
+    versions.sort_unstable();
+    assert_eq!(versions, ["judge-1", "judge-2"], "{scores}");
+}
+
+/// The application's scores sent after their run ended land once under
+/// their own ids, a run's spans needing no lookup; one score breaking a
+/// score's rules refuses the body whole, and a GET is told to POST.
+#[sqlx::test]
+async fn the_applications_late_scores_land_once_and_a_bad_one_keeps_none(pool: PgPool) {
+    let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let door = door(&pool, ContentMode::Off).await;
+    door.auth.seat(
+        "admin-1",
+        &door.organization,
+        &door.project,
+        OrganizationRole::Owner,
+        None,
+    );
+    let post = |method: &str, body: Value| {
+        door.app.clone().oneshot(
+            Request::builder()
+                .method(method)
+                .uri("/v1/scores")
+                .header(header::AUTHORIZATION, format!("Bearer {KEY}"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body.to_string()))
+                .expect("a request"),
+        )
+    };
+    let scores = json!({ "scores": [
+        { "id": "0b9a3f0e-6c1d-4f7a-9e2b-5d8c7a6b4e31", "run_id": RUN, "name": "thumbs",
+          "data_type": "boolean", "value": 1 },
+        { "id": "7c2e5a1b-3d4f-4a6b-8c9d-0e1f2a3b4c5d", "run_id": RUN, "span_id": SPAN.to_uppercase(),
+          "name": "relevance", "data_type": "number", "value": 0.5, "range_min": 0, "range_max": 1,
+          "version": " judge-2 " },
+        { "id": "1d2c3b4a-5e6f-4a7b-8c9d-0a1b2c3d4e5f", "session_id": "conv-1", "name": "outcome",
+          "data_type": "category", "categories": ["resolved"] },
+    ]});
+    for _ in 0..2 {
+        let answer = post("POST", scores.clone()).await.expect("an answer");
+        assert_eq!(answer.status(), StatusCode::NO_CONTENT);
+    }
+    let (status, read) = door
+        .lane(
+            "GET",
+            &format!("/scores?run_id={RUN}&session_id=conv-1"),
+            "admin-1",
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{read}");
+    let mut got: Vec<(String, String, String, String)> = read["scores"]
+        .as_array()
+        .expect("scores")
+        .iter()
+        .map(|s| {
+            assert_eq!(s["source"], "sdk");
+            let text = |key: &str| s[key].as_str().unwrap_or_default().to_owned();
+            (
+                text("name"),
+                text("target"),
+                text("span_id"),
+                text("scorer_version"),
+            )
+        })
+        .collect();
+    got.sort();
+    assert_eq!(
+        got,
+        [
+            (
+                "outcome".into(),
+                "session".into(),
+                String::new(),
+                String::new()
+            ),
+            (
+                "relevance".into(),
+                "span".into(),
+                SPAN.into(),
+                "judge-2".into()
+            ),
+            ("thumbs".into(), "run".into(), String::new(), String::new()),
+        ],
+        "{read}"
+    );
+
+    let bad = json!({ "scores": [
+        { "run_id": RUN, "name": "kept-not", "data_type": "boolean", "value": 1 },
+        { "run_id": RUN, "name": "relevance", "data_type": "number", "value": 2, "range_max": 1 },
+    ]});
+    let answer = post("POST", bad).await.expect("an answer");
+    assert_eq!(answer.status(), StatusCode::BAD_REQUEST);
+    let body = answer
+        .into_body()
+        .collect()
+        .await
+        .expect("a body")
+        .to_bytes();
+    assert!(
+        String::from_utf8_lossy(&body).contains("scores[1]"),
+        "names its place"
+    );
+    let none = post("POST", json!({ "scores": [] }))
+        .await
+        .expect("an answer");
+    assert_eq!(none.status(), StatusCode::BAD_REQUEST);
+    let (_, read) = door
+        .lane("GET", &format!("/scores?run_id={RUN}"), "admin-1", None)
+        .await;
+    assert!(
+        !read.to_string().contains("kept-not"),
+        "a refused body keeps nothing: {read}"
+    );
+    let get = post("GET", json!({})).await.expect("an answer");
+    assert_eq!(get.status(), StatusCode::METHOD_NOT_ALLOWED);
+    assert_eq!(
+        get.headers().get(header::ALLOW).map(|v| v.as_bytes()),
+        Some(&b"POST"[..])
+    );
+}
+
+/// A key reads the project's evaluators under `read`, and makes, versions and
+/// deletes one only holding `evaluate` too, each change filed as the key's.
+#[sqlx::test]
+async fn a_key_holding_evaluate_changes_the_projects_evaluators(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let kept = door(&pool, ContentMode::On).await;
+    kept.auth.seat(
+        "admin-1",
+        &kept.organization,
+        &kept.project,
+        OrganizationRole::Owner,
+        None,
+    );
+    const EVALUATE_KEY: &str = "tm_content_evaluate_key";
+    kept.auth.key(
+        EVALUATE_KEY,
+        &kept.organization,
+        &kept.project,
+        &[ApiKeyScope::Read, ApiKeyScope::Evaluate],
+    );
+    let (base, _) = mock_judge(json!({ "reasoning": "r", "score": true })).await;
+    let (status, connected) = kept
+        .lane(
+            "PUT",
+            "/model-connections",
+            "admin-1",
+            Some(json!({
+                "name": "Gateway", "provider": "openai_compatible", "base_url": base,
+                "models": ["judge-1"], "secret": "sk-good",
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{connected}");
+    let call = |method: &str, path: String, key: &str, body: Option<Value>| {
+        let request = Request::builder()
+            .method(method)
+            .uri(format!("/v1{path}"))
+            .header(header::AUTHORIZATION, format!("Bearer {key}"))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(body.map(|b| b.to_string()).unwrap_or_default()))
+            .expect("a request");
+        let app = kept.app.clone();
+        async move {
+            let response = app.oneshot(request).await.expect("an answer");
+            let status = response.status();
+            let bytes = response
+                .into_body()
+                .collect()
+                .await
+                .expect("a body")
+                .to_bytes();
+            (
+                status,
+                serde_json::from_slice::<Value>(&bytes).unwrap_or(Value::Null),
+            )
+        }
+    };
+    let evaluator = |name: &str| {
+        json!({
+            "name": name,
+            "messages": [
+                { "role": "system", "content": "You judge answers." },
+                { "role": "user", "content": "Asked: {{input}}\nAnswered: {{output}}" },
+            ],
+            "score": { "name": "relevant", "data_type": "boolean", "low_means": "off", "high_means": "on" },
+            "reasoning": true,
+        })
+    };
+    let (status, listed) = call("GET", "/evaluators".into(), READ_KEY, None).await;
+    assert_eq!(status, StatusCode::OK, "{listed}");
+    assert_eq!(listed["evaluators"], json!([]));
+    let (status, _) = call(
+        "POST",
+        "/evaluators".into(),
+        READ_KEY,
+        Some(evaluator("Relevant")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "read alone changes nothing");
+
+    let (status, made) = call(
+        "POST",
+        "/evaluators".into(),
+        EVALUATE_KEY,
+        Some(evaluator("Relevant")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{made}");
+    assert_eq!(made["version"], 1);
+    assert!(
+        made["created_by"]
+            .as_str()
+            .is_some_and(|by| by.starts_with("key:")),
+        "{made}"
+    );
+    let id = made["id"].as_str().expect("an id").to_owned();
+    let (status, again) = call(
+        "POST",
+        format!("/evaluators/{id}/versions"),
+        EVALUATE_KEY,
+        Some(evaluator("Relevant, again")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{again}");
+    assert_eq!(
+        (again["id"].as_str(), again["version"].clone()),
+        (Some(id.as_str()), json!(2))
+    );
+    let (status, versions) = call("GET", format!("/evaluators/{id}"), READ_KEY, None).await;
+    assert_eq!(status, StatusCode::OK, "{versions}");
+    assert_eq!(versions["versions"].as_array().map(Vec::len), Some(2));
+    let (status, _) = call("DELETE", format!("/evaluators/{id}"), READ_KEY, None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = call("DELETE", format!("/evaluators/{id}"), EVALUATE_KEY, None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, _) = call("GET", format!("/evaluators/{id}"), READ_KEY, None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    let filed: Vec<(String, String)> = sqlx::query_as(
+        "SELECT action, actor_id FROM audit.events
+          WHERE organization_id = $1 AND resource_kind = 'evaluator' ORDER BY seq",
+    )
+    .bind(&kept.organization)
+    .fetch_all(&pool)
+    .await
+    .expect("the chain");
+    let actions: Vec<&str> = filed.iter().map(|(action, _)| action.as_str()).collect();
+    assert_eq!(actions, ["created", "updated", "deleted"]);
+    assert!(
+        filed.iter().all(|(_, actor)| actor.starts_with("key:")),
+        "{filed:?}"
+    );
+}
+
+/// A member's comment on a score is content: kept sealed under the score's
+/// run where the project keeps content, opened with the run's content as its
+/// read, replaced by the next, taken back with the score, its bytes given
+/// back; refused on a session's score and where the project keeps none.
+#[sqlx::test]
+async fn a_scores_comment_is_kept_as_its_runs_content(pool: PgPool) {
+    let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    apply_audit_migrations(&pool).await;
+    let door = door(&pool, ContentMode::On).await;
+    door.auth.seat(
+        "member-1",
+        &door.organization,
+        &door.project,
+        OrganizationRole::Member,
+        Some(Role::Member),
+    );
+    door.send(scored_export(RUN)).await;
+    let before = door.held(&pool, &door.organization).await.expect("counted");
+    let put = |body: Value| {
+        let door = &door;
+        async move { door.lane("PUT", "/scores", "member-1", Some(body)).await }
+    };
+    let scored = |comment: &str| json!({ "run_id": RUN, "name": "useful", "data_type": "boolean", "value": 1, "comment": comment });
+    let comments = || async {
+        let (status, trace) = door
+            .lane(
+                "GET",
+                &format!("/traces/{RUN}?content=true"),
+                "member-1",
+                None,
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "{trace}");
+        trace["content"]
+            .as_array()
+            .expect("content")
+            .iter()
+            .filter(|span| {
+                span["span_id"]
+                    .as_str()
+                    .is_some_and(|s| s.starts_with("score/"))
+            })
+            .map(|span| span["fields"]["telmoni.score.comment"].clone())
+            .collect::<Vec<Value>>()
+    };
+    let (status, first) = put(scored("  The refund was right.  ")).await;
+    assert_eq!(status, StatusCode::OK, "{first}");
+    assert!(
+        first.get("comment").is_none(),
+        "a score's answer carries no content"
+    );
+    assert_eq!(comments().await, [json!("The refund was right.")]);
+    let (status, _) = put(scored("Said again, better.")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        comments().await,
+        [json!("Said again, better.")],
+        "the last replaces it"
+    );
+    let (status, _) =
+        put(json!({ "run_id": RUN, "name": "useful", "data_type": "boolean", "value": 0 })).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        comments().await.is_empty(),
+        "a score given again without one takes it back"
+    );
+    let (_, with) = put(scored("Kept a while.")).await;
+    let id = with["score_id"].as_str().expect("an id").to_owned();
+    let (status, _) = door
+        .lane("DELETE", &format!("/scores/{id}"), "member-1", None)
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert!(comments().await.is_empty(), "taken back with its score");
+    assert_eq!(
+        door.held(&pool, &door.organization).await.expect("counted"),
+        before,
+        "its bytes given back"
+    );
+
+    for (body, why) in [
+        (
+            json!({ "session_id": "conv-1", "name": "resolved", "data_type": "boolean", "value": 1, "comment": "x" }),
+            "a session's",
+        ),
+        (
+            scored(&"x".repeat(telmoni_telemetry::scores::COMMENT_MAX + 1)),
+            "too long",
+        ),
+    ] {
+        let (status, answer) = put(body).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{why}: {answer}");
+    }
+    let off = door_over(&pool, ContentMode::Off, true).await;
+    off.auth.seat(
+        "member-1",
+        &off.organization,
+        &off.project,
+        OrganizationRole::Member,
+        Some(Role::Member),
+    );
+    off.send(scored_export(RUN)).await;
+    let (status, answer) = off
+        .lane("PUT", "/scores", "member-1", Some(scored("x")))
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{answer}");
 }
 
 /// A member scores a run, a span and a session, a second score of one name
@@ -3506,6 +4116,7 @@ async fn scores_leave_with_their_runs_their_project_and_their_days(pool: PgPool)
         scorer: String::new(),
         scorer_version: String::new(),
         is_deleted: 0,
+        answer: String::new(),
     };
     ch.store
         .insert_scores_once(&[old], &uuid::Uuid::new_v4().to_string())
@@ -3653,6 +4264,36 @@ async fn the_list_and_a_session_carry_their_scores_and_filter_by_one(pool: PgPoo
         .lane("GET", "/traces?score_min=0.6", "admin-1", None)
         .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "bounds name their score");
+
+    // Charted over the window: the score's mean on the runs the list admits.
+    let means = |histogram: &Value| -> Vec<f64> {
+        histogram["bars"]
+            .as_array()
+            .expect("bars")
+            .iter()
+            .filter_map(|bar| bar["score_mean"].as_f64())
+            .collect()
+    };
+    let (status, charted) = door
+        .lane(
+            "GET",
+            "/traces/histogram?score=relevance&score_max=0.5",
+            "admin-1",
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{charted}");
+    assert_eq!(charted["score"], "relevance");
+    assert_eq!(
+        means(&charted),
+        [0.5],
+        "the admitted run's two scores, by when given: {charted}"
+    );
+    let (_, plain) = door.lane("GET", "/traces/histogram", "admin-1", None).await;
+    assert!(
+        means(&plain).is_empty() && plain["score"].is_null(),
+        "{plain}"
+    );
 
     let (status, session) = door.lane("GET", "/sessions/conv-1", "admin-1", None).await;
     assert_eq!(status, StatusCode::OK, "{session}");
@@ -4164,6 +4805,40 @@ async fn an_owner_makes_and_previews_an_evaluation_rule(pool: PgPool) {
         Value::Null,
         "no price for a gateway's model"
     );
+    // A span rule counts the spans its runs hold, as the loop judges them:
+    // the rule's run filters hold, a session among them.
+    let spans = |session: &str| {
+        json!({
+            "name": "Calls", "target": "span", "span_kind": "model_call",
+            "query": { "session": [session] }, "evaluators": [evaluator["id"]],
+        })
+    };
+    let (status, of_session) = kept
+        .lane(
+            "POST",
+            "/evaluation-rules/preview",
+            "member-1",
+            Some(spans("conv-1")),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{of_session}");
+    assert!(
+        of_session["targets"].as_u64().is_some_and(|n| n >= 1),
+        "{of_session}"
+    );
+    let (_, of_none) = kept
+        .lane(
+            "POST",
+            "/evaluation-rules/preview",
+            "member-1",
+            Some(spans("nobody's")),
+        )
+        .await;
+    assert_eq!(
+        of_none["targets"],
+        json!(0),
+        "a session no run holds: {of_none}"
+    );
 
     let (status, _) = kept
         .lane("PUT", "/evaluation-rules", "member-1", Some(rule.clone()))
@@ -4391,6 +5066,120 @@ async fn the_loop_judges_a_rules_run_once_and_a_refused_key_pauses_it(pool: PgPo
         (json!("relevant"), json!(1.0))
     );
     assert_eq!(by_evaluator[0]["scorer_version"], "1");
+    let (_, judged) = kept
+        .lane(
+            "GET",
+            &format!("/traces/{RUN}?content=true"),
+            "admin-1",
+            None,
+        )
+        .await;
+    let comment = judged["content"]
+        .as_array()
+        .and_then(|content| {
+            content.iter().find(|span| {
+                span["span_id"]
+                    == format!(
+                        "score/{}",
+                        by_evaluator[0]["score_id"].as_str().unwrap_or_default()
+                    )
+            })
+        })
+        .map(|span| span["fields"]["telmoni.score.comment"].clone());
+    assert_eq!(
+        comment,
+        Some(json!("It answers.")),
+        "its reasoning is its score's comment"
+    );
+    let (status, posture) = kept.lane("GET", "/privacy", "admin-1", None).await;
+    assert_eq!(status, StatusCode::OK, "{posture}");
+    let reads = posture["evaluator_reads"].as_array().expect("reads");
+    assert_eq!(reads.len(), 1, "{posture}");
+    assert_eq!(
+        (
+            reads[0]["provider"].clone(),
+            reads[0]["reads"].clone(),
+            reads[0]["evaluator"].is_string()
+        ),
+        (json!("openai_compatible"), json!(1), true),
+        "the Privacy page lists what the evaluator read, by day: {posture}"
+    );
+    // A member says otherwise: the evaluator's agreement reads one pair, apart.
+    let (status, _) = kept
+        .lane(
+            "PUT",
+            "/scores",
+            "admin-1",
+            Some(json!({ "run_id": RUN, "name": "relevant", "data_type": "boolean", "value": 0 })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, agreed) = kept
+        .lane(
+            "GET",
+            &format!("/evaluators/{}/agreement", id.as_str().unwrap_or_default()),
+            "admin-1",
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{agreed}");
+    let relevant = &agreed["scores"][0];
+    assert_eq!(
+        (
+            relevant["name"].clone(),
+            relevant["pairs"].clone(),
+            relevant["agreeing"].clone(),
+            relevant["matrix"].clone()
+        ),
+        (
+            json!("relevant"),
+            json!(1),
+            json!(0),
+            json!([[0, 1], [0, 0]])
+        ),
+        "the evaluator's yes against the member's no: {agreed}"
+    );
+    let (status, _) = kept
+        .lane(
+            "GET",
+            &format!(
+                "/evaluators/{}/agreement?days=0",
+                id.as_str().unwrap_or_default()
+            ),
+            "admin-1",
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    // The correction teaches the evaluator: kept under the run as content,
+    // given back as its prompt's examples, and taken back with the score.
+    let evaluator_id = uuid::Uuid::parse_str(id.as_str().unwrap_or_default()).expect("an id");
+    let examples = || async {
+        telmoni_telemetry::evaluators::examples::rendered(&kept.state, &kept.project, evaluator_id)
+            .await
+            .expect("its examples")
+            .0
+    };
+    let taught = examples().await;
+    assert!(
+        taught.contains("You said: yes. A person corrected it to: no."),
+        "{taught}"
+    );
+    let (_, scores) = kept
+        .lane("GET", &format!("/scores?run_id={RUN}"), "admin-1", None)
+        .await;
+    let mine = scores["scores"]
+        .as_array()
+        .and_then(|all| all.iter().find(|s| s["source"] == "member"))
+        .and_then(|s| s["score_id"].as_str())
+        .expect("the member's score")
+        .to_owned();
+    let (status, _) = kept
+        .lane("DELETE", &format!("/scores/{mine}"), "admin-1", None)
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(examples().await, "", "taken back with the member's score");
 
     let trace_run = trace_run.expect("its own trace").to_string();
     common::eventually("the evaluation's own trace is read", || async {
@@ -4480,5 +5269,446 @@ async fn the_loop_judges_a_rules_run_once_and_a_refused_key_pauses_it(pool: PgPo
     assert!(
         connections["connections"][0]["refused_at"].is_string(),
         "{connections}"
+    );
+    // The trace judged deleted, the evaluation's own trace, a copy of what it
+    // read, goes with it.
+    let (status, deleted) = kept
+        .lane("DELETE", &format!("/traces/{RUN}"), "admin-1", None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{deleted}");
+    common::eventually("the evaluation's own trace goes with it", || async {
+        let (status, _) = kept
+            .lane("GET", &format!("/traces/{trace_run}"), "admin-1", None)
+            .await;
+        status == StatusCode::NOT_FOUND
+    })
+    .await;
+}
+
+/// A System One endpoint, as an open-weight model serves it, answering each
+/// question asked by its type, keeping each request's body.
+async fn mock_system_one() -> (String, Arc<std::sync::Mutex<Vec<Value>>>) {
+    use axum::routing::post;
+    let asked = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let kept = Arc::clone(&asked);
+    let app = Router::new().route(
+        "/v1/systemone",
+        post(move |axum::Json(body): axum::Json<Value>| {
+            let kept = Arc::clone(&kept);
+            async move {
+                let mut answers = serde_json::Map::new();
+                let questions = body.get("questions").and_then(Value::as_object).cloned();
+                for (name, question) in questions.unwrap_or_default() {
+                    let answer = match question.get("type").and_then(Value::as_str) {
+                        Some("noul") => json!({ "type": "noul", "noul": 0.9 }),
+                        Some("score") => json!({ "type": "score", "score": 1.5, "confidence": 0.6,
+                            "probabilities": { "0": 0.1, "1": 0.3, "2": 0.6 } }),
+                        _ => json!({ "type": "choice", "choice": "full", "confidence": 0.8,
+                            "probabilities": { "full": 0.8, "partial": 0.15, "none": 0.05 } }),
+                    };
+                    answers.insert(name, answer);
+                }
+                kept.lock().expect("the requests").push(body);
+                axum::Json(json!({
+                    "model": "clef-1.0", "answers": answers,
+                    "usage": { "input_tokens": 300, "output_tokens": 0 },
+                }))
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("a port");
+    let at = listener.local_addr().expect("an address");
+    tokio::spawn(async move { axum::serve(listener, app).await.ok() });
+    (format!("http://{at}"), asked)
+}
+
+/// A typed evaluator on an open-weight System One endpoint is proved on
+/// save, tried on a trace and judged by the loop: one call answers every
+/// question, each its own score carrying its probabilities and the model
+/// that answered, and no reasoning is kept; a prompt evaluator is refused
+/// on that connection.
+#[sqlx::test]
+async fn a_typed_evaluator_answers_each_question_as_a_score(pool: PgPool) {
+    let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    apply_audit_migrations(&pool).await;
+    let kept = door(&pool, ContentMode::On).await;
+    kept.auth.seat(
+        "admin-1",
+        &kept.organization,
+        &kept.project,
+        OrganizationRole::Owner,
+        None,
+    );
+    let (base, asked) = mock_system_one().await;
+    let (status, connection) = kept
+        .lane(
+            "PUT",
+            "/model-connections",
+            "admin-1",
+            Some(json!({
+                "name": "Clef", "provider": "system_one_compatible", "base_url": base,
+                "models": ["Cloudflare/clef"], "secret": "",
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{connection}");
+    assert_eq!(
+        asked.lock().expect("the requests").len(),
+        1,
+        "the save asked one question first"
+    );
+    let (_, templates) = kept
+        .lane("GET", "/evaluators/templates", "admin-1", None)
+        .await;
+    assert_eq!(templates["typed"].as_array().map(Vec::len), Some(6));
+    let draft = json!({
+        "name": "Grounded",
+        "kind": "typed",
+        "state": "Asked: {{input}}\nAnswered: {{output}}",
+        "questions": [
+            { "name": "grounded", "type": "noul", "instructions": "Does the answer rest on what was asked?" },
+            { "name": "complete", "type": "score", "instructions": "How far was it done?",
+              "levels": ["no", "partly", "fully"] },
+            { "name": "support", "type": "choice", "instructions": "How much is supported?",
+              "options": [{ "name": "full" }, { "name": "partial" }, { "name": "none" }] },
+        ],
+    });
+    kept.send(turn_of("conv-1")).await;
+    common::eventually("the trace is read", || found(&kept, RUN)).await;
+
+    let (status, tried) = kept
+        .lane(
+            "POST",
+            "/evaluators/try",
+            "admin-1",
+            Some(json!({ "evaluator": draft, "run_id": RUN })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{tried}");
+    assert_eq!(
+        tried["answers"].as_array().map(Vec::len),
+        Some(3),
+        "{tried}"
+    );
+    assert_eq!(tried["model"], "clef-1.0");
+    assert_eq!(tried["answers"][0]["answer"]["noul"], 0.9);
+    let sent = asked
+        .lock()
+        .expect("the requests")
+        .last()
+        .cloned()
+        .expect("a request");
+    assert!(
+        sent["state"].as_str().is_some_and(|s| s.contains(MESSAGES)),
+        "the state holds the run as read: {sent}"
+    );
+    assert_eq!(sent["model"], "Cloudflare/clef");
+    assert_eq!(
+        sent["questions"]["complete"]["criteria"],
+        json!(["no", "partly", "fully"])
+    );
+
+    let mut tempered = draft.clone();
+    tempered["temperature"] = json!(0);
+    let (status, _) = kept
+        .lane("PUT", "/evaluators", "admin-1", Some(tempered))
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "a typed evaluator takes no temperature"
+    );
+    let (status, refused) = kept
+        .lane(
+            "PUT",
+            "/evaluators",
+            "admin-1",
+            Some(json!({
+                "name": "Prompted",
+                "messages": [{ "role": "user", "content": "{{input}}" }],
+                "score": { "name": "ok", "data_type": "boolean", "low_means": "no", "high_means": "yes" },
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{refused}");
+    assert!(
+        refused
+            .to_string()
+            .contains("answers typed questions alone"),
+        "{refused}"
+    );
+
+    let (status, saved) = kept
+        .lane("PUT", "/evaluators", "admin-1", Some(draft))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(
+        (saved["kind"].clone(), saved["messages"].clone()),
+        (json!("typed"), Value::Null)
+    );
+    assert_eq!(saved["questions"].as_array().map(Vec::len), Some(3));
+    let (status, rule) = kept
+        .lane(
+            "PUT",
+            "/evaluation-rules",
+            "admin-1",
+            Some(json!({
+                "name": "Every run", "target": "run", "evaluators": [saved["id"]],
+                "backfill_from": Utc::now() - chrono::Duration::days(1),
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{rule}");
+    let before = asked.lock().expect("the requests").len();
+    let settled = telmoni_telemetry::evaluators::run::pass(&kept.state)
+        .await
+        .expect("a pass");
+    assert_eq!(settled, 1);
+    assert_eq!(
+        asked.lock().expect("the requests").len(),
+        before + 1,
+        "one call answers every question"
+    );
+    let (status, provider, input_tokens): (String, Option<String>, Option<i64>) =
+        sqlx::query_as("SELECT status, provider, input_tokens FROM telemetry.evaluations")
+            .fetch_one(&pool)
+            .await
+            .expect("its row");
+    assert_eq!(
+        (status.as_str(), provider.as_deref(), input_tokens),
+        ("done", Some("system_one_compatible"), Some(300))
+    );
+    let (_, scores) = kept
+        .lane("GET", &format!("/scores?run_id={RUN}"), "admin-1", None)
+        .await;
+    let mut by_evaluator: Vec<&Value> = scores["scores"]
+        .as_array()
+        .expect("scores")
+        .iter()
+        .filter(|s| s["source"] == "evaluator")
+        .collect();
+    by_evaluator.sort_by_key(|s| s["name"].as_str().unwrap_or_default().to_owned());
+    assert_eq!(by_evaluator.len(), 3, "{scores}");
+    assert_eq!(
+        (
+            by_evaluator[0]["name"].clone(),
+            by_evaluator[0]["value"].clone(),
+            by_evaluator[0]["range_max"].clone()
+        ),
+        (json!("complete"), json!(1.5), json!(2.0))
+    );
+    assert_eq!(by_evaluator[0]["answer"]["probabilities"]["2"], 0.6);
+    assert_eq!(by_evaluator[0]["answer"]["model"], "clef-1.0");
+    assert_eq!(
+        (
+            by_evaluator[1]["name"].clone(),
+            by_evaluator[1]["value"].clone()
+        ),
+        (json!("grounded"), json!(1.0))
+    );
+    assert_eq!(by_evaluator[2]["categories"], json!(["full"]));
+    let (_, judged) = kept
+        .lane(
+            "GET",
+            &format!("/traces/{RUN}?content=true"),
+            "admin-1",
+            None,
+        )
+        .await;
+    assert!(
+        judged["content"]
+            .as_array()
+            .is_none_or(|content| content.iter().all(|span| !span["span_id"]
+                .as_str()
+                .is_some_and(|id| id.starts_with("score/")))),
+        "a typed evaluator keeps no reasoning as a comment: {judged}"
+    );
+}
+
+/// A prompt evaluator that sends its files gives the model each image its
+/// variables name as the provider's own part: a try opens it as the member's
+/// read, filed, and the loop as the evaluation's, unfiled; one that sends
+/// none gives the model text alone.
+#[sqlx::test]
+async fn an_evaluator_sends_the_files_its_variables_name(pool: PgPool) {
+    let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    apply_audit_migrations(&pool).await;
+    let kept = door(&pool, ContentMode::On).await;
+    kept.auth.seat(
+        "admin-1",
+        &kept.organization,
+        &kept.project,
+        OrganizationRole::Owner,
+        None,
+    );
+    let png: &[u8] = b"\x89PNG\r\n\x1a\nnot really an image";
+    let pdf: &[u8] = b"%PDF-1.7 not really a document";
+    let hash = telmoni_shared::digest::sha256_hex(png);
+    let document = telmoni_shared::digest::sha256_hex(pdf);
+    for (body, hash, mime) in [
+        (png, &hash, "image/png"),
+        (pdf, &document, "application/pdf"),
+    ] {
+        let uploaded = kept
+            .app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri(format!("/v1/media/{hash}"))
+                    .header(header::AUTHORIZATION, format!("Bearer {KEY}"))
+                    .header(header::CONTENT_TYPE, mime)
+                    .body(Body::from(body))
+                    .expect("a request"),
+            )
+            .await
+            .expect("an answer");
+        assert_eq!(uploaded.status(), StatusCode::NO_CONTENT);
+    }
+    let input = json!([{ "role": "user", "parts": [
+        { "type": "text", "content": "what is this?" },
+        { "type": "file", "modality": "image", "mime_type": "image/png", "file_id": format!("telmoni:{hash}") },
+        { "type": "file", "modality": "document", "mime_type": "application/pdf", "file_id": format!("telmoni:{document}") },
+    ]}])
+    .to_string();
+    let text = |key: &str, value: &str| json!({ "key": key, "value": { "stringValue": value } });
+    kept.send(
+        json!({ "resourceSpans": [{ "scopeSpans": [{ "scope": { "name": contract::SCOPE }, "spans": [{
+            "traceId": TRACE, "spanId": SPAN, "name": "invoke_agent",
+            "startTimeUnixNano": "1760000000000000000", "endTimeUnixNano": "1760000001500000000",
+            "attributes": [
+                text(contract::RUN_ID, RUN), text(contract::AGENT, "vision"),
+                text(contract::OPERATION, "invoke_agent"),
+                text("gen_ai.input.messages", &input), text("gen_ai.output.messages", ANSWER),
+            ],
+        }]}]}] })
+        .to_string()
+        .into_bytes(),
+    )
+    .await;
+    common::eventually("the trace is read", || found(&kept, RUN)).await;
+    let (base, asked) = mock_judge(json!({ "reasoning": "A picture.", "score": true })).await;
+    let (status, connection) = kept
+        .lane(
+            "PUT",
+            "/model-connections",
+            "admin-1",
+            Some(json!({
+                "name": "Gateway", "provider": "openai_compatible", "base_url": base,
+                "models": ["vision-1"], "secret": "sk-good",
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{connection}");
+    let draft = |media: bool| {
+        json!({
+            "name": "Sees it",
+            "messages": [{ "role": "user", "content": "Asked: {{input}}" }],
+            "score": { "name": "seen", "data_type": "boolean", "low_means": "no", "high_means": "yes" },
+            "media": media,
+        })
+    };
+    let image = format!(
+        "data:image/png;base64,{}",
+        telmoni_shared::model::Media {
+            mime_type: "image/png".into(),
+            bytes: png.to_vec()
+        }
+        .base64()
+    );
+    let last_user = |asked: &Arc<std::sync::Mutex<Vec<Value>>>| {
+        let sent = asked
+            .lock()
+            .expect("the requests")
+            .last()
+            .cloned()
+            .expect("a request");
+        sent["messages"]
+            .as_array()
+            .and_then(|m| m.iter().rev().find(|m| m["role"] == "user").cloned())
+            .expect("a user's message")
+    };
+
+    let before = kept.viewed(&pool).await.len();
+    let (status, tried) = kept
+        .lane(
+            "POST",
+            "/evaluators/try",
+            "admin-1",
+            Some(json!({ "evaluator": draft(true), "run_id": RUN })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{tried}");
+    let user = last_user(&asked);
+    assert_eq!(user["content"][1]["image_url"]["url"], image, "{user}");
+    assert_eq!(
+        user["content"].as_array().map(Vec::len),
+        Some(2),
+        "a PDF this provider takes none of stays out: {user}"
+    );
+    assert!(
+        user["content"][0]["text"]
+            .as_str()
+            .is_some_and(|t| t.contains("[1 of the files named here were not sent")),
+        "and the model is told: {user}"
+    );
+    let filed = kept.viewed(&pool).await;
+    assert_eq!(
+        filed.len(),
+        before + 2,
+        "the try's content and its image, each the member's read; the PDF it never sends is never opened"
+    );
+    assert_eq!(
+        filed.last().map(|row| row.4["media"].clone()),
+        Some(json!(hash))
+    );
+
+    let (status, _) = kept
+        .lane(
+            "POST",
+            "/evaluators/try",
+            "admin-1",
+            Some(json!({ "evaluator": draft(false), "run_id": RUN })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        last_user(&asked)["content"].is_string(),
+        "no files: text alone"
+    );
+
+    let (status, saved) = kept
+        .lane("PUT", "/evaluators", "admin-1", Some(draft(true)))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(saved["media"], true);
+    let (status, rule) = kept
+        .lane(
+            "PUT",
+            "/evaluation-rules",
+            "admin-1",
+            Some(json!({
+                "name": "Every run", "target": "run", "evaluators": [saved["id"]],
+                "backfill_from": Utc::now() - chrono::Duration::days(1),
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{rule}");
+    let filed = kept.viewed(&pool).await.len();
+    let settled = telmoni_telemetry::evaluators::run::pass(&kept.state)
+        .await
+        .expect("a pass");
+    assert_eq!(settled, 1);
+    assert_eq!(last_user(&asked)["content"][1]["image_url"]["url"], image);
+    assert_eq!(
+        kept.viewed(&pool).await.len(),
+        filed,
+        "a machine's read is the row's, never the chain's"
     );
 }

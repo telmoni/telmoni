@@ -27,3 +27,31 @@ export function scoreTitle(score: ScoreSummary): string {
   const of = score.count === 1 ? "1 score" : `${score.count} scores`;
   return score.data_type === ScoreType.Number && score.count > 1 ? `${score.name}: the mean of ${of}` : `${score.name}: ${of}`;
 }
+
+/** The longest comment a score keeps, the lane's. */
+export const COMMENT_MAX = 4_000;
+
+/** Where a score's comment is kept: under its run's content, as a span the
+ *  score's id names, which no span's 16 hex digits can be. */
+const COMMENT_SPAN = "score/";
+const COMMENT_FIELD = "telmoni.score.comment";
+
+/** Each score's comment, by the score's id, from a trace's content as it was
+ *  opened, so read and filed as the trace's content is; none where the
+ *  content was not opened. */
+export function commentsOf(
+  content: readonly { span_id: string; fields: Readonly<Record<string, string>> }[] | null | undefined,
+): Readonly<Record<string, string>> {
+  const comments: Record<string, string> = {};
+  for (const span of content ?? []) {
+    const text = span.fields[COMMENT_FIELD];
+    if (span.span_id.startsWith(COMMENT_SPAN) && text) comments[span.span_id.slice(COMMENT_SPAN.length)] = text;
+  }
+  return comments;
+}
+
+/** Whether `id` is a span's own, 16 hex digits: not a score's comment or an
+ *  evaluator's example, which the run's content keeps under ids of their own. */
+export function isSpanId(id: string): boolean {
+  return /^[0-9a-f]{16}$/.test(id);
+}

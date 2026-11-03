@@ -19,14 +19,21 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { TraceHistogram } from "@/lib/server/entities/traces";
+import { formatScoreValue } from "@/lib/scores";
 import { formatCost, formatCount, formatDuration } from "@/lib/traces";
 import { useInBrowser } from "@/lib/in-browser";
 import { isOneOf } from "@/lib/one-of";
 import { cn } from "@/lib/utils";
 
 /** What a chart of the list draws. */
-const METRICS = ["runs", "tokens", "cost", "duration", "first_token"] as const;
+const METRICS = ["runs", "tokens", "cost", "duration", "first_token", "score"] as const;
 type Metric = (typeof METRICS)[number];
+
+/** The metrics `histogram` can draw: a score's mean only where the list is
+ *  narrowed to one. */
+function drawn(histogram: TraceHistogram): Metric[] {
+  return METRICS.filter((metric) => metric !== "score" || histogram.score !== null);
+}
 
 const METRIC_LABEL: Record<Metric, string> = {
   runs: "Runs",
@@ -34,6 +41,7 @@ const METRIC_LABEL: Record<Metric, string> = {
   cost: "Cost",
   duration: "Duration",
   first_token: "Time to first token",
+  score: "Score",
 };
 
 // The theme's own colours, which follow it into the dark: a run that ended
@@ -49,6 +57,9 @@ const TOKENS: ChartConfig = {
 };
 const COST: ChartConfig = {
   cost: { label: "Cost", color: "var(--muted-foreground)" },
+};
+const SCORE: ChartConfig = {
+  score: { label: "Mean", color: "var(--foreground)" },
 };
 const DURATION: ChartConfig = {
   p50: { label: "Median", color: "var(--muted-foreground)" },
@@ -93,6 +104,7 @@ function rows(histogram: TraceHistogram, metric: Metric) {
     cost: bar.spend,
     p50: metric === "first_token" ? bar.time_to_first_token_p50_ms : bar.duration_p50_ms,
     p95: metric === "first_token" ? bar.time_to_first_token_p95_ms : bar.duration_p95_ms,
+    score: bar.score_mean,
   }));
 }
 
@@ -113,11 +125,25 @@ function MetricChart({
 
   const data = rows(histogram, metric);
   const seconds = histogram.bucket_seconds;
-  const lines = metric === "duration" || metric === "first_token";
+  const lines = metric === "duration" || metric === "first_token" || metric === "score";
   const config =
-    metric === "runs" ? RUNS : metric === "tokens" ? TOKENS : metric === "cost" ? COST : DURATION;
+    metric === "runs"
+      ? RUNS
+      : metric === "tokens"
+        ? TOKENS
+        : metric === "cost"
+          ? COST
+          : metric === "score"
+            ? SCORE
+            : DURATION;
   const value = (v: number) =>
-    lines ? formatDuration(v) : metric === "cost" ? formatCost(v) : formatCount(v);
+    metric === "score"
+      ? formatScoreValue(v)
+      : lines
+        ? formatDuration(v)
+        : metric === "cost"
+          ? formatCost(v)
+          : formatCount(v);
   // A longer window's bars narrower than a day are labelled where a day
   // starts alone, so its dates step along the axis rather than repeat.
   const dayStarts =
@@ -168,7 +194,7 @@ function MetricChart({
       width="auto"
       tickLine={false}
       axisLine={false}
-      allowDecimals={metric === "cost"}
+      allowDecimals={metric === "cost" || metric === "score"}
       tickFormatter={(v: number) => value(v)}
     />
   );
@@ -182,8 +208,15 @@ function MetricChart({
           {yAxis}
           {tooltip}
           {legend && <ChartLegend content={<ChartLegendContent />} />}
-          <Line dataKey="p50" type="monotone" stroke="var(--color-p50)" strokeWidth={1.5} dot={false} connectNulls={false} />
-          <Line dataKey="p95" type="monotone" stroke="var(--color-p95)" strokeWidth={1.5} dot={false} connectNulls={false} />
+          {metric === "score" ? (
+            // Dotted too: a bar between empty ones has no neighbour to draw a line to.
+            <Line dataKey="score" type="monotone" stroke="var(--color-score)" strokeWidth={2} dot={{ r: 4 }} connectNulls={false} />
+          ) : (
+            <>
+              <Line dataKey="p50" type="monotone" stroke="var(--color-p50)" strokeWidth={1.5} dot={false} connectNulls={false} />
+              <Line dataKey="p95" type="monotone" stroke="var(--color-p95)" strokeWidth={1.5} dot={false} connectNulls={false} />
+            </>
+          )}
         </LineChart>
       ) : (
         <BarChart data={data} margin={{ left: 0, right: 8, top: 4 }}>
@@ -212,7 +245,9 @@ function MetricChart({
 // picked beside it. A region rather than a `<section>`, which the console
 // keeps for a page's own blocks.
 export function TraceHistogramStrip({ histogram }: { histogram: TraceHistogram }) {
-  const [metric, setMetric] = useState<Metric>("runs");
+  const [picked, setMetric] = useState<Metric>("runs");
+  // A score picked, then its filter cleared, falls back to the runs.
+  const metric = drawn(histogram).includes(picked) ? picked : "runs";
   return (
     <div role="region" className="grid gap-1" aria-label="Over the window">
       <div className="flex items-center gap-2">
@@ -227,7 +262,7 @@ export function TraceHistogramStrip({ histogram }: { histogram: TraceHistogram }
             <SelectValue />
           </SelectTrigger>
           <SelectContent position="popper" align="start">
-            {METRICS.map((m) => (
+            {drawn(histogram).map((m) => (
               <SelectItem key={m} value={m}>
                 {METRIC_LABEL[m]}
               </SelectItem>
@@ -245,12 +280,12 @@ export function TraceHistogramStrip({ histogram }: { histogram: TraceHistogram }
 
 // The charts in the table's place, two by two: the window's runs by how they
 // ended, their tokens, how long they ran and how soon their first model call
-// began to answer — the median and the slowest twentieth — each a bar of the
-// same width.
+// began to answer — the median and the slowest twentieth — and, where the
+// list is narrowed to a score, that score's mean, each a bar of the same width.
 export function TraceCharts({ histogram }: { histogram: TraceHistogram }) {
   return (
     <div className="grid gap-gutter lg:grid-cols-2">
-      {METRICS.map((metric) => (
+      {drawn(histogram).map((metric) => (
         <div
           key={metric}
           role="region"
@@ -258,7 +293,7 @@ export function TraceCharts({ histogram }: { histogram: TraceHistogram }) {
           aria-label={METRIC_LABEL[metric]}
         >
           <h2 className="text-sm font-medium">
-            {METRIC_LABEL[metric]}
+            {metric === "score" ? `The mean ${histogram.score} score` : METRIC_LABEL[metric]}
             <span className="ml-2 font-normal text-muted-foreground">
               {perBar(histogram.bucket_seconds)}
             </span>

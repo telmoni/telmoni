@@ -1,0 +1,26 @@
+{
+  "key": "typed_groundedness",
+  "group": "quality",
+  "name": "Groundedness (typed)",
+  "description": "Whether the answer rests on the context the agent retrieved, rather than on what it made up.",
+  "state": "The question:\n{{input}}\n\nThe context the agent retrieved, with its tool results:\n{{trajectory}}\n\nIts answer:\n{{output}}",
+  "questions": [
+    {
+      "name": "grounded",
+      "type": "noul",
+      "instructions": "Is every claim in the answer supported by the retrieved context?",
+      "yes_means": "every claim is in the context",
+      "no_means": "a claim is not in the context, or contradicts it"
+    },
+    {
+      "name": "support",
+      "type": "choice",
+      "instructions": "How much of the answer does the retrieved context support?",
+      "options": [
+        { "name": "full", "means": "all of it" },
+        { "name": "partial", "means": "some of it, the rest unsupported" },
+        { "name": "none", "means": "none of it, or the context holds nothing relevant" }
+      ]
+    }
+  ]
+}

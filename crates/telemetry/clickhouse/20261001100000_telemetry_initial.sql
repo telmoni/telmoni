@@ -212,6 +212,9 @@ CREATE TABLE IF NOT EXISTS telemetry.scores
     scorer         String,
     scorer_version String,
     is_deleted     UInt8,
+    -- A typed evaluator's answer as JSON: its probabilities, its confidence
+    -- and the model version that gave it; empty for every other score.
+    answer         String,
     INDEX run_id_idx run_id TYPE bloom_filter GRANULARITY 1,
     INDEX session_id_idx session_id TYPE bloom_filter GRANULARITY 1
 )

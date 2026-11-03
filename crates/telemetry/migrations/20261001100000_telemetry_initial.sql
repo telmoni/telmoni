@@ -545,6 +545,9 @@ CREATE INDEX plain_content_received_idx ON telemetry.plain_content (received_at)
 CREATE INDEX plain_content_run_idx ON telemetry.plain_content (project_id, run_id);
 -- A search finds the fields holding every word it hashed.
 CREATE INDEX plain_content_words_idx ON telemetry.plain_content USING gin (words);
+-- An evaluator's newest corrections, read for its prompt's `{{examples}}`.
+CREATE INDEX plain_content_examples_idx ON telemetry.plain_content (project_id, field, received_at DESC)
+    WHERE field = 'telmoni.evaluator.example';
 
 ALTER TABLE telemetry.plain_content ENABLE ROW LEVEL SECURITY;
 ALTER TABLE telemetry.plain_content FORCE ROW LEVEL SECURITY;
@@ -627,7 +630,7 @@ CREATE TABLE telemetry.model_connections (
     CONSTRAINT model_connections_name_key UNIQUE (project_id, name),
     CONSTRAINT model_connections_provider_check CHECK (provider IN (
         'openai', 'anthropic', 'google_ai_studio', 'vertex_ai', 'azure_openai', 'bedrock',
-        'openai_compatible'
+        'openai_compatible', 'typesafe', 'system_one_compatible'
     )),
     CONSTRAINT model_connections_check CHECK (
         char_length(name) BETWEEN 1 AND 60 AND cardinality(models) BETWEEN 1 AND 20
@@ -653,9 +656,10 @@ CREATE POLICY maintenance_access ON telemetry.model_connections
 -- provider refuses; the purges delete them.
 GRANT SELECT, UPDATE, DELETE ON telemetry.model_connections TO telemetry_maintenance;
 
--- A project's evaluators, LLM-as-a-judge: a row a version under the
--- evaluator's stable id, each change a new version, each score naming the one
--- that gave it. Its connection is the project's default where none is named;
+-- A project's evaluators: a row a version under the evaluator's stable id,
+-- each change a new version, each score naming the one that gave it. A
+-- prompt one holds its messages and score; a typed one its state and the
+-- questions each of its scores answers. Its connection is the project's default where none is named;
 -- one deleted leaves the evaluator unable to judge until it names another.
 CREATE TABLE telemetry.evaluators (
     id            UUID             NOT NULL,
@@ -664,10 +668,16 @@ CREATE TABLE telemetry.evaluators (
     name          TEXT             NOT NULL,
     kind          TEXT             NOT NULL DEFAULT 'prompt',
     -- The system message, then the user's and assistant's, as {role, content}.
-    messages      JSONB            NOT NULL,
+    messages      JSONB,
     -- The score it gives: its name, type, range or categories, each described.
-    score         JSONB            NOT NULL,
+    score         JSONB,
+    -- A typed one's template of what is judged, and its questions, each
+    -- {name, type, instructions} and its levels or options.
+    state         TEXT,
+    questions     JSONB,
     reasoning     BOOLEAN          NOT NULL DEFAULT true,
+    -- A prompt one's files, sent as the provider's own parts.
+    media         BOOLEAN          NOT NULL DEFAULT false,
     connection_id UUID,
     model         TEXT,
     temperature   DOUBLE PRECISION,
@@ -676,7 +686,12 @@ CREATE TABLE telemetry.evaluators (
     created_by    TEXT             NOT NULL,
     created_at    TIMESTAMPTZ      NOT NULL DEFAULT now(),
     PRIMARY KEY (project_id, id, version),
-    CONSTRAINT evaluators_kind_check CHECK (kind IN ('prompt', 'code')),
+    CONSTRAINT evaluators_kind_check CHECK (kind IN ('prompt', 'code', 'typed')),
+    CONSTRAINT evaluators_shape_check CHECK (
+        (kind = 'typed') = (state IS NOT NULL AND questions IS NOT NULL)
+        AND (kind = 'prompt') = (messages IS NOT NULL AND score IS NOT NULL)
+        AND (kind = 'prompt' OR NOT media)
+    ),
     CONSTRAINT evaluators_check CHECK (
         version >= 1 AND char_length(name) BETWEEN 1 AND 60
         AND (temperature IS NULL OR temperature BETWEEN 0 AND 2)
@@ -839,6 +854,9 @@ CREATE INDEX evaluations_organization_idx ON telemetry.evaluations (organization
 CREATE INDEX evaluations_evaluator_idx ON telemetry.evaluations (project_id, evaluator_id, created_at DESC);
 -- The rule a cascade sets to none.
 CREATE INDEX evaluations_rule_idx ON telemetry.evaluations (rule_id);
+-- The Privacy page lists a project's reads by day.
+CREATE INDEX evaluations_read_idx ON telemetry.evaluations (project_id, read_at)
+    WHERE read_at IS NOT NULL;
 
 ALTER TABLE telemetry.evaluations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE telemetry.evaluations FORCE ROW LEVEL SECURITY;

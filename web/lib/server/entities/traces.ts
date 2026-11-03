@@ -115,11 +115,15 @@ const HistogramBarSchema = z.object({
   duration_p95_ms: z.number().nullable(),
   time_to_first_token_p50_ms: z.number().nullable(),
   time_to_first_token_p95_ms: z.number().nullable(),
+  /** The mean of the narrowing score's scores given in it; none without one. */
+  score_mean: z.number().nullable(),
 });
 
 export const TraceHistogramSchema = z.object({
   days: z.number(),
   bucket_seconds: z.number(),
+  /** The score the list is narrowed to, whose mean each bar holds. */
+  score: z.string().nullable(),
   utc_offset: z.number(),
   bars: z.array(HistogramBarSchema),
 });

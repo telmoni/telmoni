@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/components/page-header", () => ({
@@ -70,6 +70,10 @@ beforeEach(() => {
     since: "2026-09-30T10:00:00Z",
     spans: 1200,
     sent: [{ attribute: "user.email", spans: 400 }],
+    evaluator_reads: [
+      { day: "2026-10-29", evaluator_id: "ev1", evaluator: "Hallucination", provider: "anthropic", reads: 42 },
+      { day: "2026-10-28", evaluator_id: "ev2", evaluator: null, provider: "openai", reads: 3 },
+    ],
     retention: { span_days: 90, max_span_days: 360, rollup_months: 13 },
   };
   mockReads = {
@@ -227,6 +231,13 @@ describe("PrivacyPage", () => {
       from: "2026-09-30T10:00:00Z",
     });
     expect(screen.getByText("Ada")).toBeInTheDocument();
+  });
+
+  it("lists what each evaluator read, by day and provider, to any role", async () => {
+    render(await PrivacyPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+    const section = screen.getByRole("heading", { name: "What evaluators read" }).closest("section")!;
+    const rows = within(section).getAllByRole("row").slice(1).map((row) => row.textContent);
+    expect(rows).toEqual(["2026-10-29Hallucinationanthropic42", "2026-10-28A deleted evaluatoropenai3"]);
   });
 
   it("says so when the posture cannot be read, and keeps the rest", async () => {
