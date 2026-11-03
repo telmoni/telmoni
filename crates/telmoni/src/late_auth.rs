@@ -192,6 +192,41 @@ impl Auth for LateAuth {
 mod tests {
     use super::*;
 
+    /// The `fn` names inside the block `opening` starts, comments skipped.
+    fn methods_of(source: &str, opening: &str) -> std::collections::BTreeSet<String> {
+        let (_, block) = source
+            .split_once(opening)
+            .expect("the block is in the source");
+        let mut depth = 0_usize;
+        let mut names = std::collections::BTreeSet::new();
+        for line in block.lines() {
+            let code = line.split("//").next().unwrap_or_default();
+            let words: Vec<&str> = code.split_whitespace().collect();
+            if depth == 1
+                && let Some(at) = words.iter().position(|w| *w == "fn")
+                && let Some(name) = words.get(at + 1)
+            {
+                names.insert(name.split(['(', '<']).next().unwrap_or(name).to_owned());
+            }
+            depth += code.matches('{').count();
+            depth = depth.saturating_sub(code.matches('}').count());
+            if depth == 0 && code.contains('}') {
+                break;
+            }
+        }
+        names
+    }
+
+    /// Every method of the seam is forwarded: a new one fails here, not in
+    /// production, where its default would answer.
+    #[test]
+    fn late_auth_forwards_every_method_of_the_seam() {
+        let declared = methods_of(include_str!("../../shared/src/seam.rs"), "pub trait Auth:");
+        let forwarded = methods_of(include_str!("late_auth.rs"), "impl Auth for LateAuth");
+        assert!(declared.len() > 20, "{declared:?}");
+        assert_eq!(declared, forwarded);
+    }
+
     /// Each call goes to auth, never the seam's default: before auth is built,
     /// every one answers that identity is unavailable.
     #[tokio::test]
