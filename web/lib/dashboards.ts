@@ -40,8 +40,9 @@ export const COST_DASHBOARD: readonly Chart[] = [
 ];
 
 /** A chart as the page's URL carries it: `spend`, `spend:user` or
- *  `spend:tag:<key>`, the key whole after its second colon. */
-export function chartWord(chart: Chart): string {
+ *  `spend:tag:<key>`, the key whole after its second colon; a saved one's
+ *  group is any the server keeps, which [`chartOf`] reads back or drops. */
+export function chartWord(chart: { measure: ChartMeasure; group?: MetricsGroup; tag?: string }): string {
   if (!chart.group) return chart.measure;
   return chart.group === MetricsGroup.Tag
     ? `${chart.measure}:tag:${chart.tag}`

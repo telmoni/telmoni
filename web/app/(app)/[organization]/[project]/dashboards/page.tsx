@@ -9,7 +9,7 @@ import { fetchAlerts } from "@/lib/server/entities/alerts";
 import { fetchDashboards, fetchRollups } from "@/lib/server/entities/dashboards";
 import { fetchTraceFacets, fetchTraceHistogram } from "@/lib/server/entities/traces";
 import { projectPage } from "@/lib/server/project-page";
-import { OPENING_DAYS, TOTALS_WINDOWS } from "@/lib/list-query";
+import { MAX_DAYS, OPENING_DAYS, TOTALS_WINDOWS } from "@/lib/list-query";
 import { administers } from "@/lib/roles";
 import { formatCost, parseTraceQuery, tagKeys } from "@/lib/traces";
 import { ChartMeasure, RuleAggregation, RuleMeasure, RuleWindow, SpanKind } from "@/lib/types/enums";
@@ -23,7 +23,7 @@ export const metadata = { title: "Dashboards" };
 /** The window the URL asks for, the opening week where it asks for none. */
 function daysOf(given: string | string[] | undefined): number {
   const days = Number(Array.isArray(given) ? given[0] : given);
-  return Number.isInteger(days) && days >= 1 && days <= 360 ? days : OPENING_DAYS;
+  return Number.isInteger(days) && days >= 1 && days <= MAX_DAYS ? days : OPENING_DAYS;
 }
 
 /** A saved dashboard's charts as the URL's are read, any the page no longer
@@ -32,7 +32,7 @@ function savedOf(dashboard: DashboardView): SavedDashboard {
   return {
     id: dashboard.id,
     name: dashboard.name,
-    charts: chartsOf(dashboard.query.charts.map((chart) => chartWord(chart as Chart))) ?? [],
+    charts: chartsOf(dashboard.query.charts.map((chart) => chartWord(chart))) ?? [],
   };
 }
 
