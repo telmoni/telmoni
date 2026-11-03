@@ -20,6 +20,7 @@ use telmoni_shared::{
 };
 
 use crate::AppState;
+use crate::contract::SESSION_ID_MAX;
 use crate::handler::chain::{self, Change};
 use crate::handler::traces::read_failed;
 use crate::scores::{
@@ -27,9 +28,6 @@ use crate::scores::{
     member_score_id, version_of,
 };
 use crate::store::Projects;
-
-/// The longest session id a score names, as a span carries one.
-const SESSION_MAX: usize = 200;
 
 /// What a member's score sends: what it scores — a run, one of its spans or a
 /// session — and what it says.
@@ -186,13 +184,13 @@ fn target_of(
         (None, None, Some(session))
             if run_id.is_none()
                 && !session.is_empty()
-                && session.chars().count() <= SESSION_MAX =>
+                && session.chars().count() <= SESSION_ID_MAX =>
         {
             Ok(TargetKey::Session(session))
         }
         _ => Err(TelmoniError::BadRequest(format!(
             "a score names a run, a run and one of its spans by 16 hex digits, or a session \
-             of up to {SESSION_MAX} characters"
+             of up to {SESSION_ID_MAX} characters"
         ))),
     }
 }
@@ -719,7 +717,7 @@ mod tests {
     fn the_fixtures_limits_are_the_servers() {
         let limits = &fixture()["limits"];
         assert_eq!(limits["sent_max"], SENT_MAX);
-        assert_eq!(limits["session_max"], SESSION_MAX);
+        assert_eq!(limits["session_max"], SESSION_ID_MAX);
         assert_eq!(limits["name_max"], crate::scores::NAME_MAX);
         assert_eq!(limits["category_max"], crate::scores::CATEGORY_MAX);
         assert_eq!(limits["version_max"], VERSION_MAX);
