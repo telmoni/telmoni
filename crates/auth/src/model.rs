@@ -39,23 +39,12 @@ pub enum DeletionKind {
     Operator,
 }
 
-impl DeletionKind {
-    /// The wire spelling — what the SQL stores and the audit row records.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Owner => "owner",
-            Self::Account => "account",
-            Self::Operator => "operator",
-        }
-    }
-}
-
-impl std::fmt::Display for DeletionKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
+// The wire spelling: what the SQL stores and the audit row records.
+telmoni_shared::wire_enum!(DeletionKind {
+    Owner => "owner",
+    Account => "account",
+    Operator => "operator",
+});
 
 /// What happened, as an audit event's details name it beside its action and
 /// its resource. ⚠ **Each word is hashed into every row that records it, on
@@ -138,89 +127,43 @@ pub enum AuditKind {
     DefaultOrganization,
 }
 
-impl AuditKind {
-    /// Every kind.
-    #[must_use]
-    pub const fn all() -> [Self; 34] {
-        [
-            Self::AutoProvision,
-            Self::OnRequest,
-            Self::Invited,
-            Self::InviteRevoked,
-            Self::InviteAccepted,
-            Self::InviteDeclined,
-            Self::EnrolledWithProjectInvite,
-            Self::SeatGiven,
-            Self::OrganizationInviteRevoked,
-            Self::OrganizationInviteAccepted,
-            Self::OrganizationInviteDeclined,
-            Self::Left,
-            Self::Removed,
-            Self::RemovedByOwner,
-            Self::OrganizationRemovalCascade,
-            Self::OwnershipOffered,
-            Self::OwnershipOfferCancelled,
-            Self::OwnershipOfferDeclined,
-            Self::OwnershipTransferred,
-            Self::SeatFoldedIntoOwnership,
-            Self::ProjectOffered,
-            Self::ProjectOfferCancelled,
-            Self::ProjectOfferDeclined,
-            Self::ProjectTransferred,
-            Self::ProjectReceived,
-            Self::ProjectMoved,
-            Self::PreviousOwnerSeated,
-            Self::PreviousOwnerEnrolled,
-            Self::SeatHolderEnrolled,
-            Self::EmailChange,
-            Self::OrganizationDeletion,
-            Self::DeletionFinalize,
-            Self::AccountDeletion,
-            Self::DefaultOrganization,
-        ]
-    }
-
-    /// The word the chain records.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::AutoProvision => "auto_provision",
-            Self::OnRequest => "on_request",
-            Self::Invited => "invited",
-            Self::InviteRevoked => "invite_revoked",
-            Self::InviteAccepted => "invite_accepted",
-            Self::InviteDeclined => "invite_declined",
-            Self::EnrolledWithProjectInvite => "enrolled_with_project_invite",
-            Self::SeatGiven => "seat_given",
-            Self::OrganizationInviteRevoked => "organization_invite_revoked",
-            Self::OrganizationInviteAccepted => "organization_invite_accepted",
-            Self::OrganizationInviteDeclined => "organization_invite_declined",
-            Self::Left => "left",
-            Self::Removed => "removed",
-            Self::RemovedByOwner => "removed_by_owner",
-            Self::OrganizationRemovalCascade => "organization_removal_cascade",
-            Self::OwnershipOffered => "ownership_offered",
-            Self::OwnershipOfferCancelled => "ownership_offer_cancelled",
-            Self::OwnershipOfferDeclined => "ownership_offer_declined",
-            Self::OwnershipTransferred => "ownership_transferred",
-            Self::SeatFoldedIntoOwnership => "seat_folded_into_ownership",
-            Self::ProjectOffered => "project_offered",
-            Self::ProjectOfferCancelled => "project_offer_cancelled",
-            Self::ProjectOfferDeclined => "project_offer_declined",
-            Self::ProjectTransferred => "project_transferred",
-            Self::ProjectReceived => "project_received",
-            Self::ProjectMoved => "project_moved",
-            Self::PreviousOwnerSeated => "previous_owner_seated",
-            Self::PreviousOwnerEnrolled => "previous_owner_enrolled",
-            Self::SeatHolderEnrolled => "seat_holder_enrolled",
-            Self::EmailChange => "email_change",
-            Self::OrganizationDeletion => "organization_deletion",
-            Self::DeletionFinalize => "deletion_finalize",
-            Self::AccountDeletion => "account_deletion",
-            Self::DefaultOrganization => "default_organization",
-        }
-    }
-}
+// The word the chain records.
+telmoni_shared::wire_enum!(AuditKind {
+    AutoProvision => "auto_provision",
+    OnRequest => "on_request",
+    Invited => "invited",
+    InviteRevoked => "invite_revoked",
+    InviteAccepted => "invite_accepted",
+    InviteDeclined => "invite_declined",
+    EnrolledWithProjectInvite => "enrolled_with_project_invite",
+    SeatGiven => "seat_given",
+    OrganizationInviteRevoked => "organization_invite_revoked",
+    OrganizationInviteAccepted => "organization_invite_accepted",
+    OrganizationInviteDeclined => "organization_invite_declined",
+    Left => "left",
+    Removed => "removed",
+    RemovedByOwner => "removed_by_owner",
+    OrganizationRemovalCascade => "organization_removal_cascade",
+    OwnershipOffered => "ownership_offered",
+    OwnershipOfferCancelled => "ownership_offer_cancelled",
+    OwnershipOfferDeclined => "ownership_offer_declined",
+    OwnershipTransferred => "ownership_transferred",
+    SeatFoldedIntoOwnership => "seat_folded_into_ownership",
+    ProjectOffered => "project_offered",
+    ProjectOfferCancelled => "project_offer_cancelled",
+    ProjectOfferDeclined => "project_offer_declined",
+    ProjectTransferred => "project_transferred",
+    ProjectReceived => "project_received",
+    ProjectMoved => "project_moved",
+    PreviousOwnerSeated => "previous_owner_seated",
+    PreviousOwnerEnrolled => "previous_owner_enrolled",
+    SeatHolderEnrolled => "seat_holder_enrolled",
+    EmailChange => "email_change",
+    OrganizationDeletion => "organization_deletion",
+    DeletionFinalize => "deletion_finalize",
+    AccountDeletion => "account_deletion",
+    DefaultOrganization => "default_organization",
+});
 
 #[derive(Debug, Serialize, sqlx::FromRow)]
 #[serde(rename_all = "camelCase")]
@@ -321,6 +264,11 @@ mod tests {
         telmoni_shared::test_util::assert_wire_words::<InviteScope>();
     }
 
+    #[test]
+    fn the_deletion_kind_words_are_the_wire_words() {
+        telmoni_shared::test_util::assert_wire_words::<DeletionKind>();
+    }
+
     /// No raw token survives a Debug render, and the answer still hands it over.
     #[test]
     fn create_token_response_debug_masks_the_raw_token() {
@@ -369,49 +317,6 @@ mod tests {
                 format!("\"{}\"", scope.as_str())
             );
             assert_eq!(scope.to_string(), scope.as_str());
-        }
-    }
-
-    /// A new kind fails to compile here until `all()` lists it.
-    #[test]
-    fn all_lists_every_audit_kind() {
-        for kind in AuditKind::all() {
-            match kind {
-                AuditKind::AutoProvision
-                | AuditKind::OnRequest
-                | AuditKind::Invited
-                | AuditKind::InviteRevoked
-                | AuditKind::InviteAccepted
-                | AuditKind::InviteDeclined
-                | AuditKind::EnrolledWithProjectInvite
-                | AuditKind::SeatGiven
-                | AuditKind::OrganizationInviteRevoked
-                | AuditKind::OrganizationInviteAccepted
-                | AuditKind::OrganizationInviteDeclined
-                | AuditKind::Left
-                | AuditKind::Removed
-                | AuditKind::RemovedByOwner
-                | AuditKind::OrganizationRemovalCascade
-                | AuditKind::OwnershipOffered
-                | AuditKind::OwnershipOfferCancelled
-                | AuditKind::OwnershipOfferDeclined
-                | AuditKind::OwnershipTransferred
-                | AuditKind::SeatFoldedIntoOwnership
-                | AuditKind::ProjectOffered
-                | AuditKind::ProjectOfferCancelled
-                | AuditKind::ProjectOfferDeclined
-                | AuditKind::ProjectTransferred
-                | AuditKind::ProjectReceived
-                | AuditKind::ProjectMoved
-                | AuditKind::PreviousOwnerSeated
-                | AuditKind::PreviousOwnerEnrolled
-                | AuditKind::SeatHolderEnrolled
-                | AuditKind::EmailChange
-                | AuditKind::OrganizationDeletion
-                | AuditKind::DeletionFinalize
-                | AuditKind::AccountDeletion
-                | AuditKind::DefaultOrganization => {}
-            }
         }
     }
 

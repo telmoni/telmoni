@@ -132,19 +132,16 @@ impl StoppedShort {
             Self::Budget => BUDGET_NOTE,
         }
     }
-
-    /// The word the run's tag gives it.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Capped => "capped",
-            Self::Truncated => "truncated",
-            Self::TimedOut => "timed_out",
-            Self::Interrupted => "interrupted",
-            Self::Budget => "budget",
-        }
-    }
 }
+
+// The word the run's tag gives it.
+telmoni_shared::wire_enum!(StoppedShort {
+    Capped => "capped",
+    Truncated => "truncated",
+    TimedOut => "timed_out",
+    Interrupted => "interrupted",
+    Budget => "budget",
+});
 
 /// What the loop came to.
 #[derive(Debug, Clone, PartialEq, Eq)]

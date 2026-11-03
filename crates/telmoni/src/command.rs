@@ -19,18 +19,13 @@ pub enum AuthSweep {
     AuditExports,
 }
 
-impl AuthSweep {
-    /// The word on the command line, in the log and in `auth.heartbeats`.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Deletion => "deletion",
-            Self::AuditVerify => "audit-verify",
-            Self::Retention => "retention",
-            Self::AuditExports => "audit-exports",
-        }
-    }
-}
+// The word on the command line, in the log and in `auth.heartbeats`.
+telmoni_shared::wire_enum!(AuthSweep {
+    Deletion => "deletion",
+    AuditVerify => "audit-verify",
+    Retention => "retention",
+    AuditExports => "audit-exports",
+});
 
 /// Which sweep to run once.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,26 +38,21 @@ pub enum Sweep {
 }
 
 impl Sweep {
-    /// Every sweep, in the order the usage line lists them.
-    pub const ALL: [Self; 5] = [
-        Self::Auth(AuthSweep::Deletion),
-        Self::Auth(AuthSweep::AuditVerify),
-        Self::Auth(AuthSweep::Retention),
-        Self::AgentReindex,
-        Self::Auth(AuthSweep::AuditExports),
-    ];
-
-    fn parse(arg: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|s| s.as_str() == arg)
+    /// Every sweep: auth's, then the agent's.
+    fn all() -> impl Iterator<Item = Self> {
+        AuthSweep::all()
+            .into_iter()
+            .map(Self::Auth)
+            .chain([Self::AgentReindex])
     }
 
-    /// The usage line's `<a|b|c>`, built from [`Self::ALL`].
+    fn parse(arg: &str) -> Option<Self> {
+        Self::all().find(|s| s.as_str() == arg)
+    }
+
+    /// The usage line's `<a|b|c>`, built from [`Self::all`].
     fn names() -> String {
-        Self::ALL
-            .iter()
-            .map(|s| s.as_str())
-            .collect::<Vec<_>>()
-            .join("|")
+        Self::all().map(Self::as_str).collect::<Vec<_>>().join("|")
     }
 
     /// The word on the command line, and in the log.
@@ -141,7 +131,7 @@ mod tests {
         assert_eq!(parse(&["serve"]).unwrap(), Command::Serve);
         assert_eq!(parse(&["migrate"]).unwrap(), Command::Migrate);
         assert_eq!(parse(&["rotate"]).unwrap(), Command::Rotate);
-        for sweep in Sweep::ALL {
+        for sweep in Sweep::all() {
             assert_eq!(
                 parse(&["sweep", sweep.as_str()]).unwrap(),
                 Command::Sweep(sweep)

@@ -136,7 +136,7 @@ fn no_input() -> Value {
 /// The model's arguments as the tool takes them: a key it was not told of,
 /// or a value of the wrong shape, is an input error it can see and correct.
 fn input<T: DeserializeOwned>(tool: Tool, raw: &Value) -> Result<T, ToolError> {
-    T::deserialize(raw).map_err(|e| ToolError::Input(format!("{}: {e}", tool.name())))
+    T::deserialize(raw).map_err(|e| ToolError::Input(format!("{}: {e}", tool.as_str())))
 }
 
 /// A source the reply may cite as `[n]`.
@@ -209,32 +209,16 @@ pub enum Tool {
     AuditEvents,
 }
 
+// The name the model calls each by.
+telmoni_shared::wire_enum!(Tool {
+    Search => "search",
+    ListMembers => "list_members",
+    ListConnectors => "list_connectors",
+    ConnectorDeliveries => "connector_deliveries",
+    AuditEvents => "audit_events",
+});
+
 impl Tool {
-    pub const ALL: [Self; 5] = [
-        Self::Search,
-        Self::ListMembers,
-        Self::ListConnectors,
-        Self::ConnectorDeliveries,
-        Self::AuditEvents,
-    ];
-
-    #[must_use]
-    pub const fn name(self) -> &'static str {
-        match self {
-            Self::Search => "search",
-            Self::ListMembers => "list_members",
-            Self::ListConnectors => "list_connectors",
-            Self::ConnectorDeliveries => "connector_deliveries",
-            Self::AuditEvents => "audit_events",
-        }
-    }
-
-    /// The tool the model named, if there is one by that name.
-    #[must_use]
-    pub fn named(name: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|tool| tool.name() == name)
-    }
-
     /// The tool as the model is told about it.
     #[must_use]
     pub fn spec(self) -> ToolSpec {
@@ -263,7 +247,7 @@ impl Tool {
             ),
         };
         ToolSpec {
-            name: self.name(),
+            name: self.as_str(),
             description,
             parameters,
         }
@@ -273,14 +257,14 @@ impl Tool {
 /// The tools as the model is told about them.
 #[must_use]
 pub fn specs() -> Vec<ToolSpec> {
-    Tool::ALL.into_iter().map(Tool::spec).collect()
+    Tool::all().into_iter().map(Tool::spec).collect()
 }
 
 /// The agent's own name for the tool a call asked for. A name the model made
 /// up is free text, which a passage it read can steer, so it is never kept,
 /// streamed or logged.
 pub(crate) fn tool_name(called: &str) -> &'static str {
-    Tool::named(called).map_or("unknown", Tool::name)
+    called.parse().map_or("unknown", Tool::as_str)
 }
 
 /// Run one call, and answer what goes back to the model. A refusal or a
@@ -291,7 +275,7 @@ pub async fn run(
     call: &ToolCall,
     citations: &mut Citations,
 ) -> ToolResult {
-    let outcome = match Tool::named(&call.name) {
+    let outcome = match call.name.parse::<Tool>().ok() {
         Some(Tool::Search) => search(state, acting, &call.input, citations).await,
         Some(Tool::ListMembers) => list_members(state, acting, citations).await,
         Some(Tool::ListConnectors) => list_connectors(state, acting, citations).await,
@@ -572,18 +556,18 @@ mod tests {
 
     #[test]
     fn every_tool_is_found_by_the_name_its_spec_gives_the_model() {
-        for tool in Tool::ALL {
-            assert_eq!(Tool::named(tool.spec().name), Some(tool));
+        for tool in Tool::all() {
+            assert_eq!(tool.spec().name.parse::<Tool>().ok(), Some(tool));
         }
-        assert_eq!(Tool::named("delete_project"), None);
+        assert!("delete_project".parse::<Tool>().is_err());
     }
 
     /// A name the model made up is free text a passage it read can steer:
     /// the stream and the log read `unknown` for it, and each tool its own.
     #[test]
     fn a_tool_name_the_model_made_up_reads_as_unknown() {
-        for tool in Tool::ALL {
-            assert_eq!(tool_name(tool.name()), tool.name());
+        for tool in Tool::all() {
+            assert_eq!(tool_name(tool.as_str()), tool.as_str());
         }
         assert_eq!(tool_name("ada@example.com"), "unknown");
     }

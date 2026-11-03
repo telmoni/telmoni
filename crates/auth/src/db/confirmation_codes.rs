@@ -31,33 +31,15 @@ pub enum Purpose {
     ContentMode,
 }
 
-impl Purpose {
-    /// The stored spelling, matching the CHECK.
-    #[must_use]
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::OrganizationDeletion => "organization_deletion",
-            Self::AccountDeletion => "account_deletion",
-            Self::EmailChange => "email_change",
-            Self::EmailVerification => "email_verification",
-            Self::PasswordReset => "password_reset",
-            Self::ContentMode => "content_mode",
-        }
-    }
-
-    /// Every purpose, for the test that holds this enum to the CHECK.
-    #[must_use]
-    pub const fn all() -> [Self; 6] {
-        [
-            Self::OrganizationDeletion,
-            Self::AccountDeletion,
-            Self::EmailChange,
-            Self::EmailVerification,
-            Self::PasswordReset,
-            Self::ContentMode,
-        ]
-    }
-}
+// The stored spelling, matching the CHECK.
+telmoni_shared::wire_enum!(Purpose {
+    OrganizationDeletion => "organization_deletion",
+    AccountDeletion => "account_deletion",
+    EmailChange => "email_change",
+    EmailVerification => "email_verification",
+    PasswordReset => "password_reset",
+    ContentMode => "content_mode",
+});
 
 /// One act a code is minted for and spent on: the purpose, and for an
 /// organization's deletion, WHICH organization.

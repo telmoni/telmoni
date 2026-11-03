@@ -49,15 +49,22 @@ enum Start {
     Quiet,
 }
 
-/// Start the four sweeps as tasks of this process, each beating in
+/// How often a sweep runs and whether its tick logs its start: one arm a
+/// sweep, so a new one cannot be left off the timers.
+const fn every_of(sweep: AuthSweep) -> (Duration, Start) {
+    match sweep {
+        AuthSweep::Deletion => (DELETION_EVERY, Start::Logged),
+        AuthSweep::Retention => (RETENTION_EVERY, Start::Logged),
+        AuthSweep::AuditVerify => (AUDIT_VERIFY_EVERY, Start::Logged),
+        AuthSweep::AuditExports => (AUDIT_EXPORTS_EVERY, Start::Quiet),
+    }
+}
+
+/// Start every auth sweep as a task of this process, each beating in
 /// `heartbeats`.
 pub fn spawn(auth: Arc<AppState>, heartbeats: &Arc<Heartbeats<AuthLane>>) {
-    for (sweep, period, start) in [
-        (AuthSweep::Deletion, DELETION_EVERY, Start::Logged),
-        (AuthSweep::Retention, RETENTION_EVERY, Start::Logged),
-        (AuthSweep::AuditVerify, AUDIT_VERIFY_EVERY, Start::Logged),
-        (AuthSweep::AuditExports, AUDIT_EXPORTS_EVERY, Start::Quiet),
-    ] {
+    for sweep in AuthSweep::all() {
+        let (period, start) = every_of(sweep);
         tokio::spawn(every(
             auth.clone(),
             heartbeats.clone(),

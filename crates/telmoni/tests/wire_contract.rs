@@ -133,7 +133,7 @@ fn generated_contract() -> Value {
             "ExportStatus": wire::<ExportStatus>(),
             "ExportFailure": wire::<ExportFailure>(),
             "InviteScope": wire::<InviteScope>(),
-            "AgentTool": Tool::ALL.map(Tool::name),
+            "AgentTool": Tool::all().map(Tool::as_str),
             "AgentMessageRole": wire::<MessageRole>(),
             "AgentTurnEvent": wire::<TurnEventKind>(),
             "ContentField": CONTENT,

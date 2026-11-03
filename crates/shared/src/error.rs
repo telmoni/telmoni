@@ -119,17 +119,12 @@ pub enum ModelFailure {
     RateLimited,
 }
 
-impl ModelFailure {
-    /// The word the log gives it.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Answered => "answered",
-            Self::NotNow => "not_now",
-            Self::RateLimited => "rate_limited",
-        }
-    }
-}
+// The word the log gives it.
+crate::wire_enum!(ModelFailure {
+    Answered => "answered",
+    NotNow => "not_now",
+    RateLimited => "rate_limited",
+});
 
 /// Postgres's `lock_not_available`: a `lock_timeout` ran out.
 const LOCK_NOT_AVAILABLE: &str = "55P03";

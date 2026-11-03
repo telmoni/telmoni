@@ -208,7 +208,7 @@ fn external_from_env(http: &reqwest::Client, client_id: String) -> anyhow::Resul
     }
 
     let alg: SigningAlg = optional("AUTH_CUSTOM_ID_TOKEN_SIGNED_RESPONSE_ALG")
-        .map(|name| name.parse())
+        .map(|name| signing_alg(&name))
         .transpose()
         .map_err(|why| anyhow::anyhow!("AUTH_CUSTOM_ID_TOKEN_SIGNED_RESPONSE_ALG: {why}"))?
         .unwrap_or_default();
@@ -247,9 +247,32 @@ fn external_from_env(http: &reqwest::Client, client_id: String) -> anyhow::Resul
     })
 }
 
+/// The algorithm a provider signs with, by its header name; ES512 and every
+/// HS* are refused with why.
+fn signing_alg(name: &str) -> Result<SigningAlg, String> {
+    let name = name.trim();
+    name.parse().map_err(|refused| match name {
+        "ES512" => "ES512 is not verified here: ring has no P-521".to_owned(),
+        hmac if hmac.starts_with("HS") => format!(
+            "{hmac} is refused: an HMAC-signed id token is signed with the client secret, and \
+             anyone who holds the secret could mint one"
+        ),
+        _ => format!("{refused}"),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// ES512 and HS* are refused with why, the eight read by name.
+    #[test]
+    fn a_refused_algorithm_says_why() {
+        assert_eq!(signing_alg(" PS256 "), Ok(SigningAlg::Ps256));
+        assert!(signing_alg("ES512").unwrap_err().contains("P-521"));
+        assert!(signing_alg("HS256").unwrap_err().contains("client secret"));
+        assert!(signing_alg("none").unwrap_err().contains("RS256"));
+    }
 
     /// A held domain is read as an address's domain is, however it was typed.
     #[test]

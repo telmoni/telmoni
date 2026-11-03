@@ -46,56 +46,17 @@ pub enum SigningAlg {
     Es384,
 }
 
-impl SigningAlg {
-    /// Its name in a token's header.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Rs256 => "RS256",
-            Self::Rs384 => "RS384",
-            Self::Rs512 => "RS512",
-            Self::Ps256 => "PS256",
-            Self::Ps384 => "PS384",
-            Self::Ps512 => "PS512",
-            Self::Es256 => "ES256",
-            Self::Es384 => "ES384",
-        }
-    }
-}
-
-impl std::str::FromStr for SigningAlg {
-    type Err = String;
-
-    /// One of the eight, by its header name; `ES512` and every `HS*` are
-    /// refused with why.
-    fn from_str(name: &str) -> Result<Self, Self::Err> {
-        Ok(match name.trim() {
-            "RS256" => Self::Rs256,
-            "RS384" => Self::Rs384,
-            "RS512" => Self::Rs512,
-            "PS256" => Self::Ps256,
-            "PS384" => Self::Ps384,
-            "PS512" => Self::Ps512,
-            "ES256" => Self::Es256,
-            "ES384" => Self::Es384,
-            "ES512" => {
-                return Err("ES512 is not verified here: ring has no P-521".into());
-            }
-            hmac if hmac.starts_with("HS") => {
-                return Err(format!(
-                    "{hmac} is refused: an HMAC-signed id token is signed with the client \
-                     secret, and anyone who holds the secret could mint one"
-                ));
-            }
-            other => {
-                return Err(format!(
-                    "{other:?} is not an algorithm an id token is verified by here: RS256, \
-                     RS384, RS512, PS256, PS384, PS512, ES256 or ES384"
-                ));
-            }
-        })
-    }
-}
+// Its name in a token's header.
+crate::wire_enum!(SigningAlg {
+    Rs256 => "RS256",
+    Rs384 => "RS384",
+    Rs512 => "RS512",
+    Ps256 => "PS256",
+    Ps384 => "PS384",
+    Ps512 => "PS512",
+    Es256 => "ES256",
+    Es384 => "ES384",
+});
 
 #[derive(Deserialize)]
 struct Header {
@@ -380,22 +341,17 @@ mod tests {
         assert!(held.verify(&ps256_id_token(live("user_1"))).await.is_err());
     }
 
-    /// The eight are read by name; ES512 and every HS* are refused with why.
+    /// The eight are read by name; ES512, HS256 and none are not.
     #[test]
-    fn the_algorithms_taken_and_refused_say_so() {
+    fn the_algorithms_taken_are_the_eight() {
         for name in [
             "RS256", "RS384", "RS512", "PS256", "PS384", "PS512", "ES256", "ES384",
         ] {
             assert_eq!(name.parse::<SigningAlg>().unwrap().as_str(), name);
         }
-        assert!("ES512".parse::<SigningAlg>().unwrap_err().contains("P-521"));
-        assert!(
-            "HS256"
-                .parse::<SigningAlg>()
-                .unwrap_err()
-                .contains("client secret")
-        );
-        assert!("none".parse::<SigningAlg>().is_err());
+        for refused in ["ES512", "HS256", "none"] {
+            assert!(refused.parse::<SigningAlg>().is_err(), "{refused}");
+        }
     }
 
     #[tokio::test]

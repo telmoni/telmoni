@@ -26,19 +26,14 @@ pub enum Method {
     Delete,
 }
 
-impl Method {
-    /// The OpenAPI key for this method, which is lowercase.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Get => "get",
-            Self::Head => "head",
-            Self::Post => "post",
-            Self::Put => "put",
-            Self::Delete => "delete",
-        }
-    }
-}
+// The OpenAPI key for each method, which is lowercase.
+crate::wire_enum!(Method {
+    Get => "get",
+    Head => "head",
+    Post => "post",
+    Put => "put",
+    Delete => "delete",
+});
 
 /// One parameter a route takes, in the path or the query string.
 #[derive(Debug, Clone, Copy)]

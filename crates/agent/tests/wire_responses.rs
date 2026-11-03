@@ -106,7 +106,7 @@ fn a_turn_streams_as_the_console_reads() {
         TurnEvent::Conversation {
             conversation_id: CONVERSATION,
         },
-        TurnEvent::Tool(Tool::Search.name()),
+        TurnEvent::Tool(Tool::Search.as_str()),
         TurnEvent::Text("The p95 rose"),
         TurnEvent::Citation(&citation),
         TurnEvent::Done {

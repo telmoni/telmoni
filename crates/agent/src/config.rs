@@ -64,30 +64,11 @@ pub enum Provider {
     OpenAi,
 }
 
-impl Provider {
-    /// The name `AGENT_MODEL_PROVIDER` takes.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Anthropic => "anthropic",
-            Self::OpenAi => "openai",
-        }
-    }
-}
-
-impl std::str::FromStr for Provider {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let s = s.trim();
-        [Self::Anthropic, Self::OpenAi]
-            .into_iter()
-            .find(|provider| provider.as_str() == s)
-            .ok_or_else(|| {
-                anyhow::anyhow!("AGENT_MODEL_PROVIDER must be `anthropic` or `openai`, got {s:?}")
-            })
-    }
-}
+// The name `AGENT_MODEL_PROVIDER` takes.
+telmoni_shared::wire_enum!(Provider {
+    Anthropic => "anthropic",
+    OpenAi => "openai",
+});
 
 /// The chat model.
 #[derive(Clone, Debug)]
@@ -175,7 +156,11 @@ impl Config {
         };
         let model = match optional("AGENT_MODEL_PROVIDER") {
             None => None,
-            Some(raw) => Some(model_from_env(raw.parse()?)?),
+            Some(raw) => {
+                Some(model_from_env(raw.trim().parse().map_err(|e| {
+                    anyhow::anyhow!("AGENT_MODEL_PROVIDER: {e}")
+                })?)?)
+            }
         };
         let docs_corpus_url = match optional_base_url("DOCS_CORPUS_URL") {
             Some(off) if off == "off" => None,

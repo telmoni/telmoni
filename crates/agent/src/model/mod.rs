@@ -170,16 +170,12 @@ pub(crate) enum Endpoint {
     Rerank,
 }
 
-impl Endpoint {
-    pub(crate) const fn as_str(self) -> &'static str {
-        match self {
-            Self::Anthropic => "anthropic",
-            Self::OpenAiCompatible => "openai-compatible",
-            Self::Embeddings => "embeddings",
-            Self::Rerank => "rerank",
-        }
-    }
-}
+telmoni_shared::wire_enum!(Endpoint {
+    Anthropic => "anthropic",
+    OpenAiCompatible => "openai-compatible",
+    Embeddings => "embeddings",
+    Rerank => "rerank",
+});
 
 /// What one streamed event moved a turn by: text to hand on as it arrives,
 /// nothing the person sees, or the end of the stream.
