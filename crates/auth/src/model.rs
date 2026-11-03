@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use telmoni_shared::Redacted;
-use telmoni_shared::{ApiKeyScope, OrganizationId};
+use telmoni_shared::{ApiKeyScope, OrganizationId, ProjectId, UserId};
 
 /// Which level an invitation is to — a project inside an organization, or the
 /// organization itself. The two live in separate tables with separate role
@@ -170,12 +170,12 @@ telmoni_shared::wire_enum!(AuditKind {
 pub struct ApiToken {
     pub id: Uuid,
     /// The project it was minted in. Every key names one.
-    pub project_id: String,
+    pub project_id: ProjectId,
     pub name: String,
     pub description: Option<String>,
     /// The first characters of the key, as the console names its row.
     pub token_hint: String,
-    pub created_by: String,
+    pub created_by: UserId,
     /// What the key opens, as minted.
     pub scopes: Vec<ApiKeyScope>,
     pub expires_at: Option<DateTime<Utc>>,

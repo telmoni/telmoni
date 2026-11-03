@@ -539,11 +539,11 @@ fn the_keys_answer_as_the_console_reads() {
         "tokens",
         &[ApiToken {
             id: KEY,
-            project_id: project().into_inner(),
+            project_id: project(),
             name: "ci".into(),
             description: Some("the deploy pipeline".into()),
             token_hint: "tm_Ab3…x9Qz".into(),
-            created_by: person().into_inner(),
+            created_by: person(),
             scopes: vec![ApiKeyScope::Read, ApiKeyScope::Ingest],
             expires_at: Some(at(7_776_000)),
             last_used_at: Some(at(60)),

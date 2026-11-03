@@ -322,7 +322,7 @@ mod tests {
             "tm_hint",
         )
         .await?;
-        assert_eq!(tok.project_id, pid("project-tok").as_str());
+        assert_eq!(tok.project_id, pid("project-tok"));
         assert_eq!(tok.name, "my-key");
         assert!(tok.expires_at.is_none());
 
