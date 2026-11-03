@@ -21,7 +21,7 @@ use telmoni_shared::acting::Acting;
 use telmoni_shared::db::tenant_session::{ProjectAndOrganization, Scoped, project_scope};
 use telmoni_shared::extract::{Json, Query};
 use telmoni_shared::rbac::{Resource, Verb};
-use telmoni_shared::seam::Auth;
+use telmoni_shared::seam::{Auth, DroppedValue, TraceVocabulary};
 use telmoni_shared::types::WireEnum;
 use telmoni_shared::{
     AuthError, LayoutDepth, LayoutOpen, OrInternal, ProjectId, SessionColumn, SessionSort,
@@ -34,7 +34,7 @@ use crate::contract::NAME_MAX;
 use crate::db::{self, ViewRow, ViewWrite};
 use crate::handler::chain;
 use crate::handler::traces::{TraceQuery, check_days, check_limit, values};
-use crate::traces::{ListSort, PINNED_MAX};
+use crate::traces::{Facet, ListSort, PINNED_MAX};
 
 /// The most views of one kind a project keeps: more than a menu shows at a
 /// glance.
@@ -208,6 +208,65 @@ impl ViewQuery {
         filter.statuses.clone_from(&self.status);
         filter.days = days;
         Ok(filter)
+    }
+}
+
+impl ViewQuery {
+    /// A sentence's answer held to the values `vocabulary` read over its
+    /// window: a value the window lists every value of its filter without is
+    /// left out and named, as is a sort by a tag no trace carries. Where the
+    /// window holds more values than were read, none is ruled out.
+    pub(crate) fn held_to(mut self, vocabulary: &TraceVocabulary) -> (Self, Vec<DroppedValue>) {
+        let read = |facet: Facet| vocabulary.filters.iter().find(|f| f.filter == facet.word());
+        let mut dropped = Vec::new();
+        for (facet, values) in [
+            (Facet::Agent, &mut self.agent),
+            (Facet::User, &mut self.user),
+            (Facet::Session, &mut self.session),
+            (Facet::Model, &mut self.model),
+            (Facet::Tool, &mut self.tool),
+            (Facet::Environment, &mut self.environment),
+            (Facet::Release, &mut self.release),
+            (Facet::Tag, &mut self.tag),
+            (Facet::Prompt, &mut self.prompt),
+        ] {
+            let known = read(facet);
+            if known.is_some_and(|known| known.more) {
+                continue;
+            }
+            values.retain(|value| {
+                let held = known.is_some_and(|known| known.values.contains(value));
+                if !held {
+                    dropped.push(DroppedValue {
+                        filter: facet.word().to_owned(),
+                        value: value.clone(),
+                    });
+                }
+                held
+            });
+        }
+        if let Some(key) = self
+            .sort
+            .as_deref()
+            .and_then(|sort| sort.strip_prefix("tag:"))
+        {
+            let held = read(Facet::Tag).is_some_and(|tags| {
+                tags.more
+                    || tags
+                        .values
+                        .iter()
+                        .any(|pair| pair.split_once(':').is_some_and(|(k, _)| k == key))
+            });
+            if !held {
+                dropped.push(DroppedValue {
+                    filter: "sort".to_owned(),
+                    value: key.to_owned(),
+                });
+                self.sort = None;
+                self.dir = None;
+            }
+        }
+        (self, dropped)
     }
 }
 
@@ -891,5 +950,67 @@ mod tests {
             .collect();
         expected.sort();
         assert_eq!(keys, expected);
+    }
+
+    fn agents(values: &[&str], more: bool) -> telmoni_shared::seam::FilterValues {
+        telmoni_shared::seam::FilterValues {
+            filter: "agent".into(),
+            values: values.iter().map(|&v| v.to_owned()).collect(),
+            more,
+        }
+    }
+
+    /// A value the window lists its filter whole without goes, and is named;
+    /// one past the values read cannot be ruled out, and stays; a sort by a
+    /// tag no trace carries goes with its direction.
+    #[test]
+    fn an_answer_is_held_to_the_values_its_window_holds() {
+        let vocabulary = |agents: telmoni_shared::seam::FilterValues| TraceVocabulary {
+            days: 7,
+            max_days: 30,
+            filters: vec![
+                agents,
+                telmoni_shared::seam::FilterValues {
+                    filter: "tag".into(),
+                    values: vec!["team:core".into()],
+                    more: false,
+                },
+            ],
+        };
+        let answer = ViewQuery {
+            agent: vec!["billing".into(), "ghost".into()],
+            model: vec!["gpt-9".into()],
+            tag: vec!["team:core".into()],
+            sort: Some("tag:tier".into()),
+            dir: Some(SortDirection::Desc),
+            ..ViewQuery::default()
+        };
+        let (held, dropped) = answer
+            .clone()
+            .held_to(&vocabulary(agents(&["billing"], false)));
+        assert_eq!(held.agent, ["billing"]);
+        assert!(
+            held.model.is_empty(),
+            "a filter the window holds no value of"
+        );
+        assert_eq!(held.tag, ["team:core"]);
+        assert_eq!((held.sort, held.dir), (None, None));
+        let named: Vec<(&str, &str)> = dropped
+            .iter()
+            .map(|d| (d.filter.as_str(), d.value.as_str()))
+            .collect();
+        assert_eq!(
+            named,
+            [("agent", "ghost"), ("model", "gpt-9"), ("sort", "tier")]
+        );
+
+        let (held, dropped) = ViewQuery {
+            sort: Some("tag:team".into()),
+            ..answer
+        }
+        .held_to(&vocabulary(agents(&["billing"], true)));
+        assert_eq!(held.agent, ["billing", "ghost"], "past the values read");
+        assert_eq!(held.sort.as_deref(), Some("tag:team"));
+        assert_eq!(dropped.len(), 1, "{dropped:?}");
     }
 }

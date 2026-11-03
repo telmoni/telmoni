@@ -126,6 +126,7 @@ pub async fn sweep_once(state: &AppState) -> Result<u64, TelmoniError> {
             if db::try_retention_lock(tx).await? {
                 db::forget_fences(tx, ERASURE_FENCE_DAYS).await?;
                 db::forget_months(tx, QUESTION_MONTHS_KEPT_DAYS).await?;
+                db::forget_list_questions(tx).await?;
             }
             Ok::<_, sqlx::Error>(())
         })

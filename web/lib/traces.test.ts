@@ -10,6 +10,7 @@ import {
   DEFAULT_COLUMNS,
   TRACE_COLUMNS,
   activeFilters,
+  askedNote,
   currentSort,
   downloadHref,
   fits,
@@ -458,6 +459,39 @@ describe("a saved view", () => {
     expect(showsView({ ...listed, sort: "tag:team" }, view)).toBe(false);
     // Ascending is a tag's first way, so a view saved without a direction is shown by it.
     expect(showsView({ sort: "tag:repo", dir: "asc" }, { query: { sort: "tag:repo" } })).toBe(true);
+  });
+});
+
+describe("a sentence asked of the list", () => {
+  it("says what the filters could not, and the values the window holds no trace of", () => {
+    expect(askedNote({ query: { status: ["error"] }, unmet: null, dropped: [] })).toBeNull();
+    expect(
+      askedNote({
+        query: { agent: ["billing"] },
+        unmet: "slower than five seconds",
+        dropped: [
+          { filter: "agent", value: "ghost" },
+          { filter: "model", value: "gpt-9" },
+          { filter: "sort", value: "tier" },
+        ],
+      }),
+    ).toBe(
+      'The filters can\'t say "slower than five seconds". No trace in this window has agent ghost, model gpt-9, a tag tier to sort by.',
+    );
+  });
+
+  it("gives the server's sentence alone where it opened on nothing", () => {
+    expect(askedNote({ query: null, unmet: "No traces in this window.", dropped: [] })).toBe(
+      "No traces in this window.",
+    );
+  });
+
+  it("opens the list on the answer as a saved view's query, every value the page drops dropped", () => {
+    expect(queryOfView({ agent: ["billing"], status: ["error", "nope" as never], days: 30 })).toEqual({
+      agent: ["billing"],
+      status: ["error"],
+      days: 30,
+    });
   });
 });
 

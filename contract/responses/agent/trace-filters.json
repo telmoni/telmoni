@@ -1,0 +1,20 @@
+{
+  "dropped": [
+    {
+      "filter": "model",
+      "value": "gpt-9"
+    }
+  ],
+  "query": {
+    "agent": [
+      "support"
+    ],
+    "days": 7,
+    "dir": "desc",
+    "sort": "duration",
+    "status": [
+      "error"
+    ]
+  },
+  "unmet": "slower than five seconds"
+}

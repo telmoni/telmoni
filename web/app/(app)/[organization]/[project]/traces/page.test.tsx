@@ -36,6 +36,15 @@ vi.mock("@/app/(app)/[organization]/[project]/traces/actions", () => ({
   deleteTraceViewAction: vi.fn(),
 }));
 
+let mockAgent = "disabled";
+vi.mock("@/lib/server/entities/agent", () => ({
+  agentStatus: async () => mockAgent,
+}));
+
+vi.mock("@/app/(app)/agent-actions", () => ({
+  askTraceListAction: vi.fn(),
+}));
+
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
   usePathname: () => "/acme/web/traces",
@@ -247,6 +256,27 @@ describe("TracesPage", () => {
       expect(screen.getByRole("link", { name: "Clear search refund" })).toBeInTheDocument();
     } finally {
       mockContentMode = { content_mode: "off", offered: ["off", "on"] };
+    }
+  });
+
+  // Asking the list spends one of the agent's questions, so it is drawn only
+  // where the agent answers.
+  it("offers the list asked in words where the agent is on, and nowhere else", async () => {
+    for (const status of ["disabled", "unavailable"]) {
+      mockAgent = status;
+      const { unmount } = render(
+        await TracesPage({ params: PARAMS, searchParams: Promise.resolve({}) }),
+      );
+      expect(screen.queryByRole("textbox", { name: "Ask the list in words" })).toBeNull();
+      unmount();
+    }
+    mockAgent = "enabled";
+    try {
+      render(await TracesPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+      expect(screen.getByRole("textbox", { name: "Ask the list in words" })).toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: "Clear all" })).toBeNull();
+    } finally {
+      mockAgent = "disabled";
     }
   });
 

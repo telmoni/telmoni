@@ -7,6 +7,7 @@ import { NoticeCard } from "@/components/notice-card";
 import { Button } from "@/components/ui/button";
 import { ServiceUnavailable } from "@/components/service-unavailable";
 import { TraceCharts, TraceHistogramStrip } from "@/components/traces/charts";
+import { AskList } from "@/components/traces/ask-list";
 import { ContentSearch } from "@/components/traces/content-search";
 import { ListPage } from "@/components/traces/list-page";
 import { NewTraces } from "@/components/traces/new-traces";
@@ -22,10 +23,11 @@ import {
   fetchTraces,
   fetchTraceViews,
 } from "@/lib/server/data";
+import { agentStatus } from "@/lib/server/entities/agent";
 import { projectPage } from "@/lib/server/project-page";
 import { projectPath } from "@/lib/slug";
 import { AGENT_PROMPT } from "@/lib/first-run";
-import { MAX_DAYS } from "@/lib/list-query";
+import { MAX_DAYS, OPENING_DAYS } from "@/lib/list-query";
 import { DEFAULT_ROWS, activeFilters, parseTraceQuery, parseTraceUi } from "@/lib/traces";
 import { UTC_OFFSET_COOKIE, parseUtcOffset } from "@/lib/utc-offset";
 
@@ -50,12 +52,13 @@ export default async function TracesPage({
   if (resolved.kind === "unavailable") return <ServiceUnavailable />;
   const { gate, project } = resolved;
 
-  const [access, facets, histogram, views, contentMode] = await Promise.all([
+  const [access, facets, histogram, views, contentMode, agent] = await Promise.all([
     fetchTraces(project.id, { ...query, limit: query.limit ?? DEFAULT_ROWS }),
     fetchTraceFacets(project.id, query),
     fetchTraceHistogram(project.id, query, utcOffset),
     fetchTraceViews(project.id),
     fetchContentMode(project.id),
+    agentStatus(project.id),
   ]);
   // Offered where the project keeps content, or a search is already asked.
   const searchable = contentMode?.content_mode === "on" || query.q !== undefined;
@@ -88,6 +91,18 @@ export default async function TracesPage({
         access={access}
         facets={facets.kind === "ok" ? facets.facets : null}
         rows={(list) => list.traces.length}
+        ask={
+          agent === "enabled" ? (
+            <AskList
+              organization={organization}
+              slug={slug}
+              projectId={project.id}
+              days={query.days ?? OPENING_DAYS}
+              q={query.q}
+              ui={ui}
+            />
+          ) : undefined
+        }
         search={
           searchable ? (
             <ContentSearch

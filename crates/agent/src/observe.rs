@@ -100,8 +100,8 @@ pub(crate) enum Step {
 pub(crate) struct TurnRecord {
     /// A fresh id for the question: its run's.
     pub(crate) trace_id: Uuid,
-    /// The conversation it was asked in.
-    pub(crate) conversation_id: Uuid,
+    /// The conversation it was asked in; none for the trace list's.
+    pub(crate) conversation_id: Option<Uuid>,
     /// The asker's organization, which the run names as its user.
     pub(crate) organization_id: OrganizationId,
     /// The project it was asked about.
@@ -121,7 +121,7 @@ pub(crate) struct TurnRecord {
 pub(crate) struct Recorder {
     telmoni: Option<Telmoni>,
     trace_id: Uuid,
-    conversation_id: Uuid,
+    conversation_id: Option<Uuid>,
     organization_id: OrganizationId,
     project_id: Option<ProjectId>,
     started_at: DateTime<Utc>,
@@ -151,7 +151,11 @@ enum Fate {
 
 impl Recorder {
     /// Begin a question's record; with no SDK, nothing is kept.
-    pub(crate) fn start(telmoni: Option<Telmoni>, acting: &Acting, conversation_id: Uuid) -> Self {
+    pub(crate) fn start(
+        telmoni: Option<Telmoni>,
+        acting: &Acting,
+        conversation_id: Option<Uuid>,
+    ) -> Self {
         Self {
             telmoni,
             trace_id: Uuid::new_v4(),
@@ -523,7 +527,7 @@ mod tests {
     /// One question through the recorder on `telmoni`, `then` given the
     /// recorder once it has answered and before it drops and reports.
     async fn ask(telmoni: Telmoni, tool: &'static str, then: impl FnOnce(&Recorder)) {
-        let recorder = Recorder::start(Some(telmoni), &acting(), Uuid::new_v4());
+        let recorder = Recorder::start(Some(telmoni), &acting(), Some(Uuid::new_v4()));
         let model = CallsThenAnswers(tool, AtomicUsize::new(0));
         let config = configured("http://model.invalid/v1", "answers");
         let mut runner = Roster;
@@ -621,7 +625,7 @@ mod tests {
     #[tokio::test]
     async fn a_call_is_sent_under_the_vendor_its_url_is() {
         let capture = Capture::default();
-        let recorder = Recorder::start(Some(client(&capture)), &acting(), Uuid::new_v4());
+        let recorder = Recorder::start(Some(client(&capture)), &acting(), Some(Uuid::new_v4()));
         let config = configured(
             "https://generativelanguage.googleapis.com/v1beta/openai",
             "gemini-3.1-flash-lite",

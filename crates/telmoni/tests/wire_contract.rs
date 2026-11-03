@@ -8,6 +8,7 @@ use serde_json::{Value, json};
 use telmoni_agent::db::MessageRole;
 use telmoni_agent::handler::{MESSAGE_MAX_CHARS, TurnEventKind};
 use telmoni_agent::tools::Tool;
+use telmoni_agent::trace_filters::SENTENCE_MAX_CHARS;
 use telmoni_agent::turn::STREAM_MAX;
 use telmoni_auth::audit_export::{ExportFailure, ExportFormat, ExportStatus, KEEP_FOR_SECS};
 use telmoni_auth::db::confirmation_codes::CODE_DIGITS;
@@ -177,6 +178,7 @@ fn generated_contract() -> Value {
             "email_max": MAX_EMAIL_LEN,
             "agent_message_max": MESSAGE_MAX_CHARS,
             "agent_stream_max_secs": STREAM_MAX.as_secs(),
+            "trace_question_max": SENTENCE_MAX_CHARS,
             "audit_export_kept_days": KEEP_FOR_SECS / 86_400,
             "confirmation_code_length": CODE_DIGITS,
         },

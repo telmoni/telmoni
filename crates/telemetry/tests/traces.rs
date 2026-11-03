@@ -25,10 +25,12 @@ use uuid::Uuid;
 
 use common::{AuthStub, SECRET, clickhouse_or_skip, span, state_with_stores};
 use telmoni_shared::middleware::service_auth::SERVICE_SECRET_HEADER;
+use telmoni_shared::seam::{Auth as _, Telemetry as _};
 use telmoni_shared::{OrganizationId, OrganizationRole, ProjectId, Role, SpanKind, SpanStatus};
 use telmoni_telemetry::router;
+use telmoni_telemetry::seam::TelemetrySeam;
 use telmoni_telemetry::store::SpanRow;
-use telmoni_telemetry::traces::{RUNS_MAX, TRACE_UNITS_MAX};
+use telmoni_telemetry::traces::{MAX_DAYS, RUNS_MAX, TRACE_UNITS_MAX};
 
 const LANE: &str = "/internal/v1/telemetry/traces";
 const OWNER: &str = "user_owner";
@@ -39,6 +41,8 @@ const STRANGER: &str = "user_stranger";
 /// Two projects: ours, with its three people seated, and another's.
 struct Projects {
     app: Router,
+    state: Arc<telmoni_telemetry::AppState>,
+    auth: Arc<AuthStub>,
     organization: OrganizationId,
     ours: ProjectId,
     theirs: ProjectId,
@@ -61,8 +65,11 @@ fn projects(pool: &PgPool) -> Projects {
         OrganizationRole::Owner,
         None,
     );
+    let state = state_with_stores(pool, auth.clone());
     Projects {
-        app: router(state_with_stores(pool, auth)),
+        app: router(state.clone()),
+        state,
+        auth,
         organization,
         ours,
         theirs,
@@ -70,6 +77,12 @@ fn projects(pool: &PgPool) -> Projects {
 }
 
 impl Projects {
+    /// `user` on our project, as auth resolves them.
+    async fn acting(&self, user: &str) -> telmoni_shared::acting::Acting {
+        let request = self.request(user, &self.ours, "/");
+        self.auth.resolve(request.headers()).await.expect("seated")
+    }
+
     fn request(&self, user: &str, project: &ProjectId, path: &str) -> Request<Body> {
         Request::builder()
             .method("GET")
@@ -1148,4 +1161,109 @@ async fn a_query_a_parameter_does_not_take_is_a_400_that_echoes_nothing(pool: Pg
         .expect("a request");
     let answered = app.oneshot(outside).await.expect("the router answers");
     assert_eq!(answered.status(), StatusCode::UNAUTHORIZED);
+}
+
+/// The agent's words for the list are its window's facet values; an answer
+/// is checked by the list's rules, held to the values its own window holds,
+/// and refused, echoing none of it, where it is no view of the list.
+#[sqlx::test]
+async fn a_sentences_answer_is_held_to_its_windows_values(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let p = projects(&pool);
+    seed(&ch, &p).await;
+    let seam = TelemetrySeam(p.state.clone());
+    let member = p.acting(MEMBER).await;
+
+    let vocabulary = seam.trace_vocabulary(&member, 7).await.expect("the words");
+    assert_eq!((vocabulary.days, vocabulary.max_days), (7, MAX_DAYS));
+    let words: Vec<(&str, Vec<&str>)> = vocabulary
+        .filters
+        .iter()
+        .map(|f| {
+            (
+                f.filter.as_str(),
+                f.values.iter().map(String::as_str).collect(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        words.first(),
+        Some(&("agent", vec!["nightly-report", "support-bot", "zeta"])),
+        "the sidebar's order, another project's run not among them"
+    );
+    assert!(
+        vocabulary
+            .filters
+            .iter()
+            .all(|f| !f.more && !f.values.is_empty())
+    );
+    assert!(
+        words
+            .iter()
+            .any(|(f, v)| *f == "tag" && v.contains(&"team:search"))
+    );
+
+    let checked = seam
+        .checked_trace_view(
+            &member,
+            serde_json::json!({
+                "agent": [" zeta ", "ghost", "zeta"],
+                "status": ["error"],
+                "sort": "tag:team",
+                "dir": "desc",
+            }),
+            &vocabulary,
+        )
+        .await
+        .expect("a view");
+    assert_eq!(
+        checked.query,
+        serde_json::json!({
+            "agent": ["zeta"], "status": ["error"], "sort": "tag:team", "dir": "desc", "days": 7,
+        }),
+        "trimmed, each once, and the list's window where it named none"
+    );
+    assert_eq!(
+        checked
+            .dropped
+            .iter()
+            .map(|d| (d.filter.as_str(), d.value.as_str()))
+            .collect::<Vec<_>>(),
+        [("agent", "ghost")]
+    );
+
+    let wider = seam
+        .checked_trace_view(&member, serde_json::json!({ "days": 30 }), &vocabulary)
+        .await
+        .expect("a wider window");
+    assert_eq!(wider.query, serde_json::json!({ "days": 30 }));
+
+    for refused in [
+        serde_json::json!({ "agent": "zeta" }),
+        serde_json::json!({ "query": "everything" }),
+        serde_json::json!({ "sort": "nonsense" }),
+        serde_json::json!({ "days": 0 }),
+    ] {
+        let e = seam
+            .checked_trace_view(&member, refused.clone(), &vocabulary)
+            .await
+            .expect_err("no view of the list");
+        let detail = e.to_problem_details().detail.unwrap_or_default();
+        assert_eq!(e.to_problem_details().status, 400, "{refused}");
+        assert!(
+            !detail.contains("everything") && !detail.contains("nonsense"),
+            "{detail}"
+        );
+    }
+
+    let nowhere = telmoni_shared::acting::Acting {
+        project: None,
+        ..member
+    };
+    assert!(
+        seam.trace_vocabulary(&nowhere, 7).await.is_err(),
+        "a project's traces alone"
+    );
 }

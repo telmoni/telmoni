@@ -25,6 +25,8 @@ use telmoni_shared::csv;
 use telmoni_shared::db::tenant_session::{ProjectAndOrganization, Scoped};
 use telmoni_shared::extract::{Json, Query};
 use telmoni_shared::rbac::{Resource, Verb};
+use telmoni_shared::seam::{FilterValues, TraceVocabulary};
+use telmoni_shared::types::WireEnum;
 use telmoni_shared::{
     AuditAction, AuthError, ProjectId, SortDirection, SpanKind, SpanStatus, TelemetryError,
     TelmoniError, TelmoniResourceKind, TraceSort, UserId,
@@ -704,6 +706,26 @@ impl Facets {
         }
     }
 
+    /// The values as a sentence's words, each filter that holds any.
+    fn vocabulary(mut self, max_days: u16) -> TraceVocabulary {
+        let filters = Facet::variants()
+            .iter()
+            .filter_map(|&facet| {
+                let values = std::mem::take(self.values_of(facet));
+                (!values.values.is_empty()).then(|| FilterValues {
+                    filter: facet.word().to_owned(),
+                    values: values.values.into_iter().map(|v| v.value).collect(),
+                    more: values.more,
+                })
+            })
+            .collect();
+        TraceVocabulary {
+            days: self.days,
+            max_days,
+            filters,
+        }
+    }
+
     /// The read's rows, by facet, in the read's order.
     pub(crate) fn of(days: u16, rows: Vec<FacetRow>) -> Self {
         let mut facets = Self {
@@ -1106,6 +1128,26 @@ pub(crate) async fn facets_page<L: Listing>(
         .await
         .map_err(read_failed)?;
     Ok(Facets::of(filter.days, rows))
+}
+
+/// The trace list's values over its last `days` for `acting`, who may read
+/// the project's traces: [`Telemetry::trace_vocabulary`](telmoni_shared::seam::Telemetry::trace_vocabulary).
+pub(crate) async fn vocabulary(
+    state: &AppState,
+    acting: &Acting,
+    days: u16,
+) -> Result<TraceVocabulary, TelmoniError> {
+    let project_id = acting
+        .require_project(Verb::Read, Resource::Trace)?
+        .project_id
+        .clone();
+    let mut filter = TraceQuery::default().filter()?;
+    filter.days = crate::capacity::visible_days(state, &project_id, check_days(days)?).await;
+    let max_days = crate::capacity::visible_days(state, &project_id, MAX_DAYS).await;
+    let rows = traces::facets::<Traces>(&state.store, &Projects::one(project_id), &filter)
+        .await
+        .map_err(read_failed)?;
+    Ok(Facets::of(filter.days, rows).vocabulary(max_days))
 }
 
 /// One list's rows for a download, sorted as asked, up to [`EXPORT_MAX`] of

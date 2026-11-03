@@ -67,8 +67,8 @@ pub(crate) fn send(telmoni: &Telmoni, record: &TurnRecord) {
 
 /// A question as the SDK records a run: the question itself, each model call
 /// and tool call under it in the order they happened, the asking
-/// organization's id as its user, and the agent's conversation as its
-/// session.
+/// organization's id as its user, and the agent's conversation, where it
+/// has one, as its session.
 pub(crate) fn run_record(record: &TurnRecord) -> RunRecord {
     let (error_type, cancelled) = match &record.ending {
         TurnEnding::Answered { .. } => (None, false),
@@ -94,7 +94,7 @@ pub(crate) fn run_record(record: &TurnRecord) -> RunRecord {
     let (start, end) = span(record.started_at, record.ended_at);
     RunRecord {
         user_id: Some(record.organization_id.to_string()),
-        session_id: Some(record.conversation_id.to_string()),
+        session_id: record.conversation_id.map(|id| id.to_string()),
         tags,
         inside: record
             .steps
@@ -269,7 +269,7 @@ mod tests {
         let started = Utc::now().trunc_subsecs(6) - chrono::Duration::seconds(10);
         TurnRecord {
             trace_id: Uuid::new_v4(),
-            conversation_id: Uuid::new_v4(),
+            conversation_id: Some(Uuid::new_v4()),
             organization_id: OrganizationId::new(),
             project_id: None,
             started_at: started,
@@ -337,7 +337,20 @@ mod tests {
             Some(turn.organization_id.as_str()),
             "the asking organization is the user, never the person"
         );
-        assert_eq!(run.session_id, Some(turn.conversation_id.to_string()));
+        assert!(turn.conversation_id.is_some());
+        assert_eq!(
+            run.session_id,
+            turn.conversation_id.map(|id| id.to_string())
+        );
+        let asked_of_the_list = TurnRecord {
+            conversation_id: None,
+            ..turn.clone()
+        };
+        assert_eq!(
+            run_record(&asked_of_the_list).session_id,
+            None,
+            "a question of the trace list keeps no conversation"
+        );
         assert_eq!(
             run.tags,
             BTreeMap::from([
@@ -503,7 +516,7 @@ mod tests {
         );
         assert_eq!(
             attribute(run, "gen_ai.conversation.id"),
-            Some(Value::from(turn.conversation_id.to_string()))
+            turn.conversation_id.map(|id| Value::from(id.to_string()))
         );
         assert_eq!(
             attribute(run, "telmoni.tag.asked_about"),

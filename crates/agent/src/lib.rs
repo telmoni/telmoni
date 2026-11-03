@@ -28,6 +28,7 @@ pub mod retention;
 pub mod retrieve;
 pub mod seam;
 pub mod tools;
+pub mod trace_filters;
 pub mod turn;
 
 use std::sync::Arc;
@@ -40,7 +41,7 @@ use sqlx::PgPool;
 
 use telmoni_shared::TelmoniError;
 use telmoni_shared::middleware::service_auth::{ServiceSecrets, require_service_secret};
-use telmoni_shared::seam::{Auth, Notifications};
+use telmoni_shared::seam::{Auth, Notifications, Telemetry};
 
 pub use config::Config;
 
@@ -53,6 +54,9 @@ pub struct AppState {
     pub auth: Arc<dyn Auth>,
     /// The feed, the connectors and their deliveries the tools read.
     pub notifications: Arc<dyn Notifications>,
+    /// The trace list's values, and its check of a view, that a question
+    /// asked of the list is answered in.
+    pub telemetry: Arc<dyn Telemetry>,
     /// What each organization may ask, read before a question is taken: a
     /// binary that sells nothing hands it no limits.
     pub entitlements: Arc<dyn telmoni_shared::seam::Entitlements>,
@@ -117,6 +121,7 @@ pub fn router(state: Arc<AppState>) -> Router {
     let lanes = Router::new()
         .route("/agent/status", get(handler::status))
         .route("/agent/turns", post(handler::post_turn))
+        .route("/agent/trace-filters", post(handler::post_trace_filters))
         .route("/agent/usage", get(handler::get_usage))
         .route("/agent/conversations", get(handler::list_conversations))
         .route(
@@ -136,6 +141,7 @@ pub fn absent_router(service_secrets: ServiceSecrets) -> Router {
     let lanes = Router::new()
         .route("/agent/status", get(handler::absent_status))
         .route("/agent/turns", post(handler::absent))
+        .route("/agent/trace-filters", post(handler::absent))
         .route("/agent/usage", get(handler::absent))
         .route("/agent/conversations", get(handler::absent))
         .route(

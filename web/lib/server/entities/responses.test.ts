@@ -23,7 +23,12 @@ import { AuditExportListSchema, AuditExportSchema } from "@/lib/types/audit-expo
 import { SettledInviteSchema } from "@/lib/types/settled-invite";
 
 import { ActiveSessionListSchema } from "./active-sessions";
-import { ConversationListSchema, ConversationSchema, StatusSchema } from "./agent";
+import {
+  ConversationListSchema,
+  ConversationSchema,
+  StatusSchema,
+  TraceFiltersSchema,
+} from "./agent";
 import { AlertListSchema, IncidentListSchema, MuteListSchema } from "./alerts";
 import { AuditPageSchema } from "./audit";
 import { InviteListSchema, InviteLookSchema, MemberListSchema } from "./member";
@@ -85,6 +90,7 @@ const READERS: Record<string, z.ZodType> = {
   "agent/conversation.json": ConversationSchema,
   "agent/conversations.json": ConversationListSchema,
   "agent/status.json": StatusSchema,
+  "agent/trace-filters.json": TraceFiltersSchema,
   "agent/turn.json": TurnFramesSchema,
   "auth/account-deleted.json": AccountDeletedSchema,
   "auth/audit-export.json": AuditExportSchema,

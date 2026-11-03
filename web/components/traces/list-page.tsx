@@ -54,6 +54,7 @@ export function ListPage<L extends ListWindow>({
   instead,
   table,
   search,
+  ask,
   children,
 }: {
   list: ListName;
@@ -80,6 +81,8 @@ export function ListPage<L extends ListWindow>({
   before?: ReactNode;
   /** A search of the list's kept content, drawn in the filter bar. */
   search?: ReactNode;
+  /** The list asked in words, drawn first in the filter bar. */
+  ask?: ReactNode;
   /** Drawn in place of the table and its pages. */
   instead?: ReactNode;
   table: (list: L) => ReactNode;
@@ -166,6 +169,7 @@ export function ListPage<L extends ListWindow>({
                   query={query}
                   ui={ui}
                   search={search}
+                  ask={ask}
                 />
                 {before}
                 {none ??

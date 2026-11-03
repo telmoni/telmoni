@@ -410,6 +410,7 @@
     "pinned_max": 8,
     "pinned_per_run": 32,
     "project_name_max": 100,
+    "trace_question_max": 500,
     "utc_offset_east": 840,
     "utc_offset_west": -720
   },

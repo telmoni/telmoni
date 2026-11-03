@@ -160,6 +160,28 @@ nothing to the audit log; opening a trace it found is recorded as any opening
 is. It reads the newest 5,000 fields holding the words, and a document's first
 4,096 distinct words and pairs.
 
+### Asking in words
+
+Where the deployment runs the [console agent](/docs/self-host/agent), a box
+beside the filters in force takes a sentence about the list, such as
+`errors from billing this week, slowest first`, and the agent turns it into
+the list's filters, sort and window: the chips above the rows and the page's
+URL, as if you had picked them, never a query of its own. It reads the
+sentence and the values the window's **Filters** panel names, never a span.
+It picks among those values. Where a filter holds more values than the panel
+names, it may name another, which the list filters by as named; otherwise a
+value the window holds no trace of is left out and named beside the list. A sentence naming no
+window keeps the list's, and one naming a window past what the project keeps
+reads all it keeps. What the filters cannot say, such as a negation, a number
+to compare (`slower than 5 seconds`), a time of day or words a trace holds, is
+named beside the list rather than guessed; the content search takes the last.
+
+The answer replaces the filters, the sort and the window in force, and leaves a
+content search where it is. A sentence is up to 500 characters and one of the
+agent's questions, counted in the hour with the agent panel's
+([what one question may use](/docs/self-host/agent#what-one-question-may-use))
+and, where the deployment limits them, in the month's. Nothing of it is kept.
+
 ### Saved views
 
 **Views** keeps a list as the project's own: its filters, sort, window, rows

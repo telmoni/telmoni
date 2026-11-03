@@ -244,6 +244,7 @@ impl App {
                     secrets.clone(),
                     late_auth.clone(),
                     notifier.clone(),
+                    Arc::new(telmoni_telemetry::seam::TelemetrySeam(telemetry.clone())),
                     entitlements.clone(),
                 )
                 .map(Arc::new)

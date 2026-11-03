@@ -26,14 +26,16 @@ use telmoni_shared::db::tenant_session::{
     PersonAndOrganization, Scoped, maintenance_scope, person_scope,
 };
 use telmoni_shared::extract::Json;
+use telmoni_shared::seam::DroppedValue;
 use telmoni_shared::{AuthError, AuthzError, ProblemDetails, ProjectId, TelmoniError};
 
 use crate::db::{self, ConversationSummary, MessageRole, StoredMessage};
 use crate::index::conversations;
-use crate::model::{Message, ToolCall, ToolResult};
+use crate::model::{Message, Model as _, ToolCall, ToolResult};
 use crate::observe::Recorder;
 use crate::prompt;
 use crate::tools::{self, Citation, Citations};
+use crate::trace_filters;
 use crate::turn::{self, Ending, Runner};
 use crate::{AppState, Live};
 
@@ -203,24 +205,18 @@ pub async fn get_usage(
     })))
 }
 
-/// `POST /internal/v1/agent/turns`.
-pub async fn post_turn(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-    Json(body): Json<TurnRequest>,
-) -> Result<Response, TelmoniError> {
-    let (acting, project_id) = asker(&state, &headers).await?;
-    let live = Arc::clone(state.live()?);
-    let message = body.message.trim().to_owned();
-    if message.is_empty() || message.chars().count() > MESSAGE_MAX_CHARS {
-        return Err(TelmoniError::BadRequest(format!(
-            "message is 1-{MESSAGE_MAX_CHARS} characters"
-        )));
-    }
+/// A question let in, by either lane: the organization not paused, the
+/// person's hour with room — under the lock on them `tx` holds until the
+/// question is written, which the caller does — and the plan's month, which
+/// counts it.
+async fn admitted<'a>(
+    state: &'a Arc<AppState>,
+    acting: &Acting,
+) -> Result<Scoped<'a, PersonAndOrganization>, TelmoniError> {
     // A paused organization asks nothing new; its conversations stay open
     // to read.
     telmoni_shared::seam::admit_new(state.entitlements.as_ref(), &acting.organization_id).await?;
-    let mut tx = author_scope(&state, &acting).await?;
+    let mut tx = author_scope(state, acting).await?;
     let (asked, oldest) = db::recent_questions(&mut tx, &acting.user_id).await?;
     if asked >= state.config.messages_per_hour {
         tx.commit().await?;
@@ -253,8 +249,26 @@ pub async fn post_turn(
                 .err()
                 .unwrap_or_else(|| TelmoniError::Internal("the month holds no question".into())));
         };
-        tell_when_crossed(&state, &acting.organization_id, &capacity, asked);
+        tell_when_crossed(state, &acting.organization_id, &capacity, asked);
     }
+    Ok(tx)
+}
+
+/// `POST /internal/v1/agent/turns`.
+pub async fn post_turn(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<TurnRequest>,
+) -> Result<Response, TelmoniError> {
+    let (acting, project_id) = asker(&state, &headers).await?;
+    let live = Arc::clone(state.live()?);
+    let message = body.message.trim().to_owned();
+    if message.is_empty() || message.chars().count() > MESSAGE_MAX_CHARS {
+        return Err(TelmoniError::BadRequest(format!(
+            "message is 1-{MESSAGE_MAX_CHARS} characters"
+        )));
+    }
+    let mut tx = admitted(&state, &acting).await?;
     let author = db::Author {
         organization_id: &acting.organization_id,
         project_id: &project_id,
@@ -504,7 +518,7 @@ async fn run_turn(
     events: Events,
 ) {
     let acting = &asker.acting;
-    let recorder = Recorder::start(state.telmoni.clone(), acting, conversation_id);
+    let recorder = Recorder::start(state.telmoni.clone(), acting, Some(conversation_id));
     let system = prompt::system(acting, &Utc::now().format("%Y-%m-%d").to_string());
     let specs = tools::specs();
     let mut runner = LiveRunner {
@@ -677,6 +691,117 @@ async fn save_answer(
 #[derive(Debug, Serialize)]
 pub struct ConversationList {
     pub conversations: Vec<ConversationSummary>,
+}
+
+/// A sentence asked of the trace list, and the window the list shows now.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ListQuestion {
+    sentence: String,
+    days: u16,
+}
+
+/// What the trace list is answered: the saved view's query it opens on, or
+/// none where the sentence could not be read as one, what of the sentence
+/// the filters could not say, and the values the window holds no trace of.
+#[derive(Debug, Serialize)]
+pub struct ListAnswer {
+    pub query: Option<Value>,
+    pub unmet: Option<String>,
+    pub dropped: Vec<DroppedValue>,
+}
+
+impl ListAnswer {
+    fn unread(note: &str) -> Self {
+        Self {
+            query: None,
+            unmet: Some(note.to_owned()),
+            dropped: Vec::new(),
+        }
+    }
+}
+
+/// `POST /internal/v1/agent/trace-filters` — one question of the plan's,
+/// counted in the hour beside a conversation's, and kept nowhere: the
+/// sentence becomes the list's filters, sort and window, as
+/// [`trace_filters`] answers it.
+pub async fn post_trace_filters(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<ListQuestion>,
+) -> Result<Json<ListAnswer>, TelmoniError> {
+    let (acting, _) = asker(&state, &headers).await?;
+    let live = Arc::clone(state.live()?);
+    let sentence = body.sentence.trim();
+    if sentence.is_empty() || sentence.chars().count() > trace_filters::SENTENCE_MAX_CHARS {
+        return Err(TelmoniError::BadRequest(format!(
+            "sentence is 1-{} characters",
+            trace_filters::SENTENCE_MAX_CHARS
+        )));
+    }
+    // Read before the question is counted: a role that cannot read the
+    // traces, or a window that holds none, spends nothing.
+    let vocabulary = state.telemetry.trace_vocabulary(&acting, body.days).await?;
+    if vocabulary.filters.is_empty() {
+        return Ok(Json(ListAnswer::unread(trace_filters::EMPTY_WINDOW)));
+    }
+    let mut tx = admitted(&state, &acting).await?;
+    db::insert_list_question(&mut tx, &acting.organization_id, &acting.user_id).await?;
+    tx.commit().await?;
+
+    let recorder = Recorder::start(state.telmoni.clone(), &acting, None);
+    let system = trace_filters::system(&Utc::now().format("%Y-%m-%d").to_string());
+    let messages = trace_filters::asked(sentence);
+    let vocabulary = trace_filters::fitted(vocabulary, &system, &messages);
+    let spec = trace_filters::spec(&vocabulary);
+    let called = {
+        let watched = recorder.model(live.model.as_ref(), &live.model_config);
+        let cap = u32::try_from(turn::AGENT_TURN_OUTPUT_TOKENS).unwrap_or(u32::MAX);
+        tokio::time::timeout(
+            trace_filters::ASK_BUDGET,
+            watched.stream_capped(
+                &system,
+                &messages,
+                std::slice::from_ref(&spec),
+                &|_| {},
+                cap,
+            ),
+        )
+        .await
+        .unwrap_or_else(|_| {
+            Err(TelmoniError::AgentModelUnavailable {
+                context: "the trace list's question ran out of time".into(),
+                failure: telmoni_shared::ModelFailure::NotNow,
+            })
+        })
+    };
+    let called = match called {
+        Ok(called) => called,
+        Err(e) => {
+            recorder.failed(&e);
+            return Err(e);
+        }
+    };
+    recorder.answered(Ending::Answered);
+    let Some(answer) = trace_filters::answer_of(called, &vocabulary) else {
+        return Ok(Json(ListAnswer::unread(trace_filters::NOT_READ)));
+    };
+    let checked = match state
+        .telemetry
+        .checked_trace_view(&acting, answer.query, &vocabulary)
+        .await
+    {
+        Ok(checked) => checked,
+        Err(TelmoniError::BadRequest(_)) => {
+            return Ok(Json(ListAnswer::unread(trace_filters::NOT_READ)));
+        }
+        Err(e) => return Err(e),
+    };
+    Ok(Json(ListAnswer {
+        query: Some(checked.query),
+        unmet: answer.unmet,
+        dropped: checked.dropped,
+    }))
 }
 
 /// `GET /internal/v1/agent/conversations` — the person's own, asked from this

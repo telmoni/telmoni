@@ -97,6 +97,11 @@ BEGIN
     IF to_regclass('agent.questions_asked') IS NOT NULL THEN
         EXECUTE 'REVOKE INSERT, UPDATE, DELETE ON agent.questions_asked FROM agent';
     END IF;
+    -- A list question's hour is the maintenance lane's to forget: a request
+    -- that removed one could give its person the hour back.
+    IF to_regclass('agent.list_questions') IS NOT NULL THEN
+        EXECUTE 'REVOKE UPDATE, DELETE ON agent.list_questions FROM agent';
+    END IF;
 EXCEPTION
     WHEN invalid_schema_name THEN
         RAISE NOTICE 'agent schema not yet created — agent own-schema grants land on next re-apply';

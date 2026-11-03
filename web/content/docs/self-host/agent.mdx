@@ -44,6 +44,8 @@ The agent has access to five internal inspection tools:
 | `connector_deliveries` | Project | One connector's latest deliveries, newest first, each with its send attempts: outcome, status code, duration and error. |
 | `audit_events` | Project | Queries the audit log by actor, action, and time: the project's events for a role that can read its audit log, and the whole organization's for the organization's owner and admins. |
 
+A sentence asked of the trace list ([asking in words](/docs/monitoring/traces#asking-in-words)) is answered apart from a conversation: one model call is offered one tool of its own, `trace_filters`, whose input is a saved view's query and whose choices are the values of the list's window, and telemetry checks the answer by the list's own rules before the list opens on it. It reads no span.
+
 ### Strict read-only isolation
 
 - **No Mutating Capabilities**: All five tools read, and none writes: the agent has no tool that creates, updates, or deletes anything. Every result reaches the model inside `<data>` tags, which the system prompt tells it to treat as information and never as instructions; every angle bracket in that text is swapped for a look-alike, so nothing a member or a webhook wrote can close the fence or open a tag. An answer is drawn as text, never HTML, and a link in it survives only as a page of this console or its docs — resolved as the browser would, so no path can collapse onto another host — never a door such as `/auth/logout`.
@@ -51,7 +53,8 @@ The agent has access to five internal inspection tools:
 
 ### What one question may use
 
-- A question is at most 4,000 characters, and a person may ask 60 an hour (`AGENT_MESSAGES_PER_HOUR`).
+- A question is at most 4,000 characters, and a person may ask 60 an hour (`AGENT_MESSAGES_PER_HOUR`), sentences asked of the trace list among them.
+- A sentence asked of the trace list is at most 500 characters and has one model call of 30 seconds. The list's values it is offered are cut, the values on the fewest runs first, to half a question's input tokens.
 - A turn has 100 seconds and up to 8 rounds of lookups. An answer cut short by either, one the model stopped writing, or one that ran out of room says so in its last lines.
 - The model rereads the last 20 messages of the conversation each turn. A conversation is titled by the first 80 characters of its first question; the agent's history lists the 50 most recently used conversations asked from the project, and an opened one shows its last 200 messages.
 - `search` returns 6 passages unless the model asks for up to 10; `connector_deliveries` 10, up to 20; `audit_events` 20, up to 50.

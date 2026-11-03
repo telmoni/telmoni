@@ -56,7 +56,7 @@ import {
   UserSort,
   ViewKind,
 } from "./enums";
-import { AGENT_MESSAGE_MAX, AGENT_STREAM_TIMEOUT_MS } from "./agent";
+import { AGENT_MESSAGE_MAX, AGENT_STREAM_TIMEOUT_MS, TRACE_QUESTION_MAX } from "./agent";
 import { AUDIT_EXPORT_KEPT_DAYS } from "./audit-export";
 import {
   ALERT_KINDS,
@@ -210,6 +210,7 @@ describe("wire contract", () => {
       api_key_description_max: MAX_API_KEY_DESCRIPTION,
       email_max: MAX_EMAIL,
       agent_message_max: AGENT_MESSAGE_MAX,
+      trace_question_max: TRACE_QUESTION_MAX,
       audit_export_kept_days: AUDIT_EXPORT_KEPT_DAYS,
       confirmation_code_length: CONFIRMATION_CODE_LENGTH,
     }).toEqual(LIMITS);

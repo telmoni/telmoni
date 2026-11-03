@@ -15,8 +15,9 @@ import {
 } from "@/lib/traces";
 
 // The filters in force above a list: a value at a time, each taken off by
-// its own ×, and all of them at once, a search of kept content beside them
-// where the list offers one. Plain links, so the bar is the server's to draw.
+// its own ×, and all of them at once, the list asked in words and a search of
+// kept content beside them where the list offers each. Plain links, so the
+// bar is the server's to draw.
 export function FilterBar({
   list,
   organization,
@@ -24,6 +25,7 @@ export function FilterBar({
   query,
   ui = {},
   search,
+  ask,
 }: {
   list: ListName;
   organization: string;
@@ -31,16 +33,19 @@ export function FilterBar({
   query: ListQuery<string>;
   /** The trace list's own state, which its links carry. */
   ui?: TraceUi;
-  /** A search of the list's kept content, drawn first. */
+  /** A search of the list's kept content. */
   search?: ReactNode;
+  /** The list asked in words, drawn first. */
+  ask?: ReactNode;
 }) {
   const chips = activeFilters(query);
-  if (chips.length === 0 && !search) return null;
+  if (chips.length === 0 && !search && !ask) return null;
   return (
     <div
       className="flex min-h-9 flex-wrap items-center gap-1.5 rounded-md border border-border px-2 py-1"
       aria-label="Filters in force"
     >
+      {ask}
       {search}
       {chips.map((chip) => (
         <Badge key={`${chip.filter}:${chip.value}`} variant="secondary" className="max-w-full gap-1 font-normal">

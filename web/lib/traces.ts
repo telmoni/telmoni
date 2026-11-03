@@ -322,6 +322,28 @@ export function activeFilters(query: ListQuery<string>): ActiveFilter[] {
   );
 }
 
+/** What a sentence asked of the list could not open on, in words, or `null`
+ *  where it opened on all of it: the server's sentence where it opened on
+ *  nothing, else what the filters could not say and the values the window
+ *  holds no trace of. */
+export function askedNote(answer: {
+  query: object | null;
+  unmet: string | null;
+  dropped: readonly { filter: string; value: string }[];
+}): string | null {
+  if (answer.query === null) return answer.unmet;
+  const missing = answer.dropped.map(({ filter, value }) =>
+    filter === "sort"
+      ? `a tag ${value} to sort by`
+      : `${(isOneOf(FILTERS, filter) ? FILTER_LABEL[filter] : filter).toLowerCase()} ${value}`,
+  );
+  const said = [
+    answer.unmet === null ? null : `The filters can't say "${answer.unmet}".`,
+    missing.length === 0 ? null : `No trace in this window has ${missing.join(", ")}.`,
+  ].filter((part) => part !== null);
+  return said.length === 0 ? null : said.join(" ");
+}
+
 /** Where the columns menu files a column: the counts of a run's parts, and its tokens. */
 export type ColumnGroup = "counts" | "tokens";
 

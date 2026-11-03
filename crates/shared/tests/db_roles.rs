@@ -129,9 +129,11 @@ const LANE_DELETED: &[&str] = &["telemetry.project_settings", "telemetry.content
 /// The tables the runtime role only adds to: its maintenance lane drains
 /// them, landing or settling each row and removing it, or purges them. A
 /// request that rewrote or removed one could unsay an uninstall before it is
-/// sent, or swap a span's content for other bytes.
+/// sent, swap a span's content for other bytes, or give back the hour's
+/// questions.
 const LANE_DRAINED: &[&str] = &[
     "notifications.uninstalls",
+    "agent.list_questions",
     "telemetry.plain_content",
     "telemetry.media",
     "telemetry.media_names",
@@ -559,6 +561,13 @@ async fn the_maintenance_lanes_narrowed_grants_hold_in_every_tier() {
             "agent_maintenance",
             "agent.questions_asked",
             &["SELECT", "INSERT", "UPDATE", "DELETE"],
+        ),
+        // Retention forgets a list question's hour; the purges, its person
+        // and organization.
+        (
+            "agent_maintenance",
+            "agent.list_questions",
+            &["SELECT", "DELETE"],
         ),
         // The purges delete a project's or an organization's settings; the
         // project's own scope writes them. (A transfer rewrites
