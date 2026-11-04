@@ -651,7 +651,7 @@ function SpanDetail({
   return (
     <section aria-label="The span chosen" className={cn("flex flex-col", className)}>
       <div className="grid shrink-0 gap-1.5 border-b border-border p-gutter">
-        <div className="flex min-h-9 min-w-0 items-center gap-2">
+        <div className="flex min-h-7 min-w-0 items-center gap-2">
           {!spansShown && <SpansButton ref={showSpansRef} shown={false} onClick={onShowSpans} />}
           <KindIcon span={span} />
           <h3 className="min-w-0 truncate text-sm font-medium" title={span.name}>

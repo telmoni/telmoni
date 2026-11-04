@@ -165,15 +165,16 @@ nothing.
 
 ## Rules
 
-A **rule** says what its evaluators judge, under **Rules** on the same
-page; several evaluators share one, and owners and admins make, change and
-delete them:
+A **rule** says what its evaluators judge, on the project's **Rules** page
+(`/{organization}/{project}/rules`, `g` `b`), beside **Evaluators** in the
+sidebar; several evaluators share one, and owners and admins make them with
+**New rule**, and change and delete them:
 
 - **Runs**, each once its own span has arrived and a minute has passed.
 - **Spans** of one kind — model calls, tool calls, steps or other spans —
   and of one name where the rule names one.
 - **Sessions**, each once quiet for the project's idle time, ten minutes
-  unless an owner or admin sets two to 1,440 under the rules.
+  unless an owner or admin sets two to 1,440 on the Rules page.
 
 A rule takes a saved view's filters from the [trace list](/docs/monitoring/traces),
 never its sort or window, and judges a share of what they admit, from

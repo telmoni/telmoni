@@ -2,6 +2,21 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
+// A list sorts by the address; a test's has none.
+vi.mock("next/navigation", () => ({
+  usePathname: () => "/acme/web",
+  useSearchParams: () => new URLSearchParams(),
+}));
+
+vi.mock("@/components/page-header", () => ({
+  PageHeader: ({ title, action }: { title: string; action?: React.ReactNode }) => (
+    <div data-testid="page-header">
+      {title}
+      {action}
+    </div>
+  ),
+}));
+
 vi.mock("./actions", () => ({
   saveRuleAction: vi.fn(async () => ({ ok: true })),
   previewRuleAction: vi.fn(async () => ({
@@ -10,9 +25,6 @@ vi.mock("./actions", () => ({
   })),
   deleteRuleAction: vi.fn(async () => ({ ok: true })),
   saveSessionIdleAction: vi.fn(async () => ({ ok: true })),
-  saveEvaluatorAction: vi.fn(),
-  tryEvaluatorAction: vi.fn(),
-  deleteEvaluatorAction: vi.fn(),
 }));
 
 import type { EvaluationRule, Evaluator } from "@/lib/server/entities/evaluators";
@@ -92,10 +104,12 @@ describe("Rules", () => {
     render(
       <Rules projectId="p" rules={[RULE]} evaluators={[EVALUATOR]} views={[]} idleMinutes={10} canEdit contentKept />,
     );
-    expect(screen.getByText(/Tool calls named search · 25% · Relevant/)).toBeTruthy();
-    expect(screen.getByText("Off")).toBeTruthy();
-    expect(screen.getByText(/Reaching back to 2026-10-30: under way, 120 looked over/)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "New rule" }));
+    const row = screen.getByRole("row", { name: /Tool calls named search/ });
+    expect(row).toHaveTextContent("25%");
+    expect(row).toHaveTextContent("Relevant");
+    expect(row).toHaveTextContent("Off");
+    expect(row).toHaveTextContent("From 2026-10-30: under way, 120 looked over");
+    fireEvent.click(screen.getByRole("button", { name: /New rule/ }));
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Every run" } });
     fireEvent.click(screen.getByRole("checkbox", { name: "Relevant" }));
     fireEvent.click(screen.getByRole("button", { name: "Preview the last 7 days" }));

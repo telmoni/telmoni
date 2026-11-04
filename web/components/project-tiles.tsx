@@ -33,7 +33,7 @@ export function ProjectTiles({
   roles?: boolean;
 }) {
   return (
-    <ul className="grid grid-cols-1 gap-gutter sm:grid-cols-2 lg:grid-cols-3">
+    <ul className="grid grid-cols-1 gap-page sm:grid-cols-2 lg:grid-cols-3">
       {projects.map((project) => {
         const control = action?.(project);
         return (

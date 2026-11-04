@@ -694,9 +694,13 @@ html.a11y-no-letter-keys [data-letter-key] {
 
   --tracking-label: 0.4em;
 
-  /* The console's one gutter: every padding off an edge and every gap between
-     controls side by side (`p-gutter`, `gap-gutter`); `GUTTER_PX` in TypeScript. */
+  /* The console's two gutters. A control's: every padding off an edge and
+     every gap between controls side by side, inside a card as between buttons
+     (`p-gutter`, `gap-gutter`); `GUTTER_PX` in TypeScript. The page's, twice
+     it: the page's inset, which the header keeps, and every gap between cards
+     and between sections (`p-page`, `gap-page`). */
   --spacing-gutter: 0.75rem;
+  --spacing-page: calc(2 * var(--spacing-gutter));
 
   /* The side panels stand at `--spacing-sidebar`; the rail's links, a gutter in
      from each side, at `--spacing-sidebar-inner`, as do the lists' filters. */
@@ -731,6 +735,14 @@ html.a11y-no-letter-keys [data-letter-key] {
    where a custom cursor is refused. */
 @utility cursor-expand {
   cursor: var(--cursor-expand);
+}
+
+/* `trim-cap`: a block's line box cut to its cap height and baseline, so a
+   number centred in a box is centred on its digits, whatever the font's line
+   metrics; a browser without `text-box` keeps the line box as it is. */
+@utility trim-cap {
+  display: block;
+  text-box: trim-both cap alphabetic;
 }
 
 @utility text-2xs {

@@ -1,24 +1,28 @@
 "use client";
 
+import { Plus } from "lucide-react";
 import { useId, useState } from "react";
 import { toast } from "sonner";
 
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { EnumSelect } from "@/components/enum-select";
+import { LocalTime } from "@/components/local-time";
 import { NoticeCard } from "@/components/notice-card";
+import { PageAction } from "@/components/page-action";
+import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { EVALUATION_RULE_NAME_MAX } from "@/lib/evaluators";
+import { WholeListTable } from "@/components/whole-list-table";
+import { EVALUATION_RULE_NAME_MAX, VARIABLES } from "@/lib/evaluators";
 import type { EvaluationRule, Evaluator, RulePreview } from "@/lib/server/entities/evaluators";
 import type { TraceView } from "@/lib/server/entities/traces";
 import { formatCost } from "@/lib/traces";
-import { EvaluationTarget, SpanKind } from "@/lib/types/enums";
+import { EvaluationTarget, SortDirection, SpanKind } from "@/lib/types/enums";
 import { useAction } from "@/lib/use-action";
+import { decimalTyped, wholeTyped } from "@/lib/typed-number";
 
-import { VARIABLES } from "./_evaluators";
 import { deleteRuleAction, previewRuleAction, saveRuleAction, saveSessionIdleAction } from "./actions";
 
 const TARGET_LABEL: Record<EvaluationTarget, string> = {
@@ -121,94 +125,126 @@ export function Rules({
   const [editing, setEditing] = useState<RuleDraft | null>(null);
   const { pending, run } = useAction();
   const nameOf = (id: string) => evaluators.find((e) => e.id === id)?.name ?? "a deleted evaluator";
+  const percent = (rule: EvaluationRule) => Math.round(rule.sample_rate * 1000) / 10;
   return (
-    <section className="grid gap-gutter text-sm" aria-labelledby="rules-heading">
-      <div className="flex flex-wrap items-center justify-between gap-gutter">
-        <h2 id="rules-heading" className="font-medium">
-          Rules
-        </h2>
-        {canEdit && contentKept && evaluators.length > 0 && !editing && (
-          <Button variant="outline" size="sm" onClick={() => setEditing(draftOf(null))}>
-            New rule
-          </Button>
+    <>
+      <PageHeader
+        title="Rules"
+        info="A rule says what its evaluators judge: the project's runs, its spans of a kind, or its sessions once quiet, under a saved view's filters, sampled."
+        action={
+          canEdit && contentKept && evaluators.length > 0 && !editing ? (
+            <PageAction primary="New rule" onClick={() => setEditing(draftOf(null))}>
+              <Plus aria-hidden />
+              New rule
+            </PageAction>
+          ) : undefined
+        }
+      />
+      <div className="grid gap-page text-sm">
+        {editing && (
+          <RuleForm
+            key={editing.id ?? "new"}
+            projectId={projectId}
+            initial={editing}
+            evaluators={evaluators}
+            views={views}
+            onDone={() => setEditing(null)}
+          />
         )}
-      </div>
-      <p className="text-muted-foreground">
-        A rule says what its evaluators judge: the project&apos;s runs, its spans of a kind, or its sessions once
-        quiet, under a saved view&apos;s filters, sampled.
-      </p>
-      {editing && (
-        <RuleForm
-          key={editing.id ?? "new"}
-          projectId={projectId}
-          initial={editing}
-          evaluators={evaluators}
-          views={views}
-          onDone={() => setEditing(null)}
-        />
-      )}
-      {rules.length === 0 && !editing && (
-        <NoticeCard
-          title="No rules yet."
-          body={
-            evaluators.length === 0
-              ? "A rule runs evaluators; make one first."
-              : "An evaluator judges nothing until a rule names it."
-          }
-        />
-      )}
-      {rules.length > 0 && (
-        <Card className="gap-0 p-0">
-          <ul className="divide-y divide-border">
-            {rules.map((rule) => (
-              <li key={rule.id} className="flex flex-wrap items-center justify-between gap-gutter p-gutter">
-                <div className="grid min-w-0">
-                  <span className="flex items-center gap-gutter font-medium">
+        {rules.length === 0 && !editing && (
+          <NoticeCard
+            title="No rules yet."
+            body={
+              evaluators.length === 0
+                ? "A rule runs evaluators; make one first."
+                : "An evaluator judges nothing until a rule names it."
+            }
+          />
+        )}
+        {rules.length > 0 && (
+          <WholeListTable
+            rows={rules}
+            rowKey={(rule) => rule.id}
+            defaultSort="name"
+            searchLabel="Search rules"
+            searchOf={(rule) => `${rule.name} ${judgedWords(rule)} ${rule.evaluators.map(nameOf).join(" ")}`}
+            columns={[
+              {
+                key: "name",
+                label: "Name",
+                sort: { by: (rule) => rule.name.toLowerCase(), first: SortDirection.Asc },
+                className: "font-medium whitespace-nowrap",
+                cell: (rule) => (
+                  <span className="flex items-center gap-gutter">
                     {rule.name}
                     {!rule.enabled && <Badge variant="secondary">Off</Badge>}
                   </span>
-                  <span className="truncate text-muted-foreground">
-                    {judgedWords(rule)} · {Math.round(rule.sample_rate * 1000) / 10}% ·{" "}
-                    {rule.evaluators.map(nameOf).join(", ")}
-                  </span>
-                  {rule.backfill_from && (
-                    <span className="text-muted-foreground">
-                      Reaching back to {rule.backfill_from.slice(0, 10)}:{" "}
-                      {rule.backfill_done_at ? "done" : "under way"}, {rule.backfill_seen} looked over
-                    </span>
-                  )}
-                </div>
-                {canEdit && (
-                  <div className="flex gap-gutter">
-                    <Button variant="outline" size="sm" disabled={!contentKept} onClick={() => setEditing(draftOf(rule))}>
-                      Edit
-                    </Button>
-                    <ConfirmDialog
-                      trigger={
-                        <Button variant="outline" size="sm" disabled={pending}>
-                          Delete
-                        </Button>
-                      }
-                      title={`Delete ${rule.name}?`}
-                      description="Its evaluators stay, and judge nothing it named."
-                      confirmLabel="Delete"
-                      destructive
-                      onConfirm={() =>
-                        run(
-                          () => deleteRuleAction(projectId, rule.id),
-                          () => toast.success(`${rule.name} deleted`),
-                        )
-                      }
-                    />
-                  </div>
-                )}
-              </li>
-            ))}
-          </ul>
-        </Card>
-      )}
-      <SessionIdle projectId={projectId} minutes={idleMinutes} canEdit={canEdit} />
-    </section>
+                ),
+              },
+              { key: "judges", label: "Judges", className: "text-muted-foreground", cell: judgedWords },
+              {
+                key: "sample",
+                label: "Sampled",
+                numeric: true,
+                sort: { by: (rule) => rule.sample_rate, first: SortDirection.Desc },
+                cell: (rule) => `${percent(rule)}%`,
+              },
+              {
+                key: "evaluators",
+                label: "Evaluators",
+                className: "text-muted-foreground",
+                cell: (rule) => rule.evaluators.map(nameOf).join(", "),
+              },
+              {
+                key: "reach",
+                label: "Reaching back",
+                className: "text-xs text-muted-foreground",
+                cell: (rule) =>
+                  rule.backfill_from
+                    ? `From ${rule.backfill_from.slice(0, 10)}: ${rule.backfill_done_at ? "done" : "under way"}, ${rule.backfill_seen} looked over`
+                    : "—",
+              },
+              {
+                key: "updated",
+                label: "Updated",
+                sort: { by: (rule) => rule.updated_at, first: SortDirection.Desc },
+                className: "text-xs text-muted-foreground whitespace-nowrap",
+                cell: (rule) => <LocalTime iso={rule.updated_at} mode="date" />,
+              },
+            ]}
+            actions={
+              canEdit
+                ? (rule) => (
+                    <div className="flex justify-end gap-gutter">
+                      <Button variant="outline" size="sm" disabled={!contentKept} onClick={() => setEditing(draftOf(rule))}>
+                        Edit
+                      </Button>
+                      <ConfirmDialog
+                        trigger={
+                          <Button variant="outline" size="sm" disabled={pending}>
+                            Delete
+                          </Button>
+                        }
+                        title={`Delete ${rule.name}?`}
+                        description="Its evaluators stay, and judge nothing it named."
+                        confirmLabel="Delete"
+                        destructive
+                        onConfirm={() =>
+                          run(
+                            () => deleteRuleAction(projectId, rule.id),
+                            () => toast.success(`${rule.name} deleted`),
+                          )
+                        }
+                      />
+                    </div>
+                  )
+                : undefined
+            }
+          />
+        )}
+        <SessionIdle projectId={projectId} minutes={idleMinutes} canEdit={canEdit} />
+      </div>
+    </>
   );
 }
 
@@ -239,7 +275,7 @@ function SessionIdle({ projectId, minutes, canEdit }: { projectId: string; minut
           inputMode="numeric"
           value={typed}
           disabled={!canEdit}
-          onChange={(e) => setTyped(e.target.value)}
+          onChange={(e) => setTyped(wholeTyped(e.target.value))}
         />
       </div>
       {canEdit && (
@@ -367,7 +403,7 @@ function RuleForm({
             className="w-24"
             inputMode="decimal"
             value={draft.percent}
-            onChange={(e) => set({ percent: e.target.value })}
+            onChange={(e) => set({ percent: decimalTyped(e.target.value) })}
           />
         </div>
       </div>

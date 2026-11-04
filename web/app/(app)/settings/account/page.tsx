@@ -36,7 +36,7 @@ export default async function AccountPage() {
   return (
     <>
       <PageHeader title="Account" />
-      <div className="grid gap-gutter">
+      <div className="grid gap-page">
         <Section
           title="Profile"
           description="Your name and photo are managed by your identity provider during sign-in, and sync back here the next time you sign in."

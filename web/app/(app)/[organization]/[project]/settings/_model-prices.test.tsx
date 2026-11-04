@@ -85,6 +85,22 @@ describe("ModelPricesForm", () => {
     expect(toastSuccess).toHaveBeenCalled();
   });
 
+  it("offers Cancel once the list is changed, putting back the saved prices and sending nothing", () => {
+    render(<ModelPricesForm projectId="project_1" prices={[PRICE]} canEdit />);
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Add a price" }));
+    fireEvent.click(
+      within(screen.getByRole("group", { name: "Price 1" })).getByRole("button", { name: "Remove" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.getAllByRole("group")).toHaveLength(1);
+    expect(within(screen.getByRole("group", { name: "Price 1" })).getByLabelText("Provider")).toHaveValue(
+      PRICE.provider,
+    );
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+    expect(save).not.toHaveBeenCalled();
+  });
+
   it("says why a list cannot be sent, and sends nothing", async () => {
     render(<ModelPricesForm projectId="project_1" prices={[]} canEdit />);
     fireEvent.click(screen.getByRole("button", { name: "Add a price" }));

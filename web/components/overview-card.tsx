@@ -6,15 +6,15 @@ import { Children, type ReactNode } from "react";
 import { Card } from "@/components/ui/card";
 
 /** An overview's cards in three columns from `lg`, dealt across in order and each stacked
- *  a gutter under the one above at its own height; below `lg`, one column in that order. */
+ *  a page's gutter under the one above at its own height; below `lg`, one column in that order. */
 export function OverviewGrid({ children }: { children: ReactNode }) {
   const cards = Children.toArray(children);
   const stacks = [0, 1, 2].map((column) => cards.filter((_, i) => i % 3 === column));
   return (
-    <div className="grid grid-cols-1 items-start gap-gutter lg:grid-cols-3">
+    <div className="grid grid-cols-1 items-start gap-page lg:grid-cols-3">
       {stacks.map((stack, column) => (
         // Below `lg` a stack steps aside, its cards the grid's own, in their order again.
-        <div key={column} className="contents lg:flex lg:flex-col lg:gap-gutter">
+        <div key={column} className="contents lg:flex lg:flex-col lg:gap-page">
           {stack.map((card, row) => (
             <div key={row} className="min-w-0" style={{ order: row * 3 + column }}>
               {card}

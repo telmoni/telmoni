@@ -16,7 +16,7 @@ export type RoleCard = { badge: string; body: ReactNode };
 
 export function RoleCards({ cards }: { cards: Record<Role, RoleCard> }) {
   return (
-    <section className="grid gap-gutter lg:grid-cols-3">
+    <section className="grid gap-page lg:grid-cols-3">
       {[Role.Owner, Role.Admin, Role.Member].map((role) => (
         <Card key={role} className="gap-1.5">
           <div className="flex flex-wrap items-center justify-between gap-2">

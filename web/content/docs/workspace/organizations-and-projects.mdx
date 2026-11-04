@@ -89,12 +89,13 @@ URL](#name-and-url)). On these pages,
   their incidents — [`/dashboards`](/docs/monitoring/dashboards) — its spend,
   tokens, runs, latency and time to first token over a window, spend split
   by a model, an agent, a tag, a user or a session, and the dashboards saved
-  for everyone on the project — and `/api-keys`, `/connectors`, `/members`,
-  `/audit-log`, `/privacy` — the project's privacy posture: its content mode,
-  what its spans arrived with in the last thirty days, who read its content
-  then and what its evaluators read, by day, how long its data is kept and where, and the
-  [field inventory](/docs/api/field-inventory), every attribute Telmoni reads
-  from a span and what becomes of it — and `/settings` under it.
+  for everyone on the project — [`/scores`](/docs/monitoring/scores) — every
+  score of its traces, spans and sessions — `/evaluators`, `/rules` — what
+  its evaluators judge — and `/api-keys`,
+  [`/models`](/docs/workspace/model-connections) — the keys its evaluators
+  judge with — `/connectors`, `/members`,
+  `/audit-log`, and `/settings` under it — its content mode, how long its
+  data is kept, and an end user's data given or erased.
 - **Your settings** live under `/settings`: `/settings/general`,
   `/settings/account`, `/settings/notifications`, `/settings/accessibility`,
   and `/settings/privacy`.
@@ -175,7 +176,8 @@ Windows and Linux):
   [General](/docs/settings/general) settings page.
 - **Primary action (`c`)**: Triggers the primary action of the current page:
   **New project**, **Mint key**, **Invite member** (on a project's **Members**
-  page, **Add member**), **New alert** on a project's **Alerts** page, or
+  page, **Add member**), **New alert** on a project's **Alerts** page, **New objective** on its
+  **Objectives** page, or
   **Export** on the organization's audit log; on the hosted service's
   **Billing** page, **Plans** or **Manage billing**.
 - **Next and previous (`j`, `k`), open (`o`)**: With a trace open over the
@@ -189,18 +191,19 @@ Windows and Linux):
   - `g` `o`: Overview
   - `g` `t`: Traces, `g` `s`: Sessions, `g` `u`: Users, `g` `a`: Alerts,
     `g` `d`: Dashboards
-  - `g` `k`: API keys, `g` `c`: Connectors, `g` `m`: Members, `g` `l`: Audit log,
-    `g` `p`: Privacy
+  - `g` `r`: Scores, `g` `e`: Evaluators, `g` `b`: Rules, `g` `v`: Objectives
+  - `g` `k`: API keys, `g` `i`: Models, `g` `c`: Connectors, `g` `m`: Members, `g` `l`: Audit log, `g` `n`: Notifications
   - `g` `,`: Settings, as `⌘,` opens preferences on a Mac
 
   On an organization's pages: `g` `o` Overview, `g` `p` Projects, `g` `m`
-  Members, `g` `l` Audit log, `g` `,` Settings, and on the hosted service
+  Members, `g` `l` Audit log, `g` `n` Notifications, `g` `,` Settings, and on the hosted service
   `g` `b` Billing. On your account's pages: `g` `,` Settings, `g` `a`
   Accessibility, `g` `p` Privacy. A row that is not on the sidebar you are in
   has no sequence there, so `g` `k` on an organization's pages does nothing.
   A console built on this one can add rows of its own, each with a key of its
   own. Two sequences work from anywhere in the console:
-  - `g` `n`: Notifications, the page behind the bell
+  - `g` `n`: Notifications — a project's on its pages, an organization's on
+    its own, and yours on your account's
   - `g` `O` (shift): The organization's overview
 - **Keyboard shortcuts cheat sheet (`?`, `Shift` `/` on a US keyboard)**: Opens the full shortcuts sheet.
   Letter-key shortcuts can be turned off on the
@@ -294,11 +297,9 @@ project's **Settings** page (`/{organization}/{project}/settings`).
   shown. The console agent reads none of it, in any mode.
 
 Ingest reads the mode on every export, so it acts at the door, as the span
-arrives. The project's **Privacy** page shows the mode, what its spans arrived
-with in the last thirty days, content dropped at the door among it, who read
-its content then and what its evaluators read of it, by day and provider, how long its data is kept and where, and the [field
-inventory](/docs/api/field-inventory): every attribute ingest reads, and what
-becomes of each.
+arrives. The project's **Settings** page shows the mode; the [field
+inventory](/docs/api/field-inventory) lists every attribute ingest reads, and
+what becomes of each.
 
 ### Deleting a project
 
@@ -376,8 +377,7 @@ An organization Owner can hand a project to one of the project's Admins:
      and which [erasing an end user](/docs/workspace/data-deletion) still
      finds, its size counted on the new organization from the move. Each
      earlier read of that content stays in the old organization's log, with
-     the project's other earlier events; the project's **Privacy** page says
-     so.
+     the project's other earlier events.
    - Both organizations' audit logs record the move; the receiving one also
      notes the name the project was offered under when a clash renamed it. The
      project's earlier events stay in the old organization's log, so its

@@ -7,6 +7,7 @@ import { toast } from "sonner";
 
 import {
   SidePanel,
+  SidePanelBody,
   SidePanelFooter,
   SidePanelHeader,
   SidePanelRow,
@@ -115,7 +116,7 @@ export function CreateOrganizationPanel({
             An organization holds projects and the people who work on them.
           </p>
         </SidePanelHeader>
-        <div className="min-h-0 flex-1 overflow-y-auto px-gutter">
+        <SidePanelBody>
           {notice}
           <SidePanelRow label="Name" htmlFor="organization-name">
             <Input
@@ -178,7 +179,7 @@ export function CreateOrganizationPanel({
               {error}
             </p>
           )}
-        </div>
+        </SidePanelBody>
         <SidePanelFooter>
           <Button type="submit" disabled={!canSubmit}>
             {pending ? "Creating…" : "Create organization"}

@@ -102,8 +102,7 @@ export function ConsoleHeader({
         </Link>
       </div>
       {/* `pl-1` with the switcher's own `px-2`: its name starts where the
-          page's title does, a gutter from the rail's rule — the rail's own inset
-          (`console-shell.tsx`). */}
+          page's title does, a gutter from the rail's rule (`console-shell.tsx`). */}
       <div className="flex min-w-0 flex-1 items-center gap-gutter pl-1 pr-gutter">
         <ResourceSelector organizationBadge={organizationBadge} />
       </div>

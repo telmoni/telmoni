@@ -1,12 +1,32 @@
 // How a score reads wherever it is drawn: a badge on a trace, a column of the
 // list, the head of a session.
 
+import type { Score } from "@/lib/server/entities/scores";
 import type { ScoreSummary } from "@/lib/types/traces";
-import { ScoreType } from "@/lib/types/enums";
+import { ScoreSource, ScoreType } from "@/lib/types/enums";
 
 /** A number to three figures at most, as a score is read. */
 export function formatScoreValue(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(Math.abs(value) >= 10 ? 1 : 2);
+}
+
+/** Who gave a score, as a sentence ends: "relevance 0.8, by an evaluator". */
+export const SCORE_SOURCE: Record<Score["source"], string> = {
+  [ScoreSource.Sdk]: "from your code",
+  [ScoreSource.Member]: "by a member",
+  [ScoreSource.Evaluator]: "by an evaluator",
+};
+
+/** What one score says. */
+export function scoreSaid(score: Score): string {
+  switch (score.data_type) {
+    case ScoreType.Boolean:
+      return score.value === 1 ? "yes" : "no";
+    case ScoreType.Number:
+      return score.value == null ? "—" : formatScoreValue(score.value);
+    case ScoreType.Category:
+      return score.categories.join(", ");
+  }
 }
 
 /** A score name's value: a yes-or-no's share of yeses, a number's mean, a category's values. */

@@ -8,14 +8,12 @@ import {
   fetchEvaluatorVersions,
   fetchEvaluators,
 } from "@/lib/server/entities/evaluators";
-import { fetchTraceViews } from "@/lib/server/entities/traces";
 import { fetchModelConnections } from "@/lib/server/entities/model-connections";
 import { projectPage } from "@/lib/server/project-page";
 import { projectPath } from "@/lib/slug";
 
 import { EvaluatorDetails } from "./_details";
 import { Evaluators } from "./_evaluators";
-import { Rules } from "./_rules";
 
 export const metadata = { title: "Evaluators" };
 
@@ -32,12 +30,11 @@ export default async function EvaluatorsPage({
   const { project } = resolved;
   const named = typeof query.evaluator === "string" ? query.evaluator : null;
 
-  const [listing, templates, connections, rules, views, versions, evaluations, agreement] = await Promise.all([
+  const [listing, templates, connections, rules, versions, evaluations, agreement] = await Promise.all([
     fetchEvaluators(project.id),
     fetchEvaluatorTemplates(project.id),
     fetchModelConnections(project.id),
     fetchEvaluationRules(project.id),
-    fetchTraceViews(project.id),
     named ? fetchEvaluatorVersions(project.id, named) : null,
     named ? fetchEvaluations(project.id, named) : null,
     named ? fetchAgreement(project.id, named) : null,
@@ -61,20 +58,9 @@ export default async function EvaluatorsPage({
         contentKept={listing.content_kept}
         canEdit={administers(project.role)}
         here={here}
-        privacyHref={projectPath(organization, slug, "/privacy")}
         settingsHref={projectPath(organization, slug, "/settings")}
+        connectionsHref={projectPath(organization, slug, "/models")}
       />
-      <div className="mt-gutter">
-        <Rules
-          projectId={project.id}
-          rules={rules.rules}
-          evaluators={listing.evaluators}
-          views={views.kind === "ok" ? views.views : []}
-          idleMinutes={rules.session_idle_minutes}
-          canEdit={administers(project.role)}
-          contentKept={listing.content_kept}
-        />
-      </div>
       {versions && versions.length > 0 && (
         <EvaluatorDetails
           versions={versions}

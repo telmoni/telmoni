@@ -2,18 +2,18 @@
 
 import Link from "next/link";
 import { startTransition, useId, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { KeyRound } from "lucide-react";
 
-import { useConsoleShell } from "@/components/console-shell";
 import { InstallTabs } from "@/components/install-tabs";
 import { PageAction } from "@/components/page-action";
 import { CopyBox, DialogSection, PlaintextTokenDialog } from "@/components/plaintext-token-dialog";
 import {
   SidePanel,
+  SidePanelBody,
   SidePanelFooter,
   SidePanelHeader,
   SidePanelRow,
+  usePanelOpening,
 } from "@/components/side-panel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -40,10 +40,6 @@ import { mintTokenAction, type MintedKey } from "./actions";
 // key itself, shown once, stays a dialog in front of the page, since it must
 // be copied before anything else happens.
 
-/** One opening of the panel: counted, so asking again draws it afresh, and
- *  the control the focus goes back to as it shuts. */
-type Opening = { at: number; returnTo: HTMLElement | null };
-
 /** A key just minted, and whether it sends spans. */
 type NewKey = MintedKey & { ingest: boolean };
 
@@ -56,20 +52,17 @@ export function KeysActions({
   /// Its Traces page, where a key's first trace lists.
   tracesHref: string;
 }) {
-  const [opening, setOpening] = useState<Opening | null>(null);
+  const { opening, open, close, place } = usePanelOpening();
   const [minted, setMinted] = useState<NewKey | null>(null);
-  const openings = useRef(0);
-  const { element } = useConsoleShell();
-
 
   const panel = opening && (
     <MintKeyPanel
       key={opening.at}
       projectId={projectId}
-      onClose={() => setOpening(null)}
+      onClose={close}
       returnFocus={() => opening.returnTo}
       onMinted={(result) => {
-        setOpening(null);
+        close();
         setMinted(result);
       }}
     />
@@ -79,13 +72,13 @@ export function KeysActions({
     <div className="flex items-center gap-1">
       <PageAction
         primary="Mint key"
-        onClick={(e) => setOpening({ at: ++openings.current, returnTo: e.currentTarget })}
+        onClick={(e) => open(e.currentTarget, null)}
       >
         <KeyRound className="size-4" />
         Mint key
       </PageAction>
 
-      {panel && (element ? createPortal(panel, element) : panel)}
+      {place(panel)}
 
       {minted && (
         <PlaintextTokenDialog
@@ -200,7 +193,7 @@ function MintKeyPanel({
             The plaintext is shown exactly once.
           </p>
         </SidePanelHeader>
-        <div className="min-h-0 flex-1 overflow-y-auto px-gutter">
+        <SidePanelBody>
           <SidePanelRow label="Name" htmlFor="key-name">
             <Input
               ref={field}
@@ -269,7 +262,7 @@ function MintKeyPanel({
               {error}
             </p>
           )}
-        </div>
+        </SidePanelBody>
         <SidePanelFooter>
           <Button type="submit" disabled={!canSubmit}>
             {pending ? "Minting…" : "Mint key"}

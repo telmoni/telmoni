@@ -8,12 +8,6 @@ import { type ActionResult, refused } from "@/lib/action-result";
 import { extractProblem, readBody, tryFetchWithTimeout } from "@/lib/api/fetch";
 import { NOT_A_CODE, isConfirmationCode } from "@/lib/confirmation-code";
 import { env } from "@/lib/env";
-import {
-  MODEL_CONNECTION_MODEL_MAX,
-  MODEL_CONNECTION_MODELS_MAX,
-  MODEL_CONNECTION_NAME_MAX,
-  MODEL_CONNECTION_SECRET_MAX,
-} from "@/lib/evaluators";
 import { organizationChannel, publishEvent } from "@/lib/events/publisher";
 import { checkProjectName } from "@/lib/names";
 import { admitProject } from "@/lib/server/admit";
@@ -21,7 +15,7 @@ import { activeOrganization, getServerContext } from "@/lib/server/entities/orga
 import { ProjectRenamedSchema, fetchProject } from "@/lib/server/entities/projects";
 import { ModelPricesSchema } from "@/lib/server/entities/model-prices";
 import { canonicalPath } from "@/lib/server/path";
-import { ContentMode, ModelProvider } from "@/lib/types/enums";
+import { ContentMode } from "@/lib/types/enums";
 
 const Mode = z.enum(ContentMode);
 
@@ -201,47 +195,25 @@ export async function saveModelPricesAction(
   return { ok: true };
 }
 
-/** What a model connection's save sends, before the server checks its every rule. */
-const ConnectionInputSchema = z.object({
-  id: z.guid().optional(),
-  name: z.string().min(1).max(MODEL_CONNECTION_NAME_MAX),
-  provider: z.enum(ModelProvider),
-  base_url: z.string().max(2048).optional(),
-  region: z.string().max(32).optional(),
-  models: z.array(z.string().max(MODEL_CONNECTION_MODEL_MAX)).min(1).max(MODEL_CONNECTION_MODELS_MAX),
-  is_default: z.boolean(),
-  secret: z.string().max(MODEL_CONNECTION_SECRET_MAX).optional(),
-});
-
-/** A model connection made or changed, proved by one small request first: the provider's refusal is the answer. */
-export async function saveModelConnectionAction(projectId: string, input: unknown): Promise<ActionResult> {
-  const gate = await admitProject({ call: "project:model-connections", limit: 10 }, projectId);
+/// How many days the project keeps its spans and the content kept with them:
+/// one up to the longest sold, which the server holds, and the owner's or an
+/// admin's alone to set, which it holds too.
+export async function setRetentionAction(
+  projectId: string,
+  days: number,
+): Promise<ActionResult> {
+  const gate = await admitProject({ call: "project:retention", limit: 10 }, projectId);
   if (!gate.ok) return refused(gate.error);
-  const asked = ConnectionInputSchema.safeParse(input);
-  if (!asked.success) return refused("That connection could not be read.");
-  // The proof stands in front of the save: a sign-in's two exchanges and the model, a minute each at most.
-  const res = await tryFetchWithTimeout(
-    `${env.SERVER_URL}/internal/v1/telemetry/model-connections`,
-    { method: "PUT", headers: { ...gate.headers, "content-type": "application/json" }, body: JSON.stringify(asked.data) },
-    240_000,
-  );
-  if (!res) return refused("The provider did not answer in time. Reload the page to see whether the connection was saved.");
-  if (!res.ok) return refused((await extractProblem(res)).message);
-  revalidatePath("/(app)/[organization]/[project]/settings", "page");
-  return { ok: true };
-}
+  if (!Number.isInteger(days) || days < 1) return refused("Choose a whole number of days, one or more.");
 
-/** A model connection deleted, its key with it. */
-export async function deleteModelConnectionAction(projectId: string, id: string): Promise<ActionResult> {
-  if (!z.guid().safeParse(id).success) return refused("Invalid connection id.");
-  const gate = await admitProject({ call: "project:model-connections", limit: 10 }, projectId);
-  if (!gate.ok) return refused(gate.error);
-  const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/v1/telemetry/model-connections/${encodeURIComponent(id)}`, {
-    method: "DELETE",
-    headers: gate.headers,
+  const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/v1/telemetry/retention`, {
+    method: "PUT",
+    headers: { ...gate.headers, "content-type": "application/json" },
+    body: JSON.stringify({ retention_days: days }),
   });
-  if (!res) return refused("The connection could not be deleted. Try again.");
+  if (!res) return refused("Failed to change the retention. Please try again.");
   if (!res.ok) return refused((await extractProblem(res)).message);
+
   revalidatePath("/(app)/[organization]/[project]/settings", "page");
   return { ok: true };
 }

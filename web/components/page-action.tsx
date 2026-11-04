@@ -12,10 +12,7 @@ import {
   type SetStateAction,
 } from "react";
 
-import { Slot } from "radix-ui";
-
 import { Button } from "@/components/ui/button";
-import { Kbd } from "@/components/ui/kbd";
 import { PAGE_ACTION_KEY } from "@/lib/keys";
 import { useLetterKeys } from "@/lib/use-accessibility";
 import { cn } from "@/lib/utils";
@@ -75,17 +72,6 @@ export function PageAction({
     return () => set((prev) => (prev === mine ? null : prev));
   }, [primary, disabled, set]);
 
-  const keycap =
-    primary && !disabled ? (
-      <Kbd
-        data-letter-key=""
-        className={cn(
-          variant === "default" && "bg-primary-foreground/20 text-primary-foreground",
-        )}
-      >
-        {PAGE_ACTION_KEY.toUpperCase()}
-      </Kbd>
-    ) : null;
   const buttonProps = {
     ref,
     variant,
@@ -95,28 +81,7 @@ export function PageAction({
     ...props,
   };
 
-  // ⚠ A primary action that wraps a link (`asChild`) puts its keycap INSIDE
-  // the link. The slot merges into one child element, so a keycap beside it
-  // would be a second child it refuses; `Slottable` marks the link as the
-  // element and hands it the keycap as a child of its own.
-  if (primary && props.asChild) {
-    return (
-      <Button {...buttonProps}>
-        <Slot.Slottable>{children}</Slot.Slottable>
-        {keycap}
-      </Button>
-    );
-  }
-  return (
-    <Button {...buttonProps}>
-      {primary ? (
-        <>
-          {children}
-          {keycap}
-        </>
-      ) : (
-        children
-      )}
-    </Button>
-  );
+  // Its key is answered and announced (`aria-keyshortcuts`), and listed on the
+  // shortcuts sheet (`?`), but drawn on no button.
+  return <Button {...buttonProps}>{children}</Button>;
 }

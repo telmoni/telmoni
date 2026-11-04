@@ -9,6 +9,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   buildConsoleNav,
   consolePlace,
+  isAccountPath,
   navBlocks,
   type ConsoleNavItem,
 } from "@/lib/console-nav";
@@ -153,7 +154,7 @@ export function ConsoleSidebar({
 
   const flags = useFlags();
   const groups = buildConsoleNav(pathname, flags);
-  const steppedIn = groups[0]?.title === "Account";
+  const steppedIn = isAccountPath(pathname);
   const { live, fallback } = useLiveResources();
   const returnUrl = resolveReturnUrl(trail, live, fallback);
   const backToOrganization = consolePlace(returnUrl)?.kind === "organization";
@@ -167,7 +168,7 @@ export function ConsoleSidebar({
   // from the path, and a path that names nothing spells a rail of links to
   // more "not found". `(app)/not-found.tsx` marks itself, and every row here
   // answers the mark in CSS: the address's rows go, and the way back, which
-  // Account draws anyway, comes. In CSS because only the page knows — an
+  // Settings draws anyway, comes. In CSS because only the page knows — an
   // outage draws the same empty store a dead address does — and the page
   // renders after the rail: a class is right in the server's HTML, where
   // state would correct itself once the console had hydrated.
@@ -230,7 +231,7 @@ export function ConsoleSidebar({
                   one above; a headed one under a 28px heading row, the rows'
                   height, whose label sits on the icons' left edge, closer to
                   its rows than to the block before, which is what groups them.
-                  Closed, a rule parts the blocks. The way back heads Account's
+                  Closed, a rule parts the blocks. The way back heads Settings'
                   rail as a block of its own, and is all a page not found shows. */}
               <NavRow
                 item={{ title: returnLabel, url: returnUrl, icon: ArrowLeft, isActive: false }}

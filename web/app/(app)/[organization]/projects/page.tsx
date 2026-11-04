@@ -56,7 +56,7 @@ export default async function OrganizationProjectsPage() {
     <>
       <PageHeader title="Projects" action={<CreateProjectAction />} />
 
-      <div className="grid gap-gutter">
+      <div className="grid gap-page">
         {/* The tiles, with Leave beside a project the person holds a seat
             in; never for the owner, who holds every project outright and
             whose leave the lane refuses. */}

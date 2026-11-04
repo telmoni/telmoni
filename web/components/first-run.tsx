@@ -1,6 +1,8 @@
 import { Check } from "lucide-react";
 import type { ReactNode } from "react";
 
+import { StepNumber } from "@/components/ui/step-number";
+
 // A page's first run: what it shows once something lands, and the steps to get
 // there, drawn by the server in place of an empty list, so nothing flashes first.
 
@@ -51,12 +53,9 @@ export function FirstRunStep({
 }) {
   return (
     <li className="grid grid-cols-[auto_minmax(0,1fr)] gap-gutter rounded-md border border-border p-gutter">
-      <span
-        className="flex size-7 items-center justify-center rounded-md border border-border text-sm tabular-nums"
-        aria-hidden="true"
-      >
+      <StepNumber aria-hidden="true">
         {done ? <Check className="size-4 text-brand-positive" /> : n}
-      </span>
+      </StepNumber>
       <div className="grid min-w-0 gap-gutter">
         <div>
           <h3 className="text-sm font-medium">

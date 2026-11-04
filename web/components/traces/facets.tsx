@@ -45,6 +45,7 @@ import { isOneOf } from "@/lib/one-of";
 import { SpanStatus } from "@/lib/types/enums";
 import { setTracePrefs, useTracePrefs } from "@/lib/use-trace-prefs";
 import { cn } from "@/lib/utils";
+import { decimalTyped } from "@/lib/typed-number";
 
 const STATUSES = Object.values(SpanStatus);
 
@@ -435,7 +436,7 @@ function ScoreSection({
           <div className="flex gap-2">
             <Input
               value={least}
-              onChange={(event) => setLeast(event.target.value)}
+              onChange={(event) => setLeast(decimalTyped(event.target.value, true))}
               placeholder="At least"
               aria-label="At least"
               inputMode="decimal"
@@ -444,7 +445,7 @@ function ScoreSection({
             />
             <Input
               value={most}
-              onChange={(event) => setMost(event.target.value)}
+              onChange={(event) => setMost(decimalTyped(event.target.value, true))}
               placeholder="At most"
               aria-label="At most"
               inputMode="decimal"

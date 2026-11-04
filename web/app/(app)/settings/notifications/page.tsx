@@ -27,7 +27,7 @@ export default async function AccountNotificationsPage() {
   return (
     <>
       <PageHeader title="Notifications" />
-      <div className="grid gap-gutter">
+      <div className="grid gap-page">
         <OwnershipOffersSection offers={offers} />
         <ProjectOffersSection offers={projectOffers} owned={owned} />
         <GivenSeatsSection seats={seats} />

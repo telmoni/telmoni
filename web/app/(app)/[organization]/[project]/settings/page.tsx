@@ -1,21 +1,26 @@
+import Link from "next/link";
+
+import { DataTable, THead, Th, Td } from "@/components/data-table";
+import { NoticeCard } from "@/components/notice-card";
 import { PageHeader } from "@/components/page-header";
 import { Rows } from "@/components/rows";
 import { Section } from "@/components/section";
 import { SettingsRow } from "@/components/settings-row";
 import { ServiceUnavailable } from "@/components/service-unavailable";
 import { Card } from "@/components/ui/card";
-import { fetchContentMode, fetchModelPrices } from "@/lib/server/data";
-import { fetchModelConnectionsAnswer } from "@/lib/server/entities/model-connections";
+import { fetchContentMode, fetchModelPrices, fetchPrivacyPosture } from "@/lib/server/data";
 import { projectPage } from "@/lib/server/project-page";
 import { administers } from "@/lib/roles";
 import { getServerSession } from "@/lib/server/session";
+import { projectPath } from "@/lib/slug";
 import { Role } from "@/lib/types/enums";
 
 import { ContentModeForm } from "./_content-mode";
 import { DeleteProjectForm } from "./_delete-project";
-import { ModelConnections } from "./_model-connections";
+import { EraseEndUserForm } from "./_erase-end-user";
 import { ModelPricesForm } from "./_model-prices";
 import { RenameProjectForm } from "./_rename-project";
+import { RetentionForm } from "./_retention";
 
 export const metadata = {
   title: "Settings",
@@ -24,15 +29,15 @@ export const metadata = {
 export default async function SettingsPage({
   params,
 }: PageProps<"/[organization]/[project]/settings">) {
-  const { project: slug } = await params;
+  const { organization, project: slug } = await params;
 
   const resolved = await projectPage(slug);
   if (resolved.kind === "unavailable") return <ServiceUnavailable />;
   const { project } = resolved;
-  const [contentMode, prices, connections, session] = await Promise.all([
+  const [contentMode, prices, posture, session] = await Promise.all([
     fetchContentMode(project.id),
     fetchModelPrices(project.id),
-    fetchModelConnectionsAnswer(project.id),
+    fetchPrivacyPosture(project.id),
     getServerSession(),
   ]);
 
@@ -44,7 +49,7 @@ export default async function SettingsPage({
     <>
       <PageHeader title="Settings" />
 
-      <div className="grid gap-gutter">
+      <div className="grid gap-page">
         <Section
           title="Project ID"
           description="This project's identifier, which never changes when its name or URL does; the audit log names the project by it."
@@ -95,26 +100,6 @@ export default async function SettingsPage({
         </Section>
 
         <Section
-          title="Model connections"
-          description="This project's own keys to the models its evaluators judge with: OpenAI, Anthropic, Google AI Studio or Vertex AI, Azure OpenAI, Amazon Bedrock, or any endpoint speaking OpenAI's protocol. A key is sealed when it is saved, bound to the endpoint it goes to, never shown again but by its last four characters, and sent to its provider alone; Bedrock and Vertex AI can sign in as this project instead, keeping no key at all. Saving asks the first model one small question first, and tells the organization's owners and admins whenever a key is saved."
-        >
-          <Card>
-            {connections ? (
-              <ModelConnections
-                projectId={project.id}
-                connections={connections.connections}
-                federation={connections.federation}
-                canEdit={canEdit}
-              />
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                This project&apos;s model connections could not be read. Reload to try again.
-              </p>
-            )}
-          </Card>
-        </Section>
-
-        <Section
           title="Model prices"
           description="This project's own prices for the models it calls, which spend reads before the price table's: private pricing, a model it serves itself, or a fine-tune the table does not list. A call that reports its own cost keeps it. Each price is US dollars per million tokens, for a provider's model by every name it answers with, from the day it takes effect, or always."
         >
@@ -130,6 +115,97 @@ export default async function SettingsPage({
               <p className="text-sm text-muted-foreground">
                 This project&apos;s prices could not be read. Reload to try again.
               </p>
+            )}
+          </Card>
+        </Section>
+
+        <Section
+          title="Retention"
+          description={
+            <>
+              How long what this project sends is kept: its spans as long as its owner or an admin
+              chooses, up to the longest offered, and its hourly totals the same for every project.
+              Deleting a trace, an end user or the project ends it early.{" "}
+              <Link href="/docs/workspace/data-retention" className="underline underline-offset-4">
+                Every window
+              </Link>
+              .
+            </>
+          }
+        >
+          {posture ? (
+            <DataTable>
+              <THead>
+                <Th>Data</Th>
+                <Th>Kept</Th>
+              </THead>
+              <tbody>
+                <tr>
+                  <Td className="text-xs">Spans, and the content kept with them</Td>
+                  <Td className="whitespace-nowrap text-xs">
+                    {posture.retention.span_days} days after a span arrives
+                  </Td>
+                </tr>
+                <tr>
+                  <Td className="text-xs">Hourly totals, which name no end user and no tag</Td>
+                  <Td className="whitespace-nowrap text-xs">{posture.retention.rollup_months} months</Td>
+                </tr>
+              </tbody>
+            </DataTable>
+          ) : (
+            <NoticeCard title="Retention could not be read." body="Reload to try again." />
+          )}
+          {posture && canEdit && (
+            <Card>
+              <RetentionForm
+                key={posture.retention.span_days}
+                projectId={project.id}
+                days={posture.retention.span_days}
+                max={posture.retention.max_span_days}
+              />
+            </Card>
+          )}
+        </Section>
+
+        <Section
+          title="Give an end user their data"
+          description="What the project keeps about one end user, for them to have."
+        >
+          <Card className="text-sm">
+            <p>
+              Filter{" "}
+              <Link href={projectPath(organization, slug, "/users")} className="underline underline-offset-4">
+                Users
+              </Link>{" "}
+              or{" "}
+              <Link href={projectPath(organization, slug, "/traces")} className="underline underline-offset-4">
+                Traces
+              </Link>{" "}
+              by their id under <span className="font-medium">User</span>, then download: their totals, or
+              every trace of theirs the project keeps with any content kept, as JSON or CSV.
+            </p>
+          </Card>
+        </Section>
+
+        <Section
+          title="Erase an end user"
+          description={
+            <>
+              Every trace whose spans carry this id as <code>user.id</code>, the traces of their sessions
+              that name no one, and any content they kept, deleted at once. The id is matched exactly as
+              your app sent it.{" "}
+              <Link href="/docs/workspace/data-deletion" className="underline underline-offset-4">
+                What erasure takes
+              </Link>
+              .
+            </>
+          }
+        >
+          <Card className="grid gap-1 text-sm">
+            {canEdit ? (
+              <EraseEndUserForm projectId={project.id} />
+            ) : (
+              <p className="text-muted-foreground">A project admin or the organization owner erases an end user.</p>
             )}
           </Card>
         </Section>

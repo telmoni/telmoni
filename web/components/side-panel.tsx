@@ -2,12 +2,14 @@
 
 import {
   useLayoutEffect,
+  useRef,
   useState,
   type ComponentProps,
   type CSSProperties,
   type ReactNode,
   type RefObject,
 } from "react";
+import { createPortal } from "react-dom";
 import { XIcon, type LucideIcon } from "lucide-react";
 
 import { useConsoleShell } from "@/components/console-shell";
@@ -24,6 +26,24 @@ import { cn } from "@/lib/utils";
 // keys; or `full`, over the area whole. The trace list's peek stands in one
 // (`components/traces/peek.tsx`), and New project and New organization
 // (`create-panels.tsx`) in a full one.
+
+/** One opening of a page's panel, for `of`: counted, so asking again draws
+ *  it afresh, and the control the focus goes back to as it shuts. */
+export type PanelOpening<T> = { at: number; returnTo: HTMLElement | null; of: T };
+
+/** A page's panel, opened from one of its controls and drawn over the
+ *  content area, where a shell offers one, or in place. */
+export function usePanelOpening<T = null>() {
+  const [opening, setOpening] = useState<PanelOpening<T> | null>(null);
+  const openings = useRef(0);
+  const { element } = useConsoleShell();
+  return {
+    opening,
+    open: (returnTo: HTMLElement | null, of: T) => setOpening({ at: ++openings.current, returnTo, of }),
+    close: () => setOpening(null),
+    place: (panel: ReactNode) => (panel && element ? createPortal(panel, element) : panel),
+  };
+}
 
 /** Whether the panel stands as wide as the content area it is in: on a
  *  phone, beside a page too narrow for its own width, or dragged all the
@@ -192,7 +212,7 @@ export function SidePanelHeader({
   return (
     <div className={cn("shrink-0 px-gutter", flush && "border-b border-border")}>
       <div className={cn("grid gap-1.5 py-gutter", !flush && "border-b border-border")}>
-        <div className="flex min-h-9 min-w-0 items-center gap-2">
+        <div className="flex min-h-7 min-w-0 items-center gap-2">
           <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
           <h2 id={titleId} className="min-w-0 truncate text-base font-medium">
             {title}
@@ -209,6 +229,11 @@ export function SidePanelHeader({
       </div>
     </div>
   );
+}
+
+/** What the panel holds, between its head and foot, scrolling on its own. */
+export function SidePanelBody({ children }: { children: ReactNode }) {
+  return <div className="min-h-0 flex-1 overflow-y-auto px-gutter">{children}</div>;
 }
 
 /** The panel's foot, its buttons at the right: as tall as the rail's foot
@@ -250,7 +275,11 @@ export function SidePanelRow({
           {label}
         </span>
       )}
-      <div className="grid min-w-0 content-start gap-1.5 text-sm">{children}</div>
+      {/* Its first line as tall as the label's, centred: text beside the label
+          sits on the label's line, as a control does. */}
+      <div className="grid min-w-0 content-start items-center gap-1.5 text-sm sm:grid-rows-[minmax(--spacing(7),auto)]">
+        {children}
+      </div>
     </div>
   );
 }

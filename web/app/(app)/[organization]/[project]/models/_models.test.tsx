@@ -2,6 +2,13 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
+vi.mock("next/navigation", () => ({ unstable_rethrow: () => {} }));
+
+// No console shell in a test: the panel is drawn in place.
+vi.mock("@/components/console-shell", () => ({
+  useConsoleShell: () => ({ element: null, cover: () => () => {} }),
+}));
+
 vi.mock("./actions", () => ({
   saveModelConnectionAction: vi.fn(async () => ({ ok: true })),
   deleteModelConnectionAction: vi.fn(async () => ({ ok: true })),
@@ -10,7 +17,8 @@ vi.mock("./actions", () => ({
 // A native select stands in for Radix's, whose listbox jsdom cannot open.
 vi.mock("@/components/ui/select", async () => {
   const { Children } = await import("react");
-  const SelectTrigger = (_: { id?: string; children?: React.ReactNode }) => null;
+  // Read for its id alone: the native select takes it.
+  const SelectTrigger: React.FC<{ id?: string; children?: React.ReactNode }> = () => null;
   return {
     Select: ({
       value,
@@ -38,7 +46,9 @@ vi.mock("@/components/ui/select", async () => {
   };
 });
 
-import { ModelConnections, federatedSecret, modelsOf } from "./_model-connections";
+import type { ModelConnection } from "@/lib/server/entities/model-connections";
+
+import { ModelRowActions, ModelsActions, federatedSecret, modelsOf } from "./_models";
 
 const CONNECTION = {
   id: "5d4f5c68-0000-4000-8000-0000000000c1",
@@ -56,52 +66,42 @@ const CONNECTION = {
   created_at: "2026-11-02T00:00:00Z",
   updated_at: "2026-11-02T00:00:00Z",
 };
+const FEDERATION = { issuer: "https://api.example/oidc/v1/projects/p", subject: "project:p", aws_audience: "sts.amazonaws.com" };
 
-describe("ModelConnections", () => {
+/** A connection's Edit pressed, and the panel it opens. */
+function edit(connection: ModelConnection, federation?: typeof FEDERATION) {
+  render(<ModelRowActions projectId="p" connection={connection} federation={federation} />);
+  fireEvent.click(screen.getByRole("button", { name: `Edit ${connection.name}` }));
+  return screen.getByRole("form", { name: `Edit ${connection.name}` });
+}
+
+describe("the Models page's panel", () => {
   it("reads the models typed by commas or lines, each once", () => {
     expect(modelsOf(" gpt-a, gpt-b\ngpt-a ,, ")).toEqual(["gpt-a", "gpt-b"]);
   });
 
-  it("offers a member no change, and an owner a form for a new one that asks for its key", () => {
-    const { rerender } = render(<ModelConnections projectId="p" connections={[CONNECTION]} canEdit={false} />);
-    expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Connect a model" })).toBeNull();
-
-    rerender(<ModelConnections projectId="p" connections={[CONNECTION]} canEdit />);
-    fireEvent.click(screen.getByRole("button", { name: "Connect a model" }));
+  it("opens from Connect model in the side panel, asking a new one for its key", () => {
+    render(<ModelsActions projectId="p" />);
+    fireEvent.click(screen.getByRole("button", { name: /Connect model/ }));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
     const form = screen.getByRole("form", { name: "Connect a model" });
     expect(form).toHaveTextContent("API key");
     expect(screen.getByRole("button", { name: "Connect" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("asks for the key again when the endpoint moves, and keeps the provider, so a saved key goes nowhere new", () => {
-    render(<ModelConnections projectId="p" connections={[CONNECTION]} canEdit />);
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    const form = edit(CONNECTION);
     expect(screen.getByLabelText("Provider")).toBeDisabled();
+    expect(form).toHaveTextContent("Leave it empty to keep the key.");
     fireEvent.change(screen.getByLabelText("Base URL"), { target: { value: "https://elsewhere.example/v1" } });
-    expect(screen.getByRole("form", { name: "Edit Gateway" })).toHaveTextContent("a new endpoint takes the key again");
-  });
-
-  it("shows when a key was last used, and a connection that keeps no key as whom it signs in as", () => {
-    render(
-      <ModelConnections
-        projectId="p"
-        connections={[
-          { ...CONNECTION, last_used_at: "2026-11-03T08:00:00Z" },
-          { ...CONNECTION, id: "c2", name: "Bedrock", provider: "bedrock", base_url: null, region: "us-east-1", signs_in: true, secret_hint: "role/telmoni" },
-        ]}
-        canEdit={false}
-      />,
-    );
-    expect(screen.getByText(/Last used/)).toBeInTheDocument();
-    expect(screen.getByText("Never used")).toBeInTheDocument();
-    expect(screen.getByText(/signs in as role\/telmoni, no key kept/)).toBeInTheDocument();
+    expect(form).toHaveTextContent("A new endpoint takes the key again.");
   });
 
   it("offers signing in as the project only where the deployment signs, and saves whom it signs in as", () => {
-    const federation = { issuer: "https://api.example/oidc/v1/projects/p", subject: "project:p", aws_audience: "sts.amazonaws.com" };
-    render(<ModelConnections projectId="p" connections={[]} federation={federation} canEdit />);
-    fireEvent.click(screen.getByRole("button", { name: "Connect a model" }));
+    render(<ModelsActions projectId="p" federation={FEDERATION} />);
+    fireEvent.click(screen.getByRole("button", { name: /Connect model/ }));
     expect(screen.queryByLabelText("Signs in with")).toBeNull();
     expect(federatedSecret("bedrock", { role: " arn:aws:iam::123456789012:role/x ", pool: "", cloudProject: "", account: "" })).toBe(
       JSON.stringify({ role_arn: "arn:aws:iam::123456789012:role/x" }),
@@ -113,11 +113,10 @@ describe("ModelConnections", () => {
   });
 
   it("takes the new key or role when a connection switches how it signs in", () => {
-    const federation = { issuer: "https://api.example/oidc/v1/projects/p", subject: "project:p", aws_audience: "sts.amazonaws.com" };
     const keyless = { ...CONNECTION, name: "Bedrock", provider: "bedrock" as const, base_url: null, region: "us-east-1", signs_in: true, secret_hint: "role/telmoni" };
-    render(<ModelConnections projectId="p" connections={[keyless]} federation={federation} canEdit />);
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-    expect(screen.getByLabelText(/Role ARN — leave empty to keep the role/)).toBeInTheDocument();
+    const form = edit(keyless, FEDERATION);
+    expect(screen.getByLabelText("Role ARN")).toBeInTheDocument();
+    expect(form).toHaveTextContent("Leave it empty to keep the role.");
     expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
 
     fireEvent.change(screen.getByLabelText("Signs in with"), { target: { value: "key" } });
@@ -128,11 +127,9 @@ describe("ModelConnections", () => {
     expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
   });
 
-  it("edits a connection keeping its key unless a new one is typed", () => {
-    render(<ModelConnections projectId="p" connections={[CONNECTION]} canEdit />);
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-    const form = screen.getByRole("form", { name: "Edit Gateway" });
-    expect(form).toHaveTextContent("leave empty to keep the key");
+  it("edits a connection keeping its key unless a new one is typed, and offers its delete", () => {
+    edit(CONNECTION);
     expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Delete Gateway" })).toBeInTheDocument();
   });
 });

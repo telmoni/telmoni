@@ -74,35 +74,13 @@ vi.mock("next/navigation", () => ({
 let mockContext: unknown;
 let mockProject: unknown;
 let mockContentMode: unknown;
+let mockPosture: unknown;
 vi.mock("@/lib/server/data", () => ({
   getServerContext: async () => mockContext,
   fetchProjectBySlug: async () => mockProject,
   fetchContentMode: async () => mockContentMode,
   fetchModelPrices: async () => [],
-}));
-
-vi.mock("@/lib/server/entities/model-connections", () => ({
-  fetchModelConnectionsAnswer: async () => ({
-    connections: [
-      {
-        id: "5d4f5c68-0000-4000-8000-0000000000c1",
-        name: "Gateway",
-        provider: "openai_compatible",
-        base_url: "https://gw.example/v1",
-        region: null,
-        models: ["judge-1", "judge-2"],
-        is_default: true,
-        secret_hint: "WXYZ",
-        signs_in: false,
-        refused_at: null,
-        refused_reason: null,
-        last_used_at: null,
-        created_at: "2026-11-02T00:00:00Z",
-        updated_at: "2026-11-02T00:00:00Z",
-      },
-    ],
-    federation: null,
-  }),
+  fetchPrivacyPosture: async () => mockPosture,
 }));
 
 vi.mock("@/lib/server/session", () => ({
@@ -143,6 +121,54 @@ beforeEach(() => {
     role: Role.Owner,
   };
   mockContentMode = { content_mode: "off", offered: ["off"] };
+  mockPosture = { retention: { span_days: 90, max_span_days: 360, rollup_months: 13 } };
+});
+
+describe("SettingsPage: the end user's data and its retention", () => {
+  const page = async () => render(await SettingsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+
+  it("offers an admin the erasure of an end user, and tells a member who erases one", async () => {
+    mockProject = { ...(mockProject as object), role: Role.Member };
+    const { unmount } = await page();
+    expect(screen.queryByRole("textbox", { name: "End user id" })).not.toBeInTheDocument();
+    expect(screen.getByText("A project admin or the organization owner erases an end user.")).toBeInTheDocument();
+    unmount();
+
+    mockProject = { ...(mockProject as object), role: Role.Admin };
+    await page();
+    expect(screen.getByRole("textbox", { name: "End user id" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Erase" })).toBeDisabled();
+  });
+
+  it("tells anyone how an end user is given their data", async () => {
+    await page();
+    expect(screen.getByRole("link", { name: "Users" })).toHaveAttribute("href", "/acme/my-project/users");
+    expect(screen.getByRole("link", { name: "Traces" })).toHaveAttribute("href", "/acme/my-project/traces");
+  });
+
+  // ⚠ The project's own retention is its owner's or an admin's to choose,
+  // up to the longest offered; a member reads it alone.
+  it("offers an admin the retention to choose, and a member the days alone", async () => {
+    mockProject = { ...(mockProject as object), role: Role.Member };
+    const { unmount } = await page();
+    expect(screen.getByText("90 days after a span arrives")).toBeInTheDocument();
+    expect(screen.getByText("13 months")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Keep spans for")).not.toBeInTheDocument();
+    unmount();
+
+    mockProject = { ...(mockProject as object), role: Role.Admin };
+    await page();
+    const field = screen.getByLabelText("Keep spans for");
+    expect(field).toHaveValue(90);
+    expect(field).toHaveAttribute("max", "360");
+  });
+
+  it("says so when the retention cannot be read, and keeps the rest", async () => {
+    mockPosture = null;
+    await page();
+    expect(screen.getByText("Retention could not be read.")).toBeInTheDocument();
+    expect(screen.getByTestId("rename-form")).toBeInTheDocument();
+  });
 });
 
 describe("SettingsPage", () => {
@@ -152,17 +178,6 @@ describe("SettingsPage", () => {
       expect(screen.getByTestId("page-header")).toHaveTextContent("Settings");
       expect(screen.getByTestId("rename-form")).toHaveTextContent("My Project");
       expect(screen.getByTestId("rename-form")).toHaveTextContent("editable");
-    });
-
-    // Each connection by its provider, its models and its key's last four, never the key.
-    it("lists the model connections, the default marked, and offers to connect another", async () => {
-      render(await SettingsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
-      expect(screen.getByText("Gateway")).toBeInTheDocument();
-      expect(screen.getByText("Default")).toBeInTheDocument();
-      expect(
-        screen.getByText("OpenAI-compatible endpoint · judge-1, judge-2", { exact: false }),
-      ).toHaveTextContent("key …WXYZ");
-      expect(screen.getByRole("button", { name: "Connect a model" })).toBeInTheDocument();
     });
 
     // The id is what an API request and an SDK are configured with; the slug

@@ -2,6 +2,12 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
+// A list sorts by the address; a test's has none.
+vi.mock("next/navigation", () => ({
+  usePathname: () => "/acme/web",
+  useSearchParams: () => new URLSearchParams(),
+}));
+
 vi.mock("@/components/page-header", () => ({
   PageHeader: ({ title, action }: { title: string; action?: React.ReactNode }) => (
     <header>
@@ -122,8 +128,8 @@ function page(over: Partial<Parameters<typeof Evaluators>[0]> = {}) {
       contentKept
       canEdit
       here="/acme/web/evaluators"
-      privacyHref="/acme/web/privacy"
       settingsHref="/acme/web/settings"
+      connectionsHref="/acme/web/models"
       {...over}
     />,
   );
@@ -223,6 +229,12 @@ describe("Evaluators", () => {
     page({ contentKept: false });
     expect(screen.getByText("This project keeps no content.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /New evaluator/ })).toBeNull();
+  });
+
+  it("sends a project with no model connected to its Models page", () => {
+    page({ connections: [] });
+    expect(screen.getByText("No model is connected.")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Models" })).toHaveAttribute("href", "/acme/web/models");
   });
 
   it("starts a new one from a template, its prompt and score filled in", () => {

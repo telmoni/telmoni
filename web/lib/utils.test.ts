@@ -16,6 +16,8 @@ describe("cn", () => {
     ["p-gutter", "p-0"],
     ["px-2", "px-gutter"],
     ["gap-gutter", "gap-1"],
+    ["gap-gutter", "gap-page"],
+    ["p-page", "p-gutter"],
   ])("lets %s lose to %s like any other value", (base, override) => {
     expect(cn(base, override)).toBe(override);
   });

@@ -7,6 +7,7 @@ import { toast } from "sonner";
 
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { EnumSelect } from "@/components/enum-select";
+import { LocalTime } from "@/components/local-time";
 import { NoticeCard } from "@/components/notice-card";
 import { PageAction } from "@/components/page-action";
 import { PageHeader } from "@/components/page-header";
@@ -15,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { WholeListTable } from "@/components/whole-list-table";
 import type {
   Evaluator,
   EvaluatorTemplate,
@@ -36,26 +38,15 @@ import {
   TYPED_LEVELS_MAX,
   TYPED_OPTIONS_MAX,
   TYPED_QUESTIONS_MAX,
+  VARIABLES,
 } from "@/lib/evaluators";
 import { SCORE_CATEGORIES_MAX, SCORE_CATEGORY_MAX, formatScoreValue } from "@/lib/scores";
 import { SCORE_NAME_MAX } from "@/lib/traces";
-import { ModelProvider, type PromptRole, ScoreType } from "@/lib/types/enums";
+import { ModelProvider, type PromptRole, ScoreType, SortDirection } from "@/lib/types/enums";
 import { useAction } from "@/lib/use-action";
+import { decimalTyped } from "@/lib/typed-number";
 
 import { deleteEvaluatorAction, saveEvaluatorAction, tryEvaluatorAction } from "./actions";
-
-/** The variables a prompt may name, each with what fills it. */
-export const VARIABLES: ReadonlyArray<readonly [string, string]> = [
-  ["input", "a run's or a span's input"],
-  ["output", "its output"],
-  ["metadata", "its agent, status, models, tokens and tags"],
-  ["tool_calls", "its tool calls and their arguments"],
-  ["trajectory", "its tool calls with their results, in order"],
-  ["messages", "a session's conversation"],
-  ["exchanges", "a session's person-and-agent pairs"],
-  ["first_and_last", "a session's first prompt and last answer"],
-  ["examples", "members' corrections"],
-];
 
 const GROUP_LABEL: Record<string, string> = {
   quality: "Quality",
@@ -256,8 +247,8 @@ export function Evaluators({
   contentKept,
   canEdit,
   here,
-  privacyHref,
   settingsHref,
+  connectionsHref,
 }: {
   projectId: string;
   evaluators: readonly Evaluator[];
@@ -270,8 +261,8 @@ export function Evaluators({
   canEdit: boolean;
   /** The page's own path, which `?evaluator=` opens one evaluator's evaluations and versions under. */
   here: string;
-  privacyHref: string;
   settingsHref: string;
+  connectionsHref: string;
 }) {
   const [editing, setEditing] = useState<Draft | null>(null);
   const [picking, setPicking] = useState(false);
@@ -307,11 +298,7 @@ export function Evaluators({
                 <Link className="underline" href={settingsHref}>
                   Settings
                 </Link>
-                ; the{" "}
-                <Link className="underline" href={privacyHref}>
-                  Privacy
-                </Link>{" "}
-                page says what it would keep.
+                .
               </>
             }
           />
@@ -321,10 +308,9 @@ export function Evaluators({
             title="No model is connected."
             body={
               <>
-                Evaluators judge with a model on this project&apos;s own key: connect one on the
-                project&apos;s{" "}
-                <Link className="underline" href={settingsHref}>
-                  Settings
+                Evaluators judge with a model on this project&apos;s own key: connect one on its{" "}
+                <Link className="underline" href={connectionsHref}>
+                  Models
                 </Link>{" "}
                 page first.
               </>
@@ -358,66 +344,89 @@ export function Evaluators({
           />
         )}
         {evaluators.length > 0 && (
-          <Card className="gap-0 p-0">
-            <ul className="divide-y divide-border">
-              {evaluators.map((evaluator) => (
-                <li key={evaluator.id} className="flex flex-wrap items-center justify-between gap-gutter p-gutter">
-                  <div className="grid min-w-0">
-                    <span className="flex items-center gap-gutter font-medium">
-                      {evaluator.name}
-                      <Badge variant="secondary">v{evaluator.version}</Badge>
-                    </span>
-                    <span className="truncate text-muted-foreground">
-                      {givesWords(evaluator)} · {evaluator.model ?? "its connection's first model"} on{" "}
-                      {connectionName(evaluator.connection_id)} ·{" "}
-                      {(rulesOf[evaluator.id] ?? []).length === 0
-                        ? "under no rule"
-                        : `under ${(rulesOf[evaluator.id] ?? []).join(", ")}`}
-                    </span>
-                  </div>
-                  <div className="flex gap-gutter">
-                    <Button variant="outline" size="sm" asChild>
-                      <Link href={`${here}?evaluator=${evaluator.id}`}>
-                        Evaluations{(evaluator.versions ?? 1) > 1 ? ` · ${evaluator.versions} versions` : ""}
-                      </Link>
+          <WholeListTable
+            rows={evaluators}
+            rowKey={(evaluator) => evaluator.id}
+            defaultSort="name"
+            searchLabel="Search evaluators"
+            searchOf={(evaluator) => `${evaluator.name} ${evaluator.model ?? ""} ${(rulesOf[evaluator.id] ?? []).join(" ")}`}
+            columns={[
+              {
+                key: "name",
+                label: "Name",
+                sort: { by: (evaluator) => evaluator.name.toLowerCase(), first: SortDirection.Asc },
+                className: "font-medium whitespace-nowrap",
+                cell: (evaluator) => (
+                  <span className="flex items-center gap-gutter">
+                    {evaluator.name}
+                    <Badge variant="secondary">v{evaluator.version}</Badge>
+                  </span>
+                ),
+              },
+              { key: "gives", label: "Gives", className: "text-muted-foreground", cell: givesWords },
+              {
+                key: "model",
+                label: "Model",
+                className: "text-muted-foreground",
+                cell: (evaluator) =>
+                  `${evaluator.model ?? "its connection's first model"} on ${connectionName(evaluator.connection_id)}`,
+              },
+              {
+                key: "rules",
+                label: "Rules",
+                className: "text-muted-foreground",
+                cell: (evaluator) => (rulesOf[evaluator.id] ?? []).join(", ") || "None",
+              },
+              {
+                key: "created",
+                label: "Created",
+                sort: { by: (evaluator) => evaluator.created_at, first: SortDirection.Desc },
+                className: "text-xs text-muted-foreground whitespace-nowrap",
+                cell: (evaluator) => <LocalTime iso={evaluator.created_at} mode="date" />,
+              },
+            ]}
+            actions={(evaluator) => (
+              <div className="flex justify-end gap-gutter">
+                <Button variant="outline" size="sm" asChild>
+                  <Link href={`${here}?evaluator=${evaluator.id}`}>
+                    Evaluations{(evaluator.versions ?? 1) > 1 ? ` · ${evaluator.versions} versions` : ""}
+                  </Link>
+                </Button>
+                {canEdit && (
+                  <>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={!contentKept}
+                      onClick={() => {
+                        setPicking(false);
+                        setEditing(draftOf(evaluator));
+                      }}
+                    >
+                      Edit
                     </Button>
-                    {canEdit && (
-                      <>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={!contentKept}
-                          onClick={() => {
-                            setPicking(false);
-                            setEditing(draftOf(evaluator));
-                          }}
-                        >
-                          Edit
+                    <ConfirmDialog
+                      trigger={
+                        <Button variant="outline" size="sm" disabled={pending}>
+                          Delete
                         </Button>
-                        <ConfirmDialog
-                          trigger={
-                            <Button variant="outline" size="sm" disabled={pending}>
-                              Delete
-                            </Button>
-                          }
-                          title={`Delete ${evaluator.name}?`}
-                          description="Every version goes with it. The scores it gave stay, each naming its version."
-                          confirmLabel="Delete"
-                          destructive
-                          onConfirm={() =>
-                            run(
-                              () => deleteEvaluatorAction(projectId, evaluator.id),
-                              () => toast.success(`${evaluator.name} deleted`),
-                            )
-                          }
-                        />
-                      </>
-                    )}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </Card>
+                      }
+                      title={`Delete ${evaluator.name}?`}
+                      description="Every version goes with it. The scores it gave stay, each naming its version."
+                      confirmLabel="Delete"
+                      destructive
+                      onConfirm={() =>
+                        run(
+                          () => deleteEvaluatorAction(projectId, evaluator.id),
+                          () => toast.success(`${evaluator.name} deleted`),
+                        )
+                      }
+                    />
+                  </>
+                )}
+              </div>
+            )}
+          />
         )}
       </div>
     </>
@@ -457,7 +466,7 @@ function TemplatePicker({
       {groups.map((group) => (
         <div key={group} className="grid gap-2">
           <p className="text-xs font-medium text-muted-foreground">{GROUP_LABEL[group] ?? group}</p>
-          <div className="grid gap-gutter sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-page sm:grid-cols-2 lg:grid-cols-3">
             {templates
               .filter((t) => t.group === group)
               .map((template) => (
@@ -477,7 +486,7 @@ function TemplatePicker({
       {typedTemplates.length > 0 && (
         <div className="grid gap-2">
           <p className="text-xs font-medium text-muted-foreground">Typed, on a System One model</p>
-          <div className="grid gap-gutter sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-page sm:grid-cols-2 lg:grid-cols-3">
             {typedTemplates.map((template) => (
               <button
                 key={template.key}
@@ -782,7 +791,7 @@ function EvaluatorForm({
             <Input
               id={`${id}temperature`}
               value={draft.temperature}
-              onChange={(e) => set({ temperature: e.target.value })}
+              onChange={(e) => set({ temperature: decimalTyped(e.target.value) })}
               placeholder="The provider's own"
               inputMode="decimal"
             />
@@ -793,7 +802,7 @@ function EvaluatorForm({
           <Input
             id={`${id}weekly`}
             value={draft.weeklyLimit}
-            onChange={(e) => set({ weeklyLimit: e.target.value })}
+            onChange={(e) => set({ weeklyLimit: decimalTyped(e.target.value) })}
             placeholder="None"
             inputMode="decimal"
           />

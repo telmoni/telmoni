@@ -284,7 +284,7 @@ export function TraceHistogramStrip({ histogram }: { histogram: TraceHistogram }
 // list is narrowed to a score, that score's mean, each a bar of the same width.
 export function TraceCharts({ histogram }: { histogram: TraceHistogram }) {
   return (
-    <div className="grid gap-gutter lg:grid-cols-2">
+    <div className="grid gap-page lg:grid-cols-2">
       {drawn(histogram).map((metric) => (
         <div
           key={metric}

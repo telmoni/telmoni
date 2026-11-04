@@ -38,3 +38,16 @@ export const MODEL_CONNECTION_MODEL_MAX = 128;
 export const MODEL_CONNECTION_MODELS_MAX = 20;
 /** The longest key a connection keeps. */
 export const MODEL_CONNECTION_SECRET_MAX = 16_384;
+
+/** The variables a prompt may name, each with what fills it. */
+export const VARIABLES: ReadonlyArray<readonly [string, string]> = [
+  ["input", "a run's or a span's input"],
+  ["output", "its output"],
+  ["metadata", "its agent, status, models, tokens and tags"],
+  ["tool_calls", "its tool calls and their arguments"],
+  ["trajectory", "its tool calls with their results, in order"],
+  ["messages", "a session's conversation"],
+  ["exchanges", "a session's person-and-agent pairs"],
+  ["first_and_last", "a session's first prompt and last answer"],
+  ["examples", "members' corrections"],
+];

@@ -119,7 +119,7 @@ export default async function MembersPage({
         }
       />
 
-      <div className="grid gap-gutter">
+      <div className="grid gap-page">
         {canManage && <MemberCeilingNotice ceiling={listing.ceiling} />}
         <RoleCards cards={ROLES} />
 

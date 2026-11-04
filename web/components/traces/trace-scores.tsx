@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import type { Score } from "@/lib/server/entities/scores";
-import { COMMENT_MAX, formatScoreValue } from "@/lib/scores";
+import { COMMENT_MAX, SCORE_SOURCE, scoreSaid } from "@/lib/scores";
 import { ScoreSource, ScoreTarget, ScoreType } from "@/lib/types/enums";
 import { useToastAction } from "@/lib/use-action";
 
@@ -19,24 +19,6 @@ import { useToastAction } from "@/lib/use-action";
 // or admin any member's; one with a comment opens to it, read with the trace's
 // content. Score adds one of the run, as any member of the project may; the
 // server holds every rule a score keeps, its refusal the toast.
-
-const SOURCE: Record<Score["source"], string> = {
-  [ScoreSource.Sdk]: "from your code",
-  [ScoreSource.Member]: "by a member",
-  [ScoreSource.Evaluator]: "by an evaluator",
-};
-
-/** What one score says. */
-function said(score: Score): string {
-  switch (score.data_type) {
-    case ScoreType.Boolean:
-      return score.value === 1 ? "yes" : "no";
-    case ScoreType.Number:
-      return score.value == null ? "—" : formatScoreValue(score.value);
-    case ScoreType.Category:
-      return score.categories.join(", ");
-  }
-}
 
 export function TraceScores({
   projectId,
@@ -122,10 +104,10 @@ function ScoreBadge({
     <Badge
       variant="outline"
       className="gap-0.5 pr-0.5 text-xs font-normal"
-      title={`${score.name}${span ? ` of ${span}` : ""}, ${SOURCE[score.source]}`}
+      title={`${score.name}${span ? ` of ${span}` : ""}, ${SCORE_SOURCE[score.source]}`}
     >
       {span && <span className="text-muted-foreground">{span} · </span>}
-      {score.name} <span className="tabular-nums text-muted-foreground">{said(score)}</span>
+      {score.name} <span className="tabular-nums text-muted-foreground">{scoreSaid(score)}</span>
       {comment && <Comment name={score.name} text={comment} />}
       {takeBack && (
         <button

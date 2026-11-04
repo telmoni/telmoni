@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { ModelPrice } from "@/lib/server/entities/model-prices";
 import { useAction } from "@/lib/use-action";
+import { decimalTyped } from "@/lib/typed-number";
 
 import { saveModelPricesAction } from "./actions";
 
@@ -90,8 +91,10 @@ export function ModelPricesForm({
   prices: ModelPrice[];
   canEdit: boolean;
 }) {
-  const [drafts, setDrafts] = useState<Draft[]>(() => prices.map(draftOf));
+  const saved = () => prices.map(draftOf);
+  const [drafts, setDrafts] = useState<Draft[]>(saved);
   const { pending, error, setError, run } = useAction();
+  const changed = JSON.stringify(drafts) !== JSON.stringify(saved());
 
   const edit = (at: number, change: Partial<Draft>) =>
     setDrafts((held) => held.map((draft, i) => (i === at ? { ...draft, ...change } : draft)));
@@ -150,7 +153,7 @@ export function ModelPricesForm({
               placeholder={`${LABELS[key]} $ / 1M`}
               inputMode="decimal"
               value={draft[key]}
-              onChange={(e) => edit(at, { [key]: e.target.value })}
+              onChange={(e) => edit(at, { [key]: decimalTyped(e.target.value) })}
             />
           ))}
           {canEdit && (
@@ -179,6 +182,19 @@ export function ModelPricesForm({
           <Button type="submit" disabled={pending}>
             {pending ? "Saving..." : "Save"}
           </Button>
+          {changed && (
+            <Button
+              type="button"
+              variant="outline"
+              disabled={pending}
+              onClick={() => {
+                setDrafts(saved());
+                setError(null);
+              }}
+            >
+              Cancel
+            </Button>
+          )}
         </div>
       ) : (
         <p className="text-muted-foreground">

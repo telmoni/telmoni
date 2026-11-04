@@ -10,6 +10,7 @@ import { useConsoleUi } from "@/components/console-ui-context";
 import { PageAction } from "@/components/page-action";
 import {
   SidePanel,
+  SidePanelBody,
   SidePanelFooter,
   SidePanelHeader,
   SidePanelRow,
@@ -141,7 +142,7 @@ export function CreateProjectPanel({
             A project is what every API resource hangs off, with its own keys and members.
           </p>
         </SidePanelHeader>
-        <div className="min-h-0 flex-1 overflow-y-auto px-gutter">
+        <SidePanelBody>
           <SidePanelRow label="Project name" htmlFor="project-name">
             <Input
               ref={field}
@@ -214,7 +215,7 @@ export function CreateProjectPanel({
               </p>
             )}
           </SidePanelRow>
-        </div>
+        </SidePanelBody>
         <SidePanelFooter>
           {made ? (
             <>

@@ -45,7 +45,7 @@ export function AccessibilitySettings({ supportEmail }: { supportEmail: string |
   const { setShortcutsOpen } = useConsoleUi();
 
   return (
-    <div className="grid gap-gutter">
+    <div className="grid gap-page">
       <Section title="Keyboard" description="How the console answers the keyboard.">
         <Rows>
           <Row

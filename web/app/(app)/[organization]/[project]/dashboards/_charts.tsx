@@ -381,5 +381,5 @@ export function DashboardCharts({
         );
     }
   };
-  return <div className="grid gap-gutter lg:grid-cols-2">{charts.map(drawn)}</div>;
+  return <div className="grid gap-page lg:grid-cols-2">{charts.map(drawn)}</div>;
 }

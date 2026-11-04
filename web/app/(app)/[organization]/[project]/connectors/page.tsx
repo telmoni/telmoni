@@ -86,7 +86,7 @@ export default async function ConnectorsPage({
   return (
     <>
       <PageHeader title="Connectors" />
-      <div className="grid gap-gutter">
+      <div className="grid gap-page">
         <section className="grid gap-gutter">
           <p className="text-sm text-muted-foreground">
             Connect this project to the places it already talks. A Slack channel
@@ -112,7 +112,7 @@ export default async function ConnectorsPage({
           {/* Two to a row from `sm` up, one below it: a tile holds a mark, a
               name and a sentence, and two of those across a phone is a
               column of initials. */}
-          <div className="grid gap-gutter sm:grid-cols-2">
+          <div className="grid gap-page sm:grid-cols-2">
             {PROVIDERS.map((provider) => (
               <Tile
                 key={provider}

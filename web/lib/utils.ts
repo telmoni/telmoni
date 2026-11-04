@@ -14,7 +14,7 @@ import { extendTailwindMerge } from "tailwind-merge";
 // config exists.
 const twMerge = extendTailwindMerge({
   extend: {
-    theme: { radius: ["menu"], spacing: ["gutter"] },
+    theme: { radius: ["menu"], spacing: ["gutter", "page"] },
   },
 });
 
@@ -22,8 +22,8 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-/** The console's one gutter in pixels: `--spacing-gutter` (`p-gutter`,
- *  `gap-gutter`) in `app/globals.css`. */
+/** A control's gutter in pixels: `--spacing-gutter` (`p-gutter`,
+ *  `gap-gutter`) in `app/globals.css`; the page's is twice it. */
 export const GUTTER_PX = 12;
 
 /** How far a menu, popover, select or tooltip stands off the window's edges:

@@ -102,12 +102,16 @@ describe("buildConsoleNav", () => {
       "/acme/web/users",
       "/acme/web/alerts",
       "/acme/web/dashboards",
+      "/acme/web/scores",
       "/acme/web/evaluators",
+      "/acme/web/rules",
+      "/acme/web/objectives",
       "/acme/web/api-keys",
+      "/acme/web/models",
       "/acme/web/connectors",
       "/acme/web/members",
       "/acme/web/audit-log",
-      "/acme/web/privacy",
+      "/acme/web/notifications",
       "/acme/web/settings",
     ]);
   });
@@ -125,6 +129,7 @@ describe("buildConsoleNav", () => {
       "/acme/projects",
       "/acme/members",
       "/acme/audit-log",
+      "/acme/notifications",
       "/acme/settings",
     ]);
 
@@ -142,17 +147,21 @@ describe("buildConsoleNav", () => {
       "/acme/web/project",
       "/acme/web/invites",
       "/acme/web/overview",
-      "/acme/web/notifications",
     ]) {
       expect(urls).not.toContain(gone);
     }
   });
 
-  it("offers no Notifications row at either level", () => {
-    for (const pathname of ["/acme/web/api-keys", "/acme"]) {
-      const items = buildConsoleNav(pathname).flatMap((g) => g.items);
-      expect(items.some((i) => i.url.endsWith("/notifications"))).toBe(false);
-      expect(items.map((i) => i.title)).not.toContain("Notifications");
+  // Each level's own feed, never the person's: that is Settings' row.
+  it("offers a Notifications row at either level, the level's own page", () => {
+    for (const [pathname, url] of [
+      ["/acme/web/api-keys", "/acme/web/notifications"],
+      ["/acme", "/acme/notifications"],
+    ] as const) {
+      const rows = buildConsoleNav(pathname)
+        .flatMap((g) => g.items)
+        .filter((i) => i.title === "Notifications");
+      expect(rows.map((i) => i.url), pathname).toEqual([url]);
     }
   });
 
@@ -207,12 +216,16 @@ describe("buildConsoleNav", () => {
       "/acme/web/users",
       "/acme/web/alerts",
       "/acme/web/dashboards",
+      "/acme/web/scores",
       "/acme/web/evaluators",
+      "/acme/web/rules",
+      "/acme/web/objectives",
       "/acme/web/api-keys",
+      "/acme/web/models",
       "/acme/web/connectors",
       "/acme/web/members",
       "/acme/web/audit-log",
-      "/acme/web/privacy",
+      "/acme/web/notifications",
       "/acme/web/settings",
     ]);
 
@@ -245,15 +258,15 @@ describe("the blocks of a run", () => {
     ).toEqual([
       [undefined, ["Overview"]],
       ["Observability", ["Traces", "Sessions", "Users", "Alerts", "Dashboards"]],
-      ["Evaluation", ["Evaluators"]],
-      ["Project", ["API keys", "Connectors", "Members", "Audit log", "Privacy", "Settings"]],
+      ["Evaluation", ["Scores", "Evaluators", "Rules", "Objectives"]],
+      ["Project", ["API keys", "Models", "Connectors", "Members", "Audit log", "Notifications", "Settings"]],
     ]);
     const [organization] = buildConsoleNav("/acme/settings");
     expect(
       navBlocks(organization?.items ?? []).map((b) => [b.heading, b.items.map((i) => i.title)]),
     ).toEqual([
       [undefined, ["Overview"]],
-      ["Organization", ["Projects", "Members", "Audit log", "Settings"]],
+      ["Organization", ["Projects", "Members", "Audit log", "Notifications", "Settings"]],
     ]);
     const [account] = buildConsoleNav("/settings/account");
     expect(navBlocks(account?.items ?? []).map((b) => [b.heading, b.items.length])).toEqual([
@@ -303,17 +316,22 @@ describe("the whole destination set", () => {
       "/acme/web/users",
       "/acme/web/alerts",
       "/acme/web/dashboards",
+      "/acme/web/scores",
       "/acme/web/evaluators",
+      "/acme/web/rules",
+      "/acme/web/objectives",
       "/acme/web/api-keys",
+      "/acme/web/models",
       "/acme/web/connectors",
       "/acme/web/members",
       "/acme/web/audit-log",
-      "/acme/web/privacy",
+      "/acme/web/notifications",
       "/acme/web/settings",
       "/acme",
       "/acme/projects",
       "/acme/members",
       "/acme/audit-log",
+      "/acme/notifications",
       "/acme/settings",
       "/settings/general",
       "/settings/account",
