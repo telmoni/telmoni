@@ -852,7 +852,7 @@ fn tell_saved(
         saved.id,
     );
     tokio::spawn(async move {
-        let (project, path) = settings_of(&state, &project_id).await;
+        let (project, path) = connections_of(&state, &project_id).await;
         let what = match &then {
             None => format!("A {provider} model connection was made in {project}, with {now}."),
             Some(then) => format!(
@@ -861,8 +861,8 @@ fn tell_saved(
             ),
         };
         let body = format!(
-            "{what} If nobody of yours saved it, delete the connection on the project's Settings \
-             page and {undo}; the organization's audit log names who saved it."
+            "{what} If nobody of yours saved it, delete the connection on the project's Models page \
+             and {undo}; the organization's audit log names who saved it."
         );
         for wait in TELL_WAITS {
             tokio::time::sleep(wait).await;
@@ -889,9 +889,9 @@ fn tell_saved(
     });
 }
 
-/// The project in a notice's words, and its Settings page's path; one of
-/// the organization's projects, and its root, where auth cannot say.
-pub(crate) async fn settings_of(state: &AppState, project_id: &ProjectId) -> (String, String) {
+/// The project in a notice's words, and its Models page's path;
+/// one of the organization's projects, and its root, where auth cannot say.
+pub(crate) async fn connections_of(state: &AppState, project_id: &ProjectId) -> (String, String) {
     let home = state
         .auth
         .project_homes(std::slice::from_ref(project_id))
@@ -903,7 +903,7 @@ pub(crate) async fn settings_of(state: &AppState, project_id: &ProjectId) -> (St
         |h| {
             (
                 format!("the project {}", h.slug),
-                format!("/{}/{}/settings", h.organization_slug, h.slug),
+                format!("/{}/{}/models", h.organization_slug, h.slug),
             )
         },
     )

@@ -833,8 +833,8 @@ async fn a_project_left_off_keeps_no_content_and_makes_no_key(pool: PgPool) {
     assert!(!keyed);
 }
 
-/// The Privacy page counts what spans arrived with by the inventory's rows,
-/// the content an `off` project dropped among them, to any role on it.
+/// The posture counts what spans arrived with by the inventory's rows, the
+/// content an `off` project dropped among them, to any role on it.
 #[sqlx::test]
 async fn the_posture_counts_what_arrived_by_inventory_row_dropped_content_too(pool: PgPool) {
     let Some(_ch) = clickhouse_or_skip(module_path!()).await else {

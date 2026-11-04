@@ -281,7 +281,7 @@ async fn judge_with(
     let Some((id, models, provider)) = row else {
         return Err(TelmoniError::BadRequest(match change.connection_id {
             Some(_) => "no model connection with that id in this project".into(),
-            None => "an evaluator judges with a model connection: connect one on the project's Settings page first".into(),
+            None => "an evaluator judges with a model connection: connect one on the project's Models page first".into(),
         }));
     };
     if let Some(why) = misfit(provider, judging) {

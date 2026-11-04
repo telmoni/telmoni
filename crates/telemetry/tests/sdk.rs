@@ -263,4 +263,47 @@ async fn a_run_recorded_with_the_sdk_lands_through_the_door_and_the_trace_lanes_
         ],
         "{scores}"
     );
+
+    // With no run, the project's: every name newest first, then one name, then a page past the last.
+    let listed = |query: &'static str| {
+        let app = app.clone();
+        async move {
+            let response = app
+                .oneshot(request(format!("/internal/v1/telemetry/scores{query}")))
+                .await
+                .expect("the router answers");
+            assert_eq!(response.status(), StatusCode::OK);
+            let bytes = response
+                .into_body()
+                .collect()
+                .await
+                .expect("a body")
+                .to_bytes();
+            serde_json::from_slice::<Value>(&bytes).expect("a JSON body")
+        }
+    };
+    let all = listed("").await;
+    assert_eq!(all["more"], false, "{all}");
+    let all = all["scores"].as_array().expect("scores");
+    let mut names: Vec<&str> = all.iter().filter_map(|s| s["name"].as_str()).collect();
+    names.sort_unstable();
+    assert_eq!(names, ["outcome", "relevance", "thumbs"]);
+    let given: Vec<chrono::DateTime<chrono::Utc>> = all
+        .iter()
+        .map(|s| {
+            s["given_at"]
+                .as_str()
+                .expect("a time")
+                .parse()
+                .expect("RFC 3339")
+        })
+        .collect();
+    assert!(given.is_sorted_by(|a, b| a >= b), "newest first: {given:?}");
+    let thumbs = listed("?name=thumbs").await;
+    let thumbs = thumbs["scores"].as_array().expect("scores");
+    assert_eq!(thumbs.len(), 1);
+    assert_eq!(thumbs[0]["name"], "thumbs");
+    let past = listed("?page=1").await;
+    assert_eq!(past["scores"], serde_json::json!([]));
+    assert_eq!(past["more"], false);
 }

@@ -84,9 +84,9 @@ fn page_cells(page: &str) -> Vec<(String, String, String)> {
         .collect()
 }
 
-/// ⚠ The page and the Privacy page say the same of each attribute — where it
-/// belongs and the content mode it needs, in the same words — since a reader
-/// of either decides from them what may leave their process.
+/// ⚠ The page and the code say the same of each attribute — where it belongs
+/// and the content mode it needs — since a reader decides from them what may
+/// leave their process.
 #[test]
 fn the_page_and_the_code_say_the_same_of_each_attribute() {
     let page = customer_docs_page("api/field-inventory.mdx");

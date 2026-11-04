@@ -355,11 +355,10 @@ pub fn is_field(key: &str) -> bool {
 // ── The inventory, as a page reads it ────────────────────────────────────────
 //
 // One row for every name above, so the docs page (`api/field-inventory.mdx`,
-// held to [`INVENTORY`] by `tests/field_inventory.rs`) and the console's
-// privacy page, which reads it over `/internal/v1/telemetry/field-inventory`,
-// say what the code does and nothing else. The lists above are what ingest
-// reads; this table is what a person reads of them, and a test holds the two
-// to each other.
+// held to [`INVENTORY`] by `tests/field_inventory.rs`) and
+// `/internal/v1/telemetry/field-inventory` say what the code does and nothing
+// else. The lists above are what ingest reads; this table is what a person
+// reads of them, and a test holds the two to each other.
 
 /// The spans an attribute belongs on, where our SDKs and the conventions put
 /// it. Ingest reads it from whichever span carries it, a model's name or
@@ -483,8 +482,8 @@ pub const OTHER_SCALAR: &str = "any other number or boolean";
 pub const OTHER_TEXT: &str = "any other text, array or map";
 
 /// The inventory row an attribute sent on a span, or on its resource, falls
-/// under: what a span's `sent` records, so a project's Privacy page counts
-/// what arrived by the same rows the inventory shows.
+/// under: what a span's `sent` records, so the posture counts what arrived
+/// by the same rows the inventory shows.
 #[must_use]
 pub fn sent_as(key: &str, value_is_scalar: bool, on_resource: bool) -> &'static str {
     if !on_resource && key.starts_with(TAG_PREFIX) {

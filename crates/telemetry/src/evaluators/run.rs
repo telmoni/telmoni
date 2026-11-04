@@ -1131,11 +1131,11 @@ async fn refusal(
 async fn tell_refused(state: &AppState, leased: &Leased, connection_id: Uuid) {
     let dedup = format!("evaluators:{connection_id}");
     let (project, path) =
-        crate::handler::model_connections::settings_of(state, &leased.project_id).await;
+        crate::handler::model_connections::connections_of(state, &leased.project_id).await;
     let body = format!(
         "The provider refused a model connection of {project}, so the evaluators judging with \
          it are paused. Save the connection again with a key the provider takes, on the \
-         project's Settings page."
+         project's Models page."
     );
     let alert = OrganizationAlert {
         title: "An evaluator's model key was refused",

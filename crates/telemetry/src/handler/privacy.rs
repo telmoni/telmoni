@@ -1,8 +1,8 @@
-//! A project's privacy posture as its Privacy page reads it: `GET
-//! /internal/v1/telemetry/privacy`, what its spans arrived with over the last
-//! [`SENT_DAYS`] by the field inventory's rows, dropped content among them,
-//! what its evaluators read of its content over them, by day, and how long
-//! its spans and the hourly totals that outlive them are kept.
+//! A project's privacy posture, `GET /internal/v1/telemetry/privacy`, whose
+//! `retention` the project's Settings reads: what its spans arrived with over
+//! the last [`SENT_DAYS`] by the field inventory's rows, dropped content among
+//! them, what its evaluators read of its content over them, by day, and how
+//! long its spans and the hourly totals that outlive them are kept.
 //! Every role on the project `x-project-id` names reads it; its owners and
 //! admins choose its retention, `PUT /internal/v1/telemetry/retention`.
 

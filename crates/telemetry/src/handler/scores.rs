@@ -24,8 +24,8 @@ use crate::contract::SESSION_ID_MAX;
 use crate::handler::chain::{self, Change};
 use crate::handler::traces::read_failed;
 use crate::scores::{
-    COMMENT_MAX, Judgement, RUN_SQL, ScoreRow, TargetKey, VERSION_MAX, api_score_id,
-    member_score_id, version_of,
+    COMMENT_MAX, Judgement, PROJECT_PAGE, PROJECT_SQL, RUN_SQL, ScoreRow, TargetKey, VERSION_MAX,
+    api_score_id, member_score_id, version_of,
 };
 use crate::store::Projects;
 
@@ -101,6 +101,9 @@ impl From<ScoreRow> for Score {
 #[derive(Debug, Serialize)]
 pub struct Scores {
     pub scores: Vec<Score>,
+    /// The project's listing alone: whether a page after this one holds more.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub more: Option<bool>,
 }
 
 /// Whether what a score names is the project's: its run, the span in it, or
@@ -152,9 +155,16 @@ async fn judged_of(
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ScoresAsked {
-    pub run_id: Uuid,
+    /// A run's scores; none, the project's.
+    #[serde(default)]
+    pub run_id: Option<Uuid>,
     #[serde(default)]
     pub session_id: Option<String>,
+    /// The project's listing alone: one name, and which page, from 0.
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub page: Option<u32>,
 }
 
 #[derive(Row, Deserialize)]
@@ -580,7 +590,8 @@ pub async fn delete_score(
 }
 
 /// `GET /internal/v1/telemetry/scores?run_id=…[&session_id=…]` — a run's
-/// scores, its spans' and, where named, its session's, newest first.
+/// scores, its spans' and, where named, its session's, newest first; with no
+/// run, `[?name=…][&page=…]`, the project's, a page at a time.
 pub async fn get_scores(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -588,16 +599,46 @@ pub async fn get_scores(
 ) -> Result<Json<Scores>, TelmoniError> {
     let reader = crate::handler::traces::reader(&state, &headers).await?;
     let projects = Projects::one(reader.project_id.clone());
+    let Some(run) = asked.run_id else {
+        if asked.session_id.is_some() {
+            return Err(TelmoniError::BadRequest(
+                "a session's scores are read with its run's: name the run".into(),
+            ));
+        }
+        let page = asked.page.unwrap_or(0);
+        // One past the page, to tell whether another follows.
+        let mut rows: Vec<ScoreRow> = state
+            .store
+            .read(&projects, PROJECT_SQL)
+            .param("name", asked.name.unwrap_or_default())
+            .param("limit", PROJECT_PAGE + 1)
+            .param("offset", u64::from(page) * u64::from(PROJECT_PAGE))
+            .fetch_all()
+            .await
+            .map_err(read_failed)?;
+        let more = rows.len() > PROJECT_PAGE as usize;
+        rows.truncate(PROJECT_PAGE as usize);
+        return Ok(Json(Scores {
+            scores: rows.into_iter().map(Score::from).collect(),
+            more: Some(more),
+        }));
+    };
+    if asked.name.is_some() || asked.page.is_some() {
+        return Err(TelmoniError::BadRequest(
+            "a run's scores come whole: `name` and `page` list the project's".into(),
+        ));
+    }
     let rows: Vec<ScoreRow> = state
         .store
         .read(&projects, RUN_SQL)
-        .param("run", asked.run_id)
+        .param("run", run)
         .param("session", asked.session_id.unwrap_or_default())
         .fetch_all()
         .await
         .map_err(read_failed)?;
     Ok(Json(Scores {
         scores: rows.into_iter().map(Score::from).collect(),
+        more: None,
     }))
 }
 

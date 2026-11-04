@@ -346,7 +346,7 @@ pub struct SpanRow {
     /// The attributes the contract keeps, under their own names.
     pub attributes: Vec<(String, String)>,
     /// The field inventory's rows for every attribute it arrived with, kept
-    /// or dropped, each once: what a project's Privacy page counts.
+    /// or dropped, each once: what the project's posture counts.
     pub sent: Vec<String>,
 }
 

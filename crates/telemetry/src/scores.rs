@@ -574,6 +574,18 @@ pub const RUN_SQL: &str = "SELECT * FROM telemetry.scores FINAL
      ORDER BY received_at DESC
      LIMIT 1000";
 
+/// The project's scores, newest first, a page at a time: those of `name`, or
+/// every name where it is empty. By offset, not by time: a batch of scores
+/// shares one `received_at`, which a time's cursor would split.
+pub const PROJECT_SQL: &str = "SELECT * FROM telemetry.scores FINAL
+     WHERE project_id IN {projects:Array(String)} AND is_deleted = 0
+       AND ({name:String} = '' OR name = {name:String})
+     ORDER BY received_at DESC, score_id
+     LIMIT {limit:UInt32} OFFSET {offset:UInt64}";
+
+/// How many scores the project's listing answers at once.
+pub const PROJECT_PAGE: u32 = 100;
+
 #[cfg(test)]
 mod tests {
     use super::*;
