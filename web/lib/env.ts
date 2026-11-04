@@ -158,6 +158,13 @@ export const env = {
     return Number(raw);
   },
 
+  // Whether search engines, and the crawlers that feed models, are offered the
+  // public pages: `true` alone, on the one deployment meant to be found;
+  // anything else, unset included, answers every page `noindex`.
+  get SEARCH_INDEXING(): boolean {
+    return process.env.SEARCH_INDEXING?.trim() === "true";
+  },
+
   // Who runs this deployment: `lib/server/branding.ts` reads these. All
   // optional, documented here so the required-list check and this module
   // stay the one place the console's environment is described.

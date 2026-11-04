@@ -3,11 +3,14 @@ import { connection } from "next/server";
 
 import { env } from "@/lib/env";
 
-// Rendered per request (`connection()`): the console's origin is `AUTH_URL`,
-// read at runtime so one image serves every deployment, and a file built once
-// would carry the build machine's.
+// Rendered per request (`connection()`): the console's origin, `AUTH_URL`,
+// and whether it is meant to be found, `SEARCH_INDEXING`, are read at runtime
+// so one image serves every deployment.
 export default async function robots(): Promise<MetadataRoute.Robots> {
   await connection();
+  if (!env.SEARCH_INDEXING) {
+    return { rules: [{ userAgent: "*", disallow: ["/"] }] };
+  }
   return {
     rules: [
       {

@@ -320,6 +320,9 @@ services:
       PORT: "3000"
       NODE_ENV: production
       AUTH_URL: ${AUTH_URL:-http://localhost:3000}
+      # `true` offers the splash and the book to search engines; anything
+      # else answers every page noindex, as a private console should.
+      SEARCH_INDEXING: ${SEARCH_INDEXING:-false}
       AUTH_SECRET: ${AUTH_SECRET:?set AUTH_SECRET in deploy/compose/.env, 32 bytes or more}
       SERVICE_SECRET: ${SERVICE_SECRET:?set SERVICE_SECRET in deploy/compose/.env}
       SERVER_URL: http://server:8082

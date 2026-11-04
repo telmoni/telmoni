@@ -81,6 +81,29 @@ describe("LIVE_REFRESH_HOLD_SECS", () => {
   });
 });
 
+describe("SEARCH_INDEXING", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("offers the public pages to the engines on `true` alone", () => {
+    for (const raw of ["true", " true "]) {
+      vi.stubEnv("SEARCH_INDEXING", raw);
+      expect(env.SEARCH_INDEXING, raw).toBe(true);
+    }
+  });
+
+  // A spelling the console does not read keeps the deployment out of every index.
+  it("keeps them out on anything else, unset included", () => {
+    for (const raw of ["", "false", "TRUE", "1", "yes"]) {
+      vi.stubEnv("SEARCH_INDEXING", raw);
+      expect(env.SEARCH_INDEXING, raw).toBe(false);
+    }
+    vi.stubEnv("SEARCH_INDEXING", undefined);
+    expect(env.SEARCH_INDEXING).toBe(false);
+  });
+});
+
 describe("the deployment's optional settings", () => {
   const saved = { ...process.env };
   afterEach(() => {

@@ -14,7 +14,8 @@ import { PRODUCT_DESCRIPTION, PRODUCT_NAME } from "@/lib/site";
 // A function, not a constant: `metadataBase` is the deployment's origin, which
 // is `AUTH_URL` at request time and nothing a build could carry. Without it,
 // Next resolves a relative social image, which a console built on this one may
-// add as `opengraph-image`, against localhost.
+// add as `opengraph-image`, against localhost. Whether a page may be indexed
+// is the deployment's too (`SEARCH_INDEXING`).
 export function generateMetadata(): Metadata {
   return {
     metadataBase: new URL(env.AUTH_URL),
@@ -23,7 +24,7 @@ export function generateMetadata(): Metadata {
       default: PRODUCT_NAME,
     },
     description: PRODUCT_DESCRIPTION,
-    robots: "index, follow",
+    robots: env.SEARCH_INDEXING ? "index, follow" : "noindex, nofollow",
   };
 }
 

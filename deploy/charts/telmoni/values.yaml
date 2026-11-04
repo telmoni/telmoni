@@ -13,6 +13,10 @@ config:
   logLevel: "info"
   appUrl: "http://localhost:3000"
   authUrl: "http://localhost:3000"
+  # `true` offers the console's public pages, the splash and the book, to
+  # search engines and the crawlers that feed models (SEARCH_INDEXING): set
+  # on the one deployment meant to be found; off, every page says noindex.
+  searchIndexing: false
   # One callback for every provider (AUTH_REDIRECT_URI).
   redirectUri: "http://localhost:3000/auth/callback"
   # The login form is on unless disableUsernamePassword, which needs the

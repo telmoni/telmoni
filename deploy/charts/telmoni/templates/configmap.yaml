@@ -13,6 +13,7 @@ data:
   LIVE_REFRESH_HOLD_SECS: {{ .Values.web.liveRefreshHoldSeconds | quote }}
   APP_URL: {{ .Values.config.appUrl | quote }}
   AUTH_URL: {{ .Values.config.authUrl | quote }}
+  SEARCH_INDEXING: {{ .Values.config.searchIndexing | quote }}
   AUTH_REDIRECT_URI: {{ .Values.config.redirectUri | quote }}
   AUTH_DISABLE_SIGNUP: {{ .Values.config.disableSignup | quote }}
   VERIFY_EMAIL: {{ .Values.config.verifyEmail | quote }}

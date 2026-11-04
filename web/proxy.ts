@@ -38,6 +38,13 @@ function carry(settled: SettledSession | null, response: NextResponse): NextResp
   return response;
 }
 
+// A deployment not meant to be found says so on every answer, the files no
+// page's meta tag reaches among them (`robots.txt`, `llms.txt`).
+function unindexed(response: NextResponse): NextResponse {
+  if (!env.SEARCH_INDEXING) response.headers.set('x-robots-tag', 'noindex');
+  return response;
+}
+
 // The identity provider's origins, for `form-action`: signing out from the
 // account menu is a form post that ends in a redirect to the provider, which
 // the browser holds to that directive, so a provider missing from it is a
@@ -111,7 +118,7 @@ export const proxy: NextProxy = async (request) => {
 
   if (pathname === '/legal' || pathname.startsWith('/legal/')) {
     const target = legalRedirect(pathname);
-    if (target) return NextResponse.redirect(target, 308);
+    if (target) return unindexed(NextResponse.redirect(target, 308));
   }
 
   // The session is renewed here, once its bearer is about to lapse, and
@@ -129,12 +136,12 @@ export const proxy: NextProxy = async (request) => {
 
   if (isProtected && !loggedIn) {
     if (pathname.startsWith('/api/')) {
-      return carry(settled, problem(401, 'unauthenticated'));
+      return unindexed(carry(settled, problem(401, 'unauthenticated')));
     }
     const entry = '/auth/login';
     const url = new URL(entry, request.url);
     url.searchParams.set('returnTo', pathname + request.nextUrl.search);
-    return carry(settled, NextResponse.redirect(url));
+    return unindexed(carry(settled, NextResponse.redirect(url)));
   }
 
   const nonce = btoa(crypto.randomUUID());
@@ -154,7 +161,7 @@ export const proxy: NextProxy = async (request) => {
 
   const response = NextResponse.next({ request: { headers: requestHeaders } });
   response.headers.set('content-security-policy', csp);
-  return carry(settled, response);
+  return unindexed(carry(settled, response));
 };
 
 // The dots are escaped: the pattern is a regex, and an unescaped one is any
