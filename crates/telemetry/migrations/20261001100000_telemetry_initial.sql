@@ -180,7 +180,7 @@ ALTER TABLE telemetry.project_settings
 -- ══════════════════════════════════════════════════════════════════════════════
 -- A project's alerts: each a measure of its spans of one kind, folded over
 -- the last hour, day or week, against an alert threshold and an optional
--- warning one. Filed under the organization too, whose plan holds how many
+-- warning one; or an objective's burn, its fast and slow windows the two. Filed under the organization too, whose plan holds how many
 -- it may have across its projects, paused ones counted (`paused` says by
 -- whom: a person, or the plan, which lifts its own). The last evaluation is
 -- the loop's to write, under a lease (`lease_id` until `leased_until`) so
@@ -206,6 +206,9 @@ CREATE TABLE telemetry.rules (
     -- `baseline` is `previous`, its value then its change in percent.
     score_name        TEXT,
     baseline          TEXT             NOT NULL DEFAULT 'none',
+    -- A burn alert's objective: the share of the agent's runs that succeed,
+    -- or end under `latency_ms`, over its days; checked by the lane.
+    objective         JSONB,
     paused            TEXT,
     paused_at         TIMESTAMPTZ,
     value             DOUBLE PRECISION,
@@ -224,7 +227,10 @@ CREATE TABLE telemetry.rules (
     CONSTRAINT rules_name_check CHECK (char_length(name) BETWEEN 1 AND 60),
     CONSTRAINT rules_kind_check CHECK (kind IN ('run', 'step', 'model_call', 'tool_call')),
     CONSTRAINT rules_measure_check
-        CHECK (measure IN ('count', 'failures', 'duration', 'tokens', 'cost', 'score')),
+        CHECK (measure IN ('count', 'failures', 'duration', 'tokens', 'cost', 'score', 'burn')),
+    CONSTRAINT rules_objective_check
+        CHECK ((measure = 'burn') = (objective IS NOT NULL)
+               AND (objective IS NULL OR jsonb_typeof(objective) = 'object')),
     CONSTRAINT rules_score_name_check
         CHECK ((measure = 'score') = (score_name IS NOT NULL)
                AND (score_name IS NULL OR char_length(score_name) BETWEEN 1 AND 64)),

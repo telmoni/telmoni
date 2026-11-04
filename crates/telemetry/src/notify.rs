@@ -389,8 +389,12 @@ fn traces_link(state: &AppState, rule: &RuleRow) -> Option<String> {
     .ok()?;
     let filters = &rule.definition.filters;
     let failed = vec![SpanStatus::Error];
-    let statuses = if filters.status.is_empty() && rule.definition.measure == RuleMeasure::Failures
-    {
+    // An objective's runs miss it by failing, but a latency one's by running long.
+    let failures = match rule.definition.objective {
+        Some(objective) => objective.latency_ms.is_none(),
+        None => rule.definition.measure == RuleMeasure::Failures,
+    };
+    let statuses = if filters.status.is_empty() && failures {
         &failed
     } else {
         &filters.status
@@ -605,6 +609,9 @@ async fn told<'a>(
 /// metric in words with the value that set it — numbers alone, never a
 /// span's content.
 fn words(rule: &RuleRow, value: Option<f64>, told: &Told) -> (String, String) {
+    if let Some(objective) = rule.definition.objective {
+        return burn_words(rule, &objective, value, told);
+    }
     let what = metric(rule);
     let shown = value.map_or_else(|| "no value".to_owned(), |v| amount(&rule.definition, v));
     let threshold = |t: f64| amount(&rule.definition, t);
@@ -673,6 +680,90 @@ fn words(rule: &RuleRow, value: Option<f64>, told: &Told) -> (String, String) {
     )
 }
 
+/// An objective's notice: how fast its agent's runs spend its budget, over
+/// the window that set the severity, and when the budget is gone at that rate.
+fn burn_words(
+    rule: &RuleRow,
+    objective: &crate::rules::Objective,
+    value: Option<f64>,
+    told: &Told,
+) -> (String, String) {
+    let definition = &rule.definition;
+    let agent = definition.filters.agent.first().map_or("", String::as_str);
+    let promise = promise(objective, agent);
+    let burn = value.unwrap_or(0.0);
+    let shown = amount(definition, burn);
+    let gone = |burn: f64| match burn > 0.0 {
+        true => format!(
+            " At this rate its {} days' budget is gone in {}.",
+            objective.days,
+            days(f64::from(objective.days) / burn)
+        ),
+        false => String::new(),
+    };
+    let (state, body) = match (told.change, told.severity) {
+        (Move::Resolved, _) => (
+            "resolved",
+            format!(
+                "{promise}: its budget burns at {shown} again, under {} over the last hour and {}                  over the last six hours.",
+                amount(definition, definition.alert_threshold),
+                amount(definition, definition.warning_threshold.unwrap_or_default()),
+            ),
+        ),
+        (_, Severity::Warning) => (
+            "warning",
+            format!(
+                "{promise}: its budget burns at {shown} over the last six hours, past the {} that                  warns.{}",
+                amount(definition, definition.warning_threshold.unwrap_or_default()),
+                gone(burn)
+            ),
+        ),
+        _ => (
+            "alert",
+            format!(
+                "{promise}: its budget burns at {shown} over the last hour, past the {} that                  pages.{}",
+                amount(definition, definition.alert_threshold),
+                gone(burn)
+            ),
+        ),
+    };
+    let lead = if told.telling == Telling::Reminder {
+        "Still: "
+    } else {
+        ""
+    };
+    (
+        format!("{}: {state}", definition.name),
+        format!("{lead}{body}"),
+    )
+}
+
+/// What an objective promises, in words: "99.9% of support-bot's runs
+/// succeed over 30 days".
+fn promise(objective: &crate::rules::Objective, agent: &str) -> String {
+    let share = format!("{:.2}", objective.target * 100.0);
+    let share = share.trim_end_matches('0').trim_end_matches('.');
+    let how = match objective.latency_ms {
+        Some(ms) => format!("end inside {ms} ms"),
+        None => "succeed".to_owned(),
+    };
+    format!(
+        "{share}% of {agent}'s runs {how} over {} days",
+        objective.days
+    )
+}
+
+/// A span of days in words, to a tenth under ten, else whole; under a day in hours.
+fn days(days: f64) -> String {
+    if days < 1.0 {
+        return format!("{:.0} hours", (days * 24.0).max(1.0));
+    }
+    if days < 10.0 {
+        return format!("{days:.1} days");
+    }
+    format!("{days:.0} days")
+}
+
 /// The alert's metric in words: "The p95 duration of model calls over the
 /// last hour", "The most a run spent over the last day", and against the
 /// window before, "…, against the day before".
@@ -713,8 +804,8 @@ fn measured(rule: &RuleRow) -> String {
             };
             return format!("{spent} {}", over(rule.definition.window));
         }
-        // Worded above, by its score's name.
-        (RuleMeasure::Score, _) => String::new(),
+        // Worded above, by its score's name, and an objective by its promise.
+        (RuleMeasure::Score | RuleMeasure::Burn, _) => String::new(),
     };
     let of = match rule.definition.kind {
         SpanKind::Run => "runs",
@@ -796,6 +887,7 @@ fn amount(definition: &crate::rules::Definition, value: f64) -> String {
         (RuleMeasure::Duration, _) => format!("{} ms", number(value)),
         (RuleMeasure::Failures, RuleAggregation::Avg) => format!("{}%", number(value * 100.0)),
         (RuleMeasure::Cost, _) => dollars(value),
+        (RuleMeasure::Burn, _) => format!("{}×", number(value)),
         _ => number(value),
     }
 }
@@ -939,11 +1031,45 @@ mod tests {
             renotify_minutes: None,
             score_name: None,
             baseline: telmoni_shared::RuleBaseline::None,
+            objective: None,
             connectors: Vec::new(),
         }
         .checked()
         .expect("a budget")
         .definition
+    }
+
+    /// An objective's notice says what it promises, its burn as a multiple,
+    /// and how long its budget lasts at that rate.
+    #[test]
+    fn an_objective_reads_as_its_promise_and_its_burn() {
+        let success = crate::rules::Objective {
+            target: 0.999,
+            latency_ms: None,
+            days: 30,
+        };
+        assert_eq!(
+            promise(&success, "support-bot"),
+            "99.9% of support-bot's runs succeed over 30 days"
+        );
+        let latency = crate::rules::Objective {
+            target: 0.95,
+            latency_ms: Some(2_000),
+            ..success
+        };
+        assert_eq!(
+            promise(&latency, "support-bot"),
+            "95% of support-bot's runs end inside 2000 ms over 30 days"
+        );
+        let burn = crate::rules::Definition {
+            measure: RuleMeasure::Burn,
+            aggregation: RuleAggregation::Avg,
+            ..budget()
+        };
+        assert_eq!(amount(&burn, 14.4), "14.4×");
+        assert_eq!(days(30.0 / 15.0), "2.0 days");
+        assert_eq!(days(30.0 / 300.0), "2 hours");
+        assert_eq!(days(30.0 / 2.0), "15 days");
     }
 
     /// A budget's warning names the day its burn reaches the alert; no other alert forecasts.

@@ -311,6 +311,11 @@ pub fn router(state: Arc<AppState>) -> Router {
             "/telemetry/rules",
             get(handler::rules::list_rules).post(handler::rules::create_rule),
         )
+        .route("/telemetry/history", get(handler::history::get_history))
+        .route(
+            "/telemetry/objectives",
+            get(handler::objectives::list_objectives),
+        )
         .route(
             "/telemetry/rules/{id}",
             get(handler::rules::get_rule)

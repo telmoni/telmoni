@@ -39,7 +39,7 @@ impl Pick {
             RuleMeasure::Score if matches!(operator, RuleOperator::Gt | RuleOperator::Gte) => {
                 Self::HighestScored
             }
-            RuleMeasure::Failures => Self::LatestFailed,
+            RuleMeasure::Failures | RuleMeasure::Burn => Self::LatestFailed,
             RuleMeasure::Duration => Self::Slowest,
             RuleMeasure::Tokens => Self::MostTokens,
             RuleMeasure::Cost => Self::MostSpent,
@@ -153,7 +153,11 @@ pub async fn example(
 ) -> Result<Option<ExampleRun>, Unread> {
     let window = Window::of(now, rule.definition.window);
     let filters = &rule.definition.filters;
-    let pick = Pick::of(rule.definition.measure, rule.definition.operator);
+    // A latency objective's runs miss it by running long.
+    let pick = match rule.definition.objective {
+        Some(objective) if objective.latency_ms.is_some() => Pick::Slowest,
+        _ => Pick::of(rule.definition.measure, rule.definition.operator),
+    };
     let projects = Projects::one(rule.project_id.clone());
     let run_id = if pick == Pick::MostSpent {
         let spent = spend::runs(state, &projects, window, filters).await?;

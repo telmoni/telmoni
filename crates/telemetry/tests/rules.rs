@@ -587,9 +587,16 @@ async fn a_pause_by_the_plan_ends_an_evaluation_in_flight(pool: PgPool) {
         .expect("held");
     tx.commit().await.expect("commit");
     assert_eq!(held, 1);
-    let (settled, told) = incidents::settle(&state, &rule, lease_id, Some(6000.0), Utc::now())
-        .await
-        .expect("a settle");
+    let (settled, told) = incidents::settle(
+        &state,
+        &rule,
+        lease_id,
+        Some(6000.0),
+        incidents::next_severity(&rule, Some(6000.0)),
+        Utc::now(),
+    )
+    .await
+    .expect("a settle");
     assert!(!settled && told.is_empty(), "the plan's pause stands");
     assert_eq!(incidents_kept(&pool).await, 0);
 }
@@ -610,9 +617,16 @@ async fn a_project_moved_mid_evaluation_files_nothing_under_the_old_organization
         .await
         .expect("moved");
     tx.commit().await.expect("commit");
-    let (settled, _) = incidents::settle(&state, &rule, lease_id, Some(6000.0), Utc::now())
-        .await
-        .expect("a settle");
+    let (settled, _) = incidents::settle(
+        &state,
+        &rule,
+        lease_id,
+        Some(6000.0),
+        incidents::next_severity(&rule, Some(6000.0)),
+        Utc::now(),
+    )
+    .await
+    .expect("a settle");
     assert!(!settled, "the move ended the lease");
     assert_eq!(incidents_kept(&pool).await, 0);
 }

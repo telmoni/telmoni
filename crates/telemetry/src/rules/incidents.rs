@@ -156,7 +156,7 @@ pub struct Told {
     pub told_to: Vec<Uuid>,
 }
 
-/// An evaluation settled with what its severity moves: written where the
+/// An evaluation settled at the severity `next` it set: written where the
 /// lease and the definition it read still stand, with the alert's incident
 /// opened, followed or resolved in the same transaction. Answers whether it
 /// was settled, and what is to be told.
@@ -165,9 +165,9 @@ pub async fn settle(
     rule: &RuleRow,
     lease_id: Uuid,
     value: Option<f64>,
+    next: Severity,
     now: DateTime<Utc>,
 ) -> Result<(bool, Vec<Told>), TelmoniError> {
-    let next = next_severity(rule, value);
     let since = if next == rule.severity {
         rule.severity_since
     } else {

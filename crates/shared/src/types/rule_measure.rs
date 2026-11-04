@@ -7,8 +7,8 @@ use crate::{RuleAggregation, SpanKind};
 /// What an alert measures of each span of the kind it watches: the spans
 /// themselves, those that failed, how long each took, the tokens each model
 /// call spent, input and output, or what each run spent; or the project's
-/// scores of one name, a number's value or a yes or no's 1 or 0.
-/// `[PUBLIC-API]`.
+/// scores of one name, a number's value or a yes or no's 1 or 0; or how fast
+/// an agent's runs spend their objective's error budget. `[PUBLIC-API]`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "text", rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
@@ -25,6 +25,9 @@ pub enum RuleMeasure {
     Cost,
     /// Each score of the alert's name: a number's value, a yes or no's 1 or 0.
     Score,
+    /// How fast one agent's runs spend their objective's error budget: the
+    /// share that failed it, over the share it allows.
+    Burn,
 }
 
 crate::wire_enum!(RuleMeasure {
@@ -34,6 +37,7 @@ crate::wire_enum!(RuleMeasure {
     Tokens => "tokens",
     Cost => "cost",
     Score => "score",
+    Burn => "burn",
 });
 
 impl RuleMeasure {
@@ -41,7 +45,8 @@ impl RuleMeasure {
     /// counted or as a share; durations averaged, summed or at a percentile;
     /// tokens averaged or summed, since the hourly totals keep their sum
     /// alone; a run's cost averaged, summed or the largest, the cost cap; and
-    /// scores counted, averaged, the largest or at a percentile.
+    /// scores counted, averaged, the largest or at a percentile; a burn is
+    /// its window's share alone.
     #[must_use]
     pub const fn folds(self, aggregation: RuleAggregation) -> bool {
         use RuleAggregation as A;
@@ -52,17 +57,18 @@ impl RuleMeasure {
             Self::Tokens => matches!(aggregation, A::Avg | A::Sum),
             Self::Cost => matches!(aggregation, A::Avg | A::Sum | A::Max),
             Self::Score => !matches!(aggregation, A::Sum),
+            Self::Burn => matches!(aggregation, A::Avg),
         }
     }
 
     /// Whether the measure is counted on spans of `kind`: tokens on model
     /// calls alone, and cost on runs alone, from their calls; a score alert
-    /// reads the project's scores of its name, and is a run's.
+    /// reads the project's scores of its name, and is a run's, as a burn is.
     #[must_use]
     pub const fn measured_on(self, kind: SpanKind) -> bool {
         match self {
             Self::Tokens => matches!(kind, SpanKind::ModelCall),
-            Self::Cost | Self::Score => matches!(kind, SpanKind::Run),
+            Self::Cost | Self::Score | Self::Burn => matches!(kind, SpanKind::Run),
             Self::Count | Self::Failures | Self::Duration => true,
         }
     }

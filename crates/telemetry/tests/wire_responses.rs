@@ -529,6 +529,7 @@ fn alerts_answer_as_the_console_reads() {
             renotify_minutes: Some(60),
             score_name: None,
             baseline: telmoni_shared::RuleBaseline::None,
+            objective: None,
         },
         paused: None,
         paused_at: None,

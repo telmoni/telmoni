@@ -5,7 +5,8 @@
 //! a run's cost summed with no tag the same way, any other from `spans`
 //! alone, each run's model calls as they landed ([`crate::spend`]) — and settled in a transaction of its own with the
 //! severity it sets and the incident that moves with it ([`incidents`]),
-//! told once that commits. Before a pass evaluates an organization's alerts
+//! told once that commits. An objective's burn is read from its agent's runs
+//! in `spans`, over the last hour and six hours. Before a pass evaluates an organization's alerts
 //! it holds them to its plan's number, the oldest running and the rest
 //! paused by the plan, read at most every few minutes an organization.
 
@@ -22,15 +23,15 @@ use uuid::Uuid;
 use telmoni_shared::AlertCeilings;
 use telmoni_shared::db::tenant_session::maintenance_scope;
 use telmoni_shared::{
-    MissingData, OrganizationId, RuleAggregation, RuleBaseline, RuleMeasure, RuleWindow, Severity,
-    TelmoniError,
+    MissingData, OrganizationId, ProjectId, RuleAggregation, RuleBaseline, RuleMeasure, RuleWindow,
+    Severity, TelmoniError,
 };
 
 use crate::AppState;
 use crate::db::TelemetryLane;
 use crate::handler::chain;
 use crate::rules::db::{self, RuleRow};
-use crate::rules::incidents;
+use crate::rules::{Definition, Objective, SLOW_WINDOW, incidents};
 use crate::spend::{self, Unread};
 use crate::store::{Projects, micros, seconds};
 
@@ -114,6 +115,96 @@ const SCORES_SQL: &str = concat!(
     "WHERE gone = 0"
 );
 
+/// One agent's runs over a window, and those that missed its objective:
+/// failed, or for a latency objective, ran past it.
+const MISSED_SQL: &str = concat!(
+    "SELECT count() AS runs, countIf(if({latency_ms:UInt32} = 0, status = 'error', ",
+    "dateDiff('microsecond', started_at, ended_at) > toInt64({latency_ms:UInt32}) * 1000)) ",
+    "AS missed FROM telemetry.spans ",
+    "WHERE project_id IN {projects:Array(String)} ",
+    "AND received_at >= {from:DateTime64(6, 'UTC')} AND received_at < {to:DateTime64(6, 'UTC')} ",
+    "AND kind = 'run' AND agent = {agent:String}"
+);
+
+/// An objective's runs over a window, and those that missed it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Row, Deserialize)]
+pub struct Missed {
+    pub runs: u64,
+    pub missed: u64,
+}
+
+/// `agent`'s runs over `window` that missed `objective`.
+///
+/// # Errors
+///
+/// ClickHouse did not answer.
+pub async fn missed(
+    state: &AppState,
+    project_id: &ProjectId,
+    agent: &str,
+    objective: &Objective,
+    window: Window,
+) -> clickhouse::error::Result<Missed> {
+    state
+        .store
+        .read(&Projects::one(project_id.clone()), MISSED_SQL)
+        .param("latency_ms", objective.latency_ms.unwrap_or(0))
+        .param("agent", agent)
+        .param("from", micros(window.from))
+        .param("to", micros(window.to))
+        .fetch_one()
+        .await
+}
+
+/// An objective's burn over its last hour and its last six hours, at `now`.
+///
+/// # Errors
+///
+/// ClickHouse did not answer.
+pub async fn burns(
+    state: &AppState,
+    rule: &RuleRow,
+    objective: &Objective,
+    now: DateTime<Utc>,
+) -> clickhouse::error::Result<(f64, f64)> {
+    let agent = rule
+        .definition
+        .filters
+        .agent
+        .first()
+        .map_or("", String::as_str);
+    let mut burned = [0.0; 2];
+    for (burn, length) in burned
+        .iter_mut()
+        .zip([RuleWindow::Hour.duration(), SLOW_WINDOW])
+    {
+        let Missed { runs, missed } = missed(
+            state,
+            &rule.project_id,
+            agent,
+            objective,
+            Window::ending(now, length),
+        )
+        .await?;
+        *burn = objective.burn(runs, missed);
+    }
+    Ok((burned[0], burned[1]))
+}
+
+/// The severity an objective's burns set, and the value told with it: the
+/// hour's at its alert threshold pages, else the six hours' at its warning
+/// one warns; the value is the burn that set it, the hour's while neither does.
+#[must_use]
+pub fn burned(definition: &Definition, fast: f64, slow: f64) -> (Option<f64>, Severity) {
+    if fast >= definition.alert_threshold {
+        (Some(fast), Severity::Alert)
+    } else if definition.warning_threshold.is_some_and(|at| slow >= at) {
+        (Some(slow), Severity::Warning)
+    } else {
+        (Some(fast), Severity::Ok)
+    }
+}
+
 /// What a score alert's window holds: how many scores, their mean, the
 /// largest, and their 50th, 90th, 95th and 99th percentiles.
 #[derive(Debug, Clone, Default, PartialEq, Row, Deserialize)]
@@ -188,9 +279,9 @@ impl Totals {
             (RuleMeasure::Duration, percentile) => at(percentile),
             (RuleMeasure::Tokens, RuleAggregation::Avg) => Some(tokens / spans),
             (RuleMeasure::Tokens, _) => Some(tokens),
-            // Read run by run ([`crate::spend`]), and from the scores, which
-            // the totals cannot.
-            (RuleMeasure::Cost | RuleMeasure::Score, _) => None,
+            // Read run by run ([`crate::spend`]), from the scores, and from
+            // an agent's runs ([`burns`]), which the totals cannot.
+            (RuleMeasure::Cost | RuleMeasure::Score | RuleMeasure::Burn, _) => None,
         }
     }
 }
@@ -587,13 +678,30 @@ async fn value_at(
         .value(rule.definition.measure, rule.definition.aggregation))
 }
 
+/// What an evaluation at `now` reads: the alert's value, and the severity
+/// it sets.
+async fn reading(
+    state: &AppState,
+    rule: &RuleRow,
+    now: DateTime<Utc>,
+) -> Result<(Option<f64>, Severity), Unread> {
+    if let Some(objective) = &rule.definition.objective {
+        let (fast, slow) = burns(state, rule, objective, now).await?;
+        return Ok(burned(&rule.definition, fast, slow));
+    }
+    let value = value_of(state, rule, now).await?;
+    // A window holding no span, read as 0, is kept and told as the 0 it crossed at.
+    let value = value.or((rule.definition.missing_data == MissingData::Zero).then_some(0.0));
+    Ok((value, incidents::next_severity(rule, value)))
+}
+
 /// One alert: its value read and settled. Answers whether it was; one
 /// ClickHouse could not answer for waits for the next pass, logged by the
 /// error's kind alone, since its text can carry ClickHouse's message.
 async fn evaluate(state: &AppState, rule: &RuleRow, lease_id: Uuid) -> Result<bool, TelmoniError> {
     let now = Utc::now();
-    let value = match value_of(state, rule, now).await {
-        Ok(value) => value,
+    let (value, next) = match reading(state, rule, now).await {
+        Ok(read) => read,
         Err(Unread::Db(error)) => return Err(error.into()),
         Err(Unread::Store(error)) => {
             tracing::warn!(
@@ -607,9 +715,7 @@ async fn evaluate(state: &AppState, rule: &RuleRow, lease_id: Uuid) -> Result<bo
             return Ok(false);
         }
     };
-    // A window holding no span, read as 0, is kept and told as the 0 it crossed at.
-    let value = value.or((rule.definition.missing_data == MissingData::Zero).then_some(0.0));
-    let (settled, told) = incidents::settle(state, rule, lease_id, value, now).await?;
+    let (settled, told) = incidents::settle(state, rule, lease_id, value, next, now).await?;
     crate::notify::tell_incidents(state, rule, value, &told, now).await;
     // An incident left standing reaches the connectors a hold kept it from.
     let standing = rule.severity.is_breach() || rule.severity == Severity::NoData;
@@ -710,6 +816,52 @@ mod tests {
         );
         assert_eq!(change(0.6, None), None);
         assert_eq!(change(0.6, Some(0.0)), None);
+    }
+
+    /// ⚠ The hour pages at its threshold, else the six hours warn at theirs,
+    /// each told with its own burn.
+    #[test]
+    fn an_objectives_hour_pages_and_its_six_hours_warn() {
+        let definition = crate::rules::RuleInput {
+            name: "Support succeeds".into(),
+            kind: telmoni_shared::SpanKind::Run,
+            measure: RuleMeasure::Burn,
+            aggregation: RuleAggregation::Avg,
+            filters: crate::rules::RuleFilters {
+                agent: vec!["support-bot".into()],
+                ..crate::rules::RuleFilters::default()
+            },
+            window: RuleWindow::Hour,
+            operator: telmoni_shared::RuleOperator::Gte,
+            alert_threshold: 0.0,
+            warning_threshold: None,
+            missing_data: MissingData::Zero,
+            renotify_minutes: None,
+            score_name: None,
+            baseline: RuleBaseline::None,
+            objective: Some(Objective {
+                target: 0.99,
+                latency_ms: None,
+                days: 30,
+            }),
+            connectors: Vec::new(),
+        }
+        .checked()
+        .expect("an objective")
+        .definition;
+        assert_eq!(
+            burned(&definition, 20.0, 1.0),
+            (Some(20.0), Severity::Alert)
+        );
+        assert_eq!(
+            burned(&definition, 14.4, 1.0),
+            (Some(14.4), Severity::Alert)
+        );
+        assert_eq!(
+            burned(&definition, 10.0, 7.0),
+            (Some(7.0), Severity::Warning)
+        );
+        assert_eq!(burned(&definition, 3.0, 2.0), (Some(3.0), Severity::Ok));
     }
 
     #[test]

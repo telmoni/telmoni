@@ -6,7 +6,9 @@
 //! ([`crate::handler::rules`]), and each evaluated a minute after the last by
 //! a loop every replica runs ([`evaluate`]). An organization's alerts,
 //! paused ones counted, are held to its plan's number
-//! ([`telmoni_shared::seam::Entitlements::alert_ceilings`]).
+//! ([`telmoni_shared::seam::Entitlements::alert_ceilings`]). An objective is
+//! one alert too, on its burn ([`Objective`]): its fast window pages, its
+//! slow one warns.
 
 pub mod db;
 pub mod deliveries;
@@ -44,6 +46,85 @@ pub const RENOTIFY_MAX_MINUTES: i32 = 10_080;
 
 /// The most connectors one alert links.
 pub const LINKS_MAX: usize = 20;
+
+/// The burn an objective's last hour pages at: 2% of a 30 days' budget gone
+/// in an hour.
+pub const FAST_BURN: f64 = 14.4;
+
+/// The burn its last six hours warn at: 5% of a 30 days' budget gone in them.
+pub const SLOW_BURN: f64 = 6.0;
+
+/// The slow window an objective's burn is read over too.
+pub const SLOW_WINDOW: std::time::Duration = std::time::Duration::from_secs(6 * 3_600);
+
+/// The days an objective's budget is counted over.
+pub const OBJECTIVE_DAYS: [u16; 3] = [7, 28, 30];
+
+/// The lowest and highest share an objective promises: past the highest its
+/// budget is too small for any window to read.
+pub const TARGET_RANGE: std::ops::RangeInclusive<f64> = 0.5..=0.9999;
+
+/// The longest a latency objective's runs are given, in milliseconds: an hour.
+pub const LATENCY_MAX_MS: u32 = 3_600_000;
+
+/// What one agent's runs promise: that `target` of them, a share, succeed,
+/// or with `latency_ms`, end inside it, over the last `days`. A run that
+/// does not spends its error budget, `1 - target` of them.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Objective {
+    pub target: f64,
+    #[serde(default)]
+    pub latency_ms: Option<u32>,
+    pub days: u16,
+}
+
+impl Objective {
+    /// The objective as the table keeps it, or why it cannot be one.
+    fn checked(self) -> Result<Self, TelmoniError> {
+        let bad = |why: String| TelmoniError::BadRequest(why);
+        if !TARGET_RANGE.contains(&self.target) {
+            return Err(bad(format!(
+                "an objective promises {}% to {}% of its runs",
+                TARGET_RANGE.start() * 100.0,
+                TARGET_RANGE.end() * 100.0
+            )));
+        }
+        if self
+            .latency_ms
+            .is_some_and(|ms| !(1..=LATENCY_MAX_MS).contains(&ms))
+        {
+            return Err(bad(format!(
+                "a latency objective's runs end inside 1 to {LATENCY_MAX_MS} ms"
+            )));
+        }
+        if !OBJECTIVE_DAYS.contains(&self.days) {
+            return Err(bad("an objective is counted over 7, 28 or 30 days".into()));
+        }
+        Ok(self)
+    }
+
+    /// The share of runs it lets miss: its error budget.
+    #[must_use]
+    pub fn budget(&self) -> f64 {
+        1.0 - self.target
+    }
+
+    /// How fast `bad` of `runs` spend the budget: 1 spends it in exactly its
+    /// days; none spent where there was no run.
+    #[must_use]
+    pub fn burn(&self, runs: u64, bad: u64) -> f64 {
+        if runs == 0 {
+            return 0.0;
+        }
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "a count past 2^53 runs is no objective's"
+        )]
+        let share = bad as f64 / runs as f64;
+        share / self.budget()
+    }
+}
 
 /// The hours a linked connector hears an alert's notices in: on `days`, 1
 /// Monday to 7 Sunday, from `from` up to `to`, each `HH:MM` at `utc_offset`
@@ -301,12 +382,15 @@ pub struct RuleInput {
     /// What its value is read against: itself, or the window before.
     #[serde(default)]
     pub baseline: RuleBaseline,
+    /// A burn alert's objective; none for any other.
+    #[serde(default)]
+    pub objective: Option<Objective>,
     /// The project's connectors its notices go to; none, the feed alone.
     #[serde(default)]
     pub connectors: Vec<Link>,
 }
 
-/// What an alert is: the thirteen fields the table keeps, a person writes and
+/// What an alert is: the fourteen fields the table keeps, a person writes and
 /// the lanes answer, spelled once. The row and the answer embed it.
 #[derive(Debug, Clone, PartialEq, Serialize, sqlx::FromRow)]
 pub struct Definition {
@@ -330,6 +414,10 @@ pub struct Definition {
     pub score_name: Option<String>,
     /// What its value is read against: itself, or the window before.
     pub baseline: RuleBaseline,
+    /// A burn alert's objective; none for any other.
+    #[sqlx(json(nullable))]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub objective: Option<Objective>,
 }
 
 /// An alert checked whole, as the table keeps it.
@@ -345,9 +433,40 @@ impl RuleInput {
     /// characters; a kind of span ours names; an aggregation its measure
     /// folds ([`RuleMeasure::folds`](telmoni_shared::RuleMeasure::folds)); finite thresholds, a warning one met before the
     /// alert's as the operator reads them; and re-notification from a minute
-    /// to a week.
-    pub fn checked(self) -> Result<Rule, TelmoniError> {
+    /// to a week. A burn alert is its objective's: one agent's runs, and
+    /// its thresholds and windows [`FAST_BURN`] and [`SLOW_BURN`]'s.
+    pub fn checked(mut self) -> Result<Rule, TelmoniError> {
         let bad = |why: &str| TelmoniError::BadRequest(why.to_owned());
+        match (self.measure, self.objective.take()) {
+            (RuleMeasure::Burn, Some(objective)) => {
+                if !(self.filters.agent.len() == 1
+                    && RuleFilters {
+                        agent: Vec::new(),
+                        ..self.filters.clone()
+                    } == RuleFilters::default())
+                {
+                    return Err(bad(
+                        "an objective is one agent's: it takes that filter alone",
+                    ));
+                }
+                self = Self {
+                    kind: SpanKind::Run,
+                    aggregation: RuleAggregation::Avg,
+                    window: RuleWindow::Hour,
+                    operator: RuleOperator::Gte,
+                    alert_threshold: FAST_BURN,
+                    warning_threshold: Some(SLOW_BURN),
+                    missing_data: MissingData::Zero,
+                    score_name: None,
+                    baseline: RuleBaseline::None,
+                    objective: Some(objective.checked()?),
+                    ..self
+                };
+            }
+            (RuleMeasure::Burn, None) => return Err(bad("a burn alert names its objective")),
+            (_, Some(_)) => return Err(bad("an objective is a burn alert's alone")),
+            (_, None) => {}
+        }
         let name = self.name.trim().to_owned();
         if name.is_empty() || name.chars().count() > RULE_NAME_MAX {
             return Err(bad(&format!(
@@ -361,7 +480,7 @@ impl RuleInput {
             return Err(bad(&format!(
                 "{} is not folded by {}: count takes count; failures count or avg; duration \
                  avg, sum or a percentile; tokens avg or sum; cost avg, sum or max; score \
-                 count, avg, max or a percentile",
+                 count, avg, max or a percentile; burn avg",
                 self.measure, self.aggregation
             )));
         }
@@ -369,6 +488,7 @@ impl RuleInput {
             return Err(bad(match self.measure {
                 RuleMeasure::Tokens => "tokens are counted on model calls alone",
                 RuleMeasure::Score => "a score alert is a run's: it reads every score of its name",
+                RuleMeasure::Burn => "an objective is a run's",
                 _ => "cost is counted per run, from its model calls",
             }));
         }
@@ -487,6 +607,7 @@ impl RuleInput {
                 renotify_minutes: self.renotify_minutes,
                 score_name,
                 baseline: self.baseline,
+                objective: self.objective,
             },
         })
     }
@@ -524,8 +645,100 @@ mod tests {
             renotify_minutes: None,
             score_name: None,
             baseline: RuleBaseline::None,
+            objective: None,
             connectors: Vec::new(),
         }
+    }
+
+    /// An objective's alert takes its thresholds and window from its burn,
+    /// whatever was sent, one agent alone, and checks the objective.
+    #[test]
+    fn an_objective_is_one_agents_burn_at_the_fixed_thresholds() {
+        let objective = Objective {
+            target: 0.99,
+            latency_ms: None,
+            days: 30,
+        };
+        let burn = |filters: RuleFilters, objective: Option<Objective>| RuleInput {
+            measure: RuleMeasure::Burn,
+            filters,
+            objective,
+            ..input()
+        };
+        let one = || RuleFilters {
+            agent: vec!["support-bot".into()],
+            ..RuleFilters::default()
+        };
+        let kept = burn(one(), Some(objective))
+            .checked()
+            .expect("an objective");
+        let definition = &kept.definition;
+        assert_eq!(
+            (definition.kind, definition.window, definition.operator),
+            (SpanKind::Run, RuleWindow::Hour, RuleOperator::Gte)
+        );
+        assert_eq!(
+            (definition.alert_threshold, definition.warning_threshold),
+            (FAST_BURN, Some(SLOW_BURN))
+        );
+        assert_eq!(definition.objective, Some(objective));
+        assert!(burn(one(), None).checked().is_err(), "names its objective");
+        assert!(
+            burn(RuleFilters::default(), Some(objective))
+                .checked()
+                .is_err()
+        );
+        let two = RuleFilters {
+            agent: vec!["a".into(), "b".into()],
+            ..RuleFilters::default()
+        };
+        assert!(burn(two, Some(objective)).checked().is_err(), "one agent");
+        let released = RuleFilters {
+            release: vec!["v2".into()],
+            ..one()
+        };
+        assert!(
+            burn(released, Some(objective)).checked().is_err(),
+            "that filter alone"
+        );
+        for refused in [
+            Objective {
+                target: 1.0,
+                ..objective
+            },
+            Objective {
+                target: 0.4,
+                ..objective
+            },
+            Objective {
+                days: 14,
+                ..objective
+            },
+            Objective {
+                latency_ms: Some(0),
+                ..objective
+            },
+        ] {
+            assert!(burn(one(), Some(refused)).checked().is_err(), "{refused:?}");
+        }
+        let given = RuleInput {
+            objective: Some(objective),
+            ..input()
+        };
+        assert!(given.checked().is_err(), "a burn alert's alone");
+    }
+
+    /// A burn is the share missed over the share allowed, none without runs.
+    #[test]
+    fn a_burn_is_the_share_missed_over_the_budget() {
+        let objective = Objective {
+            target: 0.99,
+            latency_ms: None,
+            days: 30,
+        };
+        assert!((objective.burn(1_000, 10) - 1.0).abs() < 1e-9);
+        assert!((objective.burn(1_000, 144) - 14.4).abs() < 1e-9);
+        assert!(objective.burn(0, 0).abs() < f64::EPSILON);
     }
 
     /// A score alert names its score and takes no filter, a run's; a name

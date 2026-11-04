@@ -348,6 +348,7 @@ fn changed(before: &Definition, linked: &[Link], rule: &Rule) -> Vec<&'static st
         renotify_minutes,
         score_name,
         baseline,
+        objective,
     } = &rule.definition;
     let relinked = linked.len() != rule.connectors.len()
         || !linked.iter().all(|link| rule.connectors.contains(link));
@@ -370,6 +371,7 @@ fn changed(before: &Definition, linked: &[Link], rule: &Rule) -> Vec<&'static st
         ("missing_data", before.missing_data != *missing_data),
         ("score_name", before.score_name != *score_name),
         ("baseline", before.baseline != *baseline),
+        ("objective", before.objective != *objective),
         (
             "renotify_minutes",
             before.renotify_minutes != *renotify_minutes,

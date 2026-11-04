@@ -239,7 +239,8 @@
       "duration",
       "tokens",
       "cost",
-      "score"
+      "score",
+      "burn"
     ],
     "RuleOperator": [
       "gt",
@@ -483,6 +484,9 @@
   },
   "rules": {
     "folds": {
+      "burn": [
+        "avg"
+      ],
       "cost": [
         "avg",
         "sum",
@@ -529,7 +533,8 @@
         "failures",
         "duration",
         "cost",
-        "score"
+        "score",
+        "burn"
       ],
       "step": [
         "count",
