@@ -114,15 +114,9 @@ spec:
     kind: Service
     name: web
 ---
-# The machine lanes — ingest at /otlp/v1/traces, the read API under /v1, the
-# CLI's under /cli/v1 and Slack's signed events at /webhooks/v1/slack — and the
-# external watchdog's /heartbeat on `server-api`: on a host of their own where
-# `ingress.apiHost` names one, else under their paths on the console's host,
-# whose slugs are reserved so no organization shadows them. Only the lanes'
-# paths reach the server from outside; the console's `/internal/v1`, behind
-# the service secret, never does. Each prefix takes the lane's every version,
-# so a path missing one gets the server's 404. A matched path outranks the
-# console's catch-all, and a named host a route naming none.
+# The machine lanes and the watchdog's /heartbeat on `server-api`, on
+# `ingress.apiHost` or under their reserved paths on the console's host; the
+# console's `/internal/v1` is never routed from outside.
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -150,6 +144,9 @@ spec:
         - path:
             type: PathPrefix
             value: /cli
+        - path:
+            type: PathPrefix
+            value: /oidc
         - path:
             type: Exact
             value: /webhooks/v1/slack

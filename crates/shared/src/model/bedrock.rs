@@ -22,6 +22,7 @@ pub fn request(
     let Credentials::AccessKeys {
         access_key_id,
         secret_access_key,
+        session_token,
     } = &connection.credentials
     else {
         return Err(Refused::Unreadable(
@@ -63,6 +64,15 @@ pub fn request(
     let host = format!("bedrock-runtime.{region}.amazonaws.com");
     let path = format!("/model/{}/converse", encode_segment(ask.model));
     let stamp = at.format("%Y%m%dT%H%M%SZ").to_string();
+    // A role's session is signed with its token, which the request carries.
+    let mut signed_headers = vec![
+        ("content-type", "application/json"),
+        ("host", host.as_str()),
+        ("x-amz-date", stamp.as_str()),
+    ];
+    if let Some(token) = session_token {
+        signed_headers.push(("x-amz-security-token", token.expose()));
+    }
     let signed = authorization(
         &Signer {
             access_key_id,
@@ -74,23 +84,23 @@ pub fn request(
         "POST",
         &path,
         "",
-        &[
-            ("content-type", "application/json"),
-            ("host", &host),
-            ("x-amz-date", &stamp),
-        ],
+        &signed_headers,
         &body,
     );
+    let mut headers = vec![
+        (
+            "content-type".to_owned(),
+            "application/json".to_owned().into(),
+        ),
+        ("x-amz-date".to_owned(), stamp.clone().into()),
+        ("authorization".to_owned(), signed.into()),
+    ];
+    if let Some(token) = session_token {
+        headers.push(("x-amz-security-token".to_owned(), token.clone()));
+    }
     Ok(Prepared {
         url: format!("https://{host}{path}"),
-        headers: vec![
-            (
-                "content-type".to_owned(),
-                "application/json".to_owned().into(),
-            ),
-            ("x-amz-date".to_owned(), stamp.into()),
-            ("authorization".to_owned(), signed.into()),
-        ],
+        headers,
         body,
     })
 }
@@ -153,7 +163,9 @@ mod tests {
             credentials: Credentials::AccessKeys {
                 access_key_id: "AKID".into(),
                 secret_access_key: "secret".to_owned().into(),
+                session_token: None,
             },
+            sign_in: None,
         };
         let ask = Ask {
             model: "anthropic.claude-x:0",
@@ -198,5 +210,55 @@ mod tests {
             ..connection
         };
         assert!(request(&no_region, &ask, at).is_err());
+    }
+
+    /// A role's session goes with its token, signed and sent; a key pair's without.
+    #[test]
+    fn a_sessions_token_is_signed_and_sent() {
+        let schema = json!({ "type": "object" });
+        let ask = Ask {
+            model: "m",
+            system: "s",
+            messages: &[],
+            schema: &schema,
+            temperature: None,
+            max_tokens: 10,
+            media: &[],
+        };
+        let at = Utc
+            .with_ymd_and_hms(2026, 11, 2, 12, 0, 0)
+            .single()
+            .expect("a time");
+        let with = |session_token: Option<crate::Redacted>| Connection {
+            provider: ModelProvider::Bedrock,
+            base_url: None,
+            region: Some(crate::model::Region::try_new("us-east-1").unwrap()),
+            credentials: Credentials::AccessKeys {
+                access_key_id: "ASIA".into(),
+                secret_access_key: "secret".to_owned().into(),
+                session_token,
+            },
+            sign_in: None,
+        };
+        let header = |prepared: &Prepared, name: &str| {
+            prepared
+                .headers
+                .iter()
+                .find(|(n, _)| n == name)
+                .map(|(_, v)| v.expose().to_owned())
+        };
+        let session = request(&with(Some("the-token".to_owned().into())), &ask, at).expect("built");
+        let keys = request(&with(None), &ask, at).expect("built");
+        assert_eq!(
+            header(&session, "x-amz-security-token").as_deref(),
+            Some("the-token")
+        );
+        assert_eq!(header(&keys, "x-amz-security-token"), None);
+        let signed = header(&session, "authorization").expect("signed");
+        assert!(
+            signed.contains("SignedHeaders=content-type;host;x-amz-date;x-amz-security-token,"),
+            "{signed}"
+        );
+        assert_ne!(Some(signed), header(&keys, "authorization"));
     }
 }

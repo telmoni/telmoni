@@ -267,7 +267,7 @@ describe("AccountNotificationsPage: project offers", () => {
     await press("Accept");
     expect(acceptProjectOfferAction, "accepted before it was confirmed").not.toHaveBeenCalled();
     const dialog = screen.getByRole("dialog");
-    expect(dialog).toHaveTextContent(/connectors stay behind/i);
+    expect(dialog).toHaveTextContent(/connectors stay behind, its model connections are deleted/i);
     expect(within(dialog).queryByText("Which organization")).toBeNull();
 
     await act(async () => {

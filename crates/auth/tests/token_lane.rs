@@ -118,6 +118,9 @@ impl Telemetry for Meter {
     async fn move_project(&self, _: &ProjectId, _: &OrganizationId) -> Result<(), TelmoniError> {
         Ok(())
     }
+    async fn drop_model_connections(&self, _: &ProjectId) -> Result<(), TelmoniError> {
+        Ok(())
+    }
 }
 
 async fn json_body(resp: axum::response::Response) -> Value {

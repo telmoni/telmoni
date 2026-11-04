@@ -74,6 +74,8 @@ pub enum SiblingCall {
         /// The organization its settings were moved to.
         organization_id: String,
     },
+    /// `Telemetry::drop_model_connections`.
+    TelemetryDropModelConnections(String),
     /// `PurgeHook::purge_organization`.
     HookPurge(String),
 }
@@ -347,6 +349,7 @@ pub struct RecordingTelemetry {
     purge_organization: Answers<u64>,
     purge_project: Answers<u64>,
     move_project: Answers<()>,
+    drop_model_connections: Answers<()>,
     move_delays: Mutex<VecDeque<Duration>>,
     /// A pool to ask from, and the organization whose chain lock to ask about
     /// at each move.
@@ -369,6 +372,7 @@ impl RecordingTelemetry {
             purge_organization: Answers::default(),
             purge_project: Answers::default(),
             move_project: Answers::default(),
+            drop_model_connections: Answers::default(),
             move_delays: Mutex::new(VecDeque::new()),
             chain_probe: Mutex::new(None),
             chain_held: Mutex::new(Vec::new()),
@@ -439,6 +443,15 @@ impl RecordingTelemetry {
     pub fn failing_moves(&self, n: usize) -> &Self {
         for _ in 0..n {
             self.move_project.push(Err(sibling_down("telemetry")));
+        }
+        self
+    }
+
+    /// Fail the next `n` deletions of a moving project's model connections.
+    pub fn failing_connection_drops(&self, n: usize) -> &Self {
+        for _ in 0..n {
+            self.drop_model_connections
+                .push(Err(sibling_down("telemetry")));
         }
         self
     }
@@ -518,6 +531,14 @@ impl Telemetry for RecordingTelemetry {
             tokio::time::sleep(delay).await;
         }
         self.move_project.take().unwrap_or(Ok(()))
+    }
+
+    async fn drop_model_connections(&self, project_id: &ProjectId) -> Result<(), TelmoniError> {
+        self.calls
+            .record(SiblingCall::TelemetryDropModelConnections(
+                project_id.to_string(),
+            ));
+        self.drop_model_connections.take().unwrap_or(Ok(()))
     }
 }
 

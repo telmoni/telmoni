@@ -92,8 +92,8 @@ const PromptInputSchema = z.object({
 const EvaluatorInputSchema = z.discriminatedUnion("kind", [PromptInputSchema, TypedInputSchema]);
 
 const PAGE = "/(app)/[organization]/[project]/evaluators";
-// A model's answer stands in front of a save and a try: a minute at most.
-const JUDGED_MS = 75_000;
+// A model's answer stands in front of a save and a try: a sign-in's two exchanges and the model, a minute each at most.
+const JUDGED_MS = 240_000;
 
 /** An evaluator saved as a new version, its model asked for its answer's form first. */
 export async function saveEvaluatorAction(projectId: string, input: unknown): Promise<ActionResult> {

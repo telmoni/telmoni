@@ -220,12 +220,9 @@ pub(crate) async fn purge_organization_siblings(
 /// cannot be allowed the console's whole ten seconds.
 const PROJECT_PURGE_BUDGET: std::time::Duration = std::time::Duration::from_secs(5);
 
-/// The longest telemetry's project purge or move may take: a purge records
-/// a delete on two ClickHouse tables and waits at most two seconds for an
-/// export in flight; a move rewrites the project's settings row. The transfer's
-/// accept calls the move before notifications' purge, while its own
-/// transaction holds both organizations' locks, and the two together stay
-/// under the console's ten seconds.
+/// The longest telemetry's project purge, move or connections' deletion may
+/// take: an accept runs the move, notifications' purge and the deletion under
+/// both organizations' locks, 2 + 5 + 2 seconds inside the console's ten.
 const TELEMETRY_PROJECT_BUDGET: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// Why notifications tears a project down, which decides how.
@@ -306,6 +303,25 @@ pub(crate) async fn move_project_telemetry(
 ) -> Result<(), TelmoniError> {
     match state.siblings.telemetry.as_deref() {
         Some(telemetry) => move_telemetry(telemetry, project_id, organization_id).await,
+        None => Ok(()),
+    }
+}
+
+/// A moving project's model connections deleted by telemetry, held to its
+/// budget; no telemetry module holds none.
+pub(crate) async fn drop_model_connections(
+    state: &AppState,
+    project_id: &ProjectId,
+) -> Result<(), TelmoniError> {
+    match state.siblings.telemetry.as_deref() {
+        Some(telemetry) => {
+            within(
+                TELEMETRY_PROJECT_BUDGET,
+                "telemetry's model connections",
+                telemetry.drop_model_connections(project_id),
+            )
+            .await
+        }
         None => Ok(()),
     }
 }

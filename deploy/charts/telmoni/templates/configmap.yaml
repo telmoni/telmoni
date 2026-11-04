@@ -36,6 +36,15 @@ data:
   CONNECTOR_KEK: {{ .Values.config.connectorKek | quote }}
   TELEMETRY_KEK: {{ required "config.telemetryKek: a Cloud KMS key name, or file:/var/run/secrets/telmoni/kek/telemetry" .Values.config.telemetryKek | quote }}
   CONTENT_KEK: {{ required "config.contentKek: a Cloud KMS key name, or file:/var/run/secrets/telmoni/kek/content" .Values.config.contentKek | quote }}
+  MODEL_CONNECTION_KEK: {{ .Values.config.modelConnectionKek | quote }}
+  {{- if ne (empty .Values.config.modelFederationSigner) (empty .Values.config.modelFederationIssuer) }}
+  {{- fail "config.modelFederationSigner and config.modelFederationIssuer are set together, or neither" }}
+  {{- end }}
+  {{- if and .Values.config.modelFederationSigner (not .Values.config.modelConnectionKek) }}
+  {{- fail "config.modelFederationSigner needs config.modelConnectionKek, which seals whom each connection signs in as" }}
+  {{- end }}
+  MODEL_FEDERATION_SIGNER: {{ .Values.config.modelFederationSigner | quote }}
+  MODEL_FEDERATION_ISSUER: {{ .Values.config.modelFederationIssuer | quote }}
   {{- with .Values.config.agent }}
   AGENT_MODEL_PROVIDER: {{ .modelProvider | quote }}
   AGENT_MODEL_URL: {{ .modelUrl | quote }}

@@ -52,8 +52,13 @@ pub fn request(
         "generationConfig": config,
     });
     let model = encode_segment(ask.model);
-    let (url, auth) = match (&connection.credentials, token) {
-        (Credentials::ServiceAccount(account), Some(token)) => {
+    let vertex = match (&connection.credentials, token) {
+        (Credentials::ServiceAccount(account), Some(token)) => Some((&account.project_id, token)),
+        (Credentials::GoogleToken { token, project_id }, None) => Some((project_id, token)),
+        _ => None,
+    };
+    let (url, auth) = match (&connection.credentials, vertex) {
+        (_, Some((project_id, token))) => {
             let location = connection
                 .region
                 .as_ref()
@@ -66,7 +71,7 @@ pub fn request(
             (
                 format!(
                     "https://{host}/v1/projects/{}/locations/{location}/publishers/google/models/{model}:generateContent",
-                    encode_segment(&account.project_id)
+                    encode_segment(project_id)
                 ),
                 (
                     "authorization".to_owned(),
@@ -141,6 +146,7 @@ mod tests {
             base_url: None,
             region: None,
             credentials: Credentials::ApiKey("AIza".to_owned().into()),
+            sign_in: None,
         };
         let messages = [(Role::Assistant, "an answer".to_owned())];
         let ask = Ask {
@@ -169,5 +175,48 @@ mod tests {
         .expect("read");
         assert_eq!(judged.answer, json!({ "value": 2 }));
         assert!(answer(&json!({ "promptFeedback": { "blockReason": "SAFETY" } })).is_err());
+    }
+
+    /// A pool's token goes to Vertex AI in its location, under the project it
+    /// names, as a bearer and never as a key.
+    #[test]
+    fn a_pools_token_asks_vertex_ai_in_its_location() {
+        let schema = json!({ "type": "object" });
+        let ask = Ask {
+            model: "gemini-x",
+            system: "s",
+            messages: &[],
+            schema: &schema,
+            temperature: None,
+            max_tokens: 50,
+            media: &[],
+        };
+        let connection = Connection {
+            provider: ModelProvider::VertexAi,
+            base_url: None,
+            region: Some(crate::model::Region::try_new("europe-west4").unwrap()),
+            credentials: Credentials::GoogleToken {
+                token: "ya29.pool".to_owned().into(),
+                project_id: "their-project".into(),
+            },
+            sign_in: None,
+        };
+        let prepared = request(&connection, &ask, None).expect("built");
+        assert_eq!(
+            prepared.url,
+            "https://europe-west4-aiplatform.googleapis.com/v1/projects/their-project/locations/europe-west4/publishers/google/models/gemini-x:generateContent"
+        );
+        assert!(
+            prepared
+                .headers
+                .iter()
+                .any(|(n, v)| n == "authorization" && v.expose() == "Bearer ya29.pool")
+        );
+        assert!(!prepared.headers.iter().any(|(n, _)| n == "x-goog-api-key"));
+        let elsewhere: Redacted = "ya29.other".to_owned().into();
+        assert!(
+            request(&connection, &ask, Some(&elsewhere)).is_err(),
+            "a pool's connection takes no token but its own"
+        );
     }
 }

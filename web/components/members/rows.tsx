@@ -79,7 +79,7 @@ const WORDS = {
     transfer: "Transfer project",
     hand: (name) => `Hand this project to ${name}?`,
     handed:
-      "They become its owner when they accept: it moves into an organization they own, with its members and API keys. Its Slack and webhook connectors stay with your organization and are disconnected. You stay on as an admin of the project, and join their organization as a member. The offer lapses in 7 days if they do nothing.",
+      "They become its owner when they accept: it moves into an organization they own, with its members and API keys. Its Slack and webhook connectors stay with your organization and are disconnected, and its model connections are deleted, keys and all. You stay on as an admin of the project, and join their organization as a member. The offer lapses in 7 days if they do nothing.",
     withdraw: (email) => `Withdraw the project offer to ${email}`,
     withdrawTitle: "Withdraw the offer of this project?",
     withdrawn: "The project stays yours, and they can no longer accept it.",

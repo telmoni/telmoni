@@ -83,6 +83,7 @@ pub const ORGANIZATION_RESERVED: &[&str] = &[
     "new",
     "null",
     "oauth",
+    "oidc",
     "opengraph-image",
     "org",
     "organization",

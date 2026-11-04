@@ -263,6 +263,7 @@ fn checked(mut change: EvaluatorChange) -> Result<(EvaluatorChange, Judging), Te
 /// alone, and a prompt on any other.
 async fn judge_with(
     state: &AppState,
+    organization_id: &telmoni_shared::OrganizationId,
     project_id: &ProjectId,
     change: &EvaluatorChange,
     judging: &Judging,
@@ -291,7 +292,10 @@ async fn judge_with(
         .clone()
         .or_else(|| models.first().cloned())
         .unwrap_or_default();
-    Ok((model_connections::open(state, project_id, id).await?, model))
+    Ok((
+        model_connections::open_to_send(state, organization_id, project_id, id).await?,
+        model,
+    ))
 }
 
 /// `GET /internal/v1/telemetry/evaluators` — each evaluator's newest version
@@ -504,7 +508,14 @@ pub async fn saved(
         db::content_mode_of(&state.db, project_id).await?,
         EVALUATOR_READS,
     )?;
-    let (connection, model) = judge_with(state, project_id, &change, &judging).await?;
+    let (connection, model) = judge_with(
+        state,
+        changer.organization_id(),
+        project_id,
+        &change,
+        &judging,
+    )
+    .await?;
     let filled: BTreeMap<&str, String> = VARIABLES
         .iter()
         .map(|v| {
@@ -530,6 +541,7 @@ pub async fn saved(
     let fresh = change.id.is_none();
     let created_by = changer.who();
     let token = changer.token();
+    let actor = actor_of(&changer, &token);
     let organization_id = changer.organization_id().clone();
     let written = changing(state, &changer, project_id, async |tx| {
         content_kept(db::content_mode(tx, project_id).await?, EVALUATOR_READS)?;
@@ -600,7 +612,7 @@ pub async fn saved(
                 tx,
                 AuditEvent::new(
                     &organization_id,
-                    actor_of(&changer, &token),
+                    actor,
                     AuditAction::Created,
                     TelmoniResourceKind::Evaluator,
                 )
@@ -614,7 +626,7 @@ pub async fn saved(
                 tx,
                 AuditEvent::new(
                     &organization_id,
-                    actor_of(&changer, &token),
+                    actor,
                     AuditAction::Updated,
                     TelmoniResourceKind::Evaluator,
                 )
@@ -789,7 +801,14 @@ pub async fn try_evaluator(
         db::content_mode_of(&state.db, &project_id).await?,
         EVALUATOR_READS,
     )?;
-    let (connection, model) = judge_with(&state, &project_id, &change, &judging).await?;
+    let (connection, model) = judge_with(
+        &state,
+        &acting.organization_id,
+        &project_id,
+        &change,
+        &judging,
+    )
+    .await?;
     let projects = Projects::one(project_id.clone());
     let spans = traces::spans(
         &state.store,
@@ -1016,6 +1035,7 @@ pub async fn removed(
     id: Uuid,
 ) -> Result<(), TelmoniError> {
     let token = changer.token();
+    let actor = actor_of(&changer, &token);
     let organization_id = changer.organization_id().clone();
     // The corrections it was taught first, as the content they are: a retry
     // after a failure finds the evaluator still there to delete.
@@ -1052,7 +1072,7 @@ pub async fn removed(
             tx,
             AuditEvent::new(
                 &organization_id,
-                actor_of(&changer, &token),
+                actor,
                 AuditAction::Deleted,
                 TelmoniResourceKind::Evaluator,
             )

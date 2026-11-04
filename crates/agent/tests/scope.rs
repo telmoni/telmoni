@@ -125,6 +125,9 @@ impl Telemetry for Absent {
     async fn move_project(&self, _: &ProjectId, _: &OrganizationId) -> Result<(), TelmoniError> {
         Ok(())
     }
+    async fn drop_model_connections(&self, _: &ProjectId) -> Result<(), TelmoniError> {
+        Ok(())
+    }
 }
 
 fn state(pool: &PgPool, embedder: Arc<SameVector>) -> AppState {
@@ -1358,6 +1361,9 @@ impl Telemetry for Window {
         Ok(0)
     }
     async fn move_project(&self, _: &ProjectId, _: &OrganizationId) -> Result<(), TelmoniError> {
+        Ok(())
+    }
+    async fn drop_model_connections(&self, _: &ProjectId) -> Result<(), TelmoniError> {
         Ok(())
     }
     async fn trace_vocabulary(

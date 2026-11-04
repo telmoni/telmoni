@@ -32,11 +32,7 @@ impl App {
                 self.secrets.clone(),
                 require_service_secret,
             ));
-        // The machine lanes behind the door, each named, then versioned: the
-        // read API at `/v1`, the CLI's at `/cli/v1`, and ingest at `/otlp`,
-        // whose `/v1/traces` is OTLP's own, nested whole so `/otlp/` is its to
-        // answer too. Each lane gates its own, by key, bearer or device code.
-        // The probes are the platform's, and carry no version.
+        // The machine lanes, each named then versioned; `/otlp` nests whole, `/v1/traces` OTLP's own.
         let core = Router::new()
             .merge(probes)
             .merge(log_level)
@@ -52,6 +48,11 @@ impl App {
             .nest(
                 "/cli/v1",
                 self.door.cli(telmoni_auth::cli_router(self.auth.clone())),
+            )
+            .nest(
+                "/oidc/v1",
+                self.door
+                    .v1(telmoni_telemetry::oidc_router(self.telemetry.clone())),
             )
             .nest_service(
                 "/otlp",

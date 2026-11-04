@@ -23,7 +23,6 @@ enum ActorPattern {
     /// User actor — `Actor::User(<expr>)` from a session, header or token.
     Variable,
     /// The lane's principal, passed in as a binding named `actor`.
-    #[expect(dead_code, reason = "manifest vocabulary awaiting its next handler")]
     Principal,
 }
 
@@ -153,27 +152,27 @@ const MUTATIONS: &[Mutation] = &[
         resource_kind: "ModelConnection",
         actor_id: ActorPattern::Variable,
     },
-    // A project's evaluator: a version saved, or the evaluator deleted, by an owner or admin.
+    // An evaluator saved or deleted on the console's lane or `/v1`, both through `saved` and `removed`.
     Mutation {
         file: "crates/telemetry/src/handler/evaluators.rs",
-        fn_name: "put_evaluator",
+        fn_name: "saved",
         action: "Created",
         resource_kind: "Evaluator",
-        actor_id: ActorPattern::Variable,
+        actor_id: ActorPattern::Principal,
     },
     Mutation {
         file: "crates/telemetry/src/handler/evaluators.rs",
-        fn_name: "put_evaluator",
+        fn_name: "saved",
         action: "Updated",
         resource_kind: "Evaluator",
-        actor_id: ActorPattern::Variable,
+        actor_id: ActorPattern::Principal,
     },
     Mutation {
         file: "crates/telemetry/src/handler/evaluators.rs",
-        fn_name: "delete_evaluator",
+        fn_name: "removed",
         action: "Deleted",
         resource_kind: "Evaluator",
-        actor_id: ActorPattern::Variable,
+        actor_id: ActorPattern::Principal,
     },
     // A project's evaluation rule, made, changed or deleted by an owner or admin.
     Mutation {

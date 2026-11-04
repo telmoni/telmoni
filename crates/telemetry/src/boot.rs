@@ -67,6 +67,30 @@ pub fn state(
     // Bounded, so an export that keys its project ends inside an
     // organization's deletion grace.
     let http = telmoni_shared::http::client("telmoni-telemetry", KEY_SERVICE_WAIT)?;
+    federation_whole(&config)?;
+    let federation = match (
+        &config.model_federation_signer,
+        &config.model_federation_issuer,
+    ) {
+        (Some(signer), Some(issuer)) => {
+            let signer = telmoni_shared::model::federation::Signer::parse(
+                "MODEL_FEDERATION_SIGNER",
+                signer,
+                &config.kms_api_base,
+                &config.metadata_api_base,
+            )
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+            Some(Arc::new(
+                telmoni_shared::model::federation::Federation::new(
+                    signer,
+                    issuer,
+                    http.clone(),
+                    telmoni_shared::model::federation::Endpoints::default(),
+                ),
+            ))
+        }
+        _ => None,
+    };
     let redis =
         Redis::connect(config.redis_url.expose()).context("REDIS_URL is not a Redis URL")?;
     tracing::info!(
@@ -87,6 +111,7 @@ pub fn state(
         kek,
         content_kek,
         model_kek,
+        federation,
         egress,
         hashing_keys: hashing::Cache::default(),
         content_keys: hashing::Cache::default(),
@@ -121,6 +146,25 @@ fn one_key_a_purpose(config: &Config) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The federation's signer and issuer set together or neither, and never
+/// without the key its connections are sealed under.
+fn federation_whole(config: &Config) -> anyhow::Result<()> {
+    match (
+        config.model_federation_signer.is_some(),
+        config.model_federation_issuer.is_some(),
+    ) {
+        (false, false) => Ok(()),
+        (true, true) if config.model_connection_kek.is_some() => Ok(()),
+        (true, true) => anyhow::bail!(
+            "MODEL_FEDERATION_SIGNER needs MODEL_CONNECTION_KEK: a connection that signs in is \
+             sealed under it, as one with a key is"
+        ),
+        _ => anyhow::bail!(
+            "MODEL_FEDERATION_SIGNER and MODEL_FEDERATION_ISSUER are set together, or neither"
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -132,6 +176,8 @@ mod tests {
             telemetry_kek: telemetry_kek.into(),
             content_kek: content_kek.into(),
             model_connection_kek: None,
+            model_federation_signer: None,
+            model_federation_issuer: None,
             kms_api_base: String::new(),
             metadata_api_base: String::new(),
             redis_url: "".into(),
@@ -164,6 +210,8 @@ mod tests {
         let local = format!("local:{}", "0".repeat(64));
         let shared = Config {
             model_connection_kek: Some(local.clone().into()),
+            model_federation_signer: None,
+            model_federation_issuer: None,
             ..config(&format!("local:{}", "1".repeat(64)), &local)
         };
         let refused = one_key_a_purpose(&shared)
@@ -173,5 +221,25 @@ mod tests {
             refused.contains("CONTENT_KEK") && refused.contains("MODEL_CONNECTION_KEK"),
             "{refused}"
         );
+    }
+
+    /// A signer is refused without its issuer, and without the key its
+    /// connections are sealed under.
+    #[test]
+    fn a_signer_needs_its_issuer_and_the_connections_key() {
+        let with = |signer: bool, issuer: bool, kek: bool| Config {
+            model_federation_signer: signer.then(|| "local".to_owned().into()),
+            model_federation_issuer: issuer.then(|| "https://api.example.com".to_owned()),
+            model_connection_kek: kek.then(|| format!("local:{}", "2".repeat(64)).into()),
+            ..config("a", "b")
+        };
+        federation_whole(&with(true, true, true)).expect("whole");
+        federation_whole(&with(false, false, false)).expect("none");
+        let refused = federation_whole(&with(true, true, false))
+            .expect_err("no key to seal under")
+            .to_string();
+        assert!(refused.contains("MODEL_CONNECTION_KEK"), "{refused}");
+        federation_whole(&with(true, false, true)).expect_err("no issuer");
+        federation_whole(&with(false, true, true)).expect_err("no signer");
     }
 }

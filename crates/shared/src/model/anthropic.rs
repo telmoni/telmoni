@@ -119,6 +119,7 @@ mod tests {
             base_url: None,
             region: None,
             credentials: Credentials::ApiKey("sk-ant".to_owned().into()),
+            sign_in: None,
         };
         let messages = [(Role::User, "judge this".to_owned())];
         let ask = Ask {

@@ -27,7 +27,10 @@ use crate::{Redacted, TelmoniError};
 
 mod kek;
 
-pub use kek::{KEK_VERSION, Kek, KekError, KmsKek, LocalKek, is_loopback_origin, on_deployed_tier};
+pub use kek::{
+    KEK_VERSION, Kek, KekError, KmsKek, LocalKek, MetadataToken, is_loopback_origin,
+    on_deployed_tier,
+};
 
 /// A data key is AES-256: 32 bytes, always.
 const DEK_LEN: usize = 32;

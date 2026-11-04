@@ -616,6 +616,9 @@ CREATE TABLE telemetry.model_connections (
     models            TEXT[]      NOT NULL,
     is_default        BOOLEAN     NOT NULL DEFAULT false,
     secret_hint       TEXT        NOT NULL,
+    -- It stores no key, only whom it signs in as: a role or a pool trusting
+    -- its project's issuer, the hint naming which.
+    signs_in          BOOLEAN     NOT NULL DEFAULT false,
     secret_ciphertext BYTEA       NOT NULL,
     secret_nonce      BYTEA       NOT NULL,
     wrapped_dek       BYTEA       NOT NULL,
@@ -624,6 +627,10 @@ CREATE TABLE telemetry.model_connections (
     -- evaluators wait until a save proves it again.
     refused_at        TIMESTAMPTZ,
     refused_reason    TEXT,
+    -- When its key last went out with a request, a minute stale at most: read
+    -- beside the audit log, it shows a key used when nobody of the
+    -- customer's was using it.
+    last_used_at      TIMESTAMPTZ,
     created_by        TEXT        NOT NULL,
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -634,6 +641,9 @@ CREATE TABLE telemetry.model_connections (
     )),
     CONSTRAINT model_connections_check CHECK (
         char_length(name) BETWEEN 1 AND 60 AND cardinality(models) BETWEEN 1 AND 20
+    ),
+    CONSTRAINT model_connections_signs_in_check CHECK (
+        NOT signs_in OR provider IN ('bedrock', 'vertex_ai')
     )
 );
 
@@ -653,7 +663,8 @@ CREATE POLICY maintenance_access ON telemetry.model_connections
     WITH CHECK (current_user = 'telemetry_maintenance');
 
 -- The evaluation loop opens a project's connections and marks one its
--- provider refuses; the purges delete them.
+-- provider refuses; the purges, and a project's move to another
+-- organization, delete them.
 GRANT SELECT, UPDATE, DELETE ON telemetry.model_connections TO telemetry_maintenance;
 
 -- A project's evaluators: a row a version under the evaluator's stable id,
@@ -798,9 +809,10 @@ CREATE POLICY maintenance_access ON telemetry.evaluation_rule_evaluators
     WITH CHECK (current_user = 'telemetry_maintenance');
 
 -- The evaluation loop reads every project's rules and moves each reach back;
--- the purges delete them.
+-- a transfer moves a project's; the purges delete them.
 GRANT SELECT, DELETE ON telemetry.evaluation_rules TO telemetry_maintenance;
-GRANT UPDATE (backfill_seen, backfill_done_at) ON telemetry.evaluation_rules TO telemetry_maintenance;
+GRANT UPDATE (organization_id, backfill_seen, backfill_done_at)
+    ON telemetry.evaluation_rules TO telemetry_maintenance;
 GRANT SELECT, DELETE ON telemetry.evaluation_rule_evaluators TO telemetry_maintenance;
 
 -- One evaluator's judgement of one target, found by a rule: pending until
@@ -811,6 +823,7 @@ GRANT SELECT, DELETE ON telemetry.evaluation_rule_evaluators TO telemetry_mainte
 CREATE TABLE telemetry.evaluations (
     id                UUID             PRIMARY KEY,
     project_id        TEXT             NOT NULL,
+    -- Whose plan its judgement runs under: moved with its project until it settles.
     organization_id   TEXT             NOT NULL,
     rule_id           UUID             REFERENCES telemetry.evaluation_rules (id) ON DELETE SET NULL,
     evaluator_id      UUID             NOT NULL,

@@ -56,6 +56,8 @@ struct Door {
     app: Router,
     state: Arc<AppState>,
     auth: Arc<AuthStub>,
+    /// Every notice the module hands through the seam, over both stores.
+    notices: Arc<common::NoticeLog>,
     organization: OrganizationId,
     project: ProjectId,
 }
@@ -82,8 +84,14 @@ async fn door_over(pool: &PgPool, mode: ContentMode, stores: bool) -> Door {
     .execute(pool)
     .await
     .expect("seed the project's mode");
+    let notices = common::NoticeLog::new();
     let state = if stores {
-        common::state_with_stores(pool, auth.clone())
+        common::state_with_stores_noticed(
+            pool,
+            auth.clone(),
+            Arc::new(telmoni_shared::seam::NoLimits),
+            notices.clone(),
+        )
     } else {
         common::state(pool, auth.clone())
     };
@@ -101,6 +109,7 @@ async fn door_over(pool: &PgPool, mode: ContentMode, stores: bool) -> Door {
             .nest("/v1", v1_router(state.clone()).merge(reads)),
         state,
         auth,
+        notices,
         organization,
         project,
     }
@@ -4323,11 +4332,12 @@ async fn mock_provider() -> (String, Arc<std::sync::atomic::AtomicUsize>) {
             let counted = Arc::clone(&counted);
             async move {
                 counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                let good = headers
+                let presented = headers
                     .get(header::AUTHORIZATION)
                     .and_then(|v| v.to_str().ok())
-                    == Some("Bearer sk-good");
-                if good {
+                    .unwrap_or_default()
+                    .to_owned();
+                if presented == "Bearer sk-good" {
                     (
                         StatusCode::OK,
                         axum::Json(json!({
@@ -4336,9 +4346,10 @@ async fn mock_provider() -> (String, Arc<std::sync::atomic::AtomicUsize>) {
                         })),
                     )
                 } else {
+                    // As a careless gateway does: the key it was sent, echoed.
                     (
                         StatusCode::UNAUTHORIZED,
-                        axum::Json(json!({ "error": { "message": "Incorrect API key provided" } })),
+                        axum::Json(json!({ "error": { "message": format!("Incorrect API key provided: {presented}") } })),
                     )
                 }
             }
@@ -4352,10 +4363,205 @@ async fn mock_provider() -> (String, Arc<std::sync::atomic::AtomicUsize>) {
     (format!("http://{at}/v1"), asked)
 }
 
-/// An owner connects a model on their own key, proved by one small request:
-/// a key the provider refuses saves nothing, naming its answer; the key is
-/// sealed, never answered back nor filed, its last four alone shown; a member
-/// reads the connections and changes none.
+/// A deployment that signs answers each project's issuer alike; one that signs nothing refuses keyless connections.
+#[sqlx::test]
+async fn each_project_is_an_issuer_a_provider_can_trust(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let door = door(&pool, ContentMode::Off).await;
+    door.auth.seat(
+        "admin-1",
+        &door.organization,
+        &door.project,
+        OrganizationRole::Owner,
+        None,
+    );
+    let get = |app: Router, path: String| async move {
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri(path)
+                    .body(Body::empty())
+                    .expect("a request"),
+            )
+            .await
+            .expect("an answer");
+        let status = response.status();
+        let bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("a body")
+            .to_bytes();
+        (
+            status,
+            serde_json::from_slice::<Value>(&bytes).unwrap_or(Value::Null),
+        )
+    };
+    let unsigned = telmoni_telemetry::oidc_router(door.state.clone());
+    assert_eq!(get(unsigned, "/jwks".into()).await.0, StatusCode::NOT_FOUND);
+    let (status, refused) = door
+        .lane(
+            "PUT",
+            "/model-connections",
+            "admin-1",
+            Some(json!({
+                "name": "Bedrock", "provider": "bedrock", "region": "us-east-1",
+                "models": ["anthropic.claude"],
+                "secret": json!({ "role_arn": "arn:aws:iam::123456789012:role/telmoni" }).to_string(),
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{refused}");
+    assert!(
+        refused.to_string().contains("signs no project in"),
+        "{refused}"
+    );
+    let (_, listed) = door
+        .lane("GET", "/model-connections", "admin-1", None)
+        .await;
+    assert_eq!(listed["federation"], Value::Null, "{listed}");
+
+    let signed = common::state_with_federation(&pool, door.auth.clone());
+    let issuer = telmoni_telemetry::oidc_router(signed.clone());
+    let (status, discovery) = get(
+        issuer.clone(),
+        format!(
+            "/projects/{}/.well-known/openid-configuration",
+            door.project
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{discovery}");
+    assert_eq!(
+        discovery["issuer"],
+        format!("https://api.example/oidc/v1/projects/{}", door.project)
+    );
+    assert_eq!(discovery["jwks_uri"], "https://api.example/oidc/v1/jwks");
+    let (status, jwks) = get(issuer.clone(), "/jwks".into()).await;
+    assert_eq!(status, StatusCode::OK, "{jwks}");
+    assert_eq!(jwks["keys"][0]["alg"], "ES256");
+    assert_eq!(
+        get(
+            issuer,
+            "/projects/not a project/.well-known/openid-configuration".replace(' ', "%20")
+        )
+        .await
+        .0,
+        StatusCode::NOT_FOUND
+    );
+    let signed_door = Door {
+        app: router(signed.clone()),
+        state: signed,
+        ..door
+    };
+    let (status, listed) = signed_door
+        .lane("GET", "/model-connections", "admin-1", None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{listed}");
+    assert_eq!(
+        listed["federation"],
+        json!({
+            "issuer": format!("https://api.example/oidc/v1/projects/{}", signed_door.project),
+            "subject": format!(
+                "organization:{}:project:{}",
+                signed_door.organization, signed_door.project
+            ),
+            "aws_audience": "sts.amazonaws.com",
+        })
+    );
+}
+
+/// A moved project's evaluation rules and evaluations go with it, and its
+/// model connections are deleted only by the transfer's last step, so a
+/// move undone keeps them.
+#[sqlx::test]
+async fn a_moved_project_leaves_its_model_connections_behind(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let door = door(&pool, ContentMode::Off).await;
+    door.auth.seat(
+        "admin-1",
+        &door.organization,
+        &door.project,
+        OrganizationRole::Owner,
+        None,
+    );
+    let (base, _) = mock_provider().await;
+    let (status, saved) = door
+        .lane(
+            "PUT",
+            "/model-connections",
+            "admin-1",
+            Some(json!({
+                "name": "Gateway", "provider": "openai_compatible", "base_url": base,
+                "models": ["judge-1"], "secret": "sk-good",
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    let rule = uuid::Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO telemetry.evaluation_rules
+             (id, project_id, organization_id, name, target, created_by)
+         VALUES ($1, $2, $3, 'Every run', 'run', 'u')",
+    )
+    .bind(rule)
+    .bind(&door.project)
+    .bind(&door.organization)
+    .execute(&pool)
+    .await
+    .expect("an evaluation rule");
+    sqlx::query(
+        "INSERT INTO telemetry.evaluations (id, project_id, organization_id, rule_id,
+             evaluator_id, evaluator_version, target, target_key)
+         VALUES ($1, $2, $3, $4, $5, 1, 'run', 'run/1')",
+    )
+    .bind(uuid::Uuid::now_v7())
+    .bind(&door.project)
+    .bind(&door.organization)
+    .bind(rule)
+    .bind(uuid::Uuid::now_v7())
+    .execute(&pool)
+    .await
+    .expect("an evaluation");
+    let seam = TelemetrySeam(door.state.clone());
+    let destination = OrganizationId::new();
+    seam.move_project(&door.project, &destination)
+        .await
+        .expect("the move");
+    let moved: i64 = sqlx::query_scalar(
+        "SELECT (SELECT count(*) FROM telemetry.evaluation_rules
+                  WHERE project_id = $1 AND organization_id = $2)
+              + (SELECT count(*) FROM telemetry.evaluations
+                  WHERE project_id = $1 AND organization_id = $2)",
+    )
+    .bind(&door.project)
+    .bind(&destination)
+    .fetch_one(&pool)
+    .await
+    .expect("counted");
+    assert_eq!(
+        moved, 2,
+        "its evaluation rules and evaluations stayed filed under the organization it left"
+    );
+    let connections = async || -> i64 {
+        sqlx::query_scalar("SELECT count(*) FROM telemetry.model_connections WHERE project_id = $1")
+            .bind(&door.project)
+            .fetch_one(&pool)
+            .await
+            .expect("counted")
+    };
+    assert_eq!(
+        connections().await,
+        1,
+        "the move itself took the model connections, which an undone move cannot put back"
+    );
+    seam.drop_model_connections(&door.project)
+        .await
+        .expect("the deletion");
+    assert_eq!(connections().await, 0, "a key went with the project");
+}
+
+/// An owner's key is proved, sealed to its endpoint, never echoed, told to the owners, and moved only with the key.
 #[sqlx::test]
 async fn an_owner_connects_a_model_on_their_own_key_proved_first(pool: PgPool) {
     apply_audit_migrations(&pool).await;
@@ -4390,6 +4596,10 @@ async fn an_owner_connects_a_model_on_their_own_key_proved_first(pool: PgPool) {
     assert!(
         refused.to_string().contains("Incorrect API key provided"),
         "{refused}"
+    );
+    assert!(
+        !refused.to_string().contains("sk-bad"),
+        "the echoed key is scrubbed: {refused}"
     );
     let (status, members) = door
         .lane(
@@ -4445,13 +4655,120 @@ async fn an_owner_connects_a_model_on_their_own_key_proved_first(pool: PgPool) {
         .expect("an id")
         .parse()
         .expect("a uuid");
-    let opened =
-        telmoni_telemetry::handler::model_connections::open(&door.state, &door.project, id)
-            .await
-            .expect("opened");
+    // Opened alone it was not used; opened to be sent it was, a minute apart at most.
+    sqlx::query("UPDATE telemetry.model_connections SET last_used_at = NULL")
+        .execute(&pool)
+        .await
+        .expect("unused");
+    let opened = telmoni_telemetry::handler::model_connections::open(
+        &door.state,
+        &door.organization,
+        &door.project,
+        id,
+    )
+    .await
+    .expect("opened");
     assert!(
         matches!(&opened.credentials, telmoni_shared::model::Credentials::ApiKey(key) if key.expose() == "sk-good")
     );
+    let used = async || -> Option<chrono::DateTime<Utc>> {
+        sqlx::query_scalar("SELECT last_used_at FROM telemetry.model_connections")
+            .fetch_one(&pool)
+            .await
+            .expect("the row")
+    };
+    assert_eq!(used().await, None, "opened alone, it was not sent");
+    let send = async || {
+        telmoni_telemetry::handler::model_connections::open_to_send(
+            &door.state,
+            &door.organization,
+            &door.project,
+            id,
+        )
+        .await
+        .expect("opened to be sent")
+    };
+    send().await;
+    let first = used().await.expect("opened to be sent, it was used");
+    send().await;
+    assert_eq!(used().await, Some(first), "stamped once a minute at most");
+    let aged: chrono::DateTime<Utc> = sqlx::query_scalar(
+        "UPDATE telemetry.model_connections SET last_used_at = now() - interval '2 minutes'
+         RETURNING last_used_at",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("aged");
+    send().await;
+    assert!(
+        used().await.is_some_and(|at| at > aged),
+        "a minute on, a send stamps it again"
+    );
+    let told = async |count: usize| {
+        common::eventually("the owners told of each key saved", || async {
+            door.notices
+                .notices()
+                .iter()
+                .filter(|n| n.title == "A model connection's key was saved")
+                .count()
+                >= count
+        })
+        .await;
+        door.notices
+            .notices()
+            .into_iter()
+            .filter(|n| n.title == "A model connection's key was saved")
+            .collect::<Vec<_>>()
+    };
+    let first = told(1).await;
+    assert_eq!(first.len(), 1, "the owners told of the one key saved");
+    assert!(
+        first[0].body.contains("127.0.0.1") && first[0].body.contains("the project "),
+        "{}",
+        first[0].body
+    );
+    assert!(!first[0].body.contains("sk-good"), "{}", first[0].body);
+
+    // Pointed elsewhere without its key, nothing is sent and nothing saved.
+    let (elsewhere, elsewhere_asked) = mock_provider().await;
+    let (status, moved) = door
+        .lane(
+            "PUT",
+            "/model-connections",
+            "admin-1",
+            Some(json!({ "id": id, "name": "Gateway", "provider": "openai_compatible", "base_url": elsewhere, "models": ["judge-1"] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{moved}");
+    assert!(moved.to_string().contains("give the key again"), "{moved}");
+    assert_eq!(
+        elsewhere_asked.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "the kept key went nowhere"
+    );
+
+    // A row pointed elsewhere by any path but a save with the key opens nothing.
+    sqlx::query("UPDATE telemetry.model_connections SET base_url = $1")
+        .bind(&elsewhere)
+        .execute(&pool)
+        .await
+        .expect("the row moved");
+    assert!(
+        telmoni_telemetry::handler::model_connections::open(
+            &door.state,
+            &door.organization,
+            &door.project,
+            id,
+        )
+        .await
+        .is_err(),
+        "the key is sealed to the endpoint it was saved for"
+    );
+    sqlx::query("UPDATE telemetry.model_connections SET base_url = $1")
+        .bind(&base)
+        .execute(&pool)
+        .await
+        .expect("the row back");
 
     // Renamed with no new key, the kept one is proved again.
     let (status, renamed) = door
@@ -4466,6 +4783,45 @@ async fn an_owner_connects_a_model_on_their_own_key_proved_first(pool: PgPool) {
     assert_eq!(
         (renamed["name"].clone(), renamed["secret_hint"].clone()),
         (json!("Judge"), json!("good"))
+    );
+    assert_eq!(
+        door.notices
+            .notices()
+            .iter()
+            .filter(|n| n.title == "A model connection's key was saved")
+            .count(),
+        1,
+        "a save with no new key tells nobody"
+    );
+
+    // Moved with its key, it goes, and the owners read where to and from.
+    let host_of = |url: &str| {
+        url.trim_start_matches("http://")
+            .split('/')
+            .next()
+            .unwrap_or_default()
+            .to_owned()
+    };
+    let (status, moved) = door
+        .lane(
+            "PUT",
+            "/model-connections",
+            "admin-1",
+            Some(json!({
+                "id": id, "name": "Judge", "provider": "openai_compatible", "base_url": elsewhere,
+                "models": ["judge-2"], "secret": "sk-good",
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{moved}");
+    let both = told(2).await;
+    assert_eq!(both.len(), 2, "the owners told of the key moved");
+    let body = &both[1].body;
+    assert!(
+        body.contains("in place of")
+            && body.contains(&host_of(&elsewhere))
+            && body.contains(&host_of(&base)),
+        "{body}"
     );
 
     let (status, _) = door
@@ -4498,7 +4854,17 @@ async fn an_owner_connects_a_model_on_their_own_key_proved_first(pool: PgPool) {
             .iter()
             .map(|(action, _)| action.as_str())
             .collect::<Vec<_>>(),
-        ["created", "updated", "deleted"]
+        ["created", "updated", "updated", "deleted"]
+    );
+    assert_eq!(
+        filed[2].1["before"]["endpoint"],
+        json!(host_of(&base)),
+        "the chain keeps where the key went before"
+    );
+    assert_eq!(
+        filed[3].1["endpoint"],
+        json!(host_of(&elsewhere)),
+        "the deletion names where its key went"
     );
     assert!(
         filed
@@ -5270,6 +5636,14 @@ async fn the_loop_judges_a_rules_run_once_and_a_refused_key_pauses_it(pool: PgPo
         connections["connections"][0]["refused_at"].is_string(),
         "{connections}"
     );
+    let told: Vec<_> = kept
+        .notices
+        .notices()
+        .into_iter()
+        .filter(|n| n.title == "An evaluator's model key was refused")
+        .collect();
+    assert_eq!(told.len(), 1, "the owners told once");
+    assert!(told[0].body.contains("the project "), "{}", told[0].body);
     // The trace judged deleted, the evaluation's own trace, a copy of what it
     // read, goes with it.
     let (status, deleted) = kept

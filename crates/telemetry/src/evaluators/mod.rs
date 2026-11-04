@@ -600,7 +600,7 @@ pub const FILES_BYTES_MAX: usize = 10 * 1024 * 1024;
 ///
 /// # Errors
 ///
-/// As [`content::open_media`].
+/// As [`crate::content::open_media`].
 pub(crate) async fn files_of<'t>(
     state: &crate::AppState,
     actor: Option<telmoni_shared::audit::Actor<'_>>,

@@ -13,9 +13,9 @@ everyone on the project sees them, never a key.
 | OpenAI | An API key |
 | Anthropic | An API key |
 | Google AI Studio | An API key |
-| Google Vertex AI | A service account's JSON key, and a location (`global` where none is given) |
+| Google Vertex AI | A service account's JSON key, or a workload identity pool that trusts the project, keeping no key; and a location (`global` where none is given) |
 | Azure OpenAI | The resource's key and its endpoint (`https://<resource>.openai.azure.com`); each model is a deployment's name |
-| Amazon Bedrock | An access key id and its secret, and a region |
+| Amazon Bedrock | An access key id and its secret, or an IAM role that trusts the project, keeping no key; and a region |
 | OpenAI-compatible endpoint | A base URL, and the key it asks for, if any: a gateway such as LiteLLM or OpenRouter, Mistral, or a model you serve yourself |
 | TypeSafe (Jev) | An API key; its models are Jev's names, such as `jev-latest` |
 | System One endpoint | A base URL, and the key it asks for, if any: an open-weight model served in TypeSafe's System One shape, such as Cloudflare's Clef under SGLang or JevK5's own server, or a gateway in front of Jev |
@@ -35,17 +35,97 @@ Saving asks the first model one small question, in the JSON its answers
 will take, or a System One model one yes-or-no question, and a connection
 it does not answer is not saved: the provider's
 refusal is what the page shows, a key it refuses or a model it does not
-know. Editing a connection keeps its key unless a new one is typed, and asks
-again.
+know, with anything in it shaped like a key taken out first, since a gateway
+may echo what it was sent. Editing a connection keeps its key unless a new
+one is typed, and asks again; but a new base URL or region takes the key
+again, so a saved key never goes anywhere it was not saved to go. Each
+connection shows when its key last went out with a request.
 
 A key is sealed when it is saved, under a data key of its own wrapped by
 the deployment's `MODEL_CONNECTION_KEK`
-([Configuration](/docs/self-host/configuration)), never answered back: the
+([Configuration](/docs/self-host/configuration)), bound to the connection's
+provider, base URL and region, so a key opens only for the endpoint it was
+saved for, and never answered back: the
 page shows its last four characters, a service account's address, or an
 access key id's last four. It is sent only to its own provider, its requests
 leaving through the same guard a webhook's do, so no connection reaches an
 address inside the deployment's network; a base URL is `https` on a deployed
 tier. Each connection made, changed or deleted is filed in the
-organization's [audit log](/docs/workspace/audit-log) by its provider, never
-its key, and deleting a connection, or its project or organization, deletes
-its key.
+organization's [audit log](/docs/workspace/audit-log) by its provider and
+the host or region its key goes to, never its key, and deleting a
+connection, or its project or organization, deletes its key. The evaluators
+that judged with a deleted connection, by its name or as the default, pause
+until they name another or another is made the default. Each time one
+is saved with a key, the organization's owners and admins are told on its
+feed, and its owner by mail, with where the key goes: a key you did not
+save is one to delete here and revoke at its provider.
+
+## Give Telmoni a key of its own
+
+A key made for Telmoni alone, holding only what an evaluator does, is one
+whose leak costs little and whose revocation stops nothing else:
+
+| Provider | A key of its own |
+|---|---|
+| OpenAI | A project API key in a project of its own, with a monthly budget, its permissions restricted to the model calls |
+| Anthropic | A key in a workspace of its own, with a spend limit |
+| Google AI Studio | A key in a Google Cloud project of its own, restricted to the Generative Language API |
+| Google Vertex AI | A pool that trusts the project (below); else a service account of its own holding a custom role with `aiplatform.endpoints.predict` alone |
+| Azure OpenAI | The resource's second key, so the first stays yours to rotate |
+| Amazon Bedrock | A role that trusts the project (below); else an IAM user allowed `bedrock:InvokeModel` on the models it names, and nothing else |
+| A gateway | A virtual key of the gateway's, with its own budget and models |
+
+An evaluator may hold a weekly spend limit of its own too, set on its form,
+past which it waits until Monday 00:00 UTC.
+
+## Sign in without a key
+
+Where the deployment signs ([Configuration](/docs/self-host/configuration)),
+a Bedrock or Vertex AI connection can keep no key at all: the project signs
+in as itself, by a token valid for five minutes that the deployment signs,
+and is handed credentials that last up to fifteen minutes, as long as the
+provider grants and no longer. The connection's form shows
+three values to give your cloud: the project's **issuer**, its own and no
+other project's; the **subject** its tokens name; and, for AWS, the
+**audience**.
+
+**Amazon Bedrock.** In IAM, add an OpenID Connect identity provider with the
+issuer as its URL and the audience as its client ID. Make a role whose trust
+policy lets that provider assume it with `sts:AssumeRoleWithWebIdentity`,
+requiring the subject:
+
+```json
+{
+  "Effect": "Allow",
+  "Principal": { "Federated": "arn:aws:iam::<account>:oidc-provider/<issuer, without https://>" },
+  "Action": "sts:AssumeRoleWithWebIdentity",
+  "Condition": {
+    "StringEquals": {
+      "<issuer, without https://>:aud": "sts.amazonaws.com",
+      "<issuer, without https://>:sub": "<subject>"
+    }
+  }
+}
+```
+
+Give the role `bedrock:InvokeModel` on the models the connection names and
+nothing else, and give the connection the role's ARN.
+
+**Google Vertex AI.** Add a workload identity pool and an OIDC provider with
+the issuer as its issuer URL and the default audience, mapping
+`google.subject` to `assertion.sub`. Grant a custom role holding
+`aiplatform.endpoints.predict` alone, which is what a judgement calls (Vertex
+AI User would grant every other Vertex AI permission too), to the subject's
+principal (`principal://iam.googleapis.com/projects/<number>/locations/global/workloadIdentityPools/<pool>/subject/<subject>`),
+or let it stand in for a service account that holds the role by granting the
+principal Workload Identity User (`roles/iam.workloadIdentityUser`) on that
+account, and give the
+connection the provider's name, the project Vertex AI runs in and, if it
+stands in for one, the account.
+
+Because each project is an issuer of its own, a token one project signs
+cannot be presented as another's: a role or a pool you set to trust your
+project trusts nothing else of the deployment's. The subject names the
+organization the project is in too, so a project moved to another
+organization is trusted by nothing you set up before it moved; the move
+deletes its model connections as well, keys and all.

@@ -202,6 +202,18 @@ impl Telemetry for TelemetrySeam {
         Ok(())
     }
 
+    async fn drop_model_connections(&self, project_id: &ProjectId) -> Result<(), TelmoniError> {
+        let mut tx = maintenance_scope(&self.0.db, TelemetryLane).await?;
+        let dropped = db::drop_model_connections(&mut tx, project_id).await?;
+        tx.commit().await?;
+        tracing::info!(
+            project_id = %project_id,
+            dropped,
+            "telemetry: a moving project's model connections deleted"
+        );
+        Ok(())
+    }
+
     async fn trace_vocabulary(
         &self,
         acting: &Acting,

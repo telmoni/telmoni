@@ -365,6 +365,12 @@ An organization Owner can hand a project to one of the project's Admins:
      the move commits, with their delivery history and the project's activity
      feed, and a removal that fails moves nothing. The console agent removes
      what it holds about the project in the old organization.
+   - **Model connections do not follow either**: their keys are the old
+     organization's, so they are deleted with the move, and the project's
+     evaluators judge again once the new organization connects a model. A
+     role or a pool the old organization set to trust the project trusts it no
+     more, since its tokens name the organization it is in
+     ([Model connections](/docs/workspace/model-connections#sign-in-without-a-key)).
    - **Telemetry and content move with it**: every span, and the
      [content](#a-projects-content-mode) the project keeps, which still opens
      and which [erasing an end user](/docs/workspace/data-deletion) still

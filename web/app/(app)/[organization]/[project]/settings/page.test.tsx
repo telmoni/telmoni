@@ -82,20 +82,27 @@ vi.mock("@/lib/server/data", () => ({
 }));
 
 vi.mock("@/lib/server/entities/model-connections", () => ({
-  fetchModelConnections: async () => [
-    {
-      id: "5d4f5c68-0000-4000-8000-0000000000c1",
-      name: "Gateway",
-      provider: "openai_compatible",
-      base_url: "https://gw.example/v1",
-      region: null,
-      models: ["judge-1", "judge-2"],
-      is_default: true,
-      secret_hint: "WXYZ",
-      created_at: "2026-11-02T00:00:00Z",
-      updated_at: "2026-11-02T00:00:00Z",
-    },
-  ],
+  fetchModelConnectionsAnswer: async () => ({
+    connections: [
+      {
+        id: "5d4f5c68-0000-4000-8000-0000000000c1",
+        name: "Gateway",
+        provider: "openai_compatible",
+        base_url: "https://gw.example/v1",
+        region: null,
+        models: ["judge-1", "judge-2"],
+        is_default: true,
+        secret_hint: "WXYZ",
+        signs_in: false,
+        refused_at: null,
+        refused_reason: null,
+        last_used_at: null,
+        created_at: "2026-11-02T00:00:00Z",
+        updated_at: "2026-11-02T00:00:00Z",
+      },
+    ],
+    federation: null,
+  }),
 }));
 
 vi.mock("@/lib/server/session", () => ({

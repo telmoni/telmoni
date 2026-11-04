@@ -78,6 +78,7 @@ export const RESERVED_ORGANIZATION_SLUGS: ReadonlySet<string> = new Set([
   "new",
   "null",
   "oauth",
+  "oidc",
   "opengraph-image",
   "org",
   "organization",

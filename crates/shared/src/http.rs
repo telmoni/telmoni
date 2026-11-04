@@ -16,21 +16,34 @@ pub fn client(user_agent: &str, timeout: Duration) -> reqwest::Result<reqwest::C
     builder(user_agent).timeout(timeout).build()
 }
 
-/// The far end's `Retry-After`, in either form RFC 9110 allows, seconds or a
-/// date, a past one read as no wait; `None` where there is none to read.
+/// The far end's `Retry-After`, as digits or a date in RFC 9110's three
+/// formats, held to a day so it overflows no date; a past date is no wait.
 #[must_use]
 pub fn retry_after(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
+    const DAY: u64 = 86_400;
     let raw = headers
         .get(reqwest::header::RETRY_AFTER)?
         .to_str()
         .ok()?
         .trim();
-    if let Ok(secs) = raw.parse::<i64>() {
-        return Some(Duration::from_secs(secs.max(0).unsigned_abs()));
-    }
-    let when = chrono::DateTime::parse_from_rfc2822(raw).ok()?;
-    let secs = (when.timestamp() - chrono::Utc::now().timestamp()).max(0);
-    Some(Duration::from_secs(secs.unsigned_abs()))
+    let secs = if !raw.is_empty() && raw.bytes().all(|b| b.is_ascii_digit()) {
+        raw.parse::<u64>().unwrap_or(u64::MAX)
+    } else {
+        // IMF-fixdate, then the obsolete RFC 850 and asctime forms, each GMT.
+        let when = chrono::DateTime::parse_from_rfc2822(raw)
+            .map(|at| at.with_timezone(&chrono::Utc))
+            .or_else(|_| {
+                chrono::NaiveDateTime::parse_from_str(raw, "%A, %d-%b-%y %H:%M:%S GMT")
+                    .or_else(|_| chrono::NaiveDateTime::parse_from_str(raw, "%a %b %e %H:%M:%S %Y"))
+                    .map(|at| at.and_utc())
+            })
+            .ok()?;
+        (when - chrono::Utc::now())
+            .num_seconds()
+            .max(0)
+            .unsigned_abs()
+    };
+    Some(Duration::from_secs(secs.min(DAY)))
 }
 
 #[cfg(test)]
@@ -66,7 +79,40 @@ mod tests {
         assert_eq!(retry_after(&reqwest::header::HeaderMap::new()), None);
         assert_eq!(retry_after(&headers("later")), None);
         assert_eq!(retry_after(&headers("")), None);
-        assert_eq!(retry_after(&headers("-30")), Some(Duration::ZERO));
+        assert_eq!(
+            retry_after(&headers("-30")),
+            None,
+            "delay-seconds are digits"
+        );
+        assert_eq!(retry_after(&headers("+30")), None);
+        let past = |format: &str| {
+            (chrono::Utc::now() - chrono::Duration::seconds(60))
+                .format(format)
+                .to_string()
+        };
+        for older in [
+            past("%A, %d-%b-%y %H:%M:%S GMT"),
+            past("%a %b %e %H:%M:%S %Y"),
+        ] {
+            assert_eq!(
+                retry_after(&headers(&older)),
+                Some(Duration::ZERO),
+                "{older}"
+            );
+        }
+        let soon = (chrono::Utc::now() + chrono::Duration::seconds(120))
+            .format("%a %b %e %H:%M:%S %Y")
+            .to_string();
+        let parsed = retry_after(&headers(&soon)).expect("an asctime date parses");
+        assert!(
+            (100..=120).contains(&parsed.as_secs()),
+            "{soon}: {parsed:?}"
+        );
+        assert_eq!(
+            retry_after(&headers("10000000000000")),
+            Some(Duration::from_secs(86_400)),
+            "a day at most, which no date overflows"
+        );
         let past = (chrono::Utc::now() - chrono::Duration::seconds(60)).to_rfc2822();
         assert_eq!(retry_after(&headers(&past)), Some(Duration::ZERO));
     }

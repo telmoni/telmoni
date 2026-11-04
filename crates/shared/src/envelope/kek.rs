@@ -282,10 +282,84 @@ pub struct KmsKek {
     /// uses the primary on encrypt.
     name: String,
     api_base: String,
-    metadata_base: String,
-    /// Fetched once and reused until shortly before it expires. A `Redacted`,
-    /// so it reaches no error string.
+    /// The bearer every call carries.
+    metadata: MetadataToken,
+}
+
+/// The process's own bearer from the metadata server, fetched once and
+/// reused until shortly before it expires: what every Cloud KMS call carries.
+/// A `Redacted`, so it reaches no error string.
+pub struct MetadataToken {
+    base: String,
     token: tokio::sync::Mutex<Option<CachedToken>>,
+}
+
+impl MetadataToken {
+    /// The metadata server at `base` (the tests point it at a mock).
+    #[must_use]
+    pub fn new(base: &str) -> Self {
+        Self {
+            base: base.trim_end_matches('/').to_owned(),
+            token: tokio::sync::Mutex::new(None),
+        }
+    }
+
+    /// The cached bearer, or a fresh one. The lock is held across the fetch
+    /// on purpose: twenty rows opening at once in a new pod should fetch one
+    /// token, not twenty.
+    ///
+    /// # Errors
+    ///
+    /// The metadata server did not answer, or answered no token.
+    pub async fn bearer(&self, http: &reqwest::Client) -> Result<Redacted, KekError> {
+        let mut slot = self.token.lock().await;
+        if let Some(cached) = slot.as_ref()
+            && Instant::now() < cached.good_until
+        {
+            return Ok(cached.bearer.clone());
+        }
+        let fresh = self.fetch(http).await?;
+        let bearer = fresh.bearer.clone();
+        *slot = Some(fresh);
+        Ok(bearer)
+    }
+
+    /// The bearer dropped, as one a call was refused with: fetched afresh next time.
+    pub async fn forget(&self) {
+        self.token.lock().await.take();
+    }
+
+    async fn fetch(&self, http: &reqwest::Client) -> Result<CachedToken, KekError> {
+        #[derive(Deserialize)]
+        struct Token {
+            access_token: Redacted,
+            expires_in: u64,
+        }
+        let resp = http
+            .get(format!(
+                "{}/computeMetadata/v1/instance/service-accounts/default/token",
+                self.base
+            ))
+            .header("Metadata-Flavor", "Google")
+            .send()
+            .await
+            .map_err(|e| KekError::Unavailable(format!("metadata server unreachable: {e}")))?;
+        let status = resp.status();
+        if !status.is_success() {
+            return Err(KekError::Unavailable(format!(
+                "metadata server answered {status} to the token request"
+            )));
+        }
+        let token: Token = resp
+            .json()
+            .await
+            .map_err(|e| KekError::Unavailable(format!("metadata server token unreadable: {e}")))?;
+        let ttl = Duration::from_secs(token.expires_in).saturating_sub(TOKEN_REFRESH_MARGIN);
+        Ok(CachedToken {
+            bearer: token.access_token,
+            good_until: Instant::now() + ttl,
+        })
+    }
 }
 
 impl KmsKek {
@@ -330,8 +404,7 @@ impl KmsKek {
         Ok(Self {
             name: name.to_owned(),
             api_base: api_base.trim_end_matches('/').to_owned(),
-            metadata_base: metadata_base.trim_end_matches('/').to_owned(),
-            token: tokio::sync::Mutex::new(None),
+            metadata: MetadataToken::new(metadata_base),
         })
     }
 
@@ -393,7 +466,7 @@ impl KmsKek {
         op: &str,
         body: &serde_json::Value,
     ) -> Result<T, KekError> {
-        let bearer = self.bearer(http).await?;
+        let bearer = self.metadata.bearer(http).await?;
         let resp = http
             .post(format!("{}/v1/{}:{op}", self.api_base, self.name))
             .bearer_auth(bearer.expose())
@@ -411,58 +484,10 @@ impl KmsKek {
         }
         if status == reqwest::StatusCode::UNAUTHORIZED {
             // The bearer we hold was refused; fetch a fresh one next time.
-            self.token.lock().await.take();
+            self.metadata.forget().await;
         }
         let text = resp.text().await.unwrap_or_default();
         Err(classify(op, status, &text))
-    }
-
-    /// The cached bearer, or a fresh one from the metadata server. The lock
-    /// is held across the fetch on purpose: twenty rows opening at once in a
-    /// new pod should fetch one token, not twenty.
-    async fn bearer(&self, http: &reqwest::Client) -> Result<Redacted, KekError> {
-        let mut slot = self.token.lock().await;
-        if let Some(cached) = slot.as_ref()
-            && Instant::now() < cached.good_until
-        {
-            return Ok(cached.bearer.clone());
-        }
-        let fresh = self.fetch_token(http).await?;
-        let bearer = fresh.bearer.clone();
-        *slot = Some(fresh);
-        Ok(bearer)
-    }
-
-    async fn fetch_token(&self, http: &reqwest::Client) -> Result<CachedToken, KekError> {
-        #[derive(Deserialize)]
-        struct Token {
-            access_token: Redacted,
-            expires_in: u64,
-        }
-        let resp = http
-            .get(format!(
-                "{}/computeMetadata/v1/instance/service-accounts/default/token",
-                self.metadata_base
-            ))
-            .header("Metadata-Flavor", "Google")
-            .send()
-            .await
-            .map_err(|e| KekError::Unavailable(format!("metadata server unreachable: {e}")))?;
-        let status = resp.status();
-        if !status.is_success() {
-            return Err(KekError::Unavailable(format!(
-                "metadata server answered {status} to the token request"
-            )));
-        }
-        let token: Token = resp
-            .json()
-            .await
-            .map_err(|e| KekError::Unavailable(format!("metadata server token unreadable: {e}")))?;
-        let ttl = Duration::from_secs(token.expires_in).saturating_sub(TOKEN_REFRESH_MARGIN);
-        Ok(CachedToken {
-            bearer: token.access_token,
-            good_until: Instant::now() + ttl,
-        })
     }
 }
 

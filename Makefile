@@ -375,7 +375,7 @@ sdk-check:
 deploy-check:
 	helm lint --strict deploy/charts/telmoni -f deploy/charts/telmoni/ci/values.yaml
 	helm template telmoni deploy/charts/telmoni -f deploy/charts/telmoni/ci/values.yaml > /dev/null
-	helm template telmoni deploy/charts/telmoni -f deploy/charts/telmoni/ci/values.yaml --set highAvailability.enabled=true,ingress.enabled=true,ingress.securityPolicy=check,embeddings.enabled=true > /dev/null
+	helm template telmoni deploy/charts/telmoni -f deploy/charts/telmoni/ci/values.yaml --set highAvailability.enabled=true,ingress.enabled=true,ingress.securityPolicy=check,embeddings.enabled=true,config.modelConnectionKek=file:/var/run/secrets/telmoni/kek/model-connection,config.modelFederationSigner=projects/p/locations/l/keyRings/r/cryptoKeys/k/cryptoKeyVersions/1,config.modelFederationIssuer=https://api.example.com > /dev/null
 	POSTGRES_PASSWORD=x CLICKHOUSE_PASSWORD=x AUTH_SECRET=x SERVICE_SECRET=x TELEMETRY_KEK=x CONTENT_KEK=x docker compose -f deploy/compose/docker-compose.yml config -q
 
 .PHONY: fmt

@@ -50,8 +50,13 @@ pub const TICK: Duration = Duration::from_secs(60);
 pub const PER_ORGANIZATION: i64 = 5;
 /// The most rows a pass leases at once.
 const BATCH: i64 = 50;
-/// How long a lease holds before another replica may take the row.
+/// How long a lease holds, from its taking and again from its judgement's
+/// start, before another replica may take the row: a model's whole wait, 60
+/// seconds, and room.
 const LEASE_SECS: i64 = 180;
+/// How many rows of a batch are judged at once: each judgement holds its
+/// prompt and its files, up to 13 MiB, and one slow endpoint holds one slot.
+const AT_ONCE: usize = 8;
 /// The newest targets a rule is looked over for each minute: past them a
 /// burst is sampled down to what the minute held.
 const NEWEST: u32 = 100;
@@ -91,12 +96,52 @@ pub async fn pass(state: &Arc<AppState>) -> Result<u64, TelmoniError> {
     discover(state).await?;
     let mut settled = 0;
     loop {
-        let leased = lease(state).await?;
+        let mut leased = lease(state).await?;
         let count = leased.len();
+        leased.sort_by_key(|evaluation| evaluation.was_due);
+        // An evaluator's rows in turn, so its weekly limit reads the last one's spend.
+        let mut by_evaluator: Vec<Vec<Leased>> = Vec::new();
         for evaluation in leased {
-            if settle(state, evaluation).await? {
-                settled += 1;
+            match by_evaluator.iter_mut().find(|rows| {
+                rows.first().map(|row| row.evaluator_id) == Some(evaluation.evaluator_id)
+            }) {
+                Some(rows) => rows.push(evaluation),
+                None => by_evaluator.push(vec![evaluation]),
             }
+        }
+        let slots = Arc::new(tokio::sync::Semaphore::new(AT_ONCE));
+        let mut judging = tokio::task::JoinSet::new();
+        for rows in by_evaluator {
+            let (state, slots) = (state.clone(), slots.clone());
+            judging.spawn(async move {
+                let mut settled = 0_u64;
+                for evaluation in rows {
+                    let Ok(_slot) = Arc::clone(&slots).acquire_owned().await else {
+                        break;
+                    };
+                    if renewed(&state, &evaluation).await? && settle(&state, evaluation).await? {
+                        settled += 1;
+                    }
+                }
+                Ok::<u64, TelmoniError>(settled)
+            });
+        }
+        let mut failed = None;
+        while let Some(joined) = judging.join_next().await {
+            match joined {
+                Ok(Ok(count)) => settled += count,
+                Ok(Err(error)) => {
+                    tracing::warn!(error = %error,
+                        "telemetry: an evaluator's rows stopped short; the rest lapse and are leased again");
+                    failed.get_or_insert(error);
+                }
+                Err(panicked) => {
+                    tracing::error!(error = %panicked, "telemetry: an evaluation's judgement panicked; its lease lapses");
+                }
+            }
+        }
+        if let Some(error) = failed {
+            return Err(error);
         }
         if i64::try_from(count).unwrap_or(i64::MAX) < BATCH {
             return Ok(settled);
@@ -396,6 +441,8 @@ struct Leased {
     session_id: Option<String>,
     attempts: i16,
     lease_id: Option<Uuid>,
+    /// When it was due, before the lease moved it on.
+    was_due: DateTime<Utc>,
 }
 
 /// Up to [`BATCH`] due evaluations, [`PER_ORGANIZATION`] an organization,
@@ -410,7 +457,7 @@ async fn lease(state: &AppState) -> Result<Vec<Leased>, TelmoniError> {
                FROM telemetry.evaluations
               WHERE status IN ('pending', 'delayed') AND due_at <= now()
          ), taken AS (
-             SELECT e.id FROM telemetry.evaluations e JOIN due USING (id)
+             SELECT e.id, e.due_at FROM telemetry.evaluations e JOIN due USING (id)
               WHERE due.nth <= $1
               ORDER BY e.due_at LIMIT $2
                 FOR UPDATE OF e SKIP LOCKED
@@ -419,7 +466,8 @@ async fn lease(state: &AppState) -> Result<Vec<Leased>, TelmoniError> {
             SET lease_id = $3, due_at = now() + make_interval(secs => $4::double precision)
            FROM taken WHERE e.id = taken.id
          RETURNING e.id, e.project_id, e.organization_id, e.evaluator_id, e.evaluator_version,
-                   e.rule_id, e.target, e.run_id, e.span_id, e.session_id, e.attempts, e.lease_id",
+                   e.rule_id, e.target, e.run_id, e.span_id, e.session_id, e.attempts, e.lease_id,
+                   taken.due_at AS was_due",
     )
     .bind(PER_ORGANIZATION)
     .bind(BATCH)
@@ -429,6 +477,26 @@ async fn lease(state: &AppState) -> Result<Vec<Leased>, TelmoniError> {
     .await?;
     tx.commit().await?;
     Ok(leased)
+}
+
+/// The row's lease held for one more judgement from now: `false` where it
+/// lapsed to another replica, or its row was deleted.
+async fn renewed(state: &AppState, leased: &Leased) -> Result<bool, TelmoniError> {
+    let mut tx = maintenance_scope(&state.db, TelemetryLane).await?;
+    let held = sqlx::query(
+        "UPDATE telemetry.evaluations
+            SET due_at = now() + make_interval(secs => $3::double precision)
+          WHERE id = $1 AND lease_id = $2",
+    )
+    .bind(leased.id)
+    .bind(leased.lease_id)
+    .bind(LEASE_SECS)
+    .execute(tx.conn())
+    .await?
+    .rows_affected()
+        > 0;
+    tx.commit().await?;
+    Ok(held)
 }
 
 /// How one evaluation ended this pass.
@@ -718,8 +786,13 @@ async fn judge(state: &Arc<AppState>, leased: &Leased) -> Result<Outcome, Telmon
             format!("({count} corrections members made, kept with the runs they correct)"),
         );
     }
-    let connection =
-        crate::handler::model_connections::open(state, project_id, connection_id).await?;
+    let connection = crate::handler::model_connections::open_to_send(
+        state,
+        &leased.organization_id,
+        project_id,
+        connection_id,
+    )
+    .await?;
     let started = Utc::now();
     let answered = match &judging {
         Judging::Prompt(prompt) => {
@@ -1025,7 +1098,7 @@ async fn refusal(
             .rows_affected();
             tx.commit().await?;
             if marked > 0 {
-                tell_refused(state, &leased.organization_id, connection_id).await;
+                tell_refused(state, leased, connection_id).await;
             }
             Ok(paused(
                 "its model connection's key was refused; save the connection again",
@@ -1055,20 +1128,29 @@ async fn refusal(
 
 /// The organization's owners and admins told, once a refusal, that a
 /// connection's evaluators wait for its key.
-async fn tell_refused(state: &AppState, organization_id: &OrganizationId, connection_id: Uuid) {
+async fn tell_refused(state: &AppState, leased: &Leased, connection_id: Uuid) {
     let dedup = format!("evaluators:{connection_id}");
+    let (project, path) =
+        crate::handler::model_connections::settings_of(state, &leased.project_id).await;
+    let body = format!(
+        "The provider refused a model connection of {project}, so the evaluators judging with \
+         it are paused. Save the connection again with a key the provider takes, on the \
+         project's Settings page."
+    );
     let alert = OrganizationAlert {
         title: "An evaluator's model key was refused",
-        body: "The provider refused a project's model connection, so the evaluators judging with it are paused. Save the connection again with a key the provider takes, on the project's Settings page.",
-        metadata: json!({ "lane": "evaluators", "connection_id": connection_id }),
+        body: &body,
+        metadata: json!({
+            "lane": "evaluators", "project_id": leased.project_id, "connection_id": connection_id,
+        }),
         dedup_key: Some(&dedup),
     };
     seam::tell_owners(
         state.notifications.as_ref(),
         state.auth.as_ref(),
-        organization_id,
+        &leased.organization_id,
         alert,
-        "/",
+        &path,
     )
     .await;
 }

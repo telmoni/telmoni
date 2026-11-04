@@ -508,7 +508,7 @@ pub async fn tell_owners(
         Ok(Emitted::Replayed { .. }) => true,
         Err(e) => {
             tracing::warn!(organization_id = %organization_id, error = %e,
-                "the owners could not be told of the plan; the next pass tells them");
+                "an organization's owners could not be told on its feed");
             false
         }
     }
@@ -948,6 +948,10 @@ pub trait Telemetry: Send + Sync {
         project_id: &ProjectId,
         organization_id: &OrganizationId,
     ) -> Result<(), TelmoniError>;
+
+    /// A moving project's model connections deleted, the old organization's
+    /// keys and trust: the move's last step before it commits, since none comes back.
+    async fn drop_model_connections(&self, project_id: &ProjectId) -> Result<(), TelmoniError>;
 
     /// The trace list's values over its last `days`, as `acting` may read
     /// them on their project, `days` held to the plan's window.

@@ -1603,12 +1603,7 @@ async fn calls_at_the_answer(calls: &SiblingCalls) -> Vec<SiblingCall> {
     answered
 }
 
-/// ⚠ **The project's telemetry settings move with it, first, and a step that
-/// fails moves nothing.** They name the organization whose purge removes
-/// them and whose members may read them. The move comes before
-/// notifications' purge, which cannot be undone, so a refused move leaves
-/// the connectors where they were; and a transfer that does not finish
-/// settles the settings back with the project, where auth still holds it.
+/// ⚠ The settings move first, before the steps nothing undoes, and a step that fails settles them back.
 #[sqlx::test]
 async fn the_settings_move_first_and_a_transfer_that_does_not_finish_settles_them(pool: PgPool) {
     let h = staffed_project(&pool).await;
@@ -1629,6 +1624,7 @@ async fn the_settings_move_first_and_a_transfer_that_does_not_finish_settles_the
         organization_id: organization.to_owned(),
     };
     let purged = SiblingCall::PurgeProjectForMove(h.project.clone());
+    let dropped = SiblingCall::TelemetryDropModelConnections(h.project.clone());
     assert_eq!(
         offer(&pool, &h, OWNER, &h.source, ADMIN).await.0,
         StatusCode::OK
@@ -1690,6 +1686,35 @@ async fn the_settings_move_first_and_a_transfer_that_does_not_finish_settles_the
     assert_eq!(organization_of_project(&pool, &h.project).await, h.source);
     calls.reset();
 
+    telemetry.failing_connection_drops(1);
+    let (status, body) = send(
+        both(),
+        &pool,
+        "POST",
+        &accept_path,
+        ADMIN,
+        Some(&h.admins),
+        None,
+        None,
+    )
+    .await;
+    assert!(
+        status.is_server_error(),
+        "the project moved past a refused deletion of its model connections: {status} {body}"
+    );
+    assert_eq!(
+        calls_at_the_answer(&calls).await,
+        [
+            moved_to(&h.admins),
+            purged.clone(),
+            dropped.clone(),
+            moved_to(&h.source)
+        ],
+        "the settings moved ahead of a refused deletion were not settled back before the answer"
+    );
+    assert_eq!(organization_of_project(&pool, &h.project).await, h.source);
+    calls.reset();
+
     let (status, body) = send(
         both(),
         &pool,
@@ -1704,8 +1729,9 @@ async fn the_settings_move_first_and_a_transfer_that_does_not_finish_settles_the
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(
         calls_at_the_answer(&calls).await,
-        [moved_to(&h.admins), purged],
-        "the accepted transfer did not move the settings and purge the connectors once each"
+        [moved_to(&h.admins), purged, dropped],
+        "the accepted transfer did not move the settings, purge the connectors and delete the \
+         model connections once each, in that order"
     );
     assert_eq!(organization_of_project(&pool, &h.project).await, h.admins);
 }

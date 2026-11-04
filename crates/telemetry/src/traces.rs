@@ -1047,14 +1047,14 @@ const SPANS_IN_RUNS_SQL: &str = concat!(
     "))"
 );
 
-/// How many spans [`SPANS_IN_RUNS_SQL`] finds, and their tokens' mean.
+/// How many spans `SPANS_IN_RUNS_SQL` finds, and their tokens' mean.
 #[derive(Debug, Row, Deserialize)]
 pub struct SpansCounted {
     pub total: u64,
     pub tokens: u64,
 }
 
-/// [`SPANS_IN_RUNS_SQL`] read.
+/// `SPANS_IN_RUNS_SQL` read.
 ///
 /// # Errors
 ///
@@ -1080,7 +1080,7 @@ pub struct ScoreMeanRow {
     pub mean: f64,
 }
 
-/// [`SCORE_MEANS_SQL`]'s bars, none where the filter names no score.
+/// `SCORE_MEANS_SQL`'s bars, none where the filter names no score.
 ///
 /// # Errors
 ///

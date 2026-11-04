@@ -108,6 +108,9 @@ pub struct AppState {
     /// What seals each model connection's key (`MODEL_CONNECTION_KEK`); none
     /// where it is unset, and a connection is refused.
     pub model_kek: Option<telmoni_shared::envelope::Kek>,
+    /// The deployment as each project's issuer, for connections that store
+    /// no key (`MODEL_FEDERATION_SIGNER`); none where it is unset.
+    pub federation: Option<Arc<telmoni_shared::model::federation::Federation>>,
     /// The client a model connection's requests leave by: guarded, since the
     /// customer names the host.
     pub egress: telmoni_shared::net_guard::Egress,
@@ -365,6 +368,18 @@ pub fn router(state: Arc<AppState>) -> Router {
 }
 
 pub use handler::v1::{reads as v1_reads, router as v1_router};
+
+/// Each project's issuer, nested at `/oidc/v1` behind the machine door:
+/// unauthenticated, as an issuer's documents are, and naming no project.
+pub fn oidc_router(state: Arc<AppState>) -> Router {
+    Router::new()
+        .route(
+            "/projects/{project_id}/.well-known/openid-configuration",
+            get(handler::model_connections::discovery),
+        )
+        .route("/jwks", get(handler::model_connections::jwks))
+        .with_state(state)
+}
 
 /// Ingest, for the binary to nest at `/otlp` behind the machine door:
 /// `POST /v1/traces` behind a project API key holding the ingest scope and

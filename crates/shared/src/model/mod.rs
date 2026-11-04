@@ -6,6 +6,7 @@
 
 pub mod anthropic;
 pub mod bedrock;
+pub mod federation;
 pub mod gemini;
 pub mod openai;
 pub mod sigv4;
@@ -151,6 +152,28 @@ pub enum Refused {
 }
 
 impl Refused {
+    /// The refusal with every secret `credentials` holds, and anything shaped
+    /// like a credential, taken out of the provider's words: a gateway or a
+    /// server of the customer's own may echo what it was sent.
+    #[must_use]
+    pub fn scrubbed(self, credentials: &Credentials) -> Self {
+        let secrets = credentials.secrets();
+        let clean = |text: String| scrub(&text, &secrets);
+        match self {
+            Self::Unauthorized { status, detail } => Self::Unauthorized {
+                status,
+                detail: clean(detail),
+            },
+            Self::Provider { status, detail } => Self::Provider {
+                status,
+                detail: clean(detail),
+            },
+            Self::Unreadable(why) => Self::Unreadable(clean(why)),
+            Self::Unreached(why) => Self::Unreached(clean(why)),
+            limited @ Self::RateLimited { .. } => limited,
+        }
+    }
+
     /// A line for the person whose connection it is, never the key.
     #[must_use]
     pub fn sentence(&self) -> String {
@@ -166,6 +189,59 @@ impl Refused {
             Self::Unreached(why) => format!("the provider could not be reached: {why}"),
         }
     }
+}
+
+/// What stands in for a secret taken out of a provider's words.
+const SCRUBBED: &str = "[redacted]";
+
+/// Prefixes credentials are minted with, by OpenAI, Anthropic, AWS, Google,
+/// GitHub, Slack and Groq among others.
+const CREDENTIAL_PREFIXES: [&str; 13] = [
+    "sk-", "sk_", "pk-", "AKIA", "ASIA", "AIza", "ya29", "eyJ", "ghp_", "gho_", "xoxb-", "xoxp-",
+    "gsk_",
+];
+
+/// `text` with each of `secrets` replaced, then every word that reads as a
+/// credential: one beginning as keys are minted, the one after `Bearer`, and
+/// any of 40 or more letters and digits mixed, as a key's body is.
+fn scrub(text: &str, secrets: &[&str]) -> String {
+    let mut clean = text.to_owned();
+    for secret in secrets.iter().map(|s| s.trim()).filter(|s| s.len() >= 4) {
+        clean = clean.replace(secret, SCRUBBED);
+    }
+    let mut out = String::with_capacity(clean.len());
+    let mut word = String::new();
+    let mut after_bearer = false;
+    for c in clean.chars().chain(std::iter::once('\n')) {
+        if c.is_ascii_alphanumeric() || matches!(c, '-' | '_') {
+            word.push(c);
+            continue;
+        }
+        if !word.is_empty() {
+            out.push_str(if after_bearer || credential_like(&word) {
+                SCRUBBED
+            } else {
+                &word
+            });
+            after_bearer = word.eq_ignore_ascii_case("bearer");
+            word.clear();
+        }
+        if !c.is_whitespace() {
+            after_bearer = false;
+        }
+        out.push(c);
+    }
+    out.pop();
+    out
+}
+
+/// Whether `word` is shaped like a credential.
+fn credential_like(word: &str) -> bool {
+    let minted = word.len() >= 16 && CREDENTIAL_PREFIXES.iter().any(|p| word.starts_with(p));
+    let long = word.len() >= 40
+        && word.chars().any(|c| c.is_ascii_digit())
+        && word.chars().any(|c| c.is_ascii_alphabetic());
+    minted || long
 }
 
 /// A provider's words, cut to a line, so no page of HTML reaches a toast.
@@ -191,12 +267,19 @@ pub enum Credentials {
     ApiKey(Redacted),
     /// A Google Cloud service account's JSON key.
     ServiceAccount(vertex::ServiceAccount),
-    /// An AWS access key pair.
+    /// An AWS access key pair, and the session token a role's session adds.
     #[expect(missing_docs, reason = "the variant says what its fields are")]
     AccessKeys {
         access_key_id: String,
         secret_access_key: Redacted,
+        session_token: Option<Redacted>,
     },
+    /// No secret: whom the connection signs in as, for credentials that
+    /// last minutes ([`federation`]).
+    Federated(federation::Federated),
+    /// A Google Cloud token a pool handed, and the project Vertex AI runs in.
+    #[expect(missing_docs, reason = "the variant says what its fields are")]
+    GoogleToken { token: Redacted, project_id: String },
 }
 
 impl std::fmt::Debug for Credentials {
@@ -205,6 +288,8 @@ impl std::fmt::Debug for Credentials {
             Self::ApiKey(_) => "ApiKey(..)",
             Self::ServiceAccount(_) => "ServiceAccount(..)",
             Self::AccessKeys { .. } => "AccessKeys(..)",
+            Self::Federated(_) => "Federated(..)",
+            Self::GoogleToken { .. } => "GoogleToken(..)",
         })
     }
 }
@@ -217,17 +302,42 @@ struct AccessKeyPair {
 }
 
 impl Credentials {
+    /// What of it a provider's words must never echo.
+    fn secrets(&self) -> Vec<&str> {
+        match self {
+            Self::ApiKey(key) => vec![key.expose()],
+            Self::ServiceAccount(_) | Self::Federated(_) => Vec::new(),
+            Self::AccessKeys {
+                access_key_id,
+                secret_access_key,
+                session_token,
+            } => [access_key_id.as_str(), secret_access_key.expose()]
+                .into_iter()
+                .chain(session_token.as_ref().map(Redacted::expose))
+                .collect(),
+            Self::GoogleToken { token, .. } => vec![token.expose()],
+        }
+    }
+
     /// `secret` as `provider` takes it: an API key as given, a service
-    /// account's JSON key, or an access key pair as `{"access_key_id": …,
-    /// "secret_access_key": …}`.
+    /// account's JSON key or a pool to sign in to, or an access key pair as
+    /// `{"access_key_id": …, "secret_access_key": …}` or a role to assume.
     ///
     /// # Errors
     ///
     /// A secret not in the shape its provider takes, named without echoing it.
     pub fn read(provider: ModelProvider, secret: &Redacted) -> Result<Self, String> {
         match provider {
-            ModelProvider::VertexAi => {
-                vertex::ServiceAccount::read(secret.expose()).map(Self::ServiceAccount)
+            ModelProvider::VertexAi => match federation::Federated::google_cloud(secret.expose()) {
+                Some(pool) => pool.map(Self::Federated),
+                None => vertex::ServiceAccount::read(secret.expose()).map(Self::ServiceAccount),
+            },
+            ModelProvider::Bedrock
+                if federation::Federated::aws_role(secret.expose()).is_some() =>
+            {
+                federation::Federated::aws_role(secret.expose())
+                    .unwrap_or_else(|| Err("no role".into()))
+                    .map(Self::Federated)
             }
             ModelProvider::Bedrock => serde_json::from_str::<AccessKeyPair>(secret.expose())
                 .map_err(|_| {
@@ -242,6 +352,7 @@ impl Credentials {
                         Ok(Self::AccessKeys {
                             access_key_id: pair.access_key_id.trim().to_owned(),
                             secret_access_key: pair.secret_access_key.trim().to_owned().into(),
+                            session_token: None,
                         })
                     }
                 }),
@@ -266,6 +377,53 @@ pub struct Connection {
     pub region: Option<Region>,
     /// What it opens with.
     pub credentials: Credentials,
+    /// Where a connection that stores no key signs in, and as which project's
+    /// which connection; none for every other.
+    pub sign_in: Option<SignIn>,
+}
+
+/// The issuer a [`Credentials::Federated`] connection signs in by, and whose
+/// it is.
+#[derive(Debug, Clone)]
+pub struct SignIn {
+    /// The deployment as an issuer.
+    pub federation: std::sync::Arc<federation::Federation>,
+    /// The organization the project is in, which its token's subject names.
+    pub organization: crate::OrganizationId,
+    /// The project whose token it presents.
+    pub project: crate::ProjectId,
+    /// The connection, whose credentials are kept for it.
+    pub connection: uuid::Uuid,
+}
+
+impl Connection {
+    /// The connection with what it signs in to swapped for the credentials
+    /// it is handed; every other as it is.
+    async fn signed_in(&self, egress: &Egress) -> Result<std::borrow::Cow<'_, Self>, Refused> {
+        let Credentials::Federated(federated) = &self.credentials else {
+            return Ok(std::borrow::Cow::Borrowed(self));
+        };
+        let sign_in = self.sign_in.as_ref().ok_or_else(|| {
+            Refused::Unreadable(
+                "this deployment signs no project in: MODEL_FEDERATION_SIGNER is unset".into(),
+            )
+        })?;
+        let live = sign_in
+            .federation
+            .sign_in(
+                egress,
+                &sign_in.organization,
+                &sign_in.project,
+                sign_in.connection,
+                federated,
+                self.region.as_ref().map(Region::as_str),
+            )
+            .await?;
+        Ok(std::borrow::Cow::Owned(Self {
+            credentials: live,
+            ..self.clone()
+        }))
+    }
 }
 
 /// One request, built: where it goes, its headers, and its body.
@@ -296,6 +454,26 @@ pub async fn judge(
     connection: &Connection,
     ask: &Ask<'_>,
 ) -> Result<Judged, Refused> {
+    judged(egress, connection, ask)
+        .await
+        .map_err(|refused| refused.scrubbed(&connection.credentials))
+}
+
+/// [`judge`], its refusal as the provider worded it.
+async fn judged(
+    egress: &Egress,
+    connection: &Connection,
+    ask: &Ask<'_>,
+) -> Result<Judged, Refused> {
+    let live = connection.signed_in(egress).await?;
+    // The credentials it was handed too, which a refusal could echo.
+    asked(egress, live.as_ref(), ask)
+        .await
+        .map_err(|refused| refused.scrubbed(&live.credentials))
+}
+
+/// [`judged`] once the connection holds what it sends.
+async fn asked(egress: &Egress, connection: &Connection, ask: &Ask<'_>) -> Result<Judged, Refused> {
     type Reader = fn(&Value) -> Result<Judged, Refused>;
     let (prepared, answered): (Prepared, Reader) = match connection.provider {
         ModelProvider::Openai | ModelProvider::OpenaiCompatible | ModelProvider::AzureOpenai => {
@@ -303,18 +481,23 @@ pub async fn judge(
         }
         ModelProvider::Anthropic => (anthropic::request(connection, ask)?, anthropic::answer),
         ModelProvider::GoogleAiStudio => (gemini::request(connection, ask, None)?, gemini::answer),
-        ModelProvider::VertexAi => {
-            let Credentials::ServiceAccount(account) = &connection.credentials else {
+        ModelProvider::VertexAi => match &connection.credentials {
+            Credentials::ServiceAccount(account) => {
+                let token = vertex::token(egress, account, chrono::Utc::now()).await?;
+                (
+                    gemini::request(connection, ask, Some(&token))?,
+                    gemini::answer,
+                )
+            }
+            Credentials::GoogleToken { .. } => {
+                (gemini::request(connection, ask, None)?, gemini::answer)
+            }
+            _ => {
                 return Err(Refused::Unreadable(
-                    "a Vertex AI connection holds a service account".into(),
+                    "a Vertex AI connection holds a service account or a pool".into(),
                 ));
-            };
-            let token = vertex::token(egress, account, chrono::Utc::now()).await?;
-            (
-                gemini::request(connection, ask, Some(&token))?,
-                gemini::answer,
-            )
-        }
+            }
+        },
         ModelProvider::Bedrock => (
             bedrock::request(connection, ask, chrono::Utc::now())?,
             bedrock::answer,
@@ -354,11 +537,16 @@ pub async fn decide(
             "a typed evaluator judges with a System One connection".into(),
         ));
     }
-    let prepared = systemone::request(connection, decide)?;
-    let (status, retry_after, body) = send(egress, prepared).await?;
-    read(status, retry_after, &body, |body| {
-        systemone::answer(body, decide.model)
-    })
+    let decided = async {
+        let prepared = systemone::request(connection, decide)?;
+        let (status, retry_after, body) = send(egress, prepared).await?;
+        read(status, retry_after, &body, |body| {
+            systemone::answer(body, decide.model)
+        })
+    };
+    decided
+        .await
+        .map_err(|refused| refused.scrubbed(&connection.credentials))
 }
 
 /// The answer of a request, sent: its status, its `Retry-After`, its body.
@@ -371,7 +559,12 @@ async fn send(
         .post(&url)
         .map_err(|rejected: HostRejection| Refused::Unreached(rejected.reason().into()))?;
     for (name, value) in &headers {
-        request = request.header(name.as_str(), value.expose());
+        // Marked sensitive, so no debug line of the client's prints a key.
+        let mut value = reqwest::header::HeaderValue::from_str(value.expose()).map_err(|_| {
+            Refused::Unreadable("the key holds characters a request header cannot carry".into())
+        })?;
+        value.set_sensitive(true);
+        request = request.header(name.as_str(), value);
     }
     let response = request.body(body).send().await.map_err(|e| {
         Refused::Unreached(if e.is_timeout() {
@@ -382,12 +575,42 @@ async fn send(
     })?;
     let status = response.status().as_u16();
     let retry_after = crate::http::retry_after(response.headers());
-    let body = response
-        .bytes()
-        .await
-        .map_err(|_| Refused::Unreached("the answer was cut short".into()))?;
-    Ok((status, retry_after, body.to_vec()))
+    let body = capped(response, ANSWER_MAX).await?;
+    Ok((status, retry_after, body))
 }
+
+/// The most of a model's answer read: a judgement is a few kilobytes, so an
+/// endpoint answering more is refused before it holds the process's memory.
+const ANSWER_MAX: usize = 1024 * 1024;
+
+/// `response`'s body, read to `most` bytes and refused past them.
+///
+/// # Errors
+///
+/// A body cut short, or longer than `most`.
+pub(crate) async fn capped(
+    mut response: reqwest::Response,
+    most: usize,
+) -> Result<Vec<u8>, Refused> {
+    let mut body = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|_| Refused::Unreached("the answer was cut short".into()))?
+    {
+        if body.len() + chunk.len() > most {
+            return Err(Refused::Unreadable(format!(
+                "its answer runs past {} KiB",
+                most / 1024
+            )));
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
+}
+
+/// The most of a token service's answer read: a token and its lifetime.
+pub(crate) const TOKEN_ANSWER_MAX: usize = 64 * 1024;
 
 /// An answer read by its status: a judgement where it is a 2xx the provider's
 /// reader takes, else why not.
@@ -410,7 +633,8 @@ fn read<T>(
                     .and_then(Value::as_str)
                     .map(str::to_owned)
             })
-            .unwrap_or_else(|| String::from_utf8_lossy(body).chars().take(300).collect())
+            // Long enough that the scrub sees a whole echoed key before the cut.
+            .unwrap_or_else(|| String::from_utf8_lossy(body).chars().take(4_096).collect())
     };
     match status {
         200..=299 => answered(
@@ -537,6 +761,102 @@ impl sqlx::Encode<'_, sqlx::Postgres> for Region {
 mod tests {
     use super::*;
 
+    /// An endpoint answering more than a judgement could be is refused before
+    /// its answer holds the process's memory.
+    #[tokio::test]
+    async fn an_answer_past_its_cap_is_refused_unread() {
+        use std::future::IntoFuture as _;
+        let flood = || async { vec![b'['; ANSWER_MAX + 1] };
+        let app = axum::Router::new().fallback(flood);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("a port");
+        let base = format!("http://{}/v1", listener.local_addr().expect("an address"));
+        tokio::spawn(axum::serve(listener, app).into_future());
+        let connection = Connection {
+            provider: ModelProvider::OpenaiCompatible,
+            base_url: Some(base),
+            region: None,
+            credentials: Credentials::ApiKey("k".to_owned().into()),
+            sign_in: None,
+        };
+        let schema = serde_json::json!({ "type": "object" });
+        let messages = [(Role::User, "hi".to_owned())];
+        let ask = Ask {
+            model: "m",
+            system: "s",
+            messages: &messages,
+            schema: &schema,
+            temperature: None,
+            max_tokens: 8,
+            media: &[],
+        };
+        let refused = judge(
+            &Egress::unguarded(reqwest::Client::new()),
+            &connection,
+            &ask,
+        )
+        .await;
+        assert!(
+            matches!(&refused, Err(Refused::Unreadable(why)) if why.contains("runs past")),
+            "{refused:?}"
+        );
+    }
+
+    /// A provider echoing what it was sent never puts a key in a refusal:
+    /// the connection's own secret, and anything shaped like a credential.
+    #[test]
+    fn a_refusal_carries_no_key() {
+        let key = Credentials::ApiKey("gw-0123-abcd-key".to_owned().into());
+        let echoed = Refused::Unauthorized {
+            status: 401,
+            detail: "key gw-0123-abcd-key refused; header was Bearer gw-0123-abcd-key".into(),
+        }
+        .scrubbed(&key);
+        let Refused::Unauthorized { detail, .. } = &echoed else {
+            panic!("{echoed:?}")
+        };
+        assert_eq!(
+            detail,
+            "key [redacted] refused; header was Bearer [redacted]"
+        );
+        let pair = Credentials::AccessKeys {
+            access_key_id: "AKIAEXAMPLE0000001".into(),
+            secret_access_key: "wJalr/XUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY"
+                .to_owned()
+                .into(),
+            session_token: None,
+        };
+        let sentence = Refused::Provider {
+            status: 400,
+            detail: "AKIAEXAMPLE0000001 signed wJalr/XUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY".into(),
+        }
+        .scrubbed(&pair)
+        .sentence();
+        assert!(
+            !sentence.contains("AKIA") && !sentence.contains("wJalr"),
+            "{sentence}"
+        );
+        for (shown, kept) in [
+            (
+                "Incorrect API key provided: sk-proj-abcdefghijklmnop1234",
+                false,
+            ),
+            (
+                "token ya29 a0AfH6SMBx1234567890abcdefghijklmnopqrstuvwx",
+                false,
+            ),
+            (
+                "model us.anthropic.claude-3-5-sonnet-20241022-v2:0 not found",
+                true,
+            ),
+            ("request req_0123456789abcdef failed", true),
+        ] {
+            let clean = scrub(shown, &[]);
+            assert_eq!(clean == shown, kept, "{shown} became {clean}");
+        }
+    }
+
     /// An answer is read by its status: a refusal of the key apart from a
     /// rate limit and every other failure, and a fenced JSON answer read.
     #[test]
@@ -645,6 +965,7 @@ mod tests {
             base_url: None,
             region: Some(Region::try_new("us-east-1").unwrap()),
             credentials: Credentials::ApiKey("k".to_owned().into()),
+            sign_in: None,
         };
         let body =
             |prepared: Prepared| -> Value { serde_json::from_slice(&prepared.body).expect("json") };
@@ -680,7 +1001,9 @@ mod tests {
             credentials: Credentials::AccessKeys {
                 access_key_id: "AKID".into(),
                 secret_access_key: "s".to_owned().into(),
+                session_token: None,
             },
+            sign_in: None,
             ..key(ModelProvider::Bedrock)
         };
         let bedrock = body(bedrock::request(&pair, &ask, chrono::Utc::now()).expect("built"));

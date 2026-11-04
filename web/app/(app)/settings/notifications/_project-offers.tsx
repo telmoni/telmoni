@@ -83,7 +83,8 @@ function ProjectOfferCard({
         <p className="text-sm text-muted-foreground">
           It leaves {from} and moves into an organization you own, with its
           members and its API keys — rotate any key you did not mint. Its
-          Slack and webhook connectors stay behind. {owner} stays on
+          Slack and webhook connectors stay behind, and its model connections are
+          deleted, keys and all. {owner} stays on
           as an admin of the project, and joins your organization as a member.
           If a project there already has its name, it arrives with the next
           free number on the end.
@@ -172,8 +173,8 @@ function AcceptDialog({
             {owned.length > 1
               ? `It moves into the organization you pick, with its members and API keys, and ${chosen ? organizationLabel(chosen) : "that organization"} becomes its home.`
               : `It moves into ${chosen ? organizationLabel(chosen) : "your organization"}, with its members and API keys.`}{" "}
-            Its connectors stay behind, and its previous owner stays on as an
-            admin of the project and a member of that organization.
+            Its connectors stay behind, its model connections are deleted, keys and all, and its
+            previous owner stays on as an admin of the project and a member of that organization.
           </DialogDescription>
           {owned.length > 1 && (
             <div className="grid gap-1.5">

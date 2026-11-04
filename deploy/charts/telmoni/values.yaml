@@ -80,6 +80,14 @@ config:
   # a Cloud KMS key name, or file:/var/run/secrets/telmoni/kek/content, the
   # key `content` of the Secret `server-kek`.
   contentKek: ""
+  # Seals each model connection's key, never telemetryKek's nor contentKek's;
+  # empty, none connects. A KMS key name, or file:…/kek/model-connection.
+  modelConnectionKek: ""
+  # Both or neither, beside modelConnectionKek, for a keyless Bedrock or Vertex
+  # AI connection: KMS key versions, comma-separated, the first signing; and
+  # the machine host's https origin, where /oidc/v1 answers.
+  modelFederationSigner: ""
+  modelFederationIssuer: ""
   # The console agent. Off while modelProvider is empty; on, it needs
   # `AGENT_DATABASE_URL` in `server-secrets` (the `agent` role's DSN), and
   # `AGENT_MODEL_API_KEY` there for a hosted model. modelProvider is the

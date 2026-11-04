@@ -207,14 +207,14 @@ pub async fn purge_organization(
         .execute(tx.conn())
         .await?
         .rows_affected();
-    let evaluations = sqlx::query("DELETE FROM telemetry.evaluations WHERE organization_id = $1")
-        .bind(organization_id)
+    let evaluations = sqlx::query("DELETE FROM telemetry.evaluations WHERE project_id = ANY($1)")
+        .bind(&projects)
         .execute(tx.conn())
         .await?
         .rows_affected();
     let evaluation_rules =
-        sqlx::query("DELETE FROM telemetry.evaluation_rules WHERE organization_id = $1")
-            .bind(organization_id)
+        sqlx::query("DELETE FROM telemetry.evaluation_rules WHERE project_id = ANY($1)")
+            .bind(&projects)
             .execute(tx.conn())
             .await?
             .rows_affected();
@@ -512,9 +512,9 @@ pub async fn delete_view<B: HasProject>(
     )
 }
 
-/// A project's settings row and its alerts, handed to the organization that
-/// now holds the project, its alerts counted against that one's plan from
-/// then on. Answers whether there was a settings row.
+/// A project's settings row, its alerts and its evaluations, handed to the
+/// organization that now holds the project, counted against that one's plan
+/// from then on. Answers whether there was a settings row.
 pub async fn move_project(
     tx: &mut Scoped<'_, Maintenance<TelemetryLane>>,
     project_id: &ProjectId,
@@ -535,6 +535,20 @@ pub async fn move_project(
         .bind(organization_id)
         .execute(tx.conn())
         .await?;
+    sqlx::query("UPDATE telemetry.evaluation_rules SET organization_id = $2 WHERE project_id = $1")
+        .bind(project_id)
+        .bind(organization_id)
+        .execute(tx.conn())
+        .await?;
+    // Only the rows still to judge: the lease alone reads it, and history is unbounded.
+    sqlx::query(
+        "UPDATE telemetry.evaluations SET organization_id = $2
+          WHERE project_id = $1 AND status IN ('pending', 'delayed')",
+    )
+    .bind(project_id)
+    .bind(organization_id)
+    .execute(tx.conn())
+    .await?;
     // The content's bytes follow it to the organization that now holds it,
     // its settings row locked first, as `delete_content` locks it.
     sqlx::query("SELECT 1 FROM telemetry.project_settings WHERE project_id = $1 FOR UPDATE")
@@ -572,6 +586,21 @@ pub async fn move_project(
     .await?
     .rows_affected()
         > 0)
+}
+
+/// A project's model connections deleted as it leaves its organization, as
+/// a connector's grant is: answers how many.
+pub async fn drop_model_connections(
+    tx: &mut Scoped<'_, Maintenance<TelemetryLane>>,
+    project_id: &ProjectId,
+) -> sqlx::Result<u64> {
+    Ok(
+        sqlx::query("DELETE FROM telemetry.model_connections WHERE project_id = $1")
+            .bind(project_id)
+            .execute(tx.conn())
+            .await?
+            .rows_affected(),
+    )
 }
 
 /// A project's hashing key as its row keeps it: sealed under a data key

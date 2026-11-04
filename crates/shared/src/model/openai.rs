@@ -158,6 +158,7 @@ mod tests {
             base_url: base.map(str::to_owned),
             region: None,
             credentials: Credentials::ApiKey("sk-test".to_owned().into()),
+            sign_in: None,
         }
     }
 

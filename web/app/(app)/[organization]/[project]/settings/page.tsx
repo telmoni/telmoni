@@ -5,7 +5,7 @@ import { SettingsRow } from "@/components/settings-row";
 import { ServiceUnavailable } from "@/components/service-unavailable";
 import { Card } from "@/components/ui/card";
 import { fetchContentMode, fetchModelPrices } from "@/lib/server/data";
-import { fetchModelConnections } from "@/lib/server/entities/model-connections";
+import { fetchModelConnectionsAnswer } from "@/lib/server/entities/model-connections";
 import { projectPage } from "@/lib/server/project-page";
 import { administers } from "@/lib/roles";
 import { getServerSession } from "@/lib/server/session";
@@ -32,7 +32,7 @@ export default async function SettingsPage({
   const [contentMode, prices, connections, session] = await Promise.all([
     fetchContentMode(project.id),
     fetchModelPrices(project.id),
-    fetchModelConnections(project.id),
+    fetchModelConnectionsAnswer(project.id),
     getServerSession(),
   ]);
 
@@ -96,11 +96,16 @@ export default async function SettingsPage({
 
         <Section
           title="Model connections"
-          description="This project's own keys to the models its evaluators judge with: OpenAI, Anthropic, Google AI Studio or Vertex AI, Azure OpenAI, Amazon Bedrock, or any endpoint speaking OpenAI's protocol. A key is sealed when it is saved, never shown again but by its last four characters, and sent to its provider alone. Saving asks the first model one small question first."
+          description="This project's own keys to the models its evaluators judge with: OpenAI, Anthropic, Google AI Studio or Vertex AI, Azure OpenAI, Amazon Bedrock, or any endpoint speaking OpenAI's protocol. A key is sealed when it is saved, bound to the endpoint it goes to, never shown again but by its last four characters, and sent to its provider alone; Bedrock and Vertex AI can sign in as this project instead, keeping no key at all. Saving asks the first model one small question first, and tells the organization's owners and admins whenever a key is saved."
         >
           <Card>
             {connections ? (
-              <ModelConnections projectId={project.id} connections={connections} canEdit={canEdit} />
+              <ModelConnections
+                projectId={project.id}
+                connections={connections.connections}
+                federation={connections.federation}
+                canEdit={canEdit}
+              />
             ) : (
               <p className="text-sm text-muted-foreground">
                 This project&apos;s model connections could not be read. Reload to try again.

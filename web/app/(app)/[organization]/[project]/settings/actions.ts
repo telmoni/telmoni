@@ -219,13 +219,13 @@ export async function saveModelConnectionAction(projectId: string, input: unknow
   if (!gate.ok) return refused(gate.error);
   const asked = ConnectionInputSchema.safeParse(input);
   if (!asked.success) return refused("That connection could not be read.");
-  // A request to the provider stands in front of the save: a minute at most.
+  // The proof stands in front of the save: a sign-in's two exchanges and the model, a minute each at most.
   const res = await tryFetchWithTimeout(
     `${env.SERVER_URL}/internal/v1/telemetry/model-connections`,
     { method: "PUT", headers: { ...gate.headers, "content-type": "application/json" }, body: JSON.stringify(asked.data) },
-    75_000,
+    240_000,
   );
-  if (!res) return refused("The connection could not be saved. Try again.");
+  if (!res) return refused("The provider did not answer in time. Reload the page to see whether the connection was saved.");
   if (!res.ok) return refused((await extractProblem(res)).message);
   revalidatePath("/(app)/[organization]/[project]/settings", "page");
   return { ok: true };

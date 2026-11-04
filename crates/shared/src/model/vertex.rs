@@ -126,10 +126,9 @@ pub async fn token(
         .await
         .map_err(|_| Refused::Unreached("Google's token endpoint did not answer".into()))?;
     let status = response.status().as_u16();
-    let answer: Value = response
-        .json()
-        .await
-        .map_err(|_| Refused::Unreadable("Google's token answer is not JSON".into()))?;
+    let answer: Value =
+        serde_json::from_slice(&super::capped(response, super::TOKEN_ANSWER_MAX).await?)
+            .map_err(|_| Refused::Unreadable("Google's token answer is not JSON".into()))?;
     match status {
         200..=299 => answer
             .get("access_token")

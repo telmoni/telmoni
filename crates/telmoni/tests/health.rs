@@ -77,6 +77,8 @@ fn assemble() -> App {
             telemetry_kek: format!("local:{}", "0".repeat(64)).into(),
             content_kek: format!("local:{}", "1".repeat(64)).into(),
             model_connection_kek: None,
+            model_federation_signer: None,
+            model_federation_issuer: None,
             kms_api_base: "http://127.0.0.1:1".into(),
             metadata_api_base: "http://127.0.0.1:1".into(),
             redis_url: "redis://127.0.0.1:1".into(),

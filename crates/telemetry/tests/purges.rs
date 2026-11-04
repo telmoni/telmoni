@@ -27,8 +27,8 @@ use telmoni_telemetry::sweep::{self, Swept};
 
 const OWNER: &str = "user_owner";
 
-/// A settings row of `project` filed under `organization`, and a view, a
-/// model connection, an evaluator and an evaluation rule saved on it.
+/// A settings row of `project` filed under `organization`, its view, model
+/// connection, evaluator and rule, and an evaluation settled before it moved.
 async fn settings_and_a_view(pool: &PgPool, project: &ProjectId, organization: &OrganizationId) {
     sqlx::query(
         "INSERT INTO telemetry.project_settings (project_id, organization_id) VALUES ($1, $2)",
@@ -77,12 +77,26 @@ async fn settings_and_a_view(pool: &PgPool, project: &ProjectId, organization: &
     .execute(pool)
     .await
     .expect("an evaluation rule");
+    sqlx::query(
+        "INSERT INTO telemetry.evaluations (id, project_id, organization_id, evaluator_id,
+             evaluator_version, target, target_key, status, settled_at)
+         VALUES ($1, $2, $3, $4, 1, 'run', 'run/1', 'done', now())",
+    )
+    .bind(Uuid::now_v7())
+    .bind(project)
+    .bind(OrganizationId::new())
+    .bind(Uuid::now_v7())
+    .execute(pool)
+    .await
+    .expect("an evaluation, settled before its project moved");
 }
 
 /// The tables a purge empties in which the project has a row still.
 async fn left_of(pool: &PgPool, project: &ProjectId) -> Vec<&'static str> {
     let mut left = Vec::new();
     for table in [
+        "evaluation_rules",
+        "evaluations",
         "evaluators",
         "model_connections",
         "project_settings",
@@ -202,6 +216,8 @@ async fn a_purge_waits_two_seconds_at_most_for_a_project_held_in_place(pool: PgP
     assert_eq!(
         left_of(&pool, &project).await,
         [
+            "evaluation_rules",
+            "evaluations",
             "evaluators",
             "model_connections",
             "project_settings",
@@ -210,8 +226,7 @@ async fn a_purge_waits_two_seconds_at_most_for_a_project_held_in_place(pool: PgP
     );
 }
 
-/// An organization's purge holds every project its settings rows name while
-/// it deletes, and takes only the rows filed under the organization.
+/// An organization's purge holds each of its projects as it deletes, and takes their rows alone.
 #[sqlx::test]
 async fn an_organizations_purge_holds_every_project_its_rows_name(pool: PgPool) {
     let state = common::state(&pool, AuthStub::new());
@@ -248,8 +263,8 @@ async fn an_organizations_purge_holds_every_project_its_rows_name(pool: PgPool) 
     );
     assert!(held.is_empty(), "held in place beside the purge: {held:?}");
     assert_eq!(
-        purged, 10,
-        "a view, a model connection, an evaluator, an evaluation rule and a settings row of each project"
+        purged, 12,
+        "a view, a model connection, an evaluator, a rule, an evaluation and a settings row of each project"
     );
     for project in &ours {
         assert!(left_of(&pool, project).await.is_empty(), "{project}");
@@ -257,6 +272,8 @@ async fn an_organizations_purge_holds_every_project_its_rows_name(pool: PgPool) 
     assert_eq!(
         left_of(&pool, &theirs).await,
         [
+            "evaluation_rules",
+            "evaluations",
             "evaluators",
             "model_connections",
             "project_settings",
@@ -307,6 +324,8 @@ async fn a_projects_purge_cut_short_is_finished_by_the_sweep(pool: PgPool) {
     assert_eq!(
         left,
         [
+            "evaluation_rules",
+            "evaluations",
             "evaluators",
             "model_connections",
             "project_settings",
@@ -343,6 +362,8 @@ async fn a_projects_purge_cut_short_is_finished_by_the_sweep(pool: PgPool) {
     assert_eq!(
         left_of(&pool, &kept).await,
         [
+            "evaluation_rules",
+            "evaluations",
             "evaluators",
             "model_connections",
             "project_settings",
@@ -394,6 +415,8 @@ async fn a_purge_the_sweep_cannot_finish_now_waits_for_the_next_pass(pool: PgPoo
     assert_eq!(
         left_of(&pool, held).await,
         [
+            "evaluation_rules",
+            "evaluations",
             "evaluators",
             "model_connections",
             "project_settings",

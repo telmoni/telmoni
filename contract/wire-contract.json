@@ -596,6 +596,7 @@
         "new",
         "null",
         "oauth",
+        "oidc",
         "opengraph-image",
         "org",
         "organization",

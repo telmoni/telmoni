@@ -1183,12 +1183,9 @@ async fn emit_project_move_audits(
     .await
 }
 
-/// The last steps of an accept and a move, in order: telemetry's move, the
-/// one that can be undone, then notifications' purge, which cannot, then the
-/// commit. The transaction ends here whatever happens, rolled back before a
-/// refusal is answered rather than when its connection goes back to the pool,
-/// so the settling after finds its locks free; telemetry's settings are
-/// settled ([`SettleTelemetry`]) when any step fails.
+/// An accept's last steps: telemetry's move, which can be undone, then the
+/// connectors' purge and the model connections' deletion, which cannot, then
+/// the commit; a step that fails rolls back first and settles ([`SettleTelemetry`]).
 async fn move_purge_and_commit(
     state: &AppState,
     tx: Scoped<'_, Maintenance<AuthLane>>,
@@ -1199,7 +1196,8 @@ async fn move_purge_and_commit(
     let settle = SettleTelemetry::arm(state, project_id, source, destination);
     let ready = async {
         deletion::move_project_telemetry(state, project_id, destination).await?;
-        deletion::purge_project_connectors(state, project_id, deletion::Teardown::ForMove).await
+        deletion::purge_project_connectors(state, project_id, deletion::Teardown::ForMove).await?;
+        deletion::drop_model_connections(state, project_id).await
     }
     .await;
     if let Err(e) = ready {

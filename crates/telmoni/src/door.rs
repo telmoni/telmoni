@@ -1,10 +1,6 @@
-//! The machine door, in front of the lanes a machine reaches straight on the
-//! machine host: the read API under `/v1`, the CLI's under `/cli/v1` and
-//! ingest under `/otlp`. Each lane gates its own; the
-//! door adds the caller's address, read past the proxies in front, and the
-//! limits kept in Redis by source and by credential, so one caller cannot
-//! spend the others' room. Ingest is metered here by source alone: its
-//! credential is its project, which its handler meters once the key is known.
+//! The machine door before `/v1`, `/cli/v1`, `/oidc/v1` and `/otlp`: the
+//! caller's address past the proxies, and Redis's limits by source and by
+//! credential; ingest's by source alone, its handler metering the project.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -79,7 +75,8 @@ impl Door {
         self.trusted_proxy_hops
     }
 
-    /// The `/v1` lanes behind the door's limits.
+    /// The `/v1` lanes behind the door's limits, and the issuers' under
+    /// `/oidc/v1`, metered as `/v1` is.
     pub fn v1(self: &Arc<Self>, lanes: Router) -> Router {
         lanes.layer(middleware::from_fn_with_state(
             (self.clone(), Lane::V1),
