@@ -89,6 +89,31 @@ impl MemberCeiling {
     }
 }
 
+/// How many projects an organization may hold, as the deployment that sells
+/// plans answers it ([`crate::seam::Entitlements::project_ceiling`]): held
+/// where a project is made and where one moves in, never over those it
+/// already holds, so an organization past it keeps every one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectCeiling {
+    /// How many projects the organization may hold.
+    pub limit: u32,
+    /// The one thing that lifts it, the 402's `entitlement`.
+    pub entitlement: String,
+    /// The sentence a person reads, which names nobody.
+    pub detail: String,
+}
+
+impl ProjectCeiling {
+    /// Whether one more project may arrive, with `held` already held.
+    /// Refused, as a 402, at the ceiling.
+    pub fn admit(&self, held: u64) -> Result<(), TelmoniError> {
+        if held < u64::from(self.limit) {
+            return Ok(());
+        }
+        Err(limit_reached(&self.entitlement, &self.detail))
+    }
+}
+
 /// An organization's alerts and their deliveries, as the deployment that
 /// sells plans answers them ([`crate::seam::Entitlements::alert_ceilings`]):
 /// how many alerts it may hold across its projects, paused ones counted,

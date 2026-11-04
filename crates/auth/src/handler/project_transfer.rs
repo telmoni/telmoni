@@ -849,6 +849,7 @@ pub async fn accept(
 
     let owned = organization_members::active_organizations_owned_by(&mut tx, &user_id).await?;
     let destination = resolve_destination_organization(named, &owned, &source)?;
+    let ceiling = super::projects::project_ceiling_of(&state, &destination).await;
 
     lock_transfer_organizations(&mut tx, &source, &destination).await?;
 
@@ -883,6 +884,7 @@ pub async fn accept(
         )
         .into());
     }
+    super::projects::held_to(ceiling.as_ref(), &mut tx, &destination).await?;
     let landed = land(&mut tx, &project_id, &standing, &destination).await?;
     // The previous owner keeps a seat, and with it a row on the destination's
     // roster, as a project invitation would give them: every seat holder is
@@ -1019,7 +1021,8 @@ pub async fn move_project(
     Ok(Json(moved))
 }
 
-/// [`move_project`] for `user_id`, which the deployment's seam calls too.
+/// [`move_project`] for `user_id`, which the deployment's seam calls too,
+/// a merge's moves among them, each held to the destination's project ceiling.
 pub(crate) async fn move_into(
     state: &AppState,
     user_id: &UserId,
@@ -1066,6 +1069,8 @@ pub(crate) async fn move_into(
         .into());
     }
 
+    // Asked once the caller owns both, before either organization's lock.
+    let ceiling = super::projects::project_ceiling_of(state, destination).await;
     lock_transfer_organizations(&mut tx, &source, destination).await?;
 
     // Under the locks, everything again.
@@ -1086,6 +1091,7 @@ pub(crate) async fn move_into(
     // An offer of the project to one of its admins was an offer to take it
     // out of the organization it is leaving.
     offers::clear(&mut tx, Roster::Project(project_id)).await?;
+    super::projects::held_to(ceiling.as_ref(), &mut tx, destination).await?;
     let landed = land(&mut tx, project_id, &standing, destination).await?;
     let holders_enrolled = enrol(&mut tx, destination, &landed.staying, user_id).await?;
 

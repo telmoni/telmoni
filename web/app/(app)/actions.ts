@@ -80,7 +80,9 @@ export async function createProjectAction(
     const error = res
       ? (await extractProblem(res)).message
       : "Failed to create the project. Please try again.";
-    return refused(error);
+    // A plan's project ceiling is lifted by asking, where the deployment says who.
+    const ask = res?.status === 402 && env.SUPPORT_EMAIL ? ` To hold more, write to ${env.SUPPORT_EMAIL}.` : "";
+    return refused(`${error}${ask}`);
   }
 
   revalidatePath("/", "layout");

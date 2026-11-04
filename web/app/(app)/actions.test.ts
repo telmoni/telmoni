@@ -44,7 +44,10 @@ vi.mock("@/lib/events/publisher", () => ({
   publishEvent: (channel: string, event: unknown) => mockPublishEvent(channel, event),
   userChannel: (email: string) => `user:${email}`,
 }));
-vi.mock("@/lib/env", () => ({ env: { SERVER_URL: "http://auth.test" } }));
+const mockEnv = vi.hoisted((): { SERVER_URL: string; SUPPORT_EMAIL?: string } => ({
+  SERVER_URL: "http://auth.test",
+}));
+vi.mock("@/lib/env", () => ({ env: mockEnv }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/lib/logger", () => ({ logger: { warn: vi.fn() } }));
 // The slot a console built on this one fills; empty here, as the core ships it.
@@ -162,6 +165,27 @@ describe("createProjectAction — which organization the project lands in", () =
     expect(errorOf(r)).toMatch(/cannot create a project in that organization/i);
     expect(mockFetch).not.toHaveBeenCalled();
     expect(mockOrganizationHeaders).not.toHaveBeenCalled();
+  });
+
+  it("names who to ask for more where the plan's project ceiling refuses it", async () => {
+    mockFetch.mockResolvedValue({ ok: false, status: 402 });
+    mockExtractProblem.mockResolvedValueOnce({ message: "Hobby holds 10 projects.", problem: null });
+    mockEnv.SUPPORT_EMAIL = "support@example.test";
+    try {
+      expect(errorOf(await createProjectAction("Platform"))).toBe(
+        "Hobby holds 10 projects. To hold more, write to support@example.test.",
+      );
+      // Any other refusal, or a deployment that names nobody, is said as it came.
+      mockFetch.mockResolvedValue({ ok: false, status: 409 });
+      mockExtractProblem.mockResolvedValueOnce({ message: "That name is taken.", problem: null });
+      expect(errorOf(await createProjectAction("Platform"))).toBe("That name is taken.");
+      mockEnv.SUPPORT_EMAIL = undefined;
+      mockFetch.mockResolvedValue({ ok: false, status: 402 });
+      mockExtractProblem.mockResolvedValueOnce({ message: "Hobby holds 10 projects.", problem: null });
+      expect(errorOf(await createProjectAction("Platform"))).toBe("Hobby holds 10 projects.");
+    } finally {
+      mockEnv.SUPPORT_EMAIL = undefined;
+    }
   });
 
   it("refuses to name an organization the caller is not in at all", async () => {

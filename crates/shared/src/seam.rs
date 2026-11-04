@@ -20,8 +20,8 @@ use crate::acting::{Acting, ActingKey};
 use crate::slug::Slug;
 use crate::{
     AlertCeilings, AuditAction, AuthError, AuthzError, Capacity, FlagSet, Grants, LaneCeilings,
-    MemberCeiling, NotificationKind, OrganizationId, OrganizationStatus, ProjectId, Role,
-    TelmoniError, UserId,
+    MemberCeiling, NotificationKind, OrganizationId, OrganizationStatus, ProjectCeiling, ProjectId,
+    Role, TelmoniError, UserId,
 };
 
 /// Who may read a document the agent indexes, beyond the tenant its keys
@@ -1078,6 +1078,17 @@ pub trait Entitlements: Send + Sync {
         Ok(None)
     }
 
+    /// How many projects the organization may hold; `None` is as many as it
+    /// makes. Asked where one is made or moved in, before the organization's
+    /// lock, and it may read the deployment's own rows.
+    async fn project_ceiling(
+        &self,
+        organization_id: &OrganizationId,
+    ) -> Result<Option<ProjectCeiling>, TelmoniError> {
+        let _ = organization_id;
+        Ok(None)
+    }
+
     /// The machine lanes' ceiling the organization's plan sets — data out a
     /// day; `None` is none. Asked on every answer the read API gives, so its
     /// callers keep the answer a minute ([`lane_ceilings`]), and it may read
@@ -1177,6 +1188,22 @@ pub async fn member_ceiling(
         organization_id,
         "the member ceiling",
         entitlements.member_ceiling(organization_id),
+    )
+    .await
+}
+
+/// What a project's arrival asks, made or moved in: the organization's
+/// project ceiling, which the door holds its count to under the
+/// organization's lock. An answer that cannot be had is no ceiling, logged,
+/// as [`admit_new`] lets in what it cannot decide.
+pub async fn project_ceiling(
+    entitlements: &dyn Entitlements,
+    organization_id: &OrganizationId,
+) -> Option<ProjectCeiling> {
+    or_none(
+        organization_id,
+        "the project ceiling",
+        entitlements.project_ceiling(organization_id),
     )
     .await
 }

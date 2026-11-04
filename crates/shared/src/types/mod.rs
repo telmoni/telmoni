@@ -55,7 +55,7 @@ pub use evaluation_target::EvaluationTarget;
 pub use flag::{Flag, FlagSet};
 pub use grants::{
     AlertCeilings, Allowance, CONNECTION_BYTES, Capacity, Grants, LaneCeilings, MemberCeiling,
-    Paused, share_told,
+    Paused, ProjectCeiling, share_told,
 };
 pub use incident_status::IncidentStatus;
 pub use layout_depth::LayoutDepth;

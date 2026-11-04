@@ -25,13 +25,15 @@ use tower::ServiceExt;
 
 use telmoni_auth::test_provider::{ScriptedProvider, as_person};
 use telmoni_auth::{AppState, Config, Siblings, router};
+use telmoni_shared::acting::Acting;
 use telmoni_shared::seam::{
     Auth, Entitlements, OrganizationFounding, OwnershipChange, OwnershipHook,
 };
 use telmoni_shared::slug::{self, Slug};
 use telmoni_shared::test_util::{ServiceRole, apply_audit_migrations, seed_identity, service_pool};
 use telmoni_shared::{
-    Flag, Grants, MemberCeiling, OrganizationId, Paused, PlanError, TelmoniError, UserId,
+    Flag, Grants, MemberCeiling, OrganizationId, Paused, PlanError, ProjectCeiling, TelmoniError,
+    UserId,
 };
 
 const SERVICE_SECRET: &str = "test-service-secret";
@@ -154,11 +156,13 @@ impl OwnershipHook for RecordingOwnership {
 }
 
 /// Entitlements under which the organizations in `paused` take nothing new,
-/// and each in `ceilings` holds at most so many people.
+/// each in `ceilings` holds at most so many people, and each in `projects`
+/// so many projects.
 #[derive(Default)]
 struct PausedEntitlements {
     paused: Mutex<HashSet<String>>,
     ceilings: Mutex<HashMap<String, u32>>,
+    projects: Mutex<HashMap<String, u32>>,
 }
 
 impl PausedEntitlements {
@@ -168,6 +172,18 @@ impl PausedEntitlements {
             .unwrap()
             .insert(organization.to_owned(), limit);
     }
+
+    fn hold_projects(&self, organization: &str, limit: u32) {
+        self.projects
+            .lock()
+            .unwrap()
+            .insert(organization.to_owned(), limit);
+    }
+}
+
+/// The sentence the double refuses a project with.
+fn holds_projects(limit: u32) -> String {
+    format!("Hobby holds {limit} projects.")
 }
 
 /// The sentence the double refuses a seat with.
@@ -207,6 +223,22 @@ impl Entitlements for PausedEntitlements {
                 limit,
                 entitlement: "pro".into(),
                 detail: holds(limit),
+            }))
+    }
+
+    async fn project_ceiling(
+        &self,
+        organization_id: &OrganizationId,
+    ) -> Result<Option<ProjectCeiling>, TelmoniError> {
+        Ok(self
+            .projects
+            .lock()
+            .unwrap()
+            .get(organization_id.as_str())
+            .map(|&limit| ProjectCeiling {
+                limit,
+                entitlement: "pro".into(),
+                detail: holds_projects(limit),
             }))
     }
 }
@@ -1203,4 +1235,254 @@ async fn a_paused_organization_seats_nobody(pool: PgPool) {
     assert_eq!(status, StatusCode::PAYMENT_REQUIRED, "{body}");
     assert_eq!(body["detail"], "This organization is paused.");
     assert_eq!(seated(&pool, &organization).await, 1);
+}
+
+/// How many projects an organization holds.
+async fn projects_in(pool: &PgPool, organization: &str) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM auth.projects WHERE organization_id = $1")
+        .bind(organization)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+/// At its project ceiling an organization makes no project and keeps every
+/// one it holds, the refusal the deployment's 402; one past it, held before
+/// the ceiling came down, keeps them all as well.
+#[sqlx::test]
+async fn an_organization_at_its_project_ceiling_makes_no_project(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let deployment = Deployment::default();
+    let organization = deployment.sign_in(&pool, OWNER).await;
+    let held = projects_in(&pool, &organization).await;
+    deployment.project(&pool, &organization, "Payments").await;
+    deployment
+        .entitlements
+        .hold_projects(&organization, u32::try_from(held + 1).unwrap());
+
+    let (status, body) = deployment
+        .call(
+            &pool,
+            "POST",
+            "/internal/v1/projects",
+            OWNER,
+            Some(&organization),
+            Some(json!({ "name": "Search" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::PAYMENT_REQUIRED, "{body}");
+    assert_eq!(body["type"], "/errors/plan/limit-reached");
+    assert_eq!(body["entitlement"], "pro");
+    assert_eq!(
+        body["detail"],
+        holds_projects(u32::try_from(held + 1).unwrap())
+    );
+    assert_eq!(
+        projects_in(&pool, &organization).await,
+        held + 1,
+        "a refused project was made"
+    );
+
+    // Lowered under what it holds, it keeps them all and makes none.
+    deployment.entitlements.hold_projects(&organization, 1);
+    let (status, _) = deployment
+        .call(
+            &pool,
+            "POST",
+            "/internal/v1/projects",
+            OWNER,
+            Some(&organization),
+            Some(json!({ "name": "Search" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::PAYMENT_REQUIRED);
+    assert_eq!(projects_in(&pool, &organization).await, held + 1);
+}
+
+/// A project moved into an organization at its ceiling is refused there and
+/// stays where it was, so a move is no way round the ceiling.
+#[sqlx::test]
+async fn a_project_moves_into_no_organization_at_its_ceiling(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let deployment = Deployment::default();
+    let first = deployment.sign_in(&pool, OWNER).await;
+    let project = deployment.project(&pool, &first, "Payments").await;
+    let (status, body) = deployment
+        .call(
+            &pool,
+            "POST",
+            "/internal/v1/organizations",
+            OWNER,
+            None,
+            Some(json!({ "name": "Second" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let second = body["id"].as_str().unwrap().to_owned();
+    let held = projects_in(&pool, &second).await;
+    deployment
+        .entitlements
+        .hold_projects(&second, u32::try_from(held).unwrap());
+
+    let (status, body) = deployment
+        .call(
+            &pool,
+            "POST",
+            &format!("/internal/v1/projects/{project}/move"),
+            OWNER,
+            Some(&first),
+            Some(json!({ "organizationId": second })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::PAYMENT_REQUIRED, "{body}");
+    assert_eq!(body["detail"], holds_projects(u32::try_from(held).unwrap()));
+    assert_eq!(
+        projects_in(&pool, &second).await,
+        held,
+        "the project moved past the ceiling"
+    );
+
+    // With room, the same move lands.
+    deployment
+        .entitlements
+        .hold_projects(&second, u32::try_from(held + 1).unwrap());
+    let (status, body) = deployment
+        .call(
+            &pool,
+            "POST",
+            &format!("/internal/v1/projects/{project}/move"),
+            OWNER,
+            Some(&first),
+            Some(json!({ "organizationId": second })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+}
+
+/// A merge's moves, which billing makes through the seam rather than the
+/// route, are held to the destination's ceiling as the owner's own move is.
+#[sqlx::test]
+async fn a_merges_move_is_held_to_the_destinations_ceiling(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let deployment = Deployment::default();
+    let first = deployment.sign_in(&pool, OWNER).await;
+    let project = deployment.project(&pool, &first, "Payments").await;
+    let (status, body) = deployment
+        .call(
+            &pool,
+            "POST",
+            "/internal/v1/organizations",
+            OWNER,
+            None,
+            Some(json!({ "name": "Second" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let second = body["id"].as_str().unwrap().to_owned();
+    let held = projects_in(&pool, &second).await;
+    deployment
+        .entitlements
+        .hold_projects(&second, u32::try_from(held).unwrap());
+
+    let acting = Acting {
+        user_id: UserId::try_new(OWNER).unwrap(),
+        organization_id: OrganizationId::try_new(first.as_str()).unwrap(),
+        organization_role: Some(telmoni_shared::OrganizationRole::Owner),
+        project: None,
+        session_id: None,
+        expires_at: chrono::Utc::now().timestamp() + 60,
+    };
+    let project_id = telmoni_shared::ProjectId::try_new(project.as_str()).unwrap();
+    let refused = deployment
+        .state(&pool)
+        .move_project(
+            &acting,
+            &project_id,
+            &OrganizationId::try_new(second.as_str()).unwrap(),
+        )
+        .await
+        .expect_err("a merge moved a project past the ceiling");
+    assert!(
+        matches!(&refused, TelmoniError::Plan(PlanError::LimitReached { detail, .. }) if *detail == holds_projects(u32::try_from(held).unwrap())),
+        "{refused:?}"
+    );
+    assert_eq!(projects_in(&pool, &second).await, held);
+}
+
+/// A project accepted from another person's organization is held to the
+/// ceiling of the one it lands in, and stays where it was when refused.
+#[sqlx::test]
+async fn a_project_is_accepted_into_no_organization_at_its_ceiling(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let deployment = Deployment::default();
+    let organization = deployment.sign_in(&pool, OWNER).await;
+    let theirs = deployment.sign_in(&pool, ADMIN).await;
+    deployment.admit_admin(&pool, &organization, ADMIN).await;
+    let project = deployment.project(&pool, &organization, "Payments").await;
+    // An offer goes to an admin seated on the project itself.
+    let (status, body) = deployment
+        .call(
+            &pool,
+            "POST",
+            &format!("/internal/v1/projects/{project}/invites"),
+            OWNER,
+            Some(&organization),
+            Some(json!({ "email": format!("{ADMIN}@example.test"), "role": "admin" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let seat = body["id"].as_str().unwrap().to_owned();
+    let (status, body) = deployment.accept(&pool, ADMIN, &seat).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let held = projects_in(&pool, &theirs).await;
+    deployment
+        .entitlements
+        .hold_projects(&theirs, u32::try_from(held).unwrap());
+
+    let (status, body) = deployment
+        .call(
+            &pool,
+            "POST",
+            &format!("/internal/v1/projects/{project}/transfer"),
+            OWNER,
+            Some(&organization),
+            Some(json!({ "memberId": ADMIN })),
+        )
+        .await;
+    assert!(status.is_success(), "{status} {body}");
+    let accept = format!("/internal/v1/projects/{project}/transfer/accept");
+    let (status, body) = deployment
+        .call(
+            &pool,
+            "POST",
+            &accept,
+            ADMIN,
+            Some(&organization),
+            Some(json!({ "organizationId": theirs })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::PAYMENT_REQUIRED, "{body}");
+    assert_eq!(body["detail"], holds_projects(u32::try_from(held).unwrap()));
+    assert_eq!(
+        projects_in(&pool, &theirs).await,
+        held,
+        "the project landed past the ceiling"
+    );
+
+    // The offer stands, and with room the same accept lands it.
+    deployment
+        .entitlements
+        .hold_projects(&theirs, u32::try_from(held + 1).unwrap());
+    let (status, body) = deployment
+        .call(
+            &pool,
+            "POST",
+            &accept,
+            ADMIN,
+            Some(&organization),
+            Some(json!({ "organizationId": theirs })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(projects_in(&pool, &theirs).await, held + 1);
 }

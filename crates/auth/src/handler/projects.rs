@@ -11,10 +11,14 @@ use serde_json::json;
 use telmoni_shared::OrganizationAction;
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
 use telmoni_shared::db::tenant_session::maintenance_scope;
+use telmoni_shared::db::tenant_session::{Binding, Scoped};
 use telmoni_shared::extract::{Json, Path};
 use telmoni_shared::person_token::Principal;
 use telmoni_shared::slug::Slug;
-use telmoni_shared::{AuditAction, AuthError, ProjectId, TelmoniError, TelmoniResourceKind};
+use telmoni_shared::{
+    AuditAction, AuthError, OrganizationId, ProjectCeiling, ProjectId, TelmoniError,
+    TelmoniResourceKind,
+};
 
 use super::answer::Projects;
 use super::authorize_organization;
@@ -94,6 +98,30 @@ pub struct CreateProjectRequest {
     pub name: String,
 }
 
+/// The organization's project ceiling, read before its lock is taken, never
+/// under it: the deployment answers on its own pool.
+pub(crate) async fn project_ceiling_of(
+    state: &AppState,
+    organization: &OrganizationId,
+) -> Option<ProjectCeiling> {
+    let entitlements = state.siblings.entitlements.as_deref()?;
+    telmoni_shared::seam::project_ceiling(entitlements, organization).await
+}
+
+/// One more project held to `ceiling`, counted under the organization's lock
+/// so two arriving at once cannot both take the last place.
+pub(crate) async fn held_to<B: Binding>(
+    ceiling: Option<&ProjectCeiling>,
+    tx: &mut Scoped<'_, B>,
+    organization: &OrganizationId,
+) -> Result<(), TelmoniError> {
+    let Some(ceiling) = ceiling else {
+        return Ok(());
+    };
+    let held = projects::count_in(tx, organization).await?;
+    ceiling.admit(u64::try_from(held).unwrap_or(u64::MAX))
+}
+
 /// `POST /internal/v1/projects` — add a project to the acting organization.
 pub async fn create_project(
     State(state): State<Arc<AppState>>,
@@ -110,6 +138,8 @@ pub async fn create_project(
         acting.tx.commit().await?;
         return Err(refused);
     }
+    // Asked once the caller may make one, as an invitation asks its ceiling.
+    let ceiling = project_ceiling_of(&state, &organization_id).await;
     // The creator's role on the new project is the one their organization role
     // gives them on every project in it. The gate above admits only roles that
     // give one, so a `None` is a broken rule, refused before anything is written.
@@ -122,6 +152,7 @@ pub async fn create_project(
     // On the organization's lock, as a project landing here by transfer
     // takes it to pick a free name.
     crate::db::locks::lock_organization(&mut acting.tx, &organization_id).await?;
+    held_to(ceiling.as_ref(), &mut acting.tx, &organization_id).await?;
     let project_id = telmoni_shared::ProjectId::new();
     let Some(slug) = projects::create(&mut acting.tx, &project_id, &organization_id, &name)
         .await
