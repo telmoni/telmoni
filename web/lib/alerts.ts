@@ -7,11 +7,15 @@
 import { connectionName } from "@/lib/connect";
 import { isOneOf } from "@/lib/one-of";
 import type {
+  AgentHistory,
   Alert,
   Connection,
+  History,
   Hours,
   Incident,
   Mute,
+  Objective,
+  Percentiles,
   RuleFilters,
 } from "@/lib/server/data";
 import { projectPath } from "@/lib/slug";
@@ -105,6 +109,8 @@ export function aggregationsFor(measure: RuleMeasure): readonly [RuleAggregation
         RuleAggregation.Max,
         RuleAggregation.Count,
       ];
+    case RuleMeasure.Burn:
+      return [RuleAggregation.Avg];
   }
 }
 
@@ -115,6 +121,7 @@ export const MEASURE_LABEL: Record<RuleMeasure, string> = {
   [RuleMeasure.Tokens]: "Tokens",
   [RuleMeasure.Cost]: "Cost",
   [RuleMeasure.Score]: "Score",
+  [RuleMeasure.Burn]: "Burn rate",
 };
 
 /** How an aggregation of `measure` reads in the form. */
@@ -160,7 +167,15 @@ export const WINDOW_LABEL: Record<RuleWindow, string> = {
 };
 
 type Metric = Pick<Alert, "kind" | "measure" | "aggregation" | "window"> &
-  Partial<Pick<Alert, "score_name" | "baseline">>;
+  Partial<Pick<Alert, "score_name" | "baseline" | "objective" | "filters">>;
+
+/** What an objective promises, as its notices say it: "99.9% of
+ *  support-bot's runs succeed over 30 days". */
+export function promiseWords(objective: Objective, agent: string): string {
+  const share = Number((objective.target * 100).toFixed(2));
+  const how = objective.latency_ms === null ? "succeed" : `end inside ${NUMBER.format(objective.latency_ms)} ms`;
+  return `${share}% of ${agent}'s runs ${how} over ${objective.days} days`;
+}
 
 /** An alert's metric in its notices' own words: "The p95 duration of model
  *  calls over the last hour", "The most a run spent over the last day", and
@@ -171,6 +186,9 @@ export function metricWords(alert: Metric): string {
 }
 
 function measuredWords(alert: Metric): string {
+  if (alert.objective) {
+    return `How fast its budget burns: ${promiseWords(alert.objective, alert.filters?.agent?.[0] ?? "")}`;
+  }
   const over = alert.window === RuleWindow.Month ? "so far this month" : `over the last ${alert.window}`;
   if (alert.measure === RuleMeasure.Score) {
     const name = alert.score_name ?? "";
@@ -216,7 +234,7 @@ function measuredWords(alert: Metric): string {
 /** The unit a value is typed and read in: a change from the window before in
  *  percent, as the lane keeps it; milliseconds for a duration, a percentage
  *  of a share for the share failed, US dollars for a cost, else a number. */
-export type Unit = "change" | "ms" | "percent" | "dollars" | "number";
+export type Unit = "change" | "ms" | "percent" | "dollars" | "times" | "number";
 
 export function unitOf(
   measure: RuleMeasure,
@@ -226,6 +244,7 @@ export function unitOf(
   if (baseline === RuleBaseline.Previous) return "change";
   if (measure === RuleMeasure.Duration) return "ms";
   if (measure === RuleMeasure.Cost) return "dollars";
+  if (measure === RuleMeasure.Burn) return "times";
   if (measure === RuleMeasure.Failures && aggregation === RuleAggregation.Avg) return "percent";
   return "number";
 }
@@ -235,6 +254,7 @@ export const UNIT_SUFFIX: Record<Unit, string> = {
   ms: "ms",
   percent: "%",
   dollars: "USD",
+  times: "×",
   number: "",
 };
 
@@ -257,6 +277,8 @@ export function amount(
       return `${NUMBER.format(value * 100)}%`;
     case "dollars":
       return formatCost(value);
+    case "times":
+      return `${NUMBER.format(value)}×`;
     default:
       return NUMBER.format(value);
   }
@@ -592,6 +614,8 @@ export type RuleInput = {
   renotify_minutes: number | null;
   score_name: string | null;
   baseline: RuleBaseline;
+  /** A burn alert's objective alone. */
+  objective?: Objective;
   connectors: { connection_id: string; level: RuleLevel; hours: Hours | null }[];
 };
 
@@ -630,6 +654,65 @@ export const NEW_ALERT: AlertDraft = {
 function shown(value: number, unit: Unit): string {
   const typed = unit === "percent" ? value * 100 : value;
   return String(Number(typed.toPrecision(12)));
+}
+
+/** One percentile an alert's threshold may start from: its value as the
+ *  page reads it, and as the form types it. */
+export type Level = { level: "p50" | "p90" | "p99"; shown: string; typed: string };
+
+/** Where an alert's threshold may start from: whose history, of what, over
+ *  how many days, and its percentiles. */
+export type Suggestion = { who: string; what: string; days: number; levels: Level[] };
+
+/** The percentiles of `history`'s that a threshold of `draft`'s may start
+ *  from: durations by their own, tokens and spend an hour's, for the alert's
+ *  one agent or every agent, so none where it filters by anything else, reads
+ *  a change, or folds a way no percentile of these answers. */
+export function suggestionFor(draft: AlertDraft, history: History | null): Suggestion | null {
+  if (!history || draft.baseline !== RuleBaseline.None) return null;
+  const narrowed =
+    FILTER_FIELDS.some((field) => field !== "agent" && draft.filters[field].trim() !== "") ||
+    draft.statuses.length > 0;
+  const agents = splitValues(draft.filters.agent);
+  if (narrowed || agents.length > 1) return null;
+  const agent = agents[0] ?? null;
+  const of = (kind: SpanKind): AgentHistory | undefined =>
+    history.agents.find((row) => row.agent === agent && row.kind === kind);
+  const hourly = draft.aggregation === RuleAggregation.Sum && draft.window === RuleWindow.Hour;
+  const read = ((): { percentiles: Percentiles | undefined; what: string } | null => {
+    switch (draft.measure) {
+      case RuleMeasure.Duration:
+        return draft.aggregation === RuleAggregation.Sum
+          ? null
+          : { percentiles: of(draft.kind)?.duration_ms, what: `each of its ${KIND_PLURAL[draft.kind]}' duration` };
+      case RuleMeasure.Tokens:
+        if (draft.aggregation === RuleAggregation.Avg) {
+          return { percentiles: of(SpanKind.ModelCall)?.tokens_per_span, what: "an hour's tokens a model call" };
+        }
+        return hourly ? { percentiles: of(SpanKind.ModelCall)?.tokens_hourly, what: "an hour's tokens" } : null;
+      case RuleMeasure.Cost:
+        // A run's spend is its model calls'.
+        return hourly ? { percentiles: of(SpanKind.ModelCall)?.spend_hourly, what: "an hour's spend" } : null;
+      default:
+        return null;
+    }
+  })();
+  if (!read?.percentiles) return null;
+  const unit = unitOf(draft.measure, draft.aggregation);
+  const levels = (["p50", "p90", "p99"] as const).flatMap((level) => {
+    const value = read.percentiles?.[level];
+    if (value === null || value === undefined) return [];
+    // Whole milliseconds and tokens, a spend to three figures: a threshold a person would type.
+    const plain = unit === "dollars" ? Number(value.toPrecision(3)) : Math.round(value);
+    return [{ level, shown: amount(draft.measure, draft.aggregation, plain), typed: shown(plain, unit) }];
+  });
+  if (levels.length === 0) return null;
+  return { who: agent ?? "every agent", what: read.what, days: historyDays(history), levels };
+}
+
+/** The whole days `history` was read over. */
+export function historyDays(history: History): number {
+  return Math.round((Date.parse(history.to) - Date.parse(history.from)) / 86_400_000);
 }
 
 /** The form for an alert saved before: its values as the form types them. */
@@ -748,24 +831,11 @@ export function inputOf(
       );
     }
   }
-  let renotify: number | null = null;
-  if (draft.renotifyMinutes.trim()) {
-    renotify = parsed(draft.renotifyMinutes, "number");
-    if (renotify === null || !Number.isInteger(renotify) || renotify < 1 || renotify > RENOTIFY_MAX_MINUTES) {
-      return fail(`Notify again every 1 to ${RENOTIFY_MAX_MINUTES.toLocaleString("en-US")} minutes, or leave it empty.`);
-    }
-  }
-  if (draft.connectors.length > LINKS_MAX) return fail(`An alert links up to ${LINKS_MAX} connectors.`);
-  const seen = new Set<string>();
-  for (const link of draft.connectors) {
-    if (seen.has(link.connectionId)) return fail("An alert links a connector once.");
-    seen.add(link.connectionId);
-    const hours = link.hours;
-    if (hours) {
-      if (hours.days.length === 0) return fail("Set hours name a day at least.");
-      if (!TIME.test(hours.from) || !TIME.test(hours.to)) return fail("Set hours run from and to a time of day.");
-    }
-  }
+  const again = renotifyOf(draft.renotifyMinutes);
+  if (!again.ok) return again;
+  const renotify = again.minutes;
+  const links = linksOf(draft.connectors);
+  if (!links.ok) return links;
   const filters: RuleFilters = {};
   for (const field of filterFieldsFor(draft.kind, draft.measure)) {
     const values = splitValues(draft.filters[field]);
@@ -790,15 +860,50 @@ export function inputOf(
       renotify_minutes: renotify,
       score_name: draft.measure === RuleMeasure.Score ? scoreName : null,
       baseline: draft.baseline,
-      connectors: draft.connectors.map((link) => ({
-        connection_id: link.connectionId,
-        level: link.level,
-        hours: link.hours
-          ? { ...link.hours, days: [...new Set(link.hours.days)].sort((a, b) => a - b) }
-          : null,
-      })),
+      connectors: links.connectors,
     },
   };
+}
+
+/** The connectors a form links, checked as the lane checks them, as it takes them. */
+export function linksOf(
+  links: LinkDraft[],
+): { ok: true; connectors: RuleInput["connectors"] } | { ok: false; error: string } {
+  const fail = (error: string) => ({ ok: false as const, error });
+  if (links.length > LINKS_MAX) return fail(`An alert links up to ${LINKS_MAX} connectors.`);
+  const seen = new Set<string>();
+  for (const link of links) {
+    if (seen.has(link.connectionId)) return fail("An alert links a connector once.");
+    seen.add(link.connectionId);
+    const hours = link.hours;
+    if (hours) {
+      if (hours.days.length === 0) return fail("Set hours name a day at least.");
+      if (!TIME.test(hours.from) || !TIME.test(hours.to)) return fail("Set hours run from and to a time of day.");
+    }
+  }
+  return {
+    ok: true,
+    connectors: links.map((link) => ({
+      connection_id: link.connectionId,
+      level: link.level,
+      hours: link.hours ? { ...link.hours, days: [...new Set(link.hours.days)].sort((a, b) => a - b) } : null,
+    })),
+  };
+}
+
+/** A number of minutes to notify again after, as typed: none where empty. */
+export function renotifyOf(text: string): { ok: true; minutes: number | null } | { ok: false; error: string } {
+  if (!text.trim()) return { ok: true, minutes: null };
+  const minutes = parsed(text, "number");
+  if (minutes === null || !Number.isInteger(minutes) || minutes < 1 || minutes > RENOTIFY_MAX_MINUTES) {
+    return { ok: false, error: `Notify again every 1 to ${RENOTIFY_MAX_MINUTES.toLocaleString("en-US")} minutes, or leave it empty.` };
+  }
+  return { ok: true, minutes };
+}
+
+/** A typed number, grouping commas allowed: none for anything but a finite number. */
+export function numberOf(text: string): number | null {
+  return parsed(text, "number");
 }
 
 /** How often a held severity is told again, in words. */

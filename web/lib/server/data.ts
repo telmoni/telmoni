@@ -81,17 +81,24 @@ export type { PrivacyPosture } from "./entities/privacy";
 export {
   INCIDENTS_MAX,
   fetchAlerts,
+  fetchHistory,
   fetchIncident,
+  fetchObjectives,
   fetchRunIncidents,
 } from "./entities/alerts";
 export type {
+  AgentHistory,
   Alert,
   AlertsAccess,
+  History,
   Hours,
   Incident,
   IncidentAccess,
   Mute,
+  Objective,
+  Percentiles,
   RuleFilters,
+  Standing,
 } from "./entities/alerts";
 
 export { fetchOrganizationHealth } from "./entities/organization-health";

@@ -10,6 +10,7 @@ import { useConsoleShell } from "@/components/console-shell";
 import { PageAction } from "@/components/page-action";
 import {
   SidePanel,
+  SidePanelBody,
   SidePanelFooter,
   SidePanelHeader,
   SidePanelRow,
@@ -65,6 +66,7 @@ import {
   measuresFor,
   offsetWords,
   readsNothingAsNoData,
+  suggestionFor,
   takesWarning,
   unitOf,
   withKind,
@@ -73,6 +75,7 @@ import {
   type ConnectionChoice,
   type LinkDraft,
 } from "@/lib/alerts";
+import type { History } from "@/lib/server/data";
 import { STATUS_LABEL } from "@/lib/traces";
 import {
   MissingData,
@@ -84,6 +87,7 @@ import {
   SpanStatus,
 } from "@/lib/types/enums";
 import { useAction } from "@/lib/use-action";
+import { decimalTyped, wholeTyped } from "@/lib/typed-number";
 
 import { useLanding } from "./_act";
 import { saveAlertAction } from "./actions";
@@ -115,6 +119,8 @@ type PanelProps = {
   initial: AlertDraft;
   /** The project's connections; none where they could not be read. */
   connections: ConnectionChoice[] | null;
+  /** Its agents' history, which a threshold may start from; none where it could not be read. */
+  history: History | null;
 };
 
 /** The panel, while it is open, in the console's content area. */
@@ -140,11 +146,13 @@ export function AlertPanelHost({
 export function NewAlert({
   projectId,
   connections,
+  history,
   connectorsHref,
   canConnect,
 }: {
   projectId: string;
   connections: ConnectionChoice[] | null;
+  history: History | null;
   /** The project's Connectors page. */
   connectorsHref: string;
   /** Whether the person may add a connector there: its owners and admins. */
@@ -200,6 +208,7 @@ export function NewAlert({
         ruleId={null}
         initial={NEW_ALERT}
         connections={connections}
+        history={history}
       />
     </>
   );
@@ -210,6 +219,7 @@ function AlertPanel({
   ruleId,
   initial,
   connections,
+  history,
   onClose,
   returnFocus,
 }: PanelProps & { onClose: () => void; returnFocus: () => HTMLElement | null }) {
@@ -235,6 +245,7 @@ function AlertPanel({
   };
   const unit = unitOf(draft.measure, draft.aggregation, draft.baseline);
   const suffix = UNIT_SUFFIX[unit];
+  const suggestion = suggestionFor(draft, history);
 
   function submit() {
     const checked = inputOf(draft);
@@ -282,7 +293,7 @@ function AlertPanel({
             feed and the connectors it links.
           </p>
         </SidePanelHeader>
-        <div className="min-h-0 flex-1 overflow-y-auto px-gutter">
+        <SidePanelBody>
           <SidePanelRow label="Name" htmlFor={`${id}-name`}>
             <Input
               ref={field}
@@ -454,6 +465,37 @@ function AlertPanel({
               />
             </div>
           </SidePanelRow>
+          {suggestion && (
+            <SidePanelRow label="From its history">
+              <div className="grid max-w-md gap-1.5">
+                <p id={`${id}-history`} className="text-muted-foreground">
+                  {suggestion.who.replace(/^./, (c) => c.toUpperCase())}&rsquo;s last {suggestion.days} days,{" "}
+                  {suggestion.what}:
+                </p>
+                <div className="flex flex-wrap gap-gutter">
+                  {suggestion.levels.map((level) => (
+                    <Button
+                      key={level.level}
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={pending}
+                      aria-pressed={draft.alertThreshold.trim() === level.typed}
+                      aria-describedby={`${id}-history ${id}-replaces`}
+                      onClick={() => change({ ...draft, alertThreshold: level.typed })}
+                    >
+                      {level.level} · {level.shown}
+                    </Button>
+                  ))}
+                </div>
+                <p id={`${id}-replaces`} className="text-muted-foreground">
+                  {draft.alertThreshold.trim()
+                    ? `Replaces the alert threshold typed now, ${draft.alertThreshold.trim()}${suffix ? ` ${suffix}` : ""}.`
+                    : "Fills the empty alert threshold."}
+                </p>
+              </div>
+            </SidePanelRow>
+          )}
           {takesWarning(draft.operator) && (
             <SidePanelRow label="Warn when" htmlFor={`${id}-warning`}>
               <div className="flex max-w-md flex-wrap items-center gap-gutter">
@@ -495,7 +537,7 @@ function AlertPanel({
                 id={`${id}-renotify`}
                 inputMode="numeric"
                 value={draft.renotifyMinutes}
-                onChange={(e) => change({ ...draft, renotifyMinutes: e.target.value })}
+                onChange={(e) => change({ ...draft, renotifyMinutes: wholeTyped(e.target.value) })}
                 autoComplete="off"
                 disabled={pending}
                 aria-describedby={`${id}-renotify-unit ${id}-renotify-hint`}
@@ -523,7 +565,7 @@ function AlertPanel({
               {error}
             </p>
           )}
-        </div>
+        </SidePanelBody>
         <SidePanelFooter>
           <Button type="submit" disabled={pending}>
             {pending ? "Saving…" : ruleId ? "Save alert" : "Make alert"}
@@ -563,7 +605,7 @@ function Threshold({
         id={id}
         inputMode="decimal"
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(e) => onChange(decimalTyped(e.target.value, true))}
         placeholder={placeholder}
         autoComplete="off"
         disabled={disabled}
@@ -582,7 +624,7 @@ function Threshold({
 /** The connectors an alert's notices go to: each of the project's, switched
  *  on or off, at its level and in its hours; one the alert links that the
  *  project no longer has, listed so it is not dropped unseen. */
-function Links({
+export function Links({
   id,
   links,
   connections,

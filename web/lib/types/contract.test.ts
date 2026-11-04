@@ -285,11 +285,13 @@ describe("wire contract", () => {
     }
   });
 
-  // The kinds an alert watches, and what the server counts on each.
+  // The kinds an alert watches, and what the server counts on each: a burn
+  // is an objective's, made on the Objectives page.
   it("the alert form measures each kind as the server does", () => {
     expect(Object.keys(contract.rules.measures).sort()).toEqual([...ALERT_KINDS].sort());
     for (const kind of ALERT_KINDS) {
-      expect([...measuresFor(kind)].sort()).toEqual([...contract.rules.measures[kind]!].sort());
+      const counted = contract.rules.measures[kind]!.filter((measure) => measure !== RuleMeasure.Burn);
+      expect([...measuresFor(kind)].sort()).toEqual(counted.sort());
     }
   });
 

@@ -11,6 +11,7 @@ import { admitProject } from "@/lib/server/admit";
 import {
   MissingData,
   RuleAggregation,
+  RuleBaseline,
   RuleLevel,
   RuleMeasure,
   RuleOperator,
@@ -47,6 +48,7 @@ const RuleInputSchema = z.strictObject({
     status: z.array(z.enum(SpanStatus)).optional(),
     environment: Values,
     release: Values,
+    tag: Values,
   }),
   window: z.enum(RuleWindow),
   operator: z.enum(RuleOperator),
@@ -54,6 +56,16 @@ const RuleInputSchema = z.strictObject({
   warning_threshold: z.number().nullable(),
   missing_data: z.enum(MissingData),
   renotify_minutes: z.number().int().nullable(),
+  score_name: z.string().nullable(),
+  baseline: z.enum(RuleBaseline),
+  objective: z
+    .strictObject({
+      target: z.number(),
+      latency_ms: z.number().int().nullable(),
+      days: z.number().int(),
+    })
+    .nullable()
+    .optional(),
   connectors: z.array(
     z.strictObject({
       connection_id: Id,

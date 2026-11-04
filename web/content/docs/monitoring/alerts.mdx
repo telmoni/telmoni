@@ -51,9 +51,14 @@ once, with its incidents and its maintenance windows; an incident still open
 is first told resolved, as a member's resolution is, to the connectors that
 heard it.
 
+An [objective](/docs/monitoring/objectives) is listed here too, as the alert
+on its burn it is: its metric says what it promises, its thresholds the burns
+that page and warn, and its incidents stand under it. **Edit** opens the
+objective's own form.
+
 On a deployment that sells plans, such as the hosted service, an
 organization holds as many alerts across its projects as its plan does,
-paused ones counted, and its alerts make as many deliveries a UTC day as its
+paused ones and objectives counted, and its alerts make as many deliveries a UTC day as its
 plan holds, the feed never counted. An alert past the number is refused when
 it is made. Where the organization holds more than its plan does, the oldest
 alerts keep running and the newest wait, **Paused by the plan**, until there
@@ -108,6 +113,7 @@ project's feed alone.
 | Filters | Agent, environment and release on every kind; model and provider on model calls, and on a run's cost, read from its calls; tag, each `key:value`, on a run's cost alone, a run passing where any of its spans carries it; tool on tool calls; and the status a span ended with, on all but a cost. None on a score, which names no agent, model or status of its own. Separate a field's values with commas, and put a value that holds one between double quotes: a span passes a field it carries any of the values of, and passes the alert when it passes every field filled |
 | Compared as | How the value is compared: above, at or above, below, at or below, equal to, or not equal to |
 | Alert when | The alert threshold under that comparison: in milliseconds for a duration, as a percentage for the share failed, in US dollars for a cost, and as a percentage for a change, below 0 for a drop: **Below** −20 alerts on a fall of more than a fifth |
+| From its history | Where the alert reads one agent, or every agent, and filters by nothing else: the 50th, 90th and 99th percentiles of what that agent usually does, read from the hourly totals of the last 14 whole UTC days, so they change once a night. For a duration, its spans' own durations; for tokens folded as an average, an hour's tokens a model call, and as a total over the last hour, an hour's tokens; and for a run's cost totalled over the last hour, an hour's spend. Each percentile is a button that puts it in **Alert when**, and the line under them says what it replaces |
 | Warn when | A warning threshold under the same comparison, met before the alert's: below it for above, above it for below. Optional, and none for equal to or not equal to |
 | No data | A window holding nothing to read is read as 0; keeps the alert's last severity; is shown as **No data**; or is shown so and told once a whole window has passed with none. A window of no score, and a change with nothing to compare, is no 0, so neither takes **Read as 0** unless the alert counts |
 | Notify again | Every 1 to 10,080 minutes while an incident holds at one severity and nobody has acknowledged it; empty for never |

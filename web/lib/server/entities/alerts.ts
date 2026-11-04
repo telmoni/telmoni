@@ -51,6 +51,15 @@ const RuleFiltersSchema = z.object({
 });
 export type RuleFilters = z.infer<typeof RuleFiltersSchema>;
 
+// An objective's promise: `target` of one agent's runs succeed, or end
+// inside `latency_ms`, over its days.
+const ObjectiveSchema = z.object({
+  target: z.number(),
+  latency_ms: z.number().int().nullable(),
+  days: z.number().int(),
+});
+export type Objective = z.infer<typeof ObjectiveSchema>;
+
 // One alert: its definition, who paused it, and its last evaluation.
 const AlertSchema = z.object({
   id: z.string(),
@@ -69,6 +78,8 @@ const AlertSchema = z.object({
   score_name: z.string().nullable(),
   /** Read as it is, or as its change in percent from the window before. */
   baseline: z.enum(RuleBaseline),
+  /** A burn alert's objective; absent for any other. */
+  objective: ObjectiveSchema.optional(),
   /** A member, by hand, or its plan, past the organization's number. */
   paused: z.enum(PausedBy).nullable(),
   paused_at: z.string().nullable(),
@@ -142,6 +153,67 @@ export type IncidentAccess =
   | { kind: "unavailable" };
 
 export { INCIDENTS_MAX } from "@/lib/alerts";
+
+// The 50th, 90th and 99th percentiles of one measure, none where there was nothing.
+const PercentilesSchema = z.object({
+  p50: z.number().nullable(),
+  p90: z.number().nullable(),
+  p99: z.number().nullable(),
+});
+export type Percentiles = z.infer<typeof PercentilesSchema>;
+
+// What one agent's spans of one kind usually did over the whole days read,
+// or every agent's together where `agent` is none: durations as the spans'
+// own percentiles, tokens and spend an hour's.
+const AgentHistorySchema = z.object({
+  agent: z.string().nullable(),
+  kind: z.enum(SpanKind),
+  spans: z.number().int(),
+  hours: z.number().int(),
+  duration_ms: PercentilesSchema,
+  tokens_hourly: PercentilesSchema,
+  tokens_per_span: PercentilesSchema,
+  spend_hourly: PercentilesSchema,
+});
+export type AgentHistory = z.infer<typeof AgentHistorySchema>;
+
+const HistorySchema = z.object({
+  from: z.string(),
+  to: z.string(),
+  agents: z.array(AgentHistorySchema),
+});
+export type History = z.infer<typeof HistorySchema>;
+
+/** Each agent's history, for an alert's threshold to start from; none where
+ *  it cannot be read, which the form goes on without. */
+export const fetchHistory = cache(async (projectId: string): Promise<History | null> => {
+  const read = await readLane("fetchHistory", projectId, "/history", HistorySchema);
+  return read.kind === "ok" ? read.value : null;
+});
+
+// Where one objective stands: its burns, and its budget over the days read.
+const StandingSchema = z.object({
+  rule_id: z.string(),
+  hour_burn: z.number(),
+  six_hour_burn: z.number(),
+  days: z.number().int(),
+  runs: z.number().int(),
+  missed: z.number().int(),
+  budget_left: z.number(),
+});
+export type Standing = z.infer<typeof StandingSchema>;
+
+/** Where each of the project's objectives stands, by its alert's id; none
+ *  where it cannot be read. */
+export const fetchObjectives = cache(async (projectId: string): Promise<Standing[] | null> => {
+  const read = await readLane(
+    "fetchObjectives",
+    projectId,
+    "/objectives",
+    z.object({ objectives: z.array(StandingSchema) }),
+  );
+  return read.kind === "ok" ? read.value.objectives : null;
+});
 
 /** What the alerts page reads: the alerts by name, the incidents — those not
  *  resolved first, then the newest — and the maintenance windows; read

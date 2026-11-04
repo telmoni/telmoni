@@ -19,6 +19,7 @@ import {
   offsetWords,
   renotifyWords,
   splitValues,
+  suggestionFor,
   thresholdWords,
   toldWords,
   windowsFor,
@@ -522,5 +523,78 @@ describe("maintenance windows", () => {
     expect(inForce(mutes[2]!, now)).toBe(true);
     expect(inForce(mutes[1]!, now)).toBe(false);
     expect(inForce(mutes[0]!, now)).toBe(false);
+  });
+});
+
+describe("suggestionFor", () => {
+  const percentiles = (p50: number, p90: number, p99: number) => ({ p50, p90, p99 });
+  const HISTORY = {
+    from: "2026-10-21T00:00:00Z",
+    to: "2026-11-04T00:00:00Z",
+    agents: [
+      {
+        agent: "support-bot",
+        kind: SpanKind.ModelCall,
+        spans: 900,
+        hours: 120,
+        duration_ms: percentiles(1_200.4, 3_400.6, 8_100),
+        tokens_hourly: percentiles(5_000, 12_000, 40_000),
+        tokens_per_span: percentiles(300, 900, 2_000),
+        spend_hourly: percentiles(0.123456, 0.5, 2),
+      },
+      {
+        agent: null,
+        kind: SpanKind.ModelCall,
+        spans: 2_000,
+        hours: 300,
+        duration_ms: percentiles(900, 2_000, 6_000),
+        tokens_hourly: percentiles(9_000, 20_000, 70_000),
+        tokens_per_span: percentiles(250, 800, 1_800),
+        spend_hourly: percentiles(0.2, 0.9, 3),
+      },
+    ],
+  };
+  const draft = (over: Partial<AlertDraft>): AlertDraft => ({
+    ...NEW_ALERT,
+    kind: SpanKind.ModelCall,
+    measure: RuleMeasure.Duration,
+    aggregation: RuleAggregation.P95,
+    ...over,
+    filters: { ...NEW_ALERT.filters, ...over.filters },
+  });
+
+  it("offers the agent's own duration percentiles, whole, typed as the form types them", () => {
+    const got = suggestionFor(draft({ filters: { ...NEW_ALERT.filters, agent: "support-bot" } }), HISTORY);
+    expect(got?.who).toBe("support-bot");
+    expect(got?.days).toBe(14);
+    expect(got?.levels).toEqual([
+      { level: "p50", shown: "1,200 ms", typed: "1200" },
+      { level: "p90", shown: "3,401 ms", typed: "3401" },
+      { level: "p99", shown: "8,100 ms", typed: "8100" },
+    ]);
+  });
+
+  it("reads every agent's where none is named, and an hour's spend for an hour's sum", () => {
+    expect(suggestionFor(draft({}), HISTORY)?.who).toBe("every agent");
+    const spend = suggestionFor(
+      draft({ kind: SpanKind.Run, measure: RuleMeasure.Cost, aggregation: RuleAggregation.Sum }),
+      HISTORY,
+    );
+    expect(spend?.levels[0]).toMatchObject({ level: "p50", typed: "0.2" });
+  });
+
+  it("offers none where the history cannot answer what the alert reads", () => {
+    const named = { ...NEW_ALERT.filters, agent: "support-bot" };
+    for (const over of [
+      { filters: { ...named, model: "gpt-4o" } },
+      { filters: { ...NEW_ALERT.filters, agent: "a, b" } },
+      { baseline: RuleBaseline.Previous },
+      { measure: RuleMeasure.Tokens, aggregation: RuleAggregation.Sum, window: RuleWindow.Day },
+      { measure: RuleMeasure.Failures, aggregation: RuleAggregation.Avg },
+      { filters: { ...NEW_ALERT.filters, agent: "unknown-bot" } },
+    ] satisfies Partial<AlertDraft>[]) {
+      expect(suggestionFor(draft(over), HISTORY)).toBeNull();
+    }
+    expect(suggestionFor(draft({}), null)).toBeNull();
   });
 });

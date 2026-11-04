@@ -3,8 +3,10 @@
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { Button } from "@/components/ui/button";
 import { ALERTS_HEADING, alertHeading, draftOf, type ConnectionChoice } from "@/lib/alerts";
-import type { Alert } from "@/lib/server/data";
+import { objectiveDraftOf } from "@/lib/objectives";
+import type { Alert, History } from "@/lib/server/data";
 
+import { ObjectivePanelHost } from "../objectives/_objective-panel";
 import { useAct } from "./_act";
 import { AlertPanelHost, useOpening } from "./_alert-panel";
 import { MuteButton } from "./_mute";
@@ -12,20 +14,26 @@ import { deleteAlertAction, hearAgainAction, pauseAlertAction } from "./actions"
 
 const ROW_BUTTON = "h-9 gap-1.5 text-xs text-muted-foreground hover:text-foreground";
 
-/** An alert's own controls: edit it, pause or resume it, mute it for a
- *  while, or delete it with its incidents. One its plan paused may be kept
- *  paused as a member's own, so room returning does not run it again. */
+/** An alert's own controls: edit it, an objective's in its own panel, pause
+ *  or resume it, mute it for a while, or delete it with its incidents. One
+ *  its plan paused may be kept paused as a member's own, so room returning
+ *  does not run it again. */
 export function AlertActions({
   projectId,
   alert,
   connections,
+  history,
+  landing = ALERTS_HEADING,
 }: {
   projectId: string;
   alert: Alert;
   connections: ConnectionChoice[] | null;
+  history: History | null;
+  /** Where the focus goes once the alert is gone. */
+  landing?: string;
 }) {
   const { opening, open, close } = useOpening();
-  const { pending, error, act } = useAct(ALERTS_HEADING);
+  const { pending, error, act } = useAct(landing);
   const paused = alert.paused !== null;
 
   return (
@@ -86,14 +94,27 @@ export function AlertActions({
         destructive
         onConfirm={() => act(() => deleteAlertAction(projectId, alert.id), true)}
       />
-      <AlertPanelHost
-        opening={opening}
-        onClose={close}
-        projectId={projectId}
-        ruleId={alert.id}
-        initial={draftOf(alert)}
-        connections={connections}
-      />
+      {alert.objective ? (
+        <ObjectivePanelHost
+          opening={opening}
+          onClose={close}
+          projectId={projectId}
+          ruleId={alert.id}
+          initial={objectiveDraftOf(alert)}
+          connections={connections}
+          history={history}
+        />
+      ) : (
+        <AlertPanelHost
+          opening={opening}
+          onClose={close}
+          projectId={projectId}
+          ruleId={alert.id}
+          initial={draftOf(alert)}
+          connections={connections}
+          history={history}
+        />
+      )}
     </div>
   );
 }

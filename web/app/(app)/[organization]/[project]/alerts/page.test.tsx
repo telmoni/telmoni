@@ -169,6 +169,7 @@ vi.mock("@/lib/server/data", () => ({
   fetchProjectBySlug: async () => mockProject,
   fetchAlerts: (projectId: string) => fetchAlerts(projectId),
   fetchConnectors: async () => mockConnectors,
+  fetchHistory: async () => null,
   fetchIncident: (projectId: string, id: string) => fetchIncident(projectId, id),
   fetchMembers: async () => mockMembers,
   fetchOrganizationMembers: () => fetchOrganizationMembers(),

@@ -42,10 +42,12 @@ import {
   activeOrganization,
   fetchAlerts,
   fetchConnectors,
+  fetchHistory,
   fetchIncident,
   fetchMembers,
   fetchOrganizationMembers,
   type Alert,
+  type History,
   type Incident,
   type Mute,
 } from "@/lib/server/data";
@@ -80,11 +82,12 @@ export default async function AlertsPage({
 
   // The organization's roster names its admins, who act on every project
   // with no seat on it; only its owner and admins may read it.
-  const [access, listing, roster, everyone] = await Promise.all([
+  const [access, listing, roster, everyone, history] = await Promise.all([
     fetchAlerts(project.id),
     fetchConnectors(project.id),
     fetchMembers(project.id),
     administers(activeOrganization(gate)?.role) ? fetchOrganizationMembers() : null,
+    fetchHistory(project.id),
   ]);
   if (access.kind === "unavailable") return <ServiceUnavailable />;
   if (access.kind === "forbidden") {
@@ -142,13 +145,14 @@ export default async function AlertsPage({
             <NewAlert
               projectId={project.id}
               connections={connections}
+              history={history}
               connectorsHref={`/${organization}/${slug}/connectors`}
               canConnect={administers(project.role)}
             />
           </>
         }
       />
-      <div className="grid gap-gutter">
+      <div className="grid gap-page">
         <section className="grid gap-gutter">
           {everyAlert.length > 0 && (
             <Rows>
@@ -211,6 +215,7 @@ export default async function AlertsPage({
                 slug={slug}
                 projectId={project.id}
                 connections={connections}
+                history={history}
                 connectionNames={connectionNames}
                 unknownConnector={unknownConnector}
                 windows={windowsFor(access.mutes, alert.id, now)}
@@ -263,6 +268,7 @@ function AlertCard({
   slug,
   projectId,
   connections,
+  history,
   connectionNames,
   unknownConnector,
   windows,
@@ -276,6 +282,7 @@ function AlertCard({
   slug: string;
   projectId: string;
   connections: ConnectionChoice[] | null;
+  history: History | null;
   connectionNames: ReadonlyMap<string, string>;
   /** What a linked connection the names lack is called, mid-sentence. */
   unknownConnector: string;
@@ -306,7 +313,7 @@ function AlertCard({
           </div>
           <p className="text-sm text-muted-foreground">{metricWords(alert)}</p>
         </div>
-        <AlertActions projectId={projectId} alert={alert} connections={connections} />
+        <AlertActions projectId={projectId} alert={alert} connections={connections} history={history} />
       </div>
       {/* On their first baselines, so a name stands level with a line whose
           button makes it taller. */}
@@ -316,7 +323,9 @@ function AlertCard({
         </Detail>
         <Detail label="Thresholds">
           Alert {thresholds.alert}
+          {alert.objective && " over the last hour"}
           {thresholds.warning && <>, warning {thresholds.warning}</>}
+          {alert.objective && thresholds.warning && " over the last six hours"}
         </Detail>
         <Detail label="Filters">{filters.length > 0 ? filters.join("; ") : "None"}</Detail>
         <Detail label="No data">{MISSING_DATA_LABEL[alert.missing_data]}</Detail>

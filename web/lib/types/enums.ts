@@ -309,6 +309,7 @@ export const RuleMeasure = {
   Tokens:   "tokens",
   Cost:     "cost",
   Score:    "score",
+  Burn:     "burn",
 } as const;
 export type RuleMeasure = typeof RuleMeasure[keyof typeof RuleMeasure];
 

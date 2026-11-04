@@ -69,6 +69,8 @@ const INPUT = {
   warning_threshold: 3000,
   missing_data: "zero",
   renotify_minutes: null,
+  score_name: null,
+  baseline: "none",
   connectors: [{ connection_id: CONNECTION, level: "alert", hours: null }],
 };
 
@@ -96,6 +98,21 @@ beforeEach(() => {
 });
 
 describe("saveAlertAction", () => {
+  // The form's every field, a score's name and a baseline among them, and an objective's.
+  it("sends a score alert, a tag and an objective as the form builds them", async () => {
+    const objective = {
+      ...INPUT,
+      kind: "run",
+      measure: "burn",
+      aggregation: "avg",
+      filters: { agent: ["support-bot"], tag: ["team:support"] },
+      score_name: "relevance",
+      objective: { target: 0.99, latency_ms: null, days: 30 },
+    };
+    expect(await saveAlertAction(PROJECT, null, objective)).toEqual({ ok: true });
+    expect(sent().body).toEqual(objective);
+  });
+
   it("makes a new alert, as the person, on the project, and draws the page again", async () => {
     expect(await saveAlertAction(PROJECT, null, INPUT)).toEqual({ ok: true });
     const { url, method, body, init } = sent();

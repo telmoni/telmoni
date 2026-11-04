@@ -45,7 +45,7 @@ import { IncidentActions } from "./_incident-actions";
 import { EndMute, MuteButton } from "./_mute";
 
 const PROJECT = "project_7bQx2mNv9BcK4dLp";
-const CONNECT = { connectorsHref: "/acme/web/connectors", canConnect: true };
+const CONNECT = { connectorsHref: "/acme/web/connectors", canConnect: true, history: null };
 const RULE = "7a1c0e52-0000-4000-8000-000000000002";
 const SLACK = "3c4e2a74-0000-4000-8000-000000000004";
 const HOOK = "4d5f3b85-0000-4000-8000-000000000007";
@@ -300,7 +300,7 @@ describe("the alert's form", { timeout: 15_000 }, () => {
 
 describe("an alert's controls", { timeout: 15_000 }, () => {
   it("edits the alert in the panel as it stands, and saves it over by its id", async () => {
-    render(<AlertActions projectId={PROJECT} alert={ALERT} connections={CONNECTIONS} />);
+    render(<AlertActions projectId={PROJECT} history={null} alert={ALERT} connections={CONNECTIONS} />);
     fireEvent.click(screen.getByRole("button", { name: "Edit Slow calls" }));
     const panel = screen.getByRole("dialog");
     expect(within(panel).getByRole("heading", { name: "Edit Slow calls" })).toBeInTheDocument();
@@ -325,7 +325,7 @@ describe("an alert's controls", { timeout: 15_000 }, () => {
   });
 
   it("pauses a running alert, resumes a paused one, and deletes one once confirmed", async () => {
-    const { unmount } = render(<AlertActions projectId={PROJECT} alert={ALERT} connections={CONNECTIONS} />);
+    const { unmount } = render(<AlertActions projectId={PROJECT} history={null} alert={ALERT} connections={CONNECTIONS} />);
     fireEvent.click(screen.getByRole("button", { name: "Pause Slow calls" }));
     await waitFor(() => expect(pauseAlertAction).toHaveBeenCalledWith(PROJECT, RULE, true));
     // The row's controls wait out the pause before another is taken.
@@ -339,7 +339,7 @@ describe("an alert's controls", { timeout: 15_000 }, () => {
     unmount();
 
     render(
-      <AlertActions projectId={PROJECT} alert={{ ...ALERT, paused: "person" }} connections={CONNECTIONS} />,
+      <AlertActions projectId={PROJECT} history={null} alert={{ ...ALERT, paused: "person" }} connections={CONNECTIONS} />,
     );
     fireEvent.click(screen.getByRole("button", { name: "Resume Slow calls" }));
     await waitFor(() => expect(pauseAlertAction).toHaveBeenCalledWith(PROJECT, RULE, false));
@@ -347,7 +347,7 @@ describe("an alert's controls", { timeout: 15_000 }, () => {
 
   // ⚠ Room returning would run it again, so a member may keep it off first.
   it("offers to keep an alert the plan paused paused, as the member's own pause", async () => {
-    render(<AlertActions projectId={PROJECT} alert={{ ...ALERT, paused: "plan" }} connections={CONNECTIONS} />);
+    render(<AlertActions projectId={PROJECT} history={null} alert={{ ...ALERT, paused: "plan" }} connections={CONNECTIONS} />);
     expect(screen.getByRole("button", { name: "Resume Slow calls" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Keep Slow calls paused" }));
     await waitFor(() => expect(pauseAlertAction).toHaveBeenCalledWith(PROJECT, RULE, true));
@@ -355,14 +355,14 @@ describe("an alert's controls", { timeout: 15_000 }, () => {
 
   it("offers no second pause on an alert a member paused", () => {
     render(
-      <AlertActions projectId={PROJECT} alert={{ ...ALERT, paused: "person" }} connections={CONNECTIONS} />,
+      <AlertActions projectId={PROJECT} history={null} alert={{ ...ALERT, paused: "person" }} connections={CONNECTIONS} />,
     );
     expect(screen.queryByRole("button", { name: "Keep Slow calls paused" })).toBeNull();
   });
 
   it("says what the lane refused beside the alert", async () => {
     pauseAlertAction.mockResolvedValueOnce({ ok: false, error: "This organization's plan holds 2 alerts." });
-    render(<AlertActions projectId={PROJECT} alert={{ ...ALERT, paused: "plan" }} connections={CONNECTIONS} />);
+    render(<AlertActions projectId={PROJECT} history={null} alert={{ ...ALERT, paused: "plan" }} connections={CONNECTIONS} />);
     fireEvent.click(screen.getByRole("button", { name: "Resume Slow calls" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("plan holds 2 alerts");
   });
@@ -395,7 +395,7 @@ describe("an alert's controls", { timeout: 15_000 }, () => {
     rerender(
       <>
         {section}
-        <AlertActions projectId={PROJECT} alert={ALERT} connections={CONNECTIONS} />
+        <AlertActions projectId={PROJECT} history={null} alert={ALERT} connections={CONNECTIONS} />
       </>,
     );
     fireEvent.click(screen.getByRole("button", { name: "Delete Slow calls" }));
@@ -561,7 +561,7 @@ describe("a refusal for what is gone", { timeout: 15_000 }, () => {
     const { rerender } = render(
       <>
         {section}
-        <AlertActions projectId={PROJECT} alert={ALERT} connections={CONNECTIONS} />
+        <AlertActions projectId={PROJECT} history={null} alert={ALERT} connections={CONNECTIONS} />
       </>,
     );
     const pause = screen.getByRole("button", { name: "Pause Slow calls" });
@@ -577,7 +577,7 @@ describe("a refusal for what is gone", { timeout: 15_000 }, () => {
     rerender(
       <>
         {section}
-        <AlertActions projectId={PROJECT} alert={ALERT} connections={CONNECTIONS} />
+        <AlertActions projectId={PROJECT} history={null} alert={ALERT} connections={CONNECTIONS} />
       </>,
     );
     fireEvent.click(screen.getByRole("button", { name: "Edit Slow calls" }));
