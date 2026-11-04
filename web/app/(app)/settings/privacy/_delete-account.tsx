@@ -61,9 +61,10 @@ export function DeleteAccountForm({
   return (
     <div className="grid gap-4">
       <p className="text-sm text-muted-foreground">
-        This is permanent, with no undo: your sign-in is erased, you leave
-        every organization you are in, and they keep everything. To close one
-        organization and keep your account, delete it from its own settings
+        Deleting your account is permanent and can&rsquo;t be undone. Your
+        sign-in is erased and you leave every organization you belong to;
+        anything you added stays with them. To close a single organization
+        but keep your account, delete that organization from its settings
         instead.
       </p>
       {ownedOrganizations > 0 && (
@@ -76,10 +77,10 @@ export function DeleteAccountForm({
             .
           </p>
           <p className="text-sm text-muted-foreground">
-            An organization you own on your own is deleted with your account,
-            with its projects and API keys. One that anybody else
-            is in has to be handed to one of its admins, or emptied, first —
-            deleting your account will say which.
+            {ownedOrganizations === 1
+              ? "If you\u2019re its only member, it\u2019s deleted along with your account, including its projects and API keys. If anyone else belongs to it, you\u2019ll first need to hand it to one of its admins or remove its other members."
+              : "Any you\u2019re the only member of is deleted along with your account, including its projects and API keys. Any that someone else belongs to must first be handed to one of its admins, or have its other members removed."}{" "}
+            You&rsquo;ll be told which applies when you delete your account.
           </p>
         </div>
       )}

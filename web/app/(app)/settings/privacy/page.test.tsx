@@ -161,7 +161,7 @@ describe("AccountPrivacyPage", () => {
 
   it("points at the organization's own settings to delete one and keep the account", async () => {
     render(await AccountPrivacyPage());
-    expect(document.body.textContent).toMatch(/every organization you own on your own/i);
+    expect(document.body.textContent).toMatch(/every organization you're the only member of/i);
     expect(document.body.textContent).toMatch(/use that organization's settings/i);
   });
 });
