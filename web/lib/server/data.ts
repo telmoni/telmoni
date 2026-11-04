@@ -95,8 +95,6 @@ export type {
 } from "./entities/alerts";
 
 export { fetchOrganizationHealth } from "./entities/organization-health";
-export { fetchOrganizationSpend } from "./entities/organization-spend";
-export type { OrganizationSpend } from "./entities/organization-spend";
 export type { HealthIncident, OrganizationHealth } from "./entities/organization-health";
 
 export {
