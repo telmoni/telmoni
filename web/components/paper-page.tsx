@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 
 // The pieces of a framed public page (`paper-shell.tsx`, `framed`): the
 // splash's, and every page laid out as it is. A hero, then sections ruled
-// apart and numbered, each inset by the one measure; a list marked as the
+// apart, numbered where a page asks, each inset by the one measure; a list marked as the
 // monogram is drawn; one outlined button a section ends on.
 
 // The small line a section opens with: its number, as a document's
@@ -83,7 +83,7 @@ export function PaperSection({
       {title !== undefined && (
         <div className="flex flex-col gap-2">
           {number !== undefined && <p className={EYEBROW}>{number}</p>}
-          <h2 className="text-xl font-semibold tracking-tight text-foreground">{title}</h2>
+          <h2 className="text-2xl font-semibold tracking-tight text-foreground lg:text-[28px]">{title}</h2>
         </div>
       )}
       {children}
@@ -110,22 +110,18 @@ export function PaperPoint({ title, children }: { title?: string; children: Reac
 // of it opens in a new tab, so the page stays.
 export function PaperLink({
   href,
-  className,
   children,
-}: {
-  href: string;
-  className?: string;
-  children: React.ReactNode;
-}) {
+  ...rest
+}: Omit<React.ComponentProps<"a">, "href" | "target" | "rel"> & { href: string }) {
   if (href.startsWith("/")) {
     return (
-      <Link href={href} className={className}>
+      <Link href={href} {...rest}>
         {children}
       </Link>
     );
   }
   return (
-    <a href={href} target="_blank" rel="noreferrer" className={className}>
+    <a href={href} target="_blank" rel="noreferrer" {...rest}>
       {children}
     </a>
   );

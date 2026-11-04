@@ -5,7 +5,7 @@
       <img src=".github/assets/lockup-color-on-light.svg" alt="telmoni" width="360">
     </picture>
   </a>
-  <h3>Privacy-first telemetry and monitoring for AI agents</h3>
+  <h3>Privacy-first observability for AI agents</h3>
   <p>
     <a href="https://telmoni.com/docs"><strong>Docs</strong></a> ·
     <a href="#quickstart"><strong>Quickstart</strong></a> ·
@@ -22,7 +22,7 @@
 
 > Know when your agents stall, loop or overspend, without sending us a single prompt.
 
-Telmoni is an open-source telemetry platform for AI agents. Its SDKs record each **run** of an agent, and the **steps**, **model calls** and **tool calls** inside it, as OpenTelemetry spans; the console reads them back as traces, sessions and users, and alerts on them. Only metadata is kept: prompts and completions come off a span before it leaves your process, and ingest drops any that arrive anyway. It is one Rust binary and a Next.js console on PostgreSQL, ClickHouse and Redis, self-hosted with Docker Compose or Helm.
+Telmoni is an open-source observability platform for AI agents. Its SDKs record each **run** of an agent, and the **steps**, **model calls** and **tool calls** inside it, as OpenTelemetry spans; the console reads them back as traces, sessions and users, and alerts on them. Only metadata is kept: prompts and completions come off a span before it leaves your process, and ingest drops any that arrive anyway. It is one Rust binary and a Next.js console on PostgreSQL, ClickHouse and Redis, self-hosted with Docker Compose or Helm.
 
 > [!NOTE]
 > Telmoni hasn't launched yet, and it's built in the open. Running today: organizations and roles, API keys, the audit log, notifications, the console agent, and the first of the telemetry on them, the SDKs, ingest, the console's traces, sessions and users, its alerts, a cost cap among them, each organization's open incidents on its Overview, the cost a call reports, and the SDKs' guard, which stops a run at the caps on its steps and spend you set. Next: content an owner chooses to keep. [Where it goes next](ARCHITECTURE.md#where-it-goes-next) lists what's settled but not built.

@@ -75,7 +75,7 @@ describe("the splash page", () => {
     render(await SplashPage());
 
     expect(screen.getByText("Beta")).toBeInTheDocument();
-    expect(screen.getByText(/Privacy-first telemetry/)).toBeInTheDocument();
+    expect(screen.getByText(/Privacy-first observability/)).toBeInTheDocument();
   });
 
   it("sends a member to the console instead", async () => {
@@ -143,5 +143,53 @@ describe("the splash page", () => {
     ]) {
       expect(screen.getByText(question)).toBeInTheDocument();
     }
+  });
+
+  it("draws how a run reaches the console, each box a page of the book", async () => {
+    render(await SplashPage());
+
+    const flow = screen.getByRole("figure", { name: /^How a run reaches Telmoni/ });
+    expect(screen.getByRole("heading", { name: "What is Telmoni?" })).toBeInTheDocument();
+    expect(flow).toHaveTextContent("SDKs or OpenTelemetry");
+    for (const page of ["Traces", "Evaluators", "Objectives"]) {
+      expect(screen.getByRole("link", { name: page })).toHaveAttribute("href", expect.stringMatching(`^${DOCS_URL}/`));
+    }
+  });
+
+  it("names the stack it works with, and why, each chip a page of the book", async () => {
+    render(await SplashPage());
+
+    expect(screen.getByRole("heading", { name: "Works with your stack" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "LangChain and LangGraph" })).toHaveAttribute(
+      "href",
+      `${DOCS_URL}/api/frameworks#langchain-and-langgraph`,
+    );
+    expect(screen.getByRole("heading", { name: "Why Telmoni?" })).toBeInTheDocument();
+    expect(screen.getByText("OpenTelemetry native")).toBeInTheDocument();
+  });
+
+  it("offers a coding agent's prompts to copy where the skill is published", async () => {
+    render(await SplashPage());
+
+    if (SKILLS_URL) {
+      expect(screen.getByRole("button", { name: "Copy the tracing prompt" })).toHaveTextContent(/add tracing/);
+    } else {
+      expect(screen.queryByRole("heading", { name: "Start in five minutes" })).toBeNull();
+    }
+  });
+
+  // A key is answered and announced, never drawn on a button.
+  it("draws no key on its buttons", async () => {
+    render(await SplashPage());
+
+    expect(screen.getAllByRole("link", { name: "Sign up" }).at(-1)).toHaveTextContent(/^Sign up$/);
+    expect(screen.getAllByRole("link", { name: "Documentation" }).at(-1)).toHaveTextContent(/^Documentation$/);
+  });
+
+  it("no longer says no prompt is ever kept, now that a project may keep content", async () => {
+    render(await SplashPage());
+
+    expect(screen.queryByText(/single prompt/)).toBeNull();
+    expect(screen.queryByText(/only mode is off/)).toBeNull();
   });
 });

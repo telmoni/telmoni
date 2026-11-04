@@ -12,22 +12,6 @@ import { cn } from "@/lib/utils";
 
 const NAV_TYPE = "text-sm font-normal";
 
-// The letter a button answers to (`header-shortcuts.tsx`), drawn as a keycap
-// inside it. It takes its ink from the button's own text, so it reads on a
-// filled button and on an outlined one alike, and hides while letter-key
-// shortcuts are off (`data-letter-key`, `globals.css`).
-function Keycap({ children }: { children: string }) {
-  return (
-    <kbd
-      data-letter-key=""
-      aria-hidden="true"
-      className="ml-1 inline-flex h-5 min-w-5 items-center justify-center rounded-sm border border-current/30 bg-current/10 px-1 text-[11px] leading-none"
-    >
-      {children}
-    </kbd>
-  );
-}
-
 // ⚠ **`relative z-50` on the bar, and the panel is why.** A dropdown hanging
 // out of it has to paint over the page; with no z-index here the bar's
 // subtree competes at the root and loses.
@@ -60,7 +44,7 @@ export function SiteHeader({ signedIn, inset = false }: { signedIn: boolean; ins
 
         {/* A visitor gets the pair every row of buttons in the product uses:
             the other way out outlined, the thing you came to do filled, with
-            its key. A member gets two outlined: the console is where they
+            its key (`header-shortcuts.tsx`). A member gets two outlined: the console is where they
             already are, not a thing to sell, and the key stays on it. Below
             `lg` neither shows; the drawer carries the same pair. */}
         <div className={cn("flex items-center gap-gutter", inset ? INSET : "px-gutter")}>
@@ -72,7 +56,6 @@ export function SiteHeader({ signedIn, inset = false }: { signedIn: boolean; ins
                 <Button asChild variant="outline" size="sm" className={NAV_TYPE}>
                   <Link href="/console">
                     Console
-                    <Keycap>C</Keycap>
                   </Link>
                 </Button>
               </>
@@ -86,7 +69,6 @@ export function SiteHeader({ signedIn, inset = false }: { signedIn: boolean; ins
                   {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
                   <a href="/auth/signup">
                     Sign up
-                    <Keycap>S</Keycap>
                   </a>
                 </Button>
               </>

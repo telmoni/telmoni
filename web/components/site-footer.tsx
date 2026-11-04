@@ -3,7 +3,7 @@ import Link from "next/link";
 import { CornersToggle } from "@/components/corners-toggle";
 import { ThemeToggle } from "@/components/theme-toggle";
 
-import { footerColumns, footerLegal, type FooterLink } from "@/lib/footer";
+import { footerColumns, type FooterLink } from "@/lib/footer";
 import { INSET } from "@/lib/inset";
 import { branding } from "@/lib/server/branding";
 import { cn } from "@/lib/utils";
@@ -21,18 +21,18 @@ function FooterAnchor({ link, className }: { link: FooterLink; className: string
   );
 }
 
-// Four columns, as a product site draws them, and the legal line at the foot
-// beside the copyright: what each holds is `lib/footer.ts`'s to decide.
+// The columns a product site draws, four or five where a deployment has legal
+// documents, and the copyright at the foot: what each holds is
+// `lib/footer.ts`'s to decide.
 // `inset` is a framed public page's column, where the columns start where
 // its sections do.
 export function SiteFooter({ inset = false }: { inset?: boolean }) {
   const deployment = { legalUrl: branding.LEGAL_URL, supportEmail: branding.SUPPORT_EMAIL };
   const drawn = footerColumns(deployment);
-  const legal = footerLegal(deployment);
   const pad = inset ? INSET : "px-gutter";
   return (
     <footer className="border-t bg-muted/30">
-      <div className={cn("grid w-full grid-cols-2 gap-10 py-12 sm:grid-cols-4", pad)}>
+      <div className={cn("grid w-full grid-cols-2 gap-10 py-12 sm:grid-cols-4", drawn.length > 4 && "lg:grid-cols-5", pad)}>
         {drawn.map((column) => (
           <nav key={column.title} aria-label={column.title}>
             <h2 className="text-xs font-medium tracking-label text-foreground uppercase">
@@ -57,16 +57,7 @@ export function SiteFooter({ inset = false }: { inset?: boolean }) {
           pad,
         )}
       >
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <span>© {new Date().getFullYear()} {branding.COMPANY_NAME}. All rights reserved.</span>
-          {legal.length > 0 && (
-            <nav aria-label="Legal" className="flex flex-wrap items-center gap-x-4 gap-y-2">
-              {legal.map((link) => (
-                <FooterAnchor key={link.href} link={link} className="hover:text-foreground" />
-              ))}
-            </nav>
-          )}
-        </div>
+        <span>© {new Date().getFullYear()} {branding.COMPANY_NAME}. All rights reserved.</span>
         <div className="flex items-center gap-gutter">
           <ThemeToggle />
           <CornersToggle />

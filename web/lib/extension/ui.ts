@@ -66,4 +66,4 @@ export {
   projectPath,
 } from "@/lib/slug";
 export { PRIMARY_NAV, withExtraPrimaryNav } from "@/components/site-nav";
-export { footerColumns, footerLegal } from "@/lib/footer";
+export { footerColumns } from "@/lib/footer";

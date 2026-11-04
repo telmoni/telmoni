@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { inFront, pressedKey, typedInto } from "@/lib/keys";
 import { letterKeysOn } from "@/lib/use-accessibility";
 
-// The keycap on the header's filled button is a real shortcut: one bare
+// The header's filled button has a shortcut, drawn on no button: one bare
 // letter goes where the button goes. Only with nothing held down, nothing
 // being typed — in a field, a list or a composition — and nothing open in
 // front of the page, as the console's own letter keys (`keyboard-shortcuts.tsx`);

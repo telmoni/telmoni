@@ -8,7 +8,7 @@ export const REPO_URL: string | null = "https://github.com/telmoni/telmoni";
 export const DOCS_URL = "/docs";
 export const PRODUCT_NAME = "Telmoni";
 export const PRODUCT_DESCRIPTION =
-  "Privacy-first telemetry for AI agents: every run kept as metadata, for organizations and their projects, with roles, API keys and an audit log.";
+  "Privacy-first observability for AI agents: every run traced, scored and alerted on, its prompts kept only where a project turns content on.";
 // The security policy every repository shares, which also describes the hosted
 // service's controls: it is published with the hosted service's legal pages,
 // so every deployment links it on telmoni.com, where it exists.
