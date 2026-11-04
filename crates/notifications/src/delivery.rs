@@ -23,7 +23,7 @@ use uuid::Uuid;
 
 use crate::AppState;
 use crate::connector::{
-    ConnectionStatus, DeliveryError, Event, Opened, Provider, Retirement, Terminal,
+    ConnectionStatus, DeliveryError, Event, EventIncident, Opened, Provider, Retirement, Terminal,
 };
 use crate::db::{
     self, AttemptTrigger, FailedAttempt, Failure, LeasedDelivery, NewAttempt, NotificationsLane,
@@ -504,6 +504,11 @@ async fn attempt_one(
                 kind: delivery.kind,
                 title: &delivery.subject,
                 body: &delivery.body,
+                incident: delivery.incident_id.map(|id| EventIncident {
+                    project_id: &connection.project_id,
+                    id,
+                    run_url: delivery.run_url.as_deref(),
+                }),
             };
             let sent = dispatch_timed(state, opened, &event).await;
             let attempt = sent.attempt(delivery.id, AttemptTrigger::Scheduled);

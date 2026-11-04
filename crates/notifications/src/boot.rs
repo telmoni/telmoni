@@ -68,5 +68,6 @@ pub fn state_from_env(
         kek,
         connectors,
         heartbeats: Heartbeats::new("notifications", NotificationsLane),
+        telemetry: std::sync::OnceLock::new(),
     })
 }

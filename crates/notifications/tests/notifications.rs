@@ -224,6 +224,7 @@ fn state(pool: PgPool, auth: &Arc<AuthStub>) -> Arc<AppState> {
             "notifications",
             telmoni_notifications::db::NotificationsLane,
         ),
+        telemetry: std::sync::OnceLock::new(),
     })
 }
 

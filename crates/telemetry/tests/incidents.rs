@@ -21,15 +21,19 @@ use tower::ServiceExt;
 use uuid::Uuid;
 
 use common::{AuthStub, NoticeLog, SECRET, clickhouse_or_skip};
+use telmoni_shared::acting::{Acting, ActingProject};
 use telmoni_shared::db::tenant_session::project_scope;
 use telmoni_shared::middleware::service_auth::SERVICE_SECRET_HEADER;
-use telmoni_shared::seam::NoLimits;
-use telmoni_shared::test_util::apply_audit_migrations;
+use telmoni_shared::seam::{IncidentAct, IncidentActed, NoLimits, Telemetry};
+use telmoni_shared::test_util::{
+    apply_audit_migrations, holding_chain, until_queued_on_advisory_locks,
+};
 use telmoni_shared::{
-    NotificationKind, OrganizationId, OrganizationRole, OrganizationStatus, ProjectId, Role,
-    SpanKind,
+    AuthError, NotificationKind, OrganizationId, OrganizationRole, OrganizationStatus, ProjectId,
+    Role, SpanKind, TelmoniError, UserId,
 };
 use telmoni_telemetry::rules::{evaluate, incidents};
+use telmoni_telemetry::seam::TelemetrySeam;
 use telmoni_telemetry::store::SpanRow;
 use telmoni_telemetry::{AppState, router};
 
@@ -338,6 +342,222 @@ async fn a_held_breach_is_told_again_until_a_member_takes_it(pool: PgPool) {
         .await;
     assert_eq!(again["status"], "resolved");
     assert_eq!(project.told().len(), 3, "resolved once, told once");
+}
+
+/// ⚠ A press of an incident notice's buttons acts as the console does, as
+/// the person it is for: each opening's notice carries its incident;
+/// Acknowledge takes it, filed as the console's own Acknowledge is; Mute
+/// makes its alert an hour's window, once; and a person with no seat, or an
+/// incident gone, is refused with nothing written.
+#[sqlx::test]
+async fn a_press_acts_on_an_incident_as_the_console_does(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let project = Project::new(&pool, &ch).await;
+    for name in ["Calls A", "Calls B"] {
+        let mut body = calls_over(0.0, None);
+        body["name"] = json!(name);
+        let (status, made) = project
+            .send("POST", "/internal/v1/telemetry/rules", Some(&body))
+            .await;
+        assert_eq!(status, StatusCode::CREATED, "{made}");
+    }
+    project.evaluate(&pool).await;
+    let opened = project.incidents().await;
+    let id_of = |incident: &Value| -> Uuid {
+        incident["id"]
+            .as_str()
+            .and_then(|id| id.parse().ok())
+            .expect("an id")
+    };
+    let mut ids: Vec<Uuid> = opened.iter().map(id_of).collect();
+    ids.sort();
+    let mut carried: Vec<Uuid> = project
+        .notices
+        .notices()
+        .iter()
+        .filter_map(|notice| notice.incident.as_ref().map(|(id, _)| *id))
+        .collect();
+    carried.sort();
+    assert_eq!(carried, ids, "each opening carries its incident");
+
+    let (status, taken) = project
+        .send(
+            "POST",
+            &format!("/internal/v1/telemetry/incidents/{}/acknowledge", ids[0]),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{taken}");
+    let seam = TelemetrySeam(project.state.clone());
+    let member = Acting {
+        user_id: UserId::try_new("user_member").expect("an id"),
+        organization_id: project.organization.clone(),
+        organization_role: Some(OrganizationRole::Member),
+        project: Some(ActingProject {
+            project_id: project.project.clone(),
+            role: Role::Member,
+        }),
+        session_id: None,
+        expires_at: Utc::now().timestamp() + 60,
+    };
+    let press = |id, act| seam.act_on_incident(&member, id, act);
+    assert_eq!(
+        press(ids[1], IncidentAct::Acknowledge)
+            .await
+            .expect("taken"),
+        IncidentActed::Acknowledged
+    );
+    assert_eq!(
+        press(ids[1], IncidentAct::Acknowledge)
+            .await
+            .expect("answered"),
+        IncidentActed::AcknowledgedAlready
+    );
+    let filed: Vec<(String, String, Option<String>, String)> = sqlx::query_as(
+        "SELECT actor_id, action, in_project, (metadata - 'alert' - 'rule_id')::text
+           FROM audit.events WHERE organization_id = $1 AND resource_kind = 'incident'
+          ORDER BY seq",
+    )
+    .bind(&project.organization)
+    .fetch_all(&pool)
+    .await
+    .expect("the chain");
+    assert_eq!(
+        filed.len(),
+        2,
+        "each taken once, the second press filed nothing"
+    );
+    assert_eq!(filed[0], filed[1], "a press is filed as the console's own");
+
+    let muted = press(ids[0], IncidentAct::MuteForAnHour)
+        .await
+        .expect("muted");
+    let IncidentActed::Muted { until } = muted else {
+        panic!("not muted: {muted:?}");
+    };
+    let left = until - Utc::now();
+    assert!(
+        left > TimeDelta::minutes(59) && left <= TimeDelta::hours(1),
+        "{left}"
+    );
+    assert_eq!(
+        press(ids[0], IncidentAct::MuteForAnHour)
+            .await
+            .expect("answered"),
+        IncidentActed::MutedAlready { until }
+    );
+    let (_, windows) = project
+        .send("GET", "/internal/v1/telemetry/mutes", None)
+        .await;
+    let windows = windows["mutes"].as_array().cloned().unwrap_or_default();
+    assert_eq!(windows.len(), 1, "muted once");
+    let alert = opened
+        .iter()
+        .find(|incident| id_of(incident) == ids[0])
+        .map(|incident| incident["rule_id"].clone());
+    assert_eq!(Some(windows[0]["rule_id"].clone()), alert, "its own alert");
+
+    let stranger = Acting {
+        user_id: UserId::try_new("user_stranger").expect("an id"),
+        ..member.clone()
+    };
+    let refused = seam
+        .act_on_incident(&stranger, ids[1], IncidentAct::MuteForAnHour)
+        .await;
+    assert!(
+        matches!(refused, Err(TelmoniError::Authz(_))),
+        "{refused:?}"
+    );
+    let gone = press(Uuid::now_v7(), IncidentAct::MuteForAnHour).await;
+    assert!(
+        matches!(gone, Err(TelmoniError::Auth(AuthError::NotFound(_)))),
+        "{gone:?}"
+    );
+    let (_, windows) = project
+        .send("GET", "/internal/v1/telemetry/mutes", None)
+        .await;
+    assert_eq!(
+        windows["mutes"].as_array().map(Vec::len),
+        Some(1),
+        "nothing more made"
+    );
+}
+
+/// ⚠ A press of Mute reads the windows in force under the organization's
+/// chain lock: one made while it waited for the lock is the one it answers,
+/// and it makes none of its own.
+#[sqlx::test]
+async fn a_press_of_mute_reads_the_windows_under_the_chain_lock(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let project = Project::new(&pool, &ch).await;
+    let (status, made) = project
+        .send(
+            "POST",
+            "/internal/v1/telemetry/rules",
+            Some(&calls_over(0.0, None)),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{made}");
+    project.evaluate(&pool).await;
+    let opened = project.incidents().await;
+    let incident: Uuid = opened[0]["id"]
+        .as_str()
+        .and_then(|id| id.parse().ok())
+        .expect("an id");
+    let rule: Uuid = opened[0]["rule_id"]
+        .as_str()
+        .and_then(|id| id.parse().ok())
+        .expect("its alert");
+    let member = Acting {
+        user_id: UserId::try_new("user_member").expect("an id"),
+        organization_id: project.organization.clone(),
+        organization_role: Some(OrganizationRole::Member),
+        project: Some(ActingProject {
+            project_id: project.project.clone(),
+            role: Role::Member,
+        }),
+        session_id: None,
+        expires_at: Utc::now().timestamp() + 60,
+    };
+
+    let held = holding_chain(&pool, &project.organization).await;
+    let seam = TelemetrySeam(project.state.clone());
+    let press = tokio::spawn(async move {
+        seam.act_on_incident(&member, incident, IncidentAct::MuteForAnHour)
+            .await
+    });
+    until_queued_on_advisory_locks(&pool, 1).await;
+    let until = Utc::now() + TimeDelta::hours(2);
+    sqlx::query(
+        "INSERT INTO telemetry.mutes (id, project_id, rule_id, starts_at, ends_at, created_by)
+         VALUES ($1, $2, $3, now(), $4, 'user_member')",
+    )
+    .bind(Uuid::now_v7())
+    .bind(&project.project)
+    .bind(rule)
+    .bind(until)
+    .execute(&pool)
+    .await
+    .expect("a window made while the press waits");
+    held.commit().await.expect("the lock let go");
+
+    let acted = press.await.expect("the press ran").expect("answered");
+    let IncidentActed::MutedAlready { until: answered } = acted else {
+        panic!("a second window: {acted:?}");
+    };
+    assert!(
+        (answered - until).abs() < TimeDelta::seconds(1),
+        "{answered}"
+    );
+    let windows: i64 = sqlx::query_scalar("SELECT count(*) FROM telemetry.mutes")
+        .fetch_one(&pool)
+        .await
+        .expect("the windows");
+    assert_eq!(windows, 1, "none of its own");
 }
 
 /// ⚠ A breach a member resolved stays quiet at its severity, and a rise past it opens it again.

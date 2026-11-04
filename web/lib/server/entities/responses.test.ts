@@ -56,6 +56,7 @@ import {
   DeliveryLogPageSchema,
   SendAnswerSchema,
   SigningSecretSchema,
+  SlackIdentitiesSchema,
 } from "./connectors";
 import { ContentModeSettingSchema } from "./content-mode";
 import { RollupsSchema } from "./dashboards";
@@ -136,6 +137,7 @@ const READERS: Record<string, z.ZodType> = {
   "notifications/feed.json": FeedSchema,
   "notifications/sent.json": SendAnswerSchema,
   "notifications/signing-secret.json": SigningSecretSchema,
+  "notifications/slack-identities.json": SlackIdentitiesSchema,
   "telemetry/alerts.json": AlertListSchema,
   "telemetry/content-mode.json": ContentModeSettingSchema,
   "telemetry/dashboards.json": DashboardViewListSchema,

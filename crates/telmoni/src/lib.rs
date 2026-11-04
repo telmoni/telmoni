@@ -235,6 +235,15 @@ impl App {
             entitlements.clone(),
             notifier.clone(),
         )?);
+        if notifications
+            .telemetry
+            .set(Arc::new(telmoni_telemetry::seam::TelemetrySeam(
+                telemetry.clone(),
+            )))
+            .is_err()
+        {
+            anyhow::bail!("telemetry was wired into notifications twice");
+        }
         let agent = parts
             .agent
             .map(|agent| {

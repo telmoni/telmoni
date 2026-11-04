@@ -46,6 +46,40 @@ export function connectStartPath(provider: OAuthProvider, projectId: string): st
   return `/connect/${provider}/start?project=${encodeURIComponent(projectId)}`;
 }
 
+/** Where a person starts linking their own Slack account, from their
+ *  account settings: the handshake's other purpose, which names no project. */
+export function identityStartPath(provider: OAuthProvider): string {
+  return `/connect/${provider}/identity`;
+}
+
+/** Why linking a Slack account came back with nothing linked. */
+export const LINK_REFUSALS = [
+  "denied",
+  "vendor",
+  "callback",
+  "elsewhere",
+  "unavailable",
+  "start",
+] as const;
+export type LinkRefusal = (typeof LINK_REFUSALS)[number];
+
+/** How linking came back: linked, or why not. */
+export type LinkOutcome = "linked" | LinkRefusal;
+
+/** The account settings page, at its Slack section, with how a link came back. */
+export function accountSlackPath(outcome?: LinkOutcome): string {
+  return `/settings/account${outcome ? `?slack=${outcome}` : ""}#slack`;
+}
+
+/** The link outcome an account page was sent back with; a word no route
+ *  writes reads as the plain failure. */
+export function linkOutcome(params: SearchParams): LinkOutcome | null {
+  const word = one(params.slack);
+  if (word === undefined) return null;
+  if (word === "linked") return word;
+  return LINK_REFUSALS.find((refusal) => refusal === word) ?? "callback";
+}
+
 /** Why a handshake came back with nothing connected. */
 export const CONNECT_REFUSALS = [
   "denied",

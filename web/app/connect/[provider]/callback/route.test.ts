@@ -8,6 +8,7 @@ const {
   identityContext,
   fetchProjectAnywhere,
   projectHeaders,
+  accountHeaders,
 } =
   vi.hoisted(() => ({
     tryFetchWithTimeout: vi.fn(),
@@ -19,6 +20,7 @@ const {
       authorization: "Bearer at_1",
       "x-project-id": projectId,
     })),
+    accountHeaders: vi.fn(),
   }));
 
 vi.mock("@/lib/api/fetch", () => ({ tryFetchWithTimeout }));
@@ -28,6 +30,7 @@ vi.mock("@/lib/auth/session", () => ({
   unsealConnect,
 }));
 vi.mock("@/lib/server/data", () => ({ identityContext, fetchProjectAnywhere, projectHeaders }));
+vi.mock("@/lib/server/entities/identity-context", () => ({ accountHeaders }));
 vi.mock("@/lib/env", () => ({
   env: {
     AUTH_URL: "https://app.example",
@@ -59,10 +62,15 @@ beforeEach(() => {
   projectHeaders.mockClear();
   getSession.mockReset().mockResolvedValue({ userId: "usr_1" });
   unsealConnect.mockReset().mockResolvedValue({
+    purpose: "install",
     state: "st8",
     organizationId: ORGANIZATION,
     projectId: PROJECT,
     provider: "slack",
+  });
+  accountHeaders.mockReset().mockResolvedValue({
+    authorization: "Bearer at_1",
+    "x-organization-id": "org_elsewhere",
   });
   // The request stands in `org_elsewhere` — whichever organization a tab
   // opened last — while the project is `org_home`'s.
@@ -178,5 +186,68 @@ describe("GET /connect/[provider]/callback", () => {
     const res = await callback("?state=st8");
     expect(res.headers.get("location")).toBe(`${PAGE}?error=callback`);
     expect(tryFetchWithTimeout).not.toHaveBeenCalled();
+  });
+});
+
+// The same return address, for a person linking their own Slack account from
+// their account settings: no project, and back to that page either way.
+describe("GET /connect/[provider]/callback, linking a person's own account", () => {
+  const ACCOUNT = "https://app.example/settings/account";
+
+  beforeEach(() => {
+    unsealConnect.mockResolvedValue({ purpose: "identity", state: "st8", provider: "slack" });
+  });
+
+  it("posts the code and state as the person's own, clears the cookie and lands on their settings", async () => {
+    const res = await callback();
+    expect(res.headers.get("location")).toBe(`${ACCOUNT}?slack=linked#slack`);
+    expect(tryFetchWithTimeout).toHaveBeenCalledWith(
+      "http://notifications:8086/internal/v1/notifications/slack/identities/callback",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          authorization: "Bearer at_1",
+          "content-type": "application/json",
+        }),
+        body: JSON.stringify({ code: "c0de", state: "st8" }),
+      }),
+    );
+    expect(fetchProjectAnywhere).not.toHaveBeenCalled();
+    expect(res.cookies.get("telmoni_connect")?.value).toBe("");
+  });
+
+  it("says so when the Slack account is linked to somebody else", async () => {
+    tryFetchWithTimeout.mockResolvedValue(new Response("{}", { status: 409 }));
+    const res = await callback();
+    expect(res.headers.get("location")).toBe(`${ACCOUNT}?slack=elsewhere#slack`);
+  });
+
+  // ⚠ The same edge CSRF check as an install's.
+  it.each([
+    ["?code=c0de&state=forged", "callback"],
+    ["?state=st8", "callback"],
+    ["?error=access_denied&state=st8", "denied"],
+  ])("refuses %s before touching the service, as ?slack=%s", async (query, outcome) => {
+    const res = await callback(query);
+    expect(res.headers.get("location")).toBe(`${ACCOUNT}?slack=${outcome}#slack`);
+    expect(tryFetchWithTimeout).not.toHaveBeenCalled();
+    expect(res.cookies.get("telmoni_connect")?.value).toBe("");
+  });
+
+  it("sends a lapsed session through login, keeping the cookie", async () => {
+    getSession.mockResolvedValue(null);
+    const res = await callback();
+    expect(res.headers.get("location")).toContain("https://app.example/auth/login?returnTo=");
+    expect(res.cookies.get("telmoni_connect")).toBeUndefined();
+    expect(tryFetchWithTimeout).not.toHaveBeenCalled();
+  });
+
+  it("lands an unreachable service, or a refusal, back on the settings", async () => {
+    tryFetchWithTimeout.mockResolvedValue(null);
+    expect((await callback()).headers.get("location")).toBe(
+      `${ACCOUNT}?slack=unavailable#slack`,
+    );
+    tryFetchWithTimeout.mockResolvedValue(new Response("{}", { status: 400 }));
+    expect((await callback()).headers.get("location")).toBe(`${ACCOUNT}?slack=callback#slack`);
   });
 });

@@ -172,7 +172,7 @@ AUTH_REDIRECT_URI=https://telmoni.example.com/auth/callback
 | `CONNECTOR_KEK` | *Required for connectors* | The Key Encryption Key used to seal integration credentials and secrets at rest. `local:` plus 64 hex characters is for a machine you control and is refused in a Kubernetes pod; `file:` and the path of a file holding the 64 hex characters, mounted from a Secret, is a pod's on any cluster. Otherwise, a Cloud KMS key name (`projects/<p>/locations/<l>/keyRings/<r>/cryptoKeys/<k>`): the key, never one of its versions. Any other spelling is refused at boot. Unset, no connector is offered, and Slack credentials beside it are refused at boot. |
 | `SLACK_CLIENT_ID` | *Optional* | Client ID of the Slack app you register. `SLACK_CLIENT_ID` and `SLACK_CLIENT_SECRET` are set together; one without the other is refused at boot. |
 | `SLACK_CLIENT_SECRET` | *Optional* | Client Secret of that Slack app. |
-| `SLACK_SIGNING_SECRET` | *Required with `SLACK_CLIENT_ID`* | Secret used to verify HMAC signatures of inbound Slack event webhooks; the server refuses to start with a Slack client and no signing secret. |
+| `SLACK_SIGNING_SECRET` | *Required with `SLACK_CLIENT_ID`* | Secret used to verify HMAC signatures of inbound Slack events and button presses; the server refuses to start with a Slack client and no signing secret. |
 
 ### The Slack app
 
@@ -188,6 +188,11 @@ To offer Slack, register a Slack app and set its credentials above:
   Subscribe to `app_uninstalled` and `tokens_revoked`, so that removing the
   app from a workspace disconnects its channels; the server verifies Slack's
   signature itself.
+- Turn on the app's **Interactivity & Shortcuts**, its Request URL the same
+  `/webhooks/v1/slack`: the buttons on an incident's notice post there, signed
+  as the events are, and without it Slack answers a press with an error. A
+  person linking their own Slack account from their account settings signs in
+  with Slack at the same redirect URL, asking for `openid` alone.
 
 Without the Slack app's credentials, its tile on a project's **Connectors**
 page shows **Soon**, with **Connect** turned off; without `CONNECTOR_KEK`, so

@@ -180,6 +180,10 @@ CREATE TABLE notifications.deliveries (
     -- The producer's key a routed notice went under (`telemetry:rule:<id>`),
     -- by which its outcome is counted against the connection for that key.
     route           TEXT,
+    -- The incident an opening or its reminder is about, and the run it shows
+    -- on the console: what Slack draws the notice's buttons from.
+    incident_id     UUID,
+    run_url         TEXT,
     status          TEXT        NOT NULL DEFAULT 'pending',
     attempts        INTEGER     NOT NULL DEFAULT 0,
     next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -190,6 +194,9 @@ CREATE TABLE notifications.deliveries (
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT deliveries_status_check CHECK (status IN ('pending', 'delivered', 'failed')),
     CONSTRAINT deliveries_route_check CHECK (char_length(route) BETWEEN 1 AND 200),
+    CONSTRAINT deliveries_run_url_check CHECK (
+        run_url IS NULL OR (incident_id IS NOT NULL AND char_length(run_url) BETWEEN 1 AND 3000)
+    ),
     CONSTRAINT deliveries_kind_check CHECK (kind IN (
         'organization_alert', 'member_added', 'member_left',
         'connector_connected', 'connector_disconnected',
@@ -290,21 +297,30 @@ GRANT SELECT (delivery_id, outcome), UPDATE (error) ON notifications.delivery_at
 -- ══════════════════════════════════════════════════════════════════════════════
 -- 4. OAUTH STATES
 -- ══════════════════════════════════════════════════════════════════════════════
+-- A handshake begun: an install, for a project, or a person's own Slack
+-- account linked from their account settings, which names no project.
 CREATE TABLE notifications.oauth_states (
     state_hash      TEXT        PRIMARY KEY,
-    project_id      TEXT        NOT NULL,
-    organization_id TEXT        NOT NULL,
+    purpose         TEXT        NOT NULL,
+    project_id      TEXT,
+    organization_id TEXT,
     user_id         TEXT        NOT NULL,
     provider        TEXT        NOT NULL,
     shard_key       UUID        NOT NULL DEFAULT gen_random_uuid(),
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     expires_at      TIMESTAMPTZ NOT NULL,
     consumed_at     TIMESTAMPTZ,
-    CONSTRAINT oauth_states_provider_check CHECK (provider IN ('slack'))
+    CONSTRAINT oauth_states_provider_check CHECK (provider IN ('slack')),
+    CONSTRAINT oauth_states_purpose_check CHECK (purpose IN ('install', 'identity')),
+    CONSTRAINT oauth_states_tenant_check CHECK (
+        (purpose = 'install') = (project_id IS NOT NULL)
+        AND (project_id IS NULL) = (organization_id IS NULL)
+    )
 );
 
 CREATE INDEX oauth_states_organization_idx ON notifications.oauth_states (organization_id);
 CREATE INDEX oauth_states_expiry_idx       ON notifications.oauth_states (expires_at);
+CREATE INDEX oauth_states_user_idx         ON notifications.oauth_states (user_id);
 
 ALTER TABLE notifications.oauth_states ENABLE ROW LEVEL SECURITY;
 ALTER TABLE notifications.oauth_states FORCE ROW LEVEL SECURITY;
@@ -313,12 +329,55 @@ CREATE POLICY tenant_isolation ON notifications.oauth_states
     USING      (project_id = current_setting('app.project_id', true))
     WITH CHECK (project_id = current_setting('app.project_id', true));
 
+CREATE POLICY person_own ON notifications.oauth_states
+    USING      (project_id IS NULL AND user_id = current_setting('app.user_id', true))
+    WITH CHECK (project_id IS NULL AND user_id = current_setting('app.user_id', true));
+
 CREATE POLICY maintenance_access ON notifications.oauth_states
     TO notifications_maintenance
     USING      (current_user = 'notifications_maintenance')
     WITH CHECK (current_user = 'notifications_maintenance');
 
 GRANT SELECT, DELETE ON notifications.oauth_states TO notifications_maintenance;
+
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 4a. SLACK IDENTITIES
+-- ══════════════════════════════════════════════════════════════════════════════
+-- A person's Slack account, linked from their account settings by Sign in with
+-- Slack: who a press of a button on a notice in Slack acts as. Matched by its
+-- workspace and Slack user alone, never an address, so one Slack account acts
+-- as one person; deleted when they unlink it or their account is erased.
+CREATE TABLE notifications.slack_identities (
+    team_id       TEXT        NOT NULL,
+    slack_user_id TEXT        NOT NULL,
+    user_id       TEXT        NOT NULL,
+    team_name     TEXT,
+    shard_key     UUID        NOT NULL DEFAULT gen_random_uuid(),
+    linked_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (team_id, slack_user_id),
+    CONSTRAINT slack_identities_person_team_key UNIQUE (user_id, team_id),
+    CONSTRAINT slack_identities_ids_check CHECK (
+        char_length(team_id) BETWEEN 1 AND 64 AND char_length(slack_user_id) BETWEEN 1 AND 64
+    ),
+    CONSTRAINT slack_identities_team_name_check CHECK (char_length(team_name) BETWEEN 1 AND 200)
+);
+
+ALTER TABLE notifications.slack_identities ENABLE ROW LEVEL SECURITY;
+ALTER TABLE notifications.slack_identities FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY person_own ON notifications.slack_identities
+    USING      (user_id = current_setting('app.user_id', true))
+    WITH CHECK (user_id = current_setting('app.user_id', true));
+
+CREATE POLICY maintenance_access ON notifications.slack_identities
+    TO notifications_maintenance
+    USING      (current_user = 'notifications_maintenance')
+    WITH CHECK (current_user = 'notifications_maintenance');
+
+-- SELECT for a press, which finds the person by the Slack account; DELETE for
+-- the person's erasure.
+GRANT SELECT, DELETE ON notifications.slack_identities TO notifications_maintenance;
 
 
 -- ══════════════════════════════════════════════════════════════════════════════

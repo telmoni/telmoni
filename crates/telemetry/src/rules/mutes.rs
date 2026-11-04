@@ -159,3 +159,23 @@ pub async fn in_force(
     .fetch_one(tx.conn())
     .await
 }
+
+/// The latest end of the windows muting the alert at `at`, its own or its
+/// project's; none where no window does.
+pub async fn muted_until<B: HasProject>(
+    tx: &mut Scoped<'_, B>,
+    project_id: &ProjectId,
+    rule_id: Uuid,
+    at: DateTime<Utc>,
+) -> sqlx::Result<Option<DateTime<Utc>>> {
+    sqlx::query_scalar(
+        "SELECT max(ends_at) FROM telemetry.mutes
+          WHERE project_id = $1 AND (rule_id IS NULL OR rule_id = $2)
+            AND starts_at <= $3 AND ends_at > $3",
+    )
+    .bind(project_id)
+    .bind(rule_id)
+    .bind(at)
+    .fetch_one(tx.conn())
+    .await
+}

@@ -28,10 +28,12 @@ use telmoni_notifications::db::NotificationsLane;
 use telmoni_notifications::retention::{self, Purged};
 use telmoni_notifications::uninstall::{self, Swept};
 use telmoni_notifications::{AppState, db, delivery, handler, router};
+use telmoni_shared::acting::Acting;
 use telmoni_shared::db::tenant_session::{maintenance_scope, project_scope};
 use telmoni_shared::envelope::{KEK_VERSION, Kek, KmsKek, LocalKek, Vault};
 use telmoni_shared::middleware::service_auth::ServiceSecrets;
 use telmoni_shared::net_guard::Egress;
+use telmoni_shared::seam::{IncidentAct, IncidentActed, Telemetry};
 use telmoni_shared::test_util::{
     ServiceRole, apply_audit_migrations, captured_logs, chain_lock_held, holding_chain,
     service_pool,
@@ -246,6 +248,7 @@ fn state_over(
             "notifications",
             telmoni_notifications::db::NotificationsLane,
         ),
+        telemetry: std::sync::OnceLock::new(),
     })
 }
 
@@ -1161,6 +1164,57 @@ async fn a_dead_installation_retires_the_connection_and_fails_its_queue(pool: Pg
     );
 }
 
+/// ⚠ An incident's delivery reaches Slack with its buttons, each naming the
+/// connection's project and the incident, and the link to its run.
+#[sqlx::test]
+async fn an_incidents_delivery_reaches_slack_with_its_buttons(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let mocks = MockServer::start().await;
+    let connection = seed_connection(
+        &pool,
+        ORGANIZATION,
+        Provider::Slack,
+        SLACK_WORKSPACE,
+        "C0ALERTS",
+        &slack_hook_url(&mocks, "buttons"),
+        Some("xoxb"),
+    )
+    .await;
+    let id = seed_delivery(&pool, ORGANIZATION, connection).await;
+    let incident = Uuid::now_v7();
+    let run = "https://app.example/org_conn_1/project_org_conn_1/traces/0190";
+    sqlx::query("UPDATE notifications.deliveries SET incident_id = $2, run_url = $3 WHERE id = $1")
+        .bind(id)
+        .bind(incident)
+        .bind(run)
+        .execute(&pool)
+        .await
+        .unwrap();
+    Mock::given(method("POST"))
+        .and(path("/services/T0001/B0HOOK/buttons"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("ok"))
+        .expect(1)
+        .mount(&mocks)
+        .await;
+    let st = state(pool.clone(), &mocks, None);
+
+    assert_eq!(delivery::tick_once(&st).await.unwrap(), 1);
+    let posted = vendor_requests(&mocks)
+        .await
+        .into_iter()
+        .find(|request| request.url.path() == "/services/T0001/B0HOOK/buttons")
+        .unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&posted.body).unwrap();
+    let buttons = &body["blocks"][3]["elements"];
+    assert_eq!(buttons[0]["action_id"], "acknowledge");
+    assert_eq!(
+        buttons[0]["value"],
+        slack::button_value(&pid(ORGANIZATION), incident)
+    );
+    assert_eq!(buttons[1]["action_id"], "mute_for_an_hour");
+    assert_eq!(buttons[2]["url"], run);
+}
+
 /// An archived channel is the target's fault: `errored`, not `revoked`.
 #[sqlx::test]
 async fn a_bad_target_marks_the_connection_errored(pool: PgPool) {
@@ -1714,6 +1768,491 @@ async fn url_verification_echoes_the_challenge(pool: PgPool) {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}
+
+/// The Slack account of SLACK_WORKSPACE that presses the buttons.
+const PRESSER: &str = "U0PRESSER";
+
+/// Telemetry as a press reaches it: each act kept with who it was done as.
+#[derive(Default)]
+struct Incidents {
+    acts: std::sync::Mutex<Vec<(UserId, ProjectId, Uuid, IncidentAct)>>,
+}
+
+impl Incidents {
+    fn acts(&self) -> Vec<(UserId, ProjectId, Uuid, IncidentAct)> {
+        self.acts.lock().unwrap().clone()
+    }
+}
+
+#[async_trait::async_trait]
+impl Telemetry for Incidents {
+    async fn purge_organization(&self, _: &OrganizationId) -> Result<u64, TelmoniError> {
+        Ok(0)
+    }
+
+    async fn purge_project(&self, _: &OrganizationId, _: &ProjectId) -> Result<u64, TelmoniError> {
+        Ok(0)
+    }
+
+    async fn move_project(&self, _: &ProjectId, _: &OrganizationId) -> Result<(), TelmoniError> {
+        Ok(())
+    }
+
+    async fn drop_model_connections(&self, _: &ProjectId) -> Result<(), TelmoniError> {
+        Ok(())
+    }
+
+    async fn act_on_incident(
+        &self,
+        acting: &Acting,
+        incident_id: Uuid,
+        act: IncidentAct,
+    ) -> Result<IncidentActed, TelmoniError> {
+        let project = acting.project_or_bad_request()?.project_id.clone();
+        self.acts
+            .lock()
+            .unwrap()
+            .push((acting.user_id.clone(), project, incident_id, act));
+        Ok(match act {
+            IncidentAct::Acknowledge => IncidentActed::Acknowledged,
+            IncidentAct::MuteForAnHour => IncidentActed::Muted {
+                until: chrono::Utc::now() + chrono::TimeDelta::hours(1),
+            },
+        })
+    }
+}
+
+/// The module with ORGANIZATION's project held, every Slack answer taken,
+/// and its presses reaching `incidents`.
+async fn pressable(pool: &PgPool, mocks: &MockServer) -> (Arc<AppState>, Arc<Incidents>) {
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(mocks)
+        .await;
+    let auth = people();
+    auth.hold(&pid(ORGANIZATION), &oid(ORGANIZATION));
+    let st = state_asking(pool.clone(), mocks, auth);
+    let incidents = Arc::new(Incidents::default());
+    assert!(st.telemetry.set(incidents.clone()).is_ok());
+    (st, incidents)
+}
+
+/// `slack_user` of SLACK_WORKSPACE linked to `user`, as Sign in with Slack
+/// leaves it.
+async fn link(pool: &PgPool, slack_user: &str, user: &str) {
+    sqlx::query(
+        "INSERT INTO notifications.slack_identities (team_id, slack_user_id, user_id)
+         VALUES ($1, $2, $3)",
+    )
+    .bind(SLACK_WORKSPACE)
+    .bind(slack_user)
+    .bind(user)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// A press of `action` by `slack_user` of SLACK_WORKSPACE on the button
+/// `value` names, as the form Slack posts, its answer due at `/actions/{tail}`.
+fn pressed(mocks: &MockServer, slack_user: &str, action: &str, value: &str, tail: &str) -> String {
+    let payload = serde_json::json!({
+        "type": "block_actions",
+        "user": { "id": slack_user, "username": "pat", "name": "pat", "team_id": SLACK_WORKSPACE },
+        "api_app_id": "A0APP",
+        "token": "verification-token-deprecated",
+        "container": { "type": "message", "message_ts": "1700000000.000100", "channel_id": "C0ALERTS" },
+        "trigger_id": "1.2.abc",
+        "team": { "id": SLACK_WORKSPACE, "domain": "acme" },
+        "channel": { "id": "C0ALERTS", "name": "alerts" },
+        "message": { "type": "message", "text": "Model calls: alert" },
+        "response_url": format!("{}/actions/{tail}", mocks.uri()),
+        "actions": [{
+            "action_id": action,
+            "block_id": "b1",
+            "type": "button",
+            "value": value,
+            "action_ts": "1700000000.000200"
+        }]
+    });
+    reqwest::Url::parse_with_params(
+        "https://slack.invalid/",
+        &[("payload", payload.to_string())],
+    )
+    .unwrap()
+    .query()
+    .unwrap()
+    .to_owned()
+}
+
+/// `body` posted as Slack posts a press: a form, signed at `ts`.
+fn slack_press(body: &str, ts: i64, signature: Option<&str>) -> Request<Body> {
+    let ts = ts.to_string();
+    let signature = signature.map_or_else(|| sign(&ts, body), ToOwned::to_owned);
+    Request::post("/webhooks/v1/slack")
+        .header("x-slack-request-timestamp", ts)
+        .header("x-slack-signature", signature)
+        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+        .body(Body::from(body.to_owned()))
+        .unwrap()
+}
+
+/// The answer posted to a press's `response_url`, once its task has run.
+async fn answer_to(mocks: &MockServer, tail: &str) -> serde_json::Value {
+    let path = format!("/actions/{tail}");
+    for _ in 0..100 {
+        if let Some(answer) = vendor_requests(mocks)
+            .await
+            .into_iter()
+            .find(|request| request.url.path() == path)
+        {
+            return serde_json::from_slice(&answer.body).unwrap();
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    panic!("nothing answered the press at {path}");
+}
+
+/// ⚠ Each button on an incident's notice, pressed as Slack signs it:
+/// Acknowledge and Mute act as the member the Slack account is linked to,
+/// on the incident the button names, and the member alone is told; Open the
+/// run is a link, and acts on and answers nothing.
+#[sqlx::test]
+async fn each_button_acts_as_the_member_its_slack_account_is_linked_to(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let mocks = MockServer::start().await;
+    let (st, incidents) = pressable(&pool, &mocks).await;
+    link(&pool, PRESSER, MEMBER).await;
+    let incident = Uuid::now_v7();
+    let value = slack::button_value(&pid(ORGANIZATION), incident);
+    let now = chrono::Utc::now().timestamp();
+
+    for (action, tail) in [("acknowledge", "ack"), ("mute_for_an_hour", "mute")] {
+        let body = pressed(&mocks, PRESSER, action, &value, tail);
+        let resp = app(&st)
+            .oneshot(slack_press(&body, now, None))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK, "{action}");
+    }
+    let acknowledged = answer_to(&mocks, "ack").await;
+    assert_eq!(
+        acknowledged["response_type"], "ephemeral",
+        "the presser alone"
+    );
+    assert_eq!(acknowledged["replace_original"], false);
+    assert_eq!(acknowledged["text"], "Acknowledged. Its reminders stop.");
+    let muted = answer_to(&mocks, "mute").await;
+    let words = muted["text"].as_str().unwrap();
+    assert!(
+        words.starts_with(
+            "Muted for an hour: this alert tells no Slack channel or webhook until <!date^"
+        ),
+        "{words}"
+    );
+    let mut acts = incidents.acts();
+    acts.sort_by_key(|(.., act)| format!("{act:?}"));
+    let member = UserId::try_new(MEMBER).unwrap();
+    assert_eq!(
+        acts,
+        [
+            (
+                member.clone(),
+                pid(ORGANIZATION),
+                incident,
+                IncidentAct::Acknowledge
+            ),
+            (
+                member,
+                pid(ORGANIZATION),
+                incident,
+                IncidentAct::MuteForAnHour
+            ),
+        ]
+    );
+
+    let body = pressed(&mocks, PRESSER, "open_run", "", "open");
+    let resp = app(&st)
+        .oneshot(slack_press(&body, now, None))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK, "a link's press is answered");
+    assert_eq!(incidents.acts().len(), 2, "and acts on nothing");
+    assert!(
+        !vendor_requests(&mocks)
+            .await
+            .iter()
+            .any(|request| request.url.path() == "/actions/open"),
+        "nor tells anyone anything"
+    );
+}
+
+/// ⚠ A press from a Slack account nobody linked acts on nothing, and the
+/// presser alone is told to link theirs from their account settings; one
+/// unsigned, forged or stale is a 401 and reaches nothing.
+#[sqlx::test]
+async fn a_press_from_an_unlinked_slack_account_acts_on_nothing(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let mocks = MockServer::start().await;
+    let (st, incidents) = pressable(&pool, &mocks).await;
+    let value = slack::button_value(&pid(ORGANIZATION), Uuid::now_v7());
+    let now = chrono::Utc::now().timestamp();
+
+    let body = pressed(&mocks, PRESSER, "acknowledge", &value, "unlinked");
+    let resp = app(&st)
+        .oneshot(slack_press(&body, now, None))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let answer = answer_to(&mocks, "unlinked").await;
+    let words = answer["text"].as_str().unwrap();
+    assert!(words.starts_with("Link your Slack account to"), "{words}");
+    assert!(
+        words.contains("<https://app.example/settings/account#slack|your account settings>"),
+        "{words}"
+    );
+    assert!(
+        incidents.acts().is_empty(),
+        "matched by nothing, acted as nobody"
+    );
+
+    link(&pool, PRESSER, MEMBER).await;
+    let body = pressed(&mocks, PRESSER, "acknowledge", &value, "forged");
+    for refused in [
+        slack_press(&body, now, Some("v0=deadbeef")),
+        slack_press(&body, now - 360, None),
+        Request::post("/webhooks/v1/slack")
+            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+            .body(Body::from(body.clone()))
+            .unwrap(),
+    ] {
+        let resp = app(&st).oneshot(refused).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(
+        incidents.acts().is_empty(),
+        "an unverified press reaches nothing"
+    );
+    assert!(
+        !vendor_requests(&mocks)
+            .await
+            .iter()
+            .any(|request| request.url.path() == "/actions/forged"),
+        "and is answered by nothing"
+    );
+}
+
+/// A press by a linked person with no seat on the incident's project is
+/// refused, and one whose button names nothing this server wrote is out of
+/// date: neither acts on anything.
+#[sqlx::test]
+async fn a_press_without_a_seat_or_on_a_stale_button_acts_on_nothing(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let mocks = MockServer::start().await;
+    let (st, incidents) = pressable(&pool, &mocks).await;
+    link(&pool, PRESSER, OTHER_OWNER).await;
+    let value = slack::button_value(&pid(ORGANIZATION), Uuid::now_v7());
+    let now = chrono::Utc::now().timestamp();
+
+    let body = pressed(&mocks, PRESSER, "mute_for_an_hour", &value, "seatless");
+    let resp = app(&st)
+        .oneshot(slack_press(&body, now, None))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let answer = answer_to(&mocks, "seatless").await;
+    assert!(
+        answer["text"]
+            .as_str()
+            .unwrap()
+            .ends_with("account can't do that on this incident's project."),
+        "{answer}"
+    );
+
+    let body = pressed(
+        &mocks,
+        PRESSER,
+        "acknowledge",
+        "not a button of ours",
+        "stale",
+    );
+    let resp = app(&st)
+        .oneshot(slack_press(&body, now, None))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let answer = answer_to(&mocks, "stale").await;
+    assert!(
+        answer["text"]
+            .as_str()
+            .unwrap()
+            .starts_with("This button is out of date."),
+        "{answer}"
+    );
+    assert!(incidents.acts().is_empty());
+}
+
+/// ⚠ A person links their Slack account by Sign in with Slack, asking for
+/// `openid` alone: the sign-in theirs alone to finish, once; the account
+/// theirs alone once linked, refused to anyone else who signs in with it;
+/// unlinked by them alone; and gone with their account's erasure.
+#[sqlx::test]
+async fn a_person_links_their_slack_account_by_signing_in_with_slack(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let mocks = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/openid.connect.token"))
+        .and(body_string_contains("code=the-code"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "ok": true,
+            "access_token": "xoxp-sign-in",
+            "token_type": "Bearer",
+            "id_token": "unread"
+        })))
+        .mount(&mocks)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/api/openid.connect.userInfo"))
+        .and(header_is("authorization", "Bearer xoxp-sign-in"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "ok": true,
+            "sub": PRESSER,
+            "https://slack.com/user_id": PRESSER,
+            "https://slack.com/team_id": SLACK_WORKSPACE,
+            "https://slack.com/team_name": "Acme"
+        })))
+        .mount(&mocks)
+        .await;
+    let st = state(pool.clone(), &mocks, None);
+    let lane = |m: &str, tail: &str, user: &str, body: Option<&str>| {
+        req_as(
+            m,
+            &format!("/internal/v1/notifications/slack/identities{tail}"),
+            ORGANIZATION,
+            user,
+            body,
+        )
+    };
+    let started = |user: &'static str| {
+        let st = st.clone();
+        async move {
+            let resp = app(&st)
+                .oneshot(lane("POST", "/authorize", user, None))
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), StatusCode::OK);
+            json_body(resp).await
+        }
+    };
+    let finish = |user: &str, state: &str| {
+        let body = serde_json::json!({ "code": "the-code", "state": state }).to_string();
+        lane("POST", "/callback", user, Some(&body))
+    };
+
+    let begun = started(MEMBER).await;
+    let url = begun["url"].as_str().unwrap();
+    assert!(
+        url.starts_with(&format!("{}/openid/connect/authorize?", mocks.uri())),
+        "{url}"
+    );
+    assert!(url.contains("scope=openid&"), "{url}");
+    assert!(
+        !url.contains("email") && !url.contains("profile"),
+        "never an address or a name: {url}"
+    );
+    assert!(
+        url.contains("redirect_uri=https%3A%2F%2Fapp.example%2Fconnect%2Fslack%2Fcallback"),
+        "{url}"
+    );
+    let state_value = begun["state"].as_str().unwrap();
+
+    let resp = app(&st).oneshot(finish(OWNER, state_value)).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "another's sign-in");
+    let resp = app(&st).oneshot(finish(MEMBER, state_value)).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    assert_eq!(json_body(resp).await["team_name"], "Acme");
+    let resp = app(&st).oneshot(finish(MEMBER, state_value)).await.unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::BAD_REQUEST,
+        "a sign-in finishes once"
+    );
+
+    let resp = app(&st)
+        .oneshot(lane("GET", "", MEMBER, None))
+        .await
+        .unwrap();
+    let listed = json_body(resp).await;
+    assert_eq!(listed["offered"], true);
+    assert_eq!(listed["identities"].as_array().map(Vec::len), Some(1));
+    assert_eq!(listed["identities"][0]["team_id"], SLACK_WORKSPACE);
+    let resp = app(&st)
+        .oneshot(lane("GET", "", OWNER, None))
+        .await
+        .unwrap();
+    assert_eq!(
+        json_body(resp).await["identities"].as_array().map(Vec::len),
+        Some(0),
+        "nobody else's"
+    );
+
+    let theirs = started(OWNER).await;
+    let resp = app(&st)
+        .oneshot(finish(OWNER, theirs["state"].as_str().unwrap()))
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::CONFLICT,
+        "one Slack account acts as one person"
+    );
+    let linked: String = sqlx::query_scalar(
+        "SELECT user_id FROM notifications.slack_identities
+          WHERE team_id = $1 AND slack_user_id = $2",
+    )
+    .bind(SLACK_WORKSPACE)
+    .bind(PRESSER)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(linked, MEMBER);
+
+    let gone = format!("/{SLACK_WORKSPACE}");
+    let resp = app(&st)
+        .oneshot(lane("DELETE", &gone, OWNER, None))
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::NOT_FOUND,
+        "nobody unlinks another's"
+    );
+    let resp = app(&st)
+        .oneshot(lane("DELETE", &gone, MEMBER, None))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+    let resp = app(&st)
+        .oneshot(lane("GET", "", MEMBER, None))
+        .await
+        .unwrap();
+    assert_eq!(
+        json_body(resp).await["identities"].as_array().map(Vec::len),
+        Some(0)
+    );
+
+    link(&pool, PRESSER, MEMBER).await;
+    link(&pool, "U0OTHER", OWNER).await;
+    handler::redact_person(&st, &UserId::try_new(MEMBER).unwrap())
+        .await
+        .unwrap();
+    let left: Vec<String> =
+        sqlx::query_scalar("SELECT user_id FROM notifications.slack_identities")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(left, [OWNER], "an erasure takes the person's own alone");
 }
 
 /// `app_uninstalled` revokes every connection into the workspace across

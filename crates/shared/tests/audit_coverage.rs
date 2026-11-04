@@ -277,7 +277,7 @@ const MUTATIONS: &[Mutation] = &[
     },
     Mutation {
         file: "crates/telemetry/src/handler/mutes.rs",
-        fn_name: "open",
+        fn_name: "made",
         action: "Created",
         resource_kind: "MaintenanceWindow",
         actor_id: ActorPattern::Variable,

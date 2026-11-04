@@ -5,7 +5,8 @@
 //! later time given; one given before now is now — to its end, at most
 //! thirty days on; ended early, it keeps who ended it. A project keeps its newest [`MUTES_ENDED_KEPT`] ended, and each
 //! window opened or ended early is filed in the organization's audit chain,
-//! the record of who muted what.
+//! the record of who muted what. A press of Mute on an incident's Slack
+//! notice makes an hour's window on its alert the same way.
 
 use std::sync::Arc;
 
@@ -20,12 +21,14 @@ use telmoni_shared::acting::Acting;
 use telmoni_shared::db::tenant_session::{ProjectAndOrganization, Scoped, project_scope};
 use telmoni_shared::extract::Json;
 use telmoni_shared::rbac::{Resource, Verb};
+use telmoni_shared::seam::IncidentActed;
 use telmoni_shared::{AuditAction, AuthError, TelmoniError, TelmoniResourceKind};
 
 use crate::AppState;
 use crate::db;
 use crate::handler::chain::{self, Change};
 use crate::rules::db as rules;
+use crate::rules::incidents;
 use crate::rules::mutes::{self, MUTE_DAYS_MAX, MuteRow};
 
 /// The most windows the list answers.
@@ -117,10 +120,61 @@ pub async fn create_mute(
     Ok((StatusCode::CREATED, Json(row)))
 }
 
+/// How long the window a press of an incident notice's Mute makes runs.
+const MUTE_FOR_AN_HOUR: TimeDelta = TimeDelta::hours(1);
+
+/// One of the project's incidents' alert muted for an hour by the person
+/// `acting` names, by the window the console would make: none made where a
+/// window in force mutes it already, read under the same lock as the write.
+pub(crate) async fn mute_for_an_hour(
+    state: &AppState,
+    acting: &Acting,
+    incident_id: Uuid,
+) -> Result<IncidentActed, TelmoniError> {
+    let project_id = &acting
+        .require_project(Verb::Create, Resource::Alert)?
+        .project_id;
+    let acted = chain::write(
+        &state.db,
+        acting,
+        project_id,
+        "maintenance window",
+        async |tx| {
+            chain::held(
+                state.auth.as_ref(),
+                acting,
+                tx,
+                Verb::Create,
+                Resource::Alert,
+            )
+            .await?;
+            // Read once the lock is held, so a window made while it waited is in force at it.
+            let now = Utc::now();
+            let rule_id = incidents::one(tx, project_id, incident_id)
+                .await?
+                .ok_or_else(|| {
+                    AuthError::NotFound("no incident with that id in this project".into())
+                })?
+                .rule_id;
+            if let Some(until) = mutes::muted_until(tx, project_id, rule_id, now).await? {
+                return Ok(IncidentActed::MutedAlready { until });
+            }
+            let input = MuteInput {
+                rule_id: Some(rule_id),
+                starts_at: None,
+                ends_at: now + MUTE_FOR_AN_HOUR,
+            };
+            let row = made(acting, tx, &input, now).await?;
+            tracing::info!(project_id = %project_id, mute_id = %row.id, "telemetry: a maintenance window made");
+            Ok(IncidentActed::Muted { until: row.ends_at })
+        },
+    )
+    .await?;
+    Ok(acted)
+}
+
 /// The window itself, under the organization's chain lock: the role checked
-/// on auth's second answer, the settings row made or re-filed under it, the
-/// windows not ended counted against the cap, and the window written and
-/// filed.
+/// on auth's second answer, then [`made`].
 async fn open(
     state: &AppState,
     acting: &Acting,
@@ -128,9 +182,7 @@ async fn open(
     input: &MuteInput,
     starts_at: DateTime<Utc>,
 ) -> Result<MuteRow, TelmoniError> {
-    let project_id = &acting
-        .require_project(Verb::Create, Resource::Alert)?
-        .project_id;
+    acting.require_project(Verb::Create, Resource::Alert)?;
     chain::held(
         state.auth.as_ref(),
         acting,
@@ -139,6 +191,21 @@ async fn open(
         Resource::Alert,
     )
     .await?;
+    made(acting, tx, input, starts_at).await
+}
+
+/// The window written under the chain lock its caller holds: the settings
+/// row made or re-filed under it, the windows not ended counted against the
+/// cap, and the window written and filed.
+async fn made(
+    acting: &Acting,
+    tx: &mut Scoped<'_, ProjectAndOrganization>,
+    input: &MuteInput,
+    starts_at: DateTime<Utc>,
+) -> Result<MuteRow, TelmoniError> {
+    let project_id = &acting
+        .require_project(Verb::Create, Resource::Alert)?
+        .project_id;
     // The settings row, by which the organization's erasure finds the window.
     db::ensure_settings(tx, project_id, &acting.organization_id).await?;
     if mutes::unended(tx, project_id).await? >= MUTES_UNENDED_MAX {

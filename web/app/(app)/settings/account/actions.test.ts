@@ -51,6 +51,7 @@ import {
   requestEmailChangeAction,
   requestPasswordResetAction,
   setDefaultOrganizationAction,
+  unlinkSlackAction,
 } from "./actions";
 
 const UNRESOLVED = "Couldn't resolve your account right now. Try again in a moment.";
@@ -552,5 +553,40 @@ describe("setDefaultOrganizationAction", () => {
     );
 
     expect(tryFetchWithTimeout).not.toHaveBeenCalled();
+  });
+});
+
+describe("unlinkSlackAction", () => {
+  it("asks the service to unlink the person's own account in that workspace", async () => {
+    vi.mocked(tryFetchWithTimeout).mockResolvedValue(new Response(null, { status: 204 }));
+
+    expect(await unlinkSlackAction("T0001")).toEqual({ ok: true });
+
+    const [url, init] = vi.mocked(tryFetchWithTimeout).mock.calls[0]!;
+    expect(url).toBe("http://auth.test/internal/v1/notifications/slack/identities/T0001");
+    expect(init).toEqual(expect.objectContaining({ method: "DELETE" }));
+    expect(sentHeaders()).toEqual(
+      expect.objectContaining({
+        authorization: "Bearer at_1",
+        "x-organization-id": "org_active",
+      }),
+    );
+    // The page lists the accounts, which this has just changed.
+    expect(refresh).toHaveBeenCalledOnce();
+  });
+
+  // ⚠ The workspace rides the path: anything but a Slack id never leaves.
+  it.each(["", "T 1", "T1/../x", "T1?x=1"])("refuses %j without a request", async (teamId) => {
+    expect(await unlinkSlackAction(teamId)).toEqual({
+      ok: false,
+      error: "That Slack workspace isn't linked.",
+    });
+    expect(tryFetchWithTimeout).not.toHaveBeenCalled();
+  });
+
+  it("hands back the service's refusal in its own words", async () => {
+    vi.mocked(tryFetchWithTimeout).mockResolvedValue(new Response(null, { status: 404 }));
+    expect(await unlinkSlackAction("T0001")).toEqual({ ok: false, error: "problem" });
+    expect(refresh).not.toHaveBeenCalled();
   });
 });

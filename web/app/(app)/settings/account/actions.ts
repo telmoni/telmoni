@@ -152,6 +152,31 @@ export async function confirmEmailChangeAction(
   return body ? { ok: true, email: body.email } : { ok: true };
 }
 
+// A Slack workspace's id, as the service keeps one: letters and digits.
+const SLACK_ID = /^[A-Za-z0-9]{1,64}$/;
+
+// One of the person's Slack accounts unlinked: a press of a button on a
+// notice in that workspace acts as nobody from then on.
+export async function unlinkSlackAction(teamId: string): Promise<ActionResult> {
+  if (!SLACK_ID.test(teamId)) return refused("That Slack workspace isn't linked.");
+  const gate = await admit({ call: "account:slack-unlink", limit: 20 });
+  if (!gate.ok) return refused(gate.error);
+
+  const headers = await accountHeaders();
+  if (!headers) return refused(UNRESOLVED);
+  const res = await tryFetchWithTimeout(
+    `${env.SERVER_URL}/internal/v1/notifications/slack/identities/${teamId}`,
+    { method: "DELETE", headers },
+  );
+  if (!res) return refused("The notification service is unreachable. Try again.");
+  if (!res.ok) {
+    const { message } = await extractProblem(res);
+    return refused(message);
+  }
+  refresh();
+  return { ok: true };
+}
+
 // The organization a sign-in opens in. The body names it, so no organization
 // header goes with it: auth refuses one the
 // person holds no seat in, or one being deleted, and records the choice on the

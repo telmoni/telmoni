@@ -51,6 +51,14 @@ impl Auth for LateAuth {
         self.get()?.resolve_api_key(headers).await
     }
 
+    async fn resolve_person(
+        &self,
+        user_id: &UserId,
+        project_id: &ProjectId,
+    ) -> Result<Acting, TelmoniError> {
+        self.get()?.resolve_person(user_id, project_id).await
+    }
+
     async fn project_homes(
         &self,
         projects: &[ProjectId],
@@ -256,6 +264,7 @@ mod tests {
             late.found_organization(&founding).await.err(),
             late.close_if_empty(&acting, "1").await.err(),
             late.move_project(&acting, &project, &into).await.err(),
+            late.resolve_person(&acting.user_id, &project).await.err(),
         ];
         for refused in refused {
             assert!(

@@ -1,6 +1,6 @@
 ---
 title: "Slack"
-description: "Posting project notifications into a Slack channel: installation, the OAuth scope, retries, and disconnection handling."
+description: "Posting project notifications into a Slack channel: installation, the OAuth scope, an incident's buttons and who they act as, retries, and disconnection handling."
 ---
 
 A Slack connector posts project [notifications](/docs/integrations/notifications)
@@ -34,11 +34,46 @@ will arrive here." The test is not recorded in the project's
 [audit log](/docs/workspace/audit-log) or its delivery log.
 
 Slack shows each notice as a header with its title, its body, and its kind
-below them.
+below them. An incident's opening, and each reminder of it, also carries its
+buttons ([acting from Slack](#acting-from-slack)).
 
 On a self-hosted deployment whose operator has not configured the Slack app,
 the Slack tile shows **Soon**, with **Connect** turned off (see
 [The Slack app](/docs/self-host/configuration#the-slack-app)).
+
+## Acting from Slack
+
+The notice of an incident's opening, and each reminder of it, carries three
+buttons:
+
+- **Acknowledge** takes the incident, as **Acknowledge** on the project's
+  [Alerts page](/docs/monitoring/alerts) does: its reminders stop.
+- **Mute for an hour** makes a [maintenance window](/docs/monitoring/alerts)
+  on the incident's alert, from now to an hour from now: the incident stays in
+  the feed, and no Slack channel or webhook hears of the alert until the window
+  ends. Where a window already mutes the alert, none is made, and you are told
+  until when.
+- **Open the run** opens the run the notice shows, in the console. It appears
+  only on a notice that shows a run, and acts on nothing.
+
+A press acts as the Telmoni member whose
+[linked Slack account](/docs/settings/account#slack) pressed it, with the role
+they hold on the incident's project now. Telmoni matches the press by the Slack
+workspace and user IDs alone, never by an address. Only you see the answer, in
+the channel:
+
+- Pressed from a Slack account nobody linked, the button acts on nothing, and
+  the answer links to your account settings to link yours.
+- Pressed by somebody with no role on the incident's project, it acts on
+  nothing and says so; anyone in a shared channel is held to the same.
+- An incident already acknowledged or resolved is said to be so, and nothing
+  more is recorded.
+
+A press that acts is recorded in the project's
+[audit log](/docs/workspace/audit-log) exactly as the console records the same
+action, by the member it acted as.
+Slack signs every press, and Telmoni refuses one whose signature does not
+verify, or that is more than five minutes old.
 
 ## Connection states
 
@@ -63,7 +98,9 @@ deliver the notices raised meanwhile.
 Telmoni requests one scope from Slack, the one that lets it post into the
 channel you pick: `incoming-webhook`. It requests no scope for reading
 messages, listing channels, or listing workspace members. The grant and the
-webhook target it receives are stored encrypted at rest.
+webhook target it receives are stored encrypted at rest. Linking a person's own
+Slack account asks that person for `openid` alone, through Sign in with Slack,
+and keeps no token from it.
 
 ## Delivery and retries
 

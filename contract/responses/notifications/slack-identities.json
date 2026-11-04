@@ -1,0 +1,15 @@
+{
+  "identities": [
+    {
+      "linked_at": "2027-01-15T08:00:00Z",
+      "team_id": "T0001",
+      "team_name": "Acme"
+    },
+    {
+      "linked_at": "2027-01-15T09:00:00Z",
+      "team_id": "T0002",
+      "team_name": null
+    }
+  ],
+  "offered": true
+}

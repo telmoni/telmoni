@@ -10,10 +10,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::FromRow;
 use telmoni_shared::db::tenant_session::{
-    Binding, HasProject, Lane, Maintenance, MaintenanceLane, Organization, Project,
+    Binding, HasProject, Lane, Maintenance, MaintenanceLane, Organization, Person, Project,
     ProjectAndOrganization, Scoped,
 };
 use telmoni_shared::envelope::{Sealed, SealedRef};
+use telmoni_shared::seam::IncidentNotice;
 use telmoni_shared::{NotificationKind, OrganizationId, ProjectId, UserId};
 use uuid::Uuid;
 
@@ -1260,7 +1261,7 @@ pub async fn enqueue_delivery<B: Binding>(
 /// Answers each delivery's id and its connection's.
 #[expect(
     clippy::too_many_arguments,
-    reason = "a routed notice is its tenant, its text and its route"
+    reason = "a routed notice is its tenant, its text, its route and its incident"
 )]
 pub async fn enqueue_routed<B: Binding>(
     tx: &mut Scoped<'_, B>,
@@ -1272,6 +1273,7 @@ pub async fn enqueue_routed<B: Binding>(
     route: &str,
     connections: &[Uuid],
     most: usize,
+    incident: Option<IncidentNotice<'_>>,
 ) -> sqlx::Result<Vec<(Uuid, Uuid)>> {
     if connections.is_empty() || most == 0 {
         return Ok(Vec::new());
@@ -1303,9 +1305,9 @@ pub async fn enqueue_routed<B: Binding>(
     sqlx::query_as::<_, (Uuid, Uuid)>(
         "INSERT INTO notifications.deliveries
             (id, connection_id, project_id, organization_id, kind, subject, body, route,
-             shard_key)
+             shard_key, incident_id, run_url)
          SELECT t.id, t.connection_id, $3::text, $4::text, $5::text, $6::text, $7::text,
-                $8::text, $9::uuid
+                $8::text, $9::uuid, $10::uuid, $11::text
            FROM unnest($1::uuid[], $2::uuid[]) AS t(id, connection_id)
          RETURNING id, connection_id",
     )
@@ -1318,6 +1320,8 @@ pub async fn enqueue_routed<B: Binding>(
     .bind(body)
     .bind(route)
     .bind(telmoni_shared::derive_shard_key(organization_id))
+    .bind(incident.map(|incident| incident.id))
+    .bind(incident.and_then(|incident| incident.run_url))
     .fetch_all(tx.conn())
     .await
 }
@@ -1496,9 +1500,14 @@ pub struct LeasedDelivery {
     pub subject: String,
     pub body: String,
     pub attempts: i32,
+    /// The incident an opening or its reminder is about.
+    pub incident_id: Option<Uuid>,
+    /// The run it shows, on the console.
+    pub run_url: Option<String>,
 }
 
-const LEASED_COLUMNS: &str = "d.id, d.connection_id, d.kind, d.subject, d.body, d.attempts";
+const LEASED_COLUMNS: &str =
+    "d.id, d.connection_id, d.kind, d.subject, d.body, d.attempts, d.incident_id, d.run_url";
 
 /// Lease up to `limit` eligible deliveries, `SKIP LOCKED`.
 ///
@@ -1982,7 +1991,8 @@ pub async fn claim_for_redelivery(
             SET lease_until = now() + make_interval(secs => $4::bigint)
           WHERE d.id = $3 AND d.project_id = $1 AND d.connection_id = $2
             AND (d.lease_until IS NULL OR d.lease_until < now())
-      RETURNING d.id, d.connection_id, d.kind, d.subject, d.body, d.attempts, d.lease_until",
+      RETURNING d.id, d.connection_id, d.kind, d.subject, d.body, d.attempts, d.incident_id,
+                d.run_url, d.lease_until",
     )
     .bind(project_id)
     .bind(connection_id)
@@ -2158,7 +2168,23 @@ pub async fn sweep_connector_rows(
     Ok(removed)
 }
 
-/// Store one handshake's `state`, hashed, for the callback to consume.
+/// What a handshake is begun for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
+pub enum HandshakePurpose {
+    /// A connector installed on a project.
+    Install,
+    /// A person's own Slack account linked, from their account settings.
+    Identity,
+}
+
+telmoni_shared::wire_enum!(HandshakePurpose {
+    Install => "install",
+    Identity => "identity",
+});
+
+/// Store one install's `state`, hashed, for the callback to consume.
 pub async fn insert_oauth_state(
     tx: &mut Scoped<'_, Project>,
     state_hash: &str,
@@ -2170,10 +2196,12 @@ pub async fn insert_oauth_state(
 ) -> sqlx::Result<()> {
     sqlx::query(
         "INSERT INTO notifications.oauth_states
-            (state_hash, project_id, organization_id, user_id, provider, expires_at, shard_key)
-         VALUES ($1, $2, $3, $4, $5, now() + make_interval(secs => $6::bigint), $7)",
+            (state_hash, purpose, project_id, organization_id, user_id, provider, expires_at,
+             shard_key)
+         VALUES ($1, $2, $3, $4, $5, $6, now() + make_interval(secs => $7::bigint), $8)",
     )
     .bind(state_hash)
+    .bind(HandshakePurpose::Install)
     .bind(project_id)
     .bind(organization_id)
     .bind(user_id)
@@ -2183,6 +2211,53 @@ pub async fn insert_oauth_state(
     .execute(tx.conn())
     .await?;
     Ok(())
+}
+
+/// Store one person's `state` for linking their own account at `provider`,
+/// hashed, for the callback to consume.
+pub async fn insert_identity_state(
+    tx: &mut Scoped<'_, Person>,
+    state_hash: &str,
+    user_id: &UserId,
+    provider: Provider,
+    ttl_secs: i64,
+) -> sqlx::Result<()> {
+    sqlx::query(
+        "INSERT INTO notifications.oauth_states
+            (state_hash, purpose, user_id, provider, expires_at, shard_key)
+         VALUES ($1, $2, $3, $4, now() + make_interval(secs => $5::bigint), $6)",
+    )
+    .bind(state_hash)
+    .bind(HandshakePurpose::Identity)
+    .bind(user_id)
+    .bind(provider)
+    .bind(ttl_secs)
+    .bind(telmoni_shared::derive_shard_key(user_id))
+    .execute(tx.conn())
+    .await?;
+    Ok(())
+}
+
+/// Spend one person's linking `state` at `provider`: live, unconsumed, and
+/// theirs, which the binding alone lets them see. Answers whether it was.
+pub async fn consume_identity_state(
+    tx: &mut Scoped<'_, Person>,
+    state_hash: &str,
+    provider: Provider,
+) -> sqlx::Result<bool> {
+    let spent = sqlx::query(
+        "UPDATE notifications.oauth_states
+            SET consumed_at = now()
+          WHERE state_hash = $1 AND purpose = $2 AND provider = $3
+            AND consumed_at IS NULL AND expires_at > now()",
+    )
+    .bind(state_hash)
+    .bind(HandshakePurpose::Identity)
+    .bind(provider)
+    .execute(tx.conn())
+    .await?
+    .rows_affected();
+    Ok(spent > 0)
 }
 
 /// Who started the handshake a `state` belongs to.
@@ -2203,10 +2278,130 @@ pub async fn consume_oauth_state(
     sqlx::query_as::<_, OAuthState>(
         "UPDATE notifications.oauth_states
             SET consumed_at = now()
-          WHERE state_hash = $1 AND consumed_at IS NULL AND expires_at > now()
+          WHERE state_hash = $1 AND purpose = $2 AND consumed_at IS NULL AND expires_at > now()
       RETURNING project_id, organization_id, user_id, provider",
     )
     .bind(state_hash)
+    .bind(HandshakePurpose::Install)
+    .fetch_optional(tx.conn())
+    .await
+}
+
+/// A person's linked Slack account, as their account settings list it.
+#[derive(Debug, Serialize, FromRow)]
+pub struct SlackIdentity {
+    pub team_id: String,
+    pub team_name: Option<String>,
+    pub linked_at: DateTime<Utc>,
+}
+
+/// What linking a Slack account came to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Linked {
+    /// Linked to the person, in place of any other of theirs in its workspace.
+    Linked,
+    /// Linked already to another person, who alone can unlink it.
+    Elsewhere,
+}
+
+/// Link the Slack account `slack_user_id` of workspace `team_id` to the person
+/// the binding names: their one in that workspace, replacing any before.
+pub async fn link_slack_identity(
+    tx: &mut Scoped<'_, Person>,
+    user_id: &UserId,
+    team_id: &str,
+    slack_user_id: &str,
+    team_name: Option<&str>,
+) -> sqlx::Result<Linked> {
+    let written = sqlx::query(
+        "INSERT INTO notifications.slack_identities
+            (team_id, slack_user_id, user_id, team_name, shard_key)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (user_id, team_id) DO UPDATE
+            SET slack_user_id = EXCLUDED.slack_user_id, team_name = EXCLUDED.team_name,
+                linked_at = now()",
+    )
+    .bind(team_id)
+    .bind(slack_user_id)
+    .bind(user_id)
+    .bind(team_name)
+    .bind(telmoni_shared::derive_shard_key(user_id))
+    .execute(tx.conn())
+    .await;
+    match written {
+        Ok(_) => Ok(Linked::Linked),
+        // The primary key, (team, Slack user), is another person's row.
+        Err(sqlx::Error::Database(e)) if e.constraint() == Some("slack_identities_pkey") => {
+            Ok(Linked::Elsewhere)
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// The person's linked Slack accounts, the oldest first.
+pub async fn slack_identities_of(
+    tx: &mut Scoped<'_, Person>,
+    user_id: &UserId,
+) -> sqlx::Result<Vec<SlackIdentity>> {
+    sqlx::query_as::<_, SlackIdentity>(
+        "SELECT team_id, team_name, linked_at FROM notifications.slack_identities
+          WHERE user_id = $1 ORDER BY linked_at, team_id",
+    )
+    .bind(user_id)
+    .fetch_all(tx.conn())
+    .await
+}
+
+/// The person's Slack account in workspace `team_id` unlinked. Answers
+/// whether one was.
+pub async fn unlink_slack_identity(
+    tx: &mut Scoped<'_, Person>,
+    user_id: &UserId,
+    team_id: &str,
+) -> sqlx::Result<bool> {
+    let gone = sqlx::query(
+        "DELETE FROM notifications.slack_identities WHERE user_id = $1 AND team_id = $2",
+    )
+    .bind(user_id)
+    .bind(team_id)
+    .execute(tx.conn())
+    .await?
+    .rows_affected();
+    Ok(gone > 0)
+}
+
+/// The Slack accounts a person linked, and the handshakes they began,
+/// deleted with their account. Answers how many rows went.
+pub async fn forget_person(
+    tx: &mut Scoped<'_, Maintenance<NotificationsLane>>,
+    user_id: &UserId,
+) -> sqlx::Result<u64> {
+    let identities = sqlx::query("DELETE FROM notifications.slack_identities WHERE user_id = $1")
+        .bind(user_id)
+        .execute(tx.conn())
+        .await?
+        .rows_affected();
+    let states = sqlx::query("DELETE FROM notifications.oauth_states WHERE user_id = $1")
+        .bind(user_id)
+        .execute(tx.conn())
+        .await?
+        .rows_affected();
+    Ok(identities + states)
+}
+
+/// The person a Slack account acts as, by its workspace and user: across
+/// every person, so the lane.
+pub async fn slack_person(
+    tx: &mut Scoped<'_, Maintenance<NotificationsLane>>,
+    team_id: &str,
+    slack_user_id: &str,
+) -> sqlx::Result<Option<UserId>> {
+    sqlx::query_scalar(
+        "SELECT user_id FROM notifications.slack_identities
+          WHERE team_id = $1 AND slack_user_id = $2",
+    )
+    .bind(team_id)
+    .bind(slack_user_id)
     .fetch_optional(tx.conn())
     .await
 }

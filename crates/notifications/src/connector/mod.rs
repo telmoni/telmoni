@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use telmoni_shared::net_guard::{Egress, HostRejection};
 use telmoni_shared::{
-    Redacted, TelmoniError, text::truncate_on_char_boundary, types::NotificationKind,
+    ProjectId, Redacted, TelmoniError, text::truncate_on_char_boundary, types::NotificationKind,
 };
 use uuid::Uuid;
 
@@ -92,6 +92,19 @@ pub struct Event<'a> {
     pub title: &'a str,
     /// The longer human body.
     pub body: &'a str,
+    /// The incident an opening or its reminder is about, which Slack offers
+    /// to act on; `None` for every other notice.
+    pub incident: Option<EventIncident<'a>>,
+}
+
+/// An incident as a notice's buttons name it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EventIncident<'a> {
+    /// The project it is of, which a press is scoped to.
+    pub project_id: &'a ProjectId,
+    pub id: Uuid,
+    /// The run the notice shows, on the console.
+    pub run_url: Option<&'a str>,
 }
 
 /// Cut `s` to at most `max` bytes here, rather than have a vendor refuse it

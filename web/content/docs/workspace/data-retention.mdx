@@ -61,6 +61,7 @@ lists. On one whose mode is `on`, it is kept as long as its span, above. An end 
 | Data | Kept | Then |
 |---|---|---|
 | Your account: the name and address your identity provider or password account gave | While the account exists | Erased when you delete the account |
+| Your linked Slack accounts: each one's workspace and user IDs and the workspace's name | Until you unlink it | Erased when you unlink it, or delete the account |
 | Sessions | Until signed out or revoked; one unused for 30 days can no longer be resumed, but its row stays until you end it or delete your account; a revoked session's row 90 days | The retention sweep deletes a revoked session's row |
 | Sign-in codes, device authorizations and the tokens nobody can use any more | Usable for minutes; the daily retention sweep deletes them once expired or spent, a spent refresh token after a day | The retention sweep deletes them |
 | Confirmation codes, for a deletion or an email change | 15 minutes | Expire; five wrong guesses burn one |

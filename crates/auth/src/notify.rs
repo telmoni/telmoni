@@ -41,6 +41,7 @@ pub async fn emit_member_joined(
         body: &body,
         metadata: json!({ "project_id": project, "role": role }),
         dedup_key: None,
+        incident: None,
     };
     raise(state, project, organization, notice, "member-joined").await;
 }
@@ -66,6 +67,7 @@ pub async fn emit_member_seated(
         body: &body,
         metadata: json!({ "project_id": project, "role": role, "given": true }),
         dedup_key: None,
+        incident: None,
     };
     raise(state, project, organization, notice, "member-seated").await;
 }
@@ -87,6 +89,7 @@ pub async fn emit_member_left(
         body: &body,
         metadata: json!({ "project_id": project }),
         dedup_key: None,
+        incident: None,
     };
     raise(state, project, organization, notice, "member-left").await;
 }

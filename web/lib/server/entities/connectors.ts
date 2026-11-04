@@ -4,7 +4,7 @@ import { z } from "zod";
 import { env } from "@/lib/env";
 import { ConnectionStatus, ConnectorProvider, NotificationKind } from "@/lib/types/enums";
 
-import { identityContext, projectHeaders } from "./identity-context";
+import { accountHeaders, identityContext, projectHeaders } from "./identity-context";
 import { fetchProject } from "./projects";
 import { readJson, valueOf } from "./read";
 
@@ -68,6 +68,36 @@ export const SendAnswerSchema = z.object({
 
 /** Where a connect sends the browser, and the state its callback is checked by. */
 export const AuthorizeSchema = z.object({ url: z.url(), state: z.string().min(1) });
+
+// A person's linked Slack accounts, as their account settings list them: the
+// workspace each is in, never the Slack user, and whether Slack can be linked
+// here at all.
+export const SlackIdentitiesSchema = z.object({
+  offered: z.boolean(),
+  identities: z.array(
+    z.object({
+      team_id: z.string(),
+      team_name: z.string().nullable(),
+      linked_at: z.string(),
+    }),
+  ),
+});
+export type SlackIdentities = z.infer<typeof SlackIdentitiesSchema>;
+
+// `null` where the service cannot say, or the person stands in no
+// organization to ask it from: the account page leaves the section out.
+export const fetchSlackIdentities = cache(async (): Promise<SlackIdentities | null> => {
+  const headers = await accountHeaders();
+  if (!headers) return null;
+  return valueOf(
+    await readJson(
+      "fetchSlackIdentities",
+      `${env.SERVER_URL}/internal/v1/notifications/slack/identities`,
+      { headers, cache: "no-store" },
+      SlackIdentitiesSchema,
+    ),
+  );
+});
 
 // `null` is the outage posture and the not-configured posture alike: the page
 // renders the tiles as it did before the lane existed.

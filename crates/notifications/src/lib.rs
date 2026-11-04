@@ -2,8 +2,9 @@
 //! Slack, and a customer's own signed webhook — as a module of the
 //! `telmoni-server` binary. It owns the `notifications` schema and connects as the
 //! `notifications` role; it asks auth who is acting through
-//! [`telmoni_shared::seam::Auth`], and answers auth's notices and purges
-//! through [`seam::Notifier`].
+//! [`telmoni_shared::seam::Auth`], answers auth's notices and purges through
+//! [`seam::Notifier`], and hands a press of an incident notice's Slack button
+//! to telemetry through [`telmoni_shared::seam::Telemetry`].
 //!
 //! The feed write is synchronous; every send is durable at-least-once through
 //! the [`delivery`] leased-row loop.
@@ -67,6 +68,10 @@ pub struct AppState {
     /// The module's loops this replica runs, and their beats, which the
     /// external watchdog reads ([`AppState::stale`]).
     pub heartbeats: telmoni_shared::heartbeat::Heartbeats<db::NotificationsLane>,
+    /// Telemetry, in process: what a press of an incident notice's button
+    /// acts through. Filled once telemetry is built, since it holds this
+    /// module's seam; empty, a press is told it could not be done.
+    pub telemetry: std::sync::OnceLock<Arc<dyn telmoni_shared::seam::Telemetry>>,
 }
 
 impl AppState {
@@ -89,11 +94,27 @@ impl AppState {
 }
 
 /// The module's router: the person lanes under `/internal/v1`, and Slack's
-/// events at `/webhooks/v1/slack`.
+/// events and button presses at `/webhooks/v1/slack`.
 pub fn router(state: Arc<AppState>) -> Router {
     let person = Router::new()
         .route("/notifications/feed", get(handler::get_feed))
         .route("/notifications/read", post(handler::mark_read))
+        .route(
+            "/notifications/slack/identities",
+            get(handler::slack_identities::list_identities),
+        )
+        .route(
+            "/notifications/slack/identities/authorize",
+            post(handler::slack_identities::authorize_identity),
+        )
+        .route(
+            "/notifications/slack/identities/callback",
+            post(handler::slack_identities::link_identity),
+        )
+        .route(
+            "/notifications/slack/identities/{team_id}",
+            delete(handler::slack_identities::unlink_identity),
+        )
         .route("/connectors", get(handler::connectors::list_connectors))
         .route(
             "/connectors/webhook",

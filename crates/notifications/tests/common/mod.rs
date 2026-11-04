@@ -254,6 +254,45 @@ impl Auth for AuthStub {
         })
     }
 
+    /// The person on the project, as the suite seats them in the
+    /// organization holding it; a project the suite does not hold is not
+    /// found, as auth answers one.
+    async fn resolve_person(
+        &self,
+        user_id: &UserId,
+        project_id: &ProjectId,
+    ) -> Result<Acting, TelmoniError> {
+        let organization_id = self
+            .projects
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(project_id)
+            .cloned()
+            .ok_or_else(|| TelmoniError::BadRequest("project not found".into()))?;
+        let seat = self
+            .roster
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(&(user_id.to_string(), organization_id.to_string()))
+            .copied();
+        let Some((organization_role, Some(role))) = seat else {
+            return Err(
+                AuthzError::Forbidden("you are not a member of this project".into()).into(),
+            );
+        };
+        Ok(Acting {
+            user_id: user_id.clone(),
+            organization_id,
+            organization_role: Some(organization_role),
+            project: Some(ActingProject {
+                project_id: project_id.clone(),
+                role,
+            }),
+            session_id: None,
+            expires_at: chrono::Utc::now().timestamp() + 60,
+        })
+    }
+
     async fn global_flags(&self) -> Result<FlagSet, TelmoniError> {
         let scripted = *self
             .flags
@@ -406,6 +445,7 @@ async fn emit_lane(
             body: &body.body,
             metadata: body.metadata.unwrap_or_else(|| json!({})),
             dedup_key: body.dedup_key.as_deref(),
+            incident: None,
         },
     )
     .await?;

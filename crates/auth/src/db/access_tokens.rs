@@ -93,6 +93,22 @@ pub async fn session_refused(
     .await
 }
 
+/// Whether the person is not one here, or has asked to be deleted: what a
+/// person another party vouched for, with no session, is refused for.
+pub async fn person_refused(
+    tx: &mut Scoped<'_, Maintenance<AuthLane>>,
+    user_id: &UserId,
+) -> sqlx::Result<bool> {
+    sqlx::query_scalar(
+        "SELECT NOT EXISTS (SELECT 1 FROM auth.identities i WHERE i.user_id = $1)
+             OR EXISTS (SELECT 1 FROM auth.accounts a
+                         WHERE a.user_id = $1 AND a.deletion_requested_at IS NOT NULL)",
+    )
+    .bind(user_id)
+    .fetch_one(tx.conn())
+    .await
+}
+
 /// End a session's bearers: sign-out, a revoke from the sessions page, and
 /// a refresh token presented twice.
 pub async fn delete_for_sid(

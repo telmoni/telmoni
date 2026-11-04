@@ -19,7 +19,7 @@ use telmoni_notifications::db::{self, NotificationsLane};
 use telmoni_notifications::seam::Notifier;
 use telmoni_shared::db::tenant_session::{maintenance_scope, project_scope};
 use telmoni_shared::middleware::service_auth::ServiceSecrets;
-use telmoni_shared::seam::{Notice, Notifications, Route};
+use telmoni_shared::seam::{IncidentNotice, Notice, Notifications, Route};
 use telmoni_shared::test_util::{ServiceRole, service_pool};
 use telmoni_shared::{NotificationKind, OrganizationId, ProjectId, TelmoniError};
 
@@ -81,6 +81,7 @@ async fn routed(
         route,
         targets,
         usize::MAX,
+        None,
     )
     .await
     .expect("queued");
@@ -249,6 +250,7 @@ fn module(pool: &PgPool) -> Arc<AppState> {
         kek: None,
         connectors: telmoni_notifications::connector::Connectors::default(),
         heartbeats: telmoni_shared::heartbeat::Heartbeats::new("notifications", NotificationsLane),
+        telemetry: std::sync::OnceLock::new(),
     })
 }
 
@@ -266,6 +268,7 @@ async fn a_routed_notice_answers_the_connections_it_was_queued_to(pool: PgPool) 
         body: "The p95 duration of model calls over the last hour is 6200 ms.",
         metadata: json!({}),
         dedup_key,
+        incident: None,
     };
     let route = Route {
         key: "telemetry:rule:a",
@@ -339,6 +342,7 @@ async fn a_routed_notice_spends_its_room_on_the_connections_that_hear_it(pool: P
         body: "The p95 duration of model calls over the last hour is 6200 ms.",
         metadata: json!({}),
         dedup_key: None,
+        incident: None,
     };
     let all = [heard[1], deaf, errored, heard[0], muted];
     let route = |most| Route {
@@ -367,6 +371,54 @@ async fn a_routed_notice_spends_its_room_on_the_connections_that_hear_it(pool: P
     );
 }
 
+/// ⚠ The incident a routed notice opens, and the run it shows, ride on each of
+/// its deliveries, a reminder's as an opening's: what Slack draws its buttons from.
+#[sqlx::test]
+async fn a_routed_notices_incident_rides_on_its_deliveries(pool: PgPool) {
+    let (organization, project) = (OrganizationId::new(), ProjectId::new());
+    let heard = connection(&pool, &project, &organization, "active").await;
+    let notifier = Notifier(module(&pool));
+    let incident = Uuid::now_v7();
+    let run = "https://app.example/org/project/traces/run";
+    let notice = |dedup_key| Notice {
+        kind: NotificationKind::IncidentOpened,
+        subject_user_id: None,
+        title: "Slow calls: alert",
+        body: "The p95 duration of model calls over the last hour is 6200 ms.",
+        metadata: json!({}),
+        dedup_key,
+        incident: Some(IncidentNotice {
+            id: incident,
+            run_url: Some(run),
+        }),
+    };
+    let route = Route {
+        key: "telemetry:rule:a",
+        connections: &[heard],
+        most: 1,
+    };
+    notifier
+        .emit_routed(
+            &organization,
+            &project,
+            notice(Some("telemetry:incident:a:opened")),
+            route,
+        )
+        .await
+        .expect("emitted");
+    notifier
+        .remind(&organization, &project, notice(None), route)
+        .await
+        .expect("reminded");
+    let carried: Vec<(Option<Uuid>, Option<String>)> =
+        sqlx::query_as("SELECT incident_id, run_url FROM notifications.deliveries ORDER BY id")
+            .fetch_all(&pool)
+            .await
+            .expect("the deliveries");
+    let rides = (Some(incident), Some(run.to_owned()));
+    assert_eq!(carried, [rides.clone(), rides]);
+}
+
 /// A routed notice's metadata is held to the 4 KiB an emit's is, and nothing is written past it.
 #[sqlx::test]
 async fn a_routed_notice_past_its_metadata_bound_is_refused(pool: PgPool) {
@@ -379,6 +431,7 @@ async fn a_routed_notice_past_its_metadata_bound_is_refused(pool: PgPool) {
         body: "The p95 duration of model calls over the last hour is 6200 ms.",
         metadata: json!({ "run": "r".repeat(4_096) }),
         dedup_key: Some("telemetry:incident:a:opened"),
+        incident: None,
     };
     let route = Route {
         key: "telemetry:rule:a",

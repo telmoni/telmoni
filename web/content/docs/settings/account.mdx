@@ -1,6 +1,6 @@
 ---
 title: "Account"
-description: "Your name as sign-in recorded it, changing your account email address, resetting your password, your default organization, and the keyboard shortcuts."
+description: "Your name as sign-in recorded it, changing your account email address, resetting your password, your default organization, the Slack account the buttons on an incident's notice act as, and the keyboard shortcuts."
 ---
 
 Your **Account** settings page (`/settings/account`) manages your personal
@@ -86,6 +86,30 @@ membership, not to the organization:
 - Leaving the organization, or being removed from it, clears the choice, and
   the default falls back as above. Joining it again does not restore it.
 - While the organization waits out its deletion, it is passed over.
+
+## Slack
+
+The **Slack** section links your Slack account, so that the buttons on an
+incident's notice in a Slack channel act as you
+([acting from Slack](/docs/integrations/slack#acting-from-slack)). It appears
+where the deployment's Slack app is set up, and while you belong to an
+organization.
+
+**Link your Slack account** sends you to Slack's **Sign in with Slack**, which
+asks for one thing: `openid`, who you are on Slack. Telmoni keeps your Slack
+workspace and user IDs and the workspace's name, never your Slack address or
+name, and matches a press to you by those IDs alone. Once you approve, you
+come back to this section with the workspace listed. A sign-in must finish
+within 10 minutes, in the browser that started it.
+
+- Link one Slack account in each workspace; linking another in the same
+  workspace replaces the first.
+- A Slack account links to one Telmoni account. One already linked to
+  somebody else is refused until they unlink it.
+- **Unlink** on a workspace's row removes it at once: a press from that
+  account acts as nobody, and is answered with a link back here.
+
+Linked accounts are deleted with your account.
 
 ## Keyboard shortcuts
 

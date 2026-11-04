@@ -2,10 +2,18 @@ import { type NextRequest, NextResponse } from "next/server";
 
 import { tryFetchWithTimeout } from "@/lib/api/fetch";
 import { CONNECT_COOKIE, getSession, unsealConnect } from "@/lib/auth/session";
-import { type ConnectOutcome, connectorsPath, isOAuthProvider } from "@/lib/connect";
+import {
+  type ConnectOutcome,
+  type LinkOutcome,
+  type OAuthProvider,
+  accountSlackPath,
+  connectorsPath,
+  isOAuthProvider,
+} from "@/lib/connect";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import { fetchProjectAnywhere, identityContext, projectHeaders } from "@/lib/server/data";
+import { accountHeaders } from "@/lib/server/entities/identity-context";
 
 // The vendor sends the browser back here with `code` and `state`, or with
 // `error` when the person pressed Cancel. The project it is all for rides the
@@ -28,6 +36,9 @@ export async function GET(
     // minutes, or this is not the browser that started it.
     return NextResponse.redirect(new URL("/console", env.AUTH_URL));
   }
+  // The same return address serves a person linking their own account, which
+  // the vendor's app has registered once.
+  if (pending.purpose === "identity") return linked(request, provider, pending.state);
 
   // Back to the project's Connectors page, by id: the cookie was sealed up to
   // ten minutes ago, and a project rename or an organization URL change since
@@ -87,4 +98,45 @@ export async function GET(
     return done({ error: "callback" });
   }
   return done({ connected: provider });
+}
+
+// A person's own account at the vendor, linked: back to their account
+// settings either way. The service spends the state as theirs alone, so a
+// sign-in begun by somebody else links nothing here either.
+async function linked(request: NextRequest, provider: OAuthProvider, expected: string) {
+  const done = (outcome: LinkOutcome) => {
+    const response = NextResponse.redirect(new URL(accountSlackPath(outcome), env.AUTH_URL));
+    response.cookies.delete(CONNECT_COOKIE);
+    return response;
+  };
+  const query = request.nextUrl.searchParams;
+  const vendorError = query.get("error");
+  if (vendorError) return done(vendorError === "access_denied" ? "denied" : "vendor");
+  const state = query.get("state");
+  const code = query.get("code");
+  if (!state || state !== expected || !code) return done("callback");
+
+  const session = await getSession();
+  if (!session) {
+    const login = new URL("/auth/login", env.AUTH_URL);
+    login.searchParams.set("returnTo", request.nextUrl.pathname + request.nextUrl.search);
+    return NextResponse.redirect(login);
+  }
+  const headers = await accountHeaders();
+  if (!headers) return done("unavailable");
+  const res = await tryFetchWithTimeout(
+    `${env.SERVER_URL}/internal/v1/notifications/${provider}/identities/callback`,
+    {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify({ code, state }),
+    },
+  );
+  if (!res) return done("unavailable");
+  if (res.status === 409) return done("elsewhere");
+  if (!res.ok) {
+    logger.warn({ provider, status: res.status }, "account link refused");
+    return done("callback");
+  }
+  return done("linked");
 }

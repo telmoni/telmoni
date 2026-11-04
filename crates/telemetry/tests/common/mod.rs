@@ -682,6 +682,15 @@ pub(crate) struct LoggedNotice {
     pub(crate) reminded: bool,
     /// The connections a routed notice was sent to.
     pub(crate) connections: Vec<Uuid>,
+    /// The incident a connector may act on, and the run it shows.
+    pub(crate) incident: Option<(Uuid, Option<String>)>,
+}
+
+/// The incident a notice carries, as the log keeps it.
+fn carried(notice: &Notice<'_>) -> Option<(Uuid, Option<String>)> {
+    notice
+        .incident
+        .map(|incident| (incident.id, incident.run_url.map(str::to_owned)))
 }
 
 /// Notifications as this module holds it: every notice handed through the
@@ -776,6 +785,7 @@ impl NoticeLog {
             };
         }
         let feed_id = Uuid::new_v4();
+        let incident = carried(&notice);
         notices.push(LoggedNotice {
             feed_id,
             organization_id: organization_id.clone(),
@@ -787,6 +797,7 @@ impl NoticeLog {
             dedup_key: notice.dedup_key.map(str::to_owned),
             reminded: false,
             connections: Vec::new(),
+            incident,
         });
         Emitted::Fresh { feed_id }
     }
@@ -849,6 +860,7 @@ impl Notifications for NoticeLog {
     ) -> Result<Vec<Uuid>, TelmoniError> {
         bounded(&notice);
         let queued = self.queued(route);
+        let incident = carried(&notice);
         self.notices
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -863,6 +875,7 @@ impl Notifications for NoticeLog {
                 dedup_key: None,
                 reminded: true,
                 connections: queued.clone(),
+                incident,
             });
         Ok(queued)
     }

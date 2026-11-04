@@ -28,14 +28,15 @@ use uuid::Uuid;
 
 use crate::AppState;
 use crate::connector::{
-    ConnectionStatus, DeliveryError, Event, Grant, Installed, Provider, Terminal, webhook,
+    ConnectionStatus, DeliveryError, Event, EventIncident, Grant, Installed, Provider, Terminal,
+    webhook,
 };
 use crate::db::{self, NotificationsLane};
 use crate::handler::{ProjectIdentity, authorize};
 use crate::{delivery, notify, uninstall};
 
 /// How long a handshake may take between the authorize and the callback.
-const STATE_TTL_SECS: i64 = 600;
+pub(super) const STATE_TTL_SECS: i64 = 600;
 
 /// How long a test send or a resend waits for the far end. The console waits
 /// 20 seconds for these two lanes, room for this and the key unwrap and the
@@ -78,7 +79,7 @@ fn grant_for(state: &AppState, provider: Provider) -> Result<Arc<dyn Grant>, Tel
 
 /// Where the vendor sends the browser back, built from `APP_URL` and nothing
 /// the request carried.
-fn redirect_uri(state: &AppState, provider: Provider) -> String {
+pub(super) fn redirect_uri(state: &AppState, provider: Provider) -> String {
     format!("{}/connect/{provider}/callback", state.config.app_url)
 }
 
@@ -122,7 +123,7 @@ async fn require_flag(state: &AppState) -> Result<(), TelmoniError> {
 }
 
 /// Thirty-two random bytes as hex — the `state` the vendor echoes back.
-fn mint_state() -> Result<String, TelmoniError> {
+pub(super) fn mint_state() -> Result<String, TelmoniError> {
     let mut bytes = [0u8; 32];
     ring::rand::SystemRandom::new()
         .fill(&mut bytes)
@@ -913,6 +914,7 @@ pub async fn test_connector(
         kind: NotificationKind::ConnectorConnected,
         title: &format!("{} is connected", provider.label()),
         body: &body,
+        incident: None,
     };
     let outcome = tokio::time::timeout(TEST_SEND_TIMEOUT, delivery::send(&state, &sealed, &event))
         .await
@@ -1153,6 +1155,11 @@ async fn dispatch_redelivery(
         kind: delivery.kind,
         title: &delivery.subject,
         body: &delivery.body,
+        incident: delivery.incident_id.map(|id| EventIncident {
+            project_id,
+            id,
+            run_url: delivery.run_url.as_deref(),
+        }),
     };
     // Each step has its own budget, both inside the lease: a stalled unwrap
     // that outlived it would let the loop take the row while this request

@@ -27,8 +27,9 @@ pub struct Acting {
     /// The project they act on and their role within it, when the request
     /// scoped to a project.
     pub project: Option<ActingProject>,
-    /// The session the bearer belongs to. Optional on the wire so a module's
-    /// own double can answer without inventing one; auth always names it.
+    /// The session the bearer belongs to. Auth names it for every bearer, and
+    /// none for a person another party vouched for
+    /// ([`crate::seam::Auth::resolve_person`]).
     pub session_id: Option<SessionId>,
     /// When the bearer stops being taken, unix seconds. Nothing built on
     /// this answer outlives it.

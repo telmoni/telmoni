@@ -103,14 +103,14 @@ impl Auth for AppState {
         let project_id = acting.project_or_bad_request()?.project_id.clone();
         // The session too, as the bearer's lookup would have it: a sign-out
         // everywhere, or a deletion asked for, ends the request's reach now.
-        if let Some(sid) = acting.session_id.as_ref() {
-            let refused = crate::db::lane(&self.db, async |tx| {
-                access_tokens::session_refused(tx, &acting.user_id, sid).await
-            })
-            .await?;
-            if refused {
-                return Err(AuthError::Unauthenticated.into());
-            }
+        // A person vouched for has no session, and the deletion alone counts.
+        let refused = crate::db::lane(&self.db, async |tx| match acting.session_id.as_ref() {
+            Some(sid) => access_tokens::session_refused(tx, &acting.user_id, sid).await,
+            None => access_tokens::person_refused(tx, &acting.user_id).await,
+        })
+        .await?;
+        if refused {
+            return Err(AuthError::Unauthenticated.into());
         }
         self.on_project(
             acting.user_id.clone(),
@@ -119,6 +119,23 @@ impl Auth for AppState {
             acting.expires_at,
         )
         .await
+    }
+
+    async fn resolve_person(
+        &self,
+        user_id: &UserId,
+        project_id: &ProjectId,
+    ) -> Result<Acting, TelmoniError> {
+        let refused = crate::db::lane(&self.db, async |tx| {
+            access_tokens::person_refused(tx, user_id).await
+        })
+        .await?;
+        if refused {
+            return Err(AuthError::Unauthenticated.into());
+        }
+        let expires_at = chrono::Utc::now().timestamp() + VOUCHED_FOR_SECS;
+        self.on_project(user_id.clone(), project_id.clone(), None, expires_at)
+            .await
     }
 
     async fn project_homes(
@@ -464,6 +481,10 @@ impl AppState {
 
 /// The most events one audit tool call returns.
 const AUDIT_TOOL_MAX: i64 = 50;
+
+/// How long an answer for a person vouched for stands, in seconds: the one
+/// act it was asked for.
+const VOUCHED_FOR_SECS: i64 = 60;
 
 /// An event's details without the address an invitation or an email change
 /// records: every one of them is a top-level `email`.

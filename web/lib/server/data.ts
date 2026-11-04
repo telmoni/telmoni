@@ -163,13 +163,14 @@ export type {
   SessionTrace,
 } from "./entities/sessions";
 
-export { fetchConnectors } from "./entities/connectors";
+export { fetchConnectors, fetchSlackIdentities } from "./entities/connectors";
 export type {
   Connection,
   ConnectorListing,
   DeliveryAttempt,
   DeliveryLogEntry,
   DeliveryLogPage,
+  SlackIdentities,
 } from "./entities/connectors";
 
 export {

@@ -238,12 +238,22 @@ export async function unsealPkce(value: string): Promise<PkceData | null> {
   }
 }
 
-const ConnectData = z.object({
-  state: z.string().min(1),
-  organizationId: z.string().min(1),
-  projectId: z.string().min(1),
-  provider: z.enum(OAUTH_PROVIDERS),
-});
+// A handshake begun: an install on a project, or a person's own account at
+// the vendor linked from their account settings, which names no project.
+const ConnectData = z.discriminatedUnion("purpose", [
+  z.object({
+    purpose: z.literal("install"),
+    state: z.string().min(1),
+    organizationId: z.string().min(1),
+    projectId: z.string().min(1),
+    provider: z.enum(OAUTH_PROVIDERS),
+  }),
+  z.object({
+    purpose: z.literal("identity"),
+    state: z.string().min(1),
+    provider: z.enum(OAUTH_PROVIDERS),
+  }),
+]);
 
 export type ConnectData = z.infer<typeof ConnectData>;
 

@@ -3,7 +3,8 @@
 //! newest, or with `?run=` those whose notices showed that run, and
 //! `/incidents/{id}`; `POST /incidents/{id}/acknowledge` and `/resolve`,
 //! which any member of the project sends, each filed in the organization's
-//! audit chain. Acknowledging one stops its reminders; resolving one by hand
+//! audit chain; an Acknowledge pressed on its Slack notice takes the same
+//! path. Acknowledging one stops its reminders; resolving one by hand
 //! is told as its recovery is, and an alert still past its threshold opens
 //! nothing new until it recovers and breaches again, or rises from the
 //! warning resolved to an alert.
@@ -20,6 +21,7 @@ use telmoni_shared::acting::Acting;
 use telmoni_shared::db::tenant_session::{ProjectAndOrganization, Scoped, project_scope};
 use telmoni_shared::extract::{Json, Query};
 use telmoni_shared::rbac::{Resource, Verb};
+use telmoni_shared::seam::IncidentActed;
 use telmoni_shared::{
     AuditAction, AuthError, IncidentStatus, ProjectId, TelmoniError, TelmoniResourceKind,
 };
@@ -100,16 +102,45 @@ pub async fn acknowledge_incident(
     Path(id): Path<String>,
 ) -> Result<Json<IncidentRow>, TelmoniError> {
     let acting = state.auth.resolve(&headers).await?;
+    acting.require_project(Verb::Update, Resource::Alert)?;
+    let id = incident_id(&id)?;
+    let (row, _) = acknowledge(&state, &acting, id).await?;
+    Ok(Json(row))
+}
+
+/// One of the project's incidents taken by the person `acting` names, from
+/// the console or a press of its notice's button alike: answers it, and
+/// whether this took it.
+pub(crate) async fn acknowledge(
+    state: &AppState,
+    acting: &Acting,
+    id: Uuid,
+) -> Result<(IncidentRow, bool), TelmoniError> {
     let project_id = &acting
         .require_project(Verb::Update, Resource::Alert)?
         .project_id;
-    let id = incident_id(&id)?;
-    let (row, _) = chain::write(&state.db, &acting, project_id, "incident", async |tx| {
-        moved(&state, &acting, tx, id, Take::Acknowledge).await
+    let taken = chain::write(&state.db, acting, project_id, "incident", async |tx| {
+        moved(state, acting, tx, id, Take::Acknowledge).await
     })
     .await?;
     tracing::info!(project_id = %project_id, incident_id = %id, "telemetry: an incident acknowledged");
-    Ok(Json(row))
+    Ok(taken)
+}
+
+/// What a press of an incident notice's Acknowledge came to.
+pub(crate) async fn acknowledged(
+    state: &AppState,
+    acting: &Acting,
+    id: Uuid,
+) -> Result<IncidentActed, TelmoniError> {
+    let (row, taken) = acknowledge(state, acting, id).await?;
+    Ok(if taken {
+        IncidentActed::Acknowledged
+    } else if row.status == IncidentStatus::Resolved {
+        IncidentActed::ResolvedAlready
+    } else {
+        IncidentActed::AcknowledgedAlready
+    })
 }
 
 /// What a member does to an incident.

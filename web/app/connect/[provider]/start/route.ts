@@ -84,6 +84,7 @@ export async function GET(
   if (!parsed) return back("authorize");
 
   const sealed = await sealConnect({
+    purpose: "install",
     state: parsed.state,
     organizationId: project.organizationId,
     projectId,

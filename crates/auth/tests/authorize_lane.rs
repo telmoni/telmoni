@@ -22,7 +22,7 @@ use telmoni_auth::test_provider::{Call, ScriptedProvider, as_person, bearer, bea
 use telmoni_auth::{AppState, Config, router};
 use telmoni_shared::seam::Auth as _;
 use telmoni_shared::test_util::{ServiceRole, apply_audit_migrations, seed_identity, service_pool};
-use telmoni_shared::{OrganizationRole, Role};
+use telmoni_shared::{OrganizationRole, ProjectId, Role, UserId};
 
 const SERVICE_SECRET: &str = "test-service-secret";
 
@@ -282,6 +282,73 @@ async fn the_seam_answers_owner_seat_and_non_member_from_auths_own_tables(pool: 
         .await
         .unwrap_err();
     assert_eq!(refused.to_problem_details().status, 403);
+}
+
+/// ⚠ A person another party vouched for, as a press of Slack's signed button
+/// is, is answered from auth's own tables with no session: their seat, and
+/// a refusal without one, without an account, or once they ask to be
+/// deleted, at the second answer as at the first.
+#[sqlx::test]
+async fn the_seam_answers_a_person_vouched_for_from_its_own_tables(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let (app, state, _provider) = app(pool.clone());
+    let (organization, _) = sign_in(&app, &pool, "user_owner", None).await;
+    sign_in(&app, &pool, "user_member", None).await;
+    sign_in(&app, &pool, "user_stranger", None).await;
+    let project = create_project(&app, &pool, "user_owner", &organization, "Platform").await;
+    seat(
+        &app,
+        &pool,
+        "user_owner",
+        &organization,
+        &project,
+        "user_member",
+        "member",
+    )
+    .await;
+    let user = |id: &str| UserId::try_new(id).unwrap();
+    let project_id = ProjectId::try_new(project.as_str()).unwrap();
+
+    let acting = state
+        .resolve_person(&user("user_member"), &project_id)
+        .await
+        .unwrap();
+    assert_eq!(acting.project.as_ref().map(|p| p.role), Some(Role::Member));
+    assert_eq!(acting.organization_id.as_str(), organization.as_str());
+    assert!(acting.session_id.is_none(), "vouched for, not signed in");
+    let again = state.resolve_again(&acting).await.unwrap();
+    assert_eq!(again.project.map(|p| p.role), Some(Role::Member));
+
+    let refused = state
+        .resolve_person(&user("user_stranger"), &project_id)
+        .await
+        .unwrap_err();
+    assert_eq!(refused.to_problem_details().status, 403, "no seat");
+    let refused = state
+        .resolve_person(&user("user_nobody"), &project_id)
+        .await
+        .unwrap_err();
+    assert_eq!(refused.to_problem_details().status, 401, "no account");
+
+    sqlx::query(
+        "INSERT INTO auth.accounts (user_id, deletion_requested_at) VALUES ($1, now())
+         ON CONFLICT (user_id) DO UPDATE SET deletion_requested_at = now()",
+    )
+    .bind("user_member")
+    .execute(&pool)
+    .await
+    .unwrap();
+    let refused = state
+        .resolve_person(&user("user_member"), &project_id)
+        .await
+        .unwrap_err();
+    assert_eq!(refused.to_problem_details().status, 401, "on their way out");
+    let refused = state.resolve_again(&acting).await.unwrap_err();
+    assert_eq!(
+        refused.to_problem_details().status,
+        401,
+        "the second answer too"
+    );
 }
 
 /// `user`'s projects in `organization` as the console lists them: each one's

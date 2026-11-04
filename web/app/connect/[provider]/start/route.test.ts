@@ -102,13 +102,14 @@ describe("GET /connect/[provider]/start", () => {
     // The cookie carries the project, its organization and the state the
     // callback will check: ids, which a rename in the meantime does not move.
     expect(sealConnect).toHaveBeenCalledWith({
+      purpose: "install",
       state: "st8",
       organizationId: "org_home",
       projectId: PROJECT,
       provider: "slack",
     });
     expect(res.cookies.get("telmoni_connect")?.value).toBe(
-      'sealed:{"state":"st8","organizationId":"org_home","projectId":"project_abc","provider":"slack"}',
+      'sealed:{"purpose":"install","state":"st8","organizationId":"org_home","projectId":"project_abc","provider":"slack"}',
     );
     expect(res.cookies.get("telmoni_connect")?.httpOnly).toBe(true);
   });

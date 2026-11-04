@@ -4,6 +4,7 @@
 
 pub mod connectors;
 pub mod slack_events;
+pub mod slack_identities;
 
 use std::sync::Arc;
 
@@ -17,7 +18,7 @@ use telmoni_shared::db::tenant_session::{
 };
 use telmoni_shared::extract::Json;
 use telmoni_shared::rbac::{Resource, Verb};
-use telmoni_shared::seam::{Emitted, Notice, Route, Routed, resolve_again_in_time};
+use telmoni_shared::seam::{Emitted, IncidentNotice, Notice, Route, Routed, resolve_again_in_time};
 use telmoni_shared::{NotificationKind, OrganizationId, ProjectId, TelmoniError, UserId};
 use uuid::Uuid;
 
@@ -114,6 +115,25 @@ const ROUTE_MAX_CHARS: usize = 200;
 /// The one bound in BYTES: `metadata` is served to a browser verbatim, so a
 /// producer must not be able to make a notice carry a megabyte.
 const METADATA_MAX_BYTES: u64 = 4_096;
+/// A notice's run link: Slack's bound on a button's.
+const RUN_URL_MAX_CHARS: usize = 3_000;
+
+/// The incident a notice carries, its run link held to its bound.
+fn checked_incident(
+    incident: Option<IncidentNotice<'_>>,
+) -> Result<Option<IncidentNotice<'_>>, TelmoniError> {
+    incident
+        .map(|incident| {
+            Ok(IncidentNotice {
+                id: incident.id,
+                run_url: incident
+                    .run_url
+                    .map(|url| bounded(url, "run_url", RUN_URL_MAX_CHARS))
+                    .transpose()?,
+            })
+        })
+        .transpose()
+}
 
 /// One trimmed, length-checked text field, or a 400 that names it.
 fn bounded<'a>(value: &'a str, field: &str, max: usize) -> Result<&'a str, TelmoniError> {
@@ -134,6 +154,7 @@ struct Checked<'a> {
     body: &'a str,
     metadata: serde_json::Value,
     dedup_key: Option<&'a str>,
+    incident: Option<IncidentNotice<'a>>,
 }
 
 impl<'a> Checked<'a> {
@@ -165,6 +186,7 @@ impl<'a> Checked<'a> {
                 .filter(|key| !key.is_empty())
                 .map(|key| bounded(key, "dedup_key", DEDUP_KEY_MAX_CHARS))
                 .transpose()?,
+            incident: checked_incident(notice.incident)?,
         })
     }
 
@@ -257,6 +279,7 @@ async fn write_notice<B: db::EmitBinding>(
             key,
             connections,
             most,
+            notice.incident,
         )
         .await?
         .into_iter()
@@ -363,6 +386,7 @@ pub async fn remind_notice(
     let title = bounded(notice.title, "title", TITLE_MAX_CHARS)?;
     let body = bounded(notice.body, "body", BODY_MAX_CHARS)?;
     let route_key = bounded(route.key, "route", ROUTE_MAX_CHARS)?;
+    let incident = checked_incident(notice.incident)?;
     let mut tx = project_scope(&state.db, project_id).await?;
     let queued = db::enqueue_routed(
         &mut tx,
@@ -374,6 +398,7 @@ pub async fn remind_notice(
         route_key,
         route.connections,
         route.most,
+        incident,
     )
     .await?;
     tx.commit().await?;
@@ -610,15 +635,17 @@ fn feed_chunk() -> u64 {
 
 /// A person's account erasure: every notice that named them, on every feed
 /// and every delivery row still holding the text, rewritten to name a former
-/// member. Called by auth's `erase_person` before the identity goes;
-/// idempotent, and a failure stops that erasure for the sweep to retry.
+/// member, and the Slack accounts they linked deleted. Called by auth's
+/// `erase_person` before the identity goes; idempotent, and a failure stops
+/// that erasure for the sweep to retry.
 ///
 /// What a connected Slack channel, or a webhook, already received
 /// is not reached from here and cannot be: those copies are the vendor's.
 pub async fn redact_person(state: &AppState, user_id: &UserId) -> Result<u64, TelmoniError> {
     let mut tx = maintenance_scope(&state.db, NotificationsLane).await?;
     let redacted = db::redact_person(&mut tx, user_id).await?;
+    let forgotten = db::forget_person(&mut tx, user_id).await?;
     tx.commit().await?;
-    tracing::info!(user_id = %user_id, redacted, "notifications redaction: the person's name rewritten");
+    tracing::info!(user_id = %user_id, redacted, forgotten, "notifications redaction: the person's name rewritten and their Slack accounts unlinked");
     Ok(redacted)
 }

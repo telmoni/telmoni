@@ -1,5 +1,6 @@
 //! Slack: `incoming-webhook` scope, delivery by POSTing the webhook URL,
-//! events signed with the app's signing secret.
+//! events and button presses signed with the app's signing secret, and a
+//! person's own Slack account linked by Sign in with Slack.
 //!
 //! **`incoming-webhook` and nothing else, deliberately.** Slack's own picker
 //! binds the URL to a channel, public or private, with no bot membership.
@@ -11,11 +12,12 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use telmoni_shared::digest::{HmacKey, SignatureError, hex_decode, in_replay_window};
 use telmoni_shared::net_guard::Egress;
-use telmoni_shared::{OrInternal, Redacted, TelmoniError};
+use telmoni_shared::{OrInternal, ProjectId, Redacted, TelmoniError};
+use uuid::Uuid;
 
 use super::{
-    DeliveryError, Event, Grant, Installed, Retirement, TearDownError, Terminal, refused,
-    short_body, truncate, undialable,
+    DeliveryError, Event, EventIncident, Grant, Installed, Retirement, TearDownError, Terminal,
+    refused, short_body, truncate, undialable,
 };
 
 /// Slack's header block limit.
@@ -115,28 +117,122 @@ fn mrkdwn_escape(s: &str) -> String {
         .replace('>', "&gt;")
 }
 
-/// Render one notification as a Slack incoming-webhook payload.
+/// Render one notification as a Slack incoming-webhook payload: an incident's
+/// opening and its reminders carry its buttons.
 #[must_use]
 pub fn render(event: &Event<'_>) -> Value {
+    let mut blocks = vec![
+        json!({
+            "type": "header",
+            "text": { "type": "plain_text", "text": truncate(event.title, MAX_HEADER), "emoji": true }
+        }),
+        json!({
+            "type": "section",
+            "text": { "type": "mrkdwn", "text": truncate(&mrkdwn_escape(event.body), MAX_SECTION) }
+        }),
+        json!({
+            "type": "context",
+            "elements": [
+                { "type": "mrkdwn", "text": format!("`{}`", event.kind) }
+            ]
+        }),
+    ];
+    if let Some(incident) = &event.incident {
+        blocks.push(buttons(incident));
+    }
     json!({
         "text": mrkdwn_escape(event.title),
-        "blocks": [
-            {
-                "type": "header",
-                "text": { "type": "plain_text", "text": truncate(event.title, MAX_HEADER), "emoji": true }
-            },
-            {
-                "type": "section",
-                "text": { "type": "mrkdwn", "text": truncate(&mrkdwn_escape(event.body), MAX_SECTION) }
-            },
-            {
-                "type": "context",
-                "elements": [
-                    { "type": "mrkdwn", "text": format!("`{}`", event.kind) }
-                ]
-            }
-        ]
+        "blocks": blocks,
     })
+}
+
+/// What a button on an incident's notice does, as its `action_id` spells it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SlackAction {
+    Acknowledge,
+    MuteForAnHour,
+    /// A link, which Slack tells the app of all the same.
+    OpenRun,
+}
+
+telmoni_shared::wire_enum!(SlackAction {
+    Acknowledge => "acknowledge",
+    MuteForAnHour => "mute_for_an_hour",
+    OpenRun => "open_run",
+});
+
+/// An incident notice's buttons. Each value names the project and the
+/// incident a press is scoped to, never what the presser may do.
+fn buttons(incident: &EventIncident<'_>) -> Value {
+    let value = button_value(incident.project_id, incident.id);
+    let mut elements = vec![
+        json!({
+            "type": "button",
+            "action_id": SlackAction::Acknowledge.as_str(),
+            "text": { "type": "plain_text", "text": "Acknowledge" },
+            "style": "primary",
+            "value": value,
+        }),
+        json!({
+            "type": "button",
+            "action_id": SlackAction::MuteForAnHour.as_str(),
+            "text": { "type": "plain_text", "text": "Mute for an hour" },
+            "value": value,
+        }),
+    ];
+    if let Some(url) = incident.run_url {
+        elements.push(json!({
+            "type": "button",
+            "action_id": SlackAction::OpenRun.as_str(),
+            "text": { "type": "plain_text", "text": "Open the run" },
+            "url": url,
+        }));
+    }
+    json!({ "type": "actions", "elements": elements })
+}
+
+/// The project and the incident a button names, as its value spells them.
+#[must_use]
+pub fn button_value(project_id: &ProjectId, incident_id: Uuid) -> String {
+    format!("{project_id} {incident_id}")
+}
+
+/// A button's value read back; `None` for one this server never wrote.
+#[must_use]
+pub fn parse_button_value(value: &str) -> Option<(ProjectId, Uuid)> {
+    let (project, incident) = value.split_once(' ')?;
+    Some((ProjectId::try_new(project).ok()?, incident.parse().ok()?))
+}
+
+/// A Slack id as this server keeps one: letters and digits, at most 64.
+#[must_use]
+pub fn slack_id(id: Option<String>) -> Option<String> {
+    id.filter(|id| {
+        !id.is_empty() && id.len() <= 64 && id.bytes().all(|b| b.is_ascii_alphanumeric())
+    })
+}
+
+/// Tell the person who pressed a button, and them alone, `text`, at the
+/// `response_url` Slack handed with the press. It posts to the channel for
+/// thirty minutes, so it is a credential: never logged, never kept.
+pub async fn reply(http: &Egress, response_url: &Redacted, text: &str) -> Result<(), String> {
+    let resp = http
+        .post(response_url.expose())
+        .map_err(|why| format!("slack's response_url was refused: {why}"))?
+        .json(&json!({
+            "response_type": "ephemeral",
+            "replace_original": false,
+            "text": text,
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("slack's response_url unreachable: {}", e.without_url()))?;
+    let status = resp.status();
+    if status.is_success() {
+        Ok(())
+    } else {
+        Err(format!("slack's response_url returned {status}"))
+    }
 }
 
 /// Verify `X-Slack-Signature` against the raw body: HMAC-SHA256 over
@@ -371,6 +467,145 @@ impl SlackConnector {
     }
 }
 
+/// The one scope Sign in with Slack asks for: who the person is on Slack,
+/// their workspace and user, never their address or name.
+pub const IDENTITY_SCOPE: &str = "openid";
+
+/// A person's own Slack account, as Sign in with Slack names it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SlackAccount {
+    pub team_id: String,
+    pub user_id: String,
+    /// The workspace's name, for the person's settings to show.
+    pub team_name: Option<String>,
+}
+
+/// `openid.connect.token`'s answer, the slice read.
+#[derive(Debug, Deserialize)]
+struct IdentityToken {
+    ok: bool,
+    #[serde(default)]
+    error: Option<String>,
+    #[serde(default)]
+    access_token: Option<Redacted>,
+}
+
+/// `openid.connect.userInfo`'s answer, the slice read.
+#[derive(Debug, Deserialize)]
+struct UserInfo {
+    ok: bool,
+    #[serde(default)]
+    error: Option<String>,
+    #[serde(default, rename = "https://slack.com/user_id")]
+    user_id: Option<String>,
+    #[serde(default, rename = "https://slack.com/team_id")]
+    team_id: Option<String>,
+    #[serde(default, rename = "https://slack.com/team_name")]
+    team_name: Option<String>,
+}
+
+/// The longest workspace name kept, as its column holds it.
+const TEAM_NAME_MAX_CHARS: usize = 200;
+
+impl SlackConnector {
+    /// Slack's consent page for Sign in with Slack, asking [`IDENTITY_SCOPE`]
+    /// alone, sent back to `redirect_uri`, the install's own.
+    pub fn identity_url(&self, state: &str, redirect_uri: &str) -> Result<String, TelmoniError> {
+        reqwest::Url::parse_with_params(
+            &format!("{}/openid/connect/authorize", self.api_base),
+            &[
+                ("response_type", "code"),
+                ("scope", IDENTITY_SCOPE),
+                ("client_id", self.client_id.as_str()),
+                ("state", state),
+                ("redirect_uri", redirect_uri),
+            ],
+        )
+        .map(String::from)
+        .map_err(|e| TelmoniError::Internal(format!("slack's sign-in URL would not build: {e}")))
+    }
+
+    /// The Slack account a Sign in with Slack `code` is for: the code spent
+    /// for a token, the token for the account, and the token dropped.
+    pub async fn identify(
+        &self,
+        http: &Egress,
+        code: &str,
+        redirect_uri: &str,
+    ) -> Result<SlackAccount, TelmoniError> {
+        let resp = http
+            .post(&format!("{}/api/openid.connect.token", self.api_base))
+            .map_err(|why| undialable("slack sign-in exchange", why))?
+            .form(&[
+                ("client_id", self.client_id.as_str()),
+                ("client_secret", self.client_secret.expose()),
+                ("code", code),
+                ("redirect_uri", redirect_uri),
+                ("grant_type", "authorization_code"),
+            ])
+            .send()
+            .await
+            .or_internal("slack sign-in exchange unreachable")?;
+        if !resp.status().is_success() {
+            return Err(TelmoniError::Internal(format!(
+                "slack sign-in exchange returned {}",
+                resp.status()
+            )));
+        }
+        let token: IdentityToken = resp
+            .json()
+            .await
+            .or_internal("slack sign-in exchange body unreadable")?;
+        if !token.ok {
+            let word = token.error.unwrap_or_else(|| "unknown_error".into());
+            return Err(TelmoniError::BadRequest(format!(
+                "slack refused the code: {word}"
+            )));
+        }
+        let token = token.access_token.ok_or_else(|| {
+            TelmoniError::Internal("slack sign-in exchange carried no token".into())
+        })?;
+        let resp = http
+            .post(&format!("{}/api/openid.connect.userInfo", self.api_base))
+            .map_err(|why| undialable("slack's account read", why))?
+            .bearer_auth(token.expose())
+            .send()
+            .await
+            .or_internal("slack's account read unreachable")?;
+        if !resp.status().is_success() {
+            return Err(TelmoniError::Internal(format!(
+                "slack's account read returned {}",
+                resp.status()
+            )));
+        }
+        let info: UserInfo = resp
+            .json()
+            .await
+            .or_internal("slack's account read body unreadable")?;
+        if !info.ok {
+            let word = info.error.unwrap_or_else(|| "unknown_error".into());
+            return Err(TelmoniError::Internal(format!(
+                "slack refused the account read: {word}"
+            )));
+        }
+        let (Some(team_id), Some(user_id)) = (slack_id(info.team_id), slack_id(info.user_id))
+        else {
+            return Err(TelmoniError::Internal(
+                "slack named no workspace and user for the sign-in".into(),
+            ));
+        };
+        let team_name = info
+            .team_name
+            .map(|name| name.trim().to_owned())
+            .filter(|name| !name.is_empty() && name.chars().count() <= TEAM_NAME_MAX_CHARS);
+        Ok(SlackAccount {
+            team_id,
+            user_id,
+            team_name,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -382,6 +617,7 @@ mod tests {
             kind: telmoni_shared::types::NotificationKind::ConnectorDisconnected,
             title: "Connector disconnected",
             body: "#alerts stopped accepting posts. Reconnect it from the project's Connectors page.",
+            incident: None,
         }
     }
 
@@ -421,6 +657,7 @@ mod tests {
             kind: telmoni_shared::types::NotificationKind::MemberAdded,
             title: &long,
             body: "b",
+            incident: None,
         };
         let v = render(&event);
         assert_eq!(
@@ -436,6 +673,7 @@ mod tests {
             kind: telmoni_shared::types::NotificationKind::MemberAdded,
             title: "<!here> t",
             body: "<!channel> api & <https://x|api> is down",
+            incident: None,
         };
         let v = render(&event);
         assert_eq!(v["text"], "&lt;!here&gt; t");
@@ -580,6 +818,98 @@ mod tests {
             url.contains("redirect_uri=https%3A%2F%2Fapp.example%2Fconnect%2Fslack%2Fcallback"),
             "{url}"
         );
+        assert!(!url.contains("sec"), "the secret is not a query parameter");
+    }
+
+    /// An incident's notice carries Acknowledge, Mute for an hour and Open
+    /// the run, each value naming the project and incident a press is
+    /// scoped to; one showing no run has no link to one, and any other
+    /// notice no buttons.
+    #[test]
+    fn an_incidents_notice_carries_its_buttons() {
+        let project = ProjectId::try_new("project_1").unwrap();
+        let id = Uuid::now_v7();
+        let run = "https://app.example/org_1/project_1/traces/0190";
+        let event = |run_url| Event {
+            id: Uuid::nil(),
+            kind: telmoni_shared::types::NotificationKind::IncidentOpened,
+            title: "Model calls: alert",
+            body: "b",
+            incident: Some(EventIncident {
+                project_id: &project,
+                id,
+                run_url,
+            }),
+        };
+        let v = render(&event(Some(run)));
+        assert_eq!(v["blocks"][3]["type"], "actions");
+        let buttons = v["blocks"][3]["elements"].as_array().unwrap();
+        let actions: Vec<&str> = buttons
+            .iter()
+            .map(|button| button["action_id"].as_str().unwrap())
+            .collect();
+        assert_eq!(actions, ["acknowledge", "mute_for_an_hour", "open_run"]);
+        assert_eq!(buttons[0]["style"], "primary");
+        assert_eq!(buttons[2]["url"], run);
+        for button in &buttons[..2] {
+            let value = button["value"].as_str().unwrap();
+            assert_eq!(parse_button_value(value), Some((project.clone(), id)));
+        }
+        let no_run = render(&event(None));
+        assert_eq!(no_run["blocks"][3]["elements"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            render(&sample())["blocks"].as_array().unwrap().len(),
+            3,
+            "no incident, no buttons"
+        );
+    }
+
+    /// Every action a press names is one a button spells.
+    #[test]
+    fn a_buttons_action_is_read_back_by_its_word() {
+        for action in SlackAction::all() {
+            assert_eq!(action.as_str().parse::<SlackAction>(), Ok(action));
+        }
+        assert!("Acknowledge".parse::<SlackAction>().is_err());
+    }
+
+    #[test]
+    fn a_value_this_server_never_wrote_names_nothing() {
+        for value in [
+            String::new(),
+            "project_1".into(),
+            "project_1 not-a-uuid".into(),
+            format!(" {}", Uuid::nil()),
+        ] {
+            assert_eq!(parse_button_value(&value), None, "{value:?}");
+        }
+    }
+
+    #[test]
+    fn a_slack_id_is_letters_and_digits_alone() {
+        assert_eq!(slack_id(Some("U0PRESSER".into())), Some("U0PRESSER".into()));
+        for bad in ["", "U 1", "U1;--", "Ü1", &"U".repeat(65)] {
+            assert_eq!(slack_id(Some(bad.to_owned())), None, "{bad:?}");
+        }
+        assert_eq!(slack_id(None), None);
+    }
+
+    /// Sign in with Slack asks who the person is and nothing else: never an
+    /// address or a name.
+    #[test]
+    fn signing_in_with_slack_asks_for_openid_alone() {
+        let c = SlackConnector::new("cid", Redacted::from("sec"), "https://slack.com/");
+        let url = c
+            .identity_url("st8", "https://app.example/connect/slack/callback")
+            .unwrap();
+        assert!(
+            url.starts_with("https://slack.com/openid/connect/authorize?"),
+            "{url}"
+        );
+        assert!(url.contains("response_type=code"), "{url}");
+        assert!(url.contains("scope=openid&"), "{url}");
+        assert!(!url.contains("email") && !url.contains("profile"), "{url}");
+        assert!(url.contains("state=st8"), "{url}");
         assert!(!url.contains("sec"), "the secret is not a query parameter");
     }
 }

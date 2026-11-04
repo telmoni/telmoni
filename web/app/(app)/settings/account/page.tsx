@@ -1,12 +1,19 @@
 import { notFound } from "next/navigation";
 
+import { LocalTime } from "@/components/local-time";
 import { PageHeader } from "@/components/page-header";
-import { Rows } from "@/components/rows";
+import { Row, Rows } from "@/components/rows";
 import { Section } from "@/components/section";
 import { SettingsRow } from "@/components/settings-row";
+import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { type LinkRefusal, identityStartPath, linkOutcome } from "@/lib/connect";
 import { organizationLabel } from "@/lib/identity";
-import { defaultOrganization, getServerContext } from "@/lib/server/data";
+import {
+  defaultOrganization,
+  fetchSlackIdentities,
+  getServerContext,
+} from "@/lib/server/data";
 import { getServerSession } from "@/lib/server/session";
 import {
   canChangeEmail,
@@ -18,10 +25,23 @@ import { displayName } from "@/lib/user-display";
 import { DefaultOrganization } from "./_default-organization";
 import { ChangeEmail } from "./_email";
 import { PasswordReset } from "./_password";
+import { UnlinkSlack } from "./_slack";
 
 export const metadata = { title: "Account" };
 
-export default async function AccountPage() {
+// What linking a Slack account came back with, in a sentence.
+const LINK_NOTICES: Record<LinkRefusal, string> = {
+  denied: "Nothing was linked — the request was cancelled at Slack's page.",
+  vendor: "Slack refused the sign-in. Try again.",
+  callback: "That sign-in expired or was already used. Start again.",
+  elsewhere: "That Slack account is linked to another account here. Unlink it there first.",
+  unavailable: "Linking is unavailable right now. Try again shortly.",
+  start: "Linking couldn't be started. Try again.",
+};
+
+export default async function AccountPage({
+  searchParams,
+}: Partial<PageProps<"/settings/account">> = {}) {
   const session = await getServerSession();
   if (!session) notFound();
 
@@ -30,6 +50,12 @@ export default async function AccountPage() {
   // that section is left out and the rest of the page stands.
   const ctx = await getServerContext();
   const opening = ctx ? defaultOrganization(ctx) : null;
+  // The Slack accounts linked, where the service can link one: left out
+  // whole otherwise, as the default organization is.
+  const [slack, linked] = await Promise.all([
+    fetchSlackIdentities(),
+    searchParams?.then(linkOutcome) ?? null,
+  ]);
 
   const method = signInMethodLabel(session.authMethod);
 
@@ -104,6 +130,57 @@ export default async function AccountPage() {
               />
             </Card>
           </Section>
+        )}
+
+        {/* Last: what acts as you somewhere else. The anchor is where a
+            refused press in Slack sends the presser. */}
+        {slack?.offered && (
+          <div id="slack" className="grid">
+            <Section
+              title="Slack"
+              description="Link your Slack account, and the buttons on an incident's notice in Slack act as you, with the role you hold on its project. Only your Slack workspace and user are kept, never your address."
+            >
+              {linked && (
+                <p
+                  role="status"
+                  className={
+                    linked === "linked" ? "text-sm text-brand-positive" : "text-sm text-destructive"
+                  }
+                >
+                  {linked === "linked" ? "Your Slack account is linked." : LINK_NOTICES[linked]}
+                </p>
+              )}
+              {slack.identities.length > 0 && (
+                <Rows>
+                  {slack.identities.map((identity) => {
+                    const workspace = identity.team_name ?? identity.team_id;
+                    return (
+                      <Row
+                        key={identity.team_id}
+                        label={workspace}
+                        hint={
+                          <>
+                            Linked <LocalTime iso={identity.linked_at} mode="date" />
+                          </>
+                        }
+                      >
+                        <UnlinkSlack teamId={identity.team_id} workspace={workspace} />
+                      </Row>
+                    );
+                  })}
+                </Rows>
+              )}
+              {/* A plain anchor, not `Link`: the target starts a sign-in, and
+                  a prefetch would start one on hover. */}
+              <Button asChild size="sm" variant="outline" className="w-fit">
+                <a href={identityStartPath("slack")}>
+                  {slack.identities.length > 0
+                    ? "Link another Slack account"
+                    : "Link your Slack account"}
+                </a>
+              </Button>
+            </Section>
+          </div>
         )}
       </div>
     </>

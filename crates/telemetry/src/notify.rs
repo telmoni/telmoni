@@ -13,7 +13,7 @@ use uuid::Uuid;
 use chrono::{DateTime, Utc};
 
 use telmoni_shared::db::tenant_session::{maintenance_scope, project_scope};
-use telmoni_shared::seam::{Notice, Route};
+use telmoni_shared::seam::{IncidentNotice, Notice, Route};
 use telmoni_shared::{
     IncidentStatus, NotificationKind, OrganizationId, ProjectId, RuleAggregation, RuleBaseline,
     RuleMeasure, RuleOperator, RuleWindow, Severity, SpanKind, SpanStatus, TelmoniError,
@@ -166,6 +166,12 @@ async fn tell_one(
         "traces_url": traces_url,
     });
     let key = incident_key(one.incident_id, one.change);
+    // An opening, or its reminder, is what a person may act on where it is told.
+    let run_url = shown.and_then(|run| run_link(state, rule, run.run_id));
+    let incident = (one.change == Move::Opened).then_some(IncidentNotice {
+        id: one.incident_id,
+        run_url: run_url.as_deref(),
+    });
     let notice = |dedup_key| Notice {
         kind: kind_of(one.change),
         subject_user_id: None,
@@ -173,6 +179,7 @@ async fn tell_one(
         body: &body,
         metadata: metadata.clone(),
         dedup_key,
+        incident,
     };
     let of = Of {
         organization_id: &rule.organization_id,
@@ -1039,6 +1046,7 @@ async fn tell_resolved(state: &AppState, incident: &IncidentRow, links: &[Link],
         body,
         metadata: metadata.clone(),
         dedup_key,
+        incident: None,
     };
     let now = Utc::now();
     let muted = muted_at(state, project_id, rule_id, now).await;

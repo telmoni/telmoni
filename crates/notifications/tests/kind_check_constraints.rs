@@ -16,7 +16,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use telmoni_notifications::connector::{ConnectionStatus, Connectors, Provider, slack};
-use telmoni_notifications::db::{AttemptOutcome, AttemptTrigger, DeliveryStatus};
+use telmoni_notifications::db::{AttemptOutcome, AttemptTrigger, DeliveryStatus, HandshakePurpose};
 use telmoni_shared::{NotificationKind, Redacted};
 
 /// The crate's single pre-launch migration.
@@ -213,6 +213,10 @@ fn each_vocabulary_check_admits_exactly_its_enum() {
         (
             "delivery_attempts_outcome_check",
             spelled(AttemptOutcome::all()),
+        ),
+        (
+            "oauth_states_purpose_check",
+            spelled(HandshakePurpose::all()),
         ),
     ];
     for (constraint, words) in pins {

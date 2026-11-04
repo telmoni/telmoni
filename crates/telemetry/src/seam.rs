@@ -1,6 +1,7 @@
 //! What this module does for the modules beside it —
 //! [`telmoni_shared::seam::Telemetry`], on a handle to the module's state.
-//! Auth runs its purges and a project's move through this.
+//! Auth runs its purges and a project's move through this, and
+//! notifications a press of an incident notice's button.
 //!
 //! A purge takes a project's spans and totals with its settings and saved
 //! views: the rows marked deleted in ClickHouse first, before the settings
@@ -14,11 +15,14 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde_json::json;
+use uuid::Uuid;
 
 use telmoni_shared::acting::Acting;
 use telmoni_shared::audit::requested_by;
 use telmoni_shared::db::tenant_session::{maintenance_scope, organization_scope};
-use telmoni_shared::seam::{CheckedTraceView, Receipt, Telemetry, TraceVocabulary};
+use telmoni_shared::seam::{
+    CheckedTraceView, IncidentAct, IncidentActed, Receipt, Telemetry, TraceVocabulary,
+};
 use telmoni_shared::{
     AuditAction, OrInternal, OrganizationId, ProjectId, TelemetryError, TelmoniError,
     TelmoniResourceKind, ViewKind,
@@ -246,5 +250,21 @@ impl Telemetry for TelemetrySeam {
             query: serde_json::to_value(query).or_internal("a checked view")?,
             dropped,
         })
+    }
+
+    async fn act_on_incident(
+        &self,
+        acting: &Acting,
+        incident_id: Uuid,
+        act: IncidentAct,
+    ) -> Result<IncidentActed, TelmoniError> {
+        match act {
+            IncidentAct::Acknowledge => {
+                handler::incidents::acknowledged(&self.0, acting, incident_id).await
+            }
+            IncidentAct::MuteForAnHour => {
+                handler::mutes::mute_for_an_hour(&self.0, acting, incident_id).await
+            }
+        }
     }
 }

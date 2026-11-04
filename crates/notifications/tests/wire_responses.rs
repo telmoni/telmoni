@@ -11,12 +11,13 @@ use uuid::Uuid;
 use telmoni_notifications::connector::{ConnectionStatus, Provider};
 use telmoni_notifications::db::{
     AttemptLogEntry, AttemptOutcome, AttemptTrigger, ConnectionSummary, DeliveryLogEntry,
-    DeliveryStatus, FeedItem,
+    DeliveryStatus, FeedItem, SlackIdentity,
 };
 use telmoni_notifications::handler::Feed;
 use telmoni_notifications::handler::connectors::{
     Authorize, ConnectionAnswer, ConnectorListing, DeliveryLogPage, SendAnswer, SigningSecret,
 };
+use telmoni_notifications::handler::slack_identities::IdentityList;
 use telmoni_shared::test_util::pin_contract;
 use telmoni_shared::{NotificationKind, Redacted};
 
@@ -210,6 +211,29 @@ fn a_connect_answers_as_the_console_reads() {
         &Authorize {
             url: "https://slack.com/oauth/v2/authorize?client_id=1&state=s".into(),
             state: "s".into(),
+        },
+    );
+}
+
+/// A person's linked Slack accounts, as their account settings read them.
+#[test]
+fn the_slack_accounts_answer_as_the_console_reads() {
+    pin(
+        "slack-identities",
+        &IdentityList {
+            offered: true,
+            identities: vec![
+                SlackIdentity {
+                    team_id: "T0001".into(),
+                    team_name: Some("Acme".into()),
+                    linked_at: at(0),
+                },
+                SlackIdentity {
+                    team_id: "T0002".into(),
+                    team_name: None,
+                    linked_at: at(3_600),
+                },
+            ],
         },
     );
 }

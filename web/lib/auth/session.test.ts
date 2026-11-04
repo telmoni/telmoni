@@ -80,6 +80,7 @@ describe("sealPkce / unsealPkce", () => {
 
 describe("sealConnect / unsealConnect", () => {
   const pending = {
+    purpose: "install" as const,
     state: "st8",
     organizationId: "org_abc",
     projectId: "project_abc",
@@ -89,6 +90,14 @@ describe("sealConnect / unsealConnect", () => {
   it("round-trips the handshake through seal/unseal", async () => {
     const sealed = await sealConnect(pending);
     expect(await unsealConnect(sealed)).toEqual(pending);
+  });
+
+  // A person linking their own account names no project.
+  it("round-trips a person's own sign-in, and refuses one without its purpose", async () => {
+    const own = { purpose: "identity" as const, state: "st8", provider: "slack" as const };
+    expect(await unsealConnect(await sealConnect(own))).toEqual(own);
+    const unnamed = { state: "st8", organizationId: "org_abc", projectId: "project_abc" };
+    expect(await unsealConnect(await sealConnect(unnamed as never))).toBeNull();
   });
 
   it("refuses garbage, an empty value and a wrong secret", async () => {

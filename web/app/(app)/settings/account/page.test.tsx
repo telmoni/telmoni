@@ -47,6 +47,12 @@ vi.mock("./_default-organization", () => ({
   ),
 }));
 
+vi.mock("./_slack", () => ({
+  UnlinkSlack: ({ teamId, workspace }: { teamId: string; workspace: string }) => (
+    <button type="button" data-testid={`unlink-${teamId}`}>{`Unlink ${workspace}`}</button>
+  ),
+}));
+
 // `/me`, for the organizations. Unread by default, so every test that is not
 // about the default organization sees the page as it stands without one.
 const context = vi.hoisted(() => ({
@@ -55,10 +61,18 @@ const context = vi.hoisted(() => ({
     defaultOrganizationId: string | null;
   } | null,
 }));
+// The Slack accounts linked. Unread by default, as `/me` is.
+const slack = vi.hoisted(() => ({
+  value: null as {
+    offered: boolean;
+    identities: { team_id: string; team_name: string | null; linked_at: string }[];
+  } | null,
+}));
 vi.mock("@/lib/server/data", () => ({
   getServerContext: async () => context.value,
   defaultOrganization: (ctx: NonNullable<typeof context.value>) =>
     ctx.organizations.find((o) => o.organizationId === ctx.defaultOrganizationId) ?? null,
+  fetchSlackIdentities: async () => slack.value,
 }));
 
 const session = vi.hoisted(() => ({
@@ -78,6 +92,7 @@ vi.mock("@/lib/server/session", () => ({
 beforeEach(() => {
   session.value = { ...session.value, authMethod: "google" };
   context.value = null;
+  slack.value = null;
 });
 
 import AccountPage from "./page";
@@ -196,10 +211,55 @@ describe("AccountPage", () => {
     expect(screen.getByText("k@example.com")).toBeInTheDocument();
   });
 
+  it("leaves Slack out where the service cannot link one", async () => {
+    slack.value = { offered: false, identities: [] };
+    render(await AccountPage());
+    expect(screen.queryByRole("heading", { level: 2, name: /^slack$/i })).toBeNull();
+  });
+
+  // Last: what acts as you somewhere else, each workspace by its own name
+  // with its Unlink, and a plain link that starts the sign-in.
+  it("offers Slack last, its accounts by workspace and the link that starts a sign-in", async () => {
+    slack.value = {
+      offered: true,
+      identities: [
+        { team_id: "T0001", team_name: "Acme", linked_at: "2026-11-04T10:00:00Z" },
+        { team_id: "T0002", team_name: null, linked_at: "2026-11-04T11:00:00Z" },
+      ],
+    };
+    render(await AccountPage());
+    const headings = screen
+      .getAllByRole("heading", { level: 2 })
+      .map((h) => h.textContent?.toLowerCase() ?? "");
+    expect(headings).toEqual(["profile", "slack"]);
+    expect(screen.getByTestId("unlink-T0001")).toHaveTextContent("Unlink Acme");
+    expect(screen.getByTestId("unlink-T0002")).toHaveTextContent("Unlink T0002");
+    expect(screen.getByRole("link", { name: "Link another Slack account" })).toHaveAttribute(
+      "href",
+      "/connect/slack/identity",
+    );
+    // Where a press refused in Slack sends the presser.
+    expect(document.getElementById("slack")).not.toBeNull();
+  });
+
+  it.each([
+    ["linked", "Your Slack account is linked."],
+    ["elsewhere", "That Slack account is linked to another account here. Unlink it there first."],
+    ["nonsense", "That sign-in expired or was already used. Start again."],
+  ])("says how a link came back, ?slack=%s", async (word, words) => {
+    slack.value = { offered: true, identities: [] };
+    render(await AccountPage({ searchParams: Promise.resolve({ slack: word }) }));
+    expect(screen.getByRole("status")).toHaveTextContent(words);
+    expect(screen.getByRole("link", { name: "Link your Slack account" })).toBeInTheDocument();
+  });
+
   // Everything else on the page is the session's, so it stands when `/me`
-  // cannot be read; the organizations are the one thing asked for.
-  it("reads nothing but /me", () => {
+  // or the Slack accounts cannot be read: those two are all it asks for.
+  it("reads nothing but /me and the Slack accounts linked", () => {
     const source = readFileSync(path.join(__dirname, "page.tsx"), "utf8");
-    expect(source).not.toMatch(/\bfetch[A-Z]/);
+    expect(source.match(/\bfetch[A-Z]\w*/g)).toEqual([
+      "fetchSlackIdentities",
+      "fetchSlackIdentities",
+    ]);
   });
 });

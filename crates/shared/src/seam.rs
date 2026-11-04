@@ -259,6 +259,20 @@ pub trait Auth: Send + Sync {
         Err(not_linked("an API key"))
     }
 
+    /// The person `user_id` on `project_id`, read from the tables as
+    /// [`Auth::resolve_again`] reads them, for a caller another party vouched
+    /// for rather than a bearer: a press of Slack's signed button, matched to
+    /// the person by the Slack account they linked. It names no session, and
+    /// refuses a person who has asked to be deleted.
+    async fn resolve_person(
+        &self,
+        user_id: &UserId,
+        project_id: &ProjectId,
+    ) -> Result<Acting, TelmoniError> {
+        let _ = (user_id, project_id);
+        Err(not_linked("a person vouched for"))
+    }
+
     /// Where each of `projects` is held now — its organization, and the slugs
     /// the console's paths spell both by — for every one that still exists;
     /// one that does not is left out. For a module keying rows on a project
@@ -571,6 +585,19 @@ pub struct Notice<'a> {
     /// The emit-idempotency key, minted by the producer as `<producer>:<id>`.
     /// A replay answers the first emit's row and enqueues nothing.
     pub dedup_key: Option<&'a str>,
+    /// The incident the notice opens or reminds of, which a connector able
+    /// to act on it offers to; `None` for every other notice.
+    pub incident: Option<IncidentNotice<'a>>,
+}
+
+/// An incident as its notice carries it to a connector: what Slack draws
+/// its buttons from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IncidentNotice<'a> {
+    /// The incident.
+    pub id: Uuid,
+    /// The run the notice shows, on the console; none where it shows none.
+    pub run_url: Option<&'a str>,
 }
 
 /// A word to an organization's owner and admins on its own feed, never a
@@ -598,6 +625,7 @@ impl<'a> OrganizationAlert<'a> {
             body: self.body,
             metadata: self.metadata,
             dedup_key: self.dedup_key,
+            incident: None,
         }
     }
 }
@@ -771,9 +799,9 @@ pub trait Notifications: Send + Sync {
     async fn purge_project_for_move(&self, project_id: &ProjectId) -> Result<u64, TelmoniError>;
 
     /// Every notice that named the person, rewritten to name a former
-    /// member, on every feed and every delivery still holding the text.
-    /// Answers how many rows were rewritten. Idempotent, and an error stops
-    /// the erasure it is part of.
+    /// member, on every feed and every delivery still holding the text, and
+    /// the Slack accounts they linked deleted. Answers how many rows were
+    /// rewritten. Idempotent, and an error stops the erasure it is part of.
     async fn redact_person(&self, user_id: &UserId) -> Result<u64, TelmoniError>;
 
     /// The next page of one source, in its own order after `after`, for the
@@ -883,9 +911,41 @@ pub struct DroppedValue {
     pub value: String,
 }
 
+/// What a person does to an incident where its notice is told.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IncidentAct {
+    /// Taken, as the console's Acknowledge takes it: its reminders stop.
+    Acknowledge,
+    /// Its alert muted for an hour, as a maintenance window made on the
+    /// console mutes it.
+    MuteForAnHour,
+}
+
+/// What an [`IncidentAct`] came to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IncidentActed {
+    /// Taken now.
+    Acknowledged,
+    /// Taken before, by anyone: nothing done.
+    AcknowledgedAlready,
+    /// Resolved before: nothing done.
+    ResolvedAlready,
+    /// Muted by a window made now.
+    Muted {
+        /// When the window ends.
+        until: DateTime<Utc>,
+    },
+    /// A window in force mutes it already: none made.
+    MutedAlready {
+        /// When the last window muting it ends.
+        until: DateTime<Utc>,
+    },
+}
+
 /// What telemetry does for the modules beside it: forget what it holds of an
 /// organization or a project when it goes, follow a project to the
-/// organization it moves to, and hand the agent the trace list's words.
+/// organization it moves to, hand the agent the trace list's words, and act
+/// on an incident for a person where its notice is told.
 /// Each call is idempotent; each purge answers how many rows went.
 ///
 /// What it holds is each project's settings, in Postgres, and the project's
@@ -975,6 +1035,19 @@ pub trait Telemetry: Send + Sync {
     ) -> Result<CheckedTraceView, TelmoniError> {
         let _ = (acting, query, vocabulary);
         Err(not_linked("a trace view's check"))
+    }
+
+    /// `act` done to one of the project's incidents by the person `acting`
+    /// names, through the console's own lanes' writes, so its audit row is
+    /// theirs: for a press of a button on the incident's notice.
+    async fn act_on_incident(
+        &self,
+        acting: &Acting,
+        incident_id: Uuid,
+        act: IncidentAct,
+    ) -> Result<IncidentActed, TelmoniError> {
+        let _ = (acting, incident_id, act);
+        Err(not_linked("an act on an incident"))
     }
 }
 
