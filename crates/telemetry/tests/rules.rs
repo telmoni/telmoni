@@ -911,3 +911,282 @@ async fn a_score_alert_reads_its_scores_and_a_drop_against_the_day_before(pool: 
         .expect("the incident's runs");
     assert_eq!(shown, [lowest.run_id]);
 }
+
+/// A span of `run`'s, of `agent`, received at `at`.
+fn of_run(
+    project: &ProjectId,
+    run: Uuid,
+    agent: &str,
+    kind: SpanKind,
+    name: &str,
+    at: DateTime<Utc>,
+) -> telmoni_telemetry::store::SpanRow {
+    telmoni_telemetry::store::SpanRow {
+        run_id: run,
+        agent: agent.into(),
+        span_id: format!("{:016x}", at.timestamp_micros()),
+        ..common::received(project, kind, name, 100, at)
+    }
+}
+
+/// The runs `name`'s incidents showed.
+async fn shown_by(pool: &PgPool, name: &str) -> Vec<Uuid> {
+    sqlx::query_scalar(
+        "SELECT unnest(i.runs) FROM telemetry.incidents i JOIN telemetry.rules r ON r.id = i.rule_id
+          WHERE r.name = $1",
+    )
+    .bind(name)
+    .fetch_all(pool)
+    .await
+    .expect("the incident's runs")
+}
+
+/// ⚠ A run that calls one tool twelve times in a row, model calls between,
+/// opens an incident on its repeats, its notice naming the agent, the tool and
+/// the runs that did so; and its steps are read whole, as they land.
+#[sqlx::test]
+async fn a_run_calling_one_tool_twelve_times_in_a_row_opens_an_incident(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let (auth, organization, project, _) = seated();
+    let notices = common::NoticeLog::new();
+    let state = common::state_with_console(&pool, auth, notices.clone());
+    let app = router(state.clone());
+    let now = Utc::now();
+    let (looping, broken) = (Uuid::new_v4(), Uuid::new_v4());
+    let mut rows = Vec::new();
+    for n in 0..12 {
+        let at = now - TimeDelta::minutes(40) + TimeDelta::seconds(n * 20);
+        rows.push(of_run(
+            &project,
+            looping,
+            "support-agent",
+            SpanKind::ModelCall,
+            "chat",
+            at,
+        ));
+        rows.push(of_run(
+            &project,
+            looping,
+            "support-agent",
+            SpanKind::ToolCall,
+            "search",
+            at + TimeDelta::seconds(10),
+        ));
+    }
+    for n in 0..2 {
+        let at = now - TimeDelta::minutes(30) + TimeDelta::seconds(n);
+        rows.push(of_run(
+            &project,
+            looping,
+            "support-agent",
+            SpanKind::Step,
+            "plan",
+            at,
+        ));
+    }
+    // Three, then another tool, then two: its longest stretch is three.
+    for (n, tool) in ["search", "search", "search", "fetch", "search", "search"]
+        .into_iter()
+        .enumerate()
+    {
+        let at =
+            now - TimeDelta::minutes(20) + TimeDelta::seconds(i64::try_from(n).expect("a few"));
+        rows.push(of_run(
+            &project,
+            broken,
+            "support-agent",
+            SpanKind::ToolCall,
+            tool,
+            at,
+        ));
+    }
+    ch.store
+        .insert_spans(&rows)
+        .await
+        .expect("the spans are kept");
+    for body in [
+        json!({ "name": "Loops", "kind": "run", "measure": "repeats", "aggregation": "max",
+            "filters": { "agent": ["support-agent"] }, "window": "hour", "operator": "gte",
+            "alert_threshold": 12, "warning_threshold": 6 }),
+        json!({ "name": "Long runs", "kind": "run", "measure": "steps", "aggregation": "max",
+            "window": "hour", "operator": "gt", "alert_threshold": 100 }),
+    ] {
+        let made = request(
+            "POST",
+            LANE,
+            "user_member",
+            &organization,
+            &project,
+            Some(&body),
+        );
+        let (status, made) = answer(&app, made).await;
+        assert_eq!(status, StatusCode::CREATED, "{made}");
+    }
+
+    assert_eq!(evaluate::pass(&state).await.expect("a pass"), 2);
+    let (_, listed) = answer(
+        &app,
+        request("GET", LANE, "user_member", &organization, &project, None),
+    )
+    .await;
+    let of = |name: &str| {
+        listed["rules"]
+            .as_array()
+            .and_then(|rules| rules.iter().find(|rule| rule["name"] == name))
+            .cloned()
+            .expect("the alert")
+    };
+    let loops = of("Loops");
+    assert_eq!(loops["value"], json!(12.0), "{loops}");
+    assert_eq!(loops["severity"], "alert");
+    assert_eq!(
+        of("Long runs")["value"],
+        json!(2.0),
+        "the looping run's two steps"
+    );
+    assert_eq!(shown_by(&pool, "Loops").await, [looping]);
+    let told = notices.notices();
+    let opened = told
+        .iter()
+        .find(|notice| notice.title == "Loops: alert")
+        .expect("the loop told");
+    assert!(
+        opened.body.contains(
+            "The most times a run called one tool in a row over the last hour is 12, past the \
+             alert threshold of 12."
+        ),
+        "{}",
+        opened.body
+    );
+    assert!(
+        opened.body.contains(
+            "1 run of support-agent called search 12 or more times in a row, this one 12: "
+        ),
+        "{}",
+        opened.body
+    );
+}
+
+/// ⚠ A run whose spans landed and whose own has not, quiet past the window,
+/// opens an incident showing it; one that ended, or is still going, does
+/// not; and its own span landing resolves it.
+#[sqlx::test]
+async fn a_run_left_open_past_the_window_opens_an_incident(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let (auth, organization, project, _) = seated();
+    let notices = common::NoticeLog::new();
+    let state = common::state_with_console(&pool, auth, notices.clone());
+    let app = router(state.clone());
+    let now = Utc::now();
+    let quiet = now - TimeDelta::minutes(90);
+    let (stalled, ended, going) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+    let agent = "support-agent";
+    let rows = vec![
+        of_run(&project, stalled, agent, SpanKind::Step, "plan", quiet),
+        of_run(
+            &project,
+            stalled,
+            agent,
+            SpanKind::ModelCall,
+            "chat",
+            quiet + TimeDelta::seconds(5),
+        ),
+        of_run(&project, ended, agent, SpanKind::Step, "plan", quiet),
+        of_run(
+            &project,
+            ended,
+            agent,
+            SpanKind::Run,
+            "answer",
+            quiet + TimeDelta::minutes(5),
+        ),
+        of_run(&project, going, agent, SpanKind::Step, "plan", quiet),
+        of_run(
+            &project,
+            going,
+            agent,
+            SpanKind::Step,
+            "plan",
+            now - TimeDelta::minutes(5),
+        ),
+    ];
+    ch.store
+        .insert_spans(&rows)
+        .await
+        .expect("the spans are kept");
+    let body = json!({ "name": "Stalls", "kind": "run", "measure": "stalled",
+        "aggregation": "count", "window": "hour", "operator": "gte", "alert_threshold": 1 });
+    let made = request(
+        "POST",
+        LANE,
+        "user_member",
+        &organization,
+        &project,
+        Some(&body),
+    );
+    let (status, made) = answer(&app, made).await;
+    assert_eq!(status, StatusCode::CREATED, "{made}");
+    let rule = format!("{LANE}/{}", made["id"].as_str().expect("an id"));
+
+    assert_eq!(evaluate::pass(&state).await.expect("a pass"), 1);
+    let (_, stalls) = answer(
+        &app,
+        request("GET", &rule, "user_member", &organization, &project, None),
+    )
+    .await;
+    assert_eq!(stalls["value"], json!(1.0), "{stalls}");
+    assert_eq!(stalls["severity"], "alert");
+    assert_eq!(shown_by(&pool, "Stalls").await, [stalled]);
+    let told = notices.notices();
+    let opened = told.first().expect("the stall told");
+    assert!(
+        opened.body.contains(
+            "The count of runs left open and quiet for over an hour is 1, past the alert \
+             threshold of 1."
+        ),
+        "{}",
+        opened.body
+    );
+    assert!(
+        opened.body.contains("The run quiet longest: "),
+        "{}",
+        opened.body
+    );
+
+    // Its own span lands at last: nothing is left open, and the incident resolves.
+    ch.store
+        .insert_spans(&[of_run(
+            &project,
+            stalled,
+            agent,
+            SpanKind::Run,
+            "answer",
+            now,
+        )])
+        .await
+        .expect("the run span is kept");
+    sqlx::query("UPDATE telemetry.rules SET evaluated_at = NULL")
+        .execute(&pool)
+        .await
+        .expect("due again");
+    assert_eq!(evaluate::pass(&state).await.expect("a pass"), 1);
+    let (_, stalls) = answer(
+        &app,
+        request("GET", &rule, "user_member", &organization, &project, None),
+    )
+    .await;
+    assert_eq!(stalls["value"], json!(0.0), "{stalls}");
+    assert_eq!(stalls["severity"], "ok");
+    let resolved: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM telemetry.incidents WHERE status = 'resolved'")
+            .fetch_one(&pool)
+            .await
+            .expect("a count");
+    assert_eq!(resolved, 1);
+}

@@ -480,7 +480,8 @@ impl RuleInput {
             return Err(bad(&format!(
                 "{} is not folded by {}: count takes count; failures count or avg; duration \
                  avg, sum or a percentile; tokens avg or sum; cost avg, sum or max; score \
-                 count, avg, max or a percentile; burn avg",
+                 count, avg, max or a percentile; burn avg; steps avg, max or a percentile; \
+                 repeats max; stalled count",
                 self.measure, self.aggregation
             )));
         }
@@ -489,6 +490,9 @@ impl RuleInput {
                 RuleMeasure::Tokens => "tokens are counted on model calls alone",
                 RuleMeasure::Score => "a score alert is a run's: it reads every score of its name",
                 RuleMeasure::Burn => "an objective is a run's",
+                RuleMeasure::Steps | RuleMeasure::Repeats | RuleMeasure::Stalled => {
+                    "a run's steps, its repeats and a stall are read run by run"
+                }
                 _ => "cost is counted per run, from its model calls",
             }));
         }
@@ -530,6 +534,22 @@ impl RuleInput {
             return Err(bad(
                 "a month so far has no window of its length before it: read the hour, day or \
                  week against the one before",
+            ));
+        }
+        if self.measure == RuleMeasure::Stalled && self.window == RuleWindow::Month {
+            return Err(bad(
+                "a stall is a run quiet past the window: an hour, a day or a week",
+            ));
+        }
+        let run_by_run = matches!(
+            self.measure,
+            RuleMeasure::Steps | RuleMeasure::Repeats | RuleMeasure::Stalled
+        );
+        // Read as its spans land, before the run's own status is known.
+        if run_by_run && !filters.status.is_empty() {
+            return Err(bad(
+                "a run's steps, its repeats and a stall are read as its spans land: filter \
+                 them by agent, environment or release",
             ));
         }
         if self.measure == RuleMeasure::Cost {
@@ -872,6 +892,18 @@ mod tests {
                     RuleAggregation::Avg | RuleAggregation::Sum | RuleAggregation::Max
                 )
             );
+            assert_eq!(
+                RuleMeasure::Steps.folds(aggregation),
+                !matches!(aggregation, RuleAggregation::Count | RuleAggregation::Sum)
+            );
+            assert_eq!(
+                RuleMeasure::Repeats.folds(aggregation),
+                aggregation == RuleAggregation::Max
+            );
+            assert_eq!(
+                RuleMeasure::Stalled.folds(aggregation),
+                aggregation == RuleAggregation::Count
+            );
         }
         let refused = RuleInput {
             aggregation: RuleAggregation::Count,
@@ -1047,6 +1079,83 @@ mod tests {
                 .checked()
                 .is_err()
             );
+        }
+    }
+
+    /// A run's steps, repeats and stalls are a run's, read as its spans land,
+    /// and a stall over a window of a fixed length.
+    #[test]
+    fn steps_repeats_and_stalls_are_read_run_by_run() {
+        let of = |measure, aggregation| RuleInput {
+            kind: SpanKind::Run,
+            measure,
+            aggregation,
+            filters: RuleFilters {
+                agent: vec!["support-agent".into()],
+                release: vec!["v2".into()],
+                ..RuleFilters::default()
+            },
+            alert_threshold: 12.0,
+            warning_threshold: Some(8.0),
+            ..input()
+        };
+        for kept in [
+            of(RuleMeasure::Steps, RuleAggregation::P95),
+            of(RuleMeasure::Steps, RuleAggregation::Max),
+            of(RuleMeasure::Repeats, RuleAggregation::Max),
+            of(RuleMeasure::Stalled, RuleAggregation::Count),
+        ] {
+            assert!(kept.clone().checked().is_ok(), "{kept:?}");
+        }
+        let monthly = RuleInput {
+            window: RuleWindow::Month,
+            ..of(RuleMeasure::Stalled, RuleAggregation::Count)
+        };
+        assert!(monthly.checked().is_err(), "a stall's window has a length");
+        let weekly = RuleInput {
+            window: RuleWindow::Week,
+            ..of(RuleMeasure::Stalled, RuleAggregation::Count)
+        };
+        assert!(weekly.checked().is_ok());
+        for measure in [
+            RuleMeasure::Steps,
+            RuleMeasure::Repeats,
+            RuleMeasure::Stalled,
+        ] {
+            let aggregation = if measure == RuleMeasure::Stalled {
+                RuleAggregation::Count
+            } else {
+                RuleAggregation::Max
+            };
+            for refused in [
+                RuleFilters {
+                    status: vec![SpanStatus::Error],
+                    ..RuleFilters::default()
+                },
+                RuleFilters {
+                    tool: vec!["search".into()],
+                    ..RuleFilters::default()
+                },
+                RuleFilters {
+                    model: vec!["gpt-4o".into()],
+                    ..RuleFilters::default()
+                },
+                RuleFilters {
+                    tag: vec!["team:support".into()],
+                    ..RuleFilters::default()
+                },
+            ] {
+                let filtered = RuleInput {
+                    filters: refused,
+                    ..of(measure, aggregation)
+                };
+                assert!(filtered.checked().is_err(), "{measure}");
+            }
+            let of_steps = RuleInput {
+                kind: SpanKind::Step,
+                ..of(measure, aggregation)
+            };
+            assert!(of_steps.checked().is_err(), "{measure} is a run's");
         }
     }
 

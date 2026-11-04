@@ -1,9 +1,10 @@
 //! The run a notice shows, picked from the spans its alert counted over its
 //! window: the latest that failed for failures, the slowest for a duration,
 //! the one with the most tokens for tokens, the one that spent the most for
-//! a cost, the one scored lowest or highest for a score, as it crosses, else
-//! the latest; and that run as its spans so far tell it, its
-//! spend among them. Names and counts alone, never a content field.
+//! a cost, the one scored lowest or highest for a score, as it crosses, the
+//! one with the most steps, the longest loop or the longest quiet, else the
+//! latest; and that run as its spans so far tell it, its spend among them.
+//! Names and counts alone, never a content field.
 
 use chrono::{DateTime, Utc};
 use clickhouse::Row;
@@ -14,7 +15,7 @@ use telmoni_shared::{RuleMeasure, RuleOperator};
 
 use crate::AppState;
 use crate::rules::db::RuleRow;
-use crate::rules::evaluate::Window;
+use crate::rules::evaluate::{self, Window};
 use crate::spend::{self, Unread};
 use crate::store::{Projects, micros};
 
@@ -27,6 +28,9 @@ pub enum Pick {
     MostSpent,
     LowestScored,
     HighestScored,
+    MostSteps,
+    LongestRepeat,
+    Stalest,
     Latest,
 }
 
@@ -44,6 +48,9 @@ impl Pick {
             RuleMeasure::Tokens => Self::MostTokens,
             RuleMeasure::Cost => Self::MostSpent,
             RuleMeasure::Score => Self::LowestScored,
+            RuleMeasure::Steps => Self::MostSteps,
+            RuleMeasure::Repeats => Self::LongestRepeat,
+            RuleMeasure::Stalled => Self::Stalest,
             RuleMeasure::Count => Self::Latest,
         }
     }
@@ -56,9 +63,23 @@ impl Pick {
             Self::MostSpent => "most_spent",
             Self::LowestScored => "lowest_scored",
             Self::HighestScored => "highest_scored",
+            Self::MostSteps => "most_steps",
+            Self::LongestRepeat => "longest_repeat",
+            Self::Stalest => "stalest",
             Self::Latest => "latest",
         }
     }
+}
+
+/// A loop as a notice tells it: the agent and tool of the longest stretch,
+/// its length, and how many runs of that agent called that tool past each threshold.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Repeated {
+    pub agent: String,
+    pub tool: String,
+    pub times: u64,
+    pub past_alert: u64,
+    pub past_warning: u64,
 }
 
 /// A run as a notice tells it.
@@ -80,6 +101,8 @@ pub struct ExampleRun {
     pub unpriced: Vec<(String, String)>,
     /// Whether its own span has arrived, past which its counts are whole.
     pub ended: bool,
+    /// The loop it shows, for an alert on repeats.
+    pub repeated: Option<Repeated>,
 }
 
 /// The run of the window's span the pick names, over the filters the
@@ -112,6 +135,32 @@ const SCORED_SQL: &str = concat!(
     "ORDER BY if({pick:String} = 'highest_scored', -v, v) ASC LIMIT 1"
 );
 
+/// The run of the window with the most steps, the latest of those tied.
+const MOST_STEPS_SQL: &str = concat!(
+    "SELECT run_id FROM (",
+    evaluate::run_steps!(),
+    ") ORDER BY n DESC, last DESC LIMIT 1"
+);
+
+/// The run quiet longest of those a stall alert counts.
+const STALEST_SQL: &str = concat!(
+    "SELECT run_id FROM (",
+    evaluate::stalled_runs!(),
+    ") ORDER BY n DESC, last DESC LIMIT 1"
+);
+
+/// The run that called one tool the most times in a row, the latest of those
+/// tied, with its agent and tool, and how many runs of that agent called
+/// that tool in a row at least as often as each threshold, as `strict` compares.
+const REPEATED_SQL: &str = concat!(
+    "SELECT argMax(run_id, (n, last)) AS run_id, agent, tool, max(n) AS times, ",
+    "countIf(if({strict:Bool}, n > {alert:Float64}, n >= {alert:Float64})) AS past_alert, ",
+    "countIf(if({strict:Bool}, n > {warning:Float64}, n >= {warning:Float64})) ",
+    "AS past_warning FROM (",
+    evaluate::run_repeats!(),
+    ") WHERE n > 0 GROUP BY agent, tool ORDER BY times DESC, max(last) DESC LIMIT 1"
+);
+
 /// One run's spans so far, summed.
 const RUN_SQL: &str = concat!(
     "SELECT argMaxIf(name, ended_at, kind = 'step') AS last_step, ",
@@ -128,6 +177,17 @@ const RUN_SQL: &str = concat!(
 struct Picked {
     #[serde(with = "clickhouse::serde::uuid")]
     run_id: Uuid,
+}
+
+#[derive(Row, Deserialize)]
+struct RepeatedRow {
+    #[serde(with = "clickhouse::serde::uuid")]
+    run_id: Uuid,
+    agent: String,
+    tool: String,
+    times: u64,
+    past_alert: u64,
+    past_warning: u64,
 }
 
 #[derive(Row, Deserialize)]
@@ -159,9 +219,44 @@ pub async fn example(
         _ => Pick::of(rule.definition.measure, rule.definition.operator),
     };
     let projects = Projects::one(rule.project_id.clone());
+    let mut repeated = None;
     let run_id = if pick == Pick::MostSpent {
         let spent = spend::runs(state, &projects, window, filters).await?;
         (spent.runs > 0).then_some(spent.costliest)
+    } else if matches!(pick, Pick::MostSteps | Pick::Stalest) {
+        let sql = if pick == Pick::MostSteps {
+            MOST_STEPS_SQL
+        } else {
+            STALEST_SQL
+        };
+        let picked: Option<Picked> = evaluate::by_run(state, rule, now, sql)
+            .fetch_optional()
+            .await?;
+        picked.map(|Picked { run_id }| run_id)
+    } else if pick == Pick::LongestRepeat {
+        let definition = &rule.definition;
+        let row: Option<RepeatedRow> = evaluate::by_run(state, rule, now, REPEATED_SQL)
+            .param("strict", definition.operator == RuleOperator::Gt)
+            .param("alert", definition.alert_threshold)
+            .param(
+                "warning",
+                definition
+                    .warning_threshold
+                    .unwrap_or(definition.alert_threshold),
+            )
+            .fetch_optional()
+            .await?;
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        repeated = Some(Repeated {
+            agent: row.agent,
+            tool: row.tool,
+            times: row.times,
+            past_alert: row.past_alert,
+            past_warning: row.past_warning,
+        });
+        Some(row.run_id)
     } else if matches!(pick, Pick::LowestScored | Pick::HighestScored) {
         let picked: Option<Picked> = state
             .store
@@ -208,6 +303,7 @@ pub async fn example(
         spent: spent.spent,
         unpriced: spent.unpriced,
         ended: summed.runs > 0,
+        repeated,
     }))
 }
 
@@ -247,6 +343,18 @@ mod tests {
             Pick::Slowest
         );
         assert_eq!(Pick::of(RuleMeasure::Count, RuleOperator::Lt), Pick::Latest);
+        assert_eq!(
+            Pick::of(RuleMeasure::Steps, RuleOperator::Gt),
+            Pick::MostSteps
+        );
+        assert_eq!(
+            Pick::of(RuleMeasure::Repeats, RuleOperator::Gte),
+            Pick::LongestRepeat
+        );
+        assert_eq!(
+            Pick::of(RuleMeasure::Stalled, RuleOperator::Gt),
+            Pick::Stalest
+        );
         for pick in [Pick::LatestFailed, Pick::Slowest, Pick::MostTokens] {
             assert!(PICK_SQL.contains(&format!("'{}'", pick.as_str())));
         }

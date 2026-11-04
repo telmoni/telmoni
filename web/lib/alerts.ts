@@ -65,17 +65,34 @@ export const LINKS_MAX = 20;
  *  resolved ones. */
 export const INCIDENTS_MAX = 200;
 
-/** What an alert of `kind` measures: tokens on model calls alone, and cost on
- *  runs alone, from their calls; a score alert, reading every score of its
- *  name, is a run's. */
+/** What an alert of `kind` measures: tokens on model calls alone, and on runs
+ *  alone what is read run by run, or from scores. */
 export function measuresFor(kind: AlertKind): RuleMeasure[] {
   return [
     RuleMeasure.Count,
     RuleMeasure.Failures,
     RuleMeasure.Duration,
     ...(kind === SpanKind.ModelCall ? [RuleMeasure.Tokens] : []),
-    ...(kind === SpanKind.Run ? [RuleMeasure.Cost, RuleMeasure.Score] : []),
+    ...(kind === SpanKind.Run
+      ? [RuleMeasure.Cost, RuleMeasure.Steps, RuleMeasure.Repeats, RuleMeasure.Stalled, RuleMeasure.Score]
+      : []),
   ];
+}
+
+/** What a measure read run by run counts, as the form says it under the measure. */
+export const MEASURE_HINT: Partial<Record<RuleMeasure, string>> = {
+  [RuleMeasure.Steps]: "Each run's steps, a run still going counted as far as it has gone.",
+  [RuleMeasure.Repeats]:
+    "The most times in a row each run called one tool, whatever it called between them: a loop.",
+  [RuleMeasure.Stalled]:
+    "Runs whose spans have landed and whose own has not, quiet longer than the window: a stall, counted for one window more.",
+};
+
+/** The windows an alert on `measure` reads: a stall is quiet past a window of
+ *  a fixed length, which a month so far is not. */
+export function alertWindowsFor(measure: RuleMeasure): RuleWindow[] {
+  const all = Object.values(RuleWindow);
+  return measure === RuleMeasure.Stalled ? all.filter((window) => window !== RuleWindow.Month) : all;
 }
 
 /** How `measure` is folded over the window, as the server's `folds` admits:
@@ -111,6 +128,19 @@ export function aggregationsFor(measure: RuleMeasure): readonly [RuleAggregation
       ];
     case RuleMeasure.Burn:
       return [RuleAggregation.Avg];
+    case RuleMeasure.Steps:
+      return [
+        RuleAggregation.Max,
+        RuleAggregation.P95,
+        RuleAggregation.P99,
+        RuleAggregation.P90,
+        RuleAggregation.P50,
+        RuleAggregation.Avg,
+      ];
+    case RuleMeasure.Repeats:
+      return [RuleAggregation.Max];
+    case RuleMeasure.Stalled:
+      return [RuleAggregation.Count];
   }
 }
 
@@ -122,6 +152,9 @@ export const MEASURE_LABEL: Record<RuleMeasure, string> = {
   [RuleMeasure.Cost]: "Cost",
   [RuleMeasure.Score]: "Score",
   [RuleMeasure.Burn]: "Burn rate",
+  [RuleMeasure.Steps]: "Steps",
+  [RuleMeasure.Repeats]: "Repeats",
+  [RuleMeasure.Stalled]: "Stalled",
 };
 
 /** How an aggregation of `measure` reads in the form. */
@@ -145,6 +178,16 @@ export function aggregationLabel(measure: RuleMeasure, aggregation: RuleAggregat
         : aggregation === RuleAggregation.Avg
           ? "Average a run spent"
           : "What the runs spent";
+    case RuleMeasure.Steps:
+      return aggregation === RuleAggregation.Max
+        ? "Most steps a run took"
+        : aggregation === RuleAggregation.Avg
+          ? "Average"
+          : aggregation;
+    case RuleMeasure.Repeats:
+      return "Most times a run called one tool in a row";
+    case RuleMeasure.Stalled:
+      return "How many runs";
     default:
       return aggregation === RuleAggregation.Avg
         ? "Average"
@@ -210,6 +253,19 @@ function measuredWords(alert: Metric): string {
           ? "The average a run spent"
           : "What the runs spent";
     return `${spent} ${over}`;
+  }
+  if (alert.measure === RuleMeasure.Steps) {
+    const steps =
+      alert.aggregation === RuleAggregation.Max
+        ? "The most steps a run took"
+        : alert.aggregation === RuleAggregation.Avg
+          ? "The average steps a run took"
+          : `The ${alert.aggregation} of the steps a run took`;
+    return `${steps} ${over}`;
+  }
+  if (alert.measure === RuleMeasure.Repeats) return `The most times a run called one tool in a row ${over}`;
+  if (alert.measure === RuleMeasure.Stalled) {
+    return `The count of runs left open and quiet for over ${alert.window === RuleWindow.Hour ? "an" : "a"} ${alert.window}`;
   }
   const folded = (() => {
     switch (alert.measure) {
@@ -399,10 +455,20 @@ export function filterFieldsFor(kind: AlertKind, measure: RuleMeasure): FilterFi
   return ["agent", ...own, "environment", "release", ...tag];
 }
 
-/** Whether an alert filters by status: a run's cost does not, since it is
- *  read from the calls as they land, before the run's own status is known. */
+/** Whether an alert filters by status: a run's cost, steps, repeats and
+ *  stalls do not, since they are read as its spans land, before the run's
+ *  own status is known, nor does a score, which takes no filter. */
 export function filtersStatus(measure: RuleMeasure): boolean {
-  return measure !== RuleMeasure.Cost && measure !== RuleMeasure.Score;
+  switch (measure) {
+    case RuleMeasure.Cost:
+    case RuleMeasure.Score:
+    case RuleMeasure.Steps:
+    case RuleMeasure.Repeats:
+    case RuleMeasure.Stalled:
+      return false;
+    default:
+      return true;
+  }
 }
 
 export const FILTER_STATUSES = [SpanStatus.Ok, SpanStatus.Error, SpanStatus.Cancelled] as const;
@@ -750,11 +816,13 @@ export function withKind(draft: AlertDraft, kind: AlertKind): AlertDraft {
   return withMeasure({ ...draft, kind }, measure);
 }
 
-/** The form with its measure changed, its aggregation kept where it folds. */
+/** The form with its measure changed, its aggregation and window kept where
+ *  the measure takes them. */
 export function withMeasure(draft: AlertDraft, measure: RuleMeasure): AlertDraft {
   const folds = aggregationsFor(measure);
   const aggregation = folds.includes(draft.aggregation) ? draft.aggregation : folds[0];
-  return readsNothingAsNoData({ ...draft, measure, aggregation });
+  const window = alertWindowsFor(measure).includes(draft.window) ? draft.window : RuleWindow.Hour;
+  return readsNothingAsNoData({ ...draft, measure, aggregation, window });
 }
 
 /** Whether an empty window is no 0 for the alert: one of scores, or one read
@@ -812,6 +880,9 @@ export function inputOf(
   }
   if (draft.baseline === RuleBaseline.Previous && draft.window === RuleWindow.Month) {
     return fail("A month so far has no window of its length before it: read the hour, day or week.");
+  }
+  if (!alertWindowsFor(draft.measure).includes(draft.window)) {
+    return fail("A stall is a run quiet past the window: the last hour, day or week.");
   }
   const unit = unitOf(draft.measure, draft.aggregation, draft.baseline);
   const alert = parsed(draft.alertThreshold, unit);

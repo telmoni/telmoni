@@ -310,6 +310,9 @@ export const RuleMeasure = {
   Cost:     "cost",
   Score:    "score",
   Burn:     "burn",
+  Steps:    "steps",
+  Repeats:  "repeats",
+  Stalled:  "stalled",
 } as const;
 export type RuleMeasure = typeof RuleMeasure[keyof typeof RuleMeasure];
 

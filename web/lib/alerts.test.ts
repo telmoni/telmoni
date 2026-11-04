@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   ALERT_KINDS,
   NEW_ALERT,
+  alertWindowsFor,
   amount,
   connectionChoices,
   draftOf,
@@ -379,6 +380,73 @@ describe("a score alert", () => {
     );
     expect(amount(RuleMeasure.Score, RuleAggregation.Avg, -12.5, RuleBaseline.Previous)).toBe("-12.5%");
     expect(amount(RuleMeasure.Score, RuleAggregation.Avg, 0.8125)).toBe("0.81");
+  });
+});
+
+describe("loops and stalls", () => {
+  const LOOPS: AlertDraft = {
+    ...NEW_ALERT,
+    name: "Loops",
+    measure: RuleMeasure.Repeats,
+    aggregation: RuleAggregation.Max,
+    operator: RuleOperator.Gte,
+    alertThreshold: "12",
+    filters: { ...NEW_ALERT.filters, agent: "support-agent", tool: "search", model: "gpt-4o" },
+    statuses: [SpanStatus.Error],
+  };
+  const LOOPING = [RuleMeasure.Steps, RuleMeasure.Repeats, RuleMeasure.Stalled];
+
+  it("reads a run's steps, repeats and stalls on runs alone", () => {
+    for (const kind of ALERT_KINDS) {
+      for (const measure of LOOPING) expect(measuresFor(kind).includes(measure)).toBe(kind === SpanKind.Run);
+    }
+  });
+
+  // Read as a run's spans land, before its own status is known.
+  it("filters them by agent, environment and release, never by status", () => {
+    const checked = inputOf(LOOPS);
+    expect(checked.ok && checked.input).toMatchObject({ measure: RuleMeasure.Repeats, filters: { agent: ["support-agent"] } });
+    for (const measure of LOOPING) {
+      expect(filterFieldsFor(SpanKind.Run, measure)).toEqual(["agent", "environment", "release"]);
+      expect(filtersStatus(measure)).toBe(false);
+    }
+  });
+
+  it("reads a stall over the last hour, day or week, never the month so far", () => {
+    expect(alertWindowsFor(RuleMeasure.Stalled)).toEqual([RuleWindow.Hour, RuleWindow.Day, RuleWindow.Week]);
+    expect(alertWindowsFor(RuleMeasure.Steps)).toContain(RuleWindow.Month);
+    const monthly = { ...NEW_ALERT, window: RuleWindow.Month };
+    expect(withMeasure(monthly, RuleMeasure.Stalled)).toMatchObject({
+      aggregation: RuleAggregation.Count,
+      window: RuleWindow.Hour,
+    });
+    expect(withMeasure(monthly, RuleMeasure.Steps).window).toBe(RuleWindow.Month);
+    const stalled = { ...LOOPS, measure: RuleMeasure.Stalled, aggregation: RuleAggregation.Count };
+    expect(inputOf(stalled).ok).toBe(true);
+    expect(inputOf({ ...stalled, window: RuleWindow.Month })).toEqual({
+      ok: false,
+      error: "A stall is a run quiet past the window: the last hour, day or week.",
+    });
+  });
+
+  it("reads in its notices' words", () => {
+    const run = { kind: SpanKind.Run, window: RuleWindow.Hour };
+    expect(metricWords({ ...run, measure: RuleMeasure.Repeats, aggregation: RuleAggregation.Max })).toBe(
+      "The most times a run called one tool in a row over the last hour",
+    );
+    expect(metricWords({ ...run, measure: RuleMeasure.Steps, aggregation: RuleAggregation.P95, window: RuleWindow.Day })).toBe(
+      "The p95 of the steps a run took over the last day",
+    );
+    expect(metricWords({ ...run, measure: RuleMeasure.Steps, aggregation: RuleAggregation.Max })).toBe(
+      "The most steps a run took over the last hour",
+    );
+    expect(metricWords({ ...run, measure: RuleMeasure.Stalled, aggregation: RuleAggregation.Count })).toBe(
+      "The count of runs left open and quiet for over an hour",
+    );
+    expect(
+      metricWords({ ...run, measure: RuleMeasure.Stalled, aggregation: RuleAggregation.Count, window: RuleWindow.Week }),
+    ).toBe("The count of runs left open and quiet for over a week");
+    expect(amount(RuleMeasure.Repeats, RuleAggregation.Max, 12)).toBe("12");
   });
 });
 

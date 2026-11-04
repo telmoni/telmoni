@@ -16,13 +16,13 @@ use telmoni_shared::db::tenant_session::{maintenance_scope, project_scope};
 use telmoni_shared::seam::{Notice, Route};
 use telmoni_shared::{
     IncidentStatus, NotificationKind, OrganizationId, ProjectId, RuleAggregation, RuleBaseline,
-    RuleMeasure, RuleWindow, Severity, SpanKind, SpanStatus, TelmoniError,
+    RuleMeasure, RuleOperator, RuleWindow, Severity, SpanKind, SpanStatus, TelmoniError,
 };
 
 use crate::AppState;
 use crate::db::TelemetryLane;
 use crate::rules::db::{self, RuleRow};
-use crate::rules::example::{self, ExampleRun, Pick};
+use crate::rules::example::{self, ExampleRun, Pick, Repeated};
 use crate::rules::incidents::{self, IncidentRow, Move, Telling, Told};
 use crate::rules::{Link, deliveries, mutes};
 use crate::spend::Unread;
@@ -150,7 +150,7 @@ async fn tell_one(
     let body = carrying(
         body,
         [
-            shown.map(|run| run_line(state, rule, run)),
+            shown.map(|run| run_line(state, rule, run, one.severity)),
             traces_url.as_ref().map(|url| format!("Traces: {url}")),
         ],
     );
@@ -439,11 +439,15 @@ fn run_link(state: &AppState, rule: &RuleRow, run_id: Uuid) -> Option<String> {
     ))
 }
 
-/// The line naming the run a notice shows: which it is, its last step, its
-/// error, its steps, its tokens and what it spent, the models it called that
-/// no price covers, and where it opens.
-fn run_line(state: &AppState, rule: &RuleRow, run: &ExampleRun) -> String {
-    let label = picked(rule.definition.kind, run.pick);
+/// The line naming the run a notice shows: which it is, or the loop it shows
+/// at the threshold `severity` crossed, its last step, its error, its steps,
+/// its tokens and what it spent, the models it called that no price covers,
+/// and where it opens.
+fn run_line(state: &AppState, rule: &RuleRow, run: &ExampleRun, severity: Severity) -> String {
+    let label = run.repeated.as_ref().map_or_else(
+        || picked(rule.definition.kind, run.pick),
+        |repeated| repeated_words(&rule.definition, repeated, severity),
+    );
     let mut parts = Vec::new();
     if let Some(step) = &run.last_step {
         parts.push(format!("last step {}", clipped(step)));
@@ -470,6 +474,41 @@ fn run_line(state: &AppState, rule: &RuleRow, run: &ExampleRun) -> String {
         Some(url) => format!("{label}: {details}. {url}"),
         None => format!("{label} ({}): {details}.", run.run_id),
     }
+}
+
+/// A loop in words, its runs counted at the threshold `severity` crossed:
+/// "3 runs of support-agent called search 10 or more times in a row, this one 12".
+fn repeated_words(
+    definition: &crate::rules::Definition,
+    repeated: &Repeated,
+    severity: Severity,
+) -> String {
+    let (at, runs) = match (severity, definition.warning_threshold) {
+        (Severity::Warning, Some(warning)) => (warning, repeated.past_warning),
+        _ => (definition.alert_threshold, repeated.past_alert),
+    };
+    let called = format!(
+        "{} called {}",
+        clipped(&repeated.agent),
+        clipped(&repeated.tool)
+    );
+    let bound = match definition.operator {
+        RuleOperator::Gt => format!("more than {}", amount(definition, at)),
+        RuleOperator::Gte => format!("{} or more", amount(definition, at)),
+        _ => String::new(),
+    };
+    if bound.is_empty() || runs == 0 {
+        return format!("The run where {called} {} times in a row", repeated.times);
+    }
+    let runs = if runs == 1 {
+        "1 run".to_owned()
+    } else {
+        format!("{runs} runs")
+    };
+    format!(
+        "{runs} of {called} {bound} times in a row, this one {}",
+        repeated.times
+    )
 }
 
 /// The most unpriced names a run's line carries, the rest counted.
@@ -531,6 +570,11 @@ fn picked(kind: SpanKind, pick: Pick) -> String {
         (Pick::MostSpent, _) => "The run that spent the most".to_owned(),
         (Pick::LowestScored, _) => "The run scored lowest".to_owned(),
         (Pick::HighestScored, _) => "The run scored highest".to_owned(),
+        (Pick::MostSteps, _) => "The run with the most steps".to_owned(),
+        (Pick::LongestRepeat, _) => {
+            "The run that called one tool the most times in a row".to_owned()
+        }
+        (Pick::Stalest, _) => "The run quiet longest".to_owned(),
         (Pick::Latest, SpanKind::Run) => "The latest run".to_owned(),
         (Pick::Latest, _) => format!("The run of the latest {one}"),
     }
@@ -803,6 +847,29 @@ fn measured(rule: &RuleRow) -> String {
                 _ => "What the runs spent",
             };
             return format!("{spent} {}", over(rule.definition.window));
+        }
+        (RuleMeasure::Steps, aggregation) => {
+            let steps = match aggregation {
+                RuleAggregation::Avg => "The average steps a run took".to_owned(),
+                RuleAggregation::Max => "The most steps a run took".to_owned(),
+                percentile => format!("The {percentile} of the steps a run took"),
+            };
+            return format!("{steps} {}", over(rule.definition.window));
+        }
+        (RuleMeasure::Repeats, _) => {
+            return format!(
+                "The most times a run called one tool in a row {}",
+                over(rule.definition.window)
+            );
+        }
+        (RuleMeasure::Stalled, _) => {
+            let quiet = match rule.definition.window {
+                RuleWindow::Hour => "an hour",
+                RuleWindow::Day => "a day",
+                RuleWindow::Week => "a week",
+                RuleWindow::Month => "a month",
+            };
+            return format!("The count of runs left open and quiet for over {quiet}");
         }
         // Worded above, by its score's name, and an objective by its promise.
         (RuleMeasure::Score | RuleMeasure::Burn, _) => String::new(),
@@ -1191,6 +1258,64 @@ mod tests {
         assert_eq!(
             picked(SpanKind::Run, Pick::MostSpent),
             "The run that spent the most"
+        );
+        assert_eq!(
+            picked(SpanKind::Run, Pick::MostSteps),
+            "The run with the most steps"
+        );
+        assert_eq!(
+            picked(SpanKind::Run, Pick::Stalest),
+            "The run quiet longest"
+        );
+    }
+
+    /// A loop's runs are counted at the threshold crossed, as the alert compares.
+    #[test]
+    fn a_loop_counts_its_runs_at_the_threshold_crossed() {
+        let repeats = crate::rules::Definition {
+            measure: RuleMeasure::Repeats,
+            aggregation: RuleAggregation::Max,
+            window: RuleWindow::Hour,
+            operator: RuleOperator::Gte,
+            alert_threshold: 10.0,
+            warning_threshold: Some(5.0),
+            ..budget()
+        };
+        let looped = Repeated {
+            agent: "support-agent".into(),
+            tool: "search".into(),
+            times: 12,
+            past_alert: 3,
+            past_warning: 4,
+        };
+        assert_eq!(
+            repeated_words(&repeats, &looped, Severity::Alert),
+            "3 runs of support-agent called search 10 or more times in a row, this one 12"
+        );
+        assert_eq!(
+            repeated_words(&repeats, &looped, Severity::Warning),
+            "4 runs of support-agent called search 5 or more times in a row, this one 12"
+        );
+        let above = crate::rules::Definition {
+            operator: RuleOperator::Gt,
+            ..repeats.clone()
+        };
+        let once = Repeated {
+            past_alert: 1,
+            ..looped.clone()
+        };
+        assert_eq!(
+            repeated_words(&above, &once, Severity::Alert),
+            "1 run of support-agent called search more than 10 times in a row, this one 12"
+        );
+        let below = crate::rules::Definition {
+            operator: RuleOperator::Lt,
+            warning_threshold: None,
+            ..repeats
+        };
+        assert_eq!(
+            repeated_words(&below, &looped, Severity::Alert),
+            "The run where support-agent called search 12 times in a row"
         );
     }
 

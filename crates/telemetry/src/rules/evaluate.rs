@@ -1,14 +1,12 @@
 //! Each alert, evaluated a minute after its last evaluation by whichever
 //! replica leases it first: its value read over the window that ends then —
 //! the full hours from `spans_hourly`, and from `spans` the part of an hour
-//! at either end, so a window that holds no full hour reads `spans` alone;
-//! a run's cost summed with no tag the same way, any other from `spans`
-//! alone, each run's model calls as they landed ([`crate::spend`]) — and settled in a transaction of its own with the
-//! severity it sets and the incident that moves with it ([`incidents`]),
-//! told once that commits. An objective's burn is read from its agent's runs
-//! in `spans`, over the last hour and six hours. Before a pass evaluates an organization's alerts
-//! it holds them to its plan's number, the oldest running and the rest
-//! paused by the plan, read at most every few minutes an organization.
+//! at either end; a run's cost ([`crate::spend`]), steps, repeats and stalls
+//! from `spans` run by run, and an objective's burn from its agent's runs —
+//! and settled in a transaction of its own with the severity it sets and the
+//! incident that moves with it ([`incidents`]), told once that commits.
+//! Before a pass evaluates an organization's alerts it holds them to its
+//! plan's number, read at most every few minutes an organization.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -33,7 +31,7 @@ use crate::handler::chain;
 use crate::rules::db::{self, RuleRow};
 use crate::rules::{Definition, Objective, SLOW_WINDOW, incidents};
 use crate::spend::{self, Unread};
-use crate::store::{Projects, micros, seconds};
+use crate::store::{Projects, Read, micros, seconds};
 
 /// How often each alert is evaluated.
 pub const EVERY: Duration = Duration::from_secs(60);
@@ -104,7 +102,7 @@ const TOTALS_SQL: &str = concat!(
 /// ones left out. Scores are kept by their id, so the window's are found by
 /// a scan of the project's: bounded by retention and the plan's alerts.
 const SCORES_SQL: &str = concat!(
-    "SELECT count() AS scores, avg(v) AS mean, max(v) AS top, ",
+    "SELECT count() AS count, avg(v) AS mean, max(v) AS top, ",
     "CAST(quantiles(0.5, 0.9, 0.95, 0.99)(v) AS Array(Float64)) AS quantiles ",
     "FROM (SELECT argMax(value, received_at) AS v, argMax(is_deleted, received_at) AS gone ",
     "FROM telemetry.scores ",
@@ -114,6 +112,95 @@ const SCORES_SQL: &str = concat!(
     "GROUP BY score_id) ",
     "WHERE gone = 0"
 );
+
+/// The runs any of whose spans landed in the window, as the alert's filters
+/// admit them: agent, environment and release, which all of a run's spans carry.
+macro_rules! window_runs {
+    () => {
+        concat!(
+            "run_id IN (SELECT run_id FROM telemetry.spans ",
+            "WHERE project_id IN {projects:Array(String)} ",
+            "AND received_at >= {from:DateTime64(6, 'UTC')} ",
+            "AND received_at < {to:DateTime64(6, 'UTC')} ",
+            $crate::rules::calls_admitted!(),
+            ") "
+        )
+    };
+}
+
+/// The spans of the window's runs, from a day before it, so a run that
+/// began before the window is read whole.
+macro_rules! runs_whole {
+    () => {
+        concat!(
+            "FROM telemetry.spans WHERE project_id IN {projects:Array(String)} ",
+            "AND received_at >= {from:DateTime64(6, 'UTC')} - INTERVAL 1 DAY ",
+            "AND received_at < {to:DateTime64(6, 'UTC')} AND ",
+            $crate::rules::evaluate::window_runs!(),
+            "GROUP BY run_id"
+        )
+    };
+}
+
+/// Each run of the window, `n` its steps.
+macro_rules! run_steps {
+    () => {
+        concat!(
+            "SELECT run_id, countIf(kind = 'step') AS n, max(received_at) AS last ",
+            $crate::rules::evaluate::runs_whole!()
+        )
+    };
+}
+
+/// Each run of the window, `n` the most times in a row it called one tool,
+/// `tool`: its tool calls in the order they started, what lies between them
+/// breaking no stretch.
+macro_rules! run_repeats {
+    () => {
+        concat!(
+            "SELECT run_id, any(agent) AS agent, max(received_at) AS last, ",
+            "arrayMap(c -> c.3, arraySort(groupArrayIf((started_at, span_id, name), ",
+            "kind = 'tool_call'))) AS calls, ",
+            "arraySplit((c, p) -> c != p, calls, arrayPopBack(arrayPushFront(calls, ''))) ",
+            "AS stretches, arrayMap(s -> length(s), stretches) AS lengths, ",
+            "arrayMax(lengths) AS n, stretches[indexOf(lengths, n)][1] AS tool ",
+            $crate::rules::evaluate::runs_whole!()
+        )
+    };
+}
+
+/// Each run with spans in the window and no span of its own by `{now}`, quiet
+/// since the window ended: `n` how long, in seconds.
+macro_rules! stalled_runs {
+    () => {
+        concat!(
+            "SELECT run_id, max(received_at) AS last, ",
+            "toUInt64(greatest(dateDiff('second', last, {now:DateTime64(6, 'UTC')}), 0)) AS n ",
+            "FROM telemetry.spans WHERE project_id IN {projects:Array(String)} ",
+            "AND received_at >= {from:DateTime64(6, 'UTC')} - INTERVAL 1 DAY ",
+            "AND received_at < {now:DateTime64(6, 'UTC')} AND ",
+            $crate::rules::evaluate::window_runs!(),
+            "GROUP BY run_id ",
+            "HAVING countIf(kind = 'run') = 0 AND last < {to:DateTime64(6, 'UTC')}"
+        )
+    };
+}
+
+pub(crate) use {run_repeats, run_steps, runs_whole, stalled_runs, window_runs};
+
+/// A read run by run folded over its runs, `n` each one's measure.
+macro_rules! folded_runs {
+    () => {
+        concat!(
+            "SELECT count() AS count, avg(n) AS mean, toFloat64(max(n)) AS top, ",
+            "CAST(quantiles(0.5, 0.9, 0.95, 0.99)(n) AS Array(Float64)) AS quantiles FROM ("
+        )
+    };
+}
+
+const STEPS_SQL: &str = concat!(folded_runs!(), run_steps!(), ")");
+const REPEATS_SQL: &str = concat!(folded_runs!(), run_repeats!(), ")");
+const STALLED_SQL: &str = concat!(folded_runs!(), stalled_runs!(), ")");
 
 /// One agent's runs over a window, and those that missed its objective:
 /// failed, or for a latency objective, ran past it.
@@ -205,21 +292,22 @@ pub fn burned(definition: &Definition, fast: f64, slow: f64) -> (Option<f64>, Se
     }
 }
 
-/// What a score alert's window holds: how many scores, their mean, the
-/// largest, and their 50th, 90th, 95th and 99th percentiles.
+/// What a window holds of a score alert's scores, or of its runs read run by
+/// run: how many, their mean, the largest, and their 50th, 90th, 95th and
+/// 99th percentiles.
 #[derive(Debug, Clone, Default, PartialEq, Row, Deserialize)]
-pub struct ScoreTotals {
-    pub scores: u64,
+pub struct Folded {
+    pub count: u64,
     pub mean: f64,
     pub top: f64,
     pub quantiles: Vec<f64>,
 }
 
-impl ScoreTotals {
-    /// The alert's value over these scores, none where there are none.
+impl Folded {
+    /// The alert's value over these, none where there are none.
     #[must_use]
     pub fn value(&self, aggregation: RuleAggregation) -> Option<f64> {
-        if self.scores == 0 {
+        if self.count == 0 {
             return None;
         }
         let value = match aggregation {
@@ -227,7 +315,7 @@ impl ScoreTotals {
                 clippy::cast_precision_loss,
                 reason = "a count past 2^53 is no alert's"
             )]
-            RuleAggregation::Count => self.scores as f64,
+            RuleAggregation::Count => self.count as f64,
             RuleAggregation::Avg => self.mean,
             RuleAggregation::Max | RuleAggregation::Sum => self.top,
             percentile => quantile(&self.quantiles, percentile)?,
@@ -279,9 +367,17 @@ impl Totals {
             (RuleMeasure::Duration, percentile) => at(percentile),
             (RuleMeasure::Tokens, RuleAggregation::Avg) => Some(tokens / spans),
             (RuleMeasure::Tokens, _) => Some(tokens),
-            // Read run by run ([`crate::spend`]), from the scores, and from
-            // an agent's runs ([`burns`]), which the totals cannot.
-            (RuleMeasure::Cost | RuleMeasure::Score | RuleMeasure::Burn, _) => None,
+            // Read run by run, from the scores, and from an agent's runs
+            // ([`burns`]), which the totals cannot.
+            (
+                RuleMeasure::Cost
+                | RuleMeasure::Score
+                | RuleMeasure::Burn
+                | RuleMeasure::Steps
+                | RuleMeasure::Repeats
+                | RuleMeasure::Stalled,
+                _,
+            ) => None,
         }
     }
 }
@@ -342,6 +438,29 @@ impl Window {
             full_to: full_to.max(full_from),
         }
     }
+}
+
+/// `sql`, a read run by run, bound for `rule` at `now`: over its window, or
+/// for a stall the window before it, whose runs have been quiet since.
+pub(crate) fn by_run(
+    state: &AppState,
+    rule: &RuleRow,
+    now: DateTime<Utc>,
+    sql: &'static str,
+) -> Read {
+    let window = Window::of(now, rule.definition.window);
+    let runs = if rule.definition.measure == RuleMeasure::Stalled {
+        Window::ending(window.from, rule.definition.window.duration())
+    } else {
+        window
+    };
+    let read = state
+        .store
+        .read(&Projects::one(rule.project_id.clone()), sql)
+        .param("from", micros(runs.from))
+        .param("to", micros(runs.to))
+        .param("now", micros(window.to));
+    rule.definition.filters.bind_calls(read)
 }
 
 /// The alert's totals over its window ending at `now`.
@@ -623,12 +742,14 @@ pub async fn value_of(
 
 /// Whether the alert counts, so an empty window is a 0 rather than nothing.
 fn counts(definition: &crate::rules::Definition) -> bool {
-    definition.measure == RuleMeasure::Count
-        || (definition.aggregation == RuleAggregation::Count
-            && matches!(
-                definition.measure,
-                RuleMeasure::Failures | RuleMeasure::Score
-            ))
+    matches!(
+        definition.measure,
+        RuleMeasure::Count | RuleMeasure::Stalled
+    ) || (definition.aggregation == RuleAggregation::Count
+        && matches!(
+            definition.measure,
+            RuleMeasure::Failures | RuleMeasure::Score
+        ))
 }
 
 /// `value`'s change from `previous`, in percent of it: below 0 for a drop.
@@ -641,15 +762,26 @@ fn change(value: f64, previous: Option<f64>) -> Option<f64> {
 /// The alert's value over its window ending at `now`: a run's cost summed
 /// with no tag as the totals are read, the full hours from the hourly totals;
 /// folded any other way, or narrowed by a tag, from what each run spent; a
-/// score's from the scores; every other measure from the totals.
+/// score's from the scores; a run's steps, repeats and stalls run by run;
+/// every other measure from the totals.
 async fn value_at(
     state: &AppState,
     rule: &RuleRow,
     now: DateTime<Utc>,
 ) -> Result<Option<f64>, Unread> {
+    let by_runs = match rule.definition.measure {
+        RuleMeasure::Steps => Some(STEPS_SQL),
+        RuleMeasure::Repeats => Some(REPEATS_SQL),
+        RuleMeasure::Stalled => Some(STALLED_SQL),
+        _ => None,
+    };
+    if let Some(sql) = by_runs {
+        let runs: Folded = by_run(state, rule, now, sql).fetch_one().await?;
+        return Ok(runs.value(rule.definition.aggregation));
+    }
     if rule.definition.measure == RuleMeasure::Score {
         let window = Window::of(now, rule.definition.window);
-        let scores: ScoreTotals = state
+        let scores: Folded = state
             .store
             .read(&Projects::one(rule.project_id.clone()), SCORES_SQL)
             .param(
@@ -746,6 +878,10 @@ mod tests {
         assert_eq!(listed.len(), LEVELS.len());
         let merge = format!("quantilesTDigestMerge({})", listed.join(", "));
         assert!(TOTALS_SQL.contains(&merge), "{merge} not in {TOTALS_SQL}");
+        let levels = format!("quantiles({})", listed.join(", "));
+        for sql in [SCORES_SQL, STEPS_SQL, REPEATS_SQL, STALLED_SQL] {
+            assert!(sql.contains(&levels), "{levels} not in {sql}");
+        }
     }
 
     fn at(text: &str) -> DateTime<Utc> {
@@ -778,11 +914,11 @@ mod tests {
         );
     }
 
-    /// Scores fold as their aggregation says, none where there are none.
+    /// Scores and runs fold as their aggregation says, none where there are none.
     #[test]
-    fn a_score_alerts_value_is_its_scores_folded() {
-        let scores = ScoreTotals {
-            scores: 4,
+    fn a_fold_is_its_aggregation_and_none_without_any() {
+        let scores = Folded {
+            count: 4,
             mean: 0.6,
             top: 1.0,
             quantiles: vec![0.5, 0.9, 0.95, 0.99],
@@ -791,8 +927,8 @@ mod tests {
         assert_eq!(scores.value(RuleAggregation::Avg), Some(0.6));
         assert_eq!(scores.value(RuleAggregation::Max), Some(1.0));
         assert_eq!(scores.value(RuleAggregation::P90), Some(0.9));
-        assert_eq!(ScoreTotals::default().value(RuleAggregation::Avg), None);
-        let empty_mean = ScoreTotals {
+        assert_eq!(Folded::default().value(RuleAggregation::Avg), None);
+        let empty_mean = Folded {
             mean: f64::NAN,
             ..scores
         };

@@ -50,6 +50,7 @@ import {
   CONNECTION_STATUS_LABEL,
   LEVEL_LABEL,
   LINKS_MAX,
+  MEASURE_HINT,
   MEASURE_LABEL,
   MISSING_DATA_LABEL,
   NEW_ALERT,
@@ -59,6 +60,7 @@ import {
   WINDOW_LABEL,
   aggregationLabel,
   aggregationsFor,
+  alertWindowsFor,
   filterFieldsFor,
   filtersStatus,
   incidentKindsLabel,
@@ -324,7 +326,13 @@ function AlertPanel({
               label={(measure) => MEASURE_LABEL[measure]}
               onChange={(measure) => change(withMeasure(draft, measure))}
               disabled={pending}
+              describedBy={MEASURE_HINT[draft.measure] ? `${id}-measure-hint` : undefined}
             />
+            {MEASURE_HINT[draft.measure] && (
+              <p id={`${id}-measure-hint`} className="text-muted-foreground">
+                {MEASURE_HINT[draft.measure]}
+              </p>
+            )}
           </SidePanelRow>
           {draft.measure === RuleMeasure.Score && (
             <SidePanelRow label="Score" htmlFor={`${id}-score`}>
@@ -359,7 +367,7 @@ function AlertPanel({
             <EnumSelect
               id={`${id}-window`}
               value={draft.window}
-              options={Object.values(RuleWindow)}
+              options={alertWindowsFor(draft.measure)}
               label={(window) => WINDOW_LABEL[window]}
               onChange={(window) =>
                 change({

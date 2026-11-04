@@ -227,7 +227,8 @@ CREATE TABLE telemetry.rules (
     CONSTRAINT rules_name_check CHECK (char_length(name) BETWEEN 1 AND 60),
     CONSTRAINT rules_kind_check CHECK (kind IN ('run', 'step', 'model_call', 'tool_call')),
     CONSTRAINT rules_measure_check
-        CHECK (measure IN ('count', 'failures', 'duration', 'tokens', 'cost', 'score', 'burn')),
+        CHECK (measure IN ('count', 'failures', 'duration', 'tokens', 'cost', 'score', 'burn',
+                           'steps', 'repeats', 'stalled')),
     CONSTRAINT rules_objective_check
         CHECK ((measure = 'burn') = (objective IS NOT NULL)
                AND (objective IS NULL OR jsonb_typeof(objective) = 'object')),
@@ -237,6 +238,8 @@ CREATE TABLE telemetry.rules (
     CONSTRAINT rules_baseline_check CHECK (baseline IN ('none', 'previous')),
     -- A month so far has no window of its length before it.
     CONSTRAINT rules_baseline_lookback_check CHECK (baseline = 'none' OR lookback <> 'month'),
+    -- A stall is a run quiet past a window of a fixed length.
+    CONSTRAINT rules_stalled_lookback_check CHECK (measure <> 'stalled' OR lookback <> 'month'),
     CONSTRAINT rules_aggregation_check
         CHECK (aggregation IN ('count', 'avg', 'sum', 'max', 'p50', 'p90', 'p95', 'p99')),
     CONSTRAINT rules_filters_check CHECK (jsonb_typeof(filters) = 'object'),

@@ -240,7 +240,10 @@
       "tokens",
       "cost",
       "score",
-      "burn"
+      "burn",
+      "steps",
+      "repeats",
+      "stalled"
     ],
     "RuleOperator": [
       "gt",
@@ -507,8 +510,22 @@
         "count",
         "avg"
       ],
+      "repeats": [
+        "max"
+      ],
       "score": [
         "count",
+        "avg",
+        "max",
+        "p50",
+        "p90",
+        "p95",
+        "p99"
+      ],
+      "stalled": [
+        "count"
+      ],
+      "steps": [
         "avg",
         "max",
         "p50",
@@ -534,7 +551,10 @@
         "duration",
         "cost",
         "score",
-        "burn"
+        "burn",
+        "steps",
+        "repeats",
+        "stalled"
       ],
       "step": [
         "count",
