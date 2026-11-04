@@ -236,7 +236,7 @@ export async function deleteModelConnectionAction(projectId: string, id: string)
   if (!z.guid().safeParse(id).success) return refused("Invalid connection id.");
   const gate = await admitProject({ call: "project:model-connections", limit: 10 }, projectId);
   if (!gate.ok) return refused(gate.error);
-  const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/v1/telemetry/model-connections/${id}`, {
+  const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/v1/telemetry/model-connections/${encodeURIComponent(id)}`, {
     method: "DELETE",
     headers: gate.headers,
   });

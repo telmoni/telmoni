@@ -160,7 +160,7 @@ impl ViewQuery {
             ..TraceQuery::default()
         };
         let filter = query.filter()?;
-        let mut status: Vec<SpanStatus> = Vec::with_capacity(self.status.len());
+        let mut status: Vec<SpanStatus> = Vec::with_capacity(SpanStatus::all().len());
         for given in self.status {
             if !status.contains(&given) {
                 status.push(given);

@@ -144,7 +144,7 @@ export async function deleteEvaluatorAction(projectId: string, id: string): Prom
   if (!z.guid().safeParse(id).success) return refused("Invalid evaluator id.");
   const gate = await admitProject({ call: "project:evaluators", limit: 20 }, projectId);
   if (!gate.ok) return refused(gate.error);
-  const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/v1/telemetry/evaluators/${id}`, {
+  const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/v1/telemetry/evaluators/${encodeURIComponent(id)}`, {
     method: "DELETE",
     headers: gate.headers,
   });
@@ -211,7 +211,7 @@ export async function deleteRuleAction(projectId: string, id: string): Promise<A
   if (!z.guid().safeParse(id).success) return refused("Invalid rule id.");
   const gate = await admitProject({ call: "project:evaluation-rules", limit: 20 }, projectId);
   if (!gate.ok) return refused(gate.error);
-  const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/v1/telemetry/evaluation-rules/${id}`, {
+  const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/v1/telemetry/evaluation-rules/${encodeURIComponent(id)}`, {
     method: "DELETE",
     headers: gate.headers,
   });
