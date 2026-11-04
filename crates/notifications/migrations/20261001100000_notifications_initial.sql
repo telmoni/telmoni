@@ -366,7 +366,7 @@ CREATE TABLE notifications.slack_identities (
 ALTER TABLE notifications.slack_identities ENABLE ROW LEVEL SECURITY;
 ALTER TABLE notifications.slack_identities FORCE ROW LEVEL SECURITY;
 
-CREATE POLICY person_own ON notifications.slack_identities
+CREATE POLICY person_isolation ON notifications.slack_identities
     USING      (user_id = current_setting('app.user_id', true))
     WITH CHECK (user_id = current_setting('app.user_id', true));
 
