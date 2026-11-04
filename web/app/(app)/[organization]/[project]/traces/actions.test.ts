@@ -91,6 +91,7 @@ const layoutInput = {
     depth: "calls",
     open: "failed",
     timeline: true,
+    graph: false,
     pinned: ["plan"],
     filter: { kind: [], status: [], name: [] },
     messages: false,

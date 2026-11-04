@@ -166,6 +166,7 @@ export const LayoutQuerySchema = z.strictObject({
   depth: z.enum(LayoutDepth),
   open: z.enum(LayoutOpen),
   timeline: z.boolean(),
+  graph: z.boolean(),
   pinned: z.array(z.string()).optional(),
   filter: LayoutFilterSchema,
   messages: z.boolean(),
@@ -486,15 +487,16 @@ export async function traceDownload(
   return readDownload("traceDownload", projectId, `/traces/export${lane}`);
 }
 
-/** One trace's spans, by the run's id. A run id the path cannot be — not a
- *  UUID — is read as missing, as the server would answer a run that is not
- *  the project's. */
+/** One trace's spans, by the run's id, and its content where `content` asks,
+ *  which the server files as the reader's read: every caller says which. A
+ *  run id the path cannot be — not a UUID — is read as missing, as the server
+ *  would answer a run that is not the project's. */
 export const fetchTrace = cache(
-  async (projectId: string, runId: string): Promise<TraceAccess> => {
+  async (projectId: string, runId: string, content: boolean): Promise<TraceAccess> => {
     const read = await readLane(
       "fetchTrace",
       projectId,
-      `/traces/${encodeURIComponent(runId)}`,
+      `/traces/${encodeURIComponent(runId)}${content ? "?content=true" : ""}`,
       TraceDetailSchema,
       MISSING,
     );

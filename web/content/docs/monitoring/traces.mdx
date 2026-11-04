@@ -207,6 +207,22 @@ JSON cell in the CSV. A download that holds content is one read of it in the
 [audit log](/docs/workspace/audit-log), and one that cannot open it is
 refused rather than written without it.
 
+### Comparing two runs
+
+Tick two rows, then **Compare**, to open the two runs side by side, the first
+you ticked on the left: their duration, tokens, cost, steps, model calls and
+tool calls against each other, with the difference, then their spans row by
+row in the order the trace's tree lists them, every branch open. The first
+row where their spans differ by kind or name — a model call by its model, as
+the graph names it — is marked as where they part, and named above the rows;
+a run that ends early parts where it ends, and one that holds more spans than
+the server sends at once is said to, its figures but the cost counting only
+the spans sent, and where they part is then known only as far as both were
+sent. The first 400 rows are drawn. The comparison opens
+neither run's content: where the project keeps it, **Open messages** puts
+each span's messages beside its counterpart's, and that is one read of each
+run in the [audit log](/docs/workspace/audit-log), as its trace's page is.
+
 ## A trace
 
 A click on a row of the list, anywhere but on one of its links, opens the
@@ -243,6 +259,16 @@ first start to its last end. The arrow keys walk the tree: up and down a span,
 right to open a span's branch or step into it, left to shut it or step out of
 it. A run of more than 400 spans opens with its branches shut but the run's
 own.
+**Graph** draws the run as its agent's graph: each step, model and tool once,
+by its name and kind, each arrow what ran next, under its parent or after it,
+and a stretch that repeated drawn once with how many times it went round — a
+tool called five times in a row is one node marked ×5, and a plan and an act
+taken in turn three times are two nodes joined, the way back marked ×3. A
+model call is named by its model, and a subagent by its agent. A node that
+ran more than once says how many times in all, beside its loop's mark where it
+ran more often than its longest loop, and a red border says one of its spans
+failed. A click on a node chooses its first span, and each click after, its
+next. The graph draws the first 60 names it meets and counts the rest.
 
 Beside the tree stands the span you choose, the run's own first: its kind, its
 status and the error's type, its model and provider, the environment and
@@ -301,7 +327,7 @@ The trace's own page opens in the same layout as
 [a session's](/docs/monitoring/sessions#customize), changed by **Customize**
 beside its title: to begin with the tree holds the run's own row alone, its
 details beside it, until Customize opens its steps or calls, the branches
-with a failure inside, and the timeline. The depth and the
+with a failure inside, and the timeline or the graph. The depth and the
 calls shown narrow what the tree lists, what starts open opens its branches,
 and the pinned spans stand above the tree, each a press away from being
 chosen, wherever the depth leaves them. **Layouts** keeps a cut under a name

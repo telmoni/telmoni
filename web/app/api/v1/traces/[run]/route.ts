@@ -28,7 +28,7 @@ export async function GET(request: NextRequest, { params }: RouteContext<"/api/v
   // admits.
   if (!z.guid().safeParse(run).success) return privateProblem(404, "No such trace.");
 
-  const access = await fetchTrace(projectId, run);
+  const access = await fetchTrace(projectId, run, true);
   switch (access.kind) {
     case "ok":
       return privateJson(access.trace);

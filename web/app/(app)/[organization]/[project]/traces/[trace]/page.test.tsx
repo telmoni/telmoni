@@ -40,7 +40,8 @@ vi.mock("@/app/(app)/[organization]/[project]/traces/actions", () => ({
 }));
 
 import { setTraceTagsAction } from "@/app/(app)/[organization]/[project]/traces/actions";
-import { Role } from "@/lib/types/enums";
+import { testSpan } from "@/lib/span-fixture";
+import { Role, SpanKind } from "@/lib/types/enums";
 
 let mockContext: unknown;
 let mockProject: unknown;
@@ -49,7 +50,7 @@ let mockSetting: unknown;
 let mockLayouts: unknown;
 let mockIncidents: unknown[];
 const fetchProjectBySlug = vi.fn<(slug: string) => Promise<unknown>>(async () => mockProject);
-const fetchTrace = vi.fn<(projectId: string, runId: string) => Promise<unknown>>(
+const fetchTrace = vi.fn<(projectId: string, runId: string, content: boolean) => Promise<unknown>>(
   async () => mockTrace,
 );
 const fetchRunIncidents = vi.fn<(projectId: string, runId: string) => Promise<unknown[]>>(
@@ -89,7 +90,7 @@ vi.mock("@/lib/server/data", () => ({
   activeOrganization: () => null,
   getServerContext: async () => mockContext,
   fetchProjectBySlug: (slug: string) => fetchProjectBySlug(slug),
-  fetchTrace: (projectId: string, runId: string) => fetchTrace(projectId, runId),
+  fetchTrace: (projectId: string, runId: string, content: boolean) => fetchTrace(projectId, runId, content),
   fetchSessionLayout: async () => mockSetting,
   fetchTraceLayouts: async () => mockLayouts,
   fetchRunIncidents: (projectId: string, runId: string) => fetchRunIncidents(projectId, runId),
@@ -111,6 +112,7 @@ const FULL = {
     depth: "calls",
     open: "failed",
     timeline: true,
+    graph: false,
     pinned: [],
     filter: {},
     messages: false,
@@ -128,6 +130,7 @@ const PINNING = {
     depth: "steps",
     open: "none",
     timeline: false,
+    graph: false,
     pinned: ["search_docs"],
     filter: {},
     messages: false,
@@ -138,38 +141,14 @@ const PINNING = {
   updated_at: "2026-10-17T00:00:00Z",
 };
 
-function span(over: Record<string, unknown>) {
-  return {
+const span = (over: Record<string, unknown>) =>
+  testSpan({
     span_id: "0000000000000001",
-    parent_span_id: "",
-    trace_id: "4bf92f3577b34da6a3ce929d0e0e4736",
-    agent: "nightly-report",
-    kind: "run",
+    kind: SpanKind.Run,
     name: "nightly-report",
-    started_at: "2026-10-11T03:00:00.000Z",
     ended_at: "2026-10-11T03:00:02.000Z",
-    status: "ok",
-    error_type: "",
-    model: "",
-    provider: "",
-    input_tokens: 0,
-    output_tokens: 0,
-    cache_read_input_tokens: 0,
-    cache_write_input_tokens: 0,
-    cost: null,
-    time_to_first_token: null,
-    user_id: "",
-    session_id:"",
-    environment: "",
-    release: "",
-    tags: {},
-    sample_rate: null,
-    attributes: {},
-    units: 1,
-    received_at: "2026-10-11T03:00:02.000Z",
     ...over,
-  };
-}
+  } as Parameters<typeof testSpan>[0]);
 
 const SPANS = [
   span({
@@ -266,7 +245,7 @@ describe("TracePage", () => {
 
   it("names the run, sums it on one line, and opens on the run's own span", async () => {
     render(await TracePage({ params: PARAMS, searchParams: Promise.resolve({}) }));
-    expect(fetchTrace).toHaveBeenCalledWith("project_7bQx2mNv9BcK4dLp", RUN);
+    expect(fetchTrace).toHaveBeenCalledWith("project_7bQx2mNv9BcK4dLp", RUN, true);
     const header = screen.getByTestId("page-header");
     expect(header).toHaveTextContent("nightly-report");
     expect(header).toHaveAttribute("data-back", "/acme/web/traces");

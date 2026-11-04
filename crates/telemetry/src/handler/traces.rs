@@ -785,7 +785,8 @@ pub struct TraceDetail {
     /// that could not be read.
     pub spend: Option<RunSpend>,
     /// Each span's content, opened for the reader and filed as their read:
-    /// empty where the run kept none, none where it could not be opened.
+    /// empty where the run kept none, none where it was not asked for or
+    /// could not be opened.
     pub content: Option<Vec<SpanFields>>,
 }
 
@@ -1594,15 +1595,19 @@ async fn file_tags_change(
 }
 
 /// `GET /internal/v1/telemetry/traces/{run_id}` — one trace's spans, the run's
-/// own among them, in the order they started; `404` for a run the project
-/// does not hold, which is also what another project's run id gets.
+/// own among them, in the order they started, its content opened and filed
+/// only where asked (`content=true`), so a page that compares runs reads none
+/// until its reader opens it; `404` for a run the project does not hold.
 pub async fn get_trace(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Path(run_id): Path<String>,
+    Query(asked): Query<super::v1::TraceAsked>,
 ) -> Result<Json<TraceDetail>, TelmoniError> {
     let reader = reader(&state, &headers).await?;
-    Ok(Json(trace_detail(&state, &reader, &run_id, true).await?))
+    Ok(Json(
+        trace_detail(&state, &reader, &run_id, asked.content).await?,
+    ))
 }
 
 /// One trace as the console's lane and `/v1` answer it, its content opened

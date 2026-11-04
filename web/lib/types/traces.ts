@@ -178,7 +178,7 @@ export const TraceDetailSchema = z.object({
   /** None where the server could not read it. */
   spend: RunSpendSchema.nullable(),
   /** Each span's content, its read filed in the audit log: empty where the
-   *  run kept none, null where it could not be opened. */
+   *  run kept none, null where it was not asked for or could not be opened. */
   content: z.array(SpanFieldsSchema).nullable(),
 });
 export type TraceDetail = z.infer<typeof TraceDetailSchema>;

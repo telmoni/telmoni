@@ -244,6 +244,12 @@ export function traceHref(organization: string, project: string, runId: string):
   return projectPath(organization, project, `/traces/${encodeURIComponent(runId)}`);
 }
 
+/** Two runs side by side, the first chosen on the left. */
+export function compareHref(organization: string, project: string, a: string, b: string): string {
+  const runs = new URLSearchParams({ a, b });
+  return projectPath(organization, project, `/traces/compare?${runs}`);
+}
+
 /** A run's spans, through the console's own route. */
 export function traceReadHref(runId: string, projectId: string): string {
   return `/api/v1/traces/${encodeURIComponent(runId)}?project=${encodeURIComponent(projectId)}`;

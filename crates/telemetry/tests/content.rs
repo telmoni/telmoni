@@ -1903,8 +1903,27 @@ async fn the_trace_and_session_pages_carry_content_each_read_filed(pool: PgPool)
     kept.send(turn_of("conv-1")).await;
     common::eventually("the trace is read", || found(&kept, RUN)).await;
 
-    let (status, trace) = kept
+    let (status, plain) = kept
         .lane("GET", &format!("/traces/{RUN}"), "admin-1", None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{plain}");
+    assert_eq!(
+        plain["content"],
+        Value::Null,
+        "content opened only where asked"
+    );
+    assert!(
+        kept.viewed(&pool).await.is_empty(),
+        "nothing opened, nothing filed"
+    );
+
+    let (status, trace) = kept
+        .lane(
+            "GET",
+            &format!("/traces/{RUN}?content=true"),
+            "admin-1",
+            None,
+        )
         .await;
     assert_eq!(status, StatusCode::OK, "{trace}");
     assert_eq!(
@@ -1962,7 +1981,12 @@ async fn the_trace_and_session_pages_carry_content_each_read_filed(pool: PgPool)
     dropped.send(turn_of("conv-2")).await;
     common::eventually("the other trace is read", || found(&dropped, RUN)).await;
     let (status, trace) = dropped
-        .lane("GET", &format!("/traces/{RUN}"), "admin-1", None)
+        .lane(
+            "GET",
+            &format!("/traces/{RUN}?content=true"),
+            "admin-1",
+            None,
+        )
         .await;
     assert_eq!(status, StatusCode::OK, "{trace}");
     assert_eq!(trace["content"], json!([]), "none kept, none shown");

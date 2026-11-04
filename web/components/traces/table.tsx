@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { DownloadIcon } from "lucide-react";
+import { DownloadIcon, GitCompareArrows } from "lucide-react";
 import Link from "next/link";
 
 import { DataTable, THead, Td, Th } from "@/components/data-table";
@@ -26,6 +26,7 @@ import { openPeek } from "@/lib/peek";
 import type { Trace, TraceQuery } from "@/lib/server/entities/traces";
 import {
   TRACE_COLUMNS,
+  compareHref,
   currentSort,
   downloadHref,
   formatCount,
@@ -58,8 +59,8 @@ type Props = {
 // (`lib/trace-prefs.ts`), each heading that sorts a link that sorts by it. A
 // click on a row opens its trace in the peek beside the list (`peek.tsx`),
 // and the row stays marked while it is open. Rows are chosen to download
-// those alone; the choice is the page's, so a page of new rows starts with
-// none chosen (the page keys this on its rows).
+// those alone, or two to compare; the choice is the page's, so a page of new
+// rows starts with none chosen (the page keys this on its rows).
 export function TraceTable({ organization, slug, query, ui, traces, knownTags }: Props) {
   const prefs = useTracePrefs();
   const peeked = usePeekedRun();
@@ -89,9 +90,21 @@ export function TraceTable({ organization, slug, query, ui, traces, knownTags }:
           <span>
             {formatCount(chosen.size)} {chosen.size === 1 ? "trace" : "traces"} chosen
           </span>
+          {chosen.size === 2 ? (
+            <Button asChild variant="outline" size="sm" className="ml-auto bg-background">
+              <Link href={compareHref(organization, slug, ...([...chosen] as [string, string]))}>
+                <GitCompareArrows />
+                Compare
+              </Link>
+            </Button>
+          ) : (
+            <span className="ml-auto text-xs text-muted-foreground">
+              {chosen.size === 1 ? "Choose one more to compare them" : "Choose two to compare them"}
+            </span>
+          )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" className="ml-auto bg-background">
+              <Button variant="outline" size="sm" className="bg-background">
                 <DownloadIcon />
                 Download
               </Button>

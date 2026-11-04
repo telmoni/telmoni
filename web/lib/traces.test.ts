@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import { cellOf } from "@/components/traces/cells";
 import type { Trace, TraceSpan, TraceView } from "@/lib/server/entities/traces";
+import { testSpan } from "@/lib/span-fixture";
 import { TraceColumn } from "@/lib/types/enums";
 
 import {
@@ -37,6 +38,7 @@ import {
   timelineBars,
   toggled,
   traceHref,
+  compareHref,
   tracesHref,
   unfiltered,
   viewHref,
@@ -44,36 +46,8 @@ import {
   without,
 } from "./traces";
 
-function span(over: Partial<TraceSpan> & Pick<TraceSpan, "span_id" | "kind">): TraceSpan {
-  return {
-    parent_span_id: "",
-    trace_id: "4bf92f3577b34da6a3ce929d0e0e4736",
-    agent: "nightly-report",
-    name: over.kind,
-    started_at: "2026-10-11T03:00:00.000Z",
-    ended_at: "2026-10-11T03:00:01.000Z",
-    status: "ok",
-    error_type: "",
-    model: "",
-    provider: "",
-    input_tokens: 0,
-    output_tokens: 0,
-    cache_read_input_tokens: 0,
-    cache_write_input_tokens: 0,
-    cost: null,
-    time_to_first_token: null,
-    user_id: "",
-    session_id: "",
-    environment: "",
-    release: "",
-    tags: {},
-    sample_rate: null,
-    attributes: {},
-    units: 1,
-    received_at: "2026-10-11T03:00:01.000Z",
-    ...over,
-  };
-}
+const span = (over: Partial<TraceSpan> & Pick<TraceSpan, "span_id" | "kind">) =>
+  testSpan({ name: over.kind, ...over });
 
 const VIEW: TraceView = {
   id: "0b6f2c1e-6a4f-4d2b-9e3a-5c7d8e9f0a1b",
@@ -196,6 +170,9 @@ describe("the URL as the list's state", () => {
     );
     expect(traceHref("acme", "web", "5d4f5c68-0000-4000-8000-000000000001")).toBe(
       "/acme/web/traces/5d4f5c68-0000-4000-8000-000000000001",
+    );
+    expect(compareHref("acme", "web", "5d4f5c68-0000-4000-8000-000000000001", "5d4f5c68-0000-4000-8000-000000000002")).toBe(
+      "/acme/web/traces/compare?a=5d4f5c68-0000-4000-8000-000000000001&b=5d4f5c68-0000-4000-8000-000000000002",
     );
   });
 

@@ -28,6 +28,7 @@ import {
   indentStyle,
 } from "@/components/traces/span-parts";
 import { SpanContent } from "@/components/traces/span-content";
+import { TraceGraph } from "@/components/traces/trace-graph";
 import { TraceTags } from "@/components/traces/tags";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -248,10 +249,10 @@ function SpansButton({
 /** The trace's spans and the one chosen among them, side by side; under each
  *  other on a phone. The run's own span is chosen first. Under a `layout`
  *  (`lib/layout.ts`) the tree shows what the depth and the filter admit,
- *  starts open as the layout opens it, with its timeline on or off, and the
- *  spans the layout pinned stand above it; the caller keys the body on the
- *  layout, so a change starts it afresh. Drawn again only for another trace
- *  (`memo`), as the line above it is. */
+ *  starts open as the layout opens it, drawn as a tree, a timeline or a
+ *  graph, and the spans the layout pinned stand above it; the caller keys the
+ *  body on the layout, so a change starts it afresh. Drawn again only for
+ *  another trace (`memo`), as the line above it is. */
 export const TraceBody = memo(function TraceBody({
   trace,
   organization,
@@ -297,7 +298,12 @@ export const TraceBody = memo(function TraceBody({
   // A run still going is read again as its spans land: the tree follows them.
   if (followed !== parentOf) dispatch({ type: "spans", parentOf });
   const [search, setSearch] = useState("");
-  const [timeline, setTimeline] = useState(layout?.timeline ?? false);
+  // How the spans are drawn: as the layout opens them, then as the toggle moves.
+  const [drawn, setDrawn] = useState<"tree" | "timeline" | "graph">(
+    layout?.graph ? "graph" : layout?.timeline ? "timeline" : "tree",
+  );
+  const timeline = drawn === "timeline";
+  const graph = drawn === "graph";
   const [spansShown, setSpansShown] = useState(true);
   const tree = useRef<HTMLDivElement>(null);
   const hideSpans = useRef<HTMLButtonElement>(null);
@@ -376,7 +382,13 @@ export const TraceBody = memo(function TraceBody({
   return (
     <div className={cn("flex min-h-0 flex-col md:flex-row", className)}>
       {spansShown && (
-        <div className="flex max-h-[45%] min-h-0 shrink-0 flex-col border-b border-border md:max-h-none md:w-2/5 md:max-w-sm md:min-w-60 md:border-r md:border-b-0">
+        <div
+          className={cn(
+            "flex max-h-[45%] min-h-0 shrink-0 flex-col border-b border-border md:max-h-none md:w-2/5 md:min-w-60 md:border-r md:border-b-0",
+            // A graph's rows sit side by side: it takes the room a tree's names do not need.
+            graph ? "md:w-1/2 md:max-w-2xl" : "md:max-w-sm",
+          )}
+        >
           <div className="flex shrink-0 items-center gap-2 px-gutter pt-gutter pb-2">
             <SpansButton
               ref={hideSpans}
@@ -390,13 +402,16 @@ export const TraceBody = memo(function TraceBody({
               type="single"
               variant="outline"
               size="sm"
-              value={timeline ? "timeline" : "tree"}
-              onValueChange={(next) => next && setTimeline(next === "timeline")}
+              value={drawn}
+              onValueChange={(next) => {
+                if (next === "tree" || next === "timeline" || next === "graph") setDrawn(next);
+              }}
               aria-label="How the spans are laid out"
               className="ml-auto"
             >
               <ToggleGroupItem value="tree">Tree</ToggleGroupItem>
               <ToggleGroupItem value="timeline">Timeline</ToggleGroupItem>
+              <ToggleGroupItem value="graph">Graph</ToggleGroupItem>
             </ToggleGroup>
           </div>
           {pinned.length > 0 && (
@@ -417,57 +432,69 @@ export const TraceBody = memo(function TraceBody({
               ))}
             </div>
           )}
-          <div className="relative shrink-0 px-gutter pb-2">
-            <SearchIcon
-              className="pointer-events-none absolute top-1/2 left-6 size-4 -translate-y-1/2 text-muted-foreground"
-              aria-hidden="true"
+          {graph ? (
+            <TraceGraph
+              trace={trace}
+              tree={nodes}
+              chosen={span.span_id}
+              onChoose={(id) => dispatch({ type: "choose", id })}
+              className="min-h-0 flex-1 overflow-y-auto pb-gutter"
             />
-            <Input
-              type="search"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              // Escape empties the search first, as a search field's own
-              // does, and shuts the peek only once there is nothing to empty.
-              onKeyDown={(event) => {
-                if (event.key === "Escape" && search) {
-                  event.preventDefault();
-                  setSearch("");
-                }
-              }}
-              placeholder="Search spans"
-              aria-label="Search spans"
-              className="pl-8"
-            />
-          </div>
-          {rows.length === 0 ? (
-            <p className="px-gutter py-2 text-xs text-muted-foreground">No span matches.</p>
           ) : (
-            <div
-              ref={tree}
-              role="tree"
-              aria-label="Spans"
-              onKeyDown={onKeyDown}
-              className="min-h-0 flex-1 overflow-y-auto px-2 pb-gutter"
-            >
-              {rows.map((node) => {
-                const id = node.span.span_id;
-                const bar = bars.get(id);
-                return (
-                  <SpanRow
-                    key={id}
-                    node={node}
-                    chosen={id === span.span_id}
-                    tabStop={id === tabStop}
-                    branch={!searching && node.children.length > 0}
-                    open={!shut.has(id)}
-                    bar={timeline && bar ? bar : null}
-                    dispatch={dispatch}
-                  />
-                );
-              })}
-            </div>
+            <>
+              <div className="relative shrink-0 px-gutter pb-2">
+                <SearchIcon
+                  className="pointer-events-none absolute top-1/2 left-6 size-4 -translate-y-1/2 text-muted-foreground"
+                  aria-hidden="true"
+                />
+                <Input
+                  type="search"
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  // Escape empties the search first, as a search field's own
+                  // does, and shuts the peek only once there is nothing to empty.
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape" && search) {
+                      event.preventDefault();
+                      setSearch("");
+                    }
+                  }}
+                  placeholder="Search spans"
+                  aria-label="Search spans"
+                  className="pl-8"
+                />
+              </div>
+              {rows.length === 0 ? (
+                <p className="px-gutter py-2 text-xs text-muted-foreground">No span matches.</p>
+              ) : (
+                <div
+                  ref={tree}
+                  role="tree"
+                  aria-label="Spans"
+                  onKeyDown={onKeyDown}
+                  className="min-h-0 flex-1 overflow-y-auto px-2 pb-gutter"
+                >
+                  {rows.map((node) => {
+                    const id = node.span.span_id;
+                    const bar = bars.get(id);
+                    return (
+                      <SpanRow
+                        key={id}
+                        node={node}
+                        chosen={id === span.span_id}
+                        tabStop={id === tabStop}
+                        branch={!searching && node.children.length > 0}
+                        open={!shut.has(id)}
+                        bar={timeline && bar ? bar : null}
+                        dispatch={dispatch}
+                      />
+                    );
+                  })}
+                </div>
+              )}
+              <TruncatedNote trace={trace} className="shrink-0 border-t border-border px-gutter py-2" />
+            </>
           )}
-          <TruncatedNote trace={trace} className="shrink-0 border-t border-border px-gutter py-2" />
         </div>
       )}
       <SpanDetail

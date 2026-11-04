@@ -12,6 +12,7 @@ import {
   TruncatedNote,
   indentStyle,
 } from "@/components/traces/span-parts";
+import { TraceGraph } from "@/components/traces/trace-graph";
 import {
   openingFor,
   shutBranches,
@@ -30,7 +31,8 @@ import { cn } from "@/lib/utils";
 // and nested under what made it, as the trace page's tree nests them
 // (`trace-view.tsx`), a list to read rather than a tree to walk — the
 // chevrons are its only controls — and each span's bar on the trace's own
-// line of time where the layout draws one. Metadata alone, as every page is.
+// line of time where the layout draws one, or the whole as its agent's graph
+// where the layout asks for that. Metadata alone, as every page is.
 
 export const TraceOutline = memo(function TraceOutline({
   trace,
@@ -53,6 +55,7 @@ export const TraceOutline = memo(function TraceOutline({
   const rows = treeRows(nodes, shut).filter((node) => node.depth > 0);
   const toggle = (id: string) => setShut((was) => toggled(was, id));
 
+  if (options.graph) return <TraceGraph trace={trace} tree={nodes} className={className} />;
   if (rows.length === 0) {
     return (
       <p className={cn("px-2 py-1.5 text-xs text-muted-foreground", className)}>

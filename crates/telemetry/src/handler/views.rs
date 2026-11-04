@@ -317,6 +317,8 @@ pub struct LayoutOptions {
     pub open: LayoutOpen,
     /// Each span's bar on its trace's own line of time.
     pub timeline: bool,
+    /// The trace drawn as its agent's graph rather than its tree.
+    pub graph: bool,
     /// Span names whose spans show under each trace while it is shut.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub pinned: Vec<String>,
@@ -848,6 +850,7 @@ mod tests {
                 "depth": "calls",
                 "open": "failed",
                 "timeline": true,
+                "graph": true,
                 "pinned": [" plan ", "plan", "", "search_docs"],
                 "filter": { "kind": ["tool_call", "tool_call"], "status": ["error"], "name": [" search_docs "] },
                 "messages": true,
@@ -864,6 +867,7 @@ mod tests {
                 "depth": "calls",
                 "open": "failed",
                 "timeline": true,
+                "graph": true,
                 "pinned": ["plan", "search_docs"],
                 "filter": { "kind": ["tool_call"], "status": ["error"], "name": ["search_docs"] },
                 "messages": true,
@@ -876,7 +880,7 @@ mod tests {
             .expect("the plainest");
         assert_eq!(
             plain.query,
-            json!({ "depth": "trace", "open": "none", "timeline": false, "filter": {}, "messages": false, "scores": false })
+            json!({ "depth": "trace", "open": "none", "timeline": false, "graph": false, "filter": {}, "messages": false, "scores": false })
         );
     }
 

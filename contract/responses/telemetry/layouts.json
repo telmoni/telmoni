@@ -23,6 +23,7 @@
             "error"
           ]
         },
+        "graph": true,
         "messages": true,
         "open": "failed",
         "pinned": [

@@ -35,6 +35,8 @@ export type LayoutOptions = {
   open: LayoutOpen;
   /** Each span's bar on its trace's own line of time. */
   timeline: boolean;
+  /** The trace drawn as its agent's graph rather than its tree. */
+  graph: boolean;
   /** The trace list's columns a trace shows. */
   columns: readonly TraceColumn[];
   /** Span names whose spans show under each trace while it is shut. */
@@ -72,6 +74,7 @@ export const DEFAULT_LAYOUT: LayoutOptions = {
   depth: LayoutDepth.Trace,
   open: LayoutOpen.None,
   timeline: false,
+  graph: false,
   columns: [
     TraceColumn.Started,
     TraceColumn.User,
@@ -98,6 +101,7 @@ export function sameLayout(a: LayoutOptions, b: LayoutOptions): boolean {
     a.depth === b.depth &&
     a.open === b.open &&
     a.timeline === b.timeline &&
+    a.graph === b.graph &&
     a.messages === b.messages &&
     a.scores === b.scores &&
     sameValues(a.columns, b.columns) &&
@@ -116,6 +120,7 @@ export function layoutOf(layout: Pick<TraceLayout, "query" | "columns">): Layout
     depth: query.depth,
     open: query.open,
     timeline: query.timeline,
+    graph: query.graph,
     columns: orderedColumns(layout.columns),
     pinned: many(query.pinned, PINNED_MAX),
     filter: {
@@ -135,6 +140,7 @@ export function layoutQueryOf(options: LayoutOptions): LayoutQuery {
     depth: options.depth,
     open: options.open,
     timeline: options.timeline,
+    graph: options.graph,
     pinned: [...options.pinned],
     filter: {
       kind: [...options.filter.kind],
@@ -165,6 +171,7 @@ const StoredOptionsSchema = z.object({
   depth: z.enum(LayoutDepth),
   open: z.enum(LayoutOpen),
   timeline: z.boolean(),
+  graph: z.boolean(),
   columns: Strings.transform((v) => orderedColumns(v)),
   pinned: Strings.transform((v) => many(v, PINNED_MAX)),
   filter: z.object({

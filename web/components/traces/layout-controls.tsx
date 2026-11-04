@@ -119,9 +119,9 @@ export function LayoutControls(props: Props) {
 
 type Layout = ReturnType<typeof useLayout>;
 
-/** Every option: the depth, what starts open, the timeline, the columns,
- *  the spans pinned, the calls shown, and the messages and scores, kept now
- *  and shown once content is kept and traces are scored. */
+/** Every option: the depth, what starts open, the timeline, the graph, the
+ *  columns, the spans pinned, the calls shown, and the messages and scores,
+ *  kept now and shown once content is kept and traces are scored. */
 function CustomizeMenu({ layout, from }: { layout: Layout; from: string }) {
   const { options, setOptions, isEdited, reset } = layout;
   const [pins, setPins] = useState(false);
@@ -167,6 +167,14 @@ function CustomizeMenu({ layout, from }: { layout: Layout; from: string }) {
             onSelect={keep}
           >
             Timeline
+          </HintedItem>
+          <HintedItem
+            hint="Each step, model and tool once, joined in the order they ran, a loop marked with how many times it went round."
+            checked={options.graph}
+            onCheckedChange={(on) => setOptions({ graph: on === true })}
+            onSelect={keep}
+          >
+            Graph
           </HintedItem>
           <DropdownMenuSub>
             <DropdownMenuSubTrigger>

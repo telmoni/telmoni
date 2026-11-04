@@ -50,7 +50,7 @@ export default async function TracePage({
 
   const list = tracesHref(organization, slug, {});
   const [access, setting, layouts, incidents, scores, mode] = await Promise.all([
-    fetchTrace(project.id, runId),
+    fetchTrace(project.id, runId, true),
     fetchSessionLayout(project.id),
     fetchTraceLayouts(project.id),
     fetchRunIncidents(project.id, runId),

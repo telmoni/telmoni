@@ -434,6 +434,7 @@ fn saved_views_answer_as_the_console_reads() {
         depth: LayoutDepth::Steps,
         open: LayoutOpen::Failed,
         timeline: true,
+        graph: true,
         pinned: vec!["plan".into()],
         filter: LayoutFilter {
             kind: vec![SpanKind::ModelCall],

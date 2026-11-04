@@ -24,6 +24,7 @@ const REVIEW: TraceLayout = {
     depth: "steps",
     open: "none",
     timeline: false,
+    graph: false,
     pinned: ["answer"],
     filter: {},
     messages: false,

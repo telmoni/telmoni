@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { TraceLayout, TraceSpan } from "@/lib/server/entities/traces";
+import { testSpan } from "@/lib/span-fixture";
 import { spanTree, treeRows } from "@/lib/trace-tree";
 import { DEFAULT_COLUMNS } from "@/lib/traces";
 
@@ -55,6 +56,7 @@ function saved(over: Partial<TraceLayout> = {}): TraceLayout {
       depth: "calls",
       open: "failed",
       timeline: true,
+      graph: true,
       pinned: [" plan ", "plan", "search_docs"],
       filter: { kind: ["tool_call"], status: ["error"], name: ["search_docs"] },
       messages: false,
@@ -67,36 +69,8 @@ function saved(over: Partial<TraceLayout> = {}): TraceLayout {
   };
 }
 
-function span(over: Partial<TraceSpan> & Pick<TraceSpan, "span_id" | "kind">): TraceSpan {
-  return {
-    parent_span_id: "",
-    trace_id: "4bf92f3577b34da6a3ce929d0e0e4736",
-    agent: "nightly-report",
-    name: over.kind,
-    started_at: "2026-10-11T03:00:00.000Z",
-    ended_at: "2026-10-11T03:00:01.000Z",
-    status: "ok",
-    error_type: "",
-    model: "",
-    provider: "",
-    input_tokens: 0,
-    output_tokens: 0,
-    cache_read_input_tokens: 0,
-    cache_write_input_tokens: 0,
-    cost: null,
-    time_to_first_token: null,
-    user_id: "",
-    session_id: "",
-    environment: "",
-    release: "",
-    tags: {},
-    sample_rate: null,
-    attributes: {},
-    units: 1,
-    received_at: "2026-10-11T03:00:01.000Z",
-    ...over,
-  };
-}
+const span = (over: Partial<TraceSpan> & Pick<TraceSpan, "span_id" | "kind">) =>
+  testSpan({ name: over.kind, ...over });
 
 // A run, a step with a model call and a failed tool call inside it, a second
 // step with one call, and a subagent's run straight under the run.
@@ -145,6 +119,7 @@ describe("a saved layout", () => {
       depth: "calls",
       open: "failed",
       timeline: true,
+      graph: true,
       columns: ["started", "error_type", "tokens"],
       pinned: ["plan", "search_docs"],
       filter: { kind: ["tool_call"], status: ["error"], name: ["search_docs"] },
@@ -163,6 +138,7 @@ describe("a saved layout", () => {
       depth: "calls",
       open: "failed",
       timeline: true,
+      graph: true,
       pinned: ["plan", "search_docs"],
       filter: { kind: ["tool_call"], status: ["error"], name: ["search_docs"] },
       messages: false,
@@ -181,6 +157,7 @@ describe("what the browser kept", () => {
     expect(readLayoutOptions({ ...SIMPLE, open: "errors" })).toBeNull();
     expect(readLayoutOptions({ ...SIMPLE, timeline: "yes" })).toBeNull();
     expect(readLayoutOptions({ ...SIMPLE, filter: null })).toBeNull();
+    expect(readLayoutOptions({ ...SIMPLE, graph: "yes" })).toBeNull();
     // A column or a kind this build does not know is left out, not applied blind.
     expect(
       readLayoutOptions({

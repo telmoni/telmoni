@@ -126,6 +126,7 @@ const LAYOUT = {
     depth: "calls",
     open: "failed",
     timeline: true,
+    graph: false,
     pinned: ["plan"],
     filter: { kind: ["tool_call"] },
     messages: false,
@@ -342,28 +343,32 @@ describe("traceDownload", () => {
 });
 
 describe("fetchTrace", () => {
-  it("reads one trace's spans by the run's id", async () => {
+  it("reads one trace's spans by the run's id, its content only where asked", async () => {
     answer(200, DETAIL);
-    expect(await fetchTrace(PROJECT, RUN)).toEqual({ kind: "ok", trace: DETAIL });
-    const [url] = fetchWithTimeout.mock.calls[0]!;
-    expect(url).toBe(`http://server/internal/v1/telemetry/traces/${RUN}`);
+    expect(await fetchTrace(PROJECT, RUN, false)).toEqual({ kind: "ok", trace: DETAIL });
+    expect(fetchWithTimeout.mock.calls[0]![0]).toBe(`http://server/internal/v1/telemetry/traces/${RUN}`);
+    answer(200, DETAIL);
+    await fetchTrace(PROJECT, RUN, true);
+    expect(fetchWithTimeout.mock.calls.at(-1)![0]).toBe(
+      `http://server/internal/v1/telemetry/traces/${RUN}?content=true`,
+    );
   });
 
   // A run the project does not hold and an id that is no run id read the
   // same: the page says there is no such trace here.
   it("reads a 404 and a 400 as missing", async () => {
     answer(404, {});
-    expect(await fetchTrace(PROJECT, RUN)).toEqual({ kind: "missing" });
+    expect(await fetchTrace(PROJECT, RUN, false)).toEqual({ kind: "missing" });
     answer(400, {});
-    expect(await fetchTrace(PROJECT, "not-a-run")).toEqual({ kind: "missing" });
+    expect(await fetchTrace(PROJECT, "not-a-run", false)).toEqual({ kind: "missing" });
   });
 
   it("reads a refusal as forbidden, and anything else as unavailable", async () => {
     answer(403, {});
-    expect(await fetchTrace(PROJECT, RUN)).toEqual({ kind: "forbidden" });
+    expect(await fetchTrace(PROJECT, RUN, false)).toEqual({ kind: "forbidden" });
     answer(200, { run_id: RUN, spans: [{ kind: "run" }], truncated: false });
-    expect(await fetchTrace(PROJECT, RUN)).toEqual({ kind: "unavailable" });
+    expect(await fetchTrace(PROJECT, RUN, false)).toEqual({ kind: "unavailable" });
     fetchWithTimeout.mockRejectedValue(new Error("timed out"));
-    expect(await fetchTrace(PROJECT, RUN)).toEqual({ kind: "unavailable" });
+    expect(await fetchTrace(PROJECT, RUN, false)).toEqual({ kind: "unavailable" });
   });
 });

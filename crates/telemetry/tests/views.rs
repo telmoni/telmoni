@@ -310,6 +310,7 @@ async fn a_layout_is_a_view_of_its_own_kind(pool: PgPool) {
             "depth": "calls",
             "open": "failed",
             "timeline": true,
+            "graph": false,
             "pinned": ["answer", "plan"],
             "filter": { "kind": ["tool_call"], "status": ["error"] },
             "messages": false,

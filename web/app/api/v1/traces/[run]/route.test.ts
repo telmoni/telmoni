@@ -39,7 +39,7 @@ describe("GET /api/v1/traces/[run]", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("cache-control")).toBe("private, no-store");
     expect(await res.json()).toEqual(TRACE);
-    expect(fetchTrace).toHaveBeenCalledWith(PROJECT, RUN);
+    expect(fetchTrace).toHaveBeenCalledWith(PROJECT, RUN, true);
   });
 
   it("refuses a request with no sign-in before reading anything", async () => {
@@ -57,7 +57,7 @@ describe("GET /api/v1/traces/[run]", () => {
   it("takes a UUID of any version, as ingest does", async () => {
     const run = "11111111-1111-1111-1111-111111111111";
     expect((await read(run)).status).toBe(200);
-    expect(fetchTrace).toHaveBeenCalledWith(PROJECT, run);
+    expect(fetchTrace).toHaveBeenCalledWith(PROJECT, run, true);
   });
 
   it("sends on nothing but a project's id and a run's UUID", async () => {
