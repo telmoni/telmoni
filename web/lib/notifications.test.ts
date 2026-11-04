@@ -7,6 +7,7 @@ import {
   inviteSubtitle,
   inviterText,
   giverText,
+  noticeHref,
   seatSubtitle,
 } from "@/lib/notifications";
 import type { OrganizationEntry, ProjectOffer } from "@/lib/server/entities/organization";
@@ -234,5 +235,37 @@ describe("bellItems", () => {
       auditExports: { org_1: [READY] },
     });
     expect(count).toBe(1);
+  });
+});
+
+describe("noticeHref", () => {
+  const item = (kind: string, over: Record<string, unknown> = {}) => ({
+    id: "n1",
+    kind,
+    title: "t",
+    body: "b",
+    metadata: null,
+    page: null,
+    read_at: null,
+    created_at: "2026-11-04T10:00:00Z",
+    ...over,
+  });
+  const project = { organization: "acme", project: "web" };
+
+  it("leads a project's notice to the page its kind is about, else the project's notifications", () => {
+    const incident = item("incident_opened", { metadata: { incident_id: "i-1", rule_id: "r" } });
+    expect(noticeHref(incident, project)).toBe("/acme/web/alerts?incident=i-1#incident-i-1");
+    expect(noticeHref(item("member_added"), project)).toBe("/acme/web/members");
+    expect(noticeHref(item("member_left"), project)).toBe("/acme/web/members");
+    expect(noticeHref(item("connector_disconnected"), project)).toBe("/acme/web/connectors");
+    // An incident's notice its metadata failed to name stays on the feed's page.
+    expect(noticeHref(item("incident_resolved"), project)).toBe("/acme/web/notifications");
+  });
+
+  it("leads an organization's notice to the page it names, else the organization's notifications", () => {
+    expect(noticeHref(item("organization_alert", { page: "/acme/billing" }), { organization: "acme" })).toBe(
+      "/acme/billing",
+    );
+    expect(noticeHref(item("organization_alert"), { organization: "acme" })).toBe("/acme/notifications");
   });
 });

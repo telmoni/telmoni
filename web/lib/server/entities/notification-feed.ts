@@ -17,8 +17,24 @@ const INCIDENT_KINDS: ReadonlySet<string> = new Set([
   NotificationKind.IncidentResolved,
 ]);
 
-// Only an incident's notice keeps its metadata, checked: one that names no
-// incident stays on the feed, linking nowhere, rather than failing the feed.
+// An organization's notice may name the page it is about (`billing_url`, the
+// hosted service's billing page), an address on this console's own origin.
+const PageMetadataSchema = z.object({ billing_url: z.string() });
+
+/** The path of `url` where it is one this console can route, else none. */
+function pathOf(url: string): string | null {
+  if (url.startsWith("/") && !url.startsWith("//")) return url;
+  try {
+    const { pathname } = new URL(url);
+    return pathname.startsWith("/") ? pathname : null;
+  } catch {
+    return null;
+  }
+}
+
+// Only an incident's notice keeps its metadata, checked, and an organization's
+// the page it names: one that names neither stays on the feed, linking where
+// its kind says (`noticeHref`), rather than failing the feed.
 const FeedItemSchema = z
   .object({
     id: z.string(),
@@ -31,7 +47,13 @@ const FeedItemSchema = z
   })
   .transform(({ metadata, ...item }) => {
     const incident = INCIDENT_KINDS.has(item.kind) ? IncidentMetadataSchema.safeParse(metadata) : null;
-    return { ...item, metadata: incident?.success ? incident.data : null };
+    const named =
+      item.kind === NotificationKind.OrganizationAlert ? PageMetadataSchema.safeParse(metadata) : null;
+    return {
+      ...item,
+      metadata: incident?.success ? incident.data : null,
+      page: named?.success ? pathOf(named.data.billing_url) : null,
+    };
   });
 export type FeedItem = z.infer<typeof FeedItemSchema>;
 

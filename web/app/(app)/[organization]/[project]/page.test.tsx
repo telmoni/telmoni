@@ -201,7 +201,7 @@ describe("OverviewPage", () => {
   });
 
   // ⚠ An incident's notice is lines, and the incident itself one link away.
-  it("links an incident's notice to the incident, its lines kept", async () => {
+  it("links each notice to the page it is about, an incident's to the incident, its lines kept", async () => {
     mockFeed = { items: [OPENED, CONNECTED, JOINED], unread: 2 };
     await renderAt(SLUG);
     const notices = screen.getByRole("region", { name: "Project notices" });
@@ -209,8 +209,16 @@ describe("OverviewPage", () => {
       "href",
       `/acme/platform/alerts?incident=${INCIDENT}#incident-${INCIDENT}`,
     );
-    // The only link: a notice of any other kind names no incident.
-    expect(within(notices).getAllByRole("link")).toHaveLength(1);
+    // Every notice leads to the page it is about, and the card to the whole feed.
+    expect(within(notices).getByRole("link", { name: CONNECTED.title })).toHaveAttribute(
+      "href",
+      "/acme/platform/connectors",
+    );
+    expect(within(notices).getByRole("link", { name: JOINED.title })).toHaveAttribute("href", "/acme/platform/members");
+    expect(within(notices).getByRole("link", { name: /Go to notifications/ })).toHaveAttribute(
+      "href",
+      "/acme/platform/notifications",
+    );
     const body = within(notices).getByText(/^The p95 duration of model calls/);
     expect(body.textContent).toBe(OPENED.body);
     expect(body).toHaveClass("whitespace-pre-line");

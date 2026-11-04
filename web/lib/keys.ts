@@ -80,8 +80,8 @@ export const OPEN_KEY = "o";
  *  included. */
 export const ORGANIZATION_KEY = "O";
 
-/** `g` then this reaches Notifications, the bell's page, from anywhere in the
- *  console. */
+/** `g` then this reaches the notifications of where the console stands: a
+ *  project's or an organization's, its rail's own row, else the person's. */
 export const NOTIFICATIONS_KEY = "n";
 
 export interface GoSequence {
@@ -94,7 +94,8 @@ export interface GoSequence {
 // `lib/console-nav.ts`, or one a console built on this one adds through
 // `lib/extension/nav.ts`, is reached by `g` and that key the day it lands,
 // and the sheet lists exactly the rail you stand in, so no sequence promises
-// a page the rail lacks; only `g O` and `g n` reach their page from anywhere.
+// a page the rail lacks; only `g O` reaches its page from anywhere, and `g n`
+// the person's own Notifications where the rail has no row of that key.
 // `c` is also `PAGE_ACTION_KEY`, safely: the pending-`g` branch returns
 // before the page-action check, so the two readings never meet.
 //

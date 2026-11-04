@@ -1,63 +1,70 @@
-import type { ReactNode } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import Link from "next/link";
 
 import { OverviewCard } from "@/components/overview-card";
 import { LocalTime } from "@/components/local-time";
 import { Row, Rows } from "@/components/rows";
-import { incidentHref } from "@/lib/alerts";
 import { eventKindLabel } from "@/lib/notification-kinds";
+import { noticeHref, type NoticePlace } from "@/lib/notifications";
 import type { FeedItem, NotificationFeed } from "@/lib/server/data";
 import { cn } from "@/lib/utils";
 
-/** The project a feed is of, by the slugs an incident's link is made of. */
-type ProjectAt = { organization: string; slug: string };
-
-// A feed's notices as an overview shows them, newest first as the server
-// sends them, each unread one bold until somebody marks the feed read. The
-// organization's own notices and a project's are different sets the server
-// answers by scope, so each overview reads its own and hands it here, and
-// the two read alike. `action` is the feed's own, Mark read, in its heading
-// row beside what it clears. A project's feed names its project too, so an
-// incident's notice links to the incident. A card of its own, saying so when
-// the feed is empty or could not be read (`null`).
+// A feed's notices, newest first as the server sends them, each unread one
+// bold until somebody marks the feed read, and each a link to the page it is
+// about (`noticeHref`). The organization's own notices and a project's are
+// different sets the server answers by scope, so each page reads its own and
+// hands it here, and the two read alike. `Notices` is an overview's card of
+// them, saying so when the feed is empty or could not be read (`null`);
+// `NoticeRows` the list alone, as the feeds' own pages draw it.
 export function Notices({
   label,
   icon,
   feed,
   action,
-  project,
+  place,
+  links,
 }: {
   label: string;
   icon?: LucideIcon;
   feed: NotificationFeed | null;
   action?: ReactNode;
-  project?: ProjectAt;
+  place: NoticePlace;
+  links?: ComponentProps<typeof OverviewCard>["links"];
 }) {
   return (
-    <OverviewCard title={label} icon={icon} action={action}>
-      {feed === null ? (
-        <p className="text-muted-foreground">Could not be read just now. Reload to try again.</p>
-      ) : feed.items.length === 0 ? (
-        <p className="text-muted-foreground">Nothing new.</p>
-      ) : (
-        // Flush in the card: rows ruled apart, never a card in a card.
-        <Rows className="rounded-none p-0 ring-0">
-          {feed.items.map((item) => (
-            <NoticeRow key={item.id} item={item} project={project} />
-          ))}
-        </Rows>
-      )}
+    <OverviewCard title={label} icon={icon} action={action} links={links}>
+      <NoticeRows feed={feed} place={place} flush />
     </OverviewCard>
   );
 }
 
-function NoticeRow({ item, project }: { item: FeedItem; project?: ProjectAt }) {
+/** The feed's rows, or what stands in for them. `flush` in a card: rows ruled
+ *  apart, never a card in a card. */
+export function NoticeRows({
+  feed,
+  place,
+  flush = false,
+}: {
+  feed: NotificationFeed | null;
+  place: NoticePlace;
+  flush?: boolean;
+}) {
+  if (feed === null) {
+    return <p className="text-sm text-muted-foreground">Could not be read just now. Reload to try again.</p>;
+  }
+  if (feed.items.length === 0) return <p className="text-sm text-muted-foreground">Nothing new.</p>;
+  return (
+    <Rows className={cn(flush && "rounded-none p-0 ring-0")}>
+      {feed.items.map((item) => (
+        <NoticeRow key={item.id} item={item} place={place} />
+      ))}
+    </Rows>
+  );
+}
+
+function NoticeRow({ item, place }: { item: FeedItem; place: NoticePlace }) {
   const unread = item.read_at === null;
-  const incident =
-    project && item.metadata
-      ? incidentHref(project.organization, project.slug, item.metadata.incident_id)
-      : null;
   return (
     <Row
       label={
@@ -67,13 +74,9 @@ function NoticeRow({ item, project }: { item: FeedItem; project?: ProjectAt }) {
             unread ? "font-bold text-foreground" : "font-normal text-muted-foreground",
           )}
         >
-          {incident ? (
-            <Link href={incident} className="underline-offset-4 hover:underline">
-              {item.title}
-            </Link>
-          ) : (
-            <span>{item.title}</span>
-          )}
+          <Link href={noticeHref(item, place)} className="underline-offset-4 hover:underline">
+            {item.title}
+          </Link>
           {unread && <span className="sr-only"> Unread</span>}
         </span>
       }

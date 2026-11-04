@@ -13,6 +13,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { LocalTime } from "@/components/local-time";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import type { ActionResult } from "@/lib/action-result";
@@ -26,11 +27,14 @@ import {
   giverText,
   inviteSubtitle,
   inviterText,
+  noticeHref,
   seatSubtitle,
+  type NoticePlace,
 } from "@/lib/notifications";
 import { organizationLabel } from "@/lib/identity";
 import { usePageCovered } from "@/lib/page-cover";
-import { organizationPath } from "@/lib/slug";
+import { organizationPath, projectPath } from "@/lib/slug";
+import type { FeedItem } from "@/lib/server/data";
 import type { OrganizationEntry, ProjectOffer } from "@/lib/server/entities/organization";
 import {
   useActiveOrganization,
@@ -43,6 +47,7 @@ import {
 } from "@/lib/store";
 import { useAction } from "@/lib/use-action";
 import { useLetterKeys } from "@/lib/use-accessibility";
+import { useBellPlaces, useScopeFeed, type BellScope } from "@/lib/use-scope-feed";
 import type { AuditExport } from "@/lib/types/audit-export";
 import type { GivenSeat } from "@/lib/types/given-seat";
 import type { IncomingInvite } from "@/lib/types/incoming-invite";
@@ -70,12 +75,35 @@ export function NotificationsBell() {
     organization,
     auditExports,
   });
-  const badge = badgeCount(count);
   const letterKeys = useLetterKeys();
   const covered = usePageCovered();
   // Held here so a row that leads away can close the menu before it goes.
   const [open, setOpen] = useState(false);
-
+  // One list: what is the person's own, then a preview of the notices of the
+  // place they stand in — the project's, and the organization's for its
+  // owners and admins — newest first, each leading to the page it is about.
+  // The badge counts the person's own alone: a notice's read mark is shared
+  // by everybody it reaches, so it is read, and marked, on its feed's page.
+  const places = useBellPlaces();
+  const projectFeed = useScopeFeed(places.project, open);
+  const organizationFeed = useScopeFeed(places.organization, open);
+  const feeds = [
+    { ...projectFeed, scope: places.project },
+    { ...organizationFeed, scope: places.organization },
+  ].flatMap((read) => (read.scope ? [{ ...read, scope: read.scope }] : []));
+  const notices = feeds
+    .flatMap(({ scope, feed }) => (feed?.items ?? []).map((item) => ({ item, scope })))
+    .toSorted((a, b) => (a.item.created_at < b.item.created_at ? 1 : a.item.created_at > b.item.created_at ? -1 : 0))
+    .slice(0, NOTICE_ROWS);
+  const reading = feeds.some((read) => !read.read);
+  const badge = badgeCount(count);
+  // Where "See all" goes: the Notifications page of where the console stands,
+  // the project's before the organization's, else the person's own.
+  const seeAll = places.project
+    ? projectPath(places.project.organization, places.project.project, "/notifications")
+    : places.organization
+      ? organizationPath(places.organization.organization, "/notifications")
+      : NOTIFICATIONS_HREF;
   return (
     <DropdownMenu modal={false} open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger
@@ -131,12 +159,12 @@ export function NotificationsBell() {
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
 
-        {count === 0 && exportsBuilding.length === 0 ? (
+        {count === 0 && exportsBuilding.length === 0 && notices.length === 0 ? (
           <p
             className="px-2 py-6 text-center text-sm text-muted-foreground"
             data-testid="notifications-menu-empty"
           >
-            You&rsquo;re all caught up.
+            {reading ? "Reading…" : "You\u2019re all caught up."}
           </p>
         ) : (
           // The bleed sits on the scroller, not on each row: a row carrying its
@@ -164,6 +192,9 @@ export function NotificationsBell() {
             {invites.map((invite) => (
               <InviteRow key={invite.id} invite={invite} />
             ))}
+            {notices.map(({ item, scope }) => (
+              <NoticeRow key={`${scope.kind}:${item.id}`} item={item} scope={scope} onLeave={() => setOpen(false)} />
+            ))}
           </div>
         )}
 
@@ -172,13 +203,48 @@ export function NotificationsBell() {
             first. The rows above drop their last rule for it. */}
         <DropdownMenuSeparator />
         <DropdownMenuItem asChild className="h-7 cursor-pointer gap-2 px-2">
-          <Link href={NOTIFICATIONS_HREF} data-testid="notifications-menu-all">
+          <Link href={seeAll} onClick={() => setOpen(false)} data-testid="notifications-menu-all">
             <Bell className="size-4 shrink-0 text-muted-foreground" />
-            Go to notifications
+            See all
           </Link>
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+/** The most notices the menu lists; the feeds' own pages hold the rest. */
+const NOTICE_ROWS = 20;
+
+// One notice: where it was raised, its title, its body's first lines, and
+// when, leading to the page it is about (`noticeHref`).
+function NoticeRow({ item, scope, onLeave }: { item: FeedItem; scope: BellScope; onLeave: () => void }) {
+  const unread = item.read_at === null;
+  const place: NoticePlace =
+    scope.kind === "project" ? { organization: scope.organization, project: scope.project } : { organization: scope.organization };
+  return (
+    <DropdownMenuItem
+      asChild
+      className="h-auto cursor-pointer items-start rounded-none border-b border-border px-gutter py-gutter last:border-b-0"
+      data-testid="notifications-menu-notice"
+    >
+      <Link href={noticeHref(item, place)} onClick={onLeave}>
+        <span className="grid min-w-0 flex-1 gap-0.5">
+          <span className="truncate text-xs text-muted-foreground">
+            {scope.kind === "project" ? scope.name : "Organization"}
+          </span>
+          <span className={cn("truncate text-sm", unread ? "font-medium" : "text-muted-foreground")}>
+            {item.title}
+            {unread && <span className="sr-only"> Unread</span>}
+          </span>
+          <span className="line-clamp-2 text-xs text-muted-foreground">{item.body}</span>
+          <span className="text-xs text-muted-foreground/70">
+            <LocalTime iso={item.created_at} mode="datetime" />
+          </span>
+        </span>
+        <ChevronRight className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+      </Link>
+    </DropdownMenuItem>
   );
 }
 

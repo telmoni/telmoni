@@ -23,11 +23,28 @@ that transaction commits.
 
 ## Where you read them
 
-- **Project notices**: notices posted to a project appear on its **Overview**
-  (`/{organization}/{project}`) for anyone on the project, newest first, each
-  unread one in bold, and an incident's linking to the incident on the
-  [Alerts](/docs/monitoring/alerts) page. **Mark read** there marks every unread
-  one as read, for everyone on the project. They also reach every channel the
+The bell in the console's header holds one list: first what is yours wherever
+you are — invitations, offers, projects you were added to and audit log
+exports — then the notices of the place you stand in, newest first: the
+project's on its pages, and the organization's own for its Owner and Admins on
+any of its pages, each row naming where it was raised. The badge counts what is
+yours alone: a notice's read mark is shared by everyone it reaches, so notices
+are read, and marked read, on their own page. Each notice leads to the page it
+is about: an incident's to the incident on the
+[Alerts](/docs/monitoring/alerts) page, a member joining or leaving to the
+project's **Members**, a connector connected or lost to its **Connectors**, and
+an organization's to the page it names, its billing page on the hosted service,
+or else the organization's **Notifications**. **See all**, at its foot, opens
+the **Notifications** page of where you stand: the project's, else the
+organization's for its Owner and Admins, else yours. The bell reads the place's
+notices as it opens.
+
+- **Project notices**: notices posted to a project appear in the bell, its
+  newest 20, on its **Notifications** page
+  (`/{organization}/{project}/notifications`), its last 50, and on its
+  **Overview** for anyone on the project, newest first, each unread one in
+  bold. **Mark read** marks every unread one as read, for everyone on the
+  project. They also reach every channel the
   project connects that takes their kind (Slack, a webhook subscribed to it),
   but for an alert's incidents, which reach only the channels the alert links,
   a webhook among them only if it takes their kind. A channel whose last
@@ -37,12 +54,14 @@ that transaction commits.
   Where the deployment runs the console agent, it searches them, and the
   project's delivery log, when asked.
 - **Organization notices**: notices posted to the organization rather than a
-  project appear on its **Overview** for its Owner and Admins. **Mark read**
-  there marks every unread one as read, for everyone who reads them.
+  project appear in the bell and on the organization's **Notifications** page
+  (`/{organization}/notifications`) for its Owner and Admins; a Member opening it
+  is told whose they are. **Mark read** there marks every unread one as read,
+  for every Owner and Admin, as the project's page does for the project.
 - **Invitations, offers and projects you were added to**: Invitations to you,
   offers of an organization or a project, and projects an organization's Owner
-  or an Admin added you to, appear separately in the console header bell and on
-  your account's **Notifications** page (`/settings/notifications`).
+  or an Admin added you to, appear first in the bell and on your account's
+  **Notifications** page (`/settings/notifications`).
 
 ## Forwarding to external connectors
 

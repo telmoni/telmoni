@@ -193,7 +193,8 @@ export default async function OverviewPage({
             label="Project notices"
             icon={Inbox}
             feed={notices}
-            project={{ organization, slug }}
+            place={{ organization, project: slug }}
+            links={[{ href: `${base}/notifications`, label: "Go to notifications" }]}
             action={
               notices && newest && notices.unread > 0 ? (
                 <MarkRead

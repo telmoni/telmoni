@@ -37,8 +37,8 @@ const FEED = {
   ],
   unread: 1,
 };
-// Only an incident's notice keeps its metadata.
-const READ = { ...FEED, items: FEED.items.map((item) => ({ ...item, metadata: null })) };
+// Only an incident's notice keeps its metadata, and an organization's its page.
+const READ = { ...FEED, items: FEED.items.map((item) => ({ ...item, metadata: null, page: null })) };
 
 function answer(status: number, body: unknown) {
   fetchWithTimeout.mockResolvedValue({ ok: status < 400, status, json: async () => body });
@@ -114,5 +114,28 @@ describe("fetchNotifications", () => {
     expect(url).toBe("http://server/internal/v1/notifications/feed");
     expect(init.headers).not.toHaveProperty("x-project-id");
     expect(fetchProject).not.toHaveBeenCalled();
+  });
+
+  // The page an organization's notice names, as a path this console routes;
+  // one it cannot route is none, and the row leads to the feed's own page.
+  it("keeps the page an organization's notice names, as a path", async () => {
+    const alert = (id: string, billing_url: unknown) => ({
+      ...FEED.items[0]!,
+      id,
+      kind: "organization_alert",
+      metadata: { billing_url },
+    });
+    answer(200, {
+      items: [
+        alert("a1", "https://console.example.com/acme/billing"),
+        alert("a2", "/acme/billing"),
+        alert("a3", "//elsewhere.example/acme"),
+        alert("a4", "not a url"),
+        alert("a5", 42),
+      ],
+      unread: 5,
+    });
+    const read = await fetchNotifications();
+    expect(read?.items.map((item) => item.page)).toEqual(["/acme/billing", "/acme/billing", null, null, null]);
   });
 });

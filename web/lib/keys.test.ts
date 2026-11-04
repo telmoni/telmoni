@@ -51,7 +51,7 @@ describe("the go sequences", () => {
     expect(resolveSequence("d", "/acme/web")).toBe("/acme/web/dashboards");
     expect(resolveSequence("e", "/acme/web")).toBe("/acme/web/evaluators");
     expect(resolveSequence(",", "/acme/web")).toBe("/acme/web/settings");
-    expect(resolveSequence("p", "/acme/web")).toBe("/acme/web/privacy");
+    expect(resolveSequence("p", "/acme/web")).toBeNull();
     expect(resolveSequence("k", "/acme/members")).toBeNull();
     expect(resolveSequence("p", "/acme")).toBe("/acme/projects");
     expect(resolveSequence("m", "/acme")).toBe("/acme/members");
@@ -77,12 +77,19 @@ describe("the go sequences", () => {
     expect(resolveSequence("O", "/settings/account", null)).toBeNull();
   });
 
-  it("goes to Notifications from every page of the console, once on Settings' rail", () => {
-    for (const pathname of ["/acme/web", "/acme/web/traces", "/acme", "/acme/members", ...RAILS]) {
-      expect(resolveSequence("n", pathname, "acme"), pathname).toBe("/settings/notifications");
-      const notifications = goSequences(pathname, "acme").filter((s) => s.key === "n");
-      expect(notifications, pathname).toEqual([
-        { key: "n", label: "Notifications", href: "/settings/notifications" },
+  // The rail's own row where it has one, a project's or an organization's;
+  // the person's own from Settings' rail and off the console's paths.
+  it("goes to the notifications of the place it stands in, once a rail", () => {
+    for (const [pathname, href] of [
+      ["/acme/web", "/acme/web/notifications"],
+      ["/acme/web/traces", "/acme/web/notifications"],
+      ["/acme", "/acme/notifications"],
+      ["/acme/members", "/acme/notifications"],
+      ["/settings/account", "/settings/notifications"],
+    ] as const) {
+      expect(resolveSequence("n", pathname, "acme"), pathname).toBe(href);
+      expect(goSequences(pathname, "acme").filter((s) => s.key === "n"), pathname).toEqual([
+        { key: "n", label: "Notifications", href },
       ]);
     }
   });

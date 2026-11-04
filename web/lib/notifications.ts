@@ -7,7 +7,10 @@ import {
   type AuditExport,
   type ReadyAuditExport,
 } from "@/lib/types/audit-export";
-import { InviteScope } from "@/lib/types/enums";
+import { incidentHref } from "@/lib/alerts";
+import type { FeedItem } from "@/lib/server/entities/notification-feed";
+import { organizationPath, projectPath } from "@/lib/slug";
+import { InviteScope, NotificationKind } from "@/lib/types/enums";
 import type { GivenSeat } from "@/lib/types/given-seat";
 import type { IncomingInvite } from "@/lib/types/incoming-invite";
 
@@ -95,4 +98,30 @@ export function giverText(seat: GivenSeat): string {
   const name = seat.giverDisplayName;
   if (!seat.giverEmail) return name ?? seat.organizationName;
   return name && name !== seat.giverEmail ? name : seat.giverEmail;
+}
+
+/** Where a feed's notices were raised: an organization, by its slug, and a
+ *  project of it where the feed is the project's. */
+export type NoticePlace = { organization: string; project?: string };
+
+/** The page a notice is about, by its kind: an incident's under its alert, a
+ *  member's the project's Members, a connector's its Connectors, and an
+ *  organization's the page it names. Any other, or one whose page its row
+ *  does not name, the feed's own page, where it is read in full. */
+export function noticeHref(item: FeedItem, place: NoticePlace): string {
+  const { organization, project } = place;
+  if (project !== undefined) {
+    if (item.metadata) return incidentHref(organization, project, item.metadata.incident_id);
+    if (item.kind === NotificationKind.MemberAdded || item.kind === NotificationKind.MemberLeft) {
+      return projectPath(organization, project, "/members");
+    }
+    if (
+      item.kind === NotificationKind.ConnectorConnected ||
+      item.kind === NotificationKind.ConnectorDisconnected
+    ) {
+      return projectPath(organization, project, "/connectors");
+    }
+    return projectPath(organization, project, "/notifications");
+  }
+  return item.page ?? organizationPath(organization, "/notifications");
 }
