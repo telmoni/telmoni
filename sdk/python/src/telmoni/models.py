@@ -420,8 +420,11 @@ class ModelCallRecord:
     end: datetime
     provider: str | None = None
     operation: str = contract.DEFAULT_MODEL_OPERATION
+    # How hard the model was asked to reason: metadata, sent in every mode.
+    reasoning_effort: str | None = None
     usage: Usage | None = None
     # Content: sent only when asked and the project's mode is on.
+    input_messages: object | None = None
     output_messages: object | None = None
     error_type: str | None = None
     cancelled: bool = False
@@ -450,7 +453,8 @@ CallRecord = ModelCallRecord | ToolCallRecord
 
 @dataclass(frozen=True)
 class StepRecord:
-    """A step that has ended, with the calls made inside it."""
+    """A step that has ended, with the calls made inside it and its own steps,
+    a subagent's say, up to 16 deep."""
 
     name: str
     start: datetime
@@ -459,7 +463,7 @@ class StepRecord:
     # project's mode is on.
     input_messages: object | None = None
     output_messages: object | None = None
-    calls: Sequence[CallRecord] = ()
+    calls: Sequence[StepRecord | CallRecord] = ()
     error_type: str | None = None
     cancelled: bool = False
     # Each ``score()``'s arguments by name, sent timed at the span's end.

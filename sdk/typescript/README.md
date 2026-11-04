@@ -135,13 +135,15 @@ await telmoni.flush();
 ```
 
 A time is a `Date` or milliseconds since the Unix epoch; a step (`type: 'step'`)
-holds its own `calls`. The run is sent as the live calls would have sent it,
+holds its own `calls`, steps among them, a subagent's own subagents say, up to
+16 deep, each under the step that holds it. A model call's `reasoningEffort`,
+how hard it was asked to reason, is sent in every content mode. The run is sent as the live calls would have sent it,
 through the same exporter, content rules and sample rate, in a trace of its own
 named by the run's id, whatever context is active. Each span's id is derived
 from the run's id and the span's place in the record, so the same record sent
 again is the same bytes, which ingest answers once: give a run the same id each
 time you send it. A record's content is its run's messages (`inputMessages`,
-`outputMessages`), a model call's (`outputMessages`), a tool call's
+`outputMessages`), a model call's (`inputMessages`, `outputMessages`), a tool call's
 `arguments` and `result`, and a step's messages, a subagent's task and answer. A blank agent, a run id that is
 neither a hyphenated UUID nor 32 hex digits, or is the nil UUID, or an empty
 step's name or model throws a `TypeError`, as does a field of the wrong type —
@@ -151,8 +153,9 @@ no array, in the order it ran, tags or a usage that is no object (an array or a
 else left off with one warning. A time outside what ingest reads (after the
 Unix epoch, and less than 2^64 nanoseconds after it, in July 2554), text longer
 than ingest keeps (a step's or a tool's name past 145 characters, the agent, a
-model, a provider, a user or an error type past 128, or a session past 200,
-counted in characters, not UTF-16's units), or a span
+model, a provider, a user or an error type past 128, a session past 200, or a
+reasoning effort past 1,024, counted in characters, not UTF-16's units), a step
+nested past 16 deep, or a span
 that ends before it starts throws a `RangeError`. Either sends nothing. A
 record the export queue has no room for throws `QueueFullError`, nothing of it
 queued: flush, or wait, and record it again. One of more spans than the queue

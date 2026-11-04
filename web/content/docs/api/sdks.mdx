@@ -327,10 +327,14 @@ over, hands the finished run over whole, as data: its id, a UUID you give and
 keep with the log; its agent, user, session and tags; the messages it was
 asked and answered with, which are [content](#content); its start and end and
 how it ended; and its steps and calls, each with its own times. A step holds
-the calls made inside it. Each step and call may carry its own content too: a
-model call the messages it produced, a tool call its arguments and its result,
-and a step the messages it was asked and answered with, a subagent's task and
-its answer say. A record the export queue has no room for is refused
+the calls made inside it, and steps of its own, a subagent's own subagents say,
+up to 16 deep, each sent under the step that holds it. Each step and call may
+carry its own content too: a model call the messages it was sent and those it
+produced, a tool call its arguments and its result, and a step the messages it
+was asked and answered with, a subagent's task and its answer say. A model call
+may also name its reasoning effort, how hard its model was asked to reason, as
+its provider names it, which is no content and is sent whatever the mode. A
+record the export queue has no room for is refused
 whole, before anything is queued: flush, or wait, and record it again. A
 record of more spans than the queue holds, 2,048 unless you
 [raise it](#answers-and-warnings), is never taken, and the refusal says so. One
@@ -367,13 +371,16 @@ by as much, so time a record by the clock that sends it.
     telmoni.flush()
     ```
 
-    Times carry their timezone. A blank agent, a run id that is neither a
+    Times carry their timezone. A `StepRecord`'s `calls` hold steps as well as
+    calls, and a `ModelCallRecord` takes `input_messages` and
+    `reasoning_effort`. A blank agent, a run id that is neither a
     hyphenated UUID nor 32 hex digits, or is the nil UUID, a time without its
     timezone or outside what Telmoni reads (after the Unix epoch, and less than
     2^64 nanoseconds after it, in July 2554), an empty step's name or model,
     text longer than Telmoni keeps (a step's or a tool's name past 145
     characters, the agent, a model, a provider, a user or an error type past
-    128, or a session past 200), or a span that ends before it starts raises `ValueError`. A field of the wrong type raises
+    128, a session past 200, or a reasoning effort past 1,024), a step nested
+    past 16 deep, or a span that ends before it starts raises `ValueError`. A field of the wrong type raises
     `TypeError` — a time that is no `datetime`, an item of another class,
     `inside` or `calls` that is no sequence (a list or a tuple) — save a token
     count, read as a whole number where it can be and else left off with one
@@ -409,7 +416,9 @@ by as much, so time a record by the clock that sends it.
     ```
 
     A time is a `Date` or milliseconds since the Unix epoch; a step is
-    `{ type: 'step', name, start, end, calls }`. A blank agent, a run id that
+    `{ type: 'step', name, start, end, calls }`, its `calls` holding steps as
+    well as calls, and a model call takes `inputMessages` and
+    `reasoningEffort`. A blank agent, a run id that
     is neither a hyphenated UUID nor 32 hex digits, or is the nil UUID, or an
     empty step's name or model throws a `TypeError`, as does a field of the
     wrong type — a time that is not one, an item of no known `type`, `inside`
@@ -418,8 +427,9 @@ by as much, so time a record by the clock that sends it.
     one warning. A time outside what Telmoni reads (after the Unix epoch, and
     less than 2^64 nanoseconds after it, in July 2554), text longer than
     Telmoni keeps (a step's or a tool's name past 145 characters, the agent, a
-    model, a provider, a user or an error type past 128, or a session past
-    200, counted in characters), or a span that ends before it starts throws a `RangeError`. Either way, nothing is sent.
+    model, a provider, a user or an error type past 128, a session past 200, or
+    a reasoning effort past 1,024, counted in characters), a step nested past
+    16 deep, or a span that ends before it starts throws a `RangeError`. Either way, nothing is sent.
   </Tab>
   <Tab value="Go">
     ```go
@@ -445,13 +455,15 @@ by as much, so time a record by the clock that sends it.
     client.Flush(ctx)
     ```
 
-    A step is a `telmoni.StepRecord` with its `Calls`. A blank agent, a run
+    A step is a `telmoni.StepRecord` with its `Calls`, steps among them, and a
+    `telmoni.ModelCallRecord` takes `InputMessages` and `ReasoningEffort`. A
+    blank agent, a run
     id that is not a UUID or is the nil UUID, a time that is zero or outside
     what Telmoni reads (after the Unix epoch, and less than 2^64 nanoseconds
     after it, in July 2554), an empty step's name or model, text longer than
     Telmoni keeps (a step's or a tool's name past 145 characters, the agent, a
-    model, a provider, a user or an error type past 128, or a session past
-    200), a nil item or a
+    model, a provider, a user or an error type past 128, a session past 200, or
+    a reasoning effort past 1,024), a nil item, a step nested past 16 deep or a
     span that ends before it starts returns an error, and nothing is sent.
   </Tab>
   <Tab value="Rust">
@@ -484,14 +496,17 @@ by as much, so time a record by the clock that sends it.
     telmoni.flush();
     ```
 
-    A step is a `StepRecord` with its `calls`. A blank agent
+    A step is a `StepRecord` with its `calls`, steps among them, and a
+    `ModelCallRecord` takes `input_messages` and `reasoning_effort`. A blank
+    agent
     (`Error::EmptyAgent`), a run id that is not a UUID or is the nil UUID
     (`Error::RunId`), an empty step's name or model (`Error::EmptyName`), a
     time outside what Telmoni reads, after the Unix epoch and less than 2^64
     nanoseconds after it, in July 2554 (`Error::RecordedTime`), text longer
     than Telmoni keeps — a step's or a tool's name past 145 characters, the
-    agent, a model, a provider, a user or an error type past 128, or a
-    session past 200 (`Error::TooLong`) — a span that
+    agent, a model, a provider, a user or an error type past 128, a session
+    past 200, or a reasoning effort past 1,024 (`Error::TooLong`) — a step
+    nested past 16 deep (`Error::TooDeep`), a span that
     ends before it starts (`Error::EndBeforeStart`) or a configured sample
     rate outside its range (`Error::SampleRate`) is returned as an error, and
     nothing is sent; a record the queue has no room for is `Error::QueueFull`.

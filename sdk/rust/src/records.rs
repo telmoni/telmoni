@@ -69,20 +69,20 @@ pub struct RunRecord {
     pub scores: Vec<Score>,
 }
 
-/// What a run record holds: a step, with its own calls, or a call made in
-/// the run itself.
+/// What a run record or a step record holds: a step, with what it holds, or a
+/// call.
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum RecordItem {
-    /// A step, with the calls made inside it.
+    /// A step, with what it holds.
     Step(StepRecord),
-    /// A model call made in the run itself.
+    /// A model call.
     ModelCall(ModelCallRecord),
-    /// A tool call made in the run itself.
+    /// A tool call.
     ToolCall(ToolCallRecord),
 }
 
-/// What a step record holds: a model call or a tool call.
+/// A recorded call: a model call or a tool call.
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum CallRecord {
@@ -92,7 +92,8 @@ pub enum CallRecord {
     Tool(ToolCallRecord),
 }
 
-/// A step that has ended, with the calls made inside it.
+/// A step that has ended, with the calls made inside it and its own steps, a
+/// subagent's say, up to 16 deep.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StepRecord {
     /// The step's name, which its span takes.
@@ -107,8 +108,8 @@ pub struct StepRecord {
     pub start: SystemTime,
     /// When the step ended.
     pub end: SystemTime,
-    /// The calls made inside the step, in the order they ran.
-    pub calls: Vec<CallRecord>,
+    /// What ran inside the step, in the order it ran: its calls, and steps.
+    pub calls: Vec<RecordItem>,
     /// The type of the error the step failed with, never its message; `None`
     /// when it did not fail. Empty reads as none.
     pub error_type: Option<String>,
@@ -131,13 +132,18 @@ pub struct ModelCallRecord {
     /// `text_completion`, `embeddings`); a blank one is `chat` too, and any
     /// other, with one warning.
     pub operation: Option<String>,
+    /// How hard the model was asked to reason, as the provider names it:
+    /// metadata, sent in every content mode. Empty reads as none.
+    pub reasoning_effort: Option<String>,
     /// When the call started.
     pub start: SystemTime,
     /// When the call ended.
     pub end: SystemTime,
     /// The tokens used.
     pub usage: Option<Usage>,
-    /// The messages the call produced: content, as a run's are.
+    /// The messages sent to the model: content, as a run's are.
+    pub input_messages: Option<Content>,
+    /// The messages the call produced: content, as above.
     pub output_messages: Option<Content>,
     /// The type of the error the call failed with, never its message; `None`
     /// when it did not fail. Empty reads as none.
@@ -223,16 +229,19 @@ impl StepRecord {
 
 impl ModelCallRecord {
     /// A record of a `chat` call to `model` from `start` to `end`, with no
-    /// provider, tokens or content, neither failed nor cancelled.
+    /// provider, reasoning effort, tokens or content, neither failed nor
+    /// cancelled.
     #[must_use]
     pub fn new(model: impl Into<String>, start: SystemTime, end: SystemTime) -> Self {
         Self {
             model: model.into(),
             provider: None,
             operation: None,
+            reasoning_effort: None,
             start,
             end,
             usage: None,
+            input_messages: None,
             output_messages: None,
             error_type: None,
             cancelled: false,
@@ -316,7 +325,7 @@ pub(crate) fn send(inner: &Inner, record: RunRecord) -> Result<(), Error> {
     if !(rate > 0.0 && rate <= 1.0) {
         return Err(Error::SampleRate(rate));
     }
-    let need = spans_in(&record);
+    let need = 1 + spans_in(&record.inside);
 
     let RunRecord {
         agent,
@@ -378,81 +387,69 @@ pub(crate) fn send(inner: &Inner, record: RunRecord) -> Result<(), Error> {
         attributes,
         start,
     );
-    for item in inside {
-        match item {
-            RecordItem::Step(step) => {
-                let mut attributes = inherited.clone();
-                attributes.extend(content([
-                    (contract::INPUT_MESSAGES, step.input_messages),
-                    (contract::OUTPUT_MESSAGES, step.output_messages),
-                ]));
-                let opened =
-                    spans.open(step.name, &run, SpanKind::Internal, attributes, step.start);
-                for call in step.calls {
-                    spans.call(call, &opened, &inherited);
-                }
-                spans.close(&opened, step.error_type, step.cancelled, step.end);
-            }
-            RecordItem::ModelCall(call) => spans.call(CallRecord::Model(call), &run, &inherited),
-            RecordItem::ToolCall(call) => spans.call(CallRecord::Tool(call), &run, &inherited),
-        }
-    }
+    spans.items(inside, &run, &inherited);
     spans.close(&run, error_type, cancelled, end);
     hold.queue();
     Ok(())
 }
 
 /// Each span's scores as its events, in the order [`Spans::close`] closes the
-/// spans — a step's calls before it, the run last — judged before the hold,
+/// spans — a step after what it holds, the run last — judged before the hold,
 /// since a refusal's warning goes to a sink of the application's, which may
 /// record a run of its own.
 fn judged(run: &[Score], inside: &[RecordItem], warner: &Warner) -> VecDeque<Vec<Vec<KeyValue>>> {
-    let events = |scores: &[Score]| {
-        let mut held = 0;
-        scores
-            .iter()
-            .filter_map(|score| {
-                let attributes = scores::event(score, held, warner)?;
-                held += 1;
-                Some(attributes)
-            })
-            .collect::<Vec<_>>()
-    };
-    let call = |call: &CallRecord| match call {
-        CallRecord::Model(call) => events(&call.scores),
-        CallRecord::Tool(call) => events(&call.scores),
-    };
-    let mut judged = VecDeque::new();
-    for item in inside {
-        match item {
-            RecordItem::Step(step) => {
-                judged.extend(step.calls.iter().map(call));
-                judged.push_back(events(&step.scores));
-            }
-            RecordItem::ModelCall(c) => judged.push_back(events(&c.scores)),
-            RecordItem::ToolCall(c) => judged.push_back(events(&c.scores)),
+    fn closing(items: &[RecordItem], warner: &Warner, judged: &mut VecDeque<Vec<Vec<KeyValue>>>) {
+        for item in items {
+            let scores = match item {
+                RecordItem::Step(step) => {
+                    closing(&step.calls, warner, judged);
+                    &step.scores
+                }
+                RecordItem::ModelCall(call) => &call.scores,
+                RecordItem::ToolCall(call) => &call.scores,
+            };
+            judged.push_back(events(scores, warner));
         }
     }
-    judged.push_back(events(run));
+    let mut judged = VecDeque::new();
+    closing(inside, warner, &mut judged);
+    judged.push_back(events(run, warner));
     judged
 }
 
-/// How many spans `record` queues: the run, then each step and each call.
-fn spans_in(record: &RunRecord) -> usize {
-    1 + record
-        .inside
+/// A span's scores as its events, each one refused warned of.
+fn events(scores: &[Score], warner: &Warner) -> Vec<Vec<KeyValue>> {
+    let mut held = 0;
+    scores
         .iter()
-        .map(|item| match item {
-            RecordItem::Step(step) => 1 + step.calls.len(),
-            RecordItem::ModelCall(_) | RecordItem::ToolCall(_) => 1,
+        .filter_map(|score| {
+            let attributes = scores::event(score, held, warner)?;
+            held += 1;
+            Some(attributes)
         })
-        .sum::<usize>()
+        .collect()
 }
 
-/// Refuses `record` for a span named nothing or holding text past ingest's
-/// cap, at a time ingest cannot read, or ending before it starts.
+/// How many spans `items` queue: each step, with what it holds, and each call.
+fn spans_in(items: &[RecordItem]) -> usize {
+    items
+        .iter()
+        .map(|item| match item {
+            RecordItem::Step(step) => 1 + spans_in(&step.calls),
+            RecordItem::ModelCall(_) | RecordItem::ToolCall(_) => 1,
+        })
+        .sum()
+}
+
+/// How deep steps nest, a run's own at 1: past any agent's subagents.
+const STEP_DEPTH_MAX: usize = 16;
+
+/// Refuses `record` for a step nested too deep, a span named nothing or
+/// holding text past ingest's cap, at a time ingest cannot read, or ending
+/// before it starts.
 fn check(record: &RunRecord) -> Result<(), Error> {
-    let spans = spans_of(record);
+    let mut spans = vec![Checked::run(record)];
+    spans_of(&record.inside, 1, &mut spans)?;
     for span in &spans {
         if span.name == Some("") {
             return Err(Error::EmptyName);
@@ -473,20 +470,29 @@ fn check(record: &RunRecord) -> Result<(), Error> {
     Ok(())
 }
 
-/// Each span of `record`, as [`check`] reads it.
-fn spans_of(record: &RunRecord) -> Vec<Checked<'_>> {
-    let mut spans = vec![Checked::run(record)];
-    for item in &record.inside {
+/// Each span `items` hold, as [`check`] reads it, a step among them `depth`
+/// deep.
+fn spans_of<'a>(
+    items: &'a [RecordItem],
+    depth: usize,
+    spans: &mut Vec<Checked<'a>>,
+) -> Result<(), Error> {
+    for item in items {
         match item {
             RecordItem::Step(step) => {
+                if depth > STEP_DEPTH_MAX {
+                    return Err(Error::TooDeep {
+                        max: STEP_DEPTH_MAX,
+                    });
+                }
                 spans.push(Checked::step(step));
-                spans.extend(step.calls.iter().map(Checked::call));
+                spans_of(&step.calls, depth + 1, spans)?;
             }
             RecordItem::ModelCall(call) => spans.push(Checked::model_call(call)),
             RecordItem::ToolCall(call) => spans.push(Checked::tool_call(call)),
         }
     }
-    spans
+    Ok(())
 }
 
 /// A span of a record, as [`check`] reads it.
@@ -547,13 +553,6 @@ impl<'a> Checked<'a> {
         }
     }
 
-    fn call(call: &'a CallRecord) -> Self {
-        match call {
-            CallRecord::Model(call) => Self::model_call(call),
-            CallRecord::Tool(call) => Self::tool_call(call),
-        }
-    }
-
     fn model_call(call: &'a ModelCallRecord) -> Self {
         Self {
             name: Some(&call.model),
@@ -567,6 +566,11 @@ impl<'a> Checked<'a> {
                     Text::ModelCallProvider,
                     chars(call.provider.as_deref()),
                     contract::PROVIDER_MAX,
+                ),
+                (
+                    Text::ModelCallReasoningEffort,
+                    chars(call.reasoning_effort.as_deref()),
+                    contract::ATTRIBUTE_VALUE_MAX,
                 ),
                 (
                     Text::ModelCallErrorType,
@@ -611,17 +615,12 @@ fn readable(time: SystemTime) -> bool {
     crate::exporter::unix_nanos(time).is_some()
 }
 
-/// Every model call `inside` holds, a step's among them.
+/// Every model call `inside` holds, each step's among them.
 fn model_calls(inside: &mut [RecordItem]) -> Vec<&mut ModelCallRecord> {
     let mut calls = Vec::new();
     for item in inside {
         match item {
-            RecordItem::Step(step) => {
-                calls.extend(step.calls.iter_mut().filter_map(|call| match call {
-                    CallRecord::Model(call) => Some(call),
-                    CallRecord::Tool(_) => None,
-                }));
-            }
+            RecordItem::Step(step) => calls.extend(model_calls(&mut step.calls)),
             RecordItem::ModelCall(call) => calls.push(call),
             RecordItem::ToolCall(_) => {}
         }
@@ -638,7 +637,7 @@ struct Spans<'a> {
     run_id: Uuid,
     trace_id: TraceId,
     /// The next span's place: `0` the run, then each step and call from `1`
-    /// as the record holds them, a step before its calls.
+    /// as the record holds them, depth first, a step before what it holds.
     place: u64,
 }
 
@@ -690,6 +689,35 @@ impl Spans<'_> {
         span.end_with_timestamp(end);
     }
 
+    /// What a run or a step holds, under `parent`, each step's own under it,
+    /// so each closes before what holds it.
+    fn items(&mut self, items: Vec<RecordItem>, parent: &Context, inherited: &[KeyValue]) {
+        for item in items {
+            match item {
+                RecordItem::Step(step) => {
+                    let mut attributes = inherited.to_vec();
+                    attributes.extend(content([
+                        (contract::INPUT_MESSAGES, step.input_messages),
+                        (contract::OUTPUT_MESSAGES, step.output_messages),
+                    ]));
+                    let opened = self.open(
+                        step.name,
+                        parent,
+                        SpanKind::Internal,
+                        attributes,
+                        step.start,
+                    );
+                    self.items(step.calls, &opened, inherited);
+                    self.close(&opened, step.error_type, step.cancelled, step.end);
+                }
+                RecordItem::ModelCall(call) => {
+                    self.call(CallRecord::Model(call), parent, inherited);
+                }
+                RecordItem::ToolCall(call) => self.call(CallRecord::Tool(call), parent, inherited),
+            }
+        }
+    }
+
     /// A call under `parent`, closed as soon as it opens, as a call holds
     /// nothing.
     fn call(&mut self, call: CallRecord, parent: &Context, inherited: &[KeyValue]) {
@@ -699,8 +727,14 @@ impl Spans<'_> {
                 let operation = call.operation.unwrap_or_default();
                 let (name, own) = runs::model_call_opening(&call.model, operation, call.provider);
                 attributes.extend(own);
+                if let Some(effort) = call.reasoning_effort.filter(|effort| !effort.is_empty()) {
+                    attributes.push(KeyValue::new(contract::REQUEST_REASONING_LEVEL, effort));
+                }
                 attributes.extend(call.usage.into_iter().flat_map(runs::usage_attributes));
-                attributes.extend(content([(contract::OUTPUT_MESSAGES, call.output_messages)]));
+                attributes.extend(content([
+                    (contract::INPUT_MESSAGES, call.input_messages),
+                    (contract::OUTPUT_MESSAGES, call.output_messages),
+                ]));
                 let opened = self.open(name, parent, SpanKind::Client, attributes, call.start);
                 self.close(&opened, call.error_type, call.cancelled, call.end);
             }

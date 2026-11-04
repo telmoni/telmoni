@@ -6,6 +6,7 @@ package telmoni_test
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -43,27 +44,29 @@ type recordSpec struct {
 	End       time.Time         `json:"end"`
 	ErrorType string            `json:"error_type"`
 	Cancelled bool              `json:"cancelled"`
-	Inside    []struct {
-		Step *struct {
-			Name      string           `json:"name"`
-			Start     time.Time        `json:"start"`
-			End       time.Time        `json:"end"`
-			Calls     []recordCallSpec `json:"calls"`
-			ErrorType string           `json:"error_type"`
-			Cancelled bool             `json:"cancelled"`
-		} `json:"step"`
-		recordCallSpec
-	} `json:"inside"`
+	Inside    []recordItemSpec  `json:"inside"`
 }
 
-type recordCallSpec struct {
+// recordItemSpec is what a run or a step holds: a step, holding its own, or a
+// call.
+type recordItemSpec struct {
+	Step *struct {
+		Name      string           `json:"name"`
+		Start     time.Time        `json:"start"`
+		End       time.Time        `json:"end"`
+		Calls     []recordItemSpec `json:"calls"`
+		ErrorType string           `json:"error_type"`
+		Cancelled bool             `json:"cancelled"`
+	} `json:"step"`
 	ModelCall *struct {
-		Model     string    `json:"model"`
-		Provider  string    `json:"provider"`
-		Operation string    `json:"operation"`
-		Start     time.Time `json:"start"`
-		End       time.Time `json:"end"`
-		Usage     *struct {
+		Model           string    `json:"model"`
+		Provider        string    `json:"provider"`
+		Operation       string    `json:"operation"`
+		ReasoningEffort string    `json:"reasoning_effort"`
+		InputMessages   any       `json:"input_messages"`
+		Start           time.Time `json:"start"`
+		End             time.Time `json:"end"`
+		Usage           *struct {
 			InputTokens           int      `json:"input_tokens"`
 			OutputTokens          int      `json:"output_tokens"`
 			CacheReadInputTokens  int      `json:"cache_read_input_tokens"`
@@ -91,16 +94,32 @@ func loadRecorded(t *testing.T) recordedFixture {
 	return fixture
 }
 
-func callFrom(spec recordCallSpec) telmoni.CallRecord {
+func itemFrom(spec recordItemSpec) telmoni.RecordItem {
+	if step := spec.Step; step != nil {
+		calls := make([]telmoni.RecordItem, 0, len(step.Calls))
+		for _, call := range step.Calls {
+			calls = append(calls, itemFrom(call))
+		}
+		return telmoni.StepRecord{
+			Name:      step.Name,
+			Start:     step.Start,
+			End:       step.End,
+			Calls:     calls,
+			ErrorType: step.ErrorType,
+			Cancelled: step.Cancelled,
+		}
+	}
 	if call := spec.ModelCall; call != nil {
 		record := telmoni.ModelCallRecord{
-			Model:     call.Model,
-			Provider:  call.Provider,
-			Operation: call.Operation,
-			Start:     call.Start,
-			End:       call.End,
-			ErrorType: call.ErrorType,
-			Cancelled: call.Cancelled,
+			Model:           call.Model,
+			Provider:        call.Provider,
+			Operation:       call.Operation,
+			ReasoningEffort: call.ReasoningEffort,
+			Start:           call.Start,
+			End:             call.End,
+			InputMessages:   call.InputMessages,
+			ErrorType:       call.ErrorType,
+			Cancelled:       call.Cancelled,
 		}
 		if usage := call.Usage; usage != nil {
 			record.Usage = &telmoni.Usage{
@@ -126,23 +145,7 @@ func callFrom(spec recordCallSpec) telmoni.CallRecord {
 func recordFrom(spec recordSpec) telmoni.RunRecord {
 	inside := make([]telmoni.RecordItem, 0, len(spec.Inside))
 	for _, item := range spec.Inside {
-		step := item.Step
-		if step == nil {
-			inside = append(inside, callFrom(item.recordCallSpec))
-			continue
-		}
-		calls := make([]telmoni.CallRecord, 0, len(step.Calls))
-		for _, call := range step.Calls {
-			calls = append(calls, callFrom(call))
-		}
-		inside = append(inside, telmoni.StepRecord{
-			Name:      step.Name,
-			Start:     step.Start,
-			End:       step.End,
-			Calls:     calls,
-			ErrorType: step.ErrorType,
-			Cancelled: step.Cancelled,
-		})
+		inside = append(inside, itemFrom(item))
 	}
 	return telmoni.RunRecord{
 		RunID:     spec.RunID,
@@ -161,6 +164,15 @@ func recordFrom(spec recordSpec) telmoni.RunRecord {
 func theRecord(t *testing.T) telmoni.RunRecord {
 	t.Helper()
 	return recordFrom(loadRecorded(t).Scenario.Record)
+}
+
+// nested is depth steps, each inside the one before.
+func nested(depth int, at time.Time) telmoni.StepRecord {
+	step := telmoni.StepRecord{Name: "s", Start: at, End: at}
+	for n := 2; n <= depth; n++ {
+		step = telmoni.StepRecord{Name: fmt.Sprintf("s%d", n), Start: at, End: at, Calls: []telmoni.RecordItem{step}}
+	}
+	return step
 }
 
 // normalizeRecorded is recorded.json's normalization, as sdk/fixtures/README.md
@@ -293,8 +305,8 @@ func TestARecordInsideALiveRunTakesATraceOfItsOwn(t *testing.T) {
 			recorded = append(recorded, span)
 		}
 	}
-	if len(recorded) != 8 {
-		t.Fatalf("sent %d spans of the record, want its 8", len(recorded))
+	if len(recorded) != 10 {
+		t.Fatalf("sent %d spans of the record, want its 10", len(recorded))
 	}
 	want := strings.ReplaceAll(record.RunID, "-", "")
 	for _, span := range recorded {
@@ -333,17 +345,22 @@ func TestAFailedRecordIsMarkedOnItsRunsSpan(t *testing.T) {
 	}
 }
 
+// A call's reasoning effort, which is no content, leaves whatever the mode.
 func TestARecordsContentLeavesOnlyWhenAskedAndTheProjectAllows(t *testing.T) {
 	content := map[string]map[string]string{
 		"invoke_agent claude-code": {"gen_ai.input.messages": `["asked"]`, "gen_ai.output.messages": `{"said":"answered"}`},
 		"subagent":                 {"gen_ai.input.messages": `["the task"]`, "gen_ai.output.messages": `["the answer"]`},
-		"chat m":                   {"gen_ai.output.messages": `{"said":"it"}`},
+		"its subagent":             {"gen_ai.input.messages": `["its task"]`, "gen_ai.output.messages": `["its answer"]`},
+		"chat m":                   {"gen_ai.input.messages": `["the question"]`, "gen_ai.output.messages": `{"said":"it"}`},
 		"execute_tool t":           {"gen_ai.tool.call.arguments": `{"q":1}`, "gen_ai.tool.call.result": "found"},
 	}
-	for _, capture := range []bool{true, false} {
-		t.Run(fmt.Sprintf("capture=%v", capture), func(t *testing.T) {
-			on := contentOn()
-			h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k"), CaptureContent: capture}, newFakeTransport(t, on, on))
+	for _, tc := range []struct {
+		capture bool
+		mode    string
+	}{{true, "on"}, {false, "on"}, {true, "off"}} {
+		t.Run(fmt.Sprintf("capture=%v mode=%s", tc.capture, tc.mode), func(t *testing.T) {
+			answer := scripted{status: 200, headers: map[string]string{"Telmoni-Content-Mode": tc.mode}, body: []byte(`{}`)}
+			h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k"), CaptureContent: tc.capture}, newFakeTransport(t, answer, answer))
 			_, warm := h.client.Run(context.Background(), "warm", telmoni.RunOptions{})
 			warm.End()
 			h.flush()
@@ -354,25 +371,34 @@ func TestARecordsContentLeavesOnlyWhenAskedAndTheProjectAllows(t *testing.T) {
 				telmoni.StepRecord{
 					Name: "subagent", Start: at, End: at,
 					InputMessages: []string{"the task"}, OutputMessages: []string{"the answer"},
-					Calls: []telmoni.CallRecord{
-						telmoni.ModelCallRecord{Model: "m", Start: at, End: at, OutputMessages: map[string]string{"said": "it"}},
-					},
+					Calls: []telmoni.RecordItem{telmoni.StepRecord{
+						Name: "its subagent", Start: at, End: at,
+						InputMessages: []string{"its task"}, OutputMessages: []string{"its answer"},
+						Calls: []telmoni.RecordItem{telmoni.ModelCallRecord{
+							Model: "m", ReasoningEffort: "high", Start: at, End: at,
+							InputMessages: []string{"the question"}, OutputMessages: map[string]string{"said": "it"},
+						}},
+					}},
 				},
 				telmoni.ToolCallRecord{Name: "t", Start: at, End: at, Arguments: map[string]int{"q": 1}, Result: "found"},
 			}
 			recordRun(t, h, record)
 			spans := byName(h.transport.spans(t))
+			sends := tc.capture && tc.mode == "on"
 			for name, fields := range content {
 				sent := attributesOf(t, spans[name])
 				for key, want := range fields {
 					got, has := sent[key]
-					if capture && got != want {
+					if sends && got != want {
 						t.Errorf("%s %s = %v, want %s", name, key, got, want)
 					}
-					if !capture && has {
-						t.Errorf("%s's %s left without CaptureContent", name, key)
+					if !sends && has {
+						t.Errorf("%s's %s left, not asked for or not allowed", name, key)
 					}
 				}
+			}
+			if got := attributesOf(t, spans["chat m"])["gen_ai.request.reasoning.level"]; got != "high" {
+				t.Errorf("gen_ai.request.reasoning.level = %v, want high", got)
 			}
 		})
 	}
@@ -396,8 +422,8 @@ func TestTheSampleRateDropsARecordWhole(t *testing.T) {
 	random = 0.1
 	recordRun(t, h, record)
 	spans := h.transport.spans(t)
-	if len(spans) != 8 {
-		t.Fatalf("sent %d spans, want the record's 8", len(spans))
+	if len(spans) != 10 {
+		t.Fatalf("sent %d spans, want the record's 10", len(spans))
 	}
 	if got := attributesOf(t, byName(spans)["invoke_agent claude-code"])["telmoni.sample_rate"]; got != 0.25 {
 		t.Errorf("telmoni.sample_rate = %v, want the client's 0.25", got)
@@ -411,7 +437,7 @@ func TestARecordRefusedReturnsAnErrorAndSendsNothing(t *testing.T) {
 		Name:  "s",
 		Start: start,
 		End:   start.Add(2 * time.Second),
-		Calls: []telmoni.CallRecord{telmoni.ToolCallRecord{Name: "t", Start: start.Add(time.Second), End: start}},
+		Calls: []telmoni.RecordItem{telmoni.ToolCallRecord{Name: "t", Start: start.Add(time.Second), End: start}},
 	}
 	for _, tc := range []struct {
 		name   string
@@ -442,7 +468,7 @@ func TestARecordRefusedReturnsAnErrorAndSendsNothing(t *testing.T) {
 			r.Inside = append(r.Inside, telmoni.StepRecord{Start: start, End: start})
 		}, "cannot be empty"},
 		{"a model call with no model, in a step", func(r *telmoni.RunRecord) {
-			r.Inside = append(r.Inside, telmoni.StepRecord{Name: "s", Start: start, End: start, Calls: []telmoni.CallRecord{
+			r.Inside = append(r.Inside, telmoni.StepRecord{Name: "s", Start: start, End: start, Calls: []telmoni.RecordItem{
 				telmoni.ModelCallRecord{Start: start, End: start},
 			}})
 		}, "cannot be empty"},
@@ -469,6 +495,11 @@ func TestARecordRefusedReturnsAnErrorAndSendsNothing(t *testing.T) {
 		{"a provider of 129 characters", func(r *telmoni.RunRecord) {
 			r.Inside = append(r.Inside, telmoni.ModelCallRecord{Model: "m", Provider: strings.Repeat("p", 129), Start: start, End: start})
 		}, "telmoni: a recorded model call's Provider must be up to 128 characters"},
+		{"a reasoning effort of 1025 characters, in a step", func(r *telmoni.RunRecord) {
+			r.Inside = append(r.Inside, telmoni.StepRecord{Name: "s", Start: start, End: start, Calls: []telmoni.RecordItem{
+				telmoni.ModelCallRecord{Model: "m", ReasoningEffort: strings.Repeat("r", 1025), Start: start, End: start},
+			}})
+		}, "telmoni: a recorded model call's ReasoningEffort must be up to 1024 characters"},
 		{"a model call's error type of 129 characters", func(r *telmoni.RunRecord) {
 			r.Inside = append(r.Inside, telmoni.ModelCallRecord{Model: "m", ErrorType: strings.Repeat("e", 129), Start: start, End: start})
 		}, "telmoni: a recorded model call's ErrorType must be up to 128 characters"},
@@ -476,7 +507,7 @@ func TestARecordRefusedReturnsAnErrorAndSendsNothing(t *testing.T) {
 			r.Inside = append(r.Inside, telmoni.ToolCallRecord{Name: strings.Repeat("t", 146), Start: start, End: start})
 		}, "telmoni: a recorded tool call's Name must be up to 145 characters"},
 		{"a tool call's error type of 129 characters, in a step", func(r *telmoni.RunRecord) {
-			r.Inside = append(r.Inside, telmoni.StepRecord{Name: "s", Start: start, End: start, Calls: []telmoni.CallRecord{
+			r.Inside = append(r.Inside, telmoni.StepRecord{Name: "s", Start: start, End: start, Calls: []telmoni.RecordItem{
 				telmoni.ToolCallRecord{Name: "t", ErrorType: strings.Repeat("e", 129), Start: start, End: start},
 			}})
 		}, "telmoni: a recorded tool call's ErrorType must be up to 128 characters"},
@@ -486,9 +517,20 @@ func TestARecordRefusedReturnsAnErrorAndSendsNothing(t *testing.T) {
 				Name:  "s",
 				Start: start,
 				End:   start,
-				Calls: []telmoni.CallRecord{(*telmoni.ToolCallRecord)(nil)},
+				Calls: []telmoni.RecordItem{(*telmoni.ToolCallRecord)(nil)},
 			})
 		}, "a recorded item must be"},
+		{"a nil item in a step inside a step", func(r *telmoni.RunRecord) {
+			inner := telmoni.StepRecord{Name: "s", Start: start, End: start, Calls: []telmoni.RecordItem{nil}}
+			r.Inside = append(r.Inside, telmoni.StepRecord{Name: "s", Start: start, End: start, Calls: []telmoni.RecordItem{inner}})
+		}, "a recorded item must be"},
+		{"steps nested 17 deep", func(r *telmoni.RunRecord) { r.Inside = append(r.Inside, nested(17, start)) },
+			"telmoni: a recorded step must be nested at most 16 deep"},
+		{"a step that holds itself", func(r *telmoni.RunRecord) {
+			looped := &telmoni.StepRecord{Name: "s", Start: start, End: start}
+			looped.Calls = []telmoni.RecordItem{looped}
+			r.Inside = append(r.Inside, looped)
+		}, "nested at most 16 deep"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newHarness(t, testConfig(), nil)
@@ -506,6 +548,67 @@ func TestARecordRefusedReturnsAnErrorAndSendsNothing(t *testing.T) {
 	}
 }
 
+// A step inside a step goes under its span, each span at its place depth
+// first, each step sent after what it holds.
+func TestAStepInsideAStepGoesUnderItsSpan(t *testing.T) {
+	h := newHarness(t, testConfig(), nil)
+	record := theRecord(t)
+	at := record.Start
+	call := func(name string) telmoni.RecordItem { return telmoni.ToolCallRecord{Name: name, Start: at, End: at} }
+	step := func(name string, calls ...telmoni.RecordItem) telmoni.RecordItem {
+		return telmoni.StepRecord{Name: name, Start: at, End: at, Calls: calls}
+	}
+	record.Agent = "bot"
+	record.Inside = []telmoni.RecordItem{
+		step("outer", call("a"), step("middle", step("inner", call("b"))), call("c")),
+		call("d"),
+	}
+	recordRun(t, h, record)
+	spans := h.transport.spans(t)
+	sent := []string{"execute_tool a", "execute_tool b", "inner", "middle", "execute_tool c", "outer", "execute_tool d", "invoke_agent bot"}
+	if got := names(spans); !reflect.DeepEqual(got, sent) {
+		t.Fatalf("sent %q, want %q", got, sent)
+	}
+	var runID [16]byte
+	if _, err := hex.Decode(runID[:], []byte(strings.ReplaceAll(record.RunID, "-", ""))); err != nil {
+		t.Fatal(err)
+	}
+	places := []string{"invoke_agent bot", "outer", "execute_tool a", "middle", "inner", "execute_tool b", "execute_tool c", "execute_tool d"}
+	idOf := func(name string) string { return telmoni.RecordedSpanID(runID, slices.Index(places, name)).String() }
+	parents := map[string]string{
+		"outer": "invoke_agent bot", "execute_tool a": "outer", "middle": "outer", "inner": "middle",
+		"execute_tool b": "inner", "execute_tool c": "outer", "execute_tool d": "invoke_agent bot",
+	}
+	for _, span := range spans {
+		name := span["name"].(string)
+		if span["spanId"] != idOf(name) {
+			t.Errorf("%s's id is %v, want %s, its place's", name, span["spanId"], idOf(name))
+		}
+		got, has := span["parentSpanId"]
+		if parent, inside := parents[name]; inside && got != idOf(parent) || !inside && has {
+			t.Errorf("%s's parent is %v, want %q's", name, got, parent)
+		}
+	}
+}
+
+// Steps nested 16 deep, the deepest a record takes, are sent, each under the
+// next.
+func TestStepsNested16DeepAreSent(t *testing.T) {
+	h := newHarness(t, testConfig(), nil)
+	record := theRecord(t)
+	record.Inside = []telmoni.RecordItem{nested(16, record.Start)}
+	recordRun(t, h, record)
+	spans := h.transport.spans(t)
+	if len(spans) != 17 {
+		t.Fatalf("sent %d spans, want the run and its 16 steps", len(spans))
+	}
+	for n, inner := range spans[:16] {
+		if inner["parentSpanId"] != spans[n+1]["spanId"] {
+			t.Errorf("%v is not under %v", inner["name"], spans[n+1]["name"])
+		}
+	}
+}
+
 // Ingest's first and last times, names of spaces, and a tool's empty name,
 // which ingest reads as none, are sent as given.
 func TestARecordAtTheEdgesOfWhatIngestReadsIsSentAsGiven(t *testing.T) {
@@ -513,7 +616,7 @@ func TestARecordAtTheEdgesOfWhatIngestReadsIsSentAsGiven(t *testing.T) {
 	first, last := time.Unix(0, 1), time.Date(2554, 7, 21, 23, 34, 33, 709551615, time.UTC)
 	record := theRecord(t)
 	record.Start, record.End = first, last
-	record.Inside = []telmoni.RecordItem{telmoni.StepRecord{Name: " ", Start: first, End: last, Calls: []telmoni.CallRecord{
+	record.Inside = []telmoni.RecordItem{telmoni.StepRecord{Name: " ", Start: first, End: last, Calls: []telmoni.RecordItem{
 		telmoni.ToolCallRecord{Name: " ", Start: first, End: last},
 		telmoni.ToolCallRecord{Start: first, End: last},
 		telmoni.ModelCallRecord{Model: " ", Start: first, End: last},
@@ -540,10 +643,10 @@ func TestARecordAtIngestsCapsIsSentAsGiven(t *testing.T) {
 	start := record.Start
 	record.Agent, record.UserID, record.SessionID, record.ErrorType = wide(128), wide(128), wide(200), wide(128)
 	record.Inside = []telmoni.RecordItem{
-		telmoni.StepRecord{Name: wide(145), ErrorType: wide(128), Start: start, End: start, Calls: []telmoni.CallRecord{
+		telmoni.StepRecord{Name: wide(145), ErrorType: wide(128), Start: start, End: start, Calls: []telmoni.RecordItem{
 			telmoni.ToolCallRecord{Name: wide(145), ErrorType: wide(128), Start: start, End: start},
 		}},
-		telmoni.ModelCallRecord{Model: wide(128), Provider: wide(128), ErrorType: wide(128), Start: start, End: start},
+		telmoni.ModelCallRecord{Model: wide(128), Provider: wide(128), ReasoningEffort: wide(1024), ErrorType: wide(128), Start: start, End: start},
 		telmoni.ModelCallRecord{Operation: "generate_content", Model: wide(128), Start: start, End: start},
 	}
 	recordRun(t, h, record)
@@ -555,7 +658,7 @@ func TestARecordAtIngestsCapsIsSentAsGiven(t *testing.T) {
 		"invoke_agent " + wide(128):     {"telmoni.agent": wide(128), "user.id": wide(128), "gen_ai.conversation.id": wide(200), "error.type": wide(128)},
 		wide(145):                       {"error.type": wide(128)},
 		"execute_tool " + wide(145):     {"gen_ai.tool.name": wide(145), "error.type": wide(128)},
-		"chat " + wide(128):             {"gen_ai.request.model": wide(128), "gen_ai.provider.name": wide(128), "error.type": wide(128)},
+		"chat " + wide(128):             {"gen_ai.request.model": wide(128), "gen_ai.provider.name": wide(128), "gen_ai.request.reasoning.level": wide(1024), "error.type": wide(128)},
 		"generate_content " + wide(128): {"gen_ai.request.model": wide(128)},
 	} {
 		span := byName(spans)[name]
@@ -590,30 +693,23 @@ func TestItemsGivenByPointerAreReadThroughThem(t *testing.T) {
 	record := theRecord(t)
 	byValue := newHarness(t, testConfig(), nil)
 	recordRun(t, byValue, record)
-	pointer := func(call telmoni.CallRecord) telmoni.CallRecord {
-		switch call := call.(type) {
-		case telmoni.ModelCallRecord:
-			return &call
-		case telmoni.ToolCallRecord:
-			return &call
-		}
-		return call
-	}
-	inside := make([]telmoni.RecordItem, 0, len(record.Inside))
-	for _, item := range record.Inside {
-		switch item := item.(type) {
-		case telmoni.StepRecord:
-			calls := make([]telmoni.CallRecord, 0, len(item.Calls))
-			for _, call := range item.Calls {
-				calls = append(calls, pointer(call))
+	var pointers func(items []telmoni.RecordItem) []telmoni.RecordItem
+	pointers = func(items []telmoni.RecordItem) []telmoni.RecordItem {
+		out := make([]telmoni.RecordItem, 0, len(items))
+		for _, item := range items {
+			switch item := item.(type) {
+			case telmoni.StepRecord:
+				item.Calls = pointers(item.Calls)
+				out = append(out, &item)
+			case telmoni.ModelCallRecord:
+				out = append(out, &item)
+			case telmoni.ToolCallRecord:
+				out = append(out, &item)
 			}
-			item.Calls = calls
-			inside = append(inside, &item)
-		case telmoni.CallRecord:
-			inside = append(inside, pointer(item))
 		}
+		return out
 	}
-	record.Inside = inside
+	record.Inside = pointers(record.Inside)
 	byPointer := newHarness(t, testConfig(), nil)
 	recordRun(t, byPointer, record)
 	sameBody(t, byPointer, byValue)
@@ -1023,8 +1119,10 @@ func TestARecordedTokenCountBelowZeroIsLeftOffWarnedOfBeforeItsHold(t *testing.T
 	start := record.Start
 	record.Inside = []telmoni.RecordItem{
 		telmoni.ModelCallRecord{Model: "alone", Start: start, End: start, Usage: &telmoni.Usage{InputTokens: 5, CacheWriteInputTokens: -2}},
-		telmoni.StepRecord{Name: "s", Start: start, End: start, Calls: []telmoni.CallRecord{
-			&telmoni.ModelCallRecord{Model: "in a step", Start: start, End: start, Usage: &telmoni.Usage{OutputTokens: -1}},
+		telmoni.StepRecord{Name: "s", Start: start, End: start, Calls: []telmoni.RecordItem{
+			&telmoni.StepRecord{Name: "inner", Start: start, End: start, Calls: []telmoni.RecordItem{
+				&telmoni.ModelCallRecord{Model: "in a step", Start: start, End: start, Usage: &telmoni.Usage{OutputTokens: -1}},
+			}},
 		}},
 	}
 	h, logs := recordWarnedOf(t, record)

@@ -22,14 +22,14 @@ Every request carries `Telmoni-Sent-At`, the SDK's clock as the attempt leaves, 
 
 ## `recorded.json`
 
-`scenario.record` is a run that has already ended, handed whole to `record_run` (`recordRun`, `RecordRun`): its id, its agent, user, session and tags, its times, and what ran inside it, a step holding its own calls. Times are RFC 3339 in UTC, to the millisecond, which every language holds exactly. `export` is the one body the SDK must send for it: a record travels in a single export when it holds no more spans than a batch, each span as it ended — a step after its calls — and the run's own last.
+`scenario.record` is a run that has already ended, handed whole to `record_run` (`recordRun`, `RecordRun`): its id, its agent, user, session and tags, its times, and what ran inside it, a step holding its own calls and a step of its own, whose model call names its reasoning effort, sent as `gen_ai.request.reasoning.level` whatever the content mode, and holds its input messages, content the export lacks, as `capture_content` is off. Times are RFC 3339 in UTC, to the millisecond, which every language holds exactly. `export` is the one body the SDK must send for it: a record travels in a single export when it holds no more spans than a batch, each span as it ended — a step after what it holds — and the run's own last.
 
 Nothing is derived at random, so the export is compared nearly whole:
 
 1. Exactly one body was sent.
 2. Every `attributes` array is sorted by `key`, the resource's too; spans keep the order they were sent in.
 3. `telemetry.sdk.language` is replaced by `<language>`; `telemetry.sdk.version`, `telemetry.distro.version` and the scope's `version` by `<version>`.
-4. Everything else is compared as JSON, ids and times included. The trace's id is the run's, without its hyphens. Each span's id is the first eight bytes, in hex, of the version 5 UUID (RFC 9562) named by the span's place in the record, in decimal, under the run's id: `0` the run, then each step and call from `1` in the record's order, a step before its calls.
+4. Everything else is compared as JSON, ids and times included. The trace's id is the run's, without its hyphens. Each span's id is the first eight bytes, in hex, of the version 5 UUID (RFC 9562) named by the span's place in the record, in decimal, under the run's id: `0` the run, then each step and call from `1` in the record's order, depth first, a step before what it holds.
 5. The one warning is for the call whose operation is `rerank`, which ingest reads as no model call, so it goes as `chat`: `telmoni: a model call's operation must be chat, generate_content, text_completion or embeddings, which ingest reads as a model call; it is sent as chat`, its `kind` `input` (`answers/`, below).
 
 The same record sent twice must be the same bytes, which ingest's claim on a body answers once.

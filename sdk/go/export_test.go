@@ -24,10 +24,11 @@ var ScoreLimits = map[string]int{
 }
 
 // The hooks the tests reach for: the sample rate's random source, a record's
-// hold, the W3C grammar's helpers and a time as sent.
+// hold and its spans' ids, the W3C grammar's helpers and a time as sent.
 var (
 	WithRandom         = withRandom
 	HoldOne            = holdOne
+	RecordedSpanID     = recordedSpanID
 	EncodeBaggageValue = encodeBaggageValue
 	DecodeBaggageValue = decodeBaggageValue
 	ParseTraceparent   = parseTraceparent

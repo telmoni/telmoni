@@ -66,6 +66,7 @@ pub(crate) const REQUEST_FREQUENCY_PENALTY: &str = "gen_ai.request.frequency_pen
 pub(crate) const REQUEST_PRESENCE_PENALTY: &str = "gen_ai.request.presence_penalty";
 pub(crate) const REQUEST_MAX_TOKENS: &str = "gen_ai.request.max_tokens";
 pub(crate) const REQUEST_SEED: &str = "gen_ai.request.seed";
+pub(crate) const REQUEST_REASONING_LEVEL: &str = "gen_ai.request.reasoning.level";
 
 pub(crate) const INPUT_MESSAGES: &str = "gen_ai.input.messages";
 pub(crate) const OUTPUT_MESSAGES: &str = "gen_ai.output.messages";

@@ -17,9 +17,10 @@ use opentelemetry::{Context, KeyValue};
 use opentelemetry_sdk::trace::{SamplingDecision, SamplingResult, ShouldSample};
 use serde_json::{Value, json};
 use telmoni::{
-    Batching, CallRecord, Config, Error, ModelCallRecord, RecordItem, RunOptions, RunRecord,
+    Batching, Config, Content, Error, ModelCallRecord, RecordItem, RunOptions, RunRecord,
     StepRecord, Telmoni, Text, ToolCallRecord, Usage,
 };
+use uuid::Uuid;
 
 /// A time as the fixture writes it, RFC 3339 in UTC to the millisecond:
 /// `2026-10-12T09:00:00.100Z`.
@@ -75,7 +76,27 @@ fn flag(spec: &Value, key: &str) -> Result<bool, Failure> {
     })
 }
 
-fn call_from(spec: &Value) -> Result<CallRecord, Failure> {
+fn item_from(spec: &Value) -> Result<RecordItem, Failure> {
+    if let Some(step) = spec.get("step") {
+        let calls = step
+            .get("calls")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .map(item_from)
+            .collect::<Result<Vec<_>, _>>()?;
+        return Ok(RecordItem::Step(StepRecord {
+            name: text(step, "name")?.to_owned(),
+            input_messages: None,
+            output_messages: None,
+            start: at(text(step, "start")?)?,
+            end: at(text(step, "end")?)?,
+            calls,
+            error_type: optional_text(step, "error_type")?,
+            cancelled: flag(step, "cancelled")?,
+            scores: Vec::new(),
+        }));
+    }
     if let Some(call) = spec.get("model_call") {
         let usage = call
             .get("usage")
@@ -89,13 +110,15 @@ fn call_from(spec: &Value) -> Result<CallRecord, Failure> {
                 })
             })
             .transpose()?;
-        return Ok(CallRecord::Model(ModelCallRecord {
+        return Ok(RecordItem::ModelCall(ModelCallRecord {
             model: text(call, "model")?.to_owned(),
             provider: optional_text(call, "provider")?,
             operation: optional_text(call, "operation")?,
+            reasoning_effort: optional_text(call, "reasoning_effort")?,
             start: at(text(call, "start")?)?,
             end: at(text(call, "end")?)?,
             usage,
+            input_messages: call.get("input_messages").cloned().map(Content::from),
             output_messages: None,
             error_type: optional_text(call, "error_type")?,
             cancelled: flag(call, "cancelled")?,
@@ -103,7 +126,7 @@ fn call_from(spec: &Value) -> Result<CallRecord, Failure> {
         }));
     }
     let tool = field(spec, "tool_call")?;
-    Ok(CallRecord::Tool(ToolCallRecord {
+    Ok(RecordItem::ToolCall(ToolCallRecord {
         name: text(tool, "name")?.to_owned(),
         arguments: None,
         result: None,
@@ -117,31 +140,12 @@ fn call_from(spec: &Value) -> Result<CallRecord, Failure> {
 
 /// The scenario's record, field by field.
 fn record_from(spec: &Value) -> Result<RunRecord, Failure> {
-    let mut inside = Vec::new();
-    for item in field(spec, "inside")?.as_array().ok_or("inside")? {
-        let Some(step) = item.get("step") else {
-            inside.push(call_from(item)?.into());
-            continue;
-        };
-        let calls = step
-            .get("calls")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .map(call_from)
-            .collect::<Result<Vec<_>, _>>()?;
-        inside.push(RecordItem::Step(StepRecord {
-            name: text(step, "name")?.to_owned(),
-            input_messages: None,
-            output_messages: None,
-            start: at(text(step, "start")?)?,
-            end: at(text(step, "end")?)?,
-            calls,
-            error_type: optional_text(step, "error_type")?,
-            cancelled: flag(step, "cancelled")?,
-            scores: Vec::new(),
-        }));
-    }
+    let inside = field(spec, "inside")?
+        .as_array()
+        .ok_or("inside")?
+        .iter()
+        .map(item_from)
+        .collect::<Result<Vec<_>, _>>()?;
     let tags = spec
         .get("tags")
         .and_then(Value::as_object)
@@ -334,7 +338,7 @@ fn a_record_takes_a_trace_of_its_own_and_leaves_the_context_alone() -> Outcome {
 
     let spans = harness.spans()?;
     let recorded = of_run(&spans, &record.run_id);
-    assert_eq!(recorded.len(), 8, "every span of the record, by its id");
+    assert_eq!(recorded.len(), 10, "every span of the record, by its id");
     let trace = json!(record.run_id.replace('-', ""));
     assert!(
         recorded
@@ -379,6 +383,7 @@ fn a_failed_run_is_marked_on_its_own_span() -> Outcome {
 
 /// A record's content, its run's, steps' and calls', leaves only with
 /// `capture_content` and the mode `on`.
+/// A call's reasoning effort, which is no content, leaves whatever the mode.
 #[test]
 fn a_records_content_leaves_only_when_asked_and_the_project_allows() -> Outcome {
     let content = [
@@ -397,8 +402,18 @@ fn a_records_content_leaves_only_when_asked_and_the_project_allows() -> Outcome 
             ],
         ),
         (
+            "its subagent",
+            vec![
+                ("gen_ai.input.messages", r#"["its task"]"#),
+                ("gen_ai.output.messages", r#"["its answer"]"#),
+            ],
+        ),
+        (
             "chat m",
-            vec![("gen_ai.output.messages", r#"{"said":"it"}"#)],
+            vec![
+                ("gen_ai.input.messages", r#"["the question"]"#),
+                ("gen_ai.output.messages", r#"{"said":"it"}"#),
+            ],
         ),
         (
             "execute_tool t",
@@ -408,13 +423,14 @@ fn a_records_content_leaves_only_when_asked_and_the_project_allows() -> Outcome 
             ],
         ),
     ];
-    for capture_content in [true, false] {
+    // The project's mode is off where no answer names it on.
+    for (capture_content, answers) in [(true, 2), (false, 2), (true, 0)] {
         let harness = Harness::answering(
             Config {
                 capture_content,
                 ..keyed()
             },
-            std::iter::repeat_n(Ok(mode_on()), 2),
+            std::iter::repeat_n(Ok(mode_on()), answers),
         )?;
         harness.telmoni.run("warm", RunOptions::default())?.end();
         harness.flush()?;
@@ -427,9 +443,19 @@ fn a_records_content_leaves_only_when_asked_and_the_project_allows() -> Outcome 
                     input_messages: Some(json!(["the task"]).into()),
                     output_messages: Some(json!(["the answer"]).into()),
                     calls: vec![
-                        ModelCallRecord {
-                            output_messages: Some(json!({ "said": "it" }).into()),
-                            ..ModelCallRecord::new("m", at, at)
+                        StepRecord {
+                            input_messages: Some(json!(["its task"]).into()),
+                            output_messages: Some(json!(["its answer"]).into()),
+                            calls: vec![
+                                ModelCallRecord {
+                                    reasoning_effort: Some("high".to_owned()),
+                                    input_messages: Some(json!(["the question"]).into()),
+                                    output_messages: Some(json!({ "said": "it" }).into()),
+                                    ..ModelCallRecord::new("m", at, at)
+                                }
+                                .into(),
+                            ],
+                            ..StepRecord::new("its subagent", at, at)
                         }
                         .into(),
                     ],
@@ -448,6 +474,7 @@ fn a_records_content_leaves_only_when_asked_and_the_project_allows() -> Outcome 
         harness.telmoni.record_run(record)?;
         harness.flush()?;
         let spans = harness.spans()?;
+        let sends = capture_content && answers > 0;
         for (name, fields) in &content {
             let span = spans
                 .iter()
@@ -455,13 +482,21 @@ fn a_records_content_leaves_only_when_asked_and_the_project_allows() -> Outcome 
                 .ok_or(*name)?;
             let sent = attributes_of(span)?;
             for &(key, value) in fields {
-                if capture_content {
+                if sends {
                     assert_eq!(sent.get(key), Some(&json!(value)), "{name} {key}");
                 } else {
                     assert!(sent.get(key).is_none(), "{name} {key}");
                 }
             }
         }
+        let call = spans
+            .iter()
+            .find(|span| name_of(span) == "chat m")
+            .ok_or("chat m")?;
+        assert_eq!(
+            attributes_of(call)?.get("gen_ai.request.reasoning.level"),
+            Some(&json!("high"))
+        );
     }
     Ok(())
 }
@@ -507,7 +542,7 @@ fn the_sample_rate_drops_a_record_whole() -> Outcome {
         spans.len(),
         "only the record kept"
     );
-    assert_eq!(spans.len(), 8, "the record kept is sent whole");
+    assert_eq!(spans.len(), 10, "the record kept is sent whole");
     assert_eq!(
         attributes_of(run_span(&spans, &kept.run_id)?)?.get("telmoni.sample_rate"),
         Some(&json!(0.25))
@@ -666,7 +701,7 @@ fn a_record_with_an_empty_name_is_refused() -> Outcome {
     let harness = Harness::new()?;
     let golden = the_record()?;
     let at = golden.start;
-    let step = |name: &str, calls: Vec<CallRecord>| -> RecordItem {
+    let step = |name: &str, calls: Vec<RecordItem>| -> RecordItem {
         StepRecord {
             calls,
             ..StepRecord::new(name, at, at)
@@ -677,6 +712,7 @@ fn a_record_with_an_empty_name_is_refused() -> Outcome {
         step("", Vec::new()),
         ModelCallRecord::new("", at, at).into(),
         step("s", vec![ModelCallRecord::new("", at, at).into()]),
+        step("s", vec![step("", Vec::new())]),
     ];
     for item in refused {
         let record = RunRecord {
@@ -738,10 +774,10 @@ fn a_record_with_a_text_past_ingests_cap_is_refused() -> Outcome {
         inside: vec![item],
         ..golden.clone()
     };
-    let in_step = |call: CallRecord| {
+    let in_step = |item: RecordItem| {
         inside(
             StepRecord {
-                calls: vec![call],
+                calls: vec![item],
                 ..StepRecord::new("s", at, at)
             }
             .into(),
@@ -749,7 +785,7 @@ fn a_record_with_a_text_past_ingests_cap_is_refused() -> Outcome {
     };
     let model = |n: usize| ModelCallRecord::new(text(n), at, at);
     let tool = |n: usize| ToolCallRecord::new(text(n), at, at);
-    let cases: [Capped<'_>; 11] = [
+    let cases: [Capped<'_>; 12] = [
         (Text::RunAgent, 128, &|n| RunRecord {
             agent: text(n),
             ..golden.clone()
@@ -797,6 +833,22 @@ fn a_record_with_a_text_past_ingests_cap_is_refused() -> Outcome {
                 .into(),
             )
         }),
+        // In a step inside a step, which is checked as the run's own are.
+        (Text::ModelCallReasoningEffort, 1024, &|n| {
+            in_step(
+                StepRecord {
+                    calls: vec![
+                        ModelCallRecord {
+                            reasoning_effort: Some(text(n)),
+                            ..model(1)
+                        }
+                        .into(),
+                    ],
+                    ..StepRecord::new("inner", at, at)
+                }
+                .into(),
+            )
+        }),
         (Text::ModelCallErrorType, 128, &|n| {
             inside(
                 ModelCallRecord {
@@ -832,6 +884,142 @@ fn a_record_with_a_text_past_ingests_cap_is_refused() -> Outcome {
         .filter(|span| name_of(span).starts_with("invoke_agent "))
         .count();
     assert_eq!(runs, cases.len(), "each record at its cap, and no other");
+    Ok(())
+}
+
+/// `depth` steps, each inside the one before.
+fn nested(depth: usize, at: SystemTime) -> RecordItem {
+    let mut step = StepRecord::new("s", at, at);
+    for n in 2..=depth {
+        step = StepRecord {
+            calls: vec![step.into()],
+            ..StepRecord::new(format!("s{n}"), at, at)
+        };
+    }
+    step.into()
+}
+
+/// A step inside a step goes under its span, each span at its place depth first, each step sent after what it holds.
+#[test]
+fn a_step_inside_a_step_goes_under_its_span() -> Outcome {
+    let harness = Harness::new()?;
+    let golden = the_record()?;
+    let at = golden.start;
+    let run = Uuid::parse_str(&golden.run_id)?;
+    let call = |name: &str| -> RecordItem { ToolCallRecord::new(name, at, at).into() };
+    let step = |name: &str, calls: Vec<RecordItem>| -> RecordItem {
+        StepRecord {
+            calls,
+            ..StepRecord::new(name, at, at)
+        }
+        .into()
+    };
+    harness.telmoni.record_run(RunRecord {
+        agent: "bot".to_owned(),
+        inside: vec![
+            step(
+                "outer",
+                vec![
+                    call("a"),
+                    step("middle", vec![step("inner", vec![call("b")])]),
+                    call("c"),
+                ],
+            ),
+            call("d"),
+        ],
+        ..golden
+    })?;
+    harness.flush()?;
+    let spans = harness.spans()?;
+    let sent: Vec<&str> = spans.iter().map(name_of).collect();
+    assert_eq!(
+        sent,
+        [
+            "execute_tool a",
+            "execute_tool b",
+            "inner",
+            "middle",
+            "execute_tool c",
+            "outer",
+            "execute_tool d",
+            "invoke_agent bot",
+        ]
+    );
+    let places = [
+        "invoke_agent bot",
+        "outer",
+        "execute_tool a",
+        "middle",
+        "inner",
+        "execute_tool b",
+        "execute_tool c",
+        "execute_tool d",
+    ];
+    let id_of = |name: &str| -> Result<String, Failure> {
+        let place = places.iter().position(|each| *each == name).ok_or(name)?;
+        let id = Uuid::new_v5(&run, place.to_string().as_bytes());
+        Ok(id
+            .as_bytes()
+            .iter()
+            .take(8)
+            .map(|byte| format!("{byte:02x}"))
+            .collect())
+    };
+    let parents = BTreeMap::from([
+        ("outer", "invoke_agent bot"),
+        ("execute_tool a", "outer"),
+        ("middle", "outer"),
+        ("inner", "middle"),
+        ("execute_tool b", "inner"),
+        ("execute_tool c", "outer"),
+        ("execute_tool d", "invoke_agent bot"),
+    ]);
+    for span in &spans {
+        let name = name_of(span);
+        assert_eq!(span.get("spanId"), Some(&json!(id_of(name)?)), "{name}");
+        let parent = parents.get(name).map(|parent| id_of(parent)).transpose()?;
+        assert_eq!(
+            span.get("parentSpanId").and_then(Value::as_str),
+            parent.as_deref(),
+            "{name}"
+        );
+    }
+    Ok(())
+}
+
+/// Steps nested 16 deep are sent, each under the next, and one deeper is refused whole.
+#[test]
+fn steps_nest_16_deep_and_no_deeper() -> Outcome {
+    assert_eq!(
+        Error::TooDeep { max: 16 }.to_string(),
+        "a recorded step must be nested at most 16 deep"
+    );
+    let harness = Harness::new()?;
+    let golden = the_record()?;
+    let at = golden.start;
+    assert_eq!(
+        harness.telmoni.record_run(RunRecord {
+            inside: vec![nested(17, at)],
+            ..golden.clone()
+        }),
+        Err(Error::TooDeep { max: 16 })
+    );
+    harness.telmoni.record_run(RunRecord {
+        inside: vec![nested(16, at)],
+        ..golden
+    })?;
+    harness.flush()?;
+    let spans = harness.spans()?;
+    assert_eq!(spans.len(), 17, "the run and its 16 steps, and no more");
+    for (inner, outer) in spans.iter().zip(spans.iter().skip(1)) {
+        assert_eq!(
+            inner.get("parentSpanId"),
+            outer.get("spanId"),
+            "{} under {}",
+            name_of(inner),
+            name_of(outer)
+        );
+    }
     Ok(())
 }
 

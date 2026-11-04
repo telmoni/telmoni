@@ -18,13 +18,20 @@ import random
 import threading
 import traceback
 import uuid
-from collections.abc import AsyncIterator, Callable, Generator, Mapping, Sequence
+from collections.abc import (
+    AsyncIterator,
+    Callable,
+    Generator,
+    Iterator,
+    Mapping,
+    Sequence,
+)
 from contextlib import aclosing
 from contextvars import Token
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Generic, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, TypeAlias, TypeVar
 
 from opentelemetry import context, trace
 from opentelemetry.trace import (
@@ -730,7 +737,8 @@ class Opener:
                 "a recorded run's id must be a UUID other than the nil UUID"
             )
         items = _read(record)
-        spans = [record, *(each for item, calls in items for each in (item, *calls))]
+        held = list(_walk(items))
+        spans = [record, *held]
         for each in spans:
             start, end = _nanos(each.start), _nanos(each.end)
             # Ingest reads a time as nanoseconds from the epoch in 64 bits, and
@@ -761,7 +769,7 @@ class Opener:
             return
         # Queued whole or not at all: a record that outgrows the queue's room
         # would lose its tail, the run's own span first.
-        need = 1 + sum(1 + len(calls) for _item, calls in items)
+        need = len(spans)
         # Worked out before the hold: a count that warns runs the application's
         # logging handlers, which may record a run of their own.
         warn_once = self._client.exporter.warn_once
@@ -776,11 +784,7 @@ class Opener:
             if isinstance(each, ModelCallRecord)
         }
         # Content too, whose encoding may run the caller's ``__str__``.
-        contents = {
-            id(each): _record_content(each)
-            for item, calls in items
-            for each in (item, *calls)
-        }
+        contents = {id(each): _record_content(each) for each in held}
         judged = {id(each): _recorded_scores(each, warn_once) for each in spans}
         places = itertools.count()
 
@@ -800,6 +804,8 @@ class Opener:
                 name, own = _model_call_opening(
                     item.model, operations[id(item)], item.provider
                 )
+                if item.reasoning_effort:
+                    own[contract.REQUEST_REASONING_LEVEL] = item.reasoning_effort
                 own.update(usages[id(item)])
                 kind = SpanKind.CLIENT
             else:
@@ -812,27 +818,27 @@ class Opener:
                 judged[id(item)],
             )
 
+        def build(items: Sequence[_Read], parent: context.Context) -> None:
+            for item, inside in items:
+                if not isinstance(item, StepRecord):
+                    call(item, parent)
+                    continue
+                step = open_span(
+                    item.name,
+                    parent,
+                    {**inherited, **contents[id(item)]},
+                    SpanKind.INTERNAL,
+                    item.start,
+                )
+                build(inside, trace.set_span_in_context(step, parent))
+                _close(step, item, judged[id(item)])
+
         with self._client.processor.hold(run_uuid.int, need):
             root = context.Context()
             span = open_span(
                 run_name, root, attributes, SpanKind.INTERNAL, record.start
             )
-            ctx = trace.set_span_in_context(span, root)
-            for item, calls in items:
-                if isinstance(item, StepRecord):
-                    step = open_span(
-                        item.name,
-                        ctx,
-                        {**inherited, **contents[id(item)]},
-                        SpanKind.INTERNAL,
-                        item.start,
-                    )
-                    inner = trace.set_span_in_context(step, ctx)
-                    for each in calls:
-                        call(each, inner)
-                    _close(step, item, judged[id(item)])
-                else:
-                    call(item, ctx)
+            build(items, trace.set_span_in_context(span, root))
             _close(span, record, judged[id(record)])
 
     def _outside(self, what: str) -> Run | None:
@@ -1159,18 +1165,27 @@ def _nanos(at: datetime) -> int:
     return (at - _EPOCH) // timedelta(microseconds=1) * 1000
 
 
-def _read(
-    record: RunRecord,
-) -> list[tuple[StepRecord | CallRecord, tuple[CallRecord, ...]]]:
-    """The record's items, each step with its calls, read once and checked, so
-    the items checked are the items built; a set, in no order, is refused."""
+# An item as read, a step with what it holds.
+_Read: TypeAlias = "tuple[StepRecord | CallRecord, tuple[_Read, ...]]"
+# How deep steps nest, a run's own at 1: past any agent's subagents, and an
+# end to a step that holds itself.
+_STEP_DEPTH_MAX = 16
+
+
+def _read(record: RunRecord) -> tuple[_Read, ...]:
+    """The record's items, each step with what it holds, read once and checked,
+    so the items checked are the items built; a set, in no order, is refused."""
     inside = record.inside
     if not isinstance(inside, Sequence):
         raise TypeError(
             "a recorded run's inside must be a sequence, in the order it ran"
         )
-    items: list[tuple[StepRecord | CallRecord, tuple[CallRecord, ...]]] = []
-    for item in inside:
+    return _read_items(inside, 1)
+
+
+def _read_items(given: Sequence[object], depth: int) -> tuple[_Read, ...]:
+    items: list[_Read] = []
+    for item in given:
         if isinstance(item, (ModelCallRecord, ToolCallRecord)):
             _check(item)
             items.append((item, ()))
@@ -1180,22 +1195,26 @@ def _read(
                 "a recorded item must be a StepRecord, a ModelCallRecord "
                 "or a ToolCallRecord"
             )
+        if depth > _STEP_DEPTH_MAX:
+            raise ValueError(
+                f"a recorded step must be nested at most {_STEP_DEPTH_MAX} deep"
+            )
         _check(item)
-        given = item.calls
-        if not isinstance(given, Sequence):
+        calls = item.calls
+        if not isinstance(calls, Sequence):
             raise TypeError(
                 "a recorded step's calls must be a sequence, in the order they ran"
             )
-        calls = tuple(given)
-        for each in calls:
-            if not isinstance(each, (ModelCallRecord, ToolCallRecord)):
-                raise TypeError(
-                    "a step's recorded call must be a ModelCallRecord "
-                    "or a ToolCallRecord"
-                )
-            _check(each)
-        items.append((item, calls))
-    return items
+        items.append((item, _read_items(calls, depth + 1)))
+    return tuple(items)
+
+
+def _walk(items: Sequence[_Read]) -> Iterator[StepRecord | CallRecord]:
+    """Every item read, depth first, a step before what it holds: the order of
+    their places."""
+    for item, inside in items:
+        yield item
+        yield from _walk(inside)
 
 
 _NONE = type(None)
@@ -1221,6 +1240,7 @@ _FIELDS: dict[type, tuple[str, dict[str, tuple[type, ...]]]] = {
             "model": _TEXT,
             "provider": _UNSET_OR_TEXT,
             "operation": _UNSET_OR_TEXT,
+            "reasoning_effort": _UNSET_OR_TEXT,
             "usage": (Usage, _NONE),
         },
     ),
@@ -1236,7 +1256,11 @@ _CAPS: dict[type, dict[str, int]] = {
         "session_id": contract.SESSION_ID_MAX,
     },
     StepRecord: {"name": contract.NAME_MAX},
-    ModelCallRecord: {"model": contract.MODEL_MAX, "provider": contract.PROVIDER_MAX},
+    ModelCallRecord: {
+        "model": contract.MODEL_MAX,
+        "provider": contract.PROVIDER_MAX,
+        "reasoning_effort": contract.ATTRIBUTE_VALUE_MAX,
+    },
     ToolCallRecord: {"name": contract.NAME_MAX},
 }
 
@@ -1278,7 +1302,10 @@ def _record_content(item: StepRecord | CallRecord) -> dict[str, str]:
     sends or keeps back."""
     fields: tuple[tuple[str, object], ...]
     if isinstance(item, ModelCallRecord):
-        fields = ((contract.OUTPUT_MESSAGES, item.output_messages),)
+        fields = (
+            (contract.INPUT_MESSAGES, item.input_messages),
+            (contract.OUTPUT_MESSAGES, item.output_messages),
+        )
     elif isinstance(item, ToolCallRecord):
         fields = (
             (contract.TOOL_CALL_ARGUMENTS, item.arguments),

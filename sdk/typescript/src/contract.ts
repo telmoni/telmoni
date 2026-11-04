@@ -70,6 +70,7 @@ export const REQUEST_MAX_TOKENS = 'gen_ai.request.max_tokens';
 export const REQUEST_FREQUENCY_PENALTY = 'gen_ai.request.frequency_penalty';
 export const REQUEST_PRESENCE_PENALTY = 'gen_ai.request.presence_penalty';
 export const REQUEST_SEED = 'gen_ai.request.seed';
+export const REQUEST_REASONING_LEVEL = 'gen_ai.request.reasoning.level';
 /** In seconds, from the request to the answer's first chunk. */
 export const TIME_TO_FIRST_CHUNK = 'gen_ai.response.time_to_first_chunk';
 export const INPUT_TOKENS = 'gen_ai.usage.input_tokens';

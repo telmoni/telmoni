@@ -124,20 +124,23 @@ telmoni.record_run(
 telmoni.flush()
 ```
 
-It is sent as the live calls would have sent it, through the same exporter,
+A `StepRecord` holds its `calls`, steps among them, a subagent's own subagents
+say, up to 16 deep, each under the step that holds it. A model call's
+`reasoning_effort`, how hard it was asked to reason, is sent in every content
+mode. It is sent as the live calls would have sent it, through the same exporter,
 content rules and sample rate, in a trace of its own named by the run's id,
 whatever trace is current. Each span's id is derived from the run's id and the
 span's place in the record, so the same record sent again is the same bytes,
 which ingest answers once: give a run the same id each time you send it. A
 record's content is its run's messages (`input_messages`, `output_messages`),
-a model call's (`output_messages`), a tool call's `arguments` and `result`,
+a model call's (`input_messages`, `output_messages`), a tool call's `arguments` and `result`,
 and a step's messages, a subagent's task and answer. A blank agent, a run id that is neither a hyphenated
 UUID nor 32 hex digits, or is the nil UUID, a time without its timezone or
 outside what ingest reads (after the Unix epoch, and less than 2^64 nanoseconds
 after it, in July 2554), an empty step's name or model, text longer than
 ingest keeps (a step's or a tool's name past 145 characters, the agent, a
-model, a provider, a user or an error type past 128, or a session past 200),
-or a span that ends
+model, a provider, a user or an error type past 128, a session past 200, or a
+reasoning effort past 1,024), a step nested past 16 deep, or a span that ends
 before it starts raises `ValueError`. A
 field of the wrong type raises `TypeError` — a time that is no `datetime`, an
 item of another class, `inside` or `calls` that is no sequence (a list or a

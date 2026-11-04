@@ -54,24 +54,25 @@ type RecordItem interface {
 	recordItem()
 }
 
-// CallRecord is what a recorded step holds: a ModelCallRecord or a
-// ToolCallRecord, or a pointer to one.
+// CallRecord is a recorded call: a ModelCallRecord or a ToolCallRecord, or a
+// pointer to one.
 type CallRecord interface {
 	RecordItem
 	callRecord()
 }
 
-// StepRecord is a step that has ended, with the calls made inside it, in the
-// order they ran. InputMessages and OutputMessages, a subagent's task and
-// answer say, are content as a RunRecord's are. ErrorType and Cancelled mark
-// it as a RunRecord's mark a run.
+// StepRecord is a step that has ended, with what ran inside it, in the order
+// it ran: its calls, and its own steps, a subagent's say, up to 16 deep.
+// InputMessages and OutputMessages, a subagent's task and answer say, are
+// content as a RunRecord's are. ErrorType and Cancelled mark it as a
+// RunRecord's mark a run.
 type StepRecord struct {
 	Name           string
 	InputMessages  any
 	OutputMessages any
 	Start          time.Time
 	End            time.Time
-	Calls          []CallRecord
+	Calls          []RecordItem
 	ErrorType      string
 	Cancelled      bool
 	Scores         []RecordedScore
@@ -79,20 +80,23 @@ type StepRecord struct {
 
 // ModelCallRecord is a model call that has ended: its model, its times and its
 // tokens. Provider and Operation are as a live call's ModelCallOptions has
-// them, a blank Operation meaning chat, Usage as its Answer has it, and
-// OutputMessages content as a RunRecord's is. ErrorType and Cancelled mark it
-// as a RunRecord's mark a run.
+// them, a blank Operation meaning chat, and Usage as its Answer has it.
+// ReasoningEffort, how hard the model was asked to reason, is sent in every
+// content mode; InputMessages and OutputMessages are content as a RunRecord's
+// are. ErrorType and Cancelled mark it as a RunRecord's mark a run.
 type ModelCallRecord struct {
-	Model          string
-	Provider       string
-	Operation      string
-	Start          time.Time
-	End            time.Time
-	Usage          *Usage
-	OutputMessages any
-	ErrorType      string
-	Cancelled      bool
-	Scores         []RecordedScore
+	Model           string
+	Provider        string
+	Operation       string
+	ReasoningEffort string
+	Start           time.Time
+	End             time.Time
+	Usage           *Usage
+	InputMessages   any
+	OutputMessages  any
+	ErrorType       string
+	Cancelled       bool
+	Scores          []RecordedScore
 }
 
 // ToolCallRecord is a tool call that has ended: its name and its times.
@@ -120,6 +124,12 @@ var errNotAnItem = errors.New("telmoni: a recorded item must be a StepRecord, a 
 // errNoName refuses a step's name or a model call's model only when exactly
 // empty: ingest takes a name of spaces as given.
 var errNoName = errors.New("telmoni: a recorded step's name or model call's model cannot be empty")
+
+// stepDepthMax is how deep steps nest, a run's own at 1: past any agent's
+// subagents, and an end to a step that holds itself through a pointer.
+const stepDepthMax = 16
+
+var errTooDeep = fmt.Errorf("telmoni: a recorded step must be nested at most %d deep", stepDepthMax)
 
 // ErrQueueFull is returned by RecordRun when the export queue has no room for
 // the whole record, so nothing of it was queued: flush, or wait for the queue
@@ -153,11 +163,11 @@ var ErrShutdown = errors.New("telmoni: the client is shut down; the record was n
 //
 // It returns an error, sending nothing, for a blank agent, a run id that is
 // not a UUID, text past ingest's caps, a time at or before the Unix epoch or
-// 2^64 nanoseconds or more after it, an empty step or model, a nil item or a
-// span that ends before it starts, ErrQueueFull when the queue has no room
-// for it, and ErrShutdown once the client is shut down. A record is handed
-// over whole, so it is refused whole, where a live run's mistakes are warned
-// of.
+// 2^64 nanoseconds or more after it, an empty step or model, a nil item, a
+// step nested past 16 deep or a span that ends before it starts, ErrQueueFull
+// when the queue has no room for it, and ErrShutdown once the client is shut
+// down. A record is handed over whole, so it is refused whole, where a live
+// run's mistakes are warned of.
 func (c *Client) RecordRun(ctx context.Context, record RunRecord) error {
 	if !c.built() {
 		return errors.New("telmoni: a Client must come from New; nothing is sent")
@@ -214,28 +224,15 @@ func (c *Client) RecordRun(ctx context.Context, record RunRecord) error {
 	// own.
 	root := trace.ContextWithSpanContext(ctx, trace.SpanContext{})
 	run, runScores := r.open(root, name, trace.SpanKindInternal, attrs, record.Start)
-	inRun := trace.ContextWithSpan(root, run)
-	for _, item := range record.Inside {
-		switch item := itemValue(item).(type) {
-		case StepRecord:
-			step, stepScores := r.open(inRun, item.Name, trace.SpanKindInternal, inherited, item.Start)
-			inStep := trace.ContextWithSpan(root, step)
-			for _, call := range item.Calls {
-				r.call(inStep, call)
-			}
-			endRecorded(step, stepScores, item.End, item.ErrorType, item.Cancelled)
-		case CallRecord:
-			r.call(inRun, item)
-		}
-	}
+	r.items(trace.ContextWithSpan(root, run), record.Inside)
 	endRecorded(run, runScores, record.End, record.ErrorType, record.Cancelled)
 	built = true
 	return nil
 }
 
 // recorder opens a record's spans, each with the ids its place gives it: 0 the
-// run, then each step and call from 1 in the record's order, a step before its
-// calls.
+// run, then each step and call from 1 in the record's order, depth first, a
+// step before what it holds.
 type recorder struct {
 	tracer    trace.Tracer
 	runID     [16]byte
@@ -260,18 +257,13 @@ func (r *recorder) open(parent context.Context, name string, kind trace.SpanKind
 }
 
 // recordContents is each span's content by its place in the record: none for
-// the run, whose own goes with its opening, then each step and call in the
-// record's order, a step before its calls.
+// the run, whose own goes with its opening, then each step and call as
+// eachItem places them.
 func recordContents(record RunRecord) [][]attribute.KeyValue {
 	contents := [][]attribute.KeyValue{nil}
-	for _, item := range record.Inside {
+	eachItem(record.Inside, func(item RecordItem) {
 		contents = append(contents, contentOf(item))
-		if step, ok := itemValue(item).(StepRecord); ok {
-			for _, call := range step.Calls {
-				contents = append(contents, contentOf(call))
-			}
-		}
-	}
+	})
 	return contents
 }
 
@@ -279,15 +271,23 @@ func recordContents(record RunRecord) [][]attribute.KeyValue {
 // recordContents places content, each refused one warned of.
 func (c *Client) recordScores(record RunRecord) [][][]attribute.KeyValue {
 	scores := [][][]attribute.KeyValue{c.recordedScores(record.Scores)}
-	for _, item := range record.Inside {
+	eachItem(record.Inside, func(item RecordItem) {
 		scores = append(scores, c.recordedScores(scoresOf(item)))
-		if step, ok := itemValue(item).(StepRecord); ok {
-			for _, call := range step.Calls {
-				scores = append(scores, c.recordedScores(scoresOf(call)))
-			}
+	})
+	return scores
+}
+
+// eachItem visits every item a record holds as a value, in the record's order,
+// depth first, a step before what it holds: the order of their places. Only
+// for a record checkRecord passed, whose steps end.
+func eachItem(items []RecordItem, visit func(RecordItem)) {
+	for _, item := range items {
+		item = itemValue(item)
+		visit(item)
+		if step, ok := item.(StepRecord); ok {
+			eachItem(step.Calls, visit)
 		}
 	}
-	return scores
 }
 
 func scoresOf(item RecordItem) []RecordedScore {
@@ -316,12 +316,28 @@ func contentOf(item RecordItem) []attribute.KeyValue {
 		add(attrInputMessages, item.InputMessages)
 		add(attrOutputMessages, item.OutputMessages)
 	case ModelCallRecord:
+		add(attrInputMessages, item.InputMessages)
 		add(attrOutputMessages, item.OutputMessages)
 	case ToolCallRecord:
 		add(attrToolCallArguments, item.Arguments)
 		add(attrToolCallResult, item.Result)
 	}
 	return out
+}
+
+// items opens what a run or a step holds under parent, each step's own under
+// it, so each ends before what holds it.
+func (r *recorder) items(parent context.Context, items []RecordItem) {
+	for _, item := range items {
+		switch item := itemValue(item).(type) {
+		case StepRecord:
+			step, scores := r.open(parent, item.Name, trace.SpanKindInternal, r.inherited, item.Start)
+			r.items(trace.ContextWithSpan(parent, step), item.Calls)
+			endRecorded(step, scores, item.End, item.ErrorType, item.Cancelled)
+		case CallRecord:
+			r.call(parent, item)
+		}
+	}
 }
 
 // call opens a call and ends it at once, so it is queued as it ended: before
@@ -331,6 +347,9 @@ func (r *recorder) call(parent context.Context, call CallRecord) {
 	case ModelCallRecord:
 		operation, _ := modelOperation(call.Operation)
 		name, own := modelCallOpening(call.Model, operation, call.Provider)
+		if call.ReasoningEffort != "" {
+			own = append(own, attribute.String(attrRequestReasoningLevel, call.ReasoningEffort))
+		}
 		// No warning under the hold: RecordRun gave it before.
 		attrs := slices.Concat(r.inherited, own, usageAttributes(call.Usage, nil))
 		span, scores := r.open(parent, name, trace.SpanKindClient, attrs, call.Start)
@@ -385,16 +404,22 @@ func checkRecord(record RunRecord) error {
 	if err := checkRun(record); err != nil {
 		return err
 	}
-	for _, item := range record.Inside {
+	return checkItems(record.Inside, 1)
+}
+
+// checkItems checks what a run or a step holds, each step in it depth deep.
+func checkItems(items []RecordItem, depth int) error {
+	for _, item := range items {
 		switch item := itemValue(item).(type) {
 		case StepRecord:
+			if depth > stepDepthMax {
+				return errTooDeep
+			}
 			if err := checkStep(item); err != nil {
 				return err
 			}
-			for _, call := range item.Calls {
-				if err := checkCall(call); err != nil {
-					return err
-				}
+			if err := checkItems(item.Calls, depth+1); err != nil {
+				return err
 			}
 		case CallRecord:
 			if err := checkCall(item); err != nil {
@@ -411,35 +436,21 @@ func checkRecord(record RunRecord) error {
 // each call.
 func recordSpans(record RunRecord) int {
 	n := 1
-	for _, item := range record.Inside {
-		n++
-		if step, ok := itemValue(item).(StepRecord); ok {
-			n += len(step.Calls)
-		}
-	}
+	eachItem(record.Inside, func(RecordItem) { n++ })
 	return n
 }
 
 // warnUsage warns of each token count the record's calls leave off, and of
 // an operation sent as chat.
 func (c *Client) warnUsage(record RunRecord) {
-	for _, item := range record.Inside {
-		var calls []CallRecord
-		switch item := itemValue(item).(type) {
-		case StepRecord:
-			calls = item.Calls
-		case CallRecord:
-			calls = []CallRecord{item}
-		}
-		for _, call := range calls {
-			if call, ok := itemValue(call).(ModelCallRecord); ok {
-				usageAttributes(call.Usage, c.warnCount)
-				if _, setAside := modelOperation(call.Operation); setAside {
-					c.warnOperation()
-				}
+	eachItem(record.Inside, func(item RecordItem) {
+		if call, ok := item.(ModelCallRecord); ok {
+			usageAttributes(call.Usage, c.warnCount)
+			if _, setAside := modelOperation(call.Operation); setAside {
+				c.warnOperation()
 			}
 		}
-	}
+	})
 }
 
 func checkRun(record RunRecord) error {
@@ -474,6 +485,7 @@ func checkCall(call CallRecord) error {
 		err := checkCaps("model call", []capped{
 			{"Model", call.Model, modelMax},
 			{"Provider", call.Provider, providerMax},
+			{"ReasoningEffort", call.ReasoningEffort, attributeValueMax},
 			{"ErrorType", call.ErrorType, errorTypeMax},
 		})
 		if err != nil {

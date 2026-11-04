@@ -79,7 +79,7 @@ func ExampleClient_RecordRun() {
 				Name:  "look-up",
 				Start: start.Add(2 * time.Second),
 				End:   start.Add(3 * time.Second),
-				Calls: []telmoni.CallRecord{
+				Calls: []telmoni.RecordItem{
 					telmoni.ToolCallRecord{
 						Name:      "search",
 						Start:     start.Add(2 * time.Second),

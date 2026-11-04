@@ -62,6 +62,33 @@
                   "start": "2026-10-12T09:00:05.010Z",
                   "end": "2026-10-12T09:00:05.200Z"
                 }
+              },
+              {
+                "step": {
+                  "name": "Explore",
+                  "start": "2026-10-12T09:00:05.300Z",
+                  "end": "2026-10-12T09:00:07.900Z",
+                  "calls": [
+                    {
+                      "model_call": {
+                        "model": "claude-haiku-4-5",
+                        "provider": "anthropic",
+                        "reasoning_effort": "low",
+                        "input_messages": [
+                          { "role": "user", "parts": [{ "type": "text", "content": "Where is the retry policy set?" }] }
+                        ],
+                        "start": "2026-10-12T09:00:05.400Z",
+                        "end": "2026-10-12T09:00:07.800Z",
+                        "usage": {
+                          "input_tokens": 640,
+                          "output_tokens": 52,
+                          "cache_read_input_tokens": 0,
+                          "cache_write_input_tokens": 0
+                        }
+                      }
+                    }
+                  ]
+                }
               }
             ]
           }
@@ -196,6 +223,46 @@
               },
               {
                 "traceId": "3d6f8a1c5b2e4f7a9c0d8e1f2a3b4c5d",
+                "spanId": "24268760615f58c4",
+                "parentSpanId": "d92e4747917e5a08",
+                "name": "chat claude-haiku-4-5",
+                "kind": 3,
+                "startTimeUnixNano": "1791795605400000000",
+                "endTimeUnixNano": "1791795607800000000",
+                "attributes": [
+                  { "key": "gen_ai.conversation.id", "value": { "stringValue": "session_7" } },
+                  { "key": "gen_ai.operation.name", "value": { "stringValue": "chat" } },
+                  { "key": "gen_ai.provider.name", "value": { "stringValue": "anthropic" } },
+                  { "key": "gen_ai.request.model", "value": { "stringValue": "claude-haiku-4-5" } },
+                  { "key": "gen_ai.request.reasoning.level", "value": { "stringValue": "low" } },
+                  { "key": "gen_ai.usage.cache_read.input_tokens", "value": { "intValue": "0" } },
+                  { "key": "gen_ai.usage.cache_write.input_tokens", "value": { "intValue": "0" } },
+                  { "key": "gen_ai.usage.input_tokens", "value": { "intValue": "640" } },
+                  { "key": "gen_ai.usage.output_tokens", "value": { "intValue": "52" } },
+                  { "key": "telmoni.agent", "value": { "stringValue": "claude-code" } },
+                  { "key": "telmoni.run_id", "value": { "stringValue": "3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d" } },
+                  { "key": "telmoni.sample_rate", "value": { "doubleValue": 1.0 } },
+                  { "key": "user.id", "value": { "stringValue": "user_42" } }
+                ]
+              },
+              {
+                "traceId": "3d6f8a1c5b2e4f7a9c0d8e1f2a3b4c5d",
+                "spanId": "d92e4747917e5a08",
+                "parentSpanId": "8ec41731d61b59db",
+                "name": "Explore",
+                "kind": 1,
+                "startTimeUnixNano": "1791795605300000000",
+                "endTimeUnixNano": "1791795607900000000",
+                "attributes": [
+                  { "key": "gen_ai.conversation.id", "value": { "stringValue": "session_7" } },
+                  { "key": "telmoni.agent", "value": { "stringValue": "claude-code" } },
+                  { "key": "telmoni.run_id", "value": { "stringValue": "3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d" } },
+                  { "key": "telmoni.sample_rate", "value": { "doubleValue": 1.0 } },
+                  { "key": "user.id", "value": { "stringValue": "user_42" } }
+                ]
+              },
+              {
+                "traceId": "3d6f8a1c5b2e4f7a9c0d8e1f2a3b4c5d",
                 "spanId": "8ec41731d61b59db",
                 "parentSpanId": "98f0a67d3b8b56b9",
                 "name": "Task",
@@ -212,7 +279,7 @@
               },
               {
                 "traceId": "3d6f8a1c5b2e4f7a9c0d8e1f2a3b4c5d",
-                "spanId": "d92e4747917e5a08",
+                "spanId": "db0480f72cc653a3",
                 "parentSpanId": "98f0a67d3b8b56b9",
                 "name": "chat claude-opus-4-5",
                 "kind": 3,
@@ -235,7 +302,7 @@
               },
               {
                 "traceId": "3d6f8a1c5b2e4f7a9c0d8e1f2a3b4c5d",
-                "spanId": "24268760615f58c4",
+                "spanId": "9a8019c380ab56a1",
                 "parentSpanId": "98f0a67d3b8b56b9",
                 "name": "execute_tool WebFetch",
                 "kind": 1,

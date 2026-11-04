@@ -147,8 +147,11 @@ telmoni.record_run(RunRecord {
 telmoni.flush();
 ```
 
-A step holds its own calls: `StepRecord { calls: vec![..], ..StepRecord::new(..) }`.
-Times are `SystemTime`s, which `chrono`'s and `time`'s convert into with
+A step holds its own calls, steps among them, a subagent's own subagents say,
+up to 16 deep, each under the step that holds it:
+`StepRecord { calls: vec![..], ..StepRecord::new(..) }`. A model call's
+`reasoning_effort`, how hard it was asked to reason, is sent in every content
+mode. Times are `SystemTime`s, which `chrono`'s and `time`'s convert into with
 `SystemTime::from`.
 
 It is sent as the live calls would have sent it, through the same exporter,
@@ -157,13 +160,14 @@ whatever trace is current. Each span's id is derived from the run's id and the
 span's place in the record, so the same record sent again is the same bytes,
 which ingest answers once: give a run the same id each time you send it. A
 record's content is its run's messages (`input_messages`, `output_messages`),
-a model call's (`output_messages`), a tool call's `arguments` and `result`,
+a model call's (`input_messages`, `output_messages`), a tool call's `arguments` and `result`,
 and a step's messages, a subagent's task and answer; its tags and token counts go as a live run's do.
 A blank agent (`Error::EmptyAgent`), a run id that is not a UUID or is the nil
 UUID (`Error::RunId`), an empty step name or model (`Error::EmptyName`), text
 past ingest's caps (`Error::TooLong`: a step's or a tool's name 145
 characters, the agent, models, providers and error types 128, the user 128,
-and the session 200), a time
+the session 200, and a reasoning effort 1,024), a step nested past 16 deep
+(`Error::TooDeep`), a time
 at or before the Unix epoch or 2^64
 nanoseconds or more after it, in July 2554 (`Error::RecordedTime`), or a span
 that ends before it starts (`Error::EndBeforeStart`) is returned as an error,

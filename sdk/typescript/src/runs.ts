@@ -566,7 +566,8 @@ export class Opener {
       [contract.OUTPUT_MESSAGES, record.outputMessages],
     ] as const;
     const items = read(record);
-    for (const each of [record, ...items.flatMap(([item, calls]) => [item, ...calls])]) {
+    const every = [...walk(items)];
+    for (const each of [record, ...every]) {
       const [start, end] = [hrTimeOf(each.start), hrTimeOf(each.end)];
       // Ingest reads a time as nanoseconds from the epoch in 64 bits, and
       // refuses the export over one that is not.
@@ -593,18 +594,12 @@ export class Opener {
     const contents = new Map<Item, Attributes>();
     // Scores too, each refused one warned of.
     const scored = new Map<RecordOutcome, Attributes[]>([[record, scoresOf(record, this.#warnOnce)]]);
-    for (const [item, calls] of items) {
-      if (item.type === 'step') {
-        contents.set(item, contentOf(item));
-        scored.set(item, scoresOf(item, this.#warnOnce));
-      }
-      for (const each of item.type === 'step' ? calls : [item]) {
-        contents.set(each, contentOf(each));
-        scored.set(each, scoresOf(each, this.#warnOnce));
-        if (each.type !== 'model_call') continue;
-        usages.set(each, usageOf(each.usage, this.#warnOnce));
-        operations.set(each, operationOf(each.operation, this.#warnOnce));
-      }
+    for (const each of every) {
+      contents.set(each, contentOf(each));
+      scored.set(each, scoresOf(each, this.#warnOnce));
+      if (each.type !== 'model_call') continue;
+      usages.set(each, usageOf(each.usage, this.#warnOnce));
+      operations.set(each, operationOf(each.operation, this.#warnOnce));
     }
     let place = 0;
     const open = (name: string, parent: Context, spanAttributes: Attributes, kind: SpanKind, at: RecordTime): Span =>
@@ -615,6 +610,8 @@ export class Opener {
       if (item.type === 'model_call') {
         const operation = operations.get(item) ?? contract.DEFAULT_MODEL_OPERATION;
         const [name, callAttributes] = modelCallOpening(inherited, item.model, operation, item.provider ?? '');
+        const effort = item.reasoningEffort;
+        if (effort) callAttributes[contract.REQUEST_REASONING_LEVEL] = effort;
         Object.assign(callAttributes, usages.get(item), contents.get(item));
         close(open(name, parent, callAttributes, SpanKind.CLIENT, item.start), item, scored.get(item));
       } else {
@@ -622,21 +619,22 @@ export class Opener {
         close(open(toolSpanName(item.name), parent, callAttributes, SpanKind.INTERNAL, item.start), item, scored.get(item));
       }
     };
+    const build = (held: readonly Read[], parent: Context): void => {
+      for (const [item, inside] of held) {
+        if (item.type !== 'step') {
+          call(item, parent);
+          continue;
+        }
+        const step = open(item.name, parent, { ...inherited, ...contents.get(item) }, SpanKind.INTERNAL, item.start);
+        build(inside, trace.setSpan(parent, step));
+        close(step, item, scored.get(item));
+      }
+    };
     // Queued whole or not at all: a record that outgrows the queue's room
     // would lose its tail, the run's own span first.
-    this.#processor.record(runHex, spansIn(items), () => {
+    this.#processor.record(runHex, 1 + every.length, () => {
       const span = open(runSpanName(record.agent), ROOT_CONTEXT, attributes, SpanKind.INTERNAL, record.start);
-      const ctx = trace.setSpan(ROOT_CONTEXT, span);
-      for (const [item, calls] of items) {
-        if (item.type === 'step') {
-          const step = open(item.name, ctx, { ...inherited, ...contents.get(item) }, SpanKind.INTERNAL, item.start);
-          const inner = trace.setSpan(ctx, step);
-          for (const each of calls) call(each, inner);
-          close(step, item, scored.get(item));
-        } else {
-          call(item, ctx);
-        }
-      }
+      build(items, trace.setSpan(ROOT_CONTEXT, span));
       close(span, record, scored.get(record));
     });
   }
@@ -689,21 +687,25 @@ function later(a: HrTime, b: HrTime): boolean {
 }
 
 type Item = StepRecord | CallRecord;
+/** An item as read, a step with what it holds. */
+type Read = readonly [Item, readonly Read[]];
 
-/** How many spans a record queues: the run, then each step and each call. */
-function spansIn(items: ReadonlyArray<readonly [Item, readonly CallRecord[]]>): number {
-  return items.reduce((spans, [, calls]) => spans + 1 + calls.length, 1);
-}
+/** How deep steps nest, a run's own at 1: past any agent's subagents, and an end to a step that holds itself. */
+const STEP_DEPTH_MAX = 16;
 
-/** The record's items, each step with its calls, read once and checked, so the items checked are the items built. */
-function read(record: RunRecord): Array<[Item, readonly CallRecord[]]> {
+/** The record's items, each step with what it holds, read once and checked, so the items checked are the items built. */
+function read(record: RunRecord): Read[] {
   const inside = record.inside ?? [];
   // Cast: narrowing the name itself by `Array.isArray` makes its items `any`.
   if (!Array.isArray(inside as unknown)) {
     throw new TypeError("a recorded run's inside must be an array, in the order it ran");
   }
-  const items: Array<[Item, readonly CallRecord[]]> = [];
-  for (const item of inside) {
+  return readItems(inside, 1);
+}
+
+function readItems(given: readonly Item[], depth: number): Read[] {
+  const items: Read[] = [];
+  for (const item of given) {
     if (item?.type === 'model_call' || item?.type === 'tool_call') {
       check(item, item.type);
       items.push([item, []]);
@@ -712,21 +714,25 @@ function read(record: RunRecord): Array<[Item, readonly CallRecord[]]> {
     if (item?.type !== 'step') {
       throw new TypeError("a recorded item's type must be 'step', 'model_call' or 'tool_call'");
     }
+    if (depth > STEP_DEPTH_MAX) {
+      throw new RangeError(`a recorded step must be nested at most ${STEP_DEPTH_MAX} deep`);
+    }
     check(item, 'step');
-    const given = item.calls ?? [];
-    if (!Array.isArray(given as unknown)) {
+    const calls = item.calls ?? [];
+    if (!Array.isArray(calls as unknown)) {
       throw new TypeError("a recorded step's calls must be an array, in the order they ran");
     }
-    const calls = [...given];
-    for (const each of calls) {
-      if (each?.type !== 'model_call' && each?.type !== 'tool_call') {
-        throw new TypeError("a step's recorded call's type must be 'model_call' or 'tool_call'");
-      }
-      check(each, each.type);
-    }
-    items.push([item, calls]);
+    items.push([item, readItems(calls, depth + 1)]);
   }
   return items;
+}
+
+/** Every item read, depth first, a step before what it holds: the order of their places. */
+function* walk(items: readonly Read[]): Generator<Item> {
+  for (const [item, inside] of items) {
+    yield item;
+    yield* walk(inside);
+  }
 }
 
 /** Each kind of record, whose fields the tables below name by its keys. */
@@ -753,6 +759,7 @@ const FIELDS = {
     ['model', 'string', false],
     ['provider', 'string', true],
     ['operation', 'string', true],
+    ['reasoningEffort', 'string', true],
     ['usage', 'object', true],
   ],
   tool_call: [['name', 'string', false]],
@@ -766,7 +773,7 @@ const OUTCOME: readonly Field<RecordOutcome>[] = [
 const CAPS = {
   run: { userId: contract.USER_ID_MAX, sessionId: contract.SESSION_ID_MAX },
   step: { name: contract.NAME_MAX },
-  model_call: { model: contract.MODEL_MAX, provider: contract.PROVIDER_MAX },
+  model_call: { model: contract.MODEL_MAX, provider: contract.PROVIDER_MAX, reasoningEffort: contract.ATTRIBUTE_VALUE_MAX },
   tool_call: { name: contract.NAME_MAX },
 } satisfies { [K in keyof Kinds]: Partial<Record<keyof Kinds[K], number>> };
 
@@ -819,7 +826,10 @@ function isObject(value: unknown): value is object {
 function contentOf(item: Item): Attributes {
   const fields: ReadonlyArray<readonly [string, unknown]> =
     item.type === 'model_call'
-      ? [[contract.OUTPUT_MESSAGES, item.outputMessages]]
+      ? [
+          [contract.INPUT_MESSAGES, item.inputMessages],
+          [contract.OUTPUT_MESSAGES, item.outputMessages],
+        ]
       : item.type === 'tool_call'
         ? [
             [contract.TOOL_CALL_ARGUMENTS, item.arguments],

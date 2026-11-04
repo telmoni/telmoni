@@ -221,10 +221,14 @@ export interface ModelCallRecord extends RecordOutcome {
   provider?: string | undefined;
   /** `chat` (default, and what a blank one means), `generate_content`, `text_completion` or `embeddings`; any other goes as `chat`, with one warning. */
   operation?: string | undefined;
+  /** How hard the model was asked to reason, as the provider names it: metadata, sent in every mode. */
+  reasoningEffort?: string | undefined;
   start: RecordTime;
   end: RecordTime;
   usage?: Usage | undefined;
   /** Content: sent only with `captureContent` and the project's mode `on`. */
+  inputMessages?: unknown;
+  /** Content, as above. */
   outputMessages?: unknown;
 }
 
@@ -242,13 +246,13 @@ export interface ToolCallRecord extends RecordOutcome {
 
 export type CallRecord = ModelCallRecord | ToolCallRecord;
 
-/** A step that has ended, with the calls made inside it. */
+/** A step that has ended, with the calls made inside it and its own steps, a subagent's say, up to 16 deep. */
 export interface StepRecord extends RecordOutcome {
   type: 'step';
   name: string;
   start: RecordTime;
   end: RecordTime;
-  calls?: readonly CallRecord[] | undefined;
+  calls?: readonly (StepRecord | CallRecord)[] | undefined;
   /** Content, a subagent's task say: sent only with `captureContent` and the project's mode `on`. */
   inputMessages?: unknown;
   /** Content, its answer: as above. */

@@ -55,6 +55,7 @@ const (
 	attrRequestPresencePenalty  = "gen_ai.request.presence_penalty"
 	attrRequestMaxTokens        = "gen_ai.request.max_tokens"
 	attrRequestSeed             = "gen_ai.request.seed"
+	attrRequestReasoningLevel   = "gen_ai.request.reasoning.level"
 
 	attrInputMessages      = "gen_ai.input.messages"
 	attrOutputMessages     = "gen_ai.output.messages"

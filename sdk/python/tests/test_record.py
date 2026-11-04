@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import dataclasses
+import itertools
 import json
 import logging
 import sys
@@ -32,6 +33,7 @@ from telmoni import (
     Usage,
     WarningInfo,
     current_run,
+    ids,
     runs,
 )
 from telmoni.exporter import Answer, Exporter
@@ -44,16 +46,28 @@ def at(text: str) -> datetime:
     return datetime.fromisoformat(text.replace("Z", "+00:00"))
 
 
-def call_from(spec: dict[str, Any]) -> ModelCallRecord | ToolCallRecord:
+def item_from(spec: dict[str, Any]) -> StepRecord | ModelCallRecord | ToolCallRecord:
+    if "step" in spec:
+        step = spec["step"]
+        return StepRecord(
+            name=step["name"],
+            start=at(step["start"]),
+            end=at(step["end"]),
+            calls=[item_from(each) for each in step.get("calls", [])],
+            error_type=step.get("error_type"),
+            cancelled=step.get("cancelled", False),
+        )
     if "model_call" in spec:
         call = spec["model_call"]
         return ModelCallRecord(
             model=call["model"],
             provider=call.get("provider"),
             operation=call.get("operation", "chat"),
+            reasoning_effort=call.get("reasoning_effort"),
             start=at(call["start"]),
             end=at(call["end"]),
             usage=Usage(**call["usage"]) if "usage" in call else None,
+            input_messages=call.get("input_messages"),
             error_type=call.get("error_type"),
             cancelled=call.get("cancelled", False),
         )
@@ -68,22 +82,7 @@ def call_from(spec: dict[str, Any]) -> ModelCallRecord | ToolCallRecord:
 
 
 def record_from(spec: dict[str, Any]) -> RunRecord:
-    inside: list[StepRecord | ModelCallRecord | ToolCallRecord] = []
-    for item in spec["inside"]:
-        if "step" in item:
-            step = item["step"]
-            inside.append(
-                StepRecord(
-                    name=step["name"],
-                    start=at(step["start"]),
-                    end=at(step["end"]),
-                    calls=[call_from(each) for each in step.get("calls", [])],
-                    error_type=step.get("error_type"),
-                    cancelled=step.get("cancelled", False),
-                )
-            )
-        else:
-            inside.append(call_from(item))
+    inside = [item_from(item) for item in spec["inside"]]
     return RunRecord(
         run_id=spec["run_id"],
         agent=spec["agent"],
@@ -478,12 +477,15 @@ def test_a_failed_run_is_marked_on_its_own_span(
     assert "telmoni.cancelled" not in attributes_of(run)
 
 
-@pytest.mark.parametrize("capture_content", [True, False])
+@pytest.mark.parametrize(
+    ("capture_content", "mode"), [(True, "on"), (False, "on"), (True, "off")]
+)
 def test_a_records_content_leaves_only_when_asked_and_the_project_allows(
-    transport: FakeTransport, capture_content: bool
+    transport: FakeTransport, capture_content: bool, mode: str
 ) -> None:
-    on = Answer(200, {"Telmoni-Content-Mode": "on"}, b"{}")
-    transport.answers = [on, on]
+    """A call's reasoning effort, which is no content, leaves whatever the mode."""
+    answer = Answer(200, {"Telmoni-Content-Mode": mode}, b"{}")
+    transport.answers = [answer, answer]
     client = Telmoni(
         Config(api_key="k", capture_content=capture_content), transport=transport
     )
@@ -500,8 +502,22 @@ def test_a_records_content_leaves_only_when_asked_and_the_project_allows(
                 input_messages=["the task"],
                 output_messages=["the answer"],
                 calls=(
-                    ModelCallRecord(
-                        model="m", start=at, end=at, output_messages={"said": "it"}
+                    StepRecord(
+                        name="its subagent",
+                        start=at,
+                        end=at,
+                        input_messages=["its task"],
+                        output_messages=["its answer"],
+                        calls=(
+                            ModelCallRecord(
+                                model="m",
+                                reasoning_effort="high",
+                                start=at,
+                                end=at,
+                                input_messages=["the question"],
+                                output_messages={"said": "it"},
+                            ),
+                        ),
                     ),
                 ),
             ),
@@ -528,7 +544,14 @@ def test_a_records_content_leaves_only_when_asked_and_the_project_allows(
             "gen_ai.input.messages": '["the task"]',
             "gen_ai.output.messages": '["the answer"]',
         },
-        "chat m": {"gen_ai.output.messages": '{"said":"it"}'},
+        "its subagent": {
+            "gen_ai.input.messages": '["its task"]',
+            "gen_ai.output.messages": '["its answer"]',
+        },
+        "chat m": {
+            "gen_ai.input.messages": '["the question"]',
+            "gen_ai.output.messages": '{"said":"it"}',
+        },
         "execute_tool t": {
             "gen_ai.tool.call.arguments": '{"q":1}',
             "gen_ai.tool.call.result": "found",
@@ -536,10 +559,11 @@ def test_a_records_content_leaves_only_when_asked_and_the_project_allows(
     }
     for name, fields in content.items():
         for key, value in fields.items():
-            if capture_content:
+            if capture_content and mode == "on":
                 assert sent[name][key] == value, (name, key)
             else:
                 assert key not in sent[name], (name, key)
+    assert sent["chat m"]["gen_ai.request.reasoning.level"] == "high"
 
 
 def test_the_sample_rate_drops_a_record_whole(transport: FakeTransport) -> None:
@@ -558,6 +582,22 @@ RUN = RunRecord(run_id=str(uuid.UUID(int=1)), agent="a", start=START, end=START)
 STEP = StepRecord(name="s", start=START, end=START)
 TOOL = ToolCallRecord(name="t", start=START, end=START)
 MODEL = ModelCallRecord(model="m", start=START, end=START)
+
+
+def nested(depth: int) -> StepRecord:
+    """``depth`` steps, each inside the one before."""
+    step = STEP
+    for n in range(2, depth + 1):
+        step = dataclasses.replace(STEP, name=f"s{n}", calls=(step,))
+    return step
+
+
+def looped(record: RunRecord) -> RunRecord:
+    """``record`` holding one step that holds itself."""
+    calls: list[StepRecord | ModelCallRecord | ToolCallRecord] = []
+    step = dataclasses.replace(STEP, calls=calls)
+    calls.append(step)
+    return dataclasses.replace(record, inside=[step])
 
 
 class Shifting(Sequence[StepRecord | ModelCallRecord | ToolCallRecord]):
@@ -624,6 +664,11 @@ class Shifting(Sequence[StepRecord | ModelCallRecord | ToolCallRecord]):
             "operation must be str or None",
         ),
         (
+            {"inside": [dataclasses.replace(MODEL, reasoning_effort=5)]},  # type: ignore[arg-type]
+            TypeError,
+            "reasoning_effort must be str or None",
+        ),
+        (
             {"inside": [dataclasses.replace(MODEL, usage={"input_tokens": 1})]},  # type: ignore[arg-type]
             TypeError,
             "usage must be Usage or None",
@@ -685,6 +730,18 @@ class Shifting(Sequence[StepRecord | ModelCallRecord | ToolCallRecord]):
             "model call's provider must be up to 128",
         ),
         (
+            {
+                "inside": [
+                    dataclasses.replace(
+                        STEP,
+                        calls=[dataclasses.replace(MODEL, reasoning_effort="r" * 1025)],
+                    )
+                ]
+            },
+            ValueError,
+            "model call's reasoning_effort must be up to 1024 characters",
+        ),
+        (
             {"inside": [dataclasses.replace(TOOL, error_type="E" * 129)]},
             ValueError,
             "tool call's error_type must be up to 128",
@@ -694,9 +751,15 @@ class Shifting(Sequence[StepRecord | ModelCallRecord | ToolCallRecord]):
         ({"inside": [RUN]}, TypeError, "item must be"),
         ({"inside": [None]}, TypeError, "item must be"),
         (
-            {"inside": [dataclasses.replace(STEP, calls=[STEP])]},  # type: ignore[list-item]
+            {"inside": [nested(17)]},
+            ValueError,
+            "a recorded step must be nested at most 16 deep",
+        ),
+        (looped, ValueError, "nested at most 16 deep"),
+        (
+            {"inside": [dataclasses.replace(STEP, calls=[nested(2), RUN])]},  # type: ignore[list-item]
             TypeError,
-            "call must",
+            "item must be",
         ),
         ({"inside": iter([TOOL])}, TypeError, "inside must be a sequence"),
         ({"inside": {TOOL}}, TypeError, "inside must be a sequence"),
@@ -749,6 +812,82 @@ def test_a_record_refused_opens_and_sends_nothing(
         client.shutdown()
     assert transport.requests == []
     assert asked == []
+
+
+def test_a_step_inside_a_step_goes_under_its_span(transport: FakeTransport) -> None:
+    """Each span at its place depth first, each step sent after what it holds."""
+    client = Telmoni(Config(api_key="k"), transport=transport)
+    record = the_record()
+    at = record.start
+
+    def call(name: str) -> ToolCallRecord:
+        return ToolCallRecord(name=name, start=at, end=at)
+
+    def step(name: str, *calls: StepRecord | ToolCallRecord) -> StepRecord:
+        return StepRecord(name=name, start=at, end=at, calls=calls)
+
+    inside: list[StepRecord | ToolCallRecord] = [
+        step("outer", call("a"), step("middle", step("inner", call("b"))), call("c")),
+        call("d"),
+    ]
+    try:
+        client.record_run(dataclasses.replace(record, agent="bot", inside=inside))
+        assert client.flush()
+    finally:
+        client.shutdown()
+    spans = transport.spans()
+    assert [span["name"] for span in spans] == [
+        "execute_tool a",
+        "execute_tool b",
+        "inner",
+        "middle",
+        "execute_tool c",
+        "outer",
+        "execute_tool d",
+        "invoke_agent bot",
+    ]
+    places = [
+        "invoke_agent bot",
+        "outer",
+        "execute_tool a",
+        "middle",
+        "inner",
+        "execute_tool b",
+        "execute_tool c",
+        "execute_tool d",
+    ]
+
+    def id_of(name: str) -> str:
+        return f"{ids.span_id(uuid.UUID(record.run_id), places.index(name)):016x}"
+
+    parents = {
+        "outer": "invoke_agent bot",
+        "execute_tool a": "outer",
+        "middle": "outer",
+        "inner": "middle",
+        "execute_tool b": "inner",
+        "execute_tool c": "outer",
+        "execute_tool d": "invoke_agent bot",
+    }
+    for span in spans:
+        name = span["name"]
+        assert span["spanId"] == id_of(name), name
+        parent = parents.get(name)
+        assert span.get("parentSpanId") == (parent and id_of(parent)), name
+
+
+def test_steps_nested_16_deep_are_sent(transport: FakeTransport) -> None:
+    """The deepest a record takes, each step under the next."""
+    client = Telmoni(Config(api_key="k"), transport=transport)
+    try:
+        client.record_run(dataclasses.replace(the_record(), inside=[nested(16)]))
+        assert client.flush()
+    finally:
+        client.shutdown()
+    spans = transport.spans()
+    assert len(spans) == 17
+    for inner, outer in itertools.pairwise(spans):
+        assert inner["parentSpanId"] == outer["spanId"]
 
 
 def test_a_record_after_shutdown_is_refused(transport: FakeTransport) -> None:

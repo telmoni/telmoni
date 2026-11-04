@@ -5,9 +5,19 @@
 import { SamplingDecision, type Sampler, type SamplingResult } from '@opentelemetry/sdk-trace-base';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { spanIdAt } from '../src/ids';
 import { QueueFullError, ShutdownError } from '../src/index';
 import type { CallRecord, ModelCallRecord, RunRecord, StepRecord, ToolCallRecord, Usage } from '../src/index';
-import { type ExportBody, type Harness, type JsonAttribute, answer, attributesOf, harness, loadFixture } from './helpers';
+import {
+  type Answer,
+  type ExportBody,
+  type Harness,
+  type JsonAttribute,
+  answer,
+  attributesOf,
+  harness,
+  loadFixture,
+} from './helpers';
 
 const VERSIONED = new Set(['telemetry.sdk.version', 'telemetry.distro.version']);
 
@@ -16,11 +26,13 @@ interface Outcome {
   cancelled?: boolean;
 }
 
-interface CallSpec {
+interface ItemSpec {
   model_call?: Outcome & {
     model: string;
     provider?: string;
     operation?: string;
+    reasoning_effort?: string;
+    input_messages?: unknown;
     start: string;
     end: string;
     usage?: {
@@ -32,10 +44,7 @@ interface CallSpec {
     };
   };
   tool_call?: Outcome & { name: string; start: string; end: string };
-}
-
-interface ItemSpec extends CallSpec {
-  step?: Outcome & { name: string; start: string; end: string; calls?: CallSpec[] };
+  step?: Outcome & { name: string; start: string; end: string; calls?: ItemSpec[] };
 }
 
 interface RecordedFixture {
@@ -62,7 +71,18 @@ function outcome(spec: Outcome): { errorType?: string; cancelled?: boolean } {
   return out;
 }
 
-function callFrom(spec: CallSpec): CallRecord {
+function itemFrom(spec: ItemSpec): StepRecord | CallRecord {
+  if (spec.step) {
+    const step = spec.step;
+    return {
+      type: 'step',
+      name: step.name,
+      start: new Date(step.start),
+      end: new Date(step.end),
+      calls: (step.calls ?? []).map(itemFrom),
+      ...outcome(step),
+    };
+  }
   if (spec.model_call) {
     const call = spec.model_call;
     const record: ModelCallRecord = {
@@ -74,6 +94,8 @@ function callFrom(spec: CallSpec): CallRecord {
     };
     if (call.provider !== undefined) record.provider = call.provider;
     if (call.operation !== undefined) record.operation = call.operation;
+    if (call.reasoning_effort !== undefined) record.reasoningEffort = call.reasoning_effort;
+    if (call.input_messages !== undefined) record.inputMessages = call.input_messages;
     if (call.usage !== undefined) {
       record.usage = {
         inputTokens: call.usage.input_tokens,
@@ -97,26 +119,12 @@ function callFrom(spec: CallSpec): CallRecord {
 }
 
 function recordFrom(spec: RecordedFixture['scenario']['record']): RunRecord {
-  const inside = spec.inside.map((item): StepRecord | CallRecord => {
-    if (item.step) {
-      const step = item.step;
-      return {
-        type: 'step',
-        name: step.name,
-        start: new Date(step.start),
-        end: new Date(step.end),
-        calls: (step.calls ?? []).map(callFrom),
-        ...outcome(step),
-      };
-    }
-    return callFrom(item);
-  });
   const record: RunRecord = {
     runId: spec.run_id,
     agent: spec.agent,
     start: new Date(spec.start),
     end: new Date(spec.end),
-    inside,
+    inside: spec.inside.map(itemFrom),
     ...outcome(spec),
   };
   if (spec.user_id !== undefined) record.userId = spec.user_id;
@@ -505,11 +513,11 @@ describe('a recorded run', () => {
     expect(attributesOf(run)['telmoni.cancelled']).toBeUndefined();
   });
 
-  it("sends its run's, steps' and calls' content on their spans only when asked and the project allows", async () => {
+  it("sends its content only when asked and the project allows, and a call's reasoning effort in every mode", async () => {
     const on = answer(200, { 'Telmoni-Content-Mode': 'on' }, '{}');
     const at = theRecord().start;
-    const sendWith = async (captureContent: boolean): Promise<Record<string, Record<string, unknown>>> => {
-      const h = harness({ captureContent }, {}, [on, on]);
+    const sendWith = async (captureContent: boolean, answers: Answer[]): Promise<Record<string, Record<string, unknown>>> => {
+      const h = harness({ captureContent }, {}, answers);
       try {
         h.telmoni.run('warm', () => {});
         expect(await h.telmoni.flush()).toBe(true);
@@ -525,7 +533,27 @@ describe('a recorded run', () => {
               end: at,
               inputMessages: ['the task'],
               outputMessages: ['the answer'],
-              calls: [{ type: 'model_call', model: 'm', start: at, end: at, outputMessages: { said: 'it' } }],
+              calls: [
+                {
+                  type: 'step',
+                  name: 'its subagent',
+                  start: at,
+                  end: at,
+                  inputMessages: ['its task'],
+                  outputMessages: ['its answer'],
+                  calls: [
+                    {
+                      type: 'model_call',
+                      model: 'm',
+                      reasoningEffort: 'high',
+                      start: at,
+                      end: at,
+                      inputMessages: ['the question'],
+                      outputMessages: { said: 'it' },
+                    },
+                  ],
+                },
+              ],
             },
             { type: 'tool_call', name: 't', start: at, end: at, arguments: { q: 1 }, result: 'found' },
           ],
@@ -539,16 +567,78 @@ describe('a recorded run', () => {
     const content = {
       'invoke_agent claude-code': { 'gen_ai.input.messages': '["asked"]', 'gen_ai.output.messages': '{"said":"answered"}' },
       subagent: { 'gen_ai.input.messages': '["the task"]', 'gen_ai.output.messages': '["the answer"]' },
-      'chat m': { 'gen_ai.output.messages': '{"said":"it"}' },
+      'its subagent': { 'gen_ai.input.messages': '["its task"]', 'gen_ai.output.messages': '["its answer"]' },
+      'chat m': { 'gen_ai.input.messages': '["the question"]', 'gen_ai.output.messages': '{"said":"it"}' },
       'execute_tool t': { 'gen_ai.tool.call.arguments': '{"q":1}', 'gen_ai.tool.call.result': 'found' },
     };
-    const asked = await sendWith(true);
-    const quiet = await sendWith(false);
+    const asked = await sendWith(true, [on, on]);
+    const quiet = await sendWith(false, [on, on]);
+    // The project's mode off, as the default answer names it.
+    const barred = await sendWith(true, []);
     for (const [name, fields] of Object.entries(content)) {
       for (const [key, value] of Object.entries(fields)) {
         expect(asked[name]?.[key], `${name} ${key}`).toBe(value);
         expect(quiet[name], name).not.toHaveProperty(key);
+        expect(barred[name], name).not.toHaveProperty(key);
       }
+    }
+    for (const sent of [asked, quiet, barred]) expect(sent['chat m']?.['gen_ai.request.reasoning.level']).toBe('high');
+  });
+
+  it('nests a step inside a step under its span, each span at its place depth first, each step sent after what it holds', async () => {
+    const record = theRecord();
+    const at = record.start;
+    const call = (name: string): ToolCallRecord => ({ type: 'tool_call', name, start: at, end: at });
+    const h = harness();
+    try {
+      h.telmoni.recordRun({
+        ...record,
+        agent: 'bot',
+        inside: [
+          {
+            type: 'step',
+            name: 'outer',
+            start: at,
+            end: at,
+            calls: [
+              call('a'),
+              { type: 'step', name: 'middle', start: at, end: at, calls: [{ type: 'step', name: 'inner', start: at, end: at, calls: [call('b')] }] },
+              call('c'),
+            ],
+          },
+          call('d'),
+        ],
+      });
+      expect(await h.telmoni.flush()).toBe(true);
+    } finally {
+      await h.telmoni.shutdown();
+    }
+    const spans = h.transport.spans();
+    expect(spans.map((span) => span.name)).toEqual([
+      'execute_tool a',
+      'execute_tool b',
+      'inner',
+      'middle',
+      'execute_tool c',
+      'outer',
+      'execute_tool d',
+      'invoke_agent bot',
+    ]);
+    const places = ['invoke_agent bot', 'outer', 'execute_tool a', 'middle', 'inner', 'execute_tool b', 'execute_tool c', 'execute_tool d'];
+    const idOf = (name: string): string => spanIdAt(traceOf(record), places.indexOf(name));
+    const parents: Record<string, string> = {
+      outer: 'invoke_agent bot',
+      'execute_tool a': 'outer',
+      middle: 'outer',
+      inner: 'middle',
+      'execute_tool b': 'inner',
+      'execute_tool c': 'outer',
+      'execute_tool d': 'invoke_agent bot',
+    };
+    for (const span of spans) {
+      expect(span.spanId, span.name).toBe(idOf(span.name));
+      const parent = parents[span.name];
+      expect(span.parentSpanId, span.name).toBe(parent === undefined ? undefined : idOf(parent));
     }
   });
 
@@ -567,6 +657,9 @@ describe('a recorded run', () => {
   const start = Date.parse('2026-10-12T09:00:00.000Z');
   const step: StepRecord = { type: 'step', name: 's', start, end: start };
   const tool: ToolCallRecord = { type: 'tool_call', name: 't', start, end: start };
+  /** `depth` steps, each inside the one before. */
+  const nested = (depth: number): StepRecord =>
+    depth === 1 ? step : { ...step, name: `s${depth}`, calls: [nested(depth - 1)] };
   it.each<[string, Partial<RunRecord> | ((record: RunRecord) => RunRecord), ErrorConstructor, RegExp]>([
     ['a blank agent', { agent: ' ' }, TypeError, /agent's name/],
     ['a run id that is not a UUID', { runId: 'run-1' }, TypeError, /must be a UUID/],
@@ -599,6 +692,12 @@ describe('a recorded run', () => {
       { inside: [{ type: 'model_call', model: 'm', provider: 'p'.repeat(129), start, end: start }] },
       RangeError,
       /model call's provider must be up to 128/,
+    ],
+    [
+      "a model call's reasoning effort past 1024 characters, in a step",
+      { inside: [{ ...step, calls: [{ type: 'model_call', model: 'm', reasoningEffort: 'r'.repeat(1025), start, end: start }] }] },
+      RangeError,
+      /model call's reasoningEffort must be up to 1024 characters/,
     ],
     ["a tool call's error type past 128 characters", { inside: [{ ...tool, errorType: 'E'.repeat(129) }] }, RangeError, /tool call's errorType must be up to 128/],
     ["a step's name that is empty", { inside: [{ ...step, name: '' }] }, TypeError, /step's name cannot be empty/],
@@ -661,6 +760,12 @@ describe('a recorded run', () => {
       /operation must be a string/,
     ],
     [
+      "a model call's reasoning effort that is no string",
+      { inside: [{ type: 'model_call', model: 'm', start, end: start, reasoningEffort: { level: 'high' } as unknown as string }] },
+      TypeError,
+      /reasoningEffort must be a string/,
+    ],
+    [
       "a model call's usage that is no object",
       { inside: [{ type: 'model_call', model: 'm', start, end: start, usage: 5 as unknown as Usage }] },
       TypeError,
@@ -687,11 +792,23 @@ describe('a recorded run', () => {
       TypeError,
       /tool call's name must be a string/,
     ],
+    ['steps nested 17 deep', { inside: [nested(17)] }, RangeError, /a recorded step must be nested at most 16 deep/],
     [
-      'a step inside a step',
-      { inside: [{ type: 'step', name: 's', start, end: start, calls: [{ ...step } as unknown as CallRecord] }] },
+      'a step that holds itself',
+      (record) => {
+        const calls: StepRecord[] = [];
+        const looped: StepRecord = { ...step, calls };
+        calls.push(looped);
+        return { ...record, inside: [looped] };
+      },
+      RangeError,
+      /nested at most 16 deep/,
+    ],
+    [
+      'an item of no known type in a step inside a step',
+      { inside: [{ ...step, calls: [{ ...step, calls: [{ type: 'span' } as unknown as CallRecord] }] }] },
       TypeError,
-      /call's type must be/,
+      /item's type must be/,
     ],
     ['inside that is an iterator', { inside: once(tool) as unknown as CallRecord[] }, TypeError, /inside must be an array/],
     [
@@ -719,6 +836,22 @@ describe('a recorded run', () => {
     }
     expect(h.transport.requests).toEqual([]);
     expect(asked).toBe(0);
+  });
+
+  it('sends steps nested 16 deep, the deepest it takes', async () => {
+    const h = harness();
+    try {
+      h.telmoni.recordRun({ ...theRecord(), inside: [nested(16)] });
+      expect(await h.telmoni.flush()).toBe(true);
+    } finally {
+      await h.telmoni.shutdown();
+    }
+    const spans = h.transport.spans();
+    expect(spans).toHaveLength(17);
+    // The deepest first, each under the next.
+    for (const [inner, outer] of spans.slice(0, 16).map((span, n) => [span, spans[n + 1]] as const)) {
+      expect(inner.parentSpanId).toBe(outer?.spanId);
+    }
   });
 
   /** Its calls built afresh on each read, as a getter over rows builds them. */

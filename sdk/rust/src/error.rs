@@ -42,12 +42,17 @@ pub enum Error {
     /// A recorded step's name or model call's model was empty, which ingest
     /// refuses the span for.
     EmptyName,
-    /// A recorded text held more characters than ingest takes there, which it
-    /// refuses the span for.
+    /// A recorded text held more characters than ingest takes there.
     TooLong {
         /// Which text, never the text itself.
         what: Text,
         /// The most characters ingest takes there.
+        max: usize,
+    },
+    /// A recorded step was nested more than `max` deep, a step in the run
+    /// itself 1 deep.
+    TooDeep {
+        /// The deepest a step may be nested.
         max: usize,
     },
     /// The export queue had no room for the whole record, so nothing of it
@@ -94,6 +99,8 @@ pub enum Text {
     ModelCallModel,
     /// A model call's provider.
     ModelCallProvider,
+    /// A model call's `reasoning_effort`.
+    ModelCallReasoningEffort,
     /// A model call's `error_type`.
     ModelCallErrorType,
     /// A tool call's name.
@@ -113,6 +120,7 @@ impl fmt::Display for Text {
             Self::StepErrorType => "step's error_type",
             Self::ModelCallModel => "model call's model",
             Self::ModelCallProvider => "model call's provider",
+            Self::ModelCallReasoningEffort => "model call's reasoning_effort",
             Self::ModelCallErrorType => "model call's error_type",
             Self::ToolCallName => "tool call's name",
             Self::ToolCallErrorType => "tool call's error_type",
@@ -158,6 +166,7 @@ impl fmt::Display for Error {
             Self::TooLong { what, max } => {
                 write!(f, "a recorded {what} must be up to {max} characters")
             }
+            Self::TooDeep { max } => write!(f, "a recorded step must be nested at most {max} deep"),
             // Past the whole queue no flush makes room: never "again".
             Self::QueueFull { spans, queue } if spans > queue => write!(
                 f,
