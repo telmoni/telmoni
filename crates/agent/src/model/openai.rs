@@ -422,7 +422,12 @@ fn body(
     tools: &[ToolSpec],
     max_tokens: u32,
 ) -> Value {
-    let limit = telmoni_shared::model::openai::limit_field(config.is_openai());
+    // OpenAI's reasoning models refuse `max_tokens`; compatible endpoints know no other.
+    let limit = if config.is_openai() {
+        "max_completion_tokens"
+    } else {
+        "max_tokens"
+    };
     let mut body = json!({
         "model": config.model,
         "messages": messages(system, transcript),

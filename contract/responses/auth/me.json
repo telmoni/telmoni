@@ -55,7 +55,6 @@
     }
   ],
   "person": {
-    "analyticsOptIn": true,
     "displayName": "Sam Rivera",
     "email": "sam@example.com",
     "emailVerified": true,

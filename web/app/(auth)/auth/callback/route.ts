@@ -4,7 +4,6 @@ import { exchangeCode } from "@/lib/auth/oidc";
 import { refusalOf, refusedUrl, type Refusal } from "@/lib/auth/refusal";
 import { fetchWithTimeout } from "@/lib/api/fetch";
 import { clientKey, rateLimitRetryAfter } from "@/lib/api/rate-limit";
-import { track } from "@/lib/analytics";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import { ACTIVE_ORGANIZATION_COOKIE, expiredCookie } from "@/lib/proxy/organization";
@@ -178,8 +177,6 @@ export async function GET(request: NextRequest) {
   // cookie already; a session that ended any other way — expired, revoked
   // from another device — left it behind, naming wherever the last one stood.
   response.cookies.delete(expiredCookie(ACTIVE_ORGANIZATION_COOKIE));
-
-  track("onboarding.signup_completed", { userId: sessionData.userId });
 
   return response;
 }

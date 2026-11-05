@@ -260,13 +260,6 @@ services:
       SLACK_CLIENT_SECRET: ${SLACK_CLIENT_SECRET:-}
       SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET:-}
       CONNECTOR_KEK: ${CONNECTOR_KEK:-}
-      # A project's own model keys, sealed under a key of their own, never
-      # TELEMETRY_KEK's or CONTENT_KEK's; unset, no project connects a model.
-      # The signer and issuer, together and only beside it, let a Bedrock or
-      # Vertex AI connection keep no key, where AWS and Google reach this host.
-      MODEL_CONNECTION_KEK: ${MODEL_CONNECTION_KEK:-}
-      MODEL_FEDERATION_SIGNER: ${MODEL_FEDERATION_SIGNER:-}
-      MODEL_FEDERATION_ISSUER: ${MODEL_FEDERATION_ISSUER:-}
       # The agent: `anthropic` or `openai` (the protocol), the model and its
       # key, and the embeddings the `ollama` service serves.
       AGENT_MODEL_PROVIDER: ${AGENT_MODEL_PROVIDER:-}
@@ -333,10 +326,6 @@ services:
       # TLS and appending the client's address is assumed; 0 when the console
       # is reached directly, which leaves those limits to the caller's word.
       TRUSTED_PROXY_HOPS: ${TRUSTED_PROXY_HOPS:-1}
-      # Seconds a trace's or a session's page, or a Sessions or Users list,
-      # holds between redraws as its project's spans arrive; unset is 30, and
-      # 0 draws on every export.
-      LIVE_REFRESH_HOLD_SECS: ${LIVE_REFRESH_HOLD_SECS:-}
       # The identity provider's origins, space separated: signing out from the
       # account menu is a form post that ends in a redirect to the provider, and the console's
       # Content Security Policy lets the browser follow it there and nowhere

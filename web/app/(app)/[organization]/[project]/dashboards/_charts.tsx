@@ -24,10 +24,8 @@ import {
 } from "@/lib/dashboards";
 import { useInBrowser } from "@/lib/in-browser";
 import type { RollupPoint } from "@/lib/server/entities/dashboards";
-import { sessionHref } from "@/lib/sessions";
-import { formatCost, formatCount, formatDuration } from "@/lib/traces";
+import { formatCost, formatCount, formatDuration, sessionRunsHref, tracesHref } from "@/lib/traces";
 import { ChartMeasure, MetricsGroup } from "@/lib/types/enums";
-import { usersHref } from "@/lib/users";
 import { cn } from "@/lib/utils";
 
 import { chartTitle } from "./_labels";
@@ -202,10 +200,10 @@ function SplitChart({
   const href = (value: GroupValue): string | undefined => {
     if (value.kind !== "value") return undefined;
     if (chart.group === MetricsGroup.User) {
-      return usersHref(organization, slug, { user: [value.value], days: split.days });
+      return tracesHref(organization, slug, { user: [value.value], days: split.days });
     }
     if (chart.group === MetricsGroup.Session) {
-      return sessionHref(organization, slug, value.value, { days: split.days });
+      return sessionRunsHref(organization, slug, value.value, split.days);
     }
     return undefined;
   };

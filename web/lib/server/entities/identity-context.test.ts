@@ -44,7 +44,6 @@ function me(activeOrganizationId: string): ServerContext {
       userId: "user_me",
       email: "me@example.test",
       displayName: null,
-      analyticsOptIn: false,
     },
     organizations: [
       {

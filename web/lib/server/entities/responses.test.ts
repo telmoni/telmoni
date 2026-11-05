@@ -23,12 +23,7 @@ import { AuditExportListSchema, AuditExportSchema } from "@/lib/types/audit-expo
 import { SettledInviteSchema } from "@/lib/types/settled-invite";
 
 import { ActiveSessionListSchema } from "./active-sessions";
-import {
-  ConversationListSchema,
-  ConversationSchema,
-  StatusSchema,
-  TraceFiltersSchema,
-} from "./agent";
+import { ConversationListSchema, ConversationSchema, StatusSchema } from "./agent";
 import { AlertListSchema, IncidentListSchema, MuteListSchema } from "./alerts";
 import { AuditPageSchema } from "./audit";
 import { InviteListSchema, InviteLookSchema, MemberListSchema } from "./member";
@@ -62,23 +57,14 @@ import { ContentModeSettingSchema } from "./content-mode";
 import { RollupsSchema } from "./dashboards";
 import { FieldInventorySchema } from "./field-inventory";
 import { FeedSchema } from "./notification-feed";
-import { OrganizationHealthSchema } from "./organization-health";
 import { PrivacyPostureSchema } from "./privacy";
-import { SessionLayoutSettingSchema } from "./session-layout";
-import { SessionDetailSchema, SessionListSchema } from "./sessions";
 import {
   DashboardViewListSchema,
   FacetsSchema,
-  SavedViewOfAnyKindSchema,
-  SessionViewListSchema,
   TraceDetailSchema,
   TraceHistogramSchema,
-  TraceLayoutListSchema,
   TraceListSchema,
-  TraceTagsSchema,
-  TraceViewListSchema,
 } from "./traces";
-import { UserListSchema } from "./users";
 
 // A turn's stream, each frame read as the agent panel's parser reads it.
 const TurnFramesSchema = z.array(
@@ -93,7 +79,6 @@ const READERS: Record<string, z.ZodType> = {
   "agent/conversation.json": ConversationSchema,
   "agent/conversations.json": ConversationListSchema,
   "agent/status.json": StatusSchema,
-  "agent/trace-filters.json": TraceFiltersSchema,
   "agent/turn.json": TurnFramesSchema,
   "auth/account-deleted.json": AccountDeletedSchema,
   "auth/audit-export.json": AuditExportSchema,
@@ -143,22 +128,13 @@ const READERS: Record<string, z.ZodType> = {
   "telemetry/dashboards.json": DashboardViewListSchema,
   "telemetry/facets.json": FacetsSchema,
   "telemetry/field-inventory.json": FieldInventorySchema,
-  "telemetry/health.json": OrganizationHealthSchema,
   "telemetry/histogram.json": TraceHistogramSchema,
   "telemetry/incidents.json": IncidentListSchema,
-  "telemetry/layouts.json": TraceLayoutListSchema,
   "telemetry/mutes.json": MuteListSchema,
   "telemetry/privacy.json": PrivacyPostureSchema,
   "telemetry/rollups.json": RollupsSchema,
-  "telemetry/session-layout.json": SessionLayoutSettingSchema,
-  "telemetry/session-views.json": SessionViewListSchema,
-  "telemetry/session.json": SessionDetailSchema,
-  "telemetry/sessions.json": SessionListSchema,
-  "telemetry/trace-tags.json": TraceTagsSchema,
   "telemetry/trace.json": TraceDetailSchema,
   "telemetry/traces.json": TraceListSchema,
-  "telemetry/users.json": UserListSchema,
-  "telemetry/views.json": TraceViewListSchema,
 };
 
 // Readers that take every field as optional, so a key renamed would read as
@@ -194,14 +170,5 @@ describe("the server's answers", () => {
       .filter((file) => file.endsWith(".json"))
       .sort();
     expect(files).toEqual(Object.keys(READERS).sort());
-  });
-
-  it("a saved view of every kind reads as a save answers it", () => {
-    const Views = z.object({ views: z.array(z.unknown()) });
-    for (const name of ["telemetry/views.json", "telemetry/session-views.json", "telemetry/layouts.json"]) {
-      for (const view of Views.parse(pinned(name)).views) {
-        expect(SavedViewOfAnyKindSchema.safeParse(view).error).toBeUndefined();
-      }
-    }
   });
 });

@@ -76,32 +76,6 @@ describe("the peek in the browser's history", () => {
     expect(window.history.length).toBe(length);
   });
 
-  // Else the list's entry still names the peek's first layout, which the next peek reads as a link's.
-  it("gives the entry it goes back to the address the list now stands at", async () => {
-    window.history.replaceState(null, "", "/acme/web/sessions?days=30&view=v1");
-    openPeek(RUN_A);
-    const length = window.history.length;
-    // A layout chosen in the peek, its rewrite keeping the mark (`use-layout.ts`).
-    window.history.replaceState({ [PEEKED]: true }, "", `/acme/web/sessions?days=30&view=v2&peek=${RUN_A}`);
-    closePeek(true);
-    await landed();
-    expect(window.location.search).toBe("?days=30&view=v2");
-    expect(window.history.length, "and no entry more").toBe(length);
-    expect(window.history.state, "a fresh state, which Next's router follows").toEqual({});
-  });
-
-  it("rewrites no entry a traversal it did not start lands on, the same list's in another window", async () => {
-    openPeek(RUN_A);
-    const back = vi.spyOn(window.history, "back").mockImplementation(() => {});
-    closePeek(true);
-    back.mockRestore();
-    window.history.pushState(null, "", "/acme/web/traces?days=1");
-    window.history.pushState(null, "", "/acme/web/traces?days=2");
-    window.history.back();
-    await landed();
-    expect(window.location.search).toBe("?days=1");
-  });
-
   it("goes back no further when pressed again while the list is on its way", async () => {
     openPeek(RUN_A);
     closePeek(true);

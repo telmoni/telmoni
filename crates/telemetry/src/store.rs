@@ -22,7 +22,6 @@
 //! in the SQL, [`Read::param`] in the code), never spliced into the
 //! statement, and a read's SQL is a literal, so nothing can be.
 
-use std::collections::BTreeMap;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
@@ -103,14 +102,6 @@ const DELETE_RUNS: &str = "DELETE FROM telemetry.spans
      WHERE project_id = {project:String} AND has({runs:Array(UUID)}, run_id)";
 /// The most runs one of those names, about 190 KB of URL.
 const RUNS_PER_DELETE: usize = 5_000;
-/// A run's tags changed on every span of it: what [`Store::retag_run`] sends,
-/// a lightweight update naming its one project and run, since the row policy
-/// holds reads alone. Each span keeps its other tags.
-const RETAG_RUN: &str = "UPDATE telemetry.spans
-     SET tags = mapUpdate(mapFilter((k, v) -> NOT has({removed:Array(String)}, k), tags),
-                          mapFromArrays({keys:Array(String)}, {values:Array(String)}))
-     WHERE project_id = {project:String} AND run_id = {run:UUID}";
-
 /// The longest the client waits for ClickHouse to take a delete down: the
 /// statement answers once the mutation is recorded, not once it has run, so
 /// a healthy server answers at once, and a deletion's budget is not spent on
@@ -546,31 +537,6 @@ impl Store {
             within(DELETE_TIMEOUT, delete.execute()).await?;
         }
         Ok(())
-    }
-
-    /// `run`'s tags changed on its every span: `removed` taken off, then
-    /// `added` set. Answered once the patch is written, so a read after it
-    /// reads the change; merges fold it in later.
-    ///
-    /// ⚠ An error's text can carry ClickHouse's own message: log its kind,
-    /// never the text.
-    pub async fn retag_run(
-        &self,
-        project: &ProjectId,
-        run: Uuid,
-        added: &BTreeMap<String, String>,
-        removed: &[String],
-    ) -> clickhouse::error::Result<()> {
-        let update = self
-            .client
-            .query_raw(RETAG_RUN)
-            .with_setting(PROJECTS_SETTING, Projects::one(project.clone()).setting())
-            .param("project", project.as_str())
-            .param("run", run)
-            .param("keys", added.keys().collect::<Vec<_>>())
-            .param("values", added.values().collect::<Vec<_>>())
-            .param("removed", removed);
-        within(DELETE_TIMEOUT, update.execute()).await
     }
 
     /// A lightweight delete of `project`'s rows, answered once the mark is

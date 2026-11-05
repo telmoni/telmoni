@@ -1,12 +1,11 @@
-//! A project's saved views through the module's own router: every role on the
-//! project reads them, and its owners and admins save, save over and delete
-//! them; a view is kept as the list would read it, a layout as the page
-//! would, two of one kind and name are refused in any case, and a project
-//! keeps a hundred of each kind at most; the first view saved gives the
-//! project the settings row the purges find it by, filed under the
-//! organization that holds the project while its chain lock is held; a
-//! project reads its own views and no other's, and the purges take a
-//! project's views with it.
+//! A project's saved dashboards through the module's own router: every role
+//! on the project reads them, and its owners and admins save, save over and
+//! delete them; a dashboard is kept as the page would draw it, two of one
+//! name are refused in any case, and a project keeps a hundred at most; the
+//! first one saved gives the project the settings row the purges find it by,
+//! filed under the organization that holds the project while its chain lock
+//! is held; a project reads its own dashboards and no other's, and the purges
+//! take a project's dashboards with it.
 #![expect(clippy::expect_used, reason = "test scaffolding")]
 
 mod common;
@@ -121,14 +120,9 @@ impl Project {
         (status, body)
     }
 
-    /// The names of the views `user` reads on the project, in order.
+    /// The names of the dashboards `user` reads on the project, in order.
     async fn names(&self, user: &str) -> Vec<String> {
         self.names_of(user, LANE).await
-    }
-
-    /// The names of the layouts `user` reads on the project, in order.
-    async fn layouts(&self, user: &str) -> Vec<String> {
-        self.names_of(user, &format!("{LANE}?kind=layout")).await
     }
 
     async fn names_of(&self, user: &str, path: &str) -> Vec<String> {
@@ -166,24 +160,31 @@ async fn views_of(pool: &PgPool, project: &ProjectId) -> i64 {
         .expect("count a project's views")
 }
 
+/// A dashboard's body: its name and charts that draw.
+fn dashboard(name: &str) -> Value {
+    json!({ "name": name, "query": { "charts": [{ "measure": "spend" }] } })
+}
+
 #[sqlx::test]
-async fn every_role_reads_the_views_and_owners_and_admins_save_them(pool: PgPool) {
+async fn every_role_reads_the_dashboards_and_owners_and_admins_save_them(pool: PgPool) {
     let p = project(&pool);
     assert!(p.names(MEMBER).await.is_empty());
     assert_eq!(organization_of(&pool, &p.project).await, None);
 
-    let errors = json!({
-        "name": "  Errors ",
-        "query": { "status": ["error"], "agent": [" support-bot ", ""], "sort": "duration", "days": 30 },
-        "columns": ["duration", "started", "status"],
+    let spend = json!({
+        "name": "  Spend ",
+        "query": { "charts": [
+            { "measure": "spend", "group": "tag", "tag": " team " },
+            { "measure": "latency" },
+        ] },
     });
     let (status, _) = p
-        .send(p.request("POST", LANE, MEMBER, Some(errors.clone())))
+        .send(p.request("POST", LANE, MEMBER, Some(spend.clone())))
         .await;
     assert_eq!(
         status,
         StatusCode::FORBIDDEN,
-        "a member applies views and saves none"
+        "a member reads dashboards and saves none"
     );
     assert_eq!(
         p.auth.read_again(),
@@ -191,15 +192,17 @@ async fn every_role_reads_the_views_and_owners_and_admins_save_them(pool: PgPool
         "refused before the chain lock was taken"
     );
 
-    let (status, saved) = p.send(p.request("POST", LANE, ADMIN, Some(errors))).await;
+    let (status, saved) = p.send(p.request("POST", LANE, ADMIN, Some(spend))).await;
     assert_eq!(status, StatusCode::CREATED, "{saved}");
-    assert_eq!(saved["name"], "Errors");
+    assert_eq!(saved["name"], "Spend");
     assert_eq!(
         saved["query"],
-        json!({ "status": ["error"], "agent": ["support-bot"], "sort": "duration", "days": 30 }),
-        "kept as the list reads it"
+        json!({ "charts": [
+            { "measure": "spend", "group": "tag", "tag": "team" },
+            { "measure": "latency" },
+        ] }),
+        "kept as the page draws it"
     );
-    assert_eq!(saved["columns"], json!(["started", "status", "duration"]));
     assert_eq!(
         p.auth.chain_held(),
         [true],
@@ -208,44 +211,47 @@ async fn every_role_reads_the_views_and_owners_and_admins_save_them(pool: PgPool
     assert_eq!(
         organization_of(&pool, &p.project).await,
         Some(p.organization.to_string()),
-        "the first view gives the project the settings row its purges find it by"
+        "the first dashboard gives the project the settings row its purges find it by"
     );
 
     for user in [OWNER, ADMIN, MEMBER] {
-        assert_eq!(p.names(user).await, ["Errors"], "{user}");
+        assert_eq!(p.names(user).await, ["Spend"], "{user}");
     }
 
-    // One name per view, whatever its case.
+    // One name per dashboard, whatever its case.
     let (status, body) = p
-        .send(p.request("POST", LANE, OWNER, Some(json!({ "name": "errors" }))))
+        .send(p.request("POST", LANE, OWNER, Some(dashboard("spend"))))
         .await;
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
     let (status, _) = p
-        .send(p.request("POST", LANE, OWNER, Some(json!({ "name": "All" }))))
+        .send(p.request("POST", LANE, OWNER, Some(dashboard("All"))))
         .await;
     assert_eq!(status, StatusCode::CREATED);
-    assert_eq!(p.names(MEMBER).await, ["All", "Errors"], "by name");
+    assert_eq!(p.names(MEMBER).await, ["All", "Spend"], "by name");
 
     let id = saved["id"].as_str().expect("an id").to_owned();
     let one = format!("{LANE}/{id}");
-    let slow = json!({ "name": "Slow", "query": { "sort": "duration" }, "columns": ["started"] });
+    let latency = json!({ "name": "Latency", "query": { "charts": [{ "measure": "latency" }] } });
     let (status, _) = p
-        .send(p.request("PUT", &one, MEMBER, Some(slow.clone())))
+        .send(p.request("PUT", &one, MEMBER, Some(latency.clone())))
         .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     let (status, body) = p
-        .send(p.request("PUT", &one, OWNER, Some(json!({ "name": "ALL" }))))
+        .send(p.request("PUT", &one, OWNER, Some(dashboard("ALL"))))
         .await;
     assert_eq!(
         status,
         StatusCode::CONFLICT,
         "saved over onto another's name: {body}"
     );
-    let (status, over) = p.send(p.request("PUT", &one, OWNER, Some(slow))).await;
+    let (status, over) = p.send(p.request("PUT", &one, OWNER, Some(latency))).await;
     assert_eq!(status, StatusCode::OK, "{over}");
     assert_eq!(over["id"], saved["id"]);
-    assert_eq!(over["query"], json!({ "sort": "duration" }));
-    assert_eq!(p.names(MEMBER).await, ["All", "Slow"]);
+    assert_eq!(
+        over["query"],
+        json!({ "charts": [{ "measure": "latency" }] })
+    );
+    assert_eq!(p.names(MEMBER).await, ["All", "Latency"]);
 
     let (status, _) = p.send(p.request("DELETE", &one, MEMBER, None)).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
@@ -255,9 +261,9 @@ async fn every_role_reads_the_views_and_owners_and_admins_save_them(pool: PgPool
     assert_eq!(status, StatusCode::NOT_FOUND);
     assert_eq!(p.names(MEMBER).await, ["All"]);
 
-    for path in [format!("{LANE}/not-a-view"), format!("{LANE}/{id}")] {
+    for path in [format!("{LANE}/not-a-dashboard"), format!("{LANE}/{id}")] {
         let (status, _) = p
-            .send(p.request("PUT", &path, OWNER, Some(json!({ "name": "x" }))))
+            .send(p.request("PUT", &path, OWNER, Some(dashboard("x"))))
             .await;
         assert_eq!(status, StatusCode::NOT_FOUND, "{path}");
     }
@@ -265,290 +271,13 @@ async fn every_role_reads_the_views_and_owners_and_admins_save_them(pool: PgPool
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
-/// A layout is a view of its own kind: listed under `?kind=layout` and never
-/// among the list's views, named once among the layouts and freely beside a
-/// list view of the same name, kept as the page reads it, and saved over as
-/// the kind it was saved as.
+/// A project reads and writes its own dashboards and no other's: the row
+/// policy and each query's own `WHERE` both name the project.
 #[sqlx::test]
-async fn a_layout_is_a_view_of_its_own_kind(pool: PgPool) {
-    let p = project(&pool);
-    let (status, _) = p
-        .send(p.request("POST", LANE, OWNER, Some(json!({ "name": "Review" }))))
-        .await;
-    assert_eq!(status, StatusCode::CREATED);
-    assert!(
-        p.layouts(MEMBER).await.is_empty(),
-        "a list view is no layout"
-    );
-
-    let review = json!({
-        "name": " Review ",
-        "kind": "layout",
-        "query": {
-            "depth": "calls",
-            "open": "failed",
-            "timeline": true,
-            "pinned": ["answer", " answer ", "plan"],
-            "filter": { "kind": ["tool_call"], "status": ["error"] },
-        },
-        "columns": ["tokens", "started", "error_type"],
-    });
-    let (status, _) = p
-        .send(p.request("POST", LANE, MEMBER, Some(review.clone())))
-        .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
-    let (status, saved) = p.send(p.request("POST", LANE, ADMIN, Some(review))).await;
-    assert_eq!(status, StatusCode::CREATED, "{saved}");
-    assert_eq!(saved["kind"], "layout");
-    assert_eq!(
-        saved["name"], "Review",
-        "the list's Review stands beside it"
-    );
-    assert_eq!(
-        saved["query"],
-        json!({
-            "depth": "calls",
-            "open": "failed",
-            "timeline": true,
-            "graph": false,
-            "pinned": ["answer", "plan"],
-            "filter": { "kind": ["tool_call"], "status": ["error"] },
-            "messages": false,
-            "scores": false,
-        }),
-        "kept as the page reads it"
-    );
-    assert_eq!(saved["columns"], json!(["started", "error_type", "tokens"]));
-    assert_eq!(p.layouts(MEMBER).await, ["Review"]);
-    assert_eq!(p.names(MEMBER).await, ["Review"], "the list's own, alone");
-
-    let (status, body) = p
-        .send(p.request(
-            "POST",
-            LANE,
-            OWNER,
-            Some(json!({ "name": "review", "kind": "layout" })),
-        ))
-        .await;
-    assert_eq!(status, StatusCode::CONFLICT, "{body}");
-    assert!(
-        body["detail"]
-            .as_str()
-            .unwrap_or_default()
-            .contains("layout")
-    );
-
-    let id = saved["id"].as_str().expect("an id").to_owned();
-    let one = format!("{LANE}/{id}");
-    let (status, body) = p
-        .send(p.request(
-            "PUT",
-            &one,
-            OWNER,
-            Some(json!({ "name": "Review", "kind": "traces" })),
-        ))
-        .await;
-    assert_eq!(
-        status,
-        StatusCode::NOT_FOUND,
-        "a layout is never a list view: {body}"
-    );
-    let (status, over) = p
-        .send(p.request(
-            "PUT",
-            &one,
-            OWNER,
-            Some(json!({ "name": "Deep", "kind": "layout", "query": { "depth": "steps" } })),
-        ))
-        .await;
-    assert_eq!(status, StatusCode::OK, "{over}");
-    assert_eq!(over["kind"], "layout");
-    assert_eq!(over["query"]["depth"], "steps");
-    assert_eq!(over["query"]["pinned"], Value::Null, "left out, so none");
-    assert_eq!(p.layouts(MEMBER).await, ["Deep"]);
-
-    for body in [
-        json!({ "name": "Spans", "kind": "layout", "query": { "depth": "spans<script>" } }),
-        json!({ "name": "List", "kind": "layout", "query": { "agent": ["support-bot"] } }),
-        json!({ "name": "Pins", "kind": "layout", "query": { "pinned": (0..9).map(|i| format!("s{i}")).collect::<Vec<_>>() } }),
-        json!({ "name": "Kind", "kind": "page<script>" }),
-    ] {
-        let (status, problem) = p
-            .send(p.request("POST", LANE, OWNER, Some(body.clone())))
-            .await;
-        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
-        assert!(
-            !problem["detail"]
-                .as_str()
-                .unwrap_or_default()
-                .contains("script"),
-            "{body}: {problem}"
-        );
-    }
-    // Sent as a client sends it, percent-encoded: a raw `<` is no URI.
-    let (status, body) = p
-        .send(p.request(
-            "GET",
-            &format!("{LANE}?kind=page%3Cscript%3E"),
-            MEMBER,
-            None,
-        ))
-        .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
-    assert!(
-        !body["detail"]
-            .as_str()
-            .unwrap_or_default()
-            .contains("script")
-    );
-
-    let (status, _) = p.send(p.request("DELETE", &one, ADMIN, None)).await;
-    assert_eq!(status, StatusCode::NO_CONTENT);
-    assert!(p.layouts(MEMBER).await.is_empty());
-    assert_eq!(p.names(MEMBER).await, ["Review"]);
-}
-
-/// A sessions view and a users view are each saved under their list's kind,
-/// checked by that list's sorts and columns, and listed under it alone.
-#[sqlx::test]
-async fn a_list_view_is_saved_under_its_lists_kind(pool: PgPool) {
-    let p = project(&pool);
-    let busy = json!({
-        "name": "Busy",
-        "kind": "sessions",
-        "query": { "status": ["error"], "sort": "last_seen" },
-        "columns": ["last_seen", "traces"],
-    });
-    let (status, saved) = p.send(p.request("POST", LANE, ADMIN, Some(busy))).await;
-    assert_eq!(status, StatusCode::CREATED, "{saved}");
-    assert_eq!(saved["kind"], "sessions");
-    assert_eq!(
-        saved["columns"],
-        json!(["traces", "last_seen"]),
-        "in the list's order"
-    );
-    let heavy = json!({
-        "name": "Heavy",
-        "kind": "users",
-        "query": { "sort": "tokens", "dir": "desc" },
-        "columns": ["tokens"],
-    });
-    let (status, saved) = p.send(p.request("POST", LANE, ADMIN, Some(heavy))).await;
-    assert_eq!(status, StatusCode::CREATED, "{saved}");
-    assert_eq!(saved["kind"], "users");
-    let by_repo = json!({ "name": "By repo", "kind": "sessions", "query": { "sort": "tag:repo" } });
-    let (status, saved) = p.send(p.request("POST", LANE, ADMIN, Some(by_repo))).await;
-    assert_eq!(
-        status,
-        StatusCode::CREATED,
-        "a tag sorts the sessions: {saved}"
-    );
-    assert_eq!(saved["query"]["sort"], "tag:repo");
-    for wrong in [
-        json!({ "name": "Wrong", "kind": "users", "query": { "sort": "model_calls" } }),
-        json!({ "name": "Wrong", "kind": "users", "query": { "sort": "tag:repo" } }),
-        json!({ "name": "Wrong", "kind": "sessions", "columns": ["status"] }),
-    ] {
-        let (status, body) = p.send(p.request("POST", LANE, ADMIN, Some(wrong))).await;
-        assert_eq!(
-            status,
-            StatusCode::BAD_REQUEST,
-            "a trace list's word on another list: {body}"
-        );
-    }
-
-    assert!(
-        p.names(MEMBER).await.is_empty(),
-        "none of them among the trace list's"
-    );
-    let (status, listed) = p
-        .send(p.request("GET", &format!("{LANE}?kind=sessions"), MEMBER, None))
-        .await;
-    assert_eq!(status, StatusCode::OK, "{listed}");
-    assert_eq!(listed["views"][0]["name"], "Busy");
-    assert_eq!(
-        listed["views"][0]["query"],
-        json!({ "status": ["error"], "sort": "last_seen" }),
-        "read back by the sessions list's own sorts"
-    );
-    assert_eq!(
-        listed["views"][0]["columns"],
-        json!(["traces", "last_seen"])
-    );
-    assert_eq!(
-        p.names_of(MEMBER, &format!("{LANE}?kind=sessions")).await,
-        ["Busy", "By repo"]
-    );
-    assert_eq!(
-        p.names_of(MEMBER, &format!("{LANE}?kind=users")).await,
-        ["Heavy"]
-    );
-}
-
-/// A dashboard is a view of its own kind: owners and admins save it, every
-/// role reads it under `?kind=dashboard`, and it is none of a list's views.
-#[sqlx::test]
-async fn a_dashboard_is_saved_by_owners_and_admins_and_read_by_all(pool: PgPool) {
-    let p = project(&pool);
-    let spend = json!({
-        "name": "Spend",
-        "kind": "dashboard",
-        "query": { "charts": [
-            { "measure": "spend", "group": "user" },
-            { "measure": "latency" },
-        ] },
-    });
-    let (status, body) = p
-        .send(p.request("POST", LANE, MEMBER, Some(spend.clone())))
-        .await;
-    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
-    let (status, saved) = p.send(p.request("POST", LANE, ADMIN, Some(spend))).await;
-    assert_eq!(status, StatusCode::CREATED, "{saved}");
-    assert_eq!(saved["kind"], "dashboard");
-    assert_eq!(saved["columns"], json!([]));
-    let id = saved["id"].as_str().expect("an id").to_owned();
-
-    let (status, listed) = p
-        .send(p.request("GET", &format!("{LANE}?kind=dashboard"), MEMBER, None))
-        .await;
-    assert_eq!(status, StatusCode::OK, "{listed}");
-    assert_eq!(
-        listed["views"][0]["query"],
-        json!({ "charts": [{ "measure": "spend", "group": "user" }, { "measure": "latency" }] })
-    );
-    assert!(p.names(MEMBER).await.is_empty(), "none of the trace list's");
-
-    let over = json!({
-        "name": "Spend by team",
-        "kind": "dashboard",
-        "query": { "charts": [{ "measure": "spend", "group": "tag", "tag": "team" }] },
-    });
-    let (status, body) = p
-        .send(p.request("PUT", &format!("{LANE}/{id}"), MEMBER, Some(over.clone())))
-        .await;
-    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
-    let (status, body) = p
-        .send(p.request("PUT", &format!("{LANE}/{id}"), OWNER, Some(over)))
-        .await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-    let (status, _) = p
-        .send(p.request("DELETE", &format!("{LANE}/{id}"), MEMBER, None))
-        .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
-    let (status, _) = p
-        .send(p.request("DELETE", &format!("{LANE}/{id}"), ADMIN, None))
-        .await;
-    assert_eq!(status, StatusCode::NO_CONTENT);
-    assert_eq!(views_of(&pool, &p.project).await, 0);
-}
-
-/// A project reads and writes its own views and no other's: the row policy
-/// and each query's own `WHERE` both name the project.
-#[sqlx::test]
-async fn a_project_reads_its_own_views_and_no_others(pool: PgPool) {
+async fn a_project_reads_its_own_dashboards_and_no_others(pool: PgPool) {
     let p = project(&pool);
     let (status, saved) = p
-        .send(p.request("POST", LANE, OWNER, Some(json!({ "name": "Mine" }))))
+        .send(p.request("POST", LANE, OWNER, Some(dashboard("Mine"))))
         .await;
     assert_eq!(status, StatusCode::CREATED, "{saved}");
     let id = saved["id"].as_str().expect("an id");
@@ -558,10 +287,10 @@ async fn a_project_reads_its_own_views_and_no_others(pool: PgPool) {
     assert_eq!(
         body["views"],
         json!([]),
-        "another project's view is not here"
+        "another project's dashboard is not here"
     );
     for method in ["PUT", "DELETE"] {
-        let body = (method == "PUT").then(|| json!({ "name": "Taken" }));
+        let body = (method == "PUT").then(|| dashboard("Taken"));
         let (status, _) = p
             .send(p.on(&p.other, method, &format!("{LANE}/{id}"), OWNER, body))
             .await;
@@ -574,22 +303,22 @@ async fn a_project_reads_its_own_views_and_no_others(pool: PgPool) {
     assert_eq!(views_of(&pool, &p.project).await, 1);
 }
 
-/// ⚠ A name or a query the list would refuse is a 400 that echoes none of
-/// what a person typed.
+/// ⚠ A name or charts the page would refuse are a 400 that echoes none of
+/// what a person typed, and so is a key no dashboard holds.
 #[sqlx::test]
-async fn a_view_the_list_would_refuse_is_a_400_that_echoes_none_of_it(pool: PgPool) {
+async fn a_dashboard_the_page_would_refuse_is_a_400_that_echoes_none_of_it(pool: PgPool) {
     let p = project(&pool);
+    let charts = json!({ "charts": [{ "measure": "spend" }] });
     for body in [
-        json!({ "name": "" }),
-        json!({ "name": "   " }),
-        json!({ "name": "v".repeat(61) }),
-        json!({ "name": "two\nlines<script>" }),
-        json!({ "name": "Late<script>", "query": { "days": 0 } }),
-        json!({ "name": "Big<script>", "query": { "limit": 501 } }),
-        json!({ "name": "Long<script>", "query": { "agent": ["a".repeat(201)] } }),
-        json!({ "name": "Spend", "query": { "spend": ["high"] } }),
-        json!({ "name": "Id", "columns": ["run_id"] }),
-        json!({ "query": {} }),
+        json!({ "name": "", "query": charts }),
+        json!({ "name": "   ", "query": charts }),
+        json!({ "name": "d".repeat(61), "query": charts }),
+        json!({ "name": "two\nlines<script>", "query": charts }),
+        json!({ "name": "None" }),
+        json!({ "name": "Cost", "query": { "charts": [{ "measure": "cost<script>" }] } }),
+        json!({ "name": "List", "query": { "agent": ["support-bot<script>"] } }),
+        json!({ "name": "Kind", "kind": "traces<script>", "query": charts }),
+        json!({ "query": charts }),
     ] {
         let (status, problem) = p
             .send(p.request("POST", LANE, OWNER, Some(body.clone())))
@@ -601,42 +330,31 @@ async fn a_view_the_list_would_refuse_is_a_400_that_echoes_none_of_it(pool: PgPo
     assert_eq!(views_of(&pool, &p.project).await, 0);
 }
 
-/// A hundred of each kind: a project at its hundred list views still saves
-/// a layout.
+/// A hundred dashboards at most: one more is refused.
 #[sqlx::test]
-async fn a_project_keeps_a_hundred_views_of_each_kind_at_most(pool: PgPool) {
+async fn a_project_keeps_a_hundred_dashboards_at_most(pool: PgPool) {
     let p = project(&pool);
     sqlx::query(
-        "INSERT INTO telemetry.trace_views (id, project_id, name, query, columns)
-         SELECT gen_random_uuid(), $1, 'view ' || n, '{}', '{}'
+        "INSERT INTO telemetry.trace_views (id, project_id, name, query)
+         SELECT gen_random_uuid(), $1, 'dashboard ' || n, '{\"charts\": []}'
            FROM generate_series(1, 100) AS n",
     )
     .bind(&p.project)
     .execute(&pool)
     .await
-    .expect("a hundred views");
+    .expect("a hundred dashboards");
     let (status, body) = p
-        .send(p.request("POST", LANE, OWNER, Some(json!({ "name": "One more" }))))
+        .send(p.request("POST", LANE, OWNER, Some(dashboard("One more"))))
         .await;
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
     assert_eq!(views_of(&pool, &p.project).await, 100);
-    let (status, body) = p
-        .send(p.request(
-            "POST",
-            LANE,
-            OWNER,
-            Some(json!({ "name": "One more", "kind": "layout" })),
-        ))
-        .await;
-    assert_eq!(status, StatusCode::CREATED, "{body}");
-    assert_eq!(views_of(&pool, &p.project).await, 101);
 }
 
-/// The purges take a project's views with it: a deleted project's, and
-/// those of every project an organization's settings rows name; a view of
-/// another organization's project stays.
+/// The purges take a project's dashboards with it: a deleted project's, and
+/// those of every project an organization's settings rows name; a dashboard
+/// of another organization's project stays.
 #[sqlx::test]
-async fn the_purges_take_a_projects_views_with_it(pool: PgPool) {
+async fn the_purges_take_a_projects_dashboards_with_it(pool: PgPool) {
     let p = project(&pool);
     let (other_organization, elsewhere) = (OrganizationId::new(), ProjectId::new());
     for (organization, project) in [
@@ -653,13 +371,13 @@ async fn the_purges_take_a_projects_views_with_it(pool: PgPool) {
         .await
         .expect("a settings row");
         sqlx::query(
-            "INSERT INTO telemetry.trace_views (id, project_id, name, query, columns)
-             VALUES (gen_random_uuid(), $1, 'Errors', '{\"status\": [\"error\"]}', '{}')",
+            "INSERT INTO telemetry.trace_views (id, project_id, name, query)
+             VALUES (gen_random_uuid(), $1, 'Spend', '{\"charts\": [{\"measure\": \"spend\"}]}')",
         )
         .bind(project)
         .execute(&pool)
         .await
-        .expect("a view");
+        .expect("a dashboard");
     }
 
     let mut tx = maintenance_scope(&p.state.db, TelemetryLane)
@@ -668,7 +386,7 @@ async fn the_purges_take_a_projects_views_with_it(pool: PgPool) {
     assert_eq!(
         db::purge_project(&mut tx, &p.other).await.expect("purge"),
         2,
-        "its view and its settings row"
+        "its dashboard and its settings row"
     );
     assert_eq!(
         db::purge_organization(&mut tx, &p.organization)
@@ -683,6 +401,6 @@ async fn the_purges_take_a_projects_views_with_it(pool: PgPool) {
     assert_eq!(
         views_of(&pool, &elsewhere).await,
         1,
-        "another organization's project keeps its view"
+        "another organization's project keeps its dashboard"
     );
 }

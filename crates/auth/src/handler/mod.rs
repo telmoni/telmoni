@@ -3,7 +3,6 @@ pub mod answer;
 pub mod audit;
 pub mod cli;
 pub mod deletion;
-pub mod export;
 pub mod handover;
 pub mod invite;
 pub mod me;
@@ -203,7 +202,7 @@ pub(crate) fn recording_organization_of(
 }
 
 /// A transaction for something a person does to THEMSELVES — their sessions,
-/// their address, their analytics consent — bound to the person, once they
+/// their address — bound to the person, once they
 /// are shown to be a member of the organization the act will be recorded on,
 /// or to be in no organization at all.
 ///

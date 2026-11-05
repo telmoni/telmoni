@@ -225,59 +225,6 @@ const SUMMED_SQL: &str = concat!(
     ")"
 );
 
-/// What each project's calls spent over a period, each scaled by its run's
-/// sample rate, a project with none left out: what an organization's
-/// Overview shows, the full hours from the totals and the rest from the spans.
-const PROJECTS_SQL: &str = concat!(
-    "SELECT project_id, sum(s) AS spent, toUInt64(sum(u)) AS unpriced_calls FROM (",
-    "SELECT h.project_id AS project_id, sum((",
-    rollup_spent_of!(),
-    ") / h.sample_rate) AS s, ",
-    "sumIf(h.spans, NOT h.cost_reported AND rollup_priced = 0 AND (h.input_tokens > 0 ",
-    "OR h.output_tokens > 0 OR h.cache_read_input_tokens > 0 OR h.cache_write_input_tokens > 0)) AS u ",
-    full_hours!(),
-    "GROUP BY h.project_id ",
-    "UNION ALL SELECT project_id, sum(spent / ifNull(sample_rate, 1)) AS s, countIf(unpriced) AS u ",
-    "FROM (SELECT project_id, sample_rate, ",
-    priced!(),
-    " ",
-    window_edges!(),
-    ") GROUP BY project_id",
-    ") GROUP BY project_id ORDER BY spent DESC, project_id"
-);
-
-/// One project's spend over a period.
-#[derive(Debug, Clone, PartialEq, Row, Deserialize)]
-pub struct ProjectSpent {
-    pub project_id: String,
-    /// In US dollars, each call reported or priced.
-    pub spent: f64,
-    /// Its calls with neither a cost nor a price.
-    pub unpriced_calls: u64,
-}
-
-/// What each of `projects`' calls spent from `from` to `to`, the costliest
-/// first, a project that made no model call left out.
-///
-/// # Errors
-///
-/// ClickHouse or Postgres did not answer, or refused the read.
-pub async fn projects(
-    state: &AppState,
-    projects: &Projects,
-    from: chrono::DateTime<chrono::Utc>,
-    to: chrono::DateTime<chrono::Utc>,
-) -> Result<Vec<ProjectSpent>, Unread> {
-    let window = Window::between(from, to);
-    let book = book_for_window(state, projects, window).await?;
-    Ok(priced_by(
-        spanned(state.store.read(projects, PROJECTS_SQL), window),
-        &book,
-    )
-    .fetch_all()
-    .await?)
-}
-
 /// What the calls of `projects` that `filters` admit spent over `window`,
 /// each scaled by its run's sample rate: a budget's sum where it names no
 /// tag, which the totals keep no column for; none where no call landed.

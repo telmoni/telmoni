@@ -111,29 +111,3 @@ async function endSessions(path: string, ids: string[]): Promise<ActionResult> {
   refresh();
   return { ok: true };
 }
-
-export async function setAnalyticsPreferenceAction(
-  optIn: boolean,
-): Promise<ActionResult> {
-  const gate = await admit({ call: "privacy:analytics", limit: 20 });
-  if (!gate.ok) return refused(gate.error);
-
-  const headers = await accountHeaders();
-  if (!headers) return refused(UNRESOLVED);
-
-  const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/v1/me/analytics`, {
-    method: "PUT",
-    headers: {
-      ...headers,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({ optIn }),
-  });
-  if (!res) return refused(UNREACHABLE);
-  if (!res.ok) {
-    const { message } = await extractProblem(res);
-    return refused(message);
-  }
-  refresh();
-  return { ok: true };
-}

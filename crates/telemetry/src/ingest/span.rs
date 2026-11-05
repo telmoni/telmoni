@@ -3,7 +3,6 @@
 //! the attribute does.
 
 use std::borrow::Cow;
-use std::cmp::Ordering;
 
 use chrono::{DateTime, Utc};
 use opentelemetry_proto::tonic::common::v1::{KeyValue, any_value::Value};
@@ -177,13 +176,6 @@ pub fn read_resource(resource: Option<&Resource>) -> ResourceFields {
         match kv.key.as_str() {
             contract::ENVIRONMENT => {
                 fields.environment = resource_text(value, contract::ENVIRONMENT_MAX);
-                // Telmoni's own, its evaluations' among them: sent from outside, none.
-                if fields
-                    .environment
-                    .starts_with(contract::OWN_ENVIRONMENT_PREFIX)
-                {
-                    fields.environment.clear();
-                }
                 continue;
             }
             contract::RELEASE => {
@@ -358,7 +350,7 @@ pub fn map(
         environment: context.environment.to_owned(),
         release: context.release.to_owned(),
         tags: fields.tags,
-        sample_rate: fields.sample_rate,
+        sample_rate: None,
         attributes: fields.attributes,
         sent: fields.sent.into_iter().map(str::to_owned).collect(),
     };
@@ -415,7 +407,6 @@ struct Fields {
     user_id: Option<String>,
     session_id: Option<String>,
     cancelled: bool,
-    sample_rate: Option<f64>,
     tags: Vec<(String, String)>,
     attributes: Vec<(String, String)>,
     keeps_content: bool,
@@ -459,18 +450,6 @@ impl Fields {
                     contract::USER_ID_MAX,
                     contract::USER_ID,
                 )?);
-            }
-            contract::SAMPLE_RATE => {
-                let rate = number(value).ok_or(Refusal::Invalid(contract::SAMPLE_RATE))?;
-                let above_zero = rate.partial_cmp(&0.0) == Some(Ordering::Greater);
-                let at_most_one = matches!(
-                    rate.partial_cmp(&1.0),
-                    Some(Ordering::Less | Ordering::Equal)
-                );
-                if !(above_zero && at_most_one) {
-                    return Err(Refusal::Invalid(contract::SAMPLE_RATE));
-                }
-                self.sample_rate = Some(rate);
             }
             contract::CANCELLED => {
                 self.cancelled = match value {
@@ -928,7 +907,6 @@ mod tests {
                         }],
                     }),
                 ),
-                kv("gen_ai.request.temperature", Value::DoubleValue(0.5)),
                 kv("gen_ai.request.choice.count", Value::IntValue(2)),
                 kv(
                     "gen_ai.input.messages",
@@ -1057,7 +1035,6 @@ mod tests {
                     "gen_ai.response.finish_reasons".to_owned(),
                     r#"["stop"]"#.to_owned()
                 ),
-                ("gen_ai.request.temperature".to_owned(), "0.5".to_owned()),
                 ("gen_ai.request.choice.count".to_owned(), "2".to_owned()),
             ],
             "the resource's inventory, the span's, and an unlisted number"
@@ -1169,7 +1146,7 @@ mod tests {
     }
 
     #[test]
-    fn a_run_is_named_by_its_agent_and_carries_its_sample_rate() {
+    fn a_run_is_named_by_its_agent() {
         let project = ProjectId::new();
         let keep = |id: &str| id.to_owned();
         let mut dropped = Drops::default();
@@ -1180,7 +1157,6 @@ mod tests {
                 kv(contract::RUN_ID, s(RUN)),
                 kv(contract::AGENT, s("nightly-report")),
                 kv(contract::OPERATION, s("invoke_agent")),
-                kv(contract::SAMPLE_RATE, Value::DoubleValue(0.25)),
                 kv(contract::CANCELLED, Value::BoolValue(true)),
             ],
             status: None,
@@ -1195,7 +1171,6 @@ mod tests {
         );
         assert_eq!(row.parent_span_id, "");
         assert_eq!(row.status, SpanStatus::Cancelled);
-        assert_eq!(row.sample_rate, Some(0.25));
         assert!(dropped.is_empty());
     }
 
@@ -1291,11 +1266,6 @@ mod tests {
                 contract::TIME_TO_FIRST_CHUNK,
                 s("0.3"),
                 Refusal::Invalid(contract::TIME_TO_FIRST_CHUNK),
-            ),
-            (
-                contract::SAMPLE_RATE,
-                Value::DoubleValue(1.5),
-                Refusal::Invalid(contract::SAMPLE_RATE),
             ),
             (
                 contract::CANCELLED,

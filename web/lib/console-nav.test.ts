@@ -70,7 +70,7 @@ describe("buildConsoleNav", () => {
     for (const page of ["projects", "members", "audit-log", "settings", "billing"]) {
       const [group] = buildConsoleNav(`/acme/${page}`);
       expect(group?.title, page).toBe("Organization");
-      expect(group?.items[0]?.url, page).toBe("/acme");
+      expect(group?.items[0]?.url, page).toBe("/acme/projects");
     }
   });
 
@@ -98,16 +98,10 @@ describe("buildConsoleNav", () => {
     expect(project?.items.map((i) => i.url)).toEqual([
       "/acme/web",
       "/acme/web/traces",
-      "/acme/web/sessions",
-      "/acme/web/users",
       "/acme/web/alerts",
       "/acme/web/dashboards",
-      "/acme/web/scores",
-      "/acme/web/evaluators",
-      "/acme/web/rules",
       "/acme/web/objectives",
       "/acme/web/api-keys",
-      "/acme/web/models",
       "/acme/web/connectors",
       "/acme/web/members",
       "/acme/web/audit-log",
@@ -125,7 +119,6 @@ describe("buildConsoleNav", () => {
   it("draws every organization destination, whoever is looking", () => {
     const org = buildConsoleNav("/acme").find((g) => g.title === "Organization");
     expect(org?.items.map((i) => i.url)).toEqual([
-      "/acme",
       "/acme/projects",
       "/acme/members",
       "/acme/audit-log",
@@ -135,7 +128,7 @@ describe("buildConsoleNav", () => {
 
     const orgMode = buildConsoleNav("/acme/settings").find((g) => g.title === "Organization");
     expect(orgMode?.items.find((i) => i.title === "Settings")?.isActive).toBe(true);
-    expect(orgMode?.items.find((i) => i.title === "Overview")?.isActive).toBe(false);
+    expect(orgMode?.items.find((i) => i.title === "Projects")?.isActive).toBe(false);
   });
 
   it("offers no row for a page this build does not have", () => {
@@ -192,7 +185,7 @@ describe("buildConsoleNav", () => {
     expect(active("/acme/web/api-keys")).toEqual(["/acme/web/api-keys"]);
     expect(active("/acme/web/api-keys/abc")).toEqual(["/acme/web/api-keys"]);
     expect(active("/acme/web/connectors")).toEqual(["/acme/web/connectors"]);
-    expect(active("/acme")).toEqual(["/acme"]);
+    expect(active("/acme/projects")).toEqual(["/acme/projects"]);
     expect(active("/acme/members")).toEqual(["/acme/members"]);
 
     // A sibling that merely BEGINS with a row's path is not under it. No such
@@ -212,16 +205,10 @@ describe("buildConsoleNav", () => {
     expect(project).toEqual([
       "/acme/web",
       "/acme/web/traces",
-      "/acme/web/sessions",
-      "/acme/web/users",
       "/acme/web/alerts",
       "/acme/web/dashboards",
-      "/acme/web/scores",
-      "/acme/web/evaluators",
-      "/acme/web/rules",
       "/acme/web/objectives",
       "/acme/web/api-keys",
-      "/acme/web/models",
       "/acme/web/connectors",
       "/acme/web/members",
       "/acme/web/audit-log",
@@ -247,31 +234,18 @@ describe("buildConsoleNav", () => {
 });
 
 describe("the blocks of a run", () => {
-  // A project's observability rows are headed because they are the product
-  // and its housekeeping rows because they are the project's own; an
-  // organization's own rows are headed the same way under its Overview; the
-  // person's rail is one unheaded block, its way back saying what it is.
-  it("heads a project's observability, evaluation and housekeeping rows and the organization's own rows, and nothing else", () => {
+  it("parts a project's housekeeping from its product rows, and nothing else", () => {
     const [project] = buildConsoleNav("/acme/web/api-keys");
-    expect(
-      navBlocks(project?.items ?? []).map((b) => [b.heading, b.items.map((i) => i.title)]),
-    ).toEqual([
-      [undefined, ["Overview"]],
-      ["Observability", ["Traces", "Sessions", "Users", "Alerts", "Dashboards"]],
-      ["Evaluation", ["Scores", "Evaluators", "Rules", "Objectives"]],
-      ["Project", ["API keys", "Models", "Connectors", "Members", "Audit log", "Notifications", "Settings"]],
+    expect(navBlocks(project?.items ?? []).map((b) => b.map((i) => i.title))).toEqual([
+      ["Overview", "Traces", "Alerts", "Dashboards", "Objectives"],
+      ["API keys", "Connectors", "Members", "Audit log", "Notifications", "Settings"],
     ]);
     const [organization] = buildConsoleNav("/acme/settings");
-    expect(
-      navBlocks(organization?.items ?? []).map((b) => [b.heading, b.items.map((i) => i.title)]),
-    ).toEqual([
-      [undefined, ["Overview"]],
-      ["Organization", ["Projects", "Members", "Audit log", "Notifications", "Settings"]],
+    expect(navBlocks(organization?.items ?? []).map((b) => b.map((i) => i.title))).toEqual([
+      ["Projects", "Members", "Audit log", "Notifications", "Settings"],
     ]);
     const [account] = buildConsoleNav("/settings/account");
-    expect(navBlocks(account?.items ?? []).map((b) => [b.heading, b.items.length])).toEqual([
-      [undefined, 5],
-    ]);
+    expect(navBlocks(account?.items ?? []).map((b) => b.length)).toEqual([5]);
   });
 });
 
@@ -312,22 +286,15 @@ describe("the whole destination set", () => {
     ).toEqual([
       "/acme/web",
       "/acme/web/traces",
-      "/acme/web/sessions",
-      "/acme/web/users",
       "/acme/web/alerts",
       "/acme/web/dashboards",
-      "/acme/web/scores",
-      "/acme/web/evaluators",
-      "/acme/web/rules",
       "/acme/web/objectives",
       "/acme/web/api-keys",
-      "/acme/web/models",
       "/acme/web/connectors",
       "/acme/web/members",
       "/acme/web/audit-log",
       "/acme/web/notifications",
       "/acme/web/settings",
-      "/acme",
       "/acme/projects",
       "/acme/members",
       "/acme/audit-log",

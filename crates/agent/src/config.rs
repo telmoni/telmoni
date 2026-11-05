@@ -132,8 +132,7 @@ pub struct Config {
     /// `DOCS_CORPUS_URL`: unset, the console's own corpus; `off` indexes no
     /// docs.
     pub docs_corpus_url: Option<String>,
-    /// `AGENT_MESSAGES_PER_HOUR`: the questions one person may ask in an hour,
-    /// the panel's and the trace list's together.
+    /// `AGENT_MESSAGES_PER_HOUR`: the questions one person may ask in an hour.
     pub messages_per_hour: i64,
     /// The SDK, reporting each question as a run of the operator's own
     /// project the way any agent reports its runs (`report.rs`): on while

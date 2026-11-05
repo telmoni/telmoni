@@ -21,17 +21,16 @@ import {
 import { LIVE_HOLD_MS, liveRefresher } from "@/lib/live-refresh";
 import { projectPath } from "@/lib/slug";
 import { PEEK_PARAM, PEEK_NUDGED } from "@/lib/traces";
-import { listIsEmpty, newTraces, tracesArrived } from "@/lib/use-new-traces";
+import { listIsEmpty, tracesArrived } from "@/lib/use-new-traces";
 
 const RETRY_MS = 30_000;
 
 // A roster or an audit log: a project's, or the organization's own.
 const ROSTER_PAGES = /^\/[^/]+(?:\/[^/]+)?\/(members|audit-log)$/;
 
-// A page reading a project's spans: its traces, sessions or users, the list
-// or one of them. A trace's page names its run, which a nudge is compared
-// with.
-const SPAN_PAGES = /^\/[^/]+\/[^/]+\/(traces|sessions|users)(?:\/([^/]+))?$/;
+// A page reading a project's spans: its traces, the list or one of them. A
+// trace's page names its run, which a nudge is compared with.
+const SPAN_PAGES = /^\/[^/]+\/[^/]+\/traces(?:\/([^/]+))?$/;
 
 function payload<K extends RealtimeEventType>(
   e: MessageEvent,
@@ -51,10 +50,9 @@ function payload<K extends RealtimeEventType>(
 }
 
 /// `liveHoldMs` is how long a page reading spans holds between the redraws
-/// ingest's nudges ask for: the layout passes the deployment's
-/// (`LIVE_REFRESH_HOLD_SECS`), since this runs in the browser and reads no
-/// environment of its own. `readingKey` changes with the projects the person
-/// reads, whose nudges the stream passes on as it found them when it opened.
+/// ingest's nudges ask for, a test passing a shorter one. `readingKey` changes
+/// with the projects the person reads, whose nudges the stream passes on as
+/// it found them when it opened.
 export function RealtimeListener({
   liveHoldMs = LIVE_HOLD_MS,
   readingKey = "",
@@ -226,40 +224,29 @@ export function RealtimeListener({
         router.refresh();
       });
 
-      // A project's spans arrived, or a run's tags changed: a page reading
-      // them is drawn again, the nudges coalesced (`liveRefresher`) — but the
-      // Traces list, whose rows landed spans would move under the reader's
-      // hand, counts those in a bar above itself instead (`NewTraces`), unless
-      // it is empty and has nothing to move; a tag change moves no row, so the
-      // list draws it in place; and a trace's page is drawn for its own run alone.
-      const drawn = (e: MessageEvent, kind: "spans:ingested" | "tags:changed") => {
-        const data = payload(e, kind);
+      // A project's spans arrived: a page reading them is drawn again, the
+      // nudges coalesced (`liveRefresher`) — but the Traces list, whose rows
+      // landed spans would move under the reader's hand, counts those in a bar
+      // above itself instead (`NewTraces`), unless it is empty and has nothing
+      // to move; and a trace's page is drawn for its own run alone.
+      es.addEventListener("spans:ingested", (e: MessageEvent) => {
+        const data = payload(e, "spans:ingested");
         if (!data || data.projectId !== standing().projectId) return;
         const page = SPAN_PAGES.exec(standing().pathname);
         if (!page) return;
-        const [, section, one] = page;
-        // A download's route, not a page; a session's id may be `export`.
-        if (one === "export" && section !== "sessions") return;
+        const [, one] = page;
+        // A download's route, not a page.
+        if (one === "export") return;
         const peeked = one ? null : new URLSearchParams(window.location.search).get(PEEK_PARAM);
-        // A trace's peek for its own run; a session's for any, since a nudge
-        // names runs and never their sessions.
-        if (peeked && section === "traces" && (data.more || data.runs.includes(peeked))) peekLive.nudge();
-        if (peeked && section === "sessions") peekLive.nudge();
-        if (section === "traces" && !one && kind === "spans:ingested" && !listIsEmpty(data.projectId)) {
+        // A trace's peek for its own run.
+        if (peeked && (data.more || data.runs.includes(peeked))) peekLive.nudge();
+        if (!one && !listIsEmpty(data.projectId)) {
           tracesArrived(data.projectId, data.runs, data.more);
           return;
         }
-        // A draw would put the traces counted onto the list unasked, so a tag
-        // change waits for the reader's Show while any are counted.
-        if (section === "traces" && !one && kind === "tags:changed") {
-          const counted = newTraces(data.projectId);
-          if (counted.count > 0 || counted.more) return;
-        }
-        if (section === "traces" && one && !data.more && !data.runs.includes(one)) return;
+        if (one && !data.more && !data.runs.includes(one)) return;
         live.nudge();
-      };
-      es.addEventListener("spans:ingested", (e: MessageEvent) => drawn(e, "spans:ingested"));
-      es.addEventListener("tags:changed", (e: MessageEvent) => drawn(e, "tags:changed"));
+      });
 
       es.addEventListener("close", () => {
         active = false;

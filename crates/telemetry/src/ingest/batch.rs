@@ -203,7 +203,6 @@ fn scores_of(
                 scorer: String::new(),
                 scorer_version: event.version,
                 is_deleted: 0,
-                answer: String::new(),
             }
         })
         .collect()

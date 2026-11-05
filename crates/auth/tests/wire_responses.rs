@@ -184,7 +184,6 @@ fn me_answers_as_the_console_reads() {
                 user_id: person(),
                 email: Email::from_trusted(EMAIL),
                 display_name: Some("Sam Rivera".into()),
-                analytics_opt_in: true,
                 email_verified: true,
             },
             organizations: vec![OrganizationMembership {

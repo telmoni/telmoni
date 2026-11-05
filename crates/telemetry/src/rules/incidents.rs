@@ -17,7 +17,7 @@ use uuid::Uuid;
 use serde::Serialize;
 
 use telmoni_shared::db::tenant_session::{
-    Binding, HasOrganization, HasProject, Maintenance, Scoped, maintenance_scope,
+    Binding, HasProject, Maintenance, Scoped, maintenance_scope,
 };
 use telmoni_shared::{
     IncidentStatus, MissingData, OrganizationId, ProjectId, RuleOperator, Severity, TelmoniError,
@@ -457,30 +457,6 @@ pub async fn showing<B: HasProject>(
     )))
     .bind(project_id)
     .bind(run_id)
-    .bind(limit)
-    .fetch_all(tx.conn())
-    .await
-}
-
-/// The incidents still open, acknowledged or not, on those of `projects` the
-/// organization holds, the newest first.
-pub async fn open_in<B: HasOrganization>(
-    tx: &mut Scoped<'_, B>,
-    organization_id: &OrganizationId,
-    projects: &[ProjectId],
-    limit: i64,
-) -> sqlx::Result<Vec<IncidentRow>> {
-    sqlx::query_as(sqlx::AssertSqlSafe(format!(
-        "SELECT {INCIDENT_COLUMNS} FROM telemetry.incidents AS incident
-           JOIN telemetry.rules AS rule ON rule.id = incident.rule_id
-          WHERE incident.organization_id = $1
-            AND incident.project_id = ANY($2)
-            AND incident.status <> 'resolved'
-          ORDER BY incident.opened_at DESC, incident.id
-          LIMIT $3"
-    )))
-    .bind(organization_id)
-    .bind(projects)
     .bind(limit)
     .fetch_all(tx.conn())
     .await

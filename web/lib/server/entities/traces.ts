@@ -3,26 +3,10 @@ import { z } from "zod";
 
 import { env } from "@/lib/env";
 import { queryString } from "@/lib/list-query";
-import {
-  ChartMeasure,
-  LayoutDepth,
-  LayoutOpen,
-  MetricsGroup,
-  SessionColumn,
-  SessionSort,
-  SortDirection,
-  SpanKind,
-  SpanStatus,
-  TraceColumn,
-  TraceSort,
-  UserColumn,
-  UserSort,
-  ViewKind,
-} from "@/lib/types/enums";
+import { ChartMeasure, MetricsGroup, SortDirection, TraceSort } from "@/lib/types/enums";
 
 import {
   FILTER_KEYS,
-  ListFiltersSchema,
   ScoreSummarySchema,
   TagSortSchema,
   TraceDetailSchema,
@@ -52,10 +36,9 @@ export {
   type TraceSpan,
 } from "@/lib/types/traces";
 
-// A list's sort as it answers and keeps one: a word of its columns', or, on
-// the trace and sessions lists, a tag's.
+// The list's sort as it answers and keeps one: a word of its columns', or a
+// tag's.
 const TraceSortSchema = z.union([z.enum(TraceSort), TagSortSchema]);
-export const SessionSortSchema = z.union([z.enum(SessionSort), TagSortSchema]);
 
 // A page of the list, and how many traces the filters admit on every page.
 export const TraceListSchema = z
@@ -76,12 +59,6 @@ export const TraceListSchema = z
     traces: list.traces.map((trace) => ({ ...trace, scores: scores[trace.run_id] ?? [] })),
   }));
 export type TraceList = z.infer<typeof TraceListSchema>;
-
-// A run's tags as a change to them answers: its own span's, after it.
-export const TraceTagsSchema = z.object({
-  run_id: z.string(),
-  tags: z.record(z.string(), z.string()),
-});
 
 // One filter's values among the window's runs, each with how many of the
 // list's rows carry it under every other filter: the ticked first.
@@ -129,92 +106,6 @@ export const TraceHistogramSchema = z.object({
 });
 export type TraceHistogram = z.infer<typeof TraceHistogramSchema>;
 
-// A saved view's query: its list's, each filter's values a list, its sort
-// one of that list's, and no key the list does not take, as the server
-// refuses one.
-function viewQuerySchema<S extends string>(sort: z.ZodType<S>) {
-  return z.strictObject({
-    ...ListFiltersSchema.shape,
-    sort: sort.optional(),
-    dir: z.enum(SortDirection).optional(),
-    days: z.number().optional(),
-    limit: z.number().optional(),
-  });
-}
-export const ViewQuerySchema = viewQuerySchema(TraceSortSchema);
-export const SessionViewQuerySchema = viewQuerySchema(SessionSortSchema);
-export const UserViewQuerySchema = viewQuerySchema(z.enum(UserSort));
-/** A saved view's query, its sort among `S`. */
-export type ListViewQuery<S extends string> = ListFilters & {
-  sort?: S;
-  dir?: SortDirection;
-  days?: number;
-  limit?: number;
-};
-
-// The calls a layout shows: by kind, by how they ended and by name, any
-// value of each admitting a call, and a list left out every call.
-export const LayoutFilterSchema = z.strictObject({
-  kind: z.array(z.enum(SpanKind)).optional(),
-  status: z.array(z.enum(SpanStatus)).optional(),
-  name: z.array(z.string()).optional(),
-});
-
-// A layout of a session's page and a trace's, as a saved layout's `query`
-// holds it, its columns beside it (`lib/layout.ts` reads both as one).
-export const LayoutQuerySchema = z.strictObject({
-  depth: z.enum(LayoutDepth),
-  open: z.enum(LayoutOpen),
-  timeline: z.boolean(),
-  graph: z.boolean(),
-  pinned: z.array(z.string()).optional(),
-  filter: LayoutFilterSchema,
-  messages: z.boolean(),
-  scores: z.boolean(),
-});
-export type LayoutQuery = z.infer<typeof LayoutQuerySchema>;
-
-const SavedViewSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  columns: z.array(z.enum(TraceColumn)),
-  created_at: z.string(),
-  updated_at: z.string(),
-});
-
-// One of the project's saved views of a list: its query and the columns it
-// showed, under a name, each by that list's words.
-export const TraceViewSchema = SavedViewSchema.extend({
-  kind: z.literal(ViewKind.Traces),
-  query: ViewQuerySchema,
-});
-export type TraceView = z.infer<typeof TraceViewSchema>;
-
-export const SessionViewSchema = SavedViewSchema.extend({
-  kind: z.literal(ViewKind.Sessions),
-  query: SessionViewQuerySchema,
-  columns: z.array(z.enum(SessionColumn)),
-});
-export type SessionView = z.infer<typeof SessionViewSchema>;
-
-export const UserViewSchema = SavedViewSchema.extend({
-  kind: z.literal(ViewKind.Users),
-  query: UserViewQuerySchema,
-  columns: z.array(z.enum(UserColumn)),
-});
-export type UserView = z.infer<typeof UserViewSchema>;
-
-/** A saved view of any of the three lists. */
-export type ListView = TraceView | SessionView | UserView;
-
-// One of the project's saved layouts: a layout's options and the columns a
-// trace shows, under a name.
-export const TraceLayoutSchema = SavedViewSchema.extend({
-  kind: z.literal(ViewKind.Layout),
-  query: LayoutQuerySchema,
-});
-export type TraceLayout = z.infer<typeof TraceLayoutSchema>;
-
 /** A dashboard's charts: what each draws and, for spend, what splits it. */
 export const DashboardQuerySchema = z.object({
   charts: z
@@ -229,34 +120,21 @@ export const DashboardQuerySchema = z.object({
 });
 
 // One of the project's saved dashboards: its charts, under a name.
-export const DashboardViewSchema = SavedViewSchema.extend({
-  kind: z.literal(ViewKind.Dashboard),
+export const DashboardViewSchema = z.object({
+  id: z.string(),
+  name: z.string(),
   query: DashboardQuerySchema,
-  columns: z.array(z.string()).max(0),
+  created_at: z.string(),
+  updated_at: z.string(),
 });
 export type DashboardView = z.infer<typeof DashboardViewSchema>;
 
-/** A saved view of any kind, as a save answers it. */
-export const SavedViewOfAnyKindSchema = z.discriminatedUnion("kind", [
-  TraceViewSchema,
-  SessionViewSchema,
-  UserViewSchema,
-  TraceLayoutSchema,
-  DashboardViewSchema,
-]);
-
-export const TraceViewListSchema = z.object({ views: z.array(TraceViewSchema) });
-export const SessionViewListSchema = z.object({ views: z.array(SessionViewSchema) });
-export const UserViewListSchema = z.object({ views: z.array(UserViewSchema) });
-export const TraceLayoutListSchema = z.object({ views: z.array(TraceLayoutSchema) });
 export const DashboardViewListSchema = z.object({ views: z.array(DashboardViewSchema) });
 
 /** What narrows and orders a list, and which page of it shows, as the URL
  *  carries it, `S` the sorts it takes. The server checks every value; the
  *  page drops what it cannot read before asking (`lib/traces.ts`). */
 export type ListQuery<S extends string> = ListFilters & {
-  /** Words or a phrase the runs' kept content holds. */
-  q?: string;
   /** A score the runs carry, by its name, and its value's least and most. */
   score?: string;
   score_min?: number;
@@ -273,11 +151,10 @@ export type TraceQuery = ListQuery<TraceSort | TagSort>;
 /** The filters and the window alone: what the facets and the histogram take,
  *  each lane refusing a parameter it has no use for. */
 export function filtersOf(
-  query: ListFilters & { days?: number; q?: string; score?: string; score_min?: number; score_max?: number },
+  query: ListFilters & { days?: number; score?: string; score_min?: number; score_max?: number },
 ) {
   return {
     ...filtersIn(query),
-    q: query.q,
     score: query.score,
     score_min: query.score_min,
     score_max: query.score_max,
@@ -300,16 +177,6 @@ export type FacetsAccess =
 
 export type HistogramAccess =
   | { kind: "ok"; histogram: TraceHistogram }
-  | { kind: "forbidden" }
-  | { kind: "unavailable" };
-
-export type ViewsAccess<V extends ListView = TraceView> =
-  | { kind: "ok"; views: V[] }
-  | { kind: "forbidden" }
-  | { kind: "unavailable" };
-
-export type LayoutsAccess =
-  | { kind: "ok"; layouts: TraceLayout[] }
   | { kind: "forbidden" }
   | { kind: "unavailable" };
 
@@ -370,8 +237,8 @@ export async function fetchMedia(projectId: string, sha256: string): Promise<Med
   return readBytes("fetchMedia", ...request, MISSING);
 }
 
-/** A path the server cannot read as a run or a session, or one it has none
- *  of: the page says it is not there. */
+/** A path the server cannot read as a run, or one it has none of: the page
+ *  says it is not there. */
 export const MISSING = { 400: "missing", 404: "missing" } as const;
 
 /** A page of the project's traces in the window, as the server lists them. */
@@ -410,52 +277,6 @@ export const fetchTraceHistogram = cache(
   },
 );
 
-/** The project's saved views of the trace list, by name. */
-export const fetchTraceViews = cache(async (projectId: string): Promise<ViewsAccess> => {
-  const read = await readLane(
-    "fetchTraceViews",
-    projectId,
-    `/views?kind=${ViewKind.Traces}`,
-    TraceViewListSchema,
-  );
-  return read.kind === "ok" ? { kind: "ok", views: read.value.views } : read;
-});
-
-/** The project's saved views of the sessions list, by name. */
-export const fetchSessionViews = cache(
-  async (projectId: string): Promise<ViewsAccess<SessionView>> => {
-    const read = await readLane(
-      "fetchSessionViews",
-      projectId,
-      `/views?kind=${ViewKind.Sessions}`,
-      SessionViewListSchema,
-    );
-    return read.kind === "ok" ? { kind: "ok", views: read.value.views } : read;
-  },
-);
-
-/** The project's saved views of the users list, by name. */
-export const fetchUserViews = cache(async (projectId: string): Promise<ViewsAccess<UserView>> => {
-  const read = await readLane(
-    "fetchUserViews",
-    projectId,
-    `/views?kind=${ViewKind.Users}`,
-    UserViewListSchema,
-  );
-  return read.kind === "ok" ? { kind: "ok", views: read.value.views } : read;
-});
-
-/** The project's saved layouts of a session's page and a trace's, by name. */
-export const fetchTraceLayouts = cache(async (projectId: string): Promise<LayoutsAccess> => {
-  const read = await readLane(
-    "fetchTraceLayouts",
-    projectId,
-    `/views?kind=${ViewKind.Layout}`,
-    TraceLayoutListSchema,
-  );
-  return read.kind === "ok" ? { kind: "ok", layouts: read.value.views } : read;
-});
-
 /** A list as a file from one of telemetry's download lanes, `path` with its
  *  query: a 400 is a query the server refused, which the route says so
  *  about. */
@@ -470,19 +291,17 @@ export async function readDownload(
 }
 
 /** The list as a file: every trace the filters admit, sorted as the page is,
- *  up to the server's cap — or the runs `runs` names alone. */
+ *  up to the server's cap. */
 export async function traceDownload(
   projectId: string,
   query: TraceQuery,
   format: DownloadFormat,
-  runs: string[],
 ): Promise<DownloadAccess> {
   const lane = queryString({
     ...filtersOf(query),
     sort: query.sort,
     dir: query.dir,
     format,
-    run: runs,
   });
   return readDownload("traceDownload", projectId, `/traces/export${lane}`);
 }

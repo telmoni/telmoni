@@ -21,7 +21,6 @@ vi.mock("@/lib/api/rate-limit", () => ({
   rateLimitRetryAfter,
 }));
 vi.mock("@/lib/api/fetch", () => ({ fetchWithTimeout }));
-vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 vi.mock("@/lib/env", () => ({
   env: {
     AUTH_URL: "https://app.example",

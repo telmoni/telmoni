@@ -11,13 +11,15 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use telmoni_shared::TelmoniError;
-use telmoni_shared::model::anthropic::VERSION as API_VERSION;
 
 use super::{
     Assemble, Endpoint, Flow, Message, Model, ModelTurn, SseEvent, StopReason, TextSink,
     TokenUsage, ToolCall, ToolSpec, stream_turn, tool_input, unavailable,
 };
 use crate::config::ModelConfig;
+
+/// The API version every request names.
+const API_VERSION: &str = "2023-06-01";
 
 pub struct Anthropic {
     http: reqwest::Client,

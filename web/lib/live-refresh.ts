@@ -1,8 +1,7 @@
 /** How long a page holds after it was drawn for a nudge before it is drawn
  *  again for the next one: a flood of exports costs at most two refreshes in
  *  it, the first and the last, and a lone run is drawn the moment it lands.
- *  Thirty seconds unless `LIVE_REFRESH_HOLD_SECS` says otherwise
- *  (`lib/env.ts`), so an open console costs its server little however hard
+ *  Thirty seconds, so an open console costs its server little however hard
  *  its project is written to. */
 export const LIVE_HOLD_SECS = 30;
 export const LIVE_HOLD_MS = LIVE_HOLD_SECS * 1_000;

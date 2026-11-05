@@ -18,7 +18,6 @@ use uuid::Uuid;
 
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit, lock_chain_in_time};
 use telmoni_shared::db::tenant_session::{ProjectAndOrganization, Scoped, project_scope};
-use telmoni_shared::digest::{HmacKey, hex_decode};
 use telmoni_shared::envelope::{Dek, KEK_VERSION, Sealed, SealedRef, Vault};
 use telmoni_shared::{
     AuditAction, OrganizationId, ProjectId, Redacted, TelemetryError, TelmoniError,
@@ -112,24 +111,16 @@ pub async fn keep(
         return Ok(());
     }
     let (wrapped, key) = opened_key(state, project_id).await?;
-    let words_key = words_key(&key);
     let mut sealed = SealedFields::default();
     let mut named: (Vec<String>, Vec<Uuid>) = (Vec::new(), Vec::new());
     for span in content {
-        // A comment or an example names no file: a hash in it would hold one
-        // from its sweep.
-        let names_files = !span.span_id.starts_with(crate::scores::COMMENT_SPAN_PREFIX)
-            && !span
-                .span_id
-                .starts_with(crate::evaluators::examples::SPAN_PREFIX);
+        // A comment names no file: a hash in it would hold one from its sweep.
+        let names_files = !span.span_id.starts_with(crate::scores::COMMENT_SPAN_PREFIX);
         for (field, text) in span.fields {
             for hash in files_named(&text).into_iter().filter(|_| names_files) {
                 named.0.push(hash);
                 named.1.push(span.run_id);
             }
-            let (words, pairs) = hashed_words(&words_key, &text);
-            sealed.words.push(json!(words).to_string());
-            sealed.pairs.push(json!(pairs).to_string());
             let aad = field_aad(&span.span_id, &field);
             let Sealed { ciphertext, nonce } =
                 seal_field(&state.vault, &key, &Redacted::from(text), &aad)?;
@@ -180,7 +171,7 @@ pub async fn keep_comment(
     comment: Option<&str>,
 ) -> Result<(), TelmoniError> {
     forget_comments(state, project_id, run_id, &[score_id]).await?;
-    // A run deleted as it was judged or scored keeps nothing it said after.
+    // A run deleted as it was scored keeps nothing it said after.
     let Some(comment) = comment else {
         return Ok(());
     };
@@ -216,7 +207,7 @@ pub async fn forget_named(
     let mut tx =
         telmoni_shared::db::tenant_session::maintenance_scope(&state.db, crate::db::TelemetryLane)
             .await?;
-    db::forget_fields(tx.conn(), project_id, db::Spans::Named(run_id, spans)).await?;
+    db::forget_fields(tx.conn(), project_id, run_id, spans).await?;
     tx.commit().await?;
     Ok(())
 }
@@ -238,64 +229,6 @@ pub async fn forget_comments(
         .map(crate::scores::comment_span)
         .collect();
     forget_named(state, project_id, run_id, &spans).await
-}
-
-/// The project's fields named `field` under every span whose id begins with
-/// `prefix` deleted, their bytes given back.
-///
-/// # Errors
-///
-/// As [`keep`].
-pub async fn forget_prefixed(
-    state: &AppState,
-    project_id: &ProjectId,
-    field: &str,
-    prefix: &str,
-) -> Result<(), TelmoniError> {
-    let mut tx =
-        telmoni_shared::db::tenant_session::maintenance_scope(&state.db, crate::db::TelemetryLane)
-            .await?;
-    db::forget_fields(tx.conn(), project_id, db::Spans::Prefixed(field, prefix)).await?;
-    tx.commit().await?;
-    Ok(())
-}
-
-/// The newest `limit` fields named `field` under spans whose id begins with
-/// `prefix`, opened for an evaluation: its read recorded on its own row, as
-/// [`open_for_evaluation`]'s is. Newest first.
-///
-/// # Errors
-///
-/// As [`keep`].
-pub async fn open_prefixed_for_evaluation(
-    state: &AppState,
-    project_id: &ProjectId,
-    field: &str,
-    prefix: &str,
-    limit: i64,
-) -> Result<Vec<String>, TelmoniError> {
-    let Some((mut tx, _)) = held_if_kept(state, project_id).await? else {
-        return Ok(Vec::new());
-    };
-    let kept = db::read_prefixed(&mut tx, project_id, field, prefix, limit).await?;
-    tx.commit().await?;
-    if kept.is_empty() {
-        return Ok(Vec::new());
-    }
-    let key = key_for(state, project_id).await?;
-    kept.into_iter()
-        .map(|(_, _, span_id, field, ciphertext, nonce)| {
-            open_field(
-                &state.vault,
-                &key,
-                SealedRef {
-                    ciphertext: &ciphertext,
-                    nonce: &nonce,
-                },
-                &field_aad(&span_id, &field),
-            )
-        })
-        .collect()
 }
 
 /// Refuses what was sealed under `wrapped` once the project's content key is
@@ -326,8 +259,8 @@ async fn still_under(
     Ok(())
 }
 
-/// The runs' content, or that of the spans `spans` names, opened for
-/// `actor`, whom the caller has let read the project: the one way content is
+/// The runs' content, opened for `actor`, whom the caller has let read the
+/// project: the one way content is
 /// read, so every read is a `Viewed` row in the organization's chain,
 /// committed before a field is opened. The row names the traces read, never
 /// what they hold; a read that finds nothing writes none.
@@ -340,45 +273,19 @@ pub async fn open(
     actor: Actor<'_>,
     project_id: &ProjectId,
     runs: &[Uuid],
-    spans: Option<&[String]>,
 ) -> Result<Vec<SpanContent>, TelmoniError> {
     // No settings row, no content: a project that never kept any.
     let Some((tx, organization_id)) = held_if_kept(state, project_id).await? else {
         return Ok(Vec::new());
     };
     let kept = chain::settle(tx, project_id, WHAT, async |tx| {
-        file_the_read(tx, &organization_id, actor, project_id, runs, spans).await
+        file_the_read(tx, &organization_id, actor, project_id, runs).await
     })
     .await?;
     if kept.is_empty() {
         return Ok(Vec::new());
     }
 
-    opened(state, project_id, kept).await
-}
-
-/// The runs' content, or that of the spans `spans` names, opened for an
-/// evaluation: its read recorded on the evaluation's own row by the caller,
-/// never a chain row each, which a machine's load would hold the
-/// organization's chain under.
-///
-/// # Errors
-///
-/// As [`keep`].
-pub async fn open_for_evaluation(
-    state: &AppState,
-    project_id: &ProjectId,
-    runs: &[Uuid],
-    spans: Option<&[String]>,
-) -> Result<Vec<SpanContent>, TelmoniError> {
-    let Some((mut tx, _)) = held_if_kept(state, project_id).await? else {
-        return Ok(Vec::new());
-    };
-    let kept = db::read_content(&mut tx, project_id, runs, spans).await?;
-    tx.commit().await?;
-    if kept.is_empty() {
-        return Ok(Vec::new());
-    }
     opened(state, project_id, kept).await
 }
 
@@ -423,9 +330,8 @@ async fn file_the_read(
     actor: Actor<'_>,
     project_id: &ProjectId,
     runs: &[Uuid],
-    spans: Option<&[String]>,
 ) -> Result<Vec<db::KeptField>, TelmoniError> {
-    let kept = db::read_content(tx, project_id, runs, spans).await?;
+    let kept = db::read_content(tx, project_id, runs).await?;
     if kept.is_empty() {
         return Ok(kept);
     }
@@ -639,50 +545,6 @@ pub async fn open_media(
         .map(Some)
 }
 
-/// A file the project keeps, opened for an evaluation with no chain row: the
-/// evaluation's row records the read of its target, the files it names among
-/// it, as [`open_for_evaluation`]'s.
-///
-/// # Errors
-///
-/// As [`open_for_evaluation`].
-pub async fn open_media_for_evaluation(
-    state: &AppState,
-    project_id: &ProjectId,
-    sha256: &str,
-) -> Result<Option<(String, Vec<u8>)>, TelmoniError> {
-    let Some((mut tx, _)) = held_if_kept(state, project_id).await? else {
-        return Ok(None);
-    };
-    let kept = db::read_media(&mut tx, project_id, sha256).await?;
-    tx.commit().await?;
-    let Some((mime_type, ciphertext, nonce)) = kept else {
-        return Ok(None);
-    };
-    unsealed_media(state, project_id, sha256, (mime_type, &ciphertext, &nonce))
-        .await
-        .map(Some)
-}
-
-/// A kept file's type and size, none where the project keeps no such file
-/// or no content: what a judgement weighs before it opens one.
-///
-/// # Errors
-///
-/// Postgres did not answer.
-pub async fn media_kind(
-    state: &AppState,
-    project_id: &ProjectId,
-    sha256: &str,
-) -> Result<Option<(String, usize)>, TelmoniError> {
-    let Some((mut tx, _)) = held_if_kept(state, project_id).await? else {
-        return Ok(None);
-    };
-    let kind = db::media_kind(&mut tx, project_id, sha256).await?;
-    tx.commit().await?;
-    Ok(kind.map(|(mime_type, bytes)| (mime_type, usize::try_from(bytes).unwrap_or(usize::MAX))))
-}
-
 /// A kept file's bytes opened under the project's key, its hash the associated data.
 async fn unsealed_media(
     state: &AppState,
@@ -697,148 +559,6 @@ async fn unsealed_media(
         media_aad(sha256).as_bytes(),
     )?;
     Ok((mime_type, body))
-}
-
-/// The most fields a search reads to find its runs, newest first.
-pub const SEARCH_FIELDS_MAX: i64 = 5_000;
-
-/// The most distinct words a field is found by: a document longer than this
-/// is found by its first ones.
-const WORDS_MAX: usize = 4_096;
-
-/// The longest word kept, in characters; a longer one is cut to it, as its
-/// query is.
-const WORD_MAX: usize = 64;
-
-/// What the key words are hashed under is derived for: one key a purpose.
-const WORDS_LABEL: &[u8] = b"telmoni content words";
-
-/// The key a project's words are hashed under, derived from its content key,
-/// so deleting that key leaves every stored hash matching nothing.
-fn words_key(key: &Dek) -> HmacKey {
-    HmacKey::new(HmacKey::new(key.as_bytes()).hex(WORDS_LABEL).as_bytes())
-}
-
-/// A field's words in order, lower-cased, each a run of letters and digits:
-/// a JSON field's string values alone, so a message's own keys (`role`,
-/// `parts`) find nothing, and any other text whole.
-#[must_use]
-pub fn words_of(text: &str) -> Vec<String> {
-    fn strings<'a>(value: &'a serde_json::Value, into: &mut Vec<&'a str>) {
-        match value {
-            serde_json::Value::String(s) => into.push(s),
-            serde_json::Value::Array(items) => items.iter().for_each(|v| strings(v, into)),
-            serde_json::Value::Object(map) => map.values().for_each(|v| strings(v, into)),
-            _ => {}
-        }
-    }
-    let parsed: Option<serde_json::Value> = serde_json::from_str(text).ok();
-    let mut sources = Vec::new();
-    match &parsed {
-        Some(value @ (serde_json::Value::Array(_) | serde_json::Value::Object(_))) => {
-            strings(value, &mut sources);
-        }
-        _ => sources.push(text),
-    }
-    sources
-        .iter()
-        .flat_map(|source| source.split(|c: char| !c.is_alphanumeric()))
-        .filter(|word| !word.is_empty())
-        .map(|word| word.to_lowercase().chars().take(WORD_MAX).collect())
-        .collect()
-}
-
-/// A field's words and each pair of neighbouring words, hashed for its
-/// `words` and `pairs` columns: the first [`WORDS_MAX`] distinct of each, in
-/// its order.
-fn hashed_words(key: &HmacKey, text: &str) -> (Vec<i64>, Vec<i64>) {
-    let words = words_of(text);
-    let pairs = pairs_of(&words);
-    let hashed = |items: Vec<String>| {
-        first_distinct(items)
-            .iter()
-            .map(|item| hash_word(key, item))
-            .collect()
-    };
-    (hashed(words), hashed(pairs))
-}
-
-/// What a search asks of a field: each word of `query` among its `words`, and
-/// each pair of its neighbours among its `pairs`, so a phrase is matched by
-/// hashes alone.
-fn query_hashes(key: &HmacKey, query: &[String]) -> (Vec<i64>, Vec<i64>) {
-    let hashed = |items: &[String]| {
-        let mut hashed: Vec<i64> = items.iter().map(|item| hash_word(key, item)).collect();
-        hashed.sort_unstable();
-        hashed.dedup();
-        hashed
-    };
-    (hashed(query), hashed(&pairs_of(query)))
-}
-
-/// Each word with the one after it. A word holds no space, so a pair names
-/// its two words and no others.
-fn pairs_of(words: &[String]) -> Vec<String> {
-    words
-        .windows(2)
-        .filter_map(|pair| match pair {
-            [first, second] => Some(format!("{first} {second}")),
-            _ => None,
-        })
-        .collect()
-}
-
-/// The first [`WORDS_MAX`] distinct of `items`, in their order.
-fn first_distinct(items: Vec<String>) -> Vec<String> {
-    let mut seen = std::collections::HashSet::new();
-    items
-        .into_iter()
-        .filter(|item| seen.insert(item.clone()))
-        .take(WORDS_MAX)
-        .collect()
-}
-
-/// A word's, or a pair's, first 64 bits of keyed hash: enough to name it within
-/// a project, where a collision only finds a field that lacks it.
-fn hash_word(key: &HmacKey, word: &str) -> i64 {
-    let bytes = hex_decode(&key.prefix_hex(word.as_bytes(), 8)).unwrap_or_default();
-    <[u8; 8]>::try_from(bytes.as_slice()).map_or(0, i64::from_be_bytes)
-}
-
-/// The runs whose kept content holds every word of `query`, and each of its
-/// words beside the next where it has more than one, newest first: what the
-/// trace list narrows to. Matched by keyed hashes alone, so no field is opened
-/// and nothing is filed; none where the project has no content key.
-///
-/// # Errors
-///
-/// Postgres or the key service did not answer.
-pub async fn search(
-    state: &AppState,
-    project_id: &ProjectId,
-    query: &str,
-) -> Result<Vec<Uuid>, TelmoniError> {
-    let phrase = words_of(query);
-    if phrase.is_empty() {
-        return Ok(Vec::new());
-    }
-    let mut tx = project_scope(&state.db, project_id).await?;
-    let Some(wrapped) = db::content_key(&mut tx, project_id).await? else {
-        tx.commit().await?;
-        return Ok(Vec::new());
-    };
-    let key = unwrapped(state, project_id, &wrapped).await?;
-    let (words, pairs) = query_hashes(&words_key(&key), &phrase);
-    let found =
-        db::search_content(&mut tx, project_id, (&words, &pairs), SEARCH_FIELDS_MAX).await?;
-    tx.commit().await?;
-    let mut runs: Vec<Uuid> = Vec::new();
-    for run_id in found {
-        if !runs.contains(&run_id) {
-            runs.push(run_id);
-        }
-    }
-    Ok(runs)
 }
 
 /// A fresh data key for the project, wrapped first, holding nothing, since the
@@ -908,26 +628,6 @@ async fn held_in_place<'c>(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// A field's words are its letters and digits, lower-cased, in order; a
-    /// JSON field's string values alone, never its keys.
-    #[test]
-    fn words_are_read_from_text_and_from_a_json_fields_values_alone() {
-        assert_eq!(
-            words_of("Refund the ORDER, #4521!"),
-            ["refund", "the", "order", "4521"]
-        );
-        let messages =
-            r#"[{"role":"user","parts":[{"type":"text","content":"Where is my order?"}]}]"#;
-        // An object's values by its keys' order, each value's words in theirs.
-        assert_eq!(
-            words_of(messages),
-            ["where", "is", "my", "order", "text", "user"]
-        );
-        assert_eq!(words_of("naïve café"), ["naïve", "café"]);
-        assert!(words_of("  ,;  ").is_empty());
-        assert_eq!(words_of(&"x".repeat(100))[0].chars().count(), WORD_MAX);
-    }
 
     /// The files a field names as kept here, each once: a `telmoni:` and a
     /// whole lowercase hash, never a part of one.
@@ -1003,57 +703,5 @@ mod tests {
             .seal_bytes(&key, b"Where is my refund?", b"span/field")
             .expect("sealed");
         assert!(open(&raw).is_err());
-    }
-
-    /// A phrase is found where each of its words stands beside the next, in
-    /// that order, by the field's hashes alone.
-    #[test]
-    fn a_phrase_is_found_by_its_neighbouring_pairs_alone() {
-        let vault = telmoni_shared::envelope::Vault::new();
-        let key = words_key(&vault.new_dek().expect("a key"));
-        let (words, pairs) = hashed_words(&key, "where is my order");
-        let finds = |query: &str| {
-            let (asked, asked_pairs) = query_hashes(&key, &words_of(query));
-            asked.iter().all(|hash| words.contains(hash))
-                && asked_pairs.iter().all(|hash| pairs.contains(hash))
-        };
-        assert!(finds("my order") && finds("where is my"));
-        assert!(!finds("order my"), "out of order");
-        assert!(!finds("where order"), "not side by side");
-    }
-
-    /// ⚠ A field longer than the cap is found by its first distinct words and
-    /// pairs, as it reads, never by the alphabet's.
-    #[test]
-    fn a_long_field_is_found_by_its_first_words() {
-        let vault = telmoni_shared::envelope::Vault::new();
-        let key = words_key(&vault.new_dek().expect("a key"));
-        let mut text: Vec<String> = (0..WORDS_MAX).map(|n| format!("w{n:04}")).collect();
-        text.push("a".to_owned());
-        let (words, pairs) = hashed_words(&key, &text.join(" "));
-        assert_eq!((words.len(), pairs.len()), (WORDS_MAX, WORDS_MAX));
-        assert!(words.contains(&hash_word(&key, &format!("w{:04}", WORDS_MAX - 1))));
-        assert!(
-            !words.contains(&hash_word(&key, "a")),
-            "a word past the cap"
-        );
-    }
-
-    /// Words are hashed under a key of the content key's, never alike under
-    /// two, and each once.
-    #[test]
-    fn words_are_hashed_once_under_a_key_derived_from_the_content_key() {
-        let vault = telmoni_shared::envelope::Vault::new();
-        let (one, two) = (
-            vault.new_dek().expect("a key"),
-            vault.new_dek().expect("a key"),
-        );
-        let (words, pairs) = hashed_words(&words_key(&one), "order the order");
-        // `order` and `the`; the pairs `order the` and `the order`.
-        assert_eq!((words.len(), pairs.len()), (2, 2));
-        assert_ne!(
-            (words, pairs),
-            hashed_words(&words_key(&two), "order the order")
-        );
     }
 }

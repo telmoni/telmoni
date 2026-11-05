@@ -12,16 +12,6 @@ export const PrivacyPostureSchema = z.object({
   since: z.string(),
   spans: z.number().int(),
   sent: z.array(z.object({ attribute: z.string(), spans: z.number().int() })),
-  /** What each evaluator read of the content, a row a day an evaluator a provider. */
-  evaluator_reads: z.array(
-    z.object({
-      day: z.string(),
-      evaluator_id: z.string(),
-      evaluator: z.string().nullable(),
-      provider: z.string().nullable(),
-      reads: z.number().int(),
-    }),
-  ),
   retention: z.object({
     span_days: z.number().int(),
     max_span_days: z.number().int(),

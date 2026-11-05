@@ -56,11 +56,6 @@ const VALIDATED: &[(&str, &str, &str)] = &[
         "a `ServiceRole`'s lane, or a sibling's, which `sibling_pool` refuses unless bare",
     ),
     (
-        "crates/auth/src/handler/export.rs",
-        "sql",
-        "every caller in the file passes a literal, or a format! of the file's own constants",
-    ),
-    (
         "crates/auth/src/db/offers.rs",
         "table",
         "a `Roster`'s table, one of the two literals `Roster::parts` names",

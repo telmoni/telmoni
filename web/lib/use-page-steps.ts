@@ -5,8 +5,7 @@ import { useSyncExternalStore } from "react";
 import { listeners } from "@/lib/listeners";
 
 // What a page lets `j` and `k` step through — the trace list's peek, through
-// the runs of the page; a session's page, through its traces — offered while
-// it is open and taken back as it goes. The console's one key handler reads
+// the runs of the page — offered while it is open and taken back as it goes. The console's one key handler reads
 // it (`components/keyboard-shortcuts.tsx`), so the keys pass the pending `g`
 // first and keep the rules every bare key keeps; module state, as the trace
 // list's preferences are, since a tab shows one page at a time.

@@ -15,7 +15,7 @@ use axum::extract::{Path, State};
 use axum::http::{HeaderMap, header};
 use axum::response::{IntoResponse, Response};
 use chrono::{DateTime, SecondsFormat, Utc};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::json;
 use uuid::Uuid;
 
@@ -25,31 +25,26 @@ use telmoni_shared::csv;
 use telmoni_shared::db::tenant_session::{ProjectAndOrganization, Scoped};
 use telmoni_shared::extract::{Json, Query};
 use telmoni_shared::rbac::{Resource, Verb};
-use telmoni_shared::seam::{FilterValues, TraceVocabulary};
-use telmoni_shared::types::WireEnum;
 use telmoni_shared::{
-    AuditAction, AuthError, ProjectId, SortDirection, SpanKind, SpanStatus, TelemetryError,
-    TelmoniError, TelmoniResourceKind, TraceSort, UserId,
+    AuditAction, AuthError, ProjectId, SortDirection, SpanKind, SpanStatus, TelmoniError,
+    TelmoniResourceKind, TraceSort, UserId,
 };
 
 use crate::AppState;
 use crate::content;
 use crate::contract::{
     AGENT_MAX, ATTRIBUTE_VALUE_MAX, ENVIRONMENT_MAX, MODEL_MAX, NAME_MAX, RELEASE_MAX,
-    SESSION_ID_MAX, TAG_KEY_MAX, TAG_VALUE_MAX, TAGS_MAX, USER_ID_MAX, UTC_OFFSET_RANGE,
+    SESSION_ID_MAX, TAG_KEY_MAX, TAG_VALUE_MAX, USER_ID_MAX, UTC_OFFSET_RANGE,
 };
 use crate::erasure::{self, Erase};
 use crate::handler::chain::{self, Change};
 use crate::ingest::batch::SpanContent;
-use crate::ingest::cardinality;
-use crate::ingest::span::Cap;
-use crate::live;
 use crate::spend::{self, Unread};
 use crate::store::{self, Projects, SpanRow};
 use crate::traces::{
     self, Bar, DEFAULT_LIMIT, EXPORT_MAX, FACET_VALUES_MAX, FILTER_VALUES_MAX, Facet, FacetRow,
-    ListSort, Listing, MAX_DAYS, MAX_LIMIT, MAX_PAGE, RUNS_MAX, SPANS_MAX, TRACE_UNITS_MAX,
-    TraceFilter, TraceRow, Traces,
+    ListSort, Listing, MAX_DAYS, MAX_LIMIT, MAX_PAGE, SPANS_MAX, TRACE_UNITS_MAX, TraceFilter,
+    TraceRow, Traces,
 };
 
 /// The longest value each filter takes, in characters, by its name in a URL:
@@ -91,8 +86,6 @@ pub enum Reading {
     Histogram,
     /// A download: its sort and its format.
     Export,
-    /// The trace list's download, which also takes the runs chosen for it.
-    TraceExport,
 }
 
 /// A list lane's query string — the traces', the sessions' or the users' —
@@ -121,8 +114,6 @@ pub struct TraceQuery {
     pub tag: Vec<String>,
     /// Prompt names any of their spans carry.
     pub prompt: Vec<String>,
-    /// Runs by id: a download's chosen rows.
-    pub run: Vec<String>,
     /// A score the runs carry, by its name, and the least and most of its value.
     pub score: Option<String>,
     pub score_min: Option<String>,
@@ -141,8 +132,6 @@ pub struct TraceQuery {
     pub utc_offset: Option<String>,
     /// A download's format: `csv` or `json`.
     pub format: Option<String>,
-    /// Words or a phrase the runs' kept content holds ([`content::search`]).
-    pub q: Option<String>,
 }
 
 impl TraceQuery {
@@ -154,7 +143,7 @@ impl TraceQuery {
     /// filter. A name the lane does not know is never echoed: a person typed
     /// it.
     pub fn read(pairs: Vec<(String, String)>, reading: Reading) -> Result<Self, TelmoniError> {
-        use Reading::{Export, Histogram, List, TraceExport};
+        use Reading::{Export, Histogram, List};
         let mut query = Self::default();
         for (name, value) in pairs {
             if let Ok(facet) = name.parse::<Facet>() {
@@ -162,18 +151,13 @@ impl TraceQuery {
                 continue;
             }
             let once = match (name.as_str(), reading) {
-                ("run", TraceExport) => {
-                    query.run.push(value);
-                    continue;
-                }
                 ("days", _) => &mut query.days,
-                ("sort", List | Export | TraceExport) => &mut query.sort,
-                ("dir", List | Export | TraceExport) => &mut query.dir,
+                ("sort", List | Export) => &mut query.sort,
+                ("dir", List | Export) => &mut query.dir,
                 ("limit", List) => &mut query.limit,
                 ("page", List) => &mut query.page,
                 ("utc_offset", Histogram) => &mut query.utc_offset,
-                ("format", Export | TraceExport) => &mut query.format,
-                ("q", _) => &mut query.q,
+                ("format", Export) => &mut query.format,
                 ("score", _) => &mut query.score,
                 ("score_min", _) => &mut query.score_min,
                 ("score_max", _) => &mut query.score_max,
@@ -268,14 +252,6 @@ impl TraceQuery {
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let runs = values_up_to("run", &self.run, usize::MAX, RUNS_MAX)?
-            .iter()
-            .map(|given| {
-                given.parse::<Uuid>().map_err(|_| {
-                    TelmoniError::BadRequest("a run is named by its id, a UUID".into())
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
         Ok(TraceFilter {
             agents: values("agent", &self.agent, FILTER_VALUE_MAX.agent)?,
             user_ids: values("user", &self.user, FILTER_VALUE_MAX.user)?,
@@ -291,7 +267,6 @@ impl TraceQuery {
             releases: values("release", &self.release, FILTER_VALUE_MAX.release)?,
             tags: tag_values(&self.tag)?,
             prompts: values("prompt", &self.prompt, FILTER_VALUE_MAX.prompt)?,
-            runs,
             days: parse_days(self.days.as_deref())?,
             prices: crate::prices::PriceBook::default(),
             score: self.score_filter()?,
@@ -706,26 +681,6 @@ impl Facets {
         }
     }
 
-    /// The values as a sentence's words, each filter that holds any.
-    fn vocabulary(mut self, max_days: u16) -> TraceVocabulary {
-        let filters = Facet::variants()
-            .iter()
-            .filter_map(|&facet| {
-                let values = std::mem::take(self.values_of(facet));
-                (!values.values.is_empty()).then(|| FilterValues {
-                    filter: facet.word().to_owned(),
-                    values: values.values.into_iter().map(|v| v.value).collect(),
-                    more: values.more,
-                })
-            })
-            .collect();
-        TraceVocabulary {
-            days: self.days,
-            max_days,
-            filters,
-        }
-    }
-
     /// The read's rows, by facet, in the read's order.
     pub(crate) fn of(days: u16, rows: Vec<FacetRow>) -> Self {
         let mut facets = Self {
@@ -977,15 +932,10 @@ impl From<SpanContent> for SpanFields {
     }
 }
 
-/// The runs' content, or the named spans', opened for the reader and filed as
-/// their read; none where it could not be, and the page shows without it.
-pub(crate) async fn content_of(
-    state: &AppState,
-    reader: &Reader,
-    runs: &[Uuid],
-    spans: Option<&[String]>,
-) -> Option<Vec<SpanFields>> {
-    match content::open(state, reader.actor(), &reader.project_id, runs, spans).await {
+/// The runs' content, opened for the reader and filed as their read; none
+/// where it could not be, and the page shows without it.
+async fn content_of(state: &AppState, reader: &Reader, runs: &[Uuid]) -> Option<Vec<SpanFields>> {
+    match content::open(state, reader.actor(), &reader.project_id, runs).await {
         Ok(opened) => Some(opened.into_iter().map(SpanFields::from).collect()),
         Err(error) => {
             tracing::warn!(
@@ -1021,8 +971,7 @@ pub(crate) async fn window_prices(
         })
 }
 
-/// The filter `query` asks for, priced where its rows show spend, narrowed to
-/// the runs its search finds: to none where it finds none.
+/// The filter `query` asks for, priced where its rows show spend.
 async fn filter_of(
     state: &AppState,
     project_id: &ProjectId,
@@ -1034,33 +983,8 @@ async fn filter_of(
     if priced {
         filter.prices = window_prices(state, project_id, filter.days).await;
     }
-    let Some(q) = query.q.as_deref().map(str::trim).filter(|q| !q.is_empty()) else {
-        return Ok(filter);
-    };
-    if q.chars().count() > SEARCH_MAX {
-        return Err(TelmoniError::BadRequest(format!(
-            "a search is up to {SEARCH_MAX} characters"
-        )));
-    }
-    let found = content::search(state, project_id, q).await?;
-    let runs: Vec<Uuid> = if filter.runs.is_empty() {
-        found
-    } else {
-        found
-            .into_iter()
-            .filter(|run| filter.runs.contains(run))
-            .collect()
-    };
-    filter.runs = if runs.is_empty() {
-        vec![Uuid::nil()]
-    } else {
-        runs
-    };
     Ok(filter)
 }
-
-/// The longest search, in characters.
-const SEARCH_MAX: usize = 200;
 
 /// A list's page as its lane read it: the rows and the total, read at once
 /// since a page past the last has no row to carry the count, and what the
@@ -1131,26 +1055,6 @@ pub(crate) async fn facets_page<L: Listing>(
         .await
         .map_err(read_failed)?;
     Ok(Facets::of(filter.days, rows))
-}
-
-/// The trace list's values over its last `days` for `acting`, who may read
-/// the project's traces: [`Telemetry::trace_vocabulary`](telmoni_shared::seam::Telemetry::trace_vocabulary).
-pub(crate) async fn vocabulary(
-    state: &AppState,
-    acting: &Acting,
-    days: u16,
-) -> Result<TraceVocabulary, TelmoniError> {
-    let project_id = acting
-        .require_project(Verb::Read, Resource::Trace)?
-        .project_id
-        .clone();
-    let mut filter = TraceQuery::default().filter()?;
-    filter.days = crate::capacity::visible_days(state, &project_id, check_days(days)?).await;
-    let max_days = crate::capacity::visible_days(state, &project_id, MAX_DAYS).await;
-    let rows = traces::facets::<Traces>(&state.store, &Projects::one(project_id), &filter)
-        .await
-        .map_err(read_failed)?;
-    Ok(Facets::of(filter.days, rows).vocabulary(max_days))
 }
 
 /// One list's rows for a download, sorted as asked, up to [`EXPORT_MAX`] of
@@ -1295,12 +1199,12 @@ pub async fn export_traces(
     Query(pairs): Query<Vec<(String, String)>>,
 ) -> Result<Response, TelmoniError> {
     let (rows, format, reader) =
-        export_rows::<Traces>(&state, &headers, pairs, Reading::TraceExport).await?;
+        export_rows::<Traces>(&state, &headers, pairs, Reading::Export).await?;
     // One read of every run's content, filed once; a download that cannot
     // open it fails rather than leaving it out unsaid.
     let runs: Vec<Uuid> = rows.iter().map(|row| row.run_id).collect();
     let mut kept: HashMap<Uuid, Vec<SpanFields>> = HashMap::new();
-    for span in content::open(&state, reader.actor(), &reader.project_id, &runs, None).await? {
+    for span in content::open(&state, reader.actor(), &reader.project_id, &runs).await? {
         kept.entry(span.run_id).or_default().push(span.into());
     }
     let rows: Vec<TraceDownload> = rows
@@ -1400,204 +1304,9 @@ async fn file_trace_deletion(
     Ok(())
 }
 
-/// What a change to a run's tags sends: the tags to set, by key, and the
-/// keys to take off.
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct TagsChange {
-    #[serde(default)]
-    pub add: BTreeMap<String, String>,
-    #[serde(default)]
-    pub remove: Vec<String>,
-}
-
-/// What a change to a run's tags answers: the tags its own span carries now.
-#[derive(Debug, Serialize)]
-pub struct TraceTags {
-    pub run_id: Uuid,
-    pub tags: BTreeMap<String, String>,
-}
-
-impl TagsChange {
-    /// The change held to ingest's rules for a tag, never echoing one: a key
-    /// of 1 to [`TAG_KEY_MAX`] characters with no control character, an
-    /// added one with no `:` either, which the list's filter splits on; a
-    /// value of up to [`TAG_VALUE_MAX`]; each key added or taken off, not
-    /// both; at most [`TAGS_MAX`] of either.
-    fn checked(mut self) -> Result<Self, TelmoniError> {
-        let refused = |why: String| Err(TelmoniError::BadRequest(why));
-        if self.add.is_empty() && self.remove.is_empty() {
-            return refused("a change to a run's tags adds or removes one".into());
-        }
-        if self.add.len() > TAGS_MAX || self.remove.len() > TAGS_MAX {
-            return refused(format!(
-                "a change names at most {TAGS_MAX} tags to add and {TAGS_MAX} to remove"
-            ));
-        }
-        let key_ok = |key: &str| {
-            (1..=TAG_KEY_MAX).contains(&key.chars().count()) && !key.chars().any(char::is_control)
-        };
-        for (key, value) in &self.add {
-            if !key_ok(key) || key.contains(':') {
-                return refused(format!(
-                    "a tag's key is 1 to {TAG_KEY_MAX} characters, none of them a colon or a \
-                     control character"
-                ));
-            }
-            if value.chars().count() > TAG_VALUE_MAX || value.chars().any(char::is_control) {
-                return refused(format!(
-                    "a tag's value is up to {TAG_VALUE_MAX} characters, none of them a control \
-                     character"
-                ));
-            }
-        }
-        self.remove.sort();
-        self.remove.dedup();
-        for key in &self.remove {
-            if !key_ok(key) {
-                return refused(format!(
-                    "a tag's key is 1 to {TAG_KEY_MAX} characters, none of them a control \
-                     character"
-                ));
-            }
-            if self.add.contains_key(key) {
-                return refused("a tag is added or removed in one change, never both".into());
-            }
-        }
-        Ok(self)
-    }
-}
-
-/// `PATCH /internal/v1/telemetry/traces/{run_id}/tags` — a run's tags changed
-/// by any member of the project: filed in the organization's chain, naming
-/// the keys and never a value, as the run's every span takes the change in
-/// ClickHouse, so a failed write files nothing; then the organization's open
-/// consoles nudged. A span that lands later carries the tags it was sent
-/// with. `404` for a run the project does not hold; `400` past the tags a
-/// span carries or the project's tag cardinality for the day.
-pub async fn patch_tags(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-    Path(run_id): Path<String>,
-    Json(change): Json<TagsChange>,
-) -> Result<Json<TraceTags>, TelmoniError> {
-    let acting = state.auth.resolve(&headers).await?;
-    let project_id = acting
-        .require_project(Verb::Update, Resource::Trace)?
-        .project_id
-        .clone();
-    let run_id: Uuid = run_id
-        .parse()
-        .map_err(|_| TelmoniError::BadRequest("a trace is named by its run's id, a UUID".into()))?;
-    let change = change.checked()?;
-    let projects = Projects::one(project_id.clone());
-    let added: Vec<&str> = change.add.keys().map(String::as_str).collect();
-    let tags = chain::write(
-        &state.db,
-        &acting,
-        &project_id,
-        "a trace's tags",
-        async |tx| {
-            // The run is read under the chain's lock, so two changes to one
-            // run at the cap are weighed one after the other, never both past it.
-            chain::held(
-                state.auth.as_ref(),
-                &acting,
-                tx,
-                Verb::Update,
-                Resource::Trace,
-            )
-            .await?;
-            let run = traces::run_tags(&state.store, &projects, run_id, &added, &change.remove)
-                .await
-                .map_err(read_failed)?;
-            if run.spans == 0 {
-                return Err(AuthError::NotFound(
-                    "no trace with that run id in this project".into(),
-                )
-                .into());
-            }
-            if run.most > TAGS_MAX as u64 {
-                return Err(TelemetryError::TagsPastCap(Cap::Tags.to_string()).into());
-            }
-            let mut tags: BTreeMap<String, String> = run.run_tags.into_iter().collect();
-            // A value the run already carries takes no new place in the day's cap.
-            let fresh: Vec<(&str, &str)> = change
-                .add
-                .iter()
-                .filter(|(key, value)| tags.get(*key) != Some(*value))
-                .map(|(key, value)| (key.as_str(), value.as_str()))
-                .collect();
-            if let Some(cap) =
-                cardinality::admit(&state.redis, &project_id, Utc::now(), &fresh).await
-            {
-                return Err(TelemetryError::TagsPastCap(cap.to_string()).into());
-            }
-            file_tags_change(tx, &acting, &project_id, run_id, &change).await?;
-            state
-                .store
-                .retag_run(&project_id, run_id, &change.add, &change.remove)
-                .await
-                .map_err(|error| {
-                    store::failed(
-                        &error,
-                        "tags",
-                        "the span store did not take the tags; retry",
-                    )
-                })?;
-            tags.retain(|key, _| !change.remove.contains(key));
-            tags.extend(
-                change
-                    .add
-                    .iter()
-                    .map(|(key, value)| (key.clone(), value.clone())),
-            );
-            Ok(tags)
-        },
-    )
-    .await?;
-    live::tags_changed(
-        Arc::clone(&state),
-        acting.organization_id.as_str(),
-        project_id.as_str(),
-        run_id,
-    );
-    tracing::info!(
-        project_id = %project_id,
-        run_id = %run_id,
-        added = change.add.len(),
-        removed = change.remove.len(),
-        "telemetry: a trace's tags changed"
-    );
-    Ok(Json(TraceTags { run_id, tags }))
-}
-
-/// The change to a run's tags, filed in the organization's chain, whose lock
-/// the caller holds: its keys, never a value.
-async fn file_tags_change(
-    tx: &mut Scoped<'_, ProjectAndOrganization>,
-    acting: &Acting,
-    project_id: &ProjectId,
-    run_id: Uuid,
-    change: &TagsChange,
-) -> Result<(), TelmoniError> {
-    let change = Change {
-        action: AuditAction::Updated,
-        kind: TelmoniResourceKind::Trace,
-        id: run_id,
-        metadata: json!({
-            "added": change.add.keys().collect::<Vec<_>>(),
-            "removed": change.remove,
-        }),
-    };
-    chain::file(tx, acting, project_id, change).await?;
-    Ok(())
-}
-
 /// `GET /internal/v1/telemetry/traces/{run_id}` — one trace's spans, the run's
 /// own among them, in the order they started, its content opened and filed
-/// only where asked (`content=true`), so a page that compares runs reads none
-/// until its reader opens it; `404` for a run the project does not hold.
+/// only where asked (`content=true`); `404` for a run the project does not hold.
 pub async fn get_trace(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -1644,7 +1353,7 @@ pub(crate) async fn trace_detail(
     let shown = traces::shown(rows.iter().map(|row| row.units), SPANS_MAX, TRACE_UNITS_MAX);
     let truncated = shown < rows.len();
     let content = if with_content {
-        content_of(state, reader, &[run_id], None).await
+        content_of(state, reader, &[run_id]).await
     } else {
         None
     };
@@ -1766,7 +1475,6 @@ mod tests {
             "a tag's value may hold a colon of its own"
         );
         assert_eq!(filter.prompts, ["triage-v2"]);
-        assert!(filter.runs.is_empty());
         assert_eq!(filter.days, 30);
         assert_eq!(
             query.sort().expect("a sort"),
@@ -1795,8 +1503,7 @@ mod tests {
     }
 
     /// Each lane takes the filters and its own parameters, and no other's:
-    /// a page is a list's, a clock the histogram's, a format a download's,
-    /// and chosen runs the trace list's download alone.
+    /// a page is a list's, a clock the histogram's, and a format a download's.
     #[test]
     fn each_lane_takes_its_own_parameters_and_no_others() {
         for (reading, name) in [
@@ -1808,10 +1515,9 @@ mod tests {
             (Reading::List, "format"),
             (Reading::List, "run"),
             (Reading::Export, "page"),
+            (Reading::Export, "limit"),
             (Reading::Export, "utc_offset"),
             (Reading::Export, "run"),
-            (Reading::TraceExport, "page"),
-            (Reading::TraceExport, "limit"),
         ] {
             let refused = read(reading, &[(name, "1")]).expect_err(name);
             assert_eq!(
@@ -1821,16 +1527,8 @@ mod tests {
             );
         }
         assert!(read(Reading::Histogram, &[("utc_offset", "-300")]).is_ok());
-        assert!(read(Reading::Export, &[("sort", "tokens"), ("format", "json")]).is_ok());
-        let download = read(
-            Reading::TraceExport,
-            &[
-                ("format", "json"),
-                ("run", "6f2b8e3c-5d1a-4b7e-9c0f-1a2b3c4d5e6f"),
-            ],
-        )
-        .expect("a download's query");
-        assert_eq!(download.filter().expect("a filter").runs.len(), 1);
+        let download = read(Reading::Export, &[("sort", "tokens"), ("format", "json")])
+            .expect("a download's query");
         assert_eq!(
             parse_format(download.format.as_deref()).ok(),
             Some(Format::Json)
@@ -1856,8 +1554,6 @@ mod tests {
             read(Reading::List, &[("days", "7.5")]).and_then(|q| q.filter().map(|_| ())),
             read(Reading::List, &[("sort", "agent"), ("sort", "user")]).map(|_| ()),
             read(Reading::List, &[("nonsense<script>", "1")]).map(|_| ()),
-            read(Reading::TraceExport, &[("run", "not-a-run<script>")])
-                .and_then(|q| q.filter().map(|_| ())),
             read(Reading::Export, &[("format", "xlsx<script>")])
                 .and_then(|q| parse_format(q.format.as_deref()).map(|_| ())),
             read(Reading::Histogram, &[("utc_offset", "841")])
@@ -1921,26 +1617,6 @@ mod tests {
         for (limit, page) in [("0", ""), ("501", ""), ("", "0"), ("", "1001")] {
             assert!(parse_limit(Some(limit)).is_err() || parse_page(Some(page)).is_err());
         }
-    }
-
-    /// A download names up to a page's rows, more than a filter admits; one
-    /// more is refused.
-    #[test]
-    fn a_download_names_at_most_a_pages_runs() {
-        let runs: Vec<(String, String)> = (0..=RUNS_MAX)
-            .map(|_| ("run".to_owned(), Uuid::new_v4().to_string()))
-            .collect();
-        let page = TraceQuery::read(runs[1..].to_vec(), Reading::TraceExport).expect("read");
-        assert_eq!(page.filter().expect("a page's runs").runs.len(), RUNS_MAX);
-        let query = TraceQuery::read(runs, Reading::TraceExport).expect("read");
-        assert_eq!(
-            query
-                .filter()
-                .expect_err("too many")
-                .to_problem_details()
-                .status,
-            400
-        );
     }
 
     /// The facets keep the read's order, and say when a facet has values

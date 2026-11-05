@@ -111,12 +111,12 @@ describe("writing it", () => {
   });
 
   it("patches a list's path, dropping a key patched away and keeping the rest in place", () => {
-    expect(listHref("acme", "web", "/users", {})).toBe("/acme/web/users");
+    expect(listHref("acme", "web", "/traces", {})).toBe("/acme/web/traces");
     expect(
-      listHref("acme", "web", "/users", { sort: "user", days: 30 }, { days: undefined, dir: "desc" }),
-    ).toBe("/acme/web/users?sort=user&dir=desc");
-    expect(listHref("acme", "web", "/sessions/chat%2F42", { limit: 500 })).toBe(
-      "/acme/web/sessions/chat%2F42?limit=500",
+      listHref("acme", "web", "/traces", { sort: "user", days: 30 }, { days: undefined, dir: "desc" }),
+    ).toBe("/acme/web/traces?sort=user&dir=desc");
+    expect(listHref("acme", "web", "/traces/chat%2F42", { limit: 500 })).toBe(
+      "/acme/web/traces/chat%2F42?limit=500",
     );
   });
 });

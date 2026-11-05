@@ -1,41 +1,32 @@
 "use client";
 
-import { useState } from "react";
-import { DownloadIcon, GitCompareArrows } from "lucide-react";
 import Link from "next/link";
 
 import { DataTable, THead, Td, Th } from "@/components/data-table";
 import { cellClass, cellOf, titleOf } from "@/components/traces/cells";
 import {
   ColumnHeadings,
-  DownloadItems,
   compactPadding,
   plainClick,
   rowClass,
   rowClickTaken,
 } from "@/components/traces/list-table";
 import { usePeekedRun } from "@/components/traces/peek";
-import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { openPeek } from "@/lib/peek";
 import type { Trace, TraceQuery } from "@/lib/server/entities/traces";
 import {
   TRACE_COLUMNS,
-  compareHref,
   currentSort,
-  downloadHref,
   formatCount,
+  groupOf,
   nextSort,
+  sessionRunsHref,
   shortId,
   tagKeys,
   traceHref,
   tracesHref,
   type FilterKey,
+  type Group,
   type TraceUi,
 } from "@/lib/traces";
 import { SpanStatus, type TraceSort } from "@/lib/types/enums";
@@ -58,93 +49,51 @@ type Props = {
 // content, the peek's — and the columns the person shows
 // (`lib/trace-prefs.ts`), each heading that sorts a link that sorts by it. A
 // click on a row opens its trace in the peek beside the list (`peek.tsx`),
-// and the row stays marked while it is open. Rows are chosen to download
-// those alone, or two to compare; the choice is the page's, so a page of new
-// rows starts with none chosen (the page keys this on its rows).
+// and the row stays marked while it is open. Grouped by session or user
+// (`groupOf`), each group is a body of its own under a head that opens the
+// group's runs.
 export function TraceTable({ organization, slug, query, ui, traces, knownTags }: Props) {
   const prefs = useTracePrefs();
   const peeked = usePeekedRun();
-  const [chosen, setChosen] = useState<ReadonlySet<string>>(() => new Set());
   const columns = TRACE_COLUMNS.filter((c) => prefs.columns.includes(c.key));
   const { sort, dir } = currentSort(query);
   const tight = compactPadding(prefs.density);
-  const every = traces.length > 0 && traces.every((t) => chosen.has(t.run_id));
-  const some = !every && traces.some((t) => chosen.has(t.run_id));
   const narrowedTo = (filter: FilterKey, value: string) =>
     tracesHref(organization, slug, query, { [filter]: [value], page: undefined }, ui);
   const sortedBy = (by: TraceSort | TagSort) =>
     tracesHref(organization, slug, query, nextSort(query, by), ui);
-
-  const choose = (runId: string, on: boolean) =>
-    setChosen((was) => {
-      const next = new Set(was);
-      if (on) next.add(runId);
-      else next.delete(runId);
-      return next;
-    });
+  const group = groupOf(query);
 
   return (
-    <div className="grid gap-2">
-      {chosen.size > 0 && (
-        <div className="flex flex-wrap items-center gap-2 rounded-md bg-muted px-gutter py-1.5 text-sm" role="status">
-          <span>
-            {formatCount(chosen.size)} {chosen.size === 1 ? "trace" : "traces"} chosen
-          </span>
-          {chosen.size === 2 ? (
-            <Button asChild variant="outline" size="sm" className="ml-auto bg-background">
-              <Link href={compareHref(organization, slug, ...([...chosen] as [string, string]))}>
-                <GitCompareArrows />
-                Compare
-              </Link>
-            </Button>
-          ) : (
-            <span className="ml-auto text-xs text-muted-foreground">
-              {chosen.size === 1 ? "Choose one more to compare them" : "Choose two to compare them"}
-            </span>
-          )}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" className="bg-background">
-                <DownloadIcon />
-                Download
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DownloadItems
-                href={(format) => downloadHref(organization, slug, query, format, [...chosen])}
-              />
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <Button variant="ghost" size="sm" onClick={() => setChosen(new Set())}>
-            Clear
-          </Button>
-        </div>
-      )}
-      <DataTable>
-        <THead>
-          <Th className="w-0 pr-0">
-            <Checkbox
-              checked={every ? true : some ? "indeterminate" : false}
-              onCheckedChange={(on) =>
-                setChosen(on === true ? new Set(traces.map((t) => t.run_id)) : new Set())
+    <DataTable>
+      <THead>
+        <Th className="whitespace-nowrap">Trace</Th>
+        <ColumnHeadings
+          columns={columns}
+          sort={sort}
+          dir={dir}
+          sortHref={sortedBy}
+          tags={{ keys: tagKeys(knownTags), href: (key) => sortedBy(`tag:${key}`) }}
+        />
+      </THead>
+      {groupsOf(traces, group).map((rows) => (
+        <tbody key={rows[0]!.run_id}>
+          {group && (
+            <GroupHead
+              group={group}
+              value={valueOf(rows[0]!, group)}
+              count={rows.length}
+              span={columns.length + 1}
+              href={(value) =>
+                group === "session"
+                  ? sessionRunsHref(organization, slug, value, query.days)
+                  : tracesHref(organization, slug, { user: [value], days: query.days })
               }
-              aria-label="Choose every trace on this page"
             />
-          </Th>
-          <Th className="whitespace-nowrap">Trace</Th>
-          <ColumnHeadings
-            columns={columns}
-            sort={sort}
-            dir={dir}
-            sortHref={sortedBy}
-            tags={{ keys: tagKeys(knownTags), href: (key) => sortedBy(`tag:${key}`) }}
-          />
-        </THead>
-        <tbody>
-          {traces.map((trace) => (
+          )}
+          {rows.map((trace) => (
             <tr
               key={trace.run_id}
-              data-state={chosen.has(trace.run_id) ? "selected" : undefined}
               aria-current={peeked === trace.run_id ? "true" : undefined}
               // Anywhere on the row but what keeps its own way: the
               // keyboard's way is the id's link.
@@ -154,13 +103,6 @@ export function TraceTable({ organization, slug, query, ui, traces, knownTags }:
               }}
               className={rowClass(peeked === trace.run_id)}
             >
-              <Td className={cn("pr-0", tight)}>
-                <Checkbox
-                  checked={chosen.has(trace.run_id)}
-                  onCheckedChange={(on) => choose(trace.run_id, on === true)}
-                  aria-label={`Choose trace ${shortId(trace.run_id)}`}
-                />
-              </Td>
               <Td className={cn("whitespace-nowrap", tight)}>
                 <Link
                   href={traceHref(organization, slug, trace.run_id)}
@@ -195,7 +137,63 @@ export function TraceTable({ organization, slug, query, ui, traces, knownTags }:
             </tr>
           ))}
         </tbody>
-      </DataTable>
-    </div>
+      ))}
+    </DataTable>
+  );
+}
+
+/** A run's value of `group`; empty where it named none. */
+function valueOf(trace: Trace, group: Group): string {
+  return group === "session" ? trace.session_id : trace.user_id;
+}
+
+/** The page's rows as its groups run, one after another; all of them as one
+ *  where the list is not grouped. */
+function groupsOf(traces: readonly Trace[], group: Group | undefined): Trace[][] {
+  const groups: Trace[][] = [];
+  for (const trace of traces) {
+    const last = groups.at(-1);
+    if (last && (!group || valueOf(last[0]!, group) === valueOf(trace, group))) last.push(trace);
+    else groups.push([trace]);
+  }
+  return groups;
+}
+
+/** A group's head: its session or user, which opens the group's runs, and how
+ *  many of them this page holds. */
+function GroupHead({
+  group,
+  value,
+  count,
+  span,
+  href,
+}: {
+  group: Group;
+  value: string;
+  count: number;
+  span: number;
+  href: (value: string) => string;
+}) {
+  const noun = group === "session" ? "Session" : "User";
+  return (
+    <tr className="bg-muted/40">
+      <th scope="rowgroup" colSpan={span} className="px-gutter py-1.5 text-left text-xs font-normal">
+        <span className="text-muted-foreground">{noun}:</span>{" "}
+        {value ? (
+          <Link
+            href={href(value)}
+            title={group === "session" ? `The runs of session ${value}, in order` : `Every run of user ${value}`}
+            className="font-medium underline-offset-4 hover:underline"
+          >
+            {group === "user" ? shortId(value) : value}
+          </Link>
+        ) : (
+          <span className="text-muted-foreground">none</span>
+        )}
+        <span className="ml-gutter text-muted-foreground tabular-nums">
+          {formatCount(count)} {count === 1 ? "run" : "runs"} on this page
+        </span>
+      </th>
+    </tr>
   );
 }

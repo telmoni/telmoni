@@ -20,19 +20,23 @@
   </p>
 </div>
 
-> Know when your agents stall, loop or overspend, without sending us a single prompt.
+> Know when your agents fail, stall, loop or overspend, and stop them at the cap you set, without sending us a single prompt.
 
-Telmoni is an open-source observability platform for AI agents. Its SDKs record each **run** of an agent, and the **steps**, **model calls** and **tool calls** inside it, as OpenTelemetry spans; the console reads them back as traces, sessions and users, and alerts on them. Only metadata is kept: prompts and completions come off a span before it leaves your process, and ingest drops any that arrive anyway. It is one Rust binary and a Next.js console on PostgreSQL, ClickHouse and Redis, self-hosted with Docker Compose or Helm.
+Telmoni is open-source monitoring for the AI agents you run: a Python service, a nightly batch, a LangGraph graph, a Claude Code session. Its SDKs and coding-agent plugins record each **run** of an agent, and the **steps**, **model calls** and **tool calls** inside it, as OpenTelemetry spans; Telmoni alerts when a run fails, stalls, loops, overspends or stops arriving, stops a run at the caps you set, and shows you the run that did it. Only metadata is kept unless you choose otherwise: prompts and completions come off a span before it leaves your process, and ingest drops any that arrive anyway, until a project's owner turns its content on, when it is kept sealed under the project's own key. It is one Rust binary and a Next.js console on PostgreSQL, ClickHouse and Redis, self-hosted with Docker Compose or Helm.
 
 > [!NOTE]
-> Telmoni hasn't launched yet, and it's built in the open. Running today: organizations and roles, API keys, the audit log, notifications, the console agent, and the first of the telemetry on them, the SDKs, ingest, the console's traces, sessions and users, its alerts, a cost cap among them, each organization's open incidents on its Overview, the cost a call reports, and the SDKs' guard, which stops a run at the caps on its steps and spend you set. Next: content an owner chooses to keep. [Where it goes next](ARCHITECTURE.md#where-it-goes-next) lists what's settled but not built.
+> Telmoni hasn't launched yet, and it's built in the open. Running today: organizations and roles, API keys, the audit log, notifications, the console agent, and the telemetry on them: the SDKs and the coding-agent plugins, ingest, the console's traces, grouped by session or user, dashboards, alerts, a cost cap among them, and objectives, each organization's open incidents on its Overview, the cost a call reports, scores, content an owner chooses to keep, and the SDKs' guard, which stops a run at the caps on its steps and spend you set. [Where it goes next](ARCHITECTURE.md#where-it-goes-next) lists what is built, and [Known gaps](ARCHITECTURE.md#known-gaps) what isn't right yet.
 
 ## Features
 
-- **[Agent telemetry](https://telmoni.com/docs/api/sdks)**: open a run around your agent, and each step, model call and tool call inside it becomes a span with its timings, status, model, tokens and errors, tied to its run, session and end user.
+- **[Alerts](https://telmoni.com/docs/monitoring/alerts)**: a run that fails, runs long, loops on one tool, takes too many steps, is left open or costs past its cap, and runs that stop arriving, over an hour, a day or a week, against an alert threshold and an optional warning one; each incident told once to the feed and to the Slack channels and webhooks an alert links, acknowledged or muted from Slack, with maintenance windows; and those still open on the organization's Overview.
+- **[Guard](https://telmoni.com/docs/api/sdks#the-guard)**: opt-in caps on a run's steps and spend, counted in the agent's own process with no call to us, which stop a run before it overspends.
+- **[Objectives](https://telmoni.com/docs/monitoring/objectives) and [spend](https://telmoni.com/docs/monitoring/dashboards)**: objectives that promise a share of an agent's runs succeed or end in time, paging when the error budget burns too fast; budgets with the day they'll be reached; and spend, tokens, runs, failures and latency, split by agent, model, provider or tag.
+- **[Agent telemetry](https://telmoni.com/docs/api/sdks)**: open a run around your agent, or install a [coding-agent plugin](https://telmoni.com/docs/api/coding-agents), and each step, model call and tool call inside it becomes a span with its timings, status, model, tokens, cost and errors. Any framework that speaks OpenTelemetry works too.
 - **[Private by default](https://telmoni.com/docs/api/field-inventory)**: timings, statuses, counts and names, never content. End-user IDs are hashed with a key unique to each project, and the field inventory lists every attribute ingest reads, and what becomes of it.
-- **[Traces, sessions and users](https://telmoni.com/docs/monitoring/traces)**: filter, sort and chart runs, save views for the project, download CSV or JSON, open a trace as the tree its spans ran in or as a timeline, and see new runs the moment they arrive.
-- **[Alerts](https://telmoni.com/docs/monitoring/alerts)**: failures, latency, tokens or what a run spends, over an hour, a day or a week, against an alert threshold and an optional warning one; each incident told to the feed and to the Slack channels and webhooks an alert links, in the hours each is set to, with maintenance windows; and those still open, across the projects you can open, on the organization's Overview.
+- **[Content, when you choose it](https://telmoni.com/docs/monitoring/content)**: prompts, completions, the model's thinking, tool inputs and outputs, images and files, and failures with their stack traces, kept in full only where a project's owner turns its content mode on and the developer's capture switch is on too, sealed under the project's own key, and every read of it in the audit log.
+- **[Traces](https://telmoni.com/docs/monitoring/traces)**: the run behind every alert, as the tree its spans ran in or as a timeline; filter, sort, chart and download runs, by session and end user too, and see new runs the moment they arrive.
+- **[Scores](https://telmoni.com/docs/monitoring/scores)**: scores on a run, a span or a session from your code or a member, alerted on when they drop.
 - **[Organizations and audit](https://telmoni.com/docs/workspace/audit-log)**: owner, admin and member roles, invitations, transfers and scoped API keys; sign-in by password or any OIDC provider; and an audit log hash-chained per organization, exportable.
 - **[Notifications](https://telmoni.com/docs/integrations/notifications)**: an in-app feed, Slack, and webhooks signed with HMAC-SHA256, through a delivery queue that retries.
 - **[Console agent](https://telmoni.com/docs/self-host/agent)**: questions in plain language, answered from the docs, the audit log and the feed with sources cited, on Anthropic or any OpenAI-compatible server such as Ollama, vLLM or OpenRouter.
@@ -91,13 +95,13 @@ TypeScript, Go and Rust work the same way; the [SDK docs](https://telmoni.com/do
 
 ### 4. See it in the console
 
-The project's **Traces** page shows the run with its model call, tokens and timings. **Sessions** and **Users** group runs by the `session_id` and `user_id` a run is given.
+The project's **Traces** page shows the run with its model call, tokens and timings. **Group by** lays its runs out by the `session_id` or the `user_id` a run is given.
 
 ## Self-hosting
 
 No images are published: both paths build `server` and `web` from a checkout of this repository, for linux/amd64:
 
-- **[Docker Compose](https://telmoni.com/docs/self-host/docker-compose)**: `deploy/compose/docker-compose.yml` runs the server, the console, PostgreSQL, ClickHouse and Redis on one machine. Copy `deploy/compose/.env.example` to `deploy/compose/.env`, fill its five secrets, then `docker compose -f deploy/compose/docker-compose.yml up -d --build --wait --wait-timeout 180`, which builds both images first.
+- **[Docker Compose](https://telmoni.com/docs/self-host/docker-compose)**: `deploy/compose/docker-compose.yml` runs the server, the console, PostgreSQL, ClickHouse and Redis on one machine. Copy `deploy/compose/.env.example` to `deploy/compose/.env`, fill its six secrets, then `docker compose -f deploy/compose/docker-compose.yml up -d --build --wait --wait-timeout 180`, which builds both images first.
 - **[Kubernetes](https://telmoni.com/docs/self-host/kubernetes)**: the chart in `deploy/charts/telmoni` deploys the server, the console and the migration job, from the images you build and push to your own registry.
 
 Configuration comes only from the environment ([every setting](https://telmoni.com/docs/self-host/configuration)); [Production](https://telmoni.com/docs/self-host/production) covers OIDC, database role hardening, the reverse proxy and backups. A self-hosted Telmoni phones nothing home: the server calls only the services you configure.
@@ -113,7 +117,7 @@ Configuration comes only from the environment ([every setting](https://telmoni.c
 | [Slack](https://telmoni.com/docs/integrations/slack) | Notifications | A project's notifications, posted to a channel. |
 | [Webhooks](https://telmoni.com/docs/integrations/webhooks) | Notifications | A project's notifications, delivered to your endpoint and signed with HMAC-SHA256. |
 | [OIDC](https://telmoni.com/docs/self-host/configuration) | Any OIDC provider | Single sign-on beside the password form, or instead of it. |
-| [Read API](https://telmoni.com/docs/api/reference) | HTTP, JSON | `/v1`: the organization and its members, read with an API key. |
+| [Read API](https://telmoni.com/docs/api/reference) | HTTP, JSON | `/v1`: the organization, traces, metrics and incidents, read with an API key; scores written. |
 
 ## How it works
 
@@ -149,8 +153,9 @@ crates/
   notifications/  the feed, the Slack and webhook connectors, delivery
   agent/          the console agent: models, embeddings, the index and its hybrid search, read-only tools
   telemetry/      ingest at /otlp/v1/traces, each project's settings, the spans and their hourly
-                  totals in ClickHouse, its ClickHouse file and nightly purge, and the model
-                  prices, converted from LiteLLM's by `make prices`
+                  totals in ClickHouse, the content an `on` project keeps, sealed in Postgres,
+                  scores, alerts and objectives, its ClickHouse file and nightly
+                  purge, and the model prices, converted from LiteLLM's by `make prices`
   migrator/       the migration runner, grants, role hardening, the audit schema
   shared/         errors, RBAC, tenancy, the seams between modules
 web/              the console, a thin proxy in front of the server, and the docs it serves (content/docs)
@@ -158,7 +163,7 @@ sdk/              the SDKs: python/, typescript/, go/, rust/, and the fixtures e
 contract/         the generated wire contract, OpenAPI document and lanes' answers
 deploy/           the Helm chart and the self-host compose file
 scripts/          `up.sh` behind `make up`, and the webhook tunnel and receiver
-.github/          CI, the image publishing workflow, and the logo and diagram this README shows
+.github/          CI, the dependency audit, the SDK release workflow, and the logo and diagram this README shows
 ARCHITECTURE.md   how it is built, and why, on one page
 ```
 

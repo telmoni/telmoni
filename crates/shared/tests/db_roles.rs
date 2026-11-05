@@ -129,11 +129,9 @@ const LANE_DELETED: &[&str] = &["telemetry.project_settings", "telemetry.content
 /// The tables the runtime role only adds to: its maintenance lane drains
 /// them, landing or settling each row and removing it, or purges them. A
 /// request that rewrote or removed one could unsay an uninstall before it is
-/// sent, swap a span's content for other bytes, or give back the hour's
-/// questions.
+/// sent, or swap a span's content for other bytes.
 const LANE_DRAINED: &[&str] = &[
     "notifications.uninstalls",
-    "agent.list_questions",
     "telemetry.plain_content",
     "telemetry.media",
     "telemetry.media_names",
@@ -562,13 +560,6 @@ async fn the_maintenance_lanes_narrowed_grants_hold_in_every_tier() {
             "agent.questions_asked",
             &["SELECT", "INSERT", "UPDATE", "DELETE"],
         ),
-        // Retention forgets a list question's hour; the purges, its person
-        // and organization.
-        (
-            "agent_maintenance",
-            "agent.list_questions",
-            &["SELECT", "DELETE"],
-        ),
         // The purges delete a project's or an organization's settings; the
         // project's own scope writes them. (A transfer rewrites
         // `organization_id` alone: a column grant, not this.)
@@ -605,36 +596,6 @@ async fn the_maintenance_lanes_narrowed_grants_hold_in_every_tier() {
         (
             "telemetry_maintenance",
             "telemetry.project_prices",
-            &["SELECT", "DELETE"],
-        ),
-        // The evaluation loop opens a project's model connections and marks one
-        // its provider refuses; the purges delete them.
-        (
-            "telemetry_maintenance",
-            "telemetry.model_connections",
-            &["SELECT", "UPDATE", "DELETE"],
-        ),
-        // The evaluation loop writes and settles evaluations; the purges and retention delete them.
-        (
-            "telemetry_maintenance",
-            "telemetry.evaluations",
-            &["SELECT", "INSERT", "UPDATE", "DELETE"],
-        ),
-        // The evaluation loop reads a project's evaluators; the purges delete them.
-        (
-            "telemetry_maintenance",
-            "telemetry.evaluators",
-            &["SELECT", "DELETE"],
-        ),
-        // The loop reads every rule, its reach back and a transfer column grants; the purges delete them.
-        (
-            "telemetry_maintenance",
-            "telemetry.evaluation_rules",
-            &["SELECT", "DELETE"],
-        ),
-        (
-            "telemetry_maintenance",
-            "telemetry.evaluation_rule_evaluators",
             &["SELECT", "DELETE"],
         ),
         // The loop lands another exporter's held spans and marks each with

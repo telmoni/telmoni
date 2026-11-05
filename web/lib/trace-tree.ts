@@ -6,6 +6,10 @@ import { SpanKind } from "@/lib/types/enums";
 // it a span at a time (`components/traces/trace-view.tsx`): each span under
 // its parent.
 
+/** Past this many spans a trace opens with its branches shut, so a run of
+ *  thousands draws its first rows at once. */
+export const OPEN_ALL_UP_TO = 400;
+
 /** A span and the spans recorded under it. */
 export type SpanNode = {
   span: TraceSpan;

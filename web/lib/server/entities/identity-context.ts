@@ -72,8 +72,8 @@ export function personHeaders(session: SessionData): Record<string, string> {
   };
 }
 
-/// For the person's own account — their password, address, analytics consent
-/// and sessions — which is theirs whatever organization they are in,
+/// For the person's own account — their password, address and sessions —
+/// which is theirs whatever organization they are in,
 /// including none. Auth records the changes on the active organization's
 /// chain, so that one is named when there is one; somebody in no organization
 /// names none, and auth refuses a missing header from anybody in one.

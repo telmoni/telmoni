@@ -102,7 +102,7 @@ export async function createProjectAction(
 /// The panel's field a refusal belongs under; none for one about neither.
 export type CreateOrganizationField = "name" | "slug";
 
-/// Done with the new organization's Overview, or wherever a console built on
+/// Done with the new organization's projects, or wherever a console built on
 /// this one sends it (`lib/extension/created-organization.ts`), for the panel
 /// to open: a `redirect()` from the layout's panel remounts the console shell.
 /// A refusal may name the field it is about.
@@ -196,6 +196,8 @@ export async function createOrganizationAction(
   }
   revalidatePath("/", "layout");
   // Its Overview, unless a console built on this one sends it elsewhere.
-  const href = (await createdOrganizationHref(created.data)) ?? organizationPath(created.data.slug);
+  const href =
+    (await createdOrganizationHref(created.data)) ??
+    organizationPath(created.data.slug, "/projects");
   return { ok: true, href };
 }

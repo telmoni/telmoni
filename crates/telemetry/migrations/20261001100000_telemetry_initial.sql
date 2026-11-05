@@ -56,20 +56,12 @@ CREATE TABLE telemetry.project_settings (
     content_key_id          UUID,
     content_key_wrapped_dek BYTEA,
     content_key_version     SMALLINT,
-    -- The saved layout its sessions and traces open in, which stands until
-    -- it is deleted and the console's own default holds again (the key,
-    -- below the views); none for the default.
-    session_view_id         UUID,
     -- How long the project's spans and content are kept, in days, where an
     -- owner or admin chose fewer than the longest sold; none for the longest.
     retention_days          SMALLINT,
-    -- How long a session is quiet before its evaluation rules judge it, in
-    -- minutes; none for ten.
-    session_idle_minutes    SMALLINT,
     created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT project_settings_content_mode_check CHECK (content_mode IN ('off', 'on')),
     CONSTRAINT project_settings_retention_days_check CHECK (retention_days BETWEEN 1 AND 360),
-    CONSTRAINT project_settings_session_idle_minutes_check CHECK (session_idle_minutes BETWEEN 2 AND 1440),
     -- The key is there whole or not at all.
     CONSTRAINT project_settings_hashing_key_check CHECK (
         (hashing_key_ciphertext IS NULL) = (hashing_key_nonce IS NULL)
@@ -84,9 +76,6 @@ CREATE TABLE telemetry.project_settings (
 -- `organization_id` carries an index on it; one a cascade or a `SET NULL`
 -- takes carries an index on the key it follows.
 CREATE INDEX project_settings_organization_idx ON telemetry.project_settings (organization_id);
--- The key a deleted layout's SET NULL follows.
-CREATE INDEX project_settings_session_view_idx ON telemetry.project_settings (session_view_id)
-    WHERE session_view_id IS NOT NULL;
 
 ALTER TABLE telemetry.project_settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE telemetry.project_settings FORCE ROW LEVEL SECURITY;
@@ -117,39 +106,29 @@ GRANT UPDATE (organization_id) ON telemetry.project_settings TO telemetry_mainte
 
 
 -- ══════════════════════════════════════════════════════════════════════════════
--- 2. SAVED VIEWS
+-- 2. SAVED DASHBOARDS
 -- ══════════════════════════════════════════════════════════════════════════════
--- A project's list as somebody left it, under a name: its filters, sort and
--- window as the list's query takes them, and the columns it showed (`kind` =
--- 'traces', 'sessions' or 'users', the list's); or a layout of a session's page and a trace's, its
--- options and the columns a trace shows (`kind` = 'layout'). Every role on
--- the project applies one; its owners and admins save them. Filed under the
+-- A project's dashboard, under a name: the charts its page draws. Every role
+-- on the project reads one; its owners and admins save them. Filed under the
 -- project alone: the purges find a project by its settings row, which the
--- first view saved makes where the project has none.
+-- first one saved makes where the project has none.
 CREATE TABLE telemetry.trace_views (
     id          UUID        PRIMARY KEY,
     project_id  TEXT        NOT NULL,
-    kind        TEXT        NOT NULL DEFAULT 'traces',
     name        TEXT        NOT NULL,
-    -- A list's query, each filter's values a list (`{"agent": ["…"],
-    -- "sort": "tokens", "days": 30}`), a layout's options (`{"depth":
-    -- "calls", "open": "failed", …}`) or a dashboard's charts (`{"charts":
-    -- [{"measure": "spend", "group": "user"}]}`); the lane checks each as
-    -- its page would read it.
+    -- The charts (`{"charts": [{"measure": "spend", "group": "user"}]}`),
+    -- which the lane checks as the page would draw them.
     query       JSONB       NOT NULL,
-    -- The columns shown, by the list's column words, in the list's order.
-    columns     TEXT[]      NOT NULL,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT trace_views_kind_check CHECK (kind IN ('traces', 'sessions', 'users', 'layout', 'dashboard')),
     CONSTRAINT trace_views_name_check CHECK (char_length(name) BETWEEN 1 AND 60),
     CONSTRAINT trace_views_query_check CHECK (jsonb_typeof(query) = 'object')
 );
 
--- One name per view of a kind in a project, whatever its case: a menu that
--- offered two "Errors" would make a person guess.
+-- One name per dashboard in a project, whatever its case: a menu that
+-- offered two "Spend" would make a person guess.
 CREATE UNIQUE INDEX trace_views_project_name_idx
-    ON telemetry.trace_views (project_id, kind, lower(name));
+    ON telemetry.trace_views (project_id, lower(name));
 
 ALTER TABLE telemetry.trace_views ENABLE ROW LEVEL SECURITY;
 ALTER TABLE telemetry.trace_views FORCE ROW LEVEL SECURITY;
@@ -163,16 +142,10 @@ CREATE POLICY maintenance_access ON telemetry.trace_views
     USING      (current_user = 'telemetry_maintenance')
     WITH CHECK (current_user = 'telemetry_maintenance');
 
--- The purges delete a deleted project's views, and those of an organization's
--- projects. A transfer moves nothing: a view names no organization.
+-- The purges delete a deleted project's dashboards, and those of an
+-- organization's projects. A transfer moves nothing: a dashboard names no
+-- organization.
 GRANT SELECT, DELETE ON telemetry.trace_views TO telemetry_maintenance;
-
--- A project's default layout, where it is a saved one: deleted, the project
--- opens in its preset again. The action runs as the table's owner, so no
--- role needs a grant on the column for it.
-ALTER TABLE telemetry.project_settings
-    ADD CONSTRAINT project_settings_session_view_fkey
-    FOREIGN KEY (session_view_id) REFERENCES telemetry.trace_views (id) ON DELETE SET NULL;
 
 
 -- ══════════════════════════════════════════════════════════════════════════════
@@ -465,7 +438,7 @@ CREATE TABLE telemetry.heartbeats (
     name           TEXT        PRIMARY KEY,
     period_seconds INTEGER     NOT NULL,
     beat_at        TIMESTAMPTZ NOT NULL,
-    CONSTRAINT heartbeats_name_check CHECK (name IN ('purges', 'refusals', 'alerts', 'capacity', 'usage', 'foreign', 'evaluations')),
+    CONSTRAINT heartbeats_name_check CHECK (name IN ('purges', 'refusals', 'alerts', 'capacity', 'usage', 'foreign')),
     CONSTRAINT heartbeats_period_check CHECK (period_seconds > 0)
 );
 
@@ -531,18 +504,9 @@ CREATE TABLE telemetry.plain_content (
     nonce       BYTEA       NOT NULL,
     -- The field's sealed length in bytes, counted on `content_held`.
     bytes       INTEGER     NOT NULL,
-    -- Each distinct word of the field, lower-cased, as the first 64 bits of its
-    -- HMAC-SHA-256 under a key derived from the project's content key: what a
-    -- search finds the field by, its words never held plain, nothing matching
-    -- once the key goes.
-    words       BIGINT[]    NOT NULL DEFAULT '{}',
-    -- Each pair of neighbouring words, hashed as its words are: a phrase is
-    -- checked on the rows its words find, so its pairs take no room in their
-    -- index.
-    pairs       BIGINT[]    NOT NULL DEFAULT '{}',
     -- The content key the field is sealed under (`project_settings`), read
-    -- and searched only while it is the project's, and purged by it when the
-    -- switch deletes it, so content kept under a later key is left alone.
+    -- only while it is the project's, and purged by it when the switch
+    -- deletes it, so content kept under a later key is left alone.
     key_id      UUID        NOT NULL,
     PRIMARY KEY (project_id, trace_id, span_id, field),
     CONSTRAINT plain_content_bytes_check CHECK (bytes >= 0)
@@ -552,11 +516,6 @@ CREATE TABLE telemetry.plain_content (
 CREATE INDEX plain_content_received_idx ON telemetry.plain_content (received_at);
 -- A deletion of runs deletes by it.
 CREATE INDEX plain_content_run_idx ON telemetry.plain_content (project_id, run_id);
--- A search finds the fields holding every word it hashed.
-CREATE INDEX plain_content_words_idx ON telemetry.plain_content USING gin (words);
--- An evaluator's newest corrections, read for its prompt's `{{examples}}`.
-CREATE INDEX plain_content_examples_idx ON telemetry.plain_content (project_id, field, received_at DESC)
-    WHERE field = 'telmoni.evaluator.example';
 
 ALTER TABLE telemetry.plain_content ENABLE ROW LEVEL SECURITY;
 ALTER TABLE telemetry.plain_content FORCE ROW LEVEL SECURITY;
@@ -610,290 +569,6 @@ CREATE POLICY maintenance_access ON telemetry.project_prices
 -- Spend reads a window's projects' prices, the alerts' loop among them; the
 -- purges delete a project's.
 GRANT SELECT, DELETE ON telemetry.project_prices TO telemetry_maintenance;
-
--- A project's connections to models on the customer's own keys, which its
--- evaluators judge with: each key sealed under its own data key, wrapped by
--- MODEL_CONNECTION_KEK, never answered back; its last four characters alone
--- shown. One connection a project is its default.
-CREATE TABLE telemetry.model_connections (
-    id                UUID        PRIMARY KEY,
-    project_id        TEXT        NOT NULL,
-    name              TEXT        NOT NULL,
-    provider          TEXT        NOT NULL,
-    base_url          TEXT,
-    region            TEXT        CHECK (region ~ '^[a-z0-9-]{1,32}$'),
-    models            TEXT[]      NOT NULL,
-    is_default        BOOLEAN     NOT NULL DEFAULT false,
-    secret_hint       TEXT        NOT NULL,
-    -- It stores no key, only whom it signs in as: a role or a pool trusting
-    -- its project's issuer, the hint naming which.
-    signs_in          BOOLEAN     NOT NULL DEFAULT false,
-    secret_ciphertext BYTEA       NOT NULL,
-    secret_nonce      BYTEA       NOT NULL,
-    wrapped_dek       BYTEA       NOT NULL,
-    key_version       SMALLINT    NOT NULL,
-    -- When its provider last refused its key (401, 403), and its words: its
-    -- evaluators wait until a save proves it again.
-    refused_at        TIMESTAMPTZ,
-    refused_reason    TEXT,
-    -- When its key last went out with a request, a minute stale at most: read
-    -- beside the audit log, it shows a key used when nobody of the
-    -- customer's was using it.
-    last_used_at      TIMESTAMPTZ,
-    created_by        TEXT        NOT NULL,
-    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT model_connections_name_key UNIQUE (project_id, name),
-    CONSTRAINT model_connections_provider_check CHECK (provider IN (
-        'openai', 'anthropic', 'google_ai_studio', 'vertex_ai', 'azure_openai', 'bedrock',
-        'openai_compatible', 'typesafe', 'system_one_compatible'
-    )),
-    CONSTRAINT model_connections_check CHECK (
-        char_length(name) BETWEEN 1 AND 60 AND cardinality(models) BETWEEN 1 AND 20
-    ),
-    CONSTRAINT model_connections_signs_in_check CHECK (
-        NOT signs_in OR provider IN ('bedrock', 'vertex_ai')
-    )
-);
-
-CREATE UNIQUE INDEX model_connections_one_default
-    ON telemetry.model_connections (project_id) WHERE is_default;
-
-ALTER TABLE telemetry.model_connections ENABLE ROW LEVEL SECURITY;
-ALTER TABLE telemetry.model_connections FORCE ROW LEVEL SECURITY;
-
-CREATE POLICY tenant_isolation ON telemetry.model_connections
-    USING      (project_id = current_setting('app.project_id', true))
-    WITH CHECK (project_id = current_setting('app.project_id', true));
-
-CREATE POLICY maintenance_access ON telemetry.model_connections
-    TO telemetry_maintenance
-    USING      (current_user = 'telemetry_maintenance')
-    WITH CHECK (current_user = 'telemetry_maintenance');
-
--- The evaluation loop opens a project's connections and marks one its
--- provider refuses; the purges, and a project's move to another
--- organization, delete them.
-GRANT SELECT, UPDATE, DELETE ON telemetry.model_connections TO telemetry_maintenance;
-
--- A project's evaluators: a row a version under the evaluator's stable id,
--- each change a new version, each score naming the one that gave it. A
--- prompt one holds its messages and score; a typed one its state and the
--- questions each of its scores answers. Its connection is the project's default where none is named;
--- one deleted leaves the evaluator unable to judge until it names another.
-CREATE TABLE telemetry.evaluators (
-    id            UUID             NOT NULL,
-    version       INTEGER          NOT NULL,
-    project_id    TEXT             NOT NULL,
-    name          TEXT             NOT NULL,
-    kind          TEXT             NOT NULL DEFAULT 'prompt',
-    -- The system message, then the user's and assistant's, as {role, content}.
-    messages      JSONB,
-    -- The score it gives: its name, type, range or categories, each described.
-    score         JSONB,
-    -- A typed one's template of what is judged, and its questions, each
-    -- {name, type, instructions} and its levels or options.
-    state         TEXT,
-    questions     JSONB,
-    reasoning     BOOLEAN          NOT NULL DEFAULT true,
-    -- A prompt one's files, sent as the provider's own parts.
-    media         BOOLEAN          NOT NULL DEFAULT false,
-    connection_id UUID,
-    model         TEXT,
-    temperature   DOUBLE PRECISION,
-    -- The most it spends a week, Monday 00:00 UTC to the next, in US dollars.
-    weekly_limit  DOUBLE PRECISION,
-    created_by    TEXT             NOT NULL,
-    created_at    TIMESTAMPTZ      NOT NULL DEFAULT now(),
-    PRIMARY KEY (project_id, id, version),
-    CONSTRAINT evaluators_kind_check CHECK (kind IN ('prompt', 'typed')),
-    CONSTRAINT evaluators_shape_check CHECK (
-        (kind = 'typed') = (state IS NOT NULL AND questions IS NOT NULL)
-        AND (kind = 'prompt') = (messages IS NOT NULL AND score IS NOT NULL)
-        AND (kind = 'prompt' OR NOT media)
-    ),
-    CONSTRAINT evaluators_check CHECK (
-        version >= 1 AND char_length(name) BETWEEN 1 AND 60
-        AND (temperature IS NULL OR temperature BETWEEN 0 AND 2)
-        AND (weekly_limit IS NULL OR weekly_limit > 0)
-    )
-);
-
-ALTER TABLE telemetry.evaluators ENABLE ROW LEVEL SECURITY;
-ALTER TABLE telemetry.evaluators FORCE ROW LEVEL SECURITY;
-
-CREATE POLICY tenant_isolation ON telemetry.evaluators
-    USING      (project_id = current_setting('app.project_id', true))
-    WITH CHECK (project_id = current_setting('app.project_id', true));
-
-CREATE POLICY maintenance_access ON telemetry.evaluators
-    TO telemetry_maintenance
-    USING      (current_user = 'telemetry_maintenance')
-    WITH CHECK (current_user = 'telemetry_maintenance');
-
--- The evaluation loop reads a project's evaluators; the purges delete them.
-GRANT SELECT, DELETE ON telemetry.evaluators TO telemetry_maintenance;
-
--- What a project's evaluators judge: its runs, its spans of a kind and name,
--- or its sessions once quiet, under the trace list's own filters (a saved
--- view's query), sampled by a hash of the target's id. Several evaluators
--- share one rule; a rule may reach back to targets since a date.
-CREATE TABLE telemetry.evaluation_rules (
-    id              UUID             PRIMARY KEY,
-    project_id      TEXT             NOT NULL,
-    organization_id TEXT             NOT NULL,
-    name            TEXT             NOT NULL,
-    target          TEXT             NOT NULL,
-    -- A span rule's kind, and its name where it names one.
-    span_kind       TEXT,
-    span_name       TEXT,
-    query           JSONB            NOT NULL DEFAULT '{}',
-    sample_rate     DOUBLE PRECISION NOT NULL DEFAULT 1,
-    -- Each variable a JSON Pointer narrows, by its name.
-    pointers        JSONB            NOT NULL DEFAULT '{}',
-    enabled         BOOLEAN          NOT NULL DEFAULT true,
-    backfill_from   TIMESTAMPTZ,
-    -- How far the reach back has looked, newest first, and when it finished.
-    backfill_seen   INTEGER          NOT NULL DEFAULT 0,
-    backfill_done_at TIMESTAMPTZ,
-    created_by      TEXT             NOT NULL,
-    created_at      TIMESTAMPTZ      NOT NULL DEFAULT now(),
-    updated_at      TIMESTAMPTZ      NOT NULL DEFAULT now(),
-    CONSTRAINT evaluation_rules_name_key UNIQUE (project_id, name),
-    CONSTRAINT evaluation_rules_target_check CHECK (target IN ('run', 'span', 'session')),
-    CONSTRAINT evaluation_rules_span_check CHECK (
-        (target = 'span') = (span_kind IS NOT NULL)
-        AND (span_name IS NULL OR target = 'span')
-        AND (span_kind IS NULL OR span_kind IN ('step', 'model_call', 'tool_call', 'span'))
-    ),
-    CONSTRAINT evaluation_rules_check CHECK (
-        char_length(name) BETWEEN 1 AND 60 AND sample_rate > 0 AND sample_rate <= 1
-    )
-);
-
--- The organization's purge deletes by it, and its plan counts by it.
-CREATE INDEX evaluation_rules_organization_idx ON telemetry.evaluation_rules (organization_id);
-
--- The evaluators a rule runs, each by its stable id: its newest version judges.
-CREATE TABLE telemetry.evaluation_rule_evaluators (
-    rule_id      UUID NOT NULL REFERENCES telemetry.evaluation_rules (id) ON DELETE CASCADE,
-    evaluator_id UUID NOT NULL,
-    project_id   TEXT NOT NULL,
-    PRIMARY KEY (rule_id, evaluator_id)
-);
-
-CREATE INDEX evaluation_rule_evaluators_evaluator_idx
-    ON telemetry.evaluation_rule_evaluators (project_id, evaluator_id);
-
-ALTER TABLE telemetry.evaluation_rules ENABLE ROW LEVEL SECURITY;
-ALTER TABLE telemetry.evaluation_rules FORCE ROW LEVEL SECURITY;
-ALTER TABLE telemetry.evaluation_rule_evaluators ENABLE ROW LEVEL SECURITY;
-ALTER TABLE telemetry.evaluation_rule_evaluators FORCE ROW LEVEL SECURITY;
-
--- A write names the organization too, which `organization_read` trusts, as
--- an alert's does.
-CREATE POLICY tenant_isolation ON telemetry.evaluation_rules
-    USING      (project_id = current_setting('app.project_id', true))
-    WITH CHECK (project_id = current_setting('app.project_id', true)
-                AND organization_id = current_setting('app.organization_id', true));
-
--- An organization counts its rules across its projects, and writes none of
--- another project's.
-CREATE POLICY organization_read ON telemetry.evaluation_rules
-    FOR SELECT
-    USING (organization_id = current_setting('app.organization_id', true));
-
-CREATE POLICY maintenance_access ON telemetry.evaluation_rules
-    TO telemetry_maintenance
-    USING      (current_user = 'telemetry_maintenance')
-    WITH CHECK (current_user = 'telemetry_maintenance');
-
-CREATE POLICY tenant_isolation ON telemetry.evaluation_rule_evaluators
-    USING      (project_id = current_setting('app.project_id', true))
-    WITH CHECK (project_id = current_setting('app.project_id', true));
-
-CREATE POLICY maintenance_access ON telemetry.evaluation_rule_evaluators
-    TO telemetry_maintenance
-    USING      (current_user = 'telemetry_maintenance')
-    WITH CHECK (current_user = 'telemetry_maintenance');
-
--- The evaluation loop reads every project's rules and moves each reach back;
--- a transfer moves a project's; the purges delete them.
-GRANT SELECT, DELETE ON telemetry.evaluation_rules TO telemetry_maintenance;
-GRANT UPDATE (organization_id, backfill_seen, backfill_done_at)
-    ON telemetry.evaluation_rules TO telemetry_maintenance;
-GRANT SELECT, DELETE ON telemetry.evaluation_rule_evaluators TO telemetry_maintenance;
-
--- One evaluator's judgement of one target, found by a rule: pending until
--- the loop leases it, delayed while a provider's rate limit or the
--- evaluator's weekly limit holds, then done, its score written, or failed
--- with its reason. The row is also the record of the content it read — the
--- evaluator, the target, the time, the provider — never a chain row each.
-CREATE TABLE telemetry.evaluations (
-    id                UUID             PRIMARY KEY,
-    project_id        TEXT             NOT NULL,
-    -- Whose plan its judgement runs under: moved with its project until it settles.
-    organization_id   TEXT             NOT NULL,
-    rule_id           UUID             REFERENCES telemetry.evaluation_rules (id) ON DELETE SET NULL,
-    evaluator_id      UUID             NOT NULL,
-    evaluator_version INTEGER          NOT NULL,
-    target            TEXT             NOT NULL,
-    -- `run/<id>`, `span/<run>/<span>` or `session/<id>`: one judgement an
-    -- evaluator a target, whichever rule found it.
-    target_key        TEXT             NOT NULL,
-    run_id            UUID,
-    span_id           TEXT,
-    session_id        TEXT,
-    status            TEXT             NOT NULL DEFAULT 'pending',
-    attempts          SMALLINT         NOT NULL DEFAULT 0,
-    due_at            TIMESTAMPTZ      NOT NULL DEFAULT now(),
-    lease_id          UUID,
-    reason            TEXT,
-    provider          TEXT,
-    model             TEXT,
-    read_at           TIMESTAMPTZ,
-    -- A field it read was cut to fit an export, and judged as cut.
-    cut               BOOLEAN          NOT NULL DEFAULT false,
-    score_id          UUID,
-    -- The evaluation's own trace, in the environment `telmoni-evaluator`.
-    trace_run_id      UUID,
-    input_tokens      BIGINT,
-    output_tokens     BIGINT,
-    cost              DOUBLE PRECISION,
-    created_at        TIMESTAMPTZ      NOT NULL DEFAULT now(),
-    settled_at        TIMESTAMPTZ,
-    CONSTRAINT evaluations_target_key UNIQUE (project_id, evaluator_id, target_key),
-    CONSTRAINT evaluations_target_check CHECK (target IN ('run', 'span', 'session')),
-    CONSTRAINT evaluations_status_check CHECK (status IN ('pending', 'delayed', 'done', 'failed')),
-    CONSTRAINT evaluations_settled_check CHECK ((status IN ('done', 'failed')) = (settled_at IS NOT NULL))
-);
-
--- What the loop leases: the longest due first.
-CREATE INDEX evaluations_due_idx ON telemetry.evaluations (due_at) WHERE status IN ('pending', 'delayed');
--- The organization's purge deletes by it.
-CREATE INDEX evaluations_organization_idx ON telemetry.evaluations (organization_id);
--- An evaluator's page lists its newest, and its week's spend sums them.
-CREATE INDEX evaluations_evaluator_idx ON telemetry.evaluations (project_id, evaluator_id, created_at DESC);
--- The rule a cascade sets to none.
-CREATE INDEX evaluations_rule_idx ON telemetry.evaluations (rule_id);
--- The Privacy page lists a project's reads by day.
-CREATE INDEX evaluations_read_idx ON telemetry.evaluations (project_id, read_at)
-    WHERE read_at IS NOT NULL;
-
-ALTER TABLE telemetry.evaluations ENABLE ROW LEVEL SECURITY;
-ALTER TABLE telemetry.evaluations FORCE ROW LEVEL SECURITY;
-
-CREATE POLICY tenant_isolation ON telemetry.evaluations
-    USING      (project_id = current_setting('app.project_id', true))
-    WITH CHECK (project_id = current_setting('app.project_id', true));
-
-CREATE POLICY maintenance_access ON telemetry.evaluations
-    TO telemetry_maintenance
-    USING      (current_user = 'telemetry_maintenance')
-    WITH CHECK (current_user = 'telemetry_maintenance');
-
--- The evaluation loop writes and settles them; the purges and retention delete them.
-GRANT SELECT, INSERT, UPDATE, DELETE ON telemetry.evaluations TO telemetry_maintenance;
 
 -- Another exporter's spans, held until their trace's tree places them in a
 -- run (`foreign.rs`), their content sealed as `plain_content`'s; landed, a

@@ -49,7 +49,7 @@ describe("the go sequences", () => {
     expect(resolveSequence("k", "/acme/web")).toBe("/acme/web/api-keys");
     expect(resolveSequence("t", "/acme/web/members")).toBe("/acme/web/traces");
     expect(resolveSequence("d", "/acme/web")).toBe("/acme/web/dashboards");
-    expect(resolveSequence("e", "/acme/web")).toBe("/acme/web/evaluators");
+    expect(resolveSequence("a", "/acme/web")).toBe("/acme/web/alerts");
     expect(resolveSequence(",", "/acme/web")).toBe("/acme/web/settings");
     expect(resolveSequence("p", "/acme/web")).toBeNull();
     expect(resolveSequence("k", "/acme/members")).toBeNull();
@@ -67,12 +67,12 @@ describe("the go sequences", () => {
 
   // The path names the organization, and wins over the one handed in: that is
   // only for a path that names none.
-  it("goes to the organization's overview from anywhere, the path's first", () => {
-    expect(resolveSequence("O", "/acme/web")).toBe("/acme");
-    expect(resolveSequence("O", "/acme/settings")).toBe("/acme");
-    expect(resolveSequence("O", "/globex/web", "acme")).toBe("/globex");
-    expect(resolveSequence("O", "/settings/account", "acme")).toBe("/acme");
-    expect(resolveSequence("O", "/console", "acme")).toBe("/acme");
+  it("goes to the organization's projects from anywhere, the path's first", () => {
+    expect(resolveSequence("O", "/acme/web")).toBe("/acme/projects");
+    expect(resolveSequence("O", "/acme/settings")).toBe("/acme/projects");
+    expect(resolveSequence("O", "/globex/web", "acme")).toBe("/globex/projects");
+    expect(resolveSequence("O", "/settings/account", "acme")).toBe("/acme/projects");
+    expect(resolveSequence("O", "/console", "acme")).toBe("/acme/projects");
     expect(resolveSequence("O", "/settings/account")).toBeNull();
     expect(resolveSequence("O", "/settings/account", null)).toBeNull();
   });

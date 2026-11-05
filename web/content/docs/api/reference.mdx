@@ -1,15 +1,14 @@
 ---
 title: "API reference"
-description: "The Telmoni API: authentication, rate limits, and the public /v1 routes, its reads and its evaluators' changes."
+description: "The Telmoni API: authentication, rate limits, and the public /v1 routes."
 ---
 
 The Telmoni API is an HTTP interface under `/v1`. Authenticated by a
 [project API key](/docs/api/api-keys), it reads a project as the console does:
-its organization and roster, its traces with their spans and, if asked, their
-content, its totals by the hour or the day, its incidents and its evaluators,
-so the CLI, a notebook or a BI tool can work with them. The routes here need
-the `read` scope, and write nothing but a project's
-[evaluators](#post-v1evaluators), which take the `evaluate` scope beside it. Spans go to a lane of their own,
+its organization, its traces with their spans and, if asked, their
+content, its totals by the hour or the day and its incidents, so the CLI, a
+notebook or a BI tool can work with them. The routes here need the `read`
+scope, and write nothing. Spans go to a lane of their own,
 [`/otlp/v1/traces`](/docs/api/ingest), with a key holding the `ingest` scope, as
 do the two writes under `/v1`: `PUT /v1/media/{sha256}`, where our SDKs keep a
 file a message carried ([Ingest](/docs/api/ingest)), and
@@ -52,8 +51,7 @@ A live key without the `read` scope is refused with `403 Forbidden` and
 
 ## HTTP methods
 
-The read routes accept `GET` and `HEAD`, `/v1/scores` `POST` alone, and an
-evaluator's changes `POST` and `DELETE`. Any other method returns `405 Method Not
+The read routes accept `GET` and `HEAD`, and `/v1/scores` `POST` alone. Any other method returns `405 Method Not
 Allowed` with an `Allow` header and a problem document, except `OPTIONS`, which
 answers `204` with `Allow: GET, HEAD, OPTIONS`.
 
@@ -104,56 +102,6 @@ Retrieves the organization associated with the presented token.
   they have not set one). `owner` itself is `null` if the organization has no
   owner on record.
 
-## `GET /v1/members`
-
-Returns the roster of the project the key was minted on: the organization's
-Owner first, then the project's members by join date, newest first. It is the
-same list the project's **Members** page shows, and never the organization's
-roster, which a project Admin cannot see in the console either.
-
-### Response
-
-`200 OK` `application/json`
-
-```json
-{
-  "members": [
-    {
-      "id": "019a0b8c-3f2e-7d41-9c5a-6e2b1f0d8a47",
-      "member_id": "user_7Hq3kZ2mN8vLp4Xs",
-      "email": "you@example.com",
-      "display_name": "Sam Rivera",
-      "role": "owner",
-      "created_at": "2026-08-28T12:00:00Z",
-      "offer_expires_at": null
-    },
-    {
-      "id": "019a3d52-7b10-7c9e-a4f1-2d8e6b0c9a13",
-      "member_id": "user_2bR9tC5wQ1yJm6Fd",
-      "email": "alex@example.com",
-      "display_name": null,
-      "role": "admin",
-      "created_at": "2026-09-01T09:30:00Z",
-      "offer_expires_at": null
-    }
-  ]
-}
-```
-
-- `id`: Unique identifier of the membership record.
-- `member_id`: The person's user ID, `user_` and 16 characters, minted at
-  their first sign-in whichever way they signed in.
-- `email`: Member's email address.
-- `display_name`: User's display name, or `null`.
-- `role`: The seat's role on the project (`admin` or `member`), or `owner` on
-  the organization Owner's row. An organization Admin's standing on every
-  project comes from the organization, not from a seat, so one appears here
-  only with a seat of their own, under that seat's role.
-- `created_at`: ISO-8601 UTC timestamp of when the member took their seat; on
-  the Owner's row, when the project was created.
-- `offer_expires_at`: UTC timestamp indicating when an open offer to
-  hand the project to this admin expires, or `null` if none is pending.
-
 ## `GET /v1/traces`
 
 A page of the project's traces in the window, the same list the project's
@@ -170,9 +118,7 @@ query, each parameter repeatable where the page lets you pick several values:
   sorts.
 - `limit` and `page`: The page's size and which page, from 1.
 
-An unknown parameter, or a value that does not parse, is a `400`, and so is
-`q`: the page's search of kept content is the console's alone, since it reads
-the content's hashes without filing a read.
+An unknown parameter, or a value that does not parse, is a `400`.
 
 ### Response
 
@@ -252,10 +198,8 @@ content, so it files nothing.
   the project kept none, `null` where it could not be opened just then.
 
 Where a trace's `content` is opened, it carries beside its spans' fields the
-run's [score comments](/docs/monitoring/scores#a-scores-comment) and an
-evaluator's [corrections](/docs/workspace/evaluators#taught-by-people), each
-under a span id of its own that no span's 16 hex digits can be: `score/` and
-the score's id, `example/` and the evaluator's.
+run's [score comments](/docs/monitoring/scores#a-scores-comment), each under a
+span id that no span's 16 hex digits can be: `score/` and the score's id.
 
 ## `GET /v1/metrics`
 
@@ -315,8 +259,8 @@ spans that ended in error, `runs` and `failed_runs` the runs that ended and
 those that failed. `spend` is what the model calls cost in US dollars, each as
 it reported, else its tokens at the project's own price or the price table's,
 priced as it is read ([What a call cost](/docs/api/ingest#what-a-call-cost)),
-and scaled by its run's [sample rate](/docs/api/sdks#sampling), so a run in
-four sent counts four times.
+and scaled by its run's [sample rate](/docs/api/ingest#what-is-dropped-at-the-door),
+so a run a plan kept one in ten of counts ten times.
 `duration_ms` is every span's, `run_duration_ms` the runs' alone. The durations
 are in milliseconds, and a percentile is `null` where none can be read. `truncated` is `true` past 10,000
 points, the oldest left out: ask for a shorter window, or a day at a time.
@@ -363,34 +307,6 @@ incidents whose notices showed that run.
 
 `GET /v1/incidents/{id}` answers one incident in the same shape, or `404`
 for an ID the project does not hold.
-
-## `GET /v1/evaluators`
-
-The project's [evaluators](/docs/workspace/evaluators), each at its newest
-version, by name, as the **Evaluators** page lists them: its `id`, `version`,
-`name`, its prompt's `messages`, its `score`, whether it asks for
-`reasoning`, its `connection_id` and `model` where it names its own,
-`temperature`, `weekly_limit`, `created_by` and `created_at`, and how many
-`versions`; and `content_kept`, whether the project keeps the content an
-evaluator reads. `GET /v1/evaluators/{id}` answers one evaluator's versions,
-its newest first, or `404`.
-
-## `POST /v1/evaluators`
-
-An evaluator made by a key holding both the `read` and the `evaluate` scope,
-as the console makes one: `name`, `messages` (system, user and assistant,
-each a `role` and `content`, whose `{{variables}}` a rule fills), `score`
-(its `name` and `data_type`, a number's range or a category's options, each
-described for the model), `reasoning`, and optionally `connection_id`,
-`model`, `temperature` (0 to 2) and `weekly_limit` in US dollars. Its model
-is asked once for an answer in the score's form, and one that cannot give it
-saves nothing, `400` naming why; so is a project that keeps no content. It
-answers the evaluator at version 1. `POST /v1/evaluators/{id}/versions` saves
-its next version from the same body, and `DELETE /v1/evaluators/{id}` deletes
-it and every version, its rules judging on with the evaluators they still
-name, answering `204`. Each change is filed in the organization's
-[audit log](/docs/workspace/audit-log) as the key's, by its id, never its
-prompt; a key with `read` alone is refused with `403`.
 
 ## `POST /v1/scores`
 

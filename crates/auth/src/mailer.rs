@@ -616,9 +616,8 @@ impl ComposingMailer {
                  Accepting moves it into an organization you own. Its members \
                  come with it and join that organization as members, and so do \
                  its API keys — rotate any key you did not mint yourself. Its \
-                 Slack and webhook connectors stay with {organization}, and its \
-                 model connections are deleted, keys and all: you would connect \
-                 your own. {owner} stays \
+                 Slack and webhook connectors stay with {organization}: you would \
+                 connect your own. {owner} stays \
                  on as an admin of the project, and joins your organization as \
                  a member.\n\n\
                  Accept or decline here:\n{link}\n\n\
@@ -669,10 +668,8 @@ impl ComposingMailer {
                  {organization}: you can go on managing the project's members, \
                  API keys and connectors and reading its audit log, but deleting \
                  it or handing it on is {new_owner}'s to decide now. Its API keys went \
-                 with it, and its connectors and model connections did not — \
-                 the connectors stayed with your organization and were \
-                 disconnected, and the model connections were deleted, keys and \
-                 all. You \
+                 with it, and its connectors did not: they stayed with your \
+                 organization and were disconnected. You \
                  can leave the project from its Members page, or the \
                  organization from its Overview, at any time.\n\n\
                  If you did not offer them the project, write to {contact} right \
@@ -1470,7 +1467,7 @@ mod tests {
     }
 
     /// The project offer says what a handover moves and what it leaves: the
-    /// keys come, to be rotated; the connectors stay, and the model connections go.
+    /// keys come, to be rotated; the connectors stay.
     #[tokio::test]
     async fn the_project_offer_says_what_comes_with_it_and_what_stays_behind() {
         let mail = composed(async |m| {
@@ -1491,11 +1488,8 @@ mod tests {
         assert!(mail.text.contains("Acme"), "{}", mail.text);
         assert!(mail.text.contains("rotate any key"), "{}", mail.text);
         assert!(
-            mail.text.contains("connectors stay with Acme")
-                && mail
-                    .text
-                    .contains("model connections are deleted, keys and all"),
-            "does not say the connectors stay behind and the model connections go: {}",
+            mail.text.contains("connectors stay with Acme"),
+            "does not say the connectors stay behind: {}",
             mail.text
         );
         assert!(

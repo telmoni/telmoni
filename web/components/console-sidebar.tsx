@@ -227,12 +227,9 @@ export function ConsoleSidebar({
               key={group.title}
               className={cn(expanded && i > 0 && "mt-gutter")}
             >
-              {/* The rows come in blocks (`navBlocks`), each a gutter clear of the
-                  one above; a headed one under a 28px heading row, the rows'
-                  height, whose label sits on the icons' left edge, closer to
-                  its rows than to the block before, which is what groups them.
-                  Closed, a rule parts the blocks. The way back heads Settings'
-                  rail as a block of its own, and is all a page not found shows. */}
+              {/* The rows come in blocks (`navBlocks`), each parted from the one
+                  above by a rule. The way back heads Settings' rail as a block
+                  of its own, and is all a page not found shows. */}
               <NavRow
                 item={{ title: returnLabel, url: returnUrl, icon: ArrowLeft, isActive: false }}
                 short={returnShort}
@@ -243,21 +240,10 @@ export function ConsoleSidebar({
               {navBlocks(group.items).map((block, k) => (
                 <div
                   key={k}
-                  className={cn(
-                    (k > 0 || steppedIn) && expanded && "mt-gutter",
-                    k > 0 && "group-has-[[data-console-not-found]]/console:hidden",
-                  )}
+                  className={cn(k > 0 && "group-has-[[data-console-not-found]]/console:hidden")}
                 >
-                  {expanded ? (
-                    block.heading && (
-                      <div className="flex h-7 items-center pl-2 text-xs font-medium text-muted-foreground group-has-[[data-console-not-found]]/console:hidden">
-                        <span className="whitespace-nowrap">{block.heading}</span>
-                      </div>
-                    )
-                  ) : (
-                    (k > 0 || steppedIn) && <div className="my-2 border-t border-sidebar-border" />
-                  )}
-                  {block.items.map((item) => (
+                  {(k > 0 || steppedIn) && <div className="my-2 border-t border-sidebar-border" />}
+                  {block.map((item) => (
                     <NavRow
                       key={item.title}
                       item={item}

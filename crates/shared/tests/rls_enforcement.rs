@@ -678,8 +678,8 @@ async fn a_person_reads_only_their_own_rows_and_a_roster_only_its_people() {
         .await
         .expect("seed code");
         sqlx::query(
-            "INSERT INTO auth.accounts (user_id, analytics_opt_in, deletion_requested_at)
-             VALUES ($1, true, now())",
+            "INSERT INTO auth.accounts (user_id, deletion_requested_at)
+             VALUES ($1, now())",
         )
         .bind(person)
         .execute(&pool)
@@ -725,7 +725,7 @@ async fn a_person_reads_only_their_own_rows_and_a_roster_only_its_people() {
     assert_eq!(
         read(&mut tx, "accounts", &both).await,
         vec![member.clone()],
-        "a person must see their own consent and deletion, and nobody else's"
+        "a person must see their own pending deletion, and nobody else's"
     );
     let denied = sqlx::query("INSERT INTO auth.sessions (user_id) VALUES ($1)")
         .bind(&outsider)
@@ -760,8 +760,8 @@ async fn a_person_reads_only_their_own_rows_and_a_roster_only_its_people() {
     );
     assert!(
         read(&mut tx, "accounts", &both).await.is_empty(),
-        "an organization must never see whether its members consented to analytics \
-         or are deleting their accounts — that is why those facts left identities"
+        "an organization must never see whether its members are deleting their \
+         accounts — that is why the fact left identities"
     );
     tx.rollback().await.expect("rollback");
 

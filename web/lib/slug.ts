@@ -1,7 +1,7 @@
 /**
  * The console's paths, and the slugs that spell them:
  *
- *   /{organization}                   the organization's overview
+ *   /{organization}                   opens the organization's projects
  *   /{organization}/{page}            the organization's own pages
  *   /{organization}/{project}         a project's overview
  *   /{organization}/{project}/{page}  a project's pages

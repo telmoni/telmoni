@@ -1799,10 +1799,6 @@ impl Telemetry for Incidents {
         Ok(())
     }
 
-    async fn drop_model_connections(&self, _: &ProjectId) -> Result<(), TelmoniError> {
-        Ok(())
-    }
-
     async fn act_on_incident(
         &self,
         acting: &Acting,

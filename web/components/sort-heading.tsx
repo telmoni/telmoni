@@ -16,7 +16,6 @@ import { cn } from "@/lib/utils";
 
 // A heading that sorts: the list's URL with this column first, flipped on a
 // second click, and `aria-sort` for the reader who cannot see the chevron.
-// The traces, users and sessions lists share it, each with its own columns.
 // The list stays where it was scrolled to, as it does for every other control
 // of a list, and dims while the sorted one is on its way.
 export function SortHeading<S extends string>({

@@ -3,7 +3,7 @@
 use std::num::{NonZeroU16, NonZeroU32, NonZeroU64, NonZeroUsize};
 
 use telmoni_shared::Redacted;
-use telmoni_shared::config::{env_parse, optional, optional_base_url, require};
+use telmoni_shared::config::{optional, optional_base_url, require};
 
 /// One vendor's OAuth application, as the operator registered it.
 #[derive(Clone, Debug)]
@@ -41,7 +41,7 @@ pub struct Config {
     /// Delivery-loop poll cadence, seconds: the IDLE heartbeat of an empty
     /// queue, not the send rate.
     pub delivery_poll_secs: NonZeroU64,
-    /// Rows leased per batch (`NOTIFICATIONS_DELIVERY_BATCH`, default 200).
+    /// Rows leased per batch.
     pub delivery_batch: NonZeroU32,
     /// Sends in flight at once, across every connection — the real throughput
     /// ceiling. Nothing paces per vendor; `Retry-After` is the only brake.
@@ -55,8 +55,9 @@ pub struct Config {
     pub delivery_backoff_secs: u32,
 }
 
-/// The delivery loop's defaults, each at least one by its type; a zero
-/// here fails the build, since a const's unwrap is evaluated there.
+/// The delivery loop's settings, which no deployment tunes (a test builds a
+/// [`Config`] with its own); each at least one by its type, a zero failing
+/// the build, since a const's unwrap is evaluated there.
 pub mod defaults {
     use std::num::{NonZeroU16, NonZeroU32, NonZeroU64, NonZeroUsize};
 
@@ -65,6 +66,7 @@ pub mod defaults {
     pub const CONCURRENCY: NonZeroUsize = NonZeroUsize::new(64).unwrap();
     pub const DRAIN_ROUNDS: NonZeroU32 = NonZeroU32::new(20).unwrap();
     pub const MAX_ATTEMPTS: NonZeroU16 = NonZeroU16::new(5).unwrap();
+    pub const BACKOFF_SECS: u32 = 30;
 }
 
 impl Config {
@@ -82,21 +84,12 @@ impl Config {
                 .unwrap_or_else(|| "https://cloudkms.googleapis.com".to_owned()),
             metadata_api_base: optional_base_url("METADATA_API_BASE")
                 .unwrap_or_else(|| "http://metadata.google.internal".to_owned()),
-            delivery_poll_secs: env_parse("NOTIFICATIONS_DELIVERY_POLL_SECS", defaults::POLL_SECS)?,
-            delivery_batch: env_parse("NOTIFICATIONS_DELIVERY_BATCH", defaults::BATCH)?,
-            delivery_concurrency: env_parse(
-                "NOTIFICATIONS_DELIVERY_CONCURRENCY",
-                defaults::CONCURRENCY,
-            )?,
-            delivery_drain_rounds: env_parse(
-                "NOTIFICATIONS_DELIVERY_DRAIN_ROUNDS",
-                defaults::DRAIN_ROUNDS,
-            )?,
-            delivery_max_attempts: env_parse(
-                "NOTIFICATIONS_DELIVERY_MAX_ATTEMPTS",
-                defaults::MAX_ATTEMPTS,
-            )?,
-            delivery_backoff_secs: env_parse("NOTIFICATIONS_DELIVERY_BACKOFF_SECS", 30)?,
+            delivery_poll_secs: defaults::POLL_SECS,
+            delivery_batch: defaults::BATCH,
+            delivery_concurrency: defaults::CONCURRENCY,
+            delivery_drain_rounds: defaults::DRAIN_ROUNDS,
+            delivery_max_attempts: defaults::MAX_ATTEMPTS,
+            delivery_backoff_secs: defaults::BACKOFF_SECS,
         };
         if config.slack.is_some() && config.connector_kek.is_none() {
             anyhow::bail!(

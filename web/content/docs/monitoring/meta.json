@@ -3,8 +3,6 @@
   "defaultOpen": true,
   "pages": [
     "traces",
-    "sessions",
-    "users",
     "alerts",
     "objectives",
     "dashboards",

@@ -37,13 +37,3 @@ export function testSpan(over: Partial<TraceSpan> & Pick<TraceSpan, "span_id">):
     ...over,
   };
 }
-
-/** A span a second after the one made before it, so a list of them runs in
- *  the order it is written. */
-export function nextSpan(): (over: Partial<TraceSpan> & Pick<TraceSpan, "span_id">) => TraceSpan {
-  let clock = 0;
-  return (over) => {
-    const at = new Date(Date.UTC(2026, 10, 4, 3, 0, 0) + clock++ * 1000).toISOString();
-    return testSpan({ started_at: at, ended_at: at, received_at: at, ...over });
-  };
-}

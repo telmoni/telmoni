@@ -51,16 +51,6 @@ vi.mock("./settings/account/_email", () => ({
 vi.mock("./settings/account/_password", () => ({
   PasswordReset: () => <div data-testid="password-reset" />,
 }));
-vi.mock("./settings/privacy/_analytics", () => ({
-  AnalyticsPreference: ({ optIn }: { optIn: boolean }) => (
-    <div data-testid="analytics" data-opt-in={String(optIn)} />
-  ),
-}));
-// Whether the deployment has an analytics provider, which decides whether the
-// consent card is drawn at all.
-const analyticsConfigured = vi.hoisted(() => vi.fn(() => true));
-vi.mock("@/lib/analytics", () => ({ analyticsConfigured }));
-
 import type { ActiveSession } from "@/lib/server/data";
 
 import { AccountOnly } from "./_account-only";
@@ -120,29 +110,19 @@ describe("AccountOnly", () => {
     expect(screen.getByTestId("sessions")).toHaveAttribute("data-current", "sess_1");
   });
 
-  it("offers the account's address, password and analytics consent", () => {
-    mount({ authMethod: "password", analyticsOptIn: true });
+  it("offers the account's address and password", () => {
+    mount({ authMethod: "password" });
     expect(screen.getByTestId("change-email")).toHaveAttribute(
       "data-email",
       "ada@example.test",
     );
     expect(screen.getByTestId("password-reset")).toBeInTheDocument();
-    expect(screen.getByTestId("analytics")).toHaveAttribute("data-opt-in", "true");
   });
 
-  it("offers no address or password control to a provider sign-in, and still the consent", () => {
+  it("offers no address or password control to a provider sign-in", () => {
     mount({ authMethod: "GoogleOAuth" });
     expect(screen.queryByTestId("change-email")).toBeNull();
     expect(screen.queryByTestId("password-reset")).toBeNull();
-    expect(screen.getByTestId("analytics")).toHaveAttribute("data-opt-in", "false");
-  });
-
-  // A deployment without a provider sends nothing, so it asks for no consent.
-  it("offers no analytics consent where the deployment has no provider", () => {
-    analyticsConfigured.mockReturnValueOnce(false);
-    mount({ analyticsOptIn: true });
-    expect(screen.queryByTestId("analytics")).toBeNull();
-    expect(screen.queryByRole("heading", { name: /data collection/i })).toBeNull();
   });
 
   it("shows no invitations section when none are waiting", () => {

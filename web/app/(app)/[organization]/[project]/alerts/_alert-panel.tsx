@@ -348,8 +348,8 @@ function AlertPanel({
                 aria-describedby={`${id}-score-hint`}
               />
               <p id={`${id}-score-hint`} className="mt-1.5 text-muted-foreground">
-                Every score of this name the project holds — your code&rsquo;s, its members&rsquo;
-                and its evaluators&rsquo; — a number&rsquo;s value, a yes as 1 and a no as 0.
+                Every score of this name the project holds — your code&rsquo;s and its
+                members&rsquo; — a number&rsquo;s value, a yes as 1 and a no as 0.
               </p>
             </SidePanelRow>
           )}

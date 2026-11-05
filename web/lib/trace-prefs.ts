@@ -1,19 +1,14 @@
 import { z } from "zod";
 
-import { readLayoutChoice, type LayoutChoice } from "@/lib/layout";
 import { PEEK_WIDTH_MIN } from "@/lib/peek";
-import { DEFAULT_SESSION_COLUMNS, orderedSessionColumns, type SessionColumn } from "@/lib/sessions";
 import { DEFAULT_COLUMNS, orderedColumns, type ListName } from "@/lib/traces";
-import type { TraceColumn } from "@/lib/types/enums";
-import { DEFAULT_USER_COLUMNS, orderedUserColumns, type UserColumn } from "@/lib/users";
+import type { TraceColumn } from "@/lib/types/traces";
 
-// What a person chose of the lists' look, kept in their own browser: the
-// columns each list shows, and for every list how tightly the rows sit (set on
-// the General settings page), whether the filters stand beside it and how
-// wide; how wide a trace opened from it stands, and the layout they last
-// chose for a session's page and a trace's. None of it is a list's state — a
-// link a colleague opens shows their own columns — so none of it is in the
-// URL; a saved view carries its columns with it, and applying one sets them.
+// What a person chose of the list's look, kept in their own browser: the
+// columns it shows, how tightly the rows sit (set on the General settings
+// page), whether the filters stand beside it and how wide, and how wide a
+// trace opened from it stands. None of it is a list's state — a link a
+// colleague opens shows their own columns — so none of it is in the URL.
 
 /** How tightly the rows sit. */
 export const DENSITIES = ["comfortable", "compact"] as const;
@@ -21,10 +16,6 @@ export type Density = (typeof DENSITIES)[number];
 
 export type TracePrefs = {
   columns: readonly TraceColumn[];
-  /** The sessions table's columns. */
-  sessionColumns: readonly SessionColumn[];
-  /** The users table's. */
-  userColumns: readonly UserColumn[];
   density: Density;
   /** Whether the filters' sidebar shows. */
   filters: boolean;
@@ -34,21 +25,14 @@ export type TracePrefs = {
   /** How wide, in pixels, the person dragged that panel beside the list;
    *  `null` for its own width. */
   peekWidth: number | null;
-  /** The layout a session's page and a trace's last opened in, with its
-   *  options (`lib/layout.ts`); `null` until one is chosen, when the
-   *  project's default holds. */
-  layout: LayoutChoice | null;
 };
 
 export const DEFAULT_PREFS: TracePrefs = {
   columns: DEFAULT_COLUMNS,
-  sessionColumns: DEFAULT_SESSION_COLUMNS,
-  userColumns: DEFAULT_USER_COLUMNS,
   density: "comfortable",
   filters: true,
   peekFull: false,
   peekWidth: null,
-  layout: null,
 };
 
 /** A dragged width this build keeps: whole pixels, no narrower than a drag
@@ -74,16 +58,11 @@ const Strings = z.array(z.unknown()).transform((v) => v.filter((c): c is string 
  *  hand — falls back to the default rather than being applied blind. */
 const PrefsSchema = z.object({
   columns: Strings.transform((v) => orderedColumns(v)).catch([...DEFAULT_PREFS.columns]),
-  sessionColumns: Strings.transform((v) => orderedSessionColumns(v)).catch([
-    ...DEFAULT_PREFS.sessionColumns,
-  ]),
-  userColumns: Strings.transform((v) => orderedUserColumns(v)).catch([...DEFAULT_PREFS.userColumns]),
   density: z.enum(DENSITIES).catch(DEFAULT_PREFS.density),
   filters: z.boolean().catch(DEFAULT_PREFS.filters),
   peekFull: z.boolean().catch(DEFAULT_PREFS.peekFull),
   // Optional before the transform: a transform alone makes the key required.
   peekWidth: z.unknown().optional().transform((v) => keptWidth(v)),
-  layout: z.unknown().optional().transform((v) => readLayoutChoice(v)),
 });
 
 export function readPrefs(stored: string | null): TracePrefs {
@@ -101,6 +80,4 @@ export function readPrefs(stored: string | null): TracePrefs {
 /** Where each list's columns are kept. */
 export const COLUMNS_PREF = {
   traces: "columns",
-  sessions: "sessionColumns",
-  users: "userColumns",
 } as const satisfies Record<ListName, keyof TracePrefs>;

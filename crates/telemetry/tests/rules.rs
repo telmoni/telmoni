@@ -55,8 +55,6 @@ impl Entitlements for Holds {
             deliveries_per_day: 500,
             entitlement: "pro".into(),
             detail: "This organization's plan holds two alerts.".into(),
-            evaluation_rules: 2,
-            evaluation_rules_detail: "This organization's plan holds two evaluation rules.".into(),
         }))
     }
 }
@@ -813,11 +811,10 @@ async fn a_score_alert_reads_its_scores_and_a_drop_against_the_day_before(pool: 
             categories: Vec::new(),
             range_min: None,
             range_max: None,
-            source: telmoni_shared::ScoreSource::Evaluator,
+            source: telmoni_shared::ScoreSource::Sdk,
             scorer: String::new(),
             scorer_version: String::new(),
             is_deleted: 0,
-            answer: String::new(),
         };
     let today = now - TimeDelta::hours(1);
     let yesterday = now - TimeDelta::hours(30);

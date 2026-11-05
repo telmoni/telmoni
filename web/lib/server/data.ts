@@ -101,67 +101,31 @@ export type {
   Standing,
 } from "./entities/alerts";
 
-export { fetchOrganizationHealth } from "./entities/organization-health";
-export type { HealthIncident, OrganizationHealth } from "./entities/organization-health";
-
 export {
   fetchMedia,
   fetchTrace,
   fetchTraceFacets,
   fetchTraceHistogram,
-  fetchTraceLayouts,
   fetchTraces,
-  fetchTraceViews,
-  fetchSessionViews,
-  fetchUserViews,
   traceDownload,
 } from "./entities/traces";
 export type {
   DownloadFormat,
   Facet,
   Facets,
-  LayoutQuery,
   ListFilters,
   ListQuery,
   Trace,
   TraceAccess,
   TraceDetail,
   TraceHistogram,
-  TraceLayout,
   TraceList,
   TraceQuery,
   TraceSpan,
   TracesAccess,
-  TraceView,
-  SessionView,
-  UserView,
-  ListView,
-  ListViewQuery,
   SpanFields,
 } from "./entities/traces";
 
-export { fetchSessionLayout } from "./entities/session-layout";
-export type { SessionLayoutSetting } from "./entities/session-layout";
-
-export { fetchUserFacets, fetchUsers, userDownload } from "./entities/users";
-export type { UserList, UserQuery, UserRow, UsersAccess } from "./entities/users";
-
-export {
-  fetchSession,
-  fetchSessionFacets,
-  fetchSessions,
-  sessionDownload,
-} from "./entities/sessions";
-export type {
-  PinnedSpan,
-  SessionAccess,
-  SessionDetail,
-  SessionList,
-  SessionQuery,
-  SessionRow,
-  SessionsAccess,
-  SessionTrace,
-} from "./entities/sessions";
 
 export { fetchConnectors, fetchSlackIdentities } from "./entities/connectors";
 export type {

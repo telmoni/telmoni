@@ -1,8 +1,8 @@
 //! A project's privacy posture, `GET /internal/v1/telemetry/privacy`, whose
 //! `retention` the project's Settings reads: what its spans arrived with over
 //! the last [`SENT_DAYS`] by the field inventory's rows, dropped content among
-//! them, what its evaluators read of its content over them, by day, and how
-//! long its spans and the hourly totals that outlive them are kept.
+//! them, and how long its spans and the hourly totals that outlive them are
+//! kept.
 //! Every role on the project `x-project-id` names reads it; its owners and
 //! admins choose its retention, `PUT /internal/v1/telemetry/retention`.
 
@@ -48,16 +48,12 @@ struct Counted {
 pub struct Posture {
     /// [`SENT_DAYS`].
     pub days: u32,
-    /// Where they begin, which the page's list of reads starts from too.
+    /// Where they begin.
     pub since: DateTime<Utc>,
     /// The spans received in them.
     pub spans: u64,
     /// Each inventory row a span arrived with, most spans first.
     pub sent: Vec<Sent>,
-    /// What each evaluator read of the project's content in them, a row a
-    /// day an evaluator a provider, the newest day first: each read the
-    /// evaluation's own row records, never a chain row each.
-    pub evaluator_reads: Vec<EvaluatorReads>,
     /// How long what the spans leave is kept.
     pub retention: Retention,
 }
@@ -69,22 +65,6 @@ pub struct Sent {
     pub attribute: String,
     pub spans: u64,
 }
-
-/// One evaluator's reads of content on one day, sent to one provider.
-#[derive(Debug, Serialize, sqlx::FromRow)]
-pub struct EvaluatorReads {
-    /// The day, in UTC.
-    pub day: chrono::NaiveDate,
-    pub evaluator_id: uuid::Uuid,
-    /// Its newest version's name; none once it is deleted.
-    pub evaluator: Option<String>,
-    /// The provider its model's connection sent the content to.
-    pub provider: Option<String>,
-    pub reads: i64,
-}
-
-/// The most rows of reads the page lists.
-pub const EVALUATOR_READS_MAX: i64 = 500;
 
 /// The windows `telmoni-server rotate` holds for the project.
 #[derive(Debug, Serialize)]
@@ -128,23 +108,6 @@ pub async fn get_privacy(
     let since = Utc::now() - Duration::days(i64::from(SENT_DAYS));
     let mut tx = project_scope(&state.db, project_id).await?;
     let chosen = db::retention_days(&mut tx, project_id).await?;
-    let evaluator_reads: Vec<EvaluatorReads> = sqlx::query_as(
-        "SELECT (e.read_at AT TIME ZONE 'UTC')::date AS day, e.evaluator_id,
-                (SELECT v.name FROM telemetry.evaluators v
-                  WHERE v.project_id = e.project_id AND v.id = e.evaluator_id
-                  ORDER BY v.version DESC LIMIT 1) AS evaluator,
-                e.provider, count(*) AS reads
-           FROM telemetry.evaluations e
-          WHERE e.project_id = $1 AND e.read_at >= $2
-          GROUP BY day, e.evaluator_id, e.project_id, e.provider
-          ORDER BY day DESC, reads DESC
-          LIMIT $3",
-    )
-    .bind(project_id)
-    .bind(since)
-    .bind(EVALUATOR_READS_MAX)
-    .fetch_all(tx.conn())
-    .await?;
     tx.commit().await?;
     let counted: Counted = state
         .store
@@ -175,7 +138,6 @@ pub async fn get_privacy(
         since,
         spans: counted.spans,
         sent,
-        evaluator_reads,
         retention: Retention::of(chosen),
     }))
 }

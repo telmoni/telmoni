@@ -99,7 +99,7 @@ const PARAMS = Promise.resolve({ organization: "acme", project: "my-project" });
 
 beforeEach(() => {
   mockContext = {
-    person: { userId: "user_1", email: "ada@example.test", analyticsOptIn: false },
+    person: { userId: "user_1", email: "ada@example.test" },
     organizations: [
       {
         organizationId: "org_1",
@@ -142,7 +142,6 @@ describe("SettingsPage: the end user's data and its retention", () => {
 
   it("tells anyone how an end user is given their data", async () => {
     await page();
-    expect(screen.getByRole("link", { name: "Users" })).toHaveAttribute("href", "/acme/my-project/users");
     expect(screen.getByRole("link", { name: "Traces" })).toHaveAttribute("href", "/acme/my-project/traces");
   });
 

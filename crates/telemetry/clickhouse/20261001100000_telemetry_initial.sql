@@ -24,9 +24,8 @@ ENGINE = MergeTree
 ORDER BY applied_at;
 
 -- One row per finished span — a run, a step, a model or tool call, or any
--- other span under a run — written once, when it arrives, and never updated
--- but for its run's tags, by a lightweight UPDATE whose patch every read
--- applies, so the table is read without FINAL; a row leaves only with its
+-- other span under a run — written once, when it arrives, and never updated,
+-- so the table is read without FINAL; a row leaves only with its
 -- day's retention or its project's deletion. A span carries its project and nothing
 -- above it: a project moves between organizations without a row rewritten.
 --
@@ -78,8 +77,8 @@ CREATE TABLE IF NOT EXISTS telemetry.spans
     environment              LowCardinality(String),
     release                  LowCardinality(String),
     tags                     Map(LowCardinality(String), String),
-    -- The share of its runs sampled in that the span's run stands for, which
-    -- the SDKs set on every span of a run: NULL where none was set.
+    -- The share of runs the span's run stands for, where a plan's sampling
+    -- kept it past the grant: NULL on every other span.
     sample_rate              Nullable(Float64),
     -- The attributes the field inventory names, and any other whose value is
     -- a number or a boolean; an array is kept as its JSON.
@@ -97,10 +96,7 @@ CREATE TABLE IF NOT EXISTS telemetry.spans
 ENGINE = MergeTree
 PARTITION BY toDate(received_at)
 ORDER BY (project_id, started_at)
--- The two block columns are what a lightweight UPDATE patches rows by.
-SETTINGS non_replicated_deduplication_window = 10000,
-         enable_block_number_column = 1,
-         enable_block_offset_column = 1;
+SETTINGS non_replicated_deduplication_window = 10000;
 
 -- Each hour's totals, by project, agent, kind, model, provider, a tool call's
 -- name, status, the deployment's environment and release, the run's sample
@@ -181,8 +177,8 @@ GROUP BY project_id, hour, agent, kind, model, provider, tool, status, environme
     sample_rate, cost_reported;
 
 -- One row per score: of a run, one of its spans, or a session, from the
--- application or its exporter, from a member on a trace's page, or from an
--- evaluator. Metadata alone: a score's reasoning is content, kept as a span's.
+-- application or its exporter, or from a member on a trace's page. Metadata
+-- alone: a score's comment is content, kept as a span's.
 -- A score given again under its id replaces it, and one taken back is marked
 -- `is_deleted`, so every read is FINAL; no partition, since one id's rows must
 -- meet to replace each other, and the nightly purge deletes by age instead.
@@ -206,15 +202,12 @@ CREATE TABLE IF NOT EXISTS telemetry.scores
     categories     Array(String),
     range_min      Nullable(Float64),
     range_max      Nullable(Float64),
-    -- `sdk`, `member` or `evaluator`; the member's user id or the
-    -- evaluator's id, and the evaluator's version.
+    -- `sdk` or `member`; the member's user id, and the application's
+    -- scorer's version.
     source         LowCardinality(String),
     scorer         String,
     scorer_version String,
     is_deleted     UInt8,
-    -- A typed evaluator's answer as JSON: its probabilities, its confidence
-    -- and the model version that gave it; empty for every other score.
-    answer         String,
     INDEX run_id_idx run_id TYPE bloom_filter GRANULARITY 1,
     INDEX session_id_idx session_id TYPE bloom_filter GRANULARITY 1
 )

@@ -7,7 +7,6 @@ import {
 } from "@/app/(app)/[organization]/[project]/traces/actions";
 import { SavedMenu } from "@/components/traces/saved-menu";
 import { dashboardsHref, sameCharts, type Chart } from "@/lib/dashboards";
-import { ViewKind } from "@/lib/types/enums";
 
 /** A saved dashboard as the page reads it: its charts checked as the URL's are. */
 export type SavedDashboard = { id: string; name: string; charts: Chart[] };
@@ -37,12 +36,7 @@ export function DashboardsMenu({
   /** An owner or an admin, as the server holds. */
   canSave: boolean;
 }) {
-  const input = (name: string, of: readonly Chart[]) => ({
-    name,
-    kind: ViewKind.Dashboard,
-    query: { charts: of },
-    columns: [],
-  });
+  const input = (name: string, of: readonly Chart[]) => ({ name, query: { charts: of } });
   return (
     <SavedMenu
       noun="dashboard"

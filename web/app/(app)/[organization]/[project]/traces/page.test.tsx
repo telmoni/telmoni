@@ -36,15 +36,6 @@ vi.mock("@/app/(app)/[organization]/[project]/traces/actions", () => ({
   deleteTraceViewAction: vi.fn(),
 }));
 
-let mockAgent = "disabled";
-vi.mock("@/lib/server/entities/agent", () => ({
-  agentStatus: async () => mockAgent,
-}));
-
-vi.mock("@/app/(app)/agent-actions", () => ({
-  askTraceListAction: vi.fn(),
-}));
-
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
   usePathname: () => "/acme/web/traces",
@@ -72,7 +63,6 @@ let mockProject: unknown;
 let mockTraces: unknown;
 let mockFacets: unknown;
 let mockHistogram: unknown;
-let mockViews: unknown;
 const fetchProjectBySlug = vi.fn<(slug: string) => Promise<unknown>>(async () => mockProject);
 const fetchTraces = vi.fn<(projectId: string, query: unknown) => Promise<unknown>>(
   async () => mockTraces,
@@ -83,8 +73,6 @@ const fetchTraceFacets = vi.fn<(projectId: string, query: unknown) => Promise<un
 const fetchTraceHistogram = vi.fn<
   (projectId: string, query: unknown, utcOffset: number) => Promise<unknown>
 >(async () => mockHistogram);
-const fetchTraceViews = vi.fn<(projectId: string) => Promise<unknown>>(async () => mockViews);
-let mockContentMode: unknown = { content_mode: "off", offered: ["off", "on"] };
 
 vi.mock("@/lib/server/data", () => ({
   activeOrganization: () => null,
@@ -94,8 +82,6 @@ vi.mock("@/lib/server/data", () => ({
   fetchTraceFacets: (projectId: string, query: unknown) => fetchTraceFacets(projectId, query),
   fetchTraceHistogram: (projectId: string, query: unknown, utcOffset: number) =>
     fetchTraceHistogram(projectId, query, utcOffset),
-  fetchTraceViews: (projectId: string) => fetchTraceViews(projectId),
-  fetchContentMode: async () => mockContentMode,
 }));
 
 import TracesPage from "./page";
@@ -182,7 +168,7 @@ beforeEach(() => {
   window.localStorage.clear();
   mockOffset = undefined;
   mockContext = {
-    person: { userId: "user_1", email: "ada@example.test", analyticsOptIn: false },
+    person: { userId: "user_1", email: "ada@example.test" },
     organizations: [],
     activeOrganizationId: "org_1",
     memberships: [],
@@ -223,63 +209,9 @@ beforeEach(() => {
     kind: "ok",
     histogram: { days: 7, bucket_seconds: 10800, utc_offset: 0, bars: [] },
   };
-  mockViews = {
-    kind: "ok",
-    views: [
-      {
-        id: "0b6f2c1e-6a4f-4d2b-9e3a-5c7d8e9f0a1b",
-        name: "Errors",
-        query: { status: ["error"] },
-        columns: ["started", "status"],
-        created_at: "2026-10-11T03:00:00Z",
-        updated_at: "2026-10-11T03:00:00Z",
-      },
-    ],
-  };
 });
 
 describe("TracesPage", () => {
-  // ⚠ The search is offered where the project keeps content, and sent to the
-  // server with the filters; a project that keeps none has nothing to search.
-  it("offers a search of kept content where the project keeps it, and sends it on", async () => {
-    render(await TracesPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
-    expect(screen.queryByRole("searchbox", { name: "Search kept content" })).toBeNull();
-
-    mockContentMode = { content_mode: "on", offered: ["off", "on"] };
-    try {
-      render(
-        await TracesPage({ params: PARAMS, searchParams: Promise.resolve({ q: "refund" }) }),
-      );
-      expect(screen.getByRole("searchbox", { name: "Search kept content" })).toHaveValue("refund");
-      expect(fetchTraces).toHaveBeenLastCalledWith(PROJECT, { q: "refund", limit: 50 });
-      expect(fetchTraceFacets).toHaveBeenLastCalledWith(PROJECT, { q: "refund" });
-      expect(screen.getByRole("link", { name: "Clear search refund" })).toBeInTheDocument();
-    } finally {
-      mockContentMode = { content_mode: "off", offered: ["off", "on"] };
-    }
-  });
-
-  // Asking the list spends one of the agent's questions, so it is drawn only
-  // where the agent answers.
-  it("offers the list asked in words where the agent is on, and nowhere else", async () => {
-    for (const status of ["disabled", "unavailable"]) {
-      mockAgent = status;
-      const { unmount } = render(
-        await TracesPage({ params: PARAMS, searchParams: Promise.resolve({}) }),
-      );
-      expect(screen.queryByRole("textbox", { name: "Ask the list in words" })).toBeNull();
-      unmount();
-    }
-    mockAgent = "enabled";
-    try {
-      render(await TracesPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
-      expect(screen.getByRole("textbox", { name: "Ask the list in words" })).toBeInTheDocument();
-      expect(screen.queryByRole("link", { name: "Clear all" })).toBeNull();
-    } finally {
-      mockAgent = "disabled";
-    }
-  });
-
   it("lists a page of runs in the default columns, each value a filter, and counts them all", async () => {
     render(await TracesPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByTestId("page-header")).toHaveTextContent("Traces");
@@ -289,7 +221,6 @@ describe("TracesPage", () => {
     expect(fetchTraces).toHaveBeenCalledWith(PROJECT, { limit: 50 });
     expect(fetchTraceFacets).toHaveBeenCalledWith(PROJECT, {});
     expect(fetchTraceHistogram).toHaveBeenCalledWith(PROJECT, {}, 0);
-    expect(fetchTraceViews).toHaveBeenCalledWith(PROJECT);
 
     const table = within(screen.getByRole("table"));
     expect(table.getByRole("link", { name: "5d4f5c68" })).toHaveAttribute(
@@ -347,6 +278,29 @@ describe("TracesPage", () => {
     expect(table.getByRole("link", { name: "7a1b2c3d" }).closest("td")).not.toHaveTextContent(
       "RateLimitError",
     );
+  });
+
+  // Grouped by session, each session heads its own runs and opens them in
+  // order; a run that named none is under a head that says so.
+  it("groups the runs by session, each head opening the session's runs in order", async () => {
+    const TRACE_C = { ...TRACE_A, run_id: "9c8d7e6f-0000-4000-8000-000000000003" };
+    mockTraces = list({ traces: [TRACE_B, TRACE_A, TRACE_C], sort: "session", dir: "asc" });
+    render(
+      await TracesPage({
+        params: PARAMS,
+        searchParams: Promise.resolve({ sort: "session", dir: "asc", days: "30" }),
+      }),
+    );
+    const heads = screen.getAllByRole("rowheader");
+    expect(heads.map((head) => head.textContent)).toEqual([
+      "Session: none1 run on this page",
+      "Session: conv-12 runs on this page",
+    ]);
+    expect(within(heads[1]!).getByRole("link", { name: "conv-1" })).toHaveAttribute(
+      "href",
+      "/acme/web/traces?session=conv-1&sort=started&dir=asc&days=30",
+    );
+    expect(screen.getByRole("combobox", { name: "Group by" })).toHaveTextContent("By session");
   });
 
   // In Chrome a scroll into view moves where the page's first Tab starts, past the skip link.
@@ -565,23 +519,9 @@ describe("TracesPage", () => {
     expect(trace).toHaveAccessibleDescription("The run's id, which opens its trace. Always shown.");
   });
 
-  it("names the project's saved views, and the one the page was opened from", async () => {
-    render(await TracesPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
-    expect(screen.getByRole("button", { name: "Saved views" })).toHaveTextContent("1");
-
-    render(
-      await TracesPage({
-        params: PARAMS,
-        searchParams: Promise.resolve({ status: "error", view: "0b6f2c1e-6a4f-4d2b-9e3a-5c7d8e9f0a1b" }),
-      }),
-    );
-    expect(screen.getByRole("button", { name: "Saved view: Errors" })).toBeInTheDocument();
-  });
-
-  it("keeps the list when the facets, the histogram or the views cannot be read", async () => {
+  it("keeps the list when the facets or the histogram cannot be read", async () => {
     mockFacets = { kind: "unavailable" };
     mockHistogram = { kind: "unavailable" };
-    mockViews = { kind: "unavailable" };
     render(await TracesPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByRole("table")).toBeInTheDocument();
     expect(screen.getByText(/The filters.*could not be read/)).toBeInTheDocument();

@@ -145,9 +145,6 @@ spec:
             type: PathPrefix
             value: /cli
         - path:
-            type: PathPrefix
-            value: /oidc
-        - path:
             type: Exact
             value: /webhooks/v1/slack
         - path:

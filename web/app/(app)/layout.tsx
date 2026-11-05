@@ -55,9 +55,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const jar = await cookies();
   const reader = parseReader(jar.get(LOCAL_TIME_COOKIE)?.value);
 
-  // The listener runs in the browser and reads no environment of its own; it
-  // opens its stream again when the projects the person reads change.
-  const liveHoldMs = env.LIVE_REFRESH_HOLD_SECS * 1_000;
+  // The listener opens its stream again when the projects the person reads change.
   const reading = readingKey(ctx);
 
   // Every route under (app) answers this way while the gate is up, so no page
@@ -82,11 +80,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           {/* The screen promises that an invitation shows up here: the listener
               refreshes it from the person's channel, so it does without a
               reload. */}
-          <RealtimeListener liveHoldMs={liveHoldMs} readingKey={reading} />
+          <RealtimeListener readingKey={reading} />
           <AccountOnly
             email={session.email}
             authMethod={session.authMethod}
-            analyticsOptIn={ctx.person.analyticsOptIn}
             signupsOpen={flagOn(ctx.flags, Flag.Signup)}
             invites={ctx.incomingInvites}
             ownedOrganizations={ownedOrganizationCount(ctx.organizations)}
@@ -108,7 +105,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <LocalTimeReader reader={reader}>
         <StoreProvider {...seed}>
           <OrganizationSync rendered={(ctx && activeOrganization(ctx)?.slug) ?? null} />
-          <RealtimeListener liveHoldMs={liveHoldMs} readingKey={reading} />
+          <RealtimeListener readingKey={reading} />
           <InviteToastNotifier />
           <ConsoleUiProvider>
             <PagePrimaryActionProvider>

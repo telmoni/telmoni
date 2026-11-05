@@ -17,7 +17,7 @@ use clickhouse::{Row, RowOwned, RowRead};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use telmoni_shared::{SortDirection, SpanKind, SpanStatus, TraceSort};
+use telmoni_shared::{SortDirection, SpanStatus, TraceSort};
 
 use crate::contract::TAG_KEY_MAX;
 use crate::store::{Projects, Read, SpanRow, Store, text};
@@ -48,35 +48,6 @@ pub const MAX_PAGE: u32 = 1_000;
 pub const FACET_VALUES_MAX: usize = 50;
 /// The most traces one download holds.
 pub const EXPORT_MAX: u32 = 10_000;
-/// The most runs a download names by id: the rows chosen on one page, which
-/// the console shows a hundred at a time at most.
-pub const RUNS_MAX: usize = 100;
-/// The most span names a layout pins: the intermediate steps a reviewer
-/// checks under each trace, few enough to read without opening it.
-pub const PINNED_MAX: usize = 8;
-/// The most pinned spans one trace shows: a step a loop ran again and again
-/// is read in the trace itself.
-pub const PINNED_PER_RUN: u32 = 32;
-
-/// A window of days and a cap on rows: what a session's page is read by, one
-/// aggregation over the spans of those days and never the whole table.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Window {
-    /// How many days back, by the day each span arrived.
-    pub days: u16,
-    /// The most rows to answer.
-    pub limit: u32,
-}
-
-impl Default for Window {
-    fn default() -> Self {
-        Self {
-            days: DEFAULT_DAYS,
-            limit: DEFAULT_LIMIT,
-        }
-    }
-}
-
 /// What narrows the list, and its count, facets, histogram and download with
 /// it. Each filter admits a run matching any of its values; an empty one
 /// admits every run.
@@ -105,8 +76,6 @@ pub struct TraceFilter {
     /// Prompt names (`gen_ai.prompt.name`) a run carries where any of its
     /// spans does.
     pub prompts: Vec<String>,
-    /// The runs themselves, by id: the rows a download was chosen from.
-    pub runs: Vec<Uuid>,
     /// How many days back, by the day each span arrived.
     pub days: u16,
     /// The window's prices for the spend the rows show and sort by; none prices
@@ -137,7 +106,6 @@ impl Default for TraceFilter {
             releases: Vec::new(),
             tags: Vec::new(),
             prompts: Vec::new(),
-            runs: Vec::new(),
             days: DEFAULT_DAYS,
             prices: crate::prices::PriceBook::default(),
             score: None,
@@ -212,7 +180,7 @@ pub struct TraceRow {
     pub tags: Vec<String>,
 }
 
-/// How many rows the filter admits in the window: runs, sessions or users.
+/// How many runs the filter admits in the window.
 #[derive(Debug, Row, Deserialize)]
 pub(crate) struct CountRow {
     pub(crate) total: u64,
@@ -265,32 +233,8 @@ pub struct FacetRow {
     pub facet: Facet,
     /// The value, as stored.
     pub value: String,
-    /// How many of the list's rows carry it: runs, sessions or users.
+    /// How many of the list's runs carry it.
     pub listed: u64,
-}
-
-/// One span a layout pinned by name, as a session's page shows it under a
-/// trace: enough to read without opening the trace.
-#[derive(Debug, Clone, PartialEq, Eq, Row, Serialize, Deserialize)]
-pub struct PinnedRow {
-    /// The run it belongs to, which the page keys it under.
-    #[serde(deserialize_with = "clickhouse::serde::uuid::deserialize")]
-    pub run_id: Uuid,
-    pub span_id: String,
-    pub parent_span_id: String,
-    #[serde(deserialize_with = "text::deserialize")]
-    pub kind: SpanKind,
-    pub name: String,
-    #[serde(deserialize_with = "clickhouse::serde::chrono::datetime64::micros::deserialize")]
-    pub started_at: DateTime<Utc>,
-    #[serde(deserialize_with = "clickhouse::serde::chrono::datetime64::micros::deserialize")]
-    pub ended_at: DateTime<Utc>,
-    #[serde(deserialize_with = "text::deserialize")]
-    pub status: SpanStatus,
-    pub error_type: String,
-    pub model: String,
-    pub input_tokens: u64,
-    pub output_tokens: u64,
 }
 
 /// One bar of the histogram as the read answers it: the runs that started in
@@ -377,10 +321,8 @@ macro_rules! admits {
     (tool) => {
         "(empty({tools:Array(String)}) OR hasAny(tools, {tools:Array(String)}))"
     };
-    // An evaluation's own run is left out unless a filter names its environment.
     (environment) => {
-        "((empty({environments:Array(String)}) \
-           AND NOT has(environments, {evaluator_environment:String})) \
+        "(empty({environments:Array(String)}) \
          OR hasAny(environments, {environments:Array(String)}))"
     };
     (release) => {
@@ -447,15 +389,13 @@ macro_rules! run_sums {
     };
 }
 
-/// The project's spans in the window, of the runs the filter's ids name, if
-/// it names any: what every read sums.
+/// The project's spans in the window: what every read sums.
 macro_rules! window {
     () => {
         concat!(
             "FROM telemetry.spans ",
             "WHERE project_id IN {projects:Array(String)} ",
             "AND received_at >= now64(6) - toIntervalDay({days:UInt16}) ",
-            "AND (empty({runs:Array(UUID)}) OR has({runs:Array(UUID)}, run_id)) ",
             // A run carrying a score of that name, within its bounds, on itself or a span.
             "AND ({score:String} = '' OR run_id IN (SELECT run_id FROM telemetry.scores FINAL ",
             "WHERE project_id IN {projects:Array(String)} AND name = {score:String} ",
@@ -498,56 +438,8 @@ macro_rules! runs {
     };
 }
 
-/// Every run in the window, a row each, with what the sessions and users
-/// lists sum of it and whether the filter admits it (`admitted`), its matches
-/// counted rather than kept as the arrays `runs!` shows: some seven times
-/// less memory a run, so a long window's runs fit a read.
-macro_rules! run_rows {
-    () => {
-        concat!(
-            "SELECT run_id, anyIf(user_id, user_id != '') AS run_user_id, ",
-            "anyIf(session_id, session_id != '') AS run_session_id, ",
-            "min(started_at) AS first_started_at, max(ended_at) AS last_ended_at, ",
-            "countIf(kind = 'step') AS steps, countIf(status = 'error') AS errors, ",
-            "sumIf(input_tokens, kind = 'model_call') AS input_total, ",
-            "sumIf(output_tokens, kind = 'model_call') AS output_total, ",
-            "sumIf(",
-            $crate::spend::spent_of!(),
-            ", kind = 'model_call') AS run_spent, ",
-            // The run's own span's rate, else any of its spans', since every one
-            // names it: a run not yet ended from an SDK that sets it on the run alone is whole.
-            "ifNull(anyIf(sample_rate, kind = 'run'), ifNull(any(sample_rate), 1)) AS run_rate, ",
-            "arraySort(groupUniqArrayArray(arrayMap((k, v) -> concat(k, ':', v), ",
-            "mapKeys(tags), mapValues(tags)))) AS run_tag_pairs, ",
-            "toUInt8((empty({agents:Array(String)}) OR has({agents:Array(String)}, any(agent))) ",
-            "AND (empty({users:Array(String)}) OR has({users:Array(String)}, run_user_id)) ",
-            "AND (empty({sessions:Array(String)}) OR has({sessions:Array(String)}, run_session_id)) ",
-            "AND (empty({statuses:Array(String)}) OR has({statuses:Array(String)}, ",
-            $crate::traces::run_status!(),
-            ")) ",
-            "AND (empty({models:Array(String)}) ",
-            "OR countIf(kind = 'model_call' AND has({models:Array(String)}, model)) > 0) ",
-            "AND (empty({tools:Array(String)}) ",
-            "OR countIf(kind = 'tool_call' AND has({tools:Array(String)}, name)) > 0) ",
-            "AND ((empty({environments:Array(String)}) ",
-            "AND countIf(environment = {evaluator_environment:String}) = 0) ",
-            "OR countIf(has({environments:Array(String)}, environment)) > 0) ",
-            "AND (empty({releases:Array(String)}) ",
-            "OR countIf(has({releases:Array(String)}, release)) > 0) ",
-            "AND (empty({tags:Array(String)}) OR countIf(hasAny(arrayMap((k, v) -> ",
-            "concat(k, ':', v), mapKeys(tags), mapValues(tags)), {tags:Array(String)})) > 0) ",
-            "AND (empty({prompts:Array(String)}) ",
-            "OR countIf(mapContains(attributes, 'gen_ai.prompt.name') ",
-            "AND has({prompts:Array(String)}, attributes['gen_ai.prompt.name'])) > 0)) AS admitted ",
-            $crate::traces::window!(),
-            "GROUP BY run_id"
-        )
-    };
-}
-
 pub(crate) use admits;
 pub(crate) use run_carries;
-pub(crate) use run_rows;
 pub(crate) use run_status;
 pub(crate) use window;
 
@@ -592,8 +484,6 @@ macro_rules! by_tag {
         )
     };
 }
-
-pub(crate) use by_tag;
 
 /// The list's SQL for one sort: a literal per column and direction.
 const fn list_sql(sort: TraceSort, direction: SortDirection) -> &'static str {
@@ -660,8 +550,8 @@ const HISTOGRAM_SQL: &str = concat!(
 );
 
 /// A list's facets: each value of each facet, and how many of the list's
-/// rows (`$count`: runs, or the sessions or users `$holds` keeps) carry it
-/// among the runs every OTHER filter admits — so a value beside a ticked one
+/// rows (`$count`, of those `$holds` keeps) carry it among the runs every
+/// OTHER filter admits — so a value beside a ticked one
 /// still counts what ticking it would add. Every run is summed once, its
 /// matches kept as flags, then spread to a row per value it carries; the
 /// ticked values first, so none past the first fifty is lost, then the most
@@ -730,8 +620,6 @@ macro_rules! facets_sql {
     };
 }
 
-pub(crate) use facets_sql;
-
 /// The trace list's facets, each counting the runs that carry a value.
 const FACETS_SQL: &str = facets_sql!("count()", "");
 
@@ -755,26 +643,6 @@ const SPANS_SQL: &str = "SELECT project_id, received_at, units, run_id, agent, t
      ORDER BY started_at, ended_at DESC, span_id \
      LIMIT {limit:UInt32}";
 
-/// The spans a layout pinned by name under the runs a session's page lists,
-/// in the order they started within each run, up to [`PINNED_PER_RUN`] a
-/// run; of two that started together, the one that ended later first, as a
-/// trace's spans are read.
-const PINNED_SQL: &str = "SELECT run_id, span_id, parent_span_id, kind, name, started_at, \
-     ended_at, status, error_type, model, input_tokens, output_tokens \
-     FROM telemetry.spans \
-     WHERE project_id IN {projects:Array(String)} \
-     AND received_at >= now64(6) - toIntervalDay({days:UInt16}) \
-     AND has({runs:Array(UUID)}, run_id) AND has({names:Array(String)}, name) \
-     ORDER BY run_id, started_at, ended_at DESC, span_id \
-     LIMIT {per_run:UInt32} BY run_id";
-
-/// Each run's own span, one a run: what a session's conversation is read from.
-const RUN_SPANS_SQL: &str = "SELECT span_id FROM telemetry.spans \
-     WHERE project_id IN {projects:Array(String)} \
-     AND received_at >= now64(6) - toIntervalDay({days:UInt16}) \
-     AND has({runs:Array(UUID)}, run_id) AND kind = 'run' \
-     LIMIT 1 BY run_id";
-
 /// `read` with the filter's every value bound: each read binds them all,
 /// since each names them all.
 pub(crate) fn filtered(read: Read, filter: &TraceFilter) -> Read {
@@ -788,14 +656,9 @@ pub(crate) fn filtered(read: Read, filter: &TraceFilter) -> Read {
         .param("models", &filter.models)
         .param("tools", &filter.tools)
         .param("environments", &filter.environments)
-        .param(
-            "evaluator_environment",
-            crate::contract::EVALUATOR_ENVIRONMENT,
-        )
         .param("releases", &filter.releases)
         .param("tags", &filter.tags)
         .param("prompts", &filter.prompts)
-        .param("runs", &filter.runs)
         .param(
             "score",
             filter.score.as_ref().map_or("", |s| s.name.as_str()),
@@ -818,8 +681,7 @@ pub(crate) fn filtered(read: Read, filter: &TraceFilter) -> Read {
         )
 }
 
-/// One list over a window's runs — the traces, the sessions or the users —
-/// by what it lists: its rows, its sorts, and the SQL of its three reads.
+/// One list over a window's runs, by what it lists: its rows, its sorts, and the SQL of its three reads.
 pub(crate) trait Listing {
     type Row: RowOwned + RowRead + serde::de::DeserializeOwned;
     type Sort: Copy + std::str::FromStr + std::fmt::Display + 'static;
@@ -1031,48 +893,6 @@ const SCORE_MEANS_SQL: &str = concat!(
     ")) GROUP BY at_ms ORDER BY at_ms"
 );
 
-/// The spans of a kind, and a name where given, in the runs the filter
-/// admits over its days: what a span rule's evaluations would judge, counted
-/// with their tokens' mean.
-const SPANS_IN_RUNS_SQL: &str = concat!(
-    "SELECT uniqExact(run_id, span_id) AS total, ",
-    "toUInt64(ifNotFinite(avg(input_tokens + output_tokens), 0)) AS tokens ",
-    "FROM telemetry.spans ",
-    "WHERE project_id IN {projects:Array(String)} ",
-    // A day more than the runs' window: an admitted run's spans may land before it.
-    "AND received_at >= now64(6) - toIntervalDay({days:UInt16} + 1) ",
-    "AND kind = {span_kind:String} AND ({span_name:String} = '' OR name = {span_name:String}) ",
-    "AND run_id IN (SELECT run_id FROM (",
-    runs!(),
-    "))"
-);
-
-/// How many spans `SPANS_IN_RUNS_SQL` finds, and their tokens' mean.
-#[derive(Debug, Row, Deserialize)]
-pub struct SpansCounted {
-    pub total: u64,
-    pub tokens: u64,
-}
-
-/// `SPANS_IN_RUNS_SQL` read.
-///
-/// # Errors
-///
-/// ClickHouse did not answer.
-pub async fn spans_in_runs(
-    store: &Store,
-    projects: &Projects,
-    filter: &TraceFilter,
-    kind: &str,
-    name: &str,
-) -> clickhouse::error::Result<SpansCounted> {
-    filtered(store.read(projects, SPANS_IN_RUNS_SQL), filter)
-        .param("span_kind", kind)
-        .param("span_name", name)
-        .fetch_one()
-        .await
-}
-
 /// One bar's mean of the narrowing score.
 #[derive(Debug, Row, Deserialize)]
 pub struct ScoreMeanRow {
@@ -1180,56 +1000,6 @@ pub fn bars(
     drawn
 }
 
-/// The spans named by `names` under the runs `runs` names, in `projects` and
-/// within `days`: what a session's page shows under each trace while it is
-/// shut. Nothing for no names, and nothing for no runs.
-///
-/// # Errors
-///
-/// ClickHouse did not answer, or refused the read.
-pub async fn pinned(
-    store: &Store,
-    projects: &Projects,
-    runs: &[Uuid],
-    names: &[String],
-    days: u16,
-) -> clickhouse::error::Result<Vec<PinnedRow>> {
-    if runs.is_empty() || names.is_empty() {
-        return Ok(Vec::new());
-    }
-    store
-        .read(projects, PINNED_SQL)
-        .param("days", days)
-        .param("runs", runs)
-        .param("names", names)
-        .param("per_run", PINNED_PER_RUN)
-        .fetch_all()
-        .await
-}
-
-/// The span each of `runs` keeps as its own, within `days`: where its input
-/// and output are, the run's turn of a conversation. Nothing for no runs.
-///
-/// # Errors
-///
-/// ClickHouse did not answer, or refused the read.
-pub async fn run_spans(
-    store: &Store,
-    projects: &Projects,
-    runs: &[Uuid],
-    days: u16,
-) -> clickhouse::error::Result<Vec<String>> {
-    if runs.is_empty() {
-        return Ok(Vec::new());
-    }
-    store
-        .read(projects, RUN_SPANS_SQL)
-        .param("days", days)
-        .param("runs", runs)
-        .fetch_all()
-        .await
-}
-
 /// The spans of run `run_id` in `projects` in the order they started, up to
 /// `limit`, through the one past `units` units; none for a run not theirs.
 ///
@@ -1249,50 +1019,6 @@ pub async fn spans(
         .param("limit", limit)
         .param("units_max", units)
         .fetch_all()
-        .await
-}
-
-/// A run's tags as its own span carries them, how many spans it has, and the
-/// most tags any of them would carry once `removed` are taken off and the
-/// `added` keys set: what a change to its tags is checked against.
-const RUN_TAGS_SQL: &str = "SELECT anyIf(tags, kind = 'run') AS run_tags, count() AS spans, \
-     max(length(arrayDistinct(arrayConcat( \
-         arrayFilter(k -> NOT has({removed:Array(String)}, k), mapKeys(tags)), \
-         {added:Array(String)})))) AS most \
-     FROM telemetry.spans \
-     WHERE project_id IN {projects:Array(String)} AND run_id = {run:UUID}";
-
-/// What [`run_tags`] reads of a run.
-#[derive(Debug, Clone, Row, Deserialize)]
-pub struct RunTags {
-    /// The tags its own span carries; none where that span has not landed.
-    /// Named apart from the column, which the read's other sum reads.
-    pub run_tags: Vec<(String, String)>,
-    /// How many spans it has: none for a run the project does not hold.
-    pub spans: u64,
-    /// The most tags one of its spans would carry after the change.
-    pub most: u64,
-}
-
-/// Run `run_id`'s tags in `projects`, as [`RunTags`] reads them, with the
-/// change of `added` keys and `removed` ones weighed.
-///
-/// # Errors
-///
-/// ClickHouse did not answer, or refused the read.
-pub async fn run_tags(
-    store: &Store,
-    projects: &Projects,
-    run_id: Uuid,
-    added: &[&str],
-    removed: &[String],
-) -> clickhouse::error::Result<RunTags> {
-    store
-        .read(projects, RUN_TAGS_SQL)
-        .param("run", run_id)
-        .param("added", added)
-        .param("removed", removed)
-        .fetch_one()
         .await
 }
 
@@ -1316,7 +1042,7 @@ mod tests {
     use crate::store::PROJECTS_PARAM;
 
     /// Every filter's parameter, which every read but a trace's spans binds.
-    const FILTER_PARAMS: [&str; 12] = [
+    const FILTER_PARAMS: [&str; 11] = [
         "{days:UInt16}",
         "{agents:Array(String)}",
         "{users:Array(String)}",
@@ -1328,7 +1054,6 @@ mod tests {
         "{releases:Array(String)}",
         "{tags:Array(String)}",
         "{prompts:Array(String)}",
-        "{runs:Array(UUID)}",
     ];
 
     /// Every sort is one literal that names its projects, carries no
@@ -1418,8 +1143,8 @@ mod tests {
     }
 
     /// Every facet is spread to its tuple and ranked by its own filter, in
-    /// the facets read, under the one spelling of a run's status the list,
-    /// the sessions' and users' rows and the facets share.
+    /// the facets read, under the one spelling of a run's status the list and
+    /// the facets share.
     #[test]
     fn every_facet_is_counted_and_ranked_and_a_runs_status_is_spelled_once() {
         for facet in Facet::all() {
@@ -1435,7 +1160,6 @@ mod tests {
         }
         let status = run_status!();
         assert!(list_sql(TraceSort::Started, SortDirection::Desc).contains(status));
-        assert!(run_rows!().contains(status));
         assert!(FACETS_SQL.contains(status));
         assert!(FACETS_SQL.contains("AS misses"));
     }
@@ -1447,22 +1171,6 @@ mod tests {
         let sql = list_sql(TraceSort::Started, SortDirection::Desc);
         assert!(sql.contains("anyIf(error_type, kind = 'run') AS run_error_type"));
         assert!(sql.contains("run_error_type AS error_type"));
-    }
-
-    /// The pinned spans are read under the projects, the window, the runs
-    /// listed and the names pinned, a run's capped.
-    #[test]
-    fn the_pinned_spans_bind_the_runs_and_the_names() {
-        assert!(PINNED_SQL.contains(PROJECTS_PARAM));
-        for param in [
-            "{days:UInt16}",
-            "{runs:Array(UUID)}",
-            "{names:Array(String)}",
-            "{per_run:UInt32} BY run_id",
-        ] {
-            assert!(PINNED_SQL.contains(param), "lacks {param}");
-        }
-        assert!(!PINNED_SQL.to_ascii_lowercase().contains(" settings "));
     }
 
     /// The count, the histogram and the facets read the same window under
@@ -1497,7 +1205,7 @@ mod tests {
     fn the_default_filter_is_a_week_of_every_run() {
         let filter = TraceFilter::default();
         assert_eq!(filter.days, DEFAULT_DAYS);
-        assert!(filter.agents.is_empty() && filter.statuses.is_empty() && filter.runs.is_empty());
+        assert!(filter.agents.is_empty() && filter.statuses.is_empty());
     }
 
     /// Every window the list reads is drawn in enough bars to see a pattern

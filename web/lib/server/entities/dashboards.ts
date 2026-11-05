@@ -1,7 +1,7 @@
 import { cache } from "react";
 import { z } from "zod";
 
-import { MetricsGroup, ViewKind } from "@/lib/types/enums";
+import { MetricsGroup } from "@/lib/types/enums";
 
 import { DashboardViewListSchema, readLane, type DashboardView } from "./traces";
 
@@ -69,7 +69,7 @@ export const fetchDashboards = cache(async (projectId: string): Promise<Dashboar
   const read = await readLane(
     "fetchDashboards",
     projectId,
-    `/views?kind=${ViewKind.Dashboard}`,
+    "/views",
     DashboardViewListSchema,
   );
   return read.kind === "ok" ? { kind: "ok", dashboards: read.value.views } : read;

@@ -96,7 +96,7 @@ export default async function DashboardsPage({
     <>
       <PageHeader
         title="Dashboards"
-        info="A dashboard's charts over the window, by the UTC day or, for a day, the hour: spend, tokens, runs, latency and time to first token from the hourly totals and, for time to first token, the spans; spend split by a model, an agent, a provider, an environment or a release from the totals, or by a tag, a user or a session from the spans the plan keeps, the ten that spent most each and the rest as one. Spend is priced as it is read, the project's own prices first, and counts the evaluators' calls. Owners and admins save a dashboard for everyone on the project."
+        info="A dashboard's charts over the window, by the UTC day or, for a day, the hour: spend, tokens, runs, latency and time to first token from the hourly totals and, for time to first token, the spans; spend split by a model, an agent, a provider, an environment or a release from the totals, or by a tag, a user or a session from the spans the plan keeps, the ten that spent most each and the rest as one. Spend is priced as it is read, the project's own prices first. Owners and admins save a dashboard for everyone on the project."
         action={
           <div className="flex flex-wrap items-center gap-gutter">
             <DashboardsMenu

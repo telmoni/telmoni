@@ -17,23 +17,21 @@ use axum::{
     response::{IntoResponse, Response},
     routing::get,
 };
-use chrono::{DateTime, Utc};
 use serde::Serialize;
-use uuid::Uuid;
 
 use telmoni_shared::Email;
 use telmoni_shared::acting::ActingKey;
-use telmoni_shared::db::tenant_session::{maintenance_scope, project_scope};
+use telmoni_shared::db::tenant_session::maintenance_scope;
 use telmoni_shared::extract::Json;
 use telmoni_shared::middleware::api_key::{ApiKeyGate, refuse_as_problem, require_api_key};
 use telmoni_shared::middleware::problem;
 use telmoni_shared::openapi::{Answer, Method, NO_READ_SCOPE, Route};
 use telmoni_shared::slug::Slug;
 use telmoni_shared::types::{API_TOKEN_PREFIX, ApiKeyScope, CONNECTION_BYTES};
-use telmoni_shared::{AuthError, Flag, OrganizationId, Role, TelmoniError, TenantError, UserId};
+use telmoni_shared::{AuthError, Flag, OrganizationId, TelmoniError, TenantError};
 
 use crate::AppState;
-use crate::db::{AuthLane, members, organizations};
+use crate::db::{AuthLane, organizations};
 
 /// One `/v1` lane this service serves: what it is, and which handler answers.
 pub struct V1Lane {
@@ -48,20 +46,17 @@ pub struct V1Lane {
 pub enum V1Op {
     /// [`get_organization`]
     Organization,
-    /// [`list_members`]
-    Members,
 }
 
 /// Every lane this service serves under `/v1`.
-pub const V1_LANES: &[V1Lane] = &[
-    V1Lane {
-        op: V1Op::Organization,
-        route: Route {
-            method: Method::Get,
-            bearer: true,
-            path: "/v1/organization",
-            summary: "Who this key is",
-            description: "The organization the key belongs to — its id, \
+pub const V1_LANES: &[V1Lane] = &[V1Lane {
+    op: V1Op::Organization,
+    route: Route {
+        method: Method::Get,
+        bearer: true,
+        path: "/v1/organization",
+        summary: "Who this key is",
+        description: "The organization the key belongs to — its id, \
                           its slug, its name and its owner's address and name. \
                           The slug is what the console's URLs name it by: set \
                           from the name it was created under, when that reads \
@@ -69,39 +64,16 @@ pub const V1_LANES: &[V1Lane] = &[
                           Settings; the id never moves. A key is minted on \
                           one project of one organization, so this answers \
                           for the caller's organization and for no other.",
-            params: &[],
-            answers: &[
-                Answer {
-                    status: 200,
-                    description: "The organization.",
-                },
-                NO_READ_SCOPE,
-            ],
-        },
+        params: &[],
+        answers: &[
+            Answer {
+                status: 200,
+                description: "The organization.",
+            },
+            NO_READ_SCOPE,
+        ],
     },
-    V1Lane {
-        op: V1Op::Members,
-        route: Route {
-            method: Method::Get,
-            bearer: true,
-            path: "/v1/members",
-            summary: "Who is on the project",
-            description: "Everyone on the project the key was minted on, the \
-                          owner first, with the role each holds. The same list \
-                          the console's project roster shows, so a key reads \
-                          no more than the project admin who minted it could; \
-                          the organization's roster is the console's alone.",
-            params: &[],
-            answers: &[
-                Answer {
-                    status: 200,
-                    description: "The members: the owner, then the project's seats.",
-                },
-                NO_READ_SCOPE,
-            ],
-        },
-    },
-];
+}];
 
 /// What a lane answers to a method it does not take, and what `OPTIONS` is
 /// told: every lane here is a read.
@@ -128,7 +100,6 @@ pub fn router(state: Arc<AppState>, reads: Router) -> Router {
             path,
             match lane.op {
                 V1Op::Organization => get(get_organization),
-                V1Op::Members => get(list_members),
             },
         )
     };
@@ -304,57 +275,4 @@ pub struct V1Organization {
 pub struct V1Owner {
     pub email: Email,
     pub display_name: Option<String>,
-}
-
-/// `/v1/members`' answer.
-#[derive(Debug, Serialize)]
-pub struct V1Members {
-    pub members: Vec<V1Member>,
-}
-
-/// One row of `/v1/members`, as `api/reference.mdx` publishes it: a copy of
-/// the console's roster row, so a field the console gains is not published.
-#[derive(Debug, Serialize)]
-pub struct V1Member {
-    pub id: Uuid,
-    pub member_id: UserId,
-    pub email: Email,
-    pub display_name: Option<String>,
-    pub role: Role,
-    pub created_at: DateTime<Utc>,
-    pub offer_expires_at: Option<DateTime<Utc>>,
-}
-
-impl From<members::Member> for V1Member {
-    fn from(row: members::Member) -> Self {
-        Self {
-            id: row.id,
-            member_id: row.member_id,
-            email: row.email,
-            display_name: row.display_name,
-            role: row.role,
-            created_at: row.created_at,
-            offer_expires_at: row.offer_expires_at,
-        }
-    }
-}
-
-/// `GET /v1/members` — the roster of the PROJECT the key was minted on,
-/// with each role. ⚠ Never the organization's: a project admin may mint a
-/// key, and the console refuses that seat the organization's roster, so a key
-/// that listed it would read past its minter. Read under the owning
-/// organization as the console's roster page is — the owner's row and every
-/// address are the organization's to show, and a project-only scope would
-/// join them against nothing.
-pub async fn list_members(
-    State(state): State<Arc<AppState>>,
-    key: ActingKey,
-) -> Result<impl IntoResponse, TelmoniError> {
-    let tx = project_scope(&state.db, &key.project_id).await?;
-    let mut tx = tx.bind_organization(&key.organization_id).await?;
-    let rows = members::list_for_project(&mut tx, &key.project_id).await?;
-    tx.commit().await?;
-    Ok(Json(V1Members {
-        members: rows.into_iter().map(V1Member::from).collect(),
-    }))
 }

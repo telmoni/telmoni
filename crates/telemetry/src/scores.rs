@@ -1,10 +1,10 @@
 //! Scores: of a run, one of its spans or a session, each a name and a value,
 //! kept in `telemetry.scores` beside the spans. They come from the
 //! application's own code, as OpenTelemetry's `gen_ai.evaluation.result`
-//! event on the span it scores; from a member on a trace's page
-//! ([`crate::handler::scores`]); or from an evaluator. Metadata alone: a
-//! score's comment, a member's or an evaluator's reasoning, is content, kept
-//! only where its project keeps content ([`crate::content::keep_comment`]).
+//! event on the span it scores, or `POST /v1/scores`; or from a member on a
+//! trace's page ([`crate::handler::scores`]). Metadata alone: a score's
+//! comment is content, kept only where its project keeps content
+//! ([`crate::content::keep_comment`]).
 
 use chrono::{DateTime, Utc};
 use clickhouse::Row;
@@ -80,12 +80,10 @@ pub struct ScoreRow {
     pub range_max: Option<f64>,
     #[serde(with = "text")]
     pub source: ScoreSource,
-    /// The member's user id or the evaluator's id; empty for the application's.
+    /// The member's user id; empty for the application's.
     pub scorer: String,
     pub scorer_version: String,
     pub is_deleted: u8,
-    /// A typed evaluator's answer as JSON; empty for every other score.
-    pub answer: String,
 }
 
 /// What a score says, before it names what it scores.
@@ -260,35 +258,6 @@ pub fn api_score_id(project_id: &ProjectId, id: Uuid) -> Uuid {
 pub fn version_of(given: Option<&str>) -> Option<String> {
     let version = given.unwrap_or_default().trim();
     (version.chars().count() <= VERSION_MAX).then(|| version.to_owned())
-}
-
-/// An evaluator's score's id: one an evaluator a target, so a version that
-/// judges it again replaces the last.
-#[must_use]
-pub fn evaluator_score_id(project_id: &ProjectId, target: &TargetKey, evaluator: Uuid) -> Uuid {
-    Uuid::new_v5(
-        &NAMESPACE,
-        format!("evaluator/{project_id}/{}/{evaluator}", target.key()).as_bytes(),
-    )
-}
-
-/// A typed evaluator's score of `target` answering `question`, one a
-/// question, so each stands as its last answer gave it.
-#[must_use]
-pub fn typed_score_id(
-    project_id: &ProjectId,
-    target: &TargetKey,
-    evaluator: Uuid,
-    question: &str,
-) -> Uuid {
-    Uuid::new_v5(
-        &NAMESPACE,
-        format!(
-            "evaluator/{project_id}/{}/{evaluator}/{question}",
-            target.key()
-        )
-        .as_bytes(),
-    )
 }
 
 /// What a score is of, by its ids.
@@ -473,17 +442,6 @@ const RUN_SUMMARIES_SQL: &str = "SELECT run_id, name, any(data_type) AS data_typ
         AND target = 'run'
       GROUP BY run_id, name ORDER BY name";
 
-/// A session's scores, its runs' own and its own, a row a name; each column
-/// read by the table's name, since the nil `run_id` would shadow it.
-const SESSION_SUMMARY_SQL: &str = "SELECT toUUID('00000000-0000-0000-0000-000000000000') AS run_id,
-            name, any(data_type) AS data_type, avg(value) AS mean, count() AS n,
-            arraySort(groupUniqArrayArray(categories)) AS categories
-       FROM telemetry.scores AS s FINAL
-      WHERE s.project_id IN {projects:Array(String)}
-        AND ((has({runs:Array(UUID)}, s.run_id) AND s.target = 'run')
-          OR (s.target = 'session' AND s.session_id = {session:String}))
-      GROUP BY name ORDER BY name";
-
 #[derive(Row, Deserialize)]
 struct SummaryRow {
     #[serde(with = "clickhouse::serde::uuid")]
@@ -496,7 +454,7 @@ struct SummaryRow {
     categories: Vec<String>,
 }
 
-/// What a list or a session's head shows of one score name: its mean, but
+/// What a list shows of one score name: its mean, but
 /// a category's, how many, and a category's values.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Summary {
@@ -545,26 +503,6 @@ pub async fn of_runs(
     Ok(by_run)
 }
 
-/// A session's scores, its runs' own and its own, summed by name.
-///
-/// # Errors
-///
-/// ClickHouse did not answer, or refused the read.
-pub async fn of_session(
-    store: &crate::store::Store,
-    projects: &crate::store::Projects,
-    session: &str,
-    runs: &[Uuid],
-) -> clickhouse::error::Result<Vec<Summary>> {
-    let rows: Vec<SummaryRow> = store
-        .read(projects, SESSION_SUMMARY_SQL)
-        .param("runs", runs)
-        .param("session", session)
-        .fetch_all()
-        .await?;
-    Ok(rows.into_iter().map(Summary::from).collect())
-}
-
 /// A run's scores, and its spans' and its session's, newest first, each
 /// once as given last; those taken back left out.
 pub const RUN_SQL: &str = "SELECT * FROM telemetry.scores FINAL
@@ -573,18 +511,6 @@ pub const RUN_SQL: &str = "SELECT * FROM telemetry.scores FINAL
             AND session_id = {session:String}))
      ORDER BY received_at DESC
      LIMIT 1000";
-
-/// The project's scores, newest first, a page at a time: those of `name`, or
-/// every name where it is empty. By offset, not by time: a batch of scores
-/// shares one `received_at`, which a time's cursor would split.
-pub const PROJECT_SQL: &str = "SELECT * FROM telemetry.scores FINAL
-     WHERE project_id IN {projects:Array(String)} AND is_deleted = 0
-       AND ({name:String} = '' OR name = {name:String})
-     ORDER BY received_at DESC, score_id
-     LIMIT {limit:UInt32} OFFSET {offset:UInt64}";
-
-/// How many scores the project's listing answers at once.
-pub const PROJECT_PAGE: u32 = 100;
 
 #[cfg(test)]
 mod tests {

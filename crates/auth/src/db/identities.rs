@@ -2,8 +2,8 @@
 //! about them (written only with values the provider handed this service at a
 //! sign-in's code exchange, never from a request body; a refresh asks the
 //! provider nothing), plus the few facts that are theirs and no
-//! organization's: analytics consent, the organization a sign-in opens them
-//! in, and a pending deletion.
+//! organization's: the organization a sign-in opens them in, and a pending
+//! deletion.
 
 use chrono::{DateTime, Utc};
 use telmoni_shared::Email;
@@ -62,7 +62,6 @@ pub struct Person {
     pub email_verified: bool,
     /// Already sanitised by the writer.
     pub display_name: Option<String>,
-    pub analytics_opt_in: bool,
     /// The organization of the seat they chose to open in, if they chose one
     /// and still hold it — whatever its state: `/me` decides whether it still
     /// counts.
@@ -167,7 +166,6 @@ pub async fn get<B: IdentityRead>(
 ) -> sqlx::Result<Option<Person>> {
     sqlx::query_as(
         "SELECT i.email, i.email_verified, i.display_name,
-                COALESCE(a.analytics_opt_in, false) AS analytics_opt_in,
                 m.organization_id AS default_organization_id,
                 a.deletion_requested_at
            FROM auth.identities i
@@ -227,31 +225,6 @@ pub async fn set_email(
     .execute(tx.conn())
     .await?;
     Ok(())
-}
-
-/// Record whether this person wants to be counted in product analytics.
-/// `false` when there is no such person, or they are on their way out.
-pub async fn set_analytics_opt_in(
-    tx: &mut Scoped<'_, tenant_session::Person>,
-    user_id: &UserId,
-    opt_in: bool,
-) -> sqlx::Result<bool> {
-    // Selected from the identity so a person nobody recorded writes nothing
-    // (rather than failing the foreign key); the conflict arm refuses a
-    // person who is leaving.
-    let done = sqlx::query(
-        "INSERT INTO auth.accounts
-             (user_id, analytics_opt_in, shard_key)
-         SELECT i.user_id, $2, i.shard_key FROM auth.identities i WHERE i.user_id = $1
-         ON CONFLICT (user_id) DO UPDATE
-            SET analytics_opt_in = excluded.analytics_opt_in, updated_at = now()
-          WHERE auth.accounts.deletion_requested_at IS NULL",
-    )
-    .bind(user_id)
-    .bind(opt_in)
-    .execute(tx.conn())
-    .await?;
-    Ok(done.rows_affected() == 1)
 }
 
 /// Make `organization_id` the organization a sign-in opens this person in, and

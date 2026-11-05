@@ -304,7 +304,7 @@ pub fn sample(batch: &mut Batch, detail: &str, storage: &UserIdStorage) {
     #[expect(clippy::cast_precision_loss, reason = "a sampling rate, ten at most")]
     let rate = 1.0 / SAMPLE_ONE_IN as f64;
     for row in &mut batch.rows {
-        row.sample_rate = Some(row.sample_rate.unwrap_or(1.0) * rate);
+        row.sample_rate = Some(rate);
     }
     let kept: std::collections::HashSet<&str> =
         batch.rows.iter().map(|row| row.span_id.as_str()).collect();

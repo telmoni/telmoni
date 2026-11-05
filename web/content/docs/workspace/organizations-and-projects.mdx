@@ -27,16 +27,16 @@ URL follows from it (see [Name and URL](#name-and-url)). Nothing is asked
 first: you can change both in **Settings** whenever you like.
 
 The organization starts with no projects. The console opens on its
-**Overview** (`/{organization}`), its welcome;
-[create the first project](#creating-a-project) with **New project** there, on
-the **Projects** page or from the switcher. API keys and connectors belong to a project, so there is little
+**Projects** page (`/{organization}/projects`);
+[create the first project](#creating-a-project) with **New project** there or
+from the switcher. API keys and connectors belong to a project, so there is little
 else to do until one exists.
 
-A sign-in opens the Overview of your
+A sign-in opens the Projects page of your
 [default organization](/docs/settings/account#default-organization), or returns
 you to the page that sent you to sign in. Within a session, opening the
-console (`/console`) returns to the Overview of the organization you were last
-in.
+console (`/console`) returns to the Projects page of the organization you were
+last in.
 
 You can belong to multiple organizations at once: ones you own, including any
 you [create](#creating-an-organization), and ones you have been invited to.
@@ -67,13 +67,10 @@ changed only in its Settings; a project's follows its name (see [Name and
 URL](#name-and-url)). On these pages,
 `{organization}` and `{project}` stand for those two slugs.
 
-- **An organization's overview** is `/{organization}`, titled **Welcome** and
-  naming the organization you are working in, with a row of first actions:
-  **New project** and **Invite a member** to its Owner and Admins, **Send a
-  first trace** and **Read the docs** to everyone. Under it are the projects
-  you can open, by name, and **Leave organization** stands at the foot for
-  everyone but the Owner. Its projects are in the switcher too, and on the
-  **Projects** page for its Owner and Admins.
+- **An organization opens on its projects**: `/{organization}` opens
+  `/{organization}/projects`, the projects you can open, by name, with **New
+  project** for its Owner and Admins and **Leave organization** at the foot
+  for everyone but the Owner. Its projects are in the switcher too.
 - **Organization pages** sit beside its projects, at words no project goes by:
   `/{organization}/projects`, `/{organization}/members`,
   `/{organization}/audit-log`, and `/{organization}/settings`, with
@@ -82,19 +79,13 @@ URL](#name-and-url)). On these pages,
   the project's [overview](#a-projects-overview), titled by the project's name,
   its cards summing the project up for anyone on it, with
   [`/traces`](/docs/monitoring/traces) — every run
-  of the project's agents, and a page for each —
-  [`/sessions`](/docs/monitoring/sessions) — its runs grouped by
-  session, and a page for each — [`/users`](/docs/monitoring/users) — by
-  the user they served — [`/alerts`](/docs/monitoring/alerts) — its alerts and
+  of the project's agents, grouped by session or user where asked, and a page
+  for each — [`/alerts`](/docs/monitoring/alerts) — its alerts and
   their incidents — [`/dashboards`](/docs/monitoring/dashboards) — its spend,
   tokens, runs, latency and time to first token over a window, spend split
   by a model, an agent, a tag, a user or a session, and the dashboards saved
-  for everyone on the project — [`/scores`](/docs/monitoring/scores) — every
-  score of its traces, spans and sessions — `/evaluators`, `/rules` — what
-  its evaluators judge — and `/api-keys`,
-  [`/models`](/docs/workspace/model-connections) — the keys its evaluators
-  judge with — `/connectors`, `/members`,
-  `/audit-log`, and `/settings` under it — its content mode, how long its
+  for everyone on the project — `/objectives` — and `/api-keys`, `/connectors`,
+  `/members`, `/audit-log`, and `/settings` under it — its content mode, how long its
   data is kept, and an end user's data given or erased.
 - **Your settings** live under `/settings`: `/settings/general`,
   `/settings/account`, `/settings/notifications`, `/settings/accessibility`,
@@ -182,20 +173,16 @@ Windows and Linux):
   **Billing** page, **Plans** or **Manage billing**.
 - **Next and previous (`j`, `k`), open (`o`)**: With a trace open over the
   [Traces](/docs/monitoring/traces#a-trace) list, open the next row's trace or
-  the previous one's; on a [session's page](/docs/monitoring/sessions#a-session),
-  stand on the next trace or the previous one, and `o` opens it or shuts it.
-  After `g`, `k` is still API keys and `o` the Overview.
+  the previous one's. After `g`, `k` is still API keys and `o` a project's Overview.
 - **Navigation sequences (`g` followed by a key)**: every row of the sidebar
   you are in has one, and the sheet (`?`) lists the rows of that sidebar. On a
   project's pages:
   - `g` `o`: Overview
-  - `g` `t`: Traces, `g` `s`: Sessions, `g` `u`: Users, `g` `a`: Alerts,
-    `g` `d`: Dashboards
-  - `g` `r`: Scores, `g` `e`: Evaluators, `g` `b`: Rules, `g` `v`: Objectives
-  - `g` `k`: API keys, `g` `i`: Models, `g` `c`: Connectors, `g` `m`: Members, `g` `l`: Audit log, `g` `n`: Notifications
+  - `g` `t`: Traces, `g` `a`: Alerts, `g` `d`: Dashboards, `g` `v`: Objectives
+  - `g` `k`: API keys, `g` `c`: Connectors, `g` `m`: Members, `g` `l`: Audit log, `g` `n`: Notifications
   - `g` `,`: Settings, as `⌘,` opens preferences on a Mac
 
-  On an organization's pages: `g` `o` Overview, `g` `p` Projects, `g` `m`
+  On an organization's pages: `g` `p` Projects, `g` `m`
   Members, `g` `l` Audit log, `g` `n` Notifications, `g` `,` Settings, and on the hosted service
   `g` `b` Billing. On your account's pages: `g` `,` Settings, `g` `a`
   Accessibility, `g` `p` Privacy. A row that is not on the sidebar you are in
@@ -204,7 +191,7 @@ Windows and Linux):
   own. Two sequences work from anywhere in the console:
   - `g` `n`: Notifications — a project's on its pages, an organization's on
     its own, and yours on your account's
-  - `g` `O` (shift): The organization's overview
+  - `g` `O` (shift): The organization's projects
 - **Keyboard shortcuts cheat sheet (`?`, `Shift` `/` on a US keyboard)**: Opens the full shortcuts sheet.
   Letter-key shortcuts can be turned off on the
   [Accessibility](/docs/settings/accessibility) page; the sheet then lists the
@@ -241,10 +228,9 @@ holds what it shows. Anyone on the project reads every card:
 ### Creating a project
 
 An organization Owner or Admin can create a new project from the organization's
-Overview, its **Projects** page (`/{organization}/projects`) or the switcher's
-project menu:
+**Projects** page (`/{organization}/projects`) or the switcher's project menu:
 
-1. Select **New project** on the Overview or the Projects page, or **New project** in the
+1. Select **New project** on the Projects page, or **New project** in the
    switcher's project menu. A panel opens over the page, as a trace opens
    over its list at full size: it names the organization the project lands
    in, the one you are in, and asks for a name and its
@@ -373,12 +359,6 @@ An organization Owner can hand a project to one of the project's Admins:
      the move commits, with their delivery history and the project's activity
      feed, and a removal that fails moves nothing. The console agent removes
      what it holds about the project in the old organization.
-   - **Model connections do not follow either**: their keys are the old
-     organization's, so they are deleted with the move, and the project's
-     evaluators judge again once the new organization connects a model. A
-     role or a pool the old organization set to trust the project trusts it no
-     more, since its tokens name the organization it is in
-     ([Model connections](/docs/workspace/model-connections#sign-in-without-a-key)).
    - **Telemetry and content move with it**: every span, and the
      [content](#a-projects-content-mode) the project keeps, which still opens
      and which [erasing an end user](/docs/workspace/data-deletion) still
@@ -491,7 +471,7 @@ self-hosted instance) goes the same way.
 ## Leaving an organization or project
 
 - **Leaving an organization**: Anyone but the Owner can leave from the
-  organization's **Overview** page (`/{organization}`), with **Leave
+  organization's **Projects** page (`/{organization}/projects`), with **Leave
   organization**. Leaving removes you from the organization and from every
   project in it.
 - **Leaving a project**: Your own row of the project's **Members** page

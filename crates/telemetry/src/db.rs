@@ -1,5 +1,5 @@
-//! The telemetry module's Postgres: each project's settings, its saved views
-//! of the trace list and layouts of a session, and the content it keeps.
+//! The telemetry module's Postgres: each project's settings, its saved
+//! dashboards, and the content it keeps.
 
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
@@ -8,7 +8,7 @@ use telmoni_shared::db::project_move;
 use telmoni_shared::db::tenant_session::{
     HasProject, Lane, Maintenance, MaintenanceLane, Organization, ProjectAndOrganization, Scoped,
 };
-use telmoni_shared::{ContentMode, OrganizationId, ProjectId, ViewKind};
+use telmoni_shared::{ContentMode, OrganizationId, ProjectId};
 
 /// This module's cross-tenant lane: the one declaration, so a sibling's lane
 /// is unnameable here. See `tenant_session::Lane`.
@@ -196,28 +196,6 @@ pub async fn purge_organization(
         .execute(tx.conn())
         .await?
         .rows_affected();
-    let connections =
-        sqlx::query("DELETE FROM telemetry.model_connections WHERE project_id = ANY($1)")
-            .bind(&projects)
-            .execute(tx.conn())
-            .await?
-            .rows_affected();
-    let evaluators = sqlx::query("DELETE FROM telemetry.evaluators WHERE project_id = ANY($1)")
-        .bind(&projects)
-        .execute(tx.conn())
-        .await?
-        .rows_affected();
-    let evaluations = sqlx::query("DELETE FROM telemetry.evaluations WHERE project_id = ANY($1)")
-        .bind(&projects)
-        .execute(tx.conn())
-        .await?
-        .rows_affected();
-    let evaluation_rules =
-        sqlx::query("DELETE FROM telemetry.evaluation_rules WHERE project_id = ANY($1)")
-            .bind(&projects)
-            .execute(tx.conn())
-            .await?
-            .rows_affected();
     let content = purge_project_content(tx, &projects).await?;
     let held = sqlx::query("DELETE FROM telemetry.content_held WHERE organization_id = $1")
         .bind(organization_id)
@@ -229,17 +207,7 @@ pub async fn purge_organization(
         .execute(tx.conn())
         .await?
         .rows_affected();
-    Ok(rules
-        + mutes
-        + views
-        + prices
-        + connections
-        + evaluators
-        + evaluation_rules
-        + evaluations
-        + content
-        + held
-        + settings)
+    Ok(rules + mutes + views + prices + content + held + settings)
 }
 
 /// How long a purge waits for any lock: one left queued for a project's lock
@@ -287,215 +255,107 @@ pub async fn purge_project(
         .execute(tx.conn())
         .await?
         .rows_affected();
-    let connections = sqlx::query("DELETE FROM telemetry.model_connections WHERE project_id = $1")
-        .bind(project_id)
-        .execute(tx.conn())
-        .await?
-        .rows_affected();
-    let evaluators = sqlx::query("DELETE FROM telemetry.evaluators WHERE project_id = $1")
-        .bind(project_id)
-        .execute(tx.conn())
-        .await?
-        .rows_affected();
-    let evaluations = sqlx::query("DELETE FROM telemetry.evaluations WHERE project_id = $1")
-        .bind(project_id)
-        .execute(tx.conn())
-        .await?
-        .rows_affected();
-    let evaluation_rules =
-        sqlx::query("DELETE FROM telemetry.evaluation_rules WHERE project_id = $1")
-            .bind(project_id)
-            .execute(tx.conn())
-            .await?
-            .rows_affected();
     let content = purge_project_content(tx, std::slice::from_ref(project_id)).await?;
     let settings = sqlx::query("DELETE FROM telemetry.project_settings WHERE project_id = $1")
         .bind(project_id)
         .execute(tx.conn())
         .await?
         .rows_affected();
-    Ok(rules
-        + mutes
-        + views
-        + prices
-        + connections
-        + evaluators
-        + evaluation_rules
-        + evaluations
-        + content
-        + settings)
+    Ok(rules + mutes + views + prices + content + settings)
 }
 
-/// A saved view as its row keeps it: a view of the trace list, or a layout
-/// of a session's page and a trace's (`kind`). Its query is the JSON the
-/// lane checked when it was written; its columns, `TraceColumn`'s words.
+/// A saved dashboard as its row keeps it: its query is the JSON the lane
+/// checked when it was written, its charts.
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct ViewRow {
     pub id: Uuid,
-    pub kind: ViewKind,
     pub name: String,
     pub query: serde_json::Value,
-    pub columns: Vec<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
 
 /// The columns a [`ViewRow`] is read from, in its order.
-const VIEW_COLUMNS: &str = "id, kind, name, query, columns, created_at, updated_at";
+const VIEW_COLUMNS: &str = "id, name, query, created_at, updated_at";
 
-/// What saving a view writes.
+/// What saving a dashboard writes.
 #[derive(Debug, Clone, Copy)]
 pub struct ViewWrite<'a> {
     pub name: &'a str,
     pub query: &'a serde_json::Value,
-    pub columns: &'a [String],
 }
 
-/// The project's saved views of one kind, by name.
+/// The project's saved dashboards, by name.
 pub async fn views<B: HasProject>(
     tx: &mut Scoped<'_, B>,
     project_id: &ProjectId,
-    kind: ViewKind,
 ) -> sqlx::Result<Vec<ViewRow>> {
     sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT {VIEW_COLUMNS}
            FROM telemetry.trace_views
-          WHERE project_id = $1 AND kind = $2
+          WHERE project_id = $1
           ORDER BY lower(name), id"
     )))
     .bind(project_id)
-    .bind(kind)
     .fetch_all(tx.conn())
     .await
 }
 
-/// How many views of one kind the project keeps.
+/// How many dashboards the project keeps.
 pub async fn view_count<B: HasProject>(
     tx: &mut Scoped<'_, B>,
     project_id: &ProjectId,
-    kind: ViewKind,
 ) -> sqlx::Result<i64> {
-    sqlx::query_scalar(
-        "SELECT count(*) FROM telemetry.trace_views WHERE project_id = $1 AND kind = $2",
-    )
-    .bind(project_id)
-    .bind(kind)
-    .fetch_one(tx.conn())
-    .await
+    sqlx::query_scalar("SELECT count(*) FROM telemetry.trace_views WHERE project_id = $1")
+        .bind(project_id)
+        .fetch_one(tx.conn())
+        .await
 }
 
-/// A new view of the project. Its name taken already by one of its kind, in
-/// any case, is the unique index's refusal, `trace_views_project_name_idx`.
+/// A new dashboard of the project. Its name taken already, in any case, is
+/// the unique index's refusal, `trace_views_project_name_idx`.
 pub async fn insert_view(
     tx: &mut Scoped<'_, ProjectAndOrganization>,
     project_id: &ProjectId,
     id: Uuid,
-    kind: ViewKind,
     view: ViewWrite<'_>,
 ) -> sqlx::Result<ViewRow> {
     sqlx::query_as(sqlx::AssertSqlSafe(format!(
-        "INSERT INTO telemetry.trace_views (id, project_id, kind, name, query, columns)
-         VALUES ($1, $2, $3, $4, $5, $6)
+        "INSERT INTO telemetry.trace_views (id, project_id, name, query)
+         VALUES ($1, $2, $3, $4)
          RETURNING {VIEW_COLUMNS}"
     )))
     .bind(id)
     .bind(project_id)
-    .bind(kind)
     .bind(view.name)
     .bind(view.query)
-    .bind(view.columns)
     .fetch_one(tx.conn())
     .await
 }
 
-/// One of the project's views of `kind`, written over, or `None` where it
-/// has no view of that kind by that id: a view never changes its kind.
+/// One of the project's dashboards, written over, or `None` where it has none
+/// by that id.
 pub async fn update_view<B: HasProject>(
     tx: &mut Scoped<'_, B>,
     project_id: &ProjectId,
     id: Uuid,
-    kind: ViewKind,
     view: ViewWrite<'_>,
 ) -> sqlx::Result<Option<ViewRow>> {
     sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "UPDATE telemetry.trace_views
-            SET name = $4, query = $5, columns = $6, updated_at = now()
-          WHERE project_id = $1 AND id = $2 AND kind = $3
+            SET name = $3, query = $4, updated_at = now()
+          WHERE project_id = $1 AND id = $2
          RETURNING {VIEW_COLUMNS}"
     )))
     .bind(project_id)
     .bind(id)
-    .bind(kind)
     .bind(view.name)
     .bind(view.query)
-    .bind(view.columns)
     .fetch_optional(tx.conn())
     .await
 }
 
-/// Whether the project keeps a layout by that id, held (`FOR KEY SHARE`)
-/// until the transaction ends: a delete of the layout then waits for the
-/// settings row to name it, the order its own `SET NULL` takes the two in,
-/// so neither waits on the other in a circle.
-pub async fn layout_exists<B: HasProject>(
-    tx: &mut Scoped<'_, B>,
-    project_id: &ProjectId,
-    id: Uuid,
-) -> sqlx::Result<bool> {
-    sqlx::query_scalar::<_, i32>(
-        "SELECT 1 FROM telemetry.trace_views
-          WHERE project_id = $1 AND id = $2 AND kind = $3
-            FOR KEY SHARE",
-    )
-    .bind(project_id)
-    .bind(id)
-    .bind(ViewKind::Layout)
-    .fetch_optional(tx.conn())
-    .await
-    .map(|found| found.is_some())
-}
-
-/// The saved layout a project's sessions and traces open in, while it names
-/// one; `None` for the console's own default, and where the project has no
-/// row.
-pub async fn session_layout<B: HasProject>(
-    tx: &mut Scoped<'_, B>,
-    project_id: &ProjectId,
-) -> sqlx::Result<Option<Uuid>> {
-    let row: Option<Option<Uuid>> = sqlx::query_scalar(
-        "SELECT session_view_id FROM telemetry.project_settings WHERE project_id = $1",
-    )
-    .bind(project_id)
-    .fetch_optional(tx.conn())
-    .await?;
-    Ok(row.flatten())
-}
-
-/// A project's layout, set: its row made where it has none, and filed under
-/// `organization_id`, as [`set_content_mode`] files it.
-pub async fn set_session_layout(
-    tx: &mut Scoped<'_, ProjectAndOrganization>,
-    project_id: &ProjectId,
-    organization_id: &OrganizationId,
-    view_id: Option<Uuid>,
-) -> sqlx::Result<()> {
-    sqlx::query(
-        "INSERT INTO telemetry.project_settings
-             (project_id, organization_id, session_view_id)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (project_id) DO UPDATE
-            SET organization_id = EXCLUDED.organization_id,
-                session_view_id = EXCLUDED.session_view_id",
-    )
-    .bind(project_id)
-    .bind(organization_id)
-    .bind(view_id)
-    .execute(tx.conn())
-    .await?;
-    Ok(())
-}
-
-/// One of the project's views, removed. Answers whether there was one.
+/// One of the project's dashboards, removed. Answers whether there was one.
 pub async fn delete_view<B: HasProject>(
     tx: &mut Scoped<'_, B>,
     project_id: &ProjectId,
@@ -512,7 +372,7 @@ pub async fn delete_view<B: HasProject>(
     )
 }
 
-/// A project's settings row, its alerts and its evaluations, handed to the
+/// A project's settings row and its alerts, handed to the
 /// organization that now holds the project, counted against that one's plan
 /// from then on. Answers whether there was a settings row.
 pub async fn move_project(
@@ -535,20 +395,6 @@ pub async fn move_project(
         .bind(organization_id)
         .execute(tx.conn())
         .await?;
-    sqlx::query("UPDATE telemetry.evaluation_rules SET organization_id = $2 WHERE project_id = $1")
-        .bind(project_id)
-        .bind(organization_id)
-        .execute(tx.conn())
-        .await?;
-    // Only the rows still to judge: the lease alone reads it, and history is unbounded.
-    sqlx::query(
-        "UPDATE telemetry.evaluations SET organization_id = $2
-          WHERE project_id = $1 AND status IN ('pending', 'delayed')",
-    )
-    .bind(project_id)
-    .bind(organization_id)
-    .execute(tx.conn())
-    .await?;
     // The content's bytes follow it to the organization that now holds it,
     // its settings row locked first, as `delete_content` locks it.
     sqlx::query("SELECT 1 FROM telemetry.project_settings WHERE project_id = $1 FOR UPDATE")
@@ -586,21 +432,6 @@ pub async fn move_project(
     .await?
     .rows_affected()
         > 0)
-}
-
-/// A project's model connections deleted as it leaves its organization, as
-/// a connector's grant is: answers how many.
-pub async fn drop_model_connections(
-    tx: &mut Scoped<'_, Maintenance<TelemetryLane>>,
-    project_id: &ProjectId,
-) -> sqlx::Result<u64> {
-    Ok(
-        sqlx::query("DELETE FROM telemetry.model_connections WHERE project_id = $1")
-            .bind(project_id)
-            .execute(tx.conn())
-            .await?
-            .rows_affected(),
-    )
 }
 
 /// A project's hashing key as its row keeps it: sealed under a data key
@@ -804,11 +635,6 @@ pub struct SealedFields {
     pub ciphertexts: Vec<Vec<u8>>,
     pub nonces: Vec<Vec<u8>>,
     pub bytes: Vec<i32>,
-    /// Each field's hashed words ([`crate::content::words_of`]), as a JSON
-    /// array, since a column of arrays of differing lengths binds no other way.
-    pub words: Vec<String>,
-    /// Each field's hashed pairs of neighbouring words, the same way.
-    pub pairs: Vec<String>,
 }
 
 /// Every organization with a project filed here, and those projects, across
@@ -893,14 +719,11 @@ pub async fn keep_content(
         "WITH kept AS (
              INSERT INTO telemetry.plain_content
                  (project_id, run_id, trace_id, span_id, field, received_at, ciphertext, nonce,
-                  bytes, words, pairs, key_id)
-             SELECT $1, r, t, s, f, $3, c, n, b,
-                    ARRAY(SELECT jsonb_array_elements_text(w::jsonb)::bigint),
-                    ARRAY(SELECT jsonb_array_elements_text(p::jsonb)::bigint),
-                    $13
+                  bytes, key_id)
+             SELECT $1, r, t, s, f, $3, c, n, b, $11
                FROM UNNEST($10::uuid[], $4::text[], $5::text[], $6::text[], $7::bytea[],
-                           $8::bytea[], $9::int[], $11::text[], $12::text[])
-                 AS u(r, t, s, f, c, n, b, w, p)
+                           $8::bytea[], $9::int[])
+                 AS u(r, t, s, f, c, n, b)
              ON CONFLICT DO NOTHING
              RETURNING bytes)
          INSERT INTO telemetry.content_held (organization_id, bytes)
@@ -918,35 +741,22 @@ pub async fn keep_content(
     .bind(&sealed.nonces)
     .bind(&sealed.bytes)
     .bind(&sealed.run_ids)
-    .bind(&sealed.words)
-    .bind(&sealed.pairs)
     .bind(key_id)
     .execute(tx.conn())
     .await?;
     Ok(())
 }
 
-/// Which of a project's kept fields a forget takes: those of the spans
-/// named under one run, found by its index, or of every span whose id begins
-/// so under one field's name, found by that field's.
-pub enum Spans<'a> {
-    Named(Uuid, &'a [String]),
-    Prefixed(&'a str, &'a str),
-}
-
-/// The project's fields kept under `spans` deleted on the maintenance lane,
-/// which alone deletes content, their bytes given back to the organization
-/// holding the project, its settings row locked first, as
-/// [`delete_content`] locks it.
+/// The project's fields kept under the spans `spans` names of `run_id`
+/// deleted on the maintenance lane, which alone deletes content, their bytes
+/// given back to the organization holding the project, its settings row
+/// locked first, as [`delete_content`] locks it.
 pub async fn forget_fields(
     conn: &mut sqlx::PgConnection,
     project_id: &ProjectId,
-    spans: Spans<'_>,
+    run_id: Uuid,
+    spans: &[String],
 ) -> sqlx::Result<()> {
-    let (run, named, field, prefix) = match spans {
-        Spans::Named(run, named) => (Some(run), Some(named), None, None),
-        Spans::Prefixed(field, prefix) => (None, None, Some(field), Some(prefix)),
-    };
     sqlx::query("SELECT 1 FROM telemetry.project_settings WHERE project_id = $1 FOR UPDATE")
         .bind(project_id)
         .execute(&mut *conn)
@@ -954,11 +764,7 @@ pub async fn forget_fields(
     sqlx::query(
         "WITH gone AS (
              DELETE FROM telemetry.plain_content
-              WHERE project_id = $1
-                AND ($4::uuid IS NULL OR run_id = $4)
-                AND ($2::text[] IS NULL OR span_id = ANY($2))
-                AND ($5::text IS NULL OR field = $5)
-                AND ($3::text IS NULL OR starts_with(span_id, $3))
+              WHERE project_id = $1 AND run_id = $2 AND span_id = ANY($3)
              RETURNING bytes),
          sums AS (
              SELECT s.organization_id, sum(g.bytes) AS bytes
@@ -969,75 +775,18 @@ pub async fn forget_fields(
            FROM sums WHERE h.organization_id = sums.organization_id",
     )
     .bind(project_id)
-    .bind(named)
-    .bind(prefix)
-    .bind(run)
-    .bind(field)
+    .bind(run_id)
+    .bind(spans)
     .execute(&mut *conn)
     .await?;
     Ok(())
 }
 
-/// The newest `limit` of the project's fields named `field` whose span id
-/// begins with `prefix`, sealed, under the project's key now as
-/// [`read_content`] reads, newest first.
-pub(crate) async fn read_prefixed(
-    tx: &mut Scoped<'_, ProjectAndOrganization>,
-    project_id: &ProjectId,
-    field: &str,
-    prefix: &str,
-    limit: i64,
-) -> sqlx::Result<Vec<KeptField>> {
-    sqlx::query_as(
-        "SELECT run_id, trace_id, span_id, field, ciphertext, nonce
-           FROM telemetry.plain_content
-          WHERE project_id = $1 AND field = $2 AND starts_with(span_id, $3)
-            AND key_id = (SELECT content_key_id FROM telemetry.project_settings
-                           WHERE project_id = $1)
-          ORDER BY received_at DESC
-          LIMIT $4",
-    )
-    .bind(project_id)
-    .bind(field)
-    .bind(prefix)
-    .bind(limit)
-    .fetch_all(tx.conn())
-    .await
-}
-
-/// The run of each field of the project's content holding every one of
-/// `words` and of `pairs`, hashed, newest first, up to `limit` fields; nothing
-/// sealed. The words' index finds the fields, each one's pairs checked on it.
-/// Only fields under the project's key now, as [`read_content`] reads: none
-/// once it is deleted.
-pub(crate) async fn search_content<B: HasProject>(
-    tx: &mut Scoped<'_, B>,
-    project_id: &ProjectId,
-    (words, pairs): (&[i64], &[i64]),
-    limit: i64,
-) -> sqlx::Result<Vec<Uuid>> {
-    sqlx::query_scalar(
-        "SELECT run_id
-           FROM telemetry.plain_content
-          WHERE project_id = $1 AND words @> $2 AND pairs @> $4
-            AND key_id = (SELECT content_key_id FROM telemetry.project_settings
-                           WHERE project_id = $1)
-          ORDER BY received_at DESC
-          LIMIT $3",
-    )
-    .bind(project_id)
-    .bind(words)
-    .bind(limit)
-    .bind(pairs)
-    .fetch_all(tx.conn())
-    .await
-}
-
 /// One content field as kept: its run, trace, span and name, sealed.
 pub(crate) type KeptField = (Uuid, String, String, String, Vec<u8>, Vec<u8>);
 
-/// Every field the project keeps for the runs, or for those of their spans
-/// `spans` names, sealed, in trace, span and name order: the crate's own,
+/// Every field the project keeps for the runs, sealed, in trace, span and
+/// name order: the crate's own,
 /// read only by [`crate::content::open`], which files each read. Only fields
 /// under the project's key now: none once it is deleted
 /// ([`delete_content_key`]), whatever rows its purge has yet to take, and
@@ -1046,20 +795,17 @@ pub(crate) async fn read_content(
     tx: &mut Scoped<'_, ProjectAndOrganization>,
     project_id: &ProjectId,
     runs: &[Uuid],
-    spans: Option<&[String]>,
 ) -> sqlx::Result<Vec<KeptField>> {
     sqlx::query_as(
         "SELECT run_id, trace_id, span_id, field, ciphertext, nonce
            FROM telemetry.plain_content
           WHERE project_id = $1 AND run_id = ANY($2)
-            AND ($3::text[] IS NULL OR span_id = ANY($3))
             AND key_id = (SELECT content_key_id FROM telemetry.project_settings
                            WHERE project_id = $1)
           ORDER BY trace_id, span_id, field",
     )
     .bind(project_id)
     .bind(runs)
-    .bind(spans)
     .fetch_all(tx.conn())
     .await
 }
@@ -1163,20 +909,6 @@ async fn delete_content_of(
     .fetch_one(&mut *conn)
     .await?;
     delete_media_of(conn, project_ids, before, runs, key).await?;
-    // The record of what each evaluation read goes with what it read.
-    if key.is_none() && (before.is_some() || runs.is_some()) {
-        sqlx::query(
-            "DELETE FROM telemetry.evaluations
-              WHERE project_id = ANY($1)
-                AND ($2::timestamptz IS NULL OR created_at < $2)
-                AND ($3::uuid[] IS NULL OR run_id = ANY($3))",
-        )
-        .bind(project_ids)
-        .bind(before)
-        .bind(runs)
-        .execute(&mut *conn)
-        .await?;
-    }
     Ok(gone.unsigned_abs())
 }
 
@@ -1321,24 +1053,6 @@ pub(crate) async fn read_media(
 ) -> sqlx::Result<Option<(String, Vec<u8>, Vec<u8>)>> {
     sqlx::query_as(
         "SELECT mime_type, ciphertext, nonce FROM telemetry.media
-          WHERE project_id = $1 AND sha256 = $2
-            AND key_id = (SELECT content_key_id FROM telemetry.project_settings
-                           WHERE project_id = $1)",
-    )
-    .bind(project_id)
-    .bind(sha256)
-    .fetch_optional(tx.conn())
-    .await
-}
-
-/// A kept file's type and size, read without its bytes.
-pub(crate) async fn media_kind(
-    tx: &mut Scoped<'_, ProjectAndOrganization>,
-    project_id: &ProjectId,
-    sha256: &str,
-) -> sqlx::Result<Option<(String, i32)>> {
-    sqlx::query_as(
-        "SELECT mime_type, bytes FROM telemetry.media
           WHERE project_id = $1 AND sha256 = $2
             AND key_id = (SELECT content_key_id FROM telemetry.project_settings
                            WHERE project_id = $1)",

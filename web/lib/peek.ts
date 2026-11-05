@@ -1,5 +1,4 @@
 import { isUuid } from "@/lib/list-query";
-import { VIEW_PARAM } from "@/lib/layout";
 import { draggedPanelWidth } from "@/lib/panel-width";
 import { PEEK_PARAM } from "@/lib/traces";
 
@@ -46,8 +45,8 @@ export function openPeek(run: string): void {
   }
 }
 
-/** Shuts the peek: back over the entry it pushed, then giving the list's entry its present address;
- *  else, as from a link, the URL rewritten. `pushed` is the panel's memory, as the mark may lapse. */
+/** Shuts the peek: back over the entry it pushed; else, as from a link, the URL rewritten.
+ *  `pushed` is the panel's memory, as the mark may lapse. */
 export function closePeek(pushed: boolean): void {
   // Shut already: a second press while the list is on its way back.
   if (!new URLSearchParams(window.location.search).has(PEEK_PARAM)) return;
@@ -56,25 +55,7 @@ export function closePeek(pushed: boolean): void {
     window.history.replaceState(null, "", shut);
     return;
   }
-  window.addEventListener("popstate", () => landOnList(shut), { once: true });
   window.history.back();
-}
-
-/** Gives the entry a traversal from the peek landed on `shut`, the list's address as the peek
- *  last stood, where it reads as the list but for its layout — the one the peek was pushed
- *  from, unless a jump went past it; a fresh state, which Next follows. */
-export function landOnList(shut: string): void {
-  const list = spelled(here(), false) === spelled(shut, false);
-  if (list && spelled(here()) !== spelled(shut)) window.history.replaceState({}, "", shut);
-}
-
-/** `address` in `URLSearchParams`' own spelling and order, without its layout
- *  where `view` is false. */
-function spelled(address: string, view = true): string {
-  const url = new URL(address, window.location.origin);
-  url.searchParams.sort();
-  if (!view) url.searchParams.delete(VIEW_PARAM);
-  return `${url.pathname}?${url.searchParams}`;
 }
 
 /** The page's address as an entry is told by, its fragment too: one typed over the peek is an

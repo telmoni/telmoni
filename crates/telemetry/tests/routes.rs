@@ -51,8 +51,6 @@ impl Entitlements for Deliveries {
             deliveries_per_day: self.0,
             entitlement: "teams".into(),
             detail: "The plan holds 50 alerts.".into(),
-            evaluation_rules: 2,
-            evaluation_rules_detail: "This organization's plan holds two evaluation rules.".into(),
         }))
     }
 }

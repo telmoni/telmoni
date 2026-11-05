@@ -10,11 +10,10 @@ export function formatScoreValue(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(Math.abs(value) >= 10 ? 1 : 2);
 }
 
-/** Who gave a score, as a sentence ends: "relevance 0.8, by an evaluator". */
+/** Who gave a score, as a sentence ends: "relevance 0.8, by a member". */
 export const SCORE_SOURCE: Record<Score["source"], string> = {
   [ScoreSource.Sdk]: "from your code",
   [ScoreSource.Member]: "by a member",
-  [ScoreSource.Evaluator]: "by an evaluator",
 };
 
 /** What one score says. */
@@ -74,8 +73,8 @@ export function commentsOf(
   return comments;
 }
 
-/** Whether `id` is a span's own, 16 hex digits: not a score's comment or an
- *  evaluator's example, which the run's content keeps under ids of their own. */
+/** Whether `id` is a span's own, 16 hex digits: not a score's comment, which
+ *  the run's content keeps under an id of its own. */
 export function isSpanId(id: string): boolean {
   return /^[0-9a-f]{16}$/.test(id);
 }

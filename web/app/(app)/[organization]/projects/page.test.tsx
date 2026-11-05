@@ -27,6 +27,12 @@ vi.mock("@/components/service-unavailable", () => ({
   ServiceUnavailable: () => <div data-testid="outage">unavailable</div>,
 }));
 
+vi.mock("../_leave-organization", () => ({
+  LeaveOrganization: ({ name }: { name: string }) => (
+    <div data-testid="leave-organization" data-name={name} />
+  ),
+}));
+
 let mockContext: unknown;
 let mockProjects: unknown[] = [];
 let mockListingUnavailable = false;
@@ -162,7 +168,9 @@ describe("OrganizationProjectsPage", () => {
     expect(screen.getByText("Personal Project")).toBeInTheDocument();
   });
 
-  it("refuses the page to an organization member and names who to ask", async () => {
+  // The organization opens here for everyone in it: a member reads the
+  // projects they can open, makes none, and may leave.
+  it("shows a member the projects they can open, with no New project and a way out", async () => {
     standingIn("user_member", founders("member"), [
       { projectId: "project_shared_99", organizationId: "org_founders", role: Role.Admin },
     ]);
@@ -180,11 +188,9 @@ describe("OrganizationProjectsPage", () => {
       await OrganizationProjectsPage(),
     );
 
-    expect(screen.getByTestId("access-denied")).toBeInTheDocument();
-    expect(document.body.textContent).toMatch(/this organization.s projects/i);
-    expect(document.body.textContent).toMatch(
-      /contact Alex Founder, the organization.s owner, to request access/i,
-    );
+    expect(screen.getByText("Core Platform")).toBeInTheDocument();
+    expect(screen.queryByTestId("create-project-action")).toBeNull();
+    expect(screen.getByTestId("leave-organization")).toBeInTheDocument();
   });
 
   it("files an organization admin's projects under the organization's own, at their role", async () => {
@@ -237,6 +243,7 @@ describe("OrganizationProjectsPage", () => {
 
     expect(screen.getByRole("button", { name: "Leave Growth" })).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /leave/i })).toHaveLength(1);
+    expect(screen.getByTestId("leave-organization")).toBeInTheDocument();
   });
 
   // The owner holds every project outright and the lane refuses their leave,
@@ -252,6 +259,7 @@ describe("OrganizationProjectsPage", () => {
 
     expect(screen.getByText("Personal Project")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /leave/i })).toBeNull();
+    expect(screen.queryByTestId("leave-organization")).toBeNull();
   });
 
   it("lists a project held through the organization role, with nothing to leave", async () => {

@@ -124,7 +124,7 @@ const projectAs = (role: Role, name = "My Project") => ({
 
 // `/me` for the owner of the organization the project is in.
 const ownerContext = (incomingInvites: unknown[]) => ({
-  person: { userId: "user_owner", email: "owner@example.com", analyticsOptIn: false },
+  person: { userId: "user_owner", email: "owner@example.com" },
   organizations: [
     {
       organizationId: "org_owner",
@@ -575,7 +575,7 @@ describe("MembersPage: leaving", () => {
   const asPerson = (userId: string) => {
     mockContext = {
       ...ownerContext([]),
-      person: { userId, email: "me@example.com", analyticsOptIn: false },
+      person: { userId, email: "me@example.com" },
     };
   };
   const ROWS = [

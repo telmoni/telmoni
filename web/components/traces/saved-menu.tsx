@@ -46,14 +46,14 @@ import type { ActionResult } from "@/lib/action-result";
 import { VIEW_NAME_MAX } from "@/lib/traces";
 import { cn } from "@/lib/utils";
 
-// The project's saved views, layouts and dashboards are rows of one table,
-// kept through one menu: picked, each a link; saved as new, saved over, renamed
-// and deleted by owners and admins, for everyone on the project.
+// The project's saved dashboards, kept through one menu: picked, each a
+// link; saved as new, saved over, renamed and deleted by owners and admins,
+// for everyone on the project.
 
-/** What the menu's rows share: a saved view of any kind. */
+/** What the menu's rows share. */
 type Saved = { id: string; name: string };
 
-const PLURAL = { view: "Views", layout: "Layouts", dashboard: "Dashboards" } as const;
+const PLURAL = { dashboard: "Dashboards" } as const;
 
 type Props<T extends Saved> = {
   noun: keyof typeof PLURAL;

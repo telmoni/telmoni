@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/components/page-header", () => ({
@@ -23,31 +23,24 @@ vi.mock("@/components/service-unavailable", () => ({
   ServiceUnavailable: () => <div data-testid="outage">unavailable</div>,
 }));
 
-// The layout reads the link's part of the URL.
-let mockSearch = "";
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
   usePathname: () => "/acme/web/traces/5d4f5c68-0000-4000-8000-000000000001",
-  useSearchParams: () => new URLSearchParams(mockSearch),
+  useSearchParams: () => new URLSearchParams(),
 }));
 
 vi.mock("@/app/(app)/[organization]/[project]/traces/actions", () => ({
   saveTraceViewAction: vi.fn(),
   updateTraceViewAction: vi.fn(),
   deleteTraceViewAction: vi.fn(),
-  setSessionLayoutAction: vi.fn(),
-  setTraceTagsAction: vi.fn(),
 }));
 
-import { setTraceTagsAction } from "@/app/(app)/[organization]/[project]/traces/actions";
 import { testSpan } from "@/lib/span-fixture";
 import { Role, SpanKind } from "@/lib/types/enums";
 
 let mockContext: unknown;
 let mockProject: unknown;
 let mockTrace: unknown;
-let mockSetting: unknown;
-let mockLayouts: unknown;
 let mockIncidents: unknown[];
 const fetchProjectBySlug = vi.fn<(slug: string) => Promise<unknown>>(async () => mockProject);
 const fetchTrace = vi.fn<(projectId: string, runId: string, content: boolean) => Promise<unknown>>(
@@ -91,8 +84,6 @@ vi.mock("@/lib/server/data", () => ({
   getServerContext: async () => mockContext,
   fetchProjectBySlug: (slug: string) => fetchProjectBySlug(slug),
   fetchTrace: (projectId: string, runId: string, content: boolean) => fetchTrace(projectId, runId, content),
-  fetchSessionLayout: async () => mockSetting,
-  fetchTraceLayouts: async () => mockLayouts,
   fetchRunIncidents: (projectId: string, runId: string) => fetchRunIncidents(projectId, runId),
 }));
 
@@ -100,47 +91,6 @@ import TracePage from "./page";
 
 const RUN = "5d4f5c68-0000-4000-8000-000000000001";
 const PARAMS = Promise.resolve({ organization: "acme", project: "web", trace: RUN });
-const LAYOUT_ID = "0b6f2c1e-6a4f-4d2b-9e3a-5c7d8e9f0a1b";
-const FULL_ID = "1c7e3d2f-7b5a-4e3c-8f4b-6d8e9f0a1b2c";
-/** The default customized all the way: steps and calls, the failed open on
- *  a timeline. */
-const FULL = {
-  id: FULL_ID,
-  kind: "layout",
-  name: "Full",
-  query: {
-    depth: "calls",
-    open: "failed",
-    timeline: true,
-    graph: false,
-    pinned: [],
-    filter: {},
-    messages: false,
-    scores: true,
-  },
-  columns: ["started"],
-  created_at: "2026-10-17T00:00:00Z",
-  updated_at: "2026-10-17T00:00:00Z",
-};
-const PINNING = {
-  id: LAYOUT_ID,
-  kind: "layout",
-  name: "Pinned tools",
-  query: {
-    depth: "steps",
-    open: "none",
-    timeline: false,
-    graph: false,
-    pinned: ["search_docs"],
-    filter: {},
-    messages: false,
-    scores: true,
-  },
-  columns: ["started"],
-  created_at: "2026-10-17T00:00:00Z",
-  updated_at: "2026-10-17T00:00:00Z",
-};
-
 const span = (over: Record<string, unknown>) =>
   testSpan({
     span_id: "0000000000000001",
@@ -174,7 +124,6 @@ const SPANS = [
     input_tokens: 1200,
     output_tokens: 300,
     time_to_first_token: 0.42,
-    attributes: { "gen_ai.request.temperature": "0.2", "gen_ai.request.seed": "7" },
     started_at: "2026-10-11T03:00:00.020Z",
     ended_at: "2026-10-11T03:00:01.520Z",
   }),
@@ -192,14 +141,9 @@ const SPANS = [
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockSearch = "";
   window.localStorage.clear();
-  // The project opens in a layout of steps and calls, as the tests below
-  // read the whole tree; the default is tested on its own.
-  mockSetting = { view_id: FULL_ID };
-  mockLayouts = { kind: "ok", layouts: [PINNING, FULL] };
   mockContext = {
-    person: { userId: "user_1", email: "ada@example.test", analyticsOptIn: false },
+    person: { userId: "user_1", email: "ada@example.test" },
     organizations: [],
     activeOrganizationId: "org_1",
     memberships: [],
@@ -264,7 +208,7 @@ describe("TracePage", () => {
     ).toBe(true);
     expect(screen.getByRole("link", { name: "session" })).toHaveAttribute(
       "href",
-      "/acme/web/sessions/conv-1",
+      "/acme/web/traces?session=conv-1&sort=started&dir=asc",
     );
     expect(screen.getByRole("link", { name: "user 9f86d081" })).toHaveAttribute(
       "href",
@@ -297,31 +241,10 @@ describe("TracePage", () => {
     expect(scores.getByRole("button", { name: "Score" })).toBeInTheDocument();
   });
 
-  it("takes a tag off the run at its ×, and adds one from the form, each through the action", async () => {
-    vi.mocked(setTraceTagsAction).mockResolvedValue({ ok: true, tags: {} });
+  it("links each of the run's tags to the traces that carry it", async () => {
     render(await TracePage({ params: PARAMS, searchParams: Promise.resolve({}) }));
-    const remove = screen.getByRole("button", { name: "Remove tag team" });
-    expect(remove.closest("[data-slot=badge]")).toHaveTextContent("team=search");
-    fireEvent.click(remove);
-    await waitFor(() =>
-      expect(setTraceTagsAction).toHaveBeenCalledWith("project_7bQx2mNv9BcK4dLp", RUN, { remove: ["team"] }),
-    );
-    // Once that change has landed, the next is taken.
-    await waitFor(() => expect(remove).not.toHaveAttribute("aria-disabled"));
-
-    fireEvent.click(screen.getByRole("button", { name: "Add tag" }));
-    const form = within(await screen.findByRole("dialog", { name: "Add tag" }));
-    expect(form.getByRole("button", { name: "Add tag" })).toBeDisabled();
-    fireEvent.change(form.getByLabelText("Key"), { target: { value: " repo " } });
-    fireEvent.change(form.getByLabelText("Value"), { target: { value: "telmoni" } });
-    fireEvent.click(form.getByRole("button", { name: "Add tag" }));
-    await waitFor(() =>
-      expect(setTraceTagsAction).toHaveBeenLastCalledWith("project_7bQx2mNv9BcK4dLp", RUN, {
-        add: { repo: "telmoni" },
-      }),
-    );
-    // Added, the form shuts.
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Add tag" })).toBeNull());
+    const tag = screen.getByRole("link", { name: "team:search" });
+    expect(tag.getAttribute("href")).toContain("tag=team%3Asearch");
   });
 
   it("links the incidents whose notices showed the run, each at its row of the alerts page", async () => {
@@ -335,7 +258,7 @@ describe("TracePage", () => {
     );
   });
 
-  it("reads the span chosen in the tree: its model, what it was asked with, its tokens, and how it failed", async () => {
+  it("reads the span chosen in the tree: its model, its tokens, and how it failed", async () => {
     render(await TracePage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     const tree = screen.getByRole("tree", { name: "Spans" });
 
@@ -351,9 +274,6 @@ describe("TracePage", () => {
     );
     expect(within(chosen()).getByText("1,200")).toBeInTheDocument();
     expect(within(chosen()).getByText("anthropic")).toBeInTheDocument();
-    expect(within(chosen()).getByText("Temperature").nextSibling).toHaveTextContent("0.2");
-    expect(within(chosen()).getByText("Seed").nextSibling).toHaveTextContent("7");
-    expect(within(chosen()).queryByText("Top p")).toBeNull();
     expect(within(chosen()).getByText("Time to first token").nextSibling).toHaveTextContent("420 ms");
   });
 
@@ -416,45 +336,6 @@ describe("TracePage", () => {
     expect(tree.querySelectorAll('[role="treeitem"] span[style*="width"]')).toHaveLength(4);
   });
 
-  it("opens on the run's own row alone by default, and names the layout as changed once customized", async () => {
-    mockSetting = { view_id: null };
-    render(await TracePage({ params: PARAMS, searchParams: Promise.resolve({}) }));
-    expect(screen.getByRole("button", { name: "Customize the layout" })).toBeInTheDocument();
-    const tree = screen.getByRole("tree", { name: "Spans" });
-    expect(within(tree).getAllByRole("treeitem")).toHaveLength(1);
-    // The run's own span, chosen, still reads with the whole trace's sums.
-    expect(within(chosen()).getByText(/1 step, 2 calls/)).toBeInTheDocument();
-    // Customized to its steps, the layout is named as changed. The menu and its
-    // sub-menu open from the keyboard, as Radix opens them with no pointer.
-    fireEvent.keyDown(screen.getByRole("button", { name: "Customize the layout" }), { key: "Enter" });
-    fireEvent.keyDown(await screen.findByRole("menuitem", { name: /^How far a trace opens/ }), {
-      key: "ArrowRight",
-    });
-    fireEvent.click(await screen.findByRole("menuitemradio", { name: "Its steps" }));
-    expect(within(screen.getByRole("tree", { name: "Spans" })).getAllByRole("treeitem")).toHaveLength(2);
-    expect(screen.getByRole("button", { name: "Customize the layout, changed" })).toBeInTheDocument();
-  });
-
-  it("describes each option of the layout's menu by what it means, for a screen reader as for a pointer", async () => {
-    mockSetting = { view_id: null };
-    render(await TracePage({ params: PARAMS, searchParams: Promise.resolve({}) }));
-    fireEvent.keyDown(screen.getByRole("button", { name: "Customize the layout" }), { key: "Enter" });
-    const timeline = await screen.findByRole("menuitemcheckbox", { name: "Timeline" });
-    expect(timeline).toHaveAccessibleDescription("Each span's bar on the trace's own line of time.");
-  });
-
-  it("opens a saved layout from a link, its pinned spans above the tree, chosen at a press", async () => {
-    mockSearch = `view=${LAYOUT_ID}`;
-    render(await TracePage({ params: PARAMS, searchParams: Promise.resolve({}) }));
-    expect(screen.getByRole("button", { name: "Saved layout: Pinned tools" })).toBeInTheDocument();
-    const tree = screen.getByRole("tree", { name: "Spans" });
-    expect(within(tree).getAllByRole("treeitem")).toHaveLength(2);
-    const pin = screen.getByRole("button", { name: /search_docs/ });
-    fireEvent.click(pin);
-    expect(pin).toHaveAttribute("aria-pressed", "true");
-    expect(within(chosen()).getByRole("heading", { name: "search_docs" })).toBeInTheDocument();
-  });
-
   it("shows the run's turn at its head and each span's content in full, the content tab first", async () => {
     const turn = {
       "gen_ai.input.messages": JSON.stringify([
@@ -491,17 +372,12 @@ describe("TracePage", () => {
         ],
       },
     };
-    mockSetting = { view_id: null };
-    const { unmount } = render(await TracePage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+    render(await TracePage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getAllByText("Summarize the report").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Revenue")[0]?.tagName).toBe("STRONG");
     expect(within(chosen()).getByRole("tab", { name: "Content" })).toHaveAttribute("aria-selected", "true");
     expect(within(chosen()).getByText("Input")).toBeInTheDocument();
     expect(within(chosen()).getByText(/stopped: stop/)).toBeInTheDocument();
-    unmount();
-
-    mockSetting = { view_id: FULL_ID };
-    render(await TracePage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.queryByText("This trace kept no content.")).toBeNull();
     fireEvent.click(within(screen.getByRole("tree", { name: "Spans" })).getByText("chat claude-sonnet-5-5"));
     expect(within(chosen()).getByText("Answer in one line.")).toBeInTheDocument();
@@ -516,7 +392,6 @@ describe("TracePage", () => {
   });
 
   it("says in a line when a trace kept no content, and when it could not be read", async () => {
-    mockSetting = { view_id: null };
     const { unmount } = render(await TracePage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByText("This trace kept no content.")).toBeInTheDocument();
     unmount();

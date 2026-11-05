@@ -14,16 +14,6 @@ vi.mock("./_sessions", () => ({
   ActiveSessions: () => <div data-testid="sessions" />,
 }));
 
-vi.mock("./_analytics", () => ({
-  AnalyticsPreference: ({ optIn }: { optIn: boolean }) => (
-    <div data-testid="analytics" data-opt-in={String(optIn)} />
-  ),
-}));
-// Whether the deployment has an analytics provider, which decides whether the
-// data collection section is drawn at all.
-const analyticsConfigured = vi.hoisted(() => vi.fn(() => true));
-vi.mock("@/lib/analytics", () => ({ analyticsConfigured }));
-
 vi.mock("./_delete-account", () => ({
   DeleteAccountForm: ({ ownedOrganizations }: { ownedOrganizations: number }) => (
     <div data-testid="delete-account" data-owned={String(ownedOrganizations)} />
@@ -36,10 +26,7 @@ vi.mock("next/navigation", () => ({
   },
 }));
 
-let mockContext: {
-  person: { analyticsOptIn: boolean };
-  organizations: OrganizationEntry[];
-} | null = null;
+let mockContext: { organizations: OrganizationEntry[] } | null = null;
 vi.mock("@/lib/server/data", () => ({
   fetchActiveSessions: async () => [],
   getServerContext: async () => mockContext,
@@ -59,7 +46,6 @@ import AccountPrivacyPage from "./page";
 
 beforeEach(() => {
   mockContext = {
-    person: { analyticsOptIn: false },
     organizations: [
       { organizationId: "org_1", slug: "one", name: "One", ownerEmail: "k@example.com", role: "owner" },
     ],
@@ -72,40 +58,6 @@ describe("AccountPrivacyPage", () => {
     expect(screen.getByTestId("page-header")).toHaveTextContent("Privacy");
     expect(screen.getByTestId("sessions")).toBeInTheDocument();
     expect(screen.getByTestId("delete-account")).toBeInTheDocument();
-    expect(screen.getByTestId("analytics")).toBeInTheDocument();
-  });
-
-  // A deployment without a provider sends nothing, so the page asks for no
-  // consent and opens on the sessions.
-  it("draws no data collection section where the deployment has no provider", async () => {
-    analyticsConfigured.mockReturnValueOnce(false);
-    render(await AccountPrivacyPage());
-    expect(screen.queryByTestId("analytics")).toBeNull();
-    const headings = screen
-      .getAllByRole("heading", { level: 2 })
-      .map((h) => h.textContent?.toLowerCase() ?? "");
-    expect(headings).toEqual(["active sessions", "danger zone"]);
-  });
-
-  // The consent is the person's own, and `/me` always states it; the one way
-  // auth does not say is `/me` not answering at all.
-  it("defaults to not counted whenever auth does not say", async () => {
-    const optIn = () =>
-      screen.getByTestId("analytics").getAttribute("data-opt-in");
-
-    mockContext = null;
-    const { unmount } = render(await AccountPrivacyPage());
-    expect(optIn()).toBe("false");
-    unmount();
-
-    mockContext = { person: { analyticsOptIn: false }, organizations: [] };
-    const { unmount: close } = render(await AccountPrivacyPage());
-    expect(optIn()).toBe("false");
-    close();
-
-    mockContext = { person: { analyticsOptIn: true }, organizations: [] };
-    render(await AccountPrivacyPage());
-    expect(optIn()).toBe("true");
   });
 
   it("ends with the danger zone, and holds nothing of the profile", async () => {
@@ -113,7 +65,7 @@ describe("AccountPrivacyPage", () => {
     const headings = screen
       .getAllByRole("heading", { level: 2 })
       .map((h) => h.textContent?.toLowerCase() ?? "");
-    expect(headings).toEqual(["data collection", "active sessions", "danger zone"]);
+    expect(headings).toEqual(["active sessions", "danger zone"]);
     expect(screen.queryByTestId("deleted-organizations")).toBeNull();
     expect(screen.queryByText("k@example.com")).toBeNull();
     expect(screen.queryByText("user_1")).toBeNull();
@@ -126,7 +78,6 @@ describe("AccountPrivacyPage", () => {
   // is its own settings page's job.
   it("counts every organization the account owns, and none it only belongs to", async () => {
     mockContext = {
-      person: { analyticsOptIn: false },
       organizations: [
         { organizationId: "org_1", slug: "acme", name: "Acme", ownerEmail: "k@example.com", role: "owner" },
         { organizationId: "org_2", slug: "two", name: "Two", ownerEmail: "k@example.com", role: "owner" },
@@ -142,7 +93,6 @@ describe("AccountPrivacyPage", () => {
   // over — and each is still one organization the deletion takes.
   it("counts owned organizations that share a name once each", async () => {
     mockContext = {
-      person: { analyticsOptIn: false },
       organizations: [
         { organizationId: "org_1", slug: "one", name: "Acme", ownerEmail: "k@example.com", role: "owner" },
         { organizationId: "org_2", slug: "globex", name: "Globex", ownerEmail: "k@example.com", role: "owner" },

@@ -21,7 +21,7 @@ import { Flag } from "@/lib/flags";
 import { featureOff, requireFeature } from "./flags";
 
 const ctx = (flags: Record<string, boolean>) => ({
-  person: { userId: "user_1", email: "ada@example.test", analyticsOptIn: false },
+  person: { userId: "user_1", email: "ada@example.test" },
   organizations: [
     { organizationId: "org_1", name: "Ada", ownerEmail: "ada@example.test", role: "owner" },
   ],

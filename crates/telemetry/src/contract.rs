@@ -112,8 +112,6 @@ pub const AGENT: &str = "telmoni.agent";
 pub const USER_ID: &str = "user.id";
 /// A tag: `telmoni.tag.<key>`.
 pub const TAG_PREFIX: &str = "telmoni.tag.";
-/// The share of runs the SDK sends.
-pub const SAMPLE_RATE: &str = "telmoni.sample_rate";
 /// Set on a span the agent cancelled.
 pub const CANCELLED: &str = "telmoni.cancelled";
 /// The content fields an SDK cut so its span fits an export, by name.
@@ -266,13 +264,6 @@ pub const INVENTORY_SPAN: &[&str] = &[
     "gen_ai.response.finish_reasons",
     "gen_ai.response.status",
     "gen_ai.request.reasoning.level",
-    "gen_ai.request.temperature",
-    "gen_ai.request.top_p",
-    "gen_ai.request.top_k",
-    "gen_ai.request.max_tokens",
-    "gen_ai.request.frequency_penalty",
-    "gen_ai.request.presence_penalty",
-    "gen_ai.request.seed",
     "gen_ai.agent.version",
     "gen_ai.tool.call.id",
     "gen_ai.tool.type",
@@ -286,11 +277,6 @@ pub const INVENTORY_SPAN: &[&str] = &[
 /// The deployment a span was sent from, on its resource: our SDKs set it
 /// from their `environment` option or `TELMONI_ENVIRONMENT`.
 pub const ENVIRONMENT: &str = "deployment.environment.name";
-/// The environments Telmoni writes its own spans under; one sent from
-/// outside beginning so is read as none.
-pub const OWN_ENVIRONMENT_PREFIX: &str = "telmoni-";
-/// The environment each evaluation's own trace is written under.
-pub const EVALUATOR_ENVIRONMENT: &str = "telmoni-evaluator";
 /// The deployment's release, on the resource: the SDKs' `release` option or
 /// `TELMONI_RELEASE`.
 pub const RELEASE: &str = "service.version";
@@ -327,7 +313,6 @@ pub const FIELDS: &[&str] = &[
     RUN_ID,
     AGENT,
     USER_ID,
-    SAMPLE_RATE,
     CANCELLED,
     OPERATION,
     AGENT_NAME,
@@ -590,14 +575,6 @@ pub const INVENTORY: &[InventoryRow] = &[
          keys a UTC day, each taking up to 500 values",
     ),
     row(
-        SAMPLE_RATE,
-        ReadOn::EverySpan,
-        "the column sample_rate",
-        Needs::AnyMode,
-        "above 0, up to 1: the share of runs the SDK sends, the same on every span of a run; \
-         a sum of spend over runs scales each span by it",
-    ),
-    row(
         CANCELLED,
         ReadOn::AnySpan,
         "the column status, as cancelled",
@@ -781,55 +758,6 @@ pub const INVENTORY: &[InventoryRow] = &[
     ),
     row(
         "gen_ai.request.reasoning.level",
-        ReadOn::ModelCall,
-        KEPT_ATTRIBUTE,
-        Needs::AnyMode,
-        RULE_ATTRIBUTE,
-    ),
-    row(
-        "gen_ai.request.temperature",
-        ReadOn::ModelCall,
-        KEPT_ATTRIBUTE,
-        Needs::AnyMode,
-        RULE_ATTRIBUTE,
-    ),
-    row(
-        "gen_ai.request.top_p",
-        ReadOn::ModelCall,
-        KEPT_ATTRIBUTE,
-        Needs::AnyMode,
-        RULE_ATTRIBUTE,
-    ),
-    row(
-        "gen_ai.request.top_k",
-        ReadOn::ModelCall,
-        KEPT_ATTRIBUTE,
-        Needs::AnyMode,
-        RULE_ATTRIBUTE,
-    ),
-    row(
-        "gen_ai.request.max_tokens",
-        ReadOn::ModelCall,
-        KEPT_ATTRIBUTE,
-        Needs::AnyMode,
-        RULE_ATTRIBUTE,
-    ),
-    row(
-        "gen_ai.request.frequency_penalty",
-        ReadOn::ModelCall,
-        KEPT_ATTRIBUTE,
-        Needs::AnyMode,
-        RULE_ATTRIBUTE,
-    ),
-    row(
-        "gen_ai.request.presence_penalty",
-        ReadOn::ModelCall,
-        KEPT_ATTRIBUTE,
-        Needs::AnyMode,
-        RULE_ATTRIBUTE,
-    ),
-    row(
-        "gen_ai.request.seed",
         ReadOn::ModelCall,
         KEPT_ATTRIBUTE,
         Needs::AnyMode,

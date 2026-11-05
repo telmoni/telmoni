@@ -20,17 +20,14 @@ use uuid::Uuid;
 use telmoni_shared::acting::Acting;
 use telmoni_shared::audit::requested_by;
 use telmoni_shared::db::tenant_session::{maintenance_scope, organization_scope};
-use telmoni_shared::seam::{
-    CheckedTraceView, IncidentAct, IncidentActed, Receipt, Telemetry, TraceVocabulary,
-};
+use telmoni_shared::seam::{IncidentAct, IncidentActed, Receipt, Telemetry};
 use telmoni_shared::{
-    AuditAction, OrInternal, OrganizationId, ProjectId, TelemetryError, TelmoniError,
-    TelmoniResourceKind, ViewKind,
+    AuditAction, OrganizationId, ProjectId, TelemetryError, TelmoniError, TelmoniResourceKind,
 };
 
 use crate::AppState;
 use crate::db::{self, TelemetryLane};
-use crate::handler::{self, views::ViewQuery};
+use crate::handler;
 use crate::store;
 
 /// How long a project's receipt stays claimed: past any purge's retry.
@@ -204,52 +201,6 @@ impl Telemetry for TelemetrySeam {
             "telemetry: the project's settings moved with it"
         );
         Ok(())
-    }
-
-    async fn drop_model_connections(&self, project_id: &ProjectId) -> Result<(), TelmoniError> {
-        let mut tx = maintenance_scope(&self.0.db, TelemetryLane).await?;
-        let dropped = db::drop_model_connections(&mut tx, project_id).await?;
-        tx.commit().await?;
-        tracing::info!(
-            project_id = %project_id,
-            dropped,
-            "telemetry: a moving project's model connections deleted"
-        );
-        Ok(())
-    }
-
-    async fn trace_vocabulary(
-        &self,
-        acting: &Acting,
-        days: u16,
-    ) -> Result<TraceVocabulary, TelmoniError> {
-        handler::traces::vocabulary(&self.0, acting, days).await
-    }
-
-    async fn checked_trace_view(
-        &self,
-        acting: &Acting,
-        query: serde_json::Value,
-        vocabulary: &TraceVocabulary,
-    ) -> Result<CheckedTraceView, TelmoniError> {
-        // serde's message quotes the answer, which a sentence can steer.
-        let query = serde_json::from_value::<ViewQuery>(query)
-            .map_err(|_| TelmoniError::BadRequest("the answer is no view of the list".into()))?
-            .checked(ViewKind::Traces)?;
-        let asked = query.days.unwrap_or(vocabulary.days);
-        let reread;
-        let vocabulary = if asked == vocabulary.days {
-            vocabulary
-        } else {
-            reread = handler::traces::vocabulary(&self.0, acting, asked).await?;
-            &reread
-        };
-        let (mut query, dropped) = query.held_to(vocabulary);
-        query.days = Some(vocabulary.days);
-        Ok(CheckedTraceView {
-            query: serde_json::to_value(query).or_internal("a checked view")?,
-            dropped,
-        })
     }
 
     async fn act_on_incident(

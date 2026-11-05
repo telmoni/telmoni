@@ -109,7 +109,7 @@ project's feed alone.
 |---|---|
 | Name | 1 to 60 characters; a project holds one alert of a name, whatever its case |
 | Reads | Runs, steps, model calls or tool calls |
-| Measure | **Count**, how many there were; **Failures**, those that ended in error; **Duration**; **Tokens**, on model calls; **Cost**, on runs: what each run's model calls cost, read from the calls as they land, so an alert on it tells while the run is still going ([what a call cost](/docs/api/ingest#what-a-call-cost)); **Steps**, on runs: each run's steps; **Repeats**, on runs: the most times in a row each run called one tool; **Stalled**, on runs: the runs left open ([loops and stalls](#loops-and-stalls)); **Score**, on runs: every [score](/docs/monitoring/scores) of the name you give, 1 to 64 characters, the project holds — your code's, its members' and its evaluators' — a number's value, a yes as 1 and a no as 0, each once as it stands, counted in the window its last change landed in — a score given again or taken back moves to then — one taken back left out and a category never read |
+| Measure | **Count**, how many there were; **Failures**, those that ended in error; **Duration**; **Tokens**, on model calls; **Cost**, on runs: what each run's model calls cost, read from the calls as they land, so an alert on it tells while the run is still going ([what a call cost](/docs/api/ingest#what-a-call-cost)); **Steps**, on runs: each run's steps; **Repeats**, on runs: the most times in a row each run called one tool; **Stalled**, on runs: the runs left open ([loops and stalls](#loops-and-stalls)); **Score**, on runs: every [score](/docs/monitoring/scores) of the name you give, 1 to 64 characters, the project holds — your code's and its members' — a number's value, a yes as 1 and a no as 0, each once as it stands, counted in the window its last change landed in — a score given again or taken back moves to then — one taken back left out and a category never read |
 | Folded as | How the measure is read over the window: a count; failures as how many or as the share that failed; a duration's p95, p99, p90, p50, average or total; tokens' average or total; a run's cost as the most a run spent — a cost cap — the average a run spent, or what the runs spent in all; a run's steps as the most a run took, their p95, p99, p90, p50 or average; repeats as the most; stalled runs as how many; and scores' average, p50, p90, p95, p99, highest, or how many |
 | Window | The last hour, day or week, or the calendar month so far, from its first at midnight UTC; **Stalled** takes the last hour, day or week alone |
 | Read as | Its value; or its change from the window of the same length before it, in percent of that window's value, so a drop is below 0 — the average relevance score down a fifth on the day before is −20% — and none where either window held nothing, or the one before 0; a count of an empty window is 0, so a stream that stops reads as −100%. Not on **This month**, which has no window of its length before it |
@@ -135,7 +135,8 @@ runs, measured as **Cost**, folded as what the runs spent, its alert
 threshold the budget and its warning threshold where you want to hear first,
 80% of it say, for the project or, with a tag filter, for the runs one team's
 tag names, each run counted as the runs its [sample
-rate](/docs/api/sdks#sampling) stands for. Without a tag it reads the month
+rate](/docs/api/ingest#what-is-dropped-at-the-door) stands for where a plan
+sampled it. Without a tag it reads the month
 from the hourly totals, which outlive a retention shorter than a month. Its
 warning says where the month is headed at its burn so far: the
 day it reaches the alert threshold, or that it stays under it this month. A

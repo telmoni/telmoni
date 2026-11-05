@@ -55,7 +55,6 @@ import {
   requestAccountDeletionCodeAction,
   revokeOtherSessionsAction,
   revokeSessionAction,
-  setAnalyticsPreferenceAction,
 } from "./actions";
 import { fetchActiveSessions } from "@/lib/server/entities/active-sessions";
 import { blacklistSession } from "@/lib/auth/session-blacklist";
@@ -378,38 +377,5 @@ describe("revokeOtherSessionsAction", () => {
     fetchMock.mockResolvedValue(new Response(null, { status: 500 }));
     expect(await revokeOtherSessionsAction()).toEqual({ ok: false, error: "problem" });
     expect(blacklistSession).not.toHaveBeenCalled();
-  });
-});
-
-describe("setAnalyticsPreferenceAction", () => {
-  it("records the consent on the account, under the session's bearer", async () => {
-    fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
-    expect(await setAnalyticsPreferenceAction(true)).toEqual({ ok: true });
-    expect(fetchMock).toHaveBeenCalledWith(
-      "http://auth.test/internal/v1/me/analytics",
-      expect.objectContaining({
-        method: "PUT",
-        headers: expect.objectContaining({
-          authorization: "Bearer at_1",
-          "x-organization-id": "org_active",
-          "content-type": "application/json",
-        }),
-        body: JSON.stringify({ optIn: true }),
-      }),
-    );
-    expect(refresh).toHaveBeenCalledOnce();
-  });
-
-  it("refuses without calling auth when it cannot tell where the caller stands", async () => {
-    vi.mocked(getServerContext).mockResolvedValue(null);
-    expect(await setAnalyticsPreferenceAction(false)).toEqual({ ok: false, error: UNRESOLVED });
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it("records the consent of somebody in no organization, naming none", async () => {
-    standIn(null);
-    fetchMock.mockResolvedValue(new Response(null, { status: 200 }));
-    expect(await setAnalyticsPreferenceAction(true)).toEqual({ ok: true });
-    expect(sentHeaders()).not.toHaveProperty("x-organization-id");
   });
 });

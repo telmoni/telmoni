@@ -23,7 +23,6 @@ const PersonSchema = z.object({
   userId:         z.string(),
   email:          z.string(),
   displayName:    z.string().nullable().optional(),
-  analyticsOptIn: z.boolean(),
   /// Whether the address was ever proved, as auth's column records it. The
   /// session's own `emailVerified` is the sign-in policy's answer (true with
   /// `VERIFY_EMAIL` off); this one gates what an unproved address is told.

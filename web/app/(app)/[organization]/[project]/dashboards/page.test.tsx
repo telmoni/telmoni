@@ -115,10 +115,8 @@ beforeEach(() => {
     dashboards: [
       {
         id: "d-1",
-        kind: "dashboard",
         name: "Team spend",
         query: { charts: [{ measure: "spend", group: "tag", tag: "team" }, { measure: "spend", group: "tool" }] },
-        columns: [],
         created_at: "2026-11-02T00:00:00Z",
         updated_at: "2026-11-02T00:00:00Z",
       },

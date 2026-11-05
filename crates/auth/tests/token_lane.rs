@@ -118,9 +118,6 @@ impl Telemetry for Meter {
     async fn move_project(&self, _: &ProjectId, _: &OrganizationId) -> Result<(), TelmoniError> {
         Ok(())
     }
-    async fn drop_model_connections(&self, _: &ProjectId) -> Result<(), TelmoniError> {
-        Ok(())
-    }
 }
 
 async fn json_body(resp: axum::response::Response) -> Value {
@@ -290,68 +287,6 @@ async fn a_live_token_reads_the_organization_it_belongs_to(pool: PgPool) {
         body["owner"]["email"], EMAIL,
         "the owner rides beside the organization, as its contact: {body}"
     );
-}
-
-/// **A key reads its own project's roster and no further.** A project admin
-/// may mint one, and the console refuses that seat the organization's roster,
-/// so a key that listed it would read past its minter: the organization's
-/// other project seats somebody the key's project never did, and `/v1/members`
-/// names the owner and the key's project's seat alone.
-#[sqlx::test]
-async fn a_token_lists_its_projects_roster_and_not_the_organizations(pool: PgPool) {
-    let fixture = token(&pool).await;
-    let elsewhere = create_project(&pool, &fixture.organization, "Elsewhere").await;
-    seed_identity(&pool, "user_seated", "seated@example.test").await;
-    seed_identity(&pool, "user_elsewhere", "elsewhere@example.test").await;
-    for (user, project) in [
-        ("user_seated", fixture.project.as_str()),
-        ("user_elsewhere", elsewhere.as_str()),
-    ] {
-        sqlx::query(
-            "INSERT INTO auth.organization_members (organization_id, user_id, role, added_by)
-             VALUES ($1, $2, 'member', $3)",
-        )
-        .bind(&fixture.organization)
-        .bind(user)
-        .bind(USER)
-        .execute(&pool)
-        .await
-        .unwrap();
-        sqlx::query(
-            "INSERT INTO auth.project_members (project_id, user_id, role, added_by)
-             VALUES ($1, $2, 'member', $3)",
-        )
-        .bind(project)
-        .bind(user)
-        .bind(USER)
-        .execute(&pool)
-        .await
-        .unwrap();
-    }
-
-    let resp = app(pool.clone())
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/v1/members")
-                .header("x-service-secret", SERVICE_SECRET)
-                .header(header::AUTHORIZATION, format!("Bearer {}", fixture.raw))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-    let body = json_body(resp).await;
-    let members: Vec<&str> = body["members"]
-        .as_array()
-        .expect("a members array")
-        .iter()
-        .filter_map(|m| m["member_id"].as_str())
-        .collect();
-    assert_eq!(members, [USER, "user_seated"], "{body}");
-    assert_eq!(body["members"][0]["role"], "owner", "{body}");
-    assert_eq!(body["members"][1]["role"], "member", "{body}");
 }
 
 /// **The audit chain is internal, and a live token opens no door to it.**

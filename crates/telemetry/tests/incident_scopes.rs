@@ -1,10 +1,6 @@
-//! An organization's health, through the module's router and under its
-//! policies: the incidents still open on the projects the person can open.
-#![expect(
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    reason = "a panicking helper is a failing test"
-)]
+//! An organization's incidents under the module's policies: what its scope
+//! reads, and that a write binds the project's organization too.
+#![expect(clippy::expect_used, reason = "a panicking helper is a failing test")]
 
 mod common;
 
@@ -23,7 +19,6 @@ use telmoni_shared::middleware::service_auth::SERVICE_SECRET_HEADER;
 use telmoni_shared::test_util::apply_audit_migrations;
 use telmoni_shared::{OrganizationId, OrganizationRole, ProjectId, Role};
 use telmoni_telemetry::router;
-use telmoni_telemetry::rules::incidents;
 
 const RULES: &str = "/internal/v1/telemetry/rules";
 
@@ -132,40 +127,6 @@ async fn incident(
     id
 }
 
-/// What `user`'s Overview of `organization` reads: each open incident's id
-/// and its project's id, in the order answered.
-async fn health(
-    app: &axum::Router,
-    user: &str,
-    organization: &OrganizationId,
-) -> Vec<(String, String)> {
-    let (status, read) = send(
-        app,
-        "GET",
-        &format!("/internal/v1/telemetry/organizations/{organization}/health"),
-        user,
-        organization,
-        None,
-        None,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{read}");
-    read.get("incidents")
-        .and_then(Value::as_array)
-        .expect("a list of incidents")
-        .iter()
-        .map(|incident| {
-            (
-                incident["id"].as_str().expect("its id").to_owned(),
-                incident["project"]["id"]
-                    .as_str()
-                    .expect("its project")
-                    .to_owned(),
-            )
-        })
-        .collect()
-}
-
 /// Two projects: an owner and an admin on both, a member seated on the first
 /// alone, and a member seated on neither.
 fn organization_of_two(auth: &AuthStub) -> (OrganizationId, ProjectId, ProjectId) {
@@ -201,183 +162,6 @@ fn organization_of_two(auth: &AuthStub) -> (OrganizationId, ProjectId, ProjectId
         None,
     );
     (organization, first, second)
-}
-
-/// ⚠ A member seated in one project of two sees that one's incidents alone.
-#[sqlx::test]
-async fn a_member_seated_in_one_project_of_two_sees_that_ones_incidents_alone(pool: PgPool) {
-    apply_audit_migrations(&pool).await;
-    let auth = AuthStub::new();
-    let (organization, first, second) = organization_of_two(&auth);
-    let app = router(common::state(&pool, auth));
-    let on_first = alert(&app, &organization, &first, "Slow calls").await;
-    let on_second = alert(&app, &organization, &second, "Failed runs").await;
-    let older = incident(&pool, &organization, &first, on_first, "open", 2).await;
-    let newer = incident(&pool, &organization, &second, on_second, "open", 1).await;
-
-    assert_eq!(
-        health(&app, "user_member", &organization).await,
-        vec![(older.to_string(), first.to_string())],
-        "the member's one project",
-    );
-    let both = vec![
-        (newer.to_string(), second.to_string()),
-        (older.to_string(), first.to_string()),
-    ];
-    assert_eq!(health(&app, "user_owner", &organization).await, both);
-    assert_eq!(health(&app, "user_admin", &organization).await, both);
-    assert!(
-        health(&app, "user_unseated", &organization)
-            .await
-            .is_empty(),
-        "a member seated on no project opens none of them",
-    );
-
-    let (_, read) = send(
-        &app,
-        "GET",
-        &format!("/internal/v1/telemetry/organizations/{organization}/health"),
-        "user_member",
-        &organization,
-        None,
-        None,
-    )
-    .await;
-    let shown = &read["incidents"][0];
-    assert_eq!(shown["rule_name"], "Slow calls");
-    assert_eq!(shown["rule_id"], on_first.to_string());
-    assert_eq!(shown["status"], "open");
-    assert_eq!(shown["severity"], "alert");
-    assert_eq!(
-        shown["project"],
-        json!({ "id": first.as_str(), "slug": common::slug_of(first.as_str()).as_str(), "name": format!("Project {first}") }),
-        "its project as auth names it, for the Overview to link",
-    );
-}
-
-/// Only incidents still open, acknowledged or not, newest first; none when all is well.
-#[sqlx::test]
-async fn only_open_incidents_the_newest_first_and_none_when_all_is_well(pool: PgPool) {
-    apply_audit_migrations(&pool).await;
-    let auth = AuthStub::new();
-    let (organization, first, second) = organization_of_two(&auth);
-    let app = router(common::state(&pool, auth));
-    let slow = alert(&app, &organization, &first, "Slow calls").await;
-    let failed = alert(&app, &organization, &first, "Failed runs").await;
-    let spend = alert(&app, &organization, &second, "Spend").await;
-    assert!(health(&app, "user_owner", &organization).await.is_empty());
-
-    incident(&pool, &organization, &first, slow, "resolved", 5).await;
-    let taken = incident(&pool, &organization, &first, slow, "acknowledged", 2).await;
-    let oldest = incident(&pool, &organization, &first, failed, "open", 3).await;
-    let newest = incident(&pool, &organization, &second, spend, "open", 1).await;
-    assert_eq!(
-        health(&app, "user_owner", &organization).await,
-        vec![
-            (newest.to_string(), second.to_string()),
-            (taken.to_string(), first.to_string()),
-            (oldest.to_string(), first.to_string()),
-        ],
-    );
-
-    sqlx::query(
-        "UPDATE telemetry.incidents SET status = 'resolved', resolved_at = now()
-          WHERE status <> 'resolved'",
-    )
-    .execute(&pool)
-    .await
-    .expect("every incident resolves");
-    assert!(health(&app, "user_owner", &organization).await.is_empty());
-}
-
-/// The read keeps to the projects it is handed before its limit, not after.
-#[sqlx::test]
-async fn the_read_keeps_to_the_projects_it_is_handed(pool: PgPool) {
-    apply_audit_migrations(&pool).await;
-    let auth = AuthStub::new();
-    let (organization, first, second) = organization_of_two(&auth);
-    let state = common::state(&pool, auth);
-    let app = router(state.clone());
-    let slow = alert(&app, &organization, &first, "Slow calls").await;
-    let busy = alert(&app, &organization, &second, "Failed runs").await;
-    let mine = incident(&pool, &organization, &first, slow, "open", 2).await;
-    incident(&pool, &organization, &second, busy, "open", 1).await;
-
-    let mut tx = organization_scope(&state.db, &organization)
-        .await
-        .expect("the organization's binding");
-    let read = incidents::open_in(&mut tx, &organization, std::slice::from_ref(&first), 1)
-        .await
-        .expect("the read");
-    tx.commit().await.expect("commit");
-    assert_eq!(
-        read.iter()
-            .map(|row| (row.id, row.project_id.clone()))
-            .collect::<Vec<_>>(),
-        vec![(mine, first)],
-    );
-}
-
-/// Another organization's incidents never show, nor does a path naming it answer.
-#[sqlx::test]
-async fn another_organizations_incidents_never_show(pool: PgPool) {
-    apply_audit_migrations(&pool).await;
-    let auth = AuthStub::new();
-    let (organization, first, _) = organization_of_two(&auth);
-    let (elsewhere, theirs) = (OrganizationId::new(), ProjectId::new());
-    auth.seat(
-        "user_owner",
-        &elsewhere,
-        &theirs,
-        OrganizationRole::Member,
-        Some(Role::Admin),
-    );
-    let app = router(common::state(&pool, auth));
-    let ours = alert(&app, &organization, &first, "Slow calls").await;
-    let their_alert = alert(&app, &elsewhere, &theirs, "Slow calls").await;
-    let open = incident(&pool, &organization, &first, ours, "open", 2).await;
-    let their_incident = incident(&pool, &elsewhere, &theirs, their_alert, "open", 1).await;
-
-    assert_eq!(
-        health(&app, "user_owner", &organization).await,
-        vec![(open.to_string(), first.to_string())],
-    );
-    assert_eq!(
-        health(&app, "user_owner", &elsewhere).await,
-        vec![(their_incident.to_string(), theirs.to_string())],
-        "each organization's own, to a person in both",
-    );
-
-    let (status, _) = send(
-        &app,
-        "GET",
-        &format!("/internal/v1/telemetry/organizations/{elsewhere}/health"),
-        "user_owner",
-        &organization,
-        None,
-        None,
-    )
-    .await;
-    assert_eq!(
-        status,
-        StatusCode::FORBIDDEN,
-        "the path names another organization"
-    );
-    let (status, _) = send(
-        &app,
-        "GET",
-        &format!("/internal/v1/telemetry/organizations/{elsewhere}/health"),
-        "user_member",
-        &elsewhere,
-        None,
-        None,
-    )
-    .await;
-    assert_eq!(
-        status,
-        StatusCode::FORBIDDEN,
-        "not a member of that organization"
-    );
 }
 
 /// ⚠ An organization's scope reads every one of its incidents, no other's, and writes none.

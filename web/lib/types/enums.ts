@@ -4,9 +4,8 @@
 
 /** Wire vocabulary of the Rust `ApiKeyScope`: what an API key opens. */
 export const ApiKeyScope = {
-  Read:     "read",
-  Ingest:   "ingest",
-  Evaluate: "evaluate",
+  Read:   "read",
+  Ingest: "ingest",
 } as const;
 export type ApiKeyScope = typeof ApiKeyScope[keyof typeof ApiKeyScope];
 
@@ -92,69 +91,6 @@ export const TraceSort = {
 } as const;
 export type TraceSort = typeof TraceSort[keyof typeof TraceSort];
 
-/** Wire vocabulary of the Rust `TraceColumn`: a column of the trace list a
- *  person shows or hides, named in a saved view. */
-export const TraceColumn = {
-  Started:          "started",
-  Ended:            "ended",
-  Agent:            "agent",
-  User:             "user",
-  Session:          "session",
-  Environment:      "environment",
-  Release:          "release",
-  Status:           "status",
-  ErrorType:        "error_type",
-  Steps:            "steps",
-  ModelCalls:       "model_calls",
-  ToolCalls:        "tool_calls",
-  Errors:           "errors",
-  Spans:            "spans",
-  InputTokens:      "input_tokens",
-  OutputTokens:     "output_tokens",
-  CacheReadTokens:  "cache_read_tokens",
-  CacheWriteTokens: "cache_write_tokens",
-  Tokens:           "tokens",
-  Spend:            "spend",
-  Duration:         "duration",
-  TimeToFirstToken: "time_to_first_token",
-  Models:           "models",
-  Tools:            "tools",
-  Tags:             "tags",
-  Scores:           "scores",
-} as const;
-export type TraceColumn = typeof TraceColumn[keyof typeof TraceColumn];
-
-/** Wire vocabulary of the Rust `ModelProvider`: whose model a connection reaches. */
-export const ModelProvider = {
-  Openai:           "openai",
-  Anthropic:        "anthropic",
-  GoogleAiStudio:   "google_ai_studio",
-  VertexAi:         "vertex_ai",
-  AzureOpenai:      "azure_openai",
-  Bedrock:          "bedrock",
-  OpenaiCompatible: "openai_compatible",
-  Typesafe:            "typesafe",
-  SystemOneCompatible: "system_one_compatible",
-} as const;
-export type ModelProvider = typeof ModelProvider[keyof typeof ModelProvider];
-
-/** Wire vocabulary of the Rust `EvaluationStatus`: where an evaluation stands. */
-export const EvaluationStatus = {
-  Pending: "pending",
-  Delayed: "delayed",
-  Done:    "done",
-  Failed:  "failed",
-} as const;
-export type EvaluationStatus = typeof EvaluationStatus[keyof typeof EvaluationStatus];
-
-/** Wire vocabulary of the Rust `EvaluationTarget`: what an evaluation rule judges. */
-export const EvaluationTarget = {
-  Run:     "run",
-  Span:    "span",
-  Session: "session",
-} as const;
-export type EvaluationTarget = typeof EvaluationTarget[keyof typeof EvaluationTarget];
-
 /** Wire vocabulary of the Rust `ScoreType`: what a score's value is. */
 export const ScoreType = {
   Number:   "number",
@@ -165,9 +101,8 @@ export type ScoreType = typeof ScoreType[keyof typeof ScoreType];
 
 /** Wire vocabulary of the Rust `ScoreSource`: who gave a score. */
 export const ScoreSource = {
-  Sdk:       "sdk",
-  Member:    "member",
-  Evaluator: "evaluator",
+  Sdk:    "sdk",
+  Member: "member",
 } as const;
 export type ScoreSource = typeof ScoreSource[keyof typeof ScoreSource];
 
@@ -178,100 +113,6 @@ export const ScoreTarget = {
   Session: "session",
 } as const;
 export type ScoreTarget = typeof ScoreTarget[keyof typeof ScoreTarget];
-
-/** Wire vocabulary of the Rust `UserSort`: a column of the users page, named in the URL. */
-export const UserSort = {
-  User:         "user",
-  Traces:       "traces",
-  Errors:       "errors",
-  Steps:        "steps",
-  InputTokens:  "input_tokens",
-  OutputTokens: "output_tokens",
-  Tokens:       "tokens",
-  Spend:        "spend",
-  Duration:     "duration",
-  FirstSeen:    "first_seen",
-  LastSeen:     "last_seen",
-} as const;
-export type UserSort = typeof UserSort[keyof typeof UserSort];
-
-/** Wire vocabulary of the Rust `UserColumn`: a column of the users page a
- *  person may hide, named in a saved view. */
-export const UserColumn = {
-  Traces:       "traces",
-  Errors:       "errors",
-  Steps:        "steps",
-  InputTokens:  "input_tokens",
-  OutputTokens: "output_tokens",
-  Tokens:       "tokens",
-  Spend:        "spend",
-  Duration:     "duration",
-  FirstSeen:    "first_seen",
-  LastSeen:     "last_seen",
-} as const;
-export type UserColumn = typeof UserColumn[keyof typeof UserColumn];
-
-/** Wire vocabulary of the Rust `SessionSort`: a column of the sessions page, named in the URL. */
-export const SessionSort = {
-  Session:      "session",
-  User:         "user",
-  Traces:       "traces",
-  Errors:       "errors",
-  Steps:        "steps",
-  InputTokens:  "input_tokens",
-  OutputTokens: "output_tokens",
-  Tokens:       "tokens",
-  Spend:        "spend",
-  Duration:     "duration",
-  FirstSeen:    "first_seen",
-  LastSeen:     "last_seen",
-} as const;
-export type SessionSort = typeof SessionSort[keyof typeof SessionSort];
-
-/** Wire vocabulary of the Rust `SessionColumn`: a column of the sessions page
- *  a person may hide, named in a saved view. */
-export const SessionColumn = {
-  User:         "user",
-  Traces:       "traces",
-  Errors:       "errors",
-  Steps:        "steps",
-  InputTokens:  "input_tokens",
-  OutputTokens: "output_tokens",
-  Tokens:       "tokens",
-  Spend:        "spend",
-  Duration:     "duration",
-  FirstSeen:    "first_seen",
-  LastSeen:     "last_seen",
-  Tags:         "tags",
-} as const;
-export type SessionColumn = typeof SessionColumn[keyof typeof SessionColumn];
-
-/** Wire vocabulary of the Rust `LayoutDepth`: how far a trace opens. */
-export const LayoutDepth = {
-  Trace: "trace",
-  Steps: "steps",
-  Calls: "calls",
-} as const;
-export type LayoutDepth = typeof LayoutDepth[keyof typeof LayoutDepth];
-
-/** Wire vocabulary of the Rust `LayoutOpen`: which traces, and which
- *  branches of them, start open. */
-export const LayoutOpen = {
-  None:   "none",
-  Failed: "failed",
-  All:    "all",
-} as const;
-export type LayoutOpen = typeof LayoutOpen[keyof typeof LayoutOpen];
-
-/** Wire vocabulary of the Rust `ViewKind`: what a saved view is a view of. */
-export const ViewKind = {
-  Traces:    "traces",
-  Sessions:  "sessions",
-  Users:     "users",
-  Layout:    "layout",
-  Dashboard: "dashboard",
-} as const;
-export type ViewKind = typeof ViewKind[keyof typeof ViewKind];
 
 /** Wire vocabulary of the Rust `MetricsGroup`: what a project's totals over
  *  time are split by. */
@@ -424,9 +265,6 @@ export const ResourceKind = {
   Incident:          "incident",
   Trace:             "trace",
   EndUser:           "end_user",
-  ModelConnection:   "model_connection",
-  Evaluator:         "evaluator",
-  EvaluationRule:    "evaluation_rule",
 } as const;
 export type ResourceKind = typeof ResourceKind[keyof typeof ResourceKind];
 
@@ -541,21 +379,6 @@ export const ContentField = {
 } as const;
 export type ContentField = typeof ContentField[keyof typeof ContentField];
 
-/** Wire vocabulary of the Rust `PromptRole`: who says a prompt evaluator's message. */
-export const PromptRole = {
-  System:    "system",
-  User:      "user",
-  Assistant: "assistant",
-} as const;
-export type PromptRole = typeof PromptRole[keyof typeof PromptRole];
-
-/** Wire vocabulary of the Rust `EvaluatorKind`: a prompt to any model, or typed questions. */
-export const EvaluatorKind = {
-  Prompt: "prompt",
-  Typed:  "typed",
-} as const;
-export type EvaluatorKind = typeof EvaluatorKind[keyof typeof EvaluatorKind];
-
 /** Wire vocabulary of the Rust agent `MessageRole`: who wrote a message. */
 export const AgentMessageRole = {
   User:      "user",
@@ -578,7 +401,6 @@ export type AgentTurnEvent = typeof AgentTurnEvent[keyof typeof AgentTurnEvent];
 export const Live = {
   organizationChannel: "bfev:organization:",
   spansIngested:       "spans:ingested",
-  tagsChanged:         "tags:changed",
 } as const;
 
 /** What a message's `file` part names a file this deployment keeps by, its

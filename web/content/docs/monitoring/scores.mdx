@@ -38,15 +38,14 @@ an end user erased, a project deleted, or its days past retention.
 
 ## A score's comment
 
-A member may say why, in a **Comment** of up to 4,000 characters, and an
-[evaluator](/docs/workspace/evaluators)'s reasoning becomes its score's
-comment. A comment is content, unlike its score: it is kept only on a project
+A member may say why, in a **Comment** of up to 4,000 characters. A comment
+is content, unlike its score: it is kept only on a project
 whose [content mode](/docs/workspace/organizations-and-projects#a-projects-content-mode)
 is on — a member's is refused on one that keeps none — sealed under the
 project's key with the run's own content, and opened only with it, so a
 trace's page shows it, from the score's badge, where it shows the run's
 content, and the read is filed as that content's is; a trace's download
-carries it with the run's content, and a search of content finds its words.
+carries it with the run's content.
 Scoring again replaces it, a score given again without one takes it back, and
 it goes with its score and its run, and past the project's retention from
 when it was given. A session's score takes none: no run of the session holds
@@ -54,11 +53,6 @@ it; nor does one given once the organization holds the content its plan does.
 
 ## Where they show
 
-- **The Scores page** (`/{organization}/{project}/scores`, `g` `r`): every
-  score of the project, newest first, a hundred to a page with the older
-  ones after: when it was given, its name, what it says, the trace, span or
-  session it scores, linked, and who gave it. A name narrows the page to
-  that name's scores.
 - **A trace's page**: every score of the run and of its spans under the
   trace's line, a span's named by its span, each saying who gave it, its
   comment opened from it; and a span's beside the span when it is chosen.
@@ -70,8 +64,6 @@ it; nor does one given once the organization holds the content its plan does.
   value; a run passes where any score of the name falls within them. Narrowed
   to a score, the list's charts add its mean over the window, each bar the
   scores given in it on the runs the list admits.
-- **A session's page**: its head gives each score name's mean and how many,
-  across the session's runs and the session itself.
 - **An alert**: a [score alert](/docs/monitoring/alerts#making-an-alert)
   watches a score's average, a percentile, its highest or how many over a
   window, or its change from the window before, so a drop opens an incident.

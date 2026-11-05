@@ -125,14 +125,10 @@ pub struct AlertCeilings {
     pub alerts: u32,
     /// Deliveries a UTC day to its connectors.
     pub deliveries_per_day: u32,
-    /// Evaluation rules across its projects, as many as its alerts.
-    pub evaluation_rules: u32,
     /// The one thing that lifts them, the 402's `entitlement`.
     pub entitlement: String,
     /// The sentence a person reads, which names nobody.
     pub detail: String,
-    /// The sentence a rule past its number is refused with.
-    pub evaluation_rules_detail: String,
 }
 
 impl AlertCeilings {
@@ -143,18 +139,6 @@ impl AlertCeilings {
             return Ok(());
         }
         Err(limit_reached(&self.entitlement, &self.detail))
-    }
-
-    /// Whether one more evaluation rule may be made, with `held` already
-    /// held. Refused, as a 402, at the ceiling.
-    pub fn admit_evaluation_rule(&self, held: u64) -> Result<(), TelmoniError> {
-        if held < u64::from(self.evaluation_rules) {
-            return Ok(());
-        }
-        Err(limit_reached(
-            &self.entitlement,
-            &self.evaluation_rules_detail,
-        ))
     }
 }
 
@@ -337,8 +321,6 @@ mod tests {
             deliveries_per_day: 500,
             entitlement: "pro".into(),
             detail: "Hobby holds two alerts.".into(),
-            evaluation_rules: 2,
-            evaluation_rules_detail: "This organization's plan holds two evaluation rules.".into(),
         };
         assert!(ceilings.admit(1).is_ok());
         let pd = ceilings

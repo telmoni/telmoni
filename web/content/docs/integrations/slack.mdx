@@ -111,9 +111,7 @@ network error, a rate limit, a server error on Slack's side, or a `408`
 timeout:
 
 - Telmoni makes up to **5 attempts** in all: after 30 seconds, then 2, 8, and 32
-  minutes. These are the defaults, which the hosted service uses and a
-  self-hosted operator can change (`NOTIFICATIONS_DELIVERY_*` in the
-  [configuration reference](/docs/self-host/configuration)).
+  minutes.
 - If Slack answers with a `Retry-After` header, Telmoni waits at least that
   long before the next attempt, up to a day.
 

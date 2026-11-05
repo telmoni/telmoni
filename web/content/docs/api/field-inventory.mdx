@@ -17,7 +17,7 @@ The names are the [GenAI semantic conventions](https://github.com/open-telemetry
 at commit `6fd0d763a092db245a54104fc1124031eb3c51d2`, pinned on purpose: the
 conventions have tagged no release and rename what Telmoni sums, so a rename
 is a change to this page and to ingest, never to what is stored. What the
-conventions do not name — runs, tags, sample rates — is Telmoni's own,
+conventions do not name — runs and tags — is Telmoni's own,
 under `telmoni.*`, but for a call's cost, read under Langfuse's name for it,
 `gen_ai.usage.cost`, which exporters already send; the user a span was for is
 `user.id`, from OpenTelemetry's general registry.
@@ -57,7 +57,6 @@ rather than a plain span.
 | `telmoni.agent` | every span | the column `agent`, and a run's `name` where `gen_ai.agent.name` and `gen_ai.workflow.name` are unset | any | 1 to 128 characters; a span without it is refused |
 | `user.id` | any span | the column `user_id`, as its HMAC-SHA-256 under a key of the project's own, the first 16 bytes in hex | any | 1 to 128 characters |
 | `telmoni.tag.<key>` | any span | `tags`, under `<key>` | any | up to 32 tags; a key up to 64 characters, a value up to 256; in a project, up to 64 keys a UTC day, each taking up to 500 values |
-| `telmoni.sample_rate` | every span | the column `sample_rate` | any | above 0, up to 1: the share of runs the SDK sends, the same on every span of a run; a sum of spend over runs scales each span by it |
 | `telmoni.cancelled` | any span | the column `status`, as `cancelled` | any | `true` on a span the agent cancelled |
 
 The [coding-agent plugins](/docs/api/coding-agents) set one tag of their own:
@@ -117,13 +116,6 @@ them.
 | `gen_ai.response.finish_reasons` | a model call | `attributes`, under its own name | any | an array, as its JSON |
 | `gen_ai.response.status` | a model call | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
 | `gen_ai.request.reasoning.level` | a model call | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
-| `gen_ai.request.temperature` | a model call | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
-| `gen_ai.request.top_p` | a model call | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
-| `gen_ai.request.top_k` | a model call | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
-| `gen_ai.request.max_tokens` | a model call | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
-| `gen_ai.request.frequency_penalty` | a model call | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
-| `gen_ai.request.presence_penalty` | a model call | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
-| `gen_ai.request.seed` | a model call | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
 | `gen_ai.agent.version` | the run | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
 | `gen_ai.tool.call.id` | a tool call | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
 | `gen_ai.tool.type` | a tool call | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |

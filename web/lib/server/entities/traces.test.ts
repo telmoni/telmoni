@@ -18,9 +18,7 @@ import {
   fetchTrace,
   fetchTraceFacets,
   fetchTraceHistogram,
-  fetchTraceLayouts,
   fetchTraces,
-  fetchTraceViews,
   traceDownload,
 } from "./traces";
 
@@ -116,35 +114,6 @@ const HISTOGRAM = {
       score_mean: null,
     },
   ],
-};
-
-const LAYOUT = {
-  id: "7c1e0b6f-6a4f-4d2b-9e3a-5c7d8e9f0a1b",
-  kind: "layout",
-  name: "Review",
-  query: {
-    depth: "calls",
-    open: "failed",
-    timeline: true,
-    graph: false,
-    pinned: ["plan"],
-    filter: { kind: ["tool_call"] },
-    messages: false,
-    scores: true,
-  },
-  columns: ["started", "error_type"],
-  created_at: "2026-10-17T00:00:00Z",
-  updated_at: "2026-10-17T00:00:00Z",
-};
-
-const VIEW = {
-  kind: "traces",
-  id: "0b6f2c1e-6a4f-4d2b-9e3a-5c7d8e9f0a1b",
-  name: "Errors",
-  query: { status: ["error"], sort: "duration" },
-  columns: ["started", "duration"],
-  created_at: "2026-10-11T03:00:00Z",
-  updated_at: "2026-10-11T03:00:00Z",
 };
 
 const SPAN = {
@@ -269,40 +238,11 @@ describe("the reads beside the list", () => {
     );
   });
 
-  it("reads the project's saved views of the list, and its layouts apart from them", async () => {
-    answer(200, { views: [VIEW] });
-    expect(await fetchTraceViews(PROJECT)).toEqual({ kind: "ok", views: [VIEW] });
-    const [url] = fetchWithTimeout.mock.calls[0]!;
-    expect(url).toBe("http://server/internal/v1/telemetry/views?kind=traces");
-
-    answer(200, { views: [LAYOUT] });
-    expect(await fetchTraceLayouts(PROJECT)).toEqual({ kind: "ok", layouts: [LAYOUT] });
-    expect(fetchWithTimeout.mock.calls[1]![0]).toBe(
-      "http://server/internal/v1/telemetry/views?kind=layout",
-    );
-    // A layout among the list's views, or a view among the layouts, is an
-    // answer this console cannot read.
-    answer(200, { views: [LAYOUT] });
-    expect(await fetchTraceViews(PROJECT)).toEqual({ kind: "unavailable" });
-    answer(200, { views: [{ ...LAYOUT, query: { ...LAYOUT.query, depth: "spans" } }] });
-    expect(await fetchTraceLayouts(PROJECT)).toEqual({ kind: "unavailable" });
-  });
-
-  it("reads a saved view sorted by a tag's key with the Tags column, and none sorted by no key", async () => {
-    const tagged = { ...VIEW, query: { sort: "tag:repo", dir: "desc" }, columns: ["started", "tags"] };
-    answer(200, { views: [tagged] });
-    expect(await fetchTraceViews(PROJECT)).toEqual({ kind: "ok", views: [tagged] });
-    answer(200, { views: [{ ...VIEW, query: { sort: "tag:" } }] });
-    expect(await fetchTraceViews(PROJECT)).toEqual({ kind: "unavailable" });
-  });
-
   it("reads a refusal as forbidden, and a shape it cannot read as unavailable", async () => {
     answer(403, {});
     expect(await fetchTraceFacets(PROJECT, {})).toEqual({ kind: "forbidden" });
     answer(200, { ...HISTOGRAM, bars: [{ at: "x" }] });
     expect(await fetchTraceHistogram(PROJECT, {}, 0)).toEqual({ kind: "unavailable" });
-    answer(200, { views: [{ ...VIEW, columns: ["run_id"] }] });
-    expect(await fetchTraceViews(PROJECT)).toEqual({ kind: "unavailable" });
   });
 });
 
@@ -316,29 +256,28 @@ describe("traceDownload", () => {
     });
   }
 
-  it("asks for the list's filters and sort as a file, never its page, or the chosen runs", async () => {
+  it("asks for the list's filters and sort as a file, never its page", async () => {
     file(200);
     const result = await traceDownload(
       PROJECT,
       { agent: ["zeta"], sort: "tokens", page: 3, limit: 25 },
       "csv",
-      [RUN],
     );
     expect(result).toMatchObject({ kind: "ok", contentType: "text/csv; charset=utf-8" });
     const [url, , timeout] = fetchWithTimeout.mock.calls[0]!;
     expect(url).toBe(
-      `http://server/internal/v1/telemetry/traces/export?agent=zeta&sort=tokens&format=csv&run=${RUN}`,
+      "http://server/internal/v1/telemetry/traces/export?agent=zeta&sort=tokens&format=csv",
     );
     expect(timeout).toBeGreaterThan(10_000);
   });
 
   it("reads a 400 as a refusal of the query, and a 403 as forbidden", async () => {
     file(400);
-    expect(await traceDownload(PROJECT, {}, "json", [])).toEqual({ kind: "refused" });
+    expect(await traceDownload(PROJECT, {}, "json")).toEqual({ kind: "refused" });
     file(403);
-    expect(await traceDownload(PROJECT, {}, "json", [])).toEqual({ kind: "forbidden" });
+    expect(await traceDownload(PROJECT, {}, "json")).toEqual({ kind: "forbidden" });
     file(503);
-    expect(await traceDownload(PROJECT, {}, "json", [])).toEqual({ kind: "unavailable" });
+    expect(await traceDownload(PROJECT, {}, "json")).toEqual({ kind: "unavailable" });
   });
 });
 

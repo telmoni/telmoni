@@ -2,13 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import { DEFAULT_COLUMNS } from "@/lib/traces";
 
-import { DEFAULT_LAYOUT } from "./layout";
 import { DEFAULT_PREFS, readPrefs } from "./trace-prefs";
 
-/** The default customized to steps and calls, as a kept layout might be. */
-const COMPLEX = { ...DEFAULT_LAYOUT, depth: "calls" as const, open: "failed" as const, timeline: true };
-
 describe("what a browser kept of the trace list's look", () => {
+  // An older build's keys — the sessions' and users' columns, a layout — are
+  // passed over.
   it("reads every choice, the columns in the list's order", () => {
     expect(
       readPrefs(
@@ -22,18 +20,15 @@ describe("what a browser kept of the trace list's look", () => {
           filtersWidth: 240,
           peekFull: true,
           peekWidth: 720,
-          layout: { view: null, options: COMPLEX },
+          layout: { view: null, options: { depth: "calls" } },
         }),
       ),
     ).toEqual({
       columns: ["started", "duration", "models"],
-      sessionColumns: ["user", "last_seen"],
-      userColumns: [],
       density: "compact",
       filters: false,
       peekFull: true,
       peekWidth: 720,
-      layout: { view: null, options: COMPLEX },
     });
   });
 
@@ -56,7 +51,7 @@ describe("what a browser kept of the trace list's look", () => {
           layout: { view: null, options: {} },
         }),
       ),
-    ).toEqual({ ...DEFAULT_PREFS, columns: ["agent"], userColumns: ["tokens"] });
+    ).toEqual({ ...DEFAULT_PREFS, columns: ["agent"] });
     // A width no panel stands at, stored by hand or by an older build.
     expect(readPrefs(JSON.stringify({ peekWidth: 40 })).peekWidth).toBeNull();
     expect(readPrefs(JSON.stringify({ peekWidth: "720" })).peekWidth).toBeNull();

@@ -17,13 +17,10 @@ Project **Owners** and **Admins** can mint, rotate, and revoke API keys.
 3. Provide a name describing what service uses the key (up to 100 characters),
    and optionally a description (up to 500).
 4. Choose what it opens: **Send spans**, the `ingest` scope, which opens
-   [`/otlp/v1/traces`](/docs/api/ingest); **Read the API**, the `read` scope,
-   which opens [`/v1`](/docs/api/reference); and **Change evaluators**, the
-   `evaluate` scope, which makes, versions and deletes the project's
-   [evaluators](/docs/api/reference#post-v1evaluators) for a key that reads
-   too, so ticking it ticks reading. Sending and reading are on to start, and
-   changing evaluators off; a key needs at least one. A key baked into an
-   agent's process should send alone, so a leak of it reads nothing.
+   [`/otlp/v1/traces`](/docs/api/ingest); and **Read the API**, the `read`
+   scope, which opens [`/v1`](/docs/api/reference). Both are on to start, and
+   a key needs at least one. A key baked into an agent's process should send
+   alone, so a leak of it reads nothing.
 5. Choose when it expires: 30 days, 90 days (the default), 1 year, or **Never
    (not recommended)**.
 
@@ -57,9 +54,9 @@ Include the key as a bearer token in the HTTP `Authorization` header:
 $ curl -H "Authorization: Bearer $TELMONI_API_KEY" https://api.telmoni.com/v1/organization
 ```
 
-Each lane needs its scope: `/v1` the `read` scope, a change of an evaluator
-`evaluate` beside it, and [`/otlp/v1/traces`](/docs/api/ingest), where spans
-are sent, the `ingest` scope. A live key without the scope a lane needs is
+Each lane needs its scope: `/v1` the `read` scope, and
+[`/otlp/v1/traces`](/docs/api/ingest), where spans are sent, the `ingest`
+scope. A live key without the scope a lane needs is
 refused with `403` `/errors/authz/forbidden`.
 
 The [Telmoni CLI](/docs/api/cli) uses it from the `TELMONI_API_KEY` environment
@@ -82,11 +79,9 @@ const client = new Telmoni({ apiKey: process.env.TELMONI_API_KEY });
 
 A key is minted in a project, is deleted with it, and follows it if the project
 is transferred to another organization. On `/v1` it reads its project's
-organization (`GET /v1/organization`), its project's roster
-(`GET /v1/members`), and its project's traces, totals and incidents
-([API reference](/docs/api/reference)), never the organization's whole roster
-nor another project's: a key reads no more than the project Admin who minted
-it can see. A key remains active regardless
+organization (`GET /v1/organization`) and its project's traces, totals and
+incidents ([API reference](/docs/api/reference)), never another project's: a
+key reads no more than the project Admin who minted it can see. A key remains active regardless
 of whether the individual user who created it leaves the project.
 
 ## Who can see keys

@@ -8,7 +8,6 @@ use serde_json::{Value, json};
 use telmoni_agent::db::MessageRole;
 use telmoni_agent::handler::{MESSAGE_MAX_CHARS, TurnEventKind};
 use telmoni_agent::tools::Tool;
-use telmoni_agent::trace_filters::SENTENCE_MAX_CHARS;
 use telmoni_agent::turn::STREAM_MAX;
 use telmoni_auth::audit_export::{ExportFailure, ExportFormat, ExportStatus, KEEP_FOR_SECS};
 use telmoni_auth::db::confirmation_codes::CODE_DIGITS;
@@ -22,29 +21,14 @@ use telmoni_shared::test_util::pin_contract;
 use telmoni_shared::types::WireEnum;
 use telmoni_shared::types::email::MAX_EMAIL_LEN;
 use telmoni_shared::{
-    ApiKeyScope, ChartMeasure, ContentMode, EvaluationStatus, EvaluationTarget, Flag,
-    IncidentStatus, LayoutDepth, LayoutOpen, MetricsGroup, MissingData, ModelProvider,
+    ApiKeyScope, ChartMeasure, ContentMode, Flag, IncidentStatus, MetricsGroup, MissingData,
     NotificationKind, OrganizationRole, OrganizationStatus, Role, RuleAggregation, RuleBaseline,
     RuleLevel, RuleMeasure, RuleOperator, RuleWindow, ScoreSource, ScoreTarget, ScoreType,
-    SessionColumn, SessionSort, Severity, SortDirection, SpanKind, SpanStatus, TelmoniResourceKind,
-    TraceColumn, TraceSort, UserColumn, UserSort, ViewKind, slug,
+    Severity, SortDirection, SpanKind, SpanStatus, TelmoniResourceKind, TraceSort, slug,
 };
 use telmoni_telemetry::content::FILE_ID_PREFIX;
 use telmoni_telemetry::contract::{CONTENT, NAME_MAX as SPAN_NAME_MAX, UTC_OFFSET_RANGE};
-use telmoni_telemetry::evaluators::typed::{
-    INSTRUCTIONS_MAX, LEVELS_MAX, OPTIONS_MAX, QUESTIONS_MAX,
-};
-use telmoni_telemetry::evaluators::{
-    MEANS_MAX, MESSAGE_MAX, MESSAGES_MAX, NAME_MAX as EVALUATOR_NAME_MAX, PromptRole,
-};
-use telmoni_telemetry::handler::evaluation_rules::{
-    EVALUATORS_MAX as RULE_EVALUATORS_MAX, NAME_MAX as EVALUATION_RULE_NAME_MAX, POINTER_MAX,
-};
-use telmoni_telemetry::handler::evaluators::{EvaluatorKind, TEMPERATURE_MAX, WEEKLY_LIMIT_MAX};
 use telmoni_telemetry::handler::incidents::INCIDENTS_MAX;
-use telmoni_telemetry::handler::model_connections::{
-    MODEL_MAX, MODELS_MAX, NAME_MAX as CONNECTION_NAME_MAX, SECRET_MAX,
-};
 use telmoni_telemetry::handler::traces::FILTER_VALUE_MAX;
 use telmoni_telemetry::handler::views::{DASHBOARD_CHARTS_MAX, VIEW_NAME_MAX};
 use telmoni_telemetry::live;
@@ -56,8 +40,7 @@ use telmoni_telemetry::scores::{
     CATEGORIES_MAX, CATEGORY_MAX, COMMENT_MAX, NAME_MAX as SCORE_NAME_MAX,
 };
 use telmoni_telemetry::traces::{
-    DEFAULT_DAYS, EXPORT_MAX, FILTER_VALUES_MAX, MAX_DAYS, MAX_LIMIT, MAX_PAGE, PINNED_MAX,
-    PINNED_PER_RUN, RUNS_MAX,
+    DEFAULT_DAYS, EXPORT_MAX, FILTER_VALUES_MAX, MAX_DAYS, MAX_LIMIT, MAX_PAGE,
 };
 
 /// A vocabulary's words in its table's order, each the one serde writes
@@ -109,26 +92,15 @@ fn generated_contract() -> Value {
             "SpanKind": wire::<SpanKind>(),
             "SpanStatus": wire::<SpanStatus>(),
             "TraceSort": wire::<TraceSort>(),
-            "TraceColumn": wire::<TraceColumn>(),
-            "UserSort": wire::<UserSort>(),
-            "UserColumn": wire::<UserColumn>(),
-            "SessionSort": wire::<SessionSort>(),
-            "SessionColumn": wire::<SessionColumn>(),
             "SortDirection": wire::<SortDirection>(),
             "ContentMode": wire::<ContentMode>(),
             "ApiKeyScope": wire::<ApiKeyScope>(),
-            "LayoutDepth": wire::<LayoutDepth>(),
-            "LayoutOpen": wire::<LayoutOpen>(),
-            "ViewKind": wire::<ViewKind>(),
             "MetricsGroup": wire::<MetricsGroup>(),
             "ChartMeasure": wire::<ChartMeasure>(),
             "RuleMeasure": wire::<RuleMeasure>(),
             "RuleAggregation": wire::<RuleAggregation>(),
             "RuleWindow": wire::<RuleWindow>(),
             "RuleBaseline": wire::<RuleBaseline>(),
-            "ModelProvider": wire::<ModelProvider>(),
-            "EvaluationTarget": wire::<EvaluationTarget>(),
-            "EvaluationStatus": wire::<EvaluationStatus>(),
             "ScoreSource": wire::<ScoreSource>(),
             "ScoreTarget": wire::<ScoreTarget>(),
             "ScoreType": wire::<ScoreType>(),
@@ -153,8 +125,6 @@ fn generated_contract() -> Value {
             "AgentMessageRole": wire::<MessageRole>(),
             "AgentTurnEvent": wire::<TurnEventKind>(),
             "ContentField": CONTENT,
-            "PromptRole": wire::<PromptRole>(),
-            "EvaluatorKind": wire::<EvaluatorKind>(),
         },
         "flags": {
             "global_only": Flag::all().iter().filter(|f| f.is_global_only())
@@ -173,7 +143,6 @@ fn generated_contract() -> Value {
         "live": {
             "organization_channel": live::ORGANIZATION_CHANNEL,
             "spans_ingested": live::SPANS_INGESTED,
-            "tags_changed": live::TAGS_CHANGED,
         },
         "content": { "file_id_prefix": FILE_ID_PREFIX },
         "limits": {
@@ -182,11 +151,8 @@ fn generated_contract() -> Value {
             "list_max_limit": MAX_LIMIT,
             "list_max_page": MAX_PAGE,
             "list_export_max": EXPORT_MAX,
-            "list_runs_max": RUNS_MAX,
             "filter_values_max": FILTER_VALUES_MAX,
             "filter_value_max": FILTER_VALUE_MAX,
-            "pinned_max": PINNED_MAX,
-            "pinned_per_run": PINNED_PER_RUN,
             "dashboard_charts_max": DASHBOARD_CHARTS_MAX,
             "rollup_group_top": GROUP_TOP,
             "utc_offset_west": *UTC_OFFSET_RANGE.start(),
@@ -203,7 +169,6 @@ fn generated_contract() -> Value {
             "email_max": MAX_EMAIL_LEN,
             "agent_message_max": MESSAGE_MAX_CHARS,
             "agent_stream_max_secs": STREAM_MAX.as_secs(),
-            "trace_question_max": SENTENCE_MAX_CHARS,
             "audit_export_kept_days": KEEP_FOR_SECS / 86_400,
             "confirmation_code_length": CODE_DIGITS,
             "view_name_max": VIEW_NAME_MAX,
@@ -212,23 +177,6 @@ fn generated_contract() -> Value {
             "score_comment_max": COMMENT_MAX,
             "score_categories_max": CATEGORIES_MAX,
             "score_category_max": CATEGORY_MAX,
-            "evaluator_name_max": EVALUATOR_NAME_MAX,
-            "evaluator_messages_max": MESSAGES_MAX,
-            "evaluator_message_max": MESSAGE_MAX,
-            "evaluator_means_max": MEANS_MAX,
-            "evaluator_temperature_max": TEMPERATURE_MAX,
-            "evaluator_weekly_limit_max": WEEKLY_LIMIT_MAX,
-            "typed_questions_max": QUESTIONS_MAX,
-            "typed_levels_max": LEVELS_MAX,
-            "typed_options_max": OPTIONS_MAX,
-            "typed_instructions_max": INSTRUCTIONS_MAX,
-            "evaluation_rule_name_max": EVALUATION_RULE_NAME_MAX,
-            "evaluation_rule_evaluators_max": RULE_EVALUATORS_MAX,
-            "evaluation_rule_pointer_max": POINTER_MAX,
-            "model_connection_name_max": CONNECTION_NAME_MAX,
-            "model_connection_model_max": MODEL_MAX,
-            "model_connection_models_max": MODELS_MAX,
-            "model_connection_secret_max": SECRET_MAX,
         },
         "rules": { "folds": rule_folds(), "measures": rule_measures() },
     })

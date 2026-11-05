@@ -3,16 +3,11 @@ import {
   Activity,
   Bell,
   BellRing,
-  BrainCircuit,
-  Gauge,
   History,
   KeyRound,
   LayoutDashboard,
-  ListChecks,
   ListTree,
-  MessagesSquare,
   Plug,
-  Scale,
   Settings,
   ShieldCheck,
   SquareStack,
@@ -20,7 +15,6 @@ import {
   User,
   type LucideIcon,
   Users,
-  UsersRound,
 } from "lucide-react";
 
 import { EXTRA_NAV_ITEMS, type ExtraNavItem } from "@/lib/extension/nav";
@@ -140,21 +134,14 @@ export function organizationToRemember(
   return organizations.find((o) => o.slug === place.organization)?.organizationId ?? null;
 }
 
-/**
- * A row that opens a block of the rail: the rows from it to the next such row
- * stand together, clear of the block above, under `heading` when there is
- * one. A run's first row opens its first block whether it says so or not.
- */
-export interface NavBlock {
-  heading?: string;
-}
-
 export interface ConsoleNavItem {
   title: string;
   url: string;
   icon: LucideIcon;
   isActive: boolean;
-  block?: NavBlock;
+  /** Opens a block: this row and the rest up to the next that opens one stand
+   *  clear of the rows above. A run's first row opens its first block. */
+  block?: boolean;
   /** The letter after `g` that reaches the row (`lib/keys.ts`). */
   key?: string;
 }
@@ -164,21 +151,12 @@ export interface ConsoleNavGroup {
   items: ConsoleNavItem[];
 }
 
-export interface ConsoleNavBlock {
-  heading?: string;
-  items: ConsoleNavItem[];
-}
-
 /** A run's rows in their blocks, for the rail to draw. */
-export function navBlocks(items: readonly ConsoleNavItem[]): ConsoleNavBlock[] {
-  const blocks: ConsoleNavBlock[] = [];
-  let current: ConsoleNavBlock | undefined;
+export function navBlocks(items: readonly ConsoleNavItem[]): ConsoleNavItem[][] {
+  const blocks: ConsoleNavItem[][] = [];
   for (const item of items) {
-    if (item.block || !current) {
-      current = { heading: item.block?.heading, items: [] };
-      blocks.push(current);
-    }
-    current.items.push(item);
+    if (item.block || blocks.length === 0) blocks.push([]);
+    blocks[blocks.length - 1]?.push(item);
   }
   return blocks;
 }
@@ -190,7 +168,7 @@ interface GroupSpec {
     path: string;
     icon: LucideIcon;
     flags?: readonly Flag[];
-    block?: NavBlock;
+    block?: boolean;
     key?: string;
   }[];
 }
@@ -206,26 +184,14 @@ interface GroupSpec {
 const CORE_GROUPS: GroupSpec[] = [
   {
     title: "Project",
-    // Dashboards stands in the rail before its page exists, so the console
-    // shows the product's shape while the rest is built: it opens a
-    // placeholder that the real page replaces, as Traces, Sessions, Users and
-    // Alerts did until theirs landed. The Observability block is headed
-    // because its five rows are the product, Evaluation because its rows
-    // judge what those record, and the Project block because the rest of
-    // the rail is the project's own housekeeping; Overview stands alone above.
+    // The product's rows, then the project's own housekeeping a block below.
     items: [
       { title: "Overview", path: "", icon: Activity, key: "o" },
-      { title: "Traces", path: "/traces", icon: ListTree, block: { heading: "Observability" }, key: "t" },
-      { title: "Sessions", path: "/sessions", icon: MessagesSquare, key: "s" },
-      { title: "Users", path: "/users", icon: UsersRound, key: "u" },
+      { title: "Traces", path: "/traces", icon: ListTree, key: "t" },
       { title: "Alerts", path: "/alerts", icon: BellRing, key: "a" },
       { title: "Dashboards", path: "/dashboards", icon: LayoutDashboard, key: "d" },
-      { title: "Scores", path: "/scores", icon: Gauge, block: { heading: "Evaluation" }, key: "r" },
-      { title: "Evaluators", path: "/evaluators", icon: Scale, key: "e" },
-      { title: "Rules", path: "/rules", icon: ListChecks, key: "b" },
       { title: "Objectives", path: "/objectives", icon: Target, key: "v" },
-      { title: "API keys", path: "/api-keys", icon: KeyRound, block: { heading: "Project" }, key: "k" },
-      { title: "Models", path: "/models", icon: BrainCircuit, key: "i" },
+      { title: "API keys", path: "/api-keys", icon: KeyRound, block: true, key: "k" },
       { title: "Connectors", path: "/connectors", icon: Plug, key: "c" },
       { title: "Members", path: "/members", icon: Users, key: "m" },
       { title: "Audit log", path: "/audit-log", icon: History, key: "l" },
@@ -235,11 +201,9 @@ const CORE_GROUPS: GroupSpec[] = [
   },
   {
     title: "Organization",
-    // Overview stands alone; the organization's own rows are headed, as a
-    // project's housekeeping is headed Project.
+    // An organization opens on its projects (`[organization]/page.tsx`).
     items: [
-      { title: "Overview", path: "", icon: Activity, key: "o" },
-      { title: "Projects", path: "/projects", icon: SquareStack, block: { heading: "Organization" }, key: "p" },
+      { title: "Projects", path: "/projects", icon: SquareStack, key: "p" },
       { title: "Members", path: "/members", icon: Users, key: "m" },
       { title: "Audit log", path: "/audit-log", icon: History, key: "l" },
       { title: "Notifications", path: "/notifications", icon: Bell, key: "n" },
@@ -248,7 +212,7 @@ const CORE_GROUPS: GroupSpec[] = [
   },
   {
     title: "Settings",
-    // One unheaded block: the way back above it says what this rail is.
+    // One block: the way back above it says what this rail is.
     items: [
       { title: "General", path: "/general", icon: Settings, key: "," },
       { title: "Account", path: "/account", icon: User, key: "u" },

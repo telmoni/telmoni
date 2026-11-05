@@ -1,11 +1,10 @@
 ---
 title: "Privacy and deletion"
-description: "Managing active sessions, product analytics, and permanent account deletion."
+description: "Managing active sessions and permanent account deletion."
 ---
 
-Your account's **Privacy** page (`/settings/privacy`) manages your sessions,
-your account's deletion and, where the deployment offers it, your analytics
-preference. How long every kind of data is kept is on
+Your account's **Privacy** page (`/settings/privacy`) manages your sessions
+and your account's deletion. How long every kind of data is kept is on
 [Data retention](/docs/workspace/data-retention), and what each deletion
 removes on [Data deletion](/docs/workspace/data-deletion).
 
@@ -23,17 +22,6 @@ current one with **Sign out everywhere else**; each device is refused at its
 next request, and a console tab left open there is sent to sign in within 15
 minutes. Either is recorded in the audit log of the organization you are in.
 To end your current session, sign out from the user menu.
-
-## Product analytics
-
-A **Data collection** switch appears on this page only on a deployment whose
-operator has configured an analytics provider (`ANALYTICS_INGEST_URL` and
-`ANALYTICS_WRITE_KEY` in the [configuration
-reference](/docs/self-host/configuration#web-console-nextjs-bff)). It is **off by
-default** and records your choice. The console sends nothing to that provider,
-whatever the switch says: its one analytics event, written with your user ID at
-every browser sign-in, goes to its own operational log and is not sent on.
-Where no provider is configured, the page has no switch.
 
 ## Console agent data
 
@@ -56,11 +44,7 @@ retention window:
 Each question is sent to the model provider configured for the deployment,
 together with the earlier turns of the conversation (up to 20 messages) and
 whatever the agent's tools read to answer it: the passages it retrieved, and the
-member roster, connectors, delivery logs, or audit events it looked up. A
-sentence asked of the trace list is sent with the values of the list's window:
-its agents, models, tools, environments, releases, prompts and tags, its
-sessions' ids and its end users' ids as stored. Neither is kept; when it was
-asked is kept for an hour, to count against the hourly limit. Search
+member roster, connectors, delivery logs, or audit events it looked up. Search
 queries and the indexed text go to the configured embeddings endpoint, and to
 the rerank endpoint if one is set. On the hosted service, the model and the
 embeddings are Google's Gemini API, on Google's paid terms, as the

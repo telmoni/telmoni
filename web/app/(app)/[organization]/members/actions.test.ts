@@ -140,7 +140,6 @@ function standingAs(
       userId: "user_1",
       email: "user@example.test",
       displayName: null,
-      analyticsOptIn: false,
     },
     organizations: [
       { organizationId, slug: "acme", name: "Acme", ownerEmail: "owner@example.test", role },

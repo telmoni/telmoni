@@ -6,7 +6,6 @@
 // package behind it.
 import "server-only";
 
-import { LIVE_HOLD_SECS } from "./live-refresh";
 import { DOCS_URL } from "./site";
 
 const REQUIRED = [
@@ -57,10 +56,7 @@ export function validateEnv(): void {
 
   void env.AUTH_URL;
   void env.TRUSTED_PROXY_HOPS;
-  void env.LIVE_REFRESH_HOLD_SECS;
 }
-
-const LIVE_REFRESH_HOLD_MAX_SECS = 3_600;
 
 export function isSecureOrigin(value: string): boolean {
   let url: URL;
@@ -140,24 +136,6 @@ export const env = {
     return Number(raw);
   },
 
-  // How long a trace's or a session's page, or a Sessions or Users list,
-  // holds after it was drawn for ingest's "spans arrived" before it is drawn
-  // again for the next, in seconds (`lib/live-refresh.ts`): the first after
-  // a quiet spell draws at once, the rest once, when the hold ends, so a
-  // flood costs at most two redraws a hold; the Traces list counts them in a
-  // bar instead. Unset is thirty; 0 draws on every export.
-  get LIVE_REFRESH_HOLD_SECS(): number {
-    const raw = process.env.LIVE_REFRESH_HOLD_SECS?.trim();
-    if (!raw) return LIVE_HOLD_SECS;
-    if (!/^\d{1,4}$/.test(raw) || Number(raw) > LIVE_REFRESH_HOLD_MAX_SECS) {
-      throw new InvalidEnvError(
-        "LIVE_REFRESH_HOLD_SECS",
-        `must be the seconds a live page holds between redraws, 0 to ${LIVE_REFRESH_HOLD_MAX_SECS}`,
-      );
-    }
-    return Number(raw);
-  },
-
   // Whether search engines, and the crawlers that feed models, are offered the
   // public pages: `true` alone, on the one deployment meant to be found;
   // anything else, unset included, answers every page `noindex`.
@@ -192,15 +170,6 @@ export const env = {
   // published image is built with none.
   get TELMONI_ANNOUNCEMENT(): string | undefined {
     const v = process.env.TELMONI_ANNOUNCEMENT;
-    return v && v.trim() ? v.trim() : undefined;
-  },
-
-  get ANALYTICS_INGEST_URL(): string | undefined {
-    const v = process.env.ANALYTICS_INGEST_URL;
-    return v && v.trim() ? v.trim() : undefined;
-  },
-  get ANALYTICS_WRITE_KEY(): string | undefined {
-    const v = process.env.ANALYTICS_WRITE_KEY;
     return v && v.trim() ? v.trim() : undefined;
   },
 } as const;

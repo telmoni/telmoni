@@ -77,7 +77,7 @@ pub async fn create(
 pub struct ValidatedToken {
     pub id: Uuid,
     pub organization_id: OrganizationId,
-    /// The project the token was minted on: the roster `/v1/members` reads,
+    /// The project the token was minted on, the one every `/v1` read is of,
     /// since a project admin may mint a key and may see no more than that.
     pub project_id: ProjectId,
     /// The organization's name, which `/internal/v1/tokens/validate` answers;

@@ -2,21 +2,22 @@ import type { ReactElement } from "react";
 import { describe, expect, it } from "vitest";
 
 import { cellOf } from "@/components/traces/cells";
-import type { Trace, TraceSpan, TraceView } from "@/lib/server/entities/traces";
+import type { Trace, TraceSpan } from "@/lib/server/entities/traces";
 import { testSpan } from "@/lib/span-fixture";
-import { TraceColumn } from "@/lib/types/enums";
+import { TraceColumn } from "@/lib/types/traces";
 
 import {
   COLUMN_MENU,
   DEFAULT_COLUMNS,
   TRACE_COLUMNS,
   activeFilters,
-  askedNote,
   currentSort,
   downloadHref,
   fits,
   formatCost,
   formatDuration,
+  groupOf,
+  groupedBy,
   isTagPair,
   listDownloadHref,
   listPageHref,
@@ -28,36 +29,21 @@ import {
   parseTraceUi,
   presetActive,
   presetToggled,
-  SEARCH_MAX,
-  queryOfView,
+  sessionRunsHref,
   shortId,
-  showsView,
   orderedColumns,
   tagKeys,
   tagValues,
   timelineBars,
   toggled,
   traceHref,
-  compareHref,
   tracesHref,
   unfiltered,
-  viewHref,
-  viewQueryOf,
   without,
 } from "./traces";
 
 const span = (over: Partial<TraceSpan> & Pick<TraceSpan, "span_id" | "kind">) =>
   testSpan({ name: over.kind, ...over });
-
-const VIEW: TraceView = {
-  id: "0b6f2c1e-6a4f-4d2b-9e3a-5c7d8e9f0a1b",
-  kind: "traces",
-  name: "Errors",
-  query: { status: ["error"], agent: ["support-bot", "zeta"], sort: "duration", days: 30 },
-  columns: [TraceColumn.Started, TraceColumn.Duration],
-  created_at: "2026-10-11T03:00:00Z",
-  updated_at: "2026-10-11T03:00:00Z",
-};
 
 describe("the URL as the list's state", () => {
   it("reads a score and its bounds, a chip that clears them together, and bounds alone as none", () => {
@@ -151,9 +137,9 @@ describe("the URL as the list's state", () => {
   });
 
   it("reads the page's own state apart from the list's, which the server never sees", () => {
-    expect(parseTraceUi({ display: "chart", view: VIEW.id })).toEqual({ display: "chart", view: VIEW.id });
-    expect(parseTraceUi({ display: "table", view: "not-a-view" })).toEqual({});
-    expect(parseTraceQuery({ display: "chart", view: VIEW.id })).toEqual({});
+    expect(parseTraceUi({ display: "chart" })).toEqual({ display: "chart" });
+    expect(parseTraceUi({ display: "table" })).toEqual({});
+    expect(parseTraceQuery({ display: "chart" })).toEqual({});
   });
 
   it("writes the list's path with one thing changed, a filter's values given again, and a trace's own", () => {
@@ -165,14 +151,11 @@ describe("the URL as the list's state", () => {
       tracesHref("acme", "web", { agent: ["nightly-report"], user: ["u1"] }, { user: undefined }),
     ).toBe("/acme/web/traces?agent=nightly-report");
     expect(tracesHref("acme", "web", { user: ["a b&c"] })).toBe("/acme/web/traces?user=a+b%26c");
-    expect(tracesHref("acme", "web", { page: 2 }, {}, { display: "chart", view: VIEW.id })).toBe(
-      `/acme/web/traces?page=2&display=chart&view=${VIEW.id}`,
+    expect(tracesHref("acme", "web", { page: 2 }, {}, { display: "chart" })).toBe(
+      "/acme/web/traces?page=2&display=chart",
     );
     expect(traceHref("acme", "web", "5d4f5c68-0000-4000-8000-000000000001")).toBe(
       "/acme/web/traces/5d4f5c68-0000-4000-8000-000000000001",
-    );
-    expect(compareHref("acme", "web", "5d4f5c68-0000-4000-8000-000000000001", "5d4f5c68-0000-4000-8000-000000000002")).toBe(
-      "/acme/web/traces/compare?a=5d4f5c68-0000-4000-8000-000000000001&b=5d4f5c68-0000-4000-8000-000000000002",
     );
   });
 
@@ -224,24 +207,6 @@ describe("the URL as the list's state", () => {
       { filter: "tag", label: "Tag", value: "team:search", text: "team:search" },
     ]);
     expect(activeFilters({})).toEqual([]);
-  });
-
-  // ⚠ A search of kept content rides in the URL like a filter: named first,
-  // taken off by its own ×, gone with every filter, and dropped past what
-  // the server takes.
-  it("reads a search, names it first, and takes it off alone or with every filter", () => {
-    const query = parseTraceQuery({ q: "  where is my refund ", agent: "bot", page: "3" });
-    expect(query.q).toBe("where is my refund");
-    expect(activeFilters(query)[0]).toEqual({
-      filter: "q",
-      label: "Search",
-      value: "where is my refund",
-      text: "where is my refund",
-    });
-    expect(without(query, "q")).toEqual({ agent: ["bot"] });
-    expect(unfiltered(query)).toEqual({});
-    expect(parseTraceQuery({ q: "x".repeat(SEARCH_MAX + 1) }).q).toBeUndefined();
-    expect(parseTraceQuery({ q: "   " }).q).toBeUndefined();
   });
 
   it("takes a tag as key:value, the key 1 to 64 characters and the value up to 256", () => {
@@ -340,21 +305,18 @@ describe("the URL as the list's state", () => {
     expect(pageCount(10_000_000, 25)).toBe(1_000);
   });
 
-  it("writes a download's path with the list's filters and sort, never its page, or the chosen runs", () => {
+  it("writes a download's path with the list's filters and sort, never its page", () => {
     expect(
       downloadHref("acme", "web", { agent: ["zeta"], sort: "tokens", page: 3, limit: 25 }, "csv"),
     ).toBe("/acme/web/traces/export?agent=zeta&sort=tokens&format=csv");
     expect(
       downloadHref("acme", "web", { environment: ["production"], tag: ["team:search"], prompt: ["p"] }, "csv"),
     ).toBe("/acme/web/traces/export?environment=production&tag=team%3Asearch&prompt=p&format=csv");
-    expect(downloadHref("acme", "web", {}, "json", ["r1", "r2"])).toBe(
-      "/acme/web/traces/export?format=json&run=r1&run=r2",
-    );
   });
 });
 
-describe("the sessions and users lists, which take the trace list's filters and pages", () => {
-  it("reads a list's query with its own sorts, dropping the trace list's", () => {
+describe("a list's query, its pages and its download", () => {
+  it("reads a list's query with its own sorts, dropping any other", () => {
     const sorts = { Session: "session", LastSeen: "last_seen" } as const;
     expect(
       parseListQuery({ sort: "last_seen", status: "error", limit: "25", page: "2" }, sorts),
@@ -363,19 +325,33 @@ describe("the sessions and users lists, which take the trace list's filters and 
     expect(parseFilters({ agent: "zeta", sort: "user", days: "30" })).toEqual({ agent: ["zeta"] });
   });
 
-  it("writes a list's page and its download, the sessions' beside their page rather than under it", () => {
-    expect(listPageHref("sessions", "acme", "web", { user: ["u"], page: 2 })).toBe(
-      "/acme/web/sessions?user=u&page=2",
-    );
+  it("writes a list's page and its download, the download without its page", () => {
     expect(listPageHref("traces", "acme", "web", { status: ["error"] }, { display: "chart" })).toBe(
       "/acme/web/traces?status=error&display=chart",
     );
     expect(
-      listDownloadHref("sessions", "acme", "web", { status: ["error"], sort: "tokens", page: 3 }, "csv"),
-    ).toBe("/acme/web/session-export?status=error&sort=tokens&format=csv");
-    expect(listDownloadHref("users", "acme", "web", { days: 30 }, "json")).toBe(
-      "/acme/web/users/export?days=30&format=json",
+      listDownloadHref("traces", "acme", "web", { status: ["error"], sort: "tokens", page: 3 }, "csv"),
+    ).toBe("/acme/web/traces/export?status=error&sort=tokens&format=csv");
+  });
+
+  it("opens a run's session as its runs, the first to start first", () => {
+    expect(sessionRunsHref("acme", "web", "conv 1", 30)).toBe(
+      "/acme/web/traces?session=conv+1&sort=started&dir=asc&days=30",
     );
+  });
+
+  it("groups the list by session or user as its sort, from the first page, and back to its own", () => {
+    expect(groupOf({ sort: "session" })).toBe("session");
+    expect(groupOf({ sort: "user", dir: "desc" })).toBe("user");
+    expect(groupOf({ sort: "started" })).toBeUndefined();
+    expect(groupedBy({ status: ["error"], page: 3 }, "session")).toEqual({
+      status: ["error"],
+      sort: "session",
+      dir: "asc",
+    });
+    expect(groupedBy({ sort: "user", dir: "asc", page: 2 }, undefined)).toEqual({});
+    const sorted = { sort: "spend", dir: "desc" } as const;
+    expect(groupedBy(sorted, undefined)).toBe(sorted);
   });
 
   it("keeps a filter's every other query key as it ticks and clears values, from the first page", () => {
@@ -387,88 +363,6 @@ describe("the sessions and users lists, which take the trace list's filters and 
       limit: 25,
     });
     expect(unfiltered(query)).toEqual({ sort: "user", limit: 25 });
-  });
-});
-
-describe("a saved view", () => {
-  it("keeps the list's query but its page, and opens on it, named in the URL", () => {
-    expect(viewQueryOf({ agent: ["zeta"], sort: "tokens", limit: 25, page: 4 })).toEqual({
-      agent: ["zeta"],
-      sort: "tokens",
-      limit: 25,
-    });
-    expect(
-      viewQueryOf({ environment: ["production"], release: ["1.2"], tag: ["team:a"], prompt: ["p"] }),
-    ).toEqual({ environment: ["production"], release: ["1.2"], tag: ["team:a"], prompt: ["p"] });
-    expect(queryOfView({ environment: ["staging"], tag: ["untagged", "team:a"] })).toEqual({
-      environment: ["staging"],
-      tag: ["team:a"],
-    });
-    expect(queryOfView(VIEW.query)).toEqual({
-      agent: ["support-bot", "zeta"],
-      status: ["error"],
-      sort: "duration",
-      days: 30,
-    });
-    expect(viewHref("acme", "web", VIEW, { display: "chart" })).toBe(
-      `/acme/web/traces?agent=support-bot&agent=zeta&status=error&sort=duration&days=30&display=chart&view=${VIEW.id}`,
-    );
-  });
-
-  it("is shown while the list holds its query, a filter's values in any order, the page aside", () => {
-    const shown = queryOfView(VIEW.query);
-    expect(showsView(shown, VIEW)).toBe(true);
-    expect(showsView({ ...shown, agent: ["zeta", "support-bot"], page: 2 }, VIEW)).toBe(true);
-    expect(showsView({ ...shown, dir: "desc" }, VIEW)).toBe(true);
-    expect(showsView({ ...shown, agent: ["zeta"] }, VIEW)).toBe(false);
-    expect(showsView({ ...shown, days: 7 }, VIEW)).toBe(false);
-    expect(showsView({ ...shown, sort: "tokens" }, VIEW)).toBe(false);
-  });
-
-  it("keeps a sort by a tag's key, opens on it, and is shown while the list holds it", () => {
-    const listed = parseTraceQuery({ sort: "tag:repo", dir: "desc", page: "2" });
-    const view: TraceView = { ...VIEW, query: viewQueryOf(listed) };
-    expect(view.query).toEqual({ sort: "tag:repo", dir: "desc" });
-    expect(queryOfView(view.query)).toEqual({ sort: "tag:repo", dir: "desc" });
-    expect(viewHref("acme", "web", view)).toBe(`/acme/web/traces?sort=tag%3Arepo&dir=desc&view=${VIEW.id}`);
-    expect(showsView(listed, view)).toBe(true);
-    expect(showsView({ ...listed, dir: "asc" }, view)).toBe(false);
-    expect(showsView({ ...listed, sort: "tag:team" }, view)).toBe(false);
-    // Ascending is a tag's first way, so a view saved without a direction is shown by it.
-    expect(showsView({ sort: "tag:repo", dir: "asc" }, { query: { sort: "tag:repo" } })).toBe(true);
-  });
-});
-
-describe("a sentence asked of the list", () => {
-  it("says what the filters could not, and the values the window holds no trace of", () => {
-    expect(askedNote({ query: { status: ["error"] }, unmet: null, dropped: [] })).toBeNull();
-    expect(
-      askedNote({
-        query: { agent: ["billing"] },
-        unmet: "slower than five seconds",
-        dropped: [
-          { filter: "agent", value: "ghost" },
-          { filter: "model", value: "gpt-9" },
-          { filter: "sort", value: "tier" },
-        ],
-      }),
-    ).toBe(
-      'The filters can\'t say "slower than five seconds". No trace in this window has agent ghost, model gpt-9, a tag tier to sort by.',
-    );
-  });
-
-  it("gives the server's sentence alone where it opened on nothing", () => {
-    expect(askedNote({ query: null, unmet: "No traces in this window.", dropped: [] })).toBe(
-      "No traces in this window.",
-    );
-  });
-
-  it("opens the list on the answer as a saved view's query, every value the page drops dropped", () => {
-    expect(queryOfView({ agent: ["billing"], status: ["error", "nope" as never], days: 30 })).toEqual({
-      agent: ["billing"],
-      status: ["error"],
-      days: 30,
-    });
   });
 });
 

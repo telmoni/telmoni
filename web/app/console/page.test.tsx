@@ -59,30 +59,29 @@ describe("ConsoleEntry", () => {
   // member may open. Which organization is
   // auth's to say — the one the cookie remembers, else the person's default,
   // which a sign-in leaves it to by forgetting the cookie.
-  it("lands on the overview of the organization auth answered", async () => {
+  it("lands on the projects of the organization auth answered", async () => {
     await ConsoleEntry();
     expect(mockContextCalls).toBe(1);
-    expect(mockRedirect).toHaveBeenCalledWith("/acme");
+    expect(mockRedirect).toHaveBeenCalledWith("/acme/projects");
   });
 
-  // The projects page refuses a member, and the overview is open to all.
+  // The projects page is open to everyone in the organization, whatever their role.
   it.each(["owner", "admin", "member"])(
-    "lands an organization %s on the overview, not a page that might refuse them",
+    "lands an organization %s on its projects",
     async (role) => {
       mockContext = {
         activeOrganizationId: "org_1",
         organizations: [{ organizationId: "org_1", slug: "acme", name: "Acme", role }],
       };
       await ConsoleEntry();
-      expect(mockRedirect).toHaveBeenCalledWith("/acme");
-      expect(mockRedirect).not.toHaveBeenCalledWith("/acme/projects");
+      expect(mockRedirect).toHaveBeenCalledWith("/acme/projects");
     },
   );
 
   // ⚠ Nothing is asked before the console opens: an organization is
   // provisioned already named after its
   // owner, at the URL that name reads as, and both are changed on Settings.
-  it("opens a just-provisioned organization on its overview, asking nothing first", async () => {
+  it("opens a just-provisioned organization on its projects, asking nothing first", async () => {
     mockContext = {
       activeOrganizationId: "org_1",
       organizations: [
@@ -96,7 +95,7 @@ describe("ConsoleEntry", () => {
     };
     const ui = await ConsoleEntry();
     expect(ui).toBeUndefined();
-    expect(mockRedirect).toHaveBeenCalledWith("/adas-organization");
+    expect(mockRedirect).toHaveBeenCalledWith("/adas-organization/projects");
   });
 
   it("renders ServiceUnavailable when auth could not answer", async () => {

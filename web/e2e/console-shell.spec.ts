@@ -79,7 +79,7 @@ test.describe("Console chrome row", () => {
     const brand = page.getByRole("banner").getByRole("link", { name: "Telmoni", exact: true });
     await expect(brand).toBeVisible();
     const rail = page.locator("#console-sidebar");
-    const row = rail.getByRole("link", { name: "Overview" });
+    const row = rail.getByRole("link", { name: "Projects" });
 
     // Open, the header's first cell holds the toggle on the left — in line
     // with the nav row icons below — and the brand to its right, aligned

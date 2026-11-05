@@ -8,6 +8,7 @@ import {
   CoinsIcon,
   Columns3Icon,
   DownloadIcon,
+  GroupIcon,
   RefreshCwIcon,
   TableIcon,
   TimerIcon,
@@ -15,7 +16,6 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 
-import { ViewsMenu } from "@/components/traces/views-menu";
 import { useListNavigation } from "@/components/traces/navigate";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -29,6 +29,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Toggle } from "@/components/ui/toggle";
 import {
@@ -39,15 +40,7 @@ import {
 } from "@/components/traces/list-table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { WindowPicker } from "@/components/window-picker";
-import type { SessionQuery } from "@/lib/server/entities/sessions";
-import type {
-  ListQuery,
-  SessionView,
-  TraceQuery,
-  TraceView,
-  UserView,
-} from "@/lib/server/entities/traces";
-import { SESSIONS, SESSION_COLUMN_MENU, SESSION_TABLE } from "@/lib/sessions";
+import type { ListQuery, TraceQuery } from "@/lib/server/entities/traces";
 import {
   COLUMNS_PREF,
   type TracePrefs,
@@ -59,11 +52,14 @@ import {
   TRACES,
   TRACE_TABLE,
   formatCount,
+  groupOf,
+  groupedBy,
   listDownloadHref,
   ordered,
   tracesHref,
   type ColumnBlock,
   type ColumnGroup,
+  type Group,
   type ListName,
   type ListSpec,
   type ListTable,
@@ -72,23 +68,19 @@ import {
 } from "@/lib/traces";
 import { toggled } from "@/lib/trace-tree";
 import { setTracePrefs, useTracePrefs } from "@/lib/use-trace-prefs";
-import { USERS, USER_COLUMN_MENU, USER_TABLE } from "@/lib/users";
-import type { UserSort } from "@/lib/types/enums";
 import { cn } from "@/lib/utils";
 
 type Common = {
   organization: string;
   slug: string;
-  projectId: string;
   ui: TraceUi;
   /** How many rows the filters admit. */
   total: number;
   /** The window's days, the toolbar's first control. */
   days: number;
-  canSave: boolean;
 };
 
-type Props = Common & { query: TraceQuery; views: TraceView[] | null };
+type Props = Common & { query: TraceQuery };
 
 /** Each ready-made query's icon. */
 const PRESET_ICON: Record<Preset["id"], LucideIcon> = {
@@ -100,12 +92,17 @@ const PRESET_ICON: Record<Preset["id"], LucideIcon> = {
 /** Each list's columns menu, and its rows. */
 const TABLES: Record<ListName, { table: ListTable; menu: readonly ColumnBlock[] }> = {
   traces: { table: TRACE_TABLE, menu: COLUMN_MENU },
-  sessions: { table: SESSION_TABLE, menu: SESSION_COLUMN_MENU },
-  users: { table: USER_TABLE, menu: USER_COLUMN_MENU },
 };
 
-// The trace list's toolbar: every list's (`ListToolbar`), with the table or
-// the charts beside its saved views.
+/** What the list is grouped by, as its control names each. */
+const GROUP_LABEL: Record<Group | "none", string> = {
+  none: "No grouping",
+  session: "By session",
+  user: "By user",
+};
+
+// The trace list's toolbar: every list's (`ListToolbar`), with its grouping
+// and the table or the charts beside its ready-made queries.
 export function TraceToolbar(props: Props) {
   const { organization, slug, query, ui } = props;
   return (
@@ -113,63 +110,79 @@ export function TraceToolbar(props: Props) {
       {...props}
       list="traces"
       extra={(go) => (
-        <Tabs
-          value={ui.display ?? "table"}
-          onValueChange={(display) =>
-            go(
-              tracesHref(organization, slug, query, {}, {
-                ...ui,
-                display: display === "chart" ? "chart" : undefined,
-              }),
-            )
-          }
-        >
-          <TabsList>
-            <TabsTrigger value="table">
-              <TableIcon />
-              Table
-            </TabsTrigger>
-            <TabsTrigger value="chart">
-              <ChartColumnIcon />
-              Chart
-            </TabsTrigger>
-          </TabsList>
-        </Tabs>
+        <>
+          <Select
+            value={groupOf(query) ?? "none"}
+            onValueChange={(value) =>
+              go(
+                tracesHref(
+                  organization,
+                  slug,
+                  groupedBy(query, value === "session" || value === "user" ? value : undefined),
+                  {},
+                  ui,
+                ),
+              )
+            }
+          >
+            <SelectTrigger aria-label="Group by">
+              <GroupIcon />
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent position="popper" align="end">
+              {(["none", "session", "user"] as const).map((value) => (
+                <SelectItem key={value} value={value}>
+                  {GROUP_LABEL[value]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Tabs
+            value={ui.display ?? "table"}
+            onValueChange={(display) =>
+              go(
+                tracesHref(organization, slug, query, {}, {
+                  ...ui,
+                  display: display === "chart" ? "chart" : undefined,
+                }),
+              )
+            }
+          >
+            <TabsList>
+              <TabsTrigger value="table">
+                <TableIcon />
+                Table
+              </TabsTrigger>
+              <TabsTrigger value="chart">
+                <ChartColumnIcon />
+                Chart
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+        </>
       )}
     />
   );
 }
 
-/** A list, its query, and the project's views of it. */
-type ListToolbarProps = Common &
-  (
-    | { list: "traces"; query: TraceQuery; views: TraceView[] | null }
-    | { list: "sessions"; query: SessionQuery; views: SessionView[] | null }
-    | { list: "users"; query: ListQuery<UserSort>; views: UserView[] | null }
-  ) & {
-    /** What the list shows beside its saved views, given the toolbar's way to
-     *  navigate so the toolbar reads busy while it does. */
-    extra?: (go: (href: string) => void) => ReactNode;
-  };
+/** A list and its query. */
+type ListToolbarProps = Common & {
+  list: "traces";
+  query: TraceQuery;
+  /** What the list shows beside its ready-made queries, given the toolbar's
+   *  way to navigate so the toolbar reads busy while it does. */
+  extra?: (go: (href: string) => void) => ReactNode;
+};
 
 // A list's toolbar, one row of shadcn controls at the title row's end: the
-// refresh and the window, the ready-made queries, the saved views and the
-// list's own, then what every list has (`ListControls`). A
+// refresh and the window, the ready-made queries and the list's own, then
+// what every list has (`ListControls`). A
 // control that changes what the list holds changes its URL, and one that
 // changes only how it looks is kept in the browser (`lib/trace-prefs.ts`).
 export function ListToolbar({ extra, total, ...props }: ListToolbarProps) {
   const { organization, slug, ui, days } = props;
   const { go, pending } = useListNavigation();
-  const presets = (() => {
-    switch (props.list) {
-      case "traces":
-        return <Presets spec={TRACES} query={props.query} go={go} at={[organization, slug, ui]} />;
-      case "sessions":
-        return <Presets spec={SESSIONS} query={props.query} go={go} at={[organization, slug, ui]} />;
-      case "users":
-        return <Presets spec={USERS} query={props.query} go={go} at={[organization, slug, ui]} />;
-    }
-  })();
+  const presets = <Presets spec={TRACES} query={props.query} go={go} at={[organization, slug, ui]} />;
 
   return (
     // The room the title leaves, its controls at its end; too narrow for them,
@@ -183,7 +196,6 @@ export function ListToolbar({ extra, total, ...props }: ListToolbarProps) {
       <RefreshControl />
       <WindowPicker days={days} />
       {presets}
-      <ViewsMenu {...props} />
       {extra?.((href) => go(href))}
       <ListControls
         list={props.list}

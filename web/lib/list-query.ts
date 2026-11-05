@@ -6,9 +6,9 @@ import { SortDirection } from "@/lib/types/enums";
 
 // A list's URL is its state: the sort, the window and every filter are query
 // parameters, so a link holds the view and a page sent to a colleague opens
-// as it was left. The traces, users and sessions pages each read theirs with
-// what is here — one reading of a parameter, one bound on the window, one way
-// a column heading sorts — and keep to themselves only the columns they have.
+// as it was left. The trace list reads its own with what is here — one
+// reading of a parameter, one bound on the window, one way a column heading
+// sorts — and keeps to itself only the columns it has.
 
 /** The furthest back a list reads, in days: the longest retention sold. */
 export const MAX_DAYS = 360;

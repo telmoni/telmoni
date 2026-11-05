@@ -50,8 +50,6 @@ type Props = {
   /** The page's runs in the list's order: what the ↑ and ↓ buttons, and `j`
    *  and `k`, step through. */
   runs: readonly string[];
-  /** The window's tags, each `key:value`, which adding one to the run suggests. */
-  knownTags: readonly string[];
 };
 
 export function TracePeek(props: Props) {
@@ -61,7 +59,7 @@ export function TracePeek(props: Props) {
   return createPortal(<PeekPanel {...props} run={run} />, element);
 }
 
-function PeekPanel({ organization, slug, projectId, run, runs, knownTags }: Props & { run: string }) {
+function PeekPanel({ organization, slug, projectId, run, runs }: Props & { run: string }) {
   const titleId = useId();
   const panel = useRef<HTMLDivElement>(null);
   const { full, width, toggleFull, edge } = usePanelWidth(panel);
@@ -144,15 +142,7 @@ function PeekPanel({ organization, slug, projectId, run, runs, knownTags }: Prop
         onClose={close}
       >
         {trace && (
-          <TraceMeta
-            trace={trace}
-            organization={organization}
-            slug={slug}
-            projectId={projectId}
-            knownTags={knownTags}
-            // The panel's read is its own: the action's refresh draws the list.
-            onTagged={again}
-          />
+          <TraceMeta trace={trace} organization={organization} slug={slug} />
         )}
       </SidePanelHeader>
       <div

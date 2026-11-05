@@ -307,25 +307,6 @@ pub(crate) async fn move_project_telemetry(
     }
 }
 
-/// A moving project's model connections deleted by telemetry, held to its
-/// budget; no telemetry module holds none.
-pub(crate) async fn drop_model_connections(
-    state: &AppState,
-    project_id: &ProjectId,
-) -> Result<(), TelmoniError> {
-    match state.siblings.telemetry.as_deref() {
-        Some(telemetry) => {
-            within(
-                TELEMETRY_PROJECT_BUDGET,
-                "telemetry's model connections",
-                telemetry.drop_model_connections(project_id),
-            )
-            .await
-        }
-        None => Ok(()),
-    }
-}
-
 /// [`move_project_telemetry`] on the module itself, for a settling that
 /// outlives the request.
 pub(crate) async fn move_telemetry(

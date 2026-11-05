@@ -46,10 +46,10 @@ function draw(group: "user" | "model", days: number) {
 }
 
 describe("DashboardCharts", () => {
-  it("totals a split under its chart, each user opening their page, and says how far the spans reach", () => {
+  it("totals a split under its chart, each user opening their runs, and says how far the spans reach", () => {
     draw("user", 30);
     const split = within(screen.getByRole("region", { name: "Spend by user" }));
-    expect(split.getByRole("link", { name: "u-1" })).toHaveAttribute("href", "/acme/web/users?user=u-1&days=30");
+    expect(split.getByRole("link", { name: "u-1" })).toHaveAttribute("href", "/acme/web/traces?user=u-1&days=30");
     expect(split.getByText("Other values")).toBeInTheDocument();
     expect(split.getByText("None")).toBeInTheDocument();
     expect(split.getAllByText(/^\$[\d.]+$/).map((cell) => cell.textContent)).toEqual(["$4.00", "$2.00", "$1.00"]);

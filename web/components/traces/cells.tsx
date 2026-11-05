@@ -9,11 +9,9 @@ import type { Trace, TraceQuery } from "@/lib/server/entities/traces";
 import { scoreTitle, scoreWords } from "@/lib/scores";
 import type { ScoreSummary } from "@/lib/types/traces";
 import { formatCost, formatCount, formatDuration, type ColumnSpec, type FilterKey } from "@/lib/traces";
-import { TraceColumn } from "@/lib/types/enums";
+import { TraceColumn } from "@/lib/types/traces";
 
-// One trace's cells, as the trace list draws them (`table.tsx`) and a
-// session's page draws its traces under a layout's columns
-// (`session-runs.tsx`): the same column reads the same on both.
+// One trace's cells, as the trace list draws them (`table.tsx`).
 
 /** A cell's look: a number stands right in figures of one width, an id is
  *  cut short where it runs long. */

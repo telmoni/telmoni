@@ -757,15 +757,23 @@ async fn somebody_in_no_organization_signs_in_to_their_account_while_sign_ups_ar
     );
 }
 
-/// ⚠ **A person event lands only on a chain they belong to.** Analytics
-/// consent, session revocation and email changes are audited on the
-/// organization the console names; naming somebody else's must be refused
-/// before anything is written.
+/// ⚠ **A person event lands only on a chain they belong to.** Session
+/// revocation and email changes are audited on the organization the console
+/// names; naming somebody else's must be refused before anything is written.
 #[sqlx::test]
 async fn a_person_event_is_refused_on_an_organization_the_person_is_not_in(pool: PgPool) {
     apply_audit_migrations(&pool).await;
-    let own = sign_in(&pool, "user_me_consent").await;
+    let own = sign_in(&pool, "user_me_own").await;
     let foreign = sign_in(&pool, "user_me_foreign_owner").await;
+    let session: String = sqlx::query_scalar(
+        "INSERT INTO auth.sessions (user_id, sid, user_agent)
+         VALUES ('user_me_own', 'ses_other', 'other')
+         RETURNING id::text",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let revoke = format!("/internal/v1/auth/sessions/{session}/revoke");
     let chain_len = |organization: String| {
         let pool = pool.clone();
         async move {
@@ -780,33 +788,22 @@ async fn a_person_event_is_refused_on_an_organization_the_person_is_not_in(pool:
     };
     let foreign_before = chain_len(foreign.clone()).await;
 
-    let (status, body) = call(
-        &pool,
-        "PUT",
-        "/internal/v1/me/analytics",
-        "user_me_consent",
-        Some(&foreign),
-        Some(json!({ "optIn": true })),
-    )
-    .await;
+    let (status, body) = call(&pool, "POST", &revoke, "user_me_own", Some(&foreign), None).await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
     assert_eq!(chain_len(foreign.clone()).await, foreign_before);
 
     let own_before = chain_len(own.clone()).await;
-    let (status, body) = call(
-        &pool,
-        "PUT",
-        "/internal/v1/me/analytics",
-        "user_me_consent",
-        Some(&own),
-        Some(json!({ "optIn": true })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = call(&pool, "POST", &revoke, "user_me_own", Some(&own), None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
     assert_eq!(chain_len(own).await, own_before + 1);
 
-    let (_, body) = me(&pool, "user_me_consent", None).await;
-    assert_eq!(body["person"]["analyticsOptIn"], true);
+    let revoked: bool =
+        sqlx::query_scalar("SELECT revoked_at IS NOT NULL FROM auth.sessions WHERE id = $1::uuid")
+            .bind(&session)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(revoked);
 }
 
 /// ⚠ **Somebody in no organization still runs their own account.** With
@@ -842,17 +839,6 @@ async fn somebody_in_no_organization_manages_their_account_without_naming_one(po
         .fetch_one(&pool)
         .await
         .unwrap();
-
-    let (status, body) = call(
-        &pool,
-        "PUT",
-        "/internal/v1/me/analytics",
-        "user_me_alone",
-        None,
-        Some(json!({ "optIn": true })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{body}");
 
     let (status, body) = call(
         &pool,
@@ -900,26 +886,27 @@ async fn somebody_in_no_organization_manages_their_account_without_naming_one(po
     assert!(revoked);
 
     // A member of an organization names it, or is refused.
-    let (status, body) = call(
-        &pool,
-        "PUT",
-        "/internal/v1/me/analytics",
-        "user_me_member",
-        None,
-        Some(json!({ "optIn": true })),
+    let members: String = sqlx::query_scalar(
+        "INSERT INTO auth.sessions (user_id, sid, user_agent)
+         VALUES ('user_me_member', 'ses_member', 'member')
+         RETURNING id::text",
     )
-    .await;
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let revoke = format!("/internal/v1/auth/sessions/{members}/revoke");
+    let (status, body) = call(&pool, "POST", &revoke, "user_me_member", None, None).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
     let (status, body) = call(
         &pool,
-        "PUT",
-        "/internal/v1/me/analytics",
+        "POST",
+        &revoke,
         "user_me_member",
         Some(&theirs),
-        Some(json!({ "optIn": true })),
+        None,
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
 }
 
 /// Wait until some request in this test's database is queued on an advisory

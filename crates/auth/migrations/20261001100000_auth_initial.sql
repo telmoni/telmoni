@@ -66,7 +66,6 @@ GRANT SELECT ON auth.identities TO auth_maintenance;
 -- ══════════════════════════════════════════════════════════════════════════════
 CREATE TABLE auth.accounts (
     user_id               TEXT        PRIMARY KEY REFERENCES auth.identities (user_id) ON DELETE CASCADE,
-    analytics_opt_in      BOOLEAN     NOT NULL DEFAULT false,
     -- The seat whose organization a sign-in opens this person in, when they
     -- chose one. A seat, not an organization: leaving, a removal or the
     -- organization's erasure takes the choice with the seat, and a later seat
@@ -671,7 +670,7 @@ CREATE TABLE auth.api_tokens (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     -- At least one scope, each one `ApiKeyScope` names (`crates/auth/tests/api_key_scopes.rs`).
     CONSTRAINT api_tokens_scopes_check
-        CHECK (cardinality(scopes) > 0 AND scopes <@ ARRAY['read', 'ingest', 'evaluate']::TEXT[]),
+        CHECK (cardinality(scopes) > 0 AND scopes <@ ARRAY['read', 'ingest']::TEXT[]),
     -- The pair, not each alone: a token naming another organization's project would act for this one.
     -- ON UPDATE CASCADE is what carries the keys with a project handed to
     -- another organization: the one UPDATE of `projects.organization_id`

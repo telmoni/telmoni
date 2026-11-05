@@ -24,18 +24,6 @@ pub struct Config {
     /// content key makes its content unreadable, but in a backup taken before. Required,
     /// since every binary ingests.
     pub content_kek: Redacted,
-    /// The key that seals each model connection's key (`MODEL_CONNECTION_KEK`),
-    /// spelt as the others are and never the same key; unset, no project
-    /// connects a model.
-    pub model_connection_kek: Option<Redacted>,
-    /// What signs each project's tokens for a connection that stores no key
-    /// (`MODEL_FEDERATION_SIGNER`): a KMS key version, or `local:` on a
-    /// laptop; unset, a connection signs in to nothing.
-    pub model_federation_signer: Option<Redacted>,
-    /// The machine host's origin, where each project's issuer and the key set
-    /// are reached (`MODEL_FEDERATION_ISSUER`), https on a tier; set with the
-    /// signer, or neither.
-    pub model_federation_issuer: Option<String>,
     /// Cloud KMS's origin (`KMS_API_BASE`); the tests point it at a mock.
     pub kms_api_base: String,
     /// The instance metadata server (`METADATA_API_BASE`), where the KMS
@@ -58,16 +46,6 @@ impl Config {
             clickhouse_url: require("TELEMETRY_CLICKHOUSE_URL")?.into(),
             telemetry_kek: require("TELEMETRY_KEK")?.into(),
             content_kek: require("CONTENT_KEK")?.into(),
-            model_connection_kek: telmoni_shared::config::optional("MODEL_CONNECTION_KEK")
-                .map(Into::into),
-            model_federation_signer: telmoni_shared::config::optional("MODEL_FEDERATION_SIGNER")
-                .map(Into::into),
-            model_federation_issuer: telmoni_shared::config::optional("MODEL_FEDERATION_ISSUER")
-                .map(|url| {
-                    telmoni_shared::config::https_on_a_tier("MODEL_FEDERATION_ISSUER", url)
-                        .map(|url| url.trim_end_matches('/').to_owned())
-                })
-                .transpose()?,
             kms_api_base: optional_base_url("KMS_API_BASE")
                 .unwrap_or_else(|| "https://cloudkms.googleapis.com".to_owned()),
             metadata_api_base: optional_base_url("METADATA_API_BASE")

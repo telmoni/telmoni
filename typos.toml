@@ -24,17 +24,6 @@ extend-ignore-re = [
   "\\b(SELECT|INSERT|UPDATE|DELETE|UNIQUE|CHECK)s\\b",
   # External CamelCase product name — typos splits it and flags "Strat" ≠ "Start".
   "OptionStrat",
-  # A maintainer's own words, quoted verbatim in three places (AGENTS.md, the
-  # `analytics_opt_in` column comment, and analytics_preference.rs). They
-  # misspell "analysis", and the misspelling STAYS: the line is attributed and
-  # dated, and correcting somebody's quote falsifies the record of a decision.
-  # One of the three sits in an APPLIED migration, whose file sqlx checksums —
-  # editing even a comment there breaks migration validation on every database
-  # that has already run it.
-  #
-  # Scoped to the quote's own wording rather than added to extend-words below,
-  # so a genuine `anaylsis` written anywhere else still fails the build.
-  "anaylsis needs",
 ]
 
 [default.extend-words]
@@ -51,4 +40,3 @@ clonable    = "clonable"     # variant of "cloneable"
 writeable   = "writeable"    # variant of "writable"
 # An identifier cannot carry an apostrophe, so a possessive loses one.
 anothers    = "anothers"     # "another's", in a test fn name
-optin       = "optin"        # "opt-in" — this product's own `analytics_opt_in`

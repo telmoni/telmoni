@@ -53,7 +53,7 @@ const TrailSchema = z.array(z.string());
  *   arrow, so recording one would make the arrow a no-op — and it is not a
  *   resource the selector can switch to either.
  * - `/console`, which is a door and not a destination: it resolves to an
- *   organization's overview, so remembering it would land you somewhere you
+ *   organization's projects, so remembering it would land you somewhere you
  *   never stood.
  */
 export function isReturnablePath(path: string): path is ReturnablePath {

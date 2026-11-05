@@ -385,10 +385,6 @@ pub fn router(state: Arc<AppState>) -> Router {
             "/organization/owner-transfer/decline",
             post(handler::ownership::decline),
         )
-        .route(
-            "/organization/export",
-            get(handler::export::export_organization),
-        )
         .route("/me", delete(handler::account::delete_account))
         .route(
             "/me/deletion-code",
@@ -405,10 +401,6 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route(
             "/me/email-change/confirm",
             post(handler::account::confirm_email_change),
-        )
-        .route(
-            "/me/analytics",
-            put(handler::account::set_analytics_preference),
         )
         .route(
             "/me/default-organization",

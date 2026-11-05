@@ -3,7 +3,7 @@
 //!
 //! - **Postgres**, the `telemetry` schema, connected as the `telemetry` role:
 //!   what must be transactional or private — each project's settings, its
-//!   content mode among them, its saved views and layouts ([`db`]), and the
+//!   content mode among them, its saved dashboards ([`db`]), and the
 //!   content a project whose mode is `on` keeps, sealed ([`content`]).
 //! - **ClickHouse**, the `telemetry` database, connected as the `telemetry`
 //!   user: the spans, a row per finished span of every kind, and their
@@ -34,7 +34,7 @@ use std::sync::Arc;
 
 use axum::{
     Router, middleware,
-    routing::{get, patch, post, put},
+    routing::{get, post, put},
 };
 use sqlx::PgPool;
 
@@ -50,7 +50,6 @@ pub mod content;
 pub mod contract;
 pub mod db;
 pub mod erasure;
-pub mod evaluators;
 pub mod foreign;
 pub mod handler;
 pub mod hashing;
@@ -66,19 +65,17 @@ pub mod rules;
 pub mod schema;
 pub mod scores;
 pub mod seam;
-pub mod sessions;
 pub mod spend;
 pub mod store;
 pub mod sweep;
 pub mod traces;
-pub mod users;
 
 pub use config::Config;
 
 /// Shared module state, handed to the seam and to every handler.
 pub struct AppState {
     /// Postgres pool, as the `telemetry` role: each project's settings and
-    /// its saved views and layouts.
+    /// its saved dashboards.
     pub db: PgPool,
     /// Loaded-once configuration.
     pub config: Config,
@@ -105,15 +102,6 @@ pub struct AppState {
     pub kek: telmoni_shared::envelope::Kek,
     /// What wraps each project's content key: `CONTENT_KEK`.
     pub content_kek: telmoni_shared::envelope::Kek,
-    /// What seals each model connection's key (`MODEL_CONNECTION_KEK`); none
-    /// where it is unset, and a connection is refused.
-    pub model_kek: Option<telmoni_shared::envelope::Kek>,
-    /// The deployment as each project's issuer, for connections that store
-    /// no key (`MODEL_FEDERATION_SIGNER`); none where it is unset.
-    pub federation: Option<Arc<telmoni_shared::model::federation::Federation>>,
-    /// The client a model connection's requests leave by: guarded, since the
-    /// customer names the host.
-    pub egress: telmoni_shared::net_guard::Egress,
     /// Each project's hashing key, opened once per process ([`hashing`]).
     pub hashing_keys: hashing::Cache,
     /// Each project's content key, opened once per process and kept beside
@@ -188,55 +176,6 @@ pub fn router(state: Arc<AppState>) -> Router {
         )
         .route("/telemetry/retention", put(handler::privacy::put_retention))
         .route(
-            "/telemetry/model-connections",
-            get(handler::model_connections::get_connections)
-                .put(handler::model_connections::put_connection),
-        )
-        .route(
-            "/telemetry/model-connections/{id}",
-            axum::routing::delete(handler::model_connections::delete_connection),
-        )
-        .route(
-            "/telemetry/evaluation-rules",
-            get(handler::evaluation_rules::get_rules).put(handler::evaluation_rules::put_rule),
-        )
-        .route(
-            "/telemetry/evaluation-rules/preview",
-            post(handler::evaluation_rules::preview_rule),
-        )
-        .route(
-            "/telemetry/evaluation-rules/session-idle",
-            put(handler::evaluation_rules::put_session_idle),
-        )
-        .route(
-            "/telemetry/evaluation-rules/{id}",
-            axum::routing::delete(handler::evaluation_rules::delete_rule),
-        )
-        .route(
-            "/telemetry/evaluators",
-            get(handler::evaluators::get_evaluators).put(handler::evaluators::put_evaluator),
-        )
-        .route(
-            "/telemetry/evaluators/templates",
-            get(handler::evaluators::get_templates),
-        )
-        .route(
-            "/telemetry/evaluators/try",
-            post(handler::evaluators::try_evaluator),
-        )
-        .route(
-            "/telemetry/evaluators/{id}/evaluations",
-            get(handler::evaluators::get_evaluations),
-        )
-        .route(
-            "/telemetry/evaluators/{id}/agreement",
-            get(handler::evaluators::get_agreement),
-        )
-        .route(
-            "/telemetry/evaluators/{id}",
-            get(handler::evaluators::get_versions).delete(handler::evaluators::delete_evaluator),
-        )
-        .route(
             "/telemetry/scores",
             get(handler::scores::get_scores).put(handler::scores::put_score),
         )
@@ -270,35 +209,7 @@ pub fn router(state: Arc<AppState>) -> Router {
             "/telemetry/traces/{run_id}",
             get(handler::traces::get_trace).delete(handler::traces::delete_trace),
         )
-        .route(
-            "/telemetry/traces/{run_id}/tags",
-            patch(handler::traces::patch_tags),
-        )
-        .route("/telemetry/users", get(handler::users::list_users))
-        .route(
-            "/telemetry/users/facets",
-            get(handler::users::get_user_facets),
-        )
-        .route("/telemetry/users/export", get(handler::users::export_users))
         .route("/telemetry/users/erase", post(handler::users::erase_user))
-        .route("/telemetry/sessions", get(handler::sessions::list_sessions))
-        .route(
-            "/telemetry/session-facets",
-            get(handler::sessions::get_session_facets),
-        )
-        .route(
-            "/telemetry/session-export",
-            get(handler::sessions::export_sessions),
-        )
-        .route(
-            "/telemetry/sessions/{session_id}",
-            get(handler::sessions::get_session),
-        )
-        .route(
-            "/telemetry/session-layout",
-            get(handler::session_layout::get_session_layout)
-                .put(handler::session_layout::put_session_layout),
-        )
         .route(
             "/telemetry/views",
             get(handler::views::list_views).post(handler::views::create_view),
@@ -355,14 +266,6 @@ pub fn router(state: Arc<AppState>) -> Router {
             "/telemetry/incidents/{id}/resolve",
             post(handler::incidents::resolve_incident),
         )
-        .route(
-            "/telemetry/organizations/{id}/health",
-            get(handler::health::organization_health),
-        )
-        .route(
-            "/telemetry/organizations/{id}/spend",
-            get(handler::health::organization_spend),
-        )
         .layer(middleware::from_fn_with_state(
             state.service_secrets.clone(),
             require_service_secret,
@@ -373,18 +276,6 @@ pub fn router(state: Arc<AppState>) -> Router {
 }
 
 pub use handler::v1::{reads as v1_reads, router as v1_router};
-
-/// Each project's issuer, nested at `/oidc/v1` behind the machine door:
-/// unauthenticated, as an issuer's documents are, and naming no project.
-pub fn oidc_router(state: Arc<AppState>) -> Router {
-    Router::new()
-        .route(
-            "/projects/{project_id}/.well-known/openid-configuration",
-            get(handler::model_connections::discovery),
-        )
-        .route("/jwks", get(handler::model_connections::jwks))
-        .with_state(state)
-}
 
 /// Ingest, for the binary to nest at `/otlp` behind the machine door:
 /// `POST /v1/traces` behind a project API key holding the ingest scope and

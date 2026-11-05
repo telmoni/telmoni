@@ -49,7 +49,7 @@ const PARAMS = Promise.resolve({ organization: "acme", project: "my-project" });
 beforeEach(() => {
   vi.clearAllMocks();
   mockContext = {
-    person: { userId: "user_1", email: "ada@example.test", analyticsOptIn: false },
+    person: { userId: "user_1", email: "ada@example.test" },
     organizations: [
       {
         organizationId: "org_1",

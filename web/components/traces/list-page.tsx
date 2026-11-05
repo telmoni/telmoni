@@ -28,8 +28,7 @@ import { cn } from "@/lib/utils";
 /** What every list's page carries of its window and its pages. */
 type ListWindow = { days: number; total: number; page: number; limit: number };
 
-/** One list's page — the traces', the sessions' or the users' — in the
- *  layout the three share: the forbidden and unavailable branches, the
+/** The trace list's page: the forbidden and unavailable branches, the
  *  window and the filters, what the page says when the window holds nothing
  *  or the page is past the last, the table and the way through its pages.
  *  What differs is handed in: the toolbar, the table, the words, and what the
@@ -53,8 +52,6 @@ export function ListPage<L extends ListWindow>({
   before,
   instead,
   table,
-  search,
-  ask,
   children,
 }: {
   list: ListName;
@@ -79,10 +76,6 @@ export function ListPage<L extends ListWindow>({
   firstRun?: ReactNode;
   /** Drawn under the filter bar, before the rows. */
   before?: ReactNode;
-  /** A search of the list's kept content, drawn in the filter bar. */
-  search?: ReactNode;
-  /** The list asked in words, drawn first in the filter bar. */
-  ask?: ReactNode;
   /** Drawn in place of the table and its pages. */
   instead?: ReactNode;
   table: (list: L) => ReactNode;
@@ -168,8 +161,6 @@ export function ListPage<L extends ListWindow>({
                   slug={slug}
                   query={query}
                   ui={ui}
-                  search={search}
-                  ask={ask}
                 />
                 {before}
                 {none ??

@@ -41,7 +41,7 @@ describe("isPublic", () => {
     // relays none of them, so a path spelled like one is an organization's
     // here, or nothing.
     "/v1",
-    "/v1/members",
+    "/v1/organization",
     "/v1x",
     "/v1-internal",
     "/cli",

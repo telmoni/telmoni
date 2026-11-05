@@ -1356,11 +1356,6 @@ async fn a_pending_organization_is_refused_on_every_lane_that_acts_in_it(pool: P
         ),
         (
             "PUT",
-            "/internal/v1/me/analytics".into(),
-            Some(json!({ "optIn": true })),
-        ),
-        (
-            "PUT",
             "/internal/v1/me/default-organization".into(),
             Some(json!({ "organizationId": ORGANIZATION })),
         ),
@@ -1688,11 +1683,6 @@ async fn a_missing_organization_header_is_refused_on_every_lane_that_reads_one(p
             "POST",
             "/internal/v1/me/email-change/confirm",
             Some(json!({ "currentCode": "111111", "newCode": "222222" })),
-        ),
-        (
-            "PUT",
-            "/internal/v1/me/analytics",
-            Some(json!({ "optIn": true })),
         ),
         (
             "POST",

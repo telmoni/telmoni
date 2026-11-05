@@ -182,7 +182,7 @@ const PARAMS = Promise.resolve({ organization: "acme", project: "web" });
 beforeEach(() => {
   vi.clearAllMocks();
   mockContext = {
-    person: { userId: "user_1", email: "ada@example.test", analyticsOptIn: false },
+    person: { userId: "user_1", email: "ada@example.test" },
     organizations: [],
     activeOrganizationId: "org_1",
     memberships: [],

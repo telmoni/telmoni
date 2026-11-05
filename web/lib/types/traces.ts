@@ -5,6 +5,38 @@ import { ScoreType, SpanKind, SpanStatus } from "@/lib/types/enums";
 // A trace as the server answers it, parsed on the server by its entity
 // (`lib/server/entities/traces.ts`) and in the browser by the peeks.
 
+/** A column of the trace list a person shows or hides, by the word their
+ *  browser keeps it under (`lib/trace-prefs.ts`). */
+export const TraceColumn = {
+  Started:          "started",
+  Ended:            "ended",
+  Agent:            "agent",
+  User:             "user",
+  Session:          "session",
+  Environment:      "environment",
+  Release:          "release",
+  Status:           "status",
+  ErrorType:        "error_type",
+  Steps:            "steps",
+  ModelCalls:       "model_calls",
+  ToolCalls:        "tool_calls",
+  Errors:           "errors",
+  Spans:            "spans",
+  InputTokens:      "input_tokens",
+  OutputTokens:     "output_tokens",
+  CacheReadTokens:  "cache_read_tokens",
+  CacheWriteTokens: "cache_write_tokens",
+  Tokens:           "tokens",
+  Spend:            "spend",
+  Duration:         "duration",
+  TimeToFirstToken: "time_to_first_token",
+  Models:           "models",
+  Tools:            "tools",
+  Tags:             "tags",
+  Scores:           "scores",
+} as const;
+export type TraceColumn = typeof TraceColumn[keyof typeof TraceColumn];
+
 const Values = z.array(z.string()).optional();
 
 /** What narrows a list as the URL carries it, in the sidebar's order: a

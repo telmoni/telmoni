@@ -24,17 +24,18 @@ export default async function ConsoleEntry() {
     );
   }
 
-  // ⚠ The organization's overview, never a project of it: the one page every
-  // member of the organization may open, where the projects page refuses a
-  // member; their projects are a press away in the header's switcher. Nothing
-  // is asked first: an organization is provisioned already named after its
-  // owner, and renamed on Settings. Which
+  // ⚠ The organization's projects, never a project of it: the one page every
+  // member of the organization may open, each seeing the projects they can.
+  // Nothing is asked first: an organization is provisioned already named after
+  // its owner, and renamed on Settings. Which
   // organization is auth's answer: the one the cookie remembers, else the
   // person's default — and a sign-in clears the cookie (`auth/callback`), so
   // signing in opens the default, while within a session this returns to
   // where the console stood: after an accepted invitation, or a slug that
-  // moved under an open tab. Somebody in no organization has no overview to
+  // moved under an open tab. Somebody in no organization has no projects to
   // land on; their account names what is there for them.
   const organization = activeOrganization(ctx);
-  redirect(organization ? organizationPath(organization.slug) : "/settings/notifications");
+  redirect(
+    organization ? organizationPath(organization.slug, "/projects") : "/settings/notifications",
+  );
 }

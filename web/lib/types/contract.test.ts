@@ -24,20 +24,13 @@ import {
   FlagOffDetail,
   IncidentStatus,
   InviteScope,
-  LayoutDepth,
-  EvaluationStatus,
-  EvaluationTarget,
-  EvaluatorKind,
-  LayoutOpen,
   Live,
   MetricsGroup,
   MissingData,
-  ModelProvider,
   NotificationKind,
   OrganizationRole,
   OrganizationStatus,
   PausedBy,
-  PromptRole,
   ResourceKind,
   Role,
   RuleAggregation,
@@ -49,19 +42,13 @@ import {
   ScoreSource,
   ScoreTarget,
   ScoreType,
-  SessionColumn,
-  SessionSort,
   Severity,
   SortDirection,
   SpanKind,
   SpanStatus,
-  TraceColumn,
   TraceSort,
-  UserColumn,
-  UserSort,
-  ViewKind,
 } from "./enums";
-import { AGENT_MESSAGE_MAX, AGENT_STREAM_TIMEOUT_MS, TRACE_QUESTION_MAX } from "./agent";
+import { AGENT_MESSAGE_MAX, AGENT_STREAM_TIMEOUT_MS } from "./agent";
 import { AUDIT_EXPORT_KEPT_DAYS } from "./audit-export";
 import {
   ALERT_KINDS,
@@ -75,26 +62,6 @@ import {
 } from "../alerts";
 import { CONFIRMATION_CODE_LENGTH } from "../confirmation-code";
 import { DASHBOARD_CHARTS_MAX, ROLLUP_GROUP_TOP } from "../dashboards";
-import {
-  EVALUATION_RULE_EVALUATORS_MAX,
-  EVALUATION_RULE_NAME_MAX,
-  EVALUATION_RULE_POINTER_MAX,
-  EVALUATOR_MEANS_MAX,
-  EVALUATOR_MESSAGE_MAX,
-  EVALUATOR_MESSAGES_MAX,
-  EVALUATOR_NAME_MAX,
-  EVALUATOR_TEMPERATURE_MAX,
-  EVALUATOR_WEEKLY_LIMIT_MAX,
-  MODEL_CONNECTION_MODEL_MAX,
-  MODEL_CONNECTION_MODELS_MAX,
-  MODEL_CONNECTION_NAME_MAX,
-  MODEL_CONNECTION_SECRET_MAX,
-  TYPED_INSTRUCTIONS_MAX,
-  TYPED_LEVELS_MAX,
-  TYPED_OPTIONS_MAX,
-  TYPED_QUESTIONS_MAX,
-} from "../evaluators";
-import { PINNED_MAX, PINNED_PER_TRACE } from "../layout";
 import { FILTER_VALUES_MAX, MAX_DAYS, MAX_LIMIT, OPENING_DAYS } from "../list-query";
 import {
   MAX_API_KEY_DESCRIPTION,
@@ -105,7 +72,7 @@ import {
 } from "../names";
 import { RESERVED_ORGANIZATION_SLUGS, RESERVED_PROJECT_SLUGS, SLUG_MAX_LENGTH } from "../slug";
 import { COMMENT_MAX, SCORE_CATEGORIES_MAX, SCORE_CATEGORY_MAX } from "../scores";
-import { DOWNLOAD_MAX, FILTER_VALUE_MAX, MAX_PAGE, RUNS_MAX, SCORE_NAME_MAX, SPAN_NAME_MAX, VIEW_NAME_MAX } from "../traces";
+import { DOWNLOAD_MAX, FILTER_VALUE_MAX, MAX_PAGE, SCORE_NAME_MAX, SPAN_NAME_MAX, VIEW_NAME_MAX } from "../traces";
 import { UTC_OFFSET_EAST, UTC_OFFSET_WEST } from "../utc-offset";
 
 const contract = JSON.parse(
@@ -117,7 +84,7 @@ const contract = JSON.parse(
   enums: Record<string, string[]>;
   flags: { off_detail: Record<string, string> };
   slugs: { max_length: number; reserved: { organization: string[]; project: string[] } };
-  live: { organization_channel: string; spans_ingested: string; tags_changed: string };
+  live: { organization_channel: string; spans_ingested: string };
   content: { file_id_prefix: string };
   limits: { agent_stream_max_secs: number; [limit: string]: unknown };
   rules: { folds: Record<string, string[]>; measures: Record<string, string[]> };
@@ -147,19 +114,12 @@ const CONSOLE: Record<string, Record<string, string>> = {
   Flag,
   IncidentStatus,
   InviteScope,
-  EvaluationStatus,
-  EvaluationTarget,
-  EvaluatorKind,
-  LayoutDepth,
-  LayoutOpen,
   MetricsGroup,
   MissingData,
-  ModelProvider,
   NotificationKind,
   OrganizationRole,
   OrganizationStatus,
   PausedBy,
-  PromptRole,
   ResourceKind,
   Role,
   RuleAggregation,
@@ -171,17 +131,11 @@ const CONSOLE: Record<string, Record<string, string>> = {
   ScoreSource,
   ScoreTarget,
   ScoreType,
-  SessionColumn,
-  SessionSort,
   Severity,
   SortDirection,
   SpanKind,
   SpanStatus,
-  TraceColumn,
   TraceSort,
-  UserColumn,
-  UserSort,
-  ViewKind,
 };
 
 describe("wire contract", () => {
@@ -205,7 +159,6 @@ describe("wire contract", () => {
   it("listens where the server publishes, for the event it names", () => {
     expect(Live.organizationChannel).toBe(contract.live.organization_channel);
     expect(Live.spansIngested).toBe(contract.live.spans_ingested);
-    expect(Live.tagsChanged).toBe(contract.live.tags_changed);
   });
 
   // A file part names a kept file only under the server's prefix, so a drift
@@ -223,11 +176,8 @@ describe("wire contract", () => {
       list_max_limit: MAX_LIMIT,
       list_max_page: MAX_PAGE,
       list_export_max: DOWNLOAD_MAX,
-      list_runs_max: RUNS_MAX,
       filter_values_max: FILTER_VALUES_MAX,
       filter_value_max: FILTER_VALUE_MAX,
-      pinned_max: PINNED_MAX,
-      pinned_per_run: PINNED_PER_TRACE,
       dashboard_charts_max: DASHBOARD_CHARTS_MAX,
       rollup_group_top: ROLLUP_GROUP_TOP,
       utc_offset_west: UTC_OFFSET_WEST,
@@ -243,7 +193,6 @@ describe("wire contract", () => {
       api_key_description_max: MAX_API_KEY_DESCRIPTION,
       email_max: MAX_EMAIL,
       agent_message_max: AGENT_MESSAGE_MAX,
-      trace_question_max: TRACE_QUESTION_MAX,
       audit_export_kept_days: AUDIT_EXPORT_KEPT_DAYS,
       confirmation_code_length: CONFIRMATION_CODE_LENGTH,
       view_name_max: VIEW_NAME_MAX,
@@ -252,23 +201,6 @@ describe("wire contract", () => {
       score_comment_max: COMMENT_MAX,
       score_categories_max: SCORE_CATEGORIES_MAX,
       score_category_max: SCORE_CATEGORY_MAX,
-      evaluator_name_max: EVALUATOR_NAME_MAX,
-      evaluator_messages_max: EVALUATOR_MESSAGES_MAX,
-      evaluator_message_max: EVALUATOR_MESSAGE_MAX,
-      evaluator_means_max: EVALUATOR_MEANS_MAX,
-      evaluator_temperature_max: EVALUATOR_TEMPERATURE_MAX,
-      evaluator_weekly_limit_max: EVALUATOR_WEEKLY_LIMIT_MAX,
-      typed_questions_max: TYPED_QUESTIONS_MAX,
-      typed_levels_max: TYPED_LEVELS_MAX,
-      typed_options_max: TYPED_OPTIONS_MAX,
-      typed_instructions_max: TYPED_INSTRUCTIONS_MAX,
-      evaluation_rule_name_max: EVALUATION_RULE_NAME_MAX,
-      evaluation_rule_evaluators_max: EVALUATION_RULE_EVALUATORS_MAX,
-      evaluation_rule_pointer_max: EVALUATION_RULE_POINTER_MAX,
-      model_connection_name_max: MODEL_CONNECTION_NAME_MAX,
-      model_connection_model_max: MODEL_CONNECTION_MODEL_MAX,
-      model_connection_models_max: MODEL_CONNECTION_MODELS_MAX,
-      model_connection_secret_max: MODEL_CONNECTION_SECRET_MAX,
     }).toEqual(LIMITS);
   });
 

@@ -84,7 +84,7 @@ import { createOrganizationAction, createProjectAction } from "./actions";
 // an entry with a role in it, never an id that happens to be theirs.
 function me(organizations: OrganizationEntry[], activeOrganizationId: string): ServerContext {
   return {
-    person: { userId: "user_me", email: "me@example.test", analyticsOptIn: false },
+    person: { userId: "user_me", email: "me@example.test" },
     organizations,
     activeOrganizationId,
     defaultOrganizationId: activeOrganizationId,
@@ -292,9 +292,9 @@ describe("createOrganizationAction", () => {
   // ⚠ **It names no organization.** The new one has no id until auth mints
   // it, and naming the one on screen would assert a claim the act does not
   // need, on a chain it does not touch.
-  it("founds it with the person's own headers, naming no organization, and answers its Overview", async () => {
+  it("founds it with the person's own headers, naming no organization, and answers its projects", async () => {
     const r = await createOrganizationAction("  Acme  ", "");
-    expect(r).toEqual({ ok: true, href: "/acme" });
+    expect(r).toEqual({ ok: true, href: "/acme/projects" });
     const [url, init] = sent()!;
     expect(url).toBe("http://auth.test/internal/v1/organizations");
     expect(init.method).toBe("POST");

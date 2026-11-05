@@ -21,12 +21,11 @@ import {
 } from "@/lib/peek";
 import type { RouteRead } from "@/lib/route-read";
 import { PEEK_NUDGED } from "@/lib/traces";
-import { SessionDetailSchema } from "@/lib/types/sessions";
 import { TraceDetailSchema } from "@/lib/types/traces";
 
-// What the trace peek, the session peek and a session's opened trace share:
-// the read of a lane, its entry in the history, the rows beside the one open,
-// the header's actions, and what a panel says when a read did not land.
+// The trace peek's parts: the read of a lane, its entry in the history, the
+// rows beside the one open, the header's actions, and what a panel says when
+// a read did not land.
 
 /** How long a read may take before the panel says it failed. */
 const READ_TIMEOUT_MS = 15_000;
@@ -45,11 +44,6 @@ async function readHolding<T>(
 /** A run's spans, through the trace list's own route: none is a run missing. */
 export const readTrace = (url: string, signal: AbortSignal) =>
   readHolding(url, TraceDetailSchema, signal, (trace) => trace.spans.length > 0);
-
-/** A session's traces in a window, through its own route: none is a session
- *  missing. */
-export const readSession = (url: string, signal: AbortSignal) =>
-  readHolding(url, SessionDetailSchema, signal, (session) => session.traces.length > 0);
 
 /** `read` of `url` started, and the cleanup that ends it, after which `settle`
  *  is not called. One controller, aborted by its timer or the cleanup: joining
@@ -156,7 +150,7 @@ export function ReadFailure({
   retry,
 }: {
   read: Exclude<RouteRead<unknown>, { kind: "ok" }>;
-  noun: "trace" | "session";
+  noun: "trace";
   missing: { title: string; body: ReactNode };
   retry: () => void;
 }) {

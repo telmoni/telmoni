@@ -11,7 +11,7 @@ whatever it keeps of the spans:
 
 | Chart | What it draws |
 |---|---|
-| Spend | What the model calls cost, each as it reported, else its tokens at the project's own price or the price table's ([What a call cost](/docs/api/ingest#what-a-call-cost)), scaled by its run's [sample rate](/docs/api/sdks#sampling) |
+| Spend | What the model calls cost, each as it reported, else its tokens at the project's own price or the price table's ([What a call cost](/docs/api/ingest#what-a-call-cost)), scaled by its run's [sample rate](/docs/api/ingest#what-is-dropped-at-the-door) where a plan sampled it |
 | Tokens | The model calls' input and output tokens |
 | Runs | The runs, each in the hour its own span arrived, those that ended well and those that failed |
 | Latency | The runs' durations at the median, the 95th and the 99th percentile |
@@ -21,8 +21,7 @@ Above them, each of the project's running [budgets](/docs/monitoring/alerts#a-bu
 what the month had spent of it when the budget last read it, or **Not read
 yet** for one that has not.
 
-Spend counts every model call the project's spans hold, an
-[evaluator's](/docs/workspace/evaluators) among them, since the project pays for it.
+Spend counts every model call the project's spans hold.
 
 ## Spend split over time
 

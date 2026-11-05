@@ -5,41 +5,31 @@
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;
-use serde_json::json;
 use uuid::Uuid;
 
-use telmoni_shared::slug::Slug;
 use telmoni_shared::test_util::pin_contract;
 use telmoni_shared::{
-    ChartMeasure, ContentMode, IncidentStatus, LayoutDepth, LayoutOpen, MetricsGroup, MissingData,
-    OrganizationId, ProjectId, RuleAggregation, RuleLevel, RuleMeasure, RuleOperator, RuleWindow,
-    SessionSort, Severity, SortDirection, SpanKind, SpanStatus, TraceSort, UserSort, ViewKind,
+    ChartMeasure, ContentMode, IncidentStatus, MetricsGroup, MissingData, OrganizationId,
+    ProjectId, RuleAggregation, RuleLevel, RuleMeasure, RuleOperator, RuleWindow, Severity,
+    SortDirection, SpanKind, SpanStatus, TraceSort,
 };
 use telmoni_telemetry::contract::{InventoryRow, Needs, ReadOn};
 use telmoni_telemetry::handler::content_mode::{ContentModeSetting, OFFERED};
 use telmoni_telemetry::handler::field_inventory::FieldInventory;
-use telmoni_telemetry::handler::health::{Health, HealthIncident, HealthProject};
 use telmoni_telemetry::handler::incidents::IncidentList;
 use telmoni_telemetry::handler::mutes::MuteList;
-use telmoni_telemetry::handler::privacy::{EvaluatorReads, Posture, Retention, Sent};
+use telmoni_telemetry::handler::privacy::{Posture, Retention, Sent};
 use telmoni_telemetry::handler::rules::{Alert, AlertLink, AlertList};
-use telmoni_telemetry::handler::session_layout::SessionLayoutSetting;
-use telmoni_telemetry::handler::sessions::{SessionDetail, SessionList, SessionTrace};
 use telmoni_telemetry::handler::traces::{
     FacetValue, FacetValues, Facets, RunSpend, SpanFields, TraceDetail, TraceHistogram, TraceList,
-    TraceSpan, TraceTags, UnpricedModel,
+    TraceSpan, UnpricedModel,
 };
-use telmoni_telemetry::handler::users::UserList;
-use telmoni_telemetry::handler::views::{
-    DashboardChart, DashboardOptions, LayoutFilter, LayoutOptions, View, ViewList, ViewQuery,
-};
+use telmoni_telemetry::handler::views::{DashboardChart, DashboardOptions, View, ViewList};
 use telmoni_telemetry::rules::db::PausedBy;
 use telmoni_telemetry::rules::incidents::IncidentRow;
 use telmoni_telemetry::rules::mutes::MuteRow;
 use telmoni_telemetry::rules::{Definition, Hours, Link, RuleFilters};
-use telmoni_telemetry::sessions::SessionRow;
-use telmoni_telemetry::traces::{Bar, ListSort, PinnedRow, TraceRow};
-use telmoni_telemetry::users::UserRow;
+use telmoni_telemetry::traces::{Bar, ListSort, TraceRow};
 
 /// A run's own span's turn, as content keeps it: the person's message and
 /// the agent's answer, in the conventions' parts.
@@ -168,7 +158,7 @@ fn the_trace_list_answers_as_the_console_reads() {
     );
 }
 
-/// The facets every list's sidebar reads: traces', sessions' and users'.
+/// The facets the trace list's sidebar reads.
 #[test]
 fn the_facets_answer_as_the_console_reads() {
     let values = |value: &str, count| FacetValues {
@@ -294,180 +284,9 @@ fn a_trace_answers_as_the_console_reads() {
     );
 }
 
-/// A run's tags, as a change to them answers.
+/// The project's saved dashboards.
 #[test]
-fn a_runs_tags_answer_as_the_console_reads() {
-    pin(
-        "trace-tags",
-        &TraceTags {
-            run_id: RUN,
-            tags: [("branch", "main"), ("repo", "telmoni")]
-                .into_iter()
-                .map(|(key, value)| (key.to_owned(), value.to_owned()))
-                .collect(),
-        },
-    );
-}
-
-/// The sessions page's list.
-#[test]
-fn the_session_list_answers_as_the_console_reads() {
-    pin(
-        "sessions",
-        &SessionList {
-            sessions: vec![SessionRow {
-                session_id: "s_9c2e".into(),
-                user_id: "u_1f3a".into(),
-                traces: 2,
-                errors: 1,
-                steps: 4,
-                input_tokens: 2_400,
-                output_tokens: 680,
-                spend: 0.0084,
-                duration_ms: 4_200,
-                first_seen: at(0),
-                last_seen: at(90),
-                tags: vec!["repo:telmoni".into()],
-            }],
-            days: 7,
-            limit: 50,
-            page: 1,
-            total: 1,
-            more: false,
-            sort: ListSort::Column(SessionSort::LastSeen),
-            dir: SortDirection::Desc,
-        },
-    );
-}
-
-/// One session's page, a span pinned under its trace.
-#[test]
-fn a_session_answers_as_the_console_reads() {
-    pin(
-        "session",
-        &SessionDetail {
-            session_id: "s_9c2e".into(),
-            traces: vec![SessionTrace {
-                trace: trace(),
-                pinned: vec![PinnedRow {
-                    run_id: RUN,
-                    span_id: "00f067aa0ba902b9".into(),
-                    parent_span_id: "00f067aa0ba902b7".into(),
-                    kind: SpanKind::Step,
-                    name: "plan".into(),
-                    started_at: at(1),
-                    ended_at: at(2),
-                    status: SpanStatus::Ok,
-                    error_type: String::new(),
-                    model: "gpt-4o-mini".into(),
-                    input_tokens: 300,
-                    output_tokens: 90,
-                }],
-            }],
-            pinned: vec!["plan".into()],
-            days: 7,
-            limit: 50,
-            more: false,
-            content: Some(turn()),
-            scores: vec![telmoni_telemetry::scores::Summary {
-                name: "resolved".into(),
-                data_type: telmoni_shared::ScoreType::Boolean,
-                mean: Some(0.5),
-                count: 2,
-                categories: Vec::new(),
-            }],
-        },
-    );
-}
-
-/// The users page's list.
-#[test]
-fn the_user_list_answers_as_the_console_reads() {
-    pin(
-        "users",
-        &UserList {
-            users: vec![UserRow {
-                user_id: "u_1f3a".into(),
-                traces: 3,
-                errors: 1,
-                steps: 9,
-                input_tokens: 120,
-                output_tokens: 40,
-                spend: 0.0011,
-                duration_ms: 3_100,
-                first_seen: at(0),
-                last_seen: at(90),
-            }],
-            days: 7,
-            limit: 50,
-            page: 1,
-            total: 1,
-            more: false,
-            sort: ListSort::Column(UserSort::Tokens),
-            dir: SortDirection::Desc,
-        },
-    );
-}
-
-/// Saved views of each kind: the trace list's, the sessions', and a layout.
-#[test]
-fn saved_views_answer_as_the_console_reads() {
-    let view = |kind, name: &str, query, columns: &[&str]| View {
-        id: VIEW,
-        kind,
-        name: name.into(),
-        query,
-        columns: columns.iter().map(|&column| column.to_owned()).collect(),
-        created_at: at(0),
-        updated_at: at(60),
-    };
-    let query = ViewQuery {
-        agent: vec!["support".into()],
-        status: vec![SpanStatus::Error],
-        sort: Some("duration".into()),
-        dir: Some(SortDirection::Desc),
-        days: Some(7),
-        limit: Some(50),
-        ..ViewQuery::default()
-    };
-    let layout = LayoutOptions {
-        depth: LayoutDepth::Steps,
-        open: LayoutOpen::Failed,
-        timeline: true,
-        graph: true,
-        pinned: vec!["plan".into()],
-        filter: LayoutFilter {
-            kind: vec![SpanKind::ModelCall],
-            status: vec![SpanStatus::Error],
-            name: vec!["answer".into()],
-        },
-        messages: true,
-        scores: false,
-    };
-    let query = serde_json::to_value(query).expect("a query serializes");
-    let layout = serde_json::to_value(layout).expect("a layout serializes");
-    pin(
-        "views",
-        &ViewList {
-            views: vec![view(
-                ViewKind::Traces,
-                "Failed support runs",
-                query,
-                &["started", "agent", "tokens"],
-            )],
-        },
-    );
-    pin(
-        "layouts",
-        &ViewList {
-            views: vec![view(
-                ViewKind::Layout,
-                "Steps, failures open",
-                layout,
-                &["started", "agent", "tokens"],
-            )],
-        },
-    );
+fn saved_dashboards_answer_as_the_console_reads() {
     let charts = DashboardOptions {
         charts: vec![
             DashboardChart {
@@ -485,23 +304,13 @@ fn saved_views_answer_as_the_console_reads() {
     pin(
         "dashboards",
         &ViewList {
-            views: vec![view(
-                ViewKind::Dashboard,
-                "Spend by team",
-                serde_json::to_value(charts).expect("a dashboard serializes"),
-                &[],
-            )],
-        },
-    );
-    pin(
-        "session-views",
-        &ViewList {
-            views: vec![view(
-                ViewKind::Sessions,
-                "Slow sessions",
-                json!({ "sort": "duration", "dir": "desc" }),
-                &["user", "traces", "duration", "last_seen"],
-            )],
+            views: vec![View {
+                id: VIEW,
+                name: "Spend by team".into(),
+                query: serde_json::to_value(charts).expect("a dashboard serializes"),
+                created_at: at(0),
+                updated_at: at(60),
+            }],
         },
     );
 }
@@ -631,24 +440,6 @@ fn mutes_answer_as_the_console_reads() {
     );
 }
 
-/// The organization's Overview: its open incidents, each with its project.
-#[test]
-fn the_organization_health_answers_as_the_console_reads() {
-    pin(
-        "health",
-        &Health {
-            incidents: vec![HealthIncident {
-                project: HealthProject {
-                    id: project(),
-                    slug: Slug::from_trusted("support-bot"),
-                    name: "Support bot".into(),
-                },
-                incident: incident(),
-            }],
-        },
-    );
-}
-
 /// A project's content mode and the modes its switch offers.
 #[test]
 fn the_content_mode_answers_as_the_console_reads() {
@@ -657,17 +448,6 @@ fn the_content_mode_answers_as_the_console_reads() {
         &ContentModeSetting {
             content_mode: ContentMode::Off,
             offered: OFFERED,
-        },
-    );
-}
-
-/// A project's session layout, a saved one named.
-#[test]
-fn the_session_layout_answers_as_the_console_reads() {
-    pin(
-        "session-layout",
-        &SessionLayoutSetting {
-            view_id: Some(VIEW),
         },
     );
 }
@@ -703,22 +483,6 @@ fn the_privacy_posture_answers_as_the_console_reads() {
                 attribute: "gen_ai.input.messages".into(),
                 spans: 400,
             }],
-            evaluator_reads: vec![
-                EvaluatorReads {
-                    day: chrono::NaiveDate::from_ymd_opt(2026, 11, 2).expect("a day"),
-                    evaluator_id: uuid::Uuid::from_u128(0x7a1c_0e52_0000_4000_8000_0000_0000_0002),
-                    evaluator: Some("Hallucination".into()),
-                    provider: Some("anthropic".into()),
-                    reads: 42,
-                },
-                EvaluatorReads {
-                    day: chrono::NaiveDate::from_ymd_opt(2026, 11, 1).expect("a day"),
-                    evaluator_id: uuid::Uuid::from_u128(0x7a1c_0e52_0000_4000_8000_0000_0000_0003),
-                    evaluator: None,
-                    provider: Some("openai".into()),
-                    reads: 3,
-                },
-            ],
             retention: Retention {
                 span_days: 90,
                 max_span_days: 360,

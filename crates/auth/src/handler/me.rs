@@ -53,9 +53,6 @@ pub struct PersonSummary {
     /// The address this person signs in with.
     pub email: Email,
     pub display_name: Option<String>,
-    /// Whether this person opted in to product analytics; served here so the
-    /// privacy page costs no second fetch.
-    pub analytics_opt_in: bool,
     /// Whether the address was ever proved — the verification link, an email
     /// change, a provider's word — as the column records it, not as the
     /// session reports it with `VERIFY_EMAIL` off. The console tells an
@@ -253,7 +250,6 @@ pub(crate) async fn answer(
             user_id,
             email: person.email,
             display_name: person.display_name,
-            analytics_opt_in: person.analytics_opt_in,
             email_verified: person.email_verified,
         },
         organizations,

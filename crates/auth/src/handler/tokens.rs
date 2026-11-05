@@ -231,14 +231,7 @@ fn minted_scopes(asked: &[ApiKeyScope]) -> Result<Vec<ApiKeyScope>, TelmoniError
         .collect();
     if scopes.is_empty() {
         return Err(TelmoniError::BadRequest(
-            "scopes must name read, ingest, evaluate, or several".into(),
-        ));
-    }
-    // A change of an evaluator passes the `/v1` gate, which takes `read`.
-    if scopes.contains(&ApiKeyScope::Evaluate) && !scopes.contains(&ApiKeyScope::Read) {
-        return Err(TelmoniError::BadRequest(
-            "evaluate changes evaluators under /v1, which a key reads too: name read beside it"
-                .into(),
+            "scopes must name read, ingest, or both".into(),
         ));
     }
     Ok(scopes)
@@ -411,14 +404,13 @@ pub async fn revoke_token(
 mod tests {
     use super::*;
 
-    /// A key that changes evaluators reads too, since the `/v1` gate takes `read`.
+    /// Scopes are minted once each, in wire order, and a key of none is refused.
     #[test]
-    fn evaluate_is_minted_beside_read_alone() {
-        assert!(minted_scopes(&[ApiKeyScope::Evaluate]).is_err());
-        assert!(minted_scopes(&[ApiKeyScope::Ingest, ApiKeyScope::Evaluate]).is_err());
+    fn scopes_are_minted_once_in_wire_order() {
         assert_eq!(
-            minted_scopes(&[ApiKeyScope::Evaluate, ApiKeyScope::Read]).expect("minted"),
-            [ApiKeyScope::Read, ApiKeyScope::Evaluate]
+            minted_scopes(&[ApiKeyScope::Ingest, ApiKeyScope::Read, ApiKeyScope::Ingest])
+                .expect("minted"),
+            [ApiKeyScope::Read, ApiKeyScope::Ingest]
         );
         assert!(minted_scopes(&[]).is_err());
     }

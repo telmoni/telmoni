@@ -96,7 +96,7 @@ describe("arriving somewhere", () => {
     expect(trail).not.toContain("/acme/project-0/api-keys");
   });
 
-  it("counts an organization's overview and its own pages as one resource", () => {
+  it("counts an organization's root and its own pages as one resource", () => {
     expect(walk("/acme", "/acme/projects", "/acme/billing")).toEqual(["/acme/billing"]);
   });
 

@@ -96,9 +96,9 @@ current ones (`gen_ai.system`, `gen_ai.usage.prompt_tokens`,
 | `time_to_first_token` | `gen_ai.response.time_to_first_chunk` | a number of seconds, 0 or more: from the call's request to its answer's first chunk; empty where none was |
 | `user_id` | `user.id` | 1 to 128 characters; stored as its HMAC-SHA-256 under a key of the project's own, the first 16 bytes in hex, so no stored id names a person |
 | `session_id` | `gen_ai.conversation.id` | 1 to 200 characters, kept as sent |
-| `environment`, `release` | the resource's `deployment.environment.name` and `service.version`, on every span of the export | up to 128 characters each, as sent; empty where the resource names none, or past the cap, and an environment beginning `telmoni-`, which Telmoni keeps for its own [evaluations](/docs/workspace/evaluators), is read as none |
+| `environment`, `release` | the resource's `deployment.environment.name` and `service.version`, on every span of the export | up to 128 characters each, as sent; empty where the resource names none, or past the cap |
 | `tags` | each `telmoni.tag.<key>` | up to 32; a key up to 64 characters, a value up to 256; in a project, up to 64 keys a UTC day, each taking up to 500 values (below) |
-| `sample_rate` | `telmoni.sample_rate` | on every span of a run; above 0, up to 1 |
+| `sample_rate` | a plan's sampling, [past its capacity](#what-is-dropped-at-the-door) | a tenth, on every span of a run kept whole; empty on every other span |
 | `attributes` | the attributes the field inventory names, and any other whose value is a number or a boolean, except a name under `telmoni.`, which is dropped as `unlisted` | up to 64, the resource's among them, which keep at most 2 KiB together since every span of the export carries them; a key up to 128 characters, a value up to 1,024; a named array as its JSON |
 
 A field whose value breaks its rule refuses the span whole; an attribute past
@@ -145,9 +145,7 @@ A project sets up to 100, each naming up to 20 models.
 
 The [field inventory](/docs/api/field-inventory) names, on a span, `gen_ai.response.id`,
 `gen_ai.response.finish_reasons`, `gen_ai.response.status`,
-`gen_ai.request.reasoning.level`, the request's parameters
-(`gen_ai.request.temperature`, `top_p`, `top_k`, `max_tokens`,
-`frequency_penalty`, `presence_penalty` and `seed`), `gen_ai.agent.version`,
+`gen_ai.request.reasoning.level`, `gen_ai.agent.version`,
 `gen_ai.tool.call.id`,
 `gen_ai.tool.type`, `gen_ai.output.type`, `gen_ai.prompt.name`,
 `gen_ai.prompt.version`, `gen_ai.data_source.id` and `server.address`, and on
@@ -195,7 +193,7 @@ characters, held only by the 1 MiB an export may be.
 **Past a plan's capacity**, on a deployment that sells plans: once an
 organization's spans pass what its plan holds for the month, every span is
 kept through the plan's grace, if it has one; after it, one run in ten is kept
-whole, its spans' `sample_rate` taken to a tenth of what it was, and the rest
+whole, each of its spans' `sample_rate` set to a tenth, and the rest
 are counted in `partialSuccess.rejectedSpans`, the message's first line saying
 how many and what lifts it. Its owner and admins are told once a month. Past
 its plan's content ceiling, a span keeps its metadata alone, each field named

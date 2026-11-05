@@ -1019,38 +1019,6 @@ pub(crate) fn state_with_stores_noticed(
     ))
 }
 
-/// [`state_with_stores`], signing each project's tokens with a laptop's key
-/// as the issuer at `https://api.example`.
-pub(crate) fn state_with_federation(pool: &PgPool, auth: Arc<dyn Auth>) -> Arc<AppState> {
-    use telmoni_shared::model::federation::{Endpoints, Federation, Signer};
-    let clickhouse = std::env::var("TELEMETRY_CLICKHOUSE_URL").expect(
-        "state_with_federation: TELEMETRY_CLICKHOUSE_URL is set, checked by clickhouse_or_skip",
-    );
-    let mut state = module_at(
-        pool,
-        auth,
-        &clickhouse,
-        &redis_url(),
-        Arc::new(NoLimits),
-        NoticeLog::new(),
-    );
-    let key = Signer::generate_local().expect("a key");
-    let signer = Signer::parse(
-        "MODEL_FEDERATION_SIGNER",
-        &key.into(),
-        "http://127.0.0.1:1",
-        "http://127.0.0.1:1",
-    )
-    .expect("a laptop's signer");
-    state.federation = Some(Arc::new(Federation::new(
-        signer,
-        "https://api.example",
-        reqwest::Client::new(),
-        Endpoints::default(),
-    )));
-    Arc::new(state)
-}
-
 /// [`state_with_stores_noticed`], its notices linking the console at
 /// `https://console.example`.
 pub(crate) fn state_with_console(
@@ -1090,15 +1058,12 @@ fn module_at(
         // machine, and name no KMS.
         telemetry_kek: format!("local:{}", "0".repeat(64)).into(),
         content_kek: format!("local:{}", "1".repeat(64)).into(),
-        model_connection_kek: Some(format!("local:{}", "2".repeat(64)).into()),
-        model_federation_signer: None,
-        model_federation_issuer: None,
         kms_api_base: "http://127.0.0.1:1".into(),
         metadata_api_base: "http://127.0.0.1:1".into(),
         redis_url: redis_url.into(),
         app_url: None,
     };
-    let mut state = telmoni_telemetry::boot::state(
+    telmoni_telemetry::boot::state(
         config,
         service_pool(pool, ServiceRole::Telemetry),
         ServiceSecrets::new(SECRET, None::<String>),
@@ -1106,10 +1071,7 @@ fn module_at(
         entitlements,
         notifications,
     )
-    .expect("the module's state over a laptop's key");
-    // A suite's model providers are mocks on loopback, which the guard refuses.
-    state.egress = telmoni_shared::net_guard::Egress::unguarded(reqwest::Client::new());
-    state
+    .expect("the module's state over a laptop's key")
 }
 
 /// ClickHouse as both of the users a tier runs it with.

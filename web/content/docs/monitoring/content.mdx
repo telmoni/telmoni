@@ -1,6 +1,6 @@
 ---
 title: "Content"
-description: "What a run said, kept in full when both locks are on: the project's content mode and the SDK's capture switch. What is kept — messages, tool payloads, images and files, failures and metadata — where it is read, searched and recorded, and how long it stays."
+description: "What a run said, kept in full when both locks are on: the project's content mode and the SDK's capture switch. What is kept — messages, tool payloads, images and files, failures and metadata — where it is read and recorded, and how long it stays."
 ---
 
 **Content** is what a person or a model wrote during a run: the prompts and
@@ -74,8 +74,6 @@ A field an SDK cut to fit an export is not kept, and the trace says so.
 
 - **The trace's page** and its view beside the list show each span's content
   in full ([Traces](/docs/monitoring/traces#content)).
-- **The session's page** shows each run's own turn, so the session reads as
-  its conversation ([Sessions](/docs/monitoring/sessions)).
 - **A download** of the trace list carries every run's content.
 - **The API** answers a trace's content with `content=true`
   ([API reference](/docs/api/reference#get-v1tracesrun_id)).
@@ -83,17 +81,8 @@ A field an SDK cut to fit an export is not kept, and the trace says so.
 Each read is recorded in the organization's
 [audit log](/docs/workspace/audit-log) as `viewed` before the content is sent,
 naming the traces read and never what they hold, so the project's
-**Audit log** lists who read it. An [evaluator](/docs/workspace/evaluators)'s
-read is recorded on its evaluation instead, naming the evaluator, what it read,
-when and the provider it was sent to, and **Evaluations** on the evaluator's
-row lists them.
+**Audit log** lists who read it.
 The console agent reads none of it, in any mode.
-
-## Searching it
-
-The trace list's search finds the traces whose kept content holds every word
-you type, without opening any of it: each field keeps its words only as keyed
-hashes ([Searching kept content](/docs/monitoring/traces#searching-kept-content)).
 
 ## How long it stays
 

@@ -27,8 +27,7 @@ use telmoni_telemetry::sweep::{self, Swept};
 
 const OWNER: &str = "user_owner";
 
-/// A settings row of `project` filed under `organization`, its view, model
-/// connection, evaluator and rule, and an evaluation settled before it moved.
+/// A settings row of `project` filed under `organization`, and its view.
 async fn settings_and_a_view(pool: &PgPool, project: &ProjectId, organization: &OrganizationId) {
     sqlx::query(
         "INSERT INTO telemetry.project_settings (project_id, organization_id) VALUES ($1, $2)",
@@ -39,69 +38,20 @@ async fn settings_and_a_view(pool: &PgPool, project: &ProjectId, organization: &
     .await
     .expect("a settings row");
     sqlx::query(
-        "INSERT INTO telemetry.trace_views (id, project_id, name, query, columns)
-         VALUES ($1, $2, 'Errors', '{}', '{}')",
+        "INSERT INTO telemetry.trace_views (id, project_id, name, query)
+         VALUES ($1, $2, 'Spend', '{}')",
     )
     .bind(Uuid::now_v7())
     .bind(project)
     .execute(pool)
     .await
-    .expect("a saved view");
-    sqlx::query(
-        "INSERT INTO telemetry.model_connections
-             (id, project_id, name, provider, models, secret_hint, secret_ciphertext, secret_nonce,
-              wrapped_dek, key_version, created_by)
-         VALUES ($1, $2, 'Judge', 'openai', '{gpt-x}', 'abcd', '\\x00', '\\x00', '\\x00', 1, 'u')",
-    )
-    .bind(Uuid::now_v7())
-    .bind(project)
-    .execute(pool)
-    .await
-    .expect("a model connection");
-    sqlx::query(
-        "INSERT INTO telemetry.evaluators (id, version, project_id, name, messages, score, created_by)
-         VALUES ($1, 1, $2, 'Relevant', '[]', '{}', 'u')",
-    )
-    .bind(Uuid::now_v7())
-    .bind(project)
-    .execute(pool)
-    .await
-    .expect("an evaluator");
-    sqlx::query(
-        "INSERT INTO telemetry.evaluation_rules (id, project_id, organization_id, name, target, created_by)
-         SELECT $1, $2, organization_id, 'Every run', 'run', 'u'
-           FROM telemetry.project_settings WHERE project_id = $2",
-    )
-    .bind(Uuid::now_v7())
-    .bind(project)
-    .execute(pool)
-    .await
-    .expect("an evaluation rule");
-    sqlx::query(
-        "INSERT INTO telemetry.evaluations (id, project_id, organization_id, evaluator_id,
-             evaluator_version, target, target_key, status, settled_at)
-         VALUES ($1, $2, $3, $4, 1, 'run', 'run/1', 'done', now())",
-    )
-    .bind(Uuid::now_v7())
-    .bind(project)
-    .bind(OrganizationId::new())
-    .bind(Uuid::now_v7())
-    .execute(pool)
-    .await
-    .expect("an evaluation, settled before its project moved");
+    .expect("a saved dashboard");
 }
 
 /// The tables a purge empties in which the project has a row still.
 async fn left_of(pool: &PgPool, project: &ProjectId) -> Vec<&'static str> {
     let mut left = Vec::new();
-    for table in [
-        "evaluation_rules",
-        "evaluations",
-        "evaluators",
-        "model_connections",
-        "project_settings",
-        "trace_views",
-    ] {
+    for table in ["project_settings", "trace_views"] {
         let rows: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
             "SELECT count(*) FROM telemetry.{table} WHERE project_id = $1"
         )))
@@ -215,14 +165,7 @@ async fn a_purge_waits_two_seconds_at_most_for_a_project_held_in_place(pool: PgP
     in_place.rollback().await.expect("the export ends");
     assert_eq!(
         left_of(&pool, &project).await,
-        [
-            "evaluation_rules",
-            "evaluations",
-            "evaluators",
-            "model_connections",
-            "project_settings",
-            "trace_views"
-        ]
+        ["project_settings", "trace_views"]
     );
 }
 
@@ -262,23 +205,13 @@ async fn an_organizations_purge_holds_every_project_its_rows_name(pool: PgPool) 
         },
     );
     assert!(held.is_empty(), "held in place beside the purge: {held:?}");
-    assert_eq!(
-        purged, 12,
-        "a view, a model connection, an evaluator, a rule, an evaluation and a settings row of each project"
-    );
+    assert_eq!(purged, 4, "a view and a settings row of each project");
     for project in &ours {
         assert!(left_of(&pool, project).await.is_empty(), "{project}");
     }
     assert_eq!(
         left_of(&pool, &theirs).await,
-        [
-            "evaluation_rules",
-            "evaluations",
-            "evaluators",
-            "model_connections",
-            "project_settings",
-            "trace_views"
-        ]
+        ["project_settings", "trace_views"]
     );
 }
 
@@ -321,17 +254,7 @@ async fn a_projects_purge_cut_short_is_finished_by_the_sweep(pool: PgPool) {
         .await
         .expect_err("a purge over a store that does not answer");
     let left = left_of(&pool, &gone).await;
-    assert_eq!(
-        left,
-        [
-            "evaluation_rules",
-            "evaluations",
-            "evaluators",
-            "model_connections",
-            "project_settings",
-            "trace_views"
-        ]
-    );
+    assert_eq!(left, ["project_settings", "trace_views"]);
 
     // A pass auth cannot answer, and one ClickHouse does not: nothing goes.
     auth.failing_homes(true);
@@ -361,14 +284,7 @@ async fn a_projects_purge_cut_short_is_finished_by_the_sweep(pool: PgPool) {
     .await;
     assert_eq!(
         left_of(&pool, &kept).await,
-        [
-            "evaluation_rules",
-            "evaluations",
-            "evaluators",
-            "model_connections",
-            "project_settings",
-            "trace_views"
-        ]
+        ["project_settings", "trace_views"]
     );
     assert_eq!(common::rows_of(&clickhouse.store, &kept).await, (1, 1));
     assert_eq!(
@@ -414,14 +330,7 @@ async fn a_purge_the_sweep_cannot_finish_now_waits_for_the_next_pass(pool: PgPoo
     assert!(left_of(&pool, other).await.is_empty());
     assert_eq!(
         left_of(&pool, held).await,
-        [
-            "evaluation_rules",
-            "evaluations",
-            "evaluators",
-            "model_connections",
-            "project_settings",
-            "trace_views"
-        ]
+        ["project_settings", "trace_views"]
     );
     in_place.rollback().await.expect("the export ends");
     assert_eq!(

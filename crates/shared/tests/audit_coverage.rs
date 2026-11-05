@@ -22,8 +22,6 @@ enum ActorPattern {
     External(&'static str),
     /// User actor — `Actor::User(<expr>)` from a session, header or token.
     Variable,
-    /// The lane's principal, passed in as a binding named `actor`.
-    Principal,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -130,72 +128,6 @@ const MUTATIONS: &[Mutation] = &[
         resource_kind: "Project",
         actor_id: ActorPattern::Variable,
     },
-    // A project's model connection, made, changed or deleted by an owner or admin.
-    Mutation {
-        file: "crates/telemetry/src/handler/model_connections.rs",
-        fn_name: "put_connection",
-        action: "Created",
-        resource_kind: "ModelConnection",
-        actor_id: ActorPattern::Variable,
-    },
-    Mutation {
-        file: "crates/telemetry/src/handler/model_connections.rs",
-        fn_name: "put_connection",
-        action: "Updated",
-        resource_kind: "ModelConnection",
-        actor_id: ActorPattern::Variable,
-    },
-    Mutation {
-        file: "crates/telemetry/src/handler/model_connections.rs",
-        fn_name: "delete_connection",
-        action: "Deleted",
-        resource_kind: "ModelConnection",
-        actor_id: ActorPattern::Variable,
-    },
-    // An evaluator saved or deleted on the console's lane or `/v1`, both through `saved` and `removed`.
-    Mutation {
-        file: "crates/telemetry/src/handler/evaluators.rs",
-        fn_name: "saved",
-        action: "Created",
-        resource_kind: "Evaluator",
-        actor_id: ActorPattern::Principal,
-    },
-    Mutation {
-        file: "crates/telemetry/src/handler/evaluators.rs",
-        fn_name: "saved",
-        action: "Updated",
-        resource_kind: "Evaluator",
-        actor_id: ActorPattern::Principal,
-    },
-    Mutation {
-        file: "crates/telemetry/src/handler/evaluators.rs",
-        fn_name: "removed",
-        action: "Deleted",
-        resource_kind: "Evaluator",
-        actor_id: ActorPattern::Principal,
-    },
-    // A project's evaluation rule, made, changed or deleted by an owner or admin.
-    Mutation {
-        file: "crates/telemetry/src/handler/evaluation_rules.rs",
-        fn_name: "put_rule",
-        action: "Created",
-        resource_kind: "EvaluationRule",
-        actor_id: ActorPattern::Variable,
-    },
-    Mutation {
-        file: "crates/telemetry/src/handler/evaluation_rules.rs",
-        fn_name: "put_rule",
-        action: "Updated",
-        resource_kind: "EvaluationRule",
-        actor_id: ActorPattern::Variable,
-    },
-    Mutation {
-        file: "crates/telemetry/src/handler/evaluation_rules.rs",
-        fn_name: "delete_rule",
-        action: "Deleted",
-        resource_kind: "EvaluationRule",
-        actor_id: ActorPattern::Variable,
-    },
     // A member's score, given or taken back, filed as a change to its trace.
     Mutation {
         file: "crates/telemetry/src/handler/scores.rs",
@@ -258,13 +190,6 @@ const MUTATIONS: &[Mutation] = &[
         file: "crates/telemetry/src/handler/traces.rs",
         fn_name: "file_trace_deletion",
         action: "Deleted",
-        resource_kind: "Trace",
-        actor_id: ActorPattern::Variable,
-    },
-    Mutation {
-        file: "crates/telemetry/src/handler/traces.rs",
-        fn_name: "file_tags_change",
-        action: "Updated",
         resource_kind: "Trace",
         actor_id: ActorPattern::Variable,
     },
@@ -426,20 +351,6 @@ const MUTATIONS: &[Mutation] = &[
         file: "crates/auth/src/handler/project_transfer.rs",
         fn_name: "emit_holders_enrolled",
         action: "Created",
-        resource_kind: "Member",
-        actor_id: ActorPattern::Variable,
-    },
-    Mutation {
-        file: "crates/auth/src/handler/export.rs",
-        fn_name: "export_organization",
-        action: "Exported",
-        resource_kind: "Organization",
-        actor_id: ActorPattern::Variable,
-    },
-    Mutation {
-        file: "crates/auth/src/handler/account.rs",
-        fn_name: "set_analytics_preference",
-        action: "Updated",
         resource_kind: "Member",
         actor_id: ActorPattern::Variable,
     },
@@ -1007,7 +918,6 @@ fn actor_matches(parsed: &str, expected: ActorPattern) -> bool {
         ActorPattern::Service(name) => parsed == format!("Actor::Service(\"{name}\")"),
         ActorPattern::External(name) => parsed == format!("Actor::External(\"{name}\")"),
         ActorPattern::Variable => parsed.starts_with("Actor::User(") && parsed.ends_with(')'),
-        ActorPattern::Principal => parsed == "actor",
     }
 }
 
@@ -1016,7 +926,6 @@ fn describe_pattern(p: ActorPattern) -> String {
         ActorPattern::Service(name) => format!("Actor::Service(\"{name}\")"),
         ActorPattern::External(name) => format!("Actor::External(\"{name}\")"),
         ActorPattern::Variable => "Actor::User(<session-sourced sub>)".to_string(),
-        ActorPattern::Principal => "actor (the lane's principal, passed in)".to_string(),
     }
 }
 

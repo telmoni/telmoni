@@ -46,8 +46,8 @@ git clone https://github.com/telmoni/codex-observability-plugin.git   # or the o
 
 A turn — from your prompt to the agent's last reply, or to your interruption —
 is one run of the agent, and your session (Cursor's conversation) is the run's
-session (`gen_ai.conversation.id`), so the console shows a session as a
-[session](/docs/monitoring/sessions) of traces. Inside the run:
+session (`gen_ai.conversation.id`), so the console groups a session's traces
+together ([Sessions and users](/docs/monitoring/traces#sessions-and-users)). Inside the run:
 
 - **the model's work**, a model call with its model, its provider, named as
   the GenAI conventions and the console's prices name it (`aws.bedrock` for

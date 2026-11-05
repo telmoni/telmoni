@@ -39,7 +39,6 @@ const PERSON = {
   userId: "user_1",
   email: "ada@example.test",
   displayName: "Ada Lovelace",
-  analyticsOptIn: false,
 };
 
 const OWNED = {

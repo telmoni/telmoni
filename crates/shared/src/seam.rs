@@ -868,49 +868,6 @@ pub trait Agent: Send + Sync {
     ) -> Result<u64, TelmoniError>;
 }
 
-/// A trace list's values over a window, as its facets read them: the only
-/// words a sentence asked of the list is answered in.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct TraceVocabulary {
-    /// The window they were read over, in days.
-    pub days: u16,
-    /// The widest window the project's plan lets the list read.
-    pub max_days: u16,
-    /// Each filter the window holds a value of, in the list's sidebar order.
-    pub filters: Vec<FilterValues>,
-}
-
-/// One filter's values in a [`TraceVocabulary`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FilterValues {
-    /// Its key, as the list's URL and a saved view's query name it.
-    pub filter: String,
-    /// Its values, those on the most traces first.
-    pub values: Vec<String>,
-    /// Whether the window holds values past these.
-    pub more: bool,
-}
-
-/// A sentence's answer, checked as a view of the trace list: the saved
-/// view's query it opens on, and what of the answer the window held no
-/// trace of.
-#[derive(Debug, Clone, PartialEq)]
-pub struct CheckedTraceView {
-    /// The query, as a saved view of the list keeps it.
-    pub query: serde_json::Value,
-    /// The values left out of it.
-    pub dropped: Vec<DroppedValue>,
-}
-
-/// A value an answer named that its window's list holds no trace of.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
-pub struct DroppedValue {
-    /// The filter, or `sort` for a tag no trace carries.
-    pub filter: String,
-    /// The value, as the answer named it.
-    pub value: String,
-}
-
 /// What a person does to an incident where its notice is told.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IncidentAct {
@@ -944,8 +901,8 @@ pub enum IncidentActed {
 
 /// What telemetry does for the modules beside it: forget what it holds of an
 /// organization or a project when it goes, follow a project to the
-/// organization it moves to, hand the agent the trace list's words, and act
-/// on an incident for a person where its notice is told.
+/// organization it moves to, and act on an incident for a person where its
+/// notice is told.
 /// Each call is idempotent; each purge answers how many rows went.
 ///
 /// What it holds is each project's settings, in Postgres, and the project's
@@ -1008,34 +965,6 @@ pub trait Telemetry: Send + Sync {
         project_id: &ProjectId,
         organization_id: &OrganizationId,
     ) -> Result<(), TelmoniError>;
-
-    /// A moving project's model connections deleted, the old organization's
-    /// keys and trust: the move's last step before it commits, since none comes back.
-    async fn drop_model_connections(&self, project_id: &ProjectId) -> Result<(), TelmoniError>;
-
-    /// The trace list's values over its last `days`, as `acting` may read
-    /// them on their project, `days` held to the plan's window.
-    async fn trace_vocabulary(
-        &self,
-        acting: &Acting,
-        days: u16,
-    ) -> Result<TraceVocabulary, TelmoniError> {
-        let _ = (acting, days);
-        Err(not_linked("the trace list's values"))
-    }
-
-    /// `query` checked by the trace list's rules, as a saved view's is, and
-    /// held to the values its window holds: those read in `vocabulary`, or
-    /// read again where the answer asks another window.
-    async fn checked_trace_view(
-        &self,
-        acting: &Acting,
-        query: serde_json::Value,
-        vocabulary: &TraceVocabulary,
-    ) -> Result<CheckedTraceView, TelmoniError> {
-        let _ = (acting, query, vocabulary);
-        Err(not_linked("a trace view's check"))
-    }
 
     /// `act` done to one of the project's incidents by the person `acting`
     /// names, through the console's own lanes' writes, so its audit row is

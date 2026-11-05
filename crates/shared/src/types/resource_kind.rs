@@ -35,13 +35,6 @@ pub enum TelmoniResourceKind {
     /// One end user of a project, erased: named by the keyed hash ingest
     /// stored, never the id the project sent.
     EndUser,
-    /// A project's connection to a model on the customer's own key: made,
-    /// changed or deleted, named by its provider, never its key.
-    ModelConnection,
-    /// A project's evaluator: a version saved, or the evaluator deleted.
-    Evaluator,
-    /// A project's evaluation rule: made, changed or deleted.
-    EvaluationRule,
 }
 
 crate::wire_enum!(TelmoniResourceKind {
@@ -56,9 +49,6 @@ crate::wire_enum!(TelmoniResourceKind {
     Incident => "incident",
     Trace => "trace",
     EndUser => "end_user",
-    ModelConnection => "model_connection",
-    Evaluator => "evaluator",
-    EvaluationRule => "evaluation_rule",
 });
 
 #[cfg(test)]

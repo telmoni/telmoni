@@ -1,4 +1,4 @@
-//! The machine door before `/v1`, `/cli/v1`, `/oidc/v1` and `/otlp`: the
+//! The machine door before `/v1`, `/cli/v1` and `/otlp`: the
 //! caller's address past the proxies, and Redis's limits by source and by
 //! credential; ingest's by source alone, its handler metering the project.
 
@@ -75,8 +75,7 @@ impl Door {
         self.trusted_proxy_hops
     }
 
-    /// The `/v1` lanes behind the door's limits, and the issuers' under
-    /// `/oidc/v1`, metered as `/v1` is.
+    /// The `/v1` lanes behind the door's limits.
     pub fn v1(self: &Arc<Self>, lanes: Router) -> Router {
         lanes.layer(middleware::from_fn_with_state(
             (self.clone(), Lane::V1),

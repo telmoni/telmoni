@@ -68,7 +68,7 @@ export const PAGE_ACTION_KEY = "c";
 
 /** Step to the next and the previous of what a page steps through
  *  (`lib/use-page-steps.ts`): the trace list's peek through the page's runs,
- *  and a session's page through its traces, as a mail reader's j and k do;
+ *  as a mail reader's j and k do;
  *  `o` opens the one stood on, where the page offers that. `k` is also the
  *  API keys row's `g k` and `o` the Overview's `g o`, and the pending-`g`
  *  branch takes both first, as it does `c`. */
@@ -76,7 +76,7 @@ export const NEXT_KEY = "j";
 export const PREVIOUS_KEY = "k";
 export const OPEN_KEY = "o";
 
-/** `g` then this reaches the organization's overview from anywhere, Account
+/** `g` then this reaches the organization's projects from anywhere, Account
  *  included. */
 export const ORGANIZATION_KEY = "O";
 
@@ -120,8 +120,8 @@ export function goSequences(
   if (slug) {
     rows.push({
       key: ORGANIZATION_KEY,
-      label: "The organization's overview",
-      href: organizationPath(slug),
+      label: "The organization's projects",
+      href: organizationPath(slug, "/projects"),
     });
   }
   return rows;

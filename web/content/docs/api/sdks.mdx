@@ -101,8 +101,8 @@ holding the **ingest** scope.
     `KeyboardInterrupt` or `asyncio.CancelledError`, or a generator closed
     before its end, marks it cancelled.
     `fail("TimeoutError")` and `cancel()` do the same by hand.
-    `run` raises `ValueError` for a blank agent name, a sample rate outside
-    its range or a cap that is no cap ([the guard](#the-guard)). A token
+    `run` raises `ValueError` for a blank agent name or a cap that is no cap
+    ([the guard](#the-guard)). A token
     count is read from a number or its text, its fraction cut, and `Usage`'s
     `cost` is what the call cost in US dollars, where your provider reports
     it; of what Telmoni would refuse, these are left off with one warning: a
@@ -158,8 +158,7 @@ holding the **ingest** scope.
     marks it cancelled. `fail('TimeoutError')` and `cancel()` do the same by
     hand, and `wrap` turns a function into one that opens a run per call.
     `run` throws a `TypeError` for a blank agent name and a `RangeError` for
-    a sample rate that is no number or outside its range, or a cap that is
-    no cap ([the guard](#the-guard)). A token count is read from a number, a
+    a cap that is no cap ([the guard](#the-guard)). A token count is read from a number, a
     bigint or a decimal numeral's text, its fraction cut, and the usage's
     `cost` is what the call cost in US dollars, where your provider reports
     it; of what Telmoni would refuse, these are left off with one warning: a
@@ -278,8 +277,8 @@ holding the **ingest** scope.
     ```
 
     Each handle is a guard that ends its span when dropped or on `end()`.
-    `run` returns an error for a blank agent name, a sample rate outside its
-    range or a cap that is no cap; `step`, `model_call` and `tool_call` once
+    `run` returns an error for a blank agent name or a cap that is no cap;
+    `step`, `model_call` and `tool_call` once
     the run reached a cap it was opened with ([the guard](#the-guard)); and
     `record_run` for the cases [below](#a-run-recorded-after-it-ended).
     Nothing else in the SDK fails: of what Telmoni would refuse, these are
@@ -506,9 +505,8 @@ by as much, so time a record by the clock that sends it.
     than Telmoni keeps — a step's or a tool's name past 145 characters, the
     agent, a model, a provider, a user or an error type past 128, a session
     past 200, or a reasoning effort past 1,024 (`Error::TooLong`) — a step
-    nested past 16 deep (`Error::TooDeep`), a span that
-    ends before it starts (`Error::EndBeforeStart`) or a configured sample
-    rate outside its range (`Error::SampleRate`) is returned as an error, and
+    nested past 16 deep (`Error::TooDeep`) or a span that
+    ends before it starts (`Error::EndBeforeStart`) is returned as an error, and
     nothing is sent; a record the queue has no room for is `Error::QueueFull`.
     `record_run` takes the record, so send `record.clone()` where you would
     record it again.
@@ -516,7 +514,7 @@ by as much, so time a record by the clock that sends it.
 </Tabs>
 
 The run is sent as the live calls would have sent it, through the same
-exporter, content rules and sample rate, in a trace of its own named by the
+exporter and content rules, in a trace of its own named by the
 run's id, whatever trace is current. Each span's id is derived from the run's
 id and the span's place in the record, and a record travels in bodies of its
 own, so the same record sent again is the same bytes, whatever else the client
@@ -638,9 +636,9 @@ nothing of that run is sent from this side.
 An agent whose work spans more than one service — an orchestrator handing a
 task to a worker, a tool served over HTTP — is still one run. Before the
 request leaves, `inject` writes into its headers the W3C `traceparent` of the
-span current inside the run and the run's id, agent and sample rate as the
-W3C `baggage` members `telmoni.run_id`, `telmoni.agent` and
-`telmoni.sample_rate`, beside whatever members the headers hold already. In the service that answers, `extract` reads them back
+span current inside the run and the run's id and agent as the W3C `baggage`
+members `telmoni.run_id` and `telmoni.agent`, beside whatever members the
+headers hold already. In the service that answers, `extract` reads them back
 as the run continued there: the steps and calls it opens carry the caller's
 run and take the caller's span as their parent, so the trace shows the work
 where it was asked for, and the trace list shows one run, not one a service.
@@ -729,8 +727,7 @@ The worker never ends a run it continued: the orchestrator's own span does,
 and until it arrives the run is open with what the worker sent. Headers that
 name no run — no `traceparent`, no `telmoni.run_id`, a malformed one —
 continue nothing, and a step opened then is outside a run and sends nothing.
-A run sampled out hands nothing on, so no half of it reaches Telmoni. The
-headers carry the run's id and agent and nothing else; a service sending
+The headers carry the run's id and agent and nothing else; a service sending
 under another project's key records the spans as that project's own run, so a
 forged header reaches no other tenant. Telmoni's own helpers write and read
 the headers; no propagator is set globally, since your application's
@@ -893,10 +890,9 @@ A run is a span of its own, named `invoke_agent <agent>`, inside your current
 trace when one is current and a trace of its own otherwise. It carries the
 run's id (`telmoni.run_id`, a UUID), its agent (`telmoni.agent`), the user
 and session you named (`user.id`, `gen_ai.conversation.id`), the first 32
-of its tags Telmoni would keep, the most it keeps, as `telmoni.tag.<key>`, and
-the sample rate. Every span inside the run
-carries the run's id, agent, sample rate, user and session, so Telmoni knows each
-span's run without waiting
+of its tags Telmoni would keep, the most it keeps, as `telmoni.tag.<key>`.
+Every span inside the run carries the run's id, agent, user and session, so
+Telmoni knows each span's run without waiting
 for the trace's tree. The resource every span of an export shares names the
 SDK (`telemetry.distro.name` `telmoni`, its version, and the OpenTelemetry
 SDK's name, language and version) and, where you set them, the deployment:
@@ -911,19 +907,13 @@ Telmoni would read as no deployment, is left off with one warning. A step is a s
 model that answered, the provider and the token counts under the GenAI
 conventions' names, each a whole number from 0, another left off the call
 with one warning, and the cost you report as Langfuse's `gen_ai.usage.cost`,
-a number of US dollars from 0. Where you give them, a model call also carries
-what it was asked with — `gen_ai.request.temperature`, `top_p`, `top_k`,
-`frequency_penalty` and `presence_penalty` as numbers, `max_tokens` and `seed`
-as whole numbers within 64 bits — taken by the call as it opens (Python's
-`model_call(temperature=…, top_p=…)`, TypeScript's `{ temperature, topP }`,
-Go's `ModelCallOptions{Temperature: &t}`, Rust's
-`ModelCallOptions { temperature: Some(t), .. }`), and how soon its answer
-began, `gen_ai.response.time_to_first_chunk` in seconds from 0, taken by its
-answer (`answered(time_to_first_token=0.35)`, `{ timeToFirstToken: 0.35 }`,
-`Answer{TimeToFirstToken: d}`, `Reply { time_to_first_token: Some(d), .. }`).
-In Python and TypeScript, a parameter that is no finite number, and a time
-below 0 or not finite, is left off the call with one warning, as is a time below 0 in Go;
-a whole number's fraction is cut, as a token count's is. A tool call is
+a number of US dollars from 0. Where you give it, a model call also carries
+how soon its answer began, `gen_ai.response.time_to_first_chunk` in seconds
+from 0, taken by its answer (`answered(time_to_first_token=0.35)`,
+`{ timeToFirstToken: 0.35 }`, `Answer{TimeToFirstToken: d}`,
+`Reply { time_to_first_token: Some(d), .. }`). In Python and TypeScript, a
+time below 0 or not finite is left off the call with one warning, as is a
+time below 0 in Go. A tool call is
 `execute_tool <name>`. A failure is marked by the error's class, as
 `error.type`, and an error status; its message is recorded on the span as an
 OpenTelemetry `exception` event (`exception.type`, `exception.message`, and
@@ -1059,18 +1049,6 @@ your own code. No variable sets one: give it in code.
   </Tab>
 </Tabs>
 
-### Sampling
-
-`sample_rate`, on the client or on one run, is the share of runs sent, a
-number above 0 and up to 1. A run sampled out is dropped whole in the SDK,
-never through the trace's sampled flag, so your
-application's own sampling is untouched and the volume Telmoni sees is a
-dial you hold. A step or call still open when its run ends is dropped too,
-however late it ends. Every span of a run sent carries its rate as
-`telmoni.sample_rate`, so a sum of spend over many runs — a project's, a
-model's, a session's or a budget's — counts each run sent as the runs it
-stands for, while a run's own spend is what it spent.
-
 ### Beside your own OpenTelemetry
 
 The SDK builds every part of its tracer provider itself — resource, sampler,
@@ -1179,7 +1157,6 @@ log, a warning or an error.
             api_key="tm_...",
             organization_id="org_019a0b8c3f2e7d41",
             capture_content=False,
-            sample_rate=1.0,
             environment="production",
             release="2026.10.18",
         )
@@ -1195,7 +1172,6 @@ log, a warning or an error.
       apiKey: process.env.TELMONI_API_KEY,
       organizationId: 'org_019a0b8c3f2e7d41',
       captureContent: false,
-      sampleRate: 1.0,
       environment: 'production',
       release: '2026.10.18',
     });
@@ -1208,7 +1184,6 @@ log, a warning or an error.
     	APIKey:         telmoni.NewSecret(os.Getenv("TELMONI_API_KEY")),
     	OrganizationID: "org_019a0b8c3f2e7d41",
     	CaptureContent: false,
-    	SampleRate:     1.0,
     	Environment:    "production",
     	Release:        "2026.10.18",
     })

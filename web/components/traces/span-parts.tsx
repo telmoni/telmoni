@@ -1,8 +1,6 @@
 import { Footprints, ListTree, MoveHorizontal, Sparkles, Wrench, type LucideIcon } from "lucide-react";
 import type { CSSProperties, ReactNode } from "react";
 
-import { spanTitle } from "@/lib/layout";
-import type { PinnedSpan } from "@/lib/server/entities/sessions";
 import type { TraceDetail, TraceSpan } from "@/lib/server/entities/traces";
 import {
   STATUS_LABEL,
@@ -14,8 +12,8 @@ import {
 import { SpanKind, SpanStatus } from "@/lib/types/enums";
 import { cn } from "@/lib/utils";
 
-// What a span's row is drawn from, on the trace page and in a session's
-// outline alike: its kind's glyph, how far in it stands and the guides to
+// What a span's row is drawn from, on the trace page and in its peek alike:
+// its kind's glyph, how far in it stands and the guides to
 // there, its bar on the trace's line of time, and what it says beside its
 // name. Metadata alone: what a span kept is `span-content.tsx`'s.
 
@@ -103,18 +101,16 @@ export function SpanBar({
  *  tokens, and a failure's class. */
 export function SpanFacts({
   span,
-  tokens = true,
 }: {
   span: Pick<
     TraceSpan,
     "kind" | "status" | "error_type" | "started_at" | "ended_at" | "input_tokens" | "output_tokens"
   >;
-  tokens?: boolean;
 }) {
   return (
     <>
       <Fact>{formatDuration(spanMillis(span))}</Fact>
-      {tokens && span.kind === SpanKind.ModelCall && (
+      {span.kind === SpanKind.ModelCall && (
         <Fact>{formatCount(span.input_tokens + span.output_tokens)} tokens</Fact>
       )}
       {span.status === SpanStatus.Error && (
@@ -126,18 +122,6 @@ export function SpanFacts({
 
 function Fact({ children }: { children: ReactNode }) {
   return <span className="text-xs tabular-nums text-muted-foreground">{children}</span>;
-}
-
-/** A span the layout pinned, as its chip reads: its kind, what it is, how
- *  long it ran and a failure's class. */
-export function PinnedChip({ span }: { span: PinnedSpan }) {
-  return (
-    <>
-      <KindIcon span={span} className="size-3.5" />
-      <span className="truncate">{spanTitle(span)}</span>
-      <SpanFacts span={span} tokens={false} />
-    </>
-  );
 }
 
 /** When the server sent the first spans alone. */

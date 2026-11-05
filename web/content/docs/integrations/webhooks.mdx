@@ -198,10 +198,7 @@ do your real work afterwards: the request has a ten-second budget, and work done
 inside it is work a slow database turns into a retry.
 
 **Anything else is retried**, up to five attempts: after 30 seconds, then 2, 8
-and 32 minutes, roughly three quarters of an hour in all. These are the
-defaults, which the hosted service uses and a self-hosted operator can change
-(`NOTIFICATIONS_DELIVERY_*` in the [configuration
-reference](/docs/self-host/configuration)). A `Retry-After`
+and 32 minutes, roughly three quarters of an hour in all. A `Retry-After`
 header is honoured as a floor (you can ask for longer, never for sooner), capped
 at a day. A 404 during your deploy and a 500 under your load both come back;
 Telmoni does not give up on your endpoint over one bad answer.

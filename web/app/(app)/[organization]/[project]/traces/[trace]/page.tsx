@@ -5,26 +5,18 @@ import { NoticeCard } from "@/components/notice-card";
 import { PageHeader } from "@/components/page-header";
 import { ServiceUnavailable } from "@/components/service-unavailable";
 import { DeleteTrace } from "@/components/traces/delete-trace";
-import { LayoutControls } from "@/components/traces/layout-controls";
-import { TraceLayoutBody } from "@/components/traces/trace-layout";
-import { LayoutProvider } from "@/components/traces/use-layout";
-import { TraceMeta } from "@/components/traces/trace-view";
+import { TraceBody, TraceMeta } from "@/components/traces/trace-view";
 import { TraceScores, TraceScoresProvider } from "@/components/traces/trace-scores";
 import { Card } from "@/components/ui/card";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { MediaProjectProvider } from "@/components/traces/span-content";
+import { MediaProjectProvider, RunTurn } from "@/components/traces/span-content";
 import { ownerContact } from "@/lib/identity";
 import { administers } from "@/lib/roles";
-import {
-  activeOrganization,
-  fetchRunIncidents,
-  fetchSessionLayout,
-  fetchTrace,
-  fetchTraceLayouts,
-} from "@/lib/server/data";
+import { activeOrganization, fetchRunIncidents, fetchTrace } from "@/lib/server/data";
 import { fetchContentMode } from "@/lib/server/entities/content-mode";
 import { ContentMode } from "@/lib/types/enums";
 import { fetchScores } from "@/lib/server/entities/scores";
+import { fieldsOf } from "@/lib/messages";
 import { commentsOf } from "@/lib/scores";
 import { projectPage } from "@/lib/server/project-page";
 import { projectPath } from "@/lib/slug";
@@ -35,11 +27,9 @@ export const metadata = { title: "Trace" };
 
 // One trace: a run's record, named by the run's id, read as the list's peek
 // reads it (`components/traces/peek.tsx`) with the page's room: how it ended
-// and what it spent on one line, then its spans as the tree they ran in
-// beside the span chosen, in full, opened as far as the page's layout goes
-// (`lib/layout.ts`). Every pixel is metadata: no prompt, completion or tool
-// payload reaches this page, in any content mode. A project admin deletes it
-// from here.
+// and what it spent on one line, the run's own turn where the project keeps
+// content, then its spans as the tree they ran in beside the span chosen, in
+// full. A project admin deletes it from here.
 export default async function TracePage({
   params,
 }: PageProps<"/[organization]/[project]/traces/[trace]">) {
@@ -49,10 +39,8 @@ export default async function TracePage({
   const { gate, project } = resolved;
 
   const list = tracesHref(organization, slug, {});
-  const [access, setting, layouts, incidents, scores, mode] = await Promise.all([
+  const [access, incidents, scores, mode] = await Promise.all([
     fetchTrace(project.id, runId, true),
-    fetchSessionLayout(project.id),
-    fetchTraceLayouts(project.id),
     fetchRunIncidents(project.id, runId),
     fetchScores(project.id, runId),
     fetchContentMode(project.id),
@@ -90,59 +78,56 @@ export default async function TracePage({
   const { trace } = access;
   const { root } = summarizeTrace(trace.spans);
   return (
-    <LayoutProvider layouts={layouts.kind === "ok" ? layouts.layouts : null} project={setting}>
-        <TooltipProvider>
-        <PageHeader
-          title={root.agent}
-          backHref={list}
-          backLabel="Traces"
-          action={
-            <>
-              <LayoutControls projectId={project.id} canSave={administers(project.role)} />
-              {administers(project.role) && <DeleteTrace projectId={project.id} runId={trace.run_id} />}
-            </>
-          }
-        />
-        {/* As tall as the window leaves under the header and the page's title,
-            both of a set height, so the spans and the span chosen scroll each
-            on its own, as they do in the peek; never so short that neither
-            reads. The trace's line stands inside, where its wrapping on a
-            narrow window takes the panes' room rather than the page's. */}
-        <Card className="h-[calc(100svh-10rem)] min-h-[28rem] gap-0 overflow-hidden p-0">
-          <div className="shrink-0 border-b border-border p-gutter">
-            <TraceMeta
-              trace={trace}
-              organization={organization}
-              slug={slug}
-              projectId={project.id}
-              incidents={incidents}
-            />
-            {/* Its scores, and a member's own to give: none drawn where they could not be read. */}
-            {scores.kind === "ok" && (
-              <div aria-label="Scores" role="group" className="mt-gutter flex flex-wrap items-center gap-1">
-                <TraceScores
-                  projectId={project.id}
-                  runId={trace.run_id}
-                  scores={scores.scores}
-                  comments={commentsOf(trace.content)}
-                  spanNames={Object.fromEntries(trace.spans.map((span) => [span.span_id, span.name]))}
-                  me={gate.person.userId}
-                  administers={administers(project.role)}
-                  keepsContent={mode?.content_mode === ContentMode.On}
-                />
-              </div>
-            )}
-          </div>
-          <MediaProjectProvider projectId={project.id}>
-            <TraceScoresProvider
-              scores={scores.kind === "ok" ? scores.scores : []}
-              comments={commentsOf(trace.content)}
-            >
-              <TraceLayoutBody trace={trace} organization={organization} slug={slug} />
-            </TraceScoresProvider>
-          </MediaProjectProvider>
-        </Card>
-        </TooltipProvider>
-    </LayoutProvider>
+    <TooltipProvider>
+      <PageHeader
+        title={root.agent}
+        backHref={list}
+        backLabel="Traces"
+        action={
+          administers(project.role) && <DeleteTrace projectId={project.id} runId={trace.run_id} />
+        }
+      />
+      {/* As tall as the window leaves under the header and the page's title,
+          both of a set height, so the spans and the span chosen scroll each
+          on its own, as they do in the peek; never so short that neither
+          reads. The trace's line stands inside, where its wrapping on a
+          narrow window takes the panes' room rather than the page's. */}
+      <Card className="h-[calc(100svh-10rem)] min-h-[28rem] gap-0 overflow-hidden p-0">
+        <div className="shrink-0 border-b border-border p-gutter">
+          <TraceMeta
+            trace={trace}
+            organization={organization}
+            slug={slug}
+            incidents={incidents}
+          />
+          {/* Its scores, and a member's own to give: none drawn where they could not be read. */}
+          {scores.kind === "ok" && (
+            <div aria-label="Scores" role="group" className="mt-gutter flex flex-wrap items-center gap-1">
+              <TraceScores
+                projectId={project.id}
+                runId={trace.run_id}
+                scores={scores.scores}
+                comments={commentsOf(trace.content)}
+                spanNames={Object.fromEntries(trace.spans.map((span) => [span.span_id, span.name]))}
+                me={gate.person.userId}
+                administers={administers(project.role)}
+                keepsContent={mode?.content_mode === ContentMode.On}
+              />
+            </div>
+          )}
+        </div>
+        <MediaProjectProvider projectId={project.id}>
+          <TraceScoresProvider
+            scores={scores.kind === "ok" ? scores.scores : []}
+            comments={commentsOf(trace.content)}
+          >
+            <div className="max-h-56 shrink-0 overflow-y-auto border-b border-border p-gutter">
+              <RunTurn fields={fieldsOf(trace.content, root.span_id)} />
+            </div>
+            <TraceBody trace={trace} organization={organization} slug={slug} className="min-h-0 flex-1" />
+          </TraceScoresProvider>
+        </MediaProjectProvider>
+      </Card>
+    </TooltipProvider>
   );
 }

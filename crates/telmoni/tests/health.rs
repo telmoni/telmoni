@@ -76,9 +76,6 @@ fn assemble() -> App {
             clickhouse_url: "http://telemetry:telemetry@127.0.0.1:1".into(),
             telemetry_kek: format!("local:{}", "0".repeat(64)).into(),
             content_kek: format!("local:{}", "1".repeat(64)).into(),
-            model_connection_kek: None,
-            model_federation_signer: None,
-            model_federation_issuer: None,
             kms_api_base: "http://127.0.0.1:1".into(),
             metadata_api_base: "http://127.0.0.1:1".into(),
             redis_url: "redis://127.0.0.1:1".into(),
@@ -401,7 +398,9 @@ async fn the_public_api_is_served_at_v1_behind_its_key() {
     assert_eq!(header(&refused, "allow"), Some("GET, HEAD, OPTIONS"));
     assert_eq!(problem(refused).await["type"], "/errors/method-not-allowed");
 
-    let options = Request::options("/v1/members").body(Body::empty()).unwrap();
+    let options = Request::options("/v1/organization")
+        .body(Body::empty())
+        .unwrap();
     let told = send(options).await;
     assert_eq!(told.status(), StatusCode::NO_CONTENT);
     assert_eq!(header(&told, "allow"), Some("GET, HEAD, OPTIONS"));
@@ -745,7 +744,7 @@ async fn no_log_line_carries_an_api_key_in_a_path() {
     let key = format!("{API_TOKEN_PREFIX}k3yk3yk3yk3yk3yk3yk3yk3y");
     for (path, printed) in [
         (format!("/v1/{key}"), "/v1/…"),
-        (format!("/v1/members/{key}"), "/v1/members/…"),
+        (format!("/v1/organization/{key}"), "/v1/organization/…"),
         (format!("/v2/{key}/members"), "/v2/…/members"),
     ] {
         let before = logs.text().len();

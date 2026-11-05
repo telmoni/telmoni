@@ -1,6 +1,6 @@
 //! A member's scores: given on a trace's page, of the run, one of its spans
 //! or its session, filed in the organization's chain; and every score of a
-//! run read back, the application's, its members' and its evaluators'.
+//! run read back, the application's and its members'.
 
 use std::sync::Arc;
 
@@ -16,7 +16,7 @@ use telmoni_shared::acting::ActingKey;
 use telmoni_shared::extract::{Json, Query};
 use telmoni_shared::rbac::{Resource, Verb};
 use telmoni_shared::{
-    AuditAction, AuthError, ProjectId, ScoreSource, ScoreTarget, TelmoniError, TelmoniResourceKind,
+    AuditAction, AuthError, ScoreSource, ScoreTarget, TelmoniError, TelmoniResourceKind,
 };
 
 use crate::AppState;
@@ -24,8 +24,8 @@ use crate::contract::SESSION_ID_MAX;
 use crate::handler::chain::{self, Change};
 use crate::handler::traces::read_failed;
 use crate::scores::{
-    COMMENT_MAX, Judgement, PROJECT_PAGE, PROJECT_SQL, RUN_SQL, ScoreRow, TargetKey, VERSION_MAX,
-    api_score_id, member_score_id, version_of,
+    COMMENT_MAX, Judgement, RUN_SQL, ScoreRow, TargetKey, VERSION_MAX, api_score_id,
+    member_score_id, version_of,
 };
 use crate::store::Projects;
 
@@ -61,15 +61,12 @@ pub struct Score {
     #[serde(flatten)]
     pub judgement: Judgement,
     pub source: ScoreSource,
-    /// The member's user id or the evaluator's id; empty for the application's.
+    /// The member's user id; empty for the application's.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub scorer: String,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub scorer_version: String,
     pub given_at: chrono::DateTime<Utc>,
-    /// A typed evaluator's answer: its probabilities, confidence and model.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub answer: Option<serde_json::Value>,
 }
 
 impl From<ScoreRow> for Score {
@@ -92,7 +89,6 @@ impl From<ScoreRow> for Score {
             scorer: row.scorer,
             scorer_version: row.scorer_version,
             given_at: row.received_at,
-            answer: serde_json::from_str(&row.answer).ok(),
         }
     }
 }
@@ -101,9 +97,6 @@ impl From<ScoreRow> for Score {
 #[derive(Debug, Serialize)]
 pub struct Scores {
     pub scores: Vec<Score>,
-    /// The project's listing alone: whether a page after this one holds more.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub more: Option<bool>,
 }
 
 /// Whether what a score names is the project's: its run, the span in it, or
@@ -114,57 +107,13 @@ const EXISTS_SQL: &str = "SELECT count() AS n, any(trace_id) AS trace FROM telem
              AND ({span:String} = '' OR span_id = {span:String}))
          OR ({session:String} != '' AND session_id = {session:String}))";
 
-/// Each evaluator's standing score of a target under a name, which a
-/// member's of the same is a correction of.
-const JUDGED_SQL: &str = "SELECT * FROM telemetry.scores FINAL
-     WHERE project_id IN {projects:Array(String)} AND source = 'evaluator' AND is_deleted = 0
-       AND name = {name:String} AND target = {target:String} AND run_id = {run:UUID}
-       AND span_id = {span:String} AND session_id = {session:String}";
-
-/// The evaluators' scores of `target` under `name`, as corrections are made of them.
-async fn judged_of(
-    state: &AppState,
-    project_id: &ProjectId,
-    target: &TargetKey,
-    name: &str,
-) -> Result<Vec<crate::evaluators::examples::Judged>, TelmoniError> {
-    let (run, span, session) = target.ids();
-    let rows: Vec<ScoreRow> = state
-        .store
-        .read(&Projects::one(project_id.clone()), JUDGED_SQL)
-        .param("name", name)
-        .param("target", target.kind().to_string())
-        .param("run", run)
-        .param("span", span.as_str())
-        .param("session", session.as_str())
-        .fetch_all()
-        .await
-        .map_err(read_failed)?;
-    Ok(rows
-        .into_iter()
-        .filter_map(|row| {
-            Some(crate::evaluators::examples::Judged {
-                evaluator: Uuid::parse_str(&row.scorer).ok()?,
-                judgement: Score::from(row).judgement,
-            })
-        })
-        .collect())
-}
-
 /// The run whose scores are read, and its session's.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ScoresAsked {
-    /// A run's scores; none, the project's.
-    #[serde(default)]
-    pub run_id: Option<Uuid>,
+    pub run_id: Uuid,
     #[serde(default)]
     pub session_id: Option<String>,
-    /// The project's listing alone: one name, and which page, from 0.
-    #[serde(default)]
-    pub name: Option<String>,
-    #[serde(default)]
-    pub page: Option<u32>,
 }
 
 #[derive(Row, Deserialize)]
@@ -296,7 +245,6 @@ pub async fn put_score(
         scorer: acting.user_id.to_string(),
         scorer_version: String::new(),
         is_deleted: 0,
-        answer: String::new(),
     };
     let filed = row.clone();
     chain::write(&state.db, &acting, &project_id, "a score", async |tx| {
@@ -350,23 +298,6 @@ pub async fn put_score(
         )
         .await?;
     }
-    // A correction of an evaluator that scored it so: its example.
-    // Best effort, as the example is: the member's score stands.
-    let judged = judged_of(&state, &project_id, &target, &row.name)
-        .await
-        .unwrap_or_else(|error| {
-            tracing::warn!(project_id = %project_id, error = %error,
-                "telemetry: the evaluators a member's score corrects could not be read");
-            Vec::new()
-        });
-    crate::evaluators::examples::learn(
-        &state,
-        (&project_id, &acting.organization_id),
-        &target,
-        &judgement,
-        &judged,
-    )
-    .await;
     tracing::info!(project_id = %project_id, score_id = %score_id, target = %row.target, "telemetry: a member scored");
     Ok(Json(Score::from(row)))
 }
@@ -465,7 +396,6 @@ pub async fn post_scores(
                 scorer: String::new(),
                 scorer_version: version,
                 is_deleted: 0,
-                answer: String::new(),
             })
         })
         .collect::<Result<Vec<_>, TelmoniError>>()?;
@@ -525,21 +455,6 @@ pub async fn delete_score(
     if !given.run_id.is_nil() {
         crate::content::forget_comments(&state, &project_id, given.run_id, &[score_id]).await?;
     }
-    // And the corrections it made of the evaluators that scored the same.
-    let target = match given.target {
-        ScoreTarget::Run => Some(TargetKey::Run(given.run_id)),
-        ScoreTarget::Span => Some(TargetKey::Span(given.run_id, given.span_id.clone())),
-        ScoreTarget::Session => None,
-    };
-    if let Some(target) = target {
-        let evaluators: Vec<Uuid> = judged_of(&state, &project_id, &target, &given.name)
-            .await?
-            .into_iter()
-            .map(|judged| judged.evaluator)
-            .collect();
-        crate::evaluators::examples::forget_target(&state, &project_id, &target, &evaluators)
-            .await?;
-    }
     let taken = ScoreRow {
         received_at: Utc::now(),
         is_deleted: 1,
@@ -590,8 +505,7 @@ pub async fn delete_score(
 }
 
 /// `GET /internal/v1/telemetry/scores?run_id=…[&session_id=…]` — a run's
-/// scores, its spans' and, where named, its session's, newest first; with no
-/// run, `[?name=…][&page=…]`, the project's, a page at a time.
+/// scores, its spans' and, where named, its session's, newest first.
 pub async fn get_scores(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -599,46 +513,16 @@ pub async fn get_scores(
 ) -> Result<Json<Scores>, TelmoniError> {
     let reader = crate::handler::traces::reader(&state, &headers).await?;
     let projects = Projects::one(reader.project_id.clone());
-    let Some(run) = asked.run_id else {
-        if asked.session_id.is_some() {
-            return Err(TelmoniError::BadRequest(
-                "a session's scores are read with its run's: name the run".into(),
-            ));
-        }
-        let page = asked.page.unwrap_or(0);
-        // One past the page, to tell whether another follows.
-        let mut rows: Vec<ScoreRow> = state
-            .store
-            .read(&projects, PROJECT_SQL)
-            .param("name", asked.name.unwrap_or_default())
-            .param("limit", PROJECT_PAGE + 1)
-            .param("offset", u64::from(page) * u64::from(PROJECT_PAGE))
-            .fetch_all()
-            .await
-            .map_err(read_failed)?;
-        let more = rows.len() > PROJECT_PAGE as usize;
-        rows.truncate(PROJECT_PAGE as usize);
-        return Ok(Json(Scores {
-            scores: rows.into_iter().map(Score::from).collect(),
-            more: Some(more),
-        }));
-    };
-    if asked.name.is_some() || asked.page.is_some() {
-        return Err(TelmoniError::BadRequest(
-            "a run's scores come whole: `name` and `page` list the project's".into(),
-        ));
-    }
     let rows: Vec<ScoreRow> = state
         .store
         .read(&projects, RUN_SQL)
-        .param("run", run)
+        .param("run", asked.run_id)
         .param("session", asked.session_id.unwrap_or_default())
         .fetch_all()
         .await
         .map_err(read_failed)?;
     Ok(Json(Scores {
         scores: rows.into_iter().map(Score::from).collect(),
-        more: None,
     }))
 }
 

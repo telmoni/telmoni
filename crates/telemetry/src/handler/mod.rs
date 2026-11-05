@@ -5,22 +5,16 @@
 
 pub(crate) mod chain;
 pub mod content_mode;
-pub mod evaluation_rules;
-pub mod evaluators;
 pub mod field_inventory;
-pub mod health;
 pub mod history;
 pub mod incidents;
 pub mod ingest;
-pub mod model_connections;
 pub mod mutes;
 pub mod objectives;
 pub mod prices;
 pub mod privacy;
 pub mod rules;
 pub mod scores;
-pub mod session_layout;
-pub mod sessions;
 pub mod traces;
 pub mod usage;
 pub mod users;

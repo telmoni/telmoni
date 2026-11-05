@@ -97,8 +97,7 @@ const eslintConfig = [
     // spelling cannot slip out the same way.
     //
     // ⚠ **Every file that can run on the server, and not a list of the ones
-    // that came to mind.** The list was seven globs and it still had holes —
-    // `lib/analytics.ts` made its own call outside all of them. Server
+    // that came to mind.** The list was seven globs and it still had holes. Server
     // Components under `app/`, everything under `lib/`, and the two root files
     // are in; `components/` is out because a fetch there runs in the browser,
     // where no request slot is parked and the wrapper's server imports cannot

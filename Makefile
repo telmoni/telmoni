@@ -230,7 +230,7 @@ up-preflight: env-scaffold env-check port-check deps-check docker-up db-wait cli
 up: up-preflight
 	@echo "building the server (so it boots alongside web, not a minute after)…"
 	cargo build -p telmoni-server --quiet
-	SERVER_PORT=$(SERVER_PORT) $(if $(LIVE_REFRESH_HOLD_SECS),LIVE_REFRESH_HOLD_SECS=$(LIVE_REFRESH_HOLD_SECS)) bash scripts/up.sh
+	SERVER_PORT=$(SERVER_PORT) bash scripts/up.sh
 
 .PHONY: local
 local: up
@@ -261,7 +261,7 @@ doctor:
 
 .PHONY: web-dev
 web-dev:
-	cd $(WEB_DIR) && $(if $(LIVE_REFRESH_HOLD_SECS),LIVE_REFRESH_HOLD_SECS=$(LIVE_REFRESH_HOLD_SECS)) npm run dev
+	cd $(WEB_DIR) && npm run dev
 
 .PHONY: web-prod
 web-prod:
@@ -375,7 +375,7 @@ sdk-check:
 deploy-check:
 	helm lint --strict deploy/charts/telmoni -f deploy/charts/telmoni/ci/values.yaml
 	helm template telmoni deploy/charts/telmoni -f deploy/charts/telmoni/ci/values.yaml > /dev/null
-	helm template telmoni deploy/charts/telmoni -f deploy/charts/telmoni/ci/values.yaml --set highAvailability.enabled=true,ingress.enabled=true,ingress.securityPolicy=check,embeddings.enabled=true,config.modelConnectionKek=file:/var/run/secrets/telmoni/kek/model-connection,config.modelFederationSigner=projects/p/locations/l/keyRings/r/cryptoKeys/k/cryptoKeyVersions/1,config.modelFederationIssuer=https://api.example.com > /dev/null
+	helm template telmoni deploy/charts/telmoni -f deploy/charts/telmoni/ci/values.yaml --set highAvailability.enabled=true,ingress.enabled=true,ingress.securityPolicy=check,embeddings.enabled=true > /dev/null
 	POSTGRES_PASSWORD=x CLICKHOUSE_PASSWORD=x AUTH_SECRET=x SERVICE_SECRET=x TELEMETRY_KEK=x CONTENT_KEK=x docker compose -f deploy/compose/docker-compose.yml config -q
 
 .PHONY: fmt

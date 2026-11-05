@@ -11,14 +11,11 @@ pub enum ScoreSource {
     Sdk,
     /// A member, on a trace's page.
     Member,
-    /// An evaluator Telmoni ran.
-    Evaluator,
 }
 
 crate::wire_enum!(ScoreSource {
     Sdk => "sdk",
     Member => "member",
-    Evaluator => "evaluator",
 });
 
 #[cfg(test)]

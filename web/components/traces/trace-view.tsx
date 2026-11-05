@@ -20,7 +20,6 @@ import { StatusBadge } from "@/components/status-badge";
 import {
   INDENT_MAX,
   KindIcon,
-  PinnedChip,
   SpanBar,
   SpanFacts,
   SpanGuides,
@@ -28,22 +27,12 @@ import {
   indentStyle,
 } from "@/components/traces/span-parts";
 import { SpanContent } from "@/components/traces/span-content";
-import { TraceGraph } from "@/components/traces/trace-graph";
-import { TraceTags } from "@/components/traces/tags";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import {
-  OPEN_ALL_UP_TO,
-  PINNED_PER_TRACE,
-  openingFor,
-  shutBranches,
-  visibleTree,
-  type LayoutOptions,
-} from "@/lib/layout";
 import { incidentHref } from "@/lib/alerts";
 import { fieldsOf } from "@/lib/messages";
 import { SpanScores } from "@/components/traces/trace-scores";
@@ -52,8 +41,8 @@ import { subscribeNever } from "@/lib/in-browser";
 import { windowReaching } from "@/lib/list-query";
 import type { Incident } from "@/lib/server/entities/alerts";
 import type { RunSpend, TraceDetail, TraceSpan } from "@/lib/server/entities/traces";
-import { sessionHref } from "@/lib/sessions";
 import {
+  OPEN_ALL_UP_TO,
   branchesFrom,
   matchingRows,
   parentRow,
@@ -73,6 +62,7 @@ import {
   barsById,
   shortId,
   spanMillis,
+  sessionRunsHref,
   tracesHref,
 } from "@/lib/traces";
 import { SpanKind, SpanStatus } from "@/lib/types/enums";
@@ -136,27 +126,18 @@ function RunSpent({ spend }: { spend: RunSpend }) {
 
 /** The trace summed on one line under its name: how it ended, when it began,
  *  how long it ran, its tokens, what it spent as its cost alert reads it, the
- *  session, the user, its tags to take off or add to, and on its page the
- *  incidents whose notices showed it. Drawn again only for another trace
- *  (`memo`): the peek's edge, dragged, draws the panel around it each move. */
+ *  session, the user, its tags, and on its page the incidents whose notices
+ *  showed it. Drawn again only for another trace (`memo`): the peek's edge,
+ *  dragged, draws the panel around it each move. */
 export const TraceMeta = memo(function TraceMeta({
   trace,
   organization,
   slug,
-  projectId,
-  knownTags = [],
-  onTagged,
   incidents = [],
 }: {
   trace: TraceDetail;
   organization: string;
   slug: string;
-  /** The project a change to the run's tags is made in. */
-  projectId: string;
-  /** The window's tags, each `key:value`, which adding one suggests. */
-  knownTags?: readonly string[];
-  /** Told once a change to the run's tags lands. */
-  onTagged?: () => void;
   incidents?: readonly Pick<Incident, "id" | "rule_name">[];
 }) {
   const summary = useMemo(() => summarizeTrace(trace.spans), [trace.spans]);
@@ -179,8 +160,8 @@ export const TraceMeta = memo(function TraceMeta({
       )}
       {root.session_id && (
         <MetaLink
-          href={sessionHref(organization, slug, root.session_id, { days: reaching })}
-          title={`Session ${root.session_id}`}
+          href={sessionRunsHref(organization, slug, root.session_id, reaching)}
+          title={`The runs of session ${root.session_id}, in order`}
         >
           session
         </MetaLink>
@@ -193,13 +174,15 @@ export const TraceMeta = memo(function TraceMeta({
           user {shortId(root.user_id)}
         </MetaLink>
       )}
-      <TraceTags
-        projectId={projectId}
-        runId={trace.run_id}
-        tags={root.tags}
-        known={knownTags}
-        onChange={onTagged}
-      />
+      {Object.entries(root.tags).map(([key, value]) => (
+        <MetaLink
+          key={key}
+          href={tracesHref(organization, slug, { tag: [`${key}:${value}`], days: reaching })}
+          title={`Every trace tagged ${key}:${value}`}
+        >
+          {key}:{value}
+        </MetaLink>
+      ))}
       {incidents.map((incident) => (
         <MetaLink
           key={incident.id}
@@ -247,63 +230,41 @@ function SpansButton({
 }
 
 /** The trace's spans and the one chosen among them, side by side; under each
- *  other on a phone. The run's own span is chosen first. Under a `layout`
- *  (`lib/layout.ts`) the tree shows what the depth and the filter admit,
- *  starts open as the layout opens it, drawn as a tree, a timeline or a
- *  graph, and the spans the layout pinned stand above it; the caller keys the
- *  body on the layout, so a change starts it afresh. Drawn again only for
- *  another trace (`memo`), as the line above it is. */
+ *  other on a phone. The run's own span is chosen first, the whole tree open
+ *  but for a trace too large to draw open. Drawn again only for another trace
+ *  (`memo`), as the line above it is. */
 export const TraceBody = memo(function TraceBody({
   trace,
   organization,
   slug,
-  layout,
   className,
 }: {
   trace: TraceDetail;
   organization: string;
   slug: string;
-  layout?: LayoutOptions;
   className?: string;
 }) {
-  const nodes = useMemo(
-    () => (layout ? visibleTree(spanTree(trace.spans), layout) : spanTree(trace.spans)),
-    [trace.spans, layout],
-  );
+  const nodes = useMemo(() => spanTree(trace.spans), [trace.spans]);
   const summary = useMemo(() => summarizeTrace(trace.spans), [trace.spans]);
   const bars = useMemo(() => barsById(trace.spans), [trace.spans]);
   const parentOf = useMemo(
     () => new Map(trace.spans.map((s) => [s.span_id, s.parent_span_id])),
     [trace.spans],
   );
-  const pinned = useMemo(
-    () =>
-      layout
-        ? trace.spans.filter((s) => layout.pinned.includes(s.name)).slice(0, PINNED_PER_TRACE)
-        : [],
-    [trace.spans, layout],
-  );
   // Past OPEN_ALL_UP_TO spans a trace opens with its branches shut but the
-  // run's own, whatever the layout says, so its first rows draw at once; a
-  // search, or a branch opened, finds the rest.
+  // run's own, so its first rows draw at once; a search, or a branch opened,
+  // finds the rest.
   const [{ chosen, shut, parentOf: followed }, dispatch] = useReducer(treeReducer, null, () => ({
     chosen: summary.root.span_id,
-    shut: layout
-      ? shutBranches(nodes, openingFor(trace.spans.length, layout.open))
-      : trace.spans.length > OPEN_ALL_UP_TO
-        ? branchesFrom(nodes, 1)
-        : new Set<string>(),
+    shut: trace.spans.length > OPEN_ALL_UP_TO ? branchesFrom(nodes, 1) : new Set<string>(),
     parentOf,
   }));
   // A run still going is read again as its spans land: the tree follows them.
   if (followed !== parentOf) dispatch({ type: "spans", parentOf });
   const [search, setSearch] = useState("");
-  // How the spans are drawn: as the layout opens them, then as the toggle moves.
-  const [drawn, setDrawn] = useState<"tree" | "timeline" | "graph">(
-    layout?.graph ? "graph" : layout?.timeline ? "timeline" : "tree",
-  );
+  // How the spans are drawn: the tree, until the toggle moves.
+  const [drawn, setDrawn] = useState<"tree" | "timeline">("tree");
   const timeline = drawn === "timeline";
-  const graph = drawn === "graph";
   const [spansShown, setSpansShown] = useState(true);
   const tree = useRef<HTMLDivElement>(null);
   const hideSpans = useRef<HTMLButtonElement>(null);
@@ -383,11 +344,7 @@ export const TraceBody = memo(function TraceBody({
     <div className={cn("flex min-h-0 flex-col md:flex-row", className)}>
       {spansShown && (
         <div
-          className={cn(
-            "flex max-h-[45%] min-h-0 shrink-0 flex-col border-b border-border md:max-h-none md:w-2/5 md:min-w-60 md:border-r md:border-b-0",
-            // A graph's rows sit side by side: it takes the room a tree's names do not need.
-            graph ? "md:w-1/2 md:max-w-2xl" : "md:max-w-sm",
-          )}
+          className="flex max-h-[45%] min-h-0 shrink-0 flex-col border-b border-border md:max-h-none md:w-2/5 md:max-w-sm md:min-w-60 md:border-r md:border-b-0"
         >
           <div className="flex shrink-0 items-center gap-2 px-gutter pt-gutter pb-2">
             <SpansButton
@@ -404,97 +361,66 @@ export const TraceBody = memo(function TraceBody({
               size="sm"
               value={drawn}
               onValueChange={(next) => {
-                if (next === "tree" || next === "timeline" || next === "graph") setDrawn(next);
+                if (next === "tree" || next === "timeline") setDrawn(next);
               }}
               aria-label="How the spans are laid out"
               className="ml-auto"
             >
               <ToggleGroupItem value="tree">Tree</ToggleGroupItem>
               <ToggleGroupItem value="timeline">Timeline</ToggleGroupItem>
-              <ToggleGroupItem value="graph">Graph</ToggleGroupItem>
             </ToggleGroup>
           </div>
-          {pinned.length > 0 && (
-            <div className="flex shrink-0 flex-wrap gap-1.5 px-gutter pb-2" aria-label="Pinned spans">
-              {pinned.map((span) => (
-                <button
-                  key={span.span_id}
-                  type="button"
-                  onClick={() => chooseAndFocus(span.span_id)}
-                  aria-pressed={span.span_id === chosen}
-                  className={cn(
-                    "inline-flex max-w-full cursor-pointer items-center gap-1.5 rounded-md border border-border px-2 py-0.5 text-xs hover:bg-muted/50",
-                    span.span_id === chosen && "bg-muted",
-                  )}
-                >
-                  <PinnedChip span={span} />
-                </button>
-              ))}
+          <div className="relative shrink-0 px-gutter pb-2">
+            <SearchIcon
+              className="pointer-events-none absolute top-1/2 left-6 size-4 -translate-y-1/2 text-muted-foreground"
+              aria-hidden="true"
+            />
+            <Input
+              type="search"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              // Escape empties the search first, as a search field's own
+              // does, and shuts the peek only once there is nothing to empty.
+              onKeyDown={(event) => {
+                if (event.key === "Escape" && search) {
+                  event.preventDefault();
+                  setSearch("");
+                }
+              }}
+              placeholder="Search spans"
+              aria-label="Search spans"
+              className="pl-8"
+            />
+          </div>
+          {rows.length === 0 ? (
+            <p className="px-gutter py-2 text-xs text-muted-foreground">No span matches.</p>
+          ) : (
+            <div
+              ref={tree}
+              role="tree"
+              aria-label="Spans"
+              onKeyDown={onKeyDown}
+              className="min-h-0 flex-1 overflow-y-auto px-2 pb-gutter"
+            >
+              {rows.map((node) => {
+                const id = node.span.span_id;
+                const bar = bars.get(id);
+                return (
+                  <SpanRow
+                    key={id}
+                    node={node}
+                    chosen={id === span.span_id}
+                    tabStop={id === tabStop}
+                    branch={!searching && node.children.length > 0}
+                    open={!shut.has(id)}
+                    bar={timeline && bar ? bar : null}
+                    dispatch={dispatch}
+                  />
+                );
+              })}
             </div>
           )}
-          {graph ? (
-            <TraceGraph
-              trace={trace}
-              tree={nodes}
-              chosen={span.span_id}
-              onChoose={(id) => dispatch({ type: "choose", id })}
-              className="min-h-0 flex-1 overflow-y-auto pb-gutter"
-            />
-          ) : (
-            <>
-              <div className="relative shrink-0 px-gutter pb-2">
-                <SearchIcon
-                  className="pointer-events-none absolute top-1/2 left-6 size-4 -translate-y-1/2 text-muted-foreground"
-                  aria-hidden="true"
-                />
-                <Input
-                  type="search"
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                  // Escape empties the search first, as a search field's own
-                  // does, and shuts the peek only once there is nothing to empty.
-                  onKeyDown={(event) => {
-                    if (event.key === "Escape" && search) {
-                      event.preventDefault();
-                      setSearch("");
-                    }
-                  }}
-                  placeholder="Search spans"
-                  aria-label="Search spans"
-                  className="pl-8"
-                />
-              </div>
-              {rows.length === 0 ? (
-                <p className="px-gutter py-2 text-xs text-muted-foreground">No span matches.</p>
-              ) : (
-                <div
-                  ref={tree}
-                  role="tree"
-                  aria-label="Spans"
-                  onKeyDown={onKeyDown}
-                  className="min-h-0 flex-1 overflow-y-auto px-2 pb-gutter"
-                >
-                  {rows.map((node) => {
-                    const id = node.span.span_id;
-                    const bar = bars.get(id);
-                    return (
-                      <SpanRow
-                        key={id}
-                        node={node}
-                        chosen={id === span.span_id}
-                        tabStop={id === tabStop}
-                        branch={!searching && node.children.length > 0}
-                        open={!shut.has(id)}
-                        bar={timeline && bar ? bar : null}
-                        dispatch={dispatch}
-                      />
-                    );
-                  })}
-                </div>
-              )}
-              <TruncatedNote trace={trace} className="shrink-0 border-t border-border px-gutter py-2" />
-            </>
-          )}
+          <TruncatedNote trace={trace} className="shrink-0 border-t border-border px-gutter py-2" />
         </div>
       )}
       <SpanDetail
@@ -624,17 +550,6 @@ function Raw({ value }: { value: unknown }) {
     </pre>
   );
 }
-
-/** What a model call was asked with, as the conventions name it, in the order a request reads. */
-const REQUEST_PARAMETERS = [
-  ["gen_ai.request.temperature", "Temperature"],
-  ["gen_ai.request.top_p", "Top p"],
-  ["gen_ai.request.top_k", "Top k"],
-  ["gen_ai.request.max_tokens", "Max tokens"],
-  ["gen_ai.request.frequency_penalty", "Frequency penalty"],
-  ["gen_ai.request.presence_penalty", "Presence penalty"],
-  ["gen_ai.request.seed", "Seed"],
-] as const;
 
 /** The span chosen, in full: what it was, how it ended and when, what it
  *  spent, and every attribute kept with it; formatted, or raw as the server
@@ -783,14 +698,6 @@ function SpanDetail({
                   </FilterField>
                 )}
                 {span.provider && <Field label="Provider">{span.provider}</Field>}
-                {REQUEST_PARAMETERS.map(
-                  ([key, label]) =>
-                    span.attributes[key] !== undefined && (
-                      <Field key={key} label={label}>
-                        {span.attributes[key]}
-                      </Field>
-                    ),
-                )}
                 {span.environment && (
                   <FilterField
                     label="Environment"
@@ -845,7 +752,7 @@ function SpanDetail({
                 {run && span.session_id && (
                   <FilterField
                     label="Session"
-                    href={sessionHref(organization, slug, span.session_id, { days: reaching })}
+                    href={sessionRunsHref(organization, slug, span.session_id, reaching)}
                   >
                     {span.session_id}
                   </FilterField>

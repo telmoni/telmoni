@@ -92,8 +92,6 @@ pub enum OrganizationAction {
     CreateProjects,
     /// Read, and export, its audit log across every project.
     ReadWholeAudit,
-    /// Take its export.
-    Export,
     /// Delete it, and everything in it.
     Delete,
     /// Hand it over, or withdraw the offer.
@@ -103,7 +101,7 @@ pub enum OrganizationAction {
 impl OrganizationAction {
     /// Every action, in the order above.
     #[must_use]
-    pub const fn all() -> [Self; 9] {
+    pub const fn all() -> [Self; 8] {
         [
             Self::ViewMembers,
             Self::ManageMembers,
@@ -111,7 +109,6 @@ impl OrganizationAction {
             Self::ManageSettings,
             Self::CreateProjects,
             Self::ReadWholeAudit,
-            Self::Export,
             Self::Delete,
             Self::HandOver,
         ]
@@ -127,8 +124,7 @@ impl OrganizationAction {
             | Self::GiveSeats
             | Self::ManageSettings
             | Self::CreateProjects
-            | Self::ReadWholeAudit
-            | Self::Export => OrganizationRole::Admin,
+            | Self::ReadWholeAudit => OrganizationRole::Admin,
         }
     }
 
@@ -142,7 +138,6 @@ impl OrganizationAction {
             Self::ManageSettings => "change its name or URL",
             Self::CreateProjects => "create projects",
             Self::ReadWholeAudit => "read its whole audit log",
-            Self::Export => "export it",
             Self::Delete => "delete it",
             Self::HandOver => "hand it over",
         }

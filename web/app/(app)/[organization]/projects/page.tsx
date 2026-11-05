@@ -1,12 +1,11 @@
 import { notFound } from "next/navigation";
 
-import { AccessDenied } from "@/components/access-denied";
 import { CreateProjectAction } from "@/components/create-project";
 import { ProjectTiles } from "@/components/project-tiles";
 import { PageHeader } from "@/components/page-header";
 import { NoticeCard } from "@/components/notice-card";
 import { ServiceUnavailable } from "@/components/service-unavailable";
-import { ownerContact } from "@/lib/identity";
+import { organizationLabel } from "@/lib/identity";
 import { administers, organizationRoleOf, owns } from "@/lib/roles";
 import {
   activeOrganization,
@@ -14,8 +13,8 @@ import {
   getServerContext,
   identityContext,
 } from "@/lib/server/data";
-import { organizationPath } from "@/lib/slug";
 
+import { LeaveOrganization } from "../_leave-organization";
 import { LeaveProject } from "./_leave-project";
 
 export const metadata = {
@@ -34,16 +33,11 @@ export default async function OrganizationProjectsPage() {
   if (gate.organizationNotFound) notFound();
   const organization = activeOrganization(gate);
 
+  if (!organization || !ident) return <ServiceUnavailable />;
+  // Everyone in the organization opens here: the listing holds the projects
+  // each can open, and only its owners and admins make one.
   const role = organizationRoleOf(gate, ident);
-  if (!organization || !ident || !administers(role)) {
-    return (
-      <AccessDenied
-        what="this organization's projects"
-        owner={ownerContact(organization)}
-        backHref={organization ? organizationPath(organization.slug) : "/console"}
-      />
-    );
-  }
+  const isAdmin = administers(role);
 
   const membershipByProject = new Map(
     gate.memberships.map((m) => [m.projectId, m]),
@@ -54,7 +48,7 @@ export default async function OrganizationProjectsPage() {
 
   return (
     <>
-      <PageHeader title="Projects" action={<CreateProjectAction />} />
+      <PageHeader title="Projects" action={isAdmin ? <CreateProjectAction /> : undefined} />
 
       <div className="grid gap-page">
         {/* The tiles, with Leave beside a project the person holds a seat
@@ -66,7 +60,11 @@ export default async function OrganizationProjectsPage() {
           ) : projects.length === 0 ? (
             <NoticeCard
               title="No projects yet."
-              body="Create the first one with New project, above."
+              body={
+                isAdmin
+                  ? "Create the first one with New project, above."
+                  : "An owner or admin creates them."
+              }
             />
           ) : (
             <ProjectTiles
@@ -83,6 +81,15 @@ export default async function OrganizationProjectsPage() {
             Each project keeps its own API keys and members.
           </p>
         </section>
+
+        {/* The owner hands the organization to an admin before leaving it:
+            it is never left with nobody holding it. */}
+        {!owns(role) && (
+          <LeaveOrganization
+            organizationId={organization.organizationId}
+            name={organizationLabel(organization)}
+          />
+        )}
       </div>
     </>
   );

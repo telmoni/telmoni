@@ -2,12 +2,10 @@ import { PaperShell } from "@/components/paper-shell";
 import { SessionHeartbeat } from "@/components/session-heartbeat";
 import { SignOutButton } from "@/components/sign-out-button";
 import { Card } from "@/components/ui/card";
-import { analyticsConfigured } from "@/lib/analytics";
 import type { ActiveSession } from "@/lib/server/data";
 import { canChangeEmail, canResetPassword } from "@/lib/sign-in-method";
 import type { IncomingInvite } from "@/lib/types/incoming-invite";
 
-import { AnalyticsPreference } from "./settings/privacy/_analytics";
 import { DeleteAccountForm } from "./settings/privacy/_delete-account";
 import { ActiveSessions } from "./settings/privacy/_sessions";
 import { ChangeEmail } from "./settings/account/_email";
@@ -17,7 +15,6 @@ import { IncomingInvitesSection } from "./settings/notifications/_incoming-invit
 export function AccountOnly({
   email,
   authMethod = null,
-  analyticsOptIn = false,
   signupsOpen,
   invites,
   ownedOrganizations,
@@ -27,7 +24,6 @@ export function AccountOnly({
 }: {
   email: string;
   authMethod?: string | null;
-  analyticsOptIn?: boolean;
   signupsOpen: boolean;
   invites: readonly IncomingInvite[];
   ownedOrganizations: number;
@@ -74,14 +70,6 @@ export function AccountOnly({
           <Card className="grid gap-gutter text-sm">
             <h2 className="text-base font-medium">Password</h2>
             <PasswordReset method={authMethod} />
-          </Card>
-        )}
-
-        {/* As on the privacy page: no provider, no switch. */}
-        {analyticsConfigured() && (
-          <Card className="grid gap-gutter text-sm">
-            <h2 className="text-base font-medium">Data collection</h2>
-            <AnalyticsPreference optIn={analyticsOptIn} />
           </Card>
         )}
 

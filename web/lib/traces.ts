@@ -3,22 +3,16 @@ import type {
   ListFilters,
   ListQuery,
   TraceQuery,
-  ListViewQuery,
   TraceSpan,
 } from "@/lib/server/entities/traces";
 import { isOneOf } from "@/lib/one-of";
 import { projectPath } from "@/lib/slug";
-import {
-  SortDirection,
-  SpanKind,
-  SpanStatus,
-  TraceColumn,
-  TraceSort,
-} from "@/lib/types/enums";
+import { SortDirection, SpanKind, SpanStatus, TraceSort } from "@/lib/types/enums";
 import {
   FILTER_KEYS,
   TAG_KEY_MAX,
   TAG_VALUE_MAX,
+  TraceColumn,
   filtersIn,
   readTagSort,
   type TagSort,
@@ -27,12 +21,10 @@ import {
 import {
   MAX_DAYS,
   compact,
-  isUuid,
   listHref,
   many,
   one,
   oneOf,
-  sameValues,
   sortAfterClick,
   sortInForce,
   type Column,
@@ -40,16 +32,14 @@ import {
   whole,
 } from "./list-query";
 
-// A list's URL is its state — the trace list's, and the sessions' and the
-// users', which take its filters and pages: every filter, the sort, the
-// window and the page are query parameters, so a link holds them
-// (`list-query.ts`). Two more are the trace list's own and never reach the
-// server: the table or the charts, and the saved view it was opened from.
+// The trace list's URL is its state: every filter, the sort, the window and
+// the page are query parameters, so a link holds them (`list-query.ts`). One
+// more is its own and never reaches the server: the table or the charts.
 // What this module does is read that URL, write it with one thing changed,
 // and put the server's numbers into words.
 
-/** The lists a project's spans are read as, each a page of the console. */
-export type ListName = "traces" | "sessions" | "users";
+/** The list a project's spans are read as, a page of the console. */
+export type ListName = "traces";
 
 /** The rows a page offers to hold. */
 export const ROWS_PER_PAGE = [25, 50, 100] as const;
@@ -95,15 +85,9 @@ export const FILTER_VALUE_MAX: Record<Exclude<FilterKey, "status">, number> = {
   prompt: 1_024,
 };
 
-/** The page's own state beside the list's query: never sent to the server. */
-/** What every list's page carries in its URL beside its query. */
-export type ListUi = {
-  /** The saved view the page was opened from. */
-  view?: string;
-};
-
-/** The trace list's: its charts too. */
-export type TraceUi = ListUi & {
+/** The trace list's own state beside its query, in its URL: never sent to
+ *  the server. */
+export type TraceUi = {
   /** The charts in place of the table; the table when left out. */
   display?: "chart";
 };
@@ -149,7 +133,6 @@ export function parseListQuery<S extends string>(
 ): ListQuery<S> {
   const rows = whole(searchParams.limit, 100);
   const page = whole(searchParams.page, MAX_PAGE);
-  const q = one(searchParams.q)?.trim();
   const sort = one(searchParams.sort);
   const score = one(searchParams.score)?.trim();
   const named = score && [...score].length <= SCORE_NAME_MAX ? score : undefined;
@@ -159,7 +142,6 @@ export function parseListQuery<S extends string>(
   };
   return compact({
     ...parseFilters(searchParams),
-    q: q && [...q].length <= SEARCH_MAX ? q : undefined,
     score: named,
     score_min: bound(searchParams.score_min),
     score_max: bound(searchParams.score_max),
@@ -201,17 +183,10 @@ export function tagValues(pairs: readonly string[], key: string): string[] {
   return [...new Set(values)].sort();
 }
 
-/** A list page's own state from its URL: the view it was opened from. */
-export function parseListUi(searchParams: SearchParams): ListUi {
-  const view = one(searchParams.view);
-  return compact({ view: view !== undefined && isUuid(view) ? view : undefined });
-}
-
 /** The trace list's own state from its URL. */
 export function parseTraceUi(searchParams: SearchParams): TraceUi {
   return compact({
     display: one(searchParams.display) === "chart" ? ("chart" as const) : undefined,
-    ...parseListUi(searchParams),
   });
 }
 
@@ -225,6 +200,43 @@ export function tracesHref(
   ui: TraceUi = {},
 ): string {
   return listHref(organization, project, "/traces", { ...query, ...patch, ...ui });
+}
+
+/** What the list groups its runs by: their session or their end user, the
+ *  rows sorted by it and each group headed in the table. */
+export type Group = "session" | "user";
+
+/** The group the list stands in: its sort, where that sort is a group's. */
+export function groupOf(query: TraceQuery): Group | undefined {
+  if (query.sort === TraceSort.Session) return "session";
+  if (query.sort === TraceSort.User) return "user";
+  return undefined;
+}
+
+/** The query grouped by `group`, or back to the list's own sort, from the
+ *  first page either way. */
+export function groupedBy(query: TraceQuery, group: Group | undefined): TraceQuery {
+  if (!group) {
+    return groupOf(query) ? compact({ ...query, sort: undefined, dir: undefined, page: undefined }) : query;
+  }
+  const sort = group === "session" ? TraceSort.Session : TraceSort.User;
+  return compact({ ...query, sort, dir: SortDirection.Asc, page: undefined });
+}
+
+/** A session's runs on the list, the first to start first: where a run's
+ *  session opens. */
+export function sessionRunsHref(
+  organization: string,
+  project: string,
+  sessionId: string,
+  days?: number,
+): string {
+  return tracesHref(organization, project, {
+    session: [sessionId],
+    sort: TraceSort.Started,
+    dir: SortDirection.Asc,
+    days,
+  });
 }
 
 /** `list`'s path with `query` in its URL, as the parts every list shares —
@@ -242,12 +254,6 @@ export function listPageHref(
 /** A trace's own page. */
 export function traceHref(organization: string, project: string, runId: string): string {
   return projectPath(organization, project, `/traces/${encodeURIComponent(runId)}`);
-}
-
-/** Two runs side by side, the first chosen on the left. */
-export function compareHref(organization: string, project: string, a: string, b: string): string {
-  const runs = new URLSearchParams({ a, b });
-  return projectPath(organization, project, `/traces/compare?${runs}`);
 }
 
 /** A run's spans, through the console's own route. */
@@ -277,10 +283,9 @@ export function toggled<Q extends ListQuery<string>>(query: Q, filter: FilterKey
  *  value is named, from the first page again. */
 export function without<Q extends ListQuery<string>>(
   query: Q,
-  filter: FilterKey | "q" | "score",
+  filter: FilterKey | "score",
   value?: string,
 ): Q {
-  if (filter === "q") return compact({ ...query, q: undefined, page: undefined });
   if (filter === "score") {
     return compact({ ...query, score: undefined, score_min: undefined, score_max: undefined, page: undefined });
   }
@@ -294,26 +299,21 @@ export function unfiltered<Q extends ListQuery<string>>(query: Q): Q {
 }
 
 /** One value of one filter in force, as the page shows it: a facet's, or
- *  the search's. */
-export type ActiveFilter = { filter: FilterKey | "q" | "score"; label: string; value: string; text: string };
-
-/** The longest search the server takes, in characters. */
-export const SEARCH_MAX = 200;
+ *  the score's. */
+export type ActiveFilter = { filter: FilterKey | "score"; label: string; value: string; text: string };
 
 /** The longest score name the server keeps, in characters. */
 export const SCORE_NAME_MAX = 64;
 
-/** The longest name a saved view, layout or dashboard goes by. */
+/** The longest name a saved dashboard goes by. */
 export const VIEW_NAME_MAX = 60;
 
 /** The longest span name the server keeps: an operation, a space and a model. */
 export const SPAN_NAME_MAX = 145;
 
 /** The filters in force, a value at a time, in the sidebar's order, the
- *  search first. */
+ *  score first. */
 export function activeFilters(query: ListQuery<string>): ActiveFilter[] {
-  const searched: ActiveFilter[] =
-    query.q === undefined ? [] : [{ filter: "q", label: "Search", value: query.q, text: query.q }];
   const bounds = [
     query.score_min === undefined ? null : `≥ ${query.score_min}`,
     query.score_max === undefined ? null : `≤ ${query.score_max}`,
@@ -322,7 +322,7 @@ export function activeFilters(query: ListQuery<string>): ActiveFilter[] {
     query.score === undefined
       ? []
       : [{ filter: "score", label: "Score", value: query.score, text: [query.score, ...bounds].join(" ") }];
-  return searched.concat(scored).concat(
+  return scored.concat(
     FILTERS.flatMap((filter) =>
       (query[filter] ?? []).map((value) => ({
         filter,
@@ -332,28 +332,6 @@ export function activeFilters(query: ListQuery<string>): ActiveFilter[] {
       })),
     ),
   );
-}
-
-/** What a sentence asked of the list could not open on, in words, or `null`
- *  where it opened on all of it: the server's sentence where it opened on
- *  nothing, else what the filters could not say and the values the window
- *  holds no trace of. */
-export function askedNote(answer: {
-  query: object | null;
-  unmet: string | null;
-  dropped: readonly { filter: string; value: string }[];
-}): string | null {
-  if (answer.query === null) return answer.unmet;
-  const missing = answer.dropped.map(({ filter, value }) =>
-    filter === "sort"
-      ? `a tag ${value} to sort by`
-      : `${(isOneOf(FILTERS, filter) ? FILTER_LABEL[filter] : filter).toLowerCase()} ${value}`,
-  );
-  const said = [
-    answer.unmet === null ? null : `The filters can't say "${answer.unmet}".`,
-    missing.length === 0 ? null : `No trace in this window has ${missing.join(", ")}.`,
-  ].filter((part) => part !== null);
-  return said.length === 0 ? null : said.join(" ");
 }
 
 /** Where the columns menu files a column: the counts of a run's parts, and its tokens. */
@@ -558,7 +536,7 @@ export const TRACE_COLUMNS: readonly ColumnSpec[] = [
   {
     key: TraceColumn.Scores,
     label: "Scores",
-    hint: "The run's own scores, each name's mean, or a category's values: from your code, a member or an evaluator.",
+    hint: "The run's own scores, each name's mean, or a category's values: from your code or a member.",
   },
 ];
 
@@ -614,10 +592,9 @@ export type Preset = {
   hint: string;
 };
 
-/** A list's scaffold, from what alone differs between the three: its path,
- *  table and sorts, an id sort where the id sorts, the server's default, its
- *  ready-made queries and the sorts two of them take, and how it reads a
- *  tag's sort where a tag sorts it. */
+/** A list's scaffold: its path, table and sorts, an id sort where the id
+ *  sorts, the server's default, its ready-made queries and the sorts two of
+ *  them take, and how it reads a tag's sort where a tag sorts it. */
 export function listSpec<K extends string, S extends string>(spec: {
   path: `/${ListName}`;
   table: ListTable<K, S>;
@@ -653,16 +630,6 @@ export function listSpec<K extends string, S extends string>(spec: {
         return sort === spec.presetSorts[preset] && dir === SortDirection.Desc;
     }
   };
-  /** The list's query a saved view opens on, every value the page would drop
-   *  dropped, as it drops a stale URL's. */
-  const queryOfView = (view: ListViewQuery<S>): ListQuery<S> =>
-    parse({
-      ...filtersIn(view),
-      sort: view.sort,
-      dir: view.dir,
-      days: view.days === undefined ? undefined : String(view.days),
-      limit: view.limit === undefined ? undefined : String(view.limit),
-    });
   return {
     table: spec.table,
     presets: spec.presets,
@@ -697,37 +664,6 @@ export function listSpec<K extends string, S extends string>(spec: {
         dir: on ? undefined : SortDirection.Desc,
         page: undefined,
       });
-    },
-    /** The list as a saved view keeps it: its filters, sort, window and rows. */
-    viewQueryOf: (query: ListQuery<S>): ListViewQuery<S> =>
-      compact({
-        ...filtersIn(query),
-        sort: query.sort,
-        dir: query.dir,
-        days: query.days,
-        limit: query.limit,
-      }),
-    queryOfView,
-    /** The list as a saved view opens it, the view named in the URL. */
-    viewHref: (
-      organization: string,
-      project: string,
-      view: { id: string; query: ListViewQuery<S> },
-      ui: TraceUi = {},
-    ): string => href(organization, project, queryOfView(view.query), {}, { ...ui, view: view.id }),
-    /** Whether the list shows what `view` saved: its query, the page aside, a
-     *  filter's values in any order. */
-    showsView: (query: ListQuery<S>, view: { query: ListViewQuery<S> }): boolean => {
-      const saved = queryOfView(view.query);
-      const a = current(query);
-      const b = current(saved);
-      return (
-        FILTERS.every((filter) => sameValues(query[filter], saved[filter])) &&
-        a.sort === b.sort &&
-        a.dir === b.dir &&
-        query.days === saved.days &&
-        query.limit === saved.limit
-      );
     },
   };
 }
@@ -791,35 +727,29 @@ export function pageCount(total: number, limit: number): number {
   return Math.max(1, Math.min(MAX_PAGE, Math.ceil(total / Math.max(1, limit))));
 }
 
-/** Where each list's download is served: the sessions' beside their page
- *  rather than under it, where a session's id would be read as one. */
+/** Where each list's download is served. */
 const DOWNLOAD_PATH: Record<ListName, string> = {
   traces: "/traces/export",
-  sessions: "/session-export",
-  users: "/users/export",
 };
 
 /** The trace list as a file, through the console's own route: its filters
- *  and sort, or the runs `runs` names alone. */
+ *  and sort. */
 export function downloadHref(
   organization: string,
   project: string,
   query: TraceQuery,
   format: DownloadFormat,
-  runs: readonly string[] = [],
 ): string {
-  return listDownloadHref("traces", organization, project, query, format, runs);
+  return listDownloadHref("traces", organization, project, query, format);
 }
 
-/** `list` as a file, through the console's own route: its filters and sort,
- *  or — the trace list's alone — the runs `runs` names. */
+/** `list` as a file, through the console's own route: its filters and sort. */
 export function listDownloadHref(
   list: ListName,
   organization: string,
   project: string,
   query: ListQuery<string>,
   format: DownloadFormat,
-  runs: readonly string[] = [],
 ): string {
   return listHref(organization, project, DOWNLOAD_PATH[list], {
     ...filtersIn(query),
@@ -827,14 +757,9 @@ export function listDownloadHref(
     dir: query.dir,
     days: query.days,
     format,
-    run: runs,
   });
 }
 
-export const viewQueryOf = TRACES.viewQueryOf;
-export const queryOfView = TRACES.queryOfView;
-export const viewHref = TRACES.viewHref;
-export const showsView = TRACES.showsView;
 
 // The console's own language, not the browser's: a count drawn on the server
 // is drawn again in the browser as the page goes live, and grouped there the
@@ -885,15 +810,9 @@ export function formatDuration(ms: number): string {
 /** The most rows one download holds, as the server writes them. */
 export const DOWNLOAD_MAX = 10_000;
 
-/** The most runs a download names: a page's chosen rows, as the server
- *  takes them. */
-export const RUNS_MAX = 100;
-
 /** What each list's rows are, one and many, as the page counts them. */
 export const ROW_NOUN: Record<ListName, readonly [string, string]> = {
   traces: ["trace", "traces"],
-  sessions: ["session", "sessions"],
-  users: ["user", "users"],
 };
 
 /** The word the console gives each status. */

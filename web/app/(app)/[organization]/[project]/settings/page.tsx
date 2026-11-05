@@ -174,15 +174,11 @@ export default async function SettingsPage({
           <Card className="text-sm">
             <p>
               Filter{" "}
-              <Link href={projectPath(organization, slug, "/users")} className="underline underline-offset-4">
-                Users
-              </Link>{" "}
-              or{" "}
               <Link href={projectPath(organization, slug, "/traces")} className="underline underline-offset-4">
                 Traces
               </Link>{" "}
-              by their id under <span className="font-medium">User</span>, then download: their totals, or
-              every trace of theirs the project keeps with any content kept, as JSON or CSV.
+              by their id under <span className="font-medium">User</span>, then download every trace of
+              theirs the project keeps, with any content kept, as JSON or CSV.
             </p>
           </Card>
         </Section>

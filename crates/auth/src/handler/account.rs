@@ -1,12 +1,12 @@
 //! The person's own lanes — `/internal/v1/me/…`: the things somebody does to
 //! THEIR account rather than to an organization. Password reset, the address
-//! they sign in with, analytics consent, the organization a sign-in opens them
-//! in, and deleting the account.
+//! they sign in with, the organization a sign-in opens them in, and deleting
+//! the account.
 //!
 //! The person is the bearer and nothing else, so there is nothing in the
 //! path to forge.
 //!
-//! The address, consent and deletion audit their change on the chain of the
+//! The address and deletion audit their change on the chain of the
 //! organization the console names in `x-organization-id` — after checking the
 //! person is in it (`acting_person_in`). Somebody in no organization names
 //! none, and the act goes to the structured log alone. The default
@@ -71,13 +71,6 @@ pub struct ConfirmEmailChangeRequest {
     /// The identity provider's, mailed to the new address. Proves that address
     /// is reachable; never minted, stored or seen by this service.
     pub new_code: Redacted,
-}
-
-/// Body of `PUT /internal/v1/me/analytics`.
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct AnalyticsPreferenceRequest {
-    pub opt_in: bool,
 }
 
 /// Body of `PUT /internal/v1/me/default-organization`.
@@ -377,62 +370,11 @@ pub struct EmailChanged {
     pub sessions_revoked: usize,
 }
 
-/// Whether the person lets the console count their use.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AnalyticsPreference {
-    pub analytics_opt_in: bool,
-}
-
 /// The organization the console opens on now.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DefaultOrganization {
     pub default_organization_id: OrganizationId,
-}
-
-/// `PUT /internal/v1/me/analytics` — record whether this person wants to be
-/// counted. ⚠ **OPT-IN**: the column starts `false` and nothing reaches a
-/// provider until this lane says so. The preference is the person's and
-/// follows them into every organization they are in.
-pub async fn set_analytics_preference(
-    State(state): State<Arc<AppState>>,
-    principal: Principal,
-    headers: HeaderMap,
-    Json(req): Json<AnalyticsPreferenceRequest>,
-) -> Result<impl IntoResponse, TelmoniError> {
-    let user_id = principal.user_id;
-    let organization = recording_organization_of(&headers)?;
-
-    let mut tx = acting_person_in(&state, &user_id, organization.as_ref()).await?;
-    if !identities::set_analytics_opt_in(&mut tx, &user_id, req.opt_in).await? {
-        tx.commit().await?;
-        return Err(AuthzError::Forbidden("account deletion in progress".into()).into());
-    }
-
-    let metadata = json!({ "analytics_opt_in": req.opt_in });
-    match &organization {
-        Some(organization) => {
-            emit_audit(
-                &mut tx,
-                AuditEvent::new(
-                    organization,
-                    Actor::User(user_id.as_str()),
-                    AuditAction::Updated,
-                    TelmoniResourceKind::Member,
-                )
-                .on(user_id.as_str())
-                .details(metadata),
-            )
-            .await?;
-        }
-        None => log_act_outside_every_organization(&user_id, "analytics consent set", &metadata),
-    }
-
-    tx.commit().await?;
-    Ok(Json(AnalyticsPreference {
-        analytics_opt_in: req.opt_in,
-    }))
 }
 
 /// `PUT /internal/v1/me/default-organization` — the organization a sign-in opens

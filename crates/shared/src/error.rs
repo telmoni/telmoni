@@ -443,11 +443,6 @@ pub enum TelemetryError {
     /// with a `Retry-After` of one second, the answer an exporter retries.
     #[error("store unavailable: {0}")]
     StoreUnavailable(String),
-
-    /// A run's tags, as the console changes them, past the most a span
-    /// carries or the project's tag cardinality for the day. Maps to 400.
-    #[error("tags past their cap: {0}")]
-    TagsPastCap(String),
 }
 
 impl TelemetryError {
@@ -473,12 +468,6 @@ impl TelemetryError {
             )
             .detail(detail.clone())
             .extension(RETRY_AFTER_SECS, 1_u64),
-            Self::TagsPastCap(detail) => ProblemDetails::new(
-                "/errors/telemetry/tags-past-cap",
-                "tags past their cap",
-                400,
-            )
-            .detail(detail.clone()),
         }
     }
 }
