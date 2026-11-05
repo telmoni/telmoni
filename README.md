@@ -20,7 +20,7 @@
   </p>
 </div>
 
-> Know when your agents fail, stall, loop or overspend, and stop them at the cap you set, without sending us a single prompt.
+> Know when your agents fail, stall, loop or overspend, and stop them at the cap you set. Prompts stay in your process unless you turn content on.
 
 Telmoni is open-source monitoring for the AI agents you run: a Python service, a nightly batch, a LangGraph graph, a Claude Code session. Its SDKs and coding-agent plugins record each **run** of an agent, and the **steps**, **model calls** and **tool calls** inside it, as OpenTelemetry spans; Telmoni alerts when a run fails, stalls, loops, overspends or stops arriving, stops a run at the caps you set, and shows you the run that did it. Only metadata is kept unless you choose otherwise: prompts and completions come off a span before it leaves your process, and ingest drops any that arrive anyway, until a project's owner turns its content on, when it is kept sealed under the project's own key. It is one Rust binary and a Next.js console on PostgreSQL, ClickHouse and Redis, self-hosted with Docker Compose or Helm.
 

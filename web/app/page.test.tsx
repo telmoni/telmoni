@@ -163,9 +163,10 @@ describe("the splash page", () => {
     expect(screen.getAllByRole("link", { name: "Documentation" }).at(-1)).toHaveTextContent(/^Documentation$/);
   });
 
-  it("no longer says no prompt is ever kept, now that a project may keep content", async () => {
+  it("says where prompts stay, and no longer that none is ever kept, now that a project may keep content", async () => {
     render(await SplashPage());
 
+    expect(screen.getByText(/Prompts stay in your process unless you turn content on\./)).toBeInTheDocument();
     expect(screen.queryByText(/single prompt/)).toBeNull();
     expect(screen.queryByText(/only mode is off/)).toBeNull();
   });

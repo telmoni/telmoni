@@ -31,7 +31,7 @@ const KICKER = "Open-source monitoring for AI agents";
 const STAGE = "Beta";
 const CLAIM = "Know when your agents fail, stall, loop or overspend, and stop them at the cap you set.";
 const PITCH =
-  "Telmoni watches the agents you run, from a Python service to a Claude Code session, alerts you when one goes wrong, and shows you the run that did it. Prompts stay in your process until a project's owner and your code both turn content on.";
+  "Telmoni watches the agents you run, from a Python service to a Claude Code session, alerts you when one goes wrong, and shows you the run that did it. Prompts stay in your process unless you turn content on.";
 
 // One way in per tab, each line the book's.
 const INSTALL: readonly InstallTab[] = [
