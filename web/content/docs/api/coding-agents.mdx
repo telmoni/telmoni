@@ -130,7 +130,16 @@ while a repository's hooks, which hold no key, leave a cloud agent to
 that is neither `true` nor `false` has the file passed over, and nothing is sent
 until it is fixed, the log saying why. A plugin takes no
 [mask](/docs/api/sdks#masking-content), its hook running no code of yours: with
-both locks on, a turn is sent as it was said.
+both locks on, a turn is sent as it was said, but for what the SDK it sends
+through scrubs first. In a plugin both of its scrubbers are on: secrets, and
+personal data such as email addresses, phone numbers and card numbers, each
+replaced by a marker like `[secret: aws_key]` or `[pii: email]`
+([what each finds](/docs/api/sdks#scrubbing-secrets-and-personal-data)). Each
+is a switch beside the content's: in Claude Code, **Scrub secrets** and
+**Scrub personal data** in `/plugin configure`; in Codex, OpenCode and Cursor,
+`"scrubSecrets": false` or `"scrubPii": false` in the plugin's `telmoni.json`;
+and a key in the environment takes `TELMONI_SCRUB_SECRETS=0` or
+`TELMONI_SCRUB_PII=0` there. No pattern finds a name or a street address.
 
 On, a turn carries its conversation as its agent recorded it: your prompt, with
 its images, as the run's input, and the last reply as its output; each model

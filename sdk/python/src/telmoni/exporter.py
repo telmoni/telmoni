@@ -2,7 +2,8 @@
 
 It takes content off every span unless the code asked and the project's mode
 allows, puts each image or file a message carries to
-``PUT {endpoint}/v1/media/{sha256}`` where it sends content, sends to
+``PUT {endpoint}/v1/media/{sha256}`` where it sends content, scrubs the rest of
+that content of secrets, and of personal data where asked, sends to
 ``POST {endpoint}/otlp/v1/traces``, posts the late scores the batch carries
 to ``POST {endpoint}/v1/scores``, waits out a ``Retry-After``, and reads ``Telmoni-Content-Mode`` and the partial success
 from each answer, warning once for each attribute an answer names dropped.
@@ -34,7 +35,7 @@ from typing import Any, cast
 from opentelemetry.sdk.trace import Event, ReadableSpan
 from opentelemetry.trace import SpanKind, Status, StatusCode
 
-from . import contract
+from . import contract, scrub
 from ._version import __version__
 from .models import (
     Config,
@@ -309,6 +310,68 @@ def _attributes(span: ReadableSpan, lifted: _Lifted) -> Mapping[str, Any]:
     return {**own, **fields} if fields else own
 
 
+def _handed(value: Any) -> str:
+    """A field as the mask and the scrubbers read it: a string, any other value as
+    its JSON."""
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, separators=(",", ":"), ensure_ascii=False, default=str)
+
+
+def _answered(
+    span: ReadableSpan, attributes: Mapping[str, Any], answer: Callable[[str, Any], Any]
+) -> tuple[dict[str, Any], list[Event], Status]:
+    """Each content field of ``attributes``, each event attribute but a score's
+    own and the status message, as ``answer`` gives it, by its key; one it answers
+    ``_MASKED_OUT`` is left off."""
+    kept: dict[str, Any] = {}
+    for key, value in attributes.items():
+        if key in contract.CONTENT and key != contract.CONTENT_CUT:
+            value = answer(key, value)
+            if value is _MASKED_OUT:
+                continue
+        kept[key] = value
+    events = []
+    for event in span.events:
+        fields: dict[str, Any] = {}
+        for key, value in (event.attributes or {}).items():
+            if not _is_score_key(event, key):
+                value = answer(key, value)
+            if value is not _MASKED_OUT:
+                fields[key] = value
+        events.append(Event(event.name, fields, event.timestamp))
+    status = span.status
+    if status.description:
+        description = answer(contract.STATUS_DESCRIPTION, status.description)
+        status = Status(
+            status.status_code,
+            None if description is _MASKED_OUT else description,
+        )
+    return kept, events, status
+
+
+def _rebuilt(
+    span: ReadableSpan,
+    attributes: dict[str, Any],
+    events: list[Event],
+    status: Status,
+) -> ReadableSpan:
+    return ReadableSpan(
+        name=span.name,
+        context=span.context,
+        parent=span.parent,
+        resource=span.resource,
+        attributes=attributes,
+        events=events,
+        links=span.links,
+        kind=span.kind,
+        status=status,
+        start_time=span.start_time,
+        end_time=span.end_time,
+        instrumentation_scope=span.instrumentation_scope,
+    )
+
+
 def _header_safe(value: Any) -> bool:
     """Whether a part's type can go as a header: printable ASCII, not blank."""
     return (
@@ -344,6 +407,10 @@ class Exporter:
         # Only the worker exports, so the set needs no lock.
         self._uploaded: set[str] = set()
         self._content_mode: str | None = None
+        # Held here so a scrubber that fails can stand in for it.
+        self._scrubber: Callable[[str, bool, bool], tuple[str, dict[str, int]]] = (
+            scrub.scrub
+        )
         self._warned: set[str] = set()
         # The worker and the agent's threads warn alike: each key warns once.
         self._warned_lock = threading.Lock()
@@ -419,6 +486,8 @@ class Exporter:
         if keep:
             spans = self._mask(spans)
         lifted = self._lift(spans) if keep else {}
+        if keep:
+            spans, lifted = self._scrub(spans, lifted)
         return self._export(spans, lifted, keep)
 
     def _export(
@@ -502,58 +571,59 @@ class Exporter:
         as the code's mask answers it, before a part it takes out could be put."""
         if self._config.mask is None:
             return spans
-        return [self._masked_span(span) for span in spans]
+        return [
+            _rebuilt(span, *_answered(span, span.attributes or {}, self._masked))
+            for span in spans
+        ]
 
-    def _masked_span(self, span: ReadableSpan) -> ReadableSpan:
-        attributes: dict[str, Any] = {}
-        for key, value in (span.attributes or {}).items():
-            if key in contract.CONTENT and key != contract.CONTENT_CUT:
-                value = self._masked(key, value)
-                if value is _MASKED_OUT:
-                    continue
-            attributes[key] = value
-        events = []
-        for event in span.events:
-            kept: dict[str, Any] = {}
-            for key, value in (event.attributes or {}).items():
-                if not _is_score_key(event, key):
-                    value = self._masked(key, value)
-                if value is not _MASKED_OUT:
-                    kept[key] = value
-            events.append(Event(event.name, kept, event.timestamp))
-        status = span.status
-        if status.description:
-            description = self._masked(contract.STATUS_DESCRIPTION, status.description)
-            status = Status(
-                status.status_code,
-                None if description is _MASKED_OUT else description,
+    def _scrub(
+        self, spans: Sequence[ReadableSpan], lifted: _Lifted
+    ) -> tuple[Sequence[ReadableSpan], _Lifted]:
+        """The spans with the same fields the mask is handed scrubbed as they are
+        sent, their images lifted out first, so no base64 is read as text, and
+        what was taken out counted in ``telmoni.scrubbed``."""
+        # A None set since the client was built reads as the defaults.
+        secrets = self._config.scrub_secrets is not False
+        pii = self._config.scrub_pii is True
+        if not (secrets or pii):
+            return spans, lifted
+        scrubbed = []
+        for span in spans:
+            counts: dict[str, int] = {}
+            answer = functools.partial(
+                self._scrubbed, secrets=secrets, pii=pii, counts=counts
             )
-        return ReadableSpan(
-            name=span.name,
-            context=span.context,
-            parent=span.parent,
-            resource=span.resource,
-            attributes=attributes,
-            events=events,
-            links=span.links,
-            kind=span.kind,
-            status=status,
-            start_time=span.start_time,
-            end_time=span.end_time,
-            instrumentation_scope=span.instrumentation_scope,
-        )
+            attributes, events, status = _answered(
+                span, _attributes(span, lifted), answer
+            )
+            if counts:
+                attributes[contract.SCRUBBED] = json.dumps(
+                    counts, sort_keys=True, separators=(",", ":")
+                )
+            scrubbed.append(_rebuilt(span, attributes, events, status))
+        # Each lifted field is in its span now, scrubbed.
+        return scrubbed, {}
+
+    def _scrubbed(
+        self, key: str, value: Any, *, secrets: bool, pii: bool, counts: dict[str, int]
+    ) -> Any:
+        """One field with each match replaced, as text where one was, else as it
+        was; ``_MASKED_OUT`` where the scrubber fails on it, counted, since a field
+        is never sent unscrubbed."""
+        try:
+            text, found = self._scrubber(_handed(value), secrets, pii)
+        except Exception:  # noqa: BLE001 - a scrubber's failure never costs the batch
+            counts[f"dropped:{key}"] = counts.get(f"dropped:{key}", 0) + 1
+            return _MASKED_OUT
+        for kind, count in found.items():
+            counts[kind] = counts.get(kind, 0) + count
+        return text if found else value
 
     def _masked(self, key: str, value: Any) -> Any:
         """One field as the mask answers it, handed as a string, any other value as
         its JSON; ``_MASKED_OUT`` to send the span without it. An answer unchanged
         keeps the value as it was."""
-        given = (
-            value
-            if isinstance(value, str)
-            else json.dumps(
-                value, separators=(",", ":"), ensure_ascii=False, default=str
-            )
-        )
+        given = _handed(value)
         mask = cast("Callable[[str, str], object]", self._config.mask)
         try:
             answer = mask(key, given)

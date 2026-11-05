@@ -1,0 +1,358 @@
+{
+  "planted": {
+    "email": "dana.whitfield@example.com",
+    "phone": "+1 (555) 010-0199",
+    "card": "4242 4242 4242 4242",
+    "ssn": "123-45-6789",
+    "iban": "DE89370400440532013000",
+    "cloud_key": "AKIAIOSFODNN7EXAMPLE",
+    "jwt": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJjYW5hcnktZGFuYSJ9.ZmFrZS1zaWduYXR1cmUtb2YtYS1jYW5hcnk",
+    "pem_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCcanaryFAKEkey\n-----END PRIVATE KEY-----",
+    "connection_string": "postgres://app:Hunter2-canary@db.internal:5432/orders",
+    "ip": "203.0.113.42",
+    "home_path": "/home/dana/projects/agent"
+  },
+  "modes": {
+    "sdk_default": {
+      "scrub_secrets": true,
+      "scrub_pii": false
+    },
+    "plugin_default": {
+      "scrub_secrets": true,
+      "scrub_pii": true
+    },
+    "off": {
+      "scrub_secrets": false,
+      "scrub_pii": false
+    }
+  },
+  "cases": [
+    {
+      "name": "every planted value in one prose text",
+      "text": "Reach Dana at dana.whitfield@example.com or +1 (555) 010-0199; card 4242 4242 4242 4242, SSN 123-45-6789, IBAN DE89370400440532013000. Keys: AKIAIOSFODNN7EXAMPLE and eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJjYW5hcnktZGFuYSJ9.ZmFrZS1zaWduYXR1cmUtb2YtYS1jYW5hcnk. DB postgres://app:Hunter2-canary@db.internal:5432/orders from 203.0.113.42, repo at /home/dana/projects/agent.\n-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCcanaryFAKEkey\n-----END PRIVATE KEY-----",
+      "expect": {
+        "sdk_default": {
+          "text": "Reach Dana at dana.whitfield@example.com or +1 (555) 010-0199; card 4242 4242 4242 4242, SSN 123-45-6789, IBAN DE89370400440532013000. Keys: [secret: aws_key] and [secret: jwt]. DB [secret: connection_string] from 203.0.113.42, repo at /home/dana/projects/agent.\n[secret: private_key]",
+          "scrubbed": {
+            "secret:aws_key": 1,
+            "secret:connection_string": 1,
+            "secret:jwt": 1,
+            "secret:private_key": 1
+          }
+        },
+        "plugin_default": {
+          "text": "Reach Dana at [pii: email] or [pii: phone]; card [pii: card], SSN [pii: ssn], IBAN [pii: iban]. Keys: [secret: aws_key] and [secret: jwt]. DB [secret: connection_string] from [pii: ip], repo at [pii: home_path]/projects/agent.\n[secret: private_key]",
+          "scrubbed": {
+            "pii:card": 1,
+            "pii:email": 1,
+            "pii:home_path": 1,
+            "pii:iban": 1,
+            "pii:ip": 1,
+            "pii:phone": 1,
+            "pii:ssn": 1,
+            "secret:aws_key": 1,
+            "secret:connection_string": 1,
+            "secret:jwt": 1,
+            "secret:private_key": 1
+          }
+        },
+        "off": {
+          "text": "Reach Dana at dana.whitfield@example.com or +1 (555) 010-0199; card 4242 4242 4242 4242, SSN 123-45-6789, IBAN DE89370400440532013000. Keys: AKIAIOSFODNN7EXAMPLE and eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJjYW5hcnktZGFuYSJ9.ZmFrZS1zaWduYXR1cmUtb2YtYS1jYW5hcnk. DB postgres://app:Hunter2-canary@db.internal:5432/orders from 203.0.113.42, repo at /home/dana/projects/agent.\n-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCcanaryFAKEkey\n-----END PRIVATE KEY-----",
+          "scrubbed": {}
+        }
+      }
+    },
+    {
+      "name": "a message's JSON text, its content escaped",
+      "text": "[{\"role\":\"user\",\"parts\":[{\"type\":\"text\",\"content\":\"mail dana.whitfield@example.com, key AKIAIOSFODNN7EXAMPLE, path C:\\\\Users\\\\dana\\\\repo, -----BEGIN PRIVATE KEY-----\\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCcanaryFAKEkey\\n-----END PRIVATE KEY-----\"}]}]",
+      "expect": {
+        "sdk_default": {
+          "text": "[{\"role\":\"user\",\"parts\":[{\"type\":\"text\",\"content\":\"mail dana.whitfield@example.com, key [secret: aws_key], path C:\\\\Users\\\\dana\\\\repo, [secret: private_key]\"}]}]",
+          "scrubbed": {
+            "secret:aws_key": 1,
+            "secret:private_key": 1
+          }
+        },
+        "plugin_default": {
+          "text": "[{\"role\":\"user\",\"parts\":[{\"type\":\"text\",\"content\":\"mail [pii: email], key [secret: aws_key], path [pii: home_path]\\\\repo, [secret: private_key]\"}]}]",
+          "scrubbed": {
+            "pii:email": 1,
+            "pii:home_path": 1,
+            "secret:aws_key": 1,
+            "secret:private_key": 1
+          }
+        },
+        "off": {
+          "text": "[{\"role\":\"user\",\"parts\":[{\"type\":\"text\",\"content\":\"mail dana.whitfield@example.com, key AKIAIOSFODNN7EXAMPLE, path C:\\\\Users\\\\dana\\\\repo, -----BEGIN PRIVATE KEY-----\\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCcanaryFAKEkey\\n-----END PRIVATE KEY-----\"}]}]",
+          "scrubbed": {}
+        }
+      }
+    },
+    {
+      "name": "a tool's arguments with a password and a token beside their keywords",
+      "text": "{\"user\":\"app\",\"password\":\"Hunter2-canary!\",\"api_key\":\"abc123def456ghi789jkl0\",\"token\":\"short1\"}",
+      "expect": {
+        "sdk_default": {
+          "text": "{\"user\":\"app\",\"password\":\"[secret: password]\",\"api_key\":\"[secret: token]\",\"token\":\"short1\"}",
+          "scrubbed": {
+            "secret:password": 1,
+            "secret:token": 1
+          }
+        },
+        "plugin_default": {
+          "text": "{\"user\":\"app\",\"password\":\"[secret: password]\",\"api_key\":\"[secret: token]\",\"token\":\"short1\"}",
+          "scrubbed": {
+            "secret:password": 1,
+            "secret:token": 1
+          }
+        },
+        "off": {
+          "text": "{\"user\":\"app\",\"password\":\"Hunter2-canary!\",\"api_key\":\"abc123def456ghi789jkl0\",\"token\":\"short1\"}",
+          "scrubbed": {}
+        }
+      }
+    },
+    {
+      "name": "each provider's key shape",
+      "text": "anthropic sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA, openai sk-proj-BBBBBBBBBBBBBBBBBBBBBBBBBBBB, stripe sk_live_51HCANARYcanary0000000000 and whsec_CANARYcanary00001234, github ghp_CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC12 and github_pat_11CANARY0000000000000_canary, slack xoxb-1234567890-canary, gcp AIzaSyCANARYcanaryCANARYcanaryCANARY123, telmoni tm_CANARYcanaryCANARYcanary0123456789",
+      "expect": {
+        "sdk_default": {
+          "text": "anthropic [secret: anthropic_key], openai [secret: openai_key], stripe [secret: stripe_key] and [secret: stripe_key], github [secret: github_token] and [secret: github_token], slack [secret: slack_token], gcp [secret: gcp_key], telmoni [secret: telmoni_key]",
+          "scrubbed": {
+            "secret:anthropic_key": 1,
+            "secret:gcp_key": 1,
+            "secret:github_token": 2,
+            "secret:openai_key": 1,
+            "secret:slack_token": 1,
+            "secret:stripe_key": 2,
+            "secret:telmoni_key": 1
+          }
+        },
+        "plugin_default": {
+          "text": "anthropic [secret: anthropic_key], openai [secret: openai_key], stripe [secret: stripe_key] and [secret: stripe_key], github [secret: github_token] and [secret: github_token], slack [secret: slack_token], gcp [secret: gcp_key], telmoni [secret: telmoni_key]",
+          "scrubbed": {
+            "secret:anthropic_key": 1,
+            "secret:gcp_key": 1,
+            "secret:github_token": 2,
+            "secret:openai_key": 1,
+            "secret:slack_token": 1,
+            "secret:stripe_key": 2,
+            "secret:telmoni_key": 1
+          }
+        },
+        "off": {
+          "text": "anthropic sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA, openai sk-proj-BBBBBBBBBBBBBBBBBBBBBBBBBBBB, stripe sk_live_51HCANARYcanary0000000000 and whsec_CANARYcanary00001234, github ghp_CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC12 and github_pat_11CANARY0000000000000_canary, slack xoxb-1234567890-canary, gcp AIzaSyCANARYcanaryCANARYcanaryCANARY123, telmoni tm_CANARYcanaryCANARYcanary0123456789",
+          "scrubbed": {}
+        }
+      }
+    },
+    {
+      "name": "lookalikes left alone",
+      "text": "version 1.2.3, order 1760000000, card 4242 4242 4242 4241, AKIAIOSFODNN7EXAMPLEX, ssn 000-12-3456, time 12:30:45, token=short, sk-short, user@localhost, IBAN DE89370400440532013001",
+      "expect": {
+        "sdk_default": {
+          "text": "version 1.2.3, order 1760000000, card 4242 4242 4242 4241, AKIAIOSFODNN7EXAMPLEX, ssn 000-12-3456, time 12:30:45, token=short, sk-short, user@localhost, IBAN DE89370400440532013001",
+          "scrubbed": {}
+        },
+        "plugin_default": {
+          "text": "version 1.2.3, order 1760000000, card 4242 4242 4242 4241, AKIAIOSFODNN7EXAMPLEX, ssn 000-12-3456, time 12:30:45, token=short, sk-short, user@localhost, IBAN DE89370400440532013001",
+          "scrubbed": {}
+        },
+        "off": {
+          "text": "version 1.2.3, order 1760000000, card 4242 4242 4242 4241, AKIAIOSFODNN7EXAMPLEX, ssn 000-12-3456, time 12:30:45, token=short, sk-short, user@localhost, IBAN DE89370400440532013001",
+          "scrubbed": {}
+        }
+      }
+    },
+    {
+      "name": "a card in groups beside more digits, a phone and an IPv6 address",
+      "text": "paid 4242-4242-4242-4242 then ref 4242 4242 4242 4242 1234; call 555.010.0199 or (555) 010-0199; from 2001:db8::8a2e:370:7334 and ::1",
+      "expect": {
+        "sdk_default": {
+          "text": "paid 4242-4242-4242-4242 then ref 4242 4242 4242 4242 1234; call 555.010.0199 or (555) 010-0199; from 2001:db8::8a2e:370:7334 and ::1",
+          "scrubbed": {}
+        },
+        "plugin_default": {
+          "text": "paid [pii: card] then ref [pii: card] 1234; call [pii: phone] or [pii: phone]; from [pii: ip] and [pii: ip]",
+          "scrubbed": {
+            "pii:card": 2,
+            "pii:ip": 2,
+            "pii:phone": 2
+          }
+        },
+        "off": {
+          "text": "paid 4242-4242-4242-4242 then ref 4242 4242 4242 4242 1234; call 555.010.0199 or (555) 010-0199; from 2001:db8::8a2e:370:7334 and ::1",
+          "scrubbed": {}
+        }
+      }
+    },
+    {
+      "name": "a message whose text holds an Azure connection string and a password",
+      "text": "[{\"role\":\"tool\",\"parts\":[{\"type\":\"text\",\"content\":\"DefaultEndpointsProtocol=https;AccountName=canary;AccountKey=Q2FuYXJ5S2V5MTIzNDU2Nzg5MA==;EndpointSuffix=core.windows.net and {\\\"password\\\": \\\"Hunter2-canary\\\"}\"}]}]",
+      "expect": {
+        "sdk_default": {
+          "text": "[{\"role\":\"tool\",\"parts\":[{\"type\":\"text\",\"content\":\"DefaultEndpointsProtocol=https;AccountName=canary;AccountKey=[secret: token];EndpointSuffix=core.windows.net and {\\\"password\\\": \\\"[secret: password]\\\"}\"}]}]",
+          "scrubbed": {
+            "secret:password": 1,
+            "secret:token": 1
+          }
+        },
+        "plugin_default": {
+          "text": "[{\"role\":\"tool\",\"parts\":[{\"type\":\"text\",\"content\":\"DefaultEndpointsProtocol=https;AccountName=canary;AccountKey=[secret: token];EndpointSuffix=core.windows.net and {\\\"password\\\": \\\"[secret: password]\\\"}\"}]}]",
+          "scrubbed": {
+            "secret:password": 1,
+            "secret:token": 1
+          }
+        },
+        "off": {
+          "text": "[{\"role\":\"tool\",\"parts\":[{\"type\":\"text\",\"content\":\"DefaultEndpointsProtocol=https;AccountName=canary;AccountKey=Q2FuYXJ5S2V5MTIzNDU2Nzg5MA==;EndpointSuffix=core.windows.net and {\\\"password\\\": \\\"Hunter2-canary\\\"}\"}]}]",
+          "scrubbed": {}
+        }
+      }
+    },
+    {
+      "name": "a private key cut off before its end",
+      "text": "key -----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEAcanary\nand nothing after",
+      "expect": {
+        "sdk_default": {
+          "text": "key [secret: private_key]",
+          "scrubbed": {
+            "secret:private_key": 1
+          }
+        },
+        "plugin_default": {
+          "text": "key [secret: private_key]",
+          "scrubbed": {
+            "secret:private_key": 1
+          }
+        },
+        "off": {
+          "text": "key -----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEAcanary\nand nothing after",
+          "scrubbed": {}
+        }
+      }
+    },
+    {
+      "name": "a message whose private key was cut off, its JSON kept whole",
+      "text": "[{\"role\":\"tool\",\"parts\":[{\"type\":\"text\",\"content\":\"key -----BEGIN PRIVATE KEY-----\\nMIIEvQIBADANcanary\"}]}]",
+      "expect": {
+        "sdk_default": {
+          "text": "[{\"role\":\"tool\",\"parts\":[{\"type\":\"text\",\"content\":\"key [secret: private_key]\"}]}]",
+          "scrubbed": {
+            "secret:private_key": 1
+          }
+        },
+        "plugin_default": {
+          "text": "[{\"role\":\"tool\",\"parts\":[{\"type\":\"text\",\"content\":\"key [secret: private_key]\"}]}]",
+          "scrubbed": {
+            "secret:private_key": 1
+          }
+        },
+        "off": {
+          "text": "[{\"role\":\"tool\",\"parts\":[{\"type\":\"text\",\"content\":\"key -----BEGIN PRIVATE KEY-----\\nMIIEvQIBADANcanary\"}]}]",
+          "scrubbed": {}
+        }
+      }
+    },
+    {
+      "name": "a cut-off key before an escaped quote, the string kept whole",
+      "text": "{\"content\":\"key -----BEGIN PRIVATE KEY-----\\nMIIEcanary then \\\"quoted\\\" text\"}",
+      "expect": {
+        "sdk_default": {
+          "text": "{\"content\":\"key [secret: private_key]\"}",
+          "scrubbed": {
+            "secret:private_key": 1
+          }
+        },
+        "plugin_default": {
+          "text": "{\"content\":\"key [secret: private_key]\"}",
+          "scrubbed": {
+            "secret:private_key": 1
+          }
+        },
+        "off": {
+          "text": "{\"content\":\"key -----BEGIN PRIVATE KEY-----\\nMIIEcanary then \\\"quoted\\\" text\"}",
+          "scrubbed": {}
+        }
+      }
+    },
+    {
+      "name": "a key whose END is in another string, the JSON kept whole",
+      "text": "{\"a\":\"-----BEGIN PRIVATE KEY-----\\nMIIEcanary\",\"b\":[\"-----END PRIVATE KEY-----\"]}",
+      "expect": {
+        "sdk_default": {
+          "text": "{\"a\":\"[secret: private_key]\",\"b\":[\"-----END PRIVATE KEY-----\"]}",
+          "scrubbed": {
+            "secret:private_key": 1
+          }
+        },
+        "plugin_default": {
+          "text": "{\"a\":\"[secret: private_key]\",\"b\":[\"-----END PRIVATE KEY-----\"]}",
+          "scrubbed": {
+            "secret:private_key": 1
+          }
+        },
+        "off": {
+          "text": "{\"a\":\"-----BEGIN PRIVATE KEY-----\\nMIIEcanary\",\"b\":[\"-----END PRIVATE KEY-----\"]}",
+          "scrubbed": {}
+        }
+      }
+    },
+    {
+      "name": "home folders on three systems",
+      "text": "/Users/dana/Library and /home/dana-w/.ssh and C:/Users/dana/AppData and D:\\Users\\dana.w\\x",
+      "expect": {
+        "sdk_default": {
+          "text": "/Users/dana/Library and /home/dana-w/.ssh and C:/Users/dana/AppData and D:\\Users\\dana.w\\x",
+          "scrubbed": {}
+        },
+        "plugin_default": {
+          "text": "[pii: home_path]/Library and [pii: home_path]/.ssh and [pii: home_path]/AppData and [pii: home_path]\\x",
+          "scrubbed": {
+            "pii:home_path": 4
+          }
+        },
+        "off": {
+          "text": "/Users/dana/Library and /home/dana-w/.ssh and C:/Users/dana/AppData and D:\\Users\\dana.w\\x",
+          "scrubbed": {}
+        }
+      }
+    },
+    {
+      "name": "timestamps and ids that pass Luhn's check, left alone",
+      "text": "started 1730812345677 (ms) and 1730812345678901230 (ns), id 7992739871300008, zeros 0000 0000 0000 0000",
+      "expect": {
+        "sdk_default": {
+          "text": "started 1730812345677 (ms) and 1730812345678901230 (ns), id 7992739871300008, zeros 0000 0000 0000 0000",
+          "scrubbed": {}
+        },
+        "plugin_default": {
+          "text": "started 1730812345677 (ms) and 1730812345678901230 (ns), id 7992739871300008, zeros 0000 0000 0000 0000",
+          "scrubbed": {}
+        },
+        "off": {
+          "text": "started 1730812345677 (ms) and 1730812345678901230 (ns), id 7992739871300008, zeros 0000 0000 0000 0000",
+          "scrubbed": {}
+        }
+      }
+    },
+    {
+      "name": "nothing to scrub",
+      "text": "The run ended in 3.2 s with 1,204 tokens.",
+      "expect": {
+        "sdk_default": {
+          "text": "The run ended in 3.2 s with 1,204 tokens.",
+          "scrubbed": {}
+        },
+        "plugin_default": {
+          "text": "The run ended in 3.2 s with 1,204 tokens.",
+          "scrubbed": {}
+        },
+        "off": {
+          "text": "The run ended in 3.2 s with 1,204 tokens.",
+          "scrubbed": {}
+        }
+      }
+    }
+  ]
+}

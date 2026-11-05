@@ -116,6 +116,9 @@ pub const TAG_PREFIX: &str = "telmoni.tag.";
 pub const CANCELLED: &str = "telmoni.cancelled";
 /// The content fields an SDK cut so its span fits an export, by name.
 pub const CONTENT_CUT: &str = "telmoni.content_cut";
+/// What an SDK's scrubbers replaced in the span's content before it left:
+/// each kind's count, never a value; metadata.
+pub const SCRUBBED: &str = "telmoni.scrubbed";
 /// A failure's class, message and stack trace, as the `exception` event the
 /// conventions name carries them; kept as content.
 pub const EXCEPTION_TYPE: &str = "exception.type";
@@ -272,6 +275,7 @@ pub const INVENTORY_SPAN: &[&str] = &[
     "gen_ai.prompt.version",
     "gen_ai.data_source.id",
     "server.address",
+    SCRUBBED,
 ];
 
 /// The deployment a span was sent from, on its resource: our SDKs set it
@@ -819,6 +823,15 @@ pub const INVENTORY: &[InventoryRow] = &[
         KEPT_ATTRIBUTE,
         Needs::AnyMode,
         RULE_ATTRIBUTE,
+    ),
+    row(
+        SCRUBBED,
+        ReadOn::AnySpan,
+        KEPT_ATTRIBUTE,
+        Needs::AnyMode,
+        "a JSON object of each kind the SDK's scrubbers replaced in the span's content, \
+         `<family>:<kind>`, to its count, and `dropped:<field>` for a field one failed on; \
+         never a value it replaced",
     ),
     row(
         "service.name",

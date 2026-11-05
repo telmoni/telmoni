@@ -62,6 +62,10 @@ Where `masks`, the mask was handed `handed`, each key once — Python and TypeSc
 The rest each suite proves on its own: a mask that fails on a field is warned of once however many exports it fails in, and is asked again each export; Python's and TypeScript's mask answering anything but a string, or none, fails as a raise does, TypeScript's `Promise` among them; and a mask that is no function is refused as the client is built, in the two languages that could be handed one.
 
 
+## `canary.json`
+
+The scrubbers over content, secrets and PII, and the corpus every way out is held to. `planted` is one fake but realistic value of each kind — an email, a phone number, a Luhn-valid test card, an SSN-shaped number, an IBAN, a cloud key, a JWT, a PEM key, a connection string, an IP address and a home folder's path — which the server's suite sends through every way out. `modes` names the switches: `sdk_default` (secrets on, PII off, as a client built with neither set), `plugin_default` (both on, a coding-agent plugin's default) and `off`. For each of `cases`, each mode's scrubber turns `text` into `expect.<mode>.text` exactly, and counts what it replaced as `expect.<mode>.scrubbed`, keyed `<family>:<kind>`, which a span whose content a scrubber changed carries as `telmoni.scrubbed`: that object as JSON, its keys sorted, with no spaces. A rule replaces each match with `[secret: <kind>]` or `[pii: <kind>]`, secrets' rules first and in their order, then PII's; a scrubber that fails on a field drops the field and counts `dropped:<field>` instead.
+
 ## `scores.json`
 
 Scores, held to the server's own rules, which its tests read from this file too (`crates/telemetry/src/handler/scores.rs`). `limits` are the caps every SDK holds: a name, a category and a version in characters, Unicode code points after Unicode's White_Space is trimmed from the ends; a session's id; scores a span (`per_span_max`, half the 32 events a span holds, so a failure's event still fits); and scores a body of `/v1/scores`.

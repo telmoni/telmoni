@@ -3,7 +3,7 @@
  *
  * It takes content off every span unless the code asked and the project's mode
  * allows, puts each image or file a message carries to
- * `PUT {endpoint}/v1/media/{sha256}` where it sends content, sends to
+ * `PUT {endpoint}/v1/media/{sha256}` where it sends content, scrubs it, sends to
  * `POST {endpoint}/otlp/v1/traces`, and each score carried to it to
  * `POST {endpoint}/v1/scores`, waits out a
  * `Retry-After`, and reads `Telmoni-Content-Mode` and the partial success
@@ -22,6 +22,7 @@ import type { ReadableSpan, TimedEvent } from '@opentelemetry/sdk-trace-base';
 
 import * as contract from './contract.js';
 import { errorName } from './errors.js';
+import { scrubbedOf, scrubber } from './scrub.js';
 import type { ResolvedConfig, Transport, TransportResponse, Warning } from './types.js';
 import { VERSION } from './version.js';
 import { trimEnds } from './whitespace.js';
@@ -336,7 +337,12 @@ export class Exporter {
     // Decided once, so no answer met halfway sends content the mask never saw.
     const keep = this.#keepsContent();
     if (keep) spans = this.#mask(spans);
-    const lifted = keep ? await this.#lift(spans) : new Map<ReadableSpan, Record<string, string>>();
+    let lifted: Lifted = keep ? await this.#lift(spans) : new Map<ReadableSpan, Record<string, string>>();
+    // As each field is sent, its images lifted out: a false match in an image's base64 would break the image.
+    if (keep && (this.#config.scrubSecrets || this.#config.scrubPii)) {
+      spans = this.#scrub(spans, lifted);
+      lifted = new Map();
+    }
     return this.#export(spans, lifted, keep);
   }
 
@@ -382,32 +388,10 @@ export class Exporter {
     return (await this.#export(spans.slice(0, half), lifted, keep)) && this.#export(spans.slice(half), lifted, keep);
   }
 
-  /** The spans with every content field, event attribute and status message as the code's mask answers it, before a part it takes out could be put. */
+  /** The spans with every field the mask is handed as it answers it, before a part it takes out could be put. */
   #mask(spans: readonly ReadableSpan[]): readonly ReadableSpan[] {
     if (this.#config.mask === undefined) return spans;
-    return spans.map((span) => {
-      const attributes: Attributes = {};
-      for (const [key, value] of Object.entries(span.attributes)) {
-        if (value === undefined) continue;
-        const kept = contract.CONTENT.has(key) && key !== contract.CONTENT_CUT ? this.#masked(key, value) : value;
-        if (kept !== undefined) attributes[key] = kept;
-      }
-      const events = span.events.map((event) => {
-        const kept: Attributes = {};
-        for (const [key, value] of Object.entries(event.attributes ?? {})) {
-          const score = event.name === contract.EVALUATION_EVENT && SCORE_KEYS.has(key);
-          const answer = value === undefined || score ? value : this.#masked(key, value);
-          if (answer !== undefined) kept[key] = answer;
-        }
-        return { ...event, attributes: kept };
-      });
-      let status = span.status;
-      if (status.message) {
-        const message = this.#masked(contract.STATUS_DESCRIPTION, status.message);
-        status = message === undefined ? { code: status.code } : { ...status, message: message as string };
-      }
-      return maskedSpan(span, attributes, events, status);
-    });
+    return spans.map((span) => fieldsAs(span, span.attributes, (key, value) => this.#masked(key, value)));
   }
 
   /** One field as the mask answers it, handed as a string, any other value as its JSON; undefined to send the span without it. An answer unchanged keeps the value as it was. */
@@ -428,6 +412,33 @@ export class Exporter {
       return undefined;
     }
     return answer === given ? value : answer;
+  }
+
+  /**
+   * The spans with every field the mask is handed as the scrubbers leave it, each as it is sent, `lifted`'s in place
+   * of their own; a span they changed counts what in `telmoni.scrubbed`.
+   */
+  #scrub(spans: readonly ReadableSpan[], lifted: Lifted): readonly ReadableSpan[] {
+    return spans.map((span) => {
+      const counts = new Map<string, number>();
+      const scrubbed = fieldsAs(span, attributesOf(span, lifted), (key, value) => this.#scrubbed(key, value, counts));
+      if (counts.size > 0) scrubbed.attributes[contract.SCRUBBED] = scrubbedOf(counts);
+      return scrubbed;
+    });
+  }
+
+  /** One field as the scrubbers switched on leave it, handed as the mask is, what they replaced counted; undefined where one fails, counted as dropped. */
+  #scrubbed(key: string, value: AttributeValue, counts: Map<string, number>): AttributeValue | undefined {
+    const given = typeof value === 'string' ? value : JSON.stringify(value);
+    try {
+      const [text, found] = scrubber.scrub(given, this.#config.scrubSecrets, this.#config.scrubPii);
+      for (const [kind, count] of found) counts.set(kind, (counts.get(kind) ?? 0) + count);
+      return text === given ? value : text;
+    } catch {
+      // Never sent as it was: the field goes, named.
+      counts.set(`dropped:${key}`, (counts.get(`dropped:${key}`) ?? 0) + 1);
+      return undefined;
+    }
   }
 
   /** Each span's messages with every `blob` part lifted out: a blob repeated in every span would bloat each, past 1 MiB maybe. */
@@ -900,7 +911,39 @@ function parseJson(text: string): unknown {
   }
 }
 
-/** The span as the mask left it. */
+/**
+ * The span with every field the mask is handed — each content field of `attributes`, each event's attribute but a
+ * score's own, the status message — as `answer` gives it, undefined sending the span without it.
+ */
+function fieldsAs(
+  span: ReadableSpan,
+  attributes: ReadableSpan['attributes'],
+  answer: (key: string, value: AttributeValue) => AttributeValue | undefined,
+): ReadableSpan {
+  const kept: Attributes = {};
+  for (const [key, value] of Object.entries(attributes)) {
+    if (value === undefined) continue;
+    const given = contract.CONTENT.has(key) && key !== contract.CONTENT_CUT ? answer(key, value) : value;
+    if (given !== undefined) kept[key] = given;
+  }
+  const events = span.events.map((event) => {
+    const eventKept: Attributes = {};
+    for (const [key, value] of Object.entries(event.attributes ?? {})) {
+      const score = event.name === contract.EVALUATION_EVENT && SCORE_KEYS.has(key);
+      const given = value === undefined || score ? value : answer(key, value);
+      if (given !== undefined) eventKept[key] = given;
+    }
+    return { ...event, attributes: eventKept };
+  });
+  let status = span.status;
+  if (status.message) {
+    const message = answer(contract.STATUS_DESCRIPTION, status.message);
+    status = message === undefined ? { code: status.code } : { ...status, message: message as string };
+  }
+  return maskedSpan(span, kept, events, status);
+}
+
+/** The span as the mask or the scrubbers left it. */
 function maskedSpan(span: ReadableSpan, attributes: Attributes, events: TimedEvent[], status: SpanStatus): ReadableSpan {
   return {
     name: span.name,

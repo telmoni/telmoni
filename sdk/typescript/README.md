@@ -20,8 +20,8 @@ point `TELMONI_ENDPOINT` at its machine host; the docs read in
 ```ts
 import { Telmoni } from 'telmoni';
 
-// Reads TELMONI_ENDPOINT, TELMONI_API_KEY, TELMONI_ORG, TELMONI_ENVIRONMENT, TELMONI_RELEASE
-// and TELMONI_CAPTURE_CONTENT
+// Reads TELMONI_ENDPOINT, TELMONI_API_KEY, TELMONI_ORG, TELMONI_ENVIRONMENT, TELMONI_RELEASE,
+// TELMONI_CAPTURE_CONTENT, TELMONI_SCRUB_SECRETS and TELMONI_SCRUB_PII
 const telmoni = Telmoni.fromEnv();
 
 const reply = await telmoni.run(
@@ -210,18 +210,25 @@ const telmoni = new Telmoni({
   apiKey: 'tm_…',
   organizationId: 'org_…',
   captureContent: false, // the default
+  scrubSecrets: true, // unset, TELMONI_SCRUB_SECRETS decides: secrets in content sent are replaced
+  scrubPii: false, // unset, TELMONI_SCRUB_PII decides: personal data in content sent is kept
   environment: 'production', // the deployment, sent as deployment.environment.name
   release: '2026.10.18', // its release, sent as service.version
 });
 ```
 
 `Telmoni.fromEnv()` reads `TELMONI_ENDPOINT`, `TELMONI_API_KEY`,
-`TELMONI_ORG`, `TELMONI_ENVIRONMENT`, `TELMONI_RELEASE` and
-`TELMONI_CAPTURE_CONTENT`; a blank value is unset, and a blank endpoint falls
-back to the default. `TELMONI_CAPTURE_CONTENT` turns `captureContent` on with
-`1` alone, its blanks about it trimmed; anything else, or nothing, leaves it
-off. A client built with `new Telmoni(config)` reads no variable, so its
-`captureContent` is what the code says. No `OTEL_*` variable
+`TELMONI_ORG`, `TELMONI_ENVIRONMENT`, `TELMONI_RELEASE`,
+`TELMONI_CAPTURE_CONTENT`, `TELMONI_SCRUB_SECRETS` and `TELMONI_SCRUB_PII`; a
+blank value is unset, and a blank endpoint falls back to the default.
+`TELMONI_CAPTURE_CONTENT` turns `captureContent` on with `1` alone, its blanks
+about it trimmed; anything else, or nothing, leaves it off.
+`TELMONI_SCRUB_SECRETS` turns `scrubSecrets` off with `0` alone, and
+`TELMONI_SCRUB_PII` turns `scrubPii` on with `1` alone, each trimmed alike;
+anything else leaves each at its default. Every client reads these two where
+its code leaves the switch unset, and a switch set in code stands over its
+variable; besides them, a client built with `new Telmoni(config)` reads no
+variable, so its `captureContent` is what the code says. No `OTEL_*` variable
 is read. `prices` hands [the guard](#the-guard) prices of your own, a
 `TypeError` or `RangeError` for one that names no provider or model or is no
 number from 0; nothing of them is sent. The key is never printed or serialized: `console.log`,
@@ -292,6 +299,18 @@ const telmoni = new Telmoni({
   mask: (key, value) => value.replace(CARD, '[card]'),
 });
 ```
+
+After the mask, on the fields it is handed as they are sent, images lifted out
+first, the scrubbers replace what they find, in time linear in the field
+whatever it holds: `scrubSecrets`, on unless set `false` or
+`TELMONI_SCRUB_SECRETS=0`, each key, token, password, private key and
+connection string as `[secret: <kind>]`,
+and `scrubPii`, off unless set `true` or `TELMONI_SCRUB_PII=1`, each email,
+phone number, card, SSN, IBAN, IP address and home folder as `[pii: <kind>]`
+([Configuration](#configuration)). A span they changed carries
+`telmoni.scrubbed`, what they replaced counted by kind as JSON, such as
+`{"pii:email":1,"secret:aws_key":1}`; a field one fails on is sent without,
+counted as `dropped:<key>`, never as it was.
 
 ## Beside your own OpenTelemetry
 

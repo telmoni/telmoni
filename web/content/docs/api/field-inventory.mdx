@@ -124,6 +124,7 @@ them.
 | `gen_ai.prompt.version` | any span | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
 | `gen_ai.data_source.id` | any span | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
 | `server.address` | any span | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
+| `telmoni.scrubbed` | any span | `attributes`, under its own name | any | a JSON object of each kind the SDK's scrubbers replaced in the span's content, `<family>:<kind>`, to its count, and `dropped:<field>` for a field one failed on; never a value it replaced |
 | `service.name` | the resource | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
 | `telemetry.sdk.*` | the resource | `attributes`, under its own name | any | what the OpenTelemetry SDK says of itself: its name, language and version |
 | `telemetry.distro.*` | the resource | `attributes`, under its own name | any | what the distribution says of itself: `telmoni` and its version, on everything Telmoni's SDKs send |

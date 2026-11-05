@@ -2,6 +2,7 @@ package telmoni
 
 import (
 	"context"
+	"testing"
 
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
@@ -37,6 +38,16 @@ var (
 
 // ExportSpans sends spans as the processor would a batch.
 func ExportSpans(c *Client, spans []sdktrace.ReadOnlySpan) { c.exporter.export(spans) }
+
+// Scrub is the scrubbers over one text, which canary.json holds every SDK to.
+var Scrub = scrub
+
+// FailScrubbing makes the scrubbers panic on every field until the test ends:
+// called before the client is built, its cleanup runs after the client's.
+func FailScrubbing(t testing.TB) {
+	scrubber = func(string, bool, bool) (string, map[string]int) { panic("a scrubber failed") }
+	t.Cleanup(func() { scrubber = scrub })
+}
 
 // holdOne ends one span in the trace of runID under a record's hold, then
 // releases the hold, told the record was built only when built. False when

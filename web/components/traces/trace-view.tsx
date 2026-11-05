@@ -26,7 +26,7 @@ import {
   TruncatedNote,
   indentStyle,
 } from "@/components/traces/span-parts";
-import { SpanContent } from "@/components/traces/span-content";
+import { ScrubbedNote, SpanContent } from "@/components/traces/span-content";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -656,7 +656,10 @@ function SpanDetail({
                 This span&apos;s content could not be read. Reload to try again.
               </p>
             ) : fields ? (
-              <SpanContent fields={fields} />
+              <div className="grid gap-4">
+                <ScrubbedNote attributes={span.attributes} />
+                <SpanContent fields={fields} />
+              </div>
             ) : (
               <p className="py-2 text-sm text-muted-foreground">This span kept no content.</p>
             )}

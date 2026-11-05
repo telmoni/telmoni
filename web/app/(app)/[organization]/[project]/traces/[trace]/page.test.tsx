@@ -391,6 +391,43 @@ describe("TracePage", () => {
     expect(within(chosen()).getByText("This span kept no content.")).toBeInTheDocument();
   });
 
+  it("says what the agent's scrubbers replaced in a span's content before it left, and what they dropped", async () => {
+    const scrubbed = SPANS.map((one) =>
+      one.span_id === "0000000000000003"
+        ? { ...one, attributes: { "telmoni.scrubbed": '{"dropped:gen_ai.tool.call.result":1,"pii:email":2,"secret:aws_key":1}' } }
+        : one,
+    );
+    mockTrace = {
+      kind: "ok",
+      trace: {
+        run_id: RUN,
+        spans: scrubbed,
+        truncated: false,
+        spend: null,
+        content: [
+          {
+            run_id: RUN,
+            span_id: "0000000000000003",
+            fields: {
+              "gen_ai.output.messages": JSON.stringify([
+                { role: "assistant", parts: [{ type: "text", content: "Key [secret: aws_key] for [pii: email]" }] },
+              ]),
+            },
+          },
+        ],
+      },
+    };
+    render(await TracePage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+    fireEvent.click(within(screen.getByRole("tree", { name: "Spans" })).getByText("chat claude-sonnet-5-5"));
+    expect(
+      within(chosen()).getByText("Scrubbed before it left the agent: 2 email addresses, 1 AWS key."),
+    ).toBeInTheDocument();
+    expect(
+      within(chosen()).getByText("Dropped, its scrubber failing on it: gen_ai.tool.call.result."),
+    ).toBeInTheDocument();
+    expect(within(chosen()).getByText("Key [secret: aws_key] for [pii: email]")).toBeInTheDocument();
+  });
+
   it("says in a line when a trace kept no content, and when it could not be read", async () => {
     const { unmount } = render(await TracePage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByText("This trace kept no content.")).toBeInTheDocument();

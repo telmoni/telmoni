@@ -27,8 +27,8 @@ point `TELMONI_ENDPOINT` at its machine host; the docs read in
 use telmoni::{Config, ModelCallOptions, Reply, RunOptions, Telmoni, ToolCallOptions, Usage};
 
 fn main() -> Result<(), telmoni::Error> {
-    // Reads TELMONI_ENDPOINT, TELMONI_API_KEY, TELMONI_ORG, TELMONI_ENVIRONMENT, TELMONI_RELEASE
-    // and TELMONI_CAPTURE_CONTENT.
+    // Reads TELMONI_ENDPOINT, TELMONI_API_KEY, TELMONI_ORG, TELMONI_ENVIRONMENT, TELMONI_RELEASE,
+    // TELMONI_CAPTURE_CONTENT, TELMONI_SCRUB_SECRETS and TELMONI_SCRUB_PII.
     let telmoni = Telmoni::new(Config::from_env());
 
     let run = telmoni.run(
@@ -217,7 +217,7 @@ as; else nothing. A call answered again counts as its span then holds it.
 
 ## Configuration
 
-`Config::from_env()` reads six variables, a blank value being unset:
+`Config::from_env()` reads eight variables, a blank value being unset:
 
 | Variable | What |
 |---|---|
@@ -227,11 +227,15 @@ as; else nothing. A call answered again counts as its span then holds it.
 | `TELMONI_ENVIRONMENT` | The deployment this process runs in (`production`, `staging`), sent as `deployment.environment.name`. |
 | `TELMONI_RELEASE` | The release it runs (a version or a commit), sent as `service.version`. |
 | `TELMONI_CAPTURE_CONTENT` | `1` alone, its blanks about it trimmed, turns `capture_content` on; anything else, or nothing, leaves it off. A `capture_content` set in code over `Config::from_env()` stands. |
+| `TELMONI_SCRUB_SECRETS` | `0` alone, trimmed, turns the secrets scrubber off; anything else, or nothing, leaves it on ([Content](#content)). |
+| `TELMONI_SCRUB_PII` | `1` alone, trimmed, turns the PII scrubber on; anything else, or nothing, leaves it off. |
 
 Nothing in the SDK reads an `OTEL_*` variable. `Config` also holds
 `capture_content` (default `false`), `mask`, the code's own over content
 ([Content](#content)), which no variable sets and `Debug` shows only as set or
-not, `sampler`, the OpenTelemetry sampler whose decision a run takes when it starts
+not, `scrub_secrets` and `scrub_pii`, each `None` read from its variable above
+however the configuration was built and a `Some` set in code standing over it,
+`sampler`, the OpenTelemetry sampler whose decision a run takes when it starts
 a trace of its own, `environment` and `release`, the deployment the
 variables above name, and `prices`, the guard's prices of your own, a price
 that names no provider or model, or is no number from 0, left out with one
@@ -317,3 +321,16 @@ let config = telmoni::Config {
     ..telmoni::Config::from_env()
 };
 ```
+
+After the mask, and after its images are lifted out, content that leaves goes
+through the scrubbers, on the fields the mask is handed. The secrets scrubber,
+on unless `scrub_secrets` is `Some(false)`, or unset with
+`TELMONI_SCRUB_SECRETS=0`, sends each private key, connection string, JWT,
+provider key and value set by a keyword such as `password=` as
+`[secret: <kind>]`; the PII scrubber, off unless `scrub_pii` is `Some(true)`, or
+unset with `TELMONI_SCRUB_PII=1`, sends each email, IBAN, card number, SSN,
+phone number, IP address and home folder as `[pii: <kind>]`. A span they
+changed carries `telmoni.scrubbed`, what they replaced by kind as JSON
+(`{"pii:email":1,"secret:aws_key":2}`); a span goes without a field they fail
+on, counted as `dropped:<field>`, never with it as it was. They take time in
+proportion to the text, whatever it holds.

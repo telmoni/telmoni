@@ -14,6 +14,7 @@ import {
   metadataOf,
   readable,
   readableValue,
+  scrubbedFrom,
 } from "./messages";
 
 describe("messagesOf", () => {
@@ -92,6 +93,29 @@ describe("cutFrom and metadataOf", () => {
       ["app.customer", "acme"],
       ["app.ticket", '{"id":42}'],
     ]);
+  });
+});
+
+describe("scrubbedFrom", () => {
+  it("names each kind replaced with its count, and the fields dropped", () => {
+    expect(
+      scrubbedFrom({
+        "telmoni.scrubbed": '{"dropped:gen_ai.input.messages":1,"pii:email":2,"pii:ip":1,"secret:jwt":3}',
+      }),
+    ).toEqual({
+      replaced: ["2 email addresses", "1 IP address", "3 JWTs"],
+      dropped: ["gen_ai.input.messages"],
+    });
+  });
+
+  it("says nothing of a span that carries no count, or one it cannot read", () => {
+    expect(scrubbedFrom({})).toBeNull();
+    expect(scrubbedFrom({ "telmoni.scrubbed": "not json" })).toBeNull();
+    expect(scrubbedFrom({ "telmoni.scrubbed": '{"pii:email":-1}' })).toBeNull();
+  });
+
+  it("names a kind it does not know by its key", () => {
+    expect(scrubbedFrom({ "telmoni.scrubbed": '{"secret:new_kind":1}' })?.replaced).toEqual(["1 secret:new_kind"]);
   });
 });
 

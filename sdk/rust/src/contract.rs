@@ -22,6 +22,8 @@ pub(crate) const TAG_KEY_MAX: usize = 64;
 /// The most characters a tag's value holds: ingest's `TAG_VALUE_MAX`.
 pub(crate) const TAG_VALUE_MAX: usize = 256;
 pub(crate) const CANCELLED: &str = "telmoni.cancelled";
+/// What the scrubbers took out of a span's content, by kind, as JSON.
+pub(crate) const SCRUBBED: &str = "telmoni.scrubbed";
 /// The deployment, on the resource: the configuration's `environment` and
 /// `release`.
 pub(crate) const ENVIRONMENT: &str = "deployment.environment.name";
@@ -158,6 +160,10 @@ pub(crate) const MEDIA_DEFAULT_TYPE: &str = "application/octet-stream";
 /// `capture_content` from: `1` turns it on, and anything else, or nothing,
 /// leaves it off.
 pub(crate) const CAPTURE_CONTENT_ENV: &str = "TELMONI_CAPTURE_CONTENT";
+/// The variables the scrubbers are read from where the code sets neither:
+/// `0` alone turns the secrets one off, and `1` alone the PII one on.
+pub(crate) const SCRUB_SECRETS_ENV: &str = "TELMONI_SCRUB_SECRETS";
+pub(crate) const SCRUB_PII_ENV: &str = "TELMONI_SCRUB_PII";
 
 /// The answer's header naming the project's content mode: off or on.
 pub(crate) const CONTENT_MODE_HEADER: &str = "Telmoni-Content-Mode";

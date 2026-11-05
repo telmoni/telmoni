@@ -34,6 +34,22 @@ export interface Config {
   mask?: ((key: string, value: string) => string | null | undefined) | undefined;
 
   /**
+   * Where content leaves, after the mask, each secret in it — a key, a token, a
+   * password, a private key, a connection string — is replaced by
+   * `[secret: <kind>]`. Unset, `TELMONI_SCRUB_SECRETS` decides: `0` turns it
+   * off, and anything else, or nothing, leaves it on.
+   */
+  scrubSecrets?: boolean | undefined;
+
+  /**
+   * As `scrubSecrets`, for personal data — an email, a phone number, a card, an
+   * SSN, an IBAN, an IP address, a home folder — as `[pii: <kind>]`. Unset,
+   * `TELMONI_SCRUB_PII` decides: `1` turns it on, and anything else, or nothing,
+   * leaves it off.
+   */
+  scrubPii?: boolean | undefined;
+
+  /**
    * The sampler whose root decision a run takes when it starts a trace of its
    * own; without one, every run samples.
    */
@@ -80,6 +96,8 @@ export interface ResolvedConfig {
   readonly apiKey: string | undefined;
   readonly captureContent: boolean;
   readonly mask: ((key: string, value: string) => string | null | undefined) | undefined;
+  readonly scrubSecrets: boolean;
+  readonly scrubPii: boolean;
   readonly sampler: Sampler | undefined;
   readonly environment: string | undefined;
   readonly release: string | undefined;

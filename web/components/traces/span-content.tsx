@@ -15,6 +15,7 @@ import {
   metadataOf,
   readable,
   readableValue,
+  scrubbedFrom,
   type Message,
   type Part,
 } from "@/lib/messages";
@@ -223,6 +224,23 @@ function CutNote({ fields }: { fields: Readonly<Record<string, string>> }) {
     <p className="text-xs text-muted-foreground">
       Cut to fit an export, and not kept: {cut.join(", ")}.
     </p>
+  );
+}
+
+/** What the agent's scrubbers replaced before the span left it, and the
+ *  fields they failed on and dropped, said where they did either. */
+export function ScrubbedNote({ attributes }: { attributes: Readonly<Record<string, string>> }) {
+  const scrubbed = scrubbedFrom(attributes);
+  if (!scrubbed) return null;
+  return (
+    <div className="grid gap-1 text-xs text-muted-foreground">
+      {scrubbed.replaced.length > 0 && (
+        <p>Scrubbed before it left the agent: {scrubbed.replaced.join(", ")}.</p>
+      )}
+      {scrubbed.dropped.length > 0 && (
+        <p>Dropped, its scrubber failing on it: {scrubbed.dropped.join(", ")}.</p>
+      )}
+    </div>
   );
 }
 

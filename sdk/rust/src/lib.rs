@@ -81,6 +81,7 @@ mod records;
 mod runs;
 mod sampler;
 mod scores;
+mod scrub;
 pub mod transport;
 mod warnings;
 

@@ -532,11 +532,12 @@ impl Fields {
             // ⚠ Dropped unless the project keeps content; the answer names
             // the mode, so a sender reads why.
             _ if contract::is_content(key) => self.content_or_drop(key, value, &mut drop_attribute),
-            _ if key.starts_with("telmoni.") => drop_attribute(key, DropReason::Unlisted),
+            // Before the namespace's refusal: the inventory names one of ours, the scrubbers' counts.
             _ if contract::is_inventory_span(key) => match as_text(value) {
                 Some(rendered) => self.keep_attribute(key, rendered, &mut drop_attribute),
                 None => drop_attribute(key, DropReason::Unlisted),
             },
+            _ if key.starts_with("telmoni.") => drop_attribute(key, DropReason::Unlisted),
             _ => match value {
                 Value::IntValue(_) | Value::DoubleValue(_) | Value::BoolValue(_) => {
                     if let Some(rendered) = scalar(value) {

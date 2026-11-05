@@ -139,6 +139,58 @@ export function cutFrom(fields: Readonly<Record<string, string>>): string[] {
   return parsed.success ? parsed.data : [cut];
 }
 
+/** The attribute an SDK's scrubbers count what they replaced in, by kind
+ *  (`crates/telemetry/src/contract.rs`, `SCRUBBED`). */
+export const SCRUBBED = "telmoni.scrubbed";
+
+/** Each kind a scrubber replaces, as its marker names it. */
+export const SCRUBBED_KIND: Readonly<Record<string, string>> = {
+  "secret:private_key": "private key",
+  "secret:connection_string": "connection string",
+  "secret:jwt": "JWT",
+  "secret:anthropic_key": "Anthropic key",
+  "secret:openai_key": "OpenAI key",
+  "secret:stripe_key": "Stripe key",
+  "secret:github_token": "GitHub token",
+  "secret:slack_token": "Slack token",
+  "secret:aws_key": "AWS key",
+  "secret:gcp_key": "Google Cloud key",
+  "secret:telmoni_key": "Telmoni key",
+  "secret:password": "password",
+  "secret:token": "token",
+  "pii:email": "email address",
+  "pii:iban": "IBAN",
+  "pii:card": "card number",
+  "pii:ssn": "social security number",
+  "pii:phone": "phone number",
+  "pii:ip": "IP address",
+  "pii:home_path": "home folder",
+};
+
+/** What an SDK's scrubbers replaced in a span's content before it left the
+ *  agent, each kind with its count, and the fields they failed on and so
+ *  dropped; none where the span carries no count. */
+export function scrubbedFrom(
+  attributes: Readonly<Record<string, string>>,
+): { replaced: string[]; dropped: string[] } | null {
+  const raw = attributes[SCRUBBED];
+  if (raw === undefined) return null;
+  const parsed = z.record(z.string(), z.number().int().positive()).safeParse(json(raw));
+  if (!parsed.success) return null;
+  const replaced: string[] = [];
+  const dropped: string[] = [];
+  for (const [key, count] of Object.entries(parsed.data).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
+    if (key.startsWith("dropped:")) {
+      dropped.push(key.slice("dropped:".length));
+      continue;
+    }
+    const kind = SCRUBBED_KIND[key] ?? key;
+    const many = kind.endsWith("s") ? `${kind}es` : `${kind}s`;
+    replaced.push(`${count} ${count === 1 ? kind : many}`);
+  }
+  return { replaced, dropped };
+}
+
 /** How the trace names each content field it draws, in the order it draws them. */
 export const FIELD_LABEL: ReadonlyArray<readonly [ContentField, string]> = [
   [ContentField.SystemInstructions, "System instructions"],

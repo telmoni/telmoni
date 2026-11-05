@@ -250,6 +250,11 @@ class Config:
     # value's JSON, where content leaves, and answers the string to send
     # instead, or None to send its span without it.
     mask: Callable[[str, str], str | None] | None = field(default=None, repr=False)
+    # After the mask, content sent has each secret replaced by its kind, unless
+    # this is False, and each piece of personal data where it is True. Unset reads
+    # TELMONI_SCRUB_SECRETS (0 turns it off) and TELMONI_SCRUB_PII (1 turns it on).
+    scrub_secrets: bool | None = None
+    scrub_pii: bool | None = None
     # The sampler whose root decision a run takes when it starts a trace of its
     # own; None reads it from the application's tracer provider, or samples.
     sampler: Sampler | None = field(default=None, repr=False)
@@ -267,7 +272,8 @@ class Config:
 
     def _normalize(self) -> None:
         """Blank values unset, the endpoint read as the CLI reads it, the key
-        wrapped and every check, again as a client is built, for a field set since."""
+        wrapped, a scrubber's switch left unset read from the environment, and
+        every check, again as a client is built, for a field set since."""
         self.endpoint = endpoint_of(self.endpoint)
         check_endpoint(self.endpoint)
         self.organization_id = _unset_if_blank(self.organization_id)
@@ -279,6 +285,16 @@ class Config:
             raise TypeError("capture_content must be a bool")
         if self.mask is not None and not callable(self.mask):
             raise TypeError("mask must be callable")
+        for name in ("scrub_secrets", "scrub_pii"):
+            if not isinstance(getattr(self, name), (bool, type(None))):
+                raise TypeError(f"{name} must be a bool or None")
+        # Only 0 lets secrets out, and only 1 scrubs personal data.
+        if self.scrub_secrets is None:
+            secrets = _unset_if_blank(os.getenv(contract.SCRUB_SECRETS_ENV))
+            self.scrub_secrets = secrets != "0"
+        if self.scrub_pii is None:
+            pii = _unset_if_blank(os.getenv(contract.SCRUB_PII_ENV))
+            self.scrub_pii = pii == "1"
         self.environment = _unset_if_blank(self.environment)
         self.release = _unset_if_blank(self.release)
         self.prices = tuple(self.prices)
@@ -295,7 +311,9 @@ class Config:
     def from_env(cls) -> Config:
         """Read ``TELMONI_ENDPOINT``, ``TELMONI_API_KEY``, ``TELMONI_ORG``,
         ``TELMONI_ENVIRONMENT`` and ``TELMONI_RELEASE`` for the deployment, and
-        ``TELMONI_CAPTURE_CONTENT``, whose ``1`` alone sets ``capture_content``.
+        ``TELMONI_CAPTURE_CONTENT``, whose ``1`` alone sets ``capture_content``;
+        ``TELMONI_SCRUB_SECRETS`` and ``TELMONI_SCRUB_PII`` are read as any
+        configuration reads them, its switches left unset.
 
         A blank value is unset, as the CLI reads them. No ``OTEL_*`` variable is
         read: the SDK's tracer provider is built part by part.

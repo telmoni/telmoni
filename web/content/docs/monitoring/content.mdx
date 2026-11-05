@@ -44,6 +44,13 @@ a user id, which are metadata kept on every project, nor an attribute your code
 sets on a span itself, which is kept below as metadata content: keep a person
 out of those in your own code.
 
+After your mask, the SDK's scrubbers replace what has a shape of its own:
+secrets, on wherever content is sent, and personal data, where you turn it on,
+each by a marker such as `[secret: aws_key]` or `[pii: email]`, counted on the
+run's page ([SDKs](/docs/api/sdks#scrubbing-secrets-and-personal-data)). No
+pattern finds a name, a street address or text inside an image: what only your
+application knows is the mask's to keep home.
+
 ## What is kept
 
 On a project that keeps content, ingest keeps each piece whole, past the 1,024

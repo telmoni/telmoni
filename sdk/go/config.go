@@ -35,6 +35,16 @@ type Config struct {
 	// or false to send its span without it; it is called only where content
 	// leaves, and a panic sends the span without that field.
 	Mask func(key, value string) (string, bool) `json:"-" xml:"-"`
+	// ScrubSecrets replaces each secret in the content that leaves (keys and
+	// tokens, JWTs, passwords, private keys, connection strings) with a marker
+	// of its kind, [secret: aws_key] say, after Mask, on what it kept. Nil
+	// reads TELMONI_SCRUB_SECRETS as the client is built: 0 alone turns it off.
+	ScrubSecrets *bool `json:"scrub_secrets,omitempty"`
+	// ScrubPII replaces personal data the same way, [pii: email] say: emails,
+	// phone numbers, cards, SSNs, IBANs, IP addresses and home folders. Nil
+	// reads TELMONI_SCRUB_PII as the client is built: 1 alone turns it on. A
+	// span either scrubber changed carries telmoni.scrubbed, counting what went.
+	ScrubPII *bool `json:"scrub_pii,omitempty"`
 	// Sampler decides a run that starts a trace of its own, as the
 	// application's root sampler would decide its own spans; nil samples
 	// every such run. Nothing is dropped by it: a run it does not sample is
@@ -108,14 +118,30 @@ func (Secret) GobEncode() ([]byte, error) {
 }
 
 // normalized is the configuration as the client holds it: a blank value is
-// unset and the endpoint read as the CLI reads the same variables.
+// unset, the endpoint read as the CLI reads the same variables, and a
+// scrubber's switch left nil read from its variable.
 func (c Config) normalized() Config {
 	c.Endpoint = endpointOf(c.Endpoint)
 	c.OrganizationID = strings.TrimSpace(c.OrganizationID)
 	c.APIKey = NewSecret(strings.TrimSpace(c.APIKey.Expose()))
 	c.Environment = strings.TrimSpace(c.Environment)
 	c.Release = strings.TrimSpace(c.Release)
+	c.ScrubSecrets = switchOf(c.ScrubSecrets, envScrubSecrets, "0", true)
+	c.ScrubPII = switchOf(c.ScrubPII, envScrubPII, "1", false)
 	return c
+}
+
+// switchOf is a switch as the code set it, or else as its variable sets it:
+// flip alone, White_Space trimmed, turns it from byDefault. The pointer is the
+// client's own, so the caller's variable changes nothing after.
+func switchOf(set *bool, variable, flip string, byDefault bool) *bool {
+	on := byDefault
+	if set != nil {
+		on = *set
+	} else if strings.TrimSpace(os.Getenv(variable)) == flip {
+		on = !byDefault
+	}
+	return &on
 }
 
 const (
@@ -289,8 +315,9 @@ func DefaultConfig() Config {
 }
 
 // ConfigFromEnv reads TELMONI_ENDPOINT, TELMONI_API_KEY and TELMONI_ORG,
-// TELMONI_ENVIRONMENT and TELMONI_RELEASE for the deployment, and
-// TELMONI_CAPTURE_CONTENT, whose 1 alone sets CaptureContent, a blank value
+// TELMONI_ENVIRONMENT and TELMONI_RELEASE for the deployment,
+// TELMONI_CAPTURE_CONTENT, whose 1 alone sets CaptureContent, and
+// TELMONI_SCRUB_SECRETS and TELMONI_SCRUB_PII as New reads them, a blank value
 // counting as unset. No OTEL_* variable is read: the SDK's tracer provider is
 // built part by part.
 func ConfigFromEnv() Config {

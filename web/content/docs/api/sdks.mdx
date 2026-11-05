@@ -1049,6 +1049,57 @@ your own code. No variable sets one: give it in code.
   </Tab>
 </Tabs>
 
+### Scrubbing secrets and personal data
+
+With content on, the SDK reads each content field it sends for secrets before
+the span leaves the process: the fields your [mask](#masking-content) is
+handed, after it, and after any image is lifted out of a message, so an
+image's bytes are never read. Each match is replaced by a marker naming its
+kind, `[secret: aws_key]`:
+
+| Kind | What it finds |
+|---|---|
+| `private_key` | A PEM private key, from `-----BEGIN … PRIVATE KEY-----` to its end, or to the end of the JSON string it was cut off in |
+| `connection_string` | A URL that holds a password, `postgres://app:password@db/orders` |
+| `jwt` | A JSON Web Token |
+| `anthropic_key`, `openai_key`, `stripe_key`, `github_token`, `slack_token`, `aws_key`, `gcp_key`, `telmoni_key` | Each provider's key, by its shape |
+| `password`, `token` | The value beside `password`, `passwd` or `pwd`, of 8 characters or more; beside `secret`, `token`, `api_key`, `access_key`, `client_secret`, `accountkey` or `sharedaccesskey`, of 16 or more holding a letter and a digit |
+
+Turn personal data on too and, after the secrets, it replaces `email`
+addresses; `phone` numbers written with a `+` or separators; `card` numbers
+that pass Luhn's check and start as an issuer's do, 2 to 6, so a timestamp or
+an id is left alone; US social security numbers (`ssn`); `iban`s that pass
+their check; `ip` addresses, v4 and v6; and the user's folder in a
+`home_path`, `/home/dana` or `C:\Users\dana`, each `[pii: email]` and so on.
+No pattern finds a name, a street address, text inside an image, or a secret
+of a shape these rules do not know: a [mask](#masking-content) is for what
+your application alone knows.
+
+A span whose content a scrubber changed carries `telmoni.scrubbed`, the count
+of each kind it replaced and never a value, `{"pii:email":2,"secret:aws_key":1}`,
+which the run's page shows beside the span's content. A scrubber that fails on
+a field sends the span without that field and counts it under `dropped:` and
+the field's key: it never sends the field as it was.
+
+The secrets scrubber is on wherever content is sent: `scrub_secrets` /
+`scrubSecrets` / `ScrubSecrets` / `scrub_secrets` set false, or
+`TELMONI_SCRUB_SECRETS=0`, turns it off. The personal-data scrubber is off in
+the SDKs and on in the [coding-agent plugins](/docs/api/coding-agents):
+`scrub_pii` / `scrubPii` / `ScrubPII` / `scrub_pii` set true, or
+`TELMONI_SCRUB_PII=1`, turns it on. Every client reads the two variables where
+your code leaves its switch unset, however the client was made; a switch set
+in code stands.
+
+Both take time in proportion to a field's size, whatever it holds. On a 1 MiB
+tool output, measured on a busy eight-core laptop:
+
+| SDK | Secrets | Secrets and personal data |
+|---|---|---|
+| Python | about 50 ms | about 180 ms |
+| TypeScript | about 25 ms | about 150 ms |
+| Go | about 25 ms | about 60 ms |
+| Rust, a release build | about 45 ms | about 70 ms |
+
 ### Beside your own OpenTelemetry
 
 The SDK builds every part of its tracer provider itself — resource, sampler,
@@ -1209,7 +1260,9 @@ log, a warning or an error.
 the resource's `deployment.environment.name` and `service.version`; a blank
 one is unset, and nothing is sent for one unset. `prices` hands
 [the guard](#the-guard) prices of your own, and nothing of them is sent.
-`mask` is your own function over content, [masking content](#masking-content).
+`mask` is your own function over content, [masking content](#masking-content),
+and `scrub_secrets` and `scrub_pii` turn the
+[scrubbers](#scrubbing-secrets-and-personal-data) off and on.
 
 Each SDK keeps the API key out of the configuration's printed form: Rust's
 `Debug` shows `<redacted>` in its place and serialization skips it; Python
@@ -1234,8 +1287,10 @@ non-enumerable property, which `console.log` and `JSON.stringify` pass over.
 | `TELMONI_ENVIRONMENT` | The deployment this process runs in — `production`, `staging` — sent as `deployment.environment.name`, up to 128 characters | None: nothing is sent |
 | `TELMONI_RELEASE` | The release this process runs — a version or a commit — sent as `service.version`, up to 128 characters | None: nothing is sent |
 | `TELMONI_CAPTURE_CONTENT` | `1` turns on [content](#content); anything else — `0`, `true`, `yes` — or nothing leaves it off, the blanks about it trimmed. A setting made in code over what `from_env` read stands, on or off | Off |
+| `TELMONI_SCRUB_SECRETS` | `0` turns off the [secrets scrubber](#scrubbing-secrets-and-personal-data); anything else, or nothing, leaves it on, the blanks about it trimmed. Read by every client where its code leaves the switch unset | On |
+| `TELMONI_SCRUB_PII` | `1` turns on the [personal-data scrubber](#scrubbing-secrets-and-personal-data); anything else, or nothing, leaves it off, the blanks about it trimmed. Read by every client where its code leaves the switch unset | Off |
 
-Every SDK reads these six and no others. OpenTelemetry's own `OTEL_*`
+Every SDK reads these eight and no others. OpenTelemetry's own `OTEL_*`
 variables are your application's, for its own exporters, and change nothing
 of the SDK's: `OTEL_RESOURCE_ATTRIBUTES` in particular reaches nothing the
 SDK sends.

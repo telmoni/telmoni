@@ -176,7 +176,7 @@ func TestADeploymentNamedPastIngestsCapIsLeftOffWithOneWarning(t *testing.T) {
 	expectFields(t, h, map[string]any{"kind": "input"})
 }
 
-func TestFromEnvReadsTheSixVariablesAndNoOther(t *testing.T) {
+func TestFromEnvReadsTheEightVariablesAndNoOther(t *testing.T) {
 	t.Setenv("TELMONI_ENDPOINT", "")
 	t.Setenv("TELMONI_API_KEY", "")
 	t.Setenv("TELMONI_ORG", "org_2")

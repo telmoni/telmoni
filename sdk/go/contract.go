@@ -67,6 +67,13 @@ const (
 // 1 turns it on, and anything else, or nothing, leaves it off.
 const envCaptureContent = "TELMONI_CAPTURE_CONTENT"
 
+// The variables a scrubber's switch left nil is read from: 0 alone turns the
+// secrets' off, 1 alone turns the personal data's on.
+const (
+	envScrubSecrets = "TELMONI_SCRUB_SECRETS"
+	envScrubPII     = "TELMONI_SCRUB_PII"
+)
+
 const (
 	// mediaPath is where an image or file is put, by the lowercase hex
 	// SHA-256 of its bytes.
@@ -135,6 +142,11 @@ const (
 // attrContentCut names the content fields the exporter cut so a span fits an
 // export.
 const attrContentCut = "telmoni.content_cut"
+
+// attrScrubbed is what the scrubbers replaced in a span's content, and each
+// field they failed on and dropped: counts by family:kind as JSON, its keys
+// sorted.
+const attrScrubbed = "telmoni.scrubbed"
 
 // A failure, as the conventions' exception event carries it: content.
 const (

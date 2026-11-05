@@ -45,6 +45,11 @@ function unsetIfBlank(value: string | undefined): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
+/** The process's variables, where the platform has a process. */
+function environment(): NodeJS.ProcessEnv | undefined {
+  return typeof process !== 'undefined' ? process.env : undefined;
+}
+
 const PRINTABLE = /^[\x21-\x7e]*$/;
 const NAME = /^[A-Za-z0-9._-]+$/;
 const PATH = /^[A-Za-z0-9\-._~!$&'()*+,;=:@/]*$/;
@@ -164,12 +169,20 @@ function resolve(config: Config | undefined): ResolvedConfig {
   if (typeof captureContent !== 'boolean') throw new TypeError('captureContent must be a boolean');
   const mask: unknown = config?.mask;
   if (mask !== undefined && typeof mask !== 'function') throw new TypeError('mask must be a function');
+  // Left unset in code, each scrubber's variable decides: only 0 lets secrets out, as only 1 takes personal data out.
+  const env = environment();
+  const scrubSecrets: unknown = config?.scrubSecrets ?? unsetIfBlank(env?.[contract.SCRUB_SECRETS_ENV]) !== '0';
+  if (typeof scrubSecrets !== 'boolean') throw new TypeError('scrubSecrets must be a boolean');
+  const scrubPii: unknown = config?.scrubPii ?? unsetIfBlank(env?.[contract.SCRUB_PII_ENV]) === '1';
+  if (typeof scrubPii !== 'boolean') throw new TypeError('scrubPii must be a boolean');
   const resolved: ResolvedConfig = {
     endpoint,
     apiKey: unsetIfBlank(config?.apiKey),
     organizationId: unsetIfBlank(config?.organizationId),
     captureContent,
     mask: config?.mask,
+    scrubSecrets,
+    scrubPii,
     sampler: config?.sampler,
     environment: unsetIfBlank(config?.environment),
     release: unsetIfBlank(config?.release),
@@ -243,12 +256,14 @@ export class Telmoni {
    * - `TELMONI_ORG`
    * - `TELMONI_ENVIRONMENT` and `TELMONI_RELEASE`, the deployment it names
    * - `TELMONI_CAPTURE_CONTENT`, whose `1` alone sets `captureContent`
+   * - `TELMONI_SCRUB_SECRETS` and `TELMONI_SCRUB_PII`, as every client whose
+   *   code leaves `scrubSecrets` and `scrubPii` unset reads them
    *
    * A blank value is unset, as the CLI reads them. No `OTEL_*` variable is
    * read: the SDK's tracer provider is built part by part.
    */
   public static fromEnv(hooks?: Hooks): Telmoni {
-    const env = typeof process !== 'undefined' ? process.env : undefined;
+    const env = environment();
     return new Telmoni(
       {
         endpoint: env?.['TELMONI_ENDPOINT'],

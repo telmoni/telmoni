@@ -4,10 +4,11 @@
  */
 
 import { trace } from '@opentelemetry/api';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MEDIA_MAX_BYTES } from '../src/contract';
 import type { Telmoni } from '../src/index';
+import { scrub, scrubbedOf, scrubber } from '../src/scrub';
 import {
   type ExportBody,
   type Harness,
@@ -16,6 +17,7 @@ import {
   answer,
   answerNames,
   answers,
+  attributesOf,
   fieldsOf,
   harness,
   kept,
@@ -556,6 +558,186 @@ describe('mask.json', () => {
 
   it('a mask that is no function is refused', () => {
     expect(() => harness({ mask: 'redact' as unknown as () => string })).toThrow('mask must be a function');
+  });
+});
+
+interface CanaryFixture {
+  planted: Record<string, string>;
+  modes: Record<string, { scrub_secrets: boolean; scrub_pii: boolean }>;
+  cases: Array<{ name: string; text: string; expect: Record<string, { text: string; scrubbed: Record<string, number> }> }>;
+}
+
+describe('canary.json', () => {
+  const fixture = loadFixture<CanaryFixture>('canary.json');
+  const replays = fixture.cases.flatMap((each) =>
+    Object.entries(fixture.modes).map(([mode, switches]) => ({ ...each, mode, switches, expected: each.expect[mode]! })),
+  );
+  const whole = fixture.cases.find((each) => Object.values(fixture.planted).every((value) => each.text.includes(value)))!;
+  const on = answer(200, { 'Telmoni-Content-Mode': 'on' }, '{}');
+  const message = (content: string) => [{ role: 'user', parts: [{ type: 'text', content }] }];
+  // Compared as JSON, never as bytes: each SDK's serializer writes a `dropped:<field>` key its own way.
+  const scrubbedIn = (sent: Record<string, unknown>): unknown =>
+    sent['telmoni.scrubbed'] === undefined ? undefined : JSON.parse(sent['telmoni.scrubbed'] as string);
+
+  // The shell running the suite may set either variable; the switches' defaults are under test.
+  beforeEach(() => {
+    vi.stubEnv('TELMONI_SCRUB_SECRETS', undefined);
+    vi.stubEnv('TELMONI_SCRUB_PII', undefined);
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  it.each(replays)('$mode scrubs "$name" as the fixture says', ({ text, switches, expected }) => {
+    const [scrubbed, counts] = scrub(text, switches.scrub_secrets, switches.scrub_pii);
+    expect(scrubbed).toBe(expected.text);
+    const carried = JSON.parse(scrubbedOf(counts)) as Record<string, number>;
+    expect(carried).toEqual(expected.scrubbed);
+    expect(Object.keys(carried)).toEqual(Object.keys(carried).sort());
+  });
+
+  it("counts a keyword's value in characters, an astral one once", () => {
+    // 7 characters in 8 UTF-16 units is no password, and 15 in 19 no token; one more makes each.
+    const smile = '\u{1F600}';
+    expect(scrub(`password=${smile}abcdef`, true, false)[0]).toBe(`password=${smile}abcdef`);
+    expect(scrub(`password=${smile}abcdefg`, true, false)[0]).toBe('password=[secret: password]');
+    expect(scrub(`token=${smile.repeat(4)}a1b2c3d4e5f`, true, false)[0]).toBe(`token=${smile.repeat(4)}a1b2c3d4e5f`);
+    expect(scrub(`token=${smile.repeat(4)}a1b2c3d4e5fg`, true, false)[0]).toBe('token=[secret: token]');
+  });
+
+  it.each(Object.entries(fixture.modes))('a client keeping content sends a message as %s scrubs it, counted', async (mode, switches) => {
+    const expected = whole.expect[mode]!;
+    // `sdk_default` is a client built with neither switch set.
+    const set = mode === 'sdk_default' ? {} : { scrubSecrets: switches.scrub_secrets, scrubPii: switches.scrub_pii };
+    const h = harness({ apiKey: 'k', captureContent: true, ...set }, {}, [on, on]);
+    try {
+      await aRun(h);
+      h.telmoni.run('support-bot', (run) => {
+        run.modelCall('gpt-4o', { inputMessages: message(whole.text) }, () => {});
+      });
+      expect(await h.telmoni.flush()).toBe(true);
+    } finally {
+      await h.telmoni.shutdown();
+    }
+    const sent = attributesOf(h.transport.spans().find((span) => span.name === 'chat gpt-4o')!);
+    expect(JSON.parse(sent['gen_ai.input.messages'] as string)).toEqual(message(expected.text));
+    expect(scrubbedIn(sent)).toEqual(Object.keys(expected.scrubbed).length > 0 ? expected.scrubbed : undefined);
+    for (const value of Object.values(fixture.planted)) {
+      if (!expected.text.includes(value)) expect(h.transport.text()).not.toContain(value);
+    }
+  });
+
+  it("scrubs a recorded run's content as a live run's", async () => {
+    const start = Date.parse('2026-11-05T10:00:00.000Z');
+    const h = harness({ apiKey: 'k', captureContent: true }, {}, [on, on]);
+    try {
+      await aRun(h);
+      h.telmoni.recordRun({
+        runId: '5f0c9a7e-3b1d-4c2a-9e8f-1a2b3c4d5e6f',
+        agent: 'support-bot',
+        start,
+        end: start + 1000,
+        inside: [
+          {
+            type: 'tool_call',
+            name: 'query',
+            start,
+            end: start + 500,
+            arguments: { user: 'app', password: 'Hunter2-canary!' },
+            result: fixture.planted.connection_string,
+          },
+        ],
+      });
+      expect(await h.telmoni.flush()).toBe(true);
+    } finally {
+      await h.telmoni.shutdown();
+    }
+    const sent = attributesOf(h.transport.spans().find((span) => span.name === 'execute_tool query')!);
+    expect(sent).toMatchObject({
+      'gen_ai.tool.call.arguments': '{"user":"app","password":"[secret: password]"}',
+      'gen_ai.tool.call.result': '[secret: connection_string]',
+    });
+    expect(scrubbedIn(sent)).toEqual({ 'secret:connection_string': 1, 'secret:password': 1 });
+  });
+
+  it("scrubs a message after its images are lifted out, so an image's base64 is never read", async () => {
+    // Base64 that holds `/home/`, which read as a home folder would break the image.
+    const image = 'AA/home/AAAA';
+    const h = harness({ apiKey: 'k', captureContent: true, scrubPii: true }, {}, [on, on]);
+    const blob = [{ role: 'user', parts: [{ type: 'blob', modality: 'image', mime_type: 'image/png', content: image }] }];
+    try {
+      await aRun(h);
+      h.telmoni.run('support-bot', (run) => {
+        run.modelCall('gpt-4o', { inputMessages: blob }, () => {});
+      });
+      expect(await h.telmoni.flush()).toBe(true);
+    } finally {
+      await h.telmoni.shutdown();
+    }
+    expect(h.transport.uploads.map((upload) => Buffer.from(upload.body).toString('base64'))).toEqual([image]);
+    const sent = attributesOf(h.transport.spans().find((span) => span.name === 'chat gpt-4o')!);
+    expect(JSON.parse(sent['gen_ai.input.messages'] as string)).toEqual([
+      {
+        role: 'user',
+        parts: [{ type: 'file', modality: 'image', mime_type: 'image/png', file_id: expect.stringMatching(/^telmoni:[0-9a-f]{64}$/) }],
+      },
+    ]);
+    expect(sent).not.toHaveProperty('telmoni.scrubbed');
+  });
+
+  it('a scrubber that fails on a field sends the span without it, counted by its key, the rest scrubbed', async () => {
+    const real = scrubber.scrub;
+    const failing = vi.spyOn(scrubber, 'scrub').mockImplementation((text, secrets, pii) => {
+      if (text.startsWith('fails')) throw new Error(text);
+      return real(text, secrets, pii);
+    });
+    const key = fixture.planted.cloud_key!;
+    const h = harness({ apiKey: 'k', captureContent: true }, {}, [on, on]);
+    try {
+      await aRun(h);
+      h.telmoni.run('support-bot', (run) => {
+        run.modelCall('gpt-4o', { inputMessages: `fails on ${key}` }, (call) => call.answered({ outputMessages: `key ${key}` }));
+      });
+      expect(await h.telmoni.flush()).toBe(true);
+    } finally {
+      failing.mockRestore();
+      await h.telmoni.shutdown();
+    }
+    const sent = attributesOf(h.transport.spans().find((span) => span.name === 'chat gpt-4o')!);
+    expect(sent).not.toHaveProperty('gen_ai.input.messages');
+    expect(sent['gen_ai.output.messages']).toBe('key [secret: aws_key]');
+    expect(scrubbedIn(sent)).toEqual({ 'dropped:gen_ai.input.messages': 1, 'secret:aws_key': 1 });
+    expect(h.transport.text()).not.toContain(key);
+    expect(h.warnings.join('\n')).not.toContain(key);
+  });
+
+  // Each repeated to 256 KiB: shapes a rule could read again from every start, which would take minutes, not milliseconds.
+  const hostile = [
+    ['eyJ-', ''],
+    ['eyJ', ''],
+    ['token=', ''],
+    ['password=', ''],
+    ['atm_', ''],
+    ['xsk-ant-', ''],
+    ['xoxb-', '_'],
+    ['a', ''],
+    ['a@', ''],
+    ['a@b.', ''],
+    ['x://', ''],
+    ['a:b', ' '],
+    ['1', ''],
+    ['1 ', ''],
+    ['1.', ''],
+    ['a:', ''],
+    ['/home/', ''],
+    ['AB12', ''],
+    ['-----BEGIN PRIVATE KEY-----', ''],
+    ['+1 ', ''],
+  ].flatMap(([unit, tail]) => [false, true].map((pii) => ({ unit: unit!, tail: tail!, pii })));
+
+  it.each(hostile)('scrubs "$unit" repeated to 256 KiB in under 2 s, PII $pii', ({ unit, tail, pii }) => {
+    const text = unit.repeat(Math.ceil(262_144 / unit.length)) + tail;
+    const started = performance.now();
+    scrub(text, true, pii);
+    expect(performance.now() - started).toBeLessThan(2000);
   });
 });
 

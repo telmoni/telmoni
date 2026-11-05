@@ -80,6 +80,8 @@ export const TOOL_CALL_RESULT = 'gen_ai.tool.call.result';
 /** What the exporter takes off a span unless asked and the project allows. */
 /** The content fields the exporter cut so a span fits an export, by name. */
 export const CONTENT_CUT = 'telmoni.content_cut';
+/** What the scrubbers replaced in a span's content, and the fields they dropped, counted: JSON, its keys sorted. */
+export const SCRUBBED = 'telmoni.scrubbed';
 /** The key a status message is handed to the mask by. */
 export const STATUS_DESCRIPTION = 'otel.status_description';
 /** A failure, as the conventions' `exception` event carries it: content. */
@@ -160,6 +162,10 @@ export const SCORES_SENT_MAX = 100;
 
 /** The variable `Telmoni.fromEnv` reads `captureContent` from: `1` turns it on, and anything else, or nothing, leaves it off. */
 export const CAPTURE_CONTENT_ENV = 'TELMONI_CAPTURE_CONTENT';
+/** The variable a client reads `scrubSecrets` from, left unset: `0` turns it off, and anything else, or nothing, leaves it on. */
+export const SCRUB_SECRETS_ENV = 'TELMONI_SCRUB_SECRETS';
+/** The variable a client reads `scrubPii` from, left unset: `1` turns it on, and anything else, or nothing, leaves it off. */
+export const SCRUB_PII_ENV = 'TELMONI_SCRUB_PII';
 
 /** The answer's header naming the project's content mode: off or on. */
 export const CONTENT_MODE_HEADER = 'Telmoni-Content-Mode';

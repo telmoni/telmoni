@@ -21,6 +21,7 @@ use serde_json::json;
 
 use crate::config::{Config, Mask};
 use crate::contract;
+use crate::scrub::{self, Counts, Switches};
 use crate::transport::{Answer, Method, Transport, refusal};
 use crate::warnings::{Warner, Warning, WarningKind};
 use crate::{VERSION, lock};
@@ -58,6 +59,9 @@ pub(crate) struct Exporter {
     bearer: Option<String>,
     capture_content: bool,
     mask: Option<Mask>,
+    scrubbers: Switches,
+    /// What scrubs a field: [`scrub::scrub`], which a test swaps for one that fails.
+    scrubber: fn(&str, Switches) -> Option<(String, Counts)>,
     transport: Box<dyn Transport>,
     sleep: Box<dyn Fn(Duration) + Send + Sync>,
     warner: Arc<Warner>,
@@ -87,6 +91,8 @@ impl Exporter {
             bearer: config.api_key.clone(),
             capture_content: config.capture_content,
             mask: config.mask.clone(),
+            scrubbers: config.scrubbers(),
+            scrubber: scrub::scrub,
             transport,
             sleep,
             warner,
@@ -152,7 +158,8 @@ impl Exporter {
                 Cow::Owned(lifted) => Some(lifted),
                 Cow::Borrowed(_) => None,
             };
-            lifted.map_or(masked, Cow::Owned)
+            // As sent, its images out: a rule could misread their base64.
+            self.scrub(lifted.map_or(masked, Cow::Owned))
         } else {
             Cow::Borrowed(spans)
         };
@@ -368,46 +375,56 @@ impl Exporter {
             .iter()
             .cloned()
             .map(|mut span| {
-                span.attributes = std::mem::take(&mut span.attributes)
-                    .into_iter()
-                    .filter_map(|attribute| {
-                        let key = attribute.key.as_str();
-                        if contract::is_content(key) && key != contract::CONTENT_CUT {
-                            self.masked(mask, attribute)
-                        } else {
-                            Some(attribute)
-                        }
-                    })
-                    .collect();
-                for event in &mut span.events.events {
-                    let score = is_score(event);
-                    event.attributes = std::mem::take(&mut event.attributes)
-                        .into_iter()
-                        .filter_map(|attribute| {
-                            if score && is_score_key(&attribute) {
-                                Some(attribute)
-                            } else {
-                                self.masked(mask, attribute)
-                            }
-                        })
-                        .collect();
-                }
-                if let Status::Error { description } = &span.status
-                    && !description.is_empty()
-                {
-                    let given =
-                        KeyValue::new(contract::STATUS_DESCRIPTION, description.to_string());
-                    span.status = Status::Error {
-                        description: self
-                            .masked(mask, given)
-                            .map(|kept| kept.value.as_str().into_owned().into())
-                            .unwrap_or_default(),
-                    };
-                }
+                content_fields(&mut span, |attribute| self.masked(mask, attribute));
                 span
             })
             .collect();
         Cow::Owned(masked)
+    }
+
+    /// `spans` with every field the mask is handed as the scrubbers leave it; a
+    /// span they changed counts what in `telmoni.scrubbed`.
+    fn scrub<'a>(&self, spans: Cow<'a, [SpanData]>) -> Cow<'a, [SpanData]> {
+        if !self.scrubbers.any() {
+            return spans;
+        }
+        let scrubbed = spans
+            .into_owned()
+            .into_iter()
+            .map(|mut span| {
+                let mut counts = Counts::new();
+                content_fields(&mut span, |attribute| self.scrubbed(attribute, &mut counts));
+                if !counts.is_empty() {
+                    // A `BTreeMap` writes its keys sorted.
+                    let counts = serde_json::to_string(&counts).unwrap_or_default();
+                    span.attributes
+                        .push(KeyValue::new(contract::SCRUBBED, counts));
+                }
+                span
+            })
+            .collect();
+        Cow::Owned(scrubbed)
+    }
+
+    /// One field as the scrubbers leave it, each kind replaced counted; `None` where
+    /// they fail, counted as `dropped:<key>`, so it never leaves as it was.
+    fn scrubbed(&self, attribute: KeyValue, counts: &mut Counts) -> Option<KeyValue> {
+        let given = as_text(&attribute.value);
+        let Ok(Some((text, found))) =
+            panic::catch_unwind(AssertUnwindSafe(|| (self.scrubber)(&given, self.scrubbers)))
+        else {
+            *counts
+                .entry(format!("dropped:{}", attribute.key.as_str()))
+                .or_default() += 1;
+            return None;
+        };
+        if found.is_empty() {
+            return Some(attribute);
+        }
+        for (kind, count) in found {
+            *counts.entry(kind).or_default() += count;
+        }
+        Some(KeyValue::new(attribute.key, text))
     }
 
     /// One field as the mask answers it, handed as a string, any other value as
@@ -792,6 +809,45 @@ enum Posted {
     Refused(u16, String),
     Failed(String, Option<(u16, String)>),
     GaveUp,
+}
+
+/// Each field of `span` the content lock decides on — a content field, an
+/// event's attribute but a score's own, the status message — as `each` answers it.
+fn content_fields(span: &mut SpanData, mut each: impl FnMut(KeyValue) -> Option<KeyValue>) {
+    span.attributes = std::mem::take(&mut span.attributes)
+        .into_iter()
+        .filter_map(|attribute| {
+            let key = attribute.key.as_str();
+            if contract::is_content(key) && key != contract::CONTENT_CUT {
+                each(attribute)
+            } else {
+                Some(attribute)
+            }
+        })
+        .collect();
+    for event in &mut span.events.events {
+        let score = is_score(event);
+        event.attributes = std::mem::take(&mut event.attributes)
+            .into_iter()
+            .filter_map(|attribute| {
+                if score && is_score_key(&attribute) {
+                    Some(attribute)
+                } else {
+                    each(attribute)
+                }
+            })
+            .collect();
+    }
+    if let Status::Error { description } = &span.status
+        && !description.is_empty()
+    {
+        let given = KeyValue::new(contract::STATUS_DESCRIPTION, description.to_string());
+        span.status = Status::Error {
+            description: each(given)
+                .map(|kept| kept.value.as_str().into_owned().into())
+                .unwrap_or_default(),
+        };
+    }
 }
 
 /// Whether `event` is a score, whose own keys are metadata where every other
@@ -1459,6 +1515,59 @@ mod tests {
                 WarningKind::TooLarge.into()
             )]
         );
+    }
+
+    /// A field the scrubber fails on is left out, never sent raw, and named in `telmoni.scrubbed`.
+    #[test]
+    fn a_field_the_scrubber_fails_on_is_left_out_and_named() {
+        let (kept, warnings) = (Kept::default(), Arc::default());
+        let mut sender = exporter(&kept, &warnings);
+        sender.capture_content = true;
+        *lock(&sender.content_mode) = Some(ContentMode::On);
+        sender.scrubbers = Switches {
+            secrets: true,
+            pii: false,
+        };
+        sender.scrubber = |text, on| {
+            if text.contains("fails") {
+                panic!("the scrubber failed");
+            }
+            scrub::scrub(text, on)
+        };
+        let mut failing = spans(&[1]);
+        failing[0].attributes.extend([
+            KeyValue::new("gen_ai.input.messages", "it fails on AKIAIOSFODNN7EXAMPLE"),
+            KeyValue::new("gen_ai.output.messages", "key AKIAIOSFODNN7EXAMPLE"),
+        ]);
+        failing[0].status = Status::error("it fails here");
+        sender.export(&failing);
+        let body = lock(&kept.0)[0].clone();
+        assert!(!String::from_utf8_lossy(&body).contains("fails"));
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let sent = &body["resourceSpans"][0]["scopeSpans"][0]["spans"][0];
+        let attributes: BTreeMap<&str, &serde_json::Value> = sent["attributes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|each| (each["key"].as_str().unwrap(), &each["value"]["stringValue"]))
+            .collect();
+        assert!(!attributes.contains_key("gen_ai.input.messages"));
+        assert_eq!(
+            attributes["gen_ai.output.messages"],
+            "key [secret: aws_key]"
+        );
+        let scrubbed: serde_json::Value =
+            serde_json::from_str(attributes[contract::SCRUBBED].as_str().unwrap()).unwrap();
+        assert_eq!(
+            scrubbed,
+            json!({
+                "dropped:gen_ai.input.messages": 1,
+                "dropped:otel.status_description": 1,
+                "secret:aws_key": 1
+            })
+        );
+        assert_eq!(sent["status"], json!({ "code": 2 }));
+        assert!(lock(&warnings).is_empty());
     }
 
     /// A transport that answers each request from `answers` in turn, `None` a

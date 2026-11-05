@@ -20,8 +20,8 @@ use opentelemetry::trace::TraceContextExt as _;
 use serde_json::{Value, json};
 use telmoni::transport::{Answer, TransportError};
 use telmoni::{
-    Config, ContentMode, Hooks, ModelCallOptions, Reply, RunOptions, Telmoni, ToolCallOptions,
-    Usage,
+    Config, ContentMode, Hooks, ModelCallOptions, Reply, RunOptions, RunRecord, Telmoni,
+    ToolCallOptions, ToolCallRecord, Usage,
 };
 
 /// The fixture's normalization, as its README sets it out.
@@ -842,6 +842,93 @@ fn a_configuration_says_whether_a_mask_is_set_and_nothing_of_it() {
     };
     assert!(format!("{config:?}").contains(r#"mask: Some("<set>")"#));
     assert!(format!("{:?}", keyed()).contains("mask: None"));
+}
+
+/// Content leaving, live or recorded, holds the canary's markers, counted in `telmoni.scrubbed`.
+#[test]
+fn content_leaves_with_the_canary_values_scrubbed_and_counted() -> Outcome {
+    let fixture = load_fixture("canary.json")?;
+    let cases = field(&fixture, "cases")?.as_array().ok_or("cases")?;
+    let prose = cases.first().ok_or("the prose case")?;
+    let arguments = cases.get(2).ok_or("the arguments case")?;
+    let expected = |case: &Value| -> Result<(Value, Value), Failure> {
+        let mode = field(field(case, "expect")?, "plugin_default")?;
+        Ok((
+            field(mode, "text")?.clone(),
+            field(mode, "scrubbed")?.clone(),
+        ))
+    };
+    let harness = Harness::answering(
+        Config {
+            capture_content: true,
+            scrub_secrets: Some(true),
+            scrub_pii: Some(true),
+            ..keyed()
+        },
+        std::iter::repeat_n(Ok(common::mode_on()), 3),
+    )?;
+    let message =
+        json!([{ "role": "user", "parts": [{ "type": "text", "content": text(prose, "text")? }] }]);
+    let run = harness.telmoni.run("support-bot", RunOptions::default())?;
+    let call = run.model_call(
+        "gpt-4o",
+        ModelCallOptions {
+            input_messages: Some(message.into()),
+            ..ModelCallOptions::default()
+        },
+    )?;
+    call.end();
+    run.end();
+    let at = std::time::SystemTime::now();
+    harness.telmoni.record_run(RunRecord {
+        inside: vec![
+            ToolCallRecord {
+                arguments: Some(text(arguments, "text")?.into()),
+                ..ToolCallRecord::new("lookup", at, at)
+            }
+            .into(),
+        ],
+        ..RunRecord::new(
+            "3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d",
+            "support-bot",
+            at,
+            at,
+        )
+    })?;
+    harness.flush()?;
+
+    let spans = harness.spans()?;
+    // Compared as JSON, as every SDK's serializer writes it.
+    let scrubbed = |span: &Value| -> Result<Value, Failure> {
+        Ok(serde_json::from_str(text(
+            &attributes_of(span)?,
+            "telmoni.scrubbed",
+        )?)?)
+    };
+    let call = common::only(&spans, "chat ")?;
+    let messages: Value =
+        serde_json::from_str(text(&attributes_of(call)?, "gen_ai.input.messages")?)?;
+    let (want, counts) = expected(prose)?;
+    assert_eq!(messages.pointer("/0/parts/0/content"), Some(&want));
+    assert_eq!(scrubbed(call)?, counts);
+    let tool = common::only(&spans, "execute_tool ")?;
+    let (want, counts) = expected(arguments)?;
+    assert_eq!(
+        attributes_of(tool)?.get("gen_ai.tool.call.arguments"),
+        Some(&want)
+    );
+    assert_eq!(scrubbed(tool)?, counts);
+    for run in common::starting_with(&spans, "invoke_agent ") {
+        assert!(attributes_of(run)?.get("telmoni.scrubbed").is_none());
+    }
+    let sent = harness.transport.text();
+    for (name, planted) in field(&fixture, "planted")?.as_object().ok_or("planted")? {
+        assert!(
+            !sent.contains(planted.as_str().ok_or(name.as_str())?),
+            "{name}"
+        );
+    }
+    Ok(())
 }
 
 /// In nanoseconds, a retry its own: ingest moves a run by it.

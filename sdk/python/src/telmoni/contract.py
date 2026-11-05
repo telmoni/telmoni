@@ -80,6 +80,10 @@ SYSTEM_INSTRUCTIONS = "gen_ai.system_instructions"
 TOOL_CALL_ARGUMENTS = "gen_ai.tool.call.arguments"
 TOOL_CALL_RESULT = "gen_ai.tool.call.result"
 CONTENT_CUT = "telmoni.content_cut"
+SCRUBBED = "telmoni.scrubbed"
+"""What the scrubbers took out of a span's content, counted by kind, as JSON with
+its keys sorted (``{"pii:email":1,"secret:aws_key":2}``), and ``dropped:<field>``
+for a field one failed on, sent without it; absent where they took out nothing."""
 # A failure, as the conventions' `exception` event carries it: content.
 EXCEPTION_EVENT = "exception"
 EXCEPTION_TYPE = "exception.type"
@@ -178,6 +182,14 @@ MEDIA_DEFAULT_TYPE = "application/octet-stream"
 CAPTURE_CONTENT_ENV = "TELMONI_CAPTURE_CONTENT"
 """The variable ``Config.from_env`` reads ``capture_content`` from: ``1``
 turns it on, and anything else, or nothing, leaves it off."""
+SCRUB_SECRETS_ENV = "TELMONI_SCRUB_SECRETS"
+"""The variable a configuration reads ``scrub_secrets`` from where its code left it
+unset: ``0`` turns the secrets' scrubber off, and anything else, or nothing,
+leaves it on."""
+SCRUB_PII_ENV = "TELMONI_SCRUB_PII"
+"""The variable a configuration reads ``scrub_pii`` from where its code left it
+unset: ``1`` turns personal data's scrubber on, and anything else, or nothing,
+leaves it off."""
 
 CONTENT_MODE_HEADER = "Telmoni-Content-Mode"
 """The answer's header naming the project's content mode: off or on."""

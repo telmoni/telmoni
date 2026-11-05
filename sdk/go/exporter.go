@@ -176,7 +176,9 @@ func (e *exporter) export(spans []sdktrace.ReadOnlySpan) bool {
 	// Decided once, so no answer met halfway sends content the mask never saw.
 	keep := e.keepsContent()
 	if keep {
-		spans = e.lift(e.mask(spans))
+		// Scrubbed as sent, its images lifted out: a match in their base64
+		// would break them.
+		spans = e.scrub(e.lift(e.mask(spans)))
 	}
 	return e.exportLifted(spans, keep)
 }
@@ -406,7 +408,8 @@ type liftedSpan struct {
 
 func (s liftedSpan) Attributes() []attribute.KeyValue { return s.attributes }
 
-// maskedSpan is a span whose content the code's mask answered.
+// maskedSpan is a span whose content the code's mask or the scrubbers
+// answered.
 type maskedSpan struct {
 	sdktrace.ReadOnlySpan
 	attributes []attribute.KeyValue
@@ -418,61 +421,73 @@ func (s maskedSpan) Attributes() []attribute.KeyValue { return s.attributes }
 func (s maskedSpan) Events() []sdktrace.Event         { return s.events }
 func (s maskedSpan) Status() sdktrace.Status          { return s.status }
 
-// mask is spans with every content field, event attribute but a score's own
-// and status message as Config.Mask answers it, before a part it takes out could be put.
+// mask is spans with their content as Config.Mask answers it, before a part
+// it takes out could be put.
 func (e *exporter) mask(spans []sdktrace.ReadOnlySpan) []sdktrace.ReadOnlySpan {
 	if e.config.Mask == nil {
 		return spans
 	}
 	out := make([]sdktrace.ReadOnlySpan, len(spans))
 	for i, span := range spans {
-		attributes := make([]attribute.KeyValue, 0, len(span.Attributes()))
-		for _, kv := range span.Attributes() {
-			if key := string(kv.Key); content[key] && key != attrContentCut {
-				if masked, ok := e.masked(kv); ok {
-					attributes = append(attributes, masked)
-				}
-				continue
-			}
-			attributes = append(attributes, kv)
-		}
-		events := make([]sdktrace.Event, 0, len(span.Events()))
-		for _, event := range span.Events() {
-			kept := make([]attribute.KeyValue, 0, len(event.Attributes))
-			for _, kv := range event.Attributes {
-				if scoreKey(event, kv) {
-					kept = append(kept, kv)
-					continue
-				}
-				if masked, ok := e.masked(kv); ok {
-					kept = append(kept, masked)
-				}
-			}
-			event.Attributes = kept
-			events = append(events, event)
-		}
-		status := span.Status()
-		if status.Description != "" {
-			masked, ok := e.masked(attribute.String(attrStatusDescription, status.Description))
-			status.Description = ""
-			if ok {
-				status.Description = masked.Value.AsString()
-			}
-		}
-		out[i] = maskedSpan{span, attributes, events, status}
+		out[i] = answered(span, e.masked)
 	}
 	return out
 }
 
-// masked is one field as the mask answers it, handed as a string, any other
-// value as its JSON; false to send the span without it. An answer unchanged
-// keeps the value as it was.
+// answered is span with every content field, event attribute but a score's
+// own and status message as field answers it, or without it for false: one
+// rule for what the mask and the scrubbers are handed.
+func answered(span sdktrace.ReadOnlySpan, field func(attribute.KeyValue) (attribute.KeyValue, bool)) maskedSpan {
+	attributes := make([]attribute.KeyValue, 0, len(span.Attributes()))
+	for _, kv := range span.Attributes() {
+		if key := string(kv.Key); content[key] && key != attrContentCut {
+			if got, ok := field(kv); ok {
+				attributes = append(attributes, got)
+			}
+			continue
+		}
+		attributes = append(attributes, kv)
+	}
+	events := make([]sdktrace.Event, 0, len(span.Events()))
+	for _, event := range span.Events() {
+		kept := make([]attribute.KeyValue, 0, len(event.Attributes))
+		for _, kv := range event.Attributes {
+			if scoreKey(event, kv) {
+				kept = append(kept, kv)
+				continue
+			}
+			if got, ok := field(kv); ok {
+				kept = append(kept, got)
+			}
+		}
+		event.Attributes = kept
+		events = append(events, event)
+	}
+	status := span.Status()
+	if status.Description != "" {
+		got, ok := field(attribute.String(attrStatusDescription, status.Description))
+		status.Description = ""
+		if ok {
+			status.Description = got.Value.AsString()
+		}
+	}
+	return maskedSpan{span, attributes, events, status}
+}
+
+// handed is a field's value as the mask and the scrubbers are handed it: a
+// string as it is, any other value as its JSON.
+func handed(v attribute.Value) string {
+	if v.Type() == attribute.STRING {
+		return v.AsString()
+	}
+	return asJSON(v.AsInterface())
+}
+
+// masked is one field as the mask answers it; false to send the span without
+// it. An answer unchanged keeps the value as it was.
 func (e *exporter) masked(kv attribute.KeyValue) (attribute.KeyValue, bool) {
 	key := string(kv.Key)
-	given := kv.Value.AsString()
-	if kv.Value.Type() != attribute.STRING {
-		given = asJSON(kv.Value.AsInterface())
-	}
+	given := handed(kv.Value)
 	answer, keep, failed := e.callMask(key, given)
 	if failed {
 		// The key alone: a panic's words may hold the content.
@@ -497,6 +512,54 @@ func (e *exporter) callMask(key, value string) (answer string, keep, failed bool
 	}()
 	answer, keep = e.config.Mask(key, value)
 	return answer, keep, false
+}
+
+// scrub is spans with the scrubbers run over each field the mask kept, as it
+// is sent, each span they changed counting in telmoni.scrubbed what they
+// replaced, and each field they failed on, which goes rather than leave
+// unscrubbed.
+func (e *exporter) scrub(spans []sdktrace.ReadOnlySpan) []sdktrace.ReadOnlySpan {
+	secrets, pii := *e.config.ScrubSecrets, *e.config.ScrubPII
+	if !secrets && !pii {
+		return spans
+	}
+	out := slices.Clone(spans)
+	for i, span := range spans {
+		counts := map[string]int{}
+		scrubbed := answered(span, func(kv attribute.KeyValue) (attribute.KeyValue, bool) {
+			text, found, failed := callScrubber(handed(kv.Value), secrets, pii)
+			if failed {
+				counts["dropped:"+string(kv.Key)]++
+				return kv, false
+			}
+			if len(found) == 0 {
+				return kv, true
+			}
+			for kind, n := range found {
+				counts[kind] += n
+			}
+			return attribute.String(string(kv.Key), text), true
+		})
+		if len(counts) == 0 {
+			continue
+		}
+		// Ours alone: the application's own would go beside it.
+		attributes := slices.DeleteFunc(scrubbed.attributes, func(kv attribute.KeyValue) bool { return kv.Key == attrScrubbed })
+		scrubbed.attributes = append(attributes, attribute.String(attrScrubbed, asJSON(counts)))
+		out[i] = scrubbed
+	}
+	return out
+}
+
+// callScrubber is the scrubbers' answer, failed where they panicked.
+func callScrubber(text string, secrets, pii bool) (scrubbed string, counts map[string]int, failed bool) {
+	defer func() {
+		if recover() != nil {
+			scrubbed, counts, failed = "", nil, true
+		}
+	}()
+	scrubbed, counts = scrubber(text, secrets, pii)
+	return scrubbed, counts, false
 }
 
 // lift is spans with every blob part of their messages lifted out: a blob

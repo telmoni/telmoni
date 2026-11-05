@@ -7,6 +7,7 @@ use opentelemetry_sdk::trace::ShouldSample;
 use serde::{Deserialize, Serialize};
 
 use crate::contract;
+use crate::scrub::Switches;
 use crate::transport::{host_of, is_this_machine};
 
 /// The machine host; the console's, `https://telmoni.com`, serves people.
@@ -40,6 +41,12 @@ pub struct Config {
     /// field; with `panic = "abort"` it ends the process, as any panic does.
     #[serde(skip)]
     pub mask: Option<Mask>,
+    /// Whether content that leaves has each key, token or password in it sent as
+    /// `[secret: <kind>]`; `None` reads `TELMONI_SCRUB_SECRETS`, whose `0` alone turns it off.
+    pub scrub_secrets: Option<bool>,
+    /// Whether content that leaves has each email, phone, card or other PII in it sent
+    /// as `[pii: <kind>]`; `None` reads `TELMONI_SCRUB_PII`, whose `1` alone turns it on.
+    pub scrub_pii: Option<bool>,
     /// The sampler whose decision a run takes when it starts a trace of its
     /// own, so an application sampling at a tenth keeps a tenth of its own
     /// spans inside runs as outside them; `None` samples. The run itself is
@@ -92,6 +99,8 @@ impl fmt::Debug for Config {
             api_key,
             capture_content,
             mask,
+            scrub_secrets,
+            scrub_pii,
             sampler,
             environment,
             release,
@@ -103,6 +112,8 @@ impl fmt::Debug for Config {
             .field("api_key", &api_key.as_ref().map(|_| "<redacted>"))
             .field("capture_content", capture_content)
             .field("mask", &mask.as_ref().map(|_| "<set>"))
+            .field("scrub_secrets", scrub_secrets)
+            .field("scrub_pii", scrub_pii)
             .field("sampler", sampler)
             .field("environment", environment)
             .field("release", release)
@@ -119,6 +130,8 @@ impl Default for Config {
             api_key: None,
             capture_content: false,
             mask: None,
+            scrub_secrets: None,
+            scrub_pii: None,
             sampler: None,
             environment: None,
             release: None,
@@ -145,16 +158,17 @@ impl Config {
         .normalized()
     }
 
-    /// Reads `TELMONI_ENDPOINT`, `TELMONI_API_KEY` and `TELMONI_ORG`,
-    /// `TELMONI_ENVIRONMENT` and `TELMONI_RELEASE` for the deployment, and
-    /// `TELMONI_CAPTURE_CONTENT`, whose `1` alone sets `capture_content`, a
-    /// blank value being unset, as the CLI reads them. No `OTEL_*` variable is
-    /// read: the SDK's tracer provider is built part by part.
+    /// Reads `TELMONI_ENDPOINT`, `TELMONI_API_KEY`, `TELMONI_ORG`, `TELMONI_ENVIRONMENT`,
+    /// `TELMONI_RELEASE`, `TELMONI_CAPTURE_CONTENT`, whose `1` alone sets `capture_content`,
+    /// `TELMONI_SCRUB_SECRETS` and `TELMONI_SCRUB_PII`, a blank value being unset. No
+    /// `OTEL_*` variable is read: the SDK's tracer provider is built part by part.
     #[must_use]
     pub fn from_env() -> Self {
         Self {
             // Only 1: a "false" or a "no" must never let content out.
             capture_content: env_var(contract::CAPTURE_CONTENT_ENV).as_deref() == Some("1"),
+            scrub_secrets: Some(scrub_secrets_env()),
+            scrub_pii: Some(scrub_pii_env()),
             environment: env_var("TELMONI_ENVIRONMENT"),
             release: env_var("TELMONI_RELEASE"),
             ..Self::new(
@@ -175,6 +189,24 @@ impl Config {
         self.release = self.release.as_deref().and_then(unset_if_blank);
         self
     }
+
+    /// The scrubbers content leaves through: each as set here, else as its variable says.
+    pub(crate) fn scrubbers(&self) -> Switches {
+        Switches {
+            secrets: self.scrub_secrets.unwrap_or_else(scrub_secrets_env),
+            pii: self.scrub_pii.unwrap_or_else(scrub_pii_env),
+        }
+    }
+}
+
+/// Only `0`: a "false" or a "no" must never let a secret out.
+fn scrub_secrets_env() -> bool {
+    env_var(contract::SCRUB_SECRETS_ENV).as_deref() != Some("0")
+}
+
+/// Only `1`, as content's own switch reads.
+fn scrub_pii_env() -> bool {
+    env_var(contract::SCRUB_PII_ENV).as_deref() == Some("1")
 }
 
 /// A variable's value, `None` when unset, empty or whitespace; one that is no Unicode is

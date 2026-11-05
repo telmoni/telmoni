@@ -96,7 +96,7 @@ describe('configuration', () => {
     }).toThrow(TypeError);
   });
 
-  it('reads the six variables from the environment and no other', () => {
+  it('reads the eight variables from the environment and no other', () => {
     vi.stubEnv('TELMONI_ENDPOINT', undefined);
     vi.stubEnv('TELMONI_API_KEY', '');
     vi.stubEnv('TELMONI_ORG', 'org_2');
@@ -139,6 +139,54 @@ describe('configuration', () => {
     expect(new Telmoni({ captureContent: false }).config.captureContent).toBe(false);
     vi.stubEnv('TELMONI_CAPTURE_CONTENT', undefined);
     expect(new Telmoni({ captureContent: true }).config.captureContent).toBe(true);
+  });
+
+  it.each([
+    [undefined, true],
+    ['', true],
+    ['0', false],
+    [' 0\t', false],
+    ['\u00850\u3000', false],
+    ['1', true],
+    ['false', true],
+    ['off', true],
+    ['00', true],
+    ['0.0', true],
+  ])('reads TELMONI_SCRUB_SECRETS %o as scrubSecrets %s: 0 alone turns it off', (given, on) => {
+    vi.stubEnv('TELMONI_SCRUB_SECRETS', given);
+    expect(Telmoni.fromEnv().config.scrubSecrets).toBe(on);
+  });
+
+  it.each([
+    [undefined, false],
+    ['', false],
+    ['1', true],
+    [' 1\t', true],
+    ['0', false],
+    ['true', false],
+    ['yes', false],
+    ['01', false],
+    ['1.0', false],
+  ])('reads TELMONI_SCRUB_PII %o as scrubPii %s: 1 alone turns it on', (given, on) => {
+    vi.stubEnv('TELMONI_SCRUB_PII', given);
+    expect(Telmoni.fromEnv().config.scrubPii).toBe(on);
+  });
+
+  it('takes scrubSecrets and scrubPii set in code over the environment, which decides them left unset', () => {
+    vi.stubEnv('TELMONI_SCRUB_SECRETS', '0');
+    vi.stubEnv('TELMONI_SCRUB_PII', '1');
+    expect(new Telmoni({ scrubSecrets: true, scrubPii: false }).config).toMatchObject({ scrubSecrets: true, scrubPii: false });
+    expect(new Telmoni().config).toMatchObject({ scrubSecrets: false, scrubPii: true });
+    vi.stubEnv('TELMONI_SCRUB_SECRETS', undefined);
+    vi.stubEnv('TELMONI_SCRUB_PII', undefined);
+    expect(new Telmoni({ scrubSecrets: false, scrubPii: true }).config).toMatchObject({ scrubSecrets: false, scrubPii: true });
+    expect(new Telmoni().config).toMatchObject({ scrubSecrets: true, scrubPii: false });
+  });
+
+  it('refuses a scrubSecrets or scrubPii that is no boolean', () => {
+    // 'false' from the environment is truthy, and 0 falsy: neither is what the code meant.
+    expect(() => new Telmoni({ scrubSecrets: 0 as unknown as boolean })).toThrow('scrubSecrets must be a boolean');
+    expect(() => new Telmoni({ scrubPii: 'false' as unknown as boolean })).toThrow('scrubPii must be a boolean');
   });
 
   it('holds back every name the server keeps as content, and no other', () => {

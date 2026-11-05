@@ -26,8 +26,8 @@ point `TELMONI_ENDPOINT` at its machine host; the docs read in
 from telmoni import Telmoni, Usage
 
 # Reads TELMONI_ENDPOINT, TELMONI_API_KEY (a key with the ingest scope),
-# TELMONI_ORG, TELMONI_ENVIRONMENT, TELMONI_RELEASE and TELMONI_CAPTURE_CONTENT,
-# and nothing else.
+# TELMONI_ORG, TELMONI_ENVIRONMENT, TELMONI_RELEASE, TELMONI_CAPTURE_CONTENT,
+# TELMONI_SCRUB_SECRETS and TELMONI_SCRUB_PII, and nothing else.
 telmoni = Telmoni.from_env()
 
 
@@ -246,15 +246,31 @@ config.mask = mask
 telmoni = Telmoni(config)
 ```
 
+Where content is sent, two scrubbers then read the fields the mask is handed, as
+the mask left them and with their images lifted out: each secret (a private
+key, a connection string, a JWT, a provider's API key, a password or token set
+beside its name) is replaced by its kind, `[secret: aws_key]`, unless
+`Config(scrub_secrets=False)`; and with `Config(scrub_pii=True)` each piece of
+personal data (an email address, a phone, card or IBAN number, an SSN, an IP
+address, a home folder's path), `[pii: email]`. Left unset, each switch is read
+from the environment: `TELMONI_SCRUB_SECRETS=0` alone turns the first off, and
+`TELMONI_SCRUB_PII=1` alone turns the second on. A span they changed carries
+`telmoni.scrubbed`, what each took out counted by kind as JSON
+(`{"pii:email":1,"secret:aws_key":2}`); a field a scrubber fails on is sent
+without it, counted as `dropped:<field>`, never as it was.
+
 ## Configuration
 
-`Config(endpoint, organization_id, api_key, capture_content, mask, sampler,
-environment, release, prices)`, or `Config.from_env()`, which reads `TELMONI_ENDPOINT`
+`Config(endpoint, organization_id, api_key, capture_content, mask, scrub_secrets,
+scrub_pii, sampler, environment, release, prices)`, or `Config.from_env()`, which reads `TELMONI_ENDPOINT`
 (default `https://api.telmoni.com`), `TELMONI_API_KEY`, `TELMONI_ORG`,
 `TELMONI_ENVIRONMENT`, `TELMONI_RELEASE` and `TELMONI_CAPTURE_CONTENT`, a blank
 value counting as unset. `TELMONI_CAPTURE_CONTENT` turns `capture_content` on
 with `1` alone, its blanks about it trimmed; anything else, or nothing, leaves
-it off, and a `capture_content` set in code afterwards stands.
+it off, and a `capture_content` set in code afterwards stands. Any
+configuration whose `scrub_secrets` or `scrub_pii` the code leaves unset reads
+`TELMONI_SCRUB_SECRETS` or `TELMONI_SCRUB_PII`, trimmed alike
+([Content](#content)); a `True` or `False` set in code stands over either.
 `environment` and `release` name the deployment every span is sent from, as
 the resource's `deployment.environment.name` and `service.version`. `prices`
 hands [the guard](#the-guard) prices of your own, a `ValueError` for one that

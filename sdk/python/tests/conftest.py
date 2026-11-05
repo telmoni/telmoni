@@ -21,7 +21,7 @@ from opentelemetry.sdk.trace.sampling import (
     SamplingResult,
 )
 
-from telmoni import Config, Telmoni, WarningInfo
+from telmoni import Config, Telmoni, WarningInfo, contract
 from telmoni.exporter import Answer
 
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures"
@@ -135,6 +135,14 @@ APP_EXPORTER = InMemorySpanExporter()
 APP_PROVIDER = TracerProvider(sampler=ParentBased(APP_SAMPLER))
 APP_PROVIDER.add_span_processor(SimpleSpanProcessor(APP_EXPORTER))
 trace.set_tracer_provider(APP_PROVIDER)
+
+
+@pytest.fixture(autouse=True)
+def no_scrub_switches(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every configuration left unset reads these: the shell running the suite
+    would otherwise change what each test sends."""
+    for name in (contract.SCRUB_SECRETS_ENV, contract.SCRUB_PII_ENV):
+        monkeypatch.delenv(name, raising=False)
 
 
 @pytest.fixture

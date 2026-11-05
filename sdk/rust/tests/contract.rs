@@ -3,8 +3,11 @@
 
 mod common;
 
-use common::{Harness, Outcome, field, in_child, is_child, keyed, load_fixture};
-use telmoni::{Config, DEFAULT_ENDPOINT, RunOptions, Telmoni, VERSION};
+use common::{
+    Failure, Harness, Outcome, attributes_of, field, in_child, is_child, keyed, load_fixture,
+    mode_on, only, text,
+};
+use telmoni::{Config, DEFAULT_ENDPOINT, ModelCallOptions, RunOptions, Telmoni, VERSION};
 
 #[test]
 fn the_default_endpoint_is_the_machine_host() {
@@ -102,7 +105,7 @@ fn the_defaults_send_no_content_and_set_no_sampler() {
 }
 
 #[test]
-fn from_env_reads_the_six_variables_and_no_other() -> Outcome {
+fn from_env_reads_the_eight_variables_and_no_other() -> Outcome {
     if is_child() {
         let config = Config::from_env();
         assert_eq!(config.endpoint, DEFAULT_ENDPOINT);
@@ -113,7 +116,7 @@ fn from_env_reads_the_six_variables_and_no_other() -> Outcome {
         return Ok(());
     }
     in_child(
-        "from_env_reads_the_six_variables_and_no_other",
+        "from_env_reads_the_eight_variables_and_no_other",
         &[
             ("TELMONI_API_KEY", ""),
             ("TELMONI_ORG", "org_2"),
@@ -178,6 +181,101 @@ fn capture_content_set_in_code_wins_over_the_environment() -> Outcome {
         &["TELMONI_ENDPOINT"],
     )?;
     in_child::<&str>(name, &[], &["TELMONI_CAPTURE_CONTENT", "TELMONI_ENDPOINT"])
+}
+
+/// `TELMONI_SCRUB_SECRETS`'s `0` alone turns secrets off, and `TELMONI_SCRUB_PII`'s `1` alone PII on.
+#[test]
+fn the_scrubbers_are_read_from_the_environment() -> Outcome {
+    const WANT: &str = "TELMONI_TEST_SCRUBBERS";
+    if is_child() {
+        let config = Config::from_env();
+        let read = format!("{:?} {:?}", config.scrub_secrets, config.scrub_pii);
+        assert_eq!(read, std::env::var(WANT)?);
+        return Ok(());
+    }
+    assert_eq!(
+        (Config::default().scrub_secrets, keyed().scrub_pii),
+        (None, None)
+    );
+    for (secrets, pii, want) in [
+        (None, None, "Some(true) Some(false)"),
+        (Some(" 0\t"), Some(" 1 "), "Some(false) Some(true)"),
+        (Some("false"), Some("true"), "Some(true) Some(false)"),
+        (Some("off"), Some("yes"), "Some(true) Some(false)"),
+        (Some(""), Some(""), "Some(true) Some(false)"),
+    ] {
+        let mut set = vec![(WANT, want)];
+        let mut unset = Vec::new();
+        for (variable, given) in [
+            ("TELMONI_SCRUB_SECRETS", secrets),
+            ("TELMONI_SCRUB_PII", pii),
+        ] {
+            match given {
+                Some(given) => set.push((variable, given)),
+                None => unset.push(variable),
+            }
+        }
+        in_child("the_scrubbers_are_read_from_the_environment", &set, &unset)?;
+    }
+    Ok(())
+}
+
+/// Unset in code, the variables decide what content leaves scrubbed; set in code, the code does.
+#[test]
+fn the_scrubbers_set_in_code_win_over_the_environment() -> Outcome {
+    if is_child() {
+        let planted = field(&load_fixture("canary.json")?, "planted")?.clone();
+        let (key, email) = (text(&planted, "cloud_key")?, text(&planted, "email")?);
+        let message = format!("key {key}, mail {email}");
+        let sent = |config: Config| -> Result<String, Failure> {
+            let harness = Harness::answering(
+                Config {
+                    capture_content: true,
+                    ..config
+                },
+                std::iter::repeat_n(Ok(mode_on()), 2),
+            )?;
+            let run = harness.telmoni.run("bot", RunOptions::default())?;
+            let call = run.model_call(
+                "m",
+                ModelCallOptions {
+                    input_messages: Some(message.as_str().into()),
+                    ..ModelCallOptions::default()
+                },
+            )?;
+            call.end();
+            run.end();
+            harness.flush()?;
+            let spans = harness.spans()?;
+            Ok(text(
+                &attributes_of(only(&spans, "chat ")?)?,
+                "gen_ai.input.messages",
+            )?
+            .to_owned())
+        };
+        let scrubbed = |secrets: bool, pii: bool| {
+            let key = if secrets { "[secret: aws_key]" } else { key };
+            let email = if pii { "[pii: email]" } else { email };
+            format!("key {key}, mail {email}")
+        };
+        // The first child's variables turn secrets off and PII on; the second's are unset.
+        let flipped = std::env::var_os("TELMONI_SCRUB_SECRETS").is_some();
+        assert_eq!(sent(keyed())?, scrubbed(!flipped, flipped));
+        let set = Config {
+            scrub_secrets: Some(flipped),
+            scrub_pii: Some(!flipped),
+            ..keyed()
+        };
+        assert_eq!(sent(set)?, scrubbed(flipped, !flipped));
+        return Ok(());
+    }
+    let name = "the_scrubbers_set_in_code_win_over_the_environment";
+    in_child(
+        name,
+        &[("TELMONI_SCRUB_SECRETS", "0"), ("TELMONI_SCRUB_PII", "1")],
+        &[],
+    )?;
+    in_child::<&str>(name, &[], &["TELMONI_SCRUB_SECRETS", "TELMONI_SCRUB_PII"])
 }
 
 #[test]
