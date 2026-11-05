@@ -66,15 +66,6 @@ const DURATION: ChartConfig = {
   p95: { label: "95th percentile", color: "var(--foreground)" },
 };
 
-
-/** A bar's width in words: "an hour a bar", "3 hours a bar", "a day a bar". */
-function perBar(seconds: number): string {
-  if (seconds === 604_800) return "a week a bar";
-  if (seconds === 86_400) return "a day a bar";
-  const hours = seconds / 3_600;
-  return hours === 1 ? "an hour a bar" : `${hours} hours a bar`;
-}
-
 /** A bar's start as an axis names it: its hour on a day's chart, and its
  *  day on a longer one, whose hours would all read midnight where the axis
  *  has room for a label a day. */
@@ -269,9 +260,6 @@ export function TraceHistogramStrip({ histogram }: { histogram: TraceHistogram }
             ))}
           </SelectContent>
         </Select>
-        <span className="text-xs text-muted-foreground">
-          {perBar(histogram.bucket_seconds)}
-        </span>
       </div>
       <MetricChart histogram={histogram} metric={metric} className="h-28" />
     </div>
@@ -294,9 +282,6 @@ export function TraceCharts({ histogram }: { histogram: TraceHistogram }) {
         >
           <h2 className="text-sm font-medium">
             {metric === "score" ? `The mean ${histogram.score} score` : METRIC_LABEL[metric]}
-            <span className="ml-2 font-normal text-muted-foreground">
-              {perBar(histogram.bucket_seconds)}
-            </span>
           </h2>
           <MetricChart histogram={histogram} metric={metric} className="h-56" legend={metric !== "tokens" && metric !== "cost"} />
         </div>

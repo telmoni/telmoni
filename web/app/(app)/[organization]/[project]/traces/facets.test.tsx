@@ -14,7 +14,7 @@ vi.mock("@/components/traces/navigate", () => ({
 
 import { FacetsPanel } from "@/components/traces/facets";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { FILTERS_WIDTH_DEFAULT, FILTERS_WIDTH_MAX, FILTERS_WIDTH_MIN, FILTERS_WIDTH_STEP } from "@/lib/panel-width";
+import { FILTERS_WIDTH_DEFAULT, FILTERS_WIDTH_MAX, FILTERS_WIDTH_STEP } from "@/lib/panel-width";
 import { TRACE_PREFS_KEY } from "@/lib/trace-prefs";
 
 /** The filters dragged 80px wider than their own width. */
@@ -87,12 +87,14 @@ describe("the filters' edge", () => {
     fireEvent.pointerMove(edge, { pointerId: 2, clientX: 2000 });
     expect(edge).toHaveAttribute("aria-valuenow", String(FILTERS_WIDTH_MAX));
     fireEvent.pointerMove(edge, { pointerId: 2, clientX: -2000 });
-    expect(edge).toHaveAttribute("aria-valuenow", String(FILTERS_WIDTH_MIN));
+    expect(edge).toHaveAttribute("aria-valuenow", String(FILTERS_WIDTH_DEFAULT));
     // Another pointer's move is not this drag's.
     fireEvent.pointerMove(edge, { pointerId: 3, clientX: 500 });
-    expect(edge).toHaveAttribute("aria-valuenow", String(FILTERS_WIDTH_MIN));
+    expect(edge).toHaveAttribute("aria-valuenow", String(FILTERS_WIDTH_DEFAULT));
     fireEvent.pointerCancel(edge, { pointerId: 2 });
-    expect(now()).toBe(FILTERS_WIDTH_MIN);
+    expect(now()).toBe(FILTERS_WIDTH_DEFAULT);
+    // Back to its own: the width outlives the panel, as a page left and come back to.
+    fireEvent.doubleClick(edge);
   });
 
   it("takes the arrow keys, Home and End within its bounds, and Enter for its own width", () => {
@@ -107,19 +109,34 @@ describe("the filters' edge", () => {
     fireEvent.keyDown(edge, { key: "ArrowRight" });
     expect(now()).toBe(FILTERS_WIDTH_MAX);
     fireEvent.keyDown(edge, { key: "Home" });
-    expect(now()).toBe(FILTERS_WIDTH_MIN);
+    expect(now()).toBe(FILTERS_WIDTH_DEFAULT);
     fireEvent.keyDown(edge, { key: "Enter" });
     expect(now()).toBe(FILTERS_WIDTH_DEFAULT);
     expect(screen.getByRole("complementary", { name: "Filters" }).style.getPropertyValue("--filters-width")).toBe("");
   });
 
-  it("opens at its own width after a reload, whatever was dragged or an older build kept", () => {
-    const { unmount } = panel();
+  it("opens a page come back to at the width it was left at, and a reload at its own", async () => {
+    const left = panel();
     fireEvent.keyDown(screen.getByRole("separator", { name: "Resize the filters" }), { key: "End" });
     expect(now()).toBe(FILTERS_WIDTH_MAX);
-    unmount();
+    left.unmount();
+
+    const back = panel();
+    expect(now()).toBe(FILTERS_WIDTH_MAX);
+    // Back to its own, so the tests after this one open at it.
+    fireEvent.keyDown(screen.getByRole("separator", { name: "Resize the filters" }), { key: "Enter" });
+    back.unmount();
+
+    // A reload loads the modules afresh; an older build's saved width is not read either.
+    vi.resetModules();
     window.localStorage.setItem(TRACE_PREFS_KEY, JSON.stringify({ filtersWidth: 244 }));
-    panel();
+    const { FacetsPanel: Reloaded } = await import("@/components/traces/facets");
+    const { TooltipProvider: Provider } = await import("@/components/ui/tooltip");
+    render(
+      <Provider>
+        <Reloaded list="traces" organization="acme" slug="web" query={{}} facets={null} />
+      </Provider>,
+    );
     expect(screen.getByRole("complementary", { name: "Filters" }).style.getPropertyValue("--filters-width")).toBe("");
     expect(now()).toBe(FILTERS_WIDTH_DEFAULT);
   });

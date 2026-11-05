@@ -22,7 +22,8 @@ function Checkbox({
         data-slot="checkbox-indicator"
         className="grid place-content-center text-current transition-none"
       >
-        <CheckIcon className="size-3.5" />
+        {/* Its own colour class, so a list row that greys every unclassed icon leaves the tick the box's colour. */}
+        <CheckIcon className="size-3.5 text-current" />
       </CheckboxPrimitive.Indicator>
     </CheckboxPrimitive.Root>
   )

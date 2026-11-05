@@ -19,11 +19,11 @@ export function draggedPanelWidth(start: number, startX: number, x: number, boun
 
 /** The filters' own width, in pixels: the main sidebar's links', the 168px rail
  *  (`--spacing-sidebar`) less two gutters (`--spacing-sidebar-inner`, which
- *  `w-filters` reads). */
+ *  `w-filters` reads). Also the narrowest they are dragged to, below which their
+ *  headers cut their names short. */
 export const FILTERS_WIDTH_DEFAULT = 168 - 2 * GUTTER_PX;
 
-/** The narrowest the filters are dragged to, and the widest. */
-export const FILTERS_WIDTH_MIN = 128;
+/** The widest the filters are dragged to. */
 export const FILTERS_WIDTH_MAX = 480;
 
 /** How far an arrow key moves the filters' edge. */
@@ -34,6 +34,6 @@ export const FILTERS_WIDTH_STEP = 16;
  *  not laid out. */
 export function filtersBounds(area: number): DragBounds {
   const max =
-    area > 0 ? Math.max(FILTERS_WIDTH_MIN, Math.min(FILTERS_WIDTH_MAX, Math.floor(area / 2))) : FILTERS_WIDTH_MAX;
-  return { grows: "right", min: FILTERS_WIDTH_MIN, max };
+    area > 0 ? Math.max(FILTERS_WIDTH_DEFAULT, Math.min(FILTERS_WIDTH_MAX, Math.floor(area / 2))) : FILTERS_WIDTH_MAX;
+  return { grows: "right", min: FILTERS_WIDTH_DEFAULT, max };
 }

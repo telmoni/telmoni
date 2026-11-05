@@ -11,7 +11,6 @@ import { usePointerGesture } from "@/components/use-pointer-gesture";
 import {
   FILTERS_WIDTH_DEFAULT,
   FILTERS_WIDTH_MAX,
-  FILTERS_WIDTH_MIN,
   FILTERS_WIDTH_STEP,
   draggedPanelWidth,
   filtersBounds,
@@ -124,15 +123,22 @@ export type FiltersEdgeProps = EdgeHandlers & {
   dragging: boolean;
 };
 
+/** The filters' width as last left, in this tab's memory alone: a page left
+ *  and come back to opens at it, and a reload at their own. */
+let leftAt: number | null = null;
+
 /** The filters' width, as the person dragged or keyed it, `null` for their
- *  own, held for the page's life alone, so a reload opens them at their own;
- *  and the edge between them and the list: a splitter the keyboard
+ *  own; and the edge between them and the list: a splitter the keyboard
  *  moves too, the filters having no Full size to fall back on. */
 export function useFiltersWidth(panel: RefObject<HTMLElement | null>): {
   width: number | null;
   edge: FiltersEdgeProps;
 } {
-  const [kept, keep] = useState<number | null>(null);
+  const [kept, setKept] = useState<number | null>(() => leftAt);
+  const keep = (width: number | null) => {
+    leftAt = width;
+    setKept(width);
+  };
   const { dragged, handlers } = useDraggedEdge(panel, filtersBounds, keep);
   const width = dragged ?? kept;
   const now = width ?? FILTERS_WIDTH_DEFAULT;
@@ -165,7 +171,7 @@ export function FiltersEdge({ edge }: { edge: FiltersEdgeProps }) {
       role="separator"
       aria-orientation="vertical"
       aria-label="Resize the filters"
-      aria-valuemin={FILTERS_WIDTH_MIN}
+      aria-valuemin={FILTERS_WIDTH_DEFAULT}
       aria-valuemax={FILTERS_WIDTH_MAX}
       aria-valuenow={now}
       tabIndex={0}

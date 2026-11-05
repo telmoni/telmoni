@@ -108,16 +108,16 @@ export function FacetsPanel({ list, organization, slug, query, ui = {}, facets }
     <aside
       ref={panel}
       style={{ "--filters-width": width === null ? undefined : `${width}px` } as CSSProperties}
-      className="relative grid w-full shrink-0 content-start gap-gutter md:w-filters md:max-w-1/2"
+      className="relative grid w-full shrink-0 content-start gap-gutter *:min-w-0 md:w-filters md:max-w-1/2"
       aria-label="Filters"
       aria-busy={pending}
       data-pending={pending ? "" : undefined}
     >
       <div className="flex h-7 items-center gap-2">
         <PanelButton shown />
-        <h2 className="text-sm font-medium">Filters</h2>
+        <h2 className="min-w-0 truncate text-sm font-medium">Filters</h2>
         {ticked > 0 && (
-          <Badge variant="secondary" className="px-1.5 tabular-nums">
+          <Badge variant="secondary" className="shrink-0 px-1.5 tabular-nums">
             {ticked}
           </Badge>
         )}
@@ -153,11 +153,12 @@ export function FacetsPanel({ list, organization, slug, query, ui = {}, facets }
           className="pl-7"
         />
       </div>
-      {facets === null ? (
-        <p className="text-sm text-muted-foreground">The filters&rsquo; values could not be read.</p>
-      ) : (
-        <div className="grid">
-          {sections.map((filter) => (
+      {/* Score in the same gap-free stack as the facets, so it sits one rule below the last. */}
+      <div className="grid *:min-w-0">
+        {facets === null ? (
+          <p className="text-sm text-muted-foreground">The filters&rsquo; values could not be read.</p>
+        ) : (
+          sections.map((filter) => (
             <FacetSection
               key={filter}
               filter={filter}
@@ -167,18 +168,18 @@ export function FacetsPanel({ list, organization, slug, query, ui = {}, facets }
               clearHref={href(without(query, filter))}
               onToggle={(value) => go(href(toggled(query, filter, value)))}
             />
-          ))}
-        </div>
-      )}
-      {(!needle || "score".includes(needle)) && (
-        <ScoreSection
-          // Drawn afresh as the URL's score changes: a clear, a step back, a view.
-          key={`${query.score ?? ""}/${query.score_min ?? ""}/${query.score_max ?? ""}`}
-          query={query}
-          clearHref={href(without(query, "score"))}
-          onScore={(score) => go(href({ ...query, ...score, page: undefined }))}
-        />
-      )}
+          ))
+        )}
+        {(!needle || "score".includes(needle)) && (
+          <ScoreSection
+            // Drawn afresh as the URL's score changes: a clear, a step back, a view.
+            key={`${query.score ?? ""}/${query.score_min ?? ""}/${query.score_max ?? ""}`}
+            query={query}
+            clearHref={href(without(query, "score"))}
+            onScore={(score) => go(href({ ...query, ...score, page: undefined }))}
+          />
+        )}
+      </div>
       {/* Last in the panel, so Tab reaches it after the filters, between them and the list. */}
       <FiltersEdge edge={edge} />
     </aside>
@@ -252,14 +253,14 @@ function FacetSection({
           and its Clear is an X: a word at the panel's edge stretched the row. */}
       <div className="flex items-center gap-gutter">
         <CollapsibleTrigger asChild>
-          <Button variant="ghost" size="sm" className="flex-1 justify-start">
+          <Button variant="ghost" size="sm" className="min-w-0 flex-1 justify-start">
             <ChevronRightIcon
               className={cn("text-muted-foreground transition-transform", open && "rotate-90")}
               aria-hidden="true"
             />
-            {label}
+            <span className="truncate">{label}</span>
             {ticked.length > 0 && (
-              <Badge variant="secondary" className="px-1.5 tabular-nums">
+              <Badge variant="secondary" className="shrink-0 px-1.5 tabular-nums">
                 {ticked.length}
               </Badge>
             )}
@@ -388,14 +389,14 @@ function ScoreSection({
     <Collapsible open={open} onOpenChange={setChosen} className="border-b border-border">
       <div className="flex items-center gap-gutter">
         <CollapsibleTrigger asChild>
-          <Button variant="ghost" size="sm" className="flex-1 justify-start">
+          <Button variant="ghost" size="sm" className="min-w-0 flex-1 justify-start">
             <ChevronRightIcon
               className={cn("text-muted-foreground transition-transform", open && "rotate-90")}
               aria-hidden="true"
             />
-            Score
+            <span className="truncate">Score</span>
             {set && (
-              <Badge variant="secondary" className="px-1.5 tabular-nums">
+              <Badge variant="secondary" className="shrink-0 px-1.5 tabular-nums">
                 1
               </Badge>
             )}

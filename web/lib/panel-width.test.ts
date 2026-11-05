@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  FILTERS_WIDTH_DEFAULT,
   FILTERS_WIDTH_MAX,
-  FILTERS_WIDTH_MIN,
   draggedPanelWidth,
   filtersBounds,
 } from "./panel-width";
@@ -29,10 +29,10 @@ describe("a panel's edge dragged", () => {
 
 describe("the filters' bounds", () => {
   it("run from their least to their most, never past half the row", () => {
-    expect(filtersBounds(1000)).toEqual({ grows: "right", min: FILTERS_WIDTH_MIN, max: FILTERS_WIDTH_MAX });
+    expect(filtersBounds(1000)).toEqual({ grows: "right", min: FILTERS_WIDTH_DEFAULT, max: FILTERS_WIDTH_MAX });
     expect(filtersBounds(700).max).toBe(350);
     // A row too narrow for even half: the least, so the edge still answers.
-    expect(filtersBounds(200).max).toBe(FILTERS_WIDTH_MIN);
+    expect(filtersBounds(200).max).toBe(FILTERS_WIDTH_DEFAULT);
     // Not laid out yet: the whole range.
     expect(filtersBounds(0).max).toBe(FILTERS_WIDTH_MAX);
   });

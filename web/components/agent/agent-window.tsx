@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useState, type PointerEvent, type ReactNode, type RefObject } from "react";
-import { Maximize2, Minimize2, X as XIcon } from "lucide-react";
+import { Maximize2, Minimize2, Minus } from "lucide-react";
 
 import { PanelAction } from "@/components/side-panel";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -234,8 +234,8 @@ export function AgentWindow({
                   {full ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
                 </PanelAction>
               )}
-              <PanelAction label="Close the agent" onClick={onClose}>
-                <XIcon className="size-4" />
+              <PanelAction label="Minimize the agent" onClick={onClose}>
+                <Minus className="size-4" />
               </PanelAction>
             </div>
           </TooltipProvider>
