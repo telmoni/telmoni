@@ -27,7 +27,7 @@ import { offerPageSteps } from "@/lib/use-page-steps";
 // `j` and `k` step through what a page offers — the trace list's peek, a
 // session's traces — and `o` opens the one stood on where the page offers
 // that, through the console's one key handler, after the pending `g`, which
-// still takes `k` to API keys and `o` to the Overview.
+// still takes `k` to API keys and `o` to Agents.
 describe("KeyboardShortcuts - a page's steps", () => {
   const next = vi.fn();
   const previous = vi.fn();
@@ -65,7 +65,7 @@ describe("KeyboardShortcuts - a page's steps", () => {
     expect(previous).not.toHaveBeenCalled();
   });
 
-  it("opens on o where the page offers it, and leaves g o to the Overview", () => {
+  it("opens on o where the page offers it, and leaves g o to Agents", () => {
     render(<KeyboardShortcuts />);
     fireEvent.keyDown(document.body, { key: "o" });
     expect(open).not.toHaveBeenCalled();
@@ -86,7 +86,7 @@ describe("KeyboardShortcuts - a page's steps", () => {
     render(<KeyboardShortcuts />);
     fireEvent.keyDown(document.body, { key: "j" });
     expect(next).toHaveBeenCalledTimes(1);
-    for (const key of ["g", "t", "g", "k"]) fireEvent.keyDown(document.body, { key });
+    for (const key of ["g", "r", "g", "k"]) fireEvent.keyDown(document.body, { key });
     expect(push).not.toHaveBeenCalled();
     expect(previous).not.toHaveBeenCalled();
   });
@@ -99,11 +99,11 @@ describe("KeyboardShortcuts - a page's steps", () => {
     const sheet = screen.getByRole("dialog", { name: "Keyboard shortcuts" });
     expect(within(sheet).getByText("Next trace")).toBeInTheDocument();
     expect(within(sheet).getByText("Search")).toBeInTheDocument();
-    expect(within(sheet).queryByText("Traces")).toBeNull();
+    expect(within(sheet).queryByText("Runs")).toBeNull();
     expect(within(sheet).queryByText("New alert")).toBeNull();
 
     act(() => setPageCovered(false));
-    expect(within(sheet).getByText("Traces")).toBeInTheDocument();
+    expect(within(sheet).getByText("Runs")).toBeInTheDocument();
     expect(within(sheet).getByText("New alert")).toBeInTheDocument();
   });
 
@@ -116,7 +116,7 @@ describe("KeyboardShortcuts - a page's steps", () => {
     document.body.append(panel);
     render(<KeyboardShortcuts />);
     const control = panel.querySelector("button")!;
-    for (const key of ["j", "g", "t"]) fireEvent.keyDown(control, { key });
+    for (const key of ["j", "g", "r"]) fireEvent.keyDown(control, { key });
     panel.remove();
     expect(next).not.toHaveBeenCalled();
     expect(push).not.toHaveBeenCalled();

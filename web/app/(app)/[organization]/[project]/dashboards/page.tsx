@@ -18,7 +18,7 @@ import { DashboardCharts, type Split } from "./_charts";
 import { ChartsPicker } from "./_charts-picker";
 import { DashboardsMenu, type SavedDashboard } from "./_dashboards-menu";
 
-export const metadata = { title: "Dashboards" };
+export const metadata = { title: "Spend" };
 
 /** The window the URL asks for, the opening week where it asks for none. */
 function daysOf(given: string | string[] | undefined): number {
@@ -95,8 +95,8 @@ export default async function DashboardsPage({
   return (
     <>
       <PageHeader
-        title="Dashboards"
-        info="A dashboard's charts over the window, by the UTC day or, for a day, the hour: spend, tokens, runs, latency and time to first token from the hourly totals and, for time to first token, the spans; spend split by a model, an agent, a provider, an environment or a release from the totals, or by a tag, a user or a session from the spans the plan keeps, the ten that spent most each and the rest as one. Spend is priced as it is read, the project's own prices first. Owners and admins save a dashboard for everyone on the project."
+        title="Spend"
+        info="What the project's agents spend, against this month's budgets, and a dashboard's charts over the window, by the UTC day or, for a day, the hour: spend, tokens, runs, latency and time to first token from the hourly totals and, for time to first token, the spans; spend split by a model, an agent, a provider, an environment or a release from the totals, or by a tag, a user or a session from the spans the plan keeps, the ten that spent most each and the rest as one. Spend is priced as it is read, the project's own prices first. Owners and admins save a dashboard for everyone on the project."
         action={
           <div className="flex flex-wrap items-center gap-gutter">
             <DashboardsMenu

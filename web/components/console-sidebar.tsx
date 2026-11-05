@@ -49,8 +49,8 @@ function NavRow({
     letterKeys && !covered && item.key ? `${item.title} (${sequenceHint(item.key)})` : undefined;
   // No title is written here: the tab's title is each page's `metadata`, which
   // Next sets as the page lands. Written on the click as well, it went up
-  // before the page came, and wrong on the overviews: the row says Overview
-  // where the page is titled by its name.
+  // before the page came, and wrong on a project's first page: the row says
+  // Agents where the page is titled by the project's name.
   //
   // A row matches the console's icon buttons: 28px (h-7) tall, 2px apart, 8px
   // corners, muted at rest, the sidebar accent at half under the pointer, and

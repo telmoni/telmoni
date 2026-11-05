@@ -11,7 +11,7 @@ and each trace is placed in its runs as
 [What a span must carry](/docs/api/ingest#what-a-span-must-carry) says: under
 its topmost agent or workflow, or, where only the model client is
 instrumented, as one run of its calls named by your `service.name`. They show
-on the **Traces** page a minute or so after the trace goes quiet.
+on the **Runs** page a minute or so after the trace goes quiet.
 
 Each instrumentation below sets `gen_ai.operation.name` on its spans, which is
 what Telmoni reads them by. One that writes a convention of its own instead —

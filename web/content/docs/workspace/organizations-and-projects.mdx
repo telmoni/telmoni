@@ -76,15 +76,15 @@ URL](#name-and-url)). On these pages,
   `/{organization}/audit-log`, and `/{organization}/settings`, with
   `/{organization}/billing` on the hosted service.
 - **Project pages** sit under the organization: `/{organization}/{project}` is
-  the project's [overview](#a-projects-overview), titled by the project's name,
-  its cards summing the project up for anyone on it, with
-  [`/traces`](/docs/monitoring/traces) — every run
+  the project's [agents](#a-projects-agents), each with its last run, what it
+  cost and the alerts that watch it, with
+  [`/traces`](/docs/monitoring/traces), **Runs** — every run
   of the project's agents, grouped by session or user where asked, and a page
   for each — [`/alerts`](/docs/monitoring/alerts) — its alerts and
-  their incidents — [`/dashboards`](/docs/monitoring/dashboards) — its spend,
-  tokens, runs, latency and time to first token over a window, spend split
-  by a model, an agent, a tag, a user or a session, and the dashboards saved
-  for everyone on the project — `/objectives` — and `/api-keys`, `/connectors`,
+  their incidents — `/objectives` — [`/dashboards`](/docs/monitoring/dashboards),
+  **Spend** — its spend, tokens, runs, latency and time to first token over a
+  window, spend split by a model, an agent, a tag, a user or a session, its
+  budgets, and the dashboards saved for everyone on the project — and `/api-keys`, `/connectors`,
   `/members`, `/audit-log`, and `/settings` under it — its content mode, how long its
   data is kept, and an end user's data given or erased.
 - **Your settings** live under `/settings`: `/settings/general`,
@@ -173,12 +173,12 @@ Windows and Linux):
   **Billing** page, **Plans** or **Manage billing**.
 - **Next and previous (`j`, `k`), open (`o`)**: With a trace open over the
   [Traces](/docs/monitoring/traces#a-trace) list, open the next row's trace or
-  the previous one's. After `g`, `k` is still API keys and `o` a project's Overview.
+  the previous one's. After `g`, `k` is still API keys and `o` a project's Agents.
 - **Navigation sequences (`g` followed by a key)**: every row of the sidebar
   you are in has one, and the sheet (`?`) lists the rows of that sidebar. On a
   project's pages:
-  - `g` `o`: Overview
-  - `g` `t`: Traces, `g` `a`: Alerts, `g` `d`: Dashboards, `g` `v`: Objectives
+  - `g` `o`: Agents
+  - `g` `r`: Runs, `g` `a`: Alerts, `g` `v`: Objectives, `g` `s`: Spend
   - `g` `k`: API keys, `g` `c`: Connectors, `g` `m`: Members, `g` `l`: Audit log, `g` `n`: Notifications
   - `g` `,`: Settings, as `⌘,` opens preferences on a Mac
 
@@ -210,20 +210,26 @@ The foot of the sidebar shows the version of Telmoni the console runs.
 
 ## Projects
 
-### A project's overview
+### A project's agents
 
-A project opens on its **Overview**, `/{organization}/{project}`, titled by
-the project's name, its cards three to a row, each leading to the page that
-holds what it shows. Anyone on the project reads every card:
+A project opens on its **Agents**, `/{organization}/{project}`, the first row
+of its sidebar, its tab titled by the project's name: every agent that ran
+there in the last 14 days, the one whose last run started latest first.
+Anyone on the project reads it:
 
-| Card | What it shows |
+| Column | What it shows |
 |---|---|
-| Project info | Its name, its ID to copy, its [content mode](#a-projects-content-mode) and your role, with links to its members and settings |
-| Last 24 hours | Its runs, failed runs, spend and tokens, from the hourly totals |
-| Open incidents | Its incidents not yet resolved, up to five, each linking to it |
-| Budgets this month | Each running [budget](/docs/monitoring/alerts#a-budget): what the month had spent of it when last read |
-| Project notices | A member joining or leaving, a channel connected or lost, newest first, each unread one bold, with **Mark read** |
-| Documentation | Where to start in this book |
+| Agent | Its name, a link to its runs on **Runs** |
+| Last run | How the run that started last ended, or **Running**, and when it started, a link to the run |
+| Runs | Its runs over the 14 days, and how many ended in error |
+| Last run's cost | What that run cost, priced as **Runs** prices it, and what the agent's ended runs usually cost, their median |
+| Watched by | The [alerts](/docs/monitoring/alerts) that read its runs, those held to it and those over every agent, paused ones aside, and the open incidents of those held to it |
+
+The open incidents of alerts over every agent, which no one agent's row
+counts, are told once above the table. A project where no agent has run in
+the 14 days says how to send its first run. A project's notices are on its
+**Notifications** page, its budgets on **Spend**, and its name, ID and
+[content mode](#a-projects-content-mode) on its **Settings**.
 
 ### Creating a project
 
@@ -388,8 +394,8 @@ its **Owner**:
    a slug no other organization holds, not one of the console's own words, and
    holding no profanity or slur.
 4. Select **Create organization**. The console opens the new organization's
-   **Overview**; [create its first project](#creating-a-project) from its
-   **Projects** page or the switcher. On the hosted service, a second
+   **Projects** page; [create its first project](#creating-a-project) there
+   or from the switcher. On the hosted service, a second
    organization is paid for first, as below: the panel asks for its plan and
    sends you to the payment page, and the organization opens once the
    payment is confirmed.

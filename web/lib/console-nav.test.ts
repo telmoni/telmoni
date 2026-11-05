@@ -93,14 +93,28 @@ describe("buildConsoleNav", () => {
   it("draws the organization's rail on the pairing page", () => {
   });
 
-  it("leads the project run with Overview, then observability, then the organization's objects, and Settings last", () => {
+  it("leads the project run with its agents, then what answers whether they are well, then the project's housekeeping, and Settings last", () => {
     const [project] = buildConsoleNav("/acme/web/api-keys");
+    expect(project?.items.map((i) => i.title)).toEqual([
+      "Agents",
+      "Runs",
+      "Alerts",
+      "Objectives",
+      "Spend",
+      "API keys",
+      "Connectors",
+      "Members",
+      "Audit log",
+      "Notifications",
+      "Settings",
+    ]);
+    // Each keeps its path: Agents the project's own, Runs the trace list, Spend the dashboards.
     expect(project?.items.map((i) => i.url)).toEqual([
       "/acme/web",
       "/acme/web/traces",
       "/acme/web/alerts",
-      "/acme/web/dashboards",
       "/acme/web/objectives",
+      "/acme/web/dashboards",
       "/acme/web/api-keys",
       "/acme/web/connectors",
       "/acme/web/members",
@@ -206,8 +220,8 @@ describe("buildConsoleNav", () => {
       "/acme/web",
       "/acme/web/traces",
       "/acme/web/alerts",
-      "/acme/web/dashboards",
       "/acme/web/objectives",
+      "/acme/web/dashboards",
       "/acme/web/api-keys",
       "/acme/web/connectors",
       "/acme/web/members",
@@ -237,7 +251,7 @@ describe("the blocks of a run", () => {
   it("parts a project's housekeeping from its product rows, and nothing else", () => {
     const [project] = buildConsoleNav("/acme/web/api-keys");
     expect(navBlocks(project?.items ?? []).map((b) => b.map((i) => i.title))).toEqual([
-      ["Overview", "Traces", "Alerts", "Dashboards", "Objectives"],
+      ["Agents", "Runs", "Alerts", "Objectives", "Spend"],
       ["API keys", "Connectors", "Members", "Audit log", "Notifications", "Settings"],
     ]);
     const [organization] = buildConsoleNav("/acme/settings");
@@ -287,8 +301,8 @@ describe("the whole destination set", () => {
       "/acme/web",
       "/acme/web/traces",
       "/acme/web/alerts",
-      "/acme/web/dashboards",
       "/acme/web/objectives",
+      "/acme/web/dashboards",
       "/acme/web/api-keys",
       "/acme/web/connectors",
       "/acme/web/members",

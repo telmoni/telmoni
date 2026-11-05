@@ -47,9 +47,11 @@ describe("the go sequences", () => {
 
   it("reads the rail you stand in", () => {
     expect(resolveSequence("k", "/acme/web")).toBe("/acme/web/api-keys");
-    expect(resolveSequence("t", "/acme/web/members")).toBe("/acme/web/traces");
-    expect(resolveSequence("d", "/acme/web")).toBe("/acme/web/dashboards");
+    expect(resolveSequence("o", "/acme/web/members")).toBe("/acme/web");
+    expect(resolveSequence("r", "/acme/web/members")).toBe("/acme/web/traces");
     expect(resolveSequence("a", "/acme/web")).toBe("/acme/web/alerts");
+    expect(resolveSequence("v", "/acme/web")).toBe("/acme/web/objectives");
+    expect(resolveSequence("s", "/acme/web")).toBe("/acme/web/dashboards");
     expect(resolveSequence(",", "/acme/web")).toBe("/acme/web/settings");
     expect(resolveSequence("p", "/acme/web")).toBeNull();
     expect(resolveSequence("k", "/acme/members")).toBeNull();
@@ -94,8 +96,15 @@ describe("the go sequences", () => {
     }
   });
 
+  // Runs took `r` from Traces' `t`, and Spend `s` from Dashboards' `d`: the old
+  // letters lead nowhere, so a hand that remembers them is not sent astray.
+  it("retires g t and g d on a project's rail", () => {
+    expect(resolveSequence("t", "/acme/web")).toBeNull();
+    expect(resolveSequence("d", "/acme/web")).toBeNull();
+  });
+
   it("names a sequence in a tooltip as the sheet's keys read", () => {
-    expect(sequenceHint("t")).toBe("G then T");
+    expect(sequenceHint("r")).toBe("G then R");
     expect(sequenceHint(NOTIFICATIONS_KEY)).toBe("G then N");
     expect(sequenceHint(",")).toBe("G then ,");
     expect(sequenceHint(ORGANIZATION_KEY)).toBe("G then ⇧ O");
@@ -104,7 +113,7 @@ describe("the go sequences", () => {
   // ⚠ The corner that once shipped a 404: with nowhere to stand, a bare
   // project-relative href read as an organization of that name. Off the
   // console's paths the rail is empty, so nothing but `g O` resolves.
-  it.each(["k", "c", "m", "l", ",", "o", "t", "p", "n"])("refuses %s where no rail stands", (k) => {
+  it.each(["k", "c", "m", "l", ",", "o", "r", "p", "n"])("refuses %s where no rail stands", (k) => {
     expect(resolveSequence(k, "/")).toBeNull();
     expect(resolveSequence(k, "/", "acme")).toBeNull();
     expect(resolveSequence(k, "/console", "acme")).toBeNull();

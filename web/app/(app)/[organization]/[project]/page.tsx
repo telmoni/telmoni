@@ -1,232 +1,154 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import {
-  Activity,
-  BellRing,
-  BookOpen,
-  FolderOpen,
-  Inbox,
-  PiggyBank,
-} from "lucide-react";
 
-import { CopyButton } from "@/components/copy-button";
+import { DataTable, THead, Td, Th } from "@/components/data-table";
 import { LocalTime } from "@/components/local-time";
-import { MarkRead } from "@/components/mark-read";
-import { Figure, OverviewCard, OverviewGrid } from "@/components/overview-card";
-import { RoleBadge } from "@/components/role-badge";
+import { NoticeCard } from "@/components/notice-card";
+import { PageHeader } from "@/components/page-header";
 import { ServiceUnavailable } from "@/components/service-unavailable";
-import { Badge } from "@/components/ui/badge";
-import { SEVERITY_LABEL, incidentHref, severityVariant } from "@/lib/alerts";
-import { CONTENT_MODE_LABEL } from "@/lib/content-mode";
-import { totalsOf } from "@/lib/overview";
-import { fetchContentMode, fetchProjectBySlug, fetchProjectNotifications } from "@/lib/server/data";
+import { StatusBadge } from "@/components/status-badge";
+import { openIncidentsOf, watchersOf } from "@/lib/agents";
+import { fetchProjectBySlug } from "@/lib/server/data";
+import { fetchAgents } from "@/lib/server/entities/agents";
 import { fetchAlerts } from "@/lib/server/entities/alerts";
-import { fetchRollups } from "@/lib/server/entities/dashboards";
 import { DOCS_URL } from "@/lib/site";
 import { projectPath } from "@/lib/slug";
-import { formatCost, formatCount } from "@/lib/traces";
-import { IncidentStatus, RuleAggregation, RuleMeasure, RuleWindow, SpanKind } from "@/lib/types/enums";
+import { formatCost, formatCount, tracesHref } from "@/lib/traces";
 
-import { Notices } from "../../_notices";
-import { Overview } from "../../_overview";
-import { markProjectReadAction } from "./notice-actions";
-
-// The tab is titled as the page is, by the project's name.
+// The tab is titled by the project's name, so a tab among several says which.
 export async function generateMetadata({
   params,
 }: PageProps<"/[organization]/[project]">): Promise<Metadata> {
   const { project: slug } = await params;
   const project = await fetchProjectBySlug(slug);
-  return { title: project ? project.name : "Overview" };
+  return { title: project ? project.name : "Agents" };
 }
 
-// The project at a glance, a card a subject, each leading to the page that holds it: what
-// it is, its last day, what is open, its budgets, its notices and the book. Anybody on the project reads every card.
-export default async function OverviewPage({
-  params,
-}: PageProps<"/[organization]/[project]">) {
+const plural = (n: number, one: string, many: string) => `${formatCount(n)} ${n === 1 ? one : many}`;
+
+// A project opens on its agents: each that ran over the days read, its last
+// run and how that ended, what it cost against what its runs usually cost,
+// and the alerts that watch it with their open incidents. Anybody on the
+// project reads it.
+export default async function AgentsPage({ params }: PageProps<"/[organization]/[project]">) {
   const { organization, project: slug } = await params;
   const project = await fetchProjectBySlug(slug);
   if (!project) return <ServiceUnavailable />;
   const base = projectPath(organization, project.slug);
-
-  const [notices, day, alerts, mode] = await Promise.all([
-    fetchProjectNotifications(project.id),
-    fetchRollups(project.id, 1),
-    fetchAlerts(project.id),
-    fetchContentMode(project.id),
-  ]);
-
-  const totals = day.kind === "ok" ? totalsOf(day.rollups.points) : null;
-  const open =
-    alerts.kind === "ok" ? alerts.incidents.filter((i) => i.status !== IncidentStatus.Resolved) : null;
-  const budgets =
-    alerts.kind === "ok"
-      ? alerts.alerts.filter(
-          (alert) =>
-            alert.kind === SpanKind.Run &&
-            alert.measure === RuleMeasure.Cost &&
-            alert.aggregation === RuleAggregation.Sum &&
-            alert.window === RuleWindow.Month &&
-            alert.paused === null,
-        )
-      : [];
-  // Mark read goes up to the newest notice drawn, the first of the feed.
-  const newest = notices?.items[0];
-  const unreadable = <p className="text-muted-foreground">Could not be read just now. Reload to try again.</p>;
+  const [read, alerts] = await Promise.all([fetchAgents(project.id), fetchAlerts(project.id)]);
+  if (read.kind !== "ok") return <ServiceUnavailable />;
+  const { days, agents } = read.value;
+  const watched = alerts.kind === "ok" ? alerts : null;
+  const everyAgents = watched ? openIncidentsOf(watched.alerts, watched.incidents, null) : 0;
+  const alertsHref = `${base}/alerts`;
 
   return (
-    <Overview
-      title={project.name}
-      sections={
-        <OverviewGrid>
-          <OverviewCard
-            title="Project info"
-            icon={FolderOpen}
-            links={[
-              { href: `${base}/members`, label: "Add people to this project" },
-              { href: `${base}/settings`, label: "Go to project settings" },
-            ]}
-          >
-            <dl className="grid gap-gutter">
-              <div>
-                <dt className="text-muted-foreground">Project name</dt>
-                <dd>{project.name}</dd>
-              </div>
-              <div>
-                <dt className="text-muted-foreground">Project ID</dt>
-                <dd className="flex items-center gap-gutter">
-                  <code className="min-w-0 truncate font-mono text-xs">{project.id}</code>
-                  <CopyButton value={project.id} label="the project ID" />
-                </dd>
-              </div>
-              <div>
-                <dt className="text-muted-foreground">Content</dt>
-                <dd>{mode ? CONTENT_MODE_LABEL[mode.content_mode] : "Not read"}</dd>
-              </div>
-              <div>
-                <dt className="text-muted-foreground">Your role</dt>
-                <dd>
-                  <RoleBadge role={project.role} />
-                </dd>
-              </div>
-            </dl>
-          </OverviewCard>
-
-          <OverviewCard
-            title="Last 24 hours"
-            icon={Activity}
-            links={[{ href: `${base}/dashboards?days=1`, label: "Go to Dashboards" }]}
-          >
-            {totals === null ? (
-              unreadable
-            ) : (
-              <div className="grid grid-cols-2 gap-gutter">
-                <Figure value={formatCount(totals.runs)} label="Runs" />
-                <Figure value={formatCount(totals.failedRuns)} label="Failed runs" />
-                <Figure value={formatCost(totals.spend)} label="Spend" />
-                <Figure value={formatCount(totals.tokens)} label="Tokens" />
-              </div>
-            )}
-          </OverviewCard>
-
-          <OverviewCard
-            title="Open incidents"
-            icon={BellRing}
-            links={[{ href: `${base}/alerts`, label: "Go to Alerts" }]}
-          >
-            {open === null ? (
-              unreadable
-            ) : open.length === 0 ? (
-              <p className="text-muted-foreground">None open: every alert holds.</p>
-            ) : (
-              <ul className="grid gap-gutter">
-                {open.slice(0, 5).map((incident) => (
-                  <li key={incident.id} className="flex items-start justify-between gap-gutter">
-                    <span className="min-w-0">
-                      <Link
-                        href={incidentHref(organization, project.slug, incident.id)}
-                        className="block truncate underline-offset-4 hover:underline"
-                      >
-                        {incident.rule_name}
-                      </Link>
-                      <span className="text-xs text-muted-foreground">
-                        Opened <LocalTime iso={incident.opened_at} />
-                      </span>
-                    </span>
-                    <Badge variant={severityVariant(incident.severity)} className="font-normal">
-                      {SEVERITY_LABEL[incident.severity]}
-                    </Badge>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </OverviewCard>
-
-          <OverviewCard
-            title="Budgets this month"
-            icon={PiggyBank}
-            links={[{ href: `${base}/alerts`, label: budgets.length > 0 ? "Go to Alerts" : "Set a budget" }]}
-          >
-            {alerts.kind !== "ok" ? (
-              unreadable
-            ) : budgets.length === 0 ? (
-              <p className="text-muted-foreground">
-                None set. A budget is a cost alert summed over the month.
-              </p>
-            ) : (
-              <ul className="grid gap-gutter">
-                {budgets.map((budget) => (
-                  <li key={budget.id} className="flex items-baseline justify-between gap-gutter">
-                    <span className="min-w-0 truncate">{budget.name}</span>
-                    <span className="shrink-0 tabular-nums text-muted-foreground">
-                      {budget.value === null ? "Not read yet" : formatCost(budget.value)} of{" "}
-                      {formatCost(budget.alert_threshold)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </OverviewCard>
-
-          <Notices
-            label="Project notices"
-            icon={Inbox}
-            feed={notices}
-            place={{ organization, project: slug }}
-            links={[{ href: `${base}/notifications`, label: "Go to notifications" }]}
-            action={
-              notices && newest && notices.unread > 0 ? (
-                <MarkRead
-                  unread={notices.unread}
-                  mark={markProjectReadAction.bind(null, project.id, newest.created_at)}
-                />
-              ) : undefined
+    <>
+      <PageHeader
+        title="Agents"
+        info={`Every agent that ran in the last ${days} days: its last run, what that cost against what its runs usually cost, the alerts that watch it, and their open incidents.`}
+      />
+      <section className="grid gap-gutter">
+        {everyAgents > 0 && (
+          <NoticeCard
+            title={`${plural(everyAgents, "incident is", "incidents are")} open on alerts over every agent.`}
+            body={
+              <Link href={alertsHref} className="underline-offset-4 hover:underline">
+                Go to Alerts
+              </Link>
             }
           />
-
-          <OverviewCard
-            title="Documentation"
-            icon={BookOpen}
-            links={[{ href: DOCS_URL, label: "Read the docs" }]}
-          >
-            <ul className="grid gap-gutter">
-              {[
-                { href: `${DOCS_URL}/api/sdks`, label: "Send runs with an SDK" },
-                { href: `${DOCS_URL}/api/frameworks`, label: "Send from a framework you use" },
-                { href: `${DOCS_URL}/monitoring/alerts`, label: "Alerts and budgets" },
-                { href: `${DOCS_URL}/monitoring/content`, label: "What content is kept" },
-              ].map((doc) => (
-                <li key={doc.href}>
-                  <Link href={doc.href} className="underline-offset-4 hover:underline">
-                    {doc.label}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </OverviewCard>
-        </OverviewGrid>
-      }
-    />
+        )}
+        {agents.length === 0 ? (
+          <NoticeCard
+            title={`No agent has run here in the last ${days} days.`}
+            body={
+              <>
+                Make an ingest key on{" "}
+                <Link href={`${base}/api-keys`} className="underline underline-offset-4">
+                  API keys
+                </Link>{" "}
+                and send a run from an{" "}
+                <Link href={`${DOCS_URL}/api/sdks`} className="underline underline-offset-4">
+                  SDK
+                </Link>{" "}
+                or a{" "}
+                <Link href={`${DOCS_URL}/api/coding-agents`} className="underline underline-offset-4">
+                  coding-agent plugin
+                </Link>
+                : each agent then stands here with its last run, what it cost and the alerts that watch it.
+              </>
+            }
+          />
+        ) : (
+          <DataTable>
+            <THead>
+              <Th>Agent</Th>
+              <Th>Last run</Th>
+              <Th className="text-right">Runs</Th>
+              <Th className="text-right">Last run&rsquo;s cost</Th>
+              <Th>Watched by</Th>
+            </THead>
+            <tbody>
+              {agents.map((agent) => {
+                const watchers = watched ? watchersOf(watched.alerts, agent.agent) : null;
+                const open = watched ? openIncidentsOf(watched.alerts, watched.incidents, agent.agent) : 0;
+                return (
+                  <tr key={agent.agent}>
+                    <Td className="font-medium whitespace-nowrap">
+                      <Link
+                        href={tracesHref(organization, project.slug, { agent: [agent.agent] })}
+                        className="underline-offset-4 hover:underline"
+                      >
+                        {agent.agent}
+                      </Link>
+                    </Td>
+                    <Td className="whitespace-nowrap">
+                      <span className="flex items-center gap-gutter">
+                        <StatusBadge status={agent.last_ended ? agent.last_status : null} />
+                        <Link
+                          href={`${base}/traces/${agent.last_run_id}`}
+                          className="text-muted-foreground underline-offset-4 hover:underline"
+                        >
+                          <LocalTime iso={agent.last_started_at} />
+                        </Link>
+                      </span>
+                    </Td>
+                    <Td className="text-right whitespace-nowrap tabular-nums">
+                      {formatCount(agent.runs)}
+                      {agent.failed_runs > 0 && (
+                        <span className="block text-xs text-destructive">{formatCount(agent.failed_runs)} failed</span>
+                      )}
+                    </Td>
+                    <Td className="text-right whitespace-nowrap tabular-nums">
+                      {formatCost(agent.last_spend)}
+                      <span className="block text-xs text-muted-foreground">
+                        {agent.usual_spend === null ? "No run ended yet" : `Usually ${formatCost(agent.usual_spend)}`}
+                      </span>
+                    </Td>
+                    <Td className="whitespace-nowrap">
+                      {watchers === null ? (
+                        "—"
+                      ) : watchers === 0 ? (
+                        <Link href={alertsHref} className="text-muted-foreground underline-offset-4 hover:underline">
+                          No alert yet
+                        </Link>
+                      ) : (
+                        <Link href={alertsHref} className="underline-offset-4 hover:underline">
+                          {plural(watchers, "alert", "alerts")}
+                        </Link>
+                      )}
+                      {open > 0 && (
+                        <span className="block text-xs text-destructive">{plural(open, "open incident", "open incidents")}</span>
+                      )}
+                    </Td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </DataTable>
+        )}
+      </section>
+    </>
   );
 }

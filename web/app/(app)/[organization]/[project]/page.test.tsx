@@ -1,14 +1,11 @@
 // @vitest-environment jsdom
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ActionResult } from "@/lib/action-result";
-
 vi.mock("@/components/page-header", () => ({
-  PageHeader: ({ title, action }: { title?: string; action?: React.ReactNode }) => (
+  PageHeader: ({ title }: { title?: string }) => (
     <div data-testid="page-header">
       <h1>{title}</h1>
-      {action}
     </div>
   ),
 }));
@@ -17,252 +14,144 @@ vi.mock("@/components/service-unavailable", () => ({
   ServiceUnavailable: () => <div data-testid="outage">unavailable</div>,
 }));
 
-// The action, not its effects: which project the page hands it is the
-// assertion, and the service answers whether the person is on it.
-const markProjectReadAction = vi.hoisted(() =>
-  vi.fn<(projectId: string) => Promise<ActionResult>>(async () => ({ ok: true })),
-);
-vi.mock("./notice-actions", () => ({ markProjectReadAction }));
-
-type FeedItem = {
-  id: string;
-  kind: string;
-  title: string;
-  body: string;
-  metadata: { incident_id: string; rule_id: string } | null;
-  read_at: string | null;
-  created_at: string;
-};
-type Feed = { items: FeedItem[]; unread: number } | null;
-
 let mockProject: { id: string; slug: string; name: string; role: string } | null;
-let mockFeed: Feed;
-const fetchProjectBySlug = vi.fn<(slug: string) => Promise<typeof mockProject>>(
-  async () => mockProject,
-);
-const fetchProjectNotifications = vi.fn<(projectId: string) => Promise<Feed>>(
-  async () => mockFeed,
-);
+vi.mock("@/lib/server/data", () => ({ fetchProjectBySlug: async () => mockProject }));
 
-vi.mock("@/lib/server/data", () => ({
-  fetchProjectBySlug: (slug: string) => fetchProjectBySlug(slug),
-  fetchProjectNotifications: (projectId: string) => fetchProjectNotifications(projectId),
-  fetchContentMode: async () => ({ content_mode: "off" }),
-}));
+let mockAgents: unknown;
+vi.mock("@/lib/server/entities/agents", () => ({ fetchAgents: async () => mockAgents }));
 
 let mockAlerts: unknown;
 vi.mock("@/lib/server/entities/alerts", () => ({ fetchAlerts: async () => mockAlerts }));
 
-const point = (runs: number, failed: number, spend: number) => ({
-  at: "2026-11-02T00:00:00Z",
-  spans: runs,
-  failed,
-  runs,
-  failed_runs: failed,
-  input_tokens: 100,
-  output_tokens: 20,
-  cache_read_input_tokens: 0,
-  cache_write_input_tokens: 0,
-  spend,
-  duration_ms: { avg: 1, p50: 1, p90: 2, p99: 3 },
-  run_duration_ms: { p50: 1, p95: 2, p99: 3 },
+import AgentsPage, { generateMetadata } from "./page";
+
+const PARAMS = Promise.resolve({ organization: "acme", project: "web" });
+
+const agent = (name: string, patch: Record<string, unknown> = {}) => ({
+  agent: name,
+  runs: 1,
+  failed_runs: 0,
+  last_run_id: "0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01",
+  last_started_at: "2026-11-05T09:00:00Z",
+  last_ended: true,
+  last_status: "ok",
+  last_spend: 0.012,
+  usual_spend: 0.012,
+  ...patch,
 });
-let mockPoints: unknown[];
-const fetchRollups = vi.fn(async (_id: string, days: number) => ({
+
+// An alert over every agent where `agents` is empty, held to them where not.
+const alert = (id: string, agents: string[] = [], paused: string | null = null) => ({
+  id,
+  filters: agents.length > 0 ? { agent: agents } : {},
+  paused,
+});
+
+const incident = (id: string, rule: string, status = "open") => ({ id, rule_id: rule, status });
+
+const agentsOk = (agents: unknown[]) => ({ kind: "ok", value: { days: 14, agents } });
+const alertsOk = (alerts: unknown[], incidents: unknown[] = []) => ({
   kind: "ok",
-  rollups: { days, step: days === 1 ? "hour" : "day", group: null, points: mockPoints, truncated: false },
-}));
-vi.mock("@/lib/server/entities/dashboards", () => ({
-  fetchRollups: (id: string, days: number) => fetchRollups(id, days),
-}));
-
-import OverviewPage, { generateMetadata } from "./page";
-
-const PROJECT = "project_7bQx2mNv9BcK4dLp";
-const SLUG = "platform";
-
-const CONNECTED: FeedItem = {
-  id: "n2",
-  kind: "connector_connected",
-  title: "Slack connected",
-  body: "This project's notices will now be posted to #agents in Acme.",
-  metadata: null,
-  read_at: null,
-  created_at: "2026-10-14T03:00:00Z",
-};
-const JOINED: FeedItem = {
-  id: "n1",
-  kind: "member_added",
-  title: "Grace joined the project",
-  body: "Grace accepted an invitation as a Member.",
-  metadata: null,
-  read_at: "2026-10-13T09:00:00Z",
-  created_at: "2026-10-13T08:00:00Z",
-};
-const INCIDENT = "5d4f5c68-0000-4000-8000-000000000001";
-const OPENED: FeedItem = {
-  id: "n3",
-  kind: "incident_opened",
-  title: "Slow calls: alert",
-  body: [
-    "The p95 duration of model calls over the last hour is 6,200 ms, past the alert threshold of 5,000 ms.",
-    "The run of the slowest model call: 4 steps, 1200 tokens and $0.012. https://console.example.com/org_1/project_7bQx2mNv9BcK4dLp/traces/9b2d1f63-0000-4000-8000-000000000003",
-    "Traces: https://console.example.com/org_1/project_7bQx2mNv9BcK4dLp/traces?kind=model_call",
-  ].join("\n"),
-  metadata: { incident_id: INCIDENT, rule_id: "7a1c0e52-0000-4000-8000-000000000002" },
-  read_at: null,
-  created_at: "2026-10-14T04:00:00Z",
-};
-
-async function renderAt(project: string) {
-  render(await OverviewPage({ params: Promise.resolve({ organization: "acme", project }), searchParams: Promise.resolve({}) }));
-}
-
-beforeEach(() => {
-  vi.clearAllMocks();
-  mockProject = { id: PROJECT, slug: SLUG, name: "Platform", role: "member" };
-  mockFeed = { items: [], unread: 0 };
-  mockPoints = [];
-  mockAlerts = { kind: "ok", alerts: [], incidents: [], mutes: [], at: 0 };
+  alerts,
+  incidents,
+  mutes: [],
 });
 
-const card = (name: string) => screen.getByRole("region", { name });
+describe("a project's Agents page", () => {
+  beforeEach(() => {
+    mockProject = { id: "prj_1", slug: "web", name: "Web", role: "member" };
+    mockAgents = agentsOk([]);
+    mockAlerts = alertsOk([]);
+  });
 
-describe("OverviewPage", () => {
-  it("is titled by the project, its cards each leading to its page", async () => {
-    await renderAt(SLUG);
-    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Platform");
-    for (const name of [
-      "Project info",
-      "Last 24 hours",
-      "Open incidents",
-      "Budgets this month",
-      "Project notices",
-      "Documentation",
-    ]) {
-      expect(card(name)).toBeInTheDocument();
-    }
-    expect(card("Project info")).toHaveTextContent(PROJECT);
-    expect(within(card("Last 24 hours")).getByRole("link", { name: "Go to Dashboards" })).toHaveAttribute(
+  it("titles the tab by the project's name, and the page Agents", async () => {
+    expect(await generateMetadata({ params: PARAMS } as never)).toEqual({ title: "Web" });
+    render(await AgentsPage({ params: PARAMS } as never));
+    expect(screen.getByRole("heading", { name: "Agents" })).toBeInTheDocument();
+  });
+
+  // The first run made the project's starter alerts, each over every agent.
+  it("reads a project with one run as watched", async () => {
+    mockAgents = agentsOk([agent("support-bot")]);
+    mockAlerts = alertsOk([alert("failing"), alert("looping"), alert("stalled")]);
+    render(await AgentsPage({ params: PARAMS } as never));
+
+    const row = screen.getByRole("link", { name: "support-bot" }).closest("tr")!;
+    expect(screen.getByRole("link", { name: "support-bot" })).toHaveAttribute(
       "href",
-      "/acme/platform/dashboards?days=1",
+      "/acme/web/traces?agent=support-bot",
     );
-    expect(card("Open incidents")).toHaveTextContent("None open");
-    expect(card("Project notices")).toHaveTextContent("Nothing new.");
+    expect(within(row).getByText("OK")).toBeInTheDocument();
+    expect(within(row).getByRole("link", { name: "3 alerts" })).toHaveAttribute("href", "/acme/web/alerts");
+    expect(within(row).getByText("$0.012")).toBeInTheDocument();
+    expect(within(row).getByText("Usually $0.012")).toBeInTheDocument();
+    expect(screen.queryByText(/No agent has run/)).toBeNull();
   });
 
-  it("sums the last day, and lists what is open and each budget's month", async () => {
-    mockPoints = [point(3, 1, 0.5), point(2, 0, 1.25)];
-    mockAlerts = {
-      kind: "ok",
-      alerts: [
-        { id: "b1", name: "Monthly", kind: "run", measure: "cost", aggregation: "sum", window: "month", alert_threshold: 100, value: 42.5, paused: null },
-      ],
-      incidents: [
-        { id: INCIDENT, rule_name: "Slow calls", status: "open", severity: "alert", opened_at: "2026-11-02T01:00:00Z" },
-        { id: "gone", rule_name: "Old", status: "resolved", severity: "alert", opened_at: "2026-11-01T01:00:00Z" },
-      ],
-      mutes: [],
-      at: 0,
-    };
-    await renderAt(SLUG);
-    const day = card("Last 24 hours");
-    expect(day).toHaveTextContent("5Runs");
-    expect(day).toHaveTextContent("1Failed runs");
-    expect(day).toHaveTextContent("$1.75Spend");
-    expect(fetchRollups).toHaveBeenCalledWith(PROJECT, 1);
-    expect(screen.queryByRole("region", { name: "Getting started" })).toBeNull();
-    const open = card("Open incidents");
-    expect(within(open).getByRole("link", { name: "Slow calls" })).toBeInTheDocument();
-    expect(open).not.toHaveTextContent("Old");
-    expect(card("Budgets this month")).toHaveTextContent("$42.50 of $100.00");
-  });
+  it("links each agent's last run, and counts its failures and what it cost against its usual", async () => {
+    mockAgents = agentsOk([
+      agent("nightly-report", { runs: 1, last_ended: false, last_spend: 0.004, usual_spend: null }),
+      agent("support-bot", { runs: 12, failed_runs: 2, last_status: "error", last_spend: 0.2, usual_spend: 0.05 }),
+    ]);
+    render(await AgentsPage({ params: PARAMS } as never));
 
-  it("finds the project by the path's slug, and reads that project's own feed", async () => {
-    await renderAt(SLUG);
-    expect(fetchProjectBySlug).toHaveBeenCalledWith(SLUG);
-    expect(fetchProjectNotifications).toHaveBeenCalledWith(PROJECT);
-  });
+    const nightly = screen.getByRole("link", { name: "nightly-report" }).closest("tr")!;
+    expect(within(nightly).getByText("Running")).toBeInTheDocument();
+    expect(within(nightly).getByText("No run ended yet")).toBeInTheDocument();
+    expect(within(nightly).getByRole("link", { name: "No alert yet" })).toHaveAttribute("href", "/acme/web/alerts");
 
-  // The one place in the console a project's notices are read. Mark read is
-  // the feed's own, in its heading row.
-  it("shows the project's notices, the unread ones marked, with Mark read", async () => {
-    mockFeed = { items: [CONNECTED, JOINED], unread: 1 };
-    await renderAt(SLUG);
-    const notices = screen.getByRole("region", { name: "Project notices" });
-    expect(notices).toHaveTextContent("Slack connected");
-    expect(notices).toHaveTextContent("Channel connected");
-    expect(notices).toHaveTextContent("Grace joined the project");
-    expect(notices).toHaveTextContent("Member added");
-    expect(screen.getAllByText("Unread")).toHaveLength(1);
-    expect(screen.getByRole("heading", { level: 2, name: "Project notices" })).toBeInTheDocument();
-    expect(within(notices).getByRole("button", { name: "Mark read (1)" })).toBeInTheDocument();
-    expect(within(screen.getByTestId("page-header")).queryAllByRole("button")).toHaveLength(0);
-  });
-
-  // ⚠ An incident's notice is lines, and the incident itself one link away.
-  it("links each notice to the page it is about, an incident's to the incident, its lines kept", async () => {
-    mockFeed = { items: [OPENED, CONNECTED, JOINED], unread: 2 };
-    await renderAt(SLUG);
-    const notices = screen.getByRole("region", { name: "Project notices" });
-    expect(within(notices).getByRole("link", { name: "Slow calls: alert" })).toHaveAttribute(
+    const support = screen.getByRole("link", { name: "support-bot" }).closest("tr")!;
+    expect(within(support).getByText("12")).toBeInTheDocument();
+    expect(within(support).getByText("2 failed")).toBeInTheDocument();
+    expect(within(support).getByText("$0.20")).toBeInTheDocument();
+    expect(within(support).getByText("Usually $0.050")).toBeInTheDocument();
+    expect(support.querySelector('time[datetime="2026-11-05T09:00:00Z"]')?.closest("a")).toHaveAttribute(
       "href",
-      `/acme/platform/alerts?incident=${INCIDENT}#incident-${INCIDENT}`,
+      "/acme/web/traces/0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01",
     );
-    // Every notice leads to the page it is about, and the card to the whole feed.
-    expect(within(notices).getByRole("link", { name: CONNECTED.title })).toHaveAttribute(
-      "href",
-      "/acme/platform/connectors",
+  });
+
+  // An alert held to one agent counts on its row; one over every agent counts
+  // once, above them, since no one row is its; a paused one watches nothing.
+  it("counts an agent's own open incidents on its row, and every agent's above the table", async () => {
+    mockAgents = agentsOk([agent("support-bot"), agent("nightly-report")]);
+    mockAlerts = alertsOk(
+      [alert("held", ["support-bot"]), alert("every"), alert("paused", ["nightly-report"], "member")],
+      [incident("i1", "held"), incident("i2", "every"), incident("i3", "held", "resolved")],
     );
-    expect(within(notices).getByRole("link", { name: JOINED.title })).toHaveAttribute("href", "/acme/platform/members");
-    expect(within(notices).getByRole("link", { name: /Go to notifications/ })).toHaveAttribute(
-      "href",
-      "/acme/platform/notifications",
-    );
-    const body = within(notices).getByText(/^The p95 duration of model calls/);
-    expect(body.textContent).toBe(OPENED.body);
-    expect(body).toHaveClass("whitespace-pre-line");
+    render(await AgentsPage({ params: PARAMS } as never));
+
+    expect(screen.getByText("1 incident is open on alerts over every agent.")).toBeInTheDocument();
+    const support = screen.getByRole("link", { name: "support-bot" }).closest("tr")!;
+    expect(within(support).getByRole("link", { name: "2 alerts" })).toBeInTheDocument();
+    expect(within(support).getByText("1 open incident")).toBeInTheDocument();
+    const nightly = screen.getByRole("link", { name: "nightly-report" }).closest("tr")!;
+    expect(within(nightly).getByRole("link", { name: "1 alert" })).toBeInTheDocument();
+    expect(within(nightly).queryByText(/open incident/)).toBeNull();
   });
 
-  it("hands Mark read the project's id, not its slug", async () => {
-    mockFeed = { items: [CONNECTED], unread: 1 };
-    await renderAt(SLUG);
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Mark read (1)" }));
-    });
-    expect(markProjectReadAction).toHaveBeenCalledExactlyOnceWith(PROJECT, CONNECTED.created_at);
+  it("says how to send a first run where no agent has run", async () => {
+    render(await AgentsPage({ params: PARAMS } as never));
+    expect(screen.getByText("No agent has run here in the last 14 days.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "API keys" })).toHaveAttribute("href", "/acme/web/api-keys");
+    expect(screen.queryByRole("table")).toBeNull();
   });
 
-  it("offers no Mark read once everything on the feed is read", async () => {
-    mockFeed = { items: [JOINED], unread: 0 };
-    await renderAt(SLUG);
-    expect(within(card("Project notices")).queryAllByRole("button")).toHaveLength(0);
+  it("draws the agents with nothing said of their alerts when those could not be read", async () => {
+    mockAgents = agentsOk([agent("support-bot")]);
+    mockAlerts = { kind: "unavailable" };
+    render(await AgentsPage({ params: PARAMS } as never));
+    const row = screen.getByRole("link", { name: "support-bot" }).closest("tr")!;
+    expect(within(row).getByText("—")).toBeInTheDocument();
   });
 
-  // A feed that cannot be read is the notifications service unset or down: its card says so.
-  it("says the notices could not be read, and keeps the rest", async () => {
-    mockFeed = null;
-    await renderAt(SLUG);
-    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Platform");
-    expect(card("Project notices")).toHaveTextContent("Could not be read just now");
-    expect(within(card("Project notices")).queryAllByRole("button")).toHaveLength(0);
-    expect(card("Project info")).toBeInTheDocument();
-  });
-
-  it("shows the outage card when the project cannot be read, and asks for no feed", async () => {
-    mockProject = null;
-    await renderAt(SLUG);
+  it("says the service is out when the agents could not be read, or the project", async () => {
+    mockAgents = { kind: "unavailable" };
+    const { unmount } = render(await AgentsPage({ params: PARAMS } as never));
     expect(screen.getByTestId("outage")).toBeInTheDocument();
-    expect(screen.queryByText("Platform")).toBeNull();
-    expect(fetchProjectNotifications).not.toHaveBeenCalled();
-  });
-
-  it("titles the tab by the project", async () => {
-    expect(await generateMetadata({
-        params: Promise.resolve({ organization: "acme", project: SLUG }),
-        searchParams: Promise.resolve({}),
-      })).toEqual({
-      title: "Platform",
-    });
+    unmount();
+    mockProject = null;
+    render(await AgentsPage({ params: PARAMS } as never));
+    expect(screen.getByTestId("outage")).toBeInTheDocument();
   });
 });

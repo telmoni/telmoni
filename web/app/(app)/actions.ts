@@ -195,7 +195,7 @@ export async function createOrganizationAction(
     });
   }
   revalidatePath("/", "layout");
-  // Its Overview, unless a console built on this one sends it elsewhere.
+  // Its projects, unless a console built on this one sends it elsewhere.
   const href =
     (await createdOrganizationHref(created.data)) ??
     organizationPath(created.data.slug, "/projects");

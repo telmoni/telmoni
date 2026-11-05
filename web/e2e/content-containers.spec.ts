@@ -1,7 +1,7 @@
 import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
 import type { SessionData } from "@/lib/auth/session";
 import { buildConsoleNav } from "@/lib/console-nav";
-import { expectProjectOverview, landOnProject } from "./helpers";
+import { expectProjectAgents, landOnProject } from "./helpers";
 
 const SERVICE_SECRET = "e2e-service-secret-do-not-use-in-production";
 const SERVER = "http://localhost:8082";
@@ -200,7 +200,7 @@ test.describe("Console content containers", () => {
     await injectSession(page, user);
 
     const landing = await landOnProject(page);
-    await expectProjectOverview(page);
+    await expectProjectAgents(page);
     expect(landing, "the door lands on a project").toMatch(/^\/[a-z0-9-]+\/[a-z0-9-]+$/);
     const [, organization, projectSlug] = landing.split("/");
     await seed(page.request, user, projectSlug!);
@@ -208,7 +208,7 @@ test.describe("Console content containers", () => {
     // the `/me` its first visit makes, is the single row the privacy page lists.
     await injectSession(page, user);
     await landOnProject(page);
-    await expectProjectOverview(page);
+    await expectProjectAgents(page);
 
     const rows = (pathname: string) =>
       buildConsoleNav(pathname).flatMap((group) => group.items.map((item) => item.url));

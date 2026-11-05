@@ -26,7 +26,7 @@ import { MAX_DAYS } from "@/lib/list-query";
 import { DEFAULT_ROWS, activeFilters, parseTraceQuery, parseTraceUi } from "@/lib/traces";
 import { UTC_OFFSET_COOKIE, parseUtcOffset } from "@/lib/utc-offset";
 
-export const metadata = { title: "Traces" };
+export const metadata = { title: "Runs" };
 
 // The trace list: a toolbar, the filters beside the list, the runs over the
 // window above a page of rows, and the way through the pages below. A row
@@ -70,7 +70,7 @@ export default async function TracesPage({
       <UtcOffsetCookie drawnWith={utcOffset} />
       <ListPage
         list="traces"
-        title="Traces"
+        title="Runs"
         info="Every run of this project's agents, newest first, with its steps, model and tool calls. Click a value to narrow the list to it, a heading to sort by it."
         organization={organization}
         slug={slug}

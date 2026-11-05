@@ -1,10 +1,10 @@
 ---
-title: "Traces"
-description: "A project's Traces page: every run of its agents as a row, newest first, narrowed by any of its values, sorted, grouped by session or user, paged, drawn over the window and downloaded, and each run opened beside the list or on a page of its own, its spans as a tree beside the one you choose — metadata, and where the project keeps content, every message and tool call in full."
+title: "Runs"
+description: "A project's Runs page: every run of its agents as a row, newest first, narrowed by any of its values, sorted, grouped by session or user, paged, drawn over the window and downloaded, and each run opened beside the list or on a page of its own, its spans as a tree beside the one you choose — metadata, and where the project keeps content, every message and tool call in full."
 ---
 
 A **trace** is one run's record: the run's own span and every span recorded
-inside it, found by the run's id. A project's **Traces** page lists them; each
+inside it, found by the run's id. A project's **Runs** page (`/traces`) lists them; each
 opens beside the list, and has a page of its own. Both show its metadata —
 timings, statuses, counts, model and tool names — and, on a project whose
 [content mode](/docs/workspace/organizations-and-projects#a-projects-content-mode)
@@ -12,7 +12,7 @@ is `on`, what it kept of what a person or a model wrote, in full
 ([Content](#content), below). A project left `off` keeps none, so its traces
 show none.
 
-A project no run has reached, in all its plan keeps, opens **Traces** on its
+A project no run has reached, in all its plan keeps, opens **Runs** on its
 first run instead of an empty list: a key to mint, a prompt to paste into a
 coding agent that adds tracing with the [agent skill](/docs/api/agent-skill),
 and the SDK and framework guides. The page listens as it waits, and draws the

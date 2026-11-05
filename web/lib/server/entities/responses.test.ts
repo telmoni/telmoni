@@ -24,6 +24,7 @@ import { SettledInviteSchema } from "@/lib/types/settled-invite";
 
 import { ActiveSessionListSchema } from "./active-sessions";
 import { ConversationListSchema, ConversationSchema, StatusSchema } from "./agent";
+import { AgentListSchema } from "./agents";
 import { AlertListSchema, IncidentListSchema, MuteListSchema } from "./alerts";
 import { AuditPageSchema } from "./audit";
 import { InviteListSchema, InviteLookSchema, MemberListSchema } from "./member";
@@ -123,6 +124,7 @@ const READERS: Record<string, z.ZodType> = {
   "notifications/sent.json": SendAnswerSchema,
   "notifications/signing-secret.json": SigningSecretSchema,
   "notifications/slack-identities.json": SlackIdentitiesSchema,
+  "telemetry/agents.json": AgentListSchema,
   "telemetry/alerts.json": AlertListSchema,
   "telemetry/content-mode.json": ContentModeSettingSchema,
   "telemetry/dashboards.json": DashboardViewListSchema,

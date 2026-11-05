@@ -214,7 +214,7 @@ beforeEach(() => {
 describe("TracesPage", () => {
   it("lists a page of runs in the default columns, each value a filter, and counts them all", async () => {
     render(await TracesPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
-    expect(screen.getByTestId("page-header")).toHaveTextContent("Traces");
+    expect(screen.getByTestId("page-header")).toHaveTextContent("Runs");
     expect(screen.getByText("Total 2")).toBeInTheDocument();
     expect(fetchProjectBySlug).toHaveBeenCalledWith("web");
     // A page holds fifty rows unless the URL names another count.

@@ -71,7 +71,7 @@ operator has configured mail) and in their notifications: the bell and the
 other way, or dismiss it, or the project moves to another organization, or
 they are made an Admin of the organization, which puts them on every project.
 An invitation of theirs to that project is withdrawn by the seat. The seat is
-recorded in the audit log, and the project's **Overview** notes who joined.
+recorded in the audit log, and the project's **Notifications** page notes who joined.
 
 A project Admin who is only a Member of the organization sees no roster and
 invites by email. Where the `members` feature flag is off, or the organization
@@ -102,7 +102,7 @@ carries no invitation to an unverified address. The bell accepts and declines
 in one press; the Notifications page asks you to confirm a decline.
 
 Accepting an invitation records an audit event. Accepting a project invitation
-also posts a `member_added` notice on the project's **Overview** and to its
+also posts a `member_added` notice on the project's **Notifications** page and to its
 connectors, and lists you on the organization's roster as a **Member**: no
 organization powers come with that, and it is what lets the organization show
 your address on its rosters. Declining an invitation ends it immediately.

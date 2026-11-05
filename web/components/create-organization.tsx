@@ -67,7 +67,7 @@ export function CreateOrganizationPanel({
           window.location.assign(res.href);
           return;
         }
-        // On to its Overview. Without an address to follow, auth's answer
+        // On to its projects. Without an address to follow, auth's answer
         // could not be read; the switcher lists it all the same, the layout
         // read again by the action's revalidation. The panel shuts in one
         // transition with either, so it goes as the page lands.

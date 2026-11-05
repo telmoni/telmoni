@@ -58,7 +58,7 @@ export default async function TracePage({
   if (access.kind === "missing") {
     return (
       <>
-        <PageHeader title="Trace" backHref={list} backLabel="Traces" />
+        <PageHeader title="Trace" backHref={list} backLabel="Runs" />
         <NoticeCard
           title="No trace with this id in this project."
           body={
@@ -82,7 +82,7 @@ export default async function TracePage({
       <PageHeader
         title={root.agent}
         backHref={list}
-        backLabel="Traces"
+        backLabel="Runs"
         action={
           administers(project.role) && <DeleteTrace projectId={project.id} runId={trace.run_id} />
         }

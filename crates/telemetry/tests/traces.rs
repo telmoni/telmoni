@@ -388,6 +388,82 @@ async fn seed(ch: &common::ClickHouse, p: &Projects) -> Seeded {
     Seeded { a, b, c, d }
 }
 
+/// Each agent as its Agents page reads it: its runs, those that failed, the
+/// one that started last and what it cost, and the median of what its ended
+/// runs cost, the newest last run first; another project's agent is not here.
+#[sqlx::test]
+async fn the_agents_lane_reads_each_agents_last_run_against_its_usual_cost(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let p = projects(&pool);
+    let now = Utc::now().trunc_subsecs(6);
+    // A run of `agent` started `minutes` ago, its one call costing `cost`;
+    // ended where it carries its own span, failed where `failed`.
+    let run =
+        |project: &ProjectId, agent: &str, minutes: i64, cost: f64, ended: bool, failed: bool| {
+            let id = Uuid::new_v4();
+            let started = now - Duration::minutes(minutes);
+            let call = SpanRow {
+                agent: agent.into(),
+                parent_span_id: format!("{:016x}", 1),
+                cost: Some(cost),
+                ..span_at(project, id, SpanKind::ModelCall, "chat", started, 500, 2)
+            };
+            let own = SpanRow {
+                agent: agent.into(),
+                status: if failed {
+                    SpanStatus::Error
+                } else {
+                    SpanStatus::Ok
+                },
+                ..span_at(project, id, SpanKind::Run, agent, started, 1_000, 1)
+            };
+            (id, if ended { vec![own, call] } else { vec![call] })
+        };
+    let (_, first) = run(&p.ours, "support-bot", 30, 0.10, true, false);
+    let (_, failed) = run(&p.ours, "support-bot", 20, 0.30, true, true);
+    let (last, newest) = run(&p.ours, "support-bot", 10, 0.20, true, false);
+    let (running, open) = run(&p.ours, "nightly-report", 5, 0.05, false, false);
+    let (_, theirs) = run(&p.theirs, "zeta", 1, 9.0, true, false);
+    let rows: Vec<SpanRow> = [first, failed, newest, open, theirs].concat();
+    ch.store.insert_spans(&rows).await.expect("the spans land");
+
+    let answer = p.get("/internal/v1/telemetry/agents").await;
+    assert_eq!(answer["days"], 14);
+    let agents = answer["agents"].as_array().expect("agents");
+    assert_eq!(
+        agents.len(),
+        2,
+        "another project's agent is not here: {answer}"
+    );
+    let (nightly, support) = (&agents[0], &agents[1]);
+    assert_eq!(
+        nightly["agent"], "nightly-report",
+        "the newest last run first"
+    );
+    assert_eq!(nightly["runs"], 1);
+    assert_eq!(nightly["last_run_id"], running.to_string());
+    assert_eq!(nightly["last_ended"], false, "its own span has not arrived");
+    assert_eq!(nightly["last_spend"], 0.05);
+    assert_eq!(
+        nightly["usual_spend"],
+        Value::Null,
+        "no run of it has ended"
+    );
+    assert_eq!(support["agent"], "support-bot");
+    assert_eq!(support["runs"], 3);
+    assert_eq!(support["failed_runs"], 1);
+    assert_eq!(support["last_run_id"], last.to_string());
+    assert_eq!(support["last_ended"], true);
+    assert_eq!(support["last_status"], "ok");
+    assert_eq!(support["last_spend"], 0.2);
+    assert_eq!(
+        support["usual_spend"], 0.2,
+        "the median of 0.10, 0.30 and 0.20"
+    );
+}
+
 #[sqlx::test]
 async fn the_list_sums_each_run_newest_first_and_names_only_the_projects_runs(pool: PgPool) {
     let Some(ch) = clickhouse_or_skip(module_path!()).await else {

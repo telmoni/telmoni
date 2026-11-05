@@ -42,14 +42,13 @@ export async function landOnProject(page: Page): Promise<string> {
   return landing;
 }
 
-// A project's overview is titled by the project, so landing on one is the
-// page's title naming the project the header's switcher stands in, once the
-// switcher has caught up with a client-side navigation.
-export async function expectProjectOverview(page: Page): Promise<void> {
-  const name = (await page.getByRole("heading", { level: 1 }).innerText()).trim();
-  expect(name, "the page has a title").not.toBe("");
+// A project opens on its agents, so landing on one is that page's title, and
+// the header's switcher standing in a project, once it has caught up with a
+// client-side navigation.
+export async function expectProjectAgents(page: Page): Promise<void> {
+  await expect(page.getByRole("heading", { level: 1, name: "Agents" })).toBeVisible();
   await expect(
-    page.getByRole("button", { name: `Project: ${name}`, exact: true }),
+    page.getByRole("button", { name: /^Project: / }),
     "the switcher names the project",
   ).toBeVisible();
 }

@@ -56,7 +56,7 @@ export function PageHeader({
 
   if (!title && !action && !toolbar) return null;
   // At least as tall as the rail rows (28px), so the page title sits on the
-  // Overview icon link's axis whether the rail is closed or open; a toolbar
+  // first row's axis whether the rail is closed or open; a toolbar
   // the row cannot hold scrolls beside the title rather than wrapping.
   const row = (
     <div className="flex min-h-7 w-full min-w-0 items-center gap-gutter">

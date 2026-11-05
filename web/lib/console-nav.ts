@@ -1,11 +1,10 @@
 import {
   Accessibility,
-  Activity,
   Bell,
   BellRing,
+  Bot,
   History,
   KeyRound,
-  LayoutDashboard,
   ListTree,
   Plug,
   Settings,
@@ -15,6 +14,7 @@ import {
   User,
   type LucideIcon,
   Users,
+  Wallet,
 } from "lucide-react";
 
 import { EXTRA_NAV_ITEMS, type ExtraNavItem } from "@/lib/extension/nav";
@@ -184,13 +184,15 @@ interface GroupSpec {
 const CORE_GROUPS: GroupSpec[] = [
   {
     title: "Project",
-    // The product's rows, then the project's own housekeeping a block below.
+    // What answers "are my agents OK?", then the project's own housekeeping a
+    // block below. The pages keep their paths: Runs is the trace list, Spend
+    // the dashboards.
     items: [
-      { title: "Overview", path: "", icon: Activity, key: "o" },
-      { title: "Traces", path: "/traces", icon: ListTree, key: "t" },
+      { title: "Agents", path: "", icon: Bot, key: "o" },
+      { title: "Runs", path: "/traces", icon: ListTree, key: "r" },
       { title: "Alerts", path: "/alerts", icon: BellRing, key: "a" },
-      { title: "Dashboards", path: "/dashboards", icon: LayoutDashboard, key: "d" },
       { title: "Objectives", path: "/objectives", icon: Target, key: "v" },
+      { title: "Spend", path: "/dashboards", icon: Wallet, key: "s" },
       { title: "API keys", path: "/api-keys", icon: KeyRound, block: true, key: "k" },
       { title: "Connectors", path: "/connectors", icon: Plug, key: "c" },
       { title: "Members", path: "/members", icon: Users, key: "m" },

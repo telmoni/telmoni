@@ -441,6 +441,8 @@ macro_rules! runs {
 pub(crate) use admits;
 pub(crate) use run_carries;
 pub(crate) use run_status;
+pub(crate) use run_sums;
+pub(crate) use runs;
 pub(crate) use window;
 
 /// The list's SQL with one `ORDER BY`, so every (column, direction) is a

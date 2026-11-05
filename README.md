@@ -95,7 +95,7 @@ TypeScript, Go and Rust work the same way; the [SDK docs](https://telmoni.com/do
 
 ### 4. See it in the console
 
-The project's **Traces** page shows the run with its model call, tokens and timings. **Group by** lays its runs out by the `session_id` or the `user_id` a run is given.
+The project's **Runs** page shows the run with its model call, tokens and timings. **Group by** lays its runs out by the `session_id` or the `user_id` a run is given.
 
 ## Self-hosting
 

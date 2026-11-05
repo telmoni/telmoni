@@ -1,8 +1,5 @@
-import type { ComponentProps, ReactNode } from "react";
-import type { LucideIcon } from "lucide-react";
 import Link from "next/link";
 
-import { OverviewCard } from "@/components/overview-card";
 import { LocalTime } from "@/components/local-time";
 import { Row, Rows } from "@/components/rows";
 import { eventKindLabel } from "@/lib/notification-kinds";
@@ -12,50 +9,16 @@ import { cn } from "@/lib/utils";
 
 // A feed's notices, newest first as the server sends them, each unread one
 // bold until somebody marks the feed read, and each a link to the page it is
-// about (`noticeHref`). The organization's own notices and a project's are
-// different sets the server answers by scope, so each page reads its own and
-// hands it here, and the two read alike. `Notices` is an overview's card of
-// them, saying so when the feed is empty or could not be read (`null`);
-// `NoticeRows` the list alone, as the feeds' own pages draw it.
-export function Notices({
-  label,
-  icon,
-  feed,
-  action,
-  place,
-  links,
-}: {
-  label: string;
-  icon?: LucideIcon;
-  feed: NotificationFeed | null;
-  action?: ReactNode;
-  place: NoticePlace;
-  links?: ComponentProps<typeof OverviewCard>["links"];
-}) {
-  return (
-    <OverviewCard title={label} icon={icon} action={action} links={links}>
-      <NoticeRows feed={feed} place={place} flush />
-    </OverviewCard>
-  );
-}
-
-/** The feed's rows, or what stands in for them. `flush` in a card: rows ruled
- *  apart, never a card in a card. */
-export function NoticeRows({
-  feed,
-  place,
-  flush = false,
-}: {
-  feed: NotificationFeed | null;
-  place: NoticePlace;
-  flush?: boolean;
-}) {
+// about (`noticeHref`), or what stands in for them. The organization's own
+// notices and a project's are different sets the server answers by scope, so
+// each page reads its own and hands it here, and the two read alike.
+export function NoticeRows({ feed, place }: { feed: NotificationFeed | null; place: NoticePlace }) {
   if (feed === null) {
     return <p className="text-sm text-muted-foreground">Could not be read just now. Reload to try again.</p>;
   }
   if (feed.items.length === 0) return <p className="text-sm text-muted-foreground">Nothing new.</p>;
   return (
-    <Rows className={cn(flush && "rounded-none p-0 ring-0")}>
+    <Rows>
       {feed.items.map((item) => (
         <NoticeRow key={item.id} item={item} place={place} />
       ))}

@@ -70,7 +70,7 @@ export const PAGE_ACTION_KEY = "c";
  *  (`lib/use-page-steps.ts`): the trace list's peek through the page's runs,
  *  as a mail reader's j and k do;
  *  `o` opens the one stood on, where the page offers that. `k` is also the
- *  API keys row's `g k` and `o` the Overview's `g o`, and the pending-`g`
+ *  API keys row's `g k` and `o` the Agents row's `g o`, and the pending-`g`
  *  branch takes both first, as it does `c`. */
 export const NEXT_KEY = "j";
 export const PREVIOUS_KEY = "k";

@@ -223,6 +223,7 @@ pub fn router(state: Arc<AppState>) -> Router {
             get(handler::rules::list_rules).post(handler::rules::create_rule),
         )
         .route("/telemetry/history", get(handler::history::get_history))
+        .route("/telemetry/agents", get(handler::agents::get_agents))
         .route(
             "/telemetry/objectives",
             get(handler::objectives::list_objectives),

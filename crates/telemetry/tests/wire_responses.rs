@@ -14,6 +14,7 @@ use telmoni_shared::{
     SortDirection, SpanKind, SpanStatus, TraceSort,
 };
 use telmoni_telemetry::contract::{InventoryRow, Needs, ReadOn};
+use telmoni_telemetry::handler::agents::{AGENTS_DAYS, AgentRow, Agents};
 use telmoni_telemetry::handler::content_mode::{ContentModeSetting, OFFERED};
 use telmoni_telemetry::handler::field_inventory::FieldInventory;
 use telmoni_telemetry::handler::incidents::IncidentList;
@@ -154,6 +155,42 @@ fn the_trace_list_answers_as_the_console_reads() {
                 }],
             )]
             .into(),
+        },
+    );
+}
+
+/// The Agents page's rows: one agent whose last run ended and was priced,
+/// and one still on its first run, with no usual cost yet.
+#[test]
+fn the_agents_answer_as_the_console_reads() {
+    pin(
+        "agents",
+        &Agents {
+            days: AGENTS_DAYS,
+            agents: vec![
+                AgentRow {
+                    agent: "support".into(),
+                    runs: 12,
+                    failed_runs: 1,
+                    last_run_id: RUN,
+                    last_started_at: at(0),
+                    last_ended: true,
+                    last_status: SpanStatus::Ok,
+                    last_spend: 0.042,
+                    usual_spend: Some(0.031),
+                },
+                AgentRow {
+                    agent: "nightly-report".into(),
+                    runs: 1,
+                    failed_runs: 0,
+                    last_run_id: Uuid::from_u128(0x0192_f3a1_7c2e_7b4d_9a61_3c5e_8f0d_2b2c),
+                    last_started_at: at(60),
+                    last_ended: false,
+                    last_status: SpanStatus::Ok,
+                    last_spend: 0.0,
+                    usual_spend: None,
+                },
+            ],
         },
     );
 }
