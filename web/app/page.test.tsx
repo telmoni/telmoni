@@ -2,7 +2,7 @@
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { DOCS_URL, SKILLS_URL } from "@/lib/site";
+import { DOCS_URL } from "@/lib/site";
 
 let mockSession: { userId: string } | null = null;
 
@@ -67,7 +67,6 @@ describe("the splash page", () => {
       "href",
       DOCS_URL,
     );
-    expect(screen.getByText(/SDKs in four languages/)).toBeInTheDocument();
     expect(screen.queryByText(/not launched/i)).toBeNull();
   });
 
@@ -75,7 +74,7 @@ describe("the splash page", () => {
     render(await SplashPage());
 
     expect(screen.getByText("Beta")).toBeInTheDocument();
-    expect(screen.getByText(/Privacy-first observability/)).toBeInTheDocument();
+    expect(screen.getByText("Open-source monitoring for AI agents")).toBeInTheDocument();
   });
 
   it("sends a member to the console instead", async () => {
@@ -110,53 +109,43 @@ describe("the splash page", () => {
     }
   });
 
-  it("puts the console agent beside the skill, the CLI and the API, each with its door", async () => {
+  it("says what it catches, each with the page of the book that does it", async () => {
     render(await SplashPage());
 
-    expect(screen.getByRole("heading", { name: /send an agent/ })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Read the documentation/ })).toHaveAttribute(
-      "href",
-      `${DOCS_URL}/self-host/agent`,
-    );
-    expect(screen.getByRole("link", { name: /Install the skill/ })).toHaveAttribute(
-      "href",
-      SKILLS_URL ?? "",
-    );
-    expect(screen.getByRole("link", { name: /Install the CLI/ })).toHaveAttribute(
-      "href",
-      `${DOCS_URL}/api/cli`,
-    );
-    expect(screen.getByRole("link", { name: /Read the reference/ })).toHaveAttribute(
-      "href",
-      `${DOCS_URL}/api/reference`,
-    );
+    expect(screen.getByRole("heading", { name: "What it catches" })).toBeInTheDocument();
+    for (const [label, path] of [
+      ["Loops and stalls", "/monitoring/alerts#loops-and-stalls"],
+      ["Budgets", "/monitoring/alerts#a-budget"],
+      ["The guard", "/api/sdks#the-guard"],
+    ]) {
+      expect(screen.getByRole("link", { name: label })).toHaveAttribute("href", `${DOCS_URL}${path}`);
+    }
+  });
+
+  it("offers the Claude Code plugin beside the SDKs, and nothing the page no longer sells", async () => {
+    render(await SplashPage());
+
+    expect(screen.getByRole("tab", { name: "claude code" })).toBeInTheDocument();
+    for (const gone of ["What is Telmoni?", "Why Telmoni?", "Start in five minutes"]) {
+      expect(screen.queryByRole("heading", { name: gone })).toBeNull();
+    }
+    expect(screen.queryByText(/Evaluators/)).toBeNull();
   });
 
   it("answers the questions a visitor asks before signing up", async () => {
     render(await SplashPage());
 
     for (const question of [
-      "What runs today?",
+      "How do I get started?",
       "What does it store?",
       "Can I self-host it?",
-      "How do I get started?",
+      "Where do alerts go?",
     ]) {
       expect(screen.getByText(question)).toBeInTheDocument();
     }
   });
 
-  it("draws how a run reaches the console, each box a page of the book", async () => {
-    render(await SplashPage());
-
-    const flow = screen.getByRole("figure", { name: /^How a run reaches Telmoni/ });
-    expect(screen.getByRole("heading", { name: "What is Telmoni?" })).toBeInTheDocument();
-    expect(flow).toHaveTextContent("SDKs or OpenTelemetry");
-    for (const page of ["Traces", "Evaluators", "Objectives"]) {
-      expect(screen.getByRole("link", { name: page })).toHaveAttribute("href", expect.stringMatching(`^${DOCS_URL}/`));
-    }
-  });
-
-  it("names the stack it works with, and why, each chip a page of the book", async () => {
+  it("names the stack it works with, each chip a page of the book", async () => {
     render(await SplashPage());
 
     expect(screen.getByRole("heading", { name: "Works with your stack" })).toBeInTheDocument();
@@ -164,18 +153,6 @@ describe("the splash page", () => {
       "href",
       `${DOCS_URL}/api/frameworks#langchain-and-langgraph`,
     );
-    expect(screen.getByRole("heading", { name: "Why Telmoni?" })).toBeInTheDocument();
-    expect(screen.getByText("OpenTelemetry native")).toBeInTheDocument();
-  });
-
-  it("offers a coding agent's prompts to copy where the skill is published", async () => {
-    render(await SplashPage());
-
-    if (SKILLS_URL) {
-      expect(screen.getByRole("button", { name: "Copy the tracing prompt" })).toHaveTextContent(/add tracing/);
-    } else {
-      expect(screen.queryByRole("heading", { name: "Start in five minutes" })).toBeNull();
-    }
   });
 
   // A key is answered and announced, never drawn on a button.

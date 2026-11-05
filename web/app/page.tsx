@@ -1,4 +1,4 @@
-import { ArrowUpRight, ChevronDown, ChevronRight, Minus, Plus } from "lucide-react";
+import { Minus, Plus } from "lucide-react";
 
 import { InstallTabs, type InstallTab } from "@/components/install-tabs";
 import { JsonLd } from "@/components/json-ld";
@@ -13,11 +13,9 @@ import {
 } from "@/components/paper-page";
 import { PaperShell } from "@/components/paper-shell";
 import { getServerSession } from "@/lib/server/session";
-import { cn } from "@/lib/utils";
 import { DOCS_URL, SKILLS_URL } from "@/lib/site";
 
 import { ForgetPersonalStorage } from "./_forget-personal-storage";
-import { PromptRow } from "./_prompt-row";
 import { WayIn } from "./_way-in";
 
 // No `metadata` here on purpose. `layout.tsx` templates a page title as
@@ -27,13 +25,13 @@ import { WayIn } from "./_way-in";
 const docs = (path: string) => `${DOCS_URL}${path}`;
 
 // What the product is, over the sentence the page makes, and the paragraph
-// under it: the product as it is being built.
-const KICKER = "Privacy-first observability for AI agents";
+// under it: one job, said once.
+const KICKER = "Open-source monitoring for AI agents";
 // Beside the kicker, so nobody takes the product for finished.
 const STAGE = "Beta";
-const CLAIM = "Know when your agents stall, loop or overspend, and keep their prompts only where you choose to.";
+const CLAIM = "Know when your agents fail, stall, loop or overspend, and stop them at the cap you set.";
 const PITCH =
-  "Every run and the steps inside it, every model and tool call with its tokens, latency and cost, scored, and the alert when something goes wrong. Prompts and completions stay in your process until a project's owner and your code both turn content on.";
+  "Telmoni watches the agents you run, from a Python service to a Claude Code session, alerts you when one goes wrong, and shows you the run that did it. Prompts stay in your process until a project's owner and your code both turn content on.";
 
 // One way in per tab, each line the book's.
 const INSTALL: readonly InstallTab[] = [
@@ -42,8 +40,9 @@ const INSTALL: readonly InstallTab[] = [
   { label: "cargo", command: "cargo add telmoni" },
   { label: "go", command: "go get github.com/telmoni/telmoni/sdk/go" },
   {
-    label: "cli",
-    command: "curl -fsSL https://telmoni.com/install.sh | sh",
+    label: "claude code",
+    command:
+      "claude plugin marketplace add telmoni/claude-observability-plugin && claude plugin install telmoni-observability@telmoni-plugins",
   },
   ...(SKILLS_URL
     ? [
@@ -58,53 +57,35 @@ const INSTALL: readonly InstallTab[] = [
 
 type Pointer = { label: string; href: string };
 
-// What Telmoni is, as a run reaches it, drawn left to right: what sends it,
-// the one way in, and what the console does with it, each a page of the
-// book. Nothing is named here as running before it is built.
-const FLOW = {
-  title: "What is Telmoni?",
-  lead: "An open source, privacy-first observability platform for AI agents. SDKs in four languages, a framework's own instrumentation or any OpenTelemetry exporter send an agent's runs; the console traces them, scores them and alerts on them.",
-  sources: [
-    { title: "Your agents", body: "Python, TypeScript, Go and Rust", href: docs("/api/sdks") },
-    { title: "Frameworks", body: "OpenAI, Anthropic, LangChain, CrewAI, LiteLLM, Vercel AI SDK", href: docs("/api/frameworks") },
-    { title: "Coding agents", body: "Claude Code, Codex, Cursor, OpenCode", href: docs("/api/coding-agents") },
-  ],
-  way: { title: "SDKs or OpenTelemetry", body: "OTLP over HTTP, behind a project's API key", href: docs("/api/ingest") },
-  groups: [
-    {
-      name: "Observe",
-      says: "Runs, steps and calls with tokens, latency and cost; content where kept.",
-      pages: [
-        { label: "Traces", href: docs("/monitoring/traces") },
-        { label: "Sessions", href: docs("/monitoring/sessions") },
-        { label: "Users", href: docs("/monitoring/users") },
-        { label: "Dashboards", href: docs("/monitoring/dashboards") },
-      ],
-    },
-    {
-      name: "Evaluate",
-      says: "Scores from your code and team; evaluators on your own model key.",
-      pages: [
-        { label: "Scores", href: docs("/monitoring/scores") },
-        { label: "Evaluators", href: docs("/workspace/evaluators") },
-      ],
-    },
-    {
-      name: "Alert",
-      says: "Thresholds from your agents' history; objectives on an error budget.",
-      pages: [
-        { label: "Alerts", href: docs("/monitoring/alerts") },
-        { label: "Objectives", href: docs("/monitoring/objectives") },
-      ],
-    },
-  ],
-  through: [
-    { label: "Agent", href: docs("/self-host/agent") },
-    { label: "CLI", href: docs("/api/cli") },
-    { label: "API", href: docs("/api/reference") },
-    { label: "Webhooks", href: docs("/integrations/webhooks") },
-  ],
-} as const;
+// What Telmoni catches, a line each, each the alert or the guard that does it.
+// Nothing is named here as running before it is built.
+const CATCHES: { title: string; body: string; link: Pointer }[] = [
+  {
+    title: "A run that fails.",
+    body: "The failures over an hour, a day or a week, or their share of runs, against the threshold you set.",
+    link: { label: "Alerts", href: docs("/monitoring/alerts") },
+  },
+  {
+    title: "A run that loops or stalls.",
+    body: "The same tool called again and again, too many steps, or a run left open.",
+    link: { label: "Loops and stalls", href: docs("/monitoring/alerts#loops-and-stalls") },
+  },
+  {
+    title: "A run that overspends.",
+    body: "Its cost read as its calls land, so the alert fires while the run is still going, and a monthly budget that says the day it will be reached.",
+    link: { label: "Budgets", href: docs("/monitoring/alerts#a-budget") },
+  },
+  {
+    title: "Agents that go quiet.",
+    body: "Runs that stop arriving, read against the window before, so a nightly batch that didn't run opens an incident.",
+    link: { label: "No data", href: docs("/monitoring/alerts#making-an-alert") },
+  },
+  {
+    title: "And stops the runaway.",
+    body: "The SDKs' guard caps a run's steps and spend inside your own process, with no call to us, and stops it at the cap.",
+    link: { label: "The guard", href: docs("/api/sdks#the-guard") },
+  },
+];
 
 const PRIVACY = {
   title: "Built for privacy first",
@@ -158,85 +139,26 @@ const STACK: { title: string; chips: Pointer[] }[] = [
   },
 ];
 
-type Door = { title: string; body: string; link: Pointer };
-
-// The console agent in the app, and beside it the three doors a coding
-// agent, a terminal or a script comes in by. Each line is the book's.
-const DEVELOPERS: { title: string; doors: Door[] } = {
-  title: "Work from a terminal, or send an agent",
-  doors: [
-    {
-      title: "The console agent",
-      body: "Ask what a project has been doing, who is in it and what changed, each answer with its citations; ⌘J in the console.",
-      link: { label: "Read the documentation", href: docs("/self-host/agent") },
-    },
-    ...(SKILLS_URL
-      ? [
-          {
-            title: "The agent skill",
-            body: "Teaches Claude Code, Codex, Cursor and any agent that reads SKILL.md to drive the CLI, call the API and self-host.",
-            link: { label: "Install the skill", href: SKILLS_URL },
-          },
-        ]
-      : []),
-    {
-      title: "The CLI",
-      body: "Device sign-in for a terminal and a token for CI; organizations, status and configuration from a shell.",
-      link: { label: "Install the CLI", href: docs("/api/cli") },
-    },
-    {
-      title: "The HTTP API",
-      body: "The read-only API under /v1, with a project API key, and signed webhooks for what happens.",
-      link: { label: "Read the reference", href: docs("/api/reference") },
-    },
-  ],
-};
-
-// Why it is built the way it is, a line each.
-const WHY: { label: string; body: string }[] = [
-  { label: "Open source", body: "Apache-2.0, the whole platform: read the code, self-host it, change it." },
-  { label: "OpenTelemetry native", body: "Standard spans over OTLP, so an exporter you already run sends to it." },
-  { label: "One binary", body: "One Rust server and one console, on Docker Compose or Kubernetes." },
-  { label: "Your own model keys", body: "Evaluators judge on the keys a project connects, never ours." },
-  { label: "Made for agents", body: "A skill, a CLI and an API a coding agent can drive, and plugins that trace the agents themselves." },
-];
-
-// What to ask a coding agent, once the skill is installed; each copied whole.
-const PROMPTS: { label: string; prompt: string }[] = [
-  {
-    label: "Tracing",
-    prompt: "Use the Telmoni skill to add tracing to this application with the Telmoni SDK, following its best practices.",
-  },
-  {
-    label: "Alerts",
-    prompt: "Use the Telmoni skill to set up alerts for this project's agents: failures, p95 latency and a monthly budget.",
-  },
-  {
-    label: "Scores",
-    prompt: "Use the Telmoni skill to send scores from this application's own checks, and suggest an evaluator for its answers.",
-  },
-];
-
 const FAQ = [
   {
-    question: "What runs today?",
+    question: "How do I get started?",
     answer:
-      "The foundation — organizations and roles, API keys, the audit log, notifications, the console agent and the CLI — and the telemetry on it: the SDKs record an agent's runs and what each call cost, and stop a run at the caps you set; the console reads them as traces, sessions, users and dashboards, keeps their content where a project turns it on, scores them and judges them with evaluators on your own model keys, and alerts on them and on objectives, to Slack and webhooks.",
+      "Sign up, create a project, make an API key and paste the first run its dialog offers for your language; or install the Claude Code plugin and give it the key. Your agent's runs appear in the console within minutes, and your alerts read them from there.",
   },
   {
     question: "What does it store?",
     answer:
-      "Metadata on every project: timings, statuses, counts, and model and tool names. Content — prompts, completions, tool payloads, images and files — only on a project whose owner turned its content mode on, from code whose SDK sends it; anything else is dropped at the door.",
+      "Metadata on every project: timings, statuses, counts, costs, and model and tool names. Content — prompts, completions, the model's thinking, tool payloads, images and files — is kept in full only on a project whose owner turned its content mode on, from code that sends it; anything else is dropped at the door.",
   },
   {
     question: "Can I self-host it?",
     answer:
-      "Yes, the whole platform: Docker Compose on one machine, or the Helm chart on Kubernetes. You bring the identity provider, the mail transport and the model.",
+      "Yes, the whole platform, under Apache-2.0: one Rust server and one console, on Docker Compose on one machine or the Helm chart on Kubernetes.",
   },
   {
-    question: "How do I get started?",
+    question: "Where do alerts go?",
     answer:
-      "Sign up, create a project in the organization your first sign-in makes, make an API key and install an SDK; or install the agent skill and let a coding agent do it.",
+      "To the console's feed, Slack channels and signed webhooks, once each time an incident opens and once when it resolves, with the run that shows it; acknowledge or mute one straight from Slack.",
   },
 ];
 
@@ -264,9 +186,20 @@ export default async function SplashPage() {
           </div>
         </PaperHero>
 
-        <PaperSection title={FLOW.title}>
-          <p className={`max-w-[80ch] ${BODY}`}>{FLOW.lead}</p>
-          <Flow />
+        <PaperSection title="What it catches">
+          <ul className="flex max-w-[80ch] flex-col gap-4">
+            {CATCHES.map((item) => (
+              <PaperPoint key={item.title} title={item.title}>
+                {item.body}{" "}
+                <PaperLink
+                  href={item.link.href}
+                  className="text-foreground underline underline-offset-4 hover:no-underline"
+                >
+                  {item.link.label}
+                </PaperLink>
+              </PaperPoint>
+            ))}
+          </ul>
           <PaperGo href={DOCS_URL}>Read the docs</PaperGo>
         </PaperSection>
 
@@ -299,53 +232,6 @@ export default async function SplashPage() {
           </div>
         </PaperSection>
 
-        <PaperSection title={DEVELOPERS.title}>
-          <ul className="flex max-w-[80ch] flex-col gap-4">
-            {DEVELOPERS.doors.map((door) => (
-              <PaperPoint key={door.title} title={door.title}>
-                {door.body}{" "}
-                <PaperLink
-                  href={door.link.href}
-                  className="text-foreground underline underline-offset-4 hover:no-underline"
-                >
-                  {door.link.label}
-                </PaperLink>
-              </PaperPoint>
-            ))}
-          </ul>
-        </PaperSection>
-
-        <PaperSection title="Why Telmoni?">
-          <dl className="flex max-w-4xl flex-col">
-            {WHY.map((row) => (
-              <div
-                key={row.label}
-                className="grid gap-1 border-b border-border py-4 first:pt-0 last:border-b-0 last:pb-0 sm:grid-cols-[1fr_3fr] sm:gap-8"
-              >
-                <dt className="text-[15px] font-medium text-foreground">{row.label}</dt>
-                <dd className={BODY}>{row.body}</dd>
-              </div>
-            ))}
-          </dl>
-        </PaperSection>
-
-        {SKILLS_URL && (
-          <PaperSection title="Start in five minutes">
-            <p className={`max-w-[80ch] ${BODY}`}>
-              Install the agent skill in Claude Code, Codex, Cursor or any agent that reads SKILL.md,
-              then ask it for what you want.
-            </p>
-            <ul className="flex max-w-4xl flex-col divide-y divide-border border border-border">
-              {PROMPTS.map((entry) => (
-                <li key={entry.label}>
-                  <PromptRow label={entry.label} prompt={entry.prompt} />
-                </li>
-              ))}
-            </ul>
-            <PaperGo href={SKILLS_URL}>Get the skill</PaperGo>
-          </PaperSection>
-        )}
-
         <PaperSection title="Questions and answers">
           <div className="flex flex-col">
             {FAQ.map((entry) => (
@@ -373,11 +259,7 @@ export default async function SplashPage() {
   );
 }
 
-/** A label inside a box of the flow: the eyebrow's case and size, tracked
- *  as a word rather than as a page's opening line. */
-const CARD_LABEL = "text-[11px] font-medium uppercase tracking-wide text-muted-foreground";
-
-/** A link as a small outlined chip, as the stack and the flow list them:
+/** A link as a small outlined chip, as the stack lists them:
  *  a thumb's height on a phone, a line's on a wider page. */
 function Chip({ href, children }: { href: string; children: React.ReactNode }) {
   return (
@@ -387,94 +269,5 @@ function Chip({ href, children }: { href: string; children: React.ReactNode }) {
     >
       {children}
     </PaperLink>
-  );
-}
-
-/** A box of the flow that is a page of the book: its title, what it says,
- *  and the arrow every link out of the flow carries. */
-function FlowLink({ href, title, body }: { href: string; title: string; body: string }) {
-  return (
-    <PaperLink
-      href={href}
-      className="group flex min-h-11 items-start justify-between gap-gutter py-gutter first:pt-0 last:pb-0"
-    >
-      <span className="flex flex-col gap-1">
-        <span className="text-[15px] font-medium text-foreground group-hover:underline group-hover:underline-offset-4">
-          {title}
-        </span>
-        <span className="text-[13px] text-muted-foreground">{body}</span>
-      </span>
-      <ArrowUpRight aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground group-hover:text-foreground" />
-    </PaperLink>
-  );
-}
-
-/** The line from one column of the flow to the next, with its head: across
- *  on a wide page, down on a narrow one. */
-function Arrow() {
-  return (
-    <div aria-hidden="true" className="flex items-center justify-center text-muted-foreground/70">
-      <div className="flex h-8 flex-col items-center md:hidden">
-        <span className="w-px flex-1 bg-current" />
-        <ChevronDown className="-mt-1.5 size-3.5" />
-      </div>
-      <div className="hidden w-full items-center md:flex">
-        <span className="h-px flex-1 bg-current" />
-        <ChevronRight className="-ml-1.5 size-3.5" />
-      </div>
-    </div>
-  );
-}
-
-/** How a run reaches the console and what it does there, as boxes left to right. */
-function Flow() {
-  const box = "flex flex-col border border-border bg-background p-4";
-  return (
-    <figure aria-label="How a run reaches Telmoni" className="flex flex-col">
-      <div className="grid md:grid-cols-[minmax(0,0.9fr)_2.5rem_minmax(0,0.75fr)_2.5rem_minmax(0,1.6fr)] md:items-center">
-        <div className={cn(box, "divide-y divide-border")}>
-          {FLOW.sources.map((source) => (
-            <FlowLink key={source.title} {...source} />
-          ))}
-        </div>
-        <Arrow />
-        <div className={box}>
-          <FlowLink {...FLOW.way} />
-        </div>
-        <Arrow />
-        <div className={cn(box, "gap-4")}>
-          <span className="text-[15px] font-semibold text-foreground">Telmoni</span>
-          {FLOW.groups.map((group) => (
-            <div key={group.name} className="flex flex-col gap-2">
-              <span className={CARD_LABEL}>{group.name}</span>
-              <p className="text-[13px] leading-normal text-muted-foreground">{group.says}</p>
-              <ul className="flex flex-wrap gap-1.5">
-                {group.pages.map((page) => (
-                  <li key={page.label}>
-                    <Chip href={page.href}>{page.label}</Chip>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-          <div className="flex flex-col gap-2 border-t border-border pt-4">
-            <span className={CARD_LABEL}>Every feature through</span>
-            <ul className="flex flex-wrap gap-1.5">
-              {FLOW.through.map((page) => (
-                <li key={page.label}>
-                  <Chip href={page.href}>{page.label}</Chip>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
-      </div>
-      <figcaption className="sr-only">
-        Your agents, frameworks and coding agents send their runs through the SDKs
-        or OpenTelemetry to Telmoni, which observes them as traces, sessions, users and dashboards, evaluates
-        them with scores and evaluators, and alerts on them and on objectives; every feature is also reached
-        through the agent, the CLI, the API and webhooks.
-      </figcaption>
-    </figure>
   );
 }
